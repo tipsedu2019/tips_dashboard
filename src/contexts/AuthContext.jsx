@@ -9,14 +9,24 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!supabase) {
+      console.error('Supabase client not initialized');
+      setLoading(false);
+      return;
+    }
+
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) console.error('Error getting session:', error);
       setSession(session);
       if (session) {
         _fetchProfile(session.user);
       } else {
         setLoading(false);
       }
+    }).catch(err => {
+      console.error('Critical session fetch error:', err);
+      setLoading(false);
     });
 
     // Listen for auth changes
@@ -30,7 +40,18 @@ export function AuthProvider({ children }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Safety timeout: Ensure loading finishes even if Supabase hangs
+    const timeout = setTimeout(() => {
+      setLoading(prev => {
+        if (prev) console.warn('Auth loading timed out');
+        return false;
+      });
+    }, 5000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const _fetchProfile = async (supabaseUser) => {
