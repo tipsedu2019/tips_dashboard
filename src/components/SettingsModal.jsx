@@ -38,7 +38,7 @@ export default function LoginModal({ onClose }) {
 
         <div className="card-body">
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 24, lineHeight: 1.5 }}>
-            부여받은 강사 또는 관리자 계정으로 로그인해주세요. (테스트: admin/tips123, staff_a/staff123, lee/1234)
+            부여받은 강사 또는 관리자 계정으로 로그인해주세요.
           </p>
 
           <form onSubmit={handleLogin}>

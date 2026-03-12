@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { FileText, Book, Calendar, Download, ExternalLink, Info } from 'lucide-react';
 
 const RESOURCES = [

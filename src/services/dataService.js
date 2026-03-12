@@ -61,9 +61,10 @@ export class DataService {
         { data: students },
         { data: textbooks },
         { data: progressLogs },
-        { data: academicEvents }
+        { data: academicEvents },
+        { data: referenceMaterials }
       ] = results;
-      
+
       this.isConnected = errors.length === 0;
       this.lastUpdated = new Date();
 
@@ -88,9 +89,8 @@ export class DataService {
           ...p,
           classId: p.class_id
         })),
-        academicEvents: (academicEvents || []).map(e => ({
-          ...e,
-        })),
+        academicEvents: (academicEvents || []).map(e => ({ ...e })),
+        referenceMaterials: referenceMaterials || [],
         isConnected: this.isConnected,
         isLoading: false,
         lastUpdated: this.lastUpdated,
@@ -105,6 +105,7 @@ export class DataService {
         textbooks: [],
         progressLogs: [],
         academicEvents: [],
+        referenceMaterials: [],
         isConnected: false,
         isLoading: false,
         lastUpdated: new Date(),
@@ -131,7 +132,7 @@ export class DataService {
       subject: classObj.subject,
       color: classObj.color
     }]).select().single();
-    if (error) console.error(error);
+    if (error) throw error;
     return data;
   }
 
@@ -151,15 +152,18 @@ export class DataService {
     }
 
     const { error } = await supabase.from('classes').update(mappedUpdates).eq('id', id);
-    return !error;
+    if (error) throw error;
+    return true;
   }
 
   async deleteClass(id) {
-    await supabase.from('classes').delete().eq('id', id);
+    const { error } = await supabase.from('classes').delete().eq('id', id);
+    if (error) throw error;
   }
 
   async bulkDeleteClasses(ids) {
-    await supabase.from('classes').delete().in('id', ids);
+    const { error } = await supabase.from('classes').delete().in('id', ids);
+    if (error) throw error;
   }
 
   async bulkUpdateClasses(ids, updates) {
@@ -176,7 +180,8 @@ export class DataService {
         mappedUpdates.waitlist_ids = updates.waitlistIds;
         delete mappedUpdates.waitlistIds;
     }
-    await supabase.from('classes').update(mappedUpdates).in('id', ids);
+    const { error } = await supabase.from('classes').update(mappedUpdates).in('id', ids);
+    if (error) throw error;
   }
 
   // --- Textbooks ---
@@ -186,38 +191,36 @@ export class DataService {
   }
 
   async addTextbook(tb) {
-    const { data } = await supabase.from('textbooks').insert([tb]).select().single();
+    const { data, error } = await supabase.from('textbooks').insert([tb]).select().single();
+    if (error) throw error;
     return data;
   }
 
   async updateTextbook(id, updates) {
-    await supabase.from('textbooks').update(updates).eq('id', id);
+    const { error } = await supabase.from('textbooks').update(updates).eq('id', id);
+    if (error) throw error;
   }
 
   async deleteTextbook(id) {
-    await supabase.from('textbooks').delete().eq('id', id);
+    const { error } = await supabase.from('textbooks').delete().eq('id', id);
+    if (error) throw error;
   }
 
   async bulkDeleteTextbooks(ids) {
-    await supabase.from('textbooks').delete().in('id', ids);
+    const { error } = await supabase.from('textbooks').delete().in('id', ids);
+    if (error) throw error;
   }
 
   async bulkUpdateTextbooks(ids, updates) {
-    // Note: DataManager might send { addTags: [...] }
     if (updates.addTags) {
-        // This is tricky with Supabase if we want to append.
-        // For simplicity, if it's tags, we might need a more complex query or just replace if that's what's intended.
-        // DataManager uses bulkUpdateTextbooks(ids, { addTags: tagsArray });
-        // Let's implement a simple version that might replace or we'd need to fetch first.
-        // For now, let's just do a simple update if it's not addTags.
-        const { addTags, ...rest } = updates;
-        if (Object.keys(rest).length > 0) {
-            await supabase.from('textbooks').update(rest).in('id', ids);
-        }
-        // addTags implementation would require RPC or individual updates.
-        // I'll skip addTags for now or implement as replace if acceptable.
+      const { addTags, ...rest } = updates;
+      if (Object.keys(rest).length > 0) {
+        const { error } = await supabase.from('textbooks').update(rest).in('id', ids);
+        if (error) throw error;
+      }
     } else {
-        await supabase.from('textbooks').update(updates).in('id', ids);
+      const { error } = await supabase.from('textbooks').update(updates).in('id', ids);
+      if (error) throw error;
     }
   }
 
@@ -228,13 +231,14 @@ export class DataService {
   }
 
   async addStudent(student) {
-    const { data } = await supabase.from('students').insert([{
+    const { data, error } = await supabase.from('students').insert([{
       name: student.name,
       grade: student.grade,
       enroll_date: student.enrollDate || new Date().toISOString().split('T')[0],
       class_ids: student.classIds || [],
       waitlist_class_ids: student.waitlistClassIds || []
     }]).select().single();
+    if (error) throw error;
     return data;
   }
 
@@ -252,30 +256,35 @@ export class DataService {
         mappedUpdates.waitlist_class_ids = updates.waitlistClassIds;
         delete mappedUpdates.waitlistClassIds;
     }
-    await supabase.from('students').update(mappedUpdates).eq('id', id);
+    const { error } = await supabase.from('students').update(mappedUpdates).eq('id', id);
+    if (error) throw error;
   }
 
   async deleteStudent(id) {
-    await supabase.from('students').delete().eq('id', id);
+    const { error } = await supabase.from('students').delete().eq('id', id);
+    if (error) throw error;
   }
 
   async bulkDeleteStudents(ids) {
-    await supabase.from('students').delete().in('id', ids);
+    const { error } = await supabase.from('students').delete().in('id', ids);
+    if (error) throw error;
   }
 
   // --- Progress / Logs ---
   async addProgressLog(log) {
-    const { data } = await supabase.from('progress_logs').insert([{
+    const { data, error } = await supabase.from('progress_logs').insert([{
       class_id: log.classId,
       date: log.date,
       content: log.content,
       homework: log.homework
     }]).select().single();
+    if (error) throw error;
     return data;
   }
 
   async deleteProgressLog(logId) {
-    await supabase.from('progress_logs').delete().eq('id', logId);
+    const { error } = await supabase.from('progress_logs').delete().eq('id', logId);
+    if (error) throw error;
   }
 
   async getProgressLogsForClass(classId) {
@@ -290,16 +299,19 @@ export class DataService {
   }
 
   async addAcademicEvent(event) {
-    const { data } = await supabase.from('academic_events').insert([event]).select().single();
+    const { data, error } = await supabase.from('academic_events').insert([event]).select().single();
+    if (error) throw error;
     return data;
   }
 
   async updateAcademicEvent(id, updates) {
-    await supabase.from('academic_events').update(updates).eq('id', id);
+    const { error } = await supabase.from('academic_events').update(updates).eq('id', id);
+    if (error) throw error;
   }
 
   async deleteAcademicEvent(id) {
-    await supabase.from('academic_events').delete().eq('id', id);
+    const { error } = await supabase.from('academic_events').delete().eq('id', id);
+    if (error) throw error;
   }
 
   // --- Reference Materials ---
