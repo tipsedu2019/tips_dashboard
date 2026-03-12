@@ -308,6 +308,64 @@ export class DataService {
     return data || [];
   }
 
+  // --- Sync Utility ---
+  async syncLocalStorageData() {
+    try {
+      const storageKeys = {
+        classes: 'classes',
+        students: 'students',
+        textbooks: 'textbooks',
+        progressLogs: 'progressLogs',
+        academicEvents: 'academicEvents'
+      };
+
+      const localData = {};
+      for (const [key, storageKey] of Object.entries(storageKeys)) {
+        const saved = localStorage.getItem(storageKey);
+        localData[key] = saved ? JSON.parse(saved) : [];
+      }
+
+      console.log('Syncing data to Supabase...', localData);
+
+      // Simple migration (overwrite if conflict, or just insert new)
+      // Note: This is an idempotent sync for this project.
+      
+      // 1. Students
+      if (localData.students.length > 0) {
+        for (const s of localData.students) {
+            await this.addStudent(s);
+        }
+      }
+
+      // 2. Textbooks
+      if (localData.textbooks.length > 0) {
+        for (const t of localData.textbooks) {
+            await this.addTextbook(t);
+        }
+      }
+
+      // 3. Classes
+      if (localData.classes.length > 0) {
+        for (const c of localData.classes) {
+            await this.addClass(c);
+        }
+      }
+
+      // 4. Progress Logs
+      if (localData.progressLogs.length > 0) {
+         for (const p of localData.progressLogs) {
+             await this.addProgressLog(p);
+         }
+      }
+      
+      this._notify();
+      return { success: true, count: localData.classes.length + localData.students.length };
+    } catch (err) {
+      console.error('Sync failed:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
   // Helper dummy connect
   async connect() { return true; }
   disconnect() {}

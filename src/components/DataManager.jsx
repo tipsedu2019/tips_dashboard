@@ -599,6 +599,32 @@ export default function DataManager({ data, dataService }) {
 
   return (
     <div className="view-container">
+      {/* ⚠️ 임시 데이터 동기화 도구 (로컬 -> 클라우드) */}
+      <div style={{ margin: '20px 24px', padding: '16px 20px', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '16px', border: '1px solid rgba(59, 130, 246, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ background: '#3b82f6', color: 'white', width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Landmark size={20} />
+          </div>
+          <div>
+            <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>데이터 클라우드 동기화</h4>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>로컬(내 컴퓨터) 데이터를 온라인 서버(Supabase)로 전송합니다. 배포 후 데이터가 안 보일 때 한 번만 실행하세요.</p>
+          </div>
+        </div>
+        <button 
+          onClick={async () => {
+            if (window.confirm('현재 로컬 컴퓨터의 데이터를 클라우드로 전송하시겠습니까?')) {
+              const res = await dataService.syncLocalStorageData();
+              if (res.success) alert(`${res.count}개의 데이터가 성공적으로 전송되었습니다! 이제 배포된 사이트에서 로그인을 다시 시도해 보세요.`);
+              else alert('실패: ' + res.error);
+            }
+          }}
+          className="btn-primary" 
+          style={{ height: 40, padding: '0 20px', fontSize: 13, background: '#3b82f6' }}
+        >
+          지금 동기화하기
+        </button>
+      </div>
+
       {viewingClassStudents && (
         <StudentManifestModal 
           cls={viewingClassStudents} 
