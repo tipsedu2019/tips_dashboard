@@ -1,0 +1,916 @@
+:root {
+  /* Green Dashboard Aesthetic Light Mode - default */
+  --bg-base: #f7f9f7;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f1f5f2;
+  --text-primary: #1e2920;
+  --text-secondary: #5a6b5e;
+  --text-muted: #8b9d90;
+  --border-color: rgba(0, 0, 0, 0.06);
+  --accent-color: #216e4e; /* Dark green from reference */
+  --accent-hover: #185038;
+  --accent-light: #e5f0ea;
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --sidebar-bg: #f9fbf9;
+  --sidebar-border: rgba(0, 0, 0, 0.05);
+  
+  --radius-sm: 12px;
+  --radius-md: 20px;
+  --radius-lg: 32px;
+  
+  --timetable-bg: #ffffff;
+  --timetable-line: rgba(0, 0, 0, 0.04);
+
+  /* Timetable Colors - Adjusted to match the new green minimal theme */
+  --color-1-bg: #eaf1ed; --color-1-border: #accbc0; --color-1-text: #216e4e;
+  --color-2-bg: #fff0db; --color-2-border: #ffd599; --color-2-text: #d97706;
+  --color-3-bg: #e6f0fa; --color-3-border: #a3c2e6; --color-3-text: #2563eb;
+  --color-4-bg: #f3e8ff; --color-4-border: #d8b4fe; --color-4-text: #9333ea;
+  --color-5-bg: #ffe4e6; --color-5-border: #fda4af; --color-5-text: #e11d48;
+  --color-6-bg: #fef9c3; --color-6-border: #fef08a; --color-6-text: #ca8a04;
+}
+
+[data-theme='dark'] {
+  /* Premium Dark Mode - Green Tinted */
+  --bg-base: #0a0e0b;
+  --bg-surface: #151c17;
+  --bg-surface-hover: #1e2922;
+  --text-primary: #f2f5f3;
+  --text-secondary: #9daea2;
+  --text-muted: #6b7d71;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --accent-color: #3fbc86;
+  --accent-hover: #4ade80;
+  --accent-light: rgba(63, 188, 134, 0.15);
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --sidebar-bg: #111712;
+  --sidebar-border: rgba(255, 255, 255, 0.05);
+
+  --timetable-bg: #151c17;
+  --timetable-line: rgba(255, 255, 255, 0.04);
+
+  /* Timetable Colors - Dark Mode Adjusted */
+  --color-1-bg: rgba(63, 188, 134, 0.15); --color-1-border: rgba(63, 188, 134, 0.4); --color-1-text: #8ceabb;
+  --color-2-bg: rgba(245, 158, 11, 0.15); --color-2-border: rgba(245, 158, 11, 0.4); --color-2-text: #fcd34d;
+  --color-3-bg: rgba(59, 130, 246, 0.15); --color-3-border: rgba(59, 130, 246, 0.4); --color-3-text: #93c5fd;
+  --color-4-bg: rgba(168, 85, 247, 0.15); --color-4-border: rgba(168, 85, 247, 0.4); --color-4-text: #d8b4fe;
+  --color-5-bg: rgba(239, 68, 68, 0.15); --color-5-border: rgba(239, 68, 68, 0.4); --color-5-text: #fca5a5;
+  --color-6-bg: rgba(234, 179, 8, 0.15); --color-6-border: rgba(234, 179, 8, 0.4); --color-6-text: #fef08a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 1. Branding: Custom Selection & Scrollbars */
+::selection {
+  background-color: var(--accent-color);
+  color: #ffffff;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Layout */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 280px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s ease;
+}
+
+.sidebar-header {
+  padding: 32px 24px;
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-logo h1 {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 0 16px;
+  overflow-y: auto;
+}
+
+.sidebar-nav-section {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 24px 12px 12px;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 15px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background: transparent;
+  border: none;
+  outline: none;
+  text-align: left;
+  font-family: inherit;
+  width: 100%;
+}
+
+.sidebar-nav-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .sidebar-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-nav-item.active {
+  background: var(--accent-light);
+  color: var(--accent-color);
+  font-weight: 700;
+}
+
+/* Fix SVG outline in sidebar */
+.sidebar-link-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 40px 48px;
+  background: var(--bg-base);
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 32px;
+}
+
+.page-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 8px;
+}
+
+.page-header p {
+  color: var(--text-secondary);
+}
+
+/* Cards (Donezo style) */
+.card {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+  margin-bottom: 24px;
+  border: 1px solid var(--border-color);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06), 0 8px 16px rgba(0, 0, 0, 0.03);
+  transform: translateY(-2px);
+}
+
+.card-header {
+  padding: 24px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Forms & Inputs */
+.styled-input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.styled-input:focus {
+  outline: none;
+  border-color: var(--accent-light);
+  box-shadow: 0 0 0 3px rgba(33, 110, 78, 0.1), 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+[data-theme='dark'] .styled-input {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .styled-input:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(63, 188, 134, 0.2);
+}
+
+.card-custom {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.02);
+}
+
+[data-theme='dark'] .card-custom {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.p-6 {
+  padding: 24px;
+}
+
+.card-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.card-body {
+  padding: 24px;
+}
+
+/* Base Timetable Grid */
+.timetable-grid {
+  display: grid;
+  background: var(--timetable-bg);
+  border: 1px solid var(--timetable-line);
+  border-radius: var(--radius-sm);
+  border-right: none;
+  border-bottom: none;
+}
+
+.timetable-header-cell {
+  padding: 12px 8px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-secondary);
+  border-right: 1px solid var(--timetable-line);
+  border-bottom: 1px solid var(--timetable-line);
+  background: var(--bg-surface);
+}
+
+.timetable-time-cell {
+  padding: 8px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-right: 1px solid var(--timetable-line);
+  border-bottom: 1px solid var(--timetable-line);
+  background: var(--bg-surface);
+  height: 48px; /* Increased further for readability */
+  box-sizing: border-box;
+  transition: background-color 0.2s;
+}
+
+.timetable-cell {
+  border-right: 1px solid var(--timetable-line);
+  border-bottom: 1px solid var(--timetable-line);
+  height: 48px; /* Match time-cell height */
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+/* Crosshair Highlight Effect (via React State Classes) */
+.timetable-cell.hover-highlight {
+  background-color: var(--bg-surface-hover);
+}
+.timetable-time-cell.hover-highlight {
+  background-color: var(--bg-surface-hover);
+  color: var(--accent-color);
+}
+.timetable-header-cell.hover-highlight {
+  background-color: var(--bg-surface-hover);
+  color: var(--accent-color);
+}
+
+.timetable-block {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  right: 3px;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow: visible; /* Must be visible so tooltip can escape */
+  border-left: 4px solid;
+  z-index: 5;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+/* Clip text overflow inside the block without affecting tooltip */
+.block-subject,
+.block-name,
+.block-info {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timetable-block:hover {
+  transform: translateY(-2px) scale(1.03);
+  z-index: 50 !important; /* Must be > .tooltip z-index to show above other blocks */
+  box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+  filter: brightness(1.05);
+  overflow: visible !important;
+}
+
+/* Tooltip on Hover */
+.timetable-block .tooltip {
+  visibility: hidden;
+  background-color: rgba(30, 30, 40, 0.95);
+  color: #fff;
+  text-align: left;
+  border-radius: 10px;
+  padding: 12px 14px;
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.15s;
+  font-size: 12px;
+  white-space: pre-wrap;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  min-width: 160px;
+  max-width: 260px;
+  line-height: 1.6;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.timetable-block .tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: var(--text-primary) transparent transparent transparent;
+}
+
+.timetable-block:hover .tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Schedule variant note header inside tooltip */
+.tooltip-section-label {
+  font-weight: 700;
+  font-size: 11px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+  display: block;
+}
+
+/* Dot indicator that block has schedule variants */
+.block-variant-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  background: rgba(255, 200, 0, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 4px rgba(255, 200, 0, 0.7);
+}
+
+/* For dark mode highlight adjustment */
+[data-theme='dark'] .timetable-block:hover {
+  box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+  filter: brightness(1.15);
+}
+
+.block-subject {
+  font-weight: 700;
+  font-size: 13px;
+  opacity: 0.85;
+  margin-bottom: 2px;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.block-name { 
+  font-weight: 700; 
+  font-size: 17px; /* Scaled text size slightly for 3 lines */
+  margin-bottom: 2px;
+  letter-spacing: -0.4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.block-info { 
+  opacity: 0.9; 
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.info-label {
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.1);
+  padding: 2px 6px;
+  border-radius: 10px;
+  letter-spacing: -0.2px;
+}
+
+[data-theme='dark'] .info-label {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* 2x Grid Layout for View All */
+.view-all-grid-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1400px) {
+  .view-all-grid-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* View All Scale Down */
+.view-all-mode {
+  overflow: hidden; /* Clip extra space from scale transform */
+}
+
+.view-all-mode .timetable-grid {
+  transform-origin: top left;
+  transform: scale(0.65);
+  width: calc(100% / 0.65);
+  /* Use height to clip remaining space exactly */
+  height: auto;
+}
+
+/* Container that wraps the scaled timetable - clips the ghost space underneath */
+.view-all-mode {
+  /* After scale(0.65), effective height = real height × 0.65.
+     We set a max-height to cut off excess rendered space. */
+  max-height: none;
+}
+
+/* The outer card in view-all must clip the scaled content */
+.view-all-container {
+  overflow: hidden;
+}
+
+/* Wrapper to hold scaled grid and avoid extra space */
+.view-all-scale-wrapper {
+  overflow: hidden;
+  width: 100%;
+}
+
+
+/* Buttons & Inputs */
+.btn {
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-primary {
+  background: var(--accent-color);
+  color: #fff;
+  box-shadow: 0 2px 4px rgba(33, 110, 78, 0.15);
+}
+.btn-primary:hover { 
+  background: var(--accent-hover); 
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(33, 110, 78, 0.2);
+}
+
+.btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+.btn-secondary:hover {
+  background: var(--bg-surface-hover);
+}
+
+.filter-bar {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  align-items: center;
+}
+
+.filter-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 10px 36px 10px 16px;
+  border-radius: 8px;
+  background-color: var(--bg-surface);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231e2920' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+}
+
+.filter-select:hover {
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.filter-select:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+[data-theme='dark'] .filter-select {
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f2f5f3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+}
+
+/* Custom Dropdown for Period Selection */
+.custom-dropdown-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+}
+
+.custom-dropdown-btn:hover {
+  background: var(--bg-surface-hover);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.custom-dropdown-btn:active {
+  transform: scale(0.98);
+}
+
+/* Date input styled to match dropdown buttons */
+.styled-date-input {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+  -webkit-appearance: none;
+  appearance: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+}
+
+.styled-date-input:hover {
+  border-color: var(--text-muted);
+}
+
+.styled-date-input:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+/* Fix native calendar icon color in dark mode */
+[data-theme='dark'] .styled-date-input::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(0.7);
+}
+
+.styled-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.5;
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.styled-date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+
+.custom-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-scroll-area {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.custom-dropdown-item {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.custom-dropdown-item:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.custom-dropdown-item.active {
+  background: var(--accent-light);
+  color: var(--accent-color);
+  font-weight: 700;
+}
+
+[data-theme='dark'] .custom-dropdown-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .custom-dropdown-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme='dark'] .custom-dropdown-menu {
+  background: var(--bg-surface);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme='dark'] .custom-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .custom-dropdown-item.active {
+  background: rgba(63, 188, 134, 0.2);
+}
+
+/* Horizontal Segmented Control */
+.h-segment-container {
+  display: flex;
+  flex-wrap: wrap;
+  background: rgba(0,0,0,0.04);
+  padding: 4px;
+  border-radius: 8px;
+  gap: 2px;
+}
+
+[data-theme='dark'] .h-segment-container {
+  background: rgba(255,255,255,0.06);
+}
+
+.h-segment-btn {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.h-segment-btn:hover {
+  color: var(--text-primary);
+}
+
+.h-segment-btn.active {
+  background: var(--bg-surface);
+  color: var(--accent-color);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+[data-theme='dark'] .h-segment-btn.active {
+  background: rgba(255,255,255,0.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* Theme Toggle */
+.theme-toggle {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-toggle:hover {
+  background: var(--bg-surface-hover);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* A4 Portrait Export Wrap Helper */
+.a4-print-wrap {
+  width: 794px; /* A4 width in pixels at 96 DPI */
+  background: var(--bg-surface); /* Make sure background is solid */
+  margin: 0 auto; /* Center in normal view */
+  padding: 32px;
+}
+
+/* Responsive Mobile Layout */
+.mobile-header {
+  display: none;
+  align-items: center;
+  padding: 12px 20px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  z-index: 20;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 768px) {
+  .app-layout {
+    position: relative;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-md);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  .mobile-header {
+    display: flex;
+  }
+}
+
+/* Interactive CSS Tooltips */
+[data-tooltip] {
+  position: relative;
+  cursor: pointer;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: var(--text-primary);
+  color: var(--bg-surface);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1000;
+  box-shadow: var(--shadow-sm);
+}
+[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-6px);
+}
+[data-theme='dark'] [data-tooltip]::after {
+  background: #ffffff;
+  color: #000000;
+}
+
+/* Academic Calendar Custom Styles */
+.calendar-day-cell {
+  transition: background-color 0.2s ease;
+}
+.calendar-day-cell:hover {
+  background-color: var(--bg-surface-hover) !important;
+}
+
+.calendar-event-pill:hover {
+  filter: brightness(0.9);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.calendar-event-pill {
+  transition: all 0.2s ease;
+}
+
