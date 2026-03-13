@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
-import { Book, Users, ClipboardList, Plus, Trash2, Calendar, Pencil, School, FileSpreadsheet, Clock, Search, Filter, ArrowUpDown, LayoutGrid, List, CheckSquare, Square, BookOpen } from 'lucide-react';
+import { Book, Users, ClipboardList, Plus, Trash2, Calendar, Pencil, School, FileSpreadsheet, Clock, Search, Filter, ArrowUpDown, LayoutGrid, List, CheckSquare, Square, BookOpen, Landmark } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { stripClassPrefix, parseClassPrefix, computeWeeklyMinutes, formatHours, parseSchedule } from '../data/sampleData';
 import { useToast } from '../contexts/ToastContext';
@@ -48,7 +48,8 @@ export default function DataManager({ data, dataService }) {
     classroom: true,
     studentCount: true,
     textbook: true,
-    weeklyHours: true
+    weeklyHours: true,
+    fee: true
   });
   const [showBulkUpdateModal, setShowBulkUpdateModal] = useState(false);
   const [bulkUpdateField, setBulkUpdateField] = useState('teacher');
@@ -287,6 +288,11 @@ export default function DataManager({ data, dataService }) {
           const endIdx = headers.findIndex(h => h === '종료일');
           const gradeIdx = headers.findIndex(h => h === '학년');
           const schoolIdx = headers.findIndex(h => h === '학교');
+          const subjectIdx = headers.findIndex(h => h === '과목');
+          const scheduleIdx = headers.findIndex(h => h === '요일/시간');
+          const capacityIdx = headers.findIndex(h => h === '정원');
+          const periodIdx = headers.findIndex(h => h === '학기');
+          const feeIdx = headers.findIndex(h => h === '수업료' || h === '수강료');
 
           const processedStudents = {}; 
           const processedClasses = {}; 
@@ -342,7 +348,11 @@ export default function DataManager({ data, dataService }) {
                 startDate: startIdx !== -1 ? String(row[startIdx] || '').trim() : '',
                 endDate: endIdx !== -1 ? String(row[endIdx] || '').trim() : '',
                 grade: rowGrade || (meta ? meta.grade : ''),
-                subject: meta ? meta.subject : '',
+                subject: subjectIdx !== -1 ? String(row[subjectIdx] || '').trim() : (meta ? meta.subject : ''),
+                schedule: scheduleIdx !== -1 ? String(row[scheduleIdx] || '').trim() : '',
+                capacity: capacityIdx !== -1 ? parseInt(row[capacityIdx]) || 0 : 0,
+                period: periodIdx !== -1 ? String(row[periodIdx] || '').trim() : '미분류',
+                fee: feeIdx !== -1 ? parseInt(row[feeIdx]) || 0 : 0,
               };
 
               if (!existingCls) {
@@ -350,8 +360,6 @@ export default function DataManager({ data, dataService }) {
                   id: 'class-' + Date.now() + i,
                   className: className,
                   ...classUpdates,
-                  schedule: '',
-                  period: '미분류',
                   studentIds: []
                 };
                 dataService.addClass(existingCls);
@@ -415,7 +423,57 @@ export default function DataManager({ data, dataService }) {
     // Use setTimeout so the isProcessing state triggers a render before reading
     setTimeout(() => {
       reader.readAsArrayBuffer(file);
-    }, 100);
+    }, 500);
+  };
+
+  const handleDownloadSample = (type) => {
+    let sampleData = [];
+    let filename = '';
+
+    if (type === 'students' || type === 'classes') {
+      filename = 'TIPS_업로드양식_학생수업.xlsx';
+      sampleData = [
+        {
+          '이름': '홍길동',
+          '원생고유번호': 'S1001',
+          '학년': '중2',
+          '학교': '티팁스중학교',
+          '연락처': '010-1234-5678',
+          '보호자연락처': '010-5678-1234',
+          '수업명': '[중2수 허승주]',
+          '과목': '수학',
+          '담당강사': '허승주',
+          '요일/시간': '월수 17:30-19:30',
+          '강의실': 'A강의실',
+          '정원': 12,
+          '수업료': 300000,
+          '학기': '2026-1학기',
+          '시작일': '2026-03-01',
+          '종료일': '2026-12-31'
+        }
+      ];
+    } else if (type === 'textbooks') {
+      filename = 'TIPS_업로드양식_교재.xlsx';
+      sampleData = [
+        {
+          '수납명': '중등 수학 기본서',
+          '판매금액': 15000,
+          '제조사': '에이치출판사',
+          '태그': '수학, 기본, 중2'
+        }
+      ];
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(sampleData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'SampleData');
+    
+    setIsProcessing(true);
+    setTimeout(() => {
+      XLSX.writeFile(workbook, filename);
+      setIsProcessing(false);
+      toast.info('샘플 양식 다운로드가 시작되었습니다.');
+    }, 500);
   };
 
   const handleCsvUpload = (e, type) => {
@@ -768,6 +826,7 @@ export default function DataManager({ data, dataService }) {
               toggleSelectAll={toggleSelectAll}
               handleDeleteSelected={handleDeleteSelected}
               onExportClick={() => handleExportData('students')}
+              onDownloadSample={() => handleDownloadSample('students')}
               onUploadClick={(e) => handleCsvUpload(e, 'students')} 
               uploadIcon={<ClipboardList size={16} />} 
               uploadText="일괄 등록 (CSV)" 
@@ -825,6 +884,8 @@ export default function DataManager({ data, dataService }) {
               handleBulkUpdate={handleBulkUpdate}
               sortOrder={sortOrder}
               setSortOrder={setSortOrder}
+              onExportClick={() => handleExportData('textbooks')}
+              onDownloadSample={() => handleDownloadSample('textbooks')}
               onUploadClick={(e) => handleExcelUpload(e)} 
               uploadIcon={<FileSpreadsheet size={16} />} 
               uploadText="메이크에듀 엑셀 업로드" 
@@ -898,6 +959,7 @@ export default function DataManager({ data, dataService }) {
               sortOrder={sortOrder}
               setSortOrder={setSortOrder}
               onExportClick={() => handleExportData('classes')}
+              onDownloadSample={() => handleDownloadSample('classes')}
               onUploadClick={(e) => handleExcelUpload(e)} 
               uploadIcon={<FileSpreadsheet size={16} />} 
               uploadText="수업/학생 일괄 업로드 (Excel)" 
@@ -968,6 +1030,15 @@ export default function DataManager({ data, dataService }) {
                       </span>
                     ) : '-';
                   }
+                }] : []),
+                ...(classColumns.fee ? [{
+                  key: 'fee',
+                  label: '수업료',
+                  render: (item) => (
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {item.fee ? `${item.fee.toLocaleString()}원` : '-'}
+                    </div>
+                  )
                 }] : []),
               ]}
               listData={filteredData}
@@ -1410,6 +1481,16 @@ function ClassEditor({ cls, textbooks, students, onSave, onCancel }) {
               />
             </div>
             
+            <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>수업료 (원)</label>
+                <input type="number" className="styled-input" value={edited.fee || 0} onChange={e => setEdited({ ...edited, fee: parseInt(e.target.value) || 0 })} />
+              </div>
+              <div style={{ flex: 1 }}>
+                {/* Reserved for future field */}
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>개강일</label>
@@ -1901,6 +1982,7 @@ function StudentEditor({ student, classes, onSave, onCancel }) {
 
 const ManagementHeader = ({ 
   title, showFilters = true, onUploadClick, uploadIcon, uploadText, onExportClick,
+  onDownloadSample,
   data, activeTab, viewMode, setViewMode, searchQuery, setSearchQuery,
   filterGrade, setFilterGrade, filterTeacher, setFilterTeacher, filterSubject, setFilterSubject, filterSchool, setFilterSchool,
   filteredDataCount, selectedIds, currentIds, toggleSelectAll, handleDeleteSelected,
@@ -1915,6 +1997,11 @@ const ManagementHeader = ({
           {onExportClick && (
             <button className="btn-secondary" onClick={onExportClick} style={{ padding: '8px 16px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, height: 38, background: 'var(--bg-surface)' }}>
               <FileSpreadsheet size={16} /> 엑셀 내보내기
+            </button>
+          )}
+          {onDownloadSample && (
+            <button className="btn-secondary" onClick={onDownloadSample} style={{ padding: '8px 16px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, height: 38, background: 'var(--bg-surface)' }}>
+              <Clock size={16} /> 샘플 양식 다운로드
             </button>
           )}
           {onUploadClick && (

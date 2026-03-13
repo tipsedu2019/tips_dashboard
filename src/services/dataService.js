@@ -73,7 +73,9 @@ export class DataService {
           ...c,
           studentIds: c.student_ids,
           textbookIds: c.textbook_ids,
-          waitlistIds: c.waitlist_ids
+          waitlistIds: c.waitlist_ids,
+          startDate: c.start_date,
+          endDate: c.end_date
         })),
         students: (students || []).map(s => ({
           ...s,
@@ -130,7 +132,12 @@ export class DataService {
       waitlist_ids: classObj.waitlistIds || [],
       room: classObj.room,
       subject: classObj.subject,
-      color: classObj.color
+      color: classObj.color,
+      capacity: classObj.capacity || 0,
+      period: classObj.period,
+      start_date: classObj.startDate,
+      end_date: classObj.endDate,
+      fee: classObj.fee || 0
     }]).select().single();
     if (error) throw error;
     return data;
@@ -149,6 +156,14 @@ export class DataService {
     if (updates.waitlistIds) {
         mappedUpdates.waitlist_ids = updates.waitlistIds;
         delete mappedUpdates.waitlistIds;
+    }
+    if (updates.startDate) {
+        mappedUpdates.start_date = updates.startDate;
+        delete mappedUpdates.startDate;
+    }
+    if (updates.endDate) {
+        mappedUpdates.end_date = updates.endDate;
+        delete mappedUpdates.endDate;
     }
 
     const { error } = await supabase.from('classes').update(mappedUpdates).eq('id', id);
@@ -179,6 +194,14 @@ export class DataService {
     if (updates.waitlistIds) {
         mappedUpdates.waitlist_ids = updates.waitlistIds;
         delete mappedUpdates.waitlistIds;
+    }
+    if (updates.startDate) {
+        mappedUpdates.start_date = updates.startDate;
+        delete mappedUpdates.startDate;
+    }
+    if (updates.endDate) {
+        mappedUpdates.end_date = updates.endDate;
+        delete mappedUpdates.endDate;
     }
     const { error } = await supabase.from('classes').update(mappedUpdates).in('id', ids);
     if (error) throw error;

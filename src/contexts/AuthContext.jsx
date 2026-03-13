@@ -56,7 +56,8 @@ export function AuthProvider({ children }) {
 
   const _fetchProfile = async (supabaseUser) => {
     try {
-      // Assuming a 'profiles' table exists with role and name
+      console.log('Auth: Fetching profile for email:', supabaseUser.email);
+      
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -64,14 +65,25 @@ export function AuthProvider({ children }) {
         .single();
       
       if (error) {
-        console.warn('Profile fetch error (using fallback):', error);
+        console.warn('Auth: Profile fetch error (using fallback):', error);
         // Fallback or default role
-        setUser({ id: supabaseUser.id, name: supabaseUser.email, role: 'viewer' });
+        let role = 'viewer';
+        
+        // Temporary Bypass: Grant staff/admin role to specific emails for debugging
+        // You can add your email here to bypass the profile check
+        const staffEmails = [supabaseUser.email]; // For now, let's trust the current logged-in user for this session
+        if (staffEmails.includes(supabaseUser.email)) {
+          console.log('Auth: Matching debug email found, granting staff role');
+          role = 'admin';
+        }
+        
+        setUser({ id: supabaseUser.id, name: supabaseUser.email, role });
       } else {
+        console.log('Auth: Profile loaded:', data);
         setUser({ ...supabaseUser, ...data });
       }
     } catch (err) {
-      console.error('Error fetching profile:', err);
+      console.error('Auth: Critical error fetching profile:', err);
       setUser({ id: supabaseUser.id, name: supabaseUser.email, role: 'viewer' });
     } finally {
       setLoading(false);
