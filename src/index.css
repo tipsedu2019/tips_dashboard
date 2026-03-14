@@ -330,17 +330,81 @@ body {
   transition: background-color 0.2s;
 }
 
+.timetable-grid-shell {
+  position: relative;
+}
+
+.timetable-preview-badge {
+  position: sticky;
+  top: 12px;
+  right: 12px;
+  z-index: 40;
+  width: fit-content;
+  margin-left: auto;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+}
+
+.timetable-preview-badge.is-selection {
+  background: linear-gradient(135deg, #1f8f63, #2db77c);
+}
+
+.timetable-preview-badge.is-move {
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+}
+
 /* Crosshair Highlight Effect (via React State Classes) */
 .timetable-cell.hover-highlight {
-  background-color: var(--bg-surface-hover);
+  background-color: rgba(148, 163, 184, 0.12);
 }
 .timetable-time-cell.hover-highlight {
-  background-color: var(--bg-surface-hover);
-  color: var(--accent-color);
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--text-primary);
 }
 .timetable-header-cell.hover-highlight {
-  background-color: var(--bg-surface-hover);
-  color: var(--accent-color);
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--text-primary);
+}
+
+.timetable-cell.selection-preview,
+.timetable-cell.move-preview {
+  background-color: rgba(33, 110, 78, 0.12);
+}
+
+.timetable-cell.selection-preview::after,
+.timetable-cell.move-preview::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid rgba(33, 110, 78, 0.72);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(33, 110, 78, 0.14) 0,
+    rgba(33, 110, 78, 0.14) 10px,
+    rgba(255, 255, 255, 0.08) 10px,
+    rgba(255, 255, 255, 0.08) 20px
+  );
+}
+
+.timetable-cell.move-preview {
+  background-color: rgba(37, 99, 235, 0.12);
+}
+
+.timetable-cell.move-preview::after {
+  border-color: rgba(37, 99, 235, 0.72);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(37, 99, 235, 0.16) 0,
+    rgba(37, 99, 235, 0.16) 10px,
+    rgba(255, 255, 255, 0.08) 10px,
+    rgba(255, 255, 255, 0.08) 20px
+  );
 }
 
 .timetable-block {
@@ -363,6 +427,28 @@ body {
   justify-content: center;
   align-items: center;
   text-align: center;
+}
+
+.timetable-block.editable {
+  cursor: grab;
+}
+
+.timetable-block.editable:active {
+  cursor: grabbing;
+}
+
+.timetable-block.drag-source {
+  opacity: 0.35;
+  filter: saturate(0.8);
+}
+
+.timetable-block.ghost {
+  z-index: 30;
+  border-style: dashed;
+  border-width: 2px 2px 2px 4px;
+  border-color: rgba(37, 99, 235, 0.7);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.12)) !important;
+  box-shadow: 0 16px 28px rgba(37, 99, 235, 0.18);
 }
 
 /* Clip text overflow inside the block without affecting tooltip */
@@ -544,36 +630,54 @@ body {
 
 /* Buttons & Inputs */
 .btn {
-  padding: 10px 18px;
-  border-radius: 8px;
+  padding: 11px 18px;
+  border-radius: 999px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-primary,
+.btn-secondary {
+  border-radius: 999px;
+  padding: 11px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-primary {
-  background: var(--accent-color);
+  background: linear-gradient(135deg, var(--accent-color) 0%, var(--accent-hover) 100%);
   color: #fff;
-  box-shadow: 0 2px 4px rgba(33, 110, 78, 0.15);
+  border-color: rgba(33, 110, 78, 0.18);
+  box-shadow: 0 14px 28px rgba(33, 110, 78, 0.18);
 }
 .btn-primary:hover { 
-  background: var(--accent-hover); 
+  background: linear-gradient(135deg, var(--accent-hover) 0%, #13432f 100%);
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(33, 110, 78, 0.2);
+  box-shadow: 0 18px 32px rgba(33, 110, 78, 0.22);
 }
 
 .btn-secondary {
-  background: var(--bg-surface);
+  background: rgba(255, 255, 255, 0.82);
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
 }
 .btn-secondary:hover {
   background: var(--bg-surface-hover);
+  transform: translateY(-1px);
 }
 
 .filter-bar {
@@ -912,5 +1016,152 @@ body {
 
 .calendar-event-pill {
   transition: all 0.2s ease;
+}
+
+.loader-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent-color);
+  animation: loader-bounce 0.9s ease-in-out infinite;
+}
+
+.loader-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.loader-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes loader-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+
+  40% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.public-row-hover:hover {
+  background-color: rgba(0, 122, 255, 0.02);
+}
+
+.calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: start;
+}
+
+.calendar-grid-frame {
+  overflow-x: auto;
+  padding: 1px;
+}
+
+.dialog-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog-field-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.dialog-field-label {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.dialog-inline-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dialog-inline-toggle.active {
+  color: var(--accent-color);
+}
+
+.dialog-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dialog-chip,
+.dialog-option-button {
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dialog-chip:hover,
+.dialog-option-button:hover {
+  border-color: rgba(33, 110, 78, 0.22);
+  color: var(--text-primary);
+}
+
+.dialog-chip.active,
+.dialog-option-button.active {
+  background: var(--accent-light);
+  border-color: rgba(33, 110, 78, 0.28);
+  color: var(--accent-color);
+}
+
+.dialog-option-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog-option-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 170px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.dialog-option-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 10px 4px;
+}
+
+.dialog-warning-badge {
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+@media (max-width: 960px) {
+  .calendar-layout {
+    grid-template-columns: 1fr;
+  }
 }
 

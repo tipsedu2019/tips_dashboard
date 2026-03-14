@@ -1,185 +1,311 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
-import { Camera, User, ArrowLeft } from 'lucide-react';
-import { parseSchedule, parseScheduleMeta, generateTimeSlots, timeToSlotIndex, DAY_LABELS, CLASS_COLORS, stripClassPrefix } from '../data/sampleData';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Camera, User } from 'lucide-react';
+import {
+  DAY_LABELS,
+  generateTimeSlots,
+  getTeacherCanonicalKey,
+  parseSchedule,
+  stripClassPrefix,
+  timeToSlotIndex,
+} from '../data/sampleData';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import ClassDetailModal from './ClassDetailModal';
+import TimetableGrid from './ui/TimetableGrid';
+import TimetableEditDialog from './ui/TimetableEditDialog';
+import { getUserFriendlyDataError } from '../lib/dataErrorUtils';
+import { exportElementAsImage } from '../lib/exportAsImage';
+import {
+  buildQuickClassPayload,
+  buildQuickCreateDraft,
+  validateQuickCreateDraft,
+} from '../lib/quickClassSchedule';
+import {
+  buildTimetableTooltip,
+  canTeacherOpenClass,
+  collectClassroomEntries,
+  collectGradeOptions,
+  collectSubjectOptions,
+  collectTeacherEntries,
+  getClassColor,
+  getClassMeta,
+  resolveSlotClassroom,
+  resolveSlotTeachers,
+} from './timetableViewUtils';
+import {
+  applySlotMove,
+  buildEditableSlots,
+  findScheduleConflicts,
+  findQuickCreateConflicts,
+  isEditableScheduleClass,
+} from '../lib/timetableEditing';
 
-export default function TeacherWeeklyView({ classes, data, dataService, onViewStudentSchedule, onBack }) {
+const ALL_TEACHERS = '__all_teachers__';
+
+function EmptyState({ message }) {
+  return (
+    <div
+      style={{
+        padding: '48px 20px',
+        textAlign: 'center',
+        color: 'var(--text-muted)',
+        background: 'var(--bg-surface-hover)',
+        borderRadius: 16,
+      }}
+    >
+      {message}
+    </div>
+  );
+}
+
+function getRangeFromSlots(timeSlots, startSlot, endSlot) {
+  return {
+    start: timeSlots[startSlot]?.split('-')[0] || '09:00',
+    end: timeSlots[endSlot - 1]?.split('-')[1] || '09:30',
+  };
+}
+
+export default function TeacherWeeklyView({
+  classes,
+  allClasses = classes,
+  data,
+  dataService,
+  onViewStudentSchedule,
+  onBack,
+  defaultStatus = '수업 진행 중',
+  defaultPeriod = '',
+}) {
+  const toast = useToast();
   const { isStaff, isTeacher, user } = useAuth();
-  
-  const canEditBlock = useCallback((block) => {
-    if (isStaff) return true;
-    if (isTeacher && user && block.teacher && block.teacher.includes(user.name)) return true;
-    return false;
-  }, [isStaff, isTeacher, user]);
+  const [selectedTeacher, setSelectedTeacher] = useState(ALL_TEACHERS);
   const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
-  const teachers = useMemo(() => {
-    const set = new Set();
-    classes.forEach(c => {
-      // 콤마(구분자)로만 분리 — 공백 포함 안 함 (이름에 공백 있어도 안전)
-      const teacherList = (c.teacher || '').split(/[,\/]+/).map(t => t.trim()).filter(Boolean);
-      teacherList.forEach(t => set.add(t));
-    });
-    return [...set].sort();
-  }, [classes]);
-
-  const [selectedTeacher, setSelectedTeacher] = useState('전체');
-  const [hoveredSlot, setHoveredSlot] = useState(null);
-  const timeSlots = useMemo(() => generateTimeSlots(9, 24), []);
-
+  const [createState, setCreateState] = useState(null);
+  const [moveState, setMoveState] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const scheduleRef = useRef(null);
 
-  const getScheduleBlocks = useCallback((targetTeacher) => {
-    const blocks = [];
-    classes.forEach((cls, idx) => {
-      // 콤마/슬래시로 구분된 복수 선생님 지원
-      const teacherList = (cls.teacher || '').split(/[,\/]+/).map(t => t.trim()).filter(Boolean);
-      const slots = parseSchedule(cls.schedule, cls);
-      const meta = parseScheduleMeta(cls.schedule);
-      slots.forEach(sch => {
-        // 특정 선생님 오버라이드 확인
-        const effectiveTeacher = sch.teacher || teacherList[0]; 
-        // 만약 슬롯에 담당 선생님이 지정되어 있다면 그 분의 스케줄에만 표시, 
-        // 지정 안 되어 있다면 원본 참여 명단 모두의 스케줄에 표시
-        const shouldShow = sch.teacher ? (sch.teacher === targetTeacher) : teacherList.includes(targetTeacher);
-        
-        if (!shouldShow) return;
+  const timeSlots = useMemo(() => generateTimeSlots(9, 24), []);
+  const teacherEntries = useMemo(() => collectTeacherEntries(allClasses), [allClasses]);
+  const classroomOptions = useMemo(() => collectClassroomEntries(allClasses).map((entry) => entry.label), [allClasses]);
+  const fieldOptions = useMemo(() => ({
+    subjects: collectSubjectOptions(allClasses),
+    grades: collectGradeOptions(allClasses),
+    teachers: teacherEntries.map((entry) => entry.label),
+    classrooms: classroomOptions,
+  }), [allClasses, teacherEntries, classroomOptions]);
+  const selectedTeacherEntry = useMemo(
+    () => teacherEntries.find((entry) => entry.key === selectedTeacher) || null,
+    [selectedTeacher, teacherEntries]
+  );
 
-        const dayIdx = DAY_LABELS.indexOf(sch.day);
-        if (dayIdx === -1) return;
-        const startSlot = timeToSlotIndex(sch.start, 9);
-        const endSlot = timeToSlotIndex(sch.end, 9);
-        const color = CLASS_COLORS[idx % CLASS_COLORS.length];
-        const effectiveClassroom = sch.classroom || cls.classroom;
-        blocks.push({ cls, dayIdx, startSlot, endSlot: Math.max(endSlot, startSlot + 1), color, meta, effectiveClassroom, teacher: effectiveTeacher });
-      });
-    });
-    return blocks;
-  }, [classes]);
+  useEffect(() => {
+    if (selectedTeacher === ALL_TEACHERS) {
+      return;
+    }
+
+    if (!selectedTeacherEntry) {
+      setSelectedTeacher(ALL_TEACHERS);
+    }
+  }, [selectedTeacher, selectedTeacherEntry]);
+  const canEditTimetable = Boolean(isStaff && selectedTeacher !== ALL_TEACHERS && selectedTeacherEntry);
+  const canExportImage = selectedTeacher !== ALL_TEACHERS && Boolean(selectedTeacherEntry);
+
+  const buildBlocksForTeacher = useCallback(
+    (targetTeacherKey) =>
+      classes.flatMap((cls, colorIndex) => {
+        const meta = getClassMeta(cls);
+        const editableState = isEditableScheduleClass(cls);
+        const editableSlots = buildEditableSlots(cls);
+
+        return parseSchedule(cls.schedule, cls).flatMap((slot, slotIndex) => {
+          const teacherNames = resolveSlotTeachers(cls, slot);
+          const matchedTeacher = teacherNames.find((teacherName) => getTeacherCanonicalKey(teacherName) === targetTeacherKey);
+          if (!matchedTeacher) return [];
+
+          const dayIndex = DAY_LABELS.indexOf(slot.day);
+          if (dayIndex === -1) return [];
+
+          const classroom = resolveSlotClassroom(cls, slot) || cls.classroom || cls.room || '-';
+          const canOpen = canTeacherOpenClass({ isStaff, isTeacher, user, teacherNames });
+          const palette = getClassColor(colorIndex);
+          const startSlot = timeToSlotIndex(slot.start, 9);
+          const endSlot = Math.max(timeToSlotIndex(slot.end, 9), startSlot + 1);
+          const editSlot = editableSlots[slotIndex];
+
+          return [{
+            key: `${cls.id}-${targetTeacherKey}-${slot.day}-${slot.start}-${slot.end}-${classroom}`,
+            columnIndex: dayIndex,
+            startSlot,
+            endSlot,
+            backgroundColor: palette.bg,
+            borderColor: palette.border,
+            textColor: palette.text,
+            clickable: canOpen,
+            editable: canEditTimetable && editableState.editable,
+            editableReason: editableState.reason,
+            editData: editSlot ? { classItem: cls, slotId: editSlot.slotId, teacher: matchedTeacher, classroom } : null,
+            onClick: () => canOpen && setSelectedClassForDetails(cls),
+            variantDot: Boolean(meta.hasVariants),
+            variantDotTitle: editableState.editable ? '드래그로 이동할 수 있습니다.' : editableState.reason,
+            header: cls.subject ? `[${cls.subject}]` : '',
+            title: stripClassPrefix(cls.className),
+            detailLines: [{ label: '강의실', value: classroom }],
+            tooltip: buildTimetableTooltip({ cls, teacher: matchedTeacher, classroom, meta }),
+          }];
+        });
+      }),
+    [classes, canEditTimetable, isStaff, isTeacher, user]
+  );
 
   const handleSaveImage = useCallback(async () => {
-    if (!scheduleRef.current) return;
-    try {
-      const originalContainerStyle = scheduleRef.current.style.cssText;
-      scheduleRef.current.style.width = '794px'; 
-      scheduleRef.current.style.margin = '0 auto';
-      scheduleRef.current.style.backgroundColor = document.documentElement.getAttribute('data-theme') === 'dark' ? '#1c1c1e' : '#f5f5f7';
-      scheduleRef.current.style.padding = '32px';
-
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(scheduleRef.current, {
-        scale: 2,
-        windowWidth: 794,
-        useCORS: true,
-      });
-
-      scheduleRef.current.style.cssText = originalContainerStyle;
-
-      const link = document.createElement('a');
-      link.download = `선생님_${selectedTeacher}_주간스케줄.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
-    } catch (err) {
-      console.error('Image save error:', err);
-      alert('이미지 저장에 실패했습니다.');
+    if (!canExportImage) {
+      toast.info('이미지 저장은 단일 선생님을 선택했을 때만 사용할 수 있습니다.');
+      return;
     }
-  }, [selectedTeacher]);
 
-  const renderGrid = (teacherName) => {
-    const blocks = getScheduleBlocks(teacherName);
-    const isAll = selectedTeacher === '전체';
+    try {
+      await exportElementAsImage(scheduleRef.current, `teacher-${selectedTeacher}-weekly.png`, {
+        preset: 'a4-portrait',
+      });
+      toast.success('선생님 시간표 이미지를 저장했습니다.');
+    } catch {
+      toast.error('이미지 저장에 실패했습니다.');
+    }
+  }, [canExportImage, selectedTeacher, toast]);
+
+  const handleCreateSelection = ({ columnIndex, startSlot, endSlot }) => {
+    if (!selectedTeacherEntry) return;
+    const range = getRangeFromSlots(timeSlots, startSlot, endSlot);
+    const day = DAY_LABELS[columnIndex];
+
+    setCreateState({
+      summary: {
+        day,
+        start: range.start,
+        end: range.end,
+        fixedAxisLabel: '선생님',
+        fixedAxisValue: selectedTeacherEntry.label,
+      },
+      draft: buildQuickCreateDraft({
+        day,
+        start: range.start,
+        end: range.end,
+        classroom: classroomOptions[0] || '',
+        teacher: selectedTeacherEntry.label,
+        defaultStatus,
+        period: defaultPeriod,
+      }),
+      slot: { day, ...range, teacher: selectedTeacherEntry.label },
+    });
+  };
+
+  const handleMoveBlock = ({ block, columnIndex, startSlot }) => {
+    const range = getRangeFromSlots(timeSlots, startSlot, startSlot + (block.endSlot - block.startSlot));
+    const day = DAY_LABELS[columnIndex];
+
+    setMoveState({
+      block,
+      next: { day, ...range, teacher: selectedTeacherEntry?.label || '' },
+      warnings: findScheduleConflicts({
+        classes,
+        ignoreClassId: block.editData.classItem.id,
+        slot: { day, start: range.start, end: range.end },
+        teacher: selectedTeacherEntry?.label,
+        classroom: block.editData.classroom,
+      }),
+    });
+  };
+
+  const confirmCreate = async () => {
+    const validationError = validateQuickCreateDraft(createState?.draft);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await dataService.addClass({
+        ...buildQuickClassPayload(createState.draft, { fallbackTeacher: createState.slot.teacher }),
+        studentIds: [],
+        waitlistIds: [],
+        textbookIds: [],
+        textbookInfo: '',
+        lessons: [],
+        capacity: 0,
+        fee: 0,
+        startDate: '',
+        endDate: '',
+      });
+      setCreateState(null);
+      toast.success('새 수업을 시간표에 추가했습니다.');
+    } catch (error) {
+      toast.error(`수업 생성에 실패했습니다: ${getUserFriendlyDataError(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const confirmMove = async () => {
+    if (!moveState?.block?.editData) return;
+    setIsSaving(true);
+    try {
+      const { classItem, slotId, classroom } = moveState.block.editData;
+      const { updates } = applySlotMove({
+        cls: classItem,
+        slotId,
+        nextDay: moveState.next.day,
+        nextStart: moveState.next.start,
+        nextEnd: moveState.next.end,
+        nextTeacher: moveState.next.teacher,
+        nextClassroom: classroom,
+      });
+      await dataService.updateClass(classItem.id, { ...classItem, ...updates });
+      setMoveState(null);
+      toast.success('시간표 위치를 업데이트했습니다.');
+    } catch (error) {
+      toast.error(`시간표 이동에 실패했습니다: ${getUserFriendlyDataError(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const renderGrid = (teacherEntry) => {
+    const blocks = buildBlocksForTeacher(teacherEntry.key);
+    const isAllView = selectedTeacher === ALL_TEACHERS;
+    const showEditableEmptyGrid = !isAllView && canEditTimetable && teacherEntry.key === selectedTeacher && blocks.length === 0;
+    const showEmptyState = blocks.length === 0 && !showEditableEmptyGrid;
+
     return (
-      <div 
-        className={`card ${isAll ? 'view-all-container' : ''}`} 
-        key={teacherName} 
-        style={{ padding: 24, marginBottom: isAll ? 32 : 0, breakInside: 'avoid' }}
-      >
-        <h2 style={{ marginBottom: 16, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <User size={20} className="text-accent" /> {teacherName} 주간 스케줄
+      <section className={`card ${isAllView ? 'view-all-container' : ''}`} key={teacherEntry.key} style={{ padding: 24, marginBottom: isAllView ? 0 : 24, breakInside: 'avoid' }}>
+        <h2 style={{ marginBottom: 16, fontSize: 18, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <User size={20} className="text-accent" /> {teacherEntry.label} 주간 시간표
         </h2>
-        <div 
-          style={isAll ? { 
-            overflow: 'hidden', 
-            height: `${Math.round((timeSlots.length * 48 + 42) * 0.65)}px`
-          } : { overflowX: 'auto' }} 
-          className={isAll ? 'view-all-mode' : ''}
-          onMouseLeave={() => setHoveredSlot(null)}
-        >
-          <div
-            className="timetable-grid"
-            style={{ gridTemplateColumns: `70px repeat(${DAY_LABELS.length}, minmax(90px, 1fr))` }}
-          >
-            <div className={`timetable-header-cell`}>시간</div>
-            {DAY_LABELS.map((day, dayIdx) => (
-              <div key={day} className={`timetable-header-cell ${hoveredSlot?.col === dayIdx ? 'hover-highlight' : ''}`}>
-                {day}
-              </div>
-            ))}
-
-            {timeSlots.map((time, rowIdx) => {
-              const isTimeHovered = hoveredSlot && rowIdx >= hoveredSlot.startRow && rowIdx < hoveredSlot.endRow;
-              return (
-              <div style={{ display: 'contents' }} key={time}>
-                <div className={`timetable-time-cell ${isTimeHovered ? 'hover-highlight' : ''}`} style={{ fontWeight: time.includes(':00-') ? 600 : 400 }}>
-                  {time}
-                </div>
-                {DAY_LABELS.map((day, dayIdx) => {
-                  const blockStart = blocks.find(b => b.dayIdx === dayIdx && b.startSlot === rowIdx);
-                  const activeBlock = blocks.find(b => b.dayIdx === dayIdx && b.startSlot <= rowIdx && b.endSlot > rowIdx);
-                  
-                  const isHoveredCol = hoveredSlot?.col === dayIdx;
-                  const isHoveredRow = hoveredSlot && rowIdx >= hoveredSlot.startRow && rowIdx < hoveredSlot.endRow;
-                  const isHovered = isHoveredCol || isHoveredRow;
-
-                  return (
-                    <div 
-                      key={`${day}-${rowIdx}`} 
-                      className={`timetable-cell ${isHovered ? 'hover-highlight' : ''}`}
-                      onMouseEnter={() => {
-                        if (activeBlock) setHoveredSlot({ col: dayIdx, startRow: activeBlock.startSlot, endRow: activeBlock.endSlot });
-                        else setHoveredSlot({ col: dayIdx, startRow: rowIdx, endRow: rowIdx + 1 });
-                      }}
-                    >
-                      {blockStart && (
-                        <div
-                          className={`timetable-block ${canEditBlock(blockStart) ? 'clickable' : ''}`}
-                          style={{
-                            backgroundColor: blockStart.color?.bg || 'var(--bg-surface)',
-                            borderLeftColor: blockStart.color?.border || 'var(--border-color)',
-                            color: blockStart.color?.text || 'var(--text-primary)',
-                            height: `${(blockStart.endSlot - blockStart.startSlot) * 48 - 2}px`,
-                            position: 'relative',
-                            cursor: canEditBlock(blockStart) ? 'pointer' : 'default'
-                          }}
-                          onClick={() => {
-                            if (canEditBlock(blockStart)) setSelectedClassForDetails(blockStart.cls);
-                          }}
-                        >
-                          {blockStart.meta?.hasVariants && <span className="block-variant-dot" title="시간 변동 있음" />}
-                          <div className="block-subject">[{blockStart.cls.subject}]</div>
-                          <div className="block-name">{stripClassPrefix(blockStart.cls.className)}</div>
-                          <div className="block-info"><span className="info-label">강의실</span> {blockStart.effectiveClassroom}</div>
-                          {blockStart.cls.textbook && <div className="block-info" style={{ marginTop: 2, fontSize: 10, color: 'var(--text-muted)' }}><span className="info-label" style={{ opacity: 0.7 }}>교재</span> {blockStart.cls.textbook}</div>}
-                          <div className="tooltip">
-                            {blockStart.cls.textbook && `📚 교재: ${blockStart.cls.textbook}\n`}
-                            {blockStart.meta?.hasVariants
-                              ? `📅 시간 변동 있음\n\n${blockStart.meta.rawNote}`
-                              : blockStart.cls.schedule}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )})}
+        {showEditableEmptyGrid && (
+          <div style={{ marginBottom: 14, color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
+            아직 배정된 수업이 없습니다. 빈 시간표를 드래그해서 개강 예정 수업을 바로 생성할 수 있습니다.
           </div>
-        </div>
-      </div>
+        )}
+        {showEmptyState ? (
+          <EmptyState message="해당 선생님에게 배정된 수업이 없습니다." />
+        ) : (
+          <div className={isAllView ? 'view-all-mode' : undefined} style={isAllView ? { overflow: 'hidden', height: `${Math.round((timeSlots.length * 48 + 48) * 0.65)}px` } : undefined}>
+            <TimetableGrid
+              columns={DAY_LABELS}
+              timeSlots={timeSlots}
+              blocks={blocks}
+              timeLabel="시간"
+              editable={Boolean(canEditTimetable && teacherEntry.key === selectedTeacher)}
+              onCreateSelection={handleCreateSelection}
+              onMoveBlock={handleMoveBlock}
+            />
+          </div>
+        )}
+      </section>
     );
   };
 
-  const targetsToRender = selectedTeacher === '전체' ? teachers : [selectedTeacher];
+  const targetsToRender = selectedTeacher === ALL_TEACHERS ? teacherEntries : teacherEntries.filter((entry) => entry.key === selectedTeacher);
 
   return (
     <div className="animate-in">
@@ -187,49 +313,86 @@ export default function TeacherWeeklyView({ classes, data, dataService, onViewSt
         <div>
           <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {onBack && (
-              <button 
-                className="btn-icon" 
-                onClick={onBack} 
-                style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border-color)' }}
-              >
+              <button className="btn-icon" onClick={onBack} style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border-color)' }}>
                 <ArrowLeft size={20} />
               </button>
             )}
-            <User size={28} /> 선생님별 주간 스케줄
+            <User size={28} /> 선생님별 주간 시간표
           </h1>
-          <p>특정 선생님 또는 전체 선생님의 일주일 스케줄을 확인합니다.</p>
+          <p>선생님 기준 주간 배정을 보고, 직원 권한에서는 블록 드래그로 시간표를 빠르게 수정할 수 있습니다.</p>
         </div>
-        <button className="btn btn-primary" onClick={handleSaveImage}>
-          <Camera size={18} /> 이미지 저장 (A4 최적화)
+        <button className="btn btn-primary" onClick={handleSaveImage} disabled={!canExportImage} title={canExportImage ? '현재 선생님 시간표를 A4 세로 이미지로 저장합니다.' : '전체 보기에서는 이미지 저장을 사용할 수 없습니다.'}>
+          <Camera size={18} /> 이미지 저장
         </button>
       </div>
 
       <div className="filter-bar">
         <div className="h-segment-container">
-          <button 
-            className={`h-segment-btn ${selectedTeacher === '전체' ? 'active' : ''}`}
-            onClick={() => setSelectedTeacher('전체')}
-          >
-            전체 보기 (All)
+          <button className={`h-segment-btn ${selectedTeacher === ALL_TEACHERS ? 'active' : ''}`} onClick={() => setSelectedTeacher(ALL_TEACHERS)}>
+            전체 보기
           </button>
-          {teachers.map(t => (
-            <button 
-              key={t}
-              className={`h-segment-btn ${selectedTeacher === t ? 'active' : ''}`}
-              onClick={() => setSelectedTeacher(t)}
-            >
-              {t}
+          {teacherEntries.map((teacherEntry) => (
+            <button key={teacherEntry.key} className={`h-segment-btn ${selectedTeacher === teacherEntry.key ? 'active' : ''}`} onClick={() => setSelectedTeacher(teacherEntry.key)}>
+              {teacherEntry.label}
             </button>
           ))}
         </div>
       </div>
 
-      <div ref={scheduleRef} className={selectedTeacher === '전체' ? 'view-all-grid-container' : ''}>
-        {targetsToRender.map(renderGrid)}
-      </div>
+      {teacherEntries.length === 0 ? (
+        <div className="card" style={{ padding: 28 }}>
+          <EmptyState message="표시할 선생님 데이터가 없습니다." />
+        </div>
+      ) : (
+        <div ref={scheduleRef} className={selectedTeacher === ALL_TEACHERS ? 'view-all-grid-container' : undefined}>
+          {targetsToRender.map(renderGrid)}
+        </div>
+      )}
+
+      <TimetableEditDialog
+        open={Boolean(createState)}
+        mode="create"
+        draft={createState?.draft || {}}
+        summary={createState?.summary || {}}
+        fieldOptions={fieldOptions}
+        warnings={createState ? findQuickCreateConflicts({
+          classes,
+          scheduleLines: createState.draft.scheduleLines,
+          teacher: createState.slot.teacher,
+        }) : []}
+        busy={isSaving}
+        onChange={(key, value) => setCreateState((current) => (
+          current
+            ? { ...current, draft: { ...(current.draft || {}), [key]: value } }
+            : current
+        ))}
+        onCancel={() => setCreateState(null)}
+        onConfirm={confirmCreate}
+      />
+
+      <TimetableEditDialog
+        open={Boolean(moveState)}
+        mode="move"
+        draft={{}}
+        summary={moveState ? {
+          day: moveState.next.day,
+          start: moveState.next.start,
+          end: moveState.next.end,
+          fixedAxisLabel: '선생님',
+          fixedAxisValue: moveState.next.teacher,
+          className: stripClassPrefix(moveState.block.editData.classItem.className),
+          previousTime: `${DAY_LABELS[moveState.block.columnIndex]} ${getRangeFromSlots(timeSlots, moveState.block.startSlot, moveState.block.endSlot).start} ~ ${getRangeFromSlots(timeSlots, moveState.block.startSlot, moveState.block.endSlot).end}`,
+          nextTime: `${moveState.next.day} ${moveState.next.start} ~ ${moveState.next.end}`,
+        } : {}}
+        warnings={moveState?.warnings || []}
+        busy={isSaving}
+        onChange={() => {}}
+        onCancel={() => setMoveState(null)}
+        onConfirm={confirmMove}
+      />
 
       {selectedClassForDetails && (
-        <ClassDetailModal 
+        <ClassDetailModal
           cls={selectedClassForDetails}
           data={data}
           dataService={dataService}

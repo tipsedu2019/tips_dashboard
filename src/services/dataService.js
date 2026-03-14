@@ -1,19 +1,54 @@
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseConfigError } from '../lib/supabase';
+import { computeClassStatus, normalizeClassStatus } from '../lib/classStatus';
+import { normalizeClassroomText } from '../lib/classroomUtils';
+
+const EMPTY_SNAPSHOT = {
+  classes: [],
+  students: [],
+  textbooks: [],
+  progressLogs: [],
+  academicEvents: [],
+  academicSchools: [],
+  academicCurriculumProfiles: [],
+  academicSupplementMaterials: [],
+  academicExamScopes: [],
+  academicExamDays: [],
+  isConnected: false,
+  isLoading: false,
+  lastUpdated: null,
+  error: null
+};
+
+function generateId() {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.random() * 16 | 0;
+    const value = char === 'x' ? random : (random & 0x3 | 0x8);
+    return value.toString(16);
+  });
+}
 
 export class DataService {
   constructor() {
     this.listeners = new Set();
-    this.isConnected = false; 
+    this.channel = null;
+    this.isConnected = false;
     this.isLoading = false;
     this.lastUpdated = null;
-    this.error = null;
-    
-    // Subscribe to changes in all tables for real-time updates
-    this._setupRealtime();
+    this.error = supabaseConfigError;
+
+    if (supabase) {
+      this._setupRealtime();
+    }
   }
 
   _setupRealtime() {
-    supabase
+    if (!supabase || this.channel) return;
+
+    this.channel = supabase
       .channel('schema-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
         this._notify();
@@ -21,389 +56,1232 @@ export class DataService {
       .subscribe();
   }
 
+  _snapshot(overrides = {}) {
+    return {
+      ...EMPTY_SNAPSHOT,
+      lastUpdated: this.lastUpdated,
+      error: this.error,
+      ...overrides
+    };
+  }
+
+  _ensureClient() {
+    if (!supabase) {
+      throw new Error(supabaseConfigError || '지금은 Supabase에 연결할 수 없습니다.');
+    }
+
+    return supabase;
+  }
+
+  _pickFields(source, keys) {
+    return keys.reduce((result, key) => {
+      if (key in source) {
+        result[key] = source[key];
+      }
+      return result;
+    }, {});
+  }
+
+  _isMissingColumnError(error, columnNames) {
+    const message = String(error?.message || '').toLowerCase();
+    return columnNames.some((columnName) => message.includes(String(columnName).toLowerCase()));
+  }
+
+  _isMissingTableError(error, tableName) {
+    const message = String(error?.message || '').toLowerCase();
+    return message.includes(`relation "${tableName.toLowerCase()}"`) || message.includes(tableName.toLowerCase());
+  }
+
+  _removeColumnFromPayload(payload, columnName) {
+    if (Array.isArray(payload)) {
+      payload.forEach((item) => {
+        if (item && typeof item === 'object') {
+          delete item[columnName];
+        }
+      });
+      return payload;
+    }
+
+    if (payload && typeof payload === 'object') {
+      delete payload[columnName];
+    }
+
+    return payload;
+  }
+
+  async _runClassMutation(buildPayload, execute, optionalColumns = ['status', 'lessons', 'schedule_plan']) {
+    const payload = buildPayload();
+    const skippedColumns = [];
+    let result = await execute(payload);
+
+    while (result.error) {
+      const missingColumn = optionalColumns.find((columnName) => (
+        !skippedColumns.includes(columnName) &&
+        this._isMissingColumnError(result.error, [columnName])
+      ));
+
+      if (!missingColumn) {
+        break;
+      }
+
+      skippedColumns.push(missingColumn);
+      this._removeColumnFromPayload(payload, missingColumn);
+      console.warn(`[DataService] classes.${missingColumn} column missing; retrying without it.`);
+      result = await execute(payload);
+    }
+
+    return { result, skippedColumns };
+  }
+
+  _clonePayload(payload) {
+    if (Array.isArray(payload)) {
+      return payload.map((item) => (item && typeof item === 'object' ? { ...item } : item));
+    }
+
+    if (payload && typeof payload === 'object') {
+      return { ...payload };
+    }
+
+    return payload;
+  }
+
+  _normalizeAcademicEventInput(event) {
+    const start =
+      event?.start ||
+      event?.start_date ||
+      event?.startDate ||
+      event?.date ||
+      event?.end ||
+      event?.end_date ||
+      event?.endDate ||
+      '';
+    const end =
+      event?.end ||
+      event?.end_date ||
+      event?.endDate ||
+      event?.start ||
+      event?.start_date ||
+      event?.startDate ||
+      event?.date ||
+      start;
+
+    return {
+      id: event?.id || generateId(),
+      title: event?.title || '',
+      school: event?.school || null,
+      school_id: event?.schoolId || event?.school_id || null,
+      type: event?.type || '',
+      start,
+      end,
+      color: event?.color || null,
+      grade: event?.grade || 'all',
+      note: event?.note || null,
+    };
+  }
+
+  _buildAcademicEventPayloadCandidates(events) {
+    const items = (Array.isArray(events) ? events : [events]).map((event) => this._normalizeAcademicEventInput(event));
+    const createPayload = (mapper) => items.map((event) => mapper(event));
+
+    return [
+      {
+        payload: createPayload((event) => ({
+          id: event.id,
+          title: event.title,
+          school: event.school,
+          school_id: event.school_id,
+          type: event.type,
+          start: event.start,
+          end: event.end,
+          date: event.start,
+          color: event.color,
+          grade: event.grade,
+          note: event.note,
+        })),
+        optionalColumns: ['school_id', 'school', 'color', 'grade', 'note', 'start', 'end', 'date'],
+      },
+      {
+        payload: createPayload((event) => ({
+          id: event.id,
+          title: event.title,
+          school: event.school,
+          school_id: event.school_id,
+          type: event.type,
+          start_date: event.start,
+          end_date: event.end,
+          date: event.start,
+          color: event.color,
+          grade: event.grade,
+          note: event.note,
+        })),
+        optionalColumns: ['school_id', 'school', 'color', 'grade', 'note', 'start_date', 'end_date', 'date'],
+      },
+      {
+        payload: createPayload((event) => ({
+          id: event.id,
+          title: event.title,
+          school: event.school,
+          school_id: event.school_id,
+          type: event.type,
+          date: event.start,
+          color: event.color,
+          grade: event.grade,
+          note: event.note,
+        })),
+        optionalColumns: ['school_id', 'school', 'color', 'grade', 'note', 'date'],
+      },
+    ];
+  }
+
+  async _runAcademicEventMutation(buildCandidates, execute) {
+    const candidates = buildCandidates();
+    let lastError = null;
+
+    for (const candidate of candidates) {
+      const payload = this._clonePayload(candidate.payload);
+      const skippedColumns = [];
+      let result = await execute(payload);
+
+      while (result.error) {
+        const missingColumn = (candidate.optionalColumns || []).find((columnName) => (
+          !skippedColumns.includes(columnName) && this._isMissingColumnError(result.error, [columnName])
+        ));
+
+        if (!missingColumn) {
+          break;
+        }
+
+        skippedColumns.push(missingColumn);
+        this._removeColumnFromPayload(payload, missingColumn);
+        console.warn(`[DataService] academic_events.${missingColumn} column missing; retrying without it.`);
+        result = await execute(payload);
+      }
+
+      if (!result.error) {
+        return { result, skippedColumns };
+      }
+
+      lastError = result.error;
+    }
+
+    return { result: { error: lastError, data: null }, skippedColumns: [] };
+  }
+
+  _normalizeClassroomValue(value) {
+    return normalizeClassroomText(value);
+  }
+
+  _mapClassUpdates(updates) {
+    const mapped = { ...updates };
+
+    if ('className' in mapped) {
+      mapped.name = mapped.className;
+      delete mapped.className;
+    }
+    if ('classroom' in mapped) {
+      mapped.room = this._normalizeClassroomValue(mapped.classroom);
+      delete mapped.classroom;
+    }
+    if ('room' in mapped) {
+      mapped.room = this._normalizeClassroomValue(mapped.room);
+    }
+    if ('studentIds' in mapped) {
+      mapped.student_ids = mapped.studentIds;
+      delete mapped.studentIds;
+    }
+    if ('textbookIds' in mapped) {
+      mapped.textbook_ids = mapped.textbookIds;
+      delete mapped.textbookIds;
+    }
+    if ('waitlistIds' in mapped) {
+      mapped.waitlist_ids = mapped.waitlistIds;
+      delete mapped.waitlistIds;
+    }
+    if ('startDate' in mapped) {
+      mapped.start_date = mapped.startDate;
+      delete mapped.startDate;
+    }
+    if ('endDate' in mapped) {
+      mapped.end_date = mapped.endDate;
+      delete mapped.endDate;
+    }
+    if ('textbookInfo' in mapped) {
+      mapped.textbook_info = mapped.textbookInfo;
+      delete mapped.textbookInfo;
+    }
+    if ('schedulePlan' in mapped) {
+      mapped.schedule_plan = mapped.schedulePlan;
+      delete mapped.schedulePlan;
+    }
+    if ('status' in mapped) {
+      mapped.status = normalizeClassStatus(mapped.status);
+    }
+
+    return this._pickFields(mapped, [
+      'name', 'teacher', 'schedule', 'student_ids', 'textbook_ids',
+      'waitlist_ids', 'room', 'subject', 'color', 'capacity',
+      'period', 'start_date', 'end_date', 'fee', 'grade', 'status',
+      'textbook_info', 'lessons', 'schedule_plan'
+    ]);
+  }
+
+  _mapStudentUpdates(updates) {
+    const mapped = { ...updates };
+
+    if ('classIds' in mapped) {
+      mapped.class_ids = mapped.classIds;
+      delete mapped.classIds;
+    }
+    if ('waitlistClassIds' in mapped) {
+      mapped.waitlist_class_ids = mapped.waitlistClassIds;
+      delete mapped.waitlistClassIds;
+    }
+    if ('parentContact' in mapped) {
+      mapped.parent_contact = mapped.parentContact;
+      delete mapped.parentContact;
+    }
+    if ('enrollDate' in mapped) {
+      mapped.enroll_date = mapped.enrollDate;
+      delete mapped.enrollDate;
+    }
+
+    return this._pickFields(mapped, [
+      'name', 'uid', 'contact', 'parent_contact', 'school',
+      'grade', 'enroll_date', 'class_ids', 'waitlist_class_ids'
+    ]);
+  }
+
   subscribe(listener) {
+    let isSubscribed = true;
+
     this.listeners.add(listener);
-    // Send initial data
-    this._getSnapshot().then(snap => {
-      listener(snap);
-    });
-    return () => this.listeners.delete(listener);
+    listener(this._snapshot({ isLoading: true }));
+
+    this._getSnapshot()
+      .then((snapshot) => {
+        if (isSubscribed) {
+          listener(snapshot);
+        }
+      })
+      .catch((error) => {
+        console.error('DataService initial snapshot error:', error);
+        if (!isSubscribed) return;
+
+        this.lastUpdated = new Date();
+        this.error = error?.message || '데이터를 불러오지 못했습니다.';
+        listener(this._snapshot({
+          isConnected: false,
+          isLoading: false,
+          lastUpdated: this.lastUpdated,
+          error: this.error
+        }));
+      });
+
+    return () => {
+      isSubscribed = false;
+      this.listeners.delete(listener);
+    };
   }
 
   async _notify() {
     try {
-      const snap = await this._getSnapshot();
-      this.listeners.forEach(fn => fn(snap));
+      const snapshot = await this._getSnapshot();
+      this.listeners.forEach((listener) => listener(snapshot));
     } catch (err) {
       console.error('DataService notification error:', err);
     }
   }
 
   async _getSnapshot() {
-    try {
-      const results = await Promise.all([
-        supabase.from('classes').select('*'),
-        supabase.from('students').select('*'),
-        supabase.from('textbooks').select('*'),
-        supabase.from('progress_logs').select('*'),
-        supabase.from('academic_events').select('*'),
-        supabase.from('reference_materials').select('*')
-      ]);
+    if (!supabase) {
+      this.isConnected = false;
+      this.lastUpdated = new Date();
+      this.error = supabaseConfigError;
+      return this._snapshot({
+        isConnected: false,
+        isLoading: false,
+        lastUpdated: this.lastUpdated
+      });
+    }
 
-      const errors = results.filter(r => r.error).map(r => r.error);
+    try {
+      const resources = [
+        {
+          key: 'classes',
+          table: 'classes',
+          map: (rows) => (rows || []).map((row) => this._processClass(row))
+        },
+        {
+          key: 'students',
+          table: 'students',
+          map: (rows) => (rows || []).map((row) => this._processStudent(row))
+        },
+        {
+          key: 'textbooks',
+          table: 'textbooks',
+          map: (rows) => (rows || []).map((row) => this._processTextbook(row))
+        },
+        {
+          key: 'progressLogs',
+          table: 'progress_logs',
+          map: (rows) => (rows || []).map((row) => this._processProgressLog(row))
+        },
+        {
+          key: 'academicEvents',
+          table: 'academic_events',
+          map: (rows) => (rows || []).map((row) => this._processAcademicEvent(row))
+        },
+        {
+          key: 'academicSchools',
+          table: 'academic_schools',
+          map: (rows) => (rows || []).map((row) => this._processAcademicSchool(row)),
+          optional: true
+        },
+        {
+          key: 'academicCurriculumProfiles',
+          table: 'academic_curriculum_profiles',
+          map: (rows) => (rows || []).map((row) => this._processAcademicCurriculumProfile(row)),
+          optional: true
+        },
+        {
+          key: 'academicSupplementMaterials',
+          table: 'academic_supplement_materials',
+          map: (rows) => (rows || []).map((row) => this._processAcademicSupplementMaterial(row)),
+          optional: true
+        },
+        {
+          key: 'academicExamScopes',
+          table: 'academic_exam_scopes',
+          map: (rows) => (rows || []).map((row) => this._processAcademicExamScope(row)),
+          optional: true
+        },
+        {
+          key: 'academicExamDays',
+          table: 'academic_exam_days',
+          map: (rows) => (rows || []).map((row) => this._processAcademicExamDay(row)),
+          optional: true
+        }
+      ];
+
+      const settledResults = await Promise.allSettled(
+        resources.map((resource) => supabase.from(resource.table).select('*'))
+      );
+
+      const nextData = {};
+      const errors = [];
+
+      resources.forEach((resource, index) => {
+        const settled = settledResults[index];
+
+        if (settled.status === 'fulfilled') {
+          const { data, error } = settled.value;
+          if (error) {
+            if (!resource.optional || !this._isMissingTableError(error, resource.table)) {
+              errors.push(error);
+            }
+            nextData[resource.key] = EMPTY_SNAPSHOT[resource.key];
+            return;
+          }
+
+          nextData[resource.key] = resource.map(data);
+          return;
+        }
+
+        if (!resource.optional || !this._isMissingTableError(settled.reason, resource.table)) {
+          errors.push(settled.reason);
+        }
+        nextData[resource.key] = EMPTY_SNAPSHOT[resource.key];
+      });
+
       if (errors.length > 0) {
-          console.error('Supabase fetch errors:', errors);
-          // Still try to return what we have, but mark as disconnected/error
+        console.error('Supabase fetch errors:', errors);
       }
 
-      const [
-        { data: classes },
-        { data: students },
-        { data: textbooks },
-        { data: progressLogs },
-        { data: academicEvents },
-        { data: referenceMaterials }
-      ] = results;
+      const uniqueErrorMessages = [...new Set(
+        errors
+          .map((error) => error?.message || String(error))
+          .filter(Boolean)
+      )];
 
-      this.isConnected = errors.length === 0;
+      this.isConnected = uniqueErrorMessages.length === 0;
       this.lastUpdated = new Date();
+      this.error = uniqueErrorMessages.length > 0 ? uniqueErrorMessages[0] : null;
 
-      return {
-        classes: (classes || []).map(c => ({
-          ...c,
-          studentIds: c.student_ids,
-          textbookIds: c.textbook_ids,
-          waitlistIds: c.waitlist_ids,
-          startDate: c.start_date,
-          endDate: c.end_date
-        })),
-        students: (students || []).map(s => ({
-          ...s,
-          enrollDate: s.enroll_date,
-          classIds: s.class_ids,
-          waitlistClassIds: s.waitlist_class_ids
-        })),
-        textbooks: (textbooks || []).map(t => ({
-          ...t,
-          tags: t.tags
-        })),
-        progressLogs: (progressLogs || []).map(p => ({
-          ...p,
-          classId: p.class_id
-        })),
-        academicEvents: (academicEvents || []).map(e => ({ ...e })),
-        referenceMaterials: referenceMaterials || [],
+      return this._snapshot({
+        ...nextData,
         isConnected: this.isConnected,
         isLoading: false,
         lastUpdated: this.lastUpdated,
-        error: errors.length > 0 ? errors[0].message : null
-      };
+        error: this.error
+      });
     } catch (err) {
       console.error('DataService critical error:', err);
       this.isConnected = false;
-      return {
-        classes: [],
-        students: [],
-        textbooks: [],
-        progressLogs: [],
-        academicEvents: [],
-        referenceMaterials: [],
+      this.lastUpdated = new Date();
+      this.error = err.message;
+
+      return this._snapshot({
         isConnected: false,
         isLoading: false,
-        lastUpdated: new Date(),
-        error: err.message
-      };
+        lastUpdated: this.lastUpdated
+      });
     }
   }
 
-  // --- Classes ---
   async getClasses() {
-    const { data } = await supabase.from('classes').select('*');
-    return (data || []).map(c => ({ ...c, studentIds: c.student_ids, textbookIds: c.textbook_ids }));
+    const client = this._ensureClient();
+    const { data } = await client.from('classes').select('*');
+    return (data || []).map((row) => this._processClass(row));
   }
 
   async addClass(classObj) {
-    const { data, error } = await supabase.from('classes').insert([{
-      name: classObj.name,
-      teacher: classObj.teacher,
-      schedule: classObj.schedule,
-      student_ids: classObj.studentIds || [],
-      textbook_ids: classObj.textbookIds || [],
-      waitlist_ids: classObj.waitlistIds || [],
-      room: classObj.room,
-      subject: classObj.subject,
-      color: classObj.color,
-      capacity: classObj.capacity || 0,
-      period: classObj.period,
-      start_date: classObj.startDate,
-      end_date: classObj.endDate,
-      fee: classObj.fee || 0
-    }]).select().single();
-    if (error) throw error;
-    return data;
+    const client = this._ensureClient();
+    const { result } = await this._runClassMutation(
+      () => ({
+        id: classObj.id || generateId(),
+        name: classObj.name || classObj.className,
+        teacher: classObj.teacher,
+        schedule: classObj.schedule,
+        student_ids: classObj.studentIds || [],
+        textbook_ids: classObj.textbookIds || [],
+        waitlist_ids: classObj.waitlistIds || [],
+        room: this._normalizeClassroomValue(classObj.room || classObj.classroom),
+        subject: classObj.subject,
+        status: normalizeClassStatus(classObj.status) || computeClassStatus(classObj),
+        color: classObj.color,
+        capacity: classObj.capacity || 0,
+        period: classObj.period,
+        start_date: classObj.startDate,
+        end_date: classObj.endDate,
+        fee: classObj.fee || 0,
+        grade: classObj.grade,
+        textbook_info: classObj.textbookInfo,
+        lessons: classObj.lessons || [],
+        schedule_plan: classObj.schedulePlan || classObj.schedule_plan || null,
+      }),
+      (payload) => client.from('classes').insert([payload]).select().single()
+    );
+
+    if (result.error) throw result.error;
+    this._notify();
+    return this._processClass(result.data);
   }
 
   async updateClass(id, updates) {
-    const mappedUpdates = { ...updates };
-    if (updates.studentIds) {
-        mappedUpdates.student_ids = updates.studentIds;
-        delete mappedUpdates.studentIds;
-    }
-    if (updates.textbookIds) {
-        mappedUpdates.textbook_ids = updates.textbookIds;
-        delete mappedUpdates.textbookIds;
-    }
-    if (updates.waitlistIds) {
-        mappedUpdates.waitlist_ids = updates.waitlistIds;
-        delete mappedUpdates.waitlistIds;
-    }
-    if (updates.startDate) {
-        mappedUpdates.start_date = updates.startDate;
-        delete mappedUpdates.startDate;
-    }
-    if (updates.endDate) {
-        mappedUpdates.end_date = updates.endDate;
-        delete mappedUpdates.endDate;
-    }
+    const client = this._ensureClient();
+    const { result } = await this._runClassMutation(
+      () => this._mapClassUpdates(updates),
+      (payload) => client.from('classes').update(payload).eq('id', id)
+    );
 
-    const { error } = await supabase.from('classes').update(mappedUpdates).eq('id', id);
-    if (error) throw error;
+    if (result.error) throw result.error;
+    this._notify();
     return true;
   }
 
   async deleteClass(id) {
-    const { error } = await supabase.from('classes').delete().eq('id', id);
+    const client = this._ensureClient();
+    const { error } = await client.from('classes').delete().eq('id', id);
     if (error) throw error;
+    this._notify();
   }
 
   async bulkDeleteClasses(ids) {
-    const { error } = await supabase.from('classes').delete().in('id', ids);
+    const client = this._ensureClient();
+    const { error } = await client.from('classes').delete().in('id', ids);
     if (error) throw error;
+    this._notify();
   }
 
   async bulkUpdateClasses(ids, updates) {
-    const mappedUpdates = { ...updates };
-    if (updates.studentIds) {
-        mappedUpdates.student_ids = updates.studentIds;
-        delete mappedUpdates.studentIds;
-    }
-    if (updates.textbookIds) {
-        mappedUpdates.textbook_ids = updates.textbookIds;
-        delete mappedUpdates.textbookIds;
-    }
-    if (updates.waitlistIds) {
-        mappedUpdates.waitlist_ids = updates.waitlistIds;
-        delete mappedUpdates.waitlistIds;
-    }
-    if (updates.startDate) {
-        mappedUpdates.start_date = updates.startDate;
-        delete mappedUpdates.startDate;
-    }
-    if (updates.endDate) {
-        mappedUpdates.end_date = updates.endDate;
-        delete mappedUpdates.endDate;
-    }
-    const { error } = await supabase.from('classes').update(mappedUpdates).in('id', ids);
-    if (error) throw error;
+    const client = this._ensureClient();
+    const { result } = await this._runClassMutation(
+      () => this._mapClassUpdates(updates),
+      (payload) => client.from('classes').update(payload).in('id', ids)
+    );
+
+    if (result.error) throw result.error;
+    this._notify();
   }
 
-  // --- Textbooks ---
+  async bulkUpsertClasses(classesArray) {
+    const client = this._ensureClient();
+    const { result } = await this._runClassMutation(
+      () => classesArray.map((classItem) => ({
+        id: classItem.id || generateId(),
+        name: classItem.name || classItem.className,
+        subject: classItem.subject,
+        grade: classItem.grade,
+        teacher: classItem.teacher,
+        room: this._normalizeClassroomValue(classItem.room || classItem.classroom),
+        schedule: classItem.schedule,
+        status: normalizeClassStatus(classItem.status) || computeClassStatus(classItem),
+        fee: classItem.fee || 0,
+        capacity: classItem.capacity || 0,
+        period: classItem.period,
+        start_date: classItem.startDate,
+        end_date: classItem.endDate,
+        textbook_info: classItem.textbookInfo,
+        lessons: classItem.lessons || [],
+        schedule_plan: classItem.schedulePlan || classItem.schedule_plan || null,
+        student_ids: classItem.studentIds || [],
+        textbook_ids: classItem.textbookIds || [],
+        waitlist_ids: classItem.waitlistIds || []
+      })),
+      (payload) => client.from('classes').upsert(payload, { onConflict: 'id' }).select()
+    );
+
+    if (result.error) throw result.error;
+    this._notify();
+    return (result.data || []).map((row) => this._processClass(row));
+  }
+
+  async normalizeLegacyClassrooms(classesArray = []) {
+    const client = this._ensureClient();
+    const rows = (classesArray || [])
+      .map((classItem) => {
+        const normalizedRoom = this._normalizeClassroomValue(classItem.room || classItem.classroom);
+        if (!normalizedRoom || normalizedRoom === (classItem.room || classItem.classroom || '')) {
+          return null;
+        }
+
+        return {
+          id: classItem.id,
+          room: normalizedRoom,
+        };
+      })
+      .filter(Boolean);
+
+    if (rows.length === 0) {
+      return 0;
+    }
+
+    const { error } = await client.from('classes').upsert(rows, { onConflict: 'id' });
+    if (error) {
+      throw error;
+    }
+
+    this._notify();
+    return rows.length;
+  }
+
   async getTextbooks() {
-    const { data } = await supabase.from('textbooks').select('*');
-    return data || [];
+    const client = this._ensureClient();
+    const { data } = await client.from('textbooks').select('*');
+    return (data || []).map((row) => this._processTextbook(row));
   }
 
-  async addTextbook(tb) {
-    const { data, error } = await supabase.from('textbooks').insert([tb]).select().single();
+  async addTextbook(textbook) {
+    const client = this._ensureClient();
+    const payload = this._pickFields(textbook, ['id', 'title', 'publisher', 'price', 'tags', 'lessons']);
+    const { data, error } = await client.from('textbooks').insert([payload]).select().single();
     if (error) throw error;
-    return data;
+    this._notify();
+    return this._processTextbook(data);
   }
 
   async updateTextbook(id, updates) {
-    const { error } = await supabase.from('textbooks').update(updates).eq('id', id);
+    const client = this._ensureClient();
+    const finalUpdates = this._pickFields(updates, ['title', 'publisher', 'price', 'tags', 'lessons']);
+    const { error } = await client.from('textbooks').update(finalUpdates).eq('id', id);
     if (error) throw error;
+    this._notify();
   }
 
   async deleteTextbook(id) {
-    const { error } = await supabase.from('textbooks').delete().eq('id', id);
+    const client = this._ensureClient();
+    const { error } = await client.from('textbooks').delete().eq('id', id);
     if (error) throw error;
+    this._notify();
   }
 
   async bulkDeleteTextbooks(ids) {
-    const { error } = await supabase.from('textbooks').delete().in('id', ids);
+    const client = this._ensureClient();
+    const { error } = await client.from('textbooks').delete().in('id', ids);
     if (error) throw error;
+    this._notify();
   }
 
   async bulkUpdateTextbooks(ids, updates) {
+    const client = this._ensureClient();
+
     if (updates.addTags) {
-      const { addTags, ...rest } = updates;
-      if (Object.keys(rest).length > 0) {
-        const { error } = await supabase.from('textbooks').update(rest).in('id', ids);
-        if (error) throw error;
-      }
-    } else {
-      const { error } = await supabase.from('textbooks').update(updates).in('id', ids);
+      const { data, error } = await client.from('textbooks').select('*').in('id', ids);
+      if (error) throw error;
+
+      const mergedRows = (data || []).map((row) => ({
+        id: row.id,
+        tags: [...new Set([...(row.tags || []), ...updates.addTags])]
+      }));
+
+      const { error: mergeError } = await client.from('textbooks').upsert(mergedRows, { onConflict: 'id' });
+      if (mergeError) throw mergeError;
+    }
+
+    const rest = this._pickFields(updates, ['title', 'publisher', 'price', 'tags', 'lessons']);
+    if (Object.keys(rest).length > 0) {
+      const { error } = await client.from('textbooks').update(rest).in('id', ids);
       if (error) throw error;
     }
+
+    this._notify();
   }
 
-  // --- Students ---
   async getStudents() {
-    const { data } = await supabase.from('students').select('*');
-    return (data || []).map(s => ({ ...s, classIds: s.class_ids, enrollDate: s.enroll_date }));
+    const client = this._ensureClient();
+    const { data } = await client.from('students').select('*');
+    return (data || []).map((row) => this._processStudent(row));
   }
 
   async addStudent(student) {
-    const { data, error } = await supabase.from('students').insert([{
+    const client = this._ensureClient();
+    const payload = {
+      id: student.id || undefined,
       name: student.name,
+      uid: student.uid,
+      contact: student.contact,
+      parent_contact: student.parentContact,
+      school: student.school,
       grade: student.grade,
       enroll_date: student.enrollDate || new Date().toISOString().split('T')[0],
       class_ids: student.classIds || [],
       waitlist_class_ids: student.waitlistClassIds || []
-    }]).select().single();
+    };
+
+    const { data, error } = await client.from('students').insert([payload]).select().single();
     if (error) throw error;
-    return data;
+    this._notify();
+    return this._processStudent(data);
   }
 
   async updateStudent(id, updates) {
-    const mappedUpdates = { ...updates };
-    if (updates.enrollDate) {
-        mappedUpdates.enroll_date = updates.enrollDate;
-        delete mappedUpdates.enrollDate;
-    }
-    if (updates.classIds) {
-        mappedUpdates.class_ids = updates.classIds;
-        delete mappedUpdates.classIds;
-    }
-    if (updates.waitlistClassIds) {
-        mappedUpdates.waitlist_class_ids = updates.waitlistClassIds;
-        delete mappedUpdates.waitlistClassIds;
-    }
-    const { error } = await supabase.from('students').update(mappedUpdates).eq('id', id);
+    const client = this._ensureClient();
+    const finalUpdates = this._mapStudentUpdates(updates);
+    const { error } = await client.from('students').update(finalUpdates).eq('id', id);
     if (error) throw error;
+    this._notify();
   }
 
   async deleteStudent(id) {
-    const { error } = await supabase.from('students').delete().eq('id', id);
+    const client = this._ensureClient();
+    const { error } = await client.from('students').delete().eq('id', id);
     if (error) throw error;
+    this._notify();
   }
 
   async bulkDeleteStudents(ids) {
-    const { error } = await supabase.from('students').delete().in('id', ids);
+    const client = this._ensureClient();
+    const { error } = await client.from('students').delete().in('id', ids);
     if (error) throw error;
+    this._notify();
   }
 
-  // --- Progress / Logs ---
+  async bulkUpsertStudents(studentsArray) {
+    const client = this._ensureClient();
+    const rows = studentsArray.map((student) => ({
+      id: student.id || generateId(),
+      name: student.name,
+      uid: student.uid,
+      grade: student.grade,
+      school: student.school,
+      contact: student.contact,
+      parent_contact: student.parentContact,
+      enroll_date: student.enrollDate || new Date().toISOString().split('T')[0],
+      class_ids: student.classIds || [],
+      waitlist_class_ids: student.waitlistClassIds || []
+    }));
+
+    const { data, error } = await client.from('students').upsert(rows, { onConflict: 'id' }).select();
+    if (error) throw error;
+    this._notify();
+    return (data || []).map((row) => this._processStudent(row));
+  }
+
   async addProgressLog(log) {
-    const { data, error } = await supabase.from('progress_logs').insert([{
+    const client = this._ensureClient();
+    const completedLessonIds = log.completedLessonIds || (log.chapterId ? [log.chapterId] : []);
+    const payload = {
       class_id: log.classId,
+      textbook_id: log.textbookId,
+      chapter_id: log.chapterId,
+      completed_lesson_ids: completedLessonIds,
       date: log.date,
       content: log.content,
       homework: log.homework
-    }]).select().single();
-    if (error) throw error;
-    return data;
+    };
+
+    let result = await client.from('progress_logs').insert([payload]).select().single();
+    if (result.error && (String(result.error.message).includes('column') || String(result.error.message).includes('schema cache'))) {
+      const legacyPayload = {
+        class_id: log.classId,
+        date: log.date,
+        content: log.content,
+        homework: log.homework
+      };
+
+      result = await client.from('progress_logs').insert([legacyPayload]).select().single();
+    }
+
+    if (result.error) throw result.error;
+    this._notify();
+    return this._processProgressLog(result.data);
   }
 
   async deleteProgressLog(logId) {
-    const { error } = await supabase.from('progress_logs').delete().eq('id', logId);
+    const client = this._ensureClient();
+    const { error } = await client.from('progress_logs').delete().eq('id', logId);
     if (error) throw error;
+    this._notify();
   }
 
   async getProgressLogsForClass(classId) {
-    const { data } = await supabase.from('progress_logs').select('*').eq('class_id', classId);
-    return (data || []).map(p => ({ ...p, classId: p.class_id }));
+    const client = this._ensureClient();
+    const { data } = await client.from('progress_logs').select('*').eq('class_id', classId);
+    return (data || []).map((row) => this._processProgressLog(row));
   }
 
-  // --- Academic Events ---
+  async getAcademicSchools() {
+    const client = this._ensureClient();
+    const { data, error } = await client.from('academic_schools').select('*').order('sort_order', { ascending: true });
+    if (error) throw error;
+    return (data || []).map((row) => this._processAcademicSchool(row));
+  }
+
+  async getAcademicWorkspaceSupport() {
+    const client = this._ensureClient();
+    const requiredTables = [
+      'academic_schools',
+      'academic_curriculum_profiles',
+      'academic_supplement_materials',
+      'academic_exam_scopes',
+      'academic_exam_days',
+    ];
+
+    const settled = await Promise.all(
+      requiredTables.map(async (table) => {
+        const { error } = await client.from(table).select('id').limit(1);
+        return {
+          table,
+          available: !error || !this._isMissingTableError(error, table),
+          error,
+        };
+      })
+    );
+
+    const missingTables = settled
+      .filter((entry) => !entry.available)
+      .map((entry) => entry.table);
+
+    return {
+      ready: missingTables.length === 0,
+      missingTables,
+      checkedAt: new Date(),
+    };
+  }
+
+  async upsertAcademicSchools(schools) {
+    const client = this._ensureClient();
+    const payload = (schools || []).map((school) => ({
+      id: school.id,
+      name: school.name,
+      category: school.category,
+      color: school.color,
+      textbooks: school.textbooks || {},
+      sort_order: school.sortOrder || 0
+    }));
+
+    const { data, error } = await client.from('academic_schools').upsert(payload, { onConflict: 'id' }).select();
+    if (error) throw error;
+    this._notify();
+    return (data || []).map((row) => this._processAcademicSchool(row));
+  }
+
+  async bulkUpsertAcademicCurriculumProfiles(profiles) {
+    const client = this._ensureClient();
+    const requestedProfiles = (profiles || []).filter((profile) => profile?.schoolId && profile?.grade && profile?.subject);
+    if (requestedProfiles.length === 0) {
+      return [];
+    }
+
+    const existingRows = [];
+    const schoolIds = Array.from(new Set(requestedProfiles.map((profile) => profile.schoolId)));
+    for (const schoolId of schoolIds) {
+      const { data, error } = await client
+        .from('academic_curriculum_profiles')
+        .select('id, school_id, grade, subject')
+        .eq('school_id', schoolId);
+
+      if (error) {
+        throw error;
+      }
+
+      existingRows.push(...(data || []));
+    }
+
+    const existingIdByKey = new Map(
+      existingRows.map((row) => [`${row.school_id}::${row.grade}::${row.subject}`, row.id])
+    );
+
+    const payload = requestedProfiles.map((profile) => {
+      const key = `${profile.schoolId}::${profile.grade}::${profile.subject}`;
+      return {
+        id: profile.id || existingIdByKey.get(key) || generateId(),
+        school_id: profile.schoolId,
+        grade: profile.grade,
+        subject: profile.subject,
+        main_textbook_title: profile.mainTextbookTitle || null,
+        main_textbook_publisher: profile.mainTextbookPublisher || null,
+        note: profile.note || null,
+      };
+    });
+
+    const { data, error } = await client
+      .from('academic_curriculum_profiles')
+      .upsert(payload, { onConflict: 'school_id,grade,subject' })
+      .select();
+
+    if (error) throw error;
+    this._notify();
+    return (data || []).map((row) => this._processAcademicCurriculumProfile(row));
+  }
+
+  async replaceAcademicSupplementMaterials(profileId, items) {
+    const client = this._ensureClient();
+    const { error: deleteError } = await client.from('academic_supplement_materials').delete().eq('profile_id', profileId);
+    if (deleteError) throw deleteError;
+
+    const payload = (items || [])
+      .map((item, index) => ({
+        id: item.id || generateId(),
+        profile_id: profileId,
+        title: item.title || '',
+        publisher: item.publisher || null,
+        note: item.note || null,
+        sort_order: item.sortOrder ?? index,
+      }))
+      .filter((item) => item.title.trim());
+
+    if (payload.length > 0) {
+      const { error } = await client.from('academic_supplement_materials').insert(payload);
+      if (error) throw error;
+    }
+
+    this._notify();
+    return payload.map((row) => this._processAcademicSupplementMaterial(row));
+  }
+
+  async replaceAcademicExamScopes(profileId, items) {
+    const client = this._ensureClient();
+    const { error: deleteError } = await client.from('academic_exam_scopes').delete().eq('profile_id', profileId);
+    if (deleteError) throw deleteError;
+
+    const payload = (items || [])
+      .map((item, index) => ({
+        id: item.id || generateId(),
+        profile_id: profileId,
+        academic_event_id: item.academicEventId || null,
+        academic_exam_day_id: item.academicExamDayId || null,
+        period_label: item.periodLabel || null,
+        textbook_scope: item.textbookScope || null,
+        supplement_scope: item.supplementScope || null,
+        other_scope: item.otherScope || null,
+        note: item.note || null,
+        sort_order: item.sortOrder ?? index,
+      }))
+      .filter((item) => item.academic_event_id || item.period_label || item.textbook_scope || item.supplement_scope || item.other_scope || item.note);
+
+    if (payload.length > 0) {
+      const { error } = await client.from('academic_exam_scopes').insert(payload);
+      if (error) throw error;
+    }
+
+    this._notify();
+    return payload.map((row) => this._processAcademicExamScope(row));
+  }
+
+  async replaceAcademicExamDays(schoolId, grade, items) {
+    const client = this._ensureClient();
+    const safeGrade = String(grade || '').trim();
+    const { error: deleteError } = await client
+      .from('academic_exam_days')
+      .delete()
+      .eq('school_id', schoolId)
+      .eq('grade', safeGrade);
+
+    if (deleteError) throw deleteError;
+
+    const payload = (items || [])
+      .map((item, index) => ({
+        id: item.id || generateId(),
+        school_id: schoolId,
+        grade: safeGrade,
+        subject: item.subject,
+        exam_date: item.examDate || item.exam_date,
+        label: item.label || '',
+        note: item.note || '',
+        sort_order: item.sortOrder ?? index,
+      }))
+      .filter((item) => item.subject && item.exam_date);
+
+    if (payload.length > 0) {
+      const { error } = await client.from('academic_exam_days').insert(payload);
+      if (error) throw error;
+    }
+
+    this._notify();
+    return payload.map((row) => this._processAcademicExamDay(row));
+  }
+
+  async getAppPreference(key) {
+    const client = this._ensureClient();
+    const { data, error } = await client.from('app_preferences').select('*').eq('key', key).maybeSingle();
+    if (error) {
+      if (this._isMissingTableError(error, 'app_preferences')) {
+        return null;
+      }
+      throw error;
+    }
+    return data ? {
+      ...data,
+      value: data.value || null,
+      updatedAt: data.updated_at || null,
+    } : null;
+  }
+
+  async setAppPreference(key, value) {
+    const client = this._ensureClient();
+    const payload = {
+      key,
+      value,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await client
+      .from('app_preferences')
+      .upsert(payload, { onConflict: 'key' })
+      .select()
+      .single();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'app_preferences')) {
+        return null;
+      }
+      throw error;
+    }
+
+    return {
+      ...data,
+      value: data?.value || value,
+      updatedAt: data?.updated_at || payload.updated_at,
+    };
+  }
+
   async getAcademicEvents() {
-    const { data } = await supabase.from('academic_events').select('*');
-    return data || [];
+    const client = this._ensureClient();
+    const { data } = await client.from('academic_events').select('*');
+    return (data || []).map((row) => this._processAcademicEvent(row));
+  }
+
+  async bulkUpsertAcademicEvents(events) {
+    const client = this._ensureClient();
+    const { result } = await this._runAcademicEventMutation(
+      () => this._buildAcademicEventPayloadCandidates(events),
+      (payload) => client.from('academic_events').upsert(payload, { onConflict: 'id' }).select()
+    );
+    if (result.error) throw result.error;
+    this._notify();
+    return (result.data || []).map((row) => this._processAcademicEvent(row));
   }
 
   async addAcademicEvent(event) {
-    const { data, error } = await supabase.from('academic_events').insert([event]).select().single();
-    if (error) throw error;
-    return data;
+    const client = this._ensureClient();
+    const { result } = await this._runAcademicEventMutation(
+      () => this._buildAcademicEventPayloadCandidates(event),
+      async (payload) => {
+        const rows = Array.isArray(payload) ? payload : [payload];
+        const response = await client.from('academic_events').insert(rows).select().single();
+        return response;
+      }
+    );
+    if (result.error) throw result.error;
+    this._notify();
+    return this._processAcademicEvent(result.data);
   }
 
   async updateAcademicEvent(id, updates) {
-    const { error } = await supabase.from('academic_events').update(updates).eq('id', id);
-    if (error) throw error;
+    const client = this._ensureClient();
+    const baseEvent = {
+      ...updates,
+      id,
+      school_id: updates.schoolId ?? updates.school_id,
+      grade: updates.grade || 'all',
+      note: updates.note || null,
+    };
+    delete baseEvent.schoolId;
+
+    const { result } = await this._runAcademicEventMutation(
+      () => this._buildAcademicEventPayloadCandidates(baseEvent),
+      async (payload) => {
+        const row = Array.isArray(payload) ? payload[0] : payload;
+        return client.from('academic_events').update(row).eq('id', id);
+      }
+    );
+    if (result.error) throw result.error;
+    this._notify();
   }
 
   async deleteAcademicEvent(id) {
-    const { error } = await supabase.from('academic_events').delete().eq('id', id);
+    const client = this._ensureClient();
+    const { error } = await client.from('academic_events').delete().eq('id', id);
     if (error) throw error;
+    this._notify();
   }
 
-  // --- Reference Materials ---
-  async getReferenceMaterials() {
-    const { data } = await supabase.from('reference_materials').select('*');
-    return data || [];
+  _processClass(classRow) {
+    if (!classRow) return null;
+    return {
+      ...classRow,
+      className: classRow.name,
+      status: normalizeClassStatus(classRow.status) || computeClassStatus({
+        status: classRow.status,
+        startDate: classRow.start_date,
+        endDate: classRow.end_date
+      }),
+      classroom: this._normalizeClassroomValue(classRow.room),
+      room: classRow.room,
+      roomRaw: classRow.room,
+      studentIds: classRow.student_ids || [],
+      textbookIds: classRow.textbook_ids || [],
+      waitlistIds: classRow.waitlist_ids || [],
+      startDate: classRow.start_date,
+      endDate: classRow.end_date,
+      textbookInfo: classRow.textbook_info,
+      lessons: classRow.lessons || [],
+      schedulePlan: classRow.schedule_plan || null,
+    };
   }
 
-  // --- Sync Utility ---
-  async syncLocalStorageData() {
-    try {
-      const storageKeys = {
-        classes: 'classes',
-        students: 'students',
-        textbooks: 'textbooks',
-        progressLogs: 'progressLogs',
-        academicEvents: 'academicEvents'
-      };
+  _processAcademicSchool(schoolRow) {
+    if (!schoolRow) return null;
+    return {
+      ...schoolRow,
+      sortOrder: schoolRow.sort_order || 0,
+      textbooks: schoolRow.textbooks || {},
+      category: schoolRow.category || 'high',
+    };
+  }
 
-      const localData = {};
-      for (const [key, storageKey] of Object.entries(storageKeys)) {
-        const saved = localStorage.getItem(storageKey);
-        localData[key] = saved ? JSON.parse(saved) : [];
-      }
+  _processAcademicCurriculumProfile(profileRow) {
+    if (!profileRow) return null;
+    return {
+      ...profileRow,
+      schoolId: profileRow.school_id,
+      mainTextbookTitle: profileRow.main_textbook_title || '',
+      mainTextbookPublisher: profileRow.main_textbook_publisher || '',
+      note: profileRow.note || '',
+    };
+  }
 
-      console.log('Syncing data to Supabase...', localData);
+  _processAcademicSupplementMaterial(materialRow) {
+    if (!materialRow) return null;
+    return {
+      ...materialRow,
+      profileId: materialRow.profile_id,
+      publisher: materialRow.publisher || '',
+      note: materialRow.note || '',
+      sortOrder: materialRow.sort_order ?? 0,
+    };
+  }
 
-      // Simple migration (overwrite if conflict, or just insert new)
-      // Note: This is an idempotent sync for this project.
-      
-      // 1. Students
-      if (localData.students.length > 0) {
-        for (const s of localData.students) {
-            await this.addStudent(s);
-        }
-      }
+  _processAcademicExamScope(scopeRow) {
+    if (!scopeRow) return null;
+    return {
+      ...scopeRow,
+      profileId: scopeRow.profile_id,
+      academicEventId: scopeRow.academic_event_id || '',
+      academicExamDayId: scopeRow.academic_exam_day_id || '',
+      periodLabel: scopeRow.period_label || '',
+      textbookScope: scopeRow.textbook_scope || '',
+      supplementScope: scopeRow.supplement_scope || '',
+      otherScope: scopeRow.other_scope || '',
+      note: scopeRow.note || '',
+      sortOrder: scopeRow.sort_order ?? 0,
+    };
+  }
 
-      // 2. Textbooks
-      if (localData.textbooks.length > 0) {
-        for (const t of localData.textbooks) {
-            await this.addTextbook(t);
-        }
-      }
+  _processAcademicExamDay(dayRow) {
+    if (!dayRow) return null;
+    return {
+      ...dayRow,
+      schoolId: dayRow.school_id,
+      examDate: dayRow.exam_date || '',
+      label: dayRow.label || '',
+      note: dayRow.note || '',
+      sortOrder: dayRow.sort_order ?? 0,
+    };
+  }
 
-      // 3. Classes
-      if (localData.classes.length > 0) {
-        for (const c of localData.classes) {
-            await this.addClass(c);
-        }
-      }
+  _processAcademicEvent(eventRow) {
+    if (!eventRow) return null;
+    return {
+      ...eventRow,
+      schoolId: eventRow.school_id || eventRow.schoolId || null,
+      school: eventRow.school || null,
+      type: eventRow.type || '',
+      start: eventRow.start || eventRow.start_date || eventRow.date || '',
+      end: eventRow.end || eventRow.end_date || eventRow.start || eventRow.start_date || eventRow.date || '',
+      color: eventRow.color || null,
+      grade: eventRow.grade || 'all',
+      note: eventRow.note || ''
+    };
+  }
 
-      // 4. Progress Logs
-      if (localData.progressLogs.length > 0) {
-         for (const p of localData.progressLogs) {
-             await this.addProgressLog(p);
-         }
-      }
-      
-      this._notify();
-      return { success: true, count: localData.classes.length + localData.students.length };
-    } catch (err) {
-      console.error('Sync failed:', err);
-      return { success: false, error: err.message };
+  _processStudent(studentRow) {
+    if (!studentRow) return null;
+    return {
+      ...studentRow,
+      classIds: studentRow.class_ids || [],
+      waitlistClassIds: studentRow.waitlist_class_ids || [],
+      enrollDate: studentRow.enroll_date,
+      parentContact: studentRow.parent_contact
+    };
+  }
+
+  _processTextbook(textbookRow) {
+    if (!textbookRow) return null;
+    return {
+      ...textbookRow,
+      tags: textbookRow.tags || [],
+      lessons: textbookRow.lessons || []
+    };
+  }
+
+  _processProgressLog(progressRow) {
+    if (!progressRow) return null;
+
+    const completedLessonIds = progressRow.completed_lesson_ids || progressRow.completedLessonIds || [];
+    const chapterId = progressRow.chapter_id || progressRow.chapterId || completedLessonIds[0] || null;
+
+    return {
+      ...progressRow,
+      classId: progressRow.class_id || progressRow.classId,
+      textbookId: progressRow.textbook_id || progressRow.textbookId || null,
+      chapterId,
+      completedLessonIds: completedLessonIds.length > 0
+        ? completedLessonIds
+        : (chapterId ? [chapterId] : [])
+    };
+  }
+
+  async connect() {
+    return Boolean(supabase);
+  }
+
+  disconnect() {
+    if (this.channel && supabase) {
+      supabase.removeChannel(this.channel);
+      this.channel = null;
     }
   }
-
-  // Helper dummy connect
-  async connect() { return true; }
-  disconnect() {}
 }
 
 export const dataService = new DataService();

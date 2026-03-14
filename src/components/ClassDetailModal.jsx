@@ -1,29 +1,52 @@
 import { useState, useEffect, useMemo } from 'react';
 import { X, CheckSquare, Square, Save, Users, Calendar, BookOpen, Clock, UserPlus, Info } from 'lucide-react';
-import { stripClassPrefix, parseSchedule } from '../data/sampleData';
+import { stripClassPrefix } from '../data/sampleData';
+import { useToast } from '../contexts/ToastContext';
+import ClassSchedulePlanPreview from './ClassSchedulePlanPreview';
+import ClassSchedulePlanModal from './ClassSchedulePlanModal';
+
+function collectCompletedLessonIds(progressLogs, classId) {
+  const completedIds = new Set();
+
+  (progressLogs || [])
+    .filter((log) => log.classId === classId)
+    .forEach((log) => {
+      (log.completedLessonIds || []).forEach((lessonId) => completedIds.add(lessonId));
+
+      const chapterId = log.chapterId || log.chapter_id;
+      if (chapterId) {
+        completedIds.add(chapterId);
+      }
+    });
+
+  return [...completedIds];
+}
 
 export default function ClassDetailModal({ cls, data, dataService, onClose, onNavigateToStudent }) {
   const [activeTab, setActiveTab] = useState('students'); // 'students' | 'progress' | 'info'
   const [selectedLessons, setSelectedLessons] = useState([]);
   const [textbook, setTextbook] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const toast = useToast();
 
+  const students = data?.students || [];
   const enrolledStudents = useMemo(() => {
-    return (cls.studentIds || []).map(id => data.students.find(s => s.id === id)).filter(Boolean);
-  }, [cls.studentIds, data.students]);
+    return (cls.studentIds || []).map(id => students.find(s => s.id === id)).filter(Boolean);
+  }, [cls.studentIds, students]);
 
   const waitlistStudents = useMemo(() => {
-    return (cls.waitlistIds || []).map(id => data.students.find(s => s.id === id)).filter(Boolean);
-  }, [cls.waitlistIds, data.students]);
+    return (cls.waitlistIds || []).map(id => students.find(s => s.id === id)).filter(Boolean);
+  }, [cls.waitlistIds, students]);
 
   useEffect(() => {
+    const textbooks = data?.textbooks || [];
+    const progressLogs = data?.progressLogs || [];
     if (cls.textbookIds && cls.textbookIds.length > 0) {
-      const tb = data.textbooks.find(t => t.id === cls.textbookIds[0]);
+      const tb = textbooks.find(t => t.id === cls.textbookIds[0]);
       setTextbook(tb);
     }
-    
-    const logsForClass = data.progressLogs.filter(log => log.classId === cls.id);
-    const completedLessonIds = logsForClass.map(log => log.chapterId);
-    setSelectedLessons(completedLessonIds);
+    setSelectedLessons(collectCompletedLessonIds(progressLogs, cls.id));
   }, [cls, data]);
 
   const handleToggleLesson = (lessonId) => {
@@ -32,30 +55,51 @@ export default function ClassDetailModal({ cls, data, dataService, onClose, onNa
     );
   };
 
-  const handleSaveProgress = () => {
-    if (!textbook) return;
+  const handleSaveProgress = async () => {
+    if (!textbook) {
+      toast.error('아직 이 수업에 연결된 교재가 없습니다.');
+      return;
+    }
+
+    if (!dataService?.addProgressLog || !dataService?.deleteProgressLog) {
+      toast.error('현재 모드에서는 진도 기록을 수정할 수 없습니다.');
+      return;
+    }
+    const progressLogs = data?.progressLogs || [];
     const today = new Date().toISOString().split('T')[0];
-    const existingLogs = data.progressLogs.filter(log => log.classId === cls.id);
-    const existingLessonIds = existingLogs.map(l => l.chapterId);
-    
+    const existingLogs = progressLogs.filter(log => log.classId === cls.id);
+    const existingLessonIds = collectCompletedLessonIds(progressLogs, cls.id);
+
     const newLessonIds = selectedLessons.filter(id => !existingLessonIds.includes(id));
     const removedLessonIds = existingLessonIds.filter(id => !selectedLessons.includes(id));
-    
-    newLessonIds.forEach(lessonId => {
-      dataService.addProgressLog({
-        classId: cls.id,
-        textbookId: textbook.id,
-        chapterId: lessonId,
-        date: today
-      });
-    });
 
-    removedLessonIds.forEach(lessonId => {
-       const log = existingLogs.find(l => l.chapterId === lessonId);
-       if (log) dataService.deleteProgressLog(log.id);
-    });
-
-    onClose();
+    try {
+      setIsSaving(true);
+      for (const lessonId of newLessonIds) {
+        await dataService.addProgressLog({
+          classId: cls.id,
+          textbookId: textbook.id,
+          chapterId: lessonId,
+          date: today
+        });
+      }
+      for (const lessonId of removedLessonIds) {
+        const log = existingLogs.find((item) => {
+          if ((item.completedLessonIds || []).includes(lessonId)) {
+            return true;
+          }
+          return (item.chapterId || item.chapter_id) === lessonId;
+        });
+        if (log) await dataService.deleteProgressLog(log.id);
+      }
+      toast.success('진도 기록을 저장했습니다.');
+      onClose();
+    } catch (err) {
+      console.error('Progress save error:', err);
+      toast.error(`진도 저장에 실패했습니다: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -197,7 +241,9 @@ export default function ClassDetailModal({ cls, data, dataService, onClose, onNa
                     })}
                   </div>
                   <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
-                    <button className="btn-primary" onClick={handleSaveProgress}><Save size={18} /> 진도 저장</button>
+                    <button className="btn-primary" onClick={handleSaveProgress} disabled={isSaving}>
+                      <Save size={18} /> {isSaving ? '저장 중...' : '진도 저장'}
+                    </button>
                   </div>
                 </>
               )}
@@ -224,6 +270,24 @@ export default function ClassDetailModal({ cls, data, dataService, onClose, onNa
                   <div style={{ fontWeight: 700 }}>{(cls.studentIds || []).length} / {cls.capacity || 0} 명</div>
                 </div>
               </div>
+
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <Calendar size={18} />
+                    수업 일정표 미리보기
+                  </span>
+                  <button type="button" className="btn-secondary" onClick={() => setIsPlanModalOpen(true)}>
+                    크게 보기
+                  </button>
+                </div>
+                <ClassSchedulePlanPreview
+                  plan={cls.schedulePlan || cls.schedule_plan || null}
+                  className={cls.className || cls.name || ''}
+                  subject={cls.subject || ''}
+                  emptyMessage="아직 저장된 수업 일정표가 없습니다."
+                />
+              </div>
             </div>
           )}
         </div>
@@ -232,6 +296,19 @@ export default function ClassDetailModal({ cls, data, dataService, onClose, onNa
           <button className="btn-secondary" onClick={onClose} style={{ minWidth: 100 }}>닫기</button>
         </div>
       </div>
+      <ClassSchedulePlanModal
+        open={isPlanModalOpen}
+        classItem={{
+          className: cls.className || cls.name || '',
+          subject: cls.subject || '',
+          teacher: cls.teacher || '',
+          classroom: cls.classroom || cls.room || '',
+          schedule: cls.schedule || '',
+          capacity: cls.capacity || 0,
+        }}
+        plan={cls.schedulePlan || cls.schedule_plan || null}
+        onClose={() => setIsPlanModalOpen(false)}
+      />
     </div>
   );
 }
