@@ -8,7 +8,7 @@ This project is a Vite single-page app and is intended to be deployed on Vercel.
 - Output directory: `dist`
 - SPA rewrite: handled by `vercel.json`
 
-## Required Environment Variables
+## Required App Environment Variables
 
 Set these in Vercel for every environment:
 
@@ -28,9 +28,55 @@ Examples:
 - `VITE_FALLBACK_ADMIN_EMAILS=admin@tips.com,yeoyuasset@naver.com`
 - `VITE_FALLBACK_STAFF_EMAILS=tipsacademy@naver.com`
 - `VITE_FALLBACK_TEACHER_EMAILS=teacher@tips.com,tipsedu@naver.com`
-- `VITE_FALLBACK_STAFF_EMAILS=`
 
-You can use either full emails or bare IDs such as `admin` and `teacher`. Bare IDs are normalized to `@tips.com`.
+## Recommended Database Workflow
+
+Do not rely on manual SQL Editor copy/paste for normal updates anymore.
+
+This repo now includes Supabase CLI migrations in:
+
+- [supabase/migrations](/Users/부희/Desktop/Antigravity/tips_dashboard/supabase/migrations)
+
+One-time local setup:
+
+1. Copy [.env.supabase.example](/Users/부희/Desktop/Antigravity/tips_dashboard/.env.supabase.example) to `.env.supabase.local`
+2. Fill in either:
+   - `SUPABASE_DB_URL`
+   - or `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`
+3. Run:
+
+```powershell
+npm run db:push
+```
+
+The push script is:
+
+- [scripts/supabase-db-push.ps1](/Users/부희/Desktop/Antigravity/tips_dashboard/scripts/supabase-db-push.ps1)
+
+## Optional GitHub Automation
+
+If you want migrations to apply automatically on `main`, add these GitHub repository secrets:
+
+- `SUPABASE_ACCESS_TOKEN`
+- `SUPABASE_DB_PASSWORD`
+
+The workflow file is:
+
+- [.github/workflows/supabase-db-push.yml](/Users/부희/Desktop/Antigravity/tips_dashboard/.github/workflows/supabase-db-push.yml)
+
+If the secrets are missing, the workflow is skipped instead of failing.
+
+## Manual Fallback
+
+`SUPABASE_MIGRATION.sql` is still kept as a manual fallback for emergency repair or one-off recovery:
+
+- [SUPABASE_MIGRATION.sql](/Users/부희/Desktop/Antigravity/tips_dashboard/SUPABASE_MIGRATION.sql)
+
+For targeted fixes, these repair scripts are also available:
+
+- [tmp/class-terms-fix.sql](/Users/부희/Desktop/Antigravity/tips_dashboard/tmp/class-terms-fix.sql)
+- [tmp/academic-calendar-extension.sql](/Users/부희/Desktop/Antigravity/tips_dashboard/tmp/academic-calendar-extension.sql)
+- [tmp/rls-recursion-fix.sql](/Users/부희/Desktop/Antigravity/tips_dashboard/tmp/rls-recursion-fix.sql)
 
 ## Expected Supabase Tables
 
@@ -45,55 +91,25 @@ The connected Supabase project should contain at least:
 - `academic_schools`
 - `academic_curriculum_profiles`
 - `academic_supplement_materials`
-- `academic_exam_scopes`
-- `academic_exam_days`
 - `app_preferences`
 
-Run [`SUPABASE_MIGRATION.sql`](/Users/부희/Desktop/Antigravity/tips_dashboard/SUPABASE_MIGRATION.sql) in Supabase SQL Editor before using:
+And for the latest dashboard features:
 
-- 학사 데이터 업로드
-- 영어/수학 시험당일 관리
-- 서버 공용 표 레이아웃 저장
-- `schedule_plan` 영구 저장
-
-The app can still run before the migration, but some values will only work in client-side fallback mode.
-
-## Academic Upload Notes
-
-The academic workspace supports two upload formats:
-
-1. Five-sheet template workbook
-   - `학교목록`
-   - `교과정보`
-   - `부교재`
-   - `시험범위`
-   - `시험당일`
-2. One-sheet high-school source workbook
-   - 학교 / 고1 / 고2 / 고3 / 시험기간 / 수학여행 / 방학/기타일정 구조
-
-Bulk academic upload is intended for `admin/staff`.
-`teacher` accounts can edit shared academic information manually in the UI, but should not rely on bulk upload.
-
-## Shared Table Layout
-
-Column visibility, order, grouping, and sort are stored in `app_preferences`.
-The shared keys currently used by the frontend are:
-
-- `dashboard:classes`
-- `data-manager:students`
-- `data-manager:classes`
-- `data-manager:textbooks`
+- `class_terms`
+- `academic_event_exam_details`
+- `academy_curriculum_plans`
+- `academy_curriculum_materials`
 
 ## Pre-Deploy Checklist
 
 - Confirm `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set.
 - Confirm fallback role env vars are set if you need temporary allowlists.
-- Run [`SUPABASE_MIGRATION.sql`](/Users/부희/Desktop/Antigravity/tips_dashboard/SUPABASE_MIGRATION.sql) in Supabase SQL Editor.
-- Verify the academic tables and `app_preferences` are readable/writable under your RLS policies.
+- Run `npm run db:push`.
+- Verify the academic tables and `app_preferences` are readable and writable under your RLS policies.
 - Run `npm run build`.
 - Verify in a preview deployment:
   - public class list opens
   - public class name opens the read-only schedule plan modal
-  - admin/staff can open `데이터 관리`
+  - admin/staff can open data management
   - academic upload works for admin/staff
   - timetable image export works in single-view mode
