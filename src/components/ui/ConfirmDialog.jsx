@@ -18,11 +18,11 @@ export default function ConfirmDialog({
   return (
     <div
       onClick={onCancel}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1600,
-        display: 'flex',
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 2200,
+          display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
