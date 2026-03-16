@@ -21,7 +21,14 @@ const VARIANT_META = {
   }
 };
 
-export default function StatusBanner({ title, message, variant = 'info', compact = false }) {
+export default function StatusBanner({
+  title,
+  message,
+  variant = 'info',
+  compact = false,
+  eyebrow = '',
+  actions = null,
+}) {
   if (!title && !message) return null;
 
   const meta = VARIANT_META[variant] || VARIANT_META.info;
@@ -42,18 +49,37 @@ export default function StatusBanner({ title, message, variant = 'info', compact
       <div style={{ color: meta.color, marginTop: 1 }}>
         <Icon size={18} />
       </div>
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        {eyebrow ? (
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: meta.color,
+              marginBottom: title || message ? 4 : 0,
+            }}
+          >
+            {eyebrow}
+          </div>
+        ) : null}
         {title && (
           <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
             {title}
           </div>
         )}
         {message && (
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: title ? 2 : 0 }}>
             {message}
           </div>
         )}
       </div>
+      {actions ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }

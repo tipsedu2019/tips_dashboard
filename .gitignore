@@ -12,3 +12,7 @@ yarn-error.log*
 
 .DS_Store
 *.local
+.codex-temp/
+.push-temp/
+tmp/
+vite-dev.log

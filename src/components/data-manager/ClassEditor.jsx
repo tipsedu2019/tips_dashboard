@@ -144,8 +144,11 @@ export default function ClassEditor({
   cls,
   textbooks,
   students,
+  classTerms = [],
   academicSchools = [],
   academicExamDays = [],
+  academicEventExamDetails = [],
+  academicEvents = [],
   onSave,
   onCancel,
   isSaving,
@@ -188,9 +191,26 @@ export default function ClassEditor({
   }, [edited.studentIds, edited.waitlistIds, studentSearch, students]);
 
   const selectedTextbook = (textbooks || []).find((item) => item.id === edited.textbookIds?.[0]) || null;
+  const sortedClassTerms = useMemo(
+    () => [...(classTerms || [])].sort((left, right) => {
+      const yearGap = Number(right.academicYear || 0) - Number(left.academicYear || 0);
+      if (yearGap !== 0) {
+        return yearGap;
+      }
+      return Number(left.sortOrder || 0) - Number(right.sortOrder || 0);
+    }),
+    [classTerms]
+  );
   const examConflicts = useMemo(
-    () => getClassExamConflicts(edited, students, academicSchools, academicExamDays),
-    [academicExamDays, academicSchools, edited, students]
+    () => getClassExamConflicts(
+      edited,
+      students,
+      academicSchools,
+      academicExamDays,
+      academicEventExamDetails,
+      academicEvents
+    ),
+    [academicEventExamDetails, academicEvents, academicExamDays, academicSchools, edited, students]
   );
   const planWarningBanner = examConflicts.length > 0
     ? `시험일과 수업일이 겹칩니다. ${examConflicts.map((conflict) => `${conflict.examDate} ${conflict.subject} (${conflict.students.join(', ')})`).join(' / ')}`
@@ -350,12 +370,38 @@ export default function ClassEditor({
               </Field>
             </div>
 
-            <Field label="학기/기간">
+            <Field label="학기">
+              <select
+                className="styled-input"
+                value={edited.termId || ''}
+                onChange={(event) => {
+                  const nextTermId = event.target.value;
+                  const nextTerm = sortedClassTerms.find((term) => term.id === nextTermId) || null;
+                  const persistedTermId = nextTerm && !nextTerm.localOnly && !nextTerm.legacyOnly ? nextTermId : null;
+                  setEdited((current) => ({
+                    ...current,
+                    termId: persistedTermId,
+                    term_id: persistedTermId,
+                    period: nextTerm?.name || '',
+                  }));
+                }}
+              >
+                <option value="">학기 미지정</option>
+                {sortedClassTerms.map((term) => (
+                  <option key={term.id} value={term.id}>
+                    {[term.academicYear, term.name, term.status].filter(Boolean).join(' · ')}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="학기명 표시">
               <input
                 type="text"
                 className="styled-input"
                 value={edited.period || ''}
                 onChange={(event) => setEdited((current) => ({ ...current, period: event.target.value }))}
+                placeholder="학기 선택 시 자동 입력됩니다"
               />
             </Field>
 

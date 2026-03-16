@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import ClassSchedulePlanPreview from '../ClassSchedulePlanPreview';
 import HelpTooltip from '../ui/HelpTooltip';
+import useViewport from '../../hooks/useViewport';
 import {
   DAY_OPTIONS,
   SESSION_COUNT_OPTIONS,
@@ -124,6 +125,7 @@ export default function ClassSchedulePlanner({
   onSubjectChange,
   onClassNameChange,
 }) {
+  const { isCompact } = useViewport();
   const planner = useMemo(
     () => normalizeSchedulePlan(value, { className, subject, schedule, startDate, endDate }),
     [className, endDate, schedule, startDate, subject, value]
@@ -136,6 +138,7 @@ export default function ClassSchedulePlanner({
     [className, endDate, planner, schedule, startDate, subject]
   );
   const [expandedPeriods, setExpandedPeriods] = useState({});
+  const [mobileSection, setMobileSection] = useState('setup');
 
   useEffect(() => {
     setExpandedPeriods((current) => {
@@ -494,9 +497,22 @@ export default function ClassSchedulePlanner({
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '340px minmax(0, 1fr)', gap: 16, alignItems: 'start', minWidth: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: isCompact ? '1fr' : '340px minmax(0, 1fr)', gap: isCompact ? 12 : 16, alignItems: 'start', minWidth: 0 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="card-custom" style={{ padding: 18 }}>
+        {isCompact ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+            <ToggleChip compact fullWidth active={mobileSection === 'setup'} onClick={() => setMobileSection('setup')}>
+              기본
+            </ToggleChip>
+            <ToggleChip compact fullWidth active={mobileSection === 'periods'} onClick={() => setMobileSection('periods')}>
+              기간
+            </ToggleChip>
+            <ToggleChip compact fullWidth active={mobileSection === 'preview'} onClick={() => setMobileSection('preview')}>
+              미리보기
+            </ToggleChip>
+          </div>
+        ) : null}
+        <div className="card-custom" style={{ padding: isCompact ? 14 : 18, display: !isCompact || mobileSection === 'setup' ? 'block' : 'none' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
             <CalendarDays size={18} />
             <div style={{ fontSize: 16, fontWeight: 800 }}>수업 계획 편집</div>
@@ -561,7 +577,7 @@ export default function ClassSchedulePlanner({
           </div>
         </div>
 
-        <div className="card-custom" style={{ padding: 18 }}>
+        <div className="card-custom" style={{ padding: isCompact ? 14 : 18, display: !isCompact || mobileSection === 'periods' ? 'block' : 'none' }}>
           <div
             style={{
               display: 'flex',
@@ -721,7 +737,8 @@ export default function ClassSchedulePlanner({
         </div>
       </div>
 
-      <ClassSchedulePlanPreview
+      <div style={{ display: !isCompact || mobileSection === 'preview' ? 'block' : 'none', minWidth: 0 }}>
+        <ClassSchedulePlanPreview
         plan={persistedPlan}
         className={className}
         subject={subject}
@@ -730,7 +747,8 @@ export default function ClassSchedulePlanner({
         onToggleDate={handleCalendarToggle}
         onSubstitution={handleSubstitution}
         emptyMessage="수업명, 요일, 기간을 입력하면 일정표가 생성됩니다."
-      />
+        />
+      </div>
     </div>
   );
 }

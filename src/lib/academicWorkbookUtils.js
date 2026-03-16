@@ -65,13 +65,17 @@ function expandGrades(rawGrade, fallback = 'all') {
     return [fallback];
   }
 
-  const groupedMatch = normalized.match(/^고([123](?:,[123])*)$/);
-  if (groupedMatch) {
-    return [...new Set(groupedMatch[1].split(',').map((grade) => `고${grade}`))];
+  const explicit = [...normalized.matchAll(/고([123])/g)].map((match) => `고${match[1]}`);
+  if (explicit.length > 0) {
+    return [...new Set(explicit)];
   }
 
-  const matches = [...normalized.matchAll(/고([123])/g)].map((match) => `고${match[1]}`);
-  return matches.length > 0 ? [...new Set(matches)] : [fallback];
+  const grouped = normalized.match(/^고?([123](?:,[123])*)$/);
+  if (grouped) {
+    return [...new Set(grouped[1].split(',').map((grade) => `고${grade}`))];
+  }
+
+  return [fallback];
 }
 
 function inferWorkbookYear(rows) {
@@ -80,9 +84,28 @@ function inferWorkbookYear(rows) {
   return matched ? Number(matched[0]) : new Date().getFullYear();
 }
 
+function parseRangeOrSingleDate(fragment, year) {
+  const normalized = text(fragment).replace(/\s+/g, ' ');
+  const rangeMatch = normalized.match(/(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?\s*~\s*(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?/);
+  if (rangeMatch) {
+    return {
+      start: toDateString(year, Number(rangeMatch[1]), Number(rangeMatch[2])),
+      end: toDateString(year, Number(rangeMatch[3]), Number(rangeMatch[4])),
+    };
+  }
+
+  const singleMatch = normalized.match(/(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?/);
+  if (singleMatch) {
+    const date = toDateString(year, Number(singleMatch[1]), Number(singleMatch[2]));
+    return { start: date, end: date };
+  }
+
+  return null;
+}
+
 function parseExamEntries(value, year, title) {
   const normalized = text(value).replace(/\n/g, ' ');
-  const pattern = /\((고[123](?:,\d+)*)\)\s*(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?\s*~\s*(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?/g;
+  const pattern = /\((고?[123](?:,\d+)*)\)\s*(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?\s*~\s*(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?/g;
   const results = [];
   let match;
 
@@ -103,28 +126,10 @@ function parseExamEntries(value, year, title) {
   return results;
 }
 
-function parseRangeOrSingleDate(fragment, year) {
-  const rangeMatch = fragment.match(/(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?\s*~\s*(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?/);
-  if (rangeMatch) {
-    return {
-      start: toDateString(year, Number(rangeMatch[1]), Number(rangeMatch[2])),
-      end: toDateString(year, Number(rangeMatch[3]), Number(rangeMatch[4])),
-    };
-  }
-
-  const singleMatch = fragment.match(/(\d{1,2})\/(\d{1,2})(?:\([^)]+\))?/);
-  if (singleMatch) {
-    const date = toDateString(year, Number(singleMatch[1]), Number(singleMatch[2]));
-    return { start: date, end: date };
-  }
-
-  return null;
-}
-
 function parseTripEntries(value, year) {
   return splitMultiline(value)
     .map((line) => {
-      const match = line.match(/^(고[123](?:,\d+)*)?(?:\(([^)]+)\))?\s*(.*)$/);
+      const match = line.match(/^(고?[123](?:,\d+)*)?(?:\(([^)]+)\))?\s*(.*)$/);
       if (!match) {
         return [];
       }
@@ -158,11 +163,24 @@ function parseOtherEntries(value, year) {
         return null;
       }
 
-      const type = /(방학|개학)/.test(label) ? '방학' : '기타일정';
+      let type = '기타일정';
+      let title = label || '기타 일정';
+      if (/방학/.test(label)) {
+        type = '방학';
+        title = label || '방학';
+      } else if (/개학/.test(label)) {
+        type = '기타일정';
+        title = label || '개학';
+      } else if (/개교기념일/.test(label)) {
+        title = label;
+      } else if (/재량휴업일/.test(label)) {
+        title = label;
+      }
+
       return {
         grade: 'all',
         type,
-        title: label || (type === '방학' ? '학사 일정' : '기타 일정'),
+        title,
         start: range.start,
         end: range.end,
         note: line,
@@ -191,7 +209,6 @@ export function detectAcademicWorkbookFormat(XLSX, workbook) {
   }
 
   const cellRows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
-
   const headerTokens = cellRows
     .slice(0, 8)
     .flat()
@@ -208,7 +225,7 @@ export function parseHighSchoolMatrixWorkbook(XLSX, workbook) {
   const headerRowIndex = rows.findIndex((row) => row.some((cell) => compactText(cell) === '학교'));
 
   if (headerRowIndex === -1) {
-    throw new Error('지원하는 학사일정 시트 형식을 찾지 못했습니다.');
+    throw new Error('지원하는 고등학교 원본 시트 형식을 찾지 못했습니다.');
   }
 
   const headers = rows[headerRowIndex].map((cell) => compactText(cell));
@@ -223,7 +240,7 @@ export function parseHighSchoolMatrixWorkbook(XLSX, workbook) {
   const otherIndex = headers.findIndex((cell) => cell === '방학/기타일정');
 
   if (schoolIndex === -1 || examIndex === -1 || gradeColumns.length === 0) {
-    throw new Error('학교/학년/시험기간 열을 찾지 못했습니다.');
+    throw new Error('학교, 학년, 시험기간 열을 찾지 못했습니다.');
   }
 
   const schools = [];
@@ -247,8 +264,9 @@ export function parseHighSchoolMatrixWorkbook(XLSX, workbook) {
       continue;
     }
 
-    if (!seenSchools.has(schoolKey(currentSchool))) {
-      seenSchools.add(schoolKey(currentSchool));
+    const schoolIdentifier = schoolKey(currentSchool);
+    if (!seenSchools.has(schoolIdentifier)) {
+      seenSchools.add(schoolIdentifier);
       schools.push({
         name: currentSchool,
         category: 'high',
@@ -259,7 +277,7 @@ export function parseHighSchoolMatrixWorkbook(XLSX, workbook) {
     const publisherRow = block[2] || [];
 
     gradeColumns.forEach(({ grade, index: gradeIndex }) => {
-      const profileKey = [schoolKey(currentSchool), grade, '수학'].join('::');
+      const profileKey = [schoolIdentifier, grade, '수학'].join('::');
       if (!seenProfiles.has(profileKey)) {
         seenProfiles.add(profileKey);
         profiles.push({
@@ -287,14 +305,16 @@ export function parseHighSchoolMatrixWorkbook(XLSX, workbook) {
 
     block.forEach((row, rowOffset) => {
       const examCell = row?.[examIndex];
-      if (examCell) {
-        parseExamEntries(examCell, year, examTitles[rowOffset] || '시험').forEach((event) => {
-          events.push({
-            schoolName: currentSchool,
-            ...event,
-          });
-        });
+      if (!examCell) {
+        return;
       }
+
+      parseExamEntries(examCell, year, examTitles[rowOffset] || '시험').forEach((event) => {
+        events.push({
+          schoolName: currentSchool,
+          ...event,
+        });
+      });
     });
 
     if (tripIndex !== -1) {
@@ -321,6 +341,7 @@ export function parseHighSchoolMatrixWorkbook(XLSX, workbook) {
     profiles,
     materials,
     scopes: [],
+    examDays: [],
     events,
     summary: {
       schoolCount: schools.length,

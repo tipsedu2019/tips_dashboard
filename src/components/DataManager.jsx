@@ -8,6 +8,7 @@ import { useManagerActions } from '../hooks/useManagerActions';
 import { useDataTableControls } from '../hooks/useDataTableControls';
 import { useSharedTablePreference } from '../hooks/useSharedTablePreference';
 import { useAuth } from '../contexts/AuthContext';
+import ViewHeader from './ui/ViewHeader';
 import StudentManagerTab from './data-manager/StudentManagerTab';
 import ClassManagerTab from './data-manager/ClassManagerTab';
 import TextbookManagerTab from './data-manager/TextbookManagerTab';
@@ -43,11 +44,32 @@ const EMPTY_DATA = {
   academicExamDays: [],
 };
 
-export default function DataManager({ data = EMPTY_DATA, dataService }) {
-  const safeData = useMemo(() => ({
-    ...EMPTY_DATA,
-    ...data,
-  }), [data]);
+const TAB_META = {
+  students: {
+    label: '학생 관리',
+    icon: Users,
+    description: '학생 데이터를 정리하고 반 배정, 연락처, 학교·학년 정보를 한 화면에서 관리합니다.',
+  },
+  classes: {
+    label: '수업 관리',
+    icon: Calendar,
+    description: '수업 상태, 시간표, 선생님, 강의실과 연결 학생 정보를 정리합니다.',
+  },
+  textbooks: {
+    label: '교재 관리',
+    icon: Book,
+    description: '교재, 출판사, 차시, 수업 연결 정보를 정리합니다.',
+  },
+};
+
+export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurriculum, onBack }) {
+  const safeData = useMemo(
+    () => ({
+      ...EMPTY_DATA,
+      ...data,
+    }),
+    [data]
+  );
 
   const toast = useToast();
   const { isStaff } = useAuth();
@@ -118,6 +140,16 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
     classSubjectOptions: tableControls.filterOptions.subject || [],
   });
 
+  const activeMeta = TAB_META[activeTab];
+  const tabs = useMemo(
+    () => [
+      { id: 'students', label: TAB_META.students.label, icon: Users },
+      { id: 'classes', label: TAB_META.classes.label, icon: Calendar },
+      { id: 'textbooks', label: TAB_META.textbooks.label, icon: Book },
+    ],
+    []
+  );
+
   const handleSaveStudent = async (student) => {
     const saved = await actions.saveStudent(student);
     if (saved) {
@@ -157,8 +189,11 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
         cls={editingClass}
         textbooks={safeData.textbooks}
         students={safeData.students}
+        classTerms={safeData.classTerms}
         academicSchools={safeData.academicSchools}
         academicExamDays={safeData.academicExamDays}
+        academicEventExamDetails={safeData.academicEventExamDetails}
+        academicEvents={safeData.academicEvents}
         requestConfirm={confirm}
         showToast={toast}
         onSave={handleSaveClass}
@@ -181,7 +216,7 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
 
   return (
     <div className="view-container">
-      {viewingClassStudents && (
+      {viewingClassStudents ? (
         <StudentManifestModal
           cls={viewingClassStudents}
           data={safeData}
@@ -191,59 +226,52 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
             setViewingClassStudents(null);
           }}
         />
-      )}
+      ) : null}
 
-      <div className="view-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div
-            className="view-header-icon"
-            style={{ background: 'rgba(33, 110, 78, 0.1)', color: 'var(--accent-color)' }}
-          >
-            <ClipboardList size={22} />
-          </div>
-          <div>
-            <h2 className="view-title">데이터 관리</h2>
-            <p className="view-subtitle">
-              학생, 수업, 교재 데이터를 한곳에서 정리하고 즉시 수정할 수 있습니다.
-            </p>
-          </div>
+      <section className="workspace-surface" style={{ padding: 28, marginBottom: 24 }}>
+        <ViewHeader
+          icon={<ClipboardList size={22} />}
+          eyebrow="운영 워크스페이스"
+          title="데이터 관리"
+          description="학생, 수업, 교재 데이터를 같은 규칙과 같은 언어로 정리하고 즉시 수정할 수 있습니다."
+          onBack={onBack}
+          backLabel="개요로 돌아가기"
+        />
+
+        <div
+          className="h-segment-container"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 8,
+            padding: 6,
+            marginTop: 22,
+            background: 'var(--bg-surface-hover)',
+            borderRadius: 24,
+          }}
+        >
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className={`h-segment-btn ${activeTab === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+                style={{ padding: '13px 14px', fontSize: 14, justifyContent: 'center', minHeight: 52 }}
+              >
+                <Icon size={18} style={{ marginRight: 8 }} />
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
-      </div>
+      </section>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24, padding: '0 24px', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className={`h-segment-btn ${activeTab === 'students' ? 'active' : ''}`}
-          onClick={() => setActiveTab('students')}
-          style={{ flex: 1, minWidth: 160, padding: '12px', fontSize: 14 }}
-        >
-          <Users size={18} style={{ marginRight: 8 }} />
-          학생 관리
-        </button>
-        <button
-          type="button"
-          className={`h-segment-btn ${activeTab === 'classes' ? 'active' : ''}`}
-          onClick={() => setActiveTab('classes')}
-          style={{ flex: 1, minWidth: 160, padding: '12px', fontSize: 14 }}
-        >
-          <Calendar size={18} style={{ marginRight: 8 }} />
-          수업 관리
-        </button>
-        <button
-          type="button"
-          className={`h-segment-btn ${activeTab === 'textbooks' ? 'active' : ''}`}
-          onClick={() => setActiveTab('textbooks')}
-          style={{ flex: 1, minWidth: 160, padding: '12px', fontSize: 14 }}
-        >
-          <Book size={18} style={{ marginRight: 8 }} />
-          교재 관리
-        </button>
-      </div>
-
-      {actions.isProcessing && (
+      {actions.isProcessing ? (
         <div
           style={{
-            margin: '0 24px 20px',
+            margin: '0 0 20px',
             padding: '14px 16px',
             borderRadius: 16,
             background: 'rgba(33, 110, 78, 0.08)',
@@ -251,12 +279,12 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
             color: 'var(--text-secondary)',
           }}
         >
-          작업을 처리하고 있습니다. 완료될 때까지 잠시만 기다려 주세요.
+          요청을 처리하고 있습니다. 업로드나 일괄 수정은 완료될 때까지 잠시만 기다려 주세요.
         </div>
-      )}
+      ) : null}
 
-      <div style={{ padding: '0 24px 24px' }}>
-        {activeTab === 'students' && (
+      <div style={{ padding: '0 4px 24px' }}>
+        {activeTab === 'students' ? (
           <StudentManagerTab
             filteredData={tableControls.filteredData}
             currentIds={tableControls.currentIds}
@@ -276,10 +304,11 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
             onDownloadSample={actions.handleDownloadSample}
             onUpload={(file) => actions.handleSpreadsheetUpload(file, 'students')}
             isBusy={actions.isProcessing}
+            sectionDescription={activeMeta.description}
           />
-        )}
+        ) : null}
 
-        {activeTab === 'classes' && (
+        {activeTab === 'classes' ? (
           <ClassManagerTab
             filteredData={tableControls.filteredData}
             currentIds={tableControls.currentIds}
@@ -300,10 +329,11 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
             onDownloadSample={actions.handleDownloadSample}
             onUpload={(file) => actions.handleSpreadsheetUpload(file, 'classes')}
             isBusy={actions.isProcessing}
+            sectionDescription={activeMeta.description}
           />
-        )}
+        ) : null}
 
-        {activeTab === 'textbooks' && (
+        {activeTab === 'textbooks' ? (
           <TextbookManagerTab
             filteredData={tableControls.filteredData}
             currentIds={tableControls.currentIds}
@@ -324,8 +354,10 @@ export default function DataManager({ data = EMPTY_DATA, dataService }) {
             onDownloadSample={actions.handleDownloadSample}
             onUpload={(file) => actions.handleSpreadsheetUpload(file, 'textbooks')}
             isBusy={actions.isProcessing}
+            sectionDescription={activeMeta.description}
+            onOpenCurriculum={onOpenCurriculum}
           />
-        )}
+        ) : null}
       </div>
 
       <BulkUpdateModal

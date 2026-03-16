@@ -4,6 +4,7 @@ import { normalizeClassroomText } from '../lib/classroomUtils';
 
 const EMPTY_SNAPSHOT = {
   classes: [],
+  classTerms: [],
   students: [],
   textbooks: [],
   progressLogs: [],
@@ -13,6 +14,9 @@ const EMPTY_SNAPSHOT = {
   academicSupplementMaterials: [],
   academicExamScopes: [],
   academicExamDays: [],
+  academicEventExamDetails: [],
+  academyCurriculumPlans: [],
+  academyCurriculumMaterials: [],
   isConnected: false,
   isLoading: false,
   lastUpdated: null,
@@ -29,6 +33,22 @@ function generateId() {
     const value = char === 'x' ? random : (random & 0x3 | 0x8);
     return value.toString(16);
   });
+}
+
+function extractEmbeddedNoteMeta(note) {
+  const marker = '[[TIPS_META]]';
+  const raw = String(note || '');
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex < 0) {
+    return {};
+  }
+
+  const encoded = raw.slice(markerIndex + marker.length).trim();
+  try {
+    return JSON.parse(encoded);
+  } catch {
+    return {};
+  }
 }
 
 export class DataService {
@@ -87,6 +107,17 @@ export class DataService {
     return columnNames.some((columnName) => message.includes(String(columnName).toLowerCase()));
   }
 
+  _isOptionalReferenceError(error, columnName) {
+    const message = String(error?.message || '').toLowerCase();
+    const details = String(error?.details || '').toLowerCase();
+    const hint = String(error?.hint || '').toLowerCase();
+    const haystack = `${message} ${details} ${hint}`;
+    if (!haystack.includes(String(columnName).toLowerCase())) {
+      return false;
+    }
+    return haystack.includes('foreign key') || haystack.includes('violates') || haystack.includes('constraint');
+  }
+
   _isMissingTableError(error, tableName) {
     const message = String(error?.message || '').toLowerCase();
     return message.includes(`relation "${tableName.toLowerCase()}"`) || message.includes(tableName.toLowerCase());
@@ -109,7 +140,7 @@ export class DataService {
     return payload;
   }
 
-  async _runClassMutation(buildPayload, execute, optionalColumns = ['status', 'lessons', 'schedule_plan']) {
+  async _runClassMutation(buildPayload, execute, optionalColumns = ['status', 'lessons', 'schedule_plan', 'term_id']) {
     const payload = buildPayload();
     const skippedColumns = [];
     let result = await execute(payload);
@@ -120,13 +151,20 @@ export class DataService {
         this._isMissingColumnError(result.error, [columnName])
       ));
 
-      if (!missingColumn) {
+      const optionalReferenceColumn = optionalColumns.find((columnName) => (
+        !skippedColumns.includes(columnName) &&
+        this._isOptionalReferenceError(result.error, columnName)
+      ));
+
+      const skippedColumn = missingColumn || optionalReferenceColumn;
+
+      if (!skippedColumn) {
         break;
       }
 
-      skippedColumns.push(missingColumn);
-      this._removeColumnFromPayload(payload, missingColumn);
-      console.warn(`[DataService] classes.${missingColumn} column missing; retrying without it.`);
+      skippedColumns.push(skippedColumn);
+      this._removeColumnFromPayload(payload, skippedColumn);
+      console.warn(`[DataService] classes.${skippedColumn} unavailable; retrying without it.`);
       result = await execute(payload);
     }
 
@@ -309,6 +347,10 @@ export class DataService {
       mapped.textbook_info = mapped.textbookInfo;
       delete mapped.textbookInfo;
     }
+    if ('termId' in mapped) {
+      mapped.term_id = mapped.termId;
+      delete mapped.termId;
+    }
     if ('schedulePlan' in mapped) {
       mapped.schedule_plan = mapped.schedulePlan;
       delete mapped.schedulePlan;
@@ -321,7 +363,7 @@ export class DataService {
       'name', 'teacher', 'schedule', 'student_ids', 'textbook_ids',
       'waitlist_ids', 'room', 'subject', 'color', 'capacity',
       'period', 'start_date', 'end_date', 'fee', 'grade', 'status',
-      'textbook_info', 'lessons', 'schedule_plan'
+      'textbook_info', 'lessons', 'schedule_plan', 'term_id'
     ]);
   }
 
@@ -412,6 +454,12 @@ export class DataService {
           map: (rows) => (rows || []).map((row) => this._processClass(row))
         },
         {
+          key: 'classTerms',
+          table: 'class_terms',
+          map: (rows) => (rows || []).map((row) => this._processClassTerm(row)),
+          optional: true
+        },
+        {
           key: 'students',
           table: 'students',
           map: (rows) => (rows || []).map((row) => this._processStudent(row))
@@ -459,6 +507,24 @@ export class DataService {
           key: 'academicExamDays',
           table: 'academic_exam_days',
           map: (rows) => (rows || []).map((row) => this._processAcademicExamDay(row)),
+          optional: true
+        },
+        {
+          key: 'academicEventExamDetails',
+          table: 'academic_event_exam_details',
+          map: (rows) => (rows || []).map((row) => this._processAcademicEventExamDetail(row)),
+          optional: true
+        },
+        {
+          key: 'academyCurriculumPlans',
+          table: 'academy_curriculum_plans',
+          map: (rows) => (rows || []).map((row) => this._processAcademyCurriculumPlan(row)),
+          optional: true
+        },
+        {
+          key: 'academyCurriculumMaterials',
+          table: 'academy_curriculum_materials',
+          map: (rows) => (rows || []).map((row) => this._processAcademyCurriculumMaterial(row)),
           optional: true
         }
       ];
@@ -551,6 +617,7 @@ export class DataService {
         color: classObj.color,
         capacity: classObj.capacity || 0,
         period: classObj.period,
+        term_id: classObj.termId || classObj.term_id || null,
         start_date: classObj.startDate,
         end_date: classObj.endDate,
         fee: classObj.fee || 0,
@@ -619,6 +686,7 @@ export class DataService {
         fee: classItem.fee || 0,
         capacity: classItem.capacity || 0,
         period: classItem.period,
+        term_id: classItem.termId || classItem.term_id || null,
         start_date: classItem.startDate,
         end_date: classItem.endDate,
         textbook_info: classItem.textbookInfo,
@@ -847,18 +915,77 @@ export class DataService {
     return (data || []).map((row) => this._processAcademicSchool(row));
   }
 
+  async getClassTerms() {
+    const client = this._ensureClient();
+    const { data, error } = await client
+      .from('class_terms')
+      .select('*')
+      .order('academic_year', { ascending: false })
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      if (this._isMissingTableError(error, 'class_terms')) {
+        return [];
+      }
+      throw error;
+    }
+
+    return (data || []).map((row) => this._processClassTerm(row));
+  }
+
+  async upsertClassTerms(terms) {
+    const client = this._ensureClient();
+    const payload = (terms || []).map((term, index) => ({
+      id: term.id || generateId(),
+      academic_year: Number(term.academicYear || term.academic_year || new Date().getFullYear()),
+      name: term.name,
+      status: normalizeClassStatus(term.status) || term.status || '수업 진행 중',
+      start_date: term.startDate || term.start_date || null,
+      end_date: term.endDate || term.end_date || null,
+      sort_order: term.sortOrder ?? term.sort_order ?? index,
+    }));
+
+    const { data, error } = await client
+      .from('class_terms')
+      .upsert(payload, { onConflict: 'id' })
+      .select();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'class_terms')) {
+        return [];
+      }
+      throw error;
+    }
+
+    this._notify();
+    return (data || []).map((row) => this._processClassTerm(row));
+  }
+
+  async deleteClassTerm(id) {
+    const client = this._ensureClient();
+    const { error } = await client.from('class_terms').delete().eq('id', id);
+    if (error) {
+      if (this._isMissingTableError(error, 'class_terms')) {
+        return;
+      }
+      throw error;
+    }
+    this._notify();
+  }
+
   async getAcademicWorkspaceSupport() {
     const client = this._ensureClient();
-    const requiredTables = [
-      'academic_schools',
+    const requiredTables = ['academic_schools'];
+    const optionalTables = [
       'academic_curriculum_profiles',
       'academic_supplement_materials',
-      'academic_exam_scopes',
-      'academic_exam_days',
+      'academic_event_exam_details',
+      'academy_curriculum_plans',
+      'academy_curriculum_materials',
     ];
 
     const settled = await Promise.all(
-      requiredTables.map(async (table) => {
+      [...requiredTables, ...optionalTables].map(async (table) => {
         const { error } = await client.from(table).select('id').limit(1);
         return {
           table,
@@ -868,13 +995,14 @@ export class DataService {
       })
     );
 
-    const missingTables = settled
-      .filter((entry) => !entry.available)
-      .map((entry) => entry.table);
+    const missingTables = settled.filter((entry) => !entry.available).map((entry) => entry.table);
+    const missingRequiredTables = missingTables.filter((table) => requiredTables.includes(table));
+    const missingOptionalTables = missingTables.filter((table) => optionalTables.includes(table));
 
     return {
-      ready: missingTables.length === 0,
-      missingTables,
+      ready: missingRequiredTables.length === 0,
+      missingTables: missingRequiredTables,
+      missingOptionalTables,
       checkedAt: new Date(),
     };
   }
@@ -926,6 +1054,7 @@ export class DataService {
       const key = `${profile.schoolId}::${profile.grade}::${profile.subject}`;
       return {
         id: profile.id || existingIdByKey.get(key) || generateId(),
+        academic_year: Number(profile.academicYear || profile.academic_year || new Date().getFullYear()),
         school_id: profile.schoolId,
         grade: profile.grade,
         subject: profile.subject,
@@ -968,6 +1097,127 @@ export class DataService {
 
     this._notify();
     return payload.map((row) => this._processAcademicSupplementMaterial(row));
+  }
+
+  async replaceAcademicEventExamDetails(eventId, items) {
+    const client = this._ensureClient();
+    const { error: deleteError } = await client
+      .from('academic_event_exam_details')
+      .delete()
+      .eq('academic_event_id', eventId);
+
+    if (deleteError) {
+      if (this._isMissingTableError(deleteError, 'academic_event_exam_details')) {
+        return [];
+      }
+      throw deleteError;
+    }
+
+    const payload = (items || [])
+      .map((item, index) => ({
+        id: item.id || generateId(),
+        academic_event_id: eventId,
+        school_id: item.schoolId || item.school_id || null,
+        grade: item.grade || null,
+        subject: item.subject || null,
+        exam_date: item.examDate || item.exam_date || null,
+        exam_date_status: item.examDateStatus || item.exam_date_status || ((item.examDate || item.exam_date) ? 'exact' : 'tbd'),
+        curriculum_profile_id: item.curriculumProfileId || item.curriculum_profile_id || null,
+        academy_curriculum_plan_id: item.academyCurriculumPlanId || item.academy_curriculum_plan_id || null,
+        textbook_scope: item.textbookScope || item.textbook_scope || null,
+        supplement_scope: item.supplementScope || item.supplement_scope || null,
+        other_scope: item.otherScope || item.other_scope || null,
+        note: item.note || null,
+        sort_order: item.sortOrder ?? item.sort_order ?? index,
+      }))
+      .filter((item) => item.subject || item.exam_date || item.textbook_scope || item.supplement_scope || item.other_scope || item.note);
+
+    if (payload.length > 0) {
+      let { error } = await client.from('academic_event_exam_details').insert(payload);
+      if (error && this._isMissingColumnError(error, ['exam_date_status'])) {
+        const fallbackPayload = payload.map(({ exam_date_status, ...rest }) => rest);
+        const fallbackResult = await client.from('academic_event_exam_details').insert(fallbackPayload);
+        error = fallbackResult.error;
+      }
+      if (error) {
+        if (this._isMissingTableError(error, 'academic_event_exam_details')) {
+          return [];
+        }
+        throw error;
+      }
+    }
+
+    this._notify();
+    return payload.map((row) => this._processAcademicEventExamDetail(row));
+  }
+
+  async bulkUpsertAcademyCurriculumPlans(plans) {
+    const client = this._ensureClient();
+    const payload = (plans || []).map((plan, index) => ({
+      id: plan.id || generateId(),
+      academic_year: Number(plan.academicYear || plan.academic_year || new Date().getFullYear()),
+      academy_grade: plan.academyGrade || plan.academy_grade || null,
+      subject: plan.subject || null,
+      class_id: plan.classId || plan.class_id || null,
+      main_textbook_id: plan.mainTextbookId || plan.main_textbook_id || null,
+      note: plan.note || null,
+      sort_order: plan.sortOrder ?? plan.sort_order ?? index,
+    }));
+
+    const { data, error } = await client
+      .from('academy_curriculum_plans')
+      .upsert(payload, { onConflict: 'id' })
+      .select();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'academy_curriculum_plans')) {
+        return [];
+      }
+      throw error;
+    }
+
+    this._notify();
+    return (data || []).map((row) => this._processAcademyCurriculumPlan(row));
+  }
+
+  async replaceAcademyCurriculumMaterials(planId, items) {
+    const client = this._ensureClient();
+    const { error: deleteError } = await client
+      .from('academy_curriculum_materials')
+      .delete()
+      .eq('plan_id', planId);
+
+    if (deleteError) {
+      if (this._isMissingTableError(deleteError, 'academy_curriculum_materials')) {
+        return [];
+      }
+      throw deleteError;
+    }
+
+    const payload = (items || [])
+      .map((item, index) => ({
+        id: item.id || generateId(),
+        plan_id: planId,
+        textbook_id: item.textbookId || item.textbook_id || null,
+        title: item.title || null,
+        publisher: item.publisher || null,
+        note: item.note || null,
+        sort_order: item.sortOrder ?? item.sort_order ?? index,
+      }))
+      .filter((item) => item.title || item.textbook_id || item.publisher || item.note);
+
+    if (payload.length > 0) {
+      const { error } = await client.from('academy_curriculum_materials').insert(payload);
+      if (error) {
+        if (this._isMissingTableError(error, 'academy_curriculum_materials')) {
+          return [];
+        }
+        throw error;
+      }
+    }
+
+    this._notify();
+    return payload.map((row) => this._processAcademyCurriculumMaterial(row));
   }
 
   async replaceAcademicExamScopes(profileId, items) {
@@ -1149,6 +1399,7 @@ export class DataService {
       classroom: this._normalizeClassroomValue(classRow.room),
       room: classRow.room,
       roomRaw: classRow.room,
+      termId: classRow.term_id || null,
       studentIds: classRow.student_ids || [],
       textbookIds: classRow.textbook_ids || [],
       waitlistIds: classRow.waitlist_ids || [],
@@ -1170,10 +1421,23 @@ export class DataService {
     };
   }
 
+  _processClassTerm(termRow) {
+    if (!termRow) return null;
+    return {
+      ...termRow,
+      academicYear: Number(termRow.academic_year || new Date().getFullYear()),
+      startDate: termRow.start_date || '',
+      endDate: termRow.end_date || '',
+      sortOrder: termRow.sort_order ?? 0,
+      status: normalizeClassStatus(termRow.status) || termRow.status || '수업 진행 중',
+    };
+  }
+
   _processAcademicCurriculumProfile(profileRow) {
     if (!profileRow) return null;
     return {
       ...profileRow,
+      academicYear: Number(profileRow.academic_year || new Date().getFullYear()),
       schoolId: profileRow.school_id,
       mainTextbookTitle: profileRow.main_textbook_title || '',
       mainTextbookPublisher: profileRow.main_textbook_publisher || '',
@@ -1220,15 +1484,62 @@ export class DataService {
     };
   }
 
+  _processAcademicEventExamDetail(detailRow) {
+    if (!detailRow) return null;
+    return {
+      ...detailRow,
+      academicEventId: detailRow.academic_event_id,
+      schoolId: detailRow.school_id || '',
+      examDate: detailRow.exam_date || '',
+      examDateStatus: detailRow.exam_date_status || (detailRow.exam_date ? 'exact' : 'tbd'),
+      curriculumProfileId: detailRow.curriculum_profile_id || '',
+      academyCurriculumPlanId: detailRow.academy_curriculum_plan_id || '',
+      textbookScope: detailRow.textbook_scope || '',
+      supplementScope: detailRow.supplement_scope || '',
+      otherScope: detailRow.other_scope || '',
+      note: detailRow.note || '',
+      sortOrder: detailRow.sort_order ?? 0,
+    };
+  }
+
+  _processAcademyCurriculumPlan(planRow) {
+    if (!planRow) return null;
+    return {
+      ...planRow,
+      academicYear: Number(planRow.academic_year || new Date().getFullYear()),
+      academyGrade: planRow.academy_grade || '',
+      classId: planRow.class_id || '',
+      mainTextbookId: planRow.main_textbook_id || '',
+      note: planRow.note || '',
+      sortOrder: planRow.sort_order ?? 0,
+    };
+  }
+
+  _processAcademyCurriculumMaterial(materialRow) {
+    if (!materialRow) return null;
+    return {
+      ...materialRow,
+      planId: materialRow.plan_id,
+      textbookId: materialRow.textbook_id || '',
+      title: materialRow.title || '',
+      publisher: materialRow.publisher || '',
+      note: materialRow.note || '',
+      sortOrder: materialRow.sort_order ?? 0,
+    };
+  }
+
   _processAcademicEvent(eventRow) {
     if (!eventRow) return null;
+    const meta = extractEmbeddedNoteMeta(eventRow.note);
+    const derivedStart = eventRow.start || eventRow.start_date || eventRow.date || '';
+    const derivedEnd = eventRow.end || eventRow.end_date || meta.rangeEnd || derivedStart;
     return {
       ...eventRow,
       schoolId: eventRow.school_id || eventRow.schoolId || null,
       school: eventRow.school || null,
       type: eventRow.type || '',
-      start: eventRow.start || eventRow.start_date || eventRow.date || '',
-      end: eventRow.end || eventRow.end_date || eventRow.start || eventRow.start_date || eventRow.date || '',
+      start: derivedStart,
+      end: derivedEnd,
       color: eventRow.color || null,
       grade: eventRow.grade || 'all',
       note: eventRow.note || ''

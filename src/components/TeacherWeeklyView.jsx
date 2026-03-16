@@ -13,8 +13,11 @@ import { useToast } from '../contexts/ToastContext';
 import ClassDetailModal from './ClassDetailModal';
 import TimetableGrid from './ui/TimetableGrid';
 import TimetableEditDialog from './ui/TimetableEditDialog';
+import MobileAgendaTimetable from './ui/MobileAgendaTimetable';
+import NextSemesterPlannerView from './NextSemesterPlannerView';
 import { getUserFriendlyDataError } from '../lib/dataErrorUtils';
 import { exportElementAsImage } from '../lib/exportAsImage';
+import useViewport from '../hooks/useViewport';
 import {
   buildQuickClassPayload,
   buildQuickCreateDraft,
@@ -74,13 +77,20 @@ export default function TeacherWeeklyView({
   onBack,
   defaultStatus = '수업 진행 중',
   defaultPeriod = '',
+  termKey = '',
+  termStatus = defaultStatus,
+  terms = [],
+  embedded = false,
 }) {
+  const { isMobile } = useViewport();
   const toast = useToast();
   const { isStaff, isTeacher, user } = useAuth();
   const [selectedTeacher, setSelectedTeacher] = useState(ALL_TEACHERS);
+  const [selectedMobileDay, setSelectedMobileDay] = useState(DAY_LABELS[0]);
   const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
   const [createState, setCreateState] = useState(null);
   const [moveState, setMoveState] = useState(null);
+  const [plannerMode, setPlannerMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const scheduleRef = useRef(null);
 
@@ -107,6 +117,20 @@ export default function TeacherWeeklyView({
       setSelectedTeacher(ALL_TEACHERS);
     }
   }, [selectedTeacher, selectedTeacherEntry]);
+  useEffect(() => {
+    if (!isMobile || teacherEntries.length === 0 || selectedTeacher !== ALL_TEACHERS) {
+      return;
+    }
+
+    setSelectedTeacher(teacherEntries[0].key);
+  }, [isMobile, selectedTeacher, teacherEntries]);
+  useEffect(() => {
+    if (!plannerMode) {
+      return;
+    }
+    setCreateState(null);
+    setMoveState(null);
+  }, [plannerMode]);
   const canEditTimetable = Boolean(isStaff && selectedTeacher !== ALL_TEACHERS && selectedTeacherEntry);
   const canExportImage = selectedTeacher !== ALL_TEACHERS && Boolean(selectedTeacherEntry);
 
@@ -283,7 +307,7 @@ export default function TeacherWeeklyView({
         </h2>
         {showEditableEmptyGrid && (
           <div style={{ marginBottom: 14, color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
-            아직 배정된 수업이 없습니다. 빈 시간표를 드래그해서 개강 예정 수업을 바로 생성할 수 있습니다.
+            아직 배정된 수업이 없습니다. 빈 시간표를 드래그해서 개강 준비 중 수업을 바로 생성할 수 있습니다.
           </div>
         )}
         {showEmptyState ? (
@@ -306,25 +330,70 @@ export default function TeacherWeeklyView({
   };
 
   const targetsToRender = selectedTeacher === ALL_TEACHERS ? teacherEntries : teacherEntries.filter((entry) => entry.key === selectedTeacher);
+  const mobileBlocks = useMemo(
+    () => (selectedTeacherEntry ? buildBlocksForTeacher(selectedTeacherEntry.key) : []),
+    [buildBlocksForTeacher, selectedTeacherEntry]
+  );
+
+  if (plannerMode) {
+    return (
+      <div className="animate-in">
+        <div className="embedded-view-toolbar">
+          <div className="embedded-view-copy">
+            <div className="embedded-view-title">배치 모드</div>
+            <div className="embedded-view-description">선생님 기준으로 수업을 만들고 배치한 뒤 마지막에 한 번만 적용합니다.</div>
+          </div>
+          <button className="action-pill" onClick={() => setPlannerMode(false)}>
+            배치 모드 종료
+          </button>
+        </div>
+        <NextSemesterPlannerView
+          surface="teacher-weekly"
+          classes={classes}
+          allClasses={allClasses}
+          data={data}
+          dataService={dataService}
+          defaultStatus={defaultStatus}
+          defaultPeriod={defaultPeriod}
+          termKey={termKey}
+          termStatus={termStatus}
+          terms={terms}
+          selectedBoardValue={selectedTeacher === ALL_TEACHERS ? '' : selectedTeacherEntry?.label || ''}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="animate-in">
-      <div className="page-header">
-        <div>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {onBack && (
-              <button className="btn-icon" onClick={onBack} style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border-color)' }}>
-                <ArrowLeft size={20} />
-              </button>
-            )}
-            <User size={28} /> 선생님별 주간 시간표
-          </h1>
-          <p>선생님 기준 주간 배정을 보고, 직원 권한에서는 블록 드래그로 시간표를 빠르게 수정할 수 있습니다.</p>
+      {!embedded ? (
+        <div className="page-header">
+          <div>
+            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {onBack && (
+                <button className="btn-icon" onClick={onBack} style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border-color)' }}>
+                  <ArrowLeft size={20} />
+                </button>
+              )}
+              <User size={28} /> 선생님별 주간 시간표
+            </h1>
+            <p>선생님 기준 주간 배정을 보고, 직원 권한에서는 블록 드래그로 시간표를 빠르게 수정할 수 있습니다.</p>
+          </div>
+          <button className="btn btn-primary" onClick={handleSaveImage} disabled={!canExportImage} title={canExportImage ? '현재 선생님 시간표를 A4 세로 이미지로 저장합니다.' : '전체 보기에서는 이미지 저장을 사용할 수 없습니다.'}>
+            <Camera size={18} /> 이미지 저장
+          </button>
         </div>
-        <button className="btn btn-primary" onClick={handleSaveImage} disabled={!canExportImage} title={canExportImage ? '현재 선생님 시간표를 A4 세로 이미지로 저장합니다.' : '전체 보기에서는 이미지 저장을 사용할 수 없습니다.'}>
-          <Camera size={18} /> 이미지 저장
-        </button>
-      </div>
+      ) : (
+        <div className="embedded-view-toolbar">
+          <div className="embedded-view-copy">
+            <div className="embedded-view-title">선생님 주간 시간표</div>
+            <div className="embedded-view-description">선생님 기준 주간 배치를 빠르게 보고 수정할 수 있습니다.</div>
+          </div>
+          <button className="action-chip" onClick={handleSaveImage} disabled={!canExportImage} title={canExportImage ? '현재 선생님 시간표를 A4 세로 이미지로 저장합니다.' : '전체 보기에서는 이미지 저장을 사용할 수 없습니다.'}>
+            <Camera size={16} /> 이미지 저장
+          </button>
+        </div>
+      )}
 
       <div className="filter-bar">
         <div className="h-segment-container">
@@ -339,9 +408,35 @@ export default function TeacherWeeklyView({
         </div>
       </div>
 
+      <div className="embedded-view-toolbar" style={{ marginBottom: 16 }}>
+        <div className="embedded-view-copy">
+          <div className="embedded-view-title">배치 워크스페이스</div>
+          <div className="embedded-view-description">수업명만 먼저 만들고 시간표에 배치한 뒤 마지막에 한 번만 적용합니다.</div>
+        </div>
+        <button className="action-pill" onClick={() => setPlannerMode(true)}>
+          배치 모드 열기
+        </button>
+      </div>
+
       {teacherEntries.length === 0 ? (
         <div className="card" style={{ padding: 28 }}>
           <EmptyState message="표시할 선생님 데이터가 없습니다." />
+        </div>
+      ) : isMobile ? (
+        <div ref={scheduleRef} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <MobileAgendaTimetable
+            title={selectedTeacherEntry ? `${selectedTeacherEntry.label} 주간 시간표` : '선생님 주간 시간표'}
+            options={DAY_LABELS.map((day) => ({ key: day, label: day }))}
+            selectedKey={selectedMobileDay}
+            onSelectKey={setSelectedMobileDay}
+            emptyMessage="아직 선생님에게 배치된 수업이 없습니다."
+            blocks={mobileBlocks}
+            timeSlots={timeSlots}
+            editable={canEditTimetable}
+            onCreateSelection={handleCreateSelection}
+            onMoveBlock={handleMoveBlock}
+            onBlockClick={(block) => block.onClick?.()}
+          />
         </div>
       ) : (
         <div ref={scheduleRef} className={selectedTeacher === ALL_TEACHERS ? 'view-all-grid-container' : undefined}>

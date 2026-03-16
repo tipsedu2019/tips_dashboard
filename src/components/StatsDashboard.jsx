@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   BarChart,
@@ -27,28 +27,39 @@ import DataListView from './data-manager/DataListView';
 import { buildClassColumns, getDefaultClassSearchText } from './data-manager/columnSchemas';
 import { findExamConflictsForClasses } from '../lib/examScheduleUtils';
 
-function MetricCard({ icon, title, value, caption }) {
+const SUMMARY_PANEL_STORAGE_KEY = 'tips-dashboard-summary-panels-v2';
+
+function MetricCard({ icon, title, value, caption, collapsed = false, onToggle, children }) {
   return (
     <div className="card" style={{ padding: 24 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 14,
-            background: 'var(--accent-light)',
-            color: 'var(--accent-color)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {icon}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 14,
+              background: 'var(--accent-light)',
+              color: 'var(--accent-color)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            {icon}
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 700 }}>{title}</div>
         </div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 700 }}>{title}</div>
+        {onToggle ? <SummaryToggleButton collapsed={collapsed} onClick={onToggle} /> : null}
       </div>
       <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)' }}>{value}</div>
-      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>{caption}</div>
+      {!collapsed ? (
+        <>
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>{caption}</div>
+          {children ? <div style={{ marginTop: 14 }}>{children}</div> : null}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -93,23 +104,48 @@ function ProportionalBar({ value, max, color, extraLabel }) {
   );
 }
 
+function SummaryToggleButton({ collapsed, onClick }) {
+  return (
+    <button
+      type="button"
+      className="btn-ghost"
+      onClick={onClick}
+      title={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
+      aria-label={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 999,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}
+    >
+      {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+    </button>
+  );
+}
+
 function CollapseButton({ collapsed, onClick }) {
   return (
     <button
       type="button"
       className="btn-ghost"
       onClick={onClick}
+      title={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
+      aria-label={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
       style={{
-        padding: '8px 12px',
+        width: 36,
+        height: 36,
         borderRadius: 999,
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 6,
+        justifyContent: 'center',
         flexShrink: 0,
       }}
     >
       {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-      {collapsed ? '복구' : '최소화'}
     </button>
   );
 }
@@ -117,9 +153,38 @@ function CollapseButton({ collapsed, onClick }) {
 export default function StatsDashboard({ classes, data, dataService, onViewStudentSchedule }) {
   const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
   const [hoveredId, setHoveredId] = useState(null);
-  const [collapsedPanels, setCollapsedPanels] = useState({
-    conflicts: false,
-    examConflicts: false,
+  const [collapsedPanels, setCollapsedPanels] = useState(() => {
+    if (typeof window === 'undefined') {
+      return {
+        classes: false,
+        enrolment: false,
+        teachers: false,
+        classrooms: false,
+        conflicts: false,
+        examConflicts: false,
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(SUMMARY_PANEL_STORAGE_KEY) || '{}');
+      return {
+        classes: Boolean(parsed.classes),
+        enrolment: Boolean(parsed.enrolment),
+        teachers: Boolean(parsed.teachers),
+        classrooms: Boolean(parsed.classrooms),
+        conflicts: Boolean(parsed.conflicts),
+        examConflicts: Boolean(parsed.examConflicts),
+      };
+    } catch {
+      return {
+        classes: false,
+        enrolment: false,
+        teachers: false,
+        classrooms: false,
+        conflicts: false,
+        examConflicts: false,
+      };
+    }
   });
   const { isStaff } = useAuth();
 
@@ -130,16 +195,27 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
     }));
   };
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(SUMMARY_PANEL_STORAGE_KEY, JSON.stringify(collapsedPanels));
+  }, [collapsedPanels]);
+
   const stats = useMemo(() => {
     const uniqueTeachers = new Set();
     const uniqueClassrooms = new Set();
     const classroomUsage = {};
     const teacherWorkload = {};
+    const registeredStudentIds = [];
+    const waitlistStudentIds = [];
 
     classes.forEach((classItem) => {
       const teacherList = splitTeacherList(classItem.teacher || '');
       const roomList = splitClassroomList(classItem.classroom || classItem.room || '');
       const slots = parseSchedule(classItem.schedule, classItem);
+      registeredStudentIds.push(...(classItem.studentIds || []));
+      waitlistStudentIds.push(...(classItem.waitlistIds || []));
 
       teacherList.forEach((teacher) => uniqueTeachers.add(teacher));
       roomList.forEach((room) => uniqueClassrooms.add(room));
@@ -163,6 +239,18 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
       });
     });
 
+    const uniqueRegisteredStudentIds = [...new Set(registeredStudentIds.filter(Boolean))];
+    const uniqueWaitlistStudentIds = [...new Set(waitlistStudentIds.filter(Boolean))];
+    const filteredStudents = (data.students || []).filter((student) => uniqueRegisteredStudentIds.includes(student.id));
+    const gradeCounts = filteredStudents.reduce((accumulator, student) => {
+      const grade = String(student.grade || '誘몄젙').trim() || '誘몄젙';
+      accumulator[grade] = (accumulator[grade] || 0) + 1;
+      return accumulator;
+    }, {});
+    const gradeBreakdown = Object.entries(gradeCounts)
+      .sort(([left], [right]) => left.localeCompare(right, 'ko'))
+      .map(([grade, count]) => ({ grade, count }));
+
     const topClassrooms = Object.entries(classroomUsage)
       .map(([name, payload]) => ({
         name,
@@ -185,9 +273,11 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
       totalClasses: classes.length,
       totalTeachers: uniqueTeachers.size,
       totalClassrooms: uniqueClassrooms.size,
-      totalEnrollee: classes.reduce((sum, classItem) => sum + (classItem.studentIds?.length || 0), 0),
-      totalWaitlist: classes.reduce((sum, classItem) => sum + (classItem.waitlistIds?.length || 0), 0),
-      uniqueStudents: data.students?.length || 0,
+      totalEnrollee: registeredStudentIds.length,
+      totalWaitlist: waitlistStudentIds.length,
+      uniqueStudents: uniqueRegisteredStudentIds.length,
+      uniqueWaitlistStudents: uniqueWaitlistStudentIds.length,
+      gradeBreakdown,
       topClassrooms,
       maxClassroomMinutes: topClassrooms[0]?.minutes || 1,
       topTeachers,
@@ -311,7 +401,7 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
           id: `teacher:${name}`,
           type: 'teacher',
           label: name,
-          meta: '선생님 시간 중복',
+          meta: '선생님 시간 충돌',
           overlaps,
         };
       })
@@ -328,7 +418,7 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
           id: `classroom:${name}`,
           type: 'classroom',
           label: name,
-          meta: '강의실 시간 중복',
+          meta: '강의실 시간 충돌',
           overlaps,
         };
       })
@@ -343,8 +433,15 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
   }, [classes, data.students]);
 
   const examConflictSummary = useMemo(
-    () => findExamConflictsForClasses(classes, data.students || [], data.academicSchools || [], data.academicExamDays || []),
-    [classes, data.academicExamDays, data.academicSchools, data.students]
+    () => findExamConflictsForClasses(
+      classes,
+      data.students || [],
+      data.academicSchools || [],
+      data.academicExamDays || [],
+      data.academicEventExamDetails || [],
+      data.academicEvents || []
+    ),
+    [classes, data.academicEventExamDetails, data.academicEvents, data.academicExamDays, data.academicSchools, data.students]
   );
 
   const dashboardColumns = useMemo(
@@ -416,9 +513,9 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
           {!collapsedPanels.conflicts && (
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               {[
-                { key: 'student', title: '학생 시간 중복', items: conflictSummary.student, accent: '#ef4444' },
-                { key: 'teacher', title: '선생님 시간 중복', items: conflictSummary.teacher, accent: '#b45309' },
-                { key: 'classroom', title: '강의실 시간 중복', items: conflictSummary.classroom, accent: '#1d4ed8' },
+                { key: 'student', title: '학생 시간 충돌', items: conflictSummary.student, accent: '#ef4444' },
+                { key: 'teacher', title: '선생님 시간 충돌', items: conflictSummary.teacher, accent: '#b45309' },
+                { key: 'classroom', title: '강의실 시간 충돌', items: conflictSummary.classroom, accent: '#1d4ed8' },
               ]
                 .filter((section) => section.items.length > 0)
                 .map((section) => (
@@ -559,27 +656,63 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
       >
         <MetricCard
           icon={<Layout size={22} />}
-          title="운영 수업"
+          title={"\uC6B4\uC601 \uC218\uC5C5"}
           value={`${stats.totalClasses}개`}
           caption={`주간 총 ${formatHours(stats.totalWeeklyMinutes)} 운영 중`}
+          collapsed={collapsedPanels.classes}
+          onToggle={() => togglePanel('classes')}
         />
         <MetricCard
           icon={<Users size={22} />}
-          title="등록 인원"
+          title={"\uB4F1\uB85D \uC778\uC6D0"}
           value={`${stats.totalEnrollee}명`}
-          caption={`대기 ${stats.totalWaitlist}명 · 전체 학생 ${stats.uniqueStudents}명`}
-        />
+          caption={`학생 기준 ${stats.uniqueStudents}명 · 수강 기준 ${stats.totalEnrollee}건`}
+          collapsed={collapsedPanels.enrolment}
+          onToggle={() => togglePanel('enrolment')}
+        >
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)' }}>
+              <span>{`대기 ${stats.totalWaitlist}명`}</span>
+              <span>{`대기 학생 ${stats.uniqueWaitlistStudents}명`}</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {stats.gradeBreakdown.length > 0 ? stats.gradeBreakdown.map((entry) => (
+                <span
+                  key={entry.grade}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '6px 10px',
+                    borderRadius: 999,
+                    background: 'var(--bg-surface-hover)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  {`${entry.grade} ${entry.count}명`}
+                </span>
+              )) : (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{"\uD604\uC7AC \uD544\uD130 \uAE30\uC900 \uB4F1\uB85D \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</span>
+              )}
+            </div>
+          </div>
+        </MetricCard>
         <MetricCard
           icon={<User size={22} />}
-          title="선생님"
+          title={"\uC120\uC0DD\uB2D8"}
           value={`${stats.totalTeachers}명`}
-          caption="현재 필터 기준 수업 담당 인원"
+          caption={"현재 필터 기준 수업 담당 인원"}
+          collapsed={collapsedPanels.teachers}
+          onToggle={() => togglePanel('teachers')}
         />
         <MetricCard
           icon={<Building2 size={22} />}
-          title="강의실"
+          title={"\uAC15\uC758\uC2E4"}
           value={`${stats.totalClassrooms}실`}
-          caption="현재 필터 기준 사용 중인 강의실"
+          caption={"현재 필터 기준 사용 중인 강의실"}
+          collapsed={collapsedPanels.classrooms}
+          onToggle={() => togglePanel('classrooms')}
         />
       </div>
 
@@ -657,7 +790,7 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
           listData={tableControls.filteredData}
           rowModels={tableControls.rowModels}
           emptyTitle="표시할 수업이 없습니다"
-          emptyDescription="검색어나 필터를 조정해 주세요."
+          emptyDescription="검색어와 필터를 조정해 주세요."
           onEdit={setSelectedClassForDetails}
           onDelete={() => {}}
           selectedIds={[]}

@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 
 function TimetableBlock({
   block,
   onClick,
   onMouseDown,
+  onResizeStart,
+  onDiscard,
   suppressClick,
   isGhost = false,
   isSourceDragging = false,
@@ -14,6 +17,7 @@ function TimetableBlock({
     block.editable ? 'editable' : '',
     isGhost ? 'ghost' : '',
     isSourceDragging ? 'drag-source' : '',
+    block.warning ? 'warning' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -21,7 +25,7 @@ function TimetableBlock({
       className={classNames}
       onClick={block.clickable && !isGhost && !suppressClick ? onClick : undefined}
       onMouseDown={isGhost ? undefined : onMouseDown}
-      title={!block.editable && block.editableReason ? block.editableReason : undefined}
+      title={!block.editable && !isGhost && block.editableReason ? block.editableReason : undefined}
       style={{
         backgroundColor: block.backgroundColor || 'var(--bg-surface)',
         borderLeftColor: block.borderColor || 'var(--border-color)',
@@ -31,10 +35,51 @@ function TimetableBlock({
         cursor: isGhost ? 'grabbing' : block.editable ? 'grab' : block.clickable ? 'pointer' : 'default',
       }}
     >
-      {block.variantDot && (
-        <span className="block-variant-dot" title={block.variantDotTitle || '시간표 변형 정보가 있습니다.'} />
-      )}
-      {block.header && <div className="block-subject">{block.header}</div>}
+      {block.variantDot ? (
+        <span className="block-variant-dot" title={block.variantDotTitle || '여러 배치 변형이 있습니다.'} />
+      ) : null}
+
+      {block.discardable && !isGhost ? (
+        <button
+          type="button"
+          className="timetable-block-discard"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDiscard?.();
+          }}
+          title="배치 취소"
+        >
+          <Trash2 size={12} />
+        </button>
+      ) : null}
+
+      {block.showResizeHandles && !isGhost ? (
+        <>
+          <button
+            type="button"
+            className="timetable-resize-handle top"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onResizeStart?.('start');
+            }}
+            title="시작 시간 조정"
+          />
+          <button
+            type="button"
+            className="timetable-resize-handle bottom"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onResizeStart?.('end');
+            }}
+            title="종료 시간 조정"
+          />
+        </>
+      ) : null}
+
+      {block.header ? <div className="block-subject">{block.header}</div> : null}
       <div className="block-name">{block.title}</div>
       {(block.detailLines || []).map((line, index) => (
         <div
@@ -42,15 +87,15 @@ function TimetableBlock({
           className="block-info"
           style={line.subtle ? { marginTop: 2, fontSize: 10, color: 'var(--text-muted)' } : undefined}
         >
-          {line.label && (
+          {line.label ? (
             <span className="info-label" style={line.subtle ? { opacity: 0.7 } : undefined}>
               {line.label}
             </span>
-          )}
+          ) : null}
           {line.value}
         </div>
       ))}
-      {block.tooltip && <div className="tooltip">{block.tooltip}</div>}
+      {block.tooltip ? <div className="tooltip">{block.tooltip}</div> : null}
     </div>
   );
 }
@@ -72,21 +117,61 @@ function formatPreviewLabel(columns, timeSlots, previewRange) {
   return `${columnLabel} · ${start} ~ ${end}`;
 }
 
+function clampResizeRange(edge, rowIndex, block, totalSlots) {
+  if (edge === 'start') {
+    const nextStart = Math.min(Math.max(rowIndex, 0), block.endSlot - 1);
+    return {
+      startRow: nextStart,
+      endRow: block.endSlot,
+    };
+  }
+
+  const nextEnd = Math.max(Math.min(rowIndex + 1, totalSlots), block.startSlot + 1);
+  return {
+    startRow: block.startSlot,
+    endRow: nextEnd,
+  };
+}
+
+function getExternalDropRange(rowIndex, totalSlots, durationSlots) {
+  const safeDuration = Math.max(1, Number(durationSlots) || 4);
+  const maxStart = Math.max(0, totalSlots - safeDuration);
+  const startRow = Math.min(Math.max(rowIndex, 0), maxStart);
+  const endRow = Math.min(startRow + safeDuration, totalSlots);
+  return {
+    startRow,
+    endRow,
+  };
+}
+
 export default function TimetableGrid({
   columns,
   timeSlots,
   blocks,
   timeColumnWidth = 70,
   minColumnWidth = 90,
-  timeLabel = 'Time',
+  timeLabel = '시간',
   editable = false,
+  editableMode = 'view',
   onCreateSelection,
   onMoveBlock,
+  onResizeBlock,
+  onDiscardBlock,
+  onDropDraftItem,
+  showResizeHandles = false,
+  invalidRanges = [],
+  warningRanges = [],
+  externalDraggingDraft = null,
+  externalPreviewRange = null,
+  onExternalPreviewChange,
 }) {
   const [hoveredSlot, setHoveredSlot] = useState(null);
   const [selectionState, setSelectionState] = useState(null);
   const [dragState, setDragState] = useState(null);
+  const [resizeState, setResizeState] = useState(null);
   const [suppressClick, setSuppressClick] = useState(false);
+
+  const externalDragActive = Boolean(externalDraggingDraft?.classId);
 
   const blockMap = useMemo(() => {
     const starts = new Map();
@@ -103,12 +188,30 @@ export default function TimetableGrid({
   }, [blocks]);
 
   const previewRange = useMemo(() => {
+    if (resizeState?.columnIndex !== undefined) {
+      return {
+        mode: 'resize',
+        columnIndex: resizeState.columnIndex,
+        startRow: resizeState.startRow,
+        endRow: resizeState.endRow,
+      };
+    }
+
     if (dragState?.targetColumnIndex !== undefined) {
       return {
         mode: 'move',
         columnIndex: dragState.targetColumnIndex,
         startRow: dragState.targetStartSlot,
         endRow: dragState.targetStartSlot + dragState.blockDuration,
+      };
+    }
+
+    if (externalPreviewRange?.columnIndex !== undefined) {
+      return {
+        mode: 'external',
+        columnIndex: externalPreviewRange.columnIndex,
+        startRow: externalPreviewRange.startRow,
+        endRow: externalPreviewRange.endRow,
       };
     }
 
@@ -122,7 +225,7 @@ export default function TimetableGrid({
     }
 
     return null;
-  }, [dragState, selectionState]);
+  }, [dragState, externalPreviewRange, resizeState, selectionState]);
 
   const ghostBlock = useMemo(() => {
     if (!dragState) {
@@ -148,18 +251,97 @@ export default function TimetableGrid({
     };
   }, [dragState]);
 
+  const externalGhostBlock = useMemo(() => {
+    if (!externalDraggingDraft?.block || !externalPreviewRange) {
+      return null;
+    }
+
+    return {
+      ...externalDraggingDraft.block,
+      key: `${externalDraggingDraft.block.key}-ghost`,
+      columnIndex: externalPreviewRange.columnIndex,
+      startSlot: externalPreviewRange.startRow,
+      endSlot: externalPreviewRange.endRow,
+      clickable: false,
+      editable: false,
+    };
+  }, [externalDraggingDraft, externalPreviewRange]);
+
+  const handlePointerUp = () => {
+    if (selectionState) {
+      try {
+        if (onCreateSelection) {
+          onCreateSelection({
+            columnIndex: selectionState.columnIndex,
+            startSlot: selectionState.startRow,
+            endSlot: selectionState.endRow,
+          });
+        }
+      } catch (error) {
+        console.error('timetable create selection failed', error);
+      }
+      setSelectionState(null);
+      return;
+    }
+
+    if (resizeState) {
+      try {
+        if (onResizeBlock) {
+          onResizeBlock({
+            block: resizeState.block,
+            startSlot: resizeState.startRow,
+            endSlot: resizeState.endRow,
+          });
+          setSuppressClick(true);
+          window.setTimeout(() => setSuppressClick(false), 0);
+        }
+      } catch (error) {
+        console.error('timetable resize failed', error);
+      }
+      setResizeState(null);
+      return;
+    }
+
+    if (dragState) {
+      const moved =
+        dragState.block.columnIndex !== dragState.targetColumnIndex ||
+        dragState.block.startSlot !== dragState.targetStartSlot;
+
+      try {
+        if (moved && onMoveBlock) {
+          onMoveBlock({
+            block: dragState.block,
+            columnIndex: dragState.targetColumnIndex,
+            startSlot: dragState.targetStartSlot,
+          });
+          setSuppressClick(true);
+          window.setTimeout(() => setSuppressClick(false), 0);
+        }
+      } catch (error) {
+        console.error('timetable move failed', error);
+      }
+
+      setDragState(null);
+    }
+  };
+
   useEffect(() => {
     const clearTransientState = () => {
-      setSelectionState(null);
-      setDragState(null);
+      handlePointerUp();
     };
 
     window.addEventListener('mouseup', clearTransientState);
     return () => window.removeEventListener('mouseup', clearTransientState);
-  }, []);
+  });
+
+  useEffect(() => {
+    if (!externalDragActive) {
+      onExternalPreviewChange?.(null);
+    }
+  }, [externalDragActive, onExternalPreviewChange]);
 
   const startSelection = (columnIndex, rowIndex) => {
-    if (!editable) {
+    if (!editable || externalDragActive) {
       return;
     }
 
@@ -172,7 +354,7 @@ export default function TimetableGrid({
   };
 
   const startDrag = (block) => {
-    if (!editable || !block.editable) {
+    if (!editable || !block.editable || externalDragActive) {
       return;
     }
 
@@ -184,7 +366,25 @@ export default function TimetableGrid({
     });
   };
 
+  const startResize = (block, edge) => {
+    if (!editable || !block.editable || !onResizeBlock || externalDragActive) {
+      return;
+    }
+
+    setResizeState({
+      block,
+      edge,
+      columnIndex: block.columnIndex,
+      startRow: block.startSlot,
+      endRow: block.endSlot,
+    });
+  };
+
   const updatePointerState = (columnIndex, rowIndex, activeBlock) => {
+    if (externalDragActive) {
+      return;
+    }
+
     if (dragState) {
       setDragState((current) => {
         if (!current) return current;
@@ -195,16 +395,25 @@ export default function TimetableGrid({
           targetStartSlot: Math.min(Math.max(rowIndex, 0), maxStart),
         };
       });
-    } else if (selectionState) {
+      return;
+    }
+
+    if (resizeState) {
+      if (resizeState.columnIndex !== columnIndex) {
+        return;
+      }
+      const nextRange = clampResizeRange(resizeState.edge, rowIndex, resizeState.block, timeSlots.length);
+      setResizeState((current) => current ? { ...current, ...nextRange } : current);
+      return;
+    }
+
+    if (selectionState) {
       if (selectionState.columnIndex !== columnIndex) {
         return;
       }
 
       const range = clampRange(selectionState.anchorRow, rowIndex);
       setSelectionState((current) => current ? { ...current, ...range } : current);
-    }
-
-    if (selectionState || dragState) {
       return;
     }
 
@@ -216,41 +425,20 @@ export default function TimetableGrid({
     setHoveredSlot({ col: columnIndex, startRow: rowIndex, endRow: rowIndex + 1 });
   };
 
-  const finishSelection = () => {
-    if (!selectionState || !onCreateSelection) {
-      setSelectionState(null);
+  const updateExternalPreview = (columnIndex, rowIndex, activeBlock) => {
+    if (!externalDragActive) {
       return;
     }
 
-    onCreateSelection({
-      columnIndex: selectionState.columnIndex,
-      startSlot: selectionState.startRow,
-      endSlot: selectionState.endRow,
+    if (!editable || editableMode === 'view' || activeBlock) {
+      onExternalPreviewChange?.(null);
+      return;
+    }
+
+    onExternalPreviewChange?.({
+      columnIndex,
+      ...getExternalDropRange(rowIndex, timeSlots.length, externalDraggingDraft?.durationSlots),
     });
-    setSelectionState(null);
-  };
-
-  const finishDrag = () => {
-    if (!dragState || !onMoveBlock) {
-      setDragState(null);
-      return;
-    }
-
-    const moved =
-      dragState.block.columnIndex !== dragState.targetColumnIndex ||
-      dragState.block.startSlot !== dragState.targetStartSlot;
-
-    if (moved) {
-      onMoveBlock({
-        block: dragState.block,
-        columnIndex: dragState.targetColumnIndex,
-        startSlot: dragState.targetStartSlot,
-      });
-      setSuppressClick(true);
-      window.setTimeout(() => setSuppressClick(false), 0);
-    }
-
-    setDragState(null);
   };
 
   const previewLabel = formatPreviewLabel(columns, timeSlots, previewRange);
@@ -260,13 +448,31 @@ export default function TimetableGrid({
     <div
       className="timetable-grid-shell"
       style={{ overflowX: 'auto' }}
-      onMouseLeave={() => setHoveredSlot(null)}
+      onMouseLeave={() => {
+        setHoveredSlot(null);
+        if (externalDragActive) {
+          onExternalPreviewChange?.(null);
+        }
+      }}
+      onMouseUp={handlePointerUp}
     >
-      {previewLabel && (
-        <div className={`timetable-preview-badge ${previewRange?.mode === 'move' ? 'is-move' : 'is-selection'}`}>
-          {previewRange?.mode === 'move' ? '이동 예정' : '선택 범위'} · {previewLabel}
+      {previewLabel ? (
+        <div
+          className={[
+            'timetable-preview-badge',
+            previewRange?.mode === 'move' ? 'is-move' : '',
+            previewRange?.mode === 'external' ? 'is-external' : '',
+          ].filter(Boolean).join(' ')}
+        >
+          {previewRange?.mode === 'selection'
+            ? '선택 범위'
+            : previewRange?.mode === 'resize'
+              ? '크기 조절'
+              : previewRange?.mode === 'external'
+                ? '새 배치'
+                : '이동 예정'} · {previewLabel}
         </div>
-      )}
+      ) : null}
 
       <div
         className="timetable-grid"
@@ -312,6 +518,16 @@ export default function TimetableGrid({
                   ghostBlock &&
                   ghostBlock.columnIndex === columnIndex &&
                   ghostBlock.startSlot === rowIndex;
+                const externalGhostStartsHere =
+                  externalGhostBlock &&
+                  externalGhostBlock.columnIndex === columnIndex &&
+                  externalGhostBlock.startSlot === rowIndex;
+                const hasInvalidMarker = invalidRanges.some((range) => (
+                  range.columnIndex === columnIndex && rowIndex >= range.startSlot && rowIndex < range.endSlot
+                ));
+                const hasWarningMarker = warningRanges.some((range) => (
+                  range.columnIndex === columnIndex && rowIndex >= range.startSlot && rowIndex < range.endSlot
+                ));
 
                 return (
                   <div
@@ -320,29 +536,65 @@ export default function TimetableGrid({
                       'timetable-cell',
                       isHoveredColumn || isHoveredRow ? 'hover-highlight' : '',
                       isPreviewCell && previewRange?.mode === 'selection' ? 'selection-preview' : '',
-                      isPreviewCell && previewRange?.mode === 'move' ? 'move-preview' : '',
+                      isPreviewCell && ['move', 'resize', 'external'].includes(previewRange?.mode || '') ? 'move-preview' : '',
+                      hasInvalidMarker ? 'planner-invalid-cell' : '',
+                      hasWarningMarker ? 'planner-warning-cell' : '',
                     ].filter(Boolean).join(' ')}
                     onMouseEnter={() => updatePointerState(columnIndex, rowIndex, activeBlock)}
+                    onDragEnter={(event) => {
+                      if (!externalDragActive) return;
+                      event.preventDefault();
+                      updateExternalPreview(columnIndex, rowIndex, activeBlock);
+                    }}
+                    onDragOver={(event) => {
+                      if (!externalDragActive) return;
+                      event.preventDefault();
+                      try {
+                        event.dataTransfer.dropEffect = 'copy';
+                      } catch (error) {
+                        // ignore unsupported dropEffect writes
+                      }
+                      updateExternalPreview(columnIndex, rowIndex, activeBlock);
+                    }}
+                    onDrop={(event) => {
+                      if (!externalDragActive || !onDropDraftItem) {
+                        return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (activeBlock) {
+                        onExternalPreviewChange?.(null);
+                        return;
+                      }
+                      try {
+                        const range = getExternalDropRange(rowIndex, timeSlots.length, externalDraggingDraft?.durationSlots);
+                        onDropDraftItem({
+                          classId: externalDraggingDraft.classId,
+                          columnIndex,
+                          startSlot: range.startRow,
+                          endSlot: range.endRow,
+                        });
+                      } catch (error) {
+                        console.error('timetable external drop failed', error);
+                      } finally {
+                        onExternalPreviewChange?.(null);
+                      }
+                    }}
                     onMouseDown={() => {
-                      if (!editable || activeBlock) {
+                      if (!editable || activeBlock || editableMode === 'view' || externalDragActive) {
                         return;
                       }
                       startSelection(columnIndex, rowIndex);
                     }}
-                    onMouseUp={() => {
-                      if (selectionState) {
-                        finishSelection();
-                      } else if (dragState) {
-                        finishDrag();
-                      }
-                    }}
                   >
-                    {blockStart && (
+                    {blockStart ? (
                       <TimetableBlock
                         block={blockStart}
                         isSourceDragging={Boolean(dragState && dragState.block.key === blockStart.key)}
                         suppressClick={suppressClick}
                         onClick={() => blockStart.onClick?.(blockStart)}
+                        onDiscard={() => onDiscardBlock?.({ block: blockStart })}
+                        onResizeStart={(edge) => startResize(blockStart, edge)}
                         onMouseDown={(event) => {
                           if (!editable || !blockStart.editable) {
                             return;
@@ -352,15 +604,23 @@ export default function TimetableGrid({
                           startDrag(blockStart);
                         }}
                       />
-                    )}
+                    ) : null}
 
-                    {ghostStartsHere && (
+                    {ghostStartsHere ? (
                       <TimetableBlock
                         block={ghostBlock}
                         isGhost
                         suppressClick
                       />
-                    )}
+                    ) : null}
+
+                    {externalGhostStartsHere ? (
+                      <TimetableBlock
+                        block={externalGhostBlock}
+                        isGhost
+                        suppressClick
+                      />
+                    ) : null}
                   </div>
                 );
               })}

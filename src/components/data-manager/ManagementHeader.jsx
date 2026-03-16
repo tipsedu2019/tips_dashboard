@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Eye, Filter, Search, Trash2 } from 'lucide-react';
 import { CLASS_COLUMN_LABELS } from './utils';
+import useViewport from '../../hooks/useViewport';
 
 function renderFilterControl({ column, value, onChange, options }) {
   if (!column.filterKind) {
@@ -9,7 +10,7 @@ function renderFilterControl({ column, value, onChange, options }) {
 
   if (column.filterKind === 'single-select') {
     return (
-      <select className="styled-input" value={value} onChange={(event) => onChange(event.target.value)}>
+      <select className="styled-input" value={value || ''} onChange={(event) => onChange(event.target.value)}>
         <option value="">전체</option>
         {options.map((option) => (
           <option key={option} value={option}>
@@ -25,7 +26,7 @@ function renderFilterControl({ column, value, onChange, options }) {
       <select
         className="styled-input"
         multiple
-        value={value}
+        value={value || []}
         onChange={(event) => onChange(Array.from(event.target.selectedOptions).map((option) => option.value))}
         style={{ minHeight: 88 }}
       >
@@ -128,6 +129,7 @@ function ToolbarAction({ action, disabled }) {
 
 export default function ManagementHeader({
   title,
+  description,
   count,
   searchValue,
   onSearchChange,
@@ -142,28 +144,31 @@ export default function ManagementHeader({
   tableControls,
   searchPlaceholder = '이름, 수업명, 교재명으로 검색',
 }) {
+  const { isMobile } = useViewport();
   const columnSelectorRef = useRef(null);
   const filterRef = useRef(null);
   const [isColumnPanelOpen, setIsColumnPanelOpen] = useState(false);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
-  const activeFilterCount = useMemo(
-    () =>
-      tableControls.columns.reduce((countValue, column) => {
-        const value = tableControls.filters[column.key];
+  const activeFilterCount = useMemo(() => {
+    if (!tableControls) {
+      return 0;
+    }
 
-        if (Array.isArray(value)) {
-          return countValue + (value.length > 0 ? 1 : 0);
-        }
+    return tableControls.columns.reduce((countValue, column) => {
+      const value = tableControls.filters[column.key];
 
-        if (value && typeof value === 'object') {
-          return countValue + (value.min || value.max ? 1 : 0);
-        }
+      if (Array.isArray(value)) {
+        return countValue + (value.length > 0 ? 1 : 0);
+      }
 
-        return countValue + (String(value || '').trim() ? 1 : 0);
-      }, 0),
-    [tableControls.columns, tableControls.filters]
-  );
+      if (value && typeof value === 'object') {
+        return countValue + (value.min || value.max ? 1 : 0);
+      }
+
+      return countValue + (String(value || '').trim() ? 1 : 0);
+    }, 0);
+  }, [tableControls]);
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -196,6 +201,11 @@ export default function ManagementHeader({
           <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text-muted)' }}>
             현재 {count}개 항목
           </div>
+          {description ? (
+            <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.65, color: 'var(--text-secondary)', maxWidth: 720 }}>
+              {description}
+            </div>
+          ) : null}
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -238,7 +248,7 @@ export default function ManagementHeader({
                     top: 'calc(100% + 8px)',
                     right: 0,
                     zIndex: 1200,
-                    width: 360,
+                    width: isMobile ? 'min(100vw - 32px, 360px)' : 360,
                     maxHeight: 520,
                     overflowY: 'auto',
                     padding: 16,
@@ -290,7 +300,7 @@ export default function ManagementHeader({
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>
-                      그룹화
+                      그룹
                     </div>
                     <button
                       type="button"
@@ -373,7 +383,7 @@ export default function ManagementHeader({
                     top: 'calc(100% + 8px)',
                     right: 0,
                     zIndex: 1200,
-                    width: 220,
+                    width: isMobile ? 'min(100vw - 32px, 280px)' : 220,
                     padding: 16,
                     display: 'flex',
                     flexDirection: 'column',

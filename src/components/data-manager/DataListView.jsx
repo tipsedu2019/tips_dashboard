@@ -8,6 +8,7 @@ import {
   Square,
   Trash2,
 } from 'lucide-react';
+import useViewport from '../../hooks/useViewport';
 
 function EmptyState({ title, description }) {
   return (
@@ -217,6 +218,7 @@ export default function DataListView({
   sortDirection,
   onSortChange,
 }) {
+  const { isMobile } = useViewport();
   const [editingCell, setEditingCell] = useState(null);
   const [editValue, setEditValue] = useState('');
 
@@ -264,6 +266,115 @@ export default function DataListView({
   }, [onDragEnter, setHoveredId]);
 
   const colSpan = (selectable ? 1 : 0) + columns.length + (showActions ? 1 : 0);
+
+  if (isMobile) {
+    const visibleColumns = columns.slice(0, 6);
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {listData.length === 0 ? (
+          <div className="card-custom" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, opacity: 0.75 }}>
+              <ClipboardList size={44} strokeWidth={1.5} />
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{emptyTitle}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>{emptyDescription}</div>
+            </div>
+          </div>
+        ) : (
+          displayRows.map((row) => {
+            if (row.type === 'group') {
+              return (
+                <div
+                  key={row.key}
+                  className="card-custom"
+                  style={{
+                    padding: '12px 14px',
+                    background: row.depth === 0 ? 'rgba(33, 110, 78, 0.08)' : 'rgba(33, 110, 78, 0.04)',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>
+                    {row.column.label}: {row.value}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
+                    {row.count}媛?
+                  </div>
+                </div>
+              );
+            }
+
+            const item = row.item;
+            const itemSelected = selectedIds?.has?.(item.id);
+
+            return (
+              <div
+                key={row.key || item.id}
+                className="card-custom"
+                style={{
+                  padding: 16,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  border: itemSelected ? '1px solid rgba(33, 110, 78, 0.28)' : '1px solid var(--border-color)',
+                  boxShadow: itemSelected ? '0 12px 28px rgba(33, 110, 78, 0.12)' : undefined,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {selectable && (
+                      <button
+                        type="button"
+                        onClick={() => handleRowMouseDown(item.id, itemSelected, { preventDefault() {} })}
+                        style={{ background: 'transparent', border: 'none', padding: 0, display: 'flex', alignItems: 'center' }}
+                      >
+                        {itemSelected ? <CheckSquare size={18} color="var(--accent-color)" /> : <Square size={18} color="var(--text-muted)" />}
+                      </button>
+                    )}
+                    <div style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>
+                      {visibleColumns[0]?.render ? visibleColumns[0].render(item) : item[visibleColumns[0]?.key] || '-'}
+                    </div>
+                  </div>
+                  {showActions && (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => onEdit?.(item)}
+                        className="btn-icon"
+                        style={{ padding: 6, background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}
+                        disabled={isBusy}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete?.(item.id)}
+                        className="btn-icon"
+                        style={{ padding: 6, background: 'transparent', border: 'none', color: '#ef4444' }}
+                        disabled={isBusy}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10 }}>
+                  {visibleColumns.slice(1).map((column) => (
+                    <div key={`${item.id}-${column.key}`} style={{ display: 'grid', gap: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>{column.label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {column.render ? column.render(item) : item[column.key] || '-'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="card-custom" style={{ overflow: 'hidden', padding: 0 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   Search,
@@ -20,11 +20,87 @@ import {
 import ClassDetailModal from './ClassDetailModal';
 import TimetableGrid from './ui/TimetableGrid';
 import { getStudentExamCountdowns } from '../lib/examScheduleUtils';
+import ViewHeader from './ui/ViewHeader';
+
+function SubjectClassCard({ cls }) {
+  return (
+    <div
+      className="card-custom"
+      style={{
+        padding: 14,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        border: `1px solid ${cls.isWaitlist ? 'rgba(245, 158, 11, 0.24)' : 'var(--border-color)'}`,
+        background: cls.isWaitlist ? 'rgba(245, 158, 11, 0.05)' : 'var(--bg-surface)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--text-primary)' }}>
+            {stripClassPrefix(cls.className)}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
+            {cls.schedule || '시간표 미등록'}
+          </div>
+        </div>
+        <span
+          style={{
+            padding: '6px 10px',
+            borderRadius: 999,
+            background: cls.isWaitlist ? 'rgba(245, 158, 11, 0.14)' : 'rgba(33, 110, 78, 0.1)',
+            color: cls.isWaitlist ? '#b45309' : 'var(--accent-color)',
+            fontSize: 11,
+            fontWeight: 800,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {cls.isWaitlist ? '대기' : cls.status}
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: 12,
+            background: 'var(--bg-surface-hover)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            color: 'var(--text-primary)',
+            fontWeight: 700,
+          }}
+        >
+          <Users size={14} />
+          {cls.teacher || '선생님 미지정'}
+        </div>
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: 12,
+            background: 'var(--bg-surface-hover)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            color: 'var(--text-primary)',
+            fontWeight: 700,
+          }}
+        >
+          <Calendar size={14} />
+          {cls.classroom || cls.room || '강의실 미지정'}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function buildTooltip({ cls, isWaitlist, teacher, classroom }) {
   return [
     stripClassPrefix(cls.className),
-    isWaitlist ? '상태: 대기' : '상태: 등록',
+    isWaitlist ? '상태: 대기' : `상태: ${cls.status || '수업 진행 중'}`,
     teacher ? `선생님: ${teacher}` : null,
     classroom ? `강의실: ${classroom}` : null,
     '',
@@ -42,6 +118,7 @@ export default function StudentWeeklyView({
   data,
   dataService,
   onBack,
+  embedded = false,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -91,30 +168,26 @@ export default function StudentWeeklyView({
       }));
   }, [classes, student]);
 
-  const stats = useMemo(() => {
-    const enrolled = studentClasses.filter((cls) => !cls.isWaitlist).length;
-    const waitlist = studentClasses.filter((cls) => cls.isWaitlist).length;
-    const weeklyMinutes = studentClasses.reduce((sum, cls) => {
-      return (
-        sum +
-        parseSchedule(cls.schedule, cls).reduce((slotSum, slot) => {
-          const startSlot = timeToSlotIndex(slot.start, 9);
-          const endSlot = Math.max(timeToSlotIndex(slot.end, 9), startSlot + 1);
-          return slotSum + (endSlot - startSlot) * 30;
-        }, 0)
-      );
-    }, 0);
-
-    return {
-      enrolled,
-      waitlist,
-      weeklyHours: (weeklyMinutes / 60).toFixed(1),
-    };
-  }, [studentClasses]);
+  const subjectSections = useMemo(() => (
+    ['영어', '수학']
+      .map((subject) => ({
+        subject,
+        items: studentClasses
+          .filter((cls) => cls.subject === subject)
+          .sort((left, right) => String(left.schedule || '').localeCompare(String(right.schedule || ''))),
+      }))
+      .filter((section) => section.items.length > 0)
+  ), [studentClasses]);
 
   const examCountdowns = useMemo(
-    () => getStudentExamCountdowns(student, data?.academicSchools || [], data?.academicExamDays || []),
-    [data?.academicExamDays, data?.academicSchools, student]
+    () => getStudentExamCountdowns(
+      student,
+      data?.academicSchools || [],
+      data?.academicExamDays || [],
+      data?.academicEventExamDetails || [],
+      data?.academicEvents || []
+    ),
+    [data?.academicEventExamDetails, data?.academicEvents, data?.academicExamDays, data?.academicSchools, student]
   );
 
   const blocks = useMemo(
@@ -161,45 +234,31 @@ export default function StudentWeeklyView({
 
   return (
     <div className="animate-in">
-      <div
-        className="page-header"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: 20,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {onBack && (
-            <button
-              className="btn-icon"
-              onClick={onBack}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-              }}
-            >
-              <ArrowLeft size={20} />
-            </button>
-          )}
-          <div>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-              <Calendar size={28} /> {student ? `${student.name} 학생 주간 시간표` : '학생 시간표 조회'}
-            </h1>
-            {student && (
-              <p style={{ margin: 0 }}>
-                {student.grade || ''} {student.school || ''} 기준으로 등록반과 대기반을 함께 보여줍니다.
-              </p>
-            )}
-          </div>
+      {!embedded ? (
+        <div className="page-header" style={{ display: 'grid', gap: 18 }}>
+          <ViewHeader
+            icon={<Calendar size={22} />}
+            eyebrow="학생 시간표"
+            title={student ? `${student.name} 학생 주간 시간표` : '학생 시간표 조회'}
+            description={student
+              ? `${[student.grade, student.school].filter(Boolean).join(' · ')} 기준으로 현재 듣는 수업과 시험 일정을 함께 확인합니다.`
+              : '학생을 선택하면 영어·수학 수업 카드와 주간 시간표, 시험 일정을 함께 확인할 수 있습니다.'}
+            actions={onBack ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={onBack}
+                style={{ gap: 8 }}
+              >
+                <ArrowLeft size={16} />
+                개요로 돌아가기
+              </button>
+            ) : null}
+          />
         </div>
+      ) : null}
 
-        <div style={{ position: 'relative', width: 320, maxWidth: '100%' }} ref={dropdownRef}>
+      <div style={{ position: 'relative', width: 360, maxWidth: '100%', marginBottom: embedded ? 18 : 0 }} ref={dropdownRef}>
           <div
             style={{
               display: 'flex',
@@ -296,7 +355,7 @@ export default function StudentWeeklyView({
                         {candidate.name}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {candidate.grade} · {candidate.school}
+                        {[candidate.grade, candidate.school].filter(Boolean).join(' · ')}
                       </div>
                     </div>
                     {student?.id === candidate.id && <Check size={16} style={{ color: 'var(--accent-color)' }} />}
@@ -309,7 +368,6 @@ export default function StudentWeeklyView({
               )}
             </div>
           )}
-        </div>
       </div>
 
       {!student ? (
@@ -339,10 +397,9 @@ export default function StudentWeeklyView({
             <Users size={40} style={{ opacity: 0.3 }} />
           </div>
           <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>
-            조회할 학생을 선택해 주세요
-          </h2>
+            조회할 학생을 선택해 주세요</h2>
           <p style={{ maxWidth: 340, lineHeight: 1.6 }}>
-            상단 검색창에서 학생을 선택하면 주간 시간표와 대기 수업까지 함께 확인할 수 있습니다.
+            상단 검색창에서 학생을 선택하면 과목별 수업 목록, 시험 일정, 주간 시간표를 함께 확인할 수 있습니다.
           </p>
         </div>
       ) : (
@@ -367,7 +424,7 @@ export default function StudentWeeklyView({
                     padding: '12px 14px',
                     borderRadius: 14,
                     background: item.examDate ? 'rgba(217, 119, 6, 0.08)' : 'var(--bg-surface-hover)',
-                    border: `1px solid ${item.examDate ? 'rgba(217, 119, 6, 0.18)' : 'var(--border-color)'}`,
+                    border: '1px solid ' + (item.examDate ? 'rgba(217, 119, 6, 0.18)' : 'var(--border-color)'),
                   }}
                 >
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>{item.subject} 시험</div>
@@ -375,69 +432,67 @@ export default function StudentWeeklyView({
                     {item.ddayLabel}
                   </div>
                   <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {item.examDate ? `${item.examDate} · ${item.label}` : '등록된 일정이 없습니다.'}
+                    {item.examDate ? item.examDate + ' · ' + item.label : '등록된 시험 일정이 없습니다.'}
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 16,
-            }}
-          >
-            <div className="card" style={{ padding: 20, marginBottom: 0 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  color: 'var(--text-secondary)',
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                <Users size={16} /> 등록 수업
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+            {subjectSections.length === 0 ? (
+              <div className="card" style={{ padding: 20, marginBottom: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700 }}>
+                  <AlertCircle size={16} /> 현재 수강 중이거나 대기 중인 수업이 없습니다
+                </div>
               </div>
-              <div style={{ fontSize: 28, fontWeight: 800, marginTop: 10 }}>{stats.enrolled}</div>
-            </div>
-
-            <div className="card" style={{ padding: 20, marginBottom: 0 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  color: '#d97706',
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                <AlertCircle size={16} /> 대기 수업
-              </div>
-              <div style={{ fontSize: 28, fontWeight: 800, marginTop: 10, color: '#d97706' }}>
-                {stats.waitlist}
-              </div>
-            </div>
-
-            <div className="card" style={{ padding: 20, marginBottom: 0 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  color: 'var(--text-secondary)',
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
-                <Clock3 size={16} /> 주간 수업 시간
-              </div>
-              <div style={{ fontSize: 28, fontWeight: 800, marginTop: 10 }}>{stats.weeklyHours}h</div>
-            </div>
+            ) : (
+              subjectSections.map((section) => (
+                <div key={section.subject} className="card" style={{ padding: 18, marginBottom: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 12,
+                          background: 'var(--accent-light)',
+                          color: 'var(--accent-color)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Clock3 size={16} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800 }}>{section.subject}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                          요일, 시간, 배정 정보를 한눈에 확인할 수 있습니다.
+                        </div>
+                      </div>
+                    </div>
+                    {section.items.some((item) => item.isWaitlist) ? (
+                      <span
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: 999,
+                          background: 'rgba(245, 158, 11, 0.1)',
+                          fontSize: 11,
+                          fontWeight: 800,
+                          color: '#b45309',
+                        }}
+                      >
+                        대기 포함
+                      </span>
+                    ) : null}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {section.items.map((cls) => <SubjectClassCard key={cls.id} cls={cls} />)}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           <div className="card" style={{ padding: 24, marginBottom: 0 }}>
@@ -451,7 +506,7 @@ export default function StudentWeeklyView({
                   borderRadius: 16,
                 }}
               >
-                이 학생에게 연결된 수업 시간이 없습니다.
+                이 학생에게 연결된 수업 시간표가 아직 없습니다.
               </div>
             ) : (
               <TimetableGrid
@@ -482,3 +537,4 @@ export default function StudentWeeklyView({
     </div>
   );
 }
+

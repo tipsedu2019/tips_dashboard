@@ -1,11 +1,13 @@
 export const LEGACY_ACTIVE_CLASS_STATUS = '수강';
+export const LEGACY_UPCOMING_CLASS_STATUS = '개강 예정';
+
 export const ACTIVE_CLASS_STATUS = '수업 진행 중';
-export const UPCOMING_CLASS_STATUS = '개강 예정';
+export const PREPARING_CLASS_STATUS = '개강 준비 중';
 export const ENDED_CLASS_STATUS = '종강';
 
 export const CLASS_STATUS_OPTIONS = [
   ACTIVE_CLASS_STATUS,
-  UPCOMING_CLASS_STATUS,
+  PREPARING_CLASS_STATUS,
   ENDED_CLASS_STATUS,
 ];
 
@@ -17,6 +19,10 @@ export function normalizeClassStatus(value) {
 
   if (text === LEGACY_ACTIVE_CLASS_STATUS) {
     return ACTIVE_CLASS_STATUS;
+  }
+
+  if (text === LEGACY_UPCOMING_CLASS_STATUS) {
+    return PREPARING_CLASS_STATUS;
   }
 
   return CLASS_STATUS_OPTIONS.includes(text) ? text : '';
@@ -38,11 +44,11 @@ export function computeClassStatus(classItem, now = new Date()) {
   }
 
   const currentDate = parseDate(now);
-  const startDate = parseDate(classItem?.startDate);
-  const endDate = parseDate(classItem?.endDate);
+  const startDate = parseDate(classItem?.startDate || classItem?.start_date);
+  const endDate = parseDate(classItem?.endDate || classItem?.end_date);
 
   if (currentDate && startDate && startDate > currentDate) {
-    return UPCOMING_CLASS_STATUS;
+    return PREPARING_CLASS_STATUS;
   }
 
   if (currentDate && endDate) {
