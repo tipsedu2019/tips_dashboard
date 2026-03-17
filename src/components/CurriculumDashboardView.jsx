@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, Download, ImageDown, Plus, Printer, Save, Upload } from 'lucide-react';
 import ViewHeader from './ui/ViewHeader';
 import StatusBanner from './ui/StatusBanner';
@@ -100,7 +100,7 @@ function MaterialEditor({ items, onChange, addLabel }) {
   );
 }
 
-export default function CurriculumDashboardView({ data, dataService, onBack }) {
+export default function CurriculumDashboardView({ data, dataService }) {
   const toast = useToast();
   const { isStaff, isTeacher } = useAuth();
   const canEdit = isStaff || isTeacher;
@@ -300,9 +300,7 @@ export default function CurriculumDashboardView({ data, dataService, onBack }) {
           eyebrow="교재 정보"
           title="커리큘럼 대시보드"
           description="학교 기준 1년 교재와 학원 기준 1년 운영 커리큘럼을 같은 화면에서 비교하고 정리합니다."
-          onBack={onBack}
-          backLabel="이전 화면으로 돌아가기"
-          actions={<><button type="button" className="action-chip" onClick={() => toast.info('교재 템플릿 다운로드는 다음 단계에서 연결할 예정입니다.')}><Download size={16} />템플릿 다운로드</button><button type="button" className="action-pill" onClick={() => toast.info('교재 데이터 업로드는 다음 단계에서 연결할 예정입니다.')}><Upload size={16} />데이터 업로드</button></>}
+          actions={<><button type="button" className="action-chip" onClick={() => toast.info('교재 템플릿 다운로드는 다음 단계에서 연결할 예정입니다.')}><Download size={16} />템플릿 다운로드</button><button type="button" className="action-chip" onClick={() => toast.info('교재 데이터 업로드는 다음 단계에서 연결할 예정입니다.')}><Upload size={16} />데이터 업로드</button></>}
         />
 
         {!(data.academicCurriculumProfiles && data.academyCurriculumPlans !== undefined) ? <StatusBanner variant="warning" title="커리큘럼 저장용 테이블이 아직 준비되지 않았습니다." message="Supabase migration을 먼저 반영하면 학교 교재와 학원 커리큘럼을 연도 기준으로 저장할 수 있습니다." /> : null}

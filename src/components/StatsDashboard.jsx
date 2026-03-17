@@ -18,13 +18,6 @@ import {
   splitTeacherList,
   stripClassPrefix,
 } from '../data/sampleData';
-import ClassDetailModal from './ClassDetailModal';
-import { useDataTableControls } from '../hooks/useDataTableControls';
-import { useSharedTablePreference } from '../hooks/useSharedTablePreference';
-import { useAuth } from '../contexts/AuthContext';
-import ManagementHeader from './data-manager/ManagementHeader';
-import DataListView from './data-manager/DataListView';
-import { buildClassColumns, getDefaultClassSearchText } from './data-manager/columnSchemas';
 import { findExamConflictsForClasses } from '../lib/examScheduleUtils';
 
 const SUMMARY_PANEL_STORAGE_KEY = 'tips-dashboard-summary-panels-v2';
@@ -150,9 +143,7 @@ function CollapseButton({ collapsed, onClick }) {
   );
 }
 
-export default function StatsDashboard({ classes, data, dataService, onViewStudentSchedule }) {
-  const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
-  const [hoveredId, setHoveredId] = useState(null);
+export default function StatsDashboard({ classes, data, onViewStudentSchedule }) {
   const [collapsedPanels, setCollapsedPanels] = useState(() => {
     if (typeof window === 'undefined') {
       return {
@@ -160,6 +151,8 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
         enrolment: false,
         teachers: false,
         classrooms: false,
+        classroomUsage: false,
+        teacherWorkload: false,
         conflicts: false,
         examConflicts: false,
       };
@@ -172,6 +165,8 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
         enrolment: Boolean(parsed.enrolment),
         teachers: Boolean(parsed.teachers),
         classrooms: Boolean(parsed.classrooms),
+        classroomUsage: Boolean(parsed.classroomUsage),
+        teacherWorkload: Boolean(parsed.teacherWorkload),
         conflicts: Boolean(parsed.conflicts),
         examConflicts: Boolean(parsed.examConflicts),
       };
@@ -181,12 +176,13 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
         enrolment: false,
         teachers: false,
         classrooms: false,
+        classroomUsage: false,
+        teacherWorkload: false,
         conflicts: false,
         examConflicts: false,
       };
     }
   });
-  const { isStaff } = useAuth();
 
   const togglePanel = (key) => {
     setCollapsedPanels((current) => ({
@@ -444,39 +440,12 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
     [classes, data.academicEventExamDetails, data.academicEvents, data.academicExamDays, data.academicSchools, data.students]
   );
 
-  const dashboardColumns = useMemo(
-    () =>
-      buildClassColumns({
-        data,
-        onOpenClassDetail: setSelectedClassForDetails,
-        editable: false,
-        includeRecruitment: true,
-      }),
-    [data]
-  );
-
-  const sharedPreference = useSharedTablePreference({
-    storageKey: 'dashboard:classes',
-    dataService,
-    canPersist: isStaff,
-  });
-
-  const tableControls = useDataTableControls({
-    storageKey: 'dashboard:classes',
-    columns: dashboardColumns,
-    data: classes,
-    searchAccessor: (item) => getDefaultClassSearchText(item),
-    defaultSortKey: 'className',
-    externalState: sharedPreference.isHydrated ? sharedPreference.externalState : null,
-    onStateChange: sharedPreference.isHydrated ? sharedPreference.queuePersist : null,
-  });
-
   return (
     <div className="animate-in">
       <div className="page-header">
         <div>
           <h1>개요</h1>
-          <p>주요 운영 지표와 충돌 알림을 빠르게 확인하고, 아래 수업 목록에서 바로 상세 정보까지 이어집니다.</p>
+          <p>주요 운영 지표와 충돌 알림을 빠르게 확인하고, 필요한 시간표 화면으로 바로 넘어갈 수 있습니다.</p>
         </div>
       </div>
 
@@ -725,100 +694,81 @@ export default function StatsDashboard({ classes, data, dataService, onViewStude
         }}
       >
         <div className="card" style={{ padding: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-            <BarChart size={18} className="text-accent" />
-            <h2 style={{ margin: 0, fontSize: 16 }}>강의실 사용량 TOP 5</h2>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: collapsedPanels.classroomUsage ? 0 : 16,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <BarChart size={18} className="text-accent" />
+              <h2 style={{ margin: 0, fontSize: 16 }}>강의실 사용량 TOP 5</h2>
+            </div>
+            <CollapseButton collapsed={collapsedPanels.classroomUsage} onClick={() => togglePanel('classroomUsage')} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {stats.topClassrooms.length > 0 ? stats.topClassrooms.map((entry, index) => (
-              <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 28, fontSize: 12, fontWeight: 800, color: 'var(--text-muted)' }}>
-                  {index + 1}
+          {!collapsedPanels.classroomUsage && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {stats.topClassrooms.length > 0 ? stats.topClassrooms.map((entry, index) => (
+                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 28, fontSize: 12, fontWeight: 800, color: 'var(--text-muted)' }}>
+                    {index + 1}
+                  </div>
+                  <div style={{ minWidth: 84, fontWeight: 700 }}>{entry.name}</div>
+                  <ProportionalBar
+                    value={entry.minutes}
+                    max={stats.maxClassroomMinutes}
+                    color="var(--accent-color)"
+                    extraLabel={`${formatHours(entry.minutes)} · ${entry.count}개`}
+                  />
                 </div>
-                <div style={{ minWidth: 84, fontWeight: 700 }}>{entry.name}</div>
-                <ProportionalBar
-                  value={entry.minutes}
-                  max={stats.maxClassroomMinutes}
-                  color="var(--accent-color)"
-                  extraLabel={`${formatHours(entry.minutes)} · ${entry.count}개`}
-                />
-              </div>
-            )) : (
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>표시할 데이터가 없습니다.</div>
-            )}
-          </div>
+              )) : (
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>표시할 데이터가 없습니다.</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="card" style={{ padding: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-            <Users size={18} className="text-accent" />
-            <h2 style={{ margin: 0, fontSize: 16 }}>선생님 담당량 TOP 5</h2>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: collapsedPanels.teacherWorkload ? 0 : 16,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Users size={18} className="text-accent" />
+              <h2 style={{ margin: 0, fontSize: 16 }}>선생님 담당량 TOP 5</h2>
+            </div>
+            <CollapseButton collapsed={collapsedPanels.teacherWorkload} onClick={() => togglePanel('teacherWorkload')} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {stats.topTeachers.length > 0 ? stats.topTeachers.map((entry, index) => (
-              <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 28, fontSize: 12, fontWeight: 800, color: 'var(--text-muted)' }}>
-                  {index + 1}
+          {!collapsedPanels.teacherWorkload && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {stats.topTeachers.length > 0 ? stats.topTeachers.map((entry, index) => (
+                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 28, fontSize: 12, fontWeight: 800, color: 'var(--text-muted)' }}>
+                    {index + 1}
+                  </div>
+                  <div style={{ minWidth: 84, fontWeight: 700 }}>{entry.name}</div>
+                  <ProportionalBar
+                    value={entry.minutes}
+                    max={stats.maxTeacherMinutes}
+                    color="#b45309"
+                    extraLabel={`${formatHours(entry.minutes)} · ${entry.count}개`}
+                  />
                 </div>
-                <div style={{ minWidth: 84, fontWeight: 700 }}>{entry.name}</div>
-                <ProportionalBar
-                  value={entry.minutes}
-                  max={stats.maxTeacherMinutes}
-                  color="#b45309"
-                  extraLabel={`${formatHours(entry.minutes)} · ${entry.count}개`}
-                />
-              </div>
-            )) : (
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>표시할 데이터가 없습니다.</div>
-            )}
-          </div>
+              )) : (
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>표시할 데이터가 없습니다.</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
-
-      <ManagementHeader
-        title="전체 수업 목록"
-        count={tableControls.filteredData.length}
-        searchValue={tableControls.searchQuery}
-        onSearchChange={tableControls.setSearchQuery}
-        tableControls={tableControls}
-        searchPlaceholder="수업명, 선생님, 강의실로 검색"
-      />
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <DataListView
-          columns={tableControls.visibleColumns}
-          listData={tableControls.filteredData}
-          rowModels={tableControls.rowModels}
-          emptyTitle="표시할 수업이 없습니다"
-          emptyDescription="검색어와 필터를 조정해 주세요."
-          onEdit={setSelectedClassForDetails}
-          onDelete={() => {}}
-          selectedIds={[]}
-          currentIds={tableControls.currentIds}
-          toggleSelectAll={() => {}}
-          hoveredId={hoveredId}
-          setHoveredId={setHoveredId}
-          onDragStart={() => {}}
-          onDragEnter={() => {}}
-          activeTab="classes"
-          onInlineEdit={async () => {}}
-          isBusy={false}
-          selectable={false}
-          showActions={false}
-          sortKey={tableControls.sortState.key}
-          sortDirection={tableControls.sortState.direction}
-          onSortChange={tableControls.toggleSort}
-        />
-      </div>
-
-      {selectedClassForDetails && (
-        <ClassDetailModal
-          classItem={selectedClassForDetails}
-          data={data}
-          onClose={() => setSelectedClassForDetails(null)}
-          dataService={dataService}
-        />
-      )}
     </div>
   );
 }

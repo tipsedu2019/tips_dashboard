@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import {
   ArrowLeft,
   CalendarDays,
@@ -7,6 +7,7 @@ import {
   Search,
   UserRound,
 } from 'lucide-react';
+import { useDeferredValue } from 'react';
 import { ACTIVE_CLASS_STATUS, computeClassStatus } from '../lib/classStatus';
 import { sortSubjectOptions } from '../lib/subjectUtils';
 import { parseSchedule, stripClassPrefix } from '../data/sampleData';
@@ -198,6 +199,7 @@ export default function PublicClassListView({
 }) {
   const { isMobile, isCompact } = useViewport();
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [selectedSubject, setSelectedSubject] = useState('all');
   const [selectedGrade, setSelectedGrade] = useState('all');
   const [publicSelectedClass, setSelectedClass] = useState(null);
@@ -218,7 +220,7 @@ export default function PublicClassListView({
   );
 
   const visibleClasses = useMemo(() => {
-    const query = text(searchQuery).toLowerCase();
+    const query = text(deferredSearchQuery).toLowerCase();
     return activeClasses.filter((item) => {
       const matchesSubject = selectedSubject === 'all' || item.subject === selectedSubject;
       const matchesGrade = selectedGrade === 'all' || normalizeGrade(item.grade) === selectedGrade;
@@ -235,7 +237,7 @@ export default function PublicClassListView({
         .toLowerCase();
       return matchesSubject && matchesGrade && (!query || haystack.includes(query));
     });
-  }, [activeClasses, searchQuery, selectedGrade, selectedSubject]);
+  }, [activeClasses, deferredSearchQuery, selectedGrade, selectedSubject]);
 
   const groupedClasses = useMemo(() => {
     const buckets = new Map();

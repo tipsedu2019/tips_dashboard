@@ -18,12 +18,13 @@ export default function BottomSheet({
   return (
     <div
       onClick={onClose}
+      role="presentation"
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 1700,
-        background: 'rgba(15, 23, 42, 0.45)',
-        backdropFilter: 'blur(10px)',
+        background: 'rgba(15, 23, 42, 0.42)',
+        backdropFilter: 'blur(6px)',
         display: 'flex',
         alignItems: isMobile ? 'flex-end' : 'center',
         justifyContent: 'center',
@@ -32,6 +33,8 @@ export default function BottomSheet({
     >
       <div
         className="card animate-in"
+        role="dialog"
+        aria-modal="true"
         onClick={(event) => event.stopPropagation()}
         style={{
           width: isMobile ? '100%' : `min(${maxWidth}px, calc(100vw - 40px))`,
@@ -75,7 +78,13 @@ export default function BottomSheet({
             ) : null}
           </div>
 
-          <button type="button" className="btn-icon bottom-sheet-close" onClick={onClose} aria-label="닫기" title="닫기">
+          <button
+            type="button"
+            className="btn-icon bottom-sheet-close"
+            onClick={onClose}
+            aria-label="닫기"
+            title="닫기"
+          >
             <X size={20} />
           </button>
         </div>

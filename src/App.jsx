@@ -1,17 +1,19 @@
-﻿import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+﻿import { Suspense, lazy, startTransition, useEffect, useMemo, useState } from 'react';
 import {
   BarChart2,
   BookOpen,
   Building2,
   Calendar,
+  LayoutGrid,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
+  CalendarDays,
   Eye,
   LogOut,
   Menu,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   Settings2,
   Sun,
   User,
@@ -20,8 +22,6 @@ import {
 import { dataService } from './services/dataService';
 import { useAuth } from './contexts/AuthContext';
 import LoginModal from './components/SettingsModal';
-import PublicClassListView from './components/PublicClassListView';
-import StatsDashboard from './components/StatsDashboard';
 import PageLoader from './components/ui/PageLoader';
 import StatusBanner from './components/ui/StatusBanner';
 import TermManagerModal from './components/ui/TermManagerModal';
@@ -41,22 +41,56 @@ const DataManager = lazy(() => import('./components/DataManager'));
 const StudentWeeklyView = lazy(() => import('./components/StudentWeeklyView'));
 const AcademicCalendarView = lazy(() => import('./components/AcademicCalendarView'));
 const CurriculumDashboardView = lazy(() => import('./components/CurriculumDashboardView'));
+const PublicClassListView = lazy(() => import('./components/PublicClassListView'));
+const ClassListWorkspace = lazy(() => import('./components/ClassListWorkspace'));
+const StatsDashboard = lazy(() => import('./components/StatsDashboard'));
 
 const ALL_OPTION = '전체';
 const LOCAL_TERM_STORAGE_KEY = 'tips-dashboard:local-terms';
-const TIMETABLE_VIEW_IDS = ['classroom-weekly', 'teacher-weekly', 'daily-classroom', 'daily-teacher', 'student-weekly'];
+const TIMETABLE_VIEW_IDS = ['class-list', 'teacher-weekly', 'classroom-weekly', 'daily-teacher', 'daily-classroom', 'student-weekly'];
 const TIMETABLE_TABS = [
-  { id: 'classroom-weekly', label: '강의실 주간', icon: Building2 },
-  { id: 'teacher-weekly', label: '선생님 주간', icon: Users },
-  { id: 'daily-classroom', label: '일별 강의실', icon: Building2 },
-  { id: 'daily-teacher', label: '일별 선생님', icon: Users },
-  { id: 'student-weekly', label: '학생 시간표', icon: User },
+  {
+    id: 'class-list',
+    label: '전체 수업 목록',
+    icon: ClipboardList,
+    description: '전체 수업을 먼저 검색하고 정렬한 뒤, 필요한 시간표 화면으로 바로 넘어갈 수 있습니다.',
+  },
+  {
+    id: 'teacher-weekly',
+    label: '선생님 주간',
+    icon: Users,
+    description: '선생님별 주간 시간표를 한 작업 공간에서 비교하며 확인할 수 있습니다.',
+  },
+  {
+    id: 'classroom-weekly',
+    label: '강의실 주간',
+    icon: Building2,
+    description: '강의실 점유 상태를 주간 기준으로 보고, 중복 사용 여부를 빠르게 점검할 수 있습니다.',
+  },
+  {
+    id: 'daily-teacher',
+    label: '일별 선생님',
+    icon: Users,
+    description: '하루 단위로 선생님 스케줄을 집중해서 확인하고 조정할 수 있습니다.',
+  },
+  {
+    id: 'daily-classroom',
+    label: '일별 강의실',
+    icon: Building2,
+    description: '하루 기준 강의실 배치를 점검하고 비어 있는 시간대를 빠르게 찾을 수 있습니다.',
+  },
+  {
+    id: 'student-weekly',
+    label: '학생 시간표',
+    icon: User,
+    description: '학생별 주간 시간표를 확인하며 수업 충돌이나 이동 동선을 점검할 수 있습니다.',
+  },
 ];
 
 const NAV_VIEWS = [
   { id: 'stats', label: '개요', icon: BarChart2, staffOnly: false },
-  { id: 'timetable', label: '시간표', icon: Calendar, staffOnly: false },
-  { id: 'academic-calendar', label: '학사 일정', icon: Calendar, staffOnly: false },
+  { id: 'timetable', label: '시간표', icon: LayoutGrid, staffOnly: false },
+  { id: 'academic-calendar', label: '학사 일정', icon: CalendarDays, staffOnly: false },
   { id: 'curriculum-dashboard', label: '교재 정보', icon: BookOpen, staffOnly: true },
   { id: 'data-manager', label: '데이터 관리', icon: ClipboardList, staffOnly: true },
 ];
@@ -181,9 +215,9 @@ export default function App() {
   const [selectedSubject, setSelectedSubject] = useState(ALL_OPTION);
   const [isPeriodDropdownOpen, setIsPeriodDropdownOpen] = useState(false);
   const [isTermManagerOpen, setIsTermManagerOpen] = useState(false);
-  const [isSidebarHidden, setIsSidebarHidden] = useState(() => localStorage.getItem('tips-sidebar-hidden') === '1');
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
   const [isPublicMode, setIsPublicMode] = useState(() => getPublicModeFromLocation());
+  const [isTimetableFloatingCollapsed, setIsTimetableFloatingCollapsed] = useState(() => localStorage.getItem('tips-timetable-floating-collapsed') === '1');
   const [localTerms, setLocalTerms] = useState(() => {
     try {
       const raw = localStorage.getItem(LOCAL_TERM_STORAGE_KEY);
@@ -194,10 +228,19 @@ export default function App() {
   });
 
   const { user, isStaff, logout, loading, authError } = useAuth();
+  const showMinimalSidebar = !isCompact;
+
+  const changeView = (nextView, { closeSidebar = true } = {}) => {
+    startTransition(() => {
+      setCurrentView(nextView);
+    });
+    if (closeSidebar) {
+      setSidebarOpen(false);
+    }
+  };
 
   const goHome = () => {
-    setCurrentView('stats');
-    setSidebarOpen(false);
+    changeView('stats');
   };
 
   useEffect(() => {
@@ -223,13 +266,6 @@ export default function App() {
       // ignore local storage persistence failures
     }
   }, [localTerms]);
-
-  useEffect(() => {
-    if (isCompact) {
-      return;
-    }
-    localStorage.setItem('tips-sidebar-hidden', isSidebarHidden ? '1' : '0');
-  }, [isCompact, isSidebarHidden]);
 
   useEffect(() => {
     const unsubscribe = dataService.subscribe(setData);
@@ -285,13 +321,13 @@ export default function App() {
 
   useEffect(() => {
     if (currentView === 'planner') {
-      setCurrentView('classroom-weekly');
+      changeView('class-list', { closeSidebar: false });
     }
   }, [currentView]);
 
   useEffect(() => {
     if (user && !isStaff && (currentView === 'data-manager' || currentView === 'curriculum-dashboard')) {
-      setCurrentView('stats');
+      changeView('stats', { closeSidebar: false });
     }
   }, [currentView, isStaff, user]);
 
@@ -481,6 +517,7 @@ export default function App() {
     () => TIMETABLE_TABS.find((tab) => tab.id === currentView) || TIMETABLE_TABS[0],
     [currentView]
   );
+  const TimetableHeaderIcon = currentTimetableTab.icon || Calendar;
   const currentViewLabel = TIMETABLE_VIEW_IDS.includes(currentView) ? currentTimetableTab.label : currentViewMeta.label;
   const activeMobileTab = useMemo(() => {
     if (TIMETABLE_VIEW_IDS.includes(currentView)) {
@@ -513,11 +550,13 @@ export default function App() {
   const toggleTheme = () => setTheme((current) => (current === 'light' ? 'dark' : 'light'));
   const navigateMobileTab = (tabId) => {
     if (tabId === 'timetable') {
-      setCurrentView((current) => (TIMETABLE_VIEW_IDS.includes(current) ? current : 'student-weekly'));
+      startTransition(() => {
+        setCurrentView((current) => (TIMETABLE_VIEW_IDS.includes(current) ? current : 'class-list'));
+      });
       return;
     }
 
-    setCurrentView(tabId);
+    changeView(tabId, { closeSidebar: false });
   };
 
   const setFilterModeAndPersist = (mode) => {
@@ -529,13 +568,217 @@ export default function App() {
     setIsPublicMode(next);
     replacePublicMode(next);
     if (!next) {
-      setCurrentView('stats');
+      changeView('stats', { closeSidebar: false });
     }
   };
 
   const openStudentSchedule = (studentId) => {
     setSelectedStudentId(studentId);
-    setCurrentView('student-weekly');
+    changeView('student-weekly', { closeSidebar: false });
+  };
+
+  const renderTimetableTabs = ({ compact = false } = {}) => (
+    <div className={`workspace-tabs ${compact ? 'workspace-tabs-compact' : ''}`}>
+      {TIMETABLE_TABS.map((tab) => {
+        const Icon = tab.icon;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            className={`h-segment-btn ${currentView === tab.id ? 'active' : ''}`}
+            onClick={() => changeView(tab.id, { closeSidebar: false })}
+            style={{ minHeight: compact ? 42 : 48, justifyContent: 'center' }}
+          >
+            <Icon size={16} style={{ marginRight: 8 }} />
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const renderPeriodDropdown = () => (
+    <div style={{ position: 'relative' }}>
+      <button
+        className="custom-dropdown-btn"
+        onClick={() => setIsPeriodDropdownOpen((current) => !current)}
+      >
+        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedPeriod}</span>
+        <ChevronDown
+          size={16}
+          style={{
+            color: 'var(--text-secondary)',
+            transform: isPeriodDropdownOpen ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.2s ease',
+          }}
+        />
+      </button>
+      {isPeriodDropdownOpen && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setIsPeriodDropdownOpen(false)} />
+          <div className="custom-dropdown-menu animate-in" style={{ zIndex: 100 }}>
+            <div className="dropdown-scroll-area">
+              {periods.map((period) => (
+                <button
+                  key={period}
+                  className={`custom-dropdown-item ${selectedPeriod === period ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedPeriod(period);
+                    localStorage.setItem('selectedPeriod', period);
+                    setIsPeriodDropdownOpen(false);
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <span>{period}</span>
+                    {period !== ALL_OPTION && periodMeta[period]?.status ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          background: 'rgba(33, 110, 78, 0.12)',
+                          color: 'var(--accent-color)',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {periodMeta[period].status}
+                      </span>
+                    ) : null}
+                  </div>
+                  {period !== ALL_OPTION && periodMeta[period] && (
+                    <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
+                      {[periodMeta[period].academicYear, periodMeta[period].startDate || '-', periodMeta[period].endDate || '-']
+                        .filter(Boolean)
+                        .join(' · ')
+                        .replace(/ · ([0-9]{4}-[0-9]{2}-[0-9]{2}) · ([0-9]{4}-[0-9]{2}-[0-9]{2})$/, ' · $1 ~ $2')}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const renderTimetableFilterPanel = ({ compact = false } = {}) => (
+    <div className={compact ? 'timetable-filter-floating-card' : 'timetable-filter-card'}>
+      <div className="timetable-filter-group">
+        <label className="timetable-filter-label">학기</label>
+        <div className="h-segment-container">
+          {[
+            { id: 'all', label: '전체' },
+            { id: 'period', label: '학기' },
+            { id: 'date', label: '날짜' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setFilterModeAndPersist(tab.id)}
+              className={`h-segment-btn ${filterMode === tab.id ? 'active' : ''}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {filterMode === 'date' && (
+          <input
+            type="date"
+            value={selectedDate}
+            className="styled-date-input"
+            onChange={(event) => {
+              setSelectedDate(event.target.value);
+              localStorage.setItem('selectedDate', event.target.value);
+            }}
+          />
+        )}
+
+        {filterMode === 'period' && renderPeriodDropdown()}
+
+        <button
+          type="button"
+          className="action-chip"
+          onClick={() => setIsTermManagerOpen(true)}
+          style={{ width: compact ? 'auto' : '100%', justifyContent: 'center' }}
+        >
+          <Settings2 size={14} />
+          학기 관리
+        </button>
+
+        <div className="timetable-filter-note">
+          현재 {filteredClasses.length}개 수업이 선택되었습니다.
+        </div>
+      </div>
+
+      <div className="timetable-filter-group">
+        <label className="timetable-filter-label">과목</label>
+        <div className="h-segment-container">
+          {subjects.map((subject) => (
+            <button
+              key={subject}
+              onClick={() => {
+                setSelectedSubject(subject);
+                localStorage.setItem('selectedSubject', subject);
+              }}
+              className={`h-segment-btn ${selectedSubject === subject ? 'active' : ''}`}
+            >
+              {subject}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderFloatingTimetableMenu = () => {
+    if (isTimetableFloatingCollapsed) {
+      return (
+        <div className="timetable-floating-rail">
+          <button
+            type="button"
+            className="timetable-floating-rail-button"
+            onClick={() => {
+              setIsTimetableFloatingCollapsed(false);
+              localStorage.setItem('tips-timetable-floating-collapsed', '0');
+            }}
+          >
+            <ChevronRight size={16} />
+            시간표 패널
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="timetable-floating-filter">
+        <div className="timetable-floating-shell">
+          <div className="timetable-floating-header">
+            <div className="timetable-floating-title">시간표 패널</div>
+            <button
+              type="button"
+              className="action-chip"
+              onClick={() => {
+                setIsTimetableFloatingCollapsed(true);
+                localStorage.setItem('tips-timetable-floating-collapsed', '1');
+              }}
+            >
+              <ChevronLeft size={14} />
+              접기
+            </button>
+          </div>
+          <div className="timetable-floating-topline">
+            <div className="timetable-floating-tabs">
+              {renderTimetableTabs({ compact: true })}
+            </div>
+          </div>
+          <div id="timetable-floating-slot" className="timetable-floating-slot" />
+        </div>
+      </div>
+    );
   };
 
   if (loading) {
@@ -569,13 +812,22 @@ export default function App() {
           />
         </div>
       )}
-      <PublicClassListView
-        classes={data.classes}
-        isLoading={isDataBootstrapping}
-        onLogin={() => setShowLogin(true)}
-        showBackToDashboard={Boolean(user)}
-        onBackToDashboard={() => setPublicModeAndSync(false)}
-      />
+      <Suspense
+        fallback={(
+          <PageLoader
+            title="공개 수업 화면을 불러오는 중입니다"
+            message="최신 공개 수업 정보를 준비하고 있습니다."
+          />
+        )}
+      >
+        <PublicClassListView
+          classes={data.classes}
+          isLoading={isDataBootstrapping}
+          onLogin={() => setShowLogin(true)}
+          showBackToDashboard={Boolean(user)}
+          onBackToDashboard={() => setPublicModeAndSync(false)}
+        />
+      </Suspense>
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
     </>
   );
@@ -593,10 +845,9 @@ export default function App() {
     );
   }
 
-  const routeKey = `${currentView}-${filterMode}-${selectedDate}-${selectedPeriod}-${selectedSubject}`;
 
   return (
-    <div className={`app-layout ${isMobile ? 'app-layout-mobile' : ''} ${isTablet ? 'app-layout-tablet' : ''} ${!isCompact && isSidebarHidden ? 'sidebar-hidden' : ''}`}>
+    <div className={`app-layout ${isMobile ? 'app-layout-mobile' : ''} ${isTablet ? 'app-layout-tablet' : ''} ${showMinimalSidebar ? 'sidebar-hidden' : ''}`}>
       {sidebarOpen && isCompact && (
         <div
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 99 }}
@@ -615,6 +866,7 @@ export default function App() {
               <img
                 src="/logo_tips.png"
                 alt="TIPS Logo"
+                className="sidebar-logo-mark"
                 style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'contain' }}
               />
               <div className="sidebar-logo-text">
@@ -626,19 +878,9 @@ export default function App() {
             <button className="theme-toggle" onClick={toggleTheme} style={{ marginLeft: 'auto' }} title="테마 전환">
               {theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            {!isCompact && (
-              <button
-                className="theme-toggle"
-                onClick={() => setIsSidebarHidden(true)}
-                style={{ marginLeft: 8 }}
-                title="메뉴 숨기기"
-              >
-                <PanelLeftClose size={18} />
-              </button>
-            )}
           </div>
 
-          {!isMobile && statusBanner && (
+          {!showMinimalSidebar && !isMobile && statusBanner && (
             <StatusBanner
               compact
               eyebrow="시스템 상태"
@@ -648,144 +890,57 @@ export default function App() {
             />
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-              시간표 필터
-            </label>
-            <div className="h-segment-container">
-              {[
-                { id: 'all', label: '전체' },
-                { id: 'period', label: '학기' },
-                { id: 'date', label: '날짜' },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setFilterModeAndPersist(tab.id)}
-                  className={`h-segment-btn ${filterMode === tab.id ? 'active' : ''}`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+          {showMinimalSidebar ? (
+            <div className="sidebar-mini-tools">
+              <div className="sidebar-mini-tool-stack">
+                <div className="sidebar-mini-menu">
+                  <button
+                    type="button"
+                    className="sidebar-mini-menu-trigger"
+                    title="과목 선택"
+                    aria-label="과목 선택"
+                    data-tooltip="과목 선택"
+                  >
+                    영/수
+                  </button>
+                  <div className="sidebar-mini-menu-popover" role="menu" aria-label="과목 선택">
+                    {subjects.map((subject) => (
+                      <button
+                        key={subject}
+                        type="button"
+                        className={`sidebar-mini-menu-item ${selectedSubject === subject ? 'active' : ''}`}
+                        title={subject}
+                        onClick={() => {
+                          setSelectedSubject(subject);
+                          localStorage.setItem('selectedSubject', subject);
+                        }}
+                      >
+                        {subject}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {filterMode === 'date' && (
-              <input
-                type="date"
-                value={selectedDate}
-                className="styled-date-input"
-                onChange={(event) => {
-                  setSelectedDate(event.target.value);
-                  localStorage.setItem('selectedDate', event.target.value);
-                }}
-              />
-            )}
-
-            {filterMode === 'period' && (
-              <div style={{ position: 'relative' }}>
-                <button
-                  className="custom-dropdown-btn"
-                  onClick={() => setIsPeriodDropdownOpen((current) => !current)}
-                >
-                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedPeriod}</span>
-                  <ChevronDown
-                    size={16}
-                    style={{
-                      color: 'var(--text-secondary)',
-                      transform: isPeriodDropdownOpen ? 'rotate(180deg)' : 'none',
-                      transition: 'transform 0.2s ease',
-                    }}
-                  />
-                </button>
-                {isPeriodDropdownOpen && (
-                  <>
-                    <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setIsPeriodDropdownOpen(false)} />
-                    <div className="custom-dropdown-menu animate-in" style={{ zIndex: 100 }}>
-                      <div className="dropdown-scroll-area">
-                        {periods.map((period) => (
-                          <button
-                            key={period}
-                            className={`custom-dropdown-item ${selectedPeriod === period ? 'active' : ''}`}
-                            onClick={() => {
-                              setSelectedPeriod(period);
-                              localStorage.setItem('selectedPeriod', period);
-                              setIsPeriodDropdownOpen(false);
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                              <span>{period}</span>
-                              {period !== ALL_OPTION && periodMeta[period]?.status ? (
-                                <span
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    padding: '2px 8px',
-                                    borderRadius: 999,
-                                    background: 'rgba(33, 110, 78, 0.12)',
-                                    color: 'var(--accent-color)',
-                                    fontSize: 10,
-                                    fontWeight: 800,
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  {periodMeta[period].status}
-                                </span>
-                              ) : null}
-                            </div>
-                            {period !== ALL_OPTION && periodMeta[period] && (
-                              <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
-                                {[periodMeta[period].academicYear, periodMeta[period].startDate || '-', periodMeta[period].endDate || '-']
-                                  .filter(Boolean)
-                                  .join(' · ')
-                                  .replace(/ · ([0-9]{4}-[0-9]{2}-[0-9]{2}) · ([0-9]{4}-[0-9]{2}-[0-9]{2})$/, ' · $1 ~ $2')}
-                              </div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
+                {isStaff ? (
+                  <button
+                    type="button"
+                    className="sidebar-mini-tool-button"
+                    onClick={() => setIsTermManagerOpen(true)}
+                    data-tooltip="학기 관리"
+                    aria-label="학기 관리"
+                    title="학기 관리"
+                  >
+                    <Calendar size={18} />
+                  </button>
+                ) : null}
               </div>
-            )}
-
-            <button
-              type="button"
-              className="action-chip"
-              onClick={() => setIsTermManagerOpen(true)}
-              style={{ width: '100%', justifyContent: 'center' }}
-            >
-              <Settings2 size={14} />
-              학기 관리
-            </button>
-
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, paddingLeft: 4 }}>
-              현재 {filteredClasses.length}개 수업이 선택되었습니다.
             </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-              과목
-            </label>
-            <div className="h-segment-container">
-              {subjects.map((subject) => (
-                <button
-                  key={subject}
-                  onClick={() => {
-                    setSelectedSubject(subject);
-                    localStorage.setItem('selectedSubject', subject);
-                  }}
-                  className={`h-segment-btn ${selectedSubject === subject ? 'active' : ''}`}
-                >
-                  {subject}
-                </button>
-              ))}
-            </div>
-          </div>
+          ) : (
+            renderTimetableFilterPanel()
+          )}
         </div>
 
         <nav className="sidebar-nav">
-          <div className="sidebar-nav-section">메뉴</div>
           {visibleViews.map((view) => {
             const IconComponent = view.icon;
             const isActive = view.id === 'timetable' ? TIMETABLE_VIEW_IDS.includes(currentView) : currentView === view.id;
@@ -793,9 +948,10 @@ export default function App() {
               <button
                 key={view.id}
                 className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
+                title={view.label}
+                data-tooltip={showMinimalSidebar ? view.label : undefined}
                 onClick={() => {
-                  setCurrentView(view.id === 'timetable' ? (TIMETABLE_VIEW_IDS.includes(currentView) ? currentView : 'student-weekly') : view.id);
-                  setSidebarOpen(false);
+                  changeView(view.id === 'timetable' ? (TIMETABLE_VIEW_IDS.includes(currentView) ? currentView : 'class-list') : view.id);
                 }}
               >
                 <div className="sidebar-link-icon">
@@ -811,6 +967,8 @@ export default function App() {
           <button
             className="sidebar-nav-item"
             style={{ width: '100%' }}
+            title="퍼블릭 뷰 보기"
+            data-tooltip={showMinimalSidebar ? '퍼블릭 뷰' : undefined}
             onClick={() => setPublicModeAndSync(true)}
           >
             <div className="sidebar-link-icon">
@@ -826,6 +984,8 @@ export default function App() {
               border: '1px solid rgba(239, 68, 68, 0.2)',
               background: 'rgba(239, 68, 68, 0.05)',
             }}
+            title="로그아웃"
+            data-tooltip={showMinimalSidebar ? '로그아웃' : undefined}
             onClick={logout}
           >
             <div className="sidebar-link-icon" style={{ color: '#ef4444' }}>
@@ -833,23 +993,16 @@ export default function App() {
             </div>
             <span>로그아웃</span>
           </button>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
-            © 2026 TIPS Academy
-          </div>
+          {!showMinimalSidebar ? (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+              © 2026 TIPS Academy
+            </div>
+          ) : null}
         </div>
       </aside>
 
       <main className={`main-content ${isMobile ? 'main-content-mobile' : ''} ${isTablet ? 'main-content-tablet' : ''}`}>
-        {!isCompact && isSidebarHidden && (
-          <button
-            type="button"
-            className="sidebar-reveal-button"
-            onClick={() => setIsSidebarHidden(false)}
-          >
-            <PanelLeftOpen size={18} />
-            메뉴 펼치기
-          </button>
-        )}
+        {!isCompact && TIMETABLE_VIEW_IDS.includes(currentView) && renderFloatingTimetableMenu()}
         <div className="mobile-header" style={{ justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <button className="btn-icon" onClick={() => setSidebarOpen(true)} style={{ background: 'var(--bg-surface-hover)' }}>
@@ -860,7 +1013,7 @@ export default function App() {
               onClick={goHome}
               style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 12, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
             >
-              <img src="/logo_tips.png" alt="TIPS Logo" style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'contain' }} />
+              <img src="/logo_tips.png" alt="TIPS Logo" className="sidebar-logo-mark mobile-logo-mark" style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'contain' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <h2 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>TIPS DASHBOARD</h2>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>{currentViewLabel}</span>
@@ -900,6 +1053,18 @@ export default function App() {
           </div>
         )}
 
+        {statusBanner && showMinimalSidebar && !isMobile ? (
+          <div style={{ marginBottom: 20, maxWidth: 640 }}>
+            <StatusBanner
+              compact
+              eyebrow="시스템 상태"
+              title={statusBanner.title}
+              message={statusBanner.message}
+              variant={statusBanner.variant}
+            />
+          </div>
+        ) : null}
+
         <Suspense
           fallback={(
             <PageLoader
@@ -908,45 +1073,17 @@ export default function App() {
             />
           )}
         >
-          <div key={routeKey}>
+          <div>
             {TIMETABLE_VIEW_IDS.includes(currentView) && (
               <section className="workspace-surface" style={{ padding: 24, display: 'grid', gap: 18, marginBottom: 24 }}>
                 <ViewHeader
-                  icon={<Calendar size={22} />}
+                  icon={<TimetableHeaderIcon size={22} />}
                   eyebrow="시간표 워크스페이스"
                   title={currentTimetableTab.label}
-                  description="학생 조회와 주간·일별 시간표를 같은 작업 공간에서 전환하며 보고, 필요한 경우 바로 수정할 수 있습니다."
-                  onBack={() => setCurrentView('stats')}
-                  backLabel="개요로 돌아가기"
-                  actions={!isCompact ? (
-                    <button
-                      type="button"
-                      className={isSidebarHidden ? 'action-chip' : 'action-pill'}
-                      onClick={() => setIsSidebarHidden((current) => !current)}
-                    >
-                      {isSidebarHidden ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-                      {isSidebarHidden ? '메뉴 펼치기' : '집중 모드'}
-                    </button>
-                  ) : null}
+                  description={currentTimetableTab.description}
                 />
 
-                <div className="workspace-tabs">
-                  {TIMETABLE_TABS.map((tab) => {
-                    const Icon = tab.icon;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        className={`h-segment-btn ${currentView === tab.id ? 'active' : ''}`}
-                        onClick={() => setCurrentView(tab.id)}
-                        style={{ minHeight: 48, justifyContent: 'center' }}
-                      >
-                        <Icon size={16} style={{ marginRight: 8 }} />
-                        {tab.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                {isCompact && renderTimetableTabs()}
               </section>
             )}
             {currentView === 'stats' && (
@@ -955,6 +1092,13 @@ export default function App() {
                 data={data}
                 dataService={dataService}
                 onViewStudentSchedule={openStudentSchedule}
+              />
+            )}
+            {currentView === 'class-list' && (
+              <ClassListWorkspace
+                classes={filteredClasses}
+                data={data}
+                dataService={dataService}
               />
             )}
             {currentView === 'student-weekly' && (
@@ -981,6 +1125,13 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
+                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                subjectOptions={subjects}
+                selectedSubject={selectedSubject}
+                onSelectSubject={(subject) => {
+                  setSelectedSubject(subject);
+                  localStorage.setItem('selectedSubject', subject);
+                }}
               />
             )}
             {currentView === 'teacher-weekly' && (
@@ -996,6 +1147,13 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
+                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                subjectOptions={subjects}
+                selectedSubject={selectedSubject}
+                onSelectSubject={(subject) => {
+                  setSelectedSubject(subject);
+                  localStorage.setItem('selectedSubject', subject);
+                }}
               />
             )}
             {currentView === 'daily-classroom' && (
@@ -1010,6 +1168,13 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
+                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                subjectOptions={subjects}
+                selectedSubject={selectedSubject}
+                onSelectSubject={(subject) => {
+                  setSelectedSubject(subject);
+                  localStorage.setItem('selectedSubject', subject);
+                }}
               />
             )}
             {currentView === 'daily-teacher' && (
@@ -1024,20 +1189,26 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
+                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                subjectOptions={subjects}
+                selectedSubject={selectedSubject}
+                onSelectSubject={(subject) => {
+                  setSelectedSubject(subject);
+                  localStorage.setItem('selectedSubject', subject);
+                }}
               />
             )}
             {currentView === 'academic-calendar' && (
-              <AcademicCalendarView data={data} dataService={dataService} onBack={() => setCurrentView('stats')} />
+              <AcademicCalendarView data={data} dataService={dataService} />
             )}
             {currentView === 'curriculum-dashboard' && (
-              <CurriculumDashboardView data={data} dataService={dataService} onBack={() => setCurrentView('stats')} />
+              <CurriculumDashboardView data={data} dataService={dataService} />
             )}
             {currentView === 'data-manager' && (
               <DataManager
                 data={data}
                 dataService={dataService}
-                onOpenCurriculum={() => setCurrentView('curriculum-dashboard')}
-                onBack={() => setCurrentView('stats')}
+                onOpenCurriculum={() => changeView('curriculum-dashboard', { closeSidebar: false })}
               />
             )}
           </div>
@@ -1051,7 +1222,7 @@ export default function App() {
         dataService={dataService}
         onClose={() => setIsTermManagerOpen(false)}
         onSaved={(savedTerms = []) => {
-          setLocalTerms((current) => mergeTermsByName(savedTerms || [], current || []));
+          setLocalTerms((savedTerms || []).filter((term) => term?.localOnly));
           setIsTermManagerOpen(false);
         }}
       />
@@ -1060,8 +1231,8 @@ export default function App() {
         <nav className="mobile-bottom-nav">
           {[
             { id: 'stats', label: '개요', icon: <BarChart2 size={18} /> },
-            { id: 'timetable', label: '시간표', icon: <Calendar size={18} /> },
-            { id: 'academic-calendar', label: '학사 일정', icon: <Calendar size={18} /> },
+            { id: 'timetable', label: '시간표', icon: <LayoutGrid size={18} /> },
+            { id: 'academic-calendar', label: '학사 일정', icon: <CalendarDays size={18} /> },
             { id: 'data-manager', label: '데이터 관리', icon: <ClipboardList size={18} />, disabled: !isStaff },
           ].map((item) => (
             <button
@@ -1082,4 +1253,3 @@ export default function App() {
     </div>
   );
 }
-

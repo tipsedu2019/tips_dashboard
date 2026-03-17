@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarRange, GripVertical, Plus, Save, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { useToast } from '../../contexts/ToastContext';
-import { getUserFriendlyDataError } from '../../lib/dataErrorUtils';
+import { classifyDataError, getUserFriendlyDataError } from '../../lib/dataErrorUtils';
 import { ACTIVE_CLASS_STATUS, CLASS_STATUS_OPTIONS, PREPARING_CLASS_STATUS } from '../../lib/classStatus';
 import useViewport from '../../hooks/useViewport';
 
@@ -189,6 +189,7 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
   const { isMobile, isTablet } = useViewport();
   const [drafts, setDrafts] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [deletedTermIds, setDeletedTermIds] = useState([]);
 
   useEffect(() => {
     if (!open) {
@@ -200,17 +201,22 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
       .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, 'ko'));
 
     setDrafts(nextDrafts.length > 0 ? nextDrafts : [normalizeTerm({ status: PREPARING_CLASS_STATUS }, 0)]);
+    setDeletedTermIds([]);
   }, [open, terms]);
 
   const compact = isMobile || isTablet;
+  const duplicateNameExists = useMemo(() => {
+    const names = drafts.map((term) => term.name.trim()).filter(Boolean);
+    return new Set(names).size !== names.length;
+  }, [drafts]);
 
   const canSave = useMemo(() => {
     if (drafts.length === 0) {
       return false;
     }
 
-    return drafts.every((term) => term.academicYear.trim() && term.name.trim() && term.status);
-  }, [drafts]);
+    return drafts.every((term) => term.academicYear.trim() && term.name.trim() && term.status) && !duplicateNameExists;
+  }, [drafts, duplicateNameExists]);
 
   if (!open) {
     return null;
@@ -241,15 +247,27 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
     });
   };
 
-  const removeDraft = async (id) => {
+  const getLinkedClassCount = (term) => (
+    (classes || []).filter((classItem) => (
+      String(classItem.termId || classItem.term_id || '') === String(term.id || '')
+      || String(classItem.period || '').trim() === String(term.name || '').trim()
+    )).length
+  );
+
+  const removeDraft = (id) => {
+    const target = drafts.find((term) => term.id === id);
+    if (!target) {
+      return;
+    }
+
+    if (getLinkedClassCount(target) > 0) {
+      toast.info('이 학기에 연결된 수업이 있어 삭제할 수 없습니다. 먼저 수업의 학기를 변경해 주세요.');
+      return;
+    }
+
     const persistedTerm = terms.find((term) => term.id === id && !term.legacyOnly && !term.localOnly);
     if (persistedTerm) {
-      try {
-        await dataService.deleteClassTerm(id);
-      } catch (error) {
-        toast.error(`학기 삭제에 실패했습니다: ${getUserFriendlyDataError(error)}`);
-        return;
-      }
+      setDeletedTermIds((current) => (current.includes(id) ? current : [...current, id]));
     }
 
     setDrafts((current) => {
@@ -259,19 +277,39 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
   };
 
   const handleSave = async () => {
+    if (duplicateNameExists) {
+      toast.info('학기명은 서로 다르게 입력해 주세요.');
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const persistedTerms = await dataService.upsertClassTerms(
-        drafts.map((term, index) => ({
-          id: term.legacyOnly || term.localOnly ? null : term.id,
-          academicYear: Number(term.academicYear) || new Date().getFullYear(),
-          name: term.name.trim(),
-          status: term.status,
-          startDate: term.startDate || null,
-          endDate: term.endDate || null,
-          sortOrder: index,
-        }))
-      );
+      let persistedTerms = [];
+      let usedPermissionFallback = false;
+
+      try {
+        if (deletedTermIds.length > 0) {
+          await Promise.all(deletedTermIds.map((termId) => dataService.deleteClassTerm(termId)));
+        }
+
+        persistedTerms = await dataService.upsertClassTerms(
+          drafts.map((term, index) => ({
+            id: term.legacyOnly || term.localOnly ? null : term.id,
+            academicYear: Number(term.academicYear) || new Date().getFullYear(),
+            name: term.name.trim(),
+            status: term.status,
+            startDate: term.startDate || null,
+            endDate: term.endDate || null,
+            sortOrder: index,
+          }))
+        );
+      } catch (error) {
+        const classified = classifyDataError(error);
+        if (classified.kind !== 'permission') {
+          throw error;
+        }
+        usedPermissionFallback = true;
+      }
 
       const savedTerms = (persistedTerms && persistedTerms.length > 0)
         ? persistedTerms
@@ -310,7 +348,9 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
         );
       }
 
-      if (persistedTerms && persistedTerms.length > 0) {
+      if (usedPermissionFallback) {
+        toast.info('DB 쓰기 권한이 막혀 있어 이 브라우저에 임시 저장했습니다. Supabase RLS 정책을 열면 서버 저장으로 바로 전환됩니다.');
+      } else if (persistedTerms && persistedTerms.length > 0) {
         toast.success('학기 정보를 저장했습니다.');
       } else {
         toast.info('학기 테이블이 없어 이 브라우저에 임시 저장했습니다. 기본 학기 필터와 수업 편집에서는 바로 사용할 수 있습니다.');

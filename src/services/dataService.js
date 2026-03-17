@@ -55,6 +55,12 @@ export class DataService {
   constructor() {
     this.listeners = new Set();
     this.channel = null;
+    this.cachedData = { ...EMPTY_SNAPSHOT };
+    this.deferredSnapshotPromise = null;
+    this.notifyPromise = null;
+    this.notifyQueued = false;
+    this.realtimeNotifyTimer = null;
+    this.hasDeferredSnapshot = false;
     this.isConnected = false;
     this.isLoading = false;
     this.lastUpdated = null;
@@ -71,18 +77,162 @@ export class DataService {
     this.channel = supabase
       .channel('schema-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        this._notify();
+        this._scheduleRealtimeNotify();
       })
       .subscribe();
+  }
+
+  _scheduleRealtimeNotify(delay = 120) {
+    if (this.realtimeNotifyTimer) {
+      clearTimeout(this.realtimeNotifyTimer);
+    }
+
+    this.realtimeNotifyTimer = setTimeout(() => {
+      this.realtimeNotifyTimer = null;
+      this._notify();
+    }, delay);
   }
 
   _snapshot(overrides = {}) {
     return {
       ...EMPTY_SNAPSHOT,
+      ...this.cachedData,
       lastUpdated: this.lastUpdated,
       error: this.error,
       ...overrides
     };
+  }
+
+  _getCoreResources() {
+    return [
+      { key: 'classes', table: 'classes', processor: '_processClass' },
+      { key: 'classTerms', table: 'class_terms', processor: '_processClassTerm', optional: true },
+      { key: 'students', table: 'students', processor: '_processStudent' },
+      { key: 'textbooks', table: 'textbooks', processor: '_processTextbook' },
+      { key: 'progressLogs', table: 'progress_logs', processor: '_processProgressLog' }
+    ];
+  }
+
+  _getDeferredResources() {
+    return [
+      { key: 'academicEvents', table: 'academic_events', processor: '_processAcademicEvent' },
+      { key: 'academicSchools', table: 'academic_schools', processor: '_processAcademicSchool', optional: true },
+      { key: 'academicCurriculumProfiles', table: 'academic_curriculum_profiles', processor: '_processAcademicCurriculumProfile', optional: true },
+      { key: 'academicSupplementMaterials', table: 'academic_supplement_materials', processor: '_processAcademicSupplementMaterial', optional: true },
+      { key: 'academicExamScopes', table: 'academic_exam_scopes', processor: '_processAcademicExamScope', optional: true },
+      { key: 'academicExamDays', table: 'academic_exam_days', processor: '_processAcademicExamDay', optional: true },
+      { key: 'academicEventExamDetails', table: 'academic_event_exam_details', processor: '_processAcademicEventExamDetail', optional: true },
+      { key: 'academyCurriculumPlans', table: 'academy_curriculum_plans', processor: '_processAcademyCurriculumPlan', optional: true },
+      { key: 'academyCurriculumMaterials', table: 'academy_curriculum_materials', processor: '_processAcademyCurriculumMaterial', optional: true }
+    ];
+  }
+
+  _mapResourceRows(resource, rows) {
+    const processor = this[resource.processor];
+    if (typeof processor !== 'function') {
+      return rows || [];
+    }
+    return (rows || []).map((row) => processor.call(this, row));
+  }
+
+  _collectUniqueErrorMessages(errors = []) {
+    return [...new Set(
+      errors
+        .map((error) => error?.message || String(error))
+        .filter(Boolean)
+    )];
+  }
+
+  async _fetchResources(resources = []) {
+    const settledResults = await Promise.allSettled(
+      resources.map((resource) => supabase.from(resource.table).select('*'))
+    );
+
+    const nextData = {};
+    const errors = [];
+
+    resources.forEach((resource, index) => {
+      const settled = settledResults[index];
+
+      if (settled.status === 'fulfilled') {
+        const { data, error } = settled.value;
+        if (error) {
+          if (!resource.optional || !this._isMissingTableError(error, resource.table)) {
+            errors.push(error);
+          }
+          nextData[resource.key] = EMPTY_SNAPSHOT[resource.key];
+          return;
+        }
+
+        nextData[resource.key] = this._mapResourceRows(resource, data);
+        return;
+      }
+
+      if (!resource.optional || !this._isMissingTableError(settled.reason, resource.table)) {
+        errors.push(settled.reason);
+      }
+      nextData[resource.key] = EMPTY_SNAPSHOT[resource.key];
+    });
+
+    return { nextData, errors };
+  }
+
+  _createSnapshotFromFetch(nextData = {}, errors = []) {
+    this.cachedData = {
+      ...this.cachedData,
+      ...nextData,
+    };
+
+    const uniqueErrorMessages = this._collectUniqueErrorMessages(errors);
+
+    this.isConnected = uniqueErrorMessages.length === 0;
+    this.lastUpdated = new Date();
+    this.error = uniqueErrorMessages.length > 0 ? uniqueErrorMessages[0] : null;
+
+    return this._snapshot({
+      ...this.cachedData,
+      isConnected: this.isConnected,
+      isLoading: false,
+      lastUpdated: this.lastUpdated,
+      error: this.error
+    });
+  }
+
+  _scheduleDeferredSnapshotLoad() {
+    if (!supabase || this.hasDeferredSnapshot || this.deferredSnapshotPromise) {
+      return;
+    }
+
+    const loadDeferredResources = async () => {
+      if (this.hasDeferredSnapshot) {
+        return;
+      }
+
+      try {
+        const { nextData, errors } = await this._fetchResources(this._getDeferredResources());
+        if (errors.length > 0) {
+          console.error('Supabase deferred fetch errors:', errors);
+        }
+
+        this.hasDeferredSnapshot = true;
+        const snapshot = this._createSnapshotFromFetch(nextData, errors);
+        this.listeners.forEach((listener) => listener(snapshot));
+      } catch (error) {
+        console.error('DataService deferred snapshot error:', error);
+      } finally {
+        this.deferredSnapshotPromise = null;
+      }
+    };
+
+    this.deferredSnapshotPromise = new Promise((resolve) => {
+      const schedule = () => resolve(loadDeferredResources());
+      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(schedule, { timeout: 800 });
+        return;
+      }
+
+      setTimeout(schedule, 0);
+    });
   }
 
   _ensureClient() {
@@ -426,15 +576,34 @@ export class DataService {
   }
 
   async _notify() {
+    if (this.notifyPromise) {
+      this.notifyQueued = true;
+      return this.notifyPromise;
+    }
+
+    this.notifyPromise = (async () => {
+      try {
+        const snapshot = await this._getSnapshot({ includeDeferred: true });
+        this.listeners.forEach((listener) => listener(snapshot));
+      } catch (err) {
+        console.error('DataService notification error:', err);
+      } finally {
+        this.notifyPromise = null;
+        if (this.notifyQueued) {
+          this.notifyQueued = false;
+          this._notify();
+        }
+      }
+    })();
+
     try {
-      const snapshot = await this._getSnapshot();
-      this.listeners.forEach((listener) => listener(snapshot));
+      return await this.notifyPromise;
     } catch (err) {
       console.error('DataService notification error:', err);
     }
   }
 
-  async _getSnapshot() {
+  async _getSnapshot({ includeDeferred = false } = {}) {
     if (!supabase) {
       this.isConnected = false;
       this.lastUpdated = new Date();
@@ -447,139 +616,22 @@ export class DataService {
     }
 
     try {
-      const resources = [
-        {
-          key: 'classes',
-          table: 'classes',
-          map: (rows) => (rows || []).map((row) => this._processClass(row))
-        },
-        {
-          key: 'classTerms',
-          table: 'class_terms',
-          map: (rows) => (rows || []).map((row) => this._processClassTerm(row)),
-          optional: true
-        },
-        {
-          key: 'students',
-          table: 'students',
-          map: (rows) => (rows || []).map((row) => this._processStudent(row))
-        },
-        {
-          key: 'textbooks',
-          table: 'textbooks',
-          map: (rows) => (rows || []).map((row) => this._processTextbook(row))
-        },
-        {
-          key: 'progressLogs',
-          table: 'progress_logs',
-          map: (rows) => (rows || []).map((row) => this._processProgressLog(row))
-        },
-        {
-          key: 'academicEvents',
-          table: 'academic_events',
-          map: (rows) => (rows || []).map((row) => this._processAcademicEvent(row))
-        },
-        {
-          key: 'academicSchools',
-          table: 'academic_schools',
-          map: (rows) => (rows || []).map((row) => this._processAcademicSchool(row)),
-          optional: true
-        },
-        {
-          key: 'academicCurriculumProfiles',
-          table: 'academic_curriculum_profiles',
-          map: (rows) => (rows || []).map((row) => this._processAcademicCurriculumProfile(row)),
-          optional: true
-        },
-        {
-          key: 'academicSupplementMaterials',
-          table: 'academic_supplement_materials',
-          map: (rows) => (rows || []).map((row) => this._processAcademicSupplementMaterial(row)),
-          optional: true
-        },
-        {
-          key: 'academicExamScopes',
-          table: 'academic_exam_scopes',
-          map: (rows) => (rows || []).map((row) => this._processAcademicExamScope(row)),
-          optional: true
-        },
-        {
-          key: 'academicExamDays',
-          table: 'academic_exam_days',
-          map: (rows) => (rows || []).map((row) => this._processAcademicExamDay(row)),
-          optional: true
-        },
-        {
-          key: 'academicEventExamDetails',
-          table: 'academic_event_exam_details',
-          map: (rows) => (rows || []).map((row) => this._processAcademicEventExamDetail(row)),
-          optional: true
-        },
-        {
-          key: 'academyCurriculumPlans',
-          table: 'academy_curriculum_plans',
-          map: (rows) => (rows || []).map((row) => this._processAcademyCurriculumPlan(row)),
-          optional: true
-        },
-        {
-          key: 'academyCurriculumMaterials',
-          table: 'academy_curriculum_materials',
-          map: (rows) => (rows || []).map((row) => this._processAcademyCurriculumMaterial(row)),
-          optional: true
-        }
-      ];
-
-      const settledResults = await Promise.allSettled(
-        resources.map((resource) => supabase.from(resource.table).select('*'))
-      );
-
-      const nextData = {};
-      const errors = [];
-
-      resources.forEach((resource, index) => {
-        const settled = settledResults[index];
-
-        if (settled.status === 'fulfilled') {
-          const { data, error } = settled.value;
-          if (error) {
-            if (!resource.optional || !this._isMissingTableError(error, resource.table)) {
-              errors.push(error);
-            }
-            nextData[resource.key] = EMPTY_SNAPSHOT[resource.key];
-            return;
-          }
-
-          nextData[resource.key] = resource.map(data);
-          return;
-        }
-
-        if (!resource.optional || !this._isMissingTableError(settled.reason, resource.table)) {
-          errors.push(settled.reason);
-        }
-        nextData[resource.key] = EMPTY_SNAPSHOT[resource.key];
-      });
+      const resources = includeDeferred
+        ? [...this._getCoreResources(), ...this._getDeferredResources()]
+        : this._getCoreResources();
+      const { nextData, errors } = await this._fetchResources(resources);
 
       if (errors.length > 0) {
         console.error('Supabase fetch errors:', errors);
       }
 
-      const uniqueErrorMessages = [...new Set(
-        errors
-          .map((error) => error?.message || String(error))
-          .filter(Boolean)
-      )];
+      if (includeDeferred) {
+        this.hasDeferredSnapshot = true;
+      } else {
+        this._scheduleDeferredSnapshotLoad();
+      }
 
-      this.isConnected = uniqueErrorMessages.length === 0;
-      this.lastUpdated = new Date();
-      this.error = uniqueErrorMessages.length > 0 ? uniqueErrorMessages[0] : null;
-
-      return this._snapshot({
-        ...nextData,
-        isConnected: this.isConnected,
-        isLoading: false,
-        lastUpdated: this.lastUpdated,
-        error: this.error
-      });
+      return this._createSnapshotFromFetch(nextData, errors);
     } catch (err) {
       console.error('DataService critical error:', err);
       this.isConnected = false;

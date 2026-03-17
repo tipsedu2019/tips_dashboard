@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, Camera, Users } from 'lucide-react';
 import {
   DAY_LABELS,
@@ -72,6 +73,10 @@ export default function DailyTeacherView({
   termStatus = defaultStatus,
   terms = [],
   embedded = false,
+  floatingFilters = false,
+  subjectOptions = [],
+  selectedSubject = '전체',
+  onSelectSubject = () => {},
 }) {
   const { isMobile } = useViewport();
   const toast = useToast();
@@ -124,6 +129,11 @@ export default function DailyTeacherView({
     setCreateState(null);
     setMoveState(null);
   }, [plannerMode]);
+  useEffect(() => {
+    const openPlanner = () => setPlannerMode(true);
+    window.addEventListener('tips-open-planner', openPlanner);
+    return () => window.removeEventListener('tips-open-planner', openPlanner);
+  }, []);
 
   const buildBlocksForDay = useCallback(
     (targetDay) =>
@@ -191,6 +201,17 @@ export default function DailyTeacherView({
       toast.error('이미지 저장에 실패했습니다.');
     }
   }, [canExportImage, selectedDay, toast]);
+
+  const handleSaveCardImage = useCallback(async (event, fileName) => {
+    const card = event.currentTarget.closest('section');
+    if (!card) return;
+    try {
+      await exportElementAsImage(card, fileName, { preset: 'a4-portrait' });
+      toast.success('현재 시간표 카드를 이미지로 저장했습니다.');
+    } catch {
+      toast.error('시간표 카드 이미지 저장에 실패했습니다.');
+    }
+  }, [toast]);
 
   const handleCreateSelection = ({ columnIndex, startSlot, endSlot }) => {
     const range = getRangeFromSlots(timeSlots, startSlot, endSlot);
@@ -287,7 +308,15 @@ export default function DailyTeacherView({
     const showEmptyState = blocks.length === 0 && !showEditableEmptyGrid;
 
     return (
-      <section className={`card ${isAllView ? 'view-all-container' : ''}`} key={dayLabel} style={{ padding: 24, marginBottom: isAllView ? 0 : 24, breakInside: 'avoid' }}>
+      <section className={`card ${isAllView ? 'view-all-container' : ''}`} key={dayLabel} style={{ position: 'relative', padding: 24, marginBottom: isAllView ? 0 : 24, breakInside: 'avoid' }}>
+        <button
+          type="button"
+          className="timetable-card-camera"
+          onClick={(event) => handleSaveCardImage(event, `daily-teacher-${dayLabel}.png`)}
+          title="현재 시간표 카드 이미지를 저장합니다."
+        >
+          <Camera size={14} />
+        </button>
         <h2 style={{ marginBottom: 16, fontSize: 18, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Users size={20} className="text-accent" /> {dayLabel}요일 선생님 시간표
         </h2>
@@ -321,6 +350,7 @@ export default function DailyTeacherView({
     () => (selectedDay === ALL_DAYS ? [] : buildBlocksForDay(selectedDay)),
     [buildBlocksForDay, selectedDay]
   );
+  const floatingPanelTarget = typeof document !== 'undefined' ? document.getElementById('timetable-floating-slot') : null;
 
   if (plannerMode) {
     return (
@@ -353,6 +383,21 @@ export default function DailyTeacherView({
 
   return (
     <div className="animate-in">
+      {floatingFilters && floatingPanelTarget && createPortal(
+        <div className="timetable-floating-controls">
+          <div className="h-segment-container timetable-floating-selector">
+            {dayTabs.map((dayLabel) => (
+              <button key={dayLabel} className={`h-segment-btn ${selectedDay === dayLabel ? 'active' : ''}`} onClick={() => setSelectedDay(dayLabel)}>	
+                {dayLabel === ALL_DAYS ? '\uC804\uCCB4 \uBCF4\uAE30' : `${dayLabel}\uC694\uC77C`}
+              </button>
+            ))}
+          </div>
+          <button className="action-pill timetable-floating-action" onClick={() => setPlannerMode(true)}>	
+            {'\uBC30\uCE58 \uBAA8\uB4DC \uC5F4\uAE30'}
+          </button>
+        </div>,
+        floatingPanelTarget
+      )}
       {!embedded ? (
         <div className="page-header">
           <div>
@@ -366,23 +411,34 @@ export default function DailyTeacherView({
             </h1>
             <p>요일별 선생님 배정을 보고, 직원 권한에서는 블록 드래그로 수업 생성과 이동을 빠르게 처리할 수 있습니다.</p>
           </div>
-          <button className="btn btn-primary" onClick={handleSaveImage} disabled={!canExportImage} title={canExportImage ? '현재 요일 시간표를 A4 세로 이미지로 저장합니다.' : '전체 보기에서는 이미지 저장을 사용할 수 없습니다.'}>
-            <Camera size={18} /> 이미지 저장
-          </button>
         </div>
-      ) : (
+      ) : !floatingFilters ? (
         <div className="embedded-view-toolbar">
           <div className="embedded-view-copy">
             <div className="embedded-view-title">일별 선생님 시간표</div>
             <div className="embedded-view-description">요일별 선생님 배치를 빠르게 보고 수정할 수 있습니다.</div>
           </div>
-          <button className="action-chip" onClick={handleSaveImage} disabled={!canExportImage} title={canExportImage ? '현재 요일 시간표를 A4 세로 이미지로 저장합니다.' : '전체 보기에서는 이미지 저장을 사용할 수 없습니다.'}>
-            <Camera size={16} /> 이미지 저장
-          </button>
         </div>
-      )}
+      ) : null}
 
-      <div className="filter-bar">
+      <div className={`filter-bar ${floatingFilters ? 'filter-bar-floating' : ''}`} style={{ display: !isMobile ? 'none' : undefined }}>
+        {floatingFilters && (
+          <div className="timetable-inline-subject-filter">
+            <span className="timetable-inline-subject-label">과목</span>
+            <div className="h-segment-container timetable-inline-subject-segment">
+              {subjectOptions.map((subject) => (
+                <button
+                  key={subject}
+                  type="button"
+                  className={`h-segment-btn ${selectedSubject === subject ? 'active' : ''}`}
+                  onClick={() => onSelectSubject(subject)}
+                >
+                  {subject}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="h-segment-container">
           {dayTabs.map((dayLabel) => (
             <button key={dayLabel} className={`h-segment-btn ${selectedDay === dayLabel ? 'active' : ''}`} onClick={() => setSelectedDay(dayLabel)}>
@@ -391,17 +447,6 @@ export default function DailyTeacherView({
           ))}
         </div>
       </div>
-
-      <div className="embedded-view-toolbar" style={{ marginBottom: 16 }}>
-        <div className="embedded-view-copy">
-          <div className="embedded-view-title">배치 워크스페이스</div>
-          <div className="embedded-view-description">수업명만 먼저 만들고 시간표에 배치한 뒤 마지막에 한 번만 적용합니다.</div>
-        </div>
-        <button className="action-pill" onClick={() => setPlannerMode(true)}>
-          배치 모드 열기
-        </button>
-      </div>
-
       {teacherEntries.length === 0 ? (
         <div className="card" style={{ padding: 28 }}>
           <EmptyState message="표시할 선생님 데이터가 없습니다." />

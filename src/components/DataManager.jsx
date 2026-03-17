@@ -46,23 +46,23 @@ const EMPTY_DATA = {
 
 const TAB_META = {
   students: {
-    label: '학생 관리',
+    label: '\uD559\uC0DD \uAD00\uB9AC',
     icon: Users,
-    description: '학생 데이터를 정리하고 반 배정, 연락처, 학교·학년 정보를 한 화면에서 관리합니다.',
+    description: '\uD559\uC0DD \uB370\uC774\uD130\uB97C \uC815\uB9AC\uD558\uACE0 \uBC18 \uBC30\uC815, \uC5F0\uB77D\uCC98, \uD559\uAD50\u00B7\uD559\uB144 \uC815\uBCF4\uB97C \uD55C \uD654\uBA74\uC5D0\uC11C \uAD00\uB9AC\uD569\uB2C8\uB2E4.',
   },
   classes: {
-    label: '수업 관리',
+    label: '\uC218\uC5C5 \uAD00\uB9AC',
     icon: Calendar,
-    description: '수업 상태, 시간표, 선생님, 강의실과 연결 학생 정보를 정리합니다.',
+    description: '\uC218\uC5C5 \uC0C1\uD0DC, \uC2DC\uAC04\uD45C, \uB2F4\uB2F9 \uC120\uC0DD\uB2D8, \uAC15\uC758\uC2E4\uACFC \uC5F0\uACB0 \uD559\uC0DD \uC815\uBCF4\uB97C \uD55C \uACF3\uC5D0 \uC815\uB9AC\uD569\uB2C8\uB2E4.',
   },
   textbooks: {
-    label: '교재 관리',
+    label: '\uAD50\uC7AC \uAD00\uB9AC',
     icon: Book,
-    description: '교재, 출판사, 차시, 수업 연결 정보를 정리합니다.',
+    description: '\uAD50\uC7AC, \uCD9C\uD310\uC0AC, \uCC38\uC870 \uBA54\uBAA8, \uC218\uC5C5 \uC5F0\uACB0 \uC815\uBCF4\uB97C \uC815\uB9AC\uD569\uB2C8\uB2E4.',
   },
 };
 
-export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurriculum, onBack }) {
+export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurriculum }) {
   const safeData = useMemo(
     () => ({
       ...EMPTY_DATA,
@@ -234,7 +234,6 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
           eyebrow="운영 워크스페이스"
           title="데이터 관리"
           description="학생, 수업, 교재 데이터를 같은 규칙과 같은 언어로 정리하고 즉시 수정할 수 있습니다."
-          onBack={onBack}
           backLabel="개요로 돌아가기"
         />
 
@@ -279,7 +278,7 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
             color: 'var(--text-secondary)',
           }}
         >
-          요청을 처리하고 있습니다. 업로드나 일괄 수정은 완료될 때까지 잠시만 기다려 주세요.
+          요청을 처리하고 있습니다. 업로드나 일괄 수정이 완료될 때까지 잠시만 기다려 주세요.
         </div>
       ) : null}
 
