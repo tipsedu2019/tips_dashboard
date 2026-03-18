@@ -8,6 +8,7 @@ import {
   getTextbookTagOptions,
   uniqueSorted
 } from '../components/data-manager/utils';
+import { buildSchoolMaster, getAllManagedGrades } from '../lib/schoolConfig';
 
 function getSortValue(activeTab, item) {
   if (activeTab === 'students') {
@@ -53,14 +54,19 @@ export function useManagerFilters(activeTab, data) {
     [data.classes]
   );
 
+  const schoolMaster = useMemo(
+    () => buildSchoolMaster(data.academicSchools || [], data.students || []),
+    [data.academicSchools, data.students]
+  );
+
   const gradeOptions = useMemo(
-    () => uniqueSorted((data.students || []).map((item) => item.grade)),
-    [data.students]
+    () => getAllManagedGrades(),
+    []
   );
 
   const schoolOptions = useMemo(
-    () => uniqueSorted((data.students || []).map((item) => item.school)),
-    [data.students]
+    () => schoolMaster.map((item) => item.name),
+    [schoolMaster]
   );
 
   const classSubjectOptions = useMemo(

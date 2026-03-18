@@ -233,8 +233,9 @@ export default function App() {
   const [curriculumRoadmapIntent, setCurriculumRoadmapIntent] = useState(null);
   const subjectFlyoutCloseTimerRef = useRef(null);
 
-  const { user, isStaff, logout, loading, authError } = useAuth();
+  const { user, isStaff, isTeacher, logout, loading, authError } = useAuth();
   const showMinimalSidebar = !isCompact;
+  const canAccessCurriculumRoadmap = isStaff || isTeacher;
 
   const changeView = (nextView, { closeSidebar = true } = {}) => {
     startTransition(() => {
@@ -354,10 +355,10 @@ export default function App() {
   }, [showMinimalSidebar]);
 
   useEffect(() => {
-    if (user && !isStaff && (currentView === 'data-manager' || currentView === 'curriculum-roadmap')) {
+    if (user && ((currentView === 'data-manager' && !isStaff) || (currentView === 'curriculum-roadmap' && !canAccessCurriculumRoadmap))) {
       changeView('stats', { closeSidebar: false });
     }
-  }, [currentView, isStaff, user]);
+  }, [canAccessCurriculumRoadmap, currentView, isStaff, user]);
 
   const selectedStudent = useMemo(() => (
     data.students?.find((student) => student.id === selectedStudentId) || null
@@ -535,8 +536,14 @@ export default function App() {
 
   const statusBanner = useMemo(() => buildStatusBanner(authError, data), [authError, data]);
   const visibleViews = useMemo(() => (
-    NAV_VIEWS.filter((view) => !view.staffOnly || isStaff)
-  ), [isStaff]);
+    NAV_VIEWS.filter((view) => {
+      if (!view.staffOnly) return true;
+      if (view.id === 'curriculum-roadmap') {
+        return canAccessCurriculumRoadmap;
+      }
+      return isStaff;
+    })
+  ), [canAccessCurriculumRoadmap, isStaff]);
   const currentViewMeta = useMemo(
     () => visibleViews.find((view) => view.id === (TIMETABLE_VIEW_IDS.includes(currentView) ? 'timetable' : currentView)) || NAV_VIEWS[0],
     [currentView, visibleViews]

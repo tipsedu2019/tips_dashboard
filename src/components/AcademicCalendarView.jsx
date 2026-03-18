@@ -9,7 +9,6 @@ import {
   Pencil,
   Plus,
   Save,
-  Search,
   Settings2,
   Trash2,
   X,
@@ -21,35 +20,38 @@ import ConfirmDialog from './ui/ConfirmDialog';
 import BottomSheet from './ui/BottomSheet';
 import StatusBanner from './ui/StatusBanner';
 import { useAuth } from '../contexts/AuthContext';
-import { useDeferredValue } from 'react';
 import { getAcademicCalendarWriteState, getUserFriendlyDataError } from '../lib/dataErrorUtils';
 import { detectAcademicWorkbookFormat, parseHighSchoolMatrixWorkbook } from '../lib/academicWorkbookUtils';
+import {
+  buildSchoolMaster,
+  getAllManagedGrades,
+  getGradeOptionsForSelection,
+  getGradeSortValue,
+  getSchoolCategoryLabel,
+  inferSchoolCategoryFromGrade,
+  SCHOOL_CATEGORY_FILTER_OPTIONS,
+} from '../lib/schoolConfig';
 import useViewport from '../hooks/useViewport';
 
-const EVENT_TYPE_COLOR_PALETTE = ['#2b6c5c', '#b67a3c', '#597b97', '#7b6c98', '#6a8456', '#a55f57', '#7d6553'];
+const EVENT_TYPE_COLOR_PALETTE = ['#2f6f63', '#2563eb', '#7c3aed', '#0f766e', '#d97706', '#b91c1c', '#64748b', '#c2410c'];
 const DEFAULT_EVENT_COLOR = EVENT_TYPE_COLOR_PALETTE[0];
 const DEFAULT_EVENT_TYPE_DEFINITIONS = [
-  { id: 'exam', name: '시험', color: EVENT_TYPE_COLOR_PALETTE[0] },
-  { id: 'field-trip', name: '체험학습', color: EVENT_TYPE_COLOR_PALETTE[2] },
-  { id: 'vacation', name: '방학', color: EVENT_TYPE_COLOR_PALETTE[1] },
-  { id: 'misc', name: '기타일정', color: EVENT_TYPE_COLOR_PALETTE[6] },
-  { id: 'academy', name: '학원행사', color: EVENT_TYPE_COLOR_PALETTE[3] },
-  { id: 'holiday', name: '정기휴강', color: EVENT_TYPE_COLOR_PALETTE[5] },
+  { id: 'exam-window', name: '시험기간', color: EVENT_TYPE_COLOR_PALETTE[0] },
+  { id: 'english-exam-day', name: '영어시험일', color: EVENT_TYPE_COLOR_PALETTE[1] },
+  { id: 'math-exam-day', name: '수학시험일', color: EVENT_TYPE_COLOR_PALETTE[2] },
+  { id: 'field-trip', name: '체험학습', color: EVENT_TYPE_COLOR_PALETTE[3] },
+  { id: 'vacation', name: '방학', color: EVENT_TYPE_COLOR_PALETTE[4] },
+  { id: 'holiday', name: '휴일', color: EVENT_TYPE_COLOR_PALETTE[5] },
+  { id: 'misc', name: '기타', color: EVENT_TYPE_COLOR_PALETTE[6] },
+  { id: 'academy', name: '학원', color: EVENT_TYPE_COLOR_PALETTE[7] },
 ];
 const DEFAULT_EVENT_TYPES = DEFAULT_EVENT_TYPE_DEFINITIONS.map((item) => item.name);
 const DEFAULT_EVENT_TYPE_IDS = Object.fromEntries(DEFAULT_EVENT_TYPE_DEFINITIONS.map((item) => [item.name, item.id]));
 const SUBJECT_OPTIONS = ['영어', '수학'];
-const GRADE_ORDER = ['초6', '중1', '중2', '중3', '고1', '고2', '고3'];
-const EVENT_TYPE_STORAGE_KEY = 'tips-academic-event-types-v2';
 const EVENT_VIEW_STORAGE_KEY = 'tips-academic-view-v3';
 const NOTE_META_MARKER = '[[TIPS_META]]';
-const NON_REMOVABLE_EVENT_TYPE_IDS = new Set(['exam', 'vacation']);
-const CATEGORY_OPTIONS = [
-  { value: 'all', label: '전체 구분' },
-  { value: 'elementary', label: '초등' },
-  { value: 'middle', label: '중등' },
-  { value: 'high', label: '고등' },
-];
+const NON_REMOVABLE_EVENT_TYPE_IDS = new Set(DEFAULT_EVENT_TYPE_DEFINITIONS.map((item) => item.id));
+const ASSESSMENT_EVENT_TYPES = new Set(['시험기간', '영어시험일', '수학시험일']);
 const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
 function createId() {
@@ -104,12 +106,17 @@ function schoolKey(value) {
   return text(value).replace(/\s+/g, '').toLowerCase();
 }
 
-function categoryLabel(value) {
-  return CATEGORY_OPTIONS.find((option) => option.value === value)?.label || '기타';
-}
-
 function normalizeEventTypeDefinitions(raw) {
-  const source = Array.isArray(raw) && raw.length > 0 ? raw : DEFAULT_EVENT_TYPE_DEFINITIONS;
+  const source = Array.isArray(raw) && raw.length > 0
+    ? [
+        ...DEFAULT_EVENT_TYPE_DEFINITIONS,
+        ...raw.filter((entry) => {
+          const entryId = text(entry?.id);
+          const entryName = typeof entry === 'string' ? text(entry) : text(entry?.name);
+          return !DEFAULT_EVENT_TYPE_DEFINITIONS.some((item) => item.id === entryId || item.name === entryName);
+        }),
+      ]
+    : DEFAULT_EVENT_TYPE_DEFINITIONS;
   return source
     .map((entry, index) => {
       const defaultEntry = DEFAULT_EVENT_TYPE_DEFINITIONS.find((item) =>
@@ -229,32 +236,18 @@ function moveArrayItem(items = [], index, direction) {
   return next;
 }
 
-function inferCategory(grade) {
-  if (String(grade).startsWith('초')) return 'elementary';
-  if (String(grade).startsWith('중')) return 'middle';
-  return 'high';
-}
-
-function getGradeSortValue(grade) {
-  const label = text(grade);
-  const directIndex = GRADE_ORDER.indexOf(label);
-  if (directIndex >= 0) {
-    return directIndex;
-  }
-  if (label.startsWith('초')) return 0;
-  if (label.startsWith('중')) return 100;
-  if (label.startsWith('고')) return 200;
-  return 999;
-}
-
 function normalizeType(value) {
   const next = text(value);
-  if (next.includes('시험')) return '시험';
+  if (next.includes('학교시험기간') || next.includes('시험기간')) return '시험기간';
+  if (next.includes('영어시험일')) return '영어시험일';
+  if (next.includes('수학시험일')) return '수학시험일';
+  if (next.includes('시험')) return '시험기간';
   if (next.includes('체험') || next.includes('학습')) return '체험학습';
   if (next.includes('방학') || next.includes('개학')) return '방학';
-  if (next.includes('행사')) return '학원행사';
-  if (next.includes('휴강')) return '정기휴강';
-  return next || '기타일정';
+  if (next.includes('휴일') || next.includes('공휴일') || next.includes('대체휴일') || next.includes('휴강')) return '휴일';
+  if (next.includes('학원') || next.includes('행사')) return '학원';
+  if (next.includes('기타')) return '기타';
+  return next || '기타';
 }
 
 function todayString() {
@@ -335,6 +328,37 @@ function buildFloatingCardAnchor(anchorNode, options = {}) {
   };
 }
 
+function buildInlineComposerPlacement(anchorRect, containerRect, containerNode, options = {}) {
+  const { width = 404, preferredHeight = 520, minimumHeight = 320, gap = 6 } = options;
+  const scrollLeft = containerNode.scrollLeft || 0;
+  const scrollTop = containerNode.scrollTop || 0;
+  const relativeLeft = anchorRect.left - containerRect.left + scrollLeft;
+  const relativeRight = anchorRect.right - containerRect.left + scrollLeft;
+  const relativeTop = anchorRect.top - containerRect.top + scrollTop;
+  const relativeBottom = anchorRect.bottom - containerRect.top + scrollTop;
+  const viewportTop = scrollTop + 8;
+  const viewportBottom = scrollTop + containerNode.clientHeight - 8;
+  const maxLeft = Math.max(8, containerNode.scrollWidth - width - 8);
+  const rightSpace = containerNode.scrollWidth - relativeRight - 8;
+  const leftSpace = relativeLeft - 8;
+  const placeLeft = rightSpace < width && leftSpace > rightSpace;
+  const left = placeLeft
+    ? Math.max(8, relativeLeft - width - gap)
+    : Math.min(maxLeft, Math.max(8, relativeRight + gap));
+  const maxHeight = Math.max(minimumHeight, Math.min(preferredHeight, viewportBottom - viewportTop));
+  let top = Math.max(viewportTop, Math.min(relativeTop + 2, viewportBottom - maxHeight));
+  if (relativeBottom + maxHeight > viewportBottom && relativeTop > viewportTop + 60) {
+    top = Math.max(viewportTop, Math.min(relativeBottom - maxHeight, viewportBottom - maxHeight));
+  }
+
+  return {
+    top,
+    left,
+    width,
+    maxHeight,
+  };
+}
+
 function enumerateDateStrings(start, end) {
   const from = parseDate(start);
   const to = parseDate(end || start);
@@ -370,37 +394,6 @@ function buildAgendaGroups(events = []) {
           String(left.title || '').localeCompare(String(right.title || ''), 'ko')
       ),
     }));
-}
-
-function buildStudentSchoolCatalog(students = [], academicSchools = []) {
-  const matchedSchools = new Map((academicSchools || []).map((school) => [schoolKey(school.name), school]));
-  const buckets = new Map();
-
-  (students || []).forEach((student) => {
-    const schoolName = text(student.school);
-    if (!schoolName) return;
-    const key = schoolKey(schoolName);
-    if (!buckets.has(key)) {
-      const matched = matchedSchools.get(key);
-      buckets.set(key, {
-        id: matched?.id || '',
-        name: schoolName,
-        color: matched?.color || DEFAULT_EVENT_COLOR,
-        category: matched?.category || inferCategory(student.grade),
-        grades: new Set(),
-      });
-    }
-    if (student.grade) buckets.get(key).grades.add(text(student.grade));
-  });
-
-  return [...buckets.values()]
-    .map((school) => ({
-      ...school,
-      grades: [...school.grades].sort(
-        (left, right) => getGradeSortValue(left) - getGradeSortValue(right) || left.localeCompare(right, 'ko')
-      ),
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name, 'ko'));
 }
 
 function buildMonthWeeks(currentDate, options = {}) {
@@ -537,7 +530,7 @@ function buildEmptyEvent(dateString, school) {
     schoolKey: schoolKey(school?.name || ''),
     schoolId: school?.id || '',
     school: school?.name || '',
-    type: '시험',
+    type: '시험기간',
     category: school?.category || 'all',
     grade: '',
     grades: [],
@@ -784,6 +777,7 @@ function AcademicTypeManagerModal({ open, definitions, onClose, onSave }) {
                 <input
                   className="styled-input"
                   value={definition.name}
+                  disabled={NON_REMOVABLE_EVENT_TYPE_IDS.has(definition.id)}
                   onChange={(event) => {
                     setDraftDefinitions((current) =>
                       current.map((item, itemIndex) =>
@@ -797,8 +791,8 @@ function AcademicTypeManagerModal({ open, definitions, onClose, onSave }) {
                 </div>
               </div>
               <div className="academic-type-manager-actions">
-                <button type="button" className="action-chip" onClick={() => setDraftDefinitions((current) => moveArrayItem(current, index, -1))} disabled={index === 0}><ArrowUp size={14} /></button>
-                <button type="button" className="action-chip" onClick={() => setDraftDefinitions((current) => moveArrayItem(current, index, 1))} disabled={index === draftDefinitions.length - 1}><ArrowDown size={14} /></button>
+                <button type="button" className="action-chip" onClick={() => setDraftDefinitions((current) => moveArrayItem(current, index, -1))} disabled={index === 0 || NON_REMOVABLE_EVENT_TYPE_IDS.has(definition.id)}><ArrowUp size={14} /></button>
+                <button type="button" className="action-chip" onClick={() => setDraftDefinitions((current) => moveArrayItem(current, index, 1))} disabled={index === draftDefinitions.length - 1 || NON_REMOVABLE_EVENT_TYPE_IDS.has(definition.id)}><ArrowDown size={14} /></button>
                 <button
                   type="button"
                   className="action-chip"
@@ -845,20 +839,32 @@ function QuickInsertChips({ title, groups, onSelect, disabled }) {
   );
 }
 
-function GradeMultiSelect({ options, selectedValues, onChange, disabled, clearLabel = 'ALL' }) {
+function GradeMultiSelect({
+  options,
+  selectedValues,
+  onChange,
+  disabled,
+  clearLabel = 'ALL',
+  showClear = true,
+}) {
   const normalizedSelected = [...new Set((selectedValues || []).map((item) => text(item)).filter(Boolean))];
   const normalizedOptions = [...new Set((options || []).map((item) => text(item)).filter(Boolean))];
+  const allSelected =
+    normalizedOptions.length > 0 && normalizedSelected.length === normalizedOptions.length
+      && normalizedOptions.every((grade) => normalizedSelected.includes(grade));
 
   return (
     <div className="academic-chip-selector">
-      <button
-        type="button"
-        className={`academic-chip-option ${normalizedSelected.length === 0 ? 'is-active' : ''}`}
-        onClick={() => onChange([])}
-        disabled={disabled}
-      >
-        {clearLabel}
-      </button>
+      {showClear ? (
+        <button
+          type="button"
+          className={`academic-chip-option ${normalizedSelected.length === 0 || allSelected ? 'is-active' : ''}`}
+          onClick={() => onChange(allSelected ? [] : normalizedOptions)}
+          disabled={disabled}
+        >
+          {clearLabel}
+        </button>
+      ) : null}
       {normalizedOptions.map((grade) => {
         const active = normalizedSelected.includes(grade);
         return (
@@ -916,7 +922,7 @@ function AcademicEventModal({
       : schoolCatalog.filter((school) => school.category === localDraft.category);
   const selectedSchool = schoolCatalog.find((school) => schoolKey(school.name) === localDraft.schoolKey) || null;
   const selectedType = typeDefinitions.find((item) => item.name === localDraft.type) || typeDefinitions[0] || null;
-  const modalGradeOptions = selectedSchool?.grades?.length ? selectedSchool.grades : GRADE_ORDER;
+  const modalGradeOptions = getGradeOptionsForSelection(localDraft.category, selectedSchool);
 
   const updateDraft = (patch) => {
     setLocalDraft((current) => ({ ...current, ...patch }));
@@ -931,9 +937,9 @@ function AcademicEventModal({
   };
 
   const applySchool = (nextSchoolKey) => {
-    if (!nextSchoolKey) {
+    if (!nextSchoolKey || nextSchoolKey === 'all') {
       updateDraft({
-        schoolKey: '',
+        schoolKey: 'all',
         schoolId: '',
         school: '',
       });
@@ -955,13 +961,22 @@ function AcademicEventModal({
 
   const changeCategory = (nextCategory) => {
     const currentSchool =
-      schoolCatalog.find((school) => schoolKey(school.name) === localDraft.schoolKey && school.category === nextCategory) || null;
+      nextCategory === 'all'
+        ? null
+        : schoolCatalog.find((school) => schoolKey(school.name) === localDraft.schoolKey && school.category === nextCategory) || null;
+    const nextGradeOptions = getGradeOptionsForSelection(nextCategory, currentSchool);
+    const nextGrades =
+      nextCategory === 'all'
+        ? []
+        : (localDraft.grades || []).filter((grade) => nextGradeOptions.includes(grade));
     updateDraft({
       category: nextCategory,
-      schoolKey: currentSchool ? schoolKey(currentSchool.name) : '',
+      schoolKey: currentSchool ? schoolKey(currentSchool.name) : 'all',
       schoolId: currentSchool?.id || '',
       school: currentSchool?.name || '',
       color: currentSchool?.color || localDraft.color,
+      grades: nextGrades,
+      grade: joinGradeTokens(nextGrades),
     });
   };
 
@@ -987,7 +1002,7 @@ function AcademicEventModal({
             일정 삭제
           </button>
         ) : null}
-        {localDraft.type === '시험' && onOpenRoadmap ? (
+        {ASSESSMENT_EVENT_TYPES.has(localDraft.type) && onOpenRoadmap ? (
           <button
             type="button"
             className="action-chip"
@@ -1019,7 +1034,7 @@ function AcademicEventModal({
       open={open}
       onClose={onClose}
       title={localDraft.id ? '학사 일정 편집' : '학사 일정 추가'}
-      subtitle="기본 정보와 일정 메모를 한 번에 빠르게 정리할 수 있습니다."
+      subtitle="기본 정보와 기간, 대상 학년을 한 번에 정리할 수 있습니다."
       maxWidth={isMobile ? 700 : 620}
       fullHeightOnMobile
       actions={modalActions}
@@ -1056,46 +1071,8 @@ function AcademicEventModal({
         <section className="academic-modal-section">
           <div className="academic-modal-section-header">
             <div>
-              <div className="academic-section-caption">대상 정보</div>
-              <h3>구분, 학교, 학년</h3>
-            </div>
-          </div>
-          <div className="academic-modal-grid academic-modal-grid-3">
-            <label className="academic-field">
-              <span>구분</span>
-              <select className="styled-input" value={localDraft.category} onChange={(event) => changeCategory(event.target.value)} disabled={!canEdit}>
-                {CATEGORY_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="academic-field">
-              <span>학교</span>
-              <select className="styled-input" value={localDraft.schoolKey} onChange={(event) => applySchool(event.target.value)} disabled={!canEdit}>
-                <option value="">학교 없음</option>
-                {visibleSchools.map((school) => (
-                  <option key={schoolKey(school.name)} value={schoolKey(school.name)}>{school.name}</option>
-                ))}
-              </select>
-            </label>
-            <div className="academic-field">
-              <span>학년</span>
-              <GradeMultiSelect
-                options={modalGradeOptions}
-                selectedValues={localDraft.grades || []}
-                onChange={setDraftGrades}
-                disabled={!canEdit}
-                clearLabel="ALL"
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className="academic-modal-section">
-          <div className="academic-modal-section-header">
-            <div>
               <div className="academic-section-caption">일정 정보</div>
-              <h3>기간과 메모</h3>
+              <h3>기간</h3>
             </div>
           </div>
           <div className="academic-modal-grid academic-modal-grid-2">
@@ -1108,13 +1085,49 @@ function AcademicEventModal({
               <input className="styled-input" type="date" value={localDraft.end} onChange={(event) => updateDraft({ ...clampDateRange(localDraft.start, event.target.value) })} disabled={!canEdit} />
             </label>
           </div>
-          <label className="academic-field">
-            <span>메모</span>
-            <textarea className="styled-input" value={localDraft.note} onChange={(event) => updateDraft({ note: event.target.value })} disabled={!canEdit} style={{ minHeight: 96, resize: 'vertical' }} />
-          </label>
         </section>
 
-        {localDraft.type === '시험' && supportsExamDetails ? (
+        <section className="academic-modal-section">
+          <div className="academic-modal-section-header">
+            <div>
+              <div className="academic-section-caption">대상 정보</div>
+              <h3>학교 구분, 학교, 학년</h3>
+            </div>
+          </div>
+          <div className="academic-modal-grid academic-modal-grid-3">
+            <label className="academic-field">
+              <span>학교 구분</span>
+              <select className="styled-input" value={localDraft.category} onChange={(event) => changeCategory(event.target.value)} disabled={!canEdit}>
+                {SCHOOL_CATEGORY_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="academic-field">
+              <span>학교</span>
+              <select className="styled-input" value={localDraft.schoolKey || 'all'} onChange={(event) => applySchool(event.target.value)} disabled={!canEdit}>
+                <option value="all">전체</option>
+                {visibleSchools.map((school) => (
+                  <option key={schoolKey(school.name)} value={schoolKey(school.name)}>{school.name}</option>
+                ))}
+              </select>
+            </label>
+            {localDraft.category !== 'all' ? (
+              <div className="academic-field">
+                <span>학년</span>
+                <GradeMultiSelect
+                  options={modalGradeOptions}
+                  selectedValues={localDraft.grades || []}
+                  onChange={setDraftGrades}
+                  disabled={!canEdit}
+                  showClear={false}
+                />
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {ASSESSMENT_EVENT_TYPES.has(localDraft.type) && supportsExamDetails ? (
           <section className="academic-modal-section">
             <div className="academic-modal-section-header">
               <div>
@@ -1183,7 +1196,7 @@ function AcademicEventModal({
                         <label className="academic-field">
                           <span>학년</span>
                           <select className="styled-input" value={detail.grade} onChange={(event) => updateExamDetail(detail.id, { grade: event.target.value })} disabled={!canEdit}>
-                            {(detailSchool?.grades?.length ? detailSchool.grades : GRADE_ORDER).map((grade) => (
+                            {getGradeOptionsForSelection(detailSchool?.category, detailSchool).map((grade) => (
                               <option key={grade} value={grade}>{grade}</option>
                             ))}
                           </select>
@@ -1283,7 +1296,7 @@ function AcademicInlineComposer({
       : schoolCatalog.filter((school) => school.category === draft.category);
   const selectedSchool = schoolCatalog.find((school) => schoolKey(school.name) === draft.schoolKey) || null;
   const selectedType = typeDefinitions.find((item) => item.name === draft.type) || typeDefinitions[0] || null;
-  const gradeOptions = selectedSchool?.grades?.length ? selectedSchool.grades : GRADE_ORDER;
+  const gradeOptions = getGradeOptionsForSelection(draft.category, selectedSchool);
 
   const setDraftGrades = (nextGrades) => {
     const normalized = [...new Set((nextGrades || []).map((item) => text(item)).filter(Boolean))];
@@ -1295,20 +1308,29 @@ function AcademicInlineComposer({
 
   const changeCategory = (nextCategory) => {
     const currentSchool =
-      schoolCatalog.find((school) => schoolKey(school.name) === draft.schoolKey && school.category === nextCategory) || null;
+      nextCategory === 'all'
+        ? null
+        : schoolCatalog.find((school) => schoolKey(school.name) === draft.schoolKey && school.category === nextCategory) || null;
+    const nextGradeOptions = getGradeOptionsForSelection(nextCategory, currentSchool);
+    const nextGrades =
+      nextCategory === 'all'
+        ? []
+        : (draft.grades || []).filter((grade) => nextGradeOptions.includes(grade));
     onChange({
       category: nextCategory,
-      schoolKey: currentSchool ? schoolKey(currentSchool.name) : '',
+      schoolKey: currentSchool ? schoolKey(currentSchool.name) : 'all',
       schoolId: currentSchool?.id || '',
       school: currentSchool?.name || '',
       color: currentSchool?.color || draft.color,
+      grades: nextGrades,
+      grade: joinGradeTokens(nextGrades),
     });
   };
 
   const applySchool = (nextSchoolKey) => {
-    if (!nextSchoolKey) {
+    if (!nextSchoolKey || nextSchoolKey === 'all') {
       onChange({
-        schoolKey: '',
+        schoolKey: 'all',
         schoolId: '',
         school: '',
       });
@@ -1389,17 +1411,17 @@ function AcademicInlineComposer({
           />
         </label>
         <label className="academic-field">
-          <span>구분</span>
+          <span>학교 구분</span>
           <select className="styled-input" value={draft.category} onChange={(event) => changeCategory(event.target.value)}>
-            {CATEGORY_OPTIONS.map((option) => (
+            {SCHOOL_CATEGORY_FILTER_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
         </label>
         <label className="academic-field">
           <span>학교</span>
-          <select className="styled-input" value={draft.schoolKey} onChange={(event) => applySchool(event.target.value)}>
-            <option value="">학교 없음</option>
+          <select className="styled-input" value={draft.schoolKey || 'all'} onChange={(event) => applySchool(event.target.value)}>
+            <option value="all">전체</option>
             {visibleSchools.map((school) => (
               <option key={schoolKey(school.name)} value={schoolKey(school.name)}>{school.name}</option>
             ))}
@@ -1407,28 +1429,19 @@ function AcademicInlineComposer({
         </label>
       </div>
 
-      <div className="academic-field">
-        <span>학년</span>
-        <GradeMultiSelect
-          options={gradeOptions}
-          selectedValues={draft.grades || []}
-          onChange={setDraftGrades}
-          clearLabel="ALL"
-        />
-      </div>
+      {draft.category !== 'all' ? (
+        <div className="academic-field">
+          <span>학년</span>
+          <GradeMultiSelect
+            options={gradeOptions}
+            selectedValues={draft.grades || []}
+            onChange={setDraftGrades}
+            showClear={false}
+          />
+        </div>
+      ) : null}
 
-      <label className="academic-field">
-        <span>메모</span>
-        <textarea
-          className="styled-input"
-          value={draft.note}
-          onChange={(event) => onChange({ note: event.target.value })}
-          placeholder="필요한 메모가 있다면 간단히 적어 주세요."
-          style={{ minHeight: 88, resize: 'vertical' }}
-        />
-      </label>
-
-      {draft.type === '시험' && supportsExamDetails ? (
+      {ASSESSMENT_EVENT_TYPES.has(draft.type) && supportsExamDetails ? (
         <div className="academic-inline-composer-helper">
           시험 범위와 세부 정보는 저장 후에도 해당 일정을 눌러 이어서 입력할 수 있습니다.
         </div>
@@ -1548,7 +1561,7 @@ function AcademicEventPopover({ event, anchor, typeColorMap, canEdit, onClose, o
           </div>
         ) : null}
         {text(event.note) ? <p className="academic-event-popover-note">{event.note}</p> : null}
-        {event.type === '시험' && onOpenRoadmap ? (
+        {ASSESSMENT_EVENT_TYPES.has(event.type) && onOpenRoadmap ? (
           <div style={{ marginTop: 10 }}>
             <button type="button" className="action-chip" onClick={onOpenRoadmap}>
               교재·진도 열기
@@ -1772,6 +1785,7 @@ function AcademicMonthGridV2({
                             >
                               <span className="academic-event-bar-edge">{segment.isStartClipped ? '~' : ''}</span>
                               <span className="academic-event-bar-content">
+                                <span className="academic-event-bar-title">{segment.event.title}</span>
                                 {metaTokens.length > 0 ? (
                                   <span className="academic-event-bar-meta">
                                     {metaTokens.map((token) => (
@@ -1781,7 +1795,6 @@ function AcademicMonthGridV2({
                                     ))}
                                   </span>
                                 ) : null}
-                                <span className="academic-event-bar-title">{segment.event.title}</span>
                               </span>
                               <span className="academic-event-bar-edge">{segment.isEndClipped ? '~' : ''}</span>
                             </button>
@@ -1842,7 +1855,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   const { isStaff } = useAuth();
   const { isMobile } = useViewport();
   const uploadRef = useRef(null);
-  const searchInputRef = useRef(null);
   const dayButtonRefs = useRef(new Map());
   const calendarMainRef = useRef(null);
   const inlineComposerRef = useRef(null);
@@ -1856,11 +1868,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   const [selectedSchoolKey, setSelectedSchoolKey] = useState('all');
   const [selectedGrades, setSelectedGrades] = useState([]);
   const [selectedTypes, setSelectedTypes] = useState(DEFAULT_EVENT_TYPES);
-  const [eventTypeOptions, setEventTypeOptions] = useState(() =>
-    normalizeEventTypeDefinitions(readLocalStorageJson(EVENT_TYPE_STORAGE_KEY, DEFAULT_EVENT_TYPE_DEFINITIONS))
-  );
-  const [searchQuery, setSearchQuery] = useState('');
-  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [editingEvent, setEditingEvent] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -1874,7 +1881,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   const [selectionAnchor, setSelectionAnchor] = useState(null);
   const [selectionRange, setSelectionRange] = useState(null);
   const [draggedEventId, setDraggedEventId] = useState('');
-  const [isTypeManagerOpen, setIsTypeManagerOpen] = useState(false);
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
   const [dayDialogDate, setDayDialogDate] = useState('');
   const [inlineComposerDraft, setInlineComposerDraft] = useState(null);
@@ -1893,7 +1899,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   };
 
   const schoolCatalog = useMemo(
-    () => buildStudentSchoolCatalog(data.students, data.academicSchools),
+    () => buildSchoolMaster(data.academicSchools, data.students),
     [data.academicSchools, data.students]
   );
   const schoolByKey = useMemo(
@@ -1930,47 +1936,8 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   }, [dataService]);
 
   useEffect(() => {
-    let cancelled = false;
-    dataService
-      .getAppPreference('academic-calendar:event-types')
-      .then((preference) => {
-        if (cancelled || !preference?.value) return;
-        const next = normalizeEventTypeDefinitions(preference.value);
-        setEventTypeOptions(next);
-        setSelectedTypes((current) => {
-          const allowed = new Set(next.map((item) => item.name));
-          const normalized = current.filter((item) => allowed.has(item));
-          return normalized.length > 0 ? normalized : next.map((item) => item.name);
-        });
-      })
-      .catch(() => {
-        // Server preference is optional.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [dataService]);
-
-  useEffect(() => {
-    persistLocalStorageJson(EVENT_TYPE_STORAGE_KEY, eventTypeOptions);
-  }, [eventTypeOptions]);
-
-  useEffect(() => {
-    setSelectedTypes((current) => {
-      const allowed = new Set(eventTypeOptions.map((item) => item.name));
-      const normalized = current.filter((item) => allowed.has(item));
-      return normalized.length > 0 ? normalized : eventTypeOptions.map((item) => item.name);
-    });
-  }, [eventTypeOptions]);
-
-  useEffect(() => {
     const handler = (event) => {
       if (event.defaultPrevented) return;
-      const activeTag = document.activeElement?.tagName;
-      if (event.key === '/' && activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-      }
       if (event.key === 't') {
         event.preventDefault();
         setCurrentDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -1978,7 +1945,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
       if (event.key === 'Escape') {
         setDayDialogDate('');
         setIsFilterSheetOpen(false);
-        setIsTypeManagerOpen(false);
         closeInlineComposer();
         closeDesktopPopovers();
       }
@@ -2061,13 +2027,14 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
     [visibleSchools]
   );
   const gradeOptions = useMemo(() => {
-    if (selectedSchoolKey === 'all') {
-      const values = new Set();
-      visibleSchools.forEach((school) => school.grades.forEach((grade) => values.add(grade)));
-      return ['all', ...[...values].sort((left, right) => getGradeSortValue(left) - getGradeSortValue(right) || left.localeCompare(right, 'ko'))];
+    if (selectedCategory === 'all') {
+      return [];
     }
-    return ['all', ...(schoolByKey[selectedSchoolKey]?.grades || [])];
-  }, [schoolByKey, selectedSchoolKey, visibleSchools]);
+    if (selectedSchoolKey === 'all') {
+      return getGradeOptionsForSelection(selectedCategory, null);
+    }
+    return getGradeOptionsForSelection(selectedCategory, schoolByKey[selectedSchoolKey] || null);
+  }, [schoolByKey, selectedCategory, selectedSchoolKey]);
 
   useEffect(() => {
     if (selectedSchoolKey !== 'all' && !visibleSchoolKeys.has(selectedSchoolKey)) {
@@ -2076,8 +2043,12 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   }, [selectedSchoolKey, visibleSchoolKeys]);
 
   useEffect(() => {
-    setSelectedGrades((current) => current.filter((grade) => grade !== 'all' && gradeOptions.includes(grade)));
-  }, [gradeOptions]);
+    if (selectedCategory === 'all') {
+      setSelectedGrades([]);
+      return;
+    }
+    setSelectedGrades((current) => current.filter((grade) => gradeOptions.includes(grade)));
+  }, [gradeOptions, selectedCategory]);
 
   const typeColorMap = useMemo(
     () => Object.fromEntries(eventTypeOptions.map((item) => [item.name, item.color])),
@@ -2102,7 +2073,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
           type: normalizeType(event.type),
           grade: event.grade || 'all',
           grades: splitGradeTokens(event.grade),
-          category: school?.category || (event.grade && event.grade !== 'all' ? inferCategory(event.grade) : 'all'),
+          category: school?.category || (event.grade && event.grade !== 'all' ? inferSchoolCategoryFromGrade(event.grade) : 'all'),
           color: event.color || school?.color || DEFAULT_EVENT_COLOR,
           note: noteText,
           tags: normalizeTags(meta.tags || []),
@@ -2117,7 +2088,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   );
 
   const filteredEvents = useMemo(() => {
-    const query = text(deferredSearchQuery).toLowerCase();
     return events.filter((event) => {
       if (selectedCategory !== 'all' && schoolByKey[event.schoolKey]?.category !== selectedCategory) return false;
       if (selectedSchoolKey !== 'all' && event.schoolKey !== selectedSchoolKey) return false;
@@ -2128,13 +2098,9 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
         }
       }
       if (!selectedTypes.includes(event.type)) return false;
-      if (query) {
-        const haystack = [event.title, event.school, event.note, event.type, ...(event.tags || [])].join(' ').toLowerCase();
-        if (!haystack.includes(query)) return false;
-      }
       return true;
     });
-  }, [deferredSearchQuery, events, schoolByKey, selectedCategory, selectedGrades, selectedSchoolKey, selectedTypes]);
+  }, [events, schoolByKey, selectedCategory, selectedGrades, selectedSchoolKey, selectedTypes]);
 
   const monthWeeks = useMemo(() => buildMonthWeeks(currentDate), [currentDate]);
   const miniCalendarWeeks = useMemo(() => buildMonthWeeks(currentDate, { forceSixRows: true }), [currentDate]);
@@ -2160,28 +2126,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
   );
   const supportsExamDetails = false;
 
-  const persistTypeDefinitions = async (nextDefinitions) => {
-    const normalizedDefinitions = normalizeEventTypeDefinitions(
-      (nextDefinitions || []).map((item, index) => ({
-        ...item,
-        name: text(item.name),
-        color: pickEventTypeColor(item.name, index),
-      }))
-    );
-    setEventTypeOptions(normalizedDefinitions);
-    setSelectedTypes((current) => {
-      const allowed = new Set(normalizedDefinitions.map((item) => item.name));
-      const normalized = current.filter((item) => allowed.has(item));
-      return normalized.length > 0 ? normalized : normalizedDefinitions.map((item) => item.name);
-    });
-    persistLocalStorageJson(EVENT_TYPE_STORAGE_KEY, normalizedDefinitions);
-    try {
-      await dataService.setAppPreference('academic-calendar:event-types', normalizedDefinitions);
-    } catch {
-      // Server persistence is optional.
-    }
-  };
-
   const ensureSchoolRecord = async (draft) => {
     const existing = schoolByKey[draft.schoolKey];
     if (existing?.id) return existing;
@@ -2192,7 +2136,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
       {
         id: createId(),
         name: existing.name,
-        category: existing.category || inferCategory(draft.grade),
+        category: existing.category || inferSchoolCategoryFromGrade(draft.grade),
         color: existing.color || DEFAULT_EVENT_COLOR,
         sortOrder: 0,
       },
@@ -2208,12 +2152,12 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
       ...buildEmptyEvent(start, defaultSchool),
       end,
       category: selectedCategory === 'all' ? defaultSchool?.category || 'all' : selectedCategory,
-      schoolKey: selectedSchoolKey === 'all' ? '' : defaultSchool?.name ? schoolKey(defaultSchool.name) : '',
+      schoolKey: selectedSchoolKey === 'all' ? 'all' : defaultSchool?.name ? schoolKey(defaultSchool.name) : 'all',
       schoolId: selectedSchoolKey === 'all' ? '' : defaultSchool?.id || '',
       school: selectedSchoolKey === 'all' ? '' : defaultSchool?.name || '',
       grade: selectedGrades.length === 1 ? selectedGrades[0] : '',
       grades: selectedGrades,
-      type: selectedTypes[0] || eventTypeOptions[0]?.name || '시험',
+      type: selectedTypes[0] || eventTypeOptions[0]?.name || '시험기간',
     };
   };
 
@@ -2232,44 +2176,18 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
 
     const containerRect = containerNode.getBoundingClientRect();
     const anchorRect = anchorNode.getBoundingClientRect();
-    const gap = 14;
-    const preferredHeight = 560;
-    const minimumHeight = 336;
-    const scrollLeft = containerNode.scrollLeft || 0;
-    const scrollTop = containerNode.scrollTop || 0;
-    const relativeLeft = anchorRect.left - containerRect.left + scrollLeft;
-    const relativeRight = anchorRect.right - containerRect.left + scrollLeft;
-    const relativeTop = anchorRect.top - containerRect.top + scrollTop;
-    const relativeBottom = anchorRect.bottom - containerRect.top + scrollTop;
-    const maxLeft = Math.max(12, containerNode.scrollWidth - width - 12);
-    const viewportTop = scrollTop + 12;
-    const viewportBottom = scrollTop + containerNode.clientHeight - 12;
-    const viewportHeight = Math.max(minimumHeight, viewportBottom - viewportTop);
-    const belowSpace = viewportBottom - (relativeBottom + gap);
-    const aboveSpace = relativeTop - gap - viewportTop;
-    const placeAbove = belowSpace < minimumHeight && aboveSpace > belowSpace;
-    const availableHeight = placeAbove ? aboveSpace : belowSpace;
-    const maxHeight = Math.max(minimumHeight, Math.min(preferredHeight, Math.max(availableHeight, viewportHeight - 24)));
-
-    let left = relativeRight + gap;
-    if (left > maxLeft) {
-      left = Math.max(12, relativeLeft - width - gap);
-    }
-
-    const estimatedHeight = Math.min(preferredHeight, maxHeight);
-    let top = placeAbove ? relativeTop - estimatedHeight - gap : relativeBottom + gap;
-    if (top + estimatedHeight > viewportBottom) {
-      top = Math.max(viewportTop, viewportBottom - estimatedHeight);
-    }
-    if (top < viewportTop) {
-      top = viewportTop;
-    }
+    const placement = buildInlineComposerPlacement(anchorRect, containerRect, containerNode, {
+      width,
+      preferredHeight: 520,
+      minimumHeight: 320,
+      gap: 6,
+    });
 
     return {
-      top,
-      left,
-      width,
-      maxHeight,
+      top: placement.top,
+      left: placement.left,
+      width: placement.width,
+      maxHeight: placement.maxHeight,
       label,
     };
   };
@@ -2344,7 +2262,9 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
 
     setIsSaving(true);
     try {
-      const hasAssignedSchool = Boolean(text(nextDraft.schoolKey) || text(nextDraft.school));
+      const hasAssignedSchool = Boolean(
+        (text(nextDraft.schoolKey) && text(nextDraft.schoolKey) !== 'all') || text(nextDraft.school)
+      );
       const school = hasAssignedSchool ? await ensureSchoolRecord(nextDraft) : null;
       const normalizedGrades = joinGradeTokens(nextDraft.grades || splitGradeTokens(nextDraft.grade));
       const payload = {
@@ -2366,7 +2286,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
         ? await dataService.updateAcademicEvent(nextDraft.id, payload).then(() => ({ id: nextDraft.id, ...payload }))
         : await dataService.addAcademicEvent(payload);
 
-      if (supportsExamDetails && payload.type === '시험') {
+      if (supportsExamDetails && ASSESSMENT_EVENT_TYPES.has(payload.type)) {
         const examDetails = (nextDraft.examDetails || []).map((detail, index) => ({
           ...detail,
           schoolId: schoolByKey[detail.schoolKey]?.id || detail.schoolId || school?.id || null,
@@ -2486,7 +2406,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(
         workbook,
-        XLSX.utils.json_to_sheet((schoolCatalog || []).map((school) => ({ '학교명': school.name, '구분': categoryLabel(school.category), '색상': school.color }))),
+        XLSX.utils.json_to_sheet((schoolCatalog || []).map((school) => ({ '학교명': school.name, '학교 구분': getSchoolCategoryLabel(school.category), '색상': school.color }))),
         '학교목록'
       );
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([]), '교과정보');
@@ -2497,8 +2417,8 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
           {
             '제목': '1학기 중간고사',
             '학교명': schoolCatalog[0]?.name || '',
-            '학년': schoolCatalog[0]?.grades?.[0] || '고등',
-            '분류': '시험',
+            '학년': schoolCatalog[0]?.grades?.[0] || '고1',
+            '분류': '시험기간',
             '시작일': `${new Date().getFullYear()}-04-22`,
             '종료일': `${new Date().getFullYear()}-04-24`,
             '비고': '',
@@ -2541,7 +2461,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
         uploadPayload = {
           schools: getRows('학교목록').map((row) => ({
             name: row['학교명'] || '',
-            category: row['구분'] || '',
+            category: row['학교 구분'] || row['구분'] || '',
             color: row['색상'] || '',
           })),
           profiles: getRows('교과정보').map((row) => ({
@@ -2599,7 +2519,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
         schoolRows.set(schoolKey(name), {
           id: matched?.id || createId(),
           name,
-          category: row.category || matched?.category || inferCategory(row.grade),
+          category: row.category || matched?.category || inferSchoolCategoryFromGrade(row.grade),
           color: row.color || matched?.color || DEFAULT_EVENT_COLOR,
           sortOrder: matched?.sortOrder || schoolRows.size,
         });
@@ -2690,27 +2610,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
 
   const sidebarContent = (
     <div className="academic-calendar-sidebar-content">
-      <div className="card-custom academic-sidebar-panel academic-sidebar-search-panel">
-        <div className="academic-section-caption">빠른 찾기</div>
-        <div className="academic-toolbar-search academic-sidebar-search">
-          <Search size={16} />
-          <input
-            ref={searchInputRef}
-            className="styled-input"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="학교명, 일정명, 메모 검색"
-          />
-        </div>
-        {isMobile ? (
-          <div className="academic-sidebar-inline-actions">
-            <button type="button" className="action-chip" onClick={() => setIsFilterSheetOpen(false)}>
-              필터 닫기
-            </button>
-          </div>
-        ) : null}
-      </div>
-
       <div className="academic-mini-calendar card-custom">
         <div className="academic-mini-calendar-header">
           <button type="button" className="academic-icon-button" onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}><ChevronLeft size={16} /></button>
@@ -2739,36 +2638,33 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
 
       <div className="card-custom academic-sidebar-panel">
         <div className="academic-section-caption">필터</div>
-        <div className="academic-sidebar-field">
-          <span>구분</span>
+        <div className="academic-sidebar-field academic-sidebar-field-inline">
+          <span>학교 구분</span>
           <select className="styled-input" value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>
-            {CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {SCHOOL_CATEGORY_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </div>
-        <div className="academic-sidebar-field">
+        <div className="academic-sidebar-field academic-sidebar-field-inline">
           <span>학교</span>
           <select className="styled-input" value={selectedSchoolKey} onChange={(event) => setSelectedSchoolKey(event.target.value)}>
-            <option value="all">전체 학교</option>
+            <option value="all">전체</option>
             {visibleSchools.map((school) => <option key={schoolKey(school.name)} value={schoolKey(school.name)}>{school.name}</option>)}
           </select>
         </div>
-        <div className="academic-sidebar-field">
-          <span>학년</span>
-          <GradeMultiSelect
-            options={gradeOptions.filter((grade) => grade !== 'all')}
-            selectedValues={selectedGrades}
-            onChange={setSelectedGrades}
-            clearLabel="ALL"
-          />
-        </div>
-      </div>
-
-      <div className="card-custom academic-sidebar-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-          <div className="academic-section-caption">분류 필터</div>
-          <button type="button" className="action-chip" onClick={() => setIsTypeManagerOpen(true)}><Settings2 size={14} />분류 관리</button>
-        </div>
-        <div className="academic-type-filter-wrap">
+        {selectedCategory !== 'all' ? (
+          <div className="academic-sidebar-field academic-sidebar-field-inline academic-sidebar-field-inline-chips">
+            <span>학년</span>
+            <GradeMultiSelect
+              options={gradeOptions}
+              selectedValues={selectedGrades}
+              onChange={setSelectedGrades}
+              showClear={false}
+            />
+          </div>
+        ) : null}
+        <div className="academic-sidebar-field academic-sidebar-field-stacked">
+          <span>분류</span>
+          <div className="academic-type-filter-wrap">
           {eventTypeOptions.map((type) => {
             const active = selectedTypes.includes(type.name);
             return (
@@ -2777,6 +2673,7 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
               </button>
             );
           })}
+          </div>
         </div>
       </div>
     </div>
@@ -2799,8 +2696,6 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
         canEdit={canWriteCalendar}
         supportsExamDetails={supportsExamDetails}
       />
-
-      <AcademicTypeManagerModal open={isTypeManagerOpen} definitions={eventTypeOptions} onClose={() => setIsTypeManagerOpen(false)} onSave={persistTypeDefinitions} />
 
       <AcademicDayDialog open={Boolean(dayDialogDate)} title={dayDialogDate ? formatDisplayDateWithWeekday(dayDialogDate) : ''} events={dayDialogEvents} onClose={() => setDayDialogDate('')} typeColorMap={typeColorMap} />
 
@@ -2876,3 +2771,4 @@ export default function AcademicCalendarView({ data, dataService = sharedDataSer
 
 
 
+  const eventTypeOptions = DEFAULT_EVENT_TYPE_DEFINITIONS;

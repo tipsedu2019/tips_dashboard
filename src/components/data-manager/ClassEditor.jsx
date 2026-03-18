@@ -3,6 +3,7 @@ import { BookOpen, CalendarDays, Trash2 } from 'lucide-react';
 import { CLASS_STATUS_OPTIONS, computeClassStatus } from '../../lib/classStatus';
 import { normalizeClassroomText } from '../../lib/classroomUtils';
 import { buildSchedulePlanForSave } from '../../lib/classSchedulePlanner';
+import { getAllManagedGrades } from '../../lib/schoolConfig';
 import ClassSchedulePlanPreview from '../ClassSchedulePlanPreview';
 import ClassSchedulePlanModal from '../ClassSchedulePlanModal';
 import { getClassExamConflicts } from '../../lib/examScheduleUtils';
@@ -279,12 +280,16 @@ export default function ClassEditor({
                 />
               </Field>
               <Field label="학년">
-                <input
-                  type="text"
+                <select
                   className="styled-input"
                   value={edited.grade || ''}
                   onChange={(event) => setEdited((current) => ({ ...current, grade: event.target.value }))}
-                />
+                >
+                  <option value="">학년 선택</option>
+                  {getAllManagedGrades().map((grade) => (
+                    <option key={grade} value={grade}>{grade}</option>
+                  ))}
+                </select>
               </Field>
             </div>
 

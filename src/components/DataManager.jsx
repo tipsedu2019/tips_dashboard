@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import StudentManagerTab from './data-manager/StudentManagerTab';
 import ClassManagerTab from './data-manager/ClassManagerTab';
 import TextbookManagerTab from './data-manager/TextbookManagerTab';
+import SchoolCatalogManagerModal from './data-manager/SchoolCatalogManagerModal';
 import BulkUpdateModal from './data-manager/BulkUpdateModal';
 import ClassEditor from './data-manager/ClassEditor';
 import {
@@ -78,6 +79,7 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
   const [editingClass, setEditingClass] = useState(null);
   const [editingTextbook, setEditingTextbook] = useState(null);
   const [viewingClassStudents, setViewingClassStudents] = useState(null);
+  const [isSchoolManagerOpen, setIsSchoolManagerOpen] = useState(false);
 
   const currentTabData = useMemo(() => {
     if (activeTab === 'students') {
@@ -170,11 +172,22 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
     }
   };
 
+  const handleSaveSchools = async (rows, deletedIds) => {
+    await dataService.upsertAcademicSchools(rows);
+    if ((deletedIds || []).length > 0) {
+      await dataService.deleteAcademicSchools(deletedIds);
+    }
+    toast.success('학교 마스터를 저장했습니다.');
+    setIsSchoolManagerOpen(false);
+  };
+
   if (editingStudent) {
     return (
       <StudentEditor
         student={editingStudent}
         classes={safeData.classes}
+        students={safeData.students}
+        academicSchools={safeData.academicSchools}
         onSave={handleSaveStudent}
         onCancel={() => setEditingStudent(null)}
         isSaving={actions.isProcessing}
@@ -215,6 +228,14 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
 
   return (
     <div className="view-container">
+      <SchoolCatalogManagerModal
+        open={isSchoolManagerOpen}
+        schools={safeData.academicSchools}
+        onClose={() => setIsSchoolManagerOpen(false)}
+        onSave={handleSaveSchools}
+        isSaving={actions.isProcessing}
+      />
+
       {viewingClassStudents ? (
         <StudentManifestModal
           cls={viewingClassStudents}
@@ -292,6 +313,7 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
             onExport={actions.handleExportData}
             onDownloadSample={actions.handleDownloadSample}
             onUpload={(file) => actions.handleSpreadsheetUpload(file, 'students')}
+            onManageSchools={() => setIsSchoolManagerOpen(true)}
             isBusy={actions.isProcessing}
             sectionDescription={activeMeta.description}
           />

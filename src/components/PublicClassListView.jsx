@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useDeferredValue } from 'react';
 import { ACTIVE_CLASS_STATUS, computeClassStatus } from '../lib/classStatus';
+import { getAllManagedGrades } from '../lib/schoolConfig';
 import { sortSubjectOptions } from '../lib/subjectUtils';
 import { parseSchedule, stripClassPrefix } from '../data/sampleData';
 import useViewport from '../hooks/useViewport';
@@ -40,9 +41,8 @@ function splitLines(value, limit = 2) {
 }
 
 function filterGradeOptions(classes) {
-  return [...new Set(classes.map((item) => normalizeGrade(item.grade)))].sort((left, right) =>
-    left.localeCompare(right, 'ko')
-  );
+  const available = new Set(classes.map((item) => normalizeGrade(item.grade)));
+  return getAllManagedGrades().filter((grade) => available.has(grade));
 }
 
 function PublicInfoTile({ title, icon: Icon, lines, tone = 'green', wide = false }) {

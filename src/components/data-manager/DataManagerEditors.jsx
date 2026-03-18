@@ -3,6 +3,13 @@ import { BookOpen, Plus, Trash2, Users } from 'lucide-react';
 import { createId, getClassDisplayName } from './utils';
 import { CLASS_STATUS_OPTIONS, computeClassStatus } from '../../lib/classStatus';
 import { normalizeClassroomText } from '../../lib/classroomUtils';
+import {
+  buildSchoolMaster,
+  getGradeOptionsForSelection,
+  inferSchoolCategoryFromGrade,
+  schoolKey,
+  SCHOOL_CATEGORY_OPTIONS,
+} from '../../lib/schoolConfig';
 
 function EditorLayout({ title, description, onCancel, onSave, isSaving, children }) {
   return (
@@ -336,6 +343,15 @@ export function ClassEditor({ cls, textbooks, students, requestConfirm, showToas
   const [studentSearch, setStudentSearch] = useState('');
   const [lessonTitle, setLessonTitle] = useState('');
   const [errors, setErrors] = useState({});
+  const schoolCatalog = useMemo(
+    () => buildSchoolMaster([], students || []),
+    [students]
+  );
+  const selectedSchoolCategory = inferSchoolCategoryFromGrade(edited.grade, 'middle');
+  const gradeOptions = useMemo(
+    () => getGradeOptionsForSelection(selectedSchoolCategory),
+    [selectedSchoolCategory]
+  );
 
   const enrolledStudents = useMemo(
     () => (edited.studentIds || []).map((id) => students.find((student) => student.id === id)).filter(Boolean),
@@ -401,6 +417,26 @@ export function ClassEditor({ cls, textbooks, students, requestConfirm, showToas
             />
           </Field>
 
+          <Field label="학교 구분">
+            <select
+              className="styled-input"
+              value={selectedSchoolCategory}
+              onChange={(event) => {
+                const nextCategory = event.target.value;
+                const nextSchools = schoolCatalog.filter((item) => item.category === nextCategory);
+                setEdited((current) => ({
+                  ...current,
+                  school: nextSchools.some((item) => schoolKey(item.name) === schoolKey(current.school)) ? current.school : '',
+                  grade: getGradeOptionsForSelection(nextCategory)[0] || '',
+                }));
+              }}
+            >
+              {SCHOOL_CATEGORY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </Field>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Field label="과목" required error={errors.subject}>
               <input
@@ -411,12 +447,16 @@ export function ClassEditor({ cls, textbooks, students, requestConfirm, showToas
               />
             </Field>
             <Field label="학년">
-              <input
-                type="text"
+              <select
                 className="styled-input"
                 value={edited.grade || ''}
                 onChange={(event) => setEdited((current) => ({ ...current, grade: event.target.value }))}
-              />
+              >
+                <option value="">학년 선택</option>
+                {gradeOptions.map((grade) => (
+                  <option key={grade} value={grade}>{grade}</option>
+                ))}
+              </select>
             </Field>
           </div>
 
@@ -711,7 +751,7 @@ export function ClassEditor({ cls, textbooks, students, requestConfirm, showToas
   );
 }
 
-export function StudentEditor({ student, classes, onSave, onCancel, isSaving }) {
+export function StudentEditor({ student, classes, students = [], academicSchools = [], onSave, onCancel, isSaving }) {
   const [edited, setEdited] = useState({
     ...student,
     classIds: student.classIds || [],
@@ -719,6 +759,23 @@ export function StudentEditor({ student, classes, onSave, onCancel, isSaving }) 
   });
   const [classSearch, setClassSearch] = useState('');
   const [errors, setErrors] = useState({});
+  const schoolCatalog = useMemo(
+    () => buildSchoolMaster(academicSchools || [], students || []),
+    [academicSchools, students]
+  );
+  const selectedSchool = useMemo(
+    () => schoolCatalog.find((item) => schoolKey(item.name) === schoolKey(edited.school)) || null,
+    [edited.school, schoolCatalog]
+  );
+  const selectedSchoolCategory = selectedSchool?.category || inferSchoolCategoryFromGrade(edited.grade, 'middle');
+  const visibleSchools = useMemo(
+    () => schoolCatalog.filter((item) => item.category === selectedSchoolCategory),
+    [schoolCatalog, selectedSchoolCategory]
+  );
+  const gradeOptions = useMemo(
+    () => getGradeOptionsForSelection(selectedSchoolCategory, selectedSchool),
+    [selectedSchool, selectedSchoolCategory]
+  );
 
   const enrolledClasses = useMemo(
     () => (edited.classIds || []).map((id) => classes.find((classItem) => classItem.id === id)).filter(Boolean),
@@ -776,20 +833,34 @@ export function StudentEditor({ student, classes, onSave, onCancel, isSaving }) 
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Field label="학년">
-              <input
-                type="text"
+              <select
                 className="styled-input"
                 value={edited.grade || ''}
                 onChange={(event) => setEdited((current) => ({ ...current, grade: event.target.value }))}
-              />
+              >
+                <option value="">학년 선택</option>
+                {gradeOptions.map((grade) => (
+                  <option key={grade} value={grade}>{grade}</option>
+                ))}
+              </select>
             </Field>
             <Field label="학교">
-              <input
-                type="text"
+              <select
                 className="styled-input"
-                value={edited.school || ''}
-                onChange={(event) => setEdited((current) => ({ ...current, school: event.target.value }))}
-              />
+                value={selectedSchool ? schoolKey(selectedSchool.name) : ''}
+                onChange={(event) => {
+                  const nextSchool = visibleSchools.find((item) => schoolKey(item.name) === event.target.value) || null;
+                  setEdited((current) => ({
+                    ...current,
+                    school: nextSchool?.name || '',
+                  }));
+                }}
+              >
+                <option value="">학교 선택</option>
+                {visibleSchools.map((school) => (
+                  <option key={schoolKey(school.name)} value={schoolKey(school.name)}>{school.name}</option>
+                ))}
+              </select>
             </Field>
           </div>
 

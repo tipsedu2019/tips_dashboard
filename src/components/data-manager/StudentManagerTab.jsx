@@ -19,6 +19,7 @@ export default function StudentManagerTab({
   onDeleteStudent,
   onDownloadSample,
   onUpload,
+  onManageSchools,
   isBusy,
   sectionDescription,
 }) {
@@ -53,6 +54,10 @@ export default function StudentManagerTab({
               await onUpload(file);
               event.target.value = '';
             },
+          },
+          {
+            label: '학교 마스터',
+            onClick: onManageSchools,
           },
         ]}
         selectedCount={selectedIds.size}

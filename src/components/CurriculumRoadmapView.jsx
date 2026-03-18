@@ -6,16 +6,21 @@ import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import { getUserFriendlyDataError } from '../lib/dataErrorUtils';
+import {
+  buildSchoolMaster,
+  getAllManagedGrades,
+  getGradeOptionsForSelection,
+  getGradeSortValue,
+  getGradesForSchoolCategory,
+  inferSchoolCategoryFromGrade,
+  normalizeSchoolCategory as normalizeSharedSchoolCategory,
+  SCHOOL_CATEGORY_FILTER_OPTIONS,
+} from '../lib/schoolConfig';
 import { dataService as sharedDataService } from '../services/dataService';
 
 const DEFAULT_SUBJECT_OPTIONS = ['영어', '수학'];
-const GRADE_ORDER = ['초1', '초2', '초3', '초4', '초5', '초6', '중1', '중2', '중3', '고1', '고2', '고3'];
-const SCHOOL_CATEGORY_OPTIONS = [
-  { value: 'all', label: '전체 구분' },
-  { value: 'elementary', label: '초등' },
-  { value: 'middle', label: '중등' },
-  { value: 'high', label: '고등' },
-];
+const GRADE_ORDER = getAllManagedGrades();
+const SCHOOL_CATEGORY_OPTIONS = SCHOOL_CATEGORY_FILTER_OPTIONS;
 const FIXED_PERIODS = [
   { code: 'S1_MID', label: '1학기 중간', sortOrder: 1, periodType: 'fixed' },
   { code: 'S1_FINAL', label: '1학기 기말', sortOrder: 2, periodType: 'fixed' },
@@ -50,12 +55,11 @@ function schoolKey(value) {
 }
 
 function gradeSort(value) {
-  const index = GRADE_ORDER.indexOf(text(value));
-  return index < 0 ? GRADE_ORDER.length + 99 : index;
+  return getGradeSortValue(value);
 }
 
 function normalizeSchoolCategory(category, fallback = 'high') {
-  return SCHOOL_CATEGORY_OPTIONS.some((option) => option.value === category) ? category : fallback;
+  return normalizeSharedSchoolCategory(category, fallback);
 }
 
 function inferSchoolCategoryFromName(name) {
@@ -189,7 +193,7 @@ function buildSchoolCatalog(students = [], academicSchools = []) {
 }
 
 function buildEditorAnchor(rect) {
-  const width = Math.min(480, Math.max(360, rect.width + 64));
+  const width = Math.min(760, Math.max(620, rect.width + 140));
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
   const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 960;
   let left = rect.left;
@@ -197,8 +201,8 @@ function buildEditorAnchor(rect) {
   if (left + width > viewportWidth - 24) {
     left = Math.max(24, viewportWidth - width - 24);
   }
-  if (top + 520 > viewportHeight - 24) {
-    top = Math.max(24, rect.top - 520 - 12);
+  if (top + 640 > viewportHeight - 24) {
+    top = Math.max(24, rect.top - 640 - 12);
   }
   return { left, top, width };
 }
@@ -323,35 +327,54 @@ function MaterialRowsEditor({ rows = [], detailLabel, titleSuggestions = [], onC
     <div className="roadmap-editor-section-rows">
       {rows.map((row, index) => (
         <div key={row.id} className="roadmap-editor-row">
-          <input
-            className="styled-input"
-            list="roadmap-textbook-suggestions"
-            value={row.title}
-            onChange={(event) => onChangeRow(index, { title: event.target.value })}
-            placeholder="교재명"
-          />
-          <input
-            className="styled-input"
-            value={row.publisher}
-            onChange={(event) => onChangeRow(index, { publisher: event.target.value })}
-            placeholder="출판사"
-          />
-          <textarea
-            className="styled-input"
-            value={row.detail}
-            onChange={(event) => onChangeRow(index, { detail: event.target.value })}
-            placeholder={detailLabel}
-            style={{ minHeight: 74, resize: 'vertical' }}
-          />
-          <input
-            className="styled-input"
-            value={row.note}
-            onChange={(event) => onChangeRow(index, { note: event.target.value })}
-            placeholder="메모"
-          />
-          <button type="button" className="action-chip roadmap-editor-remove" onClick={() => onRemoveRow(index)} aria-label="행 삭제">
-            <Trash2 size={14} />
-          </button>
+          <div className="roadmap-editor-row-head">
+            <label className="academic-field roadmap-editor-field">
+              <span>교재명</span>
+              <input
+                className="styled-input"
+                list="roadmap-textbook-suggestions"
+                value={row.title}
+                onChange={(event) => onChangeRow(index, { title: event.target.value })}
+                placeholder="교재명"
+              />
+            </label>
+            <label className="academic-field roadmap-editor-field">
+              <span>출판사</span>
+              <input
+                className="styled-input"
+                value={row.publisher}
+                onChange={(event) => onChangeRow(index, { publisher: event.target.value })}
+                placeholder="출판사"
+              />
+            </label>
+            <button
+              type="button"
+              className="action-chip roadmap-editor-remove"
+              onClick={() => onRemoveRow(index)}
+              aria-label="행 삭제"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+          <label className="academic-field roadmap-editor-field roadmap-editor-field-detail">
+            <span>{detailLabel}</span>
+            <textarea
+              className="styled-input"
+              value={row.detail}
+              onChange={(event) => onChangeRow(index, { detail: event.target.value })}
+              placeholder={detailLabel}
+              style={{ minHeight: 92, resize: 'vertical' }}
+            />
+          </label>
+          <label className="academic-field roadmap-editor-field roadmap-editor-field-note">
+            <span>메모</span>
+            <input
+              className="styled-input"
+              value={row.note}
+              onChange={(event) => onChangeRow(index, { note: event.target.value })}
+              placeholder="필요할 때만 짧게 메모"
+            />
+          </label>
         </div>
       ))}
       <button type="button" className="action-chip roadmap-editor-add" onClick={onAddRow}>
@@ -490,8 +513,8 @@ export default function CurriculumRoadmapView({
   const yearOptions = useMemo(() => buildYearOptions(data), [data]);
   const subjectOptions = useMemo(() => buildSubjectOptions(data), [data]);
   const schoolCatalog = useMemo(
-    () => buildSchoolCatalog(data.students || [], data.academicSchools || []),
-    [data.students, data.academicSchools]
+    () => buildSchoolMaster(data.academicSchools || [], data.students || []),
+    [data.academicSchools, data.students]
   );
 
   const [activeTab, setActiveTab] = useState('school');
@@ -570,30 +593,6 @@ export default function CurriculumRoadmapView({
   }, [selectedSubject, subjectOptions]);
 
   useEffect(() => {
-    if (selectedSchoolKey !== ALL_SCHOOLS && !schoolOptions.some((school) => schoolKey(school.name) === selectedSchoolKey)) {
-      setSelectedSchoolKey(ALL_SCHOOLS);
-    }
-  }, [schoolOptions, selectedSchoolKey]);
-
-  useEffect(() => {
-    if (selectedSchoolGrade !== ALL_GRADES && !schoolGradeOptions.includes(selectedSchoolGrade)) {
-      setSelectedSchoolGrade(ALL_GRADES);
-    }
-  }, [schoolGradeOptions, selectedSchoolGrade]);
-
-  useEffect(() => {
-    if (selectedAcademyGrade !== ALL_ACADEMY_GRADES && !academyGradeOptions.includes(selectedAcademyGrade)) {
-      setSelectedAcademyGrade(ALL_ACADEMY_GRADES);
-    }
-  }, [academyGradeOptions, selectedAcademyGrade]);
-
-  useEffect(() => {
-    if (selectedAcademyClass !== ALL_CLASSES && !academyClassOptions.some((item) => item.id === selectedAcademyClass)) {
-      setSelectedAcademyClass(ALL_CLASSES);
-    }
-  }, [academyClassOptions, selectedAcademyClass]);
-
-  useEffect(() => {
     if (!navigationIntent) {
       return;
     }
@@ -647,15 +646,10 @@ export default function CurriculumRoadmapView({
     [schoolOptions, selectedSchoolKey]
   );
 
-  const schoolGradeOptions = useMemo(() => {
-    if (selectedSchool) {
-      return selectedSchool.grades;
-    }
-    if (selectedSchoolCategory === 'all') {
-      return GRADE_ORDER;
-    }
-    return getGradesForGroup(selectedSchoolCategory);
-  }, [selectedSchool, selectedSchoolCategory]);
+  const schoolGradeOptions = useMemo(
+    () => getGradeOptionsForSelection(selectedSchoolCategory, selectedSchool),
+    [selectedSchool, selectedSchoolCategory]
+  );
 
   const schoolPeriodOptions = useMemo(() => {
     if (selectedSchoolPeriod === ALL_PERIODS) {
@@ -669,7 +663,7 @@ export default function CurriculumRoadmapView({
     const baseSchools = selectedSchool ? [selectedSchool] : schoolOptions;
     baseSchools.forEach((school) => {
       const grades = selectedSchoolGrade === ALL_GRADES
-        ? (school.grades.length > 0 ? school.grades : getGradesForGroup(school.category))
+        ? (school.grades.length > 0 ? school.grades : getGradesForSchoolCategory(school.category))
         : [selectedSchoolGrade];
       grades.forEach((grade) => {
         if (text(grade)) {
@@ -710,12 +704,17 @@ export default function CurriculumRoadmapView({
     return map;
   }, [data.academicExamMaterialItems]);
 
-  const academyGradeOptions = useMemo(() => mergeGradeLists(
-    (data.classes || []).map((item) => text(item.grade)),
-    (data.academyCurriculumPeriodPlans || []).map((item) => item.academyGrade),
-    (data.academyCurriculumPeriodCatalogs || []).map((item) => item.academyGrade),
-    (data.academyCurriculumPlans || []).map((item) => normalizeAcademyGradeLabel(item.academyGrade))
-  ), [data.classes, data.academyCurriculumPeriodPlans, data.academyCurriculumPeriodCatalogs, data.academyCurriculumPlans]);
+  const academyGradeOptions = useMemo(() => {
+    const available = new Set(
+      [
+        ...(data.classes || []).map((item) => text(item.grade)),
+        ...(data.academyCurriculumPeriodPlans || []).map((item) => text(item.academyGrade)),
+        ...(data.academyCurriculumPeriodCatalogs || []).map((item) => text(item.academyGrade)),
+        ...(data.academyCurriculumPlans || []).map((item) => normalizeAcademyGradeLabel(item.academyGrade)),
+      ].filter(Boolean)
+    );
+    return getAllManagedGrades().filter((grade) => available.has(grade));
+  }, [data.academyCurriculumPeriodCatalogs, data.academyCurriculumPeriodPlans, data.academyCurriculumPlans, data.classes]);
 
   const academyClassOptions = useMemo(() => (
     (data.classes || [])
@@ -728,6 +727,30 @@ export default function CurriculumRoadmapView({
       }))
       .sort((left, right) => gradeSort(left.grade) - gradeSort(right.grade) || left.label.localeCompare(right.label, 'ko'))
   ), [data.classes, selectedAcademyGrade, selectedSubject]);
+
+  useEffect(() => {
+    if (selectedSchoolKey !== ALL_SCHOOLS && !schoolOptions.some((school) => schoolKey(school.name) === selectedSchoolKey)) {
+      setSelectedSchoolKey(ALL_SCHOOLS);
+    }
+  }, [schoolOptions, selectedSchoolKey]);
+
+  useEffect(() => {
+    if (selectedSchoolGrade !== ALL_GRADES && !schoolGradeOptions.includes(selectedSchoolGrade)) {
+      setSelectedSchoolGrade(ALL_GRADES);
+    }
+  }, [schoolGradeOptions, selectedSchoolGrade]);
+
+  useEffect(() => {
+    if (selectedAcademyGrade !== ALL_ACADEMY_GRADES && !academyGradeOptions.includes(selectedAcademyGrade)) {
+      setSelectedAcademyGrade(ALL_ACADEMY_GRADES);
+    }
+  }, [academyGradeOptions, selectedAcademyGrade]);
+
+  useEffect(() => {
+    if (selectedAcademyClass !== ALL_CLASSES && !academyClassOptions.some((item) => item.id === selectedAcademyClass)) {
+      setSelectedAcademyClass(ALL_CLASSES);
+    }
+  }, [academyClassOptions, selectedAcademyClass]);
 
   const academyCatalogs = useMemo(() => (
     (data.academyCurriculumPeriodCatalogs || []).filter(
@@ -1207,7 +1230,7 @@ export default function CurriculumRoadmapView({
               <label className="curriculum-filter-field">
                 <span>학교 구분</span>
                 <select className="styled-input" value={selectedSchoolCategory} onChange={(event) => { setSelectedSchoolCategory(event.target.value); setSelectedSchoolKey(ALL_SCHOOLS); }}>
-                  {SCHOOL_CATEGORY_OPTIONS.map((option) => (
+                  {SCHOOL_CATEGORY_FILTER_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>

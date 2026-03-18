@@ -1211,6 +1211,17 @@ export class DataService {
     return (data || []).map((row) => this._processAcademicSchool(row));
   }
 
+  async deleteAcademicSchools(ids = []) {
+    const client = this._ensureClient();
+    const targets = [...new Set((ids || []).filter(Boolean))];
+    if (targets.length === 0) {
+      return;
+    }
+    const { error } = await client.from('academic_schools').delete().in('id', targets);
+    if (error) throw error;
+    this._notify();
+  }
+
   async bulkUpsertAcademicCurriculumProfiles(profiles) {
     const client = this._ensureClient();
     const requestedProfiles = (profiles || []).filter((profile) => profile?.schoolId && profile?.grade && profile?.subject);
