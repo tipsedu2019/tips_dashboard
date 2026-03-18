@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Camera, Users } from 'lucide-react';
 import {
@@ -31,10 +31,17 @@ import {
   collectGradeOptions,
   collectSubjectOptions,
   collectTeacherEntries,
+  computeTimetableWindow,
+  formatCollapsedTimeHint,
   getClassColor,
   getClassMeta,
+  getTimetableCompareGridStyle,
+  getTimetableDensity,
+  getTimetableSlotHeight,
+  rebaseBlocksToWindow,
   resolveSlotClassroom,
   resolveSlotTeachers,
+  toggleCompareSelection,
 } from './timetableViewUtils';
 import {
   applySlotMove,
@@ -67,7 +74,7 @@ export default function DailyTeacherView({
   data,
   dataService,
   onBack,
-  defaultStatus = '수업 진행 중',
+  defaultStatus = '\uC218\uC5C5 \uC9C4\uD589 \uC911',
   defaultPeriod = '',
   termKey = '',
   termStatus = defaultStatus,
@@ -75,22 +82,24 @@ export default function DailyTeacherView({
   embedded = false,
   floatingFilters = false,
   subjectOptions = [],
-  selectedSubject = '전체',
+  selectedSubject = '\uC804\uCCB4',
   onSelectSubject = () => {},
 }) {
   const { isMobile } = useViewport();
   const toast = useToast();
   const { isStaff, isTeacher, user } = useAuth();
   const [selectedDay, setSelectedDay] = useState(ALL_DAYS);
+  const [compareDayKeys, setCompareDayKeys] = useState(null);
   const [selectedMobileTeacher, setSelectedMobileTeacher] = useState('');
   const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
   const [createState, setCreateState] = useState(null);
   const [moveState, setMoveState] = useState(null);
+  const [sharedMoveState, setSharedMoveState] = useState(null);
   const [plannerMode, setPlannerMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const scheduleRef = useRef(null);
 
-  const timeSlots = useMemo(() => generateTimeSlots(9, 24), []);
+  const timeSlots = useMemo(() => generateTimeSlots(11, 24).filter((slot) => !slot.startsWith('23:30-')), []);
   const teacherEntries = useMemo(() => collectTeacherEntries(classes), [classes]);
   const classroomOptions = useMemo(() => collectClassroomEntries(classes).map((entry) => entry.label), [classes]);
   const fieldOptions = useMemo(() => ({
@@ -100,7 +109,7 @@ export default function DailyTeacherView({
     classrooms: classroomOptions,
   }), [classes, teacherEntries, classroomOptions]);
   const teacherIndexMap = useMemo(() => new Map(teacherEntries.map((entry, index) => [entry.key, index])), [teacherEntries]);
-  const canEditTimetable = Boolean(isStaff && selectedDay !== ALL_DAYS);
+  const canEditTimetable = Boolean(isStaff);
   const canExportImage = selectedDay !== ALL_DAYS;
 
   useEffect(() => {
@@ -123,11 +132,34 @@ export default function DailyTeacherView({
     }
   }, [isMobile, selectedMobileTeacher, teacherEntries]);
   useEffect(() => {
+    if (isMobile) {
+      return;
+    }
+    setCompareDayKeys((current) => {
+      if (current === null) {
+        return current;
+      }
+      return current.filter((day) => DAY_LABELS.includes(day));
+    });
+  }, [isMobile]);
+  useEffect(() => {
+    if (isMobile) {
+      return;
+    }
+    const effectiveCompareKeys = compareDayKeys ?? [...DAY_LABELS];
+    if (effectiveCompareKeys.length === 1) {
+      setSelectedDay(effectiveCompareKeys[0]);
+      return;
+    }
+    setSelectedDay(ALL_DAYS);
+  }, [compareDayKeys, isMobile]);
+  useEffect(() => {
     if (!plannerMode) {
       return;
     }
     setCreateState(null);
     setMoveState(null);
+    setSharedMoveState(null);
   }, [plannerMode]);
   useEffect(() => {
     const openPlanner = () => setPlannerMode(true);
@@ -151,8 +183,8 @@ export default function DailyTeacherView({
           const classroom = resolveSlotClassroom(cls, slot) || cls.classroom || cls.room || '-';
           const canOpen = canTeacherOpenClass({ isStaff, isTeacher, user, teacherNames });
           const palette = getClassColor(colorIndex);
-          const startSlot = timeToSlotIndex(slot.start, 9);
-          const endSlot = Math.max(timeToSlotIndex(slot.end, 9), startSlot + 1);
+          const startSlot = Math.max(0, timeToSlotIndex(slot.start, 11));
+          const endSlot = Math.max(Math.min(timeToSlotIndex(slot.end, 11), timeSlots.length), startSlot + 1);
           const editSlot = editableSlots[slotIndex];
 
           return teacherNames.flatMap((teacherName) => {
@@ -177,13 +209,56 @@ export default function DailyTeacherView({
               variantDotTitle: editableState.editable ? '드래그로 이동할 수 있습니다.' : editableState.reason,
               header: cls.subject ? `[${cls.subject}]` : '',
               title: stripClassPrefix(cls.className),
-              detailLines: [{ label: '강의실', value: classroom }],
+              sourceDay: slot.day,
+              detailLines: [{ label: '\uAC15\uC758\uC2E4', value: classroom }],
               tooltip: buildTimetableTooltip({ cls, teacher: teacherName, classroom, meta }),
             }];
           });
         });
       }),
-    [classes, teacherIndexMap, canEditTimetable, isStaff, isTeacher, user]
+    [classes, teacherIndexMap, canEditTimetable, isStaff, isTeacher, timeSlots.length, user]
+  );
+
+  const targetsToRender = useMemo(() => {
+    if (!isMobile) {
+      const effectiveCompareKeys = compareDayKeys ?? [...DAY_LABELS];
+      const compareSet = new Set(effectiveCompareKeys);
+      return DAY_LABELS.filter((dayLabel) => compareSet.has(dayLabel));
+    }
+    if (selectedDay === ALL_DAYS) {
+      return DAY_LABELS;
+    }
+    return [selectedDay];
+  }, [compareDayKeys, isMobile, selectedDay]);
+
+  const blocksByDay = useMemo(
+    () => Object.fromEntries(targetsToRender.map((dayLabel) => [dayLabel, buildBlocksForDay(dayLabel)])),
+    [buildBlocksForDay, targetsToRender]
+  );
+
+  const visibleWindow = useMemo(
+    () => computeTimetableWindow(Object.values(blocksByDay), timeSlots.length, { paddingSlots: 0, defaultVisibleSlots: 8, minVisibleSlots: 6 }),
+    [blocksByDay, timeSlots.length]
+  );
+
+  const windowedTimeSlots = useMemo(
+    () => timeSlots.slice(visibleWindow.startSlot, visibleWindow.endSlot),
+    [timeSlots, visibleWindow.endSlot, visibleWindow.startSlot]
+  );
+
+  const collapsedTimeHint = useMemo(
+    () => formatCollapsedTimeHint(timeSlots, visibleWindow.startSlot, visibleWindow.endSlot),
+    [timeSlots, visibleWindow.endSlot, visibleWindow.startSlot]
+  );
+
+  const timetableDensity = useMemo(
+    () => getTimetableDensity(Math.max(1, targetsToRender.length), visibleWindow.visibleSlotCount),
+    [targetsToRender.length, visibleWindow.visibleSlotCount]
+  );
+
+  const slotHeight = useMemo(
+    () => getTimetableSlotHeight(timetableDensity),
+    [timetableDensity]
   );
 
   const handleSaveImage = useCallback(async () => {
@@ -217,7 +292,7 @@ export default function DailyTeacherView({
     const range = getRangeFromSlots(timeSlots, startSlot, endSlot);
     const teacher = teacherEntries[columnIndex]?.label || '';
     setCreateState({
-      summary: { day: selectedDay, start: range.start, end: range.end, fixedAxisLabel: '선생님', fixedAxisValue: teacher },
+      summary: { day: selectedDay, start: range.start, end: range.end, fixedAxisLabel: '\uC120\uC0DD\uB2D8', fixedAxisValue: teacher },
       draft: buildQuickCreateDraft({
         day: selectedDay,
         start: range.start,
@@ -231,21 +306,80 @@ export default function DailyTeacherView({
     });
   };
 
-  const handleMoveBlock = ({ block, columnIndex, startSlot }) => {
+  const handleMoveBlock = useCallback(({ block, columnIndex, startSlot, gridKey }) => {
     const range = getRangeFromSlots(timeSlots, startSlot, startSlot + (block.endSlot - block.startSlot));
     const teacher = teacherEntries[columnIndex]?.label || '';
+    const day = gridKey || selectedDay;
     setMoveState({
       block,
-      next: { day: selectedDay, ...range, teacher },
+      currentDay: block.sourceDay || selectedDay,
+      next: { day, ...range, teacher },
       warnings: findScheduleConflicts({
         classes,
         ignoreClassId: block.editData.classItem.id,
-        slot: { day: selectedDay, start: range.start, end: range.end },
+        slot: { day, start: range.start, end: range.end },
         teacher,
         classroom: block.editData.classroom,
       }),
     });
-  };
+  }, [classes, selectedDay, teacherEntries, timeSlots]);
+
+  const handleSharedMoveStart = useCallback(({ gridKey, block }) => {
+    setSharedMoveState({
+      sourceGridKey: gridKey,
+      targetGridKey: gridKey,
+      block,
+      targetColumnIndex: block.columnIndex,
+      targetStartSlot: block.startSlot,
+      blockDuration: block.endSlot - block.startSlot,
+    });
+  }, []);
+
+  const handleSharedMoveUpdate = useCallback(({ gridKey, columnIndex, rowIndex }) => {
+    setSharedMoveState((current) => (
+      current
+        ? {
+            ...current,
+            targetGridKey: gridKey,
+            targetColumnIndex: columnIndex,
+            targetStartSlot: rowIndex,
+          }
+        : current
+    ));
+  }, []);
+
+  useEffect(() => {
+    if (!sharedMoveState) {
+      return undefined;
+    }
+
+    const handleSharedPointerUp = () => {
+      setSharedMoveState((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const moved =
+          current.sourceGridKey !== current.targetGridKey ||
+          current.block.columnIndex !== current.targetColumnIndex ||
+          current.block.startSlot !== current.targetStartSlot;
+
+        if (moved) {
+          handleMoveBlock({
+            block: current.block,
+            columnIndex: current.targetColumnIndex,
+            startSlot: current.targetStartSlot + visibleWindow.startSlot,
+            gridKey: current.targetGridKey,
+          });
+        }
+
+        return null;
+      });
+    };
+
+    window.addEventListener('mouseup', handleSharedPointerUp);
+    return () => window.removeEventListener('mouseup', handleSharedPointerUp);
+  }, [handleMoveBlock, sharedMoveState, visibleWindow.startSlot]);
 
   const confirmCreate = async () => {
     const validationError = validateQuickCreateDraft(createState?.draft);
@@ -302,13 +436,14 @@ export default function DailyTeacherView({
   };
 
   const renderGrid = (dayLabel) => {
-    const blocks = buildBlocksForDay(dayLabel);
-    const isAllView = selectedDay === ALL_DAYS;
-    const showEditableEmptyGrid = !isAllView && canEditTimetable && dayLabel === selectedDay && blocks.length === 0;
+    const blocks = blocksByDay[dayLabel] || [];
+    const windowedBlocks = rebaseBlocksToWindow(blocks, visibleWindow.startSlot, visibleWindow.endSlot);
+    const compareActive = !isMobile && targetsToRender.length !== 1;
+    const showEditableEmptyGrid = !compareActive && canEditTimetable && dayLabel === selectedDay && blocks.length === 0;
     const showEmptyState = blocks.length === 0 && !showEditableEmptyGrid;
 
     return (
-      <section className={`card ${isAllView ? 'view-all-container' : ''}`} key={dayLabel} style={{ position: 'relative', padding: 24, marginBottom: isAllView ? 0 : 24, breakInside: 'avoid' }}>
+      <section className="card timetable-compare-card" key={dayLabel} style={{ position: 'relative', padding: 14, marginBottom: compareActive ? 0 : 18, breakInside: 'avoid' }}>
         <button
           type="button"
           className="timetable-card-camera"
@@ -317,27 +452,38 @@ export default function DailyTeacherView({
         >
           <Camera size={14} />
         </button>
-        <h2 style={{ marginBottom: 16, fontSize: 18, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Users size={20} className="text-accent" /> {dayLabel}요일 선생님 시간표
+        <h2 style={{ marginBottom: 10, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Users size={18} className="text-accent" /> {dayLabel}
         </h2>
-        {showEditableEmptyGrid && (
+        {showEditableEmptyGrid ? (
           <div style={{ marginBottom: 14, color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
-            아직 배정된 수업이 없습니다. 빈 시간표를 드래그해서 개강 준비 중 수업을 바로 생성할 수 있습니다.
+            {'\uBE48 \uC2DC\uAC04\uC744 \uB4DC\uB798\uADF8\uD558\uBA74 \uC774 \uC694\uC77C \uAE30\uC900\uC73C\uB85C \uBC14\uB85C \uC218\uC5C5\uC744 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.'}
           </div>
-        )}
+        ) : null}
         {showEmptyState ? (
           <EmptyState message="해당 요일에 배정된 선생님 수업이 없습니다." />
         ) : (
-          <div className={isAllView ? 'view-all-mode' : undefined} style={isAllView ? { overflow: 'hidden', height: `${Math.round((timeSlots.length * 48 + 48) * 0.65)}px` } : undefined}>
+          <div className="timetable-window-shell">
+            {collapsedTimeHint.topLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.topLabel}</div> : null}
             <TimetableGrid
+              gridKey={dayLabel}
               columns={teacherEntries.map((entry) => entry.label)}
-              timeSlots={timeSlots}
-              blocks={blocks}
-              timeLabel="시간"
-              editable={Boolean(canEditTimetable && dayLabel === selectedDay)}
+              timeSlots={windowedTimeSlots}
+              blocks={windowedBlocks}
+              slotOffset={visibleWindow.startSlot}
+              timeLabel={'\uC2DC\uAC04'}
+              editable={Boolean(canEditTimetable && (compareActive || dayLabel === selectedDay))}
+              editableMode={compareActive ? 'move' : 'edit'}
               onCreateSelection={handleCreateSelection}
               onMoveBlock={handleMoveBlock}
+              sharedDragState={compareActive ? sharedMoveState : null}
+              onSharedDragStart={compareActive ? handleSharedMoveStart : undefined}
+              onSharedDragUpdate={compareActive ? handleSharedMoveUpdate : undefined}
+              slotHeight={slotHeight}
+              density={timetableDensity}
+              shellClassName="timetable-compact-shell"
             />
+            {collapsedTimeHint.bottomLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.bottomLabel}</div> : null}
           </div>
         )}
       </section>
@@ -345,7 +491,6 @@ export default function DailyTeacherView({
   };
 
   const dayTabs = isMobile ? DAY_LABELS : [ALL_DAYS, ...DAY_LABELS];
-  const targetsToRender = selectedDay === ALL_DAYS ? DAY_LABELS : [selectedDay];
   const mobileBlocks = useMemo(
     () => (selectedDay === ALL_DAYS ? [] : buildBlocksForDay(selectedDay)),
     [buildBlocksForDay, selectedDay]
@@ -383,62 +528,16 @@ export default function DailyTeacherView({
 
   return (
     <div className="animate-in">
-      {floatingFilters && floatingPanelTarget && createPortal(
+      {floatingFilters && floatingPanelTarget && !isMobile && createPortal(
         <div className="timetable-floating-controls">
-          <div className="h-segment-container timetable-floating-selector">
-            {dayTabs.map((dayLabel) => (
-              <button key={dayLabel} className={`h-segment-btn ${selectedDay === dayLabel ? 'active' : ''}`} onClick={() => setSelectedDay(dayLabel)}>	
-                {dayLabel === ALL_DAYS ? '\uC804\uCCB4 \uBCF4\uAE30' : `${dayLabel}\uC694\uC77C`}
-              </button>
-            ))}
-          </div>
           <button className="action-pill timetable-floating-action" onClick={() => setPlannerMode(true)}>	
             {'\uBC30\uCE58 \uBAA8\uB4DC \uC5F4\uAE30'}
           </button>
         </div>,
         floatingPanelTarget
       )}
-      {!embedded ? (
-        <div className="page-header">
-          <div>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {onBack && (
-                <button className="btn-icon" onClick={onBack} style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border-color)' }}>
-                  <ArrowLeft size={20} />
-                </button>
-              )}
-              <Users size={28} /> 일별 선생님 시간표
-            </h1>
-            <p>요일별 선생님 배정을 보고, 직원 권한에서는 블록 드래그로 수업 생성과 이동을 빠르게 처리할 수 있습니다.</p>
-          </div>
-        </div>
-      ) : !floatingFilters ? (
-        <div className="embedded-view-toolbar">
-          <div className="embedded-view-copy">
-            <div className="embedded-view-title">일별 선생님 시간표</div>
-            <div className="embedded-view-description">요일별 선생님 배치를 빠르게 보고 수정할 수 있습니다.</div>
-          </div>
-        </div>
-      ) : null}
-
-      <div className={`filter-bar ${floatingFilters ? 'filter-bar-floating' : ''}`} style={{ display: !isMobile ? 'none' : undefined }}>
-        {floatingFilters && (
-          <div className="timetable-inline-subject-filter">
-            <span className="timetable-inline-subject-label">과목</span>
-            <div className="h-segment-container timetable-inline-subject-segment">
-              {subjectOptions.map((subject) => (
-                <button
-                  key={subject}
-                  type="button"
-                  className={`h-segment-btn ${selectedSubject === subject ? 'active' : ''}`}
-                  onClick={() => onSelectSubject(subject)}
-                >
-                  {subject}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+      {isMobile ? (
+      <div className={`filter-bar ${floatingFilters ? 'filter-bar-floating' : 'timetable-axis-filter'}`} style={{ display: !isMobile && floatingFilters ? 'none' : undefined }}>
         <div className="h-segment-container">
           {dayTabs.map((dayLabel) => (
             <button key={dayLabel} className={`h-segment-btn ${selectedDay === dayLabel ? 'active' : ''}`} onClick={() => setSelectedDay(dayLabel)}>
@@ -447,6 +546,43 @@ export default function DailyTeacherView({
           ))}
         </div>
       </div>
+      ) : null}
+      {!isMobile ? (() => {
+        const allDayKeys = [...DAY_LABELS];
+        const effectiveCompareKeys = compareDayKeys ?? allDayKeys;
+        const hasAllDaysSelected = effectiveCompareKeys.length === allDayKeys.length;
+        return (
+          <div className="timetable-compare-toolbar">
+            <div className="timetable-compare-density">
+              <button
+                type="button"
+                className={`h-segment-btn ${hasAllDaysSelected ? 'active' : ''}`}
+                onClick={() => setCompareDayKeys((current) => {
+                  const base = current ?? allDayKeys;
+                  return base.length === allDayKeys.length ? [] : allDayKeys;
+                })}
+              >
+                전체 보기
+              </button>
+            </div>
+            <div className="timetable-compare-targets">
+              {DAY_LABELS.map((dayLabel) => (
+                <button
+                  key={dayLabel}
+                  type="button"
+                  className={`timetable-compare-chip ${effectiveCompareKeys.includes(dayLabel) ? 'is-active' : ''}`}
+                  onClick={() => setCompareDayKeys((current) => {
+                    const base = current ?? allDayKeys;
+                    return toggleCompareSelection(base, dayLabel);
+                  })}
+                >
+                  {`${dayLabel}요일`}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })() : null}
       {teacherEntries.length === 0 ? (
         <div className="card" style={{ padding: 28 }}>
           <EmptyState message="표시할 선생님 데이터가 없습니다." />
@@ -454,7 +590,7 @@ export default function DailyTeacherView({
       ) : isMobile ? (
         <div ref={scheduleRef} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <MobileAgendaTimetable
-            title={selectedDay === ALL_DAYS ? '일별 선생님 시간표' : `${selectedDay}요일 선생님 시간표`}
+            title={selectedDay === ALL_DAYS ? '\uC77C\uBCC4 \uC120\uC0DD\uB2D8 \uC2DC\uAC04\uD45C' : selectedDay + '\uC694\uC77C \uC120\uC0DD\uB2D8 \uC2DC\uAC04\uD45C'}
             options={teacherEntries.map((entry) => ({ key: entry.key, label: entry.label }))}
             selectedKey={selectedMobileTeacher}
             onSelectKey={setSelectedMobileTeacher}
@@ -468,7 +604,11 @@ export default function DailyTeacherView({
           />
         </div>
       ) : (
-        <div ref={scheduleRef} className={selectedDay === ALL_DAYS ? 'view-all-grid-container' : undefined}>
+        <div
+          ref={scheduleRef}
+          className={targetsToRender.length > 1 ? 'view-all-grid-container timetable-compare-layout' : 'timetable-single-layout'}
+          style={targetsToRender.length > 1 ? getTimetableCompareGridStyle(targetsToRender.length) : undefined}
+        >
           {targetsToRender.map(renderGrid)}
         </div>
       )}
@@ -499,18 +639,13 @@ export default function DailyTeacherView({
         mode="move"
         draft={{}}
         summary={moveState ? {
-          day: moveState.next.day,
-          start: moveState.next.start,
-          end: moveState.next.end,
-          fixedAxisLabel: '선생님',
-          fixedAxisValue: moveState.next.teacher,
           className: stripClassPrefix(moveState.block.editData.classItem.className),
-          previousTime: `${selectedDay} ${getRangeFromSlots(timeSlots, moveState.block.startSlot, moveState.block.endSlot).start} ~ ${getRangeFromSlots(timeSlots, moveState.block.startSlot, moveState.block.endSlot).end}`,
+          currentTime: `${moveState.currentDay} ${getRangeFromSlots(timeSlots, moveState.block.absoluteStartSlot ?? moveState.block.startSlot, moveState.block.absoluteEndSlot ?? moveState.block.endSlot).start} ~ ${getRangeFromSlots(timeSlots, moveState.block.absoluteStartSlot ?? moveState.block.startSlot, moveState.block.absoluteEndSlot ?? moveState.block.endSlot).end}`,
           nextTime: `${moveState.next.day} ${moveState.next.start} ~ ${moveState.next.end}`,
-          previousAxisLabel: '이전 선생님',
-          previousAxis: moveState.block.editData.teacher,
-          nextAxisLabel: '변경 선생님',
-          nextAxis: moveState.next.teacher,
+          currentTeacher: moveState.block.editData.teacher,
+          nextTeacher: moveState.next.teacher,
+          currentClassroom: moveState.block.editData.classroom,
+          nextClassroom: moveState.block.editData.classroom,
         } : {}}
         warnings={moveState?.warnings || []}
         busy={isSaving}
@@ -530,3 +665,7 @@ export default function DailyTeacherView({
     </div>
   );
 }
+
+
+
+

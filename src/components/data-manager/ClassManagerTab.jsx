@@ -27,7 +27,8 @@ export default function ClassManagerTab({
     <>
       <ManagementHeader
         title="수업 관리"
-        count={filteredData.length}
+        count={tableControls.totalCount}
+        hideSummary
         searchValue={tableControls.searchQuery}
         onSearchChange={tableControls.setSearchQuery}
         tableControls={tableControls}
@@ -67,7 +68,7 @@ export default function ClassManagerTab({
 
       <DataListView
         columns={tableControls.visibleColumns}
-        listData={filteredData}
+        listData={tableControls.pagedData}
         rowModels={tableControls.rowModels}
         emptyTitle="등록된 수업 데이터가 없습니다."
         emptyDescription="수업을 직접 등록하거나 템플릿 업로드로 운영 수업 목록을 채워 주세요."
@@ -86,6 +87,14 @@ export default function ClassManagerTab({
         sortKey={tableControls.sortState.key}
         sortDirection={tableControls.sortState.direction}
         onSortChange={tableControls.toggleSort}
+        page={tableControls.page}
+        pageSize={tableControls.pageSize}
+        totalPages={tableControls.totalPages}
+        totalCount={tableControls.totalCount}
+        pageStart={tableControls.pageStart}
+        pageEnd={tableControls.pageEnd}
+        onPageChange={tableControls.setPage}
+        onPageSizeChange={tableControls.setPageSize}
       />
     </>
   );

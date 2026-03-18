@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Camera, School } from 'lucide-react';
 import {
@@ -31,10 +31,17 @@ import {
   collectGradeOptions,
   collectSubjectOptions,
   collectTeacherEntries,
+  computeTimetableWindow,
+  formatCollapsedTimeHint,
   getClassColor,
   getClassMeta,
+  getTimetableCompareGridStyle,
+  getTimetableDensity,
+  getTimetableSlotHeight,
+  rebaseBlocksToWindow,
   resolveSlotClassroom,
   resolveSlotTeachers,
+  toggleCompareSelection,
 } from './timetableViewUtils';
 import {
   applySlotMove,
@@ -76,7 +83,7 @@ export default function ClassroomWeeklyView({
   dataService,
   onViewStudentSchedule,
   onBack,
-  defaultStatus = '수업 진행 중',
+  defaultStatus = '\uC218\uC5C5 \uC9C4\uD589 \uC911',
   defaultPeriod = '',
   termKey = '',
   termStatus = defaultStatus,
@@ -84,22 +91,24 @@ export default function ClassroomWeeklyView({
   embedded = false,
   floatingFilters = false,
   subjectOptions = [],
-  selectedSubject = '전체',
+  selectedSubject = '\uC804\uCCB4',
   onSelectSubject = () => {},
 }) {
   const { isMobile } = useViewport();
   const toast = useToast();
   const { isStaff, isTeacher, user } = useAuth();
   const [selectedClassroom, setSelectedClassroom] = useState(ALL_CLASSROOMS);
+  const [compareClassroomKeys, setCompareClassroomKeys] = useState(null);
   const [selectedMobileDay, setSelectedMobileDay] = useState(DAY_LABELS[0]);
   const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
   const [createState, setCreateState] = useState(null);
   const [moveState, setMoveState] = useState(null);
+  const [sharedMoveState, setSharedMoveState] = useState(null);
   const [plannerMode, setPlannerMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const scheduleRef = useRef(null);
 
-  const timeSlots = useMemo(() => generateTimeSlots(9, 24), []);
+  const timeSlots = useMemo(() => generateTimeSlots(11, 24).filter((slot) => !slot.startsWith('23:30-')), []);
   const classroomEntries = useMemo(() => collectClassroomEntries(allClasses), [allClasses]);
   const teacherOptions = useMemo(() => collectTeacherEntries(allClasses).map((entry) => entry.label), [allClasses]);
   const fieldOptions = useMemo(() => ({
@@ -130,19 +139,47 @@ export default function ClassroomWeeklyView({
     setSelectedClassroom(classroomEntries[0].key);
   }, [classroomEntries, isMobile, selectedClassroom]);
   useEffect(() => {
+    if (isMobile) {
+      return;
+    }
+    const available = new Set(classroomEntries.map((entry) => entry.key));
+    setCompareClassroomKeys((current) => {
+      if (current === null) {
+        return current;
+      }
+      return current.filter((key) => available.has(key));
+    });
+  }, [classroomEntries, isMobile]);
+  useEffect(() => {
+    if (isMobile) {
+      return;
+    }
+    const effectiveCompareKeys = compareClassroomKeys ?? classroomEntries.map((entry) => entry.key);
+    if (effectiveCompareKeys.length === 1) {
+      setSelectedClassroom(effectiveCompareKeys[0]);
+      return;
+    }
+    setSelectedClassroom(ALL_CLASSROOMS);
+  }, [compareClassroomKeys, classroomEntries, isMobile]);
+  useEffect(() => {
     if (!plannerMode) {
       return;
     }
     setCreateState(null);
     setMoveState(null);
+    setSharedMoveState(null);
   }, [plannerMode]);
   useEffect(() => {
     const openPlanner = () => setPlannerMode(true);
     window.addEventListener('tips-open-planner', openPlanner);
     return () => window.removeEventListener('tips-open-planner', openPlanner);
   }, []);
-  const canEditTimetable = Boolean(isStaff && selectedClassroom !== ALL_CLASSROOMS && selectedClassroomEntry);
+  const canEditTimetable = Boolean(isStaff);
   const canExportImage = selectedClassroom !== ALL_CLASSROOMS && Boolean(selectedClassroomEntry);
+  const classroomLabelByKey = useMemo(
+    () => new Map(classroomEntries.map((entry) => [entry.key, entry.label])),
+    [classroomEntries]
+  );
 
   const buildBlocksForClassroom = useCallback(
     (targetKey) =>
@@ -167,8 +204,8 @@ export default function ClassroomWeeklyView({
           }
 
           const palette = getClassColor(colorIndex);
-          const startSlot = timeToSlotIndex(slot.start, 9);
-          const endSlot = Math.max(timeToSlotIndex(slot.end, 9), startSlot + 1);
+          const startSlot = Math.max(0, timeToSlotIndex(slot.start, 11));
+          const endSlot = Math.max(Math.min(timeToSlotIndex(slot.end, 11), timeSlots.length), startSlot + 1);
           const editSlot = editableSlots[slotIndex];
 
           return [{
@@ -192,12 +229,54 @@ export default function ClassroomWeeklyView({
             variantDotTitle: editableState.editable ? '드래그로 이동할 수 있습니다.' : editableState.reason,
             header: cls.subject ? `[${cls.subject}]` : '',
             title: stripClassPrefix(cls.className),
-            detailLines: [{ label: '선생님', value: primaryTeacher }],
+            detailLines: [{ label: '\uC120\uC0DD\uB2D8', value: primaryTeacher }],
             tooltip: buildTimetableTooltip({ cls, teacher: primaryTeacher, classroom, meta }),
           }];
         });
       }),
-    [classes, canEditTimetable, isStaff, isTeacher, user]
+    [classes, canEditTimetable, isStaff, isTeacher, timeSlots.length, user]
+  );
+
+  const targetsToRender = useMemo(() => {
+    if (!isMobile) {
+      const effectiveCompareKeys = compareClassroomKeys ?? classroomEntries.map((entry) => entry.key);
+      const compareSet = new Set(effectiveCompareKeys);
+      return classroomEntries.filter((entry) => compareSet.has(entry.key));
+    }
+    if (selectedClassroom === ALL_CLASSROOMS) {
+      return classroomEntries;
+    }
+    return classroomEntries.filter((entry) => entry.key === selectedClassroom);
+  }, [classroomEntries, compareClassroomKeys, isMobile, selectedClassroom]);
+
+  const blocksByClassroomKey = useMemo(
+    () => Object.fromEntries(targetsToRender.map((entry) => [entry.key, buildBlocksForClassroom(entry.key)])),
+    [buildBlocksForClassroom, targetsToRender]
+  );
+
+  const visibleWindow = useMemo(
+    () => computeTimetableWindow(Object.values(blocksByClassroomKey), timeSlots.length, { paddingSlots: 0, defaultVisibleSlots: 8, minVisibleSlots: 6 }),
+    [blocksByClassroomKey, timeSlots.length]
+  );
+
+  const windowedTimeSlots = useMemo(
+    () => timeSlots.slice(visibleWindow.startSlot, visibleWindow.endSlot),
+    [timeSlots, visibleWindow.endSlot, visibleWindow.startSlot]
+  );
+
+  const collapsedTimeHint = useMemo(
+    () => formatCollapsedTimeHint(timeSlots, visibleWindow.startSlot, visibleWindow.endSlot),
+    [timeSlots, visibleWindow.endSlot, visibleWindow.startSlot]
+  );
+
+  const timetableDensity = useMemo(
+    () => getTimetableDensity(Math.max(1, targetsToRender.length), visibleWindow.visibleSlotCount),
+    [targetsToRender.length, visibleWindow.visibleSlotCount]
+  );
+
+  const slotHeight = useMemo(
+    () => getTimetableSlotHeight(timetableDensity),
+    [timetableDensity]
   );
 
   const handleSaveImage = useCallback(async () => {
@@ -237,7 +316,7 @@ export default function ClassroomWeeklyView({
         day,
         start: range.start,
         end: range.end,
-        fixedAxisLabel: '강의실',
+        fixedAxisLabel: '\uAC15\uC758\uC2E4',
         fixedAxisValue: selectedClassroomEntry.label,
       },
       draft: buildQuickCreateDraft({
@@ -253,23 +332,81 @@ export default function ClassroomWeeklyView({
     });
   };
 
-  const handleMoveBlock = ({ block, columnIndex, startSlot }) => {
+  const handleMoveBlock = useCallback(({ block, columnIndex, startSlot, gridKey }) => {
     const range = getRangeFromSlots(timeSlots, startSlot, startSlot + (block.endSlot - block.startSlot));
     const day = DAY_LABELS[columnIndex];
+    const nextClassroom = (gridKey ? classroomLabelByKey.get(gridKey) : selectedClassroomEntry?.label) || '';
     const warnings = findScheduleConflicts({
       classes,
       ignoreClassId: block.editData.classItem.id,
       slot: { day, start: range.start, end: range.end },
       teacher: block.editData.teacher,
-      classroom: selectedClassroomEntry?.label,
+      classroom: nextClassroom,
     });
 
     setMoveState({
       block,
-      next: { day, ...range, classroom: selectedClassroomEntry?.label || '' },
+      next: { day, ...range, classroom: nextClassroom },
       warnings,
     });
-  };
+  }, [classes, classroomLabelByKey, selectedClassroomEntry, timeSlots]);
+
+  const handleSharedMoveStart = useCallback(({ gridKey, block }) => {
+    setSharedMoveState({
+      sourceGridKey: gridKey,
+      targetGridKey: gridKey,
+      block,
+      targetColumnIndex: block.columnIndex,
+      targetStartSlot: block.startSlot,
+      blockDuration: block.endSlot - block.startSlot,
+    });
+  }, []);
+
+  const handleSharedMoveUpdate = useCallback(({ gridKey, columnIndex, rowIndex }) => {
+    setSharedMoveState((current) => (
+      current
+        ? {
+            ...current,
+            targetGridKey: gridKey,
+            targetColumnIndex: columnIndex,
+            targetStartSlot: rowIndex,
+          }
+        : current
+    ));
+  }, []);
+
+  useEffect(() => {
+    if (!sharedMoveState) {
+      return undefined;
+    }
+
+    const handleSharedPointerUp = () => {
+      setSharedMoveState((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const moved =
+          current.sourceGridKey !== current.targetGridKey ||
+          current.block.columnIndex !== current.targetColumnIndex ||
+          current.block.startSlot !== current.targetStartSlot;
+
+        if (moved) {
+          handleMoveBlock({
+            block: current.block,
+            columnIndex: current.targetColumnIndex,
+            startSlot: current.targetStartSlot + visibleWindow.startSlot,
+            gridKey: current.targetGridKey,
+          });
+        }
+
+        return null;
+      });
+    };
+
+    window.addEventListener('mouseup', handleSharedPointerUp);
+    return () => window.removeEventListener('mouseup', handleSharedPointerUp);
+  }, [handleMoveBlock, sharedMoveState, visibleWindow.startSlot]);
 
   const confirmCreate = async () => {
     const validationError = validateQuickCreateDraft(createState?.draft, { needsTeacher: true });
@@ -327,13 +464,14 @@ export default function ClassroomWeeklyView({
   };
 
   const renderGrid = (classroomEntry) => {
-    const blocks = buildBlocksForClassroom(classroomEntry.key);
-    const isAllView = selectedClassroom === ALL_CLASSROOMS;
-    const showEditableEmptyGrid = !isAllView && canEditTimetable && classroomEntry.key === selectedClassroom && blocks.length === 0;
+    const blocks = blocksByClassroomKey[classroomEntry.key] || [];
+    const windowedBlocks = rebaseBlocksToWindow(blocks, visibleWindow.startSlot, visibleWindow.endSlot);
+    const compareActive = !isMobile && targetsToRender.length !== 1;
+    const showEditableEmptyGrid = !compareActive && canEditTimetable && classroomEntry.key === selectedClassroom && blocks.length === 0;
     const showEmptyState = blocks.length === 0 && !showEditableEmptyGrid;
 
     return (
-      <section className={`card ${isAllView ? 'view-all-container' : ''}`} key={classroomEntry.key} style={{ position: 'relative', padding: 24, marginBottom: isAllView ? 0 : 24, breakInside: 'avoid' }}>
+      <section className="card timetable-compare-card" key={classroomEntry.key} style={{ position: 'relative', padding: 14, marginBottom: compareActive ? 0 : 18, breakInside: 'avoid' }}>
         <button
           type="button"
           className="timetable-card-camera"
@@ -342,34 +480,44 @@ export default function ClassroomWeeklyView({
         >
           <Camera size={14} />
         </button>
-        <h2 style={{ marginBottom: 16, fontSize: 18, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <School size={20} className="text-accent" /> {classroomEntry.label} 주간 시간표
+        <h2 style={{ marginBottom: 10, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <School size={18} className="text-accent" /> {classroomEntry.label}
         </h2>
-        {showEditableEmptyGrid && (
+        {showEditableEmptyGrid ? (
           <div style={{ marginBottom: 14, color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
-            아직 배정된 수업이 없습니다. 빈 시간표를 드래그해서 개강 준비 중 수업을 바로 생성할 수 있습니다.
+            {'\uBE48 \uC2DC\uAC04\uC744 \uB4DC\uB798\uADF8\uD558\uBA74 \uC774 \uAC15\uC758\uC2E4 \uAE30\uC900\uC73C\uB85C \uBC14\uB85C \uC218\uC5C5\uC744 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.'}
           </div>
-        )}
+        ) : null}
         {showEmptyState ? (
           <EmptyState message="해당 강의실에 배정된 수업이 없습니다." />
         ) : (
-          <div className={isAllView ? 'view-all-mode' : undefined} style={isAllView ? { overflow: 'hidden', height: `${Math.round((timeSlots.length * 48 + 48) * 0.65)}px` } : undefined}>
+          <div className="timetable-window-shell">
+            {collapsedTimeHint.topLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.topLabel}</div> : null}
             <TimetableGrid
+              gridKey={classroomEntry.key}
               columns={DAY_LABELS}
-              timeSlots={timeSlots}
-              blocks={blocks}
-              timeLabel="시간"
-              editable={Boolean(canEditTimetable && classroomEntry.key === selectedClassroom)}
+              timeSlots={windowedTimeSlots}
+              blocks={windowedBlocks}
+              slotOffset={visibleWindow.startSlot}
+              timeLabel={'\uC2DC\uAC04'}
+              editable={Boolean(canEditTimetable && (compareActive || classroomEntry.key === selectedClassroom))}
+              editableMode={compareActive ? 'move' : 'edit'}
               onCreateSelection={handleCreateSelection}
               onMoveBlock={handleMoveBlock}
+              sharedDragState={compareActive ? sharedMoveState : null}
+              onSharedDragStart={compareActive ? handleSharedMoveStart : undefined}
+              onSharedDragUpdate={compareActive ? handleSharedMoveUpdate : undefined}
+              slotHeight={slotHeight}
+              density={timetableDensity}
+              shellClassName="timetable-compact-shell"
             />
+            {collapsedTimeHint.bottomLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.bottomLabel}</div> : null}
           </div>
         )}
       </section>
     );
   };
 
-  const targetsToRender = selectedClassroom === ALL_CLASSROOMS ? classroomEntries : classroomEntries.filter((entry) => entry.key === selectedClassroom);
   const mobileBlocks = useMemo(
     () => (selectedClassroomEntry ? buildBlocksForClassroom(selectedClassroomEntry.key) : []),
     [buildBlocksForClassroom, selectedClassroomEntry]
@@ -407,65 +555,16 @@ export default function ClassroomWeeklyView({
 
   return (
     <div className="animate-in">
-      {floatingFilters && floatingPanelTarget && createPortal(
+      {floatingFilters && floatingPanelTarget && !isMobile && createPortal(
         <div className="timetable-floating-controls">
-          <div className="h-segment-container timetable-floating-selector">
-            <button className={`h-segment-btn ${selectedClassroom === ALL_CLASSROOMS ? 'active' : ''}`} onClick={() => setSelectedClassroom(ALL_CLASSROOMS)}>	
-              {'\uC804\uCCB4 \uBCF4\uAE30'}
-            </button>
-            {classroomEntries.map((classroomEntry) => (
-              <button key={classroomEntry.key} className={`h-segment-btn ${selectedClassroom === classroomEntry.key ? 'active' : ''}`} onClick={() => setSelectedClassroom(classroomEntry.key)}>	
-                {classroomEntry.label}
-              </button>
-            ))}
-          </div>
           <button className="action-pill timetable-floating-action" onClick={() => setPlannerMode(true)}>	
             {'\uBC30\uCE58 \uBAA8\uB4DC \uC5F4\uAE30'}
           </button>
         </div>,
         floatingPanelTarget
       )}
-      {!embedded ? (
-        <div className="page-header">
-          <div>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {onBack && (
-                <button className="btn-icon" onClick={onBack} style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border-color)' }}>
-                  <ArrowLeft size={20} />
-                </button>
-              )}
-              <School size={28} /> 강의실별 주간 시간표
-            </h1>
-            <p>강의실 배정 상태를 한눈에 보고, 직원 권한에서는 블록 드래그로 시간표를 빠르게 수정할 수 있습니다.</p>
-          </div>
-        </div>
-      ) : !floatingFilters ? (
-        <div className="embedded-view-toolbar">
-          <div className="embedded-view-copy">
-            <div className="embedded-view-title">강의실 주간 시간표</div>
-            <div className="embedded-view-description">강의실 기준 주간 배치를 빠르게 보고 수정할 수 있습니다.</div>
-          </div>
-        </div>
-      ) : null}
-
-      <div className={`filter-bar ${floatingFilters ? 'filter-bar-floating' : ''}`} style={{ display: !isMobile ? 'none' : undefined }}>
-        {floatingFilters && (
-          <div className="timetable-inline-subject-filter">
-            <span className="timetable-inline-subject-label">과목</span>
-            <div className="h-segment-container timetable-inline-subject-segment">
-              {subjectOptions.map((subject) => (
-                <button
-                  key={subject}
-                  type="button"
-                  className={`h-segment-btn ${selectedSubject === subject ? 'active' : ''}`}
-                  onClick={() => onSelectSubject(subject)}
-                >
-                  {subject}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+      {isMobile ? (
+      <div className={`filter-bar ${floatingFilters ? 'filter-bar-floating' : 'timetable-axis-filter'}`} style={{ display: !isMobile && floatingFilters ? 'none' : undefined }}>
         <div className="h-segment-container">
           <button className={`h-segment-btn ${selectedClassroom === ALL_CLASSROOMS ? 'active' : ''}`} onClick={() => setSelectedClassroom(ALL_CLASSROOMS)}>
             전체 보기
@@ -477,6 +576,43 @@ export default function ClassroomWeeklyView({
           ))}
         </div>
       </div>
+      ) : null}
+      {!isMobile && classroomEntries.length > 0 ? (() => {
+        const allClassroomKeys = classroomEntries.map((entry) => entry.key);
+        const effectiveCompareKeys = compareClassroomKeys ?? allClassroomKeys;
+        const hasAllClassroomsSelected = effectiveCompareKeys.length === allClassroomKeys.length && allClassroomKeys.length > 0;
+        return (
+          <div className="timetable-compare-toolbar">
+            <div className="timetable-compare-density">
+              <button
+                type="button"
+                className={`h-segment-btn ${hasAllClassroomsSelected ? 'active' : ''}`}
+                onClick={() => setCompareClassroomKeys((current) => {
+                  const base = current ?? allClassroomKeys;
+                  return base.length === allClassroomKeys.length ? [] : allClassroomKeys;
+                })}
+              >
+                전체 보기
+              </button>
+            </div>
+            <div className="timetable-compare-targets">
+              {classroomEntries.map((classroomEntry) => (
+                <button
+                  key={classroomEntry.key}
+                  type="button"
+                  className={`timetable-compare-chip ${effectiveCompareKeys.includes(classroomEntry.key) ? 'is-active' : ''}`}
+                  onClick={() => setCompareClassroomKeys((current) => {
+                    const base = current ?? allClassroomKeys;
+                    return toggleCompareSelection(base, classroomEntry.key);
+                  })}
+                >
+                  {classroomEntry.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })() : null}
       {classroomEntries.length === 0 ? (
         <div className="card" style={{ padding: 28 }}>
           <EmptyState message="표시할 강의실 데이터가 없습니다." />
@@ -484,7 +620,7 @@ export default function ClassroomWeeklyView({
       ) : isMobile ? (
         <div ref={scheduleRef} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <MobileAgendaTimetable
-            title={selectedClassroomEntry ? `${selectedClassroomEntry.label} 주간 시간표` : '강의실 주간 시간표'}
+            title={selectedClassroomEntry ? selectedClassroomEntry.label + ' \uC8FC\uAC04 \uC2DC\uAC04\uD45C' : '\uAC15\uC758\uC2E4 \uC8FC\uAC04 \uC2DC\uAC04\uD45C'}
             options={DAY_LABELS.map((day) => ({ key: day, label: day }))}
             selectedKey={selectedMobileDay}
             onSelectKey={setSelectedMobileDay}
@@ -498,7 +634,11 @@ export default function ClassroomWeeklyView({
           />
         </div>
       ) : (
-        <div ref={scheduleRef} className={selectedClassroom === ALL_CLASSROOMS ? 'view-all-grid-container' : undefined}>
+        <div
+          ref={scheduleRef}
+          className={targetsToRender.length > 1 ? 'view-all-grid-container timetable-compare-layout' : 'timetable-single-layout'}
+          style={targetsToRender.length > 1 ? getTimetableCompareGridStyle(targetsToRender.length) : undefined}
+        >
           {targetsToRender.map(renderGrid)}
         </div>
       )}
@@ -530,14 +670,13 @@ export default function ClassroomWeeklyView({
         mode="move"
         draft={{}}
         summary={moveState ? {
-          day: moveState.next.day,
-          start: moveState.next.start,
-          end: moveState.next.end,
-          fixedAxisLabel: '강의실',
-          fixedAxisValue: moveState.next.classroom,
           className: stripClassPrefix(moveState.block.editData.classItem.className),
-          previousTime: `${DAY_LABELS[moveState.block.columnIndex]} ${getRangeFromSlots(timeSlots, moveState.block.startSlot, moveState.block.endSlot).start} ~ ${getRangeFromSlots(timeSlots, moveState.block.startSlot, moveState.block.endSlot).end}`,
+          currentTime: `${DAY_LABELS[moveState.block.columnIndex]} ${getRangeFromSlots(timeSlots, moveState.block.absoluteStartSlot ?? moveState.block.startSlot, moveState.block.absoluteEndSlot ?? moveState.block.endSlot).start} ~ ${getRangeFromSlots(timeSlots, moveState.block.absoluteStartSlot ?? moveState.block.startSlot, moveState.block.absoluteEndSlot ?? moveState.block.endSlot).end}`,
           nextTime: `${moveState.next.day} ${moveState.next.start} ~ ${moveState.next.end}`,
+          currentTeacher: moveState.block.editData.teacher,
+          nextTeacher: moveState.block.editData.teacher,
+          currentClassroom: moveState.block.editData.classroom,
+          nextClassroom: moveState.next.classroom,
         } : {}}
         warnings={moveState?.warnings || []}
         busy={isSaving}
@@ -558,3 +697,7 @@ export default function ClassroomWeeklyView({
     </div>
   );
 }
+
+
+
+

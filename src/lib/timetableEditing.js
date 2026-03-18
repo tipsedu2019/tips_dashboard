@@ -35,7 +35,7 @@ export function isEditableScheduleClass(cls) {
     return { editable: false, reason: '날짜 구간이 있는 변형 시간표는 드래그 편집을 지원하지 않습니다.' };
   }
   if (slots.some((slot) => slot.override)) {
-    return { editable: false, reason: '슬롯별 override가 있는 수업은 수업 편집기에서 수정해 주세요.' };
+    return { editable: false, reason: '개별 override가 있는 수업은 수업 편집기에서 수정해 주세요.' };
   }
 
   return { editable: true, reason: '' };

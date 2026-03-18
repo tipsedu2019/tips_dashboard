@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { Book, Calendar, ClipboardList, Users } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import ConfirmDialog from './ui/ConfirmDialog';
@@ -8,7 +8,6 @@ import { useManagerActions } from '../hooks/useManagerActions';
 import { useDataTableControls } from '../hooks/useDataTableControls';
 import { useSharedTablePreference } from '../hooks/useSharedTablePreference';
 import { useAuth } from '../contexts/AuthContext';
-import ViewHeader from './ui/ViewHeader';
 import StudentManagerTab from './data-manager/StudentManagerTab';
 import ClassManagerTab from './data-manager/ClassManagerTab';
 import TextbookManagerTab from './data-manager/TextbookManagerTab';
@@ -228,15 +227,7 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
         />
       ) : null}
 
-      <section className="workspace-surface" style={{ padding: 28, marginBottom: 24 }}>
-        <ViewHeader
-          icon={<ClipboardList size={22} />}
-          eyebrow="운영 워크스페이스"
-          title="데이터 관리"
-          description="학생, 수업, 교재 데이터를 같은 규칙과 같은 언어로 정리하고 즉시 수정할 수 있습니다."
-          backLabel="개요로 돌아가기"
-        />
-
+      <section className="workspace-surface" style={{ padding: 20, marginBottom: 24 }}>
         <div
           className="h-segment-container"
           style={{
@@ -244,7 +235,6 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
             gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
             gap: 8,
             padding: 6,
-            marginTop: 22,
             background: 'var(--bg-surface-hover)',
             borderRadius: 24,
           }}
@@ -377,3 +367,5 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
     </div>
   );
 }
+
+

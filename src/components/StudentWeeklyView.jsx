@@ -20,7 +20,6 @@ import {
 import ClassDetailModal from './ClassDetailModal';
 import TimetableGrid from './ui/TimetableGrid';
 import { getStudentExamCountdowns } from '../lib/examScheduleUtils';
-import ViewHeader from './ui/ViewHeader';
 
 function SubjectClassCard({ cls }) {
   return (
@@ -234,30 +233,6 @@ export default function StudentWeeklyView({
 
   return (
     <div className="animate-in">
-      {!embedded ? (
-        <div className="page-header" style={{ display: 'grid', gap: 18 }}>
-          <ViewHeader
-            icon={<Calendar size={22} />}
-            eyebrow="학생 시간표"
-            title={student ? `${student.name} 학생 주간 시간표` : '학생 시간표 조회'}
-            description={student
-              ? `${[student.grade, student.school].filter(Boolean).join(' · ')} 기준으로 현재 듣는 수업과 시험 일정을 함께 확인합니다.`
-              : '학생을 선택하면 영어·수학 수업 카드와 주간 시간표, 시험 일정을 함께 확인할 수 있습니다.'}
-            actions={onBack ? (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={onBack}
-                style={{ gap: 8 }}
-              >
-                <ArrowLeft size={16} />
-                개요로 돌아가기
-              </button>
-            ) : null}
-          />
-        </div>
-      ) : null}
-
       <div style={{ position: 'relative', width: 360, maxWidth: '100%', marginBottom: embedded ? 18 : 0 }} ref={dropdownRef}>
           <div
             style={{
@@ -537,4 +512,3 @@ export default function StudentWeeklyView({
     </div>
   );
 }
-

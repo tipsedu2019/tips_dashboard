@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+﻿import { memo, useCallback, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -42,10 +42,68 @@ function GroupRow({ row, colSpan }) {
           {row.column.label}: {row.value}
         </span>
         <span style={{ marginLeft: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
-          {row.count}개
-        </span>
+          {row.count}개        </span>
       </td>
     </tr>
+  );
+}
+
+function PaginationBar({
+  page,
+  pageSize,
+  totalPages,
+  totalCount,
+  pageStart,
+  pageEnd,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  if (!totalCount) {
+    return null;
+  }
+
+  return (
+    <div className="data-list-pagination">
+      <div className="data-list-pagination-copy">
+        <strong>{pageStart}-{pageEnd}</strong>
+        <span> / {totalCount}개 항목</span>
+      </div>
+
+      <div className="data-list-pagination-controls">
+        <label className="data-list-pagination-size">
+          <span>페이지당</span>
+          <select value={pageSize} onChange={(event) => onPageSizeChange?.(Number(event.target.value))}>
+            {[25, 50, 100].map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => onPageChange?.(page - 1)}
+          disabled={page <= 1}
+          style={{ padding: '6px 12px', minWidth: 68 }}
+        >
+          이전
+        </button>
+        <div className="data-list-pagination-status">
+          {page} / {totalPages}
+        </div>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => onPageChange?.(page + 1)}
+          disabled={page >= totalPages}
+          style={{ padding: '6px 12px', minWidth: 68 }}
+        >
+          다음
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -214,9 +272,18 @@ export default function DataListView({
   isBusy = false,
   selectable = true,
   showActions = true,
+  cardless = false,
   sortKey,
   sortDirection,
   onSortChange,
+  page = 1,
+  pageSize = 50,
+  totalPages = 1,
+  totalCount = 0,
+  pageStart = 0,
+  pageEnd = 0,
+  onPageChange,
+  onPageSizeChange,
 }) {
   const { isMobile } = useViewport();
   const [editingCell, setEditingCell] = useState(null);
@@ -297,7 +364,7 @@ export default function DataListView({
                     {row.column.label}: {row.value}
                   </div>
                   <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
-                    {row.count}媛?
+                    {row.count}개
                   </div>
                 </div>
               );
@@ -372,13 +439,27 @@ export default function DataListView({
             );
           })
         )}
+
+        <PaginationBar
+          page={page}
+          pageSize={pageSize}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          pageStart={pageStart}
+          pageEnd={pageEnd}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
+        />
       </div>
     );
   }
 
   return (
-    <div className="card-custom" style={{ overflow: 'hidden', padding: 0 }}>
-      <div style={{ overflowX: 'auto' }}>
+    <div
+      className={cardless ? 'data-list-shell data-list-shell-cardless' : 'card-custom data-list-shell'}
+      style={{ overflow: 'hidden', padding: 0 }}
+    >
+      <div style={{ overflowX: 'auto', borderTop: cardless ? '1px solid var(--border-color)' : undefined }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 880 }}>
           <thead>
             <tr style={{ background: 'var(--bg-surface-hover)', borderBottom: '1px solid var(--border-color)' }}>
@@ -454,6 +535,17 @@ export default function DataListView({
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        pageStart={pageStart}
+        pageEnd={pageEnd}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
     </div>
   );
 }
+

@@ -17,11 +17,32 @@ const EMPTY_SNAPSHOT = {
   academicEventExamDetails: [],
   academyCurriculumPlans: [],
   academyCurriculumMaterials: [],
+  academicExamMaterialPlans: [],
+  academicExamMaterialItems: [],
+  academyCurriculumPeriodCatalogs: [],
+  academyCurriculumPeriodPlans: [],
+  academyCurriculumPeriodItems: [],
   isConnected: false,
   isLoading: false,
   lastUpdated: null,
   error: null
 };
+
+const SCHOOL_EXAM_PERIODS = [
+  { code: 'S1_MID', label: '1학기 중간', sortOrder: 1 },
+  { code: 'S1_FINAL', label: '1학기 기말', sortOrder: 2 },
+  { code: 'S2_MID', label: '2학기 중간', sortOrder: 3 },
+  { code: 'S2_FINAL', label: '2학기 기말', sortOrder: 4 },
+];
+
+function normalizeLegacyAcademyGradeLabel(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  if (normalized === 'elementary') return '초등';
+  if (normalized === 'middle') return '중등';
+  if (normalized === 'high') return '고등';
+  return normalized;
+}
 
 function generateId() {
   if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
@@ -49,6 +70,26 @@ function extractEmbeddedNoteMeta(note) {
   } catch {
     return {};
   }
+}
+
+function stripEmbeddedNoteMeta(note) {
+  const marker = '[[TIPS_META]]';
+  const raw = String(note || '');
+  const markerIndex = raw.indexOf(marker);
+  return (markerIndex < 0 ? raw : raw.slice(0, markerIndex)).trim();
+}
+
+function appendEmbeddedNoteMeta(note, meta = {}) {
+  const cleanedNote = stripEmbeddedNoteMeta(note);
+  const compactMeta = Object.fromEntries(
+    Object.entries(meta || {}).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  );
+
+  if (Object.keys(compactMeta).length === 0) {
+    return cleanedNote || null;
+  }
+
+  return `${cleanedNote ? `${cleanedNote}\n\n` : ''}[[TIPS_META]]${JSON.stringify(compactMeta)}`;
 }
 
 export class DataService {
@@ -123,7 +164,12 @@ export class DataService {
       { key: 'academicExamDays', table: 'academic_exam_days', processor: '_processAcademicExamDay', optional: true },
       { key: 'academicEventExamDetails', table: 'academic_event_exam_details', processor: '_processAcademicEventExamDetail', optional: true },
       { key: 'academyCurriculumPlans', table: 'academy_curriculum_plans', processor: '_processAcademyCurriculumPlan', optional: true },
-      { key: 'academyCurriculumMaterials', table: 'academy_curriculum_materials', processor: '_processAcademyCurriculumMaterial', optional: true }
+      { key: 'academyCurriculumMaterials', table: 'academy_curriculum_materials', processor: '_processAcademyCurriculumMaterial', optional: true },
+      { key: 'academicExamMaterialPlans', table: 'academic_exam_material_plans', processor: '_processAcademicExamMaterialPlan', optional: true },
+      { key: 'academicExamMaterialItems', table: 'academic_exam_material_items', processor: '_processAcademicExamMaterialItem', optional: true },
+      { key: 'academyCurriculumPeriodCatalogs', table: 'academy_curriculum_period_catalogs', processor: '_processAcademyCurriculumPeriodCatalog', optional: true },
+      { key: 'academyCurriculumPeriodPlans', table: 'academy_curriculum_period_plans', processor: '_processAcademyCurriculumPeriodPlan', optional: true },
+      { key: 'academyCurriculumPeriodItems', table: 'academy_curriculum_period_items', processor: '_processAcademyCurriculumPeriodItem', optional: true }
     ];
   }
 
@@ -331,6 +377,60 @@ export class DataService {
     }
 
     return payload;
+  }
+
+  _buildTextbookPayload(textbook, { useLegacyName = false } = {}) {
+    const title = String(textbook?.title || textbook?.name || '').trim();
+    const payload = {
+      [useLegacyName ? 'name' : 'title']: title,
+      publisher: textbook?.publisher || '',
+      price: Number(textbook?.price || 0),
+      tags: Array.isArray(textbook?.tags) ? textbook.tags : [],
+      lessons: Array.isArray(textbook?.lessons) ? textbook.lessons : [],
+    };
+
+    if (textbook?.id) {
+      payload.id = textbook.id;
+    }
+
+    return payload;
+  }
+
+  async _runTextbookMutation(textbook, execute) {
+    const optionalColumns = ['publisher', 'price', 'tags', 'lessons'];
+    let lastError = null;
+
+    for (const useLegacyName of [false, true]) {
+      const payload = this._buildTextbookPayload(textbook, { useLegacyName });
+      const removedColumns = [];
+      let result = await execute(payload);
+
+      while (result.error) {
+        if (this._isMissingColumnError(result.error, [useLegacyName ? 'name' : 'title'])) {
+          break;
+        }
+
+        const missingColumn = optionalColumns.find((columnName) => (
+          !removedColumns.includes(columnName) && this._isMissingColumnError(result.error, [columnName])
+        ));
+
+        if (!missingColumn) {
+          break;
+        }
+
+        removedColumns.push(missingColumn);
+        delete payload[missingColumn];
+        result = await execute(payload);
+      }
+
+      if (!result.error) {
+        return result;
+      }
+
+      lastError = result.error;
+    }
+
+    throw lastError;
   }
 
   _normalizeAcademicEventInput(event) {
@@ -793,18 +893,23 @@ export class DataService {
 
   async addTextbook(textbook) {
     const client = this._ensureClient();
-    const payload = this._pickFields(textbook, ['id', 'title', 'publisher', 'price', 'tags', 'lessons']);
-    const { data, error } = await client.from('textbooks').insert([payload]).select().single();
-    if (error) throw error;
+    const { data } = await this._runTextbookMutation(
+      textbook,
+      (payload) => client.from('textbooks').insert([payload]).select().single()
+    );
     this._notify();
     return this._processTextbook(data);
   }
 
   async updateTextbook(id, updates) {
     const client = this._ensureClient();
-    const finalUpdates = this._pickFields(updates, ['title', 'publisher', 'price', 'tags', 'lessons']);
-    const { error } = await client.from('textbooks').update(finalUpdates).eq('id', id);
-    if (error) throw error;
+    await this._runTextbookMutation(
+      updates,
+      (payload) => {
+        const { id: ignoredId, ...finalUpdates } = payload;
+        return client.from('textbooks').update(finalUpdates).eq('id', id);
+      }
+    );
     this._notify();
   }
 
@@ -1059,6 +1164,36 @@ export class DataService {
     };
   }
 
+  async getCurriculumRoadmapSupport() {
+    const client = this._ensureClient();
+    const requiredTables = [
+      'academic_exam_material_plans',
+      'academic_exam_material_items',
+      'academy_curriculum_period_catalogs',
+      'academy_curriculum_period_plans',
+      'academy_curriculum_period_items',
+    ];
+
+    const settled = await Promise.all(
+      requiredTables.map(async (table) => {
+        const { error } = await client.from(table).select('id').limit(1);
+        return {
+          table,
+          available: !error || !this._isMissingTableError(error, table),
+          error,
+        };
+      })
+    );
+
+    const missingTables = settled.filter((entry) => !entry.available).map((entry) => entry.table);
+
+    return {
+      ready: missingTables.length === 0,
+      missingTables,
+      checkedAt: new Date(),
+    };
+  }
+
   async upsertAcademicSchools(schools) {
     const client = this._ensureClient();
     const payload = (schools || []).map((school) => ({
@@ -1088,38 +1223,49 @@ export class DataService {
     for (const schoolId of schoolIds) {
       const { data, error } = await client
         .from('academic_curriculum_profiles')
-        .select('id, school_id, grade, subject')
+        .select('*')
         .eq('school_id', schoolId);
 
       if (error) {
         throw error;
       }
 
-      existingRows.push(...(data || []));
+      existingRows.push(...((data || []).map((row) => this._processAcademicCurriculumProfile(row))));
     }
 
     const existingIdByKey = new Map(
-      existingRows.map((row) => [`${row.school_id}::${row.grade}::${row.subject}`, row.id])
+      existingRows.map((row) => [`${row.schoolId}::${row.academicYear}::${row.grade}::${row.subject}`, row.id])
     );
 
-    const payload = requestedProfiles.map((profile) => {
-      const key = `${profile.schoolId}::${profile.grade}::${profile.subject}`;
+    const buildPayload = ({ includeAcademicYear }) => requestedProfiles.map((profile) => {
+      const academicYear = Number(profile.academicYear || profile.academic_year || new Date().getFullYear());
+      const key = `${profile.schoolId}::${academicYear}::${profile.grade}::${profile.subject}`;
+
       return {
         id: profile.id || existingIdByKey.get(key) || generateId(),
-        academic_year: Number(profile.academicYear || profile.academic_year || new Date().getFullYear()),
+        ...(includeAcademicYear ? { academic_year: academicYear } : null),
         school_id: profile.schoolId,
         grade: profile.grade,
         subject: profile.subject,
         main_textbook_title: profile.mainTextbookTitle || null,
         main_textbook_publisher: profile.mainTextbookPublisher || null,
-        note: profile.note || null,
+        note: includeAcademicYear ? (profile.note || null) : appendEmbeddedNoteMeta(profile.note, { academicYear }),
       };
     });
 
-    const { data, error } = await client
+    let { data, error } = await client
       .from('academic_curriculum_profiles')
-      .upsert(payload, { onConflict: 'school_id,grade,subject' })
+      .upsert(buildPayload({ includeAcademicYear: true }), { onConflict: 'id' })
       .select();
+
+    if (error && this._isMissingColumnError(error, ['academic_year'])) {
+      const fallbackResult = await client
+        .from('academic_curriculum_profiles')
+        .upsert(buildPayload({ includeAcademicYear: false }), { onConflict: 'id' })
+        .select();
+      data = fallbackResult.data;
+      error = fallbackResult.error;
+    }
 
     if (error) throw error;
     this._notify();
@@ -1149,6 +1295,502 @@ export class DataService {
 
     this._notify();
     return payload.map((row) => this._processAcademicSupplementMaterial(row));
+  }
+
+  async bulkUpsertAcademicExamMaterialPlans(plans) {
+    const client = this._ensureClient();
+    const requestedPlans = (plans || []).filter(
+      (plan) => plan?.schoolId && plan?.grade && plan?.subject && plan?.examPeriodCode
+    );
+    if (requestedPlans.length === 0) {
+      return [];
+    }
+
+    const existingRows = [];
+    const schoolIds = Array.from(new Set(requestedPlans.map((plan) => plan.schoolId)));
+    for (const schoolId of schoolIds) {
+      const { data, error } = await client
+        .from('academic_exam_material_plans')
+        .select('*')
+        .eq('school_id', schoolId);
+
+      if (error) {
+        if (this._isMissingTableError(error, 'academic_exam_material_plans')) {
+          return [];
+        }
+        throw error;
+      }
+
+      existingRows.push(...((data || []).map((row) => this._processAcademicExamMaterialPlan(row))));
+    }
+
+    const existingIdByKey = new Map(
+      existingRows.map((row) => [
+        `${row.schoolId}::${row.academicYear}::${row.grade}::${row.subject}::${row.examPeriodCode}`,
+        row.id,
+      ])
+    );
+
+    const payload = requestedPlans.map((plan, index) => {
+      const academicYear = Number(plan.academicYear || plan.academic_year || new Date().getFullYear());
+      const key = `${plan.schoolId}::${academicYear}::${plan.grade}::${plan.subject}::${plan.examPeriodCode}`;
+      return {
+        id: plan.id || existingIdByKey.get(key) || generateId(),
+        academic_year: academicYear,
+        subject: plan.subject,
+        school_id: plan.schoolId,
+        grade: plan.grade,
+        exam_period_code: plan.examPeriodCode,
+        note: plan.note || null,
+        sort_order: plan.sortOrder ?? plan.sort_order ?? index,
+      };
+    });
+
+    const { data, error } = await client
+      .from('academic_exam_material_plans')
+      .upsert(payload, { onConflict: 'id' })
+      .select();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'academic_exam_material_plans')) {
+        return [];
+      }
+      throw error;
+    }
+
+    this._notify();
+    return (data || []).map((row) => this._processAcademicExamMaterialPlan(row));
+  }
+
+  async replaceAcademicExamMaterialItems(planId, items) {
+    const client = this._ensureClient();
+    const { error: deleteError } = await client
+      .from('academic_exam_material_items')
+      .delete()
+      .eq('plan_id', planId);
+    if (deleteError) {
+      if (this._isMissingTableError(deleteError, 'academic_exam_material_items')) {
+        return [];
+      }
+      throw deleteError;
+    }
+
+    const payload = (items || [])
+      .map((item, index) => ({
+        id: item.id || generateId(),
+        plan_id: planId,
+        material_category: item.materialCategory || item.material_category || 'other',
+        title: item.title || null,
+        publisher: item.publisher || null,
+        scope_detail: item.scopeDetail || item.scope_detail || null,
+        note: item.note || null,
+        sort_order: item.sortOrder ?? item.sort_order ?? index,
+      }))
+      .filter((item) => item.title || item.publisher || item.scope_detail || item.note);
+
+    if (payload.length > 0) {
+      const { error } = await client.from('academic_exam_material_items').insert(payload);
+      if (error) {
+        if (this._isMissingTableError(error, 'academic_exam_material_items')) {
+          return [];
+        }
+        throw error;
+      }
+    }
+
+    this._notify();
+    return payload.map((row) => this._processAcademicExamMaterialItem(row));
+  }
+
+  async deleteAcademicExamMaterialPlan(planId) {
+    const client = this._ensureClient();
+    const { error } = await client
+      .from('academic_exam_material_plans')
+      .delete()
+      .eq('id', planId);
+    if (error) {
+      if (this._isMissingTableError(error, 'academic_exam_material_plans')) {
+        return;
+      }
+      throw error;
+    }
+    this._notify();
+  }
+
+  async upsertAcademyCurriculumPeriodCatalogs(periods) {
+    const client = this._ensureClient();
+    const payload = (periods || [])
+      .filter((period) => period?.subject && period?.academyGrade && period?.periodCode && period?.periodLabel)
+      .map((period, index) => ({
+        id: period.id || generateId(),
+        academic_year: Number(period.academicYear || period.academic_year || new Date().getFullYear()),
+        subject: period.subject,
+        academy_grade: period.academyGrade,
+        period_code: period.periodCode,
+        period_label: period.periodLabel,
+        sort_order: period.sortOrder ?? period.sort_order ?? index,
+      }));
+
+    if (payload.length === 0) {
+      return [];
+    }
+
+    const { data, error } = await client
+      .from('academy_curriculum_period_catalogs')
+      .upsert(payload, { onConflict: 'academic_year,subject,academy_grade,period_code' })
+      .select();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'academy_curriculum_period_catalogs')) {
+        return [];
+      }
+      throw error;
+    }
+
+    this._notify();
+    return (data || []).map((row) => this._processAcademyCurriculumPeriodCatalog(row));
+  }
+
+  async deleteAcademyCurriculumPeriodCatalog(catalogId) {
+    const client = this._ensureClient();
+    const { error } = await client
+      .from('academy_curriculum_period_catalogs')
+      .delete()
+      .eq('id', catalogId);
+
+    if (error) {
+      if (this._isMissingTableError(error, 'academy_curriculum_period_catalogs')) {
+        return;
+      }
+      throw error;
+    }
+
+    this._notify();
+  }
+
+  async bulkUpsertAcademyCurriculumPeriodPlans(plans) {
+    const client = this._ensureClient();
+    const requestedPlans = (plans || []).filter(
+      (plan) => plan?.subject && plan?.academyGrade && plan?.periodCode && plan?.periodLabel && plan?.scopeType
+    );
+    if (requestedPlans.length === 0) {
+      return [];
+    }
+
+    const existingRows = [];
+    const filterKeys = Array.from(
+      new Set(
+        requestedPlans.map((plan) =>
+          `${Number(plan.academicYear || plan.academic_year || new Date().getFullYear())}::${plan.subject}::${plan.academyGrade}`
+        )
+      )
+    );
+
+    for (const key of filterKeys) {
+      const [academicYear, subject, academyGrade] = key.split('::');
+      const { data, error } = await client
+        .from('academy_curriculum_period_plans')
+        .select('*')
+        .eq('academic_year', Number(academicYear))
+        .eq('subject', subject)
+        .eq('academy_grade', academyGrade);
+
+      if (error) {
+        if (this._isMissingTableError(error, 'academy_curriculum_period_plans')) {
+          return [];
+        }
+        throw error;
+      }
+
+      existingRows.push(...((data || []).map((row) => this._processAcademyCurriculumPeriodPlan(row))));
+    }
+
+    const existingIdByKey = new Map(
+      existingRows.map((row) => [
+        `${row.academicYear}::${row.subject}::${row.academyGrade}::${row.scopeType}::${row.classId || ''}::${row.periodCode}`,
+        row.id,
+      ])
+    );
+
+    const payload = requestedPlans.map((plan, index) => {
+      const academicYear = Number(plan.academicYear || plan.academic_year || new Date().getFullYear());
+      const classId = plan.classId || plan.class_id || null;
+      const key = `${academicYear}::${plan.subject}::${plan.academyGrade}::${plan.scopeType}::${classId || ''}::${plan.periodCode}`;
+      return {
+        id: plan.id || existingIdByKey.get(key) || generateId(),
+        academic_year: academicYear,
+        subject: plan.subject,
+        academy_grade: plan.academyGrade,
+        catalog_id: plan.catalogId || plan.catalog_id || null,
+        period_type: plan.periodType || plan.period_type || 'fixed',
+        period_code: plan.periodCode,
+        period_label: plan.periodLabel,
+        scope_type: plan.scopeType,
+        class_id: classId,
+        note: plan.note || null,
+        sort_order: plan.sortOrder ?? plan.sort_order ?? index,
+      };
+    });
+
+    const { data, error } = await client
+      .from('academy_curriculum_period_plans')
+      .upsert(payload, { onConflict: 'id' })
+      .select();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'academy_curriculum_period_plans')) {
+        return [];
+      }
+      throw error;
+    }
+
+    this._notify();
+    return (data || []).map((row) => this._processAcademyCurriculumPeriodPlan(row));
+  }
+
+  async replaceAcademyCurriculumPeriodItems(planId, items) {
+    const client = this._ensureClient();
+    const { error: deleteError } = await client
+      .from('academy_curriculum_period_items')
+      .delete()
+      .eq('plan_id', planId);
+
+    if (deleteError) {
+      if (this._isMissingTableError(deleteError, 'academy_curriculum_period_items')) {
+        return [];
+      }
+      throw deleteError;
+    }
+
+    const payload = (items || [])
+      .map((item, index) => ({
+        id: item.id || generateId(),
+        plan_id: planId,
+        material_category: item.materialCategory || item.material_category || 'other',
+        textbook_id: item.textbookId || item.textbook_id || null,
+        title: item.title || null,
+        publisher: item.publisher || null,
+        plan_detail: item.planDetail || item.plan_detail || null,
+        note: item.note || null,
+        sort_order: item.sortOrder ?? item.sort_order ?? index,
+      }))
+      .filter((item) => item.textbook_id || item.title || item.publisher || item.plan_detail || item.note);
+
+    if (payload.length > 0) {
+      const { error } = await client.from('academy_curriculum_period_items').insert(payload);
+      if (error) {
+        if (this._isMissingTableError(error, 'academy_curriculum_period_items')) {
+          return [];
+        }
+        throw error;
+      }
+    }
+
+    this._notify();
+    return payload.map((row) => this._processAcademyCurriculumPeriodItem(row));
+  }
+
+  async deleteAcademyCurriculumPeriodPlan(planId) {
+    const client = this._ensureClient();
+    const { error } = await client
+      .from('academy_curriculum_period_plans')
+      .delete()
+      .eq('id', planId);
+
+    if (error) {
+      if (this._isMissingTableError(error, 'academy_curriculum_period_plans')) {
+        return;
+      }
+      throw error;
+    }
+
+    this._notify();
+  }
+
+  async migrateLegacyCurriculumRoadmap(source = {}) {
+    const client = this._ensureClient();
+    const support = await this.getCurriculumRoadmapSupport();
+    if (!support.ready) {
+      return { migrated: false, reason: 'missing-tables', support };
+    }
+
+    const [existingSchoolPlans, existingAcademyPlans, existingCatalogs] = await Promise.all([
+      client.from('academic_exam_material_plans').select('id').limit(1),
+      client.from('academy_curriculum_period_plans').select('id').limit(1),
+      client.from('academy_curriculum_period_catalogs').select('id').limit(1),
+    ]);
+
+    if ((existingSchoolPlans.data || []).length > 0 || (existingAcademyPlans.data || []).length > 0 || (existingCatalogs.data || []).length > 0) {
+      return { migrated: false, reason: 'already-populated' };
+    }
+
+    const schoolProfiles = source.academicCurriculumProfiles || [];
+    const schoolMaterials = source.academicSupplementMaterials || [];
+    const academyPlans = source.academyCurriculumPlans || [];
+    const academyMaterials = source.academyCurriculumMaterials || [];
+    const classes = source.classes || [];
+    const textbooks = source.textbooks || [];
+
+    const classesById = new Map(classes.map((row) => [row.id, row]));
+    const textbooksById = new Map(textbooks.map((row) => [row.id, row]));
+
+    const schoolPlanRows = [];
+    const schoolItemRows = [];
+    schoolProfiles.forEach((profile, profileIndex) => {
+      if (!profile?.schoolId || !profile?.grade || !profile?.subject) {
+        return;
+      }
+
+      const planId = generateId();
+      schoolPlanRows.push({
+        id: planId,
+        academic_year: Number(profile.academicYear || profile.academic_year || new Date().getFullYear()),
+        subject: profile.subject,
+        school_id: profile.schoolId,
+        grade: profile.grade,
+        exam_period_code: 'S1_MID',
+        note: profile.note || null,
+        sort_order: profileIndex,
+      });
+
+      if (profile.mainTextbookTitle || profile.mainTextbookPublisher) {
+        schoolItemRows.push({
+          id: generateId(),
+          plan_id: planId,
+          material_category: 'textbook',
+          title: profile.mainTextbookTitle || null,
+          publisher: profile.mainTextbookPublisher || null,
+          scope_detail: null,
+          note: null,
+          sort_order: 0,
+        });
+      }
+
+      schoolMaterials
+        .filter((item) => item.profileId === profile.id)
+        .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
+        .forEach((item, itemIndex) => {
+          schoolItemRows.push({
+            id: generateId(),
+            plan_id: planId,
+            material_category: 'supplement',
+            title: item.title || null,
+            publisher: item.publisher || null,
+            scope_detail: null,
+            note: item.note || null,
+            sort_order: itemIndex + 1,
+          });
+        });
+    });
+
+    const catalogRows = [];
+    const catalogByKey = new Map();
+    const academyPlanRows = [];
+    const academyItemRows = [];
+
+    academyPlans.forEach((plan, planIndex) => {
+      const matchedClass = classesById.get(plan.classId || plan.class_id || '');
+      const academicYear = Number(plan.academicYear || plan.academic_year || new Date().getFullYear());
+      const academyGrade = matchedClass?.grade || normalizeLegacyAcademyGradeLabel(plan.academyGrade || plan.academy_grade);
+      const subject = plan.subject || matchedClass?.subject || '';
+
+      if (!academyGrade || !subject) {
+        return;
+      }
+
+      const catalogKey = `${academicYear}::${subject}::${academyGrade}::custom-default-plan`;
+      let catalog = catalogByKey.get(catalogKey);
+      if (!catalog) {
+        catalog = {
+          id: generateId(),
+          academic_year: academicYear,
+          subject,
+          academy_grade: academyGrade,
+          period_code: 'custom-default-plan',
+          period_label: '기본 운영안',
+          sort_order: catalogRows.length,
+        };
+        catalogByKey.set(catalogKey, catalog);
+        catalogRows.push(catalog);
+      }
+
+      const nextPlanId = generateId();
+      academyPlanRows.push({
+        id: nextPlanId,
+        academic_year: academicYear,
+        subject,
+        academy_grade: academyGrade,
+        catalog_id: catalog.id,
+        period_type: 'custom',
+        period_code: catalog.period_code,
+        period_label: catalog.period_label,
+        scope_type: plan.classId || plan.class_id ? 'class' : 'template',
+        class_id: plan.classId || plan.class_id || null,
+        note: plan.note || null,
+        sort_order: plan.sortOrder ?? plan.sort_order ?? planIndex,
+      });
+
+      const matchedTextbook = textbooksById.get(plan.mainTextbookId || plan.main_textbook_id || '');
+      if (matchedTextbook || plan.mainTextbookId || plan.main_textbook_id) {
+        academyItemRows.push({
+          id: generateId(),
+          plan_id: nextPlanId,
+          material_category: 'textbook',
+          textbook_id: matchedTextbook?.id || plan.mainTextbookId || plan.main_textbook_id || null,
+          title: matchedTextbook?.title || matchedTextbook?.name || null,
+          publisher: matchedTextbook?.publisher || null,
+          plan_detail: null,
+          note: null,
+          sort_order: 0,
+        });
+      }
+
+      academyMaterials
+        .filter((item) => item.planId === plan.id)
+        .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
+        .forEach((item, itemIndex) => {
+          academyItemRows.push({
+            id: generateId(),
+            plan_id: nextPlanId,
+            material_category: 'supplement',
+            textbook_id: item.textbookId || item.textbook_id || null,
+            title: item.title || null,
+            publisher: item.publisher || null,
+            plan_detail: null,
+            note: item.note || null,
+            sort_order: itemIndex + 1,
+          });
+        });
+    });
+
+    if (schoolPlanRows.length > 0) {
+      const { error } = await client.from('academic_exam_material_plans').insert(schoolPlanRows);
+      if (error) throw error;
+    }
+    if (schoolItemRows.length > 0) {
+      const { error } = await client.from('academic_exam_material_items').insert(schoolItemRows);
+      if (error) throw error;
+    }
+    if (catalogRows.length > 0) {
+      const { error } = await client.from('academy_curriculum_period_catalogs').insert(catalogRows);
+      if (error) throw error;
+    }
+    if (academyPlanRows.length > 0) {
+      const { error } = await client.from('academy_curriculum_period_plans').insert(academyPlanRows);
+      if (error) throw error;
+    }
+    if (academyItemRows.length > 0) {
+      const { error } = await client.from('academy_curriculum_period_items').insert(academyItemRows);
+      if (error) throw error;
+    }
+
+    this._notify();
+    return {
+      migrated: schoolPlanRows.length > 0 || academyPlanRows.length > 0,
+      schoolPlanCount: schoolPlanRows.length,
+      academyPlanCount: academyPlanRows.length,
+      catalogCount: catalogRows.length,
+    };
   }
 
   async replaceAcademicEventExamDetails(eventId, items) {
@@ -1205,21 +1847,33 @@ export class DataService {
 
   async bulkUpsertAcademyCurriculumPlans(plans) {
     const client = this._ensureClient();
-    const payload = (plans || []).map((plan, index) => ({
-      id: plan.id || generateId(),
-      academic_year: Number(plan.academicYear || plan.academic_year || new Date().getFullYear()),
-      academy_grade: plan.academyGrade || plan.academy_grade || null,
-      subject: plan.subject || null,
-      class_id: plan.classId || plan.class_id || null,
-      main_textbook_id: plan.mainTextbookId || plan.main_textbook_id || null,
-      note: plan.note || null,
-      sort_order: plan.sortOrder ?? plan.sort_order ?? index,
-    }));
+    const buildPayload = ({ includeAcademicYear }) => (plans || []).map((plan, index) => {
+      const academicYear = Number(plan.academicYear || plan.academic_year || new Date().getFullYear());
+      return {
+        id: plan.id || generateId(),
+        ...(includeAcademicYear ? { academic_year: academicYear } : null),
+        academy_grade: plan.academyGrade || plan.academy_grade || null,
+        subject: plan.subject || null,
+        class_id: plan.classId || plan.class_id || null,
+        main_textbook_id: plan.mainTextbookId || plan.main_textbook_id || null,
+        note: includeAcademicYear ? (plan.note || null) : appendEmbeddedNoteMeta(plan.note, { academicYear }),
+        sort_order: plan.sortOrder ?? plan.sort_order ?? index,
+      };
+    });
 
-    const { data, error } = await client
+    let { data, error } = await client
       .from('academy_curriculum_plans')
-      .upsert(payload, { onConflict: 'id' })
+      .upsert(buildPayload({ includeAcademicYear: true }), { onConflict: 'id' })
       .select();
+
+    if (error && this._isMissingColumnError(error, ['academic_year'])) {
+      const fallbackResult = await client
+        .from('academy_curriculum_plans')
+        .upsert(buildPayload({ includeAcademicYear: false }), { onConflict: 'id' })
+        .select();
+      data = fallbackResult.data;
+      error = fallbackResult.error;
+    }
 
     if (error) {
       if (this._isMissingTableError(error, 'academy_curriculum_plans')) {
@@ -1487,13 +2141,14 @@ export class DataService {
 
   _processAcademicCurriculumProfile(profileRow) {
     if (!profileRow) return null;
+    const meta = extractEmbeddedNoteMeta(profileRow.note);
     return {
       ...profileRow,
-      academicYear: Number(profileRow.academic_year || new Date().getFullYear()),
+      academicYear: Number(profileRow.academic_year || meta.academicYear || new Date().getFullYear()),
       schoolId: profileRow.school_id,
       mainTextbookTitle: profileRow.main_textbook_title || '',
       mainTextbookPublisher: profileRow.main_textbook_publisher || '',
-      note: profileRow.note || '',
+      note: stripEmbeddedNoteMeta(profileRow.note),
     };
   }
 
@@ -1556,13 +2211,14 @@ export class DataService {
 
   _processAcademyCurriculumPlan(planRow) {
     if (!planRow) return null;
+    const meta = extractEmbeddedNoteMeta(planRow.note);
     return {
       ...planRow,
-      academicYear: Number(planRow.academic_year || new Date().getFullYear()),
+      academicYear: Number(planRow.academic_year || meta.academicYear || new Date().getFullYear()),
       academyGrade: planRow.academy_grade || '',
       classId: planRow.class_id || '',
       mainTextbookId: planRow.main_textbook_id || '',
-      note: planRow.note || '',
+      note: stripEmbeddedNoteMeta(planRow.note),
       sortOrder: planRow.sort_order ?? 0,
     };
   }
@@ -1580,6 +2236,72 @@ export class DataService {
     };
   }
 
+  _processAcademicExamMaterialPlan(planRow) {
+    if (!planRow) return null;
+    return {
+      ...planRow,
+      academicYear: Number(planRow.academic_year || new Date().getFullYear()),
+      schoolId: planRow.school_id,
+      examPeriodCode: planRow.exam_period_code || '',
+      note: planRow.note || '',
+      sortOrder: planRow.sort_order ?? 0,
+    };
+  }
+
+  _processAcademicExamMaterialItem(itemRow) {
+    if (!itemRow) return null;
+    return {
+      ...itemRow,
+      planId: itemRow.plan_id,
+      materialCategory: itemRow.material_category || 'other',
+      scopeDetail: itemRow.scope_detail || '',
+      note: itemRow.note || '',
+      sortOrder: itemRow.sort_order ?? 0,
+    };
+  }
+
+  _processAcademyCurriculumPeriodCatalog(row) {
+    if (!row) return null;
+    return {
+      ...row,
+      academicYear: Number(row.academic_year || new Date().getFullYear()),
+      academyGrade: row.academy_grade || '',
+      periodCode: row.period_code || '',
+      periodLabel: row.period_label || '',
+      sortOrder: row.sort_order ?? 0,
+    };
+  }
+
+  _processAcademyCurriculumPeriodPlan(planRow) {
+    if (!planRow) return null;
+    return {
+      ...planRow,
+      academicYear: Number(planRow.academic_year || new Date().getFullYear()),
+      academyGrade: planRow.academy_grade || '',
+      catalogId: planRow.catalog_id || '',
+      periodType: planRow.period_type || 'fixed',
+      periodCode: planRow.period_code || '',
+      periodLabel: planRow.period_label || '',
+      scopeType: planRow.scope_type || 'template',
+      classId: planRow.class_id || '',
+      note: planRow.note || '',
+      sortOrder: planRow.sort_order ?? 0,
+    };
+  }
+
+  _processAcademyCurriculumPeriodItem(itemRow) {
+    if (!itemRow) return null;
+    return {
+      ...itemRow,
+      planId: itemRow.plan_id,
+      materialCategory: itemRow.material_category || 'other',
+      textbookId: itemRow.textbook_id || '',
+      planDetail: itemRow.plan_detail || '',
+      note: itemRow.note || '',
+      sortOrder: itemRow.sort_order ?? 0,
+    };
+  }
+
   _processAcademicEvent(eventRow) {
     if (!eventRow) return null;
     const meta = extractEmbeddedNoteMeta(eventRow.note);
@@ -1594,7 +2316,7 @@ export class DataService {
       end: derivedEnd,
       color: eventRow.color || null,
       grade: eventRow.grade || 'all',
-      note: eventRow.note || ''
+      note: stripEmbeddedNoteMeta(eventRow.note)
     };
   }
 
@@ -1613,6 +2335,9 @@ export class DataService {
     if (!textbookRow) return null;
     return {
       ...textbookRow,
+      title: textbookRow.title || textbookRow.name || '',
+      publisher: textbookRow.publisher || '',
+      price: Number(textbookRow.price || 0),
       tags: textbookRow.tags || [],
       lessons: textbookRow.lessons || []
     };

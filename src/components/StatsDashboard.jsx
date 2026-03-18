@@ -239,7 +239,7 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
     const uniqueWaitlistStudentIds = [...new Set(waitlistStudentIds.filter(Boolean))];
     const filteredStudents = (data.students || []).filter((student) => uniqueRegisteredStudentIds.includes(student.id));
     const gradeCounts = filteredStudents.reduce((accumulator, student) => {
-      const grade = String(student.grade || '誘몄젙').trim() || '誘몄젙';
+      const grade = String(student.grade || '미정').trim() || '미정';
       accumulator[grade] = (accumulator[grade] || 0) + 1;
       return accumulator;
     }, {});
@@ -772,3 +772,4 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
     </div>
   );
 }
+

@@ -5,11 +5,42 @@ import { CLASS_STATUS_OPTIONS } from '../../lib/classStatus';
 import { normalizeClassroomText } from '../../lib/classroomUtils';
 import { createQuickScheduleLine, ensureQuickScheduleLines } from '../../lib/quickClassSchedule';
 
-function SummaryRow({ label, value }) {
+function SummaryRow({ label, value, emphasize = false }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '104px minmax(0, 1fr)',
+        gap: 12,
+        alignItems: 'start',
+        fontSize: 13,
+      }}
+    >
       <strong style={{ color: 'var(--text-secondary)' }}>{label}</strong>
-      <span style={{ color: 'var(--text-primary)', textAlign: 'right' }}>{value || '-'}</span>
+      <span style={{ color: emphasize ? 'var(--accent-color)' : 'var(--text-primary)', fontWeight: emphasize ? 700 : 500 }}>
+        {value || '-'}
+      </span>
+    </div>
+  );
+}
+
+function ChangeRow({ label, from, to }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '104px minmax(0, 1fr)',
+        gap: 12,
+        alignItems: 'start',
+        fontSize: 13,
+      }}
+    >
+      <strong style={{ color: 'var(--text-secondary)' }}>{label}</strong>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+        <span>{from || '-'}</span>
+        <span style={{ margin: '0 8px', color: 'var(--accent-color)' }}>{'->'}</span>
+        <span style={{ color: 'var(--accent-color)' }}>{to || '-'}</span>
+      </div>
     </div>
   );
 }
@@ -43,6 +74,7 @@ function OptionPicker({
   onCustomEnabledChange,
 }) {
   const [query, setQuery] = useState('');
+
   const filteredOptions = useMemo(() => {
     if (!query.trim()) {
       return options;
@@ -56,7 +88,7 @@ function OptionPicker({
     <div className="dialog-field-block">
       <div className="dialog-field-header">
         <span className="dialog-field-label">{label}</span>
-        {allowCustom && (
+        {allowCustom ? (
           <button
             type="button"
             className={`dialog-inline-toggle ${customEnabled ? 'active' : ''}`}
@@ -64,7 +96,7 @@ function OptionPicker({
           >
             {customEnabled ? '선택형으로 보기' : '직접 입력'}
           </button>
-        )}
+        ) : null}
       </div>
 
       {customEnabled ? (
@@ -77,7 +109,7 @@ function OptionPicker({
         />
       ) : (
         <div className="dialog-option-panel">
-          {searchable && options.length > 8 && (
+          {searchable && options.length > 8 ? (
             <input
               type="text"
               className="styled-input"
@@ -85,7 +117,7 @@ function OptionPicker({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-          )}
+          ) : null}
           <div className="dialog-option-list">
             {filteredOptions.map((option) => (
               <button
@@ -97,9 +129,9 @@ function OptionPicker({
                 {option}
               </button>
             ))}
-            {filteredOptions.length === 0 && (
+            {filteredOptions.length === 0 ? (
               <div className="dialog-option-empty">표시할 선택지가 없습니다.</div>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -172,7 +204,7 @@ function ScheduleRowEditor({
             value={line.classroom}
             onChange={(event) => onChange(lineIndex, { classroom: normalizeClassroomText(event.target.value) })}
           />
-          {classroomOptions.length > 0 && (
+          {classroomOptions.length > 0 ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {classroomOptions.slice(0, 6).map((option) => (
                 <button
@@ -185,7 +217,7 @@ function ScheduleRowEditor({
                 </button>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
       </label>
 
@@ -194,7 +226,7 @@ function ScheduleRowEditor({
         className="btn-icon"
         onClick={() => onRemove(lineIndex)}
         disabled={!canRemove}
-        title={canRemove ? '이 일정 줄 삭제' : '최소 한 줄은 유지해야 합니다.'}
+        title={canRemove ? '이 일정 줄 삭제' : '최소 한 줄은 남아 있어야 합니다.'}
         style={{ marginBottom: 2 }}
       >
         <Trash2 size={18} />
@@ -247,6 +279,18 @@ export default function TimetableEditDialog({
     classroom: summary.fixedAxisLabel === '강의실' ? summary.fixedAxisValue : '',
   });
 
+  const changeRows = [
+    summary.currentTime && summary.nextTime && summary.currentTime !== summary.nextTime
+      ? { label: '요일/시간', from: summary.currentTime, to: summary.nextTime }
+      : null,
+    summary.currentTeacher && summary.nextTeacher && summary.currentTeacher !== summary.nextTeacher
+      ? { label: '선생님', from: summary.currentTeacher, to: summary.nextTeacher }
+      : null,
+    summary.currentClassroom && summary.nextClassroom && summary.currentClassroom !== summary.nextClassroom
+      ? { label: '강의실', from: summary.currentClassroom, to: summary.nextClassroom }
+      : null,
+  ].filter(Boolean);
+
   const updateScheduleLine = (lineIndex, changes) => {
     const nextLines = scheduleLines.map((line, index) => (
       index === lineIndex ? { ...line, ...changes } : line
@@ -290,32 +334,25 @@ export default function TimetableEditDialog({
       <div
         onClick={(event) => event.stopPropagation()}
         className="card-custom"
-        style={{ width: '100%', maxWidth: isCreate ? 860 : 580, padding: 28, maxHeight: '88vh', overflow: 'auto' }}
+        style={{ width: '100%', maxWidth: isCreate ? 860 : 640, padding: 28, maxHeight: '88vh', overflow: 'auto' }}
       >
         <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>
           {isCreate ? '빠른 수업 생성' : '시간표 이동 확인'}
         </h3>
         <p style={{ margin: '8px 0 20px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
           {isCreate
-            ? '드래그한 범위를 시작점으로 사용합니다. 여러 요일과 시간, 강의실을 한 번에 추가할 수 있습니다.'
-            : '이동할 시간과 축을 확인한 뒤 저장해 주세요.'}
+            ? '선택한 시간 범위를 시작점으로 사용합니다. 여러 요일과 시간, 강의실을 한 번에 정리할 수 있습니다.'
+            : '현재 정보와 변경될 항목만 간단히 확인한 뒤 저장해 주세요.'}
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <SummaryRow label="기준 요일" value={summary.day} />
-          <SummaryRow label="기준 시간" value={`${summary.start || '-'} ~ ${summary.end || '-'}`} />
-          {summary.fixedAxisLabel && <SummaryRow label={summary.fixedAxisLabel} value={summary.fixedAxisValue} />}
-          {!isCreate && summary.previousTime && <SummaryRow label="이전 시간" value={summary.previousTime} />}
-        </div>
-
-        {isCreate && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginTop: 18 }}>
+        {isCreate ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             <div className="dialog-field-block">
               <div className="dialog-field-label">수업명</div>
               <input
                 type="text"
                 className="styled-input"
-                placeholder="예: 고1 영어 심화"
+                placeholder="예: 고1 공통수학"
                 value={draft.className || ''}
                 onChange={(event) => onChange('className', event.target.value)}
               />
@@ -338,12 +375,12 @@ export default function TimetableEditDialog({
               options={fieldOptions.grades || []}
               onChange={(value) => onChange('grade', value)}
               allowCustom
-              customPlaceholder="예: 중3, 고1"
+              customPlaceholder="예: 중1, 고2"
               customEnabled={customMode.grade}
               onCustomEnabledChange={(value) => setCustomMode((current) => ({ ...current, grade: value }))}
             />
 
-            {needsTeacher && (
+            {needsTeacher ? (
               <OptionPicker
                 label="선생님"
                 value={draft.teacher || ''}
@@ -355,7 +392,7 @@ export default function TimetableEditDialog({
                 customEnabled={customMode.teacher}
                 onCustomEnabledChange={(value) => setCustomMode((current) => ({ ...current, teacher: value }))}
               />
-            )}
+            ) : null}
 
             <div className="dialog-field-block">
               <div className="dialog-field-label">학기</div>
@@ -404,18 +441,39 @@ export default function TimetableEditDialog({
               </div>
             </div>
           </div>
-        )}
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <SummaryRow label="수업명" value={summary.className} />
+              <SummaryRow label="요일/시간" value={summary.currentTime} />
+              <SummaryRow label="선생님" value={summary.currentTeacher} />
+              <SummaryRow label="강의실" value={summary.currentClassroom} />
+            </div>
 
-        {!isCreate && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 18 }}>
-            <SummaryRow label="수업명" value={summary.className} />
-            <SummaryRow label="변경 후 시간" value={summary.nextTime} />
-            {summary.nextAxis && <SummaryRow label={summary.nextAxisLabel} value={summary.nextAxis} />}
-            {summary.previousAxis && <SummaryRow label={summary.previousAxisLabel} value={summary.previousAxis} />}
+            <div
+              style={{
+                padding: 16,
+                borderRadius: 16,
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-surface-hover)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>변경될 내용</div>
+              {changeRows.length > 0 ? (
+                changeRows.map((change) => (
+                  <ChangeRow key={`${change.label}-${change.from}-${change.to}`} label={change.label} from={change.from} to={change.to} />
+                ))
+              ) : (
+                <SummaryRow label="안내" value="변경되는 항목이 없습니다." />
+              )}
+            </div>
           </div>
         )}
 
-        {warnings.length > 0 && (
+        {warnings.length > 0 ? (
           <div
             style={{
               marginTop: 18,
@@ -441,7 +499,7 @@ export default function TimetableEditDialog({
               </div>
             ))}
           </div>
-        )}
+        ) : null}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={busy}>

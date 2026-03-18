@@ -134,21 +134,25 @@ export default function ManagementHeader({
   searchValue,
   onSearchChange,
   toolbarActions = [],
-  selectedCount,
-  currentCount,
+  selectedCount = 0,
+  currentCount = 0,
   onToggleSelectAll,
   onDeleteSelected,
   onBulkUpdate,
-  bulkUpdateLabel,
+  bulkUpdateLabel = '일괄 수정',
   isBusy = false,
   tableControls,
-  searchPlaceholder = '이름, 수업명, 교재명으로 검색',
+  searchPlaceholder = '이름, 학교, 연락처 검색',
+  embedded = false,
+  hideSummary = false,
+  className = '',
 }) {
   const { isMobile } = useViewport();
   const columnSelectorRef = useRef(null);
   const filterRef = useRef(null);
   const [isColumnPanelOpen, setIsColumnPanelOpen] = useState(false);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const hasOpenPanel = isColumnPanelOpen || isFilterPanelOpen;
 
   const activeFilterCount = useMemo(() => {
     if (!tableControls) {
@@ -184,47 +188,83 @@ export default function ManagementHeader({
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, []);
 
+  const rootClassName = [
+    embedded ? 'management-header-shell management-header-shell-embedded' : 'card-custom p-6 management-header-shell',
+    className,
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className="card-custom p-6" style={{ marginBottom: 20 }}>
+    <div
+      className={rootClassName}
+      style={{
+        marginBottom: embedded ? 0 : 20,
+        overflow: 'visible',
+        zIndex: hasOpenPanel ? 24 : 1,
+      }}
+    >
       <div
         style={{
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+          justifyContent: hideSummary ? 'flex-end' : 'space-between',
+          alignItems: 'flex-start',
           gap: 16,
-          marginBottom: 20,
+          marginBottom: 14,
           flexWrap: 'wrap',
         }}
       >
-        <div>
-          <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{title}</h3>
-          <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text-muted)' }}>
-            현재 {count}개 항목
+        {!hideSummary ? (
+          <div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{title}</h3>
+            <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text-muted)' }}>현재 {count}개 항목</div>
+            {description ? (
+              <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.65, color: 'var(--text-secondary)', maxWidth: 720 }}>
+                {description}
+              </div>
+            ) : null}
           </div>
-          {description ? (
-            <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.65, color: 'var(--text-secondary)', maxWidth: 720 }}>
-              {description}
-            </div>
-          ) : null}
+        ) : null}
+
+        {toolbarActions.length > 0 ? (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginLeft: 'auto' }}>
+            {toolbarActions.map((action) => (
+              <ToolbarAction key={action.label} action={action} disabled={isBusy || action.disabled} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', flex: '1 1 320px', minWidth: 220 }}>
+          <Search
+            size={16}
+            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.55 }}
+          />
+          <input
+            type="text"
+            className="styled-input"
+            placeholder={searchPlaceholder}
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.target.value)}
+            style={{ paddingLeft: 40, width: '100%' }}
+          />
         </div>
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          {toolbarActions.map((action) => (
-            <ToolbarAction key={action.label} action={action} disabled={isBusy || action.disabled} />
-          ))}
-
-          {tableControls && (
+        {tableControls ? (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
             <div ref={filterRef} style={{ position: 'relative' }}>
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setIsFilterPanelOpen((current) => !current)}
+                onClick={() => {
+                  setIsColumnPanelOpen(false);
+                  setIsFilterPanelOpen((current) => !current);
+                }}
                 style={{ padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}
                 disabled={isBusy}
               >
                 <Filter size={16} />
                 필터/정렬
-                {activeFilterCount > 0 && (
+                {activeFilterCount > 0 ? (
                   <span
                     style={{
                       padding: '2px 6px',
@@ -237,12 +277,12 @@ export default function ManagementHeader({
                   >
                     {activeFilterCount}
                   </span>
-                )}
+                ) : null}
               </button>
 
-              {isFilterPanelOpen && (
+              {isFilterPanelOpen ? (
                 <div
-                  className="card-custom"
+                  className="card-custom management-floating-panel"
                   style={{
                     position: 'absolute',
                     top: 'calc(100% + 8px)',
@@ -258,9 +298,7 @@ export default function ManagementHeader({
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>
-                      정렬
-                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>정렬</div>
                     <button
                       type="button"
                       className="btn-secondary"
@@ -299,9 +337,7 @@ export default function ManagementHeader({
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>
-                      그룹
-                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>그룹</div>
                     <button
                       type="button"
                       className="btn-secondary"
@@ -341,9 +377,7 @@ export default function ManagementHeader({
                     </select>
                   </div>
 
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', paddingTop: 4 }}>
-                    컬럼 필터
-                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', paddingTop: 4 }}>컬럼 필터</div>
 
                   {tableControls.columns.filter((column) => column.filterKind).map((column) => (
                     <div key={column.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -359,25 +393,26 @@ export default function ManagementHeader({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
 
-          {tableControls && (
             <div ref={columnSelectorRef} style={{ position: 'relative' }}>
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setIsColumnPanelOpen((current) => !current)}
+                onClick={() => {
+                  setIsFilterPanelOpen(false);
+                  setIsColumnPanelOpen((current) => !current);
+                }}
                 style={{ padding: 8, background: 'var(--bg-surface-hover)' }}
                 disabled={isBusy}
               >
                 <Eye size={18} />
               </button>
 
-              {isColumnPanelOpen && (
+              {isColumnPanelOpen ? (
                 <div
-                  className="card-custom"
+                  className="card-custom management-floating-panel"
                   style={{
                     position: 'absolute',
                     top: 'calc(100% + 8px)',
@@ -391,9 +426,7 @@ export default function ManagementHeader({
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>
-                      표시할 컬럼 선택
-                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>표시할 컬럼 선택</div>
                     <button
                       type="button"
                       className="btn-secondary"
@@ -403,6 +436,7 @@ export default function ManagementHeader({
                       순서 초기화
                     </button>
                   </div>
+
                   {tableControls.columns.map((column) => (
                     <div
                       key={column.key}
@@ -437,30 +471,13 @@ export default function ManagementHeader({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
-        </div>
+          </div>
+        ) : null}
       </div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: 2, minWidth: 220 }}>
-          <Search
-            size={16}
-            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.55 }}
-          />
-          <input
-            type="text"
-            className="styled-input"
-            placeholder={searchPlaceholder}
-            value={searchValue}
-            onChange={(event) => onSearchChange(event.target.value)}
-            style={{ paddingLeft: 40, width: '100%' }}
-          />
-        </div>
-      </div>
-
-      {selectedCount > 0 && (
+      {selectedCount > 0 ? (
         <div
           style={{
             marginTop: 16,
@@ -476,7 +493,7 @@ export default function ManagementHeader({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <strong style={{ color: 'var(--accent-color)' }}>{selectedCount}개 선택됨</strong>
+            <strong style={{ color: 'var(--accent-color)' }}>{selectedCount}개 선택</strong>
             <button
               type="button"
               className="btn-secondary"
@@ -485,7 +502,7 @@ export default function ManagementHeader({
             >
               {selectedCount === currentCount && currentCount > 0 ? '선택 해제' : '전체 선택'}
             </button>
-            {onBulkUpdate && (
+            {onBulkUpdate ? (
               <button
                 type="button"
                 className="btn-secondary"
@@ -500,7 +517,7 @@ export default function ManagementHeader({
               >
                 {bulkUpdateLabel}
               </button>
-            )}
+            ) : null}
           </div>
 
           <button
@@ -513,7 +530,7 @@ export default function ManagementHeader({
             선택 삭제
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

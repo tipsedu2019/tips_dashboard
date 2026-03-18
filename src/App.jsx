@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, startTransition, useEffect, useMemo, useState } from 'react';
+﻿import { Suspense, lazy, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart2,
   BookOpen,
@@ -6,8 +6,6 @@ import {
   Calendar,
   LayoutGrid,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   ClipboardList,
   CalendarDays,
   Eye,
@@ -25,7 +23,6 @@ import LoginModal from './components/SettingsModal';
 import PageLoader from './components/ui/PageLoader';
 import StatusBanner from './components/ui/StatusBanner';
 import TermManagerModal from './components/ui/TermManagerModal';
-import ViewHeader from './components/ui/ViewHeader';
 import useViewport from './hooks/useViewport';
 import {
   ACTIVE_CLASS_STATUS,
@@ -40,7 +37,7 @@ const DailyTeacherView = lazy(() => import('./components/DailyTeacherView'));
 const DataManager = lazy(() => import('./components/DataManager'));
 const StudentWeeklyView = lazy(() => import('./components/StudentWeeklyView'));
 const AcademicCalendarView = lazy(() => import('./components/AcademicCalendarView'));
-const CurriculumDashboardView = lazy(() => import('./components/CurriculumDashboardView'));
+const CurriculumRoadmapView = lazy(() => import('./components/CurriculumRoadmapView'));
 const PublicClassListView = lazy(() => import('./components/PublicClassListView'));
 const ClassListWorkspace = lazy(() => import('./components/ClassListWorkspace'));
 const StatsDashboard = lazy(() => import('./components/StatsDashboard'));
@@ -91,7 +88,7 @@ const NAV_VIEWS = [
   { id: 'stats', label: '개요', icon: BarChart2, staffOnly: false },
   { id: 'timetable', label: '시간표', icon: LayoutGrid, staffOnly: false },
   { id: 'academic-calendar', label: '학사 일정', icon: CalendarDays, staffOnly: false },
-  { id: 'curriculum-dashboard', label: '교재 정보', icon: BookOpen, staffOnly: true },
+  { id: 'curriculum-roadmap', label: '교재·진도', icon: BookOpen, staffOnly: true },
   { id: 'data-manager', label: '데이터 관리', icon: ClipboardList, staffOnly: true },
 ];
 
@@ -197,10 +194,15 @@ export default function App() {
     academicCurriculumProfiles: [],
     academicSupplementMaterials: [],
     academicEventExamDetails: [],
+    academicExamMaterialPlans: [],
+    academicExamMaterialItems: [],
     academicExamDays: [],
     academicExamScopes: [],
     academyCurriculumPlans: [],
     academyCurriculumMaterials: [],
+    academyCurriculumPeriodCatalogs: [],
+    academyCurriculumPeriodPlans: [],
+    academyCurriculumPeriodItems: [],
     isConnected: false,
     isLoading: true,
     lastUpdated: null,
@@ -217,7 +219,6 @@ export default function App() {
   const [isTermManagerOpen, setIsTermManagerOpen] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
   const [isPublicMode, setIsPublicMode] = useState(() => getPublicModeFromLocation());
-  const [isTimetableFloatingCollapsed, setIsTimetableFloatingCollapsed] = useState(() => localStorage.getItem('tips-timetable-floating-collapsed') === '1');
   const [localTerms, setLocalTerms] = useState(() => {
     try {
       const raw = localStorage.getItem(LOCAL_TERM_STORAGE_KEY);
@@ -226,6 +227,11 @@ export default function App() {
       return [];
     }
   });
+  const [sidebarTooltip, setSidebarTooltip] = useState(null);
+  const [isSubjectFlyoutOpen, setIsSubjectFlyoutOpen] = useState(false);
+  const [subjectFlyoutAnchor, setSubjectFlyoutAnchor] = useState(null);
+  const [curriculumRoadmapIntent, setCurriculumRoadmapIntent] = useState(null);
+  const subjectFlyoutCloseTimerRef = useRef(null);
 
   const { user, isStaff, logout, loading, authError } = useAuth();
   const showMinimalSidebar = !isCompact;
@@ -241,6 +247,11 @@ export default function App() {
 
   const goHome = () => {
     changeView('stats');
+  };
+
+  const openCurriculumRoadmap = (intent = null) => {
+    setCurriculumRoadmapIntent(intent ? { ...intent, nonce: Date.now() } : { nonce: Date.now() });
+    changeView('curriculum-roadmap', { closeSidebar: false });
   };
 
   useEffect(() => {
@@ -323,10 +334,27 @@ export default function App() {
     if (currentView === 'planner') {
       changeView('class-list', { closeSidebar: false });
     }
+    if (currentView === 'curriculum-dashboard') {
+      changeView('curriculum-roadmap', { closeSidebar: false });
+    }
   }, [currentView]);
 
+  useEffect(() => () => {
+    if (subjectFlyoutCloseTimerRef.current) {
+      window.clearTimeout(subjectFlyoutCloseTimerRef.current);
+    }
+  }, []);
+
   useEffect(() => {
-    if (user && !isStaff && (currentView === 'data-manager' || currentView === 'curriculum-dashboard')) {
+    if (!showMinimalSidebar) {
+      setSidebarTooltip(null);
+      setIsSubjectFlyoutOpen(false);
+      setSubjectFlyoutAnchor(null);
+    }
+  }, [showMinimalSidebar]);
+
+  useEffect(() => {
+    if (user && !isStaff && (currentView === 'data-manager' || currentView === 'curriculum-roadmap')) {
       changeView('stats', { closeSidebar: false });
     }
   }, [currentView, isStaff, user]);
@@ -424,7 +452,7 @@ export default function App() {
     const result = [];
     const knownNames = new Set();
 
-    [...(data.classTerms || []), ...(localTerms || [])].forEach((term, index) => {
+    mergeTermsByName(localTerms || [], data.classTerms || []).forEach((term, index) => {
       const name = term.name || term.period || '';
       if (!name) return;
       knownNames.add(name);
@@ -528,8 +556,8 @@ export default function App() {
       return 'academic-calendar';
     }
 
-    if (currentView === 'curriculum-dashboard') {
-      return 'data-manager';
+    if (currentView === 'curriculum-roadmap') {
+      return 'academic-calendar';
     }
 
     if (currentView === 'data-manager') {
@@ -548,11 +576,55 @@ export default function App() {
   const timetableDefaultPeriod = filterMode === 'period' && selectedPeriod !== ALL_OPTION ? selectedPeriod : '';
 
   const toggleTheme = () => setTheme((current) => (current === 'light' ? 'dark' : 'light'));
+  const clearSubjectFlyoutCloseTimer = () => {
+    if (subjectFlyoutCloseTimerRef.current) {
+      window.clearTimeout(subjectFlyoutCloseTimerRef.current);
+      subjectFlyoutCloseTimerRef.current = null;
+    }
+  };
+  const openSidebarTooltip = (event, label) => {
+    if (!showMinimalSidebar || !label) {
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    setSidebarTooltip({
+      label,
+      top: rect.top + rect.height / 2,
+      left: rect.right + 14,
+    });
+  };
+  const closeSidebarTooltip = () => {
+    setSidebarTooltip(null);
+  };
+  const openSubjectFlyout = (event) => {
+    if (!showMinimalSidebar) {
+      return;
+    }
+    clearSubjectFlyoutCloseTimer();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setSubjectFlyoutAnchor({
+      top: rect.top + rect.height / 2,
+      left: rect.right + 14,
+    });
+    setIsSubjectFlyoutOpen(true);
+    setSidebarTooltip(null);
+  };
+  const scheduleCloseSubjectFlyout = () => {
+    clearSubjectFlyoutCloseTimer();
+    subjectFlyoutCloseTimerRef.current = window.setTimeout(() => {
+      setIsSubjectFlyoutOpen(false);
+    }, 100);
+  };
   const navigateMobileTab = (tabId) => {
     if (tabId === 'timetable') {
       startTransition(() => {
         setCurrentView((current) => (TIMETABLE_VIEW_IDS.includes(current) ? current : 'class-list'));
       });
+      return;
+    }
+
+    if (tabId === 'curriculum-roadmap') {
+      openCurriculumRoadmap();
       return;
     }
 
@@ -582,13 +654,13 @@ export default function App() {
       {TIMETABLE_TABS.map((tab) => {
         const Icon = tab.icon;
         return (
-          <button
-            key={tab.id}
-            type="button"
-            className={`h-segment-btn ${currentView === tab.id ? 'active' : ''}`}
+            <button
+              key={tab.id}
+              type="button"
+              className={`h-segment-btn ${currentView === tab.id ? 'active' : ''}`}
             onClick={() => changeView(tab.id, { closeSidebar: false })}
-            style={{ minHeight: compact ? 42 : 48, justifyContent: 'center' }}
-          >
+              style={{ minHeight: compact ? 42 : 48, justifyContent: 'center' }}
+            >
             <Icon size={16} style={{ marginRight: 8 }} />
             {tab.label}
           </button>
@@ -734,53 +806,6 @@ export default function App() {
     </div>
   );
 
-  const renderFloatingTimetableMenu = () => {
-    if (isTimetableFloatingCollapsed) {
-      return (
-        <div className="timetable-floating-rail">
-          <button
-            type="button"
-            className="timetable-floating-rail-button"
-            onClick={() => {
-              setIsTimetableFloatingCollapsed(false);
-              localStorage.setItem('tips-timetable-floating-collapsed', '0');
-            }}
-          >
-            <ChevronRight size={16} />
-            시간표 패널
-          </button>
-        </div>
-      );
-    }
-
-    return (
-      <div className="timetable-floating-filter">
-        <div className="timetable-floating-shell">
-          <div className="timetable-floating-header">
-            <div className="timetable-floating-title">시간표 패널</div>
-            <button
-              type="button"
-              className="action-chip"
-              onClick={() => {
-                setIsTimetableFloatingCollapsed(true);
-                localStorage.setItem('tips-timetable-floating-collapsed', '1');
-              }}
-            >
-              <ChevronLeft size={14} />
-              접기
-            </button>
-          </div>
-          <div className="timetable-floating-topline">
-            <div className="timetable-floating-tabs">
-              {renderTimetableTabs({ compact: true })}
-            </div>
-          </div>
-          <div id="timetable-floating-slot" className="timetable-floating-slot" />
-        </div>
-      </div>
-    );
-  };
-
   if (loading) {
     return (
       <PageLoader
@@ -875,7 +900,16 @@ export default function App() {
                 </h1>
               </div>
             </button>
-            <button className="theme-toggle" onClick={toggleTheme} style={{ marginLeft: 'auto' }} title="테마 전환">
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              style={{ marginLeft: 'auto' }}
+              aria-label="테마 전환"
+              onMouseEnter={(event) => openSidebarTooltip(event, '테마 전환')}
+              onMouseLeave={closeSidebarTooltip}
+              onFocus={(event) => openSidebarTooltip(event, '테마 전환')}
+              onBlur={closeSidebarTooltip}
+            >
               {theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
           </div>
@@ -897,47 +931,37 @@ export default function App() {
                   <button
                     type="button"
                     className="sidebar-mini-menu-trigger"
-                    title="과목 선택"
                     aria-label="과목 선택"
-                    data-tooltip="과목 선택"
+                    aria-expanded={isSubjectFlyoutOpen}
+                    onMouseEnter={openSubjectFlyout}
+                    onMouseLeave={scheduleCloseSubjectFlyout}
+                    onFocus={openSubjectFlyout}
+                    onBlur={scheduleCloseSubjectFlyout}
                   >
                     영/수
                   </button>
-                  <div className="sidebar-mini-menu-popover" role="menu" aria-label="과목 선택">
-                    {subjects.map((subject) => (
-                      <button
-                        key={subject}
-                        type="button"
-                        className={`sidebar-mini-menu-item ${selectedSubject === subject ? 'active' : ''}`}
-                        title={subject}
-                        onClick={() => {
-                          setSelectedSubject(subject);
-                          localStorage.setItem('selectedSubject', subject);
-                        }}
-                      >
-                        {subject}
-                      </button>
-                    ))}
-                  </div>
                 </div>
 
                 {isStaff ? (
                   <button
                     type="button"
                     className="sidebar-mini-tool-button"
-                    onClick={() => setIsTermManagerOpen(true)}
-                    data-tooltip="학기 관리"
+                    onClick={() => {
+                      closeSidebarTooltip();
+                      setIsTermManagerOpen(true);
+                    }}
                     aria-label="학기 관리"
-                    title="학기 관리"
+                    onMouseEnter={(event) => openSidebarTooltip(event, '학기 관리')}
+                    onMouseLeave={closeSidebarTooltip}
+                    onFocus={(event) => openSidebarTooltip(event, '학기 관리')}
+                    onBlur={closeSidebarTooltip}
                   >
                     <Calendar size={18} />
                   </button>
                 ) : null}
               </div>
             </div>
-          ) : (
-            renderTimetableFilterPanel()
-          )}
+          ) : null}
         </div>
 
         <nav className="sidebar-nav">
@@ -948,11 +972,19 @@ export default function App() {
               <button
                 key={view.id}
                 className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
-                title={view.label}
-                data-tooltip={showMinimalSidebar ? view.label : undefined}
                 onClick={() => {
+                  closeSidebarTooltip();
+                  setIsSubjectFlyoutOpen(false);
+                  if (view.id === 'curriculum-roadmap') {
+                    openCurriculumRoadmap();
+                    return;
+                  }
                   changeView(view.id === 'timetable' ? (TIMETABLE_VIEW_IDS.includes(currentView) ? currentView : 'class-list') : view.id);
                 }}
+                onMouseEnter={(event) => openSidebarTooltip(event, view.label)}
+                onMouseLeave={closeSidebarTooltip}
+                onFocus={(event) => openSidebarTooltip(event, view.label)}
+                onBlur={closeSidebarTooltip}
               >
                 <div className="sidebar-link-icon">
                   <IconComponent size={20} strokeWidth={2} />
@@ -967,9 +999,14 @@ export default function App() {
           <button
             className="sidebar-nav-item"
             style={{ width: '100%' }}
-            title="퍼블릭 뷰 보기"
-            data-tooltip={showMinimalSidebar ? '퍼블릭 뷰' : undefined}
-            onClick={() => setPublicModeAndSync(true)}
+            onClick={() => {
+              closeSidebarTooltip();
+              setPublicModeAndSync(true);
+            }}
+            onMouseEnter={(event) => openSidebarTooltip(event, '퍼블릭 뷰')}
+            onMouseLeave={closeSidebarTooltip}
+            onFocus={(event) => openSidebarTooltip(event, '퍼블릭 뷰')}
+            onBlur={closeSidebarTooltip}
           >
             <div className="sidebar-link-icon">
               <Eye size={20} />
@@ -984,9 +1021,14 @@ export default function App() {
               border: '1px solid rgba(239, 68, 68, 0.2)',
               background: 'rgba(239, 68, 68, 0.05)',
             }}
-            title="로그아웃"
-            data-tooltip={showMinimalSidebar ? '로그아웃' : undefined}
-            onClick={logout}
+            onClick={() => {
+              closeSidebarTooltip();
+              logout();
+            }}
+            onMouseEnter={(event) => openSidebarTooltip(event, '로그아웃')}
+            onMouseLeave={closeSidebarTooltip}
+            onFocus={(event) => openSidebarTooltip(event, '로그아웃')}
+            onBlur={closeSidebarTooltip}
           >
             <div className="sidebar-link-icon" style={{ color: '#ef4444' }}>
               <LogOut size={20} />
@@ -1001,8 +1043,47 @@ export default function App() {
         </div>
       </aside>
 
+      {showMinimalSidebar && isSubjectFlyoutOpen && subjectFlyoutAnchor ? (
+        <div
+          className="sidebar-fixed-flyout"
+          role="menu"
+          aria-label="과목 선택"
+          style={{
+            top: subjectFlyoutAnchor.top,
+            left: subjectFlyoutAnchor.left,
+          }}
+          onMouseEnter={clearSubjectFlyoutCloseTimer}
+          onMouseLeave={scheduleCloseSubjectFlyout}
+        >
+          {subjects.map((subject) => (
+            <button
+              key={subject}
+              type="button"
+              className={`sidebar-fixed-flyout-item ${selectedSubject === subject ? 'active' : ''}`}
+              onClick={() => {
+                setSelectedSubject(subject);
+                localStorage.setItem('selectedSubject', subject);
+              }}
+            >
+              {subject}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {showMinimalSidebar && sidebarTooltip ? (
+        <div
+          className="sidebar-fixed-tooltip"
+          style={{
+            top: sidebarTooltip.top,
+            left: sidebarTooltip.left,
+          }}
+        >
+          {sidebarTooltip.label}
+        </div>
+      ) : null}
+
       <main className={`main-content ${isMobile ? 'main-content-mobile' : ''} ${isTablet ? 'main-content-tablet' : ''}`}>
-        {!isCompact && TIMETABLE_VIEW_IDS.includes(currentView) && renderFloatingTimetableMenu()}
         <div className="mobile-header" style={{ justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <button className="btn-icon" onClick={() => setSidebarOpen(true)} style={{ background: 'var(--bg-surface-hover)' }}>
@@ -1075,15 +1156,21 @@ export default function App() {
         >
           <div>
             {TIMETABLE_VIEW_IDS.includes(currentView) && (
-              <section className="workspace-surface" style={{ padding: 24, display: 'grid', gap: 18, marginBottom: 24 }}>
-                <ViewHeader
-                  icon={<TimetableHeaderIcon size={22} />}
-                  eyebrow="시간표 워크스페이스"
-                  title={currentTimetableTab.label}
-                  description={currentTimetableTab.description}
-                />
+              <section
+                className={`workspace-surface ${currentView === 'class-list' ? 'workspace-surface-allow-overflow' : ''}`}
+                style={{ padding: 20, display: 'grid', gap: 14, marginBottom: 24 }}
+              >
+                {isCompact ? renderTimetableFilterPanel({ compact: true }) : null}
+                {renderTimetableTabs({ compact: isCompact })}
 
-                {isCompact && renderTimetableTabs()}
+                {currentView === 'class-list' && (
+                  <ClassListWorkspace
+                    classes={filteredClasses}
+                    data={data}
+                    dataService={dataService}
+                    integrated
+                  />
+                )}
               </section>
             )}
             {currentView === 'stats' && (
@@ -1092,13 +1179,6 @@ export default function App() {
                 data={data}
                 dataService={dataService}
                 onViewStudentSchedule={openStudentSchedule}
-              />
-            )}
-            {currentView === 'class-list' && (
-              <ClassListWorkspace
-                classes={filteredClasses}
-                data={data}
-                dataService={dataService}
               />
             )}
             {currentView === 'student-weekly' && (
@@ -1125,7 +1205,7 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
-                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                floatingFilters={false}
                 subjectOptions={subjects}
                 selectedSubject={selectedSubject}
                 onSelectSubject={(subject) => {
@@ -1147,7 +1227,7 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
-                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                floatingFilters={false}
                 subjectOptions={subjects}
                 selectedSubject={selectedSubject}
                 onSelectSubject={(subject) => {
@@ -1168,7 +1248,7 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
-                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                floatingFilters={false}
                 subjectOptions={subjects}
                 selectedSubject={selectedSubject}
                 onSelectSubject={(subject) => {
@@ -1189,7 +1269,7 @@ export default function App() {
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
-                floatingFilters={!isCompact && !isTimetableFloatingCollapsed}
+                floatingFilters={false}
                 subjectOptions={subjects}
                 selectedSubject={selectedSubject}
                 onSelectSubject={(subject) => {
@@ -1199,16 +1279,24 @@ export default function App() {
               />
             )}
             {currentView === 'academic-calendar' && (
-              <AcademicCalendarView data={data} dataService={dataService} />
+              <AcademicCalendarView
+                data={data}
+                dataService={dataService}
+                onOpenRoadmap={openCurriculumRoadmap}
+              />
             )}
-            {currentView === 'curriculum-dashboard' && (
-              <CurriculumDashboardView data={data} dataService={dataService} />
+            {currentView === 'curriculum-roadmap' && (
+              <CurriculumRoadmapView
+                data={data}
+                dataService={dataService}
+                navigationIntent={curriculumRoadmapIntent}
+              />
             )}
             {currentView === 'data-manager' && (
               <DataManager
                 data={data}
                 dataService={dataService}
-                onOpenCurriculum={() => changeView('curriculum-dashboard', { closeSidebar: false })}
+                onOpenCurriculum={() => openCurriculumRoadmap()}
               />
             )}
           </div>

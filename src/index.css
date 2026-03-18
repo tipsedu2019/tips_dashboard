@@ -93,16 +93,6 @@ body {
   overflow-x: hidden;
 }
 
-body::before,
-body::after {
-  content: none;
-  display: none;
-}
-
-[data-theme='dark'] body {
-  background: var(--page-gradient);
-}
-
 /* 1. Branding: Custom Selection & Scrollbars */
 ::selection {
   background-color: var(--accent-color);
@@ -317,6 +307,7 @@ body::after {
   padding: 14px 0 20px !important;
   align-items: center;
   gap: 14px !important;
+  overflow: hidden;
 }
 
 .app-layout.sidebar-hidden .sidebar-footer .sidebar-nav-item {
@@ -372,6 +363,16 @@ body::after {
   align-items: center;
 }
 
+.sidebar-mini-menu::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 76px;
+  height: 18px;
+  transform: translateX(-50%);
+}
+
 .sidebar-mini-menu-trigger {
   width: 48px;
   height: 48px;
@@ -387,22 +388,21 @@ body::after {
 
 .sidebar-mini-menu-popover {
   position: absolute;
-  top: calc(100% + 10px);
+  top: calc(100% + 4px);
   left: 50%;
-  transform: translateX(-50%) translateY(-8px);
+  transform: translateX(-50%) translateY(-4px);
   display: grid;
-  gap: 8px;
+  gap: 6px;
   justify-items: center;
-  width: 64px;
-  padding: 10px 0;
-  border-radius: 28px;
+  width: 72px;
+  padding: 12px 8px;
+  border-radius: 24px;
   border: 1px solid var(--border-color);
-  background: color-mix(in srgb, var(--bg-surface) 96%, rgba(255, 255, 255, 0.76));
-  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
-  backdrop-filter: blur(14px);
+  background: var(--bg-surface-strong);
+  box-shadow: var(--shadow-sm);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition: opacity 0.12s ease, transform 0.12s ease;
   z-index: 20;
 }
 
@@ -421,12 +421,11 @@ body::after {
   height: 42px;
   padding: 0;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: color-mix(in srgb, var(--bg-surface) 90%, rgba(255, 255, 255, 0.6));
+  border: 1px solid transparent;
+  background: var(--bg-surface);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
 }
 
 .sidebar-mini-menu-item:hover {
@@ -869,6 +868,10 @@ body::after {
   contain-intrinsic-size: 680px;
 }
 
+.workspace-surface-allow-overflow {
+  overflow: visible;
+}
+
 [data-theme='dark'] .workspace-surface {
   background: linear-gradient(180deg, rgba(39, 29, 23, 0.94), rgba(22, 16, 13, 0.82));
   border-color: rgba(255, 236, 213, 0.1);
@@ -1025,6 +1028,41 @@ body::after {
   overflow: hidden;
 }
 
+.management-header-shell {
+  position: relative;
+  overflow: visible;
+}
+
+.management-header-shell-embedded {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  padding: 24px 24px 18px;
+}
+
+.management-floating-panel {
+  overflow: visible;
+  box-shadow: 0 26px 52px rgba(133, 79, 20, 0.16);
+}
+
+.class-list-workspace-panel {
+  display: grid;
+  gap: 0;
+  overflow: visible;
+}
+
+.class-list-workspace-panel .management-header-shell-embedded {
+  padding-bottom: 18px;
+}
+
+.data-list-shell-cardless {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 [data-theme='dark'] .card-custom {
   background: linear-gradient(180deg, rgba(37, 28, 22, 0.9), rgba(23, 17, 14, 0.78));
   border-color: rgba(255, 238, 214, 0.12);
@@ -1050,9 +1088,10 @@ body::after {
   display: grid;
   background: var(--timetable-bg);
   border: 1px solid var(--timetable-line);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   border-right: none;
   border-bottom: none;
+  overflow: hidden;
 }
 
 .timetable-header-cell {
@@ -1067,9 +1106,9 @@ body::after {
 }
 
 .timetable-time-cell {
-  padding: 8px;
-  text-align: right;
-  font-size: 12px;
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 11px;
   color: var(--text-muted);
   border-right: 1px solid var(--timetable-line);
   border-bottom: 1px solid var(--timetable-line);
@@ -1077,6 +1116,8 @@ body::after {
   height: 48px; /* Increased further for readability */
   box-sizing: border-box;
   transition: background-color 0.2s;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
 }
 
 .timetable-cell {
@@ -1170,9 +1211,9 @@ body::after {
 
 .timetable-block {
   position: absolute;
-  top: 2px;
-  left: 3px;
-  right: 3px;
+  top: 1px;
+  left: 1px;
+  right: 1px;
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 14px;
@@ -1811,9 +1852,9 @@ body::after {
   display: flex;
   flex-wrap: wrap;
   background: linear-gradient(180deg, rgba(255, 247, 234, 0.5), rgba(255, 241, 219, 0.22));
-  padding: 5px;
-  border-radius: 18px;
-  gap: 4px;
+  padding: 4px;
+  border-radius: 16px;
+  gap: 3px;
   border: 1px solid var(--border-color);
   backdrop-filter: blur(calc(var(--glass-blur) * 0.7));
 }
@@ -1826,9 +1867,9 @@ body::after {
 .h-segment-btn {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 14px;
-  padding: 11px 16px;
-  font-size: 13px;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-secondary);
   cursor: pointer;
@@ -1836,7 +1877,7 @@ body::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .h-segment-btn:hover {
@@ -2268,15 +2309,19 @@ body::after {
 .app-layout.sidebar-hidden [data-tooltip]::after {
   top: 50%;
   bottom: auto;
-  left: calc(100% + 14px);
-  transform: translateY(-50%) translateX(-4px);
-  padding: 7px 10px;
+  left: calc(100% + 10px);
+  transform: translateY(-50%);
+  padding: 8px 12px;
   border-radius: 999px;
   font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  max-width: none;
+  white-space: nowrap;
 }
 
 .app-layout.sidebar-hidden [data-tooltip]:hover::after {
-  transform: translateY(-50%) translateX(0);
+  transform: translate(4px, -50%);
 }
 
 /* Academic Calendar Custom Styles */
@@ -3892,6 +3937,7 @@ body::after {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+  align-items: start;
   border: 1px solid rgba(255,255,255,0.42);
   border-radius: 26px;
   background: linear-gradient(180deg, rgba(255, 251, 243, 0.82), rgba(255, 243, 227, 0.54));
@@ -3909,6 +3955,61 @@ body::after {
   font-size: 12px;
   font-weight: 800;
   color: var(--text-secondary);
+}
+
+.curriculum-school-add {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.curriculum-school-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1.2fr);
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 247, 236, 0.72));
+  box-shadow: 0 14px 28px rgba(133, 79, 20, 0.08);
+}
+
+.curriculum-school-add-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.curriculum-school-add-copy strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.curriculum-school-add-copy span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.curriculum-school-add-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.curriculum-school-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.8fr) auto;
+  gap: 10px;
+  align-items: center;
 }
 
 .curriculum-section {
@@ -4048,6 +4149,62 @@ body::after {
   gap: 4px;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.curriculum-report-editable-cell {
+  position: relative;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.curriculum-report-editable-cell.is-active {
+  background: rgba(255, 239, 214, 0.54);
+}
+
+.curriculum-report-cell-button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.curriculum-report-cell-button:hover {
+  opacity: 0.92;
+}
+
+.curriculum-report-cell-hint {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(171, 24, 32, 0.08);
+  color: #8f2025;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.curriculum-report-inline-editor {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 14px 28px rgba(133, 79, 20, 0.14);
+}
+
+.curriculum-inline-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .curriculum-report-empty,
@@ -4220,6 +4377,34 @@ body::after {
   box-shadow: 0 28px 58px rgba(0,0,0,0.36);
 }
 
+[data-theme='dark'] .curriculum-school-add {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 228, 191, 0.14);
+}
+
+[data-theme='dark'] .curriculum-school-editor {
+  background: linear-gradient(180deg, rgba(34, 25, 20, 0.94), rgba(23, 17, 14, 0.9));
+  border-color: rgba(255, 228, 191, 0.14);
+}
+
+[data-theme='dark'] .curriculum-report-editable-cell {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme='dark'] .curriculum-report-editable-cell.is-active {
+  background: rgba(255, 214, 168, 0.1);
+}
+
+[data-theme='dark'] .curriculum-report-cell-hint {
+  background: rgba(255, 214, 168, 0.16);
+  color: #ffd9ae;
+}
+
+[data-theme='dark'] .curriculum-report-inline-editor {
+  background: rgba(30, 24, 19, 0.94);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.32);
+}
+
 @media (max-width: 1080px) {
   .academic-calendar-shell {
     grid-template-columns: 1fr;
@@ -4256,7 +4441,14 @@ body::after {
   .academic-modal-grid-3,
   .academic-modal-grid-4,
   .academic-agenda-item,
-  .curriculum-form-grid {
+  .curriculum-form-grid,
+  .curriculum-school-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .curriculum-school-add-controls,
+  .curriculum-school-editor-grid {
+    width: 100%;
     grid-template-columns: 1fr;
   }
 
@@ -4291,6 +4483,15 @@ body::after {
     padding: 14px;
   }
 
+  .curriculum-school-add {
+    grid-template-columns: 1fr;
+  }
+
+  .curriculum-school-add-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .public-filter-grid {
     grid-template-columns: 1fr;
   }
@@ -4301,4 +4502,1708 @@ body::after {
   }
 }
 
+/* Final Flat Performance Overrides */
+:root {
+  --bg-base: #f3f5f7 !important;
+  --bg-surface: #ffffff !important;
+  --bg-surface-strong: #ffffff !important;
+  --bg-surface-hover: #f7f9fc !important;
+  --bg-surface-muted: #eef2f6 !important;
+  --text-primary: #17212b !important;
+  --text-secondary: #4a5565 !important;
+  --text-muted: #7c8797 !important;
+  --border-color: #d9e1ea !important;
+  --border-strong: #c6d0db !important;
+  --accent-color: #245c8d !important;
+  --accent-hover: #1d4c74 !important;
+  --accent-light: rgba(36, 92, 141, 0.12) !important;
+  --accent-soft: rgba(36, 92, 141, 0.08) !important;
+  --accent-strong: #1d4c74 !important;
+  --shadow-sm: none !important;
+  --shadow-md: none !important;
+  --sidebar-bg: #ffffff !important;
+  --sidebar-border: #d9e1ea !important;
+  --glass-highlight: transparent !important;
+  --glass-blur: 0px !important;
+  --page-gradient: linear-gradient(180deg, #f3f5f7 0%, #edf1f5 100%) !important;
+  --radius-sm: 12px !important;
+  --radius-md: 16px !important;
+  --radius-lg: 22px !important;
+  --timetable-bg: #ffffff !important;
+  --timetable-line: #d9e1ea !important;
+}
 
+[data-theme='dark'] {
+  --bg-base: #0f141a !important;
+  --bg-surface: #161d25 !important;
+  --bg-surface-strong: #1a232d !important;
+  --bg-surface-hover: #202a35 !important;
+  --bg-surface-muted: #111820 !important;
+  --text-primary: #eef4fb !important;
+  --text-secondary: #b4c0cf !important;
+  --text-muted: #8d99a8 !important;
+  --border-color: #2d3946 !important;
+  --border-strong: #3a4858 !important;
+  --accent-color: #7fb1de !important;
+  --accent-hover: #a6caea !important;
+  --accent-light: rgba(127, 177, 222, 0.14) !important;
+  --accent-soft: rgba(127, 177, 222, 0.1) !important;
+  --accent-strong: #a6caea !important;
+  --shadow-sm: none !important;
+  --shadow-md: none !important;
+  --sidebar-bg: #141b22 !important;
+  --sidebar-border: #2d3946 !important;
+  --glass-highlight: transparent !important;
+  --glass-blur: 0px !important;
+  --page-gradient: linear-gradient(180deg, #0f141a 0%, #121920 100%) !important;
+  --timetable-bg: #161d25 !important;
+  --timetable-line: #2d3946 !important;
+}
+
+body {
+  background: var(--bg-base) !important;
+  background-image: none !important;
+  background-attachment: initial !important;
+}
+
+.animate-in,
+.sidebar-logo-mark,
+.mobile-logo-mark {
+  animation: none !important;
+}
+
+.workspace-surface,
+.card,
+.card-custom,
+.sidebar,
+.mobile-bottom-nav,
+.custom-dropdown-btn,
+.custom-dropdown-menu,
+.sidebar-mini-menu-popover,
+.timetable-filter-card,
+.timetable-filter-floating-card,
+.timetable-filter-group,
+.academic-calendar-workspace,
+.academic-calendar-toolbar,
+.academic-calendar-sidebar,
+.academic-sidebar-panel,
+.academic-sidebar-search-panel,
+.academic-toolbar-search,
+.academic-month-nav,
+.academic-chip-option,
+.academic-day-cell,
+.academic-agenda-item,
+.academic-modal-section,
+.academic-inline-composer,
+.curriculum-filter-grid,
+.curriculum-section,
+.curriculum-school-add,
+.curriculum-school-editor,
+.curriculum-material-card,
+.curriculum-report-sheet,
+.public-class-card,
+.management-floating-panel,
+.data-list-pagination {
+  background: var(--bg-surface-strong) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  border-color: var(--border-color) !important;
+}
+
+.workspace-surface::before,
+.card::before,
+.card-custom::before,
+.public-class-card::before {
+  content: none !important;
+  display: none !important;
+}
+
+.sidebar-nav-item,
+.sidebar-mini-tool-button,
+.mobile-bottom-nav-item,
+.h-segment-btn,
+.btn-primary,
+.btn-secondary,
+.action-pill,
+.action-chip,
+.styled-input,
+.custom-dropdown-btn,
+.academic-chip-option,
+.academic-view-toggle,
+.curriculum-report-cell-button,
+.curriculum-report-inline-editor,
+.academic-event-bar,
+.timetable-block {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  transform: none !important;
+}
+
+.card:hover,
+.sidebar-nav-item:hover,
+.sidebar-nav-item.active,
+.sidebar-mini-tool-button:hover,
+.mobile-bottom-nav-item:hover,
+.mobile-bottom-nav-item.active,
+.btn-primary:hover,
+.btn-secondary:hover,
+.action-pill:hover,
+.action-chip:hover,
+.h-segment-btn:hover,
+.h-segment-btn.active {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.academic-event-bar {
+  background: color-mix(in srgb, var(--event-color, var(--accent-color)) 10%, var(--bg-surface-strong)) !important;
+  border: 1px solid color-mix(in srgb, var(--event-color, var(--accent-color)) 18%, var(--border-color)) !important;
+  border-left: 3px solid var(--event-color, var(--accent-color)) !important;
+}
+
+.timetable-filter-card,
+.timetable-filter-floating-card {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.filter-bar {
+  margin-bottom: 16px;
+  background: var(--bg-surface-hover) !important;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 10px;
+}
+
+.timetable-axis-filter {
+  margin-bottom: 20px;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.timetable-axis-filter > .h-segment-container {
+  width: 100%;
+}
+
+.data-list-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.data-list-pagination-copy {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.data-list-pagination-copy strong {
+  color: var(--text-primary);
+}
+
+.data-list-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.data-list-pagination-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.data-list-pagination-size select {
+  min-width: 72px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.data-list-pagination-status {
+  min-width: 58px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+body::before,
+body::after {
+  content: none !important;
+  display: none !important;
+}
+
+[data-theme='dark'] body {
+  background: var(--bg-base) !important;
+}
+
+.app-layout {
+  gap: 6px;
+  padding: 10px;
+}
+
+.sidebar {
+  width: 240px;
+  border-width: 1px !important;
+  border-radius: 24px !important;
+}
+
+.sidebar-nav-item {
+  border: 1px solid transparent;
+}
+
+.sidebar-nav-item,
+.sidebar-mini-tool-button,
+.mobile-bottom-nav-item,
+.h-segment-btn,
+.btn-primary,
+.btn-secondary,
+.action-pill,
+.action-chip,
+.styled-input,
+.custom-dropdown-btn,
+.academic-chip-option,
+.academic-view-toggle,
+.curriculum-report-cell-button,
+.curriculum-report-inline-editor {
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease,
+    opacity 0.12s ease !important;
+}
+
+.sidebar-nav-item:hover,
+.sidebar-nav-item.active,
+.sidebar-mini-tool-button:hover,
+.mobile-bottom-nav-item.active,
+.h-segment-btn.active,
+.academic-chip-option.is-active,
+.academic-view-toggle.is-active {
+  background: var(--accent-light) !important;
+  color: var(--accent-color) !important;
+  border-color: color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
+}
+
+.styled-input {
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+.styled-input:focus,
+.btn-primary:focus,
+.btn-secondary:focus,
+.action-pill:focus,
+.action-chip:focus,
+.h-segment-btn:focus {
+  box-shadow: 0 0 0 3px var(--accent-light) !important;
+}
+
+.workspace-tabs,
+.h-segment-container,
+.timetable-inline-subject-segment,
+.timetable-floating-selector {
+  background: var(--bg-surface-hover) !important;
+  box-shadow: none !important;
+  border: 1px solid var(--border-color);
+}
+
+.workspace-tabs {
+  padding: 10px;
+  border-radius: 16px;
+}
+
+.main-content {
+  background: transparent;
+  overflow-x: clip;
+  padding: 8px 20px 40px;
+}
+
+.custom-dropdown-menu,
+.management-floating-panel {
+  border-radius: 14px !important;
+}
+
+.management-header-shell-embedded {
+  padding: 20px 20px 16px;
+}
+
+.data-list-shell-cardless {
+  border-top: 0 !important;
+}
+
+.timetable-filter-group {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.academic-day-cell,
+.academic-mini-day,
+.timetable-grid,
+.timetable-cell,
+.timetable-time-cell,
+.timetable-header-cell,
+.timetable-block,
+.timetable-preview-badge {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.curriculum-edit-grid,
+.curriculum-compare-grid {
+  gap: 14px;
+}
+
+.curriculum-section,
+.academic-calendar-toolbar,
+.academic-calendar-workspace,
+.workspace-surface {
+  padding: 20px !important;
+}
+
+.data-list-shell,
+.academic-month-grid,
+.curriculum-section,
+.public-class-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 420px;
+}
+
+.public-class-card:hover,
+.public-class-card:focus-visible {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 960px) {
+  .data-list-pagination {
+    padding: 12px 14px;
+  }
+
+  .timetable-filter-card,
+  .timetable-filter-floating-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+.app-layout.sidebar-hidden {
+  overflow-x: clip;
+}
+
+.app-layout.sidebar-hidden [data-tooltip]::after {
+  top: 50%;
+  bottom: auto;
+  left: calc(100% + 10px);
+  right: auto;
+  transform: translateY(-50%);
+  max-width: none;
+  padding: 8px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1;
+  background: color-mix(in srgb, var(--bg-surface-strong) 94%, #0f172a 6%);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.app-layout.sidebar-hidden [data-tooltip]:hover::after {
+  transform: translate(4px, -50%);
+}
+
+.app-layout.sidebar-hidden [data-tooltip]::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 5px);
+  width: 9px;
+  height: 9px;
+  border-top: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-surface-strong) 94%, #0f172a 6%);
+  transform: translate(0, -50%) rotate(45deg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 999;
+}
+
+.app-layout.sidebar-hidden [data-tooltip]:hover::before {
+  opacity: 1;
+  transform: translate(4px, -50%) rotate(45deg);
+}
+
+.timetable-compare-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-surface-hover);
+  flex-wrap: wrap;
+}
+
+.timetable-compare-density {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.timetable-compare-targets {
+  flex: 1 1 320px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timetable-compare-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.timetable-compare-chip.is-active {
+  background: var(--accent-light);
+  border-color: color-mix(in srgb, var(--accent-color) 24%, var(--border-color));
+  color: var(--accent-color);
+}
+
+.timetable-single-layout,
+.timetable-compare-layout {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+
+.timetable-window-shell {
+  display: grid;
+  gap: 4px;
+}
+
+.timetable-collapsed-time {
+  padding-left: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: -0.02em;
+}
+
+.timetable-grid-shell.is-compact .timetable-time-cell,
+.timetable-grid-shell.is-compact .timetable-header-cell {
+  font-size: 11px;
+}
+
+.timetable-grid-shell.is-micro .timetable-time-cell,
+.timetable-grid-shell.is-micro .timetable-header-cell {
+  font-size: 10px;
+}
+
+.timetable-block.is-compact {
+  padding: 3px 5px;
+  font-size: 11px;
+}
+
+.timetable-block.is-compact .block-subject,
+.timetable-block.is-compact .block-info {
+  font-size: 9px;
+}
+
+.timetable-block.is-micro {
+  padding: 2px 4px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.timetable-block.is-micro .block-name {
+  font-size: 10px;
+}
+
+.timetable-block.is-micro .block-subject,
+.timetable-block.is-micro .block-info {
+  font-size: 9px;
+}
+
+@media (max-width: 1200px) {
+  .timetable-compare-toolbar {
+    align-items: stretch;
+  }
+
+  .timetable-compare-targets {
+    flex-basis: 100%;
+  }
+}
+
+.academic-calendar-app .academic-calendar-workspace {
+  padding: 0 !important;
+  overflow: visible;
+}
+
+.academic-calendar-app .academic-calendar-toolbar {
+  padding: 12px 18px !important;
+  border-radius: 24px !important;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+
+.academic-calendar-app .academic-calendar-toolbar-main {
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.academic-calendar-app .academic-calendar-title-block {
+  display: none !important;
+}
+
+.academic-calendar-app .academic-calendar-toolbar-sub {
+  padding: 0;
+  border-top: 0;
+}
+
+.academic-calendar-app .academic-toolbar-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.academic-calendar-app .academic-toolbar-today {
+  order: -1;
+}
+
+.academic-calendar-app .academic-month-nav {
+  gap: 6px;
+}
+
+.academic-calendar-app .academic-month-nav .academic-icon-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
+
+.academic-calendar-app .academic-month-label-block strong {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.academic-calendar-app .academic-month-label-block span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.academic-calendar-app .academic-calendar-shell {
+  --academic-calendar-height: clamp(640px, calc(100vh - 148px), 860px);
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+  gap: 0;
+  min-height: var(--academic-calendar-height);
+  align-items: stretch;
+  background: var(--bg-surface);
+  border-radius: 24px;
+  overflow: visible;
+}
+
+.academic-calendar-app .academic-calendar-sidebar {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  padding: 18px 14px 18px 18px;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  border-radius: 24px 0 0 24px;
+}
+
+.academic-calendar-app .academic-calendar-main {
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  min-height: var(--academic-calendar-height);
+  border-radius: 0 24px 24px 0;
+  background: var(--bg-surface);
+  overflow: visible;
+}
+
+.academic-calendar-app .academic-calendar-toolbar-compact {
+  margin-bottom: 12px;
+}
+
+.academic-calendar-app .academic-sidebar-panel,
+.academic-calendar-app .academic-sidebar-search-panel,
+.academic-calendar-app .academic-mini-calendar {
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--bg-surface);
+  box-shadow: none !important;
+}
+
+.academic-calendar-app .academic-sidebar-panel {
+  padding: 14px;
+}
+
+.academic-calendar-app .academic-mini-calendar {
+  padding: 12px;
+}
+
+.academic-calendar-app .academic-mini-grid {
+  grid-template-rows: repeat(6, minmax(0, 1fr));
+  min-height: 234px;
+  align-content: space-between;
+}
+
+.academic-calendar-app .academic-sidebar-search {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 14px;
+  box-shadow: none !important;
+  backdrop-filter: none;
+}
+
+.academic-calendar-app .academic-sidebar-search .styled-input {
+  min-height: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.academic-calendar-app .academic-month-grid {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: var(--academic-calendar-height);
+  height: auto;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-surface);
+  box-shadow: none !important;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+
+.academic-calendar-app .academic-weekday-row {
+  gap: 0;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.academic-calendar-app .academic-weekday {
+  padding: 12px 0 10px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.academic-calendar-app .academic-month-weeks {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  gap: 0;
+  overflow: hidden;
+}
+
+.academic-calendar-app .academic-week-block {
+  height: 100%;
+  min-height: 0;
+  border-bottom: 1px solid var(--border-color);
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+
+.academic-calendar-app .academic-week-grid {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.academic-calendar-app .academic-week-days,
+.academic-calendar-app .academic-event-lane {
+  gap: 0;
+}
+
+.academic-calendar-app .academic-week-days {
+  height: 100%;
+  min-height: 0;
+}
+
+.academic-calendar-app .academic-day-cell {
+  min-height: 0;
+  height: 100%;
+  padding: 36px 8px 8px;
+  justify-content: flex-start;
+  border: 0;
+  border-right: 1px solid var(--border-color);
+  border-radius: 0;
+  background: var(--bg-surface);
+}
+
+.academic-calendar-app .academic-day-cell:last-child {
+  border-right: 0;
+}
+
+.academic-calendar-app .academic-day-cell:hover {
+  border-color: var(--border-color);
+  background: color-mix(in srgb, var(--bg-surface) 96%, #f1f5f9);
+  box-shadow: none !important;
+}
+
+.academic-calendar-app .academic-day-cell.is-selected {
+  background: color-mix(in srgb, var(--bg-surface) 92%, #e8f0fe);
+}
+
+.academic-calendar-app .academic-day-cell.is-outside {
+  background: color-mix(in srgb, var(--bg-surface) 94%, #f8fafc);
+  opacity: 1;
+}
+
+.academic-calendar-app .academic-day-cell-header {
+  top: 8px;
+  left: 8px;
+  right: 8px;
+}
+
+.academic-calendar-app .academic-day-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.academic-calendar-app .academic-day-number.is-today {
+  background: #1a73e8;
+  color: #fff;
+}
+
+.academic-calendar-app .academic-day-today-badge {
+  display: none;
+}
+
+.academic-calendar-app .academic-day-more {
+  margin-top: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a73e8;
+}
+
+.academic-calendar-app .academic-selection-layer {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  padding: 0 4px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.academic-calendar-app .academic-selection-bar {
+  min-height: 24px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #34a853 22%, #ffffff);
+  border: 1px solid color-mix(in srgb, #34a853 60%, #dbe7dd);
+  box-shadow: inset 0 0 0 1px rgba(52, 168, 83, 0.08);
+}
+
+.academic-calendar-app .academic-selection-bar.is-start-clipped {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.academic-calendar-app .academic-selection-bar.is-end-clipped {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.academic-calendar-app .academic-week-lanes {
+  top: 34px;
+  padding: 0 4px;
+  gap: 2px;
+  z-index: 2;
+}
+
+.academic-calendar-app .academic-event-bar {
+  min-height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--event-color, #1a73e8) 18%, #ffffff);
+  box-shadow: none !important;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.academic-calendar-app .academic-event-bar::before,
+.academic-calendar-app .academic-event-bar-edge {
+  display: none;
+}
+
+.academic-calendar-app .academic-event-bar:hover {
+  transform: none !important;
+  background: color-mix(in srgb, var(--event-color, #1a73e8) 24%, #ffffff);
+  box-shadow: none !important;
+}
+
+.academic-calendar-app .academic-event-bar-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.academic-calendar-app .academic-event-bar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.academic-calendar-app .academic-event-bar-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #355070;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.academic-calendar-app .academic-event-bar-chip.is-school {
+  background: #eef7f0;
+  color: #2d6a4f;
+}
+
+.academic-calendar-app .academic-event-bar-chip.is-grade {
+  background: #f4ecff;
+  color: #6d44c4;
+}
+
+.academic-calendar-app .academic-event-bar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.academic-calendar-app .academic-inline-composer {
+  z-index: 30;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dadce0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(60, 64, 67, 0.24);
+  overflow: auto;
+}
+
+.academic-calendar-app .academic-inline-composer::before {
+  display: none;
+}
+
+.academic-calendar-app .academic-inline-composer-head strong {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.academic-calendar-app .academic-inline-composer-head p,
+.academic-calendar-app .academic-inline-composer-helper {
+  font-size: 12px;
+}
+
+.academic-calendar-app .academic-inline-composer-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  background: #fff;
+}
+
+.academic-calendar-app .academic-inline-composer .academic-chip-selector {
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.academic-calendar-app .academic-inline-composer .academic-chip-option {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
+.academic-desktop-popover {
+  position: fixed;
+  z-index: 1900;
+  border: 1px solid #dadce0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(60, 64, 67, 0.28);
+  overflow: hidden;
+}
+
+.academic-event-popover-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.academic-event-popover-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  margin-top: 4px;
+  flex: 0 0 auto;
+}
+
+.academic-event-popover-title-group {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.academic-event-popover-title-group strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f1f1f;
+}
+
+.academic-event-popover-title-group span {
+  font-size: 12px;
+  color: #5f6368;
+}
+
+.academic-event-popover-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.academic-event-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.academic-event-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #3c4043;
+}
+
+.academic-event-popover-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.academic-event-popover-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #eef3fd;
+  color: #32529b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.academic-event-popover-tag.is-school {
+  background: #eef7f0;
+  color: #2d6a4f;
+}
+
+.academic-event-popover-tag.is-grade {
+  background: #f6efe8;
+  color: #8a572a;
+}
+
+.academic-event-popover-note {
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid #eef2f7;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #3c4043;
+  white-space: pre-wrap;
+}
+
+.academic-day-popover-list {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px 12px;
+}
+
+.academic-day-popover-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+}
+
+.academic-day-popover-item:hover {
+  background: #f6fafe;
+}
+
+.academic-day-popover-item-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-top: 5px;
+  flex: 0 0 auto;
+}
+
+.academic-day-popover-item-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.academic-day-popover-item-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.academic-day-popover-item-copy span {
+  font-size: 12px;
+  color: #5f6368;
+}
+
+[data-theme='dark'] .academic-desktop-popover,
+[data-theme='dark'] .academic-calendar-app .academic-inline-composer {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #202124;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-month-grid,
+[data-theme='dark'] .academic-calendar-app .academic-calendar-main,
+[data-theme='dark'] .academic-calendar-app .academic-calendar-sidebar,
+[data-theme='dark'] .academic-calendar-app .academic-calendar-toolbar,
+[data-theme='dark'] .academic-calendar-app .academic-sidebar-panel,
+[data-theme='dark'] .academic-calendar-app .academic-sidebar-search-panel,
+[data-theme='dark'] .academic-calendar-app .academic-mini-calendar {
+  background: #202124;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-weekday-row,
+[data-theme='dark'] .academic-calendar-app .academic-week-block,
+[data-theme='dark'] .academic-calendar-app .academic-day-cell,
+[data-theme='dark'] .academic-calendar-app .academic-calendar-sidebar {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-day-cell {
+  background: #202124;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-day-cell.is-outside {
+  background: #1b1c1f;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-day-cell.is-selected {
+  background: rgba(26, 115, 232, 0.16);
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-selection-bar {
+  background: color-mix(in srgb, #34a853 24%, #202124);
+  border-color: color-mix(in srgb, #34a853 70%, rgba(255, 255, 255, 0.08));
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-event-bar {
+  background: color-mix(in srgb, var(--event-color, #8ab4f8) 26%, #202124);
+  color: #f1f3f4;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-event-bar-chip {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eaed;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-event-bar-chip.is-school {
+  background: rgba(74, 222, 128, 0.16);
+  color: #c7f5d8;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-event-bar-chip.is-grade {
+  background: rgba(192, 132, 252, 0.18);
+  color: #ead6ff;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-inline-composer-actions {
+  background: #202124;
+}
+
+[data-theme='dark'] .academic-event-popover-title-group strong,
+[data-theme='dark'] .academic-day-popover-item-copy strong {
+  color: #f1f3f4;
+}
+
+[data-theme='dark'] .academic-event-popover-title-group span,
+[data-theme='dark'] .academic-event-popover-row,
+[data-theme='dark'] .academic-event-popover-note,
+[data-theme='dark'] .academic-day-popover-item-copy span {
+  color: #bdc1c6;
+}
+
+[data-theme='dark'] .academic-day-popover-item:hover {
+  background: rgba(138, 180, 248, 0.12);
+}
+
+@media (max-width: 960px) {
+  .academic-calendar-app .academic-calendar-shell {
+    min-height: auto;
+    height: auto;
+  }
+
+  .academic-calendar-app .academic-calendar-toolbar {
+    padding: 14px !important;
+    border-radius: 24px !important;
+  }
+
+  .academic-calendar-app .academic-calendar-toolbar-main {
+    margin-bottom: 8px;
+  }
+
+  .academic-calendar-app .academic-toolbar-controls {
+    align-items: stretch;
+  }
+
+  .academic-calendar-app .academic-month-label-block {
+    min-width: 0;
+  }
+
+  .academic-calendar-app .academic-weekday {
+    font-size: 10px;
+  }
+
+  .academic-calendar-app .academic-day-cell {
+    min-height: 98px;
+    padding-top: 32px;
+  }
+
+  .academic-calendar-app .academic-week-lanes {
+    top: 32px;
+  }
+}
+
+
+
+
+.sidebar-fixed-tooltip {
+  position: fixed;
+  z-index: 1400;
+  transform: translateY(-50%);
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-surface-strong) 96%, #0f172a 4%);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
+.sidebar-fixed-flyout {
+  position: fixed;
+  z-index: 1410;
+  transform: translateY(-50%);
+  display: grid;
+  gap: 6px;
+  min-width: 88px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.sidebar-fixed-flyout::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -16px;
+  width: 16px;
+}
+
+.sidebar-fixed-flyout-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sidebar-fixed-flyout-item.active {
+  background: var(--accent-light);
+  border-color: color-mix(in srgb, var(--accent-color) 20%, var(--border-color));
+  color: var(--accent-color);
+}
+
+.timetable-compare-toolbar {
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+}
+
+.timetable-compare-density .h-segment-btn,
+.timetable-compare-chip {
+  min-height: 26px;
+}
+
+.timetable-compare-density .h-segment-btn {
+  padding: 0 11px;
+}
+
+.timetable-compare-chip {
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
+.timetable-window-shell {
+  gap: 2px;
+}
+
+.timetable-collapsed-time {
+  font-size: 10px;
+}
+
+.timetable-floating-tooltip {
+  position: fixed;
+  z-index: 2100;
+  min-width: 160px;
+  max-width: 280px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(17, 24, 39, 0.96);
+  color: #ffffff;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 12px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28);
+  pointer-events: none;
+}
+
+[data-theme='dark'] .timetable-floating-tooltip {
+  background: rgba(15, 23, 42, 0.98);
+}
+
+.app-layout {
+  gap: 12px;
+  padding: 12px;
+}
+
+.main-content {
+  padding: 8px 16px 36px;
+}
+
+.timetable-grid {
+  border-right: 1px solid var(--timetable-line);
+  border-bottom: 1px solid var(--timetable-line);
+}
+
+.timetable-time-cell {
+  font-weight: 500 !important;
+}
+
+.roadmap-view {
+  position: relative;
+}
+
+.roadmap-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow: visible;
+}
+
+.roadmap-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.roadmap-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.roadmap-header h2 {
+  margin: 6px 0 8px;
+  font-size: clamp(28px, 3vw, 36px);
+}
+
+.roadmap-header p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.roadmap-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.roadmap-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.roadmap-custom-period-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) auto 1fr;
+  align-items: end;
+  gap: 12px;
+}
+
+.roadmap-custom-period-field {
+  min-width: 0;
+}
+
+.roadmap-inline-banner {
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-color);
+  border-radius: 16px;
+  background: var(--surface-secondary);
+  color: var(--text-secondary);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+
+.roadmap-report-scroll {
+  overflow: auto;
+  border: 1px solid var(--line-color);
+  border-radius: 24px;
+  background: var(--surface-primary);
+}
+
+.roadmap-report-sheet {
+  min-width: 1080px;
+}
+
+.roadmap-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.roadmap-table th,
+.roadmap-table td {
+  border-right: 1px solid var(--line-color);
+  border-bottom: 1px solid var(--line-color);
+  vertical-align: top;
+  background: var(--surface-primary);
+}
+
+.roadmap-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 14px 12px;
+  background: var(--surface-secondary);
+  text-align: left;
+}
+
+.roadmap-sticky-col,
+.roadmap-sticky-cell {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 188px;
+  min-width: 188px;
+  padding: 14px 12px;
+  background: var(--surface-secondary);
+}
+
+.roadmap-sticky-cell strong,
+.roadmap-sticky-cell span {
+  display: block;
+}
+
+.roadmap-sticky-cell span {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.roadmap-cell {
+  padding: 10px;
+  min-width: 220px;
+}
+
+.roadmap-cell-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.roadmap-cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 156px;
+}
+
+.roadmap-cell-block {
+  border: 1px solid var(--line-color);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--surface-secondary);
+}
+
+.roadmap-cell-block-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.roadmap-cell-line + .roadmap-cell-line {
+  margin-top: 8px;
+}
+
+.roadmap-cell-line strong {
+  display: block;
+  font-size: 13px;
+}
+
+.roadmap-cell-detail,
+.roadmap-cell-note,
+.roadmap-cell-empty,
+.roadmap-print-empty {
+  color: var(--text-secondary);
+}
+
+.roadmap-cell-detail {
+  margin-top: 4px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.roadmap-cell-note {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface-secondary);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.roadmap-cell-empty {
+  min-height: 156px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--line-color);
+  border-radius: 14px;
+  background: var(--surface-secondary);
+}
+
+.roadmap-period-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.roadmap-period-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.roadmap-period-header-action {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-color);
+  border-radius: 999px;
+  background: var(--surface-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.roadmap-cell-editor {
+  z-index: 130;
+  max-height: min(72vh, 780px);
+  border: 1px solid var(--line-color);
+  border-radius: 24px;
+  background: var(--surface-primary);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16);
+  overflow: hidden;
+}
+
+.roadmap-cell-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line-color);
+}
+
+.roadmap-cell-editor-head h3 {
+  margin: 6px 0 4px;
+}
+
+.roadmap-cell-editor-head p,
+.roadmap-cell-editor-eyebrow {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.roadmap-cell-editor-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.roadmap-cell-editor-body {
+  max-height: min(56vh, 620px);
+  padding: 18px 20px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.roadmap-editor-section-title {
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.roadmap-editor-section-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.roadmap-editor-row {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr 1.3fr 0.9fr auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.roadmap-editor-remove,
+.roadmap-editor-add {
+  align-self: start;
+}
+
+.roadmap-editor-note {
+  margin-top: 4px;
+}
+
+.roadmap-cell-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px 20px;
+  border-top: 1px solid var(--line-color);
+}
+
+@media (max-width: 1200px) {
+  .roadmap-custom-period-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .roadmap-editor-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .roadmap-cell-button {
+    pointer-events: none;
+  }
+}

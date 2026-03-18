@@ -1,4 +1,4 @@
-import {
+﻿import {
   CLASS_COLORS,
   getClassroomCanonicalKey,
   getClassroomDisplayName,
@@ -145,3 +145,99 @@ export function canTeacherOpenClass({ isStaff, isTeacher, user, teacherNames }) 
     );
   });
 }
+
+export function toggleCompareSelection(currentItems = [], nextValue, maxCount = Number.MAX_SAFE_INTEGER) {
+  const normalized = Array.isArray(currentItems) ? currentItems : [];
+  if (normalized.includes(nextValue)) {
+    return normalized.filter((item) => item !== nextValue);
+  }
+
+  const nextItems = [...normalized, nextValue];
+  if (!Number.isFinite(maxCount) || maxCount >= nextItems.length) {
+    return nextItems;
+  }
+  return nextItems.slice(-Math.max(1, maxCount));
+}
+
+export function computeTimetableWindow(blockGroups = [], totalSlotCount = 0, options = {}) {
+  const { paddingSlots = 1, defaultVisibleSlots = 10, minVisibleSlots = 6 } = options;
+  const allBlocks = blockGroups.flat().filter(Boolean);
+
+  if (allBlocks.length === 0) {
+    const endSlot = Math.min(Math.max(defaultVisibleSlots, minVisibleSlots), totalSlotCount);
+    return {
+      startSlot: 0,
+      endSlot,
+      hiddenBefore: false,
+      hiddenAfter: endSlot < totalSlotCount,
+      visibleSlotCount: endSlot,
+    };
+  }
+
+  const minStart = Math.max(0, Math.min(...allBlocks.map((block) => Number(block.startSlot) || 0)));
+  const maxEnd = Math.min(totalSlotCount, Math.max(...allBlocks.map((block) => Number(block.endSlot) || 0)));
+  const requestedStart = Math.max(0, minStart - paddingSlots);
+  const requestedEnd = Math.min(totalSlotCount, maxEnd + paddingSlots);
+  let startSlot = requestedStart;
+  let endSlot = requestedEnd;
+
+  if (endSlot - startSlot < minVisibleSlots) {
+    const deficit = minVisibleSlots - (endSlot - startSlot);
+    const extendBefore = Math.min(startSlot, Math.ceil(deficit / 2));
+    startSlot -= extendBefore;
+    endSlot = Math.min(totalSlotCount, endSlot + (deficit - extendBefore));
+  }
+
+  return {
+    startSlot,
+    endSlot,
+    hiddenBefore: startSlot > 0,
+    hiddenAfter: endSlot < totalSlotCount,
+    visibleSlotCount: Math.max(0, endSlot - startSlot),
+  };
+}
+
+export function rebaseBlocksToWindow(blocks = [], startSlot = 0, endSlot = Number.MAX_SAFE_INTEGER) {
+  return (blocks || [])
+    .filter((block) => block.endSlot > startSlot && block.startSlot < endSlot)
+    .map((block) => ({
+      ...block,
+      absoluteStartSlot: block.absoluteStartSlot ?? block.startSlot,
+      absoluteEndSlot: block.absoluteEndSlot ?? block.endSlot,
+      startSlot: Math.max(0, block.startSlot - startSlot),
+      endSlot: Math.max(1, Math.min(endSlot, block.endSlot) - startSlot),
+    }));
+}
+
+export function getTimetableDensity(compareCount = 1, visibleSlotCount = 10) {
+  if (compareCount >= 4 || visibleSlotCount >= 12) {
+    return 'micro';
+  }
+  if (compareCount >= 2 || visibleSlotCount >= 9) {
+    return 'compact';
+  }
+  return 'comfortable';
+}
+
+export function getTimetableSlotHeight(density = 'comfortable') {
+  if (density === 'micro') return 24;
+  if (density === 'compact') return 30;
+  return 38;
+}
+
+export function getTimetableCompareGridStyle(compareCount = 1) {
+  const columnCount = Math.max(1, Math.min(2, Number(compareCount) || 1));
+  return {
+    gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+  };
+}
+
+export function formatCollapsedTimeHint(timeSlots = [], startSlot = 0, endSlot = 0) {
+  const topLabel = startSlot > 0 ? `${timeSlots[startSlot]?.split('-')[0] || ''} 이전 공강 시간 숨김` : '';
+  const bottomLabel = endSlot < timeSlots.length ? `${timeSlots[endSlot - 1]?.split('-')[1] || ''} 이후 공강 시간 숨김` : '';
+  return {
+    topLabel,
+    bottomLabel,
+  };
+}
+

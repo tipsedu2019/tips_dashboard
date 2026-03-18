@@ -22,13 +22,13 @@ export default function TextbookManagerTab({
   onUpload,
   isBusy,
   sectionDescription,
-  onOpenCurriculum,
 }) {
   return (
     <>
       <ManagementHeader
         title="교재 관리"
-        count={filteredData.length}
+        count={tableControls.totalCount}
+        hideSummary
         searchValue={tableControls.searchQuery}
         onSearchChange={tableControls.setSearchQuery}
         tableControls={tableControls}
@@ -40,12 +40,6 @@ export default function TextbookManagerTab({
             icon: <Plus size={16} />,
             onClick: onAddTextbook,
             variant: 'primary',
-          },
-          {
-            label: '커리큘럼 대시보드',
-            icon: null,
-            onClick: onOpenCurriculum,
-            hidden: !onOpenCurriculum,
           },
           {
             label: '템플릿 다운로드',
@@ -62,7 +56,7 @@ export default function TextbookManagerTab({
               event.target.value = '';
             },
           },
-        ].filter((action) => !action.hidden)}
+        ]}
         selectedCount={selectedIds.size}
         currentCount={currentIds.length}
         onToggleSelectAll={() => toggleSelectAll(currentIds)}
@@ -74,7 +68,7 @@ export default function TextbookManagerTab({
 
       <DataListView
         columns={tableControls.visibleColumns}
-        listData={filteredData}
+        listData={tableControls.pagedData}
         rowModels={tableControls.rowModels}
         emptyTitle="등록된 교재 데이터가 없습니다."
         emptyDescription="교재를 직접 등록하거나 템플릿 업로드로 목록을 채워 주세요."
@@ -93,6 +87,14 @@ export default function TextbookManagerTab({
         sortKey={tableControls.sortState.key}
         sortDirection={tableControls.sortState.direction}
         onSortChange={tableControls.toggleSort}
+        page={tableControls.page}
+        pageSize={tableControls.pageSize}
+        totalPages={tableControls.totalPages}
+        totalCount={tableControls.totalCount}
+        pageStart={tableControls.pageStart}
+        pageEnd={tableControls.pageEnd}
+        onPageChange={tableControls.setPage}
+        onPageSizeChange={tableControls.setPageSize}
       />
     </>
   );

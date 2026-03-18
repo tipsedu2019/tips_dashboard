@@ -26,6 +26,20 @@ function normalizeTerm(term = {}, index = 0) {
   };
 }
 
+function dedupeTerms(terms = []) {
+  const seen = new Set();
+  return terms.filter((term) => {
+    const nameKey = String(term.name || '').trim();
+    const yearKey = String(term.academicYear || '').trim();
+    const key = nameKey ? `${yearKey}::${nameKey}` : `id::${term.id}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 function FieldLabel({ children }) {
   return (
     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
@@ -196,9 +210,9 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
       return;
     }
 
-    const nextDrafts = [...(terms || [])]
+    const nextDrafts = dedupeTerms([...(terms || [])]
       .map((term, index) => normalizeTerm(term, index))
-      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, 'ko'));
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, 'ko')));
 
     setDrafts(nextDrafts.length > 0 ? nextDrafts : [normalizeTerm({ status: PREPARING_CLASS_STATUS }, 0)]);
     setDeletedTermIds([]);
@@ -206,7 +220,15 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
 
   const compact = isMobile || isTablet;
   const duplicateNameExists = useMemo(() => {
-    const names = drafts.map((term) => term.name.trim()).filter(Boolean);
+    const names = drafts
+      .map((term) => {
+        const name = term.name.trim();
+        if (!name) {
+          return '';
+        }
+        return `${String(term.academicYear || '').trim()}::${name}`;
+      })
+      .filter(Boolean);
     return new Set(names).size !== names.length;
   }, [drafts]);
 
@@ -278,7 +300,7 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
 
   const handleSave = async () => {
     if (duplicateNameExists) {
-      toast.info('학기명은 서로 다르게 입력해 주세요.');
+      toast.info('같은 학년도 안에서는 학기명을 서로 다르게 입력해 주세요.');
       return;
     }
 

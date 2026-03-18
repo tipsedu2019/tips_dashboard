@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+function getDefaultPageSize() {
+  if (typeof window === 'undefined') {
+    return 50;
+  }
+
+  return window.innerWidth < 960 ? 25 : 50;
+}
+
 function readStoredValue(key, fallback) {
   if (typeof window === 'undefined') {
     return fallback;
@@ -312,6 +320,8 @@ export function useDataTableControls({
   }, {}));
   const [columnOrder, setColumnOrder] = useState(() => externalState?.columnOrder || readStoredValue(`${storageKey}:column-order`, defaultColumnOrder));
   const [grouping, setGrouping] = useState(() => externalState?.grouping || readStoredValue(`${storageKey}:grouping`, ['', '']));
+  const [pageSize, setPageSizeState] = useState(() => externalState?.pageSize || readStoredValue(`${storageKey}:page-size`, getDefaultPageSize()));
+  const [page, setPage] = useState(1);
   const lastExternalSignatureRef = useRef('');
 
   useEffect(() => {
@@ -346,6 +356,10 @@ export function useDataTableControls({
 
     if (externalState.grouping) {
       setGrouping(normalizeGrouping(externalState.grouping, columns));
+    }
+
+    if (externalState.pageSize) {
+      setPageSizeState(Number(externalState.pageSize) || getDefaultPageSize());
     }
 
     lastExternalSignatureRef.current = signature;
@@ -402,13 +416,18 @@ export function useDataTableControls({
   }, [grouping, storageKey]);
 
   useEffect(() => {
+    writeStoredValue(`${storageKey}:page-size`, pageSize);
+  }, [pageSize, storageKey]);
+
+  useEffect(() => {
     onStateChange?.({
       visibleMap,
       sortState,
       columnOrder,
       grouping,
+      pageSize,
     });
-  }, [columnOrder, grouping, onStateChange, sortState, visibleMap]);
+  }, [columnOrder, grouping, onStateChange, pageSize, sortState, visibleMap]);
 
   const orderedColumns = useMemo(() => {
     const columnMap = new Map(columns.map((column) => [column.key, column]));
@@ -463,12 +482,38 @@ export function useDataTableControls({
     [orderedColumns, visibleMap]
   );
 
-  const rowModels = useMemo(
-    () => buildGroupedRows(filteredData, orderedColumns, grouping),
-    [filteredData, grouping, orderedColumns]
+  const totalCount = filteredData.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / Math.max(1, pageSize)));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pageStartIndex = (safePage - 1) * pageSize;
+  const pagedData = useMemo(
+    () => filteredData.slice(pageStartIndex, pageStartIndex + pageSize),
+    [filteredData, pageSize, pageStartIndex]
   );
 
-  const currentIds = useMemo(() => filteredData.map((item) => item.id), [filteredData]);
+  const rowModels = useMemo(
+    () => buildGroupedRows(pagedData, orderedColumns, grouping),
+    [grouping, orderedColumns, pagedData]
+  );
+
+  const currentIds = useMemo(() => pagedData.map((item) => item.id), [pagedData]);
+  const pageStart = totalCount === 0 ? 0 : pageStartIndex + 1;
+  const pageEnd = totalCount === 0 ? 0 : pageStartIndex + pagedData.length;
+
+  const resetPageSignature = useMemo(
+    () => JSON.stringify({ query: debouncedSearchQuery, filters, sortState, grouping }),
+    [debouncedSearchQuery, filters, grouping, sortState]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [resetPageSignature]);
+
+  useEffect(() => {
+    if (page !== safePage) {
+      setPage(safePage);
+    }
+  }, [page, safePage]);
 
   const toggleColumnVisibility = (columnKey) => {
     setVisibleMap((current) => ({
@@ -556,6 +601,12 @@ export function useDataTableControls({
     setGrouping(['', '']);
   };
 
+  const setPageSize = (nextValue) => {
+    const normalized = Math.max(1, Number(nextValue) || getDefaultPageSize());
+    setPageSizeState(normalized);
+    setPage(1);
+  };
+
   return {
     searchQuery,
     setSearchQuery,
@@ -573,11 +624,20 @@ export function useDataTableControls({
     clearAllFilters,
     filterOptions,
     filteredData,
+    pagedData,
     rowModels,
     currentIds,
     columns: orderedColumns,
     grouping,
     setGroupingLevel,
     clearGrouping,
+    page: safePage,
+    totalCount,
+    totalPages,
+    pageSize,
+    setPage,
+    setPageSize,
+    pageStart,
+    pageEnd,
   };
 }
