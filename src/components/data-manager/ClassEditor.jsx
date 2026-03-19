@@ -1,9 +1,16 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { BookOpen, CalendarDays, Trash2 } from 'lucide-react';
 import { CLASS_STATUS_OPTIONS, computeClassStatus } from '../../lib/classStatus';
 import { normalizeClassroomText } from '../../lib/classroomUtils';
 import { buildSchedulePlanForSave } from '../../lib/classSchedulePlanner';
 import { getAllManagedGrades } from '../../lib/schoolConfig';
+import {
+  buildClassroomMaster,
+  buildTeacherMaster,
+  getResourceSubjectOptions,
+  getVisibleClassroomOptions,
+  getVisibleTeacherOptions,
+} from '../../lib/resourceCatalogs';
 import ClassSchedulePlanPreview from '../ClassSchedulePlanPreview';
 import ClassSchedulePlanModal from '../ClassSchedulePlanModal';
 import { getClassExamConflicts } from '../../lib/examScheduleUtils';
@@ -20,11 +27,10 @@ function EditorLayout({ title, description, onCancel, onSave, isSaving, children
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={isSaving}>
-            취소
+            痍⑥냼
           </button>
           <button type="button" className="btn-primary" onClick={onSave} disabled={isSaving}>
-            저장
-          </button>
+            ???          </button>
         </div>
       </div>
       {children}
@@ -84,8 +90,7 @@ function SearchResults({ results, onAdd, onAddWaitlist, labelKey = 'name', secon
               style={{ padding: '0 10px', whiteSpace: 'nowrap' }}
               onClick={() => onAddWaitlist(item.id)}
             >
-              대기
-            </button>
+              ?湲?            </button>
           ) : null}
         </div>
       ))}
@@ -147,6 +152,9 @@ export default function ClassEditor({
   students,
   classTerms = [],
   academicSchools = [],
+  teacherCatalogs = [],
+  classroomCatalogs = [],
+  allClasses = [],
   academicExamDays = [],
   academicEventExamDetails = [],
   academicEvents = [],
@@ -192,6 +200,35 @@ export default function ClassEditor({
   }, [edited.studentIds, edited.waitlistIds, studentSearch, students]);
 
   const selectedTextbook = (textbooks || []).find((item) => item.id === edited.textbookIds?.[0]) || null;
+  const teacherMaster = useMemo(
+    () => buildTeacherMaster(teacherCatalogs, allClasses),
+    [allClasses, teacherCatalogs]
+  );
+  const classroomMaster = useMemo(
+    () => buildClassroomMaster(classroomCatalogs, allClasses),
+    [allClasses, classroomCatalogs]
+  );
+  const subjectOptions = useMemo(() => {
+    const options = getResourceSubjectOptions([...teacherMaster, ...classroomMaster], allClasses);
+    if (edited.subject && !options.includes(edited.subject)) {
+      return [edited.subject, ...options];
+    }
+    return options;
+  }, [allClasses, classroomMaster, edited.subject, teacherMaster]);
+  const teacherOptions = useMemo(() => {
+    const options = getVisibleTeacherOptions(teacherMaster, edited.subject);
+    if (edited.teacher && !options.includes(edited.teacher)) {
+      return [edited.teacher, ...options];
+    }
+    return options;
+  }, [edited.subject, edited.teacher, teacherMaster]);
+  const classroomOptions = useMemo(() => {
+    const options = getVisibleClassroomOptions(classroomMaster, edited.subject);
+    if (edited.classroom && !options.includes(edited.classroom)) {
+      return [edited.classroom, ...options];
+    }
+    return options;
+  }, [classroomMaster, edited.classroom, edited.subject]);
   const sortedClassTerms = useMemo(
     () => [...(classTerms || [])].sort((left, right) => {
       const yearGap = Number(right.academicYear || 0) - Number(left.academicYear || 0);
@@ -214,19 +251,19 @@ export default function ClassEditor({
     [academicEventExamDetails, academicEvents, academicExamDays, academicSchools, edited, students]
   );
   const planWarningBanner = examConflicts.length > 0
-    ? `시험일과 수업일이 겹칩니다. ${examConflicts.map((conflict) => `${conflict.examDate} ${conflict.subject} (${conflict.students.join(', ')})`).join(' / ')}`
+    ? `?쒗뿕?쇨낵 ?섏뾽?쇱씠 寃뱀묩?덈떎. ${examConflicts.map((conflict) => `${conflict.examDate} ${conflict.subject} (${conflict.students.join(', ')})`).join(' / ')}`
     : null;
 
   const handleSave = async () => {
     const nextErrors = {};
     if (!edited.className?.trim()) {
-      nextErrors.className = '수업명을 입력해 주세요.';
+      nextErrors.className = '?섏뾽紐낆쓣 ?낅젰??二쇱꽭??';
     }
     if (!edited.subject?.trim()) {
-      nextErrors.subject = '과목을 입력해 주세요.';
+      nextErrors.subject = '怨쇰ぉ???낅젰??二쇱꽭??';
     }
     if (!edited.teacher?.trim()) {
-      nextErrors.teacher = '선생님을 입력해 주세요.';
+      nextErrors.teacher = '?좎깮?섏쓣 ?낅젰??二쇱꽭??';
     }
 
     setErrors(nextErrors);
@@ -251,15 +288,15 @@ export default function ClassEditor({
 
   return (
     <EditorLayout
-      title="수업 편집"
-      description="수업 기본 정보, 일정표, 수강생을 한 화면에서 함께 관리합니다."
+      title="?섏뾽 ?몄쭛"
+      description="?섏뾽 湲곕낯 ?뺣낫, ?쇱젙?? ?섍컯?앹쓣 ???붾㈃?먯꽌 ?④퍡 愿由ы빀?덈떎."
       onCancel={onCancel}
       onSave={handleSave}
       isSaving={isSaving}
     >
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 0.95fr) minmax(540px, 1.35fr)', gap: 24, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <SectionCard title="수업 정보" description="기본 정보와 반복 시간표를 먼저 정리하면 일정표 생성이 자연스럽게 이어집니다.">
+          <SectionCard title="수업 정보" description="기본 정보와 반복 시간을 먼저 정리하면 일정과 수강생 관리까지 한 화면에서 이어서 작업할 수 있습니다.">
             <Field label="수업명" required error={errors.className}>
               <input
                 type="text"
@@ -271,13 +308,16 @@ export default function ClassEditor({
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <Field label="과목" required error={errors.subject}>
-                <input
-                  type="text"
+                <select
                   className="styled-input"
                   value={edited.subject || ''}
                   onChange={(event) => setEdited((current) => ({ ...current, subject: event.target.value }))}
-                  placeholder="영어 또는 수학"
-                />
+                >
+                  <option value="">과목 선택</option>
+                  {subjectOptions.map((subject) => (
+                    <option key={subject} value={subject}>{subject}</option>
+                  ))}
+                </select>
               </Field>
               <Field label="학년">
                 <select
@@ -308,23 +348,30 @@ export default function ClassEditor({
                 </select>
               </Field>
               <Field label="선생님" required error={errors.teacher}>
-                <input
-                  type="text"
+                <select
                   className="styled-input"
                   value={edited.teacher || ''}
                   onChange={(event) => setEdited((current) => ({ ...current, teacher: event.target.value }))}
-                />
+                >
+                  <option value="">선생님 선택</option>
+                  {teacherOptions.map((teacher) => (
+                    <option key={teacher} value={teacher}>{teacher}</option>
+                  ))}
+                </select>
               </Field>
             </div>
 
             <Field label="강의실">
-              <input
-                type="text"
+              <select
                 className="styled-input"
                 value={edited.classroom || ''}
                 onChange={(event) => setEdited((current) => ({ ...current, classroom: normalizeClassroomText(event.target.value) }))}
-                placeholder="예: 본7, [별5], 본관 2강"
-              />
+              >
+                <option value="">강의실 선택</option>
+                {classroomOptions.map((classroom) => (
+                  <option key={classroom} value={classroom}>{classroom}</option>
+                ))}
+              </select>
             </Field>
 
             <Field label="요일/시간">
@@ -391,7 +438,7 @@ export default function ClassEditor({
                   }));
                 }}
               >
-                <option value="">학기 미지정</option>
+                <option value="">학기 미선택</option>
                 {sortedClassTerms.map((term) => (
                   <option key={term.id} value={term.id}>
                     {[term.academicYear, term.name, term.status].filter(Boolean).join(' · ')}
@@ -406,7 +453,7 @@ export default function ClassEditor({
                 className="styled-input"
                 value={edited.period || ''}
                 onChange={(event) => setEdited((current) => ({ ...current, period: event.target.value }))}
-                placeholder="학기 선택 시 자동 입력됩니다"
+                placeholder="학기 선택 시 자동 입력됩니다."
               />
             </Field>
 
@@ -424,7 +471,7 @@ export default function ClassEditor({
                   }));
                 }}
               >
-                <option value="">교재를 선택하세요.</option>
+                <option value="">교재를 선택해 주세요</option>
                 {(textbooks || []).map((textbook) => (
                   <option key={textbook.id} value={textbook.id}>
                     {textbook.title}
@@ -448,13 +495,13 @@ export default function ClassEditor({
                   {selectedTextbook.title}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                  진도 기록과 교재 차시는 기존 교재 탭 기준으로 그대로 관리됩니다. 수업 계획 일정표는 이 교재 정보와 별도로 저장됩니다.
+                  수업 진도 기록은 연결된 교재 정보를 기준으로 이어집니다. 세부 일정과 차시 계획은 아래 수업 계획 카드에서 함께 관리할 수 있습니다.
                 </div>
               </div>
             ) : null}
           </SectionCard>
 
-          <SectionCard title="수강생 관리" description="학생 검색 후 등록반 또는 대기반으로 바로 이동시킬 수 있습니다.">
+          <SectionCard title="수강생 관리" description="학생을 검색해 등록반이나 대기반으로 바로 이동시킬 수 있습니다.">
             <div style={{ position: 'relative', marginBottom: 20 }}>
               <input
                 type="text"
@@ -533,13 +580,13 @@ export default function ClassEditor({
         </div>
 
         <SectionCard
-          title="수업 계획"
-          description="수업 일정표는 풀스크린 모달에서 편집합니다. 저장된 일정표는 퍼블릭 페이지와 수업 상세에서도 그대로 열어볼 수 있습니다."
+          title="?섏뾽 怨꾪쉷"
+          description="?섏뾽 ?쇱젙?쒕뒗 ??ㅽ겕由?紐⑤떖?먯꽌 ?몄쭛?⑸땲?? ??λ맂 ?쇱젙?쒕뒗 ?쇰툝由??섏씠吏? ?섏뾽 ?곸꽭?먯꽌??洹몃?濡??댁뼱蹂????덉뒿?덈떎."
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
             <div style={{ flex: 1, minWidth: 280 }}>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                기본 회차는 선택한 주간 수업 요일 수 × 4주로 잡힙니다. 휴강, 보강, 미정 수업일을 넓은 화면에서 편하게 조정해 주세요.
+                湲곕낯 ?뚯감???좏깮??二쇨컙 ?섏뾽 ?붿씪 ??횞 4二쇰줈 ?≫옓?덈떎. ?닿컯, 蹂닿컯, 誘몄젙 ?섏뾽?쇱쓣 ?볦? ?붾㈃?먯꽌 ?명븯寃?議곗젙??二쇱꽭??
               </div>
               {planWarningBanner ? (
                 <div
@@ -560,7 +607,7 @@ export default function ClassEditor({
             </div>
             <button type="button" className="btn-primary" onClick={() => setIsPlanModalOpen(true)}>
               <CalendarDays size={18} />
-              수업 계획 열기
+              ?섏뾽 怨꾪쉷 ?닿린
             </button>
           </div>
 
@@ -568,7 +615,7 @@ export default function ClassEditor({
             plan={edited.schedulePlan}
             className={edited.className || ''}
             subject={edited.subject || ''}
-            emptyMessage="아직 저장된 수업 일정표가 없습니다."
+            emptyMessage="?꾩쭅 ??λ맂 ?섏뾽 ?쇱젙?쒓? ?놁뒿?덈떎."
           />
         </SectionCard>
       </div>
@@ -594,3 +641,6 @@ export default function ClassEditor({
     </EditorLayout>
   );
 }
+
+
+

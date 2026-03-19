@@ -111,6 +111,7 @@ const DataRow = memo(function DataRow({
   item,
   columns,
   currentIds,
+  selectable,
   isSelected,
   isHovered,
   depth = 0,
@@ -139,7 +140,7 @@ const DataRow = memo(function DataRow({
         userSelect: 'none',
       }}
     >
-      {currentIds && (
+      {selectable && currentIds && (
         <td style={{ padding: '12px 16px', cursor: 'pointer' }} onMouseDown={(event) => onRowMouseDown?.(item.id, isSelected, event)}>
           {isSelected ? <CheckSquare size={18} color="var(--accent-color)" /> : <Square size={18} color="var(--text-muted)" />}
         </td>
@@ -512,6 +513,7 @@ export default function DataListView({
                     item={row.item}
                     columns={columns}
                     currentIds={currentIds}
+                    selectable={selectable}
                     isSelected={selectedIds?.has?.(row.item.id)}
                     isHovered={hoveredId === row.item.id}
                     depth={row.depth || 0}

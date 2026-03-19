@@ -27,10 +27,7 @@ import {
 import {
   buildTimetableTooltip,
   canTeacherOpenClass,
-  collectClassroomEntries,
   collectGradeOptions,
-  collectSubjectOptions,
-  collectTeacherEntries,
   computeTimetableWindow,
   formatCollapsedTimeHint,
   getClassColor,
@@ -43,6 +40,12 @@ import {
   resolveSlotTeachers,
   toggleCompareSelection,
 } from './timetableViewUtils';
+import {
+  buildClassroomMaster,
+  buildTeacherMaster,
+  getResourceSubjectOptions,
+  getSubjectOptionMap,
+} from '../lib/resourceCatalogs';
 import {
   applySlotMove,
   buildEditableSlots,
@@ -109,14 +112,30 @@ export default function TeacherWeeklyView({
   const scheduleRef = useRef(null);
 
   const timeSlots = useMemo(() => generateTimeSlots(11, 24).filter((slot) => !slot.startsWith('23:30-')), []);
-  const teacherEntries = useMemo(() => collectTeacherEntries(allClasses), [allClasses]);
-  const classroomOptions = useMemo(() => collectClassroomEntries(allClasses).map((entry) => entry.label), [allClasses]);
+  const teacherMaster = useMemo(
+    () => buildTeacherMaster(data?.teacherCatalogs, allClasses),
+    [allClasses, data?.teacherCatalogs]
+  );
+  const classroomMaster = useMemo(
+    () => buildClassroomMaster(data?.classroomCatalogs, allClasses),
+    [allClasses, data?.classroomCatalogs]
+  );
+  const teacherEntries = useMemo(
+    () => teacherMaster.filter((entry) => entry.isVisible !== false).map((entry) => ({ key: entry.key, label: entry.name })),
+    [teacherMaster]
+  );
+  const classroomOptions = useMemo(
+    () => classroomMaster.filter((entry) => entry.isVisible !== false).map((entry) => entry.name),
+    [classroomMaster]
+  );
   const fieldOptions = useMemo(() => ({
-    subjects: collectSubjectOptions(allClasses),
+    subjects: getResourceSubjectOptions([...teacherMaster, ...classroomMaster], allClasses),
     grades: collectGradeOptions(allClasses),
     teachers: teacherEntries.map((entry) => entry.label),
     classrooms: classroomOptions,
-  }), [allClasses, teacherEntries, classroomOptions]);
+    teacherOptionsBySubject: getSubjectOptionMap(teacherMaster),
+    classroomOptionsBySubject: getSubjectOptionMap(classroomMaster),
+  }), [allClasses, classroomMaster, classroomOptions, teacherEntries, teacherMaster]);
   const selectedTeacherEntry = useMemo(
     () => teacherEntries.find((entry) => entry.key === selectedTeacher) || null,
     [selectedTeacher, teacherEntries]

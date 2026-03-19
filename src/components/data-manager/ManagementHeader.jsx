@@ -127,6 +127,123 @@ function ToolbarAction({ action, disabled }) {
   );
 }
 
+function QuickFilterGroup({ column, options, selectedValues, onChange }) {
+  const normalizedSelected = Array.isArray(selectedValues) ? selectedValues : [];
+  const allSelected = options.length > 0 && normalizedSelected.length === options.length;
+
+  const toggleOption = (option) => {
+    if (normalizedSelected.includes(option)) {
+      onChange(normalizedSelected.filter((value) => value !== option));
+      return;
+    }
+
+    onChange([...normalizedSelected, option]);
+  };
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gap: 10,
+        padding: 16,
+        borderRadius: 20,
+        border: '1px solid var(--border-color)',
+        background: 'var(--bg-surface)',
+        minHeight: '100%',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)' }}>{column.label}</div>
+        <button
+          type="button"
+          className="btn-secondary"
+          style={{ padding: '4px 10px', fontSize: 12, minHeight: 30 }}
+          onClick={() => onChange(allSelected ? [] : options)}
+        >
+          {allSelected ? '전체 해제' : '전체 선택'}
+        </button>
+      </div>
+      {options.length > 0 ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          {options.map((option) => {
+            const active = normalizedSelected.includes(option);
+            return (
+              <button
+                key={option}
+                type="button"
+                className={`chip-button ${active ? 'is-active' : ''}`}
+                onClick={() => toggleOption(option)}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div
+          style={{
+            minHeight: 34,
+            display: 'flex',
+            alignItems: 'center',
+            fontSize: 12,
+            color: 'var(--text-muted)',
+          }}
+        >
+          선택한 과목에 맞는 항목이 없습니다.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuickFilterGroupV2(props) {
+  const { column, options, selectedValues, onChange } = props;
+  const normalizedSelected = Array.isArray(selectedValues) ? selectedValues : [];
+  const allSelected = options.length > 0 && normalizedSelected.length === options.length;
+
+  const toggleOption = (option) => {
+    if (normalizedSelected.includes(option)) {
+      onChange(normalizedSelected.filter((value) => value !== option));
+      return;
+    }
+    onChange([...normalizedSelected, option]);
+  };
+
+  return (
+    <div className="management-quick-filter-group">
+      <div className="management-quick-filter-head">
+        <div className="management-quick-filter-title">{column.label}</div>
+        <button
+          type="button"
+          className="management-quick-filter-toggle"
+          onClick={() => onChange(allSelected ? [] : options)}
+        >
+          {allSelected ? '전체 해제' : '전체 선택'}
+        </button>
+      </div>
+      {options.length > 0 ? (
+        <div className="management-quick-filter-chips">
+          {options.map((option) => {
+            const active = normalizedSelected.includes(option);
+            return (
+              <button
+                key={option}
+                type="button"
+                className={`chip-button ${active ? 'is-active' : ''}`}
+                onClick={() => toggleOption(option)}
+              >
+                {option}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="management-quick-filter-empty">선택한 과목에 맞는 항목이 없습니다.</div>
+      )}
+    </div>
+  );
+}
+
 export default function ManagementHeader({
   title,
   description,
@@ -146,6 +263,8 @@ export default function ManagementHeader({
   embedded = false,
   hideSummary = false,
   className = '',
+  quickFilterKeys = [],
+  quickFilterOptions = {},
 }) {
   const { isMobile } = useViewport();
   const columnSelectorRef = useRef(null);
@@ -154,6 +273,8 @@ export default function ManagementHeader({
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const hasOpenPanel = isColumnPanelOpen || isFilterPanelOpen;
 
+  const quickFilterKeySet = useMemo(() => new Set(quickFilterKeys), [quickFilterKeys]);
+
   const activeFilterCount = useMemo(() => {
     if (!tableControls) {
       return 0;
@@ -161,18 +282,34 @@ export default function ManagementHeader({
 
     return tableControls.columns.reduce((countValue, column) => {
       const value = tableControls.filters[column.key];
-
       if (Array.isArray(value)) {
         return countValue + (value.length > 0 ? 1 : 0);
       }
-
       if (value && typeof value === 'object') {
         return countValue + (value.min || value.max ? 1 : 0);
       }
-
       return countValue + (String(value || '').trim() ? 1 : 0);
     }, 0);
   }, [tableControls]);
+
+  const quickFilterColumns = useMemo(() => {
+    if (!tableControls) {
+      return [];
+    }
+    const columnMap = new Map(tableControls.columns.map((column) => [column.key, column]));
+    return quickFilterKeys
+      .map((key) => columnMap.get(key))
+      .filter((column) => column && column.filterKind === 'multi-select');
+  }, [quickFilterKeys, tableControls]);
+
+  const floatingFilterColumns = useMemo(() => {
+    if (!tableControls) {
+      return [];
+    }
+    return tableControls.columns.filter(
+      (column) => column.filterKind && !quickFilterKeySet.has(column.key)
+    );
+  }, [quickFilterKeySet, tableControls]);
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -191,7 +328,9 @@ export default function ManagementHeader({
   const rootClassName = [
     embedded ? 'management-header-shell management-header-shell-embedded' : 'card-custom p-6 management-header-shell',
     className,
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
@@ -217,7 +356,15 @@ export default function ManagementHeader({
             <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{title}</h3>
             <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text-muted)' }}>현재 {count}개 항목</div>
             {description ? (
-              <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.65, color: 'var(--text-secondary)', maxWidth: 720 }}>
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 13,
+                  lineHeight: 1.65,
+                  color: 'var(--text-secondary)',
+                  maxWidth: 720,
+                }}
+              >
                 {description}
               </div>
             ) : null}
@@ -233,246 +380,285 @@ export default function ManagementHeader({
         ) : null}
       </div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: '1 1 320px', minWidth: 220 }}>
-          <Search
-            size={16}
-            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.55 }}
-          />
-          <input
-            type="text"
-            className="styled-input"
-            placeholder={searchPlaceholder}
-            value={searchValue}
-            onChange={(event) => onSearchChange(event.target.value)}
-            style={{ paddingLeft: 40, width: '100%' }}
-          />
-        </div>
+      <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: '1 1 320px', minWidth: 220 }}>
+            <Search
+              size={16}
+              style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.55 }}
+            />
+            <input
+              type="text"
+              className="styled-input"
+              placeholder={searchPlaceholder}
+              value={searchValue}
+              onChange={(event) => onSearchChange(event.target.value)}
+              style={{ paddingLeft: 40, width: '100%' }}
+            />
+          </div>
 
-        {tableControls ? (
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
-            <div ref={filterRef} style={{ position: 'relative' }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  setIsColumnPanelOpen(false);
-                  setIsFilterPanelOpen((current) => !current);
-                }}
-                style={{ padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}
-                disabled={isBusy}
-              >
-                <Filter size={16} />
-                필터/정렬
-                {activeFilterCount > 0 ? (
-                  <span
+          {tableControls ? (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
+              <div ref={filterRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setIsColumnPanelOpen(false);
+                    setIsFilterPanelOpen((current) => !current);
+                  }}
+                  style={{ padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}
+                  disabled={isBusy}
+                >
+                  <Filter size={16} />
+                  필터/정렬
+                  {activeFilterCount > 0 ? (
+                    <span
+                      style={{
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                        background: 'var(--accent-light)',
+                        color: 'var(--accent-color)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {activeFilterCount}
+                    </span>
+                  ) : null}
+                </button>
+
+                {isFilterPanelOpen ? (
+                  <div
+                    className="card-custom management-floating-panel"
                     style={{
-                      padding: '2px 6px',
-                      borderRadius: 999,
-                      background: 'var(--accent-light)',
-                      color: 'var(--accent-color)',
-                      fontSize: 11,
-                      fontWeight: 700,
+                      position: 'absolute',
+                      top: 'calc(100% + 8px)',
+                      right: 0,
+                      zIndex: 1200,
+                      width: isMobile ? 'min(100vw - 32px, 360px)' : 360,
+                      maxHeight: 520,
+                      overflowY: 'auto',
+                      padding: 16,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 14,
                     }}
                   >
-                    {activeFilterCount}
-                  </span>
-                ) : null}
-              </button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>정렬</div>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: 12 }}
+                        onClick={tableControls.clearAllFilters}
+                      >
+                        필터 초기화
+                      </button>
+                    </div>
 
-              {isFilterPanelOpen ? (
-                <div
-                  className="card-custom management-floating-panel"
-                  style={{
-                    position: 'absolute',
-                    top: 'calc(100% + 8px)',
-                    right: 0,
-                    zIndex: 1200,
-                    width: isMobile ? 'min(100vw - 32px, 360px)' : 360,
-                    maxHeight: 520,
-                    overflowY: 'auto',
-                    padding: 16,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 14,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>정렬</div>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ padding: '4px 10px', fontSize: 12 }}
-                      onClick={tableControls.clearAllFilters}
-                    >
-                      필터 초기화
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
-                    <select
-                      className="styled-input"
-                      value={tableControls.sortState.key}
-                      onChange={(event) => tableControls.setSort(event.target.value, tableControls.sortState.direction)}
-                    >
-                      {tableControls.columns.map((column) => (
-                        <option key={column.key} value={column.key}>
-                          {column.label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ width: 44, justifyContent: 'center', padding: 0 }}
-                      onClick={() =>
-                        tableControls.setSort(
-                          tableControls.sortState.key,
-                          tableControls.sortState.direction === 'asc' ? 'desc' : 'asc'
-                        )
-                      }
-                    >
-                      {tableControls.sortState.direction === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>그룹</div>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ padding: '4px 10px', fontSize: 12 }}
-                      onClick={tableControls.clearGrouping}
-                    >
-                      그룹 초기화
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <select
-                      className="styled-input"
-                      value={tableControls.grouping?.[0] || ''}
-                      onChange={(event) => tableControls.setGroupingLevel(0, event.target.value)}
-                    >
-                      <option value="">그룹 1 없음</option>
-                      {tableControls.columns.map((column) => (
-                        <option key={column.key} value={column.key}>
-                          {column.label}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="styled-input"
-                      value={tableControls.grouping?.[1] || ''}
-                      onChange={(event) => tableControls.setGroupingLevel(1, event.target.value)}
-                    >
-                      <option value="">그룹 2 없음</option>
-                      {tableControls.columns
-                        .filter((column) => column.key !== tableControls.grouping?.[0])
-                        .map((column) => (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+                      <select
+                        className="styled-input"
+                        value={tableControls.sortState.key}
+                        onChange={(event) => tableControls.setSort(event.target.value, tableControls.sortState.direction)}
+                      >
+                        {tableControls.columns.map((column) => (
                           <option key={column.key} value={column.key}>
                             {column.label}
                           </option>
                         ))}
-                    </select>
-                  </div>
-
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', paddingTop: 4 }}>컬럼 필터</div>
-
-                  {tableControls.columns.filter((column) => column.filterKind).map((column) => (
-                    <div key={column.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
-                        {column.label}
-                      </label>
-                      {renderFilterControl({
-                        column,
-                        value: tableControls.filters[column.key],
-                        onChange: (value) => tableControls.setFilterValue(column.key, value),
-                        options: tableControls.filterOptions[column.key] || [],
-                      })}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ width: 44, justifyContent: 'center', padding: 0 }}
+                        onClick={() =>
+                          tableControls.setSort(
+                            tableControls.sortState.key,
+                            tableControls.sortState.direction === 'asc' ? 'desc' : 'asc'
+                          )
+                        }
+                      >
+                        {tableControls.sortState.direction === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
+                      </button>
                     </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
 
-            <div ref={columnSelectorRef} style={{ position: 'relative' }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  setIsFilterPanelOpen(false);
-                  setIsColumnPanelOpen((current) => !current);
-                }}
-                style={{ padding: 8, background: 'var(--bg-surface-hover)' }}
-                disabled={isBusy}
-              >
-                <Eye size={18} />
-              </button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>그룹</div>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: 12 }}
+                        onClick={tableControls.clearGrouping}
+                      >
+                        그룹 초기화
+                      </button>
+                    </div>
 
-              {isColumnPanelOpen ? (
-                <div
-                  className="card-custom management-floating-panel"
-                  style={{
-                    position: 'absolute',
-                    top: 'calc(100% + 8px)',
-                    right: 0,
-                    zIndex: 1200,
-                    width: isMobile ? 'min(100vw - 32px, 280px)' : 220,
-                    padding: 16,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <select
+                        className="styled-input"
+                        value={tableControls.grouping?.[0] || ''}
+                        onChange={(event) => tableControls.setGroupingLevel(0, event.target.value)}
+                      >
+                        <option value="">그룹 1 없음</option>
+                        {tableControls.columns.map((column) => (
+                          <option key={column.key} value={column.key}>
+                            {column.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="styled-input"
+                        value={tableControls.grouping?.[1] || ''}
+                        onChange={(event) => tableControls.setGroupingLevel(1, event.target.value)}
+                      >
+                        <option value="">그룹 2 없음</option>
+                        {tableControls.columns
+                          .filter((column) => column.key !== tableControls.grouping?.[0])
+                          .map((column) => (
+                            <option key={column.key} value={column.key}>
+                              {column.label}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {floatingFilterColumns.length > 0 ? (
+                      <>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', paddingTop: 4 }}>컬럼 필터</div>
+                        {floatingFilterColumns.map((column) => (
+                          <div key={column.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                              {column.label}
+                            </label>
+                            {renderFilterControl({
+                              column,
+                              value: tableControls.filters[column.key],
+                              onChange: (value) => tableControls.setFilterValue(column.key, value),
+                              options: quickFilterOptions[column.key] || tableControls.filterOptions[column.key] || [],
+                            })}
+                          </div>
+                        ))}
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div ref={columnSelectorRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setIsFilterPanelOpen(false);
+                    setIsColumnPanelOpen((current) => !current);
                   }}
+                  style={{ padding: 8, background: 'var(--bg-surface-hover)' }}
+                  disabled={isBusy}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>표시할 컬럼 선택</div>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ padding: '4px 10px', fontSize: 12 }}
-                      onClick={tableControls.resetColumnOrder}
-                    >
-                      순서 초기화
-                    </button>
-                  </div>
+                  <Eye size={18} />
+                </button>
 
-                  {tableControls.columns.map((column) => (
-                    <div
-                      key={column.key}
-                      style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 10, fontSize: 13 }}
-                    >
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={tableControls.visibleMap[column.key] !== false}
-                          onChange={() => tableControls.toggleColumnVisibility(column.key)}
-                        />
-                        {CLASS_COLUMN_LABELS[column.key] || column.label || column.key}
-                      </label>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          style={{ width: 28, height: 28, padding: 0, justifyContent: 'center' }}
-                          onClick={() => tableControls.moveColumn(column.key, 'up')}
-                        >
-                          <ArrowUp size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          style={{ width: 28, height: 28, padding: 0, justifyContent: 'center' }}
-                          onClick={() => tableControls.moveColumn(column.key, 'down')}
-                        >
-                          <ArrowDown size={14} />
-                        </button>
-                      </div>
+                {isColumnPanelOpen ? (
+                  <div
+                    className="card-custom management-floating-panel"
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 8px)',
+                      right: 0,
+                      zIndex: 1200,
+                      width: isMobile ? 'min(100vw - 32px, 280px)' : 220,
+                      padding: 16,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>표시할 컬럼 선택</div>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: 12 }}
+                        onClick={tableControls.resetColumnOrder}
+                      >
+                        순서 초기화
+                      </button>
                     </div>
-                  ))}
-                </div>
-              ) : null}
+
+                    {tableControls.columns.map((column) => (
+                      <div
+                        key={column.key}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr auto',
+                          alignItems: 'center',
+                          gap: 10,
+                          fontSize: 13,
+                        }}
+                      >
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={tableControls.visibleMap[column.key] !== false}
+                            onChange={() => tableControls.toggleColumnVisibility(column.key)}
+                          />
+                          {CLASS_COLUMN_LABELS[column.key] || column.label || column.key}
+                        </label>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ width: 28, height: 28, padding: 0, justifyContent: 'center' }}
+                            onClick={() => tableControls.moveColumn(column.key, 'up')}
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ width: 28, height: 28, padding: 0, justifyContent: 'center' }}
+                            onClick={() => tableControls.moveColumn(column.key, 'down')}
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
+          ) : null}
+        </div>
+
+        {quickFilterColumns.length > 0 ? (
+          <div
+            className={`management-quick-filter-rail ${isMobile ? 'is-mobile' : ''}`}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile
+                ? '1fr'
+                : quickFilterColumns.length === 4
+                  ? 'minmax(180px, 0.9fr) minmax(180px, 0.9fr) minmax(260px, 1.2fr) minmax(260px, 1.2fr)'
+                  : quickFilterColumns.length > 1
+                    ? 'repeat(auto-fit, minmax(260px, 1fr))'
+                    : '1fr',
+              gap: 12,
+              alignItems: 'start',
+            }}
+          >
+            {quickFilterColumns.map((column) => (
+              <QuickFilterGroupV2
+                key={column.key}
+                column={column}
+                options={quickFilterOptions[column.key] || tableControls.filterOptions[column.key] || []}
+                selectedValues={tableControls.filters[column.key]}
+                onChange={(value) => tableControls.setFilterValue(column.key, value)}
+              />
+            ))}
           </div>
         ) : null}
       </div>
@@ -523,7 +709,13 @@ export default function ManagementHeader({
           <button
             type="button"
             className="btn-secondary"
-            style={{ background: '#fee2e2', color: '#ef4444', border: 'none', padding: '8px 16px', fontWeight: 700 }}
+            style={{
+              background: '#fee2e2',
+              color: '#ef4444',
+              border: 'none',
+              padding: '8px 16px',
+              fontWeight: 700,
+            }}
             onClick={onDeleteSelected}
           >
             <Trash2 size={16} style={{ marginRight: 8 }} />

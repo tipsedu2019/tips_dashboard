@@ -1,5 +1,6 @@
 import { computeWeeklyMinutes, formatHours } from '../../data/sampleData';
 import { CLASS_STATUS_OPTIONS } from '../../lib/classStatus';
+import { buildSchoolMaster } from '../../lib/schoolConfig';
 import {
   formatCurrency,
   getClassDisplayName,
@@ -44,6 +45,9 @@ export function buildClassColumns({
   onOpenClassDetail,
   editable = true,
   includeRecruitment = false,
+  subjectOptions = [],
+  teacherOptions = [],
+  classroomOptions = [],
 }) {
   const columns = [
     {
@@ -64,7 +68,10 @@ export function buildClassColumns({
       label: '과목',
       visibleByDefault: true,
       canInlineEdit: editable,
-      filterKind: 'single-select',
+      editKind: 'select',
+      editOptions: subjectOptions,
+      filterKind: 'multi-select',
+      filterOptions: subjectOptions,
       getValue: (classItem) => classItem.subject || '',
     },
     {
@@ -72,7 +79,7 @@ export function buildClassColumns({
       label: '학년',
       visibleByDefault: true,
       canInlineEdit: editable,
-      filterKind: 'single-select',
+      filterKind: 'multi-select',
       getValue: (classItem) => classItem.grade || '',
     },
     {
@@ -133,7 +140,10 @@ export function buildClassColumns({
       label: '선생님',
       visibleByDefault: true,
       canInlineEdit: editable,
-      filterKind: 'single-select',
+      editKind: 'select',
+      editOptions: teacherOptions,
+      filterKind: 'multi-select',
+      filterOptions: teacherOptions,
       getValue: (classItem) => classItem.teacher || '',
     },
     {
@@ -141,7 +151,10 @@ export function buildClassColumns({
       label: '강의실',
       visibleByDefault: true,
       canInlineEdit: editable,
-      filterKind: 'single-select',
+      editKind: 'select',
+      editOptions: classroomOptions,
+      filterKind: 'multi-select',
+      filterOptions: classroomOptions,
       getValue: (classItem) => classItem.classroom || '',
     },
   ];
@@ -300,7 +313,8 @@ export function buildClassColumns({
   return columns;
 }
 
-export function buildStudentColumns() {
+export function buildStudentColumns({ data } = {}) {
+  const schoolOptions = buildSchoolMaster(data?.academicSchools || [], data?.students || []).map((item) => item.name);
   return [
     {
       key: 'name',
@@ -325,6 +339,7 @@ export function buildStudentColumns() {
       visibleByDefault: true,
       canInlineEdit: true,
       filterKind: 'single-select',
+      filterOptions: schoolOptions,
       getValue: (student) => student.school || '',
     },
     {

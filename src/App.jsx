@@ -48,7 +48,7 @@ const TIMETABLE_VIEW_IDS = ['class-list', 'teacher-weekly', 'classroom-weekly', 
 const TIMETABLE_TABS = [
   {
     id: 'class-list',
-    label: '전체 수업 목록',
+    label: '수업 목록',
     icon: ClipboardList,
     description: '전체 수업을 먼저 검색하고 정렬한 뒤, 필요한 시간표 화면으로 바로 넘어갈 수 있습니다.',
   },
@@ -191,6 +191,8 @@ export default function App() {
     classTerms: [],
     academicEvents: [],
     academicSchools: [],
+    teacherCatalogs: [],
+    classroomCatalogs: [],
     academicCurriculumProfiles: [],
     academicSupplementMaterials: [],
     academicEventExamDetails: [],
@@ -231,6 +233,7 @@ export default function App() {
   const [isSubjectFlyoutOpen, setIsSubjectFlyoutOpen] = useState(false);
   const [subjectFlyoutAnchor, setSubjectFlyoutAnchor] = useState(null);
   const [curriculumRoadmapIntent, setCurriculumRoadmapIntent] = useState(null);
+  const [dataManagerIntent, setDataManagerIntent] = useState(null);
   const subjectFlyoutCloseTimerRef = useRef(null);
 
   const { user, isStaff, isTeacher, logout, loading, authError } = useAuth();
@@ -253,6 +256,11 @@ export default function App() {
   const openCurriculumRoadmap = (intent = null) => {
     setCurriculumRoadmapIntent(intent ? { ...intent, nonce: Date.now() } : { nonce: Date.now() });
     changeView('curriculum-roadmap', { closeSidebar: false });
+  };
+
+  const openDataManager = (intent = null) => {
+    setDataManagerIntent(intent ? { ...intent, nonce: Date.now() } : { nonce: Date.now() });
+    changeView('data-manager', { closeSidebar: false });
   };
 
   useEffect(() => {
@@ -635,6 +643,11 @@ export default function App() {
       return;
     }
 
+    if (tabId === 'data-manager') {
+      openDataManager();
+      return;
+    }
+
     changeView(tabId, { closeSidebar: false });
   };
 
@@ -955,7 +968,7 @@ export default function App() {
                     className="sidebar-mini-tool-button"
                     onClick={() => {
                       closeSidebarTooltip();
-                      setIsTermManagerOpen(true);
+                      openDataManager({ tab: 'classes', openTerms: true });
                     }}
                     aria-label="학기 관리"
                     onMouseEnter={(event) => openSidebarTooltip(event, '학기 관리')}
@@ -984,6 +997,10 @@ export default function App() {
                   setIsSubjectFlyoutOpen(false);
                   if (view.id === 'curriculum-roadmap') {
                     openCurriculumRoadmap();
+                    return;
+                  }
+                  if (view.id === 'data-manager') {
+                    openDataManager();
                     return;
                   }
                   changeView(view.id === 'timetable' ? (TIMETABLE_VIEW_IDS.includes(currentView) ? currentView : 'class-list') : view.id);
@@ -1304,6 +1321,8 @@ export default function App() {
                 data={data}
                 dataService={dataService}
                 onOpenCurriculum={() => openCurriculumRoadmap()}
+                onOpenTermManager={() => setIsTermManagerOpen(true)}
+                navigationIntent={dataManagerIntent}
               />
             )}
           </div>

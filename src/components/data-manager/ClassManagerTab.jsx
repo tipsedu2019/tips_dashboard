@@ -1,6 +1,24 @@
-import { Download, Plus, Upload } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { Calendar, Download, Plus, Upload } from 'lucide-react';
 import ManagementHeader from './ManagementHeader';
 import DataListView from './DataListView';
+
+const QUICK_FILTER_KEYS = ['subject', 'grade', 'teacher', 'classroom'];
+
+function filterResourceOptionsBySubjects(master = [], selectedSubjects = []) {
+  const visibleEntries = (master || []).filter((item) => item?.isVisible !== false);
+  if (!Array.isArray(selectedSubjects) || selectedSubjects.length === 0) {
+    return visibleEntries.map((item) => item.name);
+  }
+
+  const subjectSet = new Set(selectedSubjects);
+  return visibleEntries
+    .filter((item) => {
+      const subjects = Array.isArray(item?.subjects) ? item.subjects.filter(Boolean) : [];
+      return subjects.length === 0 || subjects.some((subject) => subjectSet.has(subject));
+    })
+    .map((item) => item.name);
+}
 
 export default function ClassManagerTab({
   filteredData,
@@ -20,9 +38,50 @@ export default function ClassManagerTab({
   onDeleteClass,
   onDownloadSample,
   onUpload,
+  teacherMaster = [],
+  classroomMaster = [],
+  subjectOptions = [],
+  onManageTeachers,
+  onManageClassrooms,
+  onManageTerms,
   isBusy,
   sectionDescription,
 }) {
+  const quickFilterOptions = useMemo(() => {
+    const selectedSubjects = Array.isArray(tableControls.filters.subject)
+      ? tableControls.filters.subject
+      : [];
+
+    return {
+      subject: subjectOptions,
+      grade: tableControls.filterOptions.grade || [],
+      teacher: filterResourceOptionsBySubjects(teacherMaster, selectedSubjects),
+      classroom: filterResourceOptionsBySubjects(classroomMaster, selectedSubjects),
+    };
+  }, [
+    classroomMaster,
+    subjectOptions,
+    tableControls.filterOptions.grade,
+    tableControls.filters.subject,
+    teacherMaster,
+  ]);
+
+  useEffect(() => {
+    const current = Array.isArray(tableControls.filters.teacher) ? tableControls.filters.teacher : [];
+    const next = current.filter((value) => quickFilterOptions.teacher.includes(value));
+    if (next.length !== current.length) {
+      tableControls.setFilterValue('teacher', next);
+    }
+  }, [quickFilterOptions.teacher, tableControls]);
+
+  useEffect(() => {
+    const current = Array.isArray(tableControls.filters.classroom) ? tableControls.filters.classroom : [];
+    const next = current.filter((value) => quickFilterOptions.classroom.includes(value));
+    if (next.length !== current.length) {
+      tableControls.setFilterValue('classroom', next);
+    }
+  }, [quickFilterOptions.classroom, tableControls]);
+
   return (
     <>
       <ManagementHeader
@@ -34,6 +93,8 @@ export default function ClassManagerTab({
         tableControls={tableControls}
         searchPlaceholder="수업명, 과목, 선생님, 강의실 검색"
         description={sectionDescription}
+        quickFilterKeys={QUICK_FILTER_KEYS}
+        quickFilterOptions={quickFilterOptions}
         toolbarActions={[
           {
             label: '수업 등록',
@@ -55,6 +116,19 @@ export default function ClassManagerTab({
               await onUpload(file);
               event.target.value = '';
             },
+          },
+          {
+            label: '선생님 마스터',
+            onClick: onManageTeachers,
+          },
+          {
+            label: '강의실 마스터',
+            onClick: onManageClassrooms,
+          },
+          {
+            label: '학기 마스터',
+            icon: <Calendar size={16} />,
+            onClick: onManageTerms,
           },
         ]}
         selectedCount={selectedIds.size}

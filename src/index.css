@@ -3457,6 +3457,52 @@ body {
   justify-content: flex-end;
 }
 
+.resource-master-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.92), rgba(255, 246, 235, 0.76));
+  box-shadow: 0 16px 32px rgba(133, 79, 20, 0.07);
+}
+
+.resource-master-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.resource-master-row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.resource-master-row-subjects {
+  display: grid;
+  gap: 8px;
+}
+
+.resource-master-chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-chip.is-visible {
+  color: var(--accent-color);
+  border-color: rgba(33, 110, 78, 0.24);
+  background: rgba(33, 110, 78, 0.08);
+}
+
+.action-chip.is-hidden {
+  color: var(--text-muted);
+}
+
 .academic-inline-composer {
   position: absolute;
   z-index: 18;
@@ -4454,11 +4500,13 @@ body {
 
   .academic-type-manager-add,
   .academic-type-manager-row,
+  .resource-master-row,
   .academic-inline-composer-grid {
     grid-template-columns: 1fr;
   }
 
   .academic-type-manager-actions,
+  .resource-master-row-head,
   .academic-inline-composer-actions {
     justify-content: stretch;
   }
@@ -4834,6 +4882,16 @@ body::after {
   padding: 8px 20px 40px;
 }
 
+.main-content:has(.academic-calendar-app) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow-y: hidden;
+  overflow-x: clip;
+  padding: 0 !important;
+}
+
 .custom-dropdown-menu,
 .management-floating-panel {
   border-radius: 14px !important;
@@ -5063,7 +5121,37 @@ body::after {
 
 .academic-calendar-app .academic-calendar-workspace {
   padding: 0 !important;
-  overflow: visible;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100% !important;
+  max-height: 100%;
+  min-height: 0 !important;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+  contain: none;
+}
+
+.academic-calendar-app {
+  --academic-shell-height: calc(100dvh - 24px);
+  font-family: "Google Sans", "Google Sans Text", "Pretendard Variable", "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 2px 0;
+}
+
+.academic-calendar-app.view-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: calc(100dvh - 20px) !important;
+  max-height: calc(100dvh - 20px);
+  min-height: 0;
 }
 
 .academic-calendar-app .academic-calendar-toolbar {
@@ -5120,12 +5208,14 @@ body::after {
 }
 
 .academic-calendar-app .academic-calendar-shell {
-  --academic-calendar-height: calc(100vh - 28px);
+  --academic-calendar-height: 100%;
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr);
   gap: 0;
-  height: var(--academic-calendar-height);
-  min-height: var(--academic-calendar-height);
+  flex: 1 1 auto;
+  height: 100% !important;
+  min-height: 100%;
+  max-height: 100%;
   align-items: stretch;
   background: var(--bg-surface);
   border-radius: 24px;
@@ -5148,7 +5238,7 @@ body::after {
 .academic-calendar-app .academic-calendar-sidebar-content {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  min-height: 0;
   gap: 10px;
 }
 
@@ -5156,8 +5246,10 @@ body::after {
   padding: 0 !important;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: var(--academic-calendar-height);
+  flex: 1 1 auto;
+  position: relative;
+  height: 100% !important;
+  min-height: 0 !important;
   border-radius: 0 24px 24px 0;
   background: var(--bg-surface);
   overflow: hidden;
@@ -5232,8 +5324,9 @@ body::after {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   flex: 1 1 auto;
-  min-height: var(--academic-calendar-height);
-  height: auto;
+  min-height: 0;
+  height: 100% !important;
+  max-height: 100%;
   overflow: hidden;
   padding: 0;
   gap: 0;
@@ -5266,9 +5359,11 @@ body::after {
   display: grid;
   flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
+  height: 100% !important;
+  max-height: 100%;
   gap: 0;
   overflow: hidden;
+  align-content: stretch;
 }
 
 .academic-calendar-app .academic-week-block {
@@ -5355,10 +5450,17 @@ body::after {
 }
 
 .academic-calendar-app .academic-day-more {
-  margin-top: auto;
-  font-size: 11px;
+  position: absolute;
+  top: calc(28px + var(--academic-lane-space, 0px));
+  left: 8px;
+  z-index: 3;
+  margin-top: 0;
+  min-height: 24px;
+  font-size: 12px;
   font-weight: 600;
   color: #1a73e8;
+  display: inline-flex;
+  align-items: center;
 }
 
 .academic-calendar-app .academic-selection-layer {
@@ -5392,27 +5494,28 @@ body::after {
 }
 
 .academic-calendar-app .academic-week-lanes {
-  top: 30px;
-  padding: 0 2px;
-  gap: 1px;
+  top: 28px;
+  padding: 0 3px;
+  gap: 2px;
   z-index: 2;
 }
 
 .academic-calendar-app .academic-event-lane {
-  gap: 4px;
+  gap: 2px;
 }
 
 .academic-calendar-app .academic-event-bar {
-  min-height: 18px;
+  min-height: 22px;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 3px;
-  padding: 0 5px;
+  padding: 0 7px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--event-color, #1a73e8) 22%, #ffffff);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--event-color, #1a73e8) 14%, transparent) !important;
-  font-size: 10px;
+  box-shadow: none !important;
+  font-size: 11.5px;
   font-weight: 700;
   overflow: hidden;
 }
@@ -5434,10 +5537,11 @@ body::after {
   align-items: center !important;
   justify-content: flex-start;
   flex-wrap: nowrap !important;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  width: 100%;
-  flex: 1 1 auto;
+  width: max-content;
+  max-width: 100%;
+  flex: 0 1 auto;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -5446,10 +5550,10 @@ body::after {
   display: inline-flex;
   align-items: center !important;
   flex-wrap: nowrap !important;
-  gap: 3px;
+  gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 46%;
+  max-width: none;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -5457,12 +5561,12 @@ body::after {
 .academic-calendar-app .academic-event-bar-chip {
   display: inline-flex;
   align-items: center;
-  height: 14px;
+  height: 17px;
   padding: 0 5px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.86);
   color: #355070;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
@@ -5480,8 +5584,9 @@ body::after {
 
 .academic-calendar-app .academic-event-bar-title {
   width: auto;
-  flex: 1 1 auto;
+  flex: 0 1 auto !important;
   min-width: 0;
+  max-width: min(70%, 260px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5535,13 +5640,123 @@ body::after {
 
 .academic-calendar-app .academic-inline-composer {
   z-index: 30;
-  gap: 10px;
-  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  padding: 0;
   border: 1px solid #dadce0;
   border-radius: 16px;
   background: #fff;
-  box-shadow: 0 8px 24px rgba(60, 64, 67, 0.24);
-  overflow: auto;
+  box-shadow: 0 10px 28px rgba(60, 64, 67, 0.28);
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+
+.academic-calendar-app .academic-event-editor-popover {
+  border: 1px solid #dadce0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(60, 64, 67, 0.28) !important;
+}
+
+.academic-calendar-app .academic-inline-composer.academic-event-editor-popover,
+.academic-calendar-app .academic-event-editor-popover.academic-inline-composer {
+  border: 1px solid #dadce0;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(60, 64, 67, 0.28) !important;
+}
+
+.academic-calendar-app .academic-editor-popover-head {
+  align-items: center;
+}
+
+.academic-calendar-app .academic-editor-popover-head .academic-event-popover-title-group strong {
+  font-size: 18px;
+}
+
+.academic-calendar-app .academic-editor-popover-head .academic-event-popover-title-group span {
+  font-size: 12px;
+}
+
+.academic-calendar-app .academic-editor-popover-body {
+  gap: 14px;
+}
+
+.academic-calendar-app .academic-editor-popover-body.is-sheet {
+  padding: 0;
+}
+
+.academic-calendar-app .academic-editor-popover-sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.academic-calendar-app .academic-editor-popover-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.academic-calendar-app .academic-editor-popover-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.academic-calendar-app .academic-editor-popover-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.academic-calendar-app .academic-editor-grade-field .academic-chip-selector {
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.academic-calendar-app .academic-editor-popover-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 6px;
+  border-top: 1px solid #eef2f7;
+}
+
+.academic-calendar-app .academic-editor-popover-actions-left,
+.academic-calendar-app .academic-editor-popover-actions-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.academic-calendar-app .academic-event-editor-popover .academic-icon-button,
+.academic-calendar-app .academic-event-editor-sheet .academic-icon-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+
+.academic-calendar-app .academic-event-editor-popover .academic-icon-button.is-primary,
+.academic-calendar-app .academic-event-editor-sheet .academic-icon-button.is-primary {
+  border-color: #1a73e8;
+  background: #1a73e8;
+  color: #fff;
+}
+
+.academic-calendar-app .academic-event-editor-popover .academic-icon-button.is-primary:hover,
+.academic-calendar-app .academic-event-editor-sheet .academic-icon-button.is-primary:hover {
+  border-color: #1558b0;
+  background: #1558b0;
+  color: #fff;
+}
+
+.academic-calendar-app .academic-event-editor-popover .academic-icon-button.is-danger,
+.academic-calendar-app .academic-event-editor-sheet .academic-icon-button.is-danger {
+  color: #c5221f;
+}
+
+.academic-calendar-app .academic-event-editor-sheet {
+  display: flex;
+  flex-direction: column;
 }
 
 .academic-calendar-app .academic-inline-composer::before {
@@ -5595,8 +5810,8 @@ body::after {
 .academic-event-popover-head {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px 10px;
+  gap: 10px;
+  padding: 12px 14px 10px;
   border-bottom: 1px solid #eef2f7;
 }
 
@@ -5620,17 +5835,30 @@ body::after {
   font-size: 16px;
   font-weight: 700;
   color: #1f1f1f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .academic-event-popover-title-group span {
   font-size: 12px;
   color: #5f6368;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .academic-event-popover-actions {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex: 0 0 auto;
+}
+
+.academic-event-popover-actions .academic-icon-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
 }
 
 .academic-event-popover-body {
@@ -5687,18 +5915,22 @@ body::after {
 }
 
 .academic-day-popover-list {
-  max-height: 320px;
-  overflow: auto;
-  padding: 8px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: none;
+  overflow: visible;
+  padding: 10px 14px 14px;
 }
 
 .academic-day-popover-item {
   width: 100%;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 10px;
-  border: 0;
+  padding: 11px 12px;
+  border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
   text-align: left;
@@ -5706,13 +5938,14 @@ body::after {
 
 .academic-day-popover-item:hover {
   background: #f6fafe;
+  border-color: #d6e5fb;
 }
 
 .academic-day-popover-item-dot {
   width: 10px;
   height: 10px;
   border-radius: 3px;
-  margin-top: 5px;
+  margin-top: 0;
   flex: 0 0 auto;
 }
 
@@ -5720,11 +5953,12 @@ body::after {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  flex: 1 1 auto;
 }
 
 .academic-day-popover-item-copy strong {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: #1f1f1f;
 }
@@ -5732,6 +5966,36 @@ body::after {
 .academic-day-popover-item-copy span {
   font-size: 12px;
   color: #5f6368;
+}
+
+.academic-day-popover-item-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: 8px;
+  white-space: nowrap;
+  min-width: fit-content;
+}
+
+.academic-day-popover {
+  min-width: 520px;
+  max-width: 520px;
+}
+
+.academic-day-popover-item-meta .academic-event-popover-tag {
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.academic-day-popover-item-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: #94a3b8;
+  flex: 0 0 auto;
 }
 
 [data-theme='dark'] .academic-desktop-popover,
@@ -5799,6 +6063,29 @@ body::after {
   background: #202124;
 }
 
+[data-theme='dark'] .academic-calendar-app .academic-editor-popover-actions {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-event-editor-popover .academic-icon-button.is-primary,
+[data-theme='dark'] .academic-calendar-app .academic-event-editor-sheet .academic-icon-button.is-primary {
+  border-color: #8ab4f8;
+  background: #8ab4f8;
+  color: #202124;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-event-editor-popover .academic-icon-button.is-primary:hover,
+[data-theme='dark'] .academic-calendar-app .academic-event-editor-sheet .academic-icon-button.is-primary:hover {
+  border-color: #6ea3f7;
+  background: #6ea3f7;
+  color: #202124;
+}
+
+[data-theme='dark'] .academic-calendar-app .academic-event-editor-popover .academic-icon-button.is-danger,
+[data-theme='dark'] .academic-calendar-app .academic-event-editor-sheet .academic-icon-button.is-danger {
+  color: #f28b82;
+}
+
 [data-theme='dark'] .academic-event-popover-title-group strong,
 [data-theme='dark'] .academic-day-popover-item-copy strong {
   color: #f1f3f4;
@@ -5813,12 +6100,24 @@ body::after {
 
 [data-theme='dark'] .academic-day-popover-item:hover {
   background: rgba(138, 180, 248, 0.12);
+  border-color: rgba(138, 180, 248, 0.18);
+}
+
+[data-theme='dark'] .academic-day-popover-item-chevron {
+  color: #8ea7cf;
 }
 
 @media (max-width: 960px) {
+  .academic-calendar-app {
+    height: auto;
+    min-height: auto;
+    overflow: visible;
+  }
+
   .academic-calendar-app .academic-calendar-shell {
     min-height: auto;
     height: auto;
+    flex: initial;
   }
 
   .academic-calendar-app .academic-calendar-toolbar {
@@ -6057,9 +6356,10 @@ body::after {
 
 .roadmap-report-scroll {
   overflow: auto;
-  border: 1px solid var(--line-color);
+  border: 1px solid #cdd8e5;
   border-radius: 24px;
-  background: var(--surface-primary);
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(205, 216, 229, 0.35);
 }
 
 .roadmap-report-sheet {
@@ -6075,10 +6375,18 @@ body::after {
 
 .roadmap-table th,
 .roadmap-table td {
-  border-right: 1px solid var(--line-color);
-  border-bottom: 1px solid var(--line-color);
+  border-right: 1px solid #d4dde9;
+  border-bottom: 1px solid #d4dde9;
   vertical-align: top;
-  background: var(--surface-primary);
+  background: #ffffff;
+}
+
+.roadmap-table thead tr:first-child th {
+  border-top: 1px solid #d4dde9;
+}
+
+.roadmap-table tr > *:first-child {
+  border-left: 1px solid #d4dde9;
 }
 
 .roadmap-table thead th {
@@ -6086,8 +6394,10 @@ body::after {
   top: 0;
   z-index: 2;
   padding: 14px 12px;
-  background: var(--surface-secondary);
-  text-align: left;
+  background: #f8fbff;
+  text-align: center;
+  vertical-align: middle;
+  box-shadow: inset 0 -1px 0 #d4dde9;
 }
 
 .roadmap-sticky-col,
@@ -6098,7 +6408,9 @@ body::after {
   width: 188px;
   min-width: 188px;
   padding: 14px 12px;
-  background: var(--surface-secondary);
+  background: #f8fbff;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .roadmap-sticky-cell strong,
@@ -6115,6 +6427,7 @@ body::after {
 .roadmap-cell {
   padding: 10px;
   min-width: 220px;
+  background: #ffffff;
 }
 
 .roadmap-cell-button {
@@ -6135,10 +6448,10 @@ body::after {
 }
 
 .roadmap-cell-block {
-  border: 1px solid var(--line-color);
+  border: 1px solid #d8e2ee;
   border-radius: 14px;
   padding: 10px 12px;
-  background: var(--surface-secondary);
+  background: #fcfdff;
 }
 
 .roadmap-cell-block-label {
@@ -6176,7 +6489,8 @@ body::after {
 .roadmap-cell-note {
   padding: 10px 12px;
   border-radius: 14px;
-  background: var(--surface-secondary);
+  border: 1px solid #d8e2ee;
+  background: #fcfdff;
   font-size: 12px;
   white-space: pre-wrap;
 }
@@ -6186,9 +6500,9 @@ body::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px dashed var(--line-color);
+  border: 1px dashed #d4dde9;
   border-radius: 14px;
-  background: var(--surface-secondary);
+  background: #fbfcfe;
 }
 
 .roadmap-period-header {
@@ -6216,13 +6530,45 @@ body::after {
   cursor: pointer;
 }
 
+.roadmap-view-preset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.roadmap-view-preset-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.roadmap-view-preset-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.roadmap-view-preset-group .action-chip.active {
+  background: #eef4fb;
+  border-color: #bfd0e3;
+  color: var(--text-primary);
+}
+
+.roadmap-cell-static {
+  width: 100%;
+}
+
 .roadmap-cell-editor {
   z-index: 130;
   max-height: min(82vh, 860px);
-  border: 1px solid var(--line-color);
+  border: 1px solid #d7e0eb;
   border-radius: 24px;
-  background: #fffdf9;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16);
+  background: #ffffff;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
   overflow: hidden;
   backdrop-filter: none;
 }
@@ -6233,8 +6579,22 @@ body::after {
   justify-content: space-between;
   gap: 16px;
   padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--line-color);
-  background: #fffdf9;
+  border-bottom: 1px solid #e1e8f0;
+  background: #ffffff;
+}
+
+.roadmap-cell-editor-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.roadmap-cell-editor-icon {
+  width: 38px;
+  height: 38px;
+  border-color: #d7e0eb;
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
 .roadmap-cell-editor-head h3 {
@@ -6261,7 +6621,7 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  background: #fffdf9;
+  background: #ffffff;
 }
 
 .roadmap-editor-section {
@@ -6286,9 +6646,9 @@ body::after {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--line-color);
+  border: 1px solid #dbe4ef;
   border-radius: 16px;
-  background: var(--surface-secondary);
+  background: #f9fbfe;
 }
 
 .roadmap-editor-row-head {
@@ -6306,33 +6666,222 @@ body::after {
   width: 100%;
 }
 
+.roadmap-editor-field-note {
+  display: none;
+}
+
 .roadmap-editor-field-note .styled-input {
   min-height: 42px;
 }
 
-.roadmap-editor-remove,
+.roadmap-editor-remove {
+  align-self: start;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-color: #d7e0eb;
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
 .roadmap-editor-add {
   align-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid #d7e0eb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+}
+
+.roadmap-editor-add:hover,
+.roadmap-editor-remove:hover {
+  background: #f8fbff;
 }
 
 .roadmap-editor-note {
   margin-top: 4px;
 }
 
-.roadmap-cell-editor-actions {
+.roadmap-cell-group + .roadmap-cell-group {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #d8e2ee;
+}
+
+.roadmap-cell-group-label {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.roadmap-cell-assessment {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.roadmap-cell-assessment-line {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid #d8e2ee;
+  background: #f4f8ff;
+  color: #38506b;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.roadmap-editor-assessment-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.roadmap-editor-assessment-grid.is-multi-period {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.roadmap-editor-split-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #dbe4ef;
+  border-radius: 20px;
+  background: #fbfdff;
+}
+
+.roadmap-editor-split-head {
+  display: grid;
+  gap: 4px;
+}
+
+.roadmap-editor-split-head strong {
+  font-size: 14px;
+}
+
+.roadmap-editor-split-head span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.management-quick-filter-rail {
+  position: relative;
+}
+
+.management-quick-filter-group {
+  display: grid;
   gap: 10px;
-  padding: 16px 20px 20px;
-  border-top: 1px solid var(--line-color);
-  background: #fffdf9;
+  min-height: 100%;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, #c7d3e2 12%);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 10px 24px rgba(148, 163, 184, 0.08);
+}
+
+.management-quick-filter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.management-quick-filter-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.management-quick-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, #c7d3e2 12%);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.management-quick-filter-toggle:hover {
+  background: #f8fbff;
+  color: var(--text-primary);
+}
+
+.management-quick-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.management-quick-filter-empty {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.roadmap-schedule-cell {
+  min-width: 240px;
+}
+
+.roadmap-schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.roadmap-schedule-item {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid #d8e2ee;
+  background: #fcfdff;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 [data-theme='dark'] .roadmap-cell-editor,
 [data-theme='dark'] .roadmap-cell-editor-head,
-[data-theme='dark'] .roadmap-cell-editor-body,
-[data-theme='dark'] .roadmap-cell-editor-actions {
+[data-theme='dark'] .roadmap-cell-editor-body {
   background: #1b1511;
+}
+
+[data-theme='dark'] .roadmap-view-preset-group .action-chip.active {
+  background: rgba(92, 116, 143, 0.28);
+  border-color: rgba(149, 170, 194, 0.4);
+}
+
+[data-theme='dark'] .roadmap-cell-group + .roadmap-cell-group {
+  border-top-color: rgba(149, 170, 194, 0.24);
+}
+
+[data-theme='dark'] .roadmap-cell-assessment-line,
+[data-theme='dark'] .roadmap-schedule-item {
+  background: rgba(38, 50, 66, 0.72);
+  border-color: rgba(149, 170, 194, 0.2);
+  color: #dfe8f2;
 }
 
 @media (max-width: 1200px) {
@@ -6342,6 +6891,10 @@ body::after {
   }
 
   .roadmap-editor-row-head {
+    grid-template-columns: 1fr;
+  }
+
+  .roadmap-editor-assessment-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -10,6 +10,8 @@ const EMPTY_SNAPSHOT = {
   progressLogs: [],
   academicEvents: [],
   academicSchools: [],
+  teacherCatalogs: [],
+  classroomCatalogs: [],
   academicCurriculumProfiles: [],
   academicSupplementMaterials: [],
   academicExamScopes: [],
@@ -158,6 +160,8 @@ export class DataService {
     return [
       { key: 'academicEvents', table: 'academic_events', processor: '_processAcademicEvent' },
       { key: 'academicSchools', table: 'academic_schools', processor: '_processAcademicSchool', optional: true },
+      { key: 'teacherCatalogs', table: 'teacher_catalogs', processor: '_processTeacherCatalog', optional: true },
+      { key: 'classroomCatalogs', table: 'classroom_catalogs', processor: '_processClassroomCatalog', optional: true },
       { key: 'academicCurriculumProfiles', table: 'academic_curriculum_profiles', processor: '_processAcademicCurriculumProfile', optional: true },
       { key: 'academicSupplementMaterials', table: 'academic_supplement_materials', processor: '_processAcademicSupplementMaterial', optional: true },
       { key: 'academicExamScopes', table: 'academic_exam_scopes', processor: '_processAcademicExamScope', optional: true },
@@ -1072,6 +1076,30 @@ export class DataService {
     return (data || []).map((row) => this._processAcademicSchool(row));
   }
 
+  async getTeacherCatalogs() {
+    const client = this._ensureClient();
+    const { data, error } = await client.from('teacher_catalogs').select('*').order('sort_order', { ascending: true });
+    if (error) {
+      if (this._isMissingTableError(error, 'teacher_catalogs')) {
+        return [];
+      }
+      throw error;
+    }
+    return (data || []).map((row) => this._processTeacherCatalog(row));
+  }
+
+  async getClassroomCatalogs() {
+    const client = this._ensureClient();
+    const { data, error } = await client.from('classroom_catalogs').select('*').order('sort_order', { ascending: true });
+    if (error) {
+      if (this._isMissingTableError(error, 'classroom_catalogs')) {
+        return [];
+      }
+      throw error;
+    }
+    return (data || []).map((row) => this._processClassroomCatalog(row));
+  }
+
   async getClassTerms() {
     const client = this._ensureClient();
     const { data, error } = await client
@@ -1219,6 +1247,80 @@ export class DataService {
     }
     const { error } = await client.from('academic_schools').delete().in('id', targets);
     if (error) throw error;
+    this._notify();
+  }
+
+  async upsertTeacherCatalogs(resources) {
+    const client = this._ensureClient();
+    const payload = (resources || []).map((resource, index) => ({
+      id: resource.id || generateId(),
+      name: String(resource.name || '').trim(),
+      subjects: Array.isArray(resource.subjects) ? resource.subjects : [],
+      is_visible: resource.isVisible !== false,
+      sort_order: resource.sortOrder ?? index,
+    }));
+
+    const { data, error } = await client.from('teacher_catalogs').upsert(payload, { onConflict: 'id' }).select();
+    if (error) {
+      if (this._isMissingTableError(error, 'teacher_catalogs')) {
+        return [];
+      }
+      throw error;
+    }
+    this._notify();
+    return (data || []).map((row) => this._processTeacherCatalog(row));
+  }
+
+  async deleteTeacherCatalogs(ids = []) {
+    const client = this._ensureClient();
+    const targets = [...new Set((ids || []).filter(Boolean))];
+    if (targets.length === 0) {
+      return;
+    }
+    const { error } = await client.from('teacher_catalogs').delete().in('id', targets);
+    if (error) {
+      if (this._isMissingTableError(error, 'teacher_catalogs')) {
+        return;
+      }
+      throw error;
+    }
+    this._notify();
+  }
+
+  async upsertClassroomCatalogs(resources) {
+    const client = this._ensureClient();
+    const payload = (resources || []).map((resource, index) => ({
+      id: resource.id || generateId(),
+      name: this._normalizeClassroomValue(resource.name || ''),
+      subjects: Array.isArray(resource.subjects) ? resource.subjects : [],
+      is_visible: resource.isVisible !== false,
+      sort_order: resource.sortOrder ?? index,
+    }));
+
+    const { data, error } = await client.from('classroom_catalogs').upsert(payload, { onConflict: 'id' }).select();
+    if (error) {
+      if (this._isMissingTableError(error, 'classroom_catalogs')) {
+        return [];
+      }
+      throw error;
+    }
+    this._notify();
+    return (data || []).map((row) => this._processClassroomCatalog(row));
+  }
+
+  async deleteClassroomCatalogs(ids = []) {
+    const client = this._ensureClient();
+    const targets = [...new Set((ids || []).filter(Boolean))];
+    if (targets.length === 0) {
+      return;
+    }
+    const { error } = await client.from('classroom_catalogs').delete().in('id', targets);
+    if (error) {
+      if (this._isMissingTableError(error, 'classroom_catalogs')) {
+        return;
+      }
+      throw error;
+    }
     this._notify();
   }
 
@@ -2138,6 +2240,28 @@ export class DataService {
     };
   }
 
+  _processTeacherCatalog(resourceRow) {
+    if (!resourceRow) return null;
+    return {
+      ...resourceRow,
+      name: resourceRow.name || '',
+      subjects: Array.isArray(resourceRow.subjects) ? resourceRow.subjects : [],
+      isVisible: resourceRow.is_visible !== false,
+      sortOrder: resourceRow.sort_order ?? 0,
+    };
+  }
+
+  _processClassroomCatalog(resourceRow) {
+    if (!resourceRow) return null;
+    return {
+      ...resourceRow,
+      name: this._normalizeClassroomValue(resourceRow.name || ''),
+      subjects: Array.isArray(resourceRow.subjects) ? resourceRow.subjects : [],
+      isVisible: resourceRow.is_visible !== false,
+      sortOrder: resourceRow.sort_order ?? 0,
+    };
+  }
+
   _processClassTerm(termRow) {
     if (!termRow) return null;
     return {
@@ -2327,7 +2451,14 @@ export class DataService {
       end: derivedEnd,
       color: eventRow.color || null,
       grade: eventRow.grade || 'all',
-      note: stripEmbeddedNoteMeta(eventRow.note)
+      academicYear:
+        Number(meta.academicYear || String(derivedStart || '').slice(0, 4)) ||
+        new Date().getFullYear(),
+      note: stripEmbeddedNoteMeta(eventRow.note),
+      meta,
+      roadmapSync: meta.roadmapSync || null,
+      roadmapPeriodCode: meta.roadmapPeriodCode || '',
+      roadmapSubject: meta.roadmapSubject || '',
     };
   }
 

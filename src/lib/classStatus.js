@@ -1,4 +1,4 @@
-export const LEGACY_ACTIVE_CLASS_STATUS = '수강';
+export const LEGACY_ACTIVE_CLASS_STATUS = '개강';
 export const LEGACY_UPCOMING_CLASS_STATUS = '개강 예정';
 
 export const ACTIVE_CLASS_STATUS = '수업 진행 중';

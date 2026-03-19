@@ -1,5 +1,6 @@
 ﻿import { useMemo, useState } from 'react';
 import { Book, Calendar, ClipboardList, Users } from 'lucide-react';
+import { useEffect } from 'react';
 import { useToast } from '../contexts/ToastContext';
 import ConfirmDialog from './ui/ConfirmDialog';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
@@ -12,6 +13,7 @@ import StudentManagerTab from './data-manager/StudentManagerTab';
 import ClassManagerTab from './data-manager/ClassManagerTab';
 import TextbookManagerTab from './data-manager/TextbookManagerTab';
 import SchoolCatalogManagerModal from './data-manager/SchoolCatalogManagerModal';
+import ResourceCatalogManagerModal from './data-manager/ResourceCatalogManagerModal';
 import BulkUpdateModal from './data-manager/BulkUpdateModal';
 import ClassEditor from './data-manager/ClassEditor';
 import {
@@ -32,12 +34,19 @@ import {
   buildStudentColumns,
   buildTextbookColumns,
 } from './data-manager/columnSchemas';
+import {
+  buildClassroomMaster,
+  buildTeacherMaster,
+  getResourceSubjectOptions,
+} from '../lib/resourceCatalogs';
 
 const EMPTY_DATA = {
   classes: [],
   students: [],
   textbooks: [],
   academicSchools: [],
+  teacherCatalogs: [],
+  classroomCatalogs: [],
   academicCurriculumProfiles: [],
   academicSupplementMaterials: [],
   academicExamScopes: [],
@@ -62,7 +71,13 @@ const TAB_META = {
   },
 };
 
-export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurriculum }) {
+export default function DataManager({
+  data = EMPTY_DATA,
+  dataService,
+  onOpenCurriculum,
+  onOpenTermManager,
+  navigationIntent = null,
+}) {
   const safeData = useMemo(
     () => ({
       ...EMPTY_DATA,
@@ -80,6 +95,35 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
   const [editingTextbook, setEditingTextbook] = useState(null);
   const [viewingClassStudents, setViewingClassStudents] = useState(null);
   const [isSchoolManagerOpen, setIsSchoolManagerOpen] = useState(false);
+  const [isTeacherManagerOpen, setIsTeacherManagerOpen] = useState(false);
+  const [isClassroomManagerOpen, setIsClassroomManagerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!navigationIntent) {
+      return;
+    }
+
+    if (navigationIntent.tab) {
+      setActiveTab(navigationIntent.tab);
+    }
+
+    if (navigationIntent.openTerms) {
+      onOpenTermManager?.();
+    }
+  }, [navigationIntent, onOpenTermManager]);
+
+  const teacherMaster = useMemo(
+    () => buildTeacherMaster(safeData.teacherCatalogs, safeData.classes),
+    [safeData.teacherCatalogs, safeData.classes]
+  );
+  const classroomMaster = useMemo(
+    () => buildClassroomMaster(safeData.classroomCatalogs, safeData.classes),
+    [safeData.classroomCatalogs, safeData.classes]
+  );
+  const resourceSubjectOptions = useMemo(
+    () => getResourceSubjectOptions([...teacherMaster, ...classroomMaster], safeData.classes),
+    [classroomMaster, safeData.classes, teacherMaster]
+  );
 
   const currentTabData = useMemo(() => {
     if (activeTab === 'students') {
@@ -93,16 +137,19 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
 
   const columnDefinitions = useMemo(() => {
     if (activeTab === 'students') {
-      return buildStudentColumns();
+      return buildStudentColumns({ data: safeData });
     }
     if (activeTab === 'classes') {
       return buildClassColumns({
         data: safeData,
         onOpenManifest: setViewingClassStudents,
+        subjectOptions: resourceSubjectOptions,
+        teacherOptions: teacherMaster.filter((item) => item.isVisible !== false).map((item) => item.name),
+        classroomOptions: classroomMaster.filter((item) => item.isVisible !== false).map((item) => item.name),
       });
     }
     return buildTextbookColumns();
-  }, [activeTab, safeData]);
+  }, [activeTab, classroomMaster, safeData, teacherMaster]);
 
   const sharedPreference = useSharedTablePreference({
     storageKey: `data-manager:${activeTab}`,
@@ -181,6 +228,24 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
     setIsSchoolManagerOpen(false);
   };
 
+  const handleSaveTeachers = async (rows, deletedIds) => {
+    await dataService.upsertTeacherCatalogs(rows);
+    if ((deletedIds || []).length > 0) {
+      await dataService.deleteTeacherCatalogs(deletedIds);
+    }
+    toast.success('선생님 마스터를 저장했습니다.');
+    setIsTeacherManagerOpen(false);
+  };
+
+  const handleSaveClassrooms = async (rows, deletedIds) => {
+    await dataService.upsertClassroomCatalogs(rows);
+    if ((deletedIds || []).length > 0) {
+      await dataService.deleteClassroomCatalogs(deletedIds);
+    }
+    toast.success('강의실 마스터를 저장했습니다.');
+    setIsClassroomManagerOpen(false);
+  };
+
   if (editingStudent) {
     return (
       <StudentEditor
@@ -203,6 +268,9 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
         students={safeData.students}
         classTerms={safeData.classTerms}
         academicSchools={safeData.academicSchools}
+        teacherCatalogs={safeData.teacherCatalogs}
+        classroomCatalogs={safeData.classroomCatalogs}
+        allClasses={safeData.classes}
         academicExamDays={safeData.academicExamDays}
         academicEventExamDetails={safeData.academicEventExamDetails}
         academicEvents={safeData.academicEvents}
@@ -233,6 +301,28 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
         schools={safeData.academicSchools}
         onClose={() => setIsSchoolManagerOpen(false)}
         onSave={handleSaveSchools}
+        isSaving={actions.isProcessing}
+      />
+      <ResourceCatalogManagerModal
+        open={isTeacherManagerOpen}
+        title="선생님 마스터 관리"
+        subtitle="수업 관리, 시간표 편집, 필터에서 공통으로 사용할 선생님 목록과 연결 과목을 정리합니다."
+        resourceLabel="선생님"
+        resources={teacherMaster}
+        subjectOptions={resourceSubjectOptions}
+        onClose={() => setIsTeacherManagerOpen(false)}
+        onSave={handleSaveTeachers}
+        isSaving={actions.isProcessing}
+      />
+      <ResourceCatalogManagerModal
+        open={isClassroomManagerOpen}
+        title="강의실 마스터 관리"
+        subtitle="수업 관리, 시간표 편집, 필터에서 공통으로 사용할 강의실 목록과 연결 과목을 정리합니다."
+        resourceLabel="강의실"
+        resources={classroomMaster}
+        subjectOptions={resourceSubjectOptions}
+        onClose={() => setIsClassroomManagerOpen(false)}
+        onSave={handleSaveClassrooms}
         isSaving={actions.isProcessing}
       />
 
@@ -339,6 +429,12 @@ export default function DataManager({ data = EMPTY_DATA, dataService, onOpenCurr
             onExport={actions.handleExportData}
             onDownloadSample={actions.handleDownloadSample}
             onUpload={(file) => actions.handleSpreadsheetUpload(file, 'classes')}
+            teacherMaster={teacherMaster}
+            classroomMaster={classroomMaster}
+            subjectOptions={resourceSubjectOptions}
+            onManageTeachers={() => setIsTeacherManagerOpen(true)}
+            onManageClassrooms={() => setIsClassroomManagerOpen(true)}
+            onManageTerms={onOpenTermManager}
             isBusy={actions.isProcessing}
             sectionDescription={activeMeta.description}
           />

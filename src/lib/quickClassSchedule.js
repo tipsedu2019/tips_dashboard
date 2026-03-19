@@ -83,7 +83,7 @@ export function validateQuickCreateDraft(draft, { needsTeacher = false } = {}) {
 
   const lines = ensureQuickScheduleLines(draft?.scheduleLines || []);
   if (lines.length === 0) {
-    return '수업 일정을 한 줄 이상 추가해 주세요.';
+    return '수업 일정은 한 줄 이상 추가해 주세요.';
   }
 
   for (const line of lines) {
@@ -94,7 +94,7 @@ export function validateQuickCreateDraft(draft, { needsTeacher = false } = {}) {
       return '수업 일정의 시작/종료 시간을 다시 확인해 주세요.';
     }
     if (!String(line.classroom || '').trim()) {
-      return '각 수업 일정의 강의실을 입력해 주세요.';
+      return '각 수업 일정에 강의실을 입력해 주세요.';
     }
   }
 

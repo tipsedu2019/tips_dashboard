@@ -27,10 +27,7 @@ import {
 import {
   buildTimetableTooltip,
   canTeacherOpenClass,
-  collectClassroomEntries,
   collectGradeOptions,
-  collectSubjectOptions,
-  collectTeacherEntries,
   computeTimetableWindow,
   formatCollapsedTimeHint,
   getClassColor,
@@ -43,6 +40,12 @@ import {
   resolveSlotTeachers,
   toggleCompareSelection,
 } from './timetableViewUtils';
+import {
+  buildClassroomMaster,
+  buildTeacherMaster,
+  getResourceSubjectOptions,
+  getSubjectOptionMap,
+} from '../lib/resourceCatalogs';
 import {
   applySlotMove,
   buildEditableSlots,
@@ -100,14 +103,30 @@ export default function DailyClassroomView({
   const scheduleRef = useRef(null);
 
   const timeSlots = useMemo(() => generateTimeSlots(11, 24).filter((slot) => !slot.startsWith('23:30-')), []);
-  const classroomEntries = useMemo(() => collectClassroomEntries(classes), [classes]);
-  const teacherOptions = useMemo(() => collectTeacherEntries(classes).map((entry) => entry.label), [classes]);
+  const teacherMaster = useMemo(
+    () => buildTeacherMaster(data?.teacherCatalogs, allClasses),
+    [allClasses, data?.teacherCatalogs]
+  );
+  const classroomMaster = useMemo(
+    () => buildClassroomMaster(data?.classroomCatalogs, allClasses),
+    [allClasses, data?.classroomCatalogs]
+  );
+  const classroomEntries = useMemo(
+    () => classroomMaster.filter((entry) => entry.isVisible !== false).map((entry) => ({ key: entry.key, label: entry.name })),
+    [classroomMaster]
+  );
+  const teacherOptions = useMemo(
+    () => teacherMaster.filter((entry) => entry.isVisible !== false).map((entry) => entry.name),
+    [teacherMaster]
+  );
   const fieldOptions = useMemo(() => ({
-    subjects: collectSubjectOptions(classes),
-    grades: collectGradeOptions(classes),
+    subjects: getResourceSubjectOptions([...teacherMaster, ...classroomMaster], allClasses),
+    grades: collectGradeOptions(allClasses),
     teachers: teacherOptions,
     classrooms: classroomEntries.map((entry) => entry.label),
-  }), [classes, teacherOptions, classroomEntries]);
+    teacherOptionsBySubject: getSubjectOptionMap(teacherMaster),
+    classroomOptionsBySubject: getSubjectOptionMap(classroomMaster),
+  }), [allClasses, classroomEntries, classroomMaster, teacherMaster, teacherOptions]);
   const classroomIndexMap = useMemo(() => new Map(classroomEntries.map((entry, index) => [entry.key, index])), [classroomEntries]);
   const canEditTimetable = Boolean(isStaff);
   const canExportImage = selectedDay !== ALL_DAYS;
