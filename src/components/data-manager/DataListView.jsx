@@ -22,11 +22,11 @@ import {
 function EmptyState({ title, description }) {
   return (
     <tr>
-      <td colSpan={99} style={{ padding: '72px 24px', textAlign: 'center' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, opacity: 0.75 }}>
+      <td colSpan={99} className="data-list-empty-cell">
+        <div className="data-list-empty-state">
           <ClipboardList size={48} strokeWidth={1.5} />
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</div>
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{description}</div>
+          <div className="data-list-empty-title">{title}</div>
+          <div className="data-list-empty-description">{description}</div>
         </div>
       </td>
     </tr>
@@ -36,22 +36,11 @@ function EmptyState({ title, description }) {
 function GroupRow({ row, colSpan }) {
   return (
     <tr>
-      <td
-        colSpan={colSpan}
-        style={{
-          padding: '10px 16px',
-          background: row.depth === 0 ? 'rgba(33, 110, 78, 0.08)' : 'rgba(33, 110, 78, 0.04)',
-          borderBottom: '1px solid var(--border-color)',
-          fontSize: 13,
-          fontWeight: 700,
-          color: 'var(--text-primary)',
-        }}
-      >
-        <span style={{ marginLeft: row.depth * 18 }}>
+      <td colSpan={colSpan} className={`data-list-group-row depth-${Math.min(row.depth || 0, 2)}`}>
+        <span className="data-list-group-label" style={{ marginLeft: row.depth * 18 }}>
           {row.column.label}: {row.value}
         </span>
-        <span style={{ marginLeft: 10, color: 'var(--text-muted)', fontWeight: 600 }}>
-          {row.count}개        </span>
+        <span className="data-list-group-count">{row.count}개</span>
       </td>
     </tr>
   );
@@ -95,7 +84,7 @@ function PaginationBar({
           className="btn-secondary"
           onClick={() => onPageChange?.(page - 1)}
           disabled={page <= 1}
-          style={{ padding: '6px 12px', minWidth: 68 }}
+          style={{ minWidth: 68 }}
         >
           이전
         </button>
@@ -107,7 +96,7 @@ function PaginationBar({
           className="btn-secondary"
           onClick={() => onPageChange?.(page + 1)}
           disabled={page >= totalPages}
-          style={{ padding: '6px 12px', minWidth: 68 }}
+          style={{ minWidth: 68 }}
         >
           다음
         </button>
@@ -141,14 +130,6 @@ function ClassMobileCard({
     <div
       className={`card-custom data-list-mobile-card data-list-mobile-card-class ${itemSelected ? 'is-selected' : ''}`}
       data-testid={`data-list-mobile-card-${item.id}`}
-      style={{
-        padding: 16,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        border: itemSelected ? '1px solid rgba(33, 110, 78, 0.28)' : '1px solid var(--border-color)',
-        boxShadow: itemSelected ? '0 12px 28px rgba(33, 110, 78, 0.12)' : undefined,
-      }}
     >
       <div className="data-list-mobile-card-head">
         <div className="data-list-mobile-card-copy">
@@ -157,7 +138,7 @@ function ClassMobileCard({
               <button
                 type="button"
                 onClick={() => handleRowMouseDown(item.id, itemSelected, { preventDefault() {} })}
-                style={{ background: 'transparent', border: 'none', padding: 0, display: 'flex', alignItems: 'center' }}
+                className="data-list-selection-toggle"
               >
                 {itemSelected ? <CheckSquare size={18} color="var(--accent-color)" /> : <Square size={18} color="var(--text-muted)" />}
               </button>
@@ -181,12 +162,11 @@ function ClassMobileCard({
         </div>
 
         {showActions ? (
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="data-list-mobile-card-actions">
             <button
               type="button"
               onClick={() => onEdit?.(item)}
-              className="btn-icon"
-              style={{ padding: 6, background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}
+              className="btn-icon data-list-card-action"
               disabled={isBusy}
             >
               <Pencil size={16} />
@@ -194,8 +174,7 @@ function ClassMobileCard({
             <button
               type="button"
               onClick={() => onDelete?.(item.id)}
-              className="btn-icon"
-              style={{ padding: 6, background: 'transparent', border: 'none', color: '#ef4444' }}
+              className="btn-icon data-list-card-action is-danger"
               disabled={isBusy}
             >
               <Trash2 size={16} />
@@ -257,15 +236,10 @@ const DataRow = memo(function DataRow({
     <tr
       onMouseEnter={() => onRowMouseEnter?.(item.id, currentIds)}
       onMouseLeave={onRowMouseLeave}
-      style={{
-        borderBottom: '1px solid var(--border-color)',
-        background: isSelected ? 'rgba(57, 158, 116, 0.04)' : 'transparent',
-        transition: 'background 0.2s',
-        userSelect: 'none',
-      }}
+      className={`data-list-row ${isSelected ? 'is-selected' : ''}`}
     >
       {selectable && currentIds && (
-        <td style={{ padding: '12px 16px', cursor: 'pointer' }} onMouseDown={(event) => onRowMouseDown?.(item.id, isSelected, event)}>
+        <td className="data-list-cell data-list-cell-select" onMouseDown={(event) => onRowMouseDown?.(item.id, isSelected, event)}>
           {isSelected ? <CheckSquare size={18} color="var(--accent-color)" /> : <Square size={18} color="var(--text-muted)" />}
         </td>
       )}
@@ -276,12 +250,8 @@ const DataRow = memo(function DataRow({
         return (
           <td
             key={column.key}
-            style={{
-              padding: '12px 16px',
-              fontSize: 14,
-              verticalAlign: 'top',
-              ...(index === 0 && depth > 0 ? { paddingLeft: 16 + depth * 18 } : null),
-            }}
+            className="data-list-cell"
+            style={index === 0 && depth > 0 ? { paddingLeft: 16 + depth * 18 } : undefined}
             onDoubleClick={() => {
               if (column.canInlineEdit && !isBusy) {
                 onRowDoubleClick(item.id, column.key, column.getEditValue ? column.getEditValue(item) : item[column.key] || '');
@@ -292,8 +262,7 @@ const DataRow = memo(function DataRow({
               column.multiline ? (
                 <textarea
                   autoFocus
-                  className="styled-input"
-                  style={{ padding: 8, fontSize: 13, minHeight: 68, width: '100%', margin: 0, resize: 'vertical' }}
+                  className="styled-input data-list-inline-editor data-list-inline-editor-textarea"
                   value={editValue}
                   onChange={(event) => setEditValue(event.target.value)}
                   onBlur={submitInlineEdit}
@@ -309,8 +278,7 @@ const DataRow = memo(function DataRow({
               ) : column.editKind === 'select' ? (
                 <select
                   autoFocus
-                  className="styled-input"
-                  style={{ padding: '4px 8px', fontSize: 13, height: 34, margin: 0, width: '100%' }}
+                  className="styled-input data-list-inline-editor"
                   value={editValue}
                   onChange={(event) => setEditValue(event.target.value)}
                   onBlur={submitInlineEdit}
@@ -326,8 +294,7 @@ const DataRow = memo(function DataRow({
                 <input
                   autoFocus
                   type={column.editKind === 'date' ? 'date' : (column.inputType || 'text')}
-                  className="styled-input"
-                  style={{ padding: '4px 8px', fontSize: 13, height: 30, margin: 0, width: '100%' }}
+                  className="styled-input data-list-inline-editor"
                   value={editValue}
                   onChange={(event) => setEditValue(event.target.value)}
                   onBlur={submitInlineEdit}
@@ -342,21 +309,12 @@ const DataRow = memo(function DataRow({
       })}
 
       {showActions && (
-        <td style={{ padding: '12px 16px', textAlign: 'right', minWidth: 90 }}>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 6,
-              opacity: isHovered || isSelected ? 1 : 0,
-              transition: 'opacity 0.15s ease',
-            }}
-          >
+        <td className="data-list-cell data-list-cell-actions">
+          <div className={`data-list-row-actions ${isHovered || isSelected ? 'is-visible' : ''}`}>
             <button
               type="button"
               onClick={() => onEdit?.(item)}
-              className="btn-icon"
-              style={{ padding: 6, background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
+              className="btn-icon data-list-card-action"
               disabled={isBusy}
             >
               <Pencil size={16} />
@@ -364,8 +322,7 @@ const DataRow = memo(function DataRow({
             <button
               type="button"
               onClick={() => onDelete?.(item.id)}
-              className="btn-icon"
-              style={{ padding: 6, background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer' }}
+              className="btn-icon data-list-card-action is-danger"
               disabled={isBusy}
             >
               <Trash2 size={16} />
@@ -463,13 +420,13 @@ export default function DataListView({
     const visibleColumns = columns.slice(0, 6);
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="data-list-mobile-stack">
         {listData.length === 0 ? (
-          <div className="card-custom" style={{ padding: 24 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, opacity: 0.75 }}>
+          <div className="card-custom data-list-mobile-empty-card">
+            <div className="data-list-empty-state">
               <ClipboardList size={44} strokeWidth={1.5} />
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{emptyTitle}</div>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>{emptyDescription}</div>
+              <div className="data-list-empty-title">{emptyTitle}</div>
+              <div className="data-list-empty-description">{emptyDescription}</div>
             </div>
           </div>
         ) : (
@@ -478,17 +435,12 @@ export default function DataListView({
               return (
                 <div
                   key={row.key}
-                  className="card-custom"
-                  style={{
-                    padding: '12px 14px',
-                    background: row.depth === 0 ? 'rgba(33, 110, 78, 0.08)' : 'rgba(33, 110, 78, 0.04)',
-                    border: '1px solid var(--border-color)',
-                  }}
+                  className={`card-custom data-list-group-card depth-${Math.min(row.depth || 0, 2)}`}
                 >
-                  <div style={{ fontSize: 13, fontWeight: 800 }}>
+                  <div className="data-list-group-card-title">
                     {row.column.label}: {row.value}
                   </div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
+                  <div className="data-list-group-card-count">
                     {row.count}개
                   </div>
                 </div>
@@ -519,37 +471,29 @@ export default function DataListView({
                 key={row.key || item.id}
                 className="card-custom data-list-mobile-card"
                 data-testid={`data-list-mobile-card-${item.id}`}
-                style={{
-                  padding: 16,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                  border: itemSelected ? '1px solid rgba(33, 110, 78, 0.28)' : '1px solid var(--border-color)',
-                  boxShadow: itemSelected ? '0 12px 28px rgba(33, 110, 78, 0.12)' : undefined,
-                }}
+                data-selected={itemSelected ? 'true' : 'false'}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="data-list-mobile-card-head is-generic">
+                  <div className="data-list-mobile-card-heading">
                     {selectable && (
                       <button
                         type="button"
                         onClick={() => handleRowMouseDown(item.id, itemSelected, { preventDefault() {} })}
-                        style={{ background: 'transparent', border: 'none', padding: 0, display: 'flex', alignItems: 'center' }}
+                        className="data-list-selection-toggle"
                       >
                         {itemSelected ? <CheckSquare size={18} color="var(--accent-color)" /> : <Square size={18} color="var(--text-muted)" />}
                       </button>
                     )}
-                    <div style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>
+                    <div className="data-list-mobile-card-heading-value">
                       {visibleColumns[0]?.render ? visibleColumns[0].render(item) : item[visibleColumns[0]?.key] || '-'}
                     </div>
                   </div>
                   {showActions && (
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div className="data-list-mobile-card-actions">
                       <button
                         type="button"
                         onClick={() => onEdit?.(item)}
-                        className="btn-icon"
-                        style={{ padding: 6, background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}
+                        className="btn-icon data-list-card-action"
                         disabled={isBusy}
                       >
                         <Pencil size={16} />
@@ -557,8 +501,7 @@ export default function DataListView({
                       <button
                         type="button"
                         onClick={() => onDelete?.(item.id)}
-                        className="btn-icon"
-                        style={{ padding: 6, background: 'transparent', border: 'none', color: '#ef4444' }}
+                        className="btn-icon data-list-card-action is-danger"
                         disabled={isBusy}
                       >
                         <Trash2 size={16} />
@@ -567,11 +510,11 @@ export default function DataListView({
                   )}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10 }}>
+                <div className="data-list-mobile-field-grid">
                   {visibleColumns.slice(1).map((column) => (
-                    <div key={`${item.id}-${column.key}`} style={{ display: 'grid', gap: 4 }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)' }}>{column.label}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    <div key={`${item.id}-${column.key}`} className="data-list-mobile-field">
+                      <div className="data-list-mobile-field-label">{column.label}</div>
+                      <div className="data-list-mobile-field-value">
                         {column.render ? column.render(item) : item[column.key] || '-'}
                       </div>
                     </div>
@@ -599,18 +542,17 @@ export default function DataListView({
   return (
     <div
       className={cardless ? 'data-list-shell data-list-shell-cardless' : 'card-custom data-list-shell'}
-      style={{ overflow: 'hidden', padding: 0 }}
     >
-      <div style={{ overflowX: 'auto', borderTop: cardless ? '1px solid var(--border-color)' : undefined }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 880 }}>
+      <div className={`data-list-table-scroll ${cardless ? 'is-cardless' : ''}`}>
+        <table className="data-list-table">
           <thead>
-            <tr style={{ background: 'var(--bg-surface-hover)', borderBottom: '1px solid var(--border-color)' }}>
+            <tr className="data-list-head-row">
               {selectable && (
-                <th style={{ padding: '12px 16px', textAlign: 'left', width: 44 }}>
+                <th className="data-list-head-cell is-select">
                   <button
                     type="button"
                     onClick={() => toggleSelectAll?.(currentIds)}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}
+                    className="data-list-selection-toggle"
                   >
                     {selectedIds?.size === currentIds?.length && currentIds?.length > 0
                       ? <CheckSquare size={18} color="var(--accent-color)" />
@@ -621,10 +563,10 @@ export default function DataListView({
               {columns.map((column) => (
                 <th
                   key={column.key}
-                  style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer' }}
+                  className="data-list-head-cell"
                   onClick={() => onSortChange?.(column.key)}
                 >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span className="data-list-head-label">
                     {column.label}
                     {sortKey === column.key && (
                       sortDirection === 'asc'
@@ -635,7 +577,7 @@ export default function DataListView({
                 </th>
               ))}
               {showActions && (
-                <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>작업</th>
+                <th className="data-list-head-cell is-actions">작업</th>
               )}
             </tr>
           </thead>

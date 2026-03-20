@@ -24,33 +24,21 @@ const SUMMARY_PANEL_STORAGE_KEY = 'tips-dashboard-summary-panels-v2';
 
 function MetricCard({ icon, title, value, caption, collapsed = false, onToggle, children }) {
   return (
-    <div className="card" style={{ padding: 24 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 14,
-              background: 'var(--accent-light)',
-              color: 'var(--accent-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
+    <div className="card stats-metric-card">
+      <div className="stats-metric-card-head">
+        <div className="stats-metric-card-title-group">
+          <div className="stats-metric-card-icon">
             {icon}
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 700 }}>{title}</div>
+          <div className="stats-metric-card-label">{title}</div>
         </div>
         {onToggle ? <SummaryToggleButton collapsed={collapsed} onClick={onToggle} /> : null}
       </div>
-      <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)' }}>{value}</div>
+      <div className="stats-metric-card-value">{value}</div>
       {!collapsed ? (
         <>
-          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>{caption}</div>
-          {children ? <div style={{ marginTop: 14 }}>{children}</div> : null}
+          <div className="stats-metric-card-caption">{caption}</div>
+          {children ? <div className="stats-metric-card-body">{children}</div> : null}
         </>
       ) : null}
     </div>
@@ -60,37 +48,17 @@ function MetricCard({ icon, title, value, caption, collapsed = false, onToggle, 
 function ProportionalBar({ value, max, color, extraLabel }) {
   const pct = max > 0 ? Math.max(4, (value / max) * 100) : 0;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-      <div
-        style={{
-          flex: 1,
-          background: 'var(--bg-surface-hover)',
-          borderRadius: 8,
-          height: 10,
-          minWidth: 60,
-          overflow: 'hidden',
-        }}
-      >
+    <div className="stats-bar-row">
+      <div className="stats-bar-track">
         <div
+          className="stats-bar-fill"
           style={{
             width: `${pct}%`,
-            height: '100%',
             background: color,
-            borderRadius: 8,
-            transition: 'width 0.4s ease',
           }}
         />
       </div>
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: 700,
-          color: 'var(--text-primary)',
-          whiteSpace: 'nowrap',
-          minWidth: 72,
-          textAlign: 'right',
-        }}
-      >
+      <div className="stats-bar-label">
         {extraLabel}
       </div>
     </div>
@@ -101,19 +69,10 @@ function SummaryToggleButton({ collapsed, onClick }) {
   return (
     <button
       type="button"
-      className="btn-ghost"
+      className="btn-ghost stats-icon-button"
       onClick={onClick}
       title={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
       aria-label={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
-      style={{
-        width: 36,
-        height: 36,
-        borderRadius: 999,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-      }}
     >
       {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
     </button>
@@ -124,19 +83,10 @@ function CollapseButton({ collapsed, onClick }) {
   return (
     <button
       type="button"
-      className="btn-ghost"
+      className="btn-ghost stats-icon-button"
       onClick={onClick}
       title={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
       aria-label={collapsed ? '\uBCF5\uAD6C' : '\uCD5C\uC18C\uD654'}
-      style={{
-        width: 36,
-        height: 36,
-        borderRadius: 999,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-      }}
     >
       {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
     </button>
@@ -441,7 +391,7 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
   );
 
   return (
-    <div className="animate-in">
+    <div className="animate-in stats-dashboard">
       <div className="page-header">
         <div>
           <h1>개요</h1>
@@ -450,29 +400,19 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
       </div>
 
       {conflictSummary.total > 0 && (
-        <div
-          className="card"
-          style={{
-            marginBottom: 28,
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            background: 'rgba(239, 68, 68, 0.02)',
-          }}
-        >
-          <div
-            className="card-header"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, color: '#ef4444' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="card stats-alert-card is-danger">
+          <div className="card-header stats-alert-card-head">
+            <div className="stats-alert-card-heading">
               <AlertTriangle size={20} />
-              <h2 style={{ margin: 0, color: '#ef4444' }}>충돌 알림</h2>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ padding: '4px 8px', borderRadius: 999, background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: 12, fontWeight: 700 }}>
+              <h2>충돌 알림</h2>
+              <div className="stats-alert-badge-row">
+                <span className="stats-alert-badge is-danger">
                   학생 {conflictSummary.student.length}
                 </span>
-                <span style={{ padding: '4px 8px', borderRadius: 999, background: 'rgba(245, 158, 11, 0.12)', color: '#b45309', fontSize: 12, fontWeight: 700 }}>
+                <span className="stats-alert-badge is-warning">
                   선생님 {conflictSummary.teacher.length}
                 </span>
-                <span style={{ padding: '4px 8px', borderRadius: 999, background: 'rgba(37, 99, 235, 0.12)', color: '#1d4ed8', fontSize: 12, fontWeight: 700 }}>
+                <span className="stats-alert-badge is-info">
                   강의실 {conflictSummary.classroom.length}
                 </span>
               </div>
@@ -480,7 +420,7 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
             <CollapseButton collapsed={collapsedPanels.conflicts} onClick={() => togglePanel('conflicts')} />
           </div>
           {!collapsedPanels.conflicts && (
-            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div className="card-body stats-alert-card-body">
               {[
                 { key: 'student', title: '학생 시간 충돌', items: conflictSummary.student, accent: '#ef4444' },
                 { key: 'teacher', title: '선생님 시간 충돌', items: conflictSummary.teacher, accent: '#b45309' },
@@ -488,54 +428,40 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
               ]
                 .filter((section) => section.items.length > 0)
                 .map((section) => (
-                  <section key={section.key} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: section.accent }}>{section.title}</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+                  <section key={section.key} className="stats-alert-section">
+                    <h3 style={{ color: section.accent }}>{section.title}</h3>
+                    <div className="stats-alert-entry-grid">
                       {section.items.map((entry) => (
-                        <div
-                          key={entry.id}
-                          style={{
-                            padding: 16,
-                            background: 'var(--bg-surface)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: 12,
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12 }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontWeight: 700, fontSize: 14 }}>{entry.label}</div>
-                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{entry.meta}</div>
+                        <div key={entry.id} className="stats-alert-entry">
+                          <div className="stats-alert-entry-head">
+                            <div className="stats-alert-entry-copy">
+                              <div className="stats-alert-entry-title">{entry.label}</div>
+                              <div className="stats-alert-entry-meta">{entry.meta}</div>
                             </div>
                             {entry.type === 'student' && (
                               <button
-                                className="h-segment-btn"
-                                style={{ fontSize: 11, padding: '4px 8px' }}
+                                className="h-segment-btn stats-inline-action"
                                 onClick={() => onViewStudentSchedule(entry.id)}
                               >
-                                <ExternalLink size={12} style={{ marginRight: 4 }} />
+                                <ExternalLink size={12} />
                                 시간표 보기
                               </button>
                             )}
                           </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div className="stats-alert-overlap-list">
                             {entry.overlaps.map((overlap, index) => (
                               <div
                                 key={`${entry.id}-${index}`}
-                                style={{
-                                  fontSize: 12,
-                                  padding: 8,
-                                  background: 'rgba(239, 68, 68, 0.05)',
-                                  borderRadius: 6,
-                                  borderLeft: `3px solid ${section.accent}`,
-                                }}
+                                className="stats-alert-overlap-card"
+                                style={{ '--stats-accent': section.accent }}
                               >
-                                <div style={{ fontWeight: 700, color: section.accent, marginBottom: 4 }}>
+                                <div className="stats-alert-overlap-time" style={{ color: section.accent }}>
                                   {overlap.day} {overlap.start}-{overlap.end}
                                 </div>
-                                <div style={{ color: 'var(--text-secondary)' }}>
+                                <div className="stats-alert-overlap-line">
                                   1. {stripClassPrefix(overlap.left.className)} ({overlap.left.start}-{overlap.left.end})
                                 </div>
-                                <div style={{ color: 'var(--text-secondary)' }}>
+                                <div className="stats-alert-overlap-line">
                                   2. {stripClassPrefix(overlap.right.className)} ({overlap.right.start}-{overlap.right.end})
                                 </div>
                               </div>
@@ -552,59 +478,34 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
       )}
 
       {examConflictSummary.length > 0 && (
-        <div
-          className="card"
-          style={{
-            marginBottom: 28,
-            border: '1px solid rgba(217, 119, 6, 0.3)',
-            background: 'rgba(245, 158, 11, 0.04)',
-          }}
-        >
-          <div
-            className="card-header"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, color: '#b45309' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="card stats-alert-card is-warning">
+          <div className="card-header stats-alert-card-head">
+            <div className="stats-alert-card-heading">
               <AlertTriangle size={20} />
-              <h2 style={{ margin: 0, color: '#b45309' }}>시험/수업 충돌 알림</h2>
-              <span style={{ padding: '4px 8px', borderRadius: 999, background: 'rgba(245, 158, 11, 0.12)', fontSize: 12, fontWeight: 700 }}>
+              <h2>시험/수업 충돌 알림</h2>
+              <span className="stats-alert-badge is-warning">
                 {examConflictSummary.length}개 수업
               </span>
             </div>
             <CollapseButton collapsed={collapsedPanels.examConflicts} onClick={() => togglePanel('examConflicts')} />
           </div>
           {!collapsedPanels.examConflicts && (
-            <div className="card-body" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+            <div className="card-body stats-alert-entry-grid">
               {examConflictSummary.map((entry) => (
-                <div
-                  key={entry.classId}
-                  style={{
-                    padding: 16,
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 14,
-                  }}
-                >
-                  <div style={{ fontWeight: 800, marginBottom: 6 }}>{stripClassPrefix(entry.className)}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>{entry.subject}</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div key={entry.classId} className="stats-alert-entry">
+                  <div className="stats-alert-entry-title">{stripClassPrefix(entry.className)}</div>
+                  <div className="stats-alert-entry-meta">{entry.subject}</div>
+                  <div className="stats-alert-overlap-list">
                     {entry.conflicts.map((conflict) => (
                       <div
                         key={`${entry.classId}-${conflict.subject}-${conflict.examDate}`}
-                        style={{
-                          padding: 10,
-                          borderRadius: 10,
-                          background: 'rgba(245, 158, 11, 0.08)',
-                          borderLeft: '3px solid #d97706',
-                          fontSize: 12,
-                          lineHeight: 1.6,
-                        }}
+                        className="stats-alert-overlap-card is-warning"
                       >
-                        <div style={{ fontWeight: 800, color: '#b45309' }}>
+                        <div className="stats-alert-overlap-time is-warning">
                           {conflict.examDate} · {conflict.label}
                         </div>
-                        <div style={{ color: 'var(--text-secondary)' }}>{conflict.schoolName} · {conflict.grade}</div>
-                        <div style={{ color: 'var(--text-primary)' }}>대상 학생: {conflict.students.join(', ')}</div>
+                        <div className="stats-alert-overlap-line">{conflict.schoolName} · {conflict.grade}</div>
+                        <div className="stats-alert-overlap-line is-strong">대상 학생: {conflict.students.join(', ')}</div>
                       </div>
                     ))}
                   </div>
@@ -615,14 +516,7 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
         </div>
       )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: 20,
-          marginBottom: 28,
-        }}
-      >
+      <div className="stats-kpi-grid">
         <MetricCard
           icon={<Layout size={22} />}
           title={"\uC6B4\uC601 \uC218\uC5C5"}
@@ -639,30 +533,18 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
           collapsed={collapsedPanels.enrolment}
           onToggle={() => togglePanel('enrolment')}
         >
-          <div style={{ display: 'grid', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)' }}>
+          <div className="stats-metric-chip-stack">
+            <div className="stats-metric-meta-row">
               <span>{`대기 ${stats.totalWaitlist}명`}</span>
               <span>{`대기 학생 ${stats.uniqueWaitlistStudents}명`}</span>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <div className="stats-metric-chip-row">
               {stats.gradeBreakdown.length > 0 ? stats.gradeBreakdown.map((entry) => (
-                <span
-                  key={entry.grade}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '6px 10px',
-                    borderRadius: 999,
-                    background: 'var(--bg-surface-hover)',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: 'var(--text-secondary)',
-                  }}
-                >
+                <span key={entry.grade} className="stats-metric-chip">
                   {`${entry.grade} ${entry.count}명`}
                 </span>
               )) : (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{"\uD604\uC7AC \uD544\uD130 \uAE30\uC900 \uB4F1\uB85D \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</span>
+                <span className="stats-metric-empty">{"\uD604\uC7AC \uD544\uD130 \uAE30\uC900 \uB4F1\uB85D \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</span>
               )}
             </div>
           </div>
@@ -685,38 +567,23 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
         />
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: 20,
-          marginBottom: 28,
-        }}
-      >
-        <div className="card" style={{ padding: 24 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 12,
-              marginBottom: collapsedPanels.classroomUsage ? 0 : 16,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="stats-ranking-grid">
+        <div className="card stats-ranking-card">
+          <div className={`stats-ranking-card-head ${collapsedPanels.classroomUsage ? 'is-collapsed' : ''}`}>
+            <div className="stats-ranking-card-title">
               <BarChart size={18} className="text-accent" />
-              <h2 style={{ margin: 0, fontSize: 16 }}>강의실 사용량 TOP 5</h2>
+              <h2>강의실 사용량 TOP 5</h2>
             </div>
             <CollapseButton collapsed={collapsedPanels.classroomUsage} onClick={() => togglePanel('classroomUsage')} />
           </div>
           {!collapsedPanels.classroomUsage && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="stats-ranking-list">
               {stats.topClassrooms.length > 0 ? stats.topClassrooms.map((entry, index) => (
-                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 28, fontSize: 12, fontWeight: 800, color: 'var(--text-muted)' }}>
+                <div key={entry.name} className="stats-ranking-row">
+                  <div className="stats-ranking-index">
                     {index + 1}
                   </div>
-                  <div style={{ minWidth: 84, fontWeight: 700 }}>{entry.name}</div>
+                  <div className="stats-ranking-name">{entry.name}</div>
                   <ProportionalBar
                     value={entry.minutes}
                     max={stats.maxClassroomMinutes}
@@ -725,36 +592,28 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
                   />
                 </div>
               )) : (
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>표시할 데이터가 없습니다.</div>
+                <div className="stats-ranking-empty">표시할 데이터가 없습니다.</div>
               )}
             </div>
           )}
         </div>
 
-        <div className="card" style={{ padding: 24 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 12,
-              marginBottom: collapsedPanels.teacherWorkload ? 0 : 16,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="card stats-ranking-card">
+          <div className={`stats-ranking-card-head ${collapsedPanels.teacherWorkload ? 'is-collapsed' : ''}`}>
+            <div className="stats-ranking-card-title">
               <Users size={18} className="text-accent" />
-              <h2 style={{ margin: 0, fontSize: 16 }}>선생님 담당량 TOP 5</h2>
+              <h2>선생님 담당량 TOP 5</h2>
             </div>
             <CollapseButton collapsed={collapsedPanels.teacherWorkload} onClick={() => togglePanel('teacherWorkload')} />
           </div>
           {!collapsedPanels.teacherWorkload && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="stats-ranking-list">
               {stats.topTeachers.length > 0 ? stats.topTeachers.map((entry, index) => (
-                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 28, fontSize: 12, fontWeight: 800, color: 'var(--text-muted)' }}>
+                <div key={entry.name} className="stats-ranking-row">
+                  <div className="stats-ranking-index">
                     {index + 1}
                   </div>
-                  <div style={{ minWidth: 84, fontWeight: 700 }}>{entry.name}</div>
+                  <div className="stats-ranking-name">{entry.name}</div>
                   <ProportionalBar
                     value={entry.minutes}
                     max={stats.maxTeacherMinutes}
@@ -763,7 +622,7 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
                   />
                 </div>
               )) : (
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>표시할 데이터가 없습니다.</div>
+                <div className="stats-ranking-empty">표시할 데이터가 없습니다.</div>
               )}
             </div>
           )}

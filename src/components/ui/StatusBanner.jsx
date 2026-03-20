@@ -3,22 +3,13 @@ import { AlertCircle, Info, WifiOff } from 'lucide-react';
 const VARIANT_META = {
   error: {
     icon: AlertCircle,
-    color: '#ef4444',
-    background: 'rgba(239, 68, 68, 0.08)',
-    border: 'rgba(239, 68, 68, 0.18)'
   },
   warning: {
     icon: WifiOff,
-    color: '#d97706',
-    background: 'rgba(245, 158, 11, 0.10)',
-    border: 'rgba(245, 158, 11, 0.18)'
   },
   info: {
     icon: Info,
-    color: 'var(--accent-color)',
-    background: 'var(--accent-light)',
-    border: 'rgba(33, 110, 78, 0.16)'
-  }
+  },
 };
 
 export default function StatusBanner({
@@ -33,52 +24,32 @@ export default function StatusBanner({
 
   const meta = VARIANT_META[variant] || VARIANT_META.info;
   const Icon = meta.icon;
+  const rootClassName = [
+    'status-banner',
+    compact ? 'is-compact' : '',
+    `is-${variant}`,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 12,
-        padding: compact ? '12px 14px' : '14px 16px',
-        borderRadius: 16,
-        background: meta.background,
-        border: `1px solid ${meta.border}`
-      }}
-    >
-      <div style={{ color: meta.color, marginTop: 1 }}>
+    <div className={rootClassName}>
+      <div className="status-banner-icon">
         <Icon size={18} />
       </div>
-      <div style={{ minWidth: 0, flex: 1 }}>
+      <div className="status-banner-copy">
         {eyebrow ? (
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: meta.color,
-              marginBottom: title || message ? 4 : 0,
-            }}
-          >
-            {eyebrow}
-          </div>
+          <div className="status-banner-eyebrow">{eyebrow}</div>
         ) : null}
         {title && (
-          <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
-            {title}
-          </div>
+          <div className="status-banner-title">{title}</div>
         )}
         {message && (
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: title ? 2 : 0 }}>
-            {message}
-          </div>
+          <div className="status-banner-message">{message}</div>
         )}
       </div>
       {actions ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {actions}
-        </div>
+        <div className="status-banner-actions">{actions}</div>
       ) : null}
     </div>
   );

@@ -30,38 +30,16 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div 
-        style={{ 
-          position: 'fixed', bottom: 24, right: 24, zIndex: 9999, 
-          display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'none' 
-        }}
-      >
+      <div className="toast-stack">
         {toasts.map((t) => (
-          <div 
-            key={t.id} 
-            className="animate-toast"
-            style={{ 
-              background: 'var(--bg-surface)', 
-              color: 'var(--text-primary)',
-              padding: '12px 16px', 
-              borderRadius: 12, 
-              boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 12,
-              border: `1px solid var(--border-color)`,
-              minWidth: 280,
-              pointerEvents: 'auto'
-            }}
-          >
-            {t.type === 'success' && <CheckCircle size={20} color="#10b981" />}
-            {t.type === 'error' && <AlertCircle size={20} color="#ef4444" />}
-            {t.type === 'info' && <Info size={20} color="#3b82f6" />}
-            <span style={{ fontSize: 14, fontWeight: 500, flex: 1 }}>{t.message}</span>
-            <button 
-              onClick={() => removeToast(t.id)} 
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
-            >
+          <div key={t.id} className={`animate-toast toast-item is-${t.type}`}>
+            <div className="toast-item-icon">
+              {t.type === 'success' && <CheckCircle size={20} />}
+              {t.type === 'error' && <AlertCircle size={20} />}
+              {t.type === 'info' && <Info size={20} />}
+            </div>
+            <span className="toast-item-message">{t.message}</span>
+            <button onClick={() => removeToast(t.id)} className="toast-item-close" type="button" aria-label="닫기">
               <X size={16} />
             </button>
           </div>
