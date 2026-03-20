@@ -1,11 +1,10 @@
-﻿import { Suspense, lazy, startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart2,
   BookOpen,
   Building2,
   Calendar,
   LayoutGrid,
-  ChevronDown,
   ClipboardList,
   CalendarDays,
   Eye,
@@ -19,16 +18,28 @@ import {
 } from 'lucide-react';
 import { dataService } from './services/dataService';
 import { useAuth } from './contexts/AuthContext';
+import { isE2EModeEnabled } from './testing/e2e/e2eMode';
+import { e2eDataService } from './testing/e2e/mockDataService';
 import LoginModal from './components/SettingsModal';
+import BottomSheet from './components/ui/BottomSheet';
 import PageLoader from './components/ui/PageLoader';
 import StatusBanner from './components/ui/StatusBanner';
 import TermManagerModal from './components/ui/TermManagerModal';
+import TimetableUnifiedFilterPanel from './components/ui/TimetableUnifiedFilterPanel';
 import useViewport from './hooks/useViewport';
+import { collectGradeOptions } from './components/timetableViewUtils';
 import {
   ACTIVE_CLASS_STATUS,
   computeClassStatus,
 } from './lib/classStatus';
+import { buildClassroomMaster, buildTeacherMaster } from './lib/resourceCatalogs';
 import { sortSubjectOptions } from './lib/subjectUtils';
+import {
+  getClassroomDisplayName,
+  parseSchedule,
+  splitClassroomList,
+  splitTeacherList,
+} from './data/sampleData';
 
 const ClassroomWeeklyView = lazy(() => import('./components/ClassroomWeeklyView'));
 const TeacherWeeklyView = lazy(() => import('./components/TeacherWeeklyView'));
@@ -44,6 +55,16 @@ const StatsDashboard = lazy(() => import('./components/StatsDashboard'));
 
 const ALL_OPTION = '전체';
 const LOCAL_TERM_STORAGE_KEY = 'tips-dashboard:local-terms';
+const CURRENT_TERM_STORAGE_KEY = 'tips-dashboard:current-term';
+const CURRENT_TERM_PREFERENCE_KEY = 'tips-dashboard:current-term';
+const TIMETABLE_FILTER_STORAGE_KEY = 'tips-dashboard:timetable-filters-v2';
+const DEFAULT_TIMETABLE_FILTERS = {
+  term: '',
+  subject: [],
+  grade: [],
+  teacher: [],
+  classroom: [],
+};
 const TIMETABLE_VIEW_IDS = ['class-list', 'teacher-weekly', 'classroom-weekly', 'daily-teacher', 'daily-classroom', 'student-weekly'];
 const TIMETABLE_TABS = [
   {
@@ -152,6 +173,114 @@ function mergeTermsByName(...collections) {
   return [...merged.values()];
 }
 
+function readStoredJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeTimetableFilters(raw = null) {
+  return {
+    term: typeof raw?.term === 'string' ? raw.term : '',
+    subject: Array.isArray(raw?.subject) ? raw.subject.filter(Boolean) : [],
+    grade: Array.isArray(raw?.grade) ? raw.grade.filter(Boolean) : [],
+    teacher: Array.isArray(raw?.teacher) ? raw.teacher.filter(Boolean) : [],
+    classroom: Array.isArray(raw?.classroom) ? raw.classroom.filter(Boolean) : [],
+  };
+}
+
+function normalizeCurrentTermPreference(raw = null) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const name = String(raw?.name || '').trim();
+  const academicYear = raw?.academicYear ? Number(raw.academicYear) : null;
+  const termId = raw?.termId ? String(raw.termId) : '';
+
+  if (!name && !termId) {
+    return null;
+  }
+
+  return {
+    termId,
+    academicYear: Number.isFinite(academicYear) ? academicYear : null,
+    name,
+  };
+}
+
+function resolveClassTermName(classItem, managedTerms = []) {
+  const directPeriod = String(classItem?.period || '').trim();
+  if (directPeriod) {
+    return directPeriod;
+  }
+
+  const matchedTerm = (managedTerms || []).find((term) => String(term.id || '') === String(classItem?.termId || ''));
+  return String(matchedTerm?.name || '').trim();
+}
+
+function collectClassTeachers(classItem) {
+  const teachers = new Set(splitTeacherList(classItem?.teacher));
+
+  parseSchedule(classItem?.schedule, classItem).forEach((slot) => {
+    splitTeacherList(slot?.teacher).forEach((teacher) => {
+      if (teacher) {
+        teachers.add(teacher);
+      }
+    });
+  });
+
+  return [...teachers].filter(Boolean);
+}
+
+function collectClassClassrooms(classItem) {
+  const classrooms = new Set(
+    splitClassroomList(classItem?.classroom || classItem?.room)
+      .map((value) => getClassroomDisplayName(value))
+      .filter(Boolean)
+  );
+
+  parseSchedule(classItem?.schedule, classItem).forEach((slot) => {
+    const classroom = getClassroomDisplayName(slot?.classroom || '');
+    if (classroom) {
+      classrooms.add(classroom);
+    }
+  });
+
+  return [...classrooms];
+}
+
+function filterResourceNamesBySubjects(entries = [], selectedSubjects = []) {
+  const normalizedSubjects = Array.isArray(selectedSubjects)
+    ? selectedSubjects.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+
+  if (normalizedSubjects.length === 0) {
+    return (entries || [])
+      .filter((entry) => entry?.isVisible !== false)
+      .map((entry) => entry.name);
+  }
+
+  const subjectSet = new Set(normalizedSubjects);
+
+  return (entries || [])
+    .filter((entry) => {
+      if (entry?.isVisible === false) {
+        return false;
+      }
+
+      const subjects = Array.isArray(entry?.subjects)
+        ? entry.subjects.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+
+      return subjects.some((subject) => subjectSet.has(subject));
+    })
+    .map((entry) => entry.name);
+}
+
 function buildStatusBanner(authError, data) {
   if (authError) {
     return {
@@ -182,6 +311,7 @@ function buildStatusBanner(authError, data) {
 
 export default function App() {
   const { isMobile, isTablet, isCompact } = useViewport();
+  const activeDataService = isE2EModeEnabled() ? e2eDataService : dataService;
   const [currentView, setCurrentView] = useState('stats');
   const [data, setData] = useState({
     classes: [],
@@ -213,28 +343,28 @@ export default function App() {
   const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [showLogin, setShowLogin] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [filterMode, setFilterMode] = useState('date');
+  const [timetableFilters, setTimetableFilters] = useState(() => normalizeTimetableFilters(readStoredJson(TIMETABLE_FILTER_STORAGE_KEY, DEFAULT_TIMETABLE_FILTERS)));
+  const [currentTermPreference, setCurrentTermPreference] = useState(() => normalizeCurrentTermPreference(readStoredJson(CURRENT_TERM_STORAGE_KEY, null)));
+  const [filterMode, setFilterMode] = useState('period');
   const [selectedDate, setSelectedDate] = useState(() => toDateInputValue(new Date()));
   const [selectedPeriod, setSelectedPeriod] = useState(ALL_OPTION);
   const [selectedSubject, setSelectedSubject] = useState(ALL_OPTION);
   const [isPeriodDropdownOpen, setIsPeriodDropdownOpen] = useState(false);
   const [isTermManagerOpen, setIsTermManagerOpen] = useState(false);
+  const [isTimetableFilterSheetOpen, setIsTimetableFilterSheetOpen] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
   const [isPublicMode, setIsPublicMode] = useState(() => getPublicModeFromLocation());
-  const [localTerms, setLocalTerms] = useState(() => {
-    try {
-      const raw = localStorage.getItem(LOCAL_TERM_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [localTerms, setLocalTerms] = useState(() => readStoredJson(LOCAL_TERM_STORAGE_KEY, []));
   const [sidebarTooltip, setSidebarTooltip] = useState(null);
   const [isSubjectFlyoutOpen, setIsSubjectFlyoutOpen] = useState(false);
   const [subjectFlyoutAnchor, setSubjectFlyoutAnchor] = useState(null);
+  const [isPeriodFlyoutOpen, setIsPeriodFlyoutOpen] = useState(false);
+  const [periodFlyoutAnchor, setPeriodFlyoutAnchor] = useState(null);
   const [curriculumRoadmapIntent, setCurriculumRoadmapIntent] = useState(null);
+  const [academicCalendarIntent, setAcademicCalendarIntent] = useState(null);
   const [dataManagerIntent, setDataManagerIntent] = useState(null);
   const subjectFlyoutCloseTimerRef = useRef(null);
+  const periodFlyoutCloseTimerRef = useRef(null);
 
   const { user, isStaff, isTeacher, logout, loading, authError } = useAuth();
   const showMinimalSidebar = !isCompact;
@@ -258,21 +388,15 @@ export default function App() {
     changeView('curriculum-roadmap', { closeSidebar: false });
   };
 
+  const openAcademicCalendar = (intent = null) => {
+    setAcademicCalendarIntent(intent ? { ...intent, nonce: Date.now() } : { nonce: Date.now() });
+    changeView('academic-calendar', { closeSidebar: false });
+  };
+
   const openDataManager = (intent = null) => {
     setDataManagerIntent(intent ? { ...intent, nonce: Date.now() } : { nonce: Date.now() });
     changeView('data-manager', { closeSidebar: false });
   };
-
-  useEffect(() => {
-    const savedMode = localStorage.getItem('filterMode');
-    const savedDate = localStorage.getItem('selectedDate');
-    const savedPeriod = localStorage.getItem('selectedPeriod');
-    const savedSubject = localStorage.getItem('selectedSubject');
-    if (savedMode) setFilterMode(savedMode);
-    if (savedDate) setSelectedDate(savedDate);
-    if (savedPeriod) setSelectedPeriod(savedPeriod);
-    if (savedSubject) setSelectedSubject(savedSubject);
-  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -288,9 +412,59 @@ export default function App() {
   }, [localTerms]);
 
   useEffect(() => {
-    const unsubscribe = dataService.subscribe(setData);
+    try {
+      localStorage.setItem(TIMETABLE_FILTER_STORAGE_KEY, JSON.stringify(timetableFilters));
+    } catch {
+      // ignore local storage persistence failures
+    }
+  }, [timetableFilters]);
+
+  useEffect(() => {
+    try {
+      if (currentTermPreference) {
+        localStorage.setItem(CURRENT_TERM_STORAGE_KEY, JSON.stringify(currentTermPreference));
+      } else {
+        localStorage.removeItem(CURRENT_TERM_STORAGE_KEY);
+      }
+    } catch {
+      // ignore local storage persistence failures
+    }
+  }, [currentTermPreference]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    activeDataService.getAppPreference?.(CURRENT_TERM_PREFERENCE_KEY)
+      .then((savedPreference) => {
+        if (cancelled) {
+          return;
+        }
+        const normalized = normalizeCurrentTermPreference(savedPreference?.value || savedPreference || null);
+        if (normalized) {
+          setCurrentTermPreference(normalized);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('Current term preference load skipped:', error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDataService]);
+
+  useEffect(() => {
+    const unsubscribe = activeDataService.subscribe(setData);
     return unsubscribe;
-  }, []);
+  }, [activeDataService]);
+
+  useEffect(() => {
+    if (!isCompact || !TIMETABLE_VIEW_IDS.includes(currentView)) {
+      setIsTimetableFilterSheetOpen(false);
+    }
+  }, [currentView, isCompact]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -321,7 +495,7 @@ export default function App() {
     }
 
     let cancelled = false;
-    dataService.normalizeLegacyClassrooms(data.classes)
+    activeDataService.normalizeLegacyClassrooms(data.classes)
       .then((updatedCount) => {
         if (cancelled || updatedCount === 0) {
           return;
@@ -337,7 +511,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [data.classes, data.isLoading, isStaff]);
+  }, [activeDataService, data.classes, data.isLoading, isStaff]);
 
   useEffect(() => {
     if (currentView === 'planner') {
@@ -348,17 +522,9 @@ export default function App() {
     }
   }, [currentView]);
 
-  useEffect(() => () => {
-    if (subjectFlyoutCloseTimerRef.current) {
-      window.clearTimeout(subjectFlyoutCloseTimerRef.current);
-    }
-  }, []);
-
   useEffect(() => {
     if (!showMinimalSidebar) {
       setSidebarTooltip(null);
-      setIsSubjectFlyoutOpen(false);
-      setSubjectFlyoutAnchor(null);
     }
   }, [showMinimalSidebar]);
 
@@ -372,52 +538,27 @@ export default function App() {
     data.students?.find((student) => student.id === selectedStudentId) || null
   ), [data.students, selectedStudentId]);
 
-  const periods = useMemo(() => {
-    const values = new Set();
+  const persistCurrentTermPreference = useCallback(async (nextPreference) => {
+    const normalized = normalizeCurrentTermPreference(nextPreference);
+    setCurrentTermPreference(normalized);
 
-    (data.classTerms || []).forEach((term) => {
-      const name = term.name || term.period || '';
-      if (name) {
-        values.add(name);
-      }
-    });
-
-    (localTerms || []).forEach((term) => {
-      const name = term.name || term.period || '';
-      if (name) {
-        values.add(name);
-      }
-    });
-
-    (data.classes || []).forEach((classItem) => {
-      if (classItem.period) {
-        values.add(classItem.period);
-      }
-    });
-
-    return [ALL_OPTION, ...Array.from(values).sort((left, right) => left.localeCompare(right, 'ko'))];
-  }, [data.classTerms, data.classes, localTerms]);
-
-  const subjects = useMemo(() => (
-    [ALL_OPTION, ...sortSubjectOptions(
-      data.classes.map((classItem) => classItem.subject).filter(Boolean),
-      { includeDefaults: false }
-    )]
-  ), [data.classes]);
-
-  useEffect(() => {
-    if (!periods.includes(selectedPeriod)) {
-      setSelectedPeriod(ALL_OPTION);
-      localStorage.setItem('selectedPeriod', ALL_OPTION);
+    if (!activeDataService.setAppPreference) {
+      return;
     }
-  }, [periods, selectedPeriod]);
 
-  useEffect(() => {
-    if (!subjects.includes(selectedSubject)) {
-      setSelectedSubject(ALL_OPTION);
-      localStorage.setItem('selectedSubject', ALL_OPTION);
+    try {
+      await activeDataService.setAppPreference(CURRENT_TERM_PREFERENCE_KEY, normalized);
+    } catch (error) {
+      console.warn('Current term preference save skipped:', error);
     }
-  }, [selectedSubject, subjects]);
+  }, [activeDataService]);
+
+  const handleTimetableFilterChange = useCallback((key, value) => {
+    setTimetableFilters((current) => normalizeTimetableFilters({
+      ...current,
+      [key]: Array.isArray(value) ? [...value] : value,
+    }));
+  }, []);
 
   const periodMeta = useMemo(() => {
     const result = {};
@@ -457,6 +598,32 @@ export default function App() {
     return result;
   }, [data.classTerms, data.classes, localTerms]);
 
+  const termNames = useMemo(() => {
+    const values = new Set();
+
+    (data.classTerms || []).forEach((term) => {
+      const name = term.name || term.period || '';
+      if (name) {
+        values.add(name);
+      }
+    });
+
+    (localTerms || []).forEach((term) => {
+      const name = term.name || term.period || '';
+      if (name) {
+        values.add(name);
+      }
+    });
+
+    (data.classes || []).forEach((classItem) => {
+      if (classItem.period) {
+        values.add(classItem.period);
+      }
+    });
+
+    return Array.from(values).sort((left, right) => left.localeCompare(right, 'ko'));
+  }, [data.classTerms, data.classes, localTerms]);
+
   const managedTerms = useMemo(() => {
     const result = [];
     const knownNames = new Set();
@@ -477,9 +644,7 @@ export default function App() {
       });
     });
 
-    periods
-      .filter((period) => period !== ALL_OPTION)
-      .forEach((period, index) => {
+    termNames.forEach((period, index) => {
         if (knownNames.has(period)) return;
         result.push({
           id: `legacy-${period}`,
@@ -500,47 +665,137 @@ export default function App() {
       }
       return Number(left.sortOrder || 0) - Number(right.sortOrder || 0);
     });
-  }, [data.classTerms, localTerms, periodMeta, periods]);
+  }, [data.classTerms, localTerms, periodMeta, termNames]);
 
-  const classesMatchingBaseFilters = useMemo(() => {
-    let nextClasses = data.classes;
+  const periods = useMemo(() => [ALL_OPTION, ...termNames], [termNames]);
 
-    if (selectedSubject !== ALL_OPTION) {
-      nextClasses = nextClasses.filter((classItem) => classItem.subject === selectedSubject);
+  const currentTerm = useMemo(() => {
+    if (!currentTermPreference) {
+      return null;
     }
 
-    if (filterMode === 'all') return nextClasses;
+    return managedTerms.find((term) => {
+      const sameId = currentTermPreference.termId && String(term.id || '') === String(currentTermPreference.termId);
+      const sameYearAndName =
+        currentTermPreference.academicYear &&
+        Number(term.academicYear || 0) === Number(currentTermPreference.academicYear) &&
+        term.name === currentTermPreference.name;
+      const sameName = currentTermPreference.name && term.name === currentTermPreference.name;
+      return sameId || sameYearAndName || sameName;
+    }) || null;
+  }, [currentTermPreference, managedTerms]);
 
-    if (filterMode === 'period') {
-      if (selectedPeriod === ALL_OPTION) return nextClasses;
-      return nextClasses.filter((classItem) => {
-        const classPeriod = classItem.period || '';
-        const classTermName = managedTerms.find((term) => String(term.id) === String(classItem.termId))?.name || '';
-        return classPeriod === selectedPeriod || classTermName === selectedPeriod;
-      });
-    }
+  const currentTermName = currentTerm?.name || '';
 
-    const targetDate = parseLocalDate(selectedDate);
-    if (!targetDate) return nextClasses;
+  useEffect(() => {
+    const availableTerms = new Set(managedTerms.map((term) => term.name));
+    setTimetableFilters((current) => {
+      const next = normalizeTimetableFilters(current);
+      let changed = false;
 
-    return nextClasses.filter((classItem) => {
-      const startDate = parseLocalDate(classItem.startDate);
-      const endDate = parseLocalDate(classItem.endDate);
-
-      if (!startDate && !endDate) return true;
-      if (startDate && targetDate < startDate) return false;
-      if (endDate) {
-        const endOfDay = new Date(endDate.getTime());
-        endOfDay.setHours(23, 59, 59, 999);
-        if (targetDate > endOfDay) return false;
+      if (next.term && !availableTerms.has(next.term)) {
+        next.term = '';
+        changed = true;
       }
 
-      return true;
-    });
-  }, [data.classes, filterMode, selectedDate, selectedPeriod, selectedSubject]);
+      if (!next.term && currentTermName) {
+        next.term = currentTermName;
+        changed = true;
+      }
 
-  const filteredClasses = useMemo(() => classesMatchingBaseFilters, [classesMatchingBaseFilters]);
-  const weeklyAxisClasses = useMemo(() => classesMatchingBaseFilters, [classesMatchingBaseFilters]);
+      return changed ? next : current;
+    });
+  }, [currentTermName, managedTerms]);
+
+  const termFilteredClasses = useMemo(() => {
+    if (!timetableFilters.term) {
+      return data.classes;
+    }
+    return (data.classes || []).filter((classItem) => resolveClassTermName(classItem, managedTerms) === timetableFilters.term);
+  }, [data.classes, managedTerms, timetableFilters.term]);
+
+  const subjectOptions = useMemo(
+    () => sortSubjectOptions(termFilteredClasses.map((classItem) => classItem.subject).filter(Boolean), { includeDefaults: false }),
+    [termFilteredClasses]
+  );
+  const subjects = useMemo(() => [ALL_OPTION, ...subjectOptions], [subjectOptions]);
+
+  const subjectFilteredClasses = useMemo(() => {
+    if (!timetableFilters.subject.length) {
+      return termFilteredClasses;
+    }
+    const selectedSubjects = new Set(timetableFilters.subject);
+    return termFilteredClasses.filter((classItem) => selectedSubjects.has(classItem.subject));
+  }, [termFilteredClasses, timetableFilters.subject]);
+
+  const gradeOptions = useMemo(() => collectGradeOptions(subjectFilteredClasses), [subjectFilteredClasses]);
+
+  const gradeFilteredClasses = useMemo(() => {
+    if (!timetableFilters.grade.length) {
+      return subjectFilteredClasses;
+    }
+    const selectedGrades = new Set(timetableFilters.grade);
+    return subjectFilteredClasses.filter((classItem) => selectedGrades.has(String(classItem.grade || '').trim()));
+  }, [subjectFilteredClasses, timetableFilters.grade]);
+
+  const timetableTeacherMaster = useMemo(
+    () => buildTeacherMaster(data.teacherCatalogs, gradeFilteredClasses),
+    [data.teacherCatalogs, gradeFilteredClasses]
+  );
+
+  const teacherOptions = useMemo(
+    () => filterResourceNamesBySubjects(timetableTeacherMaster, timetableFilters.subject),
+    [timetableTeacherMaster, timetableFilters.subject]
+  );
+
+  const timetableClassroomMaster = useMemo(
+    () => buildClassroomMaster(data.classroomCatalogs, gradeFilteredClasses),
+    [data.classroomCatalogs, gradeFilteredClasses]
+  );
+
+  const classroomOptions = useMemo(
+    () => filterResourceNamesBySubjects(timetableClassroomMaster, timetableFilters.subject),
+    [timetableClassroomMaster, timetableFilters.subject]
+  );
+
+  useEffect(() => {
+    setTimetableFilters((current) => {
+      const next = normalizeTimetableFilters(current);
+      const sanitized = {
+        ...next,
+        subject: next.subject.filter((value) => subjectOptions.includes(value)),
+        grade: next.grade.filter((value) => gradeOptions.includes(value)),
+        teacher: next.teacher.filter((value) => teacherOptions.includes(value)),
+        classroom: next.classroom.filter((value) => classroomOptions.includes(value)),
+      };
+
+      const changed =
+        sanitized.subject.length !== next.subject.length ||
+        sanitized.grade.length !== next.grade.length ||
+        sanitized.teacher.length !== next.teacher.length ||
+        sanitized.classroom.length !== next.classroom.length;
+
+      return changed ? sanitized : current;
+    });
+  }, [classroomOptions, gradeOptions, subjectOptions, teacherOptions]);
+
+  const filteredClasses = useMemo(() => {
+    let nextClasses = gradeFilteredClasses;
+
+    if (timetableFilters.teacher.length > 0) {
+      const selectedTeachers = new Set(timetableFilters.teacher);
+      nextClasses = nextClasses.filter((classItem) => collectClassTeachers(classItem).some((teacher) => selectedTeachers.has(teacher)));
+    }
+
+    if (timetableFilters.classroom.length > 0) {
+      const selectedClassrooms = new Set(timetableFilters.classroom);
+      nextClasses = nextClasses.filter((classItem) => collectClassClassrooms(classItem).some((classroom) => selectedClassrooms.has(classroom)));
+    }
+
+    return nextClasses;
+  }, [gradeFilteredClasses, timetableFilters.classroom, timetableFilters.teacher]);
+
+  const weeklyAxisClasses = useMemo(() => filteredClasses, [filteredClasses]);
 
   const statusBanner = useMemo(() => buildStatusBanner(authError, data), [authError, data]);
   const visibleViews = useMemo(() => (
@@ -560,8 +815,28 @@ export default function App() {
     () => TIMETABLE_TABS.find((tab) => tab.id === currentView) || TIMETABLE_TABS[0],
     [currentView]
   );
-  const TimetableHeaderIcon = currentTimetableTab.icon || Calendar;
   const currentViewLabel = TIMETABLE_VIEW_IDS.includes(currentView) ? currentTimetableTab.label : currentViewMeta.label;
+  const timetableSummaryTokens = useMemo(() => {
+    const tokens = [];
+    if (timetableFilters.term || currentTermName) {
+      tokens.push(`학기 · ${timetableFilters.term || currentTermName}`);
+    }
+    if (timetableFilters.subject.length > 0) {
+      tokens.push(...timetableFilters.subject.slice(0, 2).map((value) => `과목 · ${value}`));
+    }
+    if (timetableFilters.grade.length > 0) {
+      tokens.push(...timetableFilters.grade.slice(0, 2).map((value) => `학년 · ${value}`));
+    }
+    if (timetableFilters.teacher.length > 0) {
+      tokens.push(...timetableFilters.teacher.slice(0, 1).map((value) => `선생님 · ${value}`));
+    }
+    if (timetableFilters.classroom.length > 0) {
+      tokens.push(...timetableFilters.classroom.slice(0, 1).map((value) => `강의실 · ${value}`));
+    }
+    tokens.push(`${filteredClasses.length}개 수업`);
+    return tokens;
+  }, [currentTermName, filteredClasses.length, timetableFilters.classroom, timetableFilters.grade, timetableFilters.subject, timetableFilters.teacher, timetableFilters.term]);
+  const isAcademicHubView = currentView === 'academic-calendar' || currentView === 'curriculum-roadmap';
   const activeMobileTab = useMemo(() => {
     if (TIMETABLE_VIEW_IDS.includes(currentView)) {
       return 'timetable';
@@ -584,17 +859,24 @@ export default function App() {
 
   const displayUserName = user?.name || user?.email || '사용자';
   const isDataBootstrapping = data.isLoading && !data.lastUpdated;
+  const isUnifiedTimetableView = TIMETABLE_VIEW_IDS.includes(currentView) && currentView !== 'student-weekly';
   const timetableDefaultStatus =
-    filterMode === 'period' && selectedPeriod !== ALL_OPTION
-      ? (periodMeta[selectedPeriod]?.status || ACTIVE_CLASS_STATUS)
+    timetableFilters.term
+      ? (periodMeta[timetableFilters.term]?.status || ACTIVE_CLASS_STATUS)
       : ACTIVE_CLASS_STATUS;
-  const timetableDefaultPeriod = filterMode === 'period' && selectedPeriod !== ALL_OPTION ? selectedPeriod : '';
+  const timetableDefaultPeriod = timetableFilters.term || currentTermName || '';
 
   const toggleTheme = () => setTheme((current) => (current === 'light' ? 'dark' : 'light'));
   const clearSubjectFlyoutCloseTimer = () => {
     if (subjectFlyoutCloseTimerRef.current) {
       window.clearTimeout(subjectFlyoutCloseTimerRef.current);
       subjectFlyoutCloseTimerRef.current = null;
+    }
+  };
+  const clearPeriodFlyoutCloseTimer = () => {
+    if (periodFlyoutCloseTimerRef.current) {
+      window.clearTimeout(periodFlyoutCloseTimerRef.current);
+      periodFlyoutCloseTimerRef.current = null;
     }
   };
   const openSidebarTooltip = (event, label) => {
@@ -616,12 +898,14 @@ export default function App() {
       return;
     }
     clearSubjectFlyoutCloseTimer();
+    clearPeriodFlyoutCloseTimer();
     const rect = event.currentTarget.getBoundingClientRect();
     setSubjectFlyoutAnchor({
       top: rect.top + rect.height / 2,
       left: rect.right + 14,
     });
     setIsSubjectFlyoutOpen(true);
+    setIsPeriodFlyoutOpen(false);
     setSidebarTooltip(null);
   };
   const scheduleCloseSubjectFlyout = () => {
@@ -629,6 +913,34 @@ export default function App() {
     subjectFlyoutCloseTimerRef.current = window.setTimeout(() => {
       setIsSubjectFlyoutOpen(false);
     }, 100);
+  };
+  const openPeriodFlyout = (event) => {
+    if (!showMinimalSidebar) {
+      return;
+    }
+    clearPeriodFlyoutCloseTimer();
+    clearSubjectFlyoutCloseTimer();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setPeriodFlyoutAnchor({
+      top: rect.top + rect.height / 2,
+      left: rect.right + 14,
+    });
+    setIsPeriodFlyoutOpen(true);
+    setIsSubjectFlyoutOpen(false);
+    setSidebarTooltip(null);
+  };
+  const scheduleClosePeriodFlyout = () => {
+    clearPeriodFlyoutCloseTimer();
+    periodFlyoutCloseTimerRef.current = window.setTimeout(() => {
+      setIsPeriodFlyoutOpen(false);
+    }, 100);
+  };
+  const selectPeriodFromFlyout = (period) => {
+    setSelectedPeriod(period);
+    localStorage.setItem('selectedPeriod', period);
+    setFilterMode('period');
+    localStorage.setItem('filterMode', 'period');
+    setIsPeriodFlyoutOpen(false);
   };
   const navigateMobileTab = (tabId) => {
     if (tabId === 'timetable') {
@@ -670,78 +982,92 @@ export default function App() {
   };
 
   const renderTimetableTabs = ({ compact = false } = {}) => (
-    <div className={`workspace-tabs ${compact ? 'workspace-tabs-compact' : ''}`}>
+    <div className={`workspace-tabs timetable-workspace-tabs ${compact ? 'workspace-tabs-compact' : ''}`}>
       {TIMETABLE_TABS.map((tab) => {
         const Icon = tab.icon;
         return (
-            <button
-              key={tab.id}
-              type="button"
-              className={`h-segment-btn ${currentView === tab.id ? 'active' : ''}`}
+          <button
+            key={tab.id}
+            type="button"
+            className={`h-segment-btn workspace-tab-btn ${currentView === tab.id ? 'active' : ''}`}
+            aria-pressed={currentView === tab.id}
+            aria-label={tab.label}
+            title={tab.description}
             onClick={() => changeView(tab.id, { closeSidebar: false })}
-              style={{ minHeight: compact ? 42 : 48, justifyContent: 'center' }}
-            >
-            <Icon size={16} style={{ marginRight: 8 }} />
-            {tab.label}
+          >
+            <Icon size={16} className="workspace-tab-icon" aria-hidden="true" focusable="false" />
+            <span>{tab.label}</span>
           </button>
         );
       })}
     </div>
   );
 
+  const renderUnifiedTimetableFilterPanel = ({ compact = false } = {}) => (
+    <TimetableUnifiedFilterPanel
+      compact={compact}
+      filters={timetableFilters}
+      termOptions={managedTerms}
+      subjectOptions={subjectOptions}
+      gradeOptions={gradeOptions}
+      teacherOptions={teacherOptions}
+      classroomOptions={classroomOptions}
+      currentTermLabel={currentTermName}
+      onChange={handleTimetableFilterChange}
+    />
+  );
+
   const renderPeriodDropdown = () => (
-    <div style={{ position: 'relative' }}>
+    <div className="period-dropdown-shell">
       <button
+        type="button"
         className="custom-dropdown-btn"
+        aria-haspopup="listbox"
+        aria-expanded={isPeriodDropdownOpen}
+        aria-controls="period-dropdown-menu"
         onClick={() => setIsPeriodDropdownOpen((current) => !current)}
       >
-        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedPeriod}</span>
+        <span className="period-dropdown-current">{selectedPeriod}</span>
         <ChevronDown
           size={16}
-          style={{
-            color: 'var(--text-secondary)',
-            transform: isPeriodDropdownOpen ? 'rotate(180deg)' : 'none',
-            transition: 'transform 0.2s ease',
-          }}
+          className={`period-dropdown-caret ${isPeriodDropdownOpen ? 'is-open' : ''}`}
+          aria-hidden="true"
+          focusable="false"
         />
       </button>
       {isPeriodDropdownOpen && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setIsPeriodDropdownOpen(false)} />
-          <div className="custom-dropdown-menu animate-in" style={{ zIndex: 100 }}>
+          <button
+            type="button"
+            className="shell-overlay"
+            aria-label="학기 선택 닫기"
+            onClick={() => setIsPeriodDropdownOpen(false)}
+          />
+          <div id="period-dropdown-menu" className="custom-dropdown-menu animate-in period-dropdown-menu">
             <div className="dropdown-scroll-area">
               {periods.map((period) => (
                 <button
                   key={period}
+                  type="button"
                   className={`custom-dropdown-item ${selectedPeriod === period ? 'active' : ''}`}
+                  aria-pressed={selectedPeriod === period}
+                  aria-label={`학기 ${period}`}
                   onClick={() => {
                     setSelectedPeriod(period);
                     localStorage.setItem('selectedPeriod', period);
                     setIsPeriodDropdownOpen(false);
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div className="period-dropdown-item-head">
                     <span>{period}</span>
                     {period !== ALL_OPTION && periodMeta[period]?.status ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '2px 8px',
-                          borderRadius: 999,
-                          background: 'rgba(33, 110, 78, 0.12)',
-                          color: 'var(--accent-color)',
-                          fontSize: 10,
-                          fontWeight: 800,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
+                      <span className="period-dropdown-status">
                         {periodMeta[period].status}
                       </span>
                     ) : null}
                   </div>
                   {period !== ALL_OPTION && periodMeta[period] && (
-                    <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
+                    <div className="period-dropdown-detail">
                       {[periodMeta[period].academicYear, periodMeta[period].startDate || '-', periodMeta[period].endDate || '-']
                         .filter(Boolean)
                         .join(' · ')
@@ -769,6 +1095,8 @@ export default function App() {
           ].map((tab) => (
             <button
               key={tab.id}
+              type="button"
+              aria-pressed={filterMode === tab.id}
               onClick={() => setFilterModeAndPersist(tab.id)}
               className={`h-segment-btn ${filterMode === tab.id ? 'active' : ''}`}
             >
@@ -793,9 +1121,8 @@ export default function App() {
 
         <button
           type="button"
-          className="action-chip"
+          className={`action-chip ${compact ? '' : 'action-chip-full'}`.trim()}
           onClick={() => setIsTermManagerOpen(true)}
-          style={{ width: compact ? 'auto' : '100%', justifyContent: 'center' }}
         >
           <Settings2 size={14} />
           학기 관리
@@ -812,6 +1139,8 @@ export default function App() {
           {subjects.map((subject) => (
             <button
               key={subject}
+              type="button"
+              aria-pressed={selectedSubject === subject}
               onClick={() => {
                 setSelectedSubject(subject);
                 localStorage.setItem('selectedSubject', subject);
@@ -822,6 +1151,31 @@ export default function App() {
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+
+  const renderTimetableMobileSummary = () => (
+    <div className="card-custom timetable-mobile-summary" data-testid="timetable-mobile-summary">
+      <div className="timetable-mobile-summary-head">
+        <div>
+          <div className="timetable-mobile-summary-eyebrow">{currentTimetableTab.label}</div>
+          <strong className="timetable-mobile-summary-title">시간표 필터를 간단하게 유지합니다.</strong>
+        </div>
+        <button
+          type="button"
+          className="action-chip timetable-mobile-summary-button"
+          data-testid="timetable-filter-button"
+          onClick={() => setIsTimetableFilterSheetOpen(true)}
+        >
+          <Settings2 size={14} />
+          필터
+        </button>
+      </div>
+      <div className="timetable-mobile-summary-chips">
+        {timetableSummaryTokens.map((token) => (
+          <span key={token} className="timetable-mobile-summary-chip">{token}</span>
+        ))}
       </div>
     </div>
   );
@@ -838,16 +1192,7 @@ export default function App() {
   const publicView = (
     <>
       {statusBanner && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 92,
-            left: 16,
-            width: 'min(420px, calc(100vw - 32px))',
-            zIndex: 1200,
-            pointerEvents: 'none',
-          }}
-        >
+        <div className="public-mode-status-banner">
           <StatusBanner
             compact
             eyebrow="퍼블릭 모드"
@@ -895,36 +1240,38 @@ export default function App() {
     <div className={`app-layout ${isMobile ? 'app-layout-mobile' : ''} ${isTablet ? 'app-layout-tablet' : ''} ${showMinimalSidebar ? 'sidebar-hidden' : ''}`}>
       {sidebarOpen && isCompact && (
         <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 99 }}
+          className="app-shell-overlay"
           onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
         />
       )}
 
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="sidebar-logo" style={{ marginBottom: 0, gap: 10 }}>
+        <div className="sidebar-header sidebar-header-shell">
+          <div className="sidebar-logo sidebar-logo-shell">
             <button
               type="button"
+              className="sidebar-brand-button"
               onClick={goHome}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+              aria-label="홈으로 이동"
             >
               <img
                 src="/logo_tips.png"
                 alt="TIPS Logo"
-                className="sidebar-logo-mark"
-                style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'contain' }}
+                className="sidebar-logo-mark sidebar-brand-mark"
               />
               <div className="sidebar-logo-text">
-                <h1 style={{ margin: 0, lineHeight: '1.2' }}>
-                  TIPS <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>DASHBOARD</span>
+                <h1 className="sidebar-brand-title">
+                  TIPS <span className="sidebar-brand-eyebrow">DASHBOARD</span>
                 </h1>
               </div>
             </button>
             <button
+              type="button"
               className="theme-toggle"
               onClick={toggleTheme}
-              style={{ marginLeft: 'auto' }}
               aria-label="테마 전환"
+              title="테마 전환"
               onMouseEnter={(event) => openSidebarTooltip(event, '테마 전환')}
               onMouseLeave={closeSidebarTooltip}
               onFocus={(event) => openSidebarTooltip(event, '테마 전환')}
@@ -966,15 +1313,20 @@ export default function App() {
                   <button
                     type="button"
                     className="sidebar-mini-tool-button"
-                    onClick={() => {
-                      closeSidebarTooltip();
-                      openDataManager({ tab: 'classes', openTerms: true });
+                    aria-label="학기 선택"
+                    aria-expanded={isPeriodFlyoutOpen}
+                    onClick={(event) => {
+                      if (isPeriodFlyoutOpen) {
+                        clearPeriodFlyoutCloseTimer();
+                        setIsPeriodFlyoutOpen(false);
+                        return;
+                      }
+                      openPeriodFlyout(event);
                     }}
-                    aria-label="학기 관리"
-                    onMouseEnter={(event) => openSidebarTooltip(event, '학기 관리')}
-                    onMouseLeave={closeSidebarTooltip}
-                    onFocus={(event) => openSidebarTooltip(event, '학기 관리')}
-                    onBlur={closeSidebarTooltip}
+                    onMouseEnter={openPeriodFlyout}
+                    onMouseLeave={scheduleClosePeriodFlyout}
+                    onFocus={openPeriodFlyout}
+                    onBlur={scheduleClosePeriodFlyout}
                   >
                     <Calendar size={18} />
                   </button>
@@ -991,7 +1343,10 @@ export default function App() {
             return (
               <button
                 key={view.id}
+                type="button"
+                data-testid={`sidebar-nav-${view.id}`}
                 className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => {
                   closeSidebarTooltip();
                   setIsSubjectFlyoutOpen(false);
@@ -1019,10 +1374,11 @@ export default function App() {
           })}
         </nav>
 
-        <div className="sidebar-footer" style={{ padding: '16px 24px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="sidebar-footer sidebar-footer-shell">
           <button
-            className="sidebar-nav-item"
-            style={{ width: '100%' }}
+            type="button"
+            className="sidebar-nav-item sidebar-footer-action"
+            aria-label="퍼블릭 뷰 보기"
             onClick={() => {
               closeSidebarTooltip();
               setPublicModeAndSync(true);
@@ -1038,13 +1394,9 @@ export default function App() {
             <span>퍼블릭 뷰 보기</span>
           </button>
           <button
-            className="sidebar-nav-item"
-            style={{
-              width: '100%',
-              color: '#ef4444',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              background: 'rgba(239, 68, 68, 0.05)',
-            }}
+            type="button"
+            className="sidebar-nav-item sidebar-footer-action sidebar-footer-action-danger"
+            aria-label="로그아웃"
             onClick={() => {
               closeSidebarTooltip();
               logout();
@@ -1054,13 +1406,13 @@ export default function App() {
             onFocus={(event) => openSidebarTooltip(event, '로그아웃')}
             onBlur={closeSidebarTooltip}
           >
-            <div className="sidebar-link-icon" style={{ color: '#ef4444' }}>
+            <div className="sidebar-link-icon sidebar-link-icon-danger">
               <LogOut size={20} />
             </div>
             <span>로그아웃</span>
           </button>
           {!showMinimalSidebar ? (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+            <div className="sidebar-footer-note">
               © 2026 TIPS Academy
             </div>
           ) : null}
@@ -1084,12 +1436,41 @@ export default function App() {
               key={subject}
               type="button"
               className={`sidebar-fixed-flyout-item ${selectedSubject === subject ? 'active' : ''}`}
+              aria-pressed={selectedSubject === subject}
+              aria-label={`과목 ${subject}`}
               onClick={() => {
                 setSelectedSubject(subject);
                 localStorage.setItem('selectedSubject', subject);
               }}
             >
               {subject}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {showMinimalSidebar && isPeriodFlyoutOpen && periodFlyoutAnchor ? (
+        <div
+          className="sidebar-fixed-flyout"
+          role="menu"
+          aria-label="학기 선택"
+          style={{
+            top: periodFlyoutAnchor.top,
+            left: periodFlyoutAnchor.left,
+          }}
+          onMouseEnter={clearPeriodFlyoutCloseTimer}
+          onMouseLeave={scheduleClosePeriodFlyout}
+        >
+          {periods.map((period) => (
+            <button
+              key={period}
+              type="button"
+              className={`sidebar-fixed-flyout-item ${filterMode === 'period' && selectedPeriod === period ? 'active' : ''}`}
+              aria-pressed={filterMode === 'period' && selectedPeriod === period}
+              aria-label={`학기 ${period}`}
+              onClick={() => selectPeriodFromFlyout(period)}
+            >
+              {period}
             </button>
           ))}
         </div>
@@ -1108,37 +1489,45 @@ export default function App() {
       ) : null}
 
       <main className={`main-content ${isMobile ? 'main-content-mobile' : ''} ${isTablet ? 'main-content-tablet' : ''}`}>
-        <div className="mobile-header" style={{ justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <button className="btn-icon" onClick={() => setSidebarOpen(true)} style={{ background: 'var(--bg-surface-hover)' }}>
+        <div className="mobile-header mobile-header-shell">
+          <div className="mobile-header-brand-row">
+            <button
+              type="button"
+              data-testid="mobile-menu-button"
+              className="btn-icon mobile-header-menu-button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="메뉴 열기"
+              title="메뉴 열기"
+            >
               <Menu size={24} />
             </button>
             <button
               type="button"
+              className="mobile-header-brand"
               onClick={goHome}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 12, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
+              aria-label="홈으로 이동"
             >
-              <img src="/logo_tips.png" alt="TIPS Logo" className="sidebar-logo-mark mobile-logo-mark" style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'contain' }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>TIPS DASHBOARD</h2>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>{currentViewLabel}</span>
+              <img src="/logo_tips.png" alt="TIPS Logo" className="sidebar-logo-mark mobile-logo-mark mobile-header-brand-mark" />
+              <div className="mobile-header-brand-copy">
+                <h2 className="mobile-header-brand-title">TIPS DASHBOARD</h2>
+                <span className="mobile-header-brand-eyebrow">{currentViewLabel}</span>
               </div>
             </button>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className="theme-toggle" onClick={toggleTheme} title="테마 전환">
+          <div className="mobile-header-actions">
+            <button type="button" className="theme-toggle" onClick={toggleTheme} title="테마 전환" aria-label="테마 전환">
               {theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button className="btn-icon" onClick={() => setPublicModeAndSync(true)} title="퍼블릭 뷰 보기">
+            <button type="button" className="btn-icon" onClick={() => setPublicModeAndSync(true)} title="퍼블릭 뷰 보기" aria-label="퍼블릭 뷰 보기">
               <Eye size={18} />
             </button>
             {!isMobile && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <div className="mobile-header-user">
+                <span className="mobile-header-user-name">
                   {displayUserName}
                 </span>
-                <button className="btn-icon" onClick={logout} title="로그아웃" style={{ color: '#ef4444' }}>
+                <button type="button" className="btn-icon mobile-header-logout" onClick={logout} title="로그아웃" aria-label="로그아웃">
                   <LogOut size={20} />
                 </button>
               </div>
@@ -1147,7 +1536,7 @@ export default function App() {
         </div>
 
         {statusBanner && isMobile && (
-          <div style={{ marginBottom: 20, maxWidth: 560 }}>
+          <div className="shell-status-banner shell-status-banner-mobile">
             <StatusBanner
               compact
               eyebrow="시스템 상태"
@@ -1159,7 +1548,7 @@ export default function App() {
         )}
 
         {statusBanner && showMinimalSidebar && !isMobile ? (
-          <div style={{ marginBottom: 20, maxWidth: 640 }}>
+          <div className="shell-status-banner shell-status-banner-desktop">
             <StatusBanner
               compact
               eyebrow="시스템 상태"
@@ -1179,29 +1568,57 @@ export default function App() {
           )}
         >
           <div>
+            {isMobile && isAcademicHubView && canAccessCurriculumRoadmap ? (
+              <div className="app-mobile-academic-switcher workspace-tabs workspace-tabs-compact" data-testid="mobile-academic-switcher">
+                <button
+                  type="button"
+                  className={`h-segment-btn workspace-tab-btn ${currentView === 'academic-calendar' ? 'active' : ''}`}
+                  aria-pressed={currentView === 'academic-calendar'}
+                  data-testid="mobile-academic-tab-calendar"
+                  onClick={() => changeView('academic-calendar', { closeSidebar: false })}
+                >
+                  <CalendarDays size={16} className="workspace-tab-icon" />
+                  <span>학사 일정</span>
+                </button>
+                <button
+                  type="button"
+                  className={`h-segment-btn workspace-tab-btn ${currentView === 'curriculum-roadmap' ? 'active' : ''}`}
+                  aria-pressed={currentView === 'curriculum-roadmap'}
+                  data-testid="mobile-academic-tab-roadmap"
+                  onClick={() => openCurriculumRoadmap()}
+                >
+                  <BookOpen size={16} className="workspace-tab-icon" />
+                  <span>교재·진도</span>
+                </button>
+              </div>
+            ) : null}
+
             {TIMETABLE_VIEW_IDS.includes(currentView) && (
               <section
-                className={`workspace-surface ${currentView === 'class-list' ? 'workspace-surface-allow-overflow' : ''}`}
-                style={{ padding: 20, display: 'grid', gap: 14, marginBottom: 24 }}
+                className={`workspace-surface app-shell-panel ${currentView === 'class-list' ? 'workspace-surface-allow-overflow' : ''}`}
               >
-                {isCompact ? renderTimetableFilterPanel({ compact: true }) : null}
-                {renderTimetableTabs({ compact: isCompact })}
+                <div className={`app-shell-toolbar-stack ${isCompact ? 'is-mobile' : ''}`}>
+                  {isCompact && isUnifiedTimetableView ? renderTimetableMobileSummary() : null}
+                  {renderTimetableTabs({ compact: isCompact })}
+                </div>
+                {!isCompact && isUnifiedTimetableView ? renderUnifiedTimetableFilterPanel() : null}
 
                 {currentView === 'class-list' && (
                   <ClassListWorkspace
                     classes={filteredClasses}
                     data={data}
-                    dataService={dataService}
+                    dataService={activeDataService}
                     integrated
+                    hideHeader
                   />
                 )}
               </section>
             )}
             {currentView === 'stats' && (
               <StatsDashboard
-                classes={filteredClasses}
+                classes={data.classes || []}
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 onViewStudentSchedule={openStudentSchedule}
               />
             )}
@@ -1211,7 +1628,7 @@ export default function App() {
                 students={data.students}
                 classes={data.classes}
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 onSelectStudent={setSelectedStudentId}
                 embedded
               />
@@ -1221,21 +1638,16 @@ export default function App() {
                 classes={filteredClasses}
                 allClasses={weeklyAxisClasses}
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 onViewStudentSchedule={openStudentSchedule}
                 defaultStatus={timetableDefaultStatus}
                 defaultPeriod={timetableDefaultPeriod}
-                termKey={selectedPeriod !== ALL_OPTION ? selectedPeriod : timetableDefaultPeriod || 'workspace'}
+                termKey={timetableDefaultPeriod || 'workspace'}
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
                 floatingFilters={false}
-                subjectOptions={subjects}
-                selectedSubject={selectedSubject}
-                onSelectSubject={(subject) => {
-                  setSelectedSubject(subject);
-                  localStorage.setItem('selectedSubject', subject);
-                }}
+                selectedClassroomNames={timetableFilters.classroom}
               />
             )}
             {currentView === 'teacher-weekly' && (
@@ -1243,21 +1655,16 @@ export default function App() {
                 classes={filteredClasses}
                 allClasses={weeklyAxisClasses}
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 onViewStudentSchedule={openStudentSchedule}
                 defaultStatus={timetableDefaultStatus}
                 defaultPeriod={timetableDefaultPeriod}
-                termKey={selectedPeriod !== ALL_OPTION ? selectedPeriod : timetableDefaultPeriod || 'workspace'}
+                termKey={timetableDefaultPeriod || 'workspace'}
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
                 floatingFilters={false}
-                subjectOptions={subjects}
-                selectedSubject={selectedSubject}
-                onSelectSubject={(subject) => {
-                  setSelectedSubject(subject);
-                  localStorage.setItem('selectedSubject', subject);
-                }}
+                selectedTeacherNames={timetableFilters.teacher}
               />
             )}
             {currentView === 'daily-classroom' && (
@@ -1265,20 +1672,15 @@ export default function App() {
                 classes={filteredClasses}
                 allClasses={weeklyAxisClasses}
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 defaultStatus={timetableDefaultStatus}
                 defaultPeriod={timetableDefaultPeriod}
-                termKey={selectedPeriod !== ALL_OPTION ? selectedPeriod : timetableDefaultPeriod || 'workspace'}
+                termKey={timetableDefaultPeriod || 'workspace'}
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
                 floatingFilters={false}
-                subjectOptions={subjects}
-                selectedSubject={selectedSubject}
-                onSelectSubject={(subject) => {
-                  setSelectedSubject(subject);
-                  localStorage.setItem('selectedSubject', subject);
-                }}
+                selectedClassroomNames={timetableFilters.classroom}
               />
             )}
             {currentView === 'daily-teacher' && (
@@ -1286,40 +1688,37 @@ export default function App() {
                 classes={filteredClasses}
                 allClasses={weeklyAxisClasses}
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 defaultStatus={timetableDefaultStatus}
                 defaultPeriod={timetableDefaultPeriod}
-                termKey={selectedPeriod !== ALL_OPTION ? selectedPeriod : timetableDefaultPeriod || 'workspace'}
+                termKey={timetableDefaultPeriod || 'workspace'}
                 termStatus={timetableDefaultStatus}
                 terms={managedTerms}
                 embedded
                 floatingFilters={false}
-                subjectOptions={subjects}
-                selectedSubject={selectedSubject}
-                onSelectSubject={(subject) => {
-                  setSelectedSubject(subject);
-                  localStorage.setItem('selectedSubject', subject);
-                }}
+                selectedTeacherNames={timetableFilters.teacher}
               />
             )}
             {currentView === 'academic-calendar' && (
               <AcademicCalendarView
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 onOpenRoadmap={openCurriculumRoadmap}
+                navigationIntent={academicCalendarIntent}
               />
             )}
             {currentView === 'curriculum-roadmap' && (
               <CurriculumRoadmapView
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 navigationIntent={curriculumRoadmapIntent}
+                onOpenAcademicCalendar={openAcademicCalendar}
               />
             )}
             {currentView === 'data-manager' && (
               <DataManager
                 data={data}
-                dataService={dataService}
+                dataService={activeDataService}
                 onOpenCurriculum={() => openCurriculumRoadmap()}
                 onOpenTermManager={() => setIsTermManagerOpen(true)}
                 navigationIntent={dataManagerIntent}
@@ -1333,26 +1732,43 @@ export default function App() {
         open={isTermManagerOpen}
         terms={managedTerms}
         classes={data.classes || []}
-        dataService={dataService}
+        dataService={activeDataService}
+        currentTermPreference={currentTermPreference}
         onClose={() => setIsTermManagerOpen(false)}
-        onSaved={(savedTerms = []) => {
-          setLocalTerms((savedTerms || []).filter((term) => term?.localOnly));
+        onSaved={(savedTerms = [], nextCurrentTerm = null) => {
+          setLocalTerms(savedTerms || []);
+          persistCurrentTermPreference(nextCurrentTerm);
           setIsTermManagerOpen(false);
         }}
       />
+
+      <BottomSheet
+        open={Boolean(isCompact && isUnifiedTimetableView && isTimetableFilterSheetOpen)}
+        onClose={() => setIsTimetableFilterSheetOpen(false)}
+        title="시간표 필터"
+        subtitle="학기, 날짜, 과목 기준을 한 화면에서 조정할 수 있습니다."
+        testId="timetable-filter-sheet"
+      >
+        <div className="timetable-filter-sheet-stack">
+          {renderUnifiedTimetableFilterPanel({ compact: true })}
+        </div>
+      </BottomSheet>
 
       {isMobile && user && !isPublicMode && (
         <nav className="mobile-bottom-nav">
           {[
             { id: 'stats', label: '개요', icon: <BarChart2 size={18} /> },
             { id: 'timetable', label: '시간표', icon: <LayoutGrid size={18} /> },
-            { id: 'academic-calendar', label: '학사 일정', icon: <CalendarDays size={18} /> },
+            { id: 'academic-calendar', label: '학사·진도', icon: <CalendarDays size={18} /> },
             { id: 'data-manager', label: '데이터 관리', icon: <ClipboardList size={18} />, disabled: !isStaff },
           ].map((item) => (
-            <button
+              <button
               key={item.id}
               type="button"
+              data-testid={`mobile-nav-${item.id}`}
               className={`mobile-bottom-nav-item ${activeMobileTab === item.id ? 'active' : ''}`}
+              aria-current={activeMobileTab === item.id ? 'page' : undefined}
+              aria-label={item.label}
               onClick={() => !item.disabled && navigateMobileTab(item.id)}
               disabled={item.disabled}
             >

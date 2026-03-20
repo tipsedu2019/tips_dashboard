@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDataTableControls } from '../hooks/useDataTableControls';
 import { useSharedTablePreference } from '../hooks/useSharedTablePreference';
+import useViewport from '../hooks/useViewport';
 import ClassDetailModal from './ClassDetailModal';
 import DataListView from './data-manager/DataListView';
 import ManagementHeader from './data-manager/ManagementHeader';
@@ -35,8 +36,9 @@ function filterResourceOptionsBySubjects(master = [], selectedSubjects = []) {
     .map((item) => item.name);
 }
 
-export default function ClassListWorkspace({ classes, data, dataService, integrated = false }) {
+export default function ClassListWorkspace({ classes, data, dataService, integrated = false, hideHeader = false }) {
   const { isStaff } = useAuth();
+  const { isMobile } = useViewport();
   const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
   const [hoveredId, setHoveredId] = useState(null);
   const teacherMaster = useMemo(
@@ -117,8 +119,59 @@ export default function ClassListWorkspace({ classes, data, dataService, integra
     }
   }, [quickFilterOptions.classroom, tableControls]);
 
+  const mobileSummaryTokens = useMemo(() => {
+    if (!isMobile) {
+      return [];
+    }
+
+    const tokens = [];
+    const selectedSubjects = Array.isArray(tableControls.filters.subject) ? tableControls.filters.subject : [];
+    const selectedGrades = Array.isArray(tableControls.filters.grade) ? tableControls.filters.grade : [];
+    const selectedTeachers = Array.isArray(tableControls.filters.teacher) ? tableControls.filters.teacher : [];
+    const selectedClassrooms = Array.isArray(tableControls.filters.classroom) ? tableControls.filters.classroom : [];
+
+    if (selectedSubjects.length > 0) {
+      tokens.push(...selectedSubjects.slice(0, 2).map((value) => `과목 · ${value}`));
+    }
+    if (selectedGrades.length > 0) {
+      tokens.push(...selectedGrades.slice(0, 2).map((value) => `학년 · ${value}`));
+    }
+    if (selectedTeachers.length > 0) {
+      tokens.push(...selectedTeachers.slice(0, 1).map((value) => `선생님 · ${value}`));
+    }
+    if (selectedClassrooms.length > 0) {
+      tokens.push(...selectedClassrooms.slice(0, 1).map((value) => `강의실 · ${value}`));
+    }
+
+    return tokens.slice(0, 4);
+  }, [isMobile, tableControls.filters.classroom, tableControls.filters.grade, tableControls.filters.subject, tableControls.filters.teacher]);
+
   const content = (
     <>
+      {!integrated && isMobile ? (
+        <section className="card-custom class-list-mobile-summary" data-testid="class-list-mobile-summary">
+          <div className="class-list-mobile-summary-head">
+            <div>
+              <div className="class-list-mobile-summary-eyebrow">모바일 수업 목록</div>
+              <strong className="class-list-mobile-summary-title">{tableControls.totalCount}개 수업</strong>
+            </div>
+            <span className="class-list-mobile-summary-count">현재 페이지 {tableControls.pagedData.length}개</span>
+          </div>
+          <div className="class-list-mobile-summary-copy">
+            검색과 핵심 필터로 먼저 좁히고, 필요한 수업만 카드로 빠르게 확인하세요.
+          </div>
+          {mobileSummaryTokens.length > 0 ? (
+            <div className="class-list-mobile-summary-chips">
+              {mobileSummaryTokens.map((token) => (
+                <span key={token} className="class-list-mobile-summary-chip">
+                  {token}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <ManagementHeader
         title={CLASS_LIST_TITLE}
         description={CLASS_LIST_DESCRIPTION}
@@ -131,6 +184,7 @@ export default function ClassListWorkspace({ classes, data, dataService, integra
         hideSummary={integrated}
         quickFilterKeys={QUICK_FILTER_KEYS}
         quickFilterOptions={quickFilterOptions}
+        classesUnifiedFilterMode={hideHeader}
       />
 
       <DataListView
@@ -176,7 +230,7 @@ export default function ClassListWorkspace({ classes, data, dataService, integra
           {content}
         </div>
       ) : (
-        <div className="animate-in" style={{ display: 'grid', gap: 20 }}>
+        <div className="animate-in class-list-workspace-shell">
           {content}
         </div>
       )}

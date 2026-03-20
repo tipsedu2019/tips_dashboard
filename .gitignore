@@ -16,3 +16,11 @@ yarn-error.log*
 .push-temp/
 tmp/
 vite-dev.log
+
+# Local Codex / skill / install helpers
+.codex/
+docs/toss-skills-quickstart.md
+install-toss-skills.cmd
+scripts/install-toss-skills.ps1
+scripts/install-superpowers.ps1
+scripts/start-vite-dev.ps1

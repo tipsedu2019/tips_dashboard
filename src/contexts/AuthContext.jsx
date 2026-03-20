@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   fallbackAdminEmails,
   fallbackStaffEmails,
@@ -6,6 +6,7 @@ import {
   supabase,
   supabaseConfigError,
 } from '../lib/supabase';
+import { getE2ERole, isE2EModeEnabled } from '../testing/e2e/e2eMode';
 
 const AuthContext = createContext(null);
 
@@ -89,13 +90,52 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
+  const lastResolvedSessionKeyRef = useRef('');
+  const profileRequestRef = useRef({ key: '', promise: null });
+  const loadingRef = useRef(true);
 
   useEffect(() => {
     let isActive = true;
 
+    if (isE2EModeEnabled()) {
+      const role = getE2ERole();
+      const e2eUser = {
+        id: 'e2e-user',
+        email: `${role}@tips.test`,
+        name: 'E2E Tester',
+        role,
+        isE2E: true,
+      };
+      lastResolvedSessionKeyRef.current = `e2e:${role}`;
+      profileRequestRef.current = { key: '', promise: null };
+      setSession({ user: e2eUser, expires_at: null });
+      setUser(e2eUser);
+      setAuthError(null);
+      setLoading(false);
+      loadingRef.current = false;
+      return undefined;
+    }
+
+    const setLoadingState = (nextLoading) => {
+      if (loadingRef.current === nextLoading) {
+        return;
+      }
+
+      loadingRef.current = nextLoading;
+      setLoading(nextLoading);
+    };
+
+    const getSessionKey = (nextSession) => {
+      if (!nextSession?.user?.id) {
+        return 'anonymous';
+      }
+
+      return `${nextSession.user.id}:${nextSession.expires_at || ''}`;
+    };
+
     if (!supabase) {
       setAuthError(supabaseConfigError);
-      setLoading(false);
+      setLoadingState(false);
       return undefined;
     }
 
@@ -104,17 +144,61 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      setSession(nextSession);
+      const sessionKey = getSessionKey(nextSession);
 
-      if (!nextSession?.user) {
-        setUser(null);
-        setAuthError(null);
-        setLoading(false);
+      if (sessionKey === 'anonymous') {
+        profileRequestRef.current = { key: '', promise: null };
+
+        if (lastResolvedSessionKeyRef.current === sessionKey) {
+          setLoadingState(false);
+          return;
+        }
+
+        lastResolvedSessionKeyRef.current = sessionKey;
+        setSession((current) => (current === null ? current : null));
+        setUser((current) => (current === null ? current : null));
+        setAuthError((current) => (current === null ? current : null));
+        setLoadingState(false);
         return;
       }
 
-      setLoading(true);
-      await fetchProfile(nextSession.user, () => isActive, setUser, setAuthError, setLoading);
+      if (lastResolvedSessionKeyRef.current === sessionKey) {
+        const inflight = profileRequestRef.current;
+        if (inflight.key === sessionKey && inflight.promise) {
+          return inflight.promise;
+        }
+
+        setLoadingState(false);
+        return;
+      }
+
+      lastResolvedSessionKeyRef.current = sessionKey;
+      setSession((current) => (
+        current?.user?.id === nextSession.user.id && current?.expires_at === nextSession.expires_at
+          ? current
+          : nextSession
+      ));
+
+      if (profileRequestRef.current.key === sessionKey && profileRequestRef.current.promise) {
+        return profileRequestRef.current.promise;
+      }
+
+      setLoadingState(true);
+
+      const profilePromise = fetchProfile(
+        nextSession.user,
+        () => isActive,
+        setUser,
+        setAuthError,
+        setLoadingState
+      ).finally(() => {
+        if (profileRequestRef.current.key === sessionKey) {
+          profileRequestRef.current = { key: '', promise: null };
+        }
+      });
+
+      profileRequestRef.current = { key: sessionKey, promise: profilePromise };
+      return profilePromise;
     };
 
     supabase.auth.getSession()
@@ -126,7 +210,7 @@ export function AuthProvider({ children }) {
         if (error) {
           console.error('Error getting session:', error);
           setAuthError(error.message);
-          setLoading(false);
+          setLoadingState(false);
           return;
         }
 
@@ -139,7 +223,7 @@ export function AuthProvider({ children }) {
         }
 
         setAuthError(error.message);
-        setLoading(false);
+        setLoadingState(false);
       });
 
     const {
@@ -150,7 +234,7 @@ export function AuthProvider({ children }) {
 
     const timeout = setTimeout(() => {
       if (isActive) {
-        setLoading(false);
+        setLoadingState(false);
       }
     }, 5000);
 
@@ -177,6 +261,22 @@ export function AuthProvider({ children }) {
       loading,
       authError,
       login: async (email, password) => {
+        if (isE2EModeEnabled()) {
+          const normalizedEmail = normalizeEmail(email) || `${getE2ERole()}@tips.test`;
+          const nextRole = getE2ERole();
+          const e2eUser = {
+            id: 'e2e-user',
+            email: normalizedEmail,
+            name: 'E2E Tester',
+            role: nextRole,
+            isE2E: true,
+          };
+          setSession({ user: e2eUser, expires_at: null });
+          setUser(e2eUser);
+          setAuthError(null);
+          setLoading(false);
+          return true;
+        }
         if (!supabase) {
           throw new Error(supabaseConfigError || '지금은 Supabase에 연결할 수 없습니다.');
         }
@@ -195,6 +295,9 @@ export function AuthProvider({ children }) {
         return true;
       },
       logout: async () => {
+        if (isE2EModeEnabled()) {
+          return true;
+        }
         if (!supabase) {
           return false;
         }

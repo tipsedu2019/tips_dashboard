@@ -101,8 +101,11 @@ export class DataService {
     this.cachedData = { ...EMPTY_SNAPSHOT };
     this.deferredSnapshotPromise = null;
     this.notifyPromise = null;
-    this.notifyQueued = false;
+    this.notifyFullRefreshQueued = false;
+    this.queuedResourceKeys = new Set();
     this.realtimeNotifyTimer = null;
+    this.pendingRealtimeTables = new Set();
+    this.pendingRealtimeRequiresFull = false;
     this.hasDeferredSnapshot = false;
     this.isConnected = false;
     this.isLoading = false;
@@ -119,20 +122,29 @@ export class DataService {
 
     this.channel = supabase
       .channel('schema-db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        this._scheduleRealtimeNotify();
+      .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+        this._scheduleRealtimeNotify(payload?.table);
       })
       .subscribe();
   }
 
-  _scheduleRealtimeNotify(delay = 120) {
+  _scheduleRealtimeNotify(tableName, delay = 120) {
+    if (tableName) {
+      this.pendingRealtimeTables.add(tableName);
+    } else {
+      this.pendingRealtimeRequiresFull = true;
+    }
+
     if (this.realtimeNotifyTimer) {
       clearTimeout(this.realtimeNotifyTimer);
     }
 
     this.realtimeNotifyTimer = setTimeout(() => {
+      const tables = this.pendingRealtimeRequiresFull ? null : [...this.pendingRealtimeTables];
       this.realtimeNotifyTimer = null;
-      this._notify();
+      this.pendingRealtimeRequiresFull = false;
+      this.pendingRealtimeTables.clear();
+      this._notify(tables?.length ? { tables } : {});
     }, delay);
   }
 
@@ -175,6 +187,47 @@ export class DataService {
       { key: 'academyCurriculumPeriodPlans', table: 'academy_curriculum_period_plans', processor: '_processAcademyCurriculumPeriodPlan', optional: true },
       { key: 'academyCurriculumPeriodItems', table: 'academy_curriculum_period_items', processor: '_processAcademyCurriculumPeriodItem', optional: true }
     ];
+  }
+
+  _getAllResources() {
+    return [...this._getCoreResources(), ...this._getDeferredResources()];
+  }
+
+  _getResourcesByKeys(resourceKeys = []) {
+    const requestedKeys = new Set(resourceKeys);
+    return this._getAllResources().filter((resource) => requestedKeys.has(resource.key));
+  }
+
+  _resolveResourceKeysForTables(tables = []) {
+    if (!Array.isArray(tables) || tables.length === 0) {
+      return null;
+    }
+
+    const tableSet = new Set(tables.filter(Boolean));
+    if (tableSet.size === 0) {
+      return null;
+    }
+
+    const resourceKeys = new Set();
+    this._getAllResources().forEach((resource) => {
+      if (tableSet.has(resource.table)) {
+        resourceKeys.add(resource.key);
+      }
+    });
+
+    const relatedResourceKeys = {
+      academic_event_exam_details: ['academicEvents'],
+      academic_exam_material_plans: ['academicExamMaterialItems'],
+      academic_exam_material_items: ['academicExamMaterialPlans'],
+      academy_curriculum_period_plans: ['academyCurriculumPeriodItems'],
+      academy_curriculum_period_items: ['academyCurriculumPeriodPlans'],
+    };
+
+    tableSet.forEach((tableName) => {
+      (relatedResourceKeys[tableName] || []).forEach((resourceKey) => resourceKeys.add(resourceKey));
+    });
+
+    return resourceKeys.size > 0 ? [...resourceKeys] : null;
   }
 
   _mapResourceRows(resource, rows) {
@@ -246,6 +299,15 @@ export class DataService {
       lastUpdated: this.lastUpdated,
       error: this.error
     });
+  }
+
+  _publishOptimisticData(nextData = {}) {
+    const snapshot = this._snapshot(nextData);
+    this.cachedData = {
+      ...this.cachedData,
+      ...nextData,
+    };
+    this.listeners.forEach((listener) => listener(snapshot));
   }
 
   _scheduleDeferredSnapshotLoad() {
@@ -679,23 +741,49 @@ export class DataService {
     };
   }
 
-  async _notify() {
+  async _notify({ tables = null, resourceKeys = null } = {}) {
+    const nextResourceKeys = resourceKeys || this._resolveResourceKeysForTables(tables);
+
     if (this.notifyPromise) {
-      this.notifyQueued = true;
+      if (nextResourceKeys?.length) {
+        nextResourceKeys.forEach((resourceKey) => this.queuedResourceKeys.add(resourceKey));
+      } else {
+        this.notifyFullRefreshQueued = true;
+      }
       return this.notifyPromise;
     }
 
+    const effectiveResourceKeys = this.notifyFullRefreshQueued
+      ? null
+      : (nextResourceKeys?.length ? [...new Set(nextResourceKeys)] : null);
+    this.notifyFullRefreshQueued = false;
+
     this.notifyPromise = (async () => {
       try {
-        const snapshot = await this._getSnapshot({ includeDeferred: true });
+        const snapshot = await this._getSnapshot(
+          effectiveResourceKeys?.length
+            ? { resourceKeys: effectiveResourceKeys }
+            : { includeDeferred: true }
+        );
         this.listeners.forEach((listener) => listener(snapshot));
       } catch (err) {
         console.error('DataService notification error:', err);
       } finally {
         this.notifyPromise = null;
-        if (this.notifyQueued) {
-          this.notifyQueued = false;
-          this._notify();
+        const queuedResourceKeys = this.notifyFullRefreshQueued
+          ? null
+          : [...this.queuedResourceKeys];
+        const shouldRunFullRefresh = this.notifyFullRefreshQueued;
+
+        this.notifyFullRefreshQueued = false;
+        this.queuedResourceKeys.clear();
+
+        if (shouldRunFullRefresh || queuedResourceKeys.length > 0) {
+          this._notify(
+            queuedResourceKeys?.length
+              ? { resourceKeys: queuedResourceKeys }
+              : {}
+          );
         }
       }
     })();
@@ -707,7 +795,7 @@ export class DataService {
     }
   }
 
-  async _getSnapshot({ includeDeferred = false } = {}) {
+  async _getSnapshot({ includeDeferred = false, resourceKeys = null } = {}) {
     if (!supabase) {
       this.isConnected = false;
       this.lastUpdated = new Date();
@@ -720,18 +808,22 @@ export class DataService {
     }
 
     try {
-      const resources = includeDeferred
-        ? [...this._getCoreResources(), ...this._getDeferredResources()]
-        : this._getCoreResources();
+      const resources = resourceKeys?.length
+        ? this._getResourcesByKeys(resourceKeys)
+        : (
+          includeDeferred
+            ? this._getAllResources()
+            : this._getCoreResources()
+        );
       const { nextData, errors } = await this._fetchResources(resources);
 
       if (errors.length > 0) {
         console.error('Supabase fetch errors:', errors);
       }
 
-      if (includeDeferred) {
+      if (!resourceKeys?.length && includeDeferred) {
         this.hasDeferredSnapshot = true;
-      } else {
+      } else if (!resourceKeys?.length) {
         this._scheduleDeferredSnapshotLoad();
       }
 
@@ -786,7 +878,7 @@ export class DataService {
     );
 
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['classes'] });
     return this._processClass(result.data);
   }
 
@@ -798,7 +890,7 @@ export class DataService {
     );
 
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['classes'] });
     return true;
   }
 
@@ -806,14 +898,14 @@ export class DataService {
     const client = this._ensureClient();
     const { error } = await client.from('classes').delete().eq('id', id);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['classes'] });
   }
 
   async bulkDeleteClasses(ids) {
     const client = this._ensureClient();
     const { error } = await client.from('classes').delete().in('id', ids);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['classes'] });
   }
 
   async bulkUpdateClasses(ids, updates) {
@@ -824,7 +916,7 @@ export class DataService {
     );
 
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['classes'] });
   }
 
   async bulkUpsertClasses(classesArray) {
@@ -856,7 +948,7 @@ export class DataService {
     );
 
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['classes'] });
     return (result.data || []).map((row) => this._processClass(row));
   }
 
@@ -885,7 +977,7 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['classes'] });
     return rows.length;
   }
 
@@ -901,7 +993,7 @@ export class DataService {
       textbook,
       (payload) => client.from('textbooks').insert([payload]).select().single()
     );
-    this._notify();
+    this._notify({ tables: ['textbooks'] });
     return this._processTextbook(data);
   }
 
@@ -914,21 +1006,21 @@ export class DataService {
         return client.from('textbooks').update(finalUpdates).eq('id', id);
       }
     );
-    this._notify();
+    this._notify({ tables: ['textbooks'] });
   }
 
   async deleteTextbook(id) {
     const client = this._ensureClient();
     const { error } = await client.from('textbooks').delete().eq('id', id);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['textbooks'] });
   }
 
   async bulkDeleteTextbooks(ids) {
     const client = this._ensureClient();
     const { error } = await client.from('textbooks').delete().in('id', ids);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['textbooks'] });
   }
 
   async bulkUpdateTextbooks(ids, updates) {
@@ -953,7 +1045,7 @@ export class DataService {
       if (error) throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['textbooks'] });
   }
 
   async getStudents() {
@@ -979,7 +1071,7 @@ export class DataService {
 
     const { data, error } = await client.from('students').insert([payload]).select().single();
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['students'] });
     return this._processStudent(data);
   }
 
@@ -988,21 +1080,21 @@ export class DataService {
     const finalUpdates = this._mapStudentUpdates(updates);
     const { error } = await client.from('students').update(finalUpdates).eq('id', id);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['students'] });
   }
 
   async deleteStudent(id) {
     const client = this._ensureClient();
     const { error } = await client.from('students').delete().eq('id', id);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['students'] });
   }
 
   async bulkDeleteStudents(ids) {
     const client = this._ensureClient();
     const { error } = await client.from('students').delete().in('id', ids);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['students'] });
   }
 
   async bulkUpsertStudents(studentsArray) {
@@ -1022,7 +1114,7 @@ export class DataService {
 
     const { data, error } = await client.from('students').upsert(rows, { onConflict: 'id' }).select();
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['students'] });
     return (data || []).map((row) => this._processStudent(row));
   }
 
@@ -1052,7 +1144,7 @@ export class DataService {
     }
 
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['progress_logs'] });
     return this._processProgressLog(result.data);
   }
 
@@ -1060,7 +1152,7 @@ export class DataService {
     const client = this._ensureClient();
     const { error } = await client.from('progress_logs').delete().eq('id', logId);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['progress_logs'] });
   }
 
   async getProgressLogsForClass(classId) {
@@ -1142,8 +1234,15 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
-    return (data || []).map((row) => this._processClassTerm(row));
+    const processed = (data || [])
+      .map((row) => this._processClassTerm(row))
+      .sort((left, right) => (
+        Number(right.academicYear || 0) - Number(left.academicYear || 0)
+        || Number(left.sortOrder || 0) - Number(right.sortOrder || 0)
+      ));
+    this._publishOptimisticData({ classTerms: processed });
+    await this._notify({ tables: ['class_terms'] });
+    return processed;
   }
 
   async deleteClassTerm(id) {
@@ -1155,7 +1254,10 @@ export class DataService {
       }
       throw error;
     }
-    this._notify();
+    this._publishOptimisticData({
+      classTerms: (this.cachedData.classTerms || []).filter((term) => term.id !== id),
+    });
+    await this._notify({ tables: ['class_terms'] });
   }
 
   async getAcademicWorkspaceSupport() {
@@ -1235,7 +1337,7 @@ export class DataService {
 
     const { data, error } = await client.from('academic_schools').upsert(payload, { onConflict: 'id' }).select();
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['academic_schools'] });
     return (data || []).map((row) => this._processAcademicSchool(row));
   }
 
@@ -1247,7 +1349,7 @@ export class DataService {
     }
     const { error } = await client.from('academic_schools').delete().in('id', targets);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['academic_schools'] });
   }
 
   async upsertTeacherCatalogs(resources) {
@@ -1267,8 +1369,12 @@ export class DataService {
       }
       throw error;
     }
-    this._notify();
-    return (data || []).map((row) => this._processTeacherCatalog(row));
+    const processed = (data || [])
+      .map((row) => this._processTeacherCatalog(row))
+      .sort((left, right) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0) || String(left.name || '').localeCompare(String(right.name || ''), 'ko'));
+    this._publishOptimisticData({ teacherCatalogs: processed });
+    await this._notify({ tables: ['teacher_catalogs'] });
+    return processed;
   }
 
   async deleteTeacherCatalogs(ids = []) {
@@ -1284,7 +1390,11 @@ export class DataService {
       }
       throw error;
     }
-    this._notify();
+    const targetSet = new Set(targets);
+    this._publishOptimisticData({
+      teacherCatalogs: (this.cachedData.teacherCatalogs || []).filter((item) => !targetSet.has(item.id)),
+    });
+    await this._notify({ tables: ['teacher_catalogs'] });
   }
 
   async upsertClassroomCatalogs(resources) {
@@ -1304,8 +1414,12 @@ export class DataService {
       }
       throw error;
     }
-    this._notify();
-    return (data || []).map((row) => this._processClassroomCatalog(row));
+    const processed = (data || [])
+      .map((row) => this._processClassroomCatalog(row))
+      .sort((left, right) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0) || String(left.name || '').localeCompare(String(right.name || ''), 'ko'));
+    this._publishOptimisticData({ classroomCatalogs: processed });
+    await this._notify({ tables: ['classroom_catalogs'] });
+    return processed;
   }
 
   async deleteClassroomCatalogs(ids = []) {
@@ -1321,7 +1435,11 @@ export class DataService {
       }
       throw error;
     }
-    this._notify();
+    const targetSet = new Set(targets);
+    this._publishOptimisticData({
+      classroomCatalogs: (this.cachedData.classroomCatalogs || []).filter((item) => !targetSet.has(item.id)),
+    });
+    await this._notify({ tables: ['classroom_catalogs'] });
   }
 
   async bulkUpsertAcademicCurriculumProfiles(profiles) {
@@ -1381,7 +1499,7 @@ export class DataService {
     }
 
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['academic_curriculum_profiles'] });
     return (data || []).map((row) => this._processAcademicCurriculumProfile(row));
   }
 
@@ -1406,7 +1524,7 @@ export class DataService {
       if (error) throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academic_supplement_materials'] });
     return payload.map((row) => this._processAcademicSupplementMaterial(row));
   }
 
@@ -1471,7 +1589,7 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academic_exam_material_plans'] });
     return (data || []).map((row) => this._processAcademicExamMaterialPlan(row));
   }
 
@@ -1511,7 +1629,7 @@ export class DataService {
       }
     }
 
-    this._notify();
+    this._notify({ tables: ['academic_exam_material_items'] });
     return payload.map((row) => this._processAcademicExamMaterialItem(row));
   }
 
@@ -1527,7 +1645,7 @@ export class DataService {
       }
       throw error;
     }
-    this._notify();
+    this._notify({ tables: ['academic_exam_material_plans', 'academic_exam_material_items'] });
   }
 
   async upsertAcademyCurriculumPeriodCatalogs(periods) {
@@ -1560,7 +1678,7 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academy_curriculum_period_catalogs'] });
     return (data || []).map((row) => this._processAcademyCurriculumPeriodCatalog(row));
   }
 
@@ -1578,7 +1696,7 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academy_curriculum_period_catalogs'] });
   }
 
   async bulkUpsertAcademyCurriculumPeriodPlans(plans) {
@@ -1657,7 +1775,7 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academy_curriculum_period_plans'] });
     return (data || []).map((row) => this._processAcademyCurriculumPeriodPlan(row));
   }
 
@@ -1699,7 +1817,7 @@ export class DataService {
       }
     }
 
-    this._notify();
+    this._notify({ tables: ['academy_curriculum_period_items'] });
     return payload.map((row) => this._processAcademyCurriculumPeriodItem(row));
   }
 
@@ -1717,7 +1835,7 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academy_curriculum_period_plans', 'academy_curriculum_period_items'] });
   }
 
   async migrateLegacyCurriculumRoadmap(source = {}) {
@@ -1954,7 +2072,7 @@ export class DataService {
       }
     }
 
-    this._notify();
+    this._notify({ tables: ['academic_event_exam_details'] });
     return payload.map((row) => this._processAcademicEventExamDetail(row));
   }
 
@@ -1995,7 +2113,7 @@ export class DataService {
       throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academy_curriculum_plans'] });
     return (data || []).map((row) => this._processAcademyCurriculumPlan(row));
   }
 
@@ -2035,7 +2153,7 @@ export class DataService {
       }
     }
 
-    this._notify();
+    this._notify({ tables: ['academy_curriculum_materials'] });
     return payload.map((row) => this._processAcademyCurriculumMaterial(row));
   }
 
@@ -2064,7 +2182,7 @@ export class DataService {
       if (error) throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academic_exam_scopes'] });
     return payload.map((row) => this._processAcademicExamScope(row));
   }
 
@@ -2097,7 +2215,7 @@ export class DataService {
       if (error) throw error;
     }
 
-    this._notify();
+    this._notify({ tables: ['academic_exam_days'] });
     return payload.map((row) => this._processAcademicExamDay(row));
   }
 
@@ -2157,7 +2275,7 @@ export class DataService {
       (payload) => client.from('academic_events').upsert(payload, { onConflict: 'id' }).select()
     );
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['academic_events'] });
     return (result.data || []).map((row) => this._processAcademicEvent(row));
   }
 
@@ -2172,7 +2290,7 @@ export class DataService {
       }
     );
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['academic_events'] });
     return this._processAcademicEvent(result.data);
   }
 
@@ -2195,14 +2313,14 @@ export class DataService {
       }
     );
     if (result.error) throw result.error;
-    this._notify();
+    this._notify({ tables: ['academic_events'] });
   }
 
   async deleteAcademicEvent(id) {
     const client = this._ensureClient();
     const { error } = await client.from('academic_events').delete().eq('id', id);
     if (error) throw error;
-    this._notify();
+    this._notify({ tables: ['academic_events'] });
   }
 
   _processClass(classRow) {

@@ -1,5 +1,6 @@
 ﻿import { useMemo, useState } from 'react';
 import { BookOpen, CalendarDays, Trash2 } from 'lucide-react';
+import { parseSchedule, splitClassroomList, splitTeacherList } from '../../data/sampleData';
 import { CLASS_STATUS_OPTIONS, computeClassStatus } from '../../lib/classStatus';
 import { normalizeClassroomText } from '../../lib/classroomUtils';
 import { buildSchedulePlanForSave } from '../../lib/classSchedulePlanner';
@@ -11,6 +12,7 @@ import {
   getVisibleClassroomOptions,
   getVisibleTeacherOptions,
 } from '../../lib/resourceCatalogs';
+import { findScheduleConflicts } from '../../lib/timetableEditing';
 import ClassSchedulePlanPreview from '../ClassSchedulePlanPreview';
 import ClassSchedulePlanModal from '../ClassSchedulePlanModal';
 import { getClassExamConflicts } from '../../lib/examScheduleUtils';
@@ -27,10 +29,11 @@ function EditorLayout({ title, description, onCancel, onSave, isSaving, children
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={isSaving}>
-            痍⑥냼
+            취소
           </button>
           <button type="button" className="btn-primary" onClick={onSave} disabled={isSaving}>
-            ???          </button>
+            저장
+          </button>
         </div>
       </div>
       {children}
@@ -65,6 +68,55 @@ function Field({ label, required = false, children, error }) {
   );
 }
 
+function buildLiveScheduleConflicts({ allClasses, edited }) {
+  const schedule = String(edited?.schedule || '').trim();
+  if (!schedule) {
+    return [];
+  }
+
+  const slots = parseSchedule(schedule, edited);
+  if (!slots.length) {
+    return [];
+  }
+
+  const teachers = splitTeacherList(edited?.teacher || '');
+  const classrooms = splitClassroomList(normalizeClassroomText(edited?.classroom || ''));
+
+  return slots
+    .flatMap((slot) => {
+      const teacherWarnings = teachers.flatMap((teacher) => findScheduleConflicts({
+        classes: allClasses,
+        ignoreClassId: edited?.id,
+        slot,
+        teacher,
+        classroom: '',
+      }));
+      const classroomWarnings = classrooms.flatMap((classroom) => findScheduleConflicts({
+        classes: allClasses,
+        ignoreClassId: edited?.id,
+        slot,
+        teacher: '',
+        classroom,
+      }));
+      return [...teacherWarnings, ...classroomWarnings];
+    })
+    .filter((warning, index, warnings) => warnings.findIndex((item) => item.id === warning.id) === index);
+}
+
+function formatLiveScheduleWarning(warning) {
+  if (!warning) {
+    return '';
+  }
+
+  const prefix = warning.type === 'teacher'
+    ? '선생님 중복'
+    : warning.type === 'classroom'
+      ? '강의실 중복'
+      : '시간표 중복';
+
+  return `${prefix}: ${warning.message}`;
+}
+
 function SearchResults({ results, onAdd, onAddWaitlist, labelKey = 'name', secondaryKey }) {
   if (results.length === 0) {
     return null;
@@ -90,7 +142,8 @@ function SearchResults({ results, onAdd, onAddWaitlist, labelKey = 'name', secon
               style={{ padding: '0 10px', whiteSpace: 'nowrap' }}
               onClick={() => onAddWaitlist(item.id)}
             >
-              ?湲?            </button>
+              대기
+            </button>
           ) : null}
         </div>
       ))}
@@ -251,19 +304,26 @@ export default function ClassEditor({
     [academicEventExamDetails, academicEvents, academicExamDays, academicSchools, edited, students]
   );
   const planWarningBanner = examConflicts.length > 0
-    ? `?쒗뿕?쇨낵 ?섏뾽?쇱씠 寃뱀묩?덈떎. ${examConflicts.map((conflict) => `${conflict.examDate} ${conflict.subject} (${conflict.students.join(', ')})`).join(' / ')}`
+    ? `시험 일정과 수업 시간이 겹칩니다. ${examConflicts.map((conflict) => `${conflict.examDate} ${conflict.subject} (${conflict.students.join(', ')})`).join(' / ')}`
+    : null;
+  const liveScheduleConflicts = useMemo(
+    () => buildLiveScheduleConflicts({ allClasses, edited }),
+    [allClasses, edited]
+  );
+  const liveScheduleWarningBanner = liveScheduleConflicts.length > 0
+    ? liveScheduleConflicts.map((warning) => formatLiveScheduleWarning(warning)).join(' / ')
     : null;
 
   const handleSave = async () => {
     const nextErrors = {};
     if (!edited.className?.trim()) {
-      nextErrors.className = '?섏뾽紐낆쓣 ?낅젰??二쇱꽭??';
+      nextErrors.className = '수업명을 입력해 주세요.';
     }
     if (!edited.subject?.trim()) {
-      nextErrors.subject = '怨쇰ぉ???낅젰??二쇱꽭??';
+      nextErrors.subject = '과목을 입력해 주세요.';
     }
     if (!edited.teacher?.trim()) {
-      nextErrors.teacher = '?좎깮?섏쓣 ?낅젰??二쇱꽭??';
+      nextErrors.teacher = '선생님을 입력해 주세요.';
     }
 
     setErrors(nextErrors);
@@ -288,8 +348,8 @@ export default function ClassEditor({
 
   return (
     <EditorLayout
-      title="?섏뾽 ?몄쭛"
-      description="?섏뾽 湲곕낯 ?뺣낫, ?쇱젙?? ?섍컯?앹쓣 ???붾㈃?먯꽌 ?④퍡 愿由ы빀?덈떎."
+      title="수업 등록"
+      description="수업 기본 정보, 일정, 수강생을 한 화면에서 이어서 관리합니다."
       onCancel={onCancel}
       onSave={handleSave}
       isSaving={isSaving}
@@ -376,12 +436,35 @@ export default function ClassEditor({
 
             <Field label="요일/시간">
               <textarea
+                data-testid="class-editor-schedule-input"
                 className="styled-input"
                 style={{ minHeight: 88, resize: 'vertical' }}
                 value={edited.schedule || ''}
                 onChange={(event) => setEdited((current) => ({ ...current, schedule: event.target.value }))}
                 placeholder={'월수 17:30-19:00\n[3/1~4/30] 토 13:00-15:00'}
               />
+              {liveScheduleConflicts.length > 0 ? (
+                <div
+                  data-testid="class-editor-live-conflicts"
+                  style={{
+                    marginTop: 10,
+                    padding: '12px 14px',
+                    borderRadius: 14,
+                    background: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.22)',
+                    color: '#92400e',
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    display: 'grid',
+                    gap: 6,
+                  }}
+                >
+                  <strong>실시간 중복 알림</strong>
+                  {liveScheduleConflicts.map((warning) => (
+                    <div key={warning.id}>{formatLiveScheduleWarning(warning)}</div>
+                  ))}
+                </div>
+              ) : null}
             </Field>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -580,13 +663,13 @@ export default function ClassEditor({
         </div>
 
         <SectionCard
-          title="?섏뾽 怨꾪쉷"
-          description="?섏뾽 ?쇱젙?쒕뒗 ??ㅽ겕由?紐⑤떖?먯꽌 ?몄쭛?⑸땲?? ??λ맂 ?쇱젙?쒕뒗 ?쇰툝由??섏씠吏? ?섏뾽 ?곸꽭?먯꽌??洹몃?濡??댁뼱蹂????덉뒿?덈떎."
+          title="수업 계획"
+          description="수업 일정은 전용 모달에서 정리하고, 저장된 계획은 미리보기 카드와 상세 화면에서 그대로 이어집니다."
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
             <div style={{ flex: 1, minWidth: 280 }}>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                湲곕낯 ?뚯감???좏깮??二쇨컙 ?섏뾽 ?붿씪 ??횞 4二쇰줈 ?≫옓?덈떎. ?닿컯, 蹂닿컯, 誘몄젙 ?섏뾽?쇱쓣 ?볦? ?붾㈃?먯꽌 ?명븯寃?議곗젙??二쇱꽭??
+                기본 과목과 반을 정한 뒤 주간 수업 요일과 시간, 휴강/보강, 기간별 운영 계획을 이어서 조정할 수 있습니다.
               </div>
               {planWarningBanner ? (
                 <div
@@ -607,7 +690,7 @@ export default function ClassEditor({
             </div>
             <button type="button" className="btn-primary" onClick={() => setIsPlanModalOpen(true)}>
               <CalendarDays size={18} />
-              ?섏뾽 怨꾪쉷 ?닿린
+              수업 계획 열기
             </button>
           </div>
 
@@ -615,7 +698,7 @@ export default function ClassEditor({
             plan={edited.schedulePlan}
             className={edited.className || ''}
             subject={edited.subject || ''}
-            emptyMessage="?꾩쭅 ??λ맂 ?섏뾽 ?쇱젙?쒓? ?놁뒿?덈떎."
+            emptyMessage="아직 저장한 수업 일정표가 없습니다."
           />
         </SectionCard>
       </div>
@@ -635,7 +718,7 @@ export default function ClassEditor({
           className: nextClassName,
           schedulePlan: nextPlan || current.schedulePlan,
         }))}
-        warningBanner={planWarningBanner}
+        warningBanner={[planWarningBanner, liveScheduleWarningBanner].filter(Boolean).join(' / ') || null}
         onClose={() => setIsPlanModalOpen(false)}
       />
     </EditorLayout>

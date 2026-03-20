@@ -41,6 +41,13 @@ function serializeExternalState(value) {
   }
 }
 
+function getDefaultSortState(columns, defaultSortKey) {
+  return {
+    key: defaultSortKey || columns.find((column) => column.sortable !== false)?.key || columns[0]?.key,
+    direction: 'asc'
+  };
+}
+
 function normalizeText(value) {
   if (Array.isArray(value)) {
     return value.join(' ');
@@ -310,10 +317,7 @@ export function useDataTableControls({
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [visibleMap, setVisibleMap] = useState(() => externalState?.visibleMap || readStoredValue(`${storageKey}:columns`, initialVisibility));
-  const [sortState, setSortState] = useState(() => externalState?.sortState || readStoredValue(`${storageKey}:sort`, {
-    key: defaultSortKey || columns.find((column) => column.sortable !== false)?.key || columns[0]?.key,
-    direction: 'asc'
-  }));
+  const [sortState, setSortState] = useState(() => externalState?.sortState || readStoredValue(`${storageKey}:sort`, getDefaultSortState(columns, defaultSortKey)));
   const [filters, setFilters] = useState(() => columns.reduce((result, column) => {
     result[column.key] = defaultFilterValue(column);
     return result;
@@ -323,11 +327,70 @@ export function useDataTableControls({
   const [pageSize, setPageSizeState] = useState(() => externalState?.pageSize || readStoredValue(`${storageKey}:page-size`, getDefaultPageSize()));
   const [page, setPage] = useState(1);
   const lastExternalSignatureRef = useRef('');
+  const lastEmittedSignatureRef = useRef('');
+  const previousStorageKeyRef = useRef(storageKey);
+  const persistedSignaturesRef = useRef({
+    visibleMap: '',
+    sortState: '',
+    columnOrder: '',
+    grouping: '',
+    pageSize: '',
+  });
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 200);
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
+
+  useEffect(() => {
+    persistedSignaturesRef.current = {
+      visibleMap: serializeExternalState(visibleMap),
+      sortState: serializeExternalState(sortState),
+      columnOrder: serializeExternalState(columnOrder),
+      grouping: serializeExternalState(grouping),
+      pageSize: serializeExternalState(pageSize),
+    };
+  }, []);
+
+  useEffect(() => {
+    if (previousStorageKeyRef.current === storageKey) {
+      return;
+    }
+
+    previousStorageKeyRef.current = storageKey;
+
+    const nextVisibleMap = externalState?.visibleMap
+      ? { ...initialVisibility, ...externalState.visibleMap }
+      : readStoredValue(`${storageKey}:columns`, initialVisibility);
+    const nextSortState = externalState?.sortState || readStoredValue(`${storageKey}:sort`, getDefaultSortState(columns, defaultSortKey));
+    const nextColumnOrder = normalizeColumnOrder(
+      externalState?.columnOrder || readStoredValue(`${storageKey}:column-order`, defaultColumnOrder),
+      columns
+    );
+    const nextGrouping = normalizeGrouping(
+      externalState?.grouping || readStoredValue(`${storageKey}:grouping`, ['', '']),
+      columns
+    );
+    const nextPageSize = Number(externalState?.pageSize || readStoredValue(`${storageKey}:page-size`, getDefaultPageSize()))
+      || getDefaultPageSize();
+
+    lastExternalSignatureRef.current = externalState ? serializeExternalState(externalState) : '';
+    lastEmittedSignatureRef.current = '';
+    persistedSignaturesRef.current = {
+      visibleMap: serializeExternalState(nextVisibleMap),
+      sortState: serializeExternalState(nextSortState),
+      columnOrder: serializeExternalState(nextColumnOrder),
+      grouping: serializeExternalState(nextGrouping),
+      pageSize: serializeExternalState(nextPageSize),
+    };
+
+    setVisibleMap((current) => (serializeExternalState(current) === persistedSignaturesRef.current.visibleMap ? current : nextVisibleMap));
+    setSortState((current) => (serializeExternalState(current) === persistedSignaturesRef.current.sortState ? current : nextSortState));
+    setColumnOrder((current) => (serializeExternalState(current) === persistedSignaturesRef.current.columnOrder ? current : nextColumnOrder));
+    setGrouping((current) => (serializeExternalState(current) === persistedSignaturesRef.current.grouping ? current : nextGrouping));
+    setPageSizeState((current) => (current === nextPageSize ? current : nextPageSize));
+    setPage(1);
+  }, [columns, defaultColumnOrder, defaultSortKey, externalState, initialVisibility, storageKey]);
 
   useEffect(() => {
     if (!externalState) {
@@ -340,26 +403,41 @@ export function useDataTableControls({
     }
 
     if (externalState.visibleMap) {
-      setVisibleMap({ ...initialVisibility, ...externalState.visibleMap });
+      setVisibleMap((current) => {
+        const nextValue = { ...initialVisibility, ...externalState.visibleMap };
+        return serializeExternalState(current) === serializeExternalState(nextValue) ? current : nextValue;
+      });
     }
 
     if (externalState.sortState?.key) {
-      setSortState((current) => ({
-        ...current,
-        ...externalState.sortState,
-      }));
+      setSortState((current) => {
+        const nextValue = {
+          ...current,
+          ...externalState.sortState,
+        };
+        return serializeExternalState(current) === serializeExternalState(nextValue) ? current : nextValue;
+      });
     }
 
     if (externalState.columnOrder) {
-      setColumnOrder(normalizeColumnOrder(externalState.columnOrder, columns));
+      setColumnOrder((current) => {
+        const nextValue = normalizeColumnOrder(externalState.columnOrder, columns);
+        return serializeExternalState(current) === serializeExternalState(nextValue) ? current : nextValue;
+      });
     }
 
     if (externalState.grouping) {
-      setGrouping(normalizeGrouping(externalState.grouping, columns));
+      setGrouping((current) => {
+        const nextValue = normalizeGrouping(externalState.grouping, columns);
+        return serializeExternalState(current) === serializeExternalState(nextValue) ? current : nextValue;
+      });
     }
 
-    if (externalState.pageSize) {
-      setPageSizeState(Number(externalState.pageSize) || getDefaultPageSize());
+    if (externalState.pageSize !== undefined && externalState.pageSize !== null) {
+      setPageSizeState((current) => {
+        const nextValue = Number(externalState.pageSize) || getDefaultPageSize();
+        return current === nextValue ? current : nextValue;
+      });
     }
 
     lastExternalSignatureRef.current = signature;
@@ -369,64 +447,84 @@ export function useDataTableControls({
     setVisibleMap((current) => {
       const nextValue = { ...initialVisibility, ...current };
       const hasChanged = Object.keys(nextValue).some((key) => nextValue[key] !== current[key]);
-      if (!hasChanged) {
-        return current;
-      }
-      writeStoredValue(`${storageKey}:columns`, nextValue);
-      return nextValue;
+      return hasChanged ? nextValue : current;
     });
   }, [initialVisibility, storageKey]);
 
   useEffect(() => {
+    const nextSerialized = serializeExternalState(visibleMap);
+    if (persistedSignaturesRef.current.visibleMap === nextSerialized) {
+      return;
+    }
+    persistedSignaturesRef.current.visibleMap = nextSerialized;
     writeStoredValue(`${storageKey}:columns`, visibleMap);
   }, [storageKey, visibleMap]);
 
   useEffect(() => {
+    const nextSerialized = serializeExternalState(sortState);
+    if (persistedSignaturesRef.current.sortState === nextSerialized) {
+      return;
+    }
+    persistedSignaturesRef.current.sortState = nextSerialized;
     writeStoredValue(`${storageKey}:sort`, sortState);
   }, [storageKey, sortState]);
 
   useEffect(() => {
     setColumnOrder((current) => {
       const nextValue = normalizeColumnOrder(current, columns);
-      if (JSON.stringify(nextValue) === JSON.stringify(current)) {
-        return current;
-      }
-      writeStoredValue(`${storageKey}:column-order`, nextValue);
-      return nextValue;
+      return serializeExternalState(current) === serializeExternalState(nextValue) ? current : nextValue;
     });
   }, [columns, storageKey]);
 
   useEffect(() => {
+    const nextSerialized = serializeExternalState(columnOrder);
+    if (persistedSignaturesRef.current.columnOrder === nextSerialized) {
+      return;
+    }
+    persistedSignaturesRef.current.columnOrder = nextSerialized;
     writeStoredValue(`${storageKey}:column-order`, columnOrder);
   }, [columnOrder, storageKey]);
 
   useEffect(() => {
     setGrouping((current) => {
       const nextValue = normalizeGrouping(current, columns);
-      if (JSON.stringify(nextValue) === JSON.stringify(current)) {
-        return current;
-      }
-      writeStoredValue(`${storageKey}:grouping`, nextValue);
-      return nextValue;
+      return serializeExternalState(current) === serializeExternalState(nextValue) ? current : nextValue;
     });
   }, [columns, storageKey]);
 
   useEffect(() => {
+    const nextSerialized = serializeExternalState(grouping);
+    if (persistedSignaturesRef.current.grouping === nextSerialized) {
+      return;
+    }
+    persistedSignaturesRef.current.grouping = nextSerialized;
     writeStoredValue(`${storageKey}:grouping`, grouping);
   }, [grouping, storageKey]);
 
   useEffect(() => {
+    const nextSerialized = serializeExternalState(pageSize);
+    if (persistedSignaturesRef.current.pageSize === nextSerialized) {
+      return;
+    }
+    persistedSignaturesRef.current.pageSize = nextSerialized;
     writeStoredValue(`${storageKey}:page-size`, pageSize);
   }, [pageSize, storageKey]);
 
   useEffect(() => {
-    onStateChange?.({
+    const nextState = {
       visibleMap,
       sortState,
       columnOrder,
       grouping,
       pageSize,
-    });
+    };
+    const signature = serializeExternalState(nextState);
+    if (signature === lastEmittedSignatureRef.current) {
+      return;
+    }
+
+    lastEmittedSignatureRef.current = signature;
+    onStateChange?.(nextState);
   }, [columnOrder, grouping, onStateChange, pageSize, sortState, visibleMap]);
 
   const orderedColumns = useMemo(() => {

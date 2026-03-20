@@ -2,8 +2,9 @@ import { useEffect, useMemo } from 'react';
 import { Calendar, Download, Plus, Upload } from 'lucide-react';
 import ManagementHeader from './ManagementHeader';
 import DataListView from './DataListView';
+import TimetableUnifiedFilterPanel from '../ui/TimetableUnifiedFilterPanel';
 
-const QUICK_FILTER_KEYS = ['subject', 'grade', 'teacher', 'classroom'];
+const QUICK_FILTER_KEYS = ['period', 'subject', 'grade', 'teacher', 'classroom'];
 
 function filterResourceOptionsBySubjects(master = [], selectedSubjects = []) {
   const visibleEntries = (master || []).filter((item) => item?.isVisible !== false);
@@ -15,7 +16,7 @@ function filterResourceOptionsBySubjects(master = [], selectedSubjects = []) {
   return visibleEntries
     .filter((item) => {
       const subjects = Array.isArray(item?.subjects) ? item.subjects.filter(Boolean) : [];
-      return subjects.length === 0 || subjects.some((subject) => subjectSet.has(subject));
+      return subjects.some((subject) => subjectSet.has(subject));
     })
     .map((item) => item.name);
 }
@@ -41,6 +42,7 @@ export default function ClassManagerTab({
   teacherMaster = [],
   classroomMaster = [],
   subjectOptions = [],
+  classTerms = [],
   onManageTeachers,
   onManageClassrooms,
   onManageTerms,
@@ -62,9 +64,68 @@ export default function ClassManagerTab({
     classroomMaster,
     subjectOptions,
     tableControls.filterOptions.grade,
+    tableControls.filterOptions.period,
     tableControls.filters.subject,
     teacherMaster,
   ]);
+
+  const unifiedFilters = useMemo(() => ({
+    term: String(tableControls.filters.period || ''),
+    subject: Array.isArray(tableControls.filters.subject) ? tableControls.filters.subject : [],
+    grade: Array.isArray(tableControls.filters.grade) ? tableControls.filters.grade : [],
+    teacher: Array.isArray(tableControls.filters.teacher) ? tableControls.filters.teacher : [],
+    classroom: Array.isArray(tableControls.filters.classroom) ? tableControls.filters.classroom : [],
+  }), [
+    tableControls.filters.classroom,
+    tableControls.filters.grade,
+    tableControls.filters.period,
+    tableControls.filters.subject,
+    tableControls.filters.teacher,
+  ]);
+
+  const unifiedTermOptions = useMemo(
+    () => {
+      const optionMap = new Map();
+
+      (classTerms || []).forEach((term) => {
+        const name = String(term?.name || term?.period || '').trim();
+        if (!name) {
+          return;
+        }
+        optionMap.set(name, {
+          id: term.id,
+          name,
+          academicYear: Number(term.academicYear || term.academic_year || 0) || undefined,
+          sortOrder: Number(term.sortOrder ?? term.sort_order ?? optionMap.size),
+        });
+      });
+
+      (tableControls.filterOptions.period || []).forEach((name) => {
+        const safeName = String(name || '').trim();
+        if (!safeName || optionMap.has(safeName)) {
+          return;
+        }
+        optionMap.set(safeName, { name: safeName, sortOrder: optionMap.size });
+      });
+
+      return [...optionMap.values()].sort((left, right) => {
+        const yearGap = Number(right.academicYear || 0) - Number(left.academicYear || 0);
+        if (yearGap !== 0) {
+          return yearGap;
+        }
+        return Number(left.sortOrder || 0) - Number(right.sortOrder || 0);
+      });
+    },
+    [classTerms, tableControls.filterOptions.period]
+  );
+
+  const handleUnifiedFilterChange = (key, value) => {
+    if (key === 'term') {
+      tableControls.setFilterValue('period', value);
+      return;
+    }
+    tableControls.setFilterValue(key, value);
+  };
 
   useEffect(() => {
     const current = Array.isArray(tableControls.filters.teacher) ? tableControls.filters.teacher : [];
@@ -84,6 +145,16 @@ export default function ClassManagerTab({
 
   return (
     <>
+      <TimetableUnifiedFilterPanel
+        filters={unifiedFilters}
+        termOptions={unifiedTermOptions}
+        subjectOptions={quickFilterOptions.subject}
+        gradeOptions={quickFilterOptions.grade}
+        teacherOptions={quickFilterOptions.teacher}
+        classroomOptions={quickFilterOptions.classroom}
+        onChange={handleUnifiedFilterChange}
+      />
+
       <ManagementHeader
         title="수업 관리"
         count={tableControls.totalCount}
@@ -95,6 +166,7 @@ export default function ClassManagerTab({
         description={sectionDescription}
         quickFilterKeys={QUICK_FILTER_KEYS}
         quickFilterOptions={quickFilterOptions}
+        classesUnifiedFilterMode
         toolbarActions={[
           {
             label: '수업 등록',

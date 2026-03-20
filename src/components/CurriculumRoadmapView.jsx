@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileDown, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import { CalendarDays, FileDown, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import BottomSheet from './ui/BottomSheet';
 import ConfirmDialog from './ui/ConfirmDialog';
 import StatusBanner from './ui/StatusBanner';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
+import useViewport from '../hooks/useViewport';
 import { getUserFriendlyDataError } from '../lib/dataErrorUtils';
 import {
   buildSchoolMaster,
@@ -87,6 +89,21 @@ const ROADMAP_SCHEDULE_COLUMN_OPTIONS = [
   { key: 'vacation-holiday', label: '방학·휴일', types: ['방학·휴일'] },
   { key: 'misc', label: '기타', types: ['기타'] },
 ];
+const ROADMAP_EDITOR_EVENT_TYPE_BY_SUBJECT = {
+  영어: '영어시험일',
+  수학: '수학시험일',
+};
+const ROADMAP_EDITOR_SHARED_EVENT_TYPES = ['시험기간', '체험학습', '방학·휴일', '기타'];
+const ROADMAP_EVENT_COLOR_BY_TYPE = {
+  시험기간: '#2f6f63',
+  영어시험일: '#4f6fe8',
+  수학시험일: '#7a52d1',
+  체험학습: '#2f8f73',
+  '방학·휴일': '#d07a2b',
+  기타: '#64748b',
+};
+const SCHOOL_ANNUAL_BOARD_LABEL = '학교 연간일정표';
+const ROADMAP_LINKED_EVENT_TYPES = ['시험기간', '영어시험일', '수학시험일', '체험학습', '방학·휴일', '기타'];
 
 function createId() {
   if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
@@ -281,6 +298,40 @@ function formatRoadmapDateRange(start, end = start) {
   return startLabel === endLabel ? startLabel : `${startLabel} ~ ${endLabel}`;
 }
 
+function parseRoadmapDate(value = '') {
+  const normalized = text(value);
+  if (!normalized) return null;
+  const parsed = new Date(`${normalized}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function compareRoadmapLinkedEvents(left, right) {
+  const leftStart = text(left?.start);
+  const rightStart = text(right?.start);
+  if (leftStart !== rightStart) {
+    return leftStart.localeCompare(rightStart);
+  }
+  const leftEnd = text(left?.end || left?.start);
+  const rightEnd = text(right?.end || right?.start);
+  if (leftEnd !== rightEnd) {
+    return leftEnd.localeCompare(rightEnd);
+  }
+  return text(left?.title).localeCompare(text(right?.title), 'ko');
+}
+
+function isPastRoadmapLinkedEvent(event, referenceDate = new Date()) {
+  const todayLabel = `${referenceDate.getFullYear()}-${String(referenceDate.getMonth() + 1).padStart(2, '0')}-${String(referenceDate.getDate()).padStart(2, '0')}`;
+  const eventEnd = text(event?.end || event?.start);
+  return Boolean(eventEnd && eventEnd < todayLabel);
+}
+
+function buildRoadmapLinkedEventSummary(event) {
+  const gradeValues = splitGradeValues(event?.grade);
+  const gradeLabel = gradeValues.length > 0 ? gradeValues.join(', ') : '공통';
+  const dateLabel = formatRoadmapDateRange(event?.start, event?.end);
+  return [text(event?.title), gradeLabel, dateLabel].filter(Boolean).join(' · ');
+}
+
 function inferRoadmapPeriodCodeFromMonth(value = '') {
   const normalized = text(value);
   if (!normalized) return '';
@@ -335,6 +386,43 @@ function normalizeRoadmapEventType(value) {
   }
   if (normalized.includes('기타')) return '기타';
   return normalized;
+}
+
+function getRoadmapEditorEventTypeOptions(subject = '') {
+  const subjectType = ROADMAP_EDITOR_EVENT_TYPE_BY_SUBJECT[text(subject)] || '';
+  return [...new Set([subjectType, ...ROADMAP_EDITOR_SHARED_EVENT_TYPES].filter(Boolean))];
+}
+
+function getDefaultRoadmapEditorEventType(subject = '') {
+  return getRoadmapEditorEventTypeOptions(subject)[0] || '시험기간';
+}
+
+function normalizeRoadmapEditorEventType(value, subject = '') {
+  const normalized = normalizeRoadmapEventType(value);
+  const options = getRoadmapEditorEventTypeOptions(subject);
+  return options.includes(normalized) ? normalized : getDefaultRoadmapEditorEventType(subject);
+}
+
+function getRoadmapScheduleEditorCopy(eventType = '시험기간') {
+  const normalizedType = normalizeRoadmapEventType(eventType) || '시험기간';
+  if (normalizedType === '시험기간') {
+    return {
+      description: '학사일정의 시험기간과 바로 연결되는 범위를 관리합니다.',
+      startLabel: '시험 시작',
+      endLabel: '시험 종료',
+    };
+  }
+  return {
+    description: '학사일정에 연결할 일정 종류와 날짜를 직접 입력합니다.',
+    startLabel: '일정 시작',
+    endLabel: '일정 종료',
+  };
+}
+
+function buildRoadmapScheduleEventTitle(schoolName, periodLabel, eventType) {
+  return [text(schoolName), text(periodLabel), normalizeRoadmapEventType(eventType) || '시험기간']
+    .filter(Boolean)
+    .join(' ');
 }
 
 function inferAssessmentPeriodCode(event) {
@@ -405,12 +493,27 @@ function buildSchoolAssessmentLookup(events = [], selectedSubject = '') {
           examWindowEnd: '',
           lines: [],
           byType: new Map(),
+          eventMetaByType: new Map(),
+          eventsByType: new Map(),
+          linkedEvents: [],
         });
       }
 
       const target = map.get(key);
-      const rangeLabel = formatRoadmapDateRange(event.start, event.end);
-      const label = `${eventType} ${rangeLabel}`.trim();
+      const linkedEvent = {
+        id: text(event.id),
+        schoolId: text(event.schoolId),
+        schoolName: text(event.school),
+        type: eventType,
+        title: text(event.title),
+        start: text(event.start),
+        end: text(event.end) || text(event.start),
+        grade,
+        gradeValues: [grade],
+        subject: eventSubject,
+        summary: buildRoadmapLinkedEventSummary({ ...event, type: eventType, grade }),
+      };
+      const label = linkedEvent.summary;
 
       if (eventType === '시험기간') {
         target.eventId = event.id || target.eventId;
@@ -425,13 +528,30 @@ function buildSchoolAssessmentLookup(events = [], selectedSubject = '') {
       if (label && !bucket.includes(label)) {
         bucket.push(label);
       }
+
+      if (!target.eventsByType.has(eventType)) {
+        target.eventsByType.set(eventType, []);
+      }
+      target.eventsByType.get(eventType).push(linkedEvent);
+
+      const eventMeta = target.eventMetaByType.get(eventType);
+      if (!eventMeta || !text(eventMeta.id)) {
+        target.eventMetaByType.set(eventType, {
+          id: text(event.id),
+          start: text(event.start),
+          end: text(event.end) || text(event.start),
+          title: text(event.title),
+          subject: eventSubject,
+        });
+      }
     });
   });
 
   map.forEach((entry) => {
-    entry.lines = ROADMAP_SCHEDULE_COLUMN_OPTIONS.flatMap((column) =>
-      column.types.flatMap((type) => entry.byType.get(type) || [])
-    );
+    entry.linkedEvents = ROADMAP_SCHEDULE_COLUMN_OPTIONS
+      .flatMap((column) => column.types.flatMap((type) => entry.eventsByType.get(type) || []))
+      .sort(compareRoadmapLinkedEvents);
+    entry.lines = entry.linkedEvents.map((event) => event.summary);
   });
 
   return map;
@@ -475,6 +595,151 @@ function buildScheduleEventsBySchool(
     if (displaySummary && !bucket.includes(displaySummary)) {
       bucket.push(displaySummary);
     }
+  });
+
+  return schoolMap;
+}
+
+function buildStructuredSchoolAssessmentLookup(events = [], selectedSubject = '') {
+  const map = new Map();
+
+  (events || []).forEach((event) => {
+    const eventType = normalizeRoadmapEventType(event?.type);
+    if (!ROADMAP_EVENT_TYPE_OPTIONS.includes(eventType) || !event?.schoolId) {
+      return;
+    }
+
+    const periodCode = inferAssessmentPeriodCode(event);
+    const gradeValues = splitGradeValues(event?.grade);
+    if (!periodCode || gradeValues.length === 0) {
+      return;
+    }
+
+    const eventSubject = resolveRoadmapSubject(event);
+    const appliesToSelectedSubject = eventType === '시험기간' || !eventSubject || eventSubject === selectedSubject;
+    if (!appliesToSelectedSubject) {
+      return;
+    }
+
+    gradeValues.forEach((grade) => {
+      const key = buildSchoolAssessmentKey(event.schoolId, resolveAssessmentAcademicYear(event), grade, periodCode);
+      if (!map.has(key)) {
+        map.set(key, {
+          eventId: '',
+          examWindowStart: '',
+          examWindowEnd: '',
+          lines: [],
+          byType: new Map(),
+          eventMetaByType: new Map(),
+          eventsByType: new Map(),
+          linkedEvents: [],
+        });
+      }
+
+      const target = map.get(key);
+      const linkedEvent = {
+        id: text(event.id),
+        schoolId: text(event.schoolId),
+        schoolName: text(event.school),
+        type: eventType,
+        title: text(event.title),
+        start: text(event.start),
+        end: text(event.end) || text(event.start),
+        grade,
+        gradeValues: [grade],
+        subject: eventSubject,
+        summary: buildRoadmapLinkedEventSummary({ ...event, type: eventType, grade }),
+      };
+
+      if (eventType === '시험기간') {
+        target.eventId = event.id || target.eventId;
+        target.examWindowStart = text(event.start) || target.examWindowStart;
+        target.examWindowEnd = text(event.end) || text(event.start) || target.examWindowEnd;
+      }
+
+      if (!target.byType.has(eventType)) {
+        target.byType.set(eventType, []);
+      }
+      const lineBucket = target.byType.get(eventType);
+      if (linkedEvent.summary && !lineBucket.includes(linkedEvent.summary)) {
+        lineBucket.push(linkedEvent.summary);
+      }
+
+      if (!target.eventsByType.has(eventType)) {
+        target.eventsByType.set(eventType, []);
+      }
+      target.eventsByType.get(eventType).push(linkedEvent);
+
+      const eventMeta = target.eventMetaByType.get(eventType);
+      if (!eventMeta || !text(eventMeta.id)) {
+        target.eventMetaByType.set(eventType, {
+          id: text(event.id),
+          start: text(event.start),
+          end: text(event.end) || text(event.start),
+          title: text(event.title),
+          subject: eventSubject,
+        });
+      }
+    });
+  });
+
+  map.forEach((entry) => {
+    entry.linkedEvents = ROADMAP_LINKED_EVENT_TYPES
+      .flatMap((type) => entry.eventsByType.get(type) || [])
+      .sort(compareRoadmapLinkedEvents);
+    entry.lines = entry.linkedEvents.map((event) => event.summary);
+  });
+
+  return map;
+}
+
+function buildStructuredScheduleEventsBySchool(
+  events = [],
+  selectedCategoryTypes = ROADMAP_SCHEDULE_COLUMN_OPTIONS,
+  selectedYear = new Date().getFullYear()
+) {
+  const scheduleTypeSet = new Set(selectedCategoryTypes.flatMap((column) => column.types));
+  const schoolMap = new Map();
+
+  (events || []).forEach((event) => {
+    const eventType = normalizeRoadmapEventType(event?.type);
+    if (
+      !scheduleTypeSet.has(eventType) ||
+      !event?.schoolId ||
+      resolveAssessmentAcademicYear(event) !== Number(selectedYear)
+    ) {
+      return;
+    }
+
+    if (!schoolMap.has(event.schoolId)) {
+      schoolMap.set(event.schoolId, new Map());
+    }
+
+    const gradeValues = splitGradeValues(event?.grade);
+    const gradeLabel = gradeValues.length > 0 ? gradeValues.join(', ') : '공통';
+    const bucketMap = schoolMap.get(event.schoolId);
+    if (!bucketMap.has(eventType)) {
+      bucketMap.set(eventType, []);
+    }
+    bucketMap.get(eventType).push({
+      id: text(event.id),
+      schoolId: text(event.schoolId),
+      schoolName: text(event.school),
+      type: eventType,
+      title: text(event.title),
+      start: text(event.start),
+      end: text(event.end) || text(event.start),
+      grade: gradeValues.join(','),
+      gradeValues,
+      gradeLabel,
+      summary: [text(event.title), gradeLabel, formatRoadmapDateRange(event.start, event.end)].filter(Boolean).join(' · '),
+    });
+  });
+
+  schoolMap.forEach((bucketMap) => {
+    bucketMap.forEach((bucket, key) => {
+      bucketMap.set(key, [...bucket].sort(compareRoadmapLinkedEvents));
+    });
   });
 
   return schoolMap;
@@ -1101,12 +1366,14 @@ function RoadmapCellEditorV2({
   isSaving,
   onClose,
   onChangeSchoolPeriod,
+  onChangeScheduleEventType,
   onChangeNote,
   onChangeExamRange,
   onChangeRow,
   onAddRow,
   onRemoveRow,
   onSave,
+  scheduleTypeOptions = [],
 }) {
   if (!activeEditor || !editorDraft) {
     return null;
@@ -1116,6 +1383,8 @@ function RoadmapCellEditorV2({
     activeEditor.tab === 'school' &&
     Array.isArray(activeEditor.periodOptions) &&
     activeEditor.periodOptions.length > 1;
+  const scheduleEventType = text(editorDraft.scheduleEventType) || scheduleTypeOptions[0] || '시험기간';
+  const scheduleCopy = getRoadmapScheduleEditorCopy(scheduleEventType);
 
   return (
     <div
@@ -1161,7 +1430,7 @@ function RoadmapCellEditorV2({
           <section className="roadmap-editor-split-card">
             <div className="roadmap-editor-split-head">
               <strong>일정 입력</strong>
-              <span>학사일정 시험기간과 바로 연결됩니다.</span>
+              <span>{scheduleCopy.description}</span>
             </div>
             <div className={`roadmap-editor-assessment-grid ${hasMultiplePeriods ? 'is-multi-period' : ''}`.trim()}>
               {hasMultiplePeriods ? (
@@ -1179,7 +1448,20 @@ function RoadmapCellEditorV2({
                 </label>
               ) : null}
               <label className="academic-field roadmap-editor-field">
-                <span>시험 시작</span>
+                <span>일정 종류</span>
+                <select
+                  className="styled-input"
+                  value={scheduleEventType}
+                  onChange={(event) => onChangeScheduleEventType(event.target.value)}
+                  data-testid="roadmap-schedule-type-select"
+                >
+                  {scheduleTypeOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="academic-field roadmap-editor-field">
+                <span>{scheduleCopy.startLabel}</span>
                 <input
                   type="date"
                   className="styled-input"
@@ -1188,7 +1470,7 @@ function RoadmapCellEditorV2({
                 />
               </label>
               <label className="academic-field roadmap-editor-field">
-                <span>시험 종료</span>
+                <span>{scheduleCopy.endLabel}</span>
                 <input
                   type="date"
                   className="styled-input"
@@ -1236,7 +1518,162 @@ function RoadmapCellEditorV2({
   );
 }
 
-function RoadmapCell({ cell, onClick, disabled = false }) {
+function RoadmapCellEditorMobileSheet({
+  activeEditor,
+  editorDraft,
+  textbookSuggestions,
+  isSaving,
+  onClose,
+  onChangeSchoolPeriod,
+  onChangeScheduleEventType,
+  onChangeNote,
+  onChangeExamRange,
+  onChangeRow,
+  onAddRow,
+  onRemoveRow,
+  onSave,
+  scheduleTypeOptions = [],
+}) {
+  if (!activeEditor || !editorDraft) {
+    return null;
+  }
+
+  const hasMultiplePeriods =
+    activeEditor.tab === 'school' &&
+    Array.isArray(activeEditor.periodOptions) &&
+    activeEditor.periodOptions.length > 1;
+  const scheduleEventType = text(editorDraft.scheduleEventType) || scheduleTypeOptions[0] || '시험기간';
+  const scheduleCopy = getRoadmapScheduleEditorCopy(scheduleEventType);
+
+  return (
+    <BottomSheet
+      open={Boolean(activeEditor)}
+      onClose={onClose}
+      title={activeEditor.title}
+      subtitle={activeEditor.subtitle}
+      maxWidth={720}
+      fullHeightOnMobile
+      testId="roadmap-editor-sheet"
+      actions={(
+        <div className="roadmap-editor-sheet-actions">
+          <button type="button" className="action-chip" onClick={onClose}>
+            닫기
+          </button>
+          <button type="button" className="action-pill" onClick={onSave} disabled={isSaving}>
+            <Save size={16} />
+            저장
+          </button>
+        </div>
+      )}
+    >
+      <div className="roadmap-editor-sheet">
+        <div className="roadmap-cell-editor-eyebrow">{activeEditor.eyebrow}</div>
+        <div className="roadmap-editor-context-card" data-testid="roadmap-editor-context-card">
+          <div className="roadmap-editor-context-head">
+            <strong>{activeEditor.title}</strong>
+            <span>{activeEditor.detailLabel}</span>
+          </div>
+          <div className="roadmap-editor-context-chips">
+            <span className="roadmap-mobile-summary-chip">{activeEditor.tab === 'school' ? '학교 기준' : '학원 기준'}</span>
+            {activeEditor.period?.label ? (
+              <span className="roadmap-mobile-summary-chip">{activeEditor.period.label}</span>
+            ) : null}
+          </div>
+        </div>
+
+        {activeEditor.tab === 'school' ? (
+          <section className="roadmap-editor-split-card">
+            <div className="roadmap-editor-split-head">
+              <strong>일정 입력</strong>
+              <span>{scheduleCopy.description}</span>
+            </div>
+            <div className={`roadmap-editor-assessment-grid ${hasMultiplePeriods ? 'is-multi-period' : ''}`.trim()}>
+              {hasMultiplePeriods ? (
+                <label className="academic-field roadmap-editor-field roadmap-editor-field-period">
+                  <span>시기</span>
+                  <select
+                    className="styled-input"
+                    value={editorDraft.activePeriodCode || activeEditor.period?.code || ''}
+                    onChange={(event) => onChangeSchoolPeriod(event.target.value)}
+                  >
+                    {activeEditor.periodOptions.map((period) => (
+                      <option key={period.code} value={period.code}>{period.label}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label className="academic-field roadmap-editor-field">
+                <span>일정 종류</span>
+                <select
+                  className="styled-input"
+                  value={scheduleEventType}
+                  onChange={(event) => onChangeScheduleEventType(event.target.value)}
+                  data-testid="roadmap-schedule-type-select"
+                >
+                  {scheduleTypeOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="academic-field roadmap-editor-field">
+                <span>{scheduleCopy.startLabel}</span>
+                <input
+                  type="date"
+                  className="styled-input"
+                  value={editorDraft.examStart || ''}
+                  onChange={(event) => onChangeExamRange({ examStart: event.target.value })}
+                />
+              </label>
+              <label className="academic-field roadmap-editor-field">
+                <span>{scheduleCopy.endLabel}</span>
+                <input
+                  type="date"
+                  className="styled-input"
+                  value={editorDraft.examEnd || ''}
+                  onChange={(event) => onChangeExamRange({ examEnd: event.target.value })}
+                />
+              </label>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="roadmap-editor-split-card">
+          <div className="roadmap-editor-split-head">
+            <strong>{activeEditor.tab === 'school' ? '교재·시험범위 입력' : '교재·진도 입력'}</strong>
+            <span>교과서, 부교재, 기타 자료를 섹션별로 정리해 둘 수 있습니다.</span>
+          </div>
+
+          {MATERIAL_SECTION_DEFINITIONS.map((section) => (
+            <section key={section.key} className="roadmap-editor-section">
+              <div className="roadmap-editor-section-title">{section.label}</div>
+              <MaterialRowsEditorCompact
+                rows={editorDraft.rowsByCategory?.[section.key] || []}
+                detailLabel={activeEditor.detailLabel}
+                titleSuggestions={textbookSuggestions}
+                onChangeRow={(rowIndex, patch) => onChangeRow(section.key, rowIndex, patch)}
+                onAddRow={() => onAddRow(section.key)}
+                onRemoveRow={(rowIndex) => onRemoveRow(section.key, rowIndex)}
+              />
+            </section>
+          ))}
+
+          <label className="academic-field roadmap-editor-note">
+            <span>메모</span>
+            <textarea
+              className="styled-input"
+              value={editorDraft.note || ''}
+              onChange={(event) => onChangeNote(event.target.value)}
+              placeholder="추가로 남겨둘 메모가 있으면 입력해 주세요."
+              style={{ minHeight: 88, resize: 'vertical' }}
+            />
+          </label>
+        </section>
+      </div>
+    </BottomSheet>
+  );
+}
+
+function RoadmapCell({ cell, onClick, disabled = false, testId = '', actions = null, highlighted = false }) {
   const sections = (cell.sections || []).map((section, index) => ({
     key: section.key || `${index}`,
     label: section.label || '',
@@ -1295,14 +1732,28 @@ function RoadmapCell({ cell, onClick, disabled = false }) {
     </div>
   );
 
-  if (disabled || !onClick) {
-    return <div className="roadmap-cell-static">{content}</div>;
+  const body = disabled || !onClick ? (
+    <div className={`roadmap-cell-static ${highlighted ? 'is-linked-focus' : ''}`.trim()}>{content}</div>
+  ) : (
+    <button
+      type="button"
+      className={`roadmap-cell-button ${highlighted ? 'is-linked-focus' : ''}`.trim()}
+      onClick={onClick}
+      data-testid={testId || undefined}
+    >
+      {content}
+    </button>
+  );
+
+  if (!actions) {
+    return body;
   }
 
   return (
-    <button type="button" className="roadmap-cell-button" onClick={onClick}>
-      {content}
-    </button>
+    <div className="roadmap-cell-shell">
+      {body}
+      <div className="roadmap-cell-actions">{actions}</div>
+    </div>
   );
 }
 
@@ -1310,9 +1761,11 @@ export default function CurriculumRoadmapView({
   data = {},
   dataService = sharedDataService,
   navigationIntent = null,
+  onOpenAcademicCalendar,
 }) {
   const toast = useToast();
   const { isStaff, isTeacher } = useAuth();
+  const { isMobile } = useViewport();
   const { confirm, dialogProps } = useConfirmDialog();
   const canEdit = isStaff || isTeacher;
   const reportRef = useRef(null);
@@ -1333,7 +1786,7 @@ export default function CurriculumRoadmapView({
   const [selectedSchoolKey, setSelectedSchoolKey] = useState(ALL_SCHOOLS);
   const [selectedSchoolGrade, setSelectedSchoolGrade] = useState(ALL_GRADES);
   const [selectedSchoolPeriod, setSelectedSchoolPeriod] = useState(ALL_PERIODS);
-  const [schoolViewPreset, setSchoolViewPreset] = useState('school-grade-by-period');
+  const [schoolViewPreset, setSchoolViewPreset] = useState('school-annual-board');
   const [selectedAcademyGrade, setSelectedAcademyGrade] = useState(ALL_ACADEMY_GRADES);
   const [selectedAcademyClass, setSelectedAcademyClass] = useState(ALL_CLASSES);
   const [selectedAcademyPeriod, setSelectedAcademyPeriod] = useState(ALL_PERIODS);
@@ -1345,6 +1798,11 @@ export default function CurriculumRoadmapView({
   const [activeEditor, setActiveEditor] = useState(null);
   const [editorDraft, setEditorDraft] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isMobileFilterSheetOpen, setIsMobileFilterSheetOpen] = useState(false);
+  const [visibleLinkedEventTypes, setVisibleLinkedEventTypes] = useState(ROADMAP_LINKED_EVENT_TYPES);
+  const [hidePastLinkedEvents, setHidePastLinkedEvents] = useState(false);
+  const [calendarEventPicker, setCalendarEventPicker] = useState(null);
+  const [focusedLinkedTarget, setFocusedLinkedTarget] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1398,6 +1856,12 @@ export default function CurriculumRoadmapView({
   }, [selectedYear, yearOptions]);
 
   useEffect(() => {
+    if (activeTab === 'school' && schoolViewPreset !== 'school-annual-board') {
+      setSchoolViewPreset('school-annual-board');
+    }
+  }, [activeTab, schoolViewPreset]);
+
+  useEffect(() => {
     if (!subjectOptions.includes(selectedSubject)) {
       setSelectedSubject(subjectOptions[0] || SUBJECT_OPTIONS_KO[0]);
     }
@@ -1411,36 +1875,18 @@ export default function CurriculumRoadmapView({
     if (navigationIntent.tab) {
       setActiveTab(navigationIntent.tab);
     }
-    if (navigationIntent.academicYear) {
-      setSelectedYear(Number(navigationIntent.academicYear));
+    if (navigationIntent.tab === 'school') {
+      setSchoolViewPreset('school-annual-board');
     }
-    if (navigationIntent.subject) {
-      setSelectedSubject(navigationIntent.subject);
-    }
-    if (navigationIntent.schoolCategory) {
-      setSelectedSchoolCategory(navigationIntent.schoolCategory);
-    }
-    if (navigationIntent.schoolKey) {
-      setSelectedSchoolKey(navigationIntent.schoolKey);
-    } else if (navigationIntent.schoolId) {
-      const matchedSchool = schoolCatalog.find((school) => school.id === navigationIntent.schoolId);
-      if (matchedSchool) {
-        setSelectedSchoolKey(schoolKey(matchedSchool.name));
-      }
-    } else if (navigationIntent.schoolName) {
-      setSelectedSchoolKey(schoolKey(navigationIntent.schoolName));
-    }
-    if (navigationIntent.grade) {
-      setSelectedSchoolGrade(navigationIntent.grade);
-      setSelectedAcademyGrade(navigationIntent.grade);
-    }
-    if (navigationIntent.periodCode) {
-      setSelectedSchoolPeriod(navigationIntent.periodCode);
-      setSelectedAcademyPeriod(navigationIntent.periodCode);
-    }
-    if (navigationIntent.classId) {
-      setSelectedAcademyClass(navigationIntent.classId);
-    }
+    setFocusedLinkedTarget({
+      focusTarget: navigationIntent.focusTarget || 'grade-cell',
+      schoolId: text(navigationIntent.schoolId),
+      schoolKey: text(navigationIntent.schoolKey),
+      grade: text(navigationIntent.grade),
+      scheduleColumnKey: text(navigationIntent.scheduleColumnKey),
+      eventId: text(navigationIntent.eventId),
+      nonce: navigationIntent.nonce || Date.now(),
+    });
   }, [navigationIntent, schoolCatalog]);
 
   const textbookSuggestions = useMemo(
@@ -1468,6 +1914,53 @@ export default function CurriculumRoadmapView({
     }
     return FIXED_PERIODS_KO.filter((period) => period.code === selectedSchoolPeriod);
   }, [selectedSchoolPeriod]);
+
+  const filterLinkedRoadmapEvents = (events = []) => (
+    (events || [])
+      .filter((event) => visibleLinkedEventTypes.includes(event.type))
+      .filter((event) => !hidePastLinkedEvents || !isPastRoadmapLinkedEvent(event))
+      .sort(compareRoadmapLinkedEvents)
+  );
+
+  const buildAcademicCalendarIntentFromLinkedEvent = (event, context = {}) => ({
+    eventId: text(event?.id),
+    eventType: text(event?.type),
+    date: text(event?.start),
+    schoolId: text(context.schoolId || event?.schoolId),
+    schoolKey: text(context.schoolKey || schoolKey(context.schoolName || event?.schoolName)),
+    schoolName: text(context.schoolName || event?.schoolName),
+    schoolCategory: text(context.schoolCategory || ''),
+    grade: text(context.grade || event?.gradeValues?.[0] || event?.grade),
+  });
+
+  const openAcademicCalendarForLinkedEvents = (events = [], context = {}) => {
+    const filteredEvents = filterLinkedRoadmapEvents(events);
+    if (filteredEvents.length === 0 || typeof onOpenAcademicCalendar !== 'function') {
+      return;
+    }
+    if (filteredEvents.length === 1) {
+      onOpenAcademicCalendar(buildAcademicCalendarIntentFromLinkedEvent(filteredEvents[0], context));
+      return;
+    }
+    setCalendarEventPicker({
+      title: context.title || '연결된 학사일정',
+      subtitle: context.subtitle || '열어볼 일정을 선택해 주세요.',
+      events: filteredEvents,
+      context,
+    });
+  };
+
+  const isFocusedGradeCell = (school, grade) => (
+    focusedLinkedTarget?.focusTarget === 'grade-cell' &&
+    (text(focusedLinkedTarget.schoolId) === text(school.id) || text(focusedLinkedTarget.schoolKey) === schoolKey(school.name)) &&
+    text(focusedLinkedTarget.grade) === text(grade)
+  );
+
+  const isFocusedScheduleCell = (school, columnKey) => (
+    focusedLinkedTarget?.focusTarget === 'schedule-column' &&
+    (text(focusedLinkedTarget.schoolId) === text(school.id) || text(focusedLinkedTarget.schoolKey) === schoolKey(school.name)) &&
+    text(focusedLinkedTarget.scheduleColumnKey) === text(columnKey)
+  );
 
   const schoolRows = useMemo(() => {
     const rows = [];
@@ -1516,12 +2009,12 @@ export default function CurriculumRoadmapView({
   }, [data.academicExamMaterialItems]);
 
   const schoolAssessmentByKey = useMemo(
-    () => buildSchoolAssessmentLookup(data.academicEvents || [], selectedSubject),
+    () => buildStructuredSchoolAssessmentLookup(data.academicEvents || [], selectedSubject),
     [data.academicEvents, selectedSubject]
   );
 
   const schoolScheduleBySchool = useMemo(
-    () => buildScheduleEventsBySchool(data.academicEvents || [], ROADMAP_SCHEDULE_COLUMN_OPTIONS, selectedYear),
+    () => buildStructuredScheduleEventsBySchool(data.academicEvents || [], ROADMAP_SCHEDULE_COLUMN_OPTIONS, selectedYear),
     [data.academicEvents, selectedYear]
   );
 
@@ -1722,14 +2215,16 @@ export default function CurriculumRoadmapView({
       const plan = school.id ? schoolPlanByKey.get(`${school.id}::${grade}::${period.code}`) : null;
       const items = plan ? schoolItemsByPlanId.get(plan.id) || [] : [];
       const assessment = school.id ? schoolAssessmentByKey.get(buildSchoolAssessmentKey(school.id, selectedYear, grade, period.code)) : null;
+      const linkedEvents = filterLinkedRoadmapEvents(assessment?.linkedEvents || []);
       return {
         key: `${grade}::${period.code}`,
         label: periods.length > 1 ? period.label : '',
         note: plan?.note || '',
-        assessmentLines: assessment?.lines || [],
+        assessmentLines: linkedEvents.map((event) => event.summary),
         examStart: assessment?.examWindowStart || '',
         examEnd: assessment?.examWindowEnd || '',
         eventId: assessment?.eventId || '',
+        linkedEvents,
         itemsByCategory: groupItemsByCategory(items, 'scopeDetail'),
       };
     });
@@ -1775,10 +2270,22 @@ export default function CurriculumRoadmapView({
       })),
       scheduleGroups: ROADMAP_SCHEDULE_COLUMN_OPTIONS.map((column) => ({
         ...column,
-        entries: column.types.flatMap((type) => schoolScheduleBySchool.get(school.id)?.get(type) || []),
+        entries: filterLinkedRoadmapEvents(
+          column.types.flatMap((type) => schoolScheduleBySchool.get(school.id)?.get(type) || [])
+        ),
       })),
     }));
-  }, [selectedSchool, schoolOptions, selectedSchoolGradeColumns, schoolPeriodOptions, schoolScheduleBySchool, schoolPlanByKey, schoolItemsByPlanId, schoolAssessmentByKey]);
+  }, [
+    filterLinkedRoadmapEvents,
+    schoolItemsByPlanId,
+    schoolOptions,
+    schoolPlanByKey,
+    schoolScheduleBySchool,
+    schoolAssessmentByKey,
+    schoolPeriodOptions,
+    selectedSchool,
+    selectedSchoolGradeColumns,
+  ]);
 
   const academyGroupedRows = useMemo(() => {
     if (academyViewPreset === 'class-by-period') {
@@ -1876,7 +2383,7 @@ export default function CurriculumRoadmapView({
     setEditorDraft(null);
   };
 
-  const buildSchoolEditorDraft = (school, grade, periodCode, periodOptions) => {
+  const buildSchoolEditorDraft = (school, grade, periodCode, periodOptions, preferredEventType = '') => {
     const availablePeriods = Array.isArray(periodOptions) && periodOptions.length > 0 ? periodOptions : FIXED_PERIODS_KO;
     const currentPeriod = availablePeriods.find((item) => item.code === periodCode) || availablePeriods[0];
     const plan = school?.id ? schoolPlanByKey.get(`${school.id}::${grade}::${currentPeriod?.code || ''}`) : null;
@@ -1884,14 +2391,17 @@ export default function CurriculumRoadmapView({
     const assessment = school?.id
       ? schoolAssessmentByKey.get(buildSchoolAssessmentKey(school.id, selectedYear, grade, currentPeriod?.code || ''))
       : null;
+    const scheduleEventType = normalizeRoadmapEditorEventType(preferredEventType, selectedSubject);
+    const linkedEvent = assessment?.eventMetaByType?.get(scheduleEventType) || null;
 
     return {
       planId: plan?.id || '',
       activePeriodCode: currentPeriod?.code || '',
+      scheduleEventType,
       note: plan?.note || '',
-      examStart: assessment?.examWindowStart || '',
-      examEnd: assessment?.examWindowEnd || '',
-      linkedEventId: assessment?.eventId || '',
+      examStart: linkedEvent?.start || '',
+      examEnd: linkedEvent?.end || linkedEvent?.start || '',
+      linkedEventId: linkedEvent?.id || '',
       rowsByCategory: buildDraftRows(items, 'scopeDetail'),
     };
   };
@@ -1905,7 +2415,13 @@ export default function CurriculumRoadmapView({
         ? current.periodOptions
         : [current.period].filter(Boolean);
       const nextPeriod = periodOptions.find((item) => item.code === periodCode) || periodOptions[0] || current.period;
-      setEditorDraft(buildSchoolEditorDraft(current.school, current.grade, nextPeriod?.code || '', periodOptions));
+      setEditorDraft(buildSchoolEditorDraft(
+        current.school,
+        current.grade,
+        nextPeriod?.code || '',
+        periodOptions,
+        editorDraft?.scheduleEventType,
+      ));
       return {
         ...current,
         period: nextPeriod,
@@ -1913,8 +2429,29 @@ export default function CurriculumRoadmapView({
     });
   };
 
+  const syncSchoolEditorEventType = (nextEventType) => {
+    setEditorDraft((current) => {
+      if (!activeEditor || activeEditor.tab !== 'school' || !current) {
+        return current;
+      }
+      const normalizedType = normalizeRoadmapEditorEventType(nextEventType, selectedSubject);
+      const periodCode = current.activePeriodCode || activeEditor.period?.code || '';
+      const assessment = activeEditor.school?.id
+        ? schoolAssessmentByKey.get(buildSchoolAssessmentKey(activeEditor.school.id, selectedYear, activeEditor.grade, periodCode))
+        : null;
+      const linkedEvent = assessment?.eventMetaByType?.get(normalizedType) || null;
+      return {
+        ...current,
+        scheduleEventType: normalizedType,
+        examStart: linkedEvent?.start || current.examStart || '',
+        examEnd: linkedEvent?.end || linkedEvent?.start || current.examEnd || current.examStart || '',
+        linkedEventId: linkedEvent?.id || '',
+      };
+    });
+  };
+
   useEffect(() => {
-    if (!activeEditor) {
+    if (!activeEditor || isMobile) {
       return undefined;
     }
 
@@ -1927,7 +2464,7 @@ export default function CurriculumRoadmapView({
 
     document.addEventListener('mousedown', handlePointer, true);
     return () => document.removeEventListener('mousedown', handlePointer, true);
-  }, [activeEditor]);
+  }, [activeEditor, isMobile]);
 
   const openSchoolEditor = (row, period, target, options = {}) => {
     const periodOptions = Array.isArray(options.periodOptions) && options.periodOptions.length > 0
@@ -2046,13 +2583,18 @@ export default function CurriculumRoadmapView({
   };
 
   const syncSchoolAssessmentEvent = async (school, grade, period, draft, fallbackSchool = null) => {
+    const eventType = normalizeRoadmapEditorEventType(draft?.scheduleEventType, selectedSubject);
     const eventStart = text(draft?.examStart || draft?.examEnd);
     const eventEnd = text(draft?.examEnd || draft?.examStart);
     const schoolRecord = school?.id ? school : fallbackSchool;
     const currentAssessment = schoolRecord?.id
       ? schoolAssessmentByKey.get(buildSchoolAssessmentKey(schoolRecord.id, selectedYear, grade, period.code))
       : null;
-    const existingEventId = text(draft?.linkedEventId || currentAssessment?.eventId);
+    const existingEventId = text(
+      draft?.linkedEventId ||
+      currentAssessment?.eventMetaByType?.get(eventType)?.id ||
+      (eventType === '시험기간' ? currentAssessment?.eventId : '')
+    );
 
     if (!eventStart) {
       if (existingEventId) {
@@ -2061,28 +2603,30 @@ export default function CurriculumRoadmapView({
       return;
     }
 
-    const eventColor = '#2f6f63';
+    const roadmapSubject = ROADMAP_EDITOR_EVENT_TYPE_BY_SUBJECT[selectedSubject] === eventType ? selectedSubject : '';
+    const eventColor = ROADMAP_EVENT_COLOR_BY_TYPE[eventType] || '#2f6f63';
     const roadmapMeta = {
       academicYear: Number(selectedYear) || new Date().getFullYear(),
       roadmapPeriodCode: period.code,
-      roadmapSubject: selectedSubject,
+      roadmapSubject,
       roadmapSync: {
         source: 'curriculum-roadmap',
-        kind: 'exam-window',
+        kind: 'schedule-event',
+        eventType,
         academicYear: Number(selectedYear) || new Date().getFullYear(),
         schoolId: schoolRecord?.id || '',
         grade,
         periodCode: period.code,
-        subject: selectedSubject,
+        subject: roadmapSubject,
       },
     };
 
     await dataService.bulkUpsertAcademicEvents([{
       id: existingEventId || createId(),
-      title: `${schoolRecord?.name || school?.name || ''} ${period.label} 시험기간`,
+      title: buildRoadmapScheduleEventTitle(schoolRecord?.name || school?.name || '', period.label, eventType),
       school: schoolRecord?.name || school?.name || '',
       schoolId: schoolRecord?.id || school?.id || null,
-      type: '시험기간',
+      type: eventType,
       start: eventStart,
       end: eventEnd,
       grade,
@@ -2268,6 +2812,226 @@ export default function CurriculumRoadmapView({
     popup.focus();
   };
 
+  const activePresetOptions = ACADEMY_VIEW_PRESET_OPTIONS;
+  const activePreset = academyViewPreset;
+  const setActivePreset = setAcademyViewPreset;
+  const activePresetLabel = activeTab === 'school'
+    ? SCHOOL_ANNUAL_BOARD_LABEL
+    : activePresetOptions.find((preset) => preset.value === activePreset)?.label || '';
+  const selectedAcademyClassLabel = selectedAcademyClass === ALL_CLASSES
+    ? '전체 수업'
+    : academyClassOptions.find((item) => item.id === selectedAcademyClass)?.label || '선택 수업';
+  const selectedSchoolPeriodLabel = selectedSchoolPeriod === ALL_PERIODS
+    ? '전체 시기'
+    : FIXED_PERIODS_KO.find((period) => period.code === selectedSchoolPeriod)?.label || selectedSchoolPeriod;
+  const selectedAcademyPeriodLabel = selectedAcademyPeriod === ALL_PERIODS
+    ? '전체 시기'
+    : academyPeriodOptions.find((period) => period.code === selectedAcademyPeriod)?.label || selectedAcademyPeriod;
+  const roadmapModeLabel = activeTab === 'school' ? '학교 기준' : '학원 기준';
+  const roadmapScopeLabel = activeTab === 'school'
+    ? (selectedSchool ? selectedSchool.name : '전체 학교')
+    : selectedAcademyClassLabel;
+  const roadmapSummaryTokens = activeTab === 'school'
+    ? [
+        selectedSchool ? selectedSchool.name : '전체 학교',
+        selectedSchoolGrade === ALL_GRADES ? '전체 학년' : selectedSchoolGrade,
+        selectedSchoolPeriodLabel,
+      ]
+    : [
+        selectedAcademyGrade === ALL_ACADEMY_GRADES ? '전체 학년' : selectedAcademyGrade,
+        selectedAcademyClassLabel,
+        selectedAcademyPeriodLabel,
+      ];
+  const roadmapSheetContextTokens = [`${selectedYear}년`, selectedSubject, activePresetLabel].filter(Boolean);
+  const roadmapFilterControls = (
+    <>
+      <div className="roadmap-filter-grid">
+        <label className="curriculum-filter-field">
+          <span>연도</span>
+          <select
+            className="styled-input"
+            data-testid="roadmap-filter-year-select"
+            value={selectedYear}
+            onChange={(event) => setSelectedYear(Number(event.target.value))}
+          >
+            {yearOptions.map((year) => (
+              <option key={year} value={year}>{year}년</option>
+            ))}
+          </select>
+        </label>
+        <label className="curriculum-filter-field">
+          <span>과목</span>
+          <select
+            className="styled-input"
+            data-testid="roadmap-filter-subject-select"
+            value={selectedSubject}
+            onChange={(event) => setSelectedSubject(event.target.value)}
+          >
+            {subjectOptions.map((subject) => (
+              <option key={subject} value={subject}>{subject}</option>
+            ))}
+          </select>
+        </label>
+
+        {activeTab === 'school' ? (
+          <>
+            <label className="curriculum-filter-field">
+              <span>학교 구분</span>
+              <select className="styled-input" value={selectedSchoolCategory} onChange={(event) => { setSelectedSchoolCategory(event.target.value); setSelectedSchoolKey(ALL_SCHOOLS); }}>
+                {SCHOOL_CATEGORY_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="curriculum-filter-field">
+              <span>학교</span>
+              <select className="styled-input" value={selectedSchoolKey} onChange={(event) => setSelectedSchoolKey(event.target.value)}>
+                <option value={ALL_SCHOOLS}>전체 학교</option>
+                {schoolOptions.map((school) => (
+                  <option key={schoolKey(school.name)} value={schoolKey(school.name)}>{school.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="curriculum-filter-field">
+              <span>학년</span>
+              <select className="styled-input" value={selectedSchoolGrade} onChange={(event) => setSelectedSchoolGrade(event.target.value)}>
+                <option value={ALL_GRADES}>전체 학년</option>
+                {schoolGradeOptions.map((grade) => (
+                  <option key={grade} value={grade}>{grade}</option>
+                ))}
+              </select>
+            </label>
+            <label className="curriculum-filter-field">
+              <span>시기</span>
+              <select className="styled-input" value={selectedSchoolPeriod} onChange={(event) => setSelectedSchoolPeriod(event.target.value)}>
+                <option value={ALL_PERIODS}>전체 시기</option>
+                {FIXED_PERIODS_KO.map((period) => (
+                  <option key={period.code} value={period.code}>{period.label}</option>
+                ))}
+              </select>
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="curriculum-filter-field">
+              <span>학원 학년</span>
+              <select className="styled-input" value={selectedAcademyGrade} onChange={(event) => { setSelectedAcademyGrade(event.target.value); setSelectedAcademyClass(ALL_CLASSES); }}>
+                <option value={ALL_ACADEMY_GRADES}>전체 학년</option>
+                {academyGradeOptions.map((grade) => (
+                  <option key={grade} value={grade}>{grade}</option>
+                ))}
+              </select>
+            </label>
+            <label className="curriculum-filter-field">
+              <span>수업</span>
+              <select className="styled-input" value={selectedAcademyClass} onChange={(event) => setSelectedAcademyClass(event.target.value)}>
+                <option value={ALL_CLASSES}>전체 수업</option>
+                {academyClassOptions.map((item) => (
+                  <option key={item.id} value={item.id}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="curriculum-filter-field">
+              <span>시기</span>
+              <select className="styled-input" value={selectedAcademyPeriod} onChange={(event) => setSelectedAcademyPeriod(event.target.value)}>
+                <option value={ALL_PERIODS}>전체 시기</option>
+                {academyPeriodOptions.map((period) => (
+                  <option key={period.code} value={period.code}>{period.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="curriculum-filter-field">
+              <span>표시 기준</span>
+              <select className="styled-input" value={academyScopeMode} onChange={(event) => setAcademyScopeMode(event.target.value)}>
+                <option value="priority">수업 우선</option>
+                <option value="class">수업만</option>
+                <option value="template">템플릿만</option>
+              </select>
+            </label>
+          </>
+        )}
+      </div>
+
+      {activeTab === 'school' ? (
+        <div className="roadmap-linked-filters" data-testid="roadmap-school-linked-filters">
+          <div className="roadmap-linked-filter-row">
+            <span className="roadmap-linked-filter-label">학사일정 표시</span>
+            <div className="roadmap-linked-filter-chips">
+              {ROADMAP_LINKED_EVENT_TYPES.map((type) => {
+                const active = visibleLinkedEventTypes.includes(type);
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    className={`action-chip ${active ? 'active' : ''}`}
+                    data-testid={`roadmap-event-filter-chip-${type}`}
+                    onClick={() => setVisibleLinkedEventTypes((current) => (
+                      current.includes(type)
+                        ? current.filter((value) => value !== type)
+                        : [...current, type]
+                    ))}
+                  >
+                    {type}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <button
+            type="button"
+            className={`action-chip ${hidePastLinkedEvents ? 'active' : ''}`}
+            data-testid="roadmap-hide-past-toggle"
+            onClick={() => setHidePastLinkedEvents((current) => !current)}
+          >
+            지나간 일정 숨기기
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === 'academy' ? <div className="roadmap-view-preset-row">
+        <div className="roadmap-view-preset-group">
+          <span className="roadmap-view-preset-label">보기 프리셋</span>
+          {activePresetOptions.map((preset) => (
+            <button
+              key={preset.value}
+              type="button"
+              className={`action-chip ${activePreset === preset.value ? 'active' : ''}`}
+              onClick={() => setActivePreset(preset.value)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div> : null}
+
+      {activeTab === 'academy' ? (
+        <div className="roadmap-custom-period-row">
+          <label className="curriculum-filter-field roadmap-custom-period-field">
+            <span>사용자 시기</span>
+            <input
+              className="styled-input"
+              value={customPeriodLabel}
+              onChange={(event) => setCustomPeriodLabel(event.target.value)}
+              placeholder="예: 봄방학 특강"
+              disabled={!canEdit}
+            />
+          </label>
+          <button type="button" className="action-chip" onClick={addCustomPeriod} disabled={!canEdit}>
+            <Plus size={14} />
+            시기 추가
+          </button>
+          <div className="roadmap-inline-banner">
+            학원 기준은 고정 시기 외에도 사용자 시기를 만들어 반별 운영과 진도를 함께 관리할 수 있습니다.
+          </div>
+        </div>
+      ) : (
+        <div className="roadmap-inline-banner">
+          학교 기준에서는 시험 시기별 교재, 범위, 메모를 한 화면에서 함께 관리합니다.
+        </div>
+      )}
+    </>
+  );
+
   const schoolReportTable = (() => {
     if (schoolViewPreset === 'school-by-grade') {
       const baseSchools = selectedSchool ? [selectedSchool] : schoolOptions;
@@ -2300,6 +3064,7 @@ export default function CurriculumRoadmapView({
                   <td key={grade} className="roadmap-cell">
                     <RoadmapCell
                       cell={buildSchoolCell(school, grade, schoolPeriodOptions)}
+                      testId={`roadmap-school-cell-${school.id || schoolKey(school.name)}-${grade}`}
                       onClick={(event) =>
                         handleOpenSchoolEditor(
                           { school, grade },
@@ -2320,7 +3085,7 @@ export default function CurriculumRoadmapView({
 
     if (schoolViewPreset === 'school-annual-board') {
       return (
-        <table className="roadmap-table roadmap-board-table">
+        <table className="roadmap-table roadmap-board-table" data-testid="roadmap-school-annual-board">
           <thead>
             <tr>
               <th className="roadmap-sticky-col">학교</th>
@@ -2351,30 +3116,78 @@ export default function CurriculumRoadmapView({
                   <strong>{row.school.name}</strong>
                   <span>{getSchoolCategoryLabel(row.school.category)}</span>
                 </th>
-                {row.gradeCells.map((cell) => (
-                  <td key={cell.grade} className="roadmap-cell">
-                    <RoadmapCell
-                      cell={cell.cell}
-                      onClick={(event) =>
-                        handleOpenSchoolEditor(
-                          { school: row.school, grade: cell.grade },
-                          null,
-                          event.currentTarget,
-                          { periodOptions: schoolPeriodOptions }
-                        )
-                      }
-                    />
-                  </td>
-                ))}
+                {row.gradeCells.map((cell) => {
+                  const linkedEvents = filterLinkedRoadmapEvents(
+                    cell.cell.sections.flatMap((section) => section.linkedEvents || [])
+                  );
+                  return (
+                    <td key={cell.grade} className="roadmap-cell">
+                      <RoadmapCell
+                        cell={cell.cell}
+                        testId={`roadmap-school-board-cell-${row.id}-${cell.grade}`}
+                        highlighted={isFocusedGradeCell(row.school, cell.grade)}
+                        actions={linkedEvents.length > 0 ? (
+                          <button
+                            type="button"
+                            className="roadmap-inline-icon-button"
+                            data-testid={`roadmap-calendar-link-grade-${row.id}-${cell.grade}`}
+                            aria-label="학사일정 열기"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openAcademicCalendarForLinkedEvents(linkedEvents, {
+                                title: `${row.school.name} ${cell.grade} 학사일정`,
+                                schoolId: row.school.id,
+                                schoolKey: schoolKey(row.school.name),
+                                schoolName: row.school.name,
+                                schoolCategory: row.school.category,
+                                grade: cell.grade,
+                              });
+                            }}
+                          >
+                            <CalendarDays size={14} />
+                          </button>
+                        ) : null}
+                        onClick={(event) =>
+                          handleOpenSchoolEditor(
+                            { school: row.school, grade: cell.grade },
+                            null,
+                            event.currentTarget,
+                            { periodOptions: schoolPeriodOptions }
+                          )
+                        }
+                      />
+                    </td>
+                  );
+                })}
                 {row.scheduleGroups.map((group) => (
                   <td key={group.key} className="roadmap-cell roadmap-schedule-cell">
-                    <div className="roadmap-cell-static">
+                    <div className={`roadmap-cell-static ${isFocusedScheduleCell(row.school, group.key) ? 'is-linked-focus' : ''}`.trim()}>
+                      <div className="roadmap-cell-actions">
+                        {group.entries.length > 0 ? (
+                          <button
+                            type="button"
+                            className="roadmap-inline-icon-button"
+                            data-testid={`roadmap-calendar-link-schedule-${row.id}-${group.key}`}
+                            aria-label="학사일정 열기"
+                            onClick={() => openAcademicCalendarForLinkedEvents(group.entries, {
+                              title: `${row.school.name} ${group.label}`,
+                              schoolId: row.school.id,
+                              schoolKey: schoolKey(row.school.name),
+                              schoolName: row.school.name,
+                              schoolCategory: row.school.category,
+                              grade: group.entries[0]?.gradeValues?.[0] || '',
+                            })}
+                          >
+                            <CalendarDays size={14} />
+                          </button>
+                        ) : null}
+                      </div>
                       {group.entries.length === 0 ? (
                         <div className="roadmap-cell-empty">연동 일정 없음</div>
                       ) : (
                         <div className="roadmap-schedule-list">
                           {group.entries.map((entry) => (
-                            <div key={entry} className="roadmap-schedule-item">{entry}</div>
+                            <div key={entry.id || entry.summary} className="roadmap-schedule-item">{entry.summary}</div>
                           ))}
                         </div>
                       )}
@@ -2417,6 +3230,7 @@ export default function CurriculumRoadmapView({
                 <td key={period.code} className="roadmap-cell">
                   <RoadmapCell
                     cell={buildSchoolCell(row.school, row.grade, [period])}
+                    testId={`roadmap-school-cell-${row.id}-${period.code}`}
                     onClick={(event) => handleOpenSchoolEditor(row, period, event.currentTarget)}
                   />
                 </td>
@@ -2462,6 +3276,7 @@ export default function CurriculumRoadmapView({
                 <td key={cell.key} className="roadmap-cell">
                   <RoadmapCell
                     cell={cell.cell}
+                    testId={`roadmap-academy-cell-${cell.key}`}
                     disabled={!cell.editable}
                     onClick={cell.editable ? (event) => openAcademyEditor(cell.row, cell.period, event.currentTarget) : undefined}
                   />
@@ -2517,10 +3332,52 @@ export default function CurriculumRoadmapView({
           ))}
         </div>
 
+        {isMobile ? (
+          <div className="card-custom roadmap-mobile-summary" data-testid="roadmap-mobile-summary">
+            <div className="roadmap-mobile-summary-head">
+              <div>
+                <div className="roadmap-mobile-summary-eyebrow">{selectedYear}년 · {selectedSubject}</div>
+                <strong className="roadmap-mobile-summary-title">
+                  {activeTab === 'school' ? '학교 기준' : '학원 기준'} · {activePresetLabel}
+                </strong>
+              </div>
+              <div className="roadmap-mobile-summary-actions">
+                <button
+                  type="button"
+                  className="action-chip"
+                  data-testid="roadmap-filter-button"
+                  onClick={() => setIsMobileFilterSheetOpen(true)}
+                >
+                  필터
+                </button>
+                <button type="button" className="action-chip" onClick={printReport}>
+                  PDF
+                </button>
+              </div>
+            </div>
+            <div className="roadmap-mobile-summary-copy">
+              {`${roadmapModeLabel} · ${roadmapScopeLabel}`}
+            </div>
+            <div className="roadmap-mobile-summary-actions">
+              <span className="roadmap-mobile-summary-badge">{activePresetLabel}</span>
+            </div>
+            <div className="roadmap-mobile-summary-chips">
+              {roadmapSummaryTokens.map((token) => (
+                <span key={token} className="roadmap-mobile-summary-chip">{token}</span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="roadmap-filter-grid">
           <label className="curriculum-filter-field">
             <span>연도</span>
-            <select className="styled-input" value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+            <select
+              className="styled-input"
+              data-testid="roadmap-filter-year-select"
+              value={selectedYear}
+              onChange={(event) => setSelectedYear(Number(event.target.value))}
+            >
               {yearOptions.map((year) => (
                 <option key={year} value={year}>{year}년</option>
               ))}
@@ -2528,7 +3385,12 @@ export default function CurriculumRoadmapView({
           </label>
           <label className="curriculum-filter-field">
             <span>과목</span>
-            <select className="styled-input" value={selectedSubject} onChange={(event) => setSelectedSubject(event.target.value)}>
+            <select
+              className="styled-input"
+              data-testid="roadmap-filter-subject-select"
+              value={selectedSubject}
+              onChange={(event) => setSelectedSubject(event.target.value)}
+            >
               {subjectOptions.map((subject) => (
                 <option key={subject} value={subject}>{subject}</option>
               ))}
@@ -2614,7 +3476,43 @@ export default function CurriculumRoadmapView({
           )}
         </div>
 
-        <div className="roadmap-view-preset-row">
+        {activeTab === 'school' ? (
+          <div className="roadmap-linked-filters" data-testid="roadmap-school-linked-filters">
+            <div className="roadmap-linked-filter-row">
+              <span className="roadmap-linked-filter-label">학사일정 표시</span>
+              <div className="roadmap-linked-filter-chips">
+                {ROADMAP_LINKED_EVENT_TYPES.map((type) => {
+                  const active = visibleLinkedEventTypes.includes(type);
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      className={`action-chip ${active ? 'active' : ''}`}
+                      data-testid={`roadmap-event-filter-chip-${type}`}
+                      onClick={() => setVisibleLinkedEventTypes((current) => (
+                        current.includes(type)
+                          ? current.filter((value) => value !== type)
+                          : [...current, type]
+                      ))}
+                    >
+                      {type}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <button
+              type="button"
+              className={`action-chip ${hidePastLinkedEvents ? 'active' : ''}`}
+              data-testid="roadmap-hide-past-toggle"
+              onClick={() => setHidePastLinkedEvents((current) => !current)}
+            >
+              지나간 일정 숨기기
+            </button>
+          </div>
+        ) : null}
+
+        {activeTab === 'academy' ? <div className="roadmap-view-preset-row">
           <div className="roadmap-view-preset-group">
             <span className="roadmap-view-preset-label">보기 프리셋</span>
             {(activeTab === 'school' ? SCHOOL_VIEW_PRESET_OPTIONS : ACADEMY_VIEW_PRESET_OPTIONS).map((preset) => {
@@ -2632,7 +3530,7 @@ export default function CurriculumRoadmapView({
               );
             })}
           </div>
-        </div>
+        </div> : null}
 
         {activeTab === 'academy' ? (
           <div className="roadmap-custom-period-row">
@@ -2659,6 +3557,36 @@ export default function CurriculumRoadmapView({
             학교 기준 표는 시험 시기별 교과서·부교재·기타 자료와 시험범위를 한 셀에서 함께 관리합니다.
           </div>
         )}
+
+        <BottomSheet
+          open={Boolean(isMobile && isMobileFilterSheetOpen)}
+          onClose={() => setIsMobileFilterSheetOpen(false)}
+          title="로드맵 필터"
+          subtitle="연도, 과목, 보기 프리셋과 범위를 한 번에 조정합니다."
+          maxWidth={720}
+          testId="roadmap-filter-sheet"
+        >
+          <div className="roadmap-mobile-sheet-stack">
+            <div className="roadmap-mobile-context-card" data-testid="roadmap-mobile-context-card">
+              <div className="roadmap-mobile-context-head">
+                <div>
+                  <span className="academic-section-caption">현재 기준</span>
+                  <strong>{roadmapModeLabel}</strong>
+                </div>
+                <span className="roadmap-mobile-summary-badge">{roadmapScopeLabel}</span>
+              </div>
+              <div className="roadmap-mobile-context-copy">
+                연도, 과목, 보기 프리셋을 먼저 맞춘 뒤 필요한 셀만 바로 편집하면 됩니다.
+              </div>
+              <div className="roadmap-mobile-summary-chips">
+                {roadmapSheetContextTokens.map((token) => (
+                  <span key={token} className="roadmap-mobile-summary-chip">{token}</span>
+                ))}
+              </div>
+            </div>
+            {roadmapFilterControls}
+          </div>
+        </BottomSheet>
 
         <div className="roadmap-report-scroll">
           <div ref={reportRef} className="roadmap-report-sheet">
@@ -2762,21 +3690,69 @@ export default function CurriculumRoadmapView({
         </div>
       </section>
 
+      <BottomSheet
+        open={Boolean(calendarEventPicker)}
+        onClose={() => setCalendarEventPicker(null)}
+        title={calendarEventPicker?.title || '연결된 학사일정'}
+        subtitle={calendarEventPicker?.subtitle || '열어볼 일정을 선택해 주세요.'}
+        maxWidth={480}
+        testId="roadmap-calendar-event-picker"
+      >
+        <div className="roadmap-calendar-picker-list">
+          {(calendarEventPicker?.events || []).map((event) => (
+            <button
+              key={event.id || event.summary}
+              type="button"
+              className="roadmap-calendar-picker-item"
+              data-testid={`roadmap-calendar-event-option-${event.id}`}
+              onClick={() => {
+                onOpenAcademicCalendar?.(buildAcademicCalendarIntentFromLinkedEvent(event, calendarEventPicker?.context));
+                setCalendarEventPicker(null);
+              }}
+            >
+              <strong>{event.title}</strong>
+              <span>{event.summary}</span>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
+
       <div ref={editorRef}>
-        <RoadmapCellEditorV2
-          activeEditor={activeEditor}
-          editorDraft={editorDraft}
-          textbookSuggestions={textbookSuggestions}
-          isSaving={isSaving}
-          onClose={closeEditor}
-          onChangeSchoolPeriod={syncSchoolEditorPeriod}
-          onChangeNote={(value) => setEditorDraft((current) => ({ ...current, note: value }))}
-          onChangeExamRange={(patch) => setEditorDraft((current) => ({ ...current, ...patch }))}
-          onChangeRow={updateEditorRow}
-          onAddRow={addEditorRow}
-          onRemoveRow={removeEditorRow}
-          onSave={saveActiveEditor}
-        />
+        {isMobile ? (
+          <RoadmapCellEditorMobileSheet
+            activeEditor={activeEditor}
+            editorDraft={editorDraft}
+            textbookSuggestions={textbookSuggestions}
+            isSaving={isSaving}
+            onClose={closeEditor}
+            onChangeSchoolPeriod={syncSchoolEditorPeriod}
+            onChangeScheduleEventType={syncSchoolEditorEventType}
+            onChangeNote={(value) => setEditorDraft((current) => ({ ...current, note: value }))}
+            onChangeExamRange={(patch) => setEditorDraft((current) => ({ ...current, ...patch }))}
+            onChangeRow={updateEditorRow}
+            onAddRow={addEditorRow}
+            onRemoveRow={removeEditorRow}
+            onSave={saveActiveEditor}
+            scheduleTypeOptions={getRoadmapEditorEventTypeOptions(selectedSubject)}
+          />
+        ) : (
+          <RoadmapCellEditorV2
+            activeEditor={activeEditor}
+            editorDraft={editorDraft}
+            textbookSuggestions={textbookSuggestions}
+            isSaving={isSaving}
+            onClose={closeEditor}
+            onChangeSchoolPeriod={syncSchoolEditorPeriod}
+            onChangeScheduleEventType={syncSchoolEditorEventType}
+            onChangeNote={(value) => setEditorDraft((current) => ({ ...current, note: value }))}
+            onChangeExamRange={(patch) => setEditorDraft((current) => ({ ...current, ...patch }))}
+            onChangeRow={updateEditorRow}
+            onAddRow={addEditorRow}
+            onRemoveRow={removeEditorRow}
+            onSave={saveActiveEditor}
+            scheduleTypeOptions={getRoadmapEditorEventTypeOptions(selectedSubject)}
+          />
+        )}
       </div>
 
       <ConfirmDialog {...dialogProps} />

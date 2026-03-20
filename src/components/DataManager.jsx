@@ -432,6 +432,7 @@ export default function DataManager({
             teacherMaster={teacherMaster}
             classroomMaster={classroomMaster}
             subjectOptions={resourceSubjectOptions}
+            classTerms={safeData.classTerms}
             onManageTeachers={() => setIsTeacherManagerOpen(true)}
             onManageClassrooms={() => setIsClassroomManagerOpen(true)}
             onManageTerms={onOpenTermManager}

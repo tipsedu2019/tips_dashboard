@@ -1,3 +1,4 @@
+import { useEffect, useId } from 'react';
 import { X } from 'lucide-react';
 import useViewport from '../../hooks/useViewport';
 
@@ -9,9 +10,35 @@ export default function BottomSheet({
   children,
   actions = null,
   maxWidth = 620,
-  fullHeightOnMobile = true,
+  fullHeightOnMobile = false,
+  closeLabel = '닫기',
+  testId = '',
 }) {
   const { isMobile } = useViewport();
+  const titleId = useId();
+  const subtitleId = useId();
+
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose?.();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose, open]);
 
   if (!open) return null;
 
@@ -19,62 +46,26 @@ export default function BottomSheet({
     <div
       onClick={onClose}
       role="presentation"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1700,
-        background: 'rgba(15, 23, 42, 0.42)',
-        backdropFilter: 'blur(6px)',
-        display: 'flex',
-        alignItems: isMobile ? 'flex-end' : 'center',
-        justifyContent: 'center',
-        padding: isMobile ? 0 : 20,
-      }}
+      className={`bottom-sheet-overlay ${isMobile ? 'is-mobile' : 'is-desktop'}`}
     >
       <div
-        className="card animate-in"
+        className={`card animate-in bottom-sheet-shell ${isMobile ? 'is-mobile' : 'is-desktop'} ${isMobile && fullHeightOnMobile ? 'is-full-height' : ''}`}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={subtitle ? subtitleId : undefined}
+        data-testid={testId || undefined}
         onClick={(event) => event.stopPropagation()}
         style={{
           width: isMobile ? '100%' : `min(${maxWidth}px, calc(100vw - 40px))`,
-          maxWidth: '100%',
-          maxHeight: isMobile ? '100vh' : 'min(88vh, 920px)',
-          height: isMobile && fullHeightOnMobile ? 'min(96vh, 100vh)' : 'auto',
-          borderRadius: isMobile ? '28px 28px 0 0' : 28,
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
         }}
       >
-        <div
-          style={{
-            padding: isMobile ? '12px 18px 14px' : '18px 22px',
-            borderBottom: '1px solid var(--border-color)',
-            background: 'var(--bg-surface)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: 12,
-            alignItems: 'flex-start',
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            {isMobile ? (
-              <div
-                style={{
-                  width: 48,
-                  height: 5,
-                  borderRadius: 999,
-                  background: 'rgba(15, 23, 42, 0.12)',
-                  margin: '0 auto 12px',
-                }}
-              />
-            ) : null}
-            <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--text-primary)' }}>{title}</div>
+        <div className={`bottom-sheet-header ${isMobile ? 'is-mobile' : 'is-desktop'}`}>
+          <div className="bottom-sheet-header-copy">
+            {isMobile ? <div className="bottom-sheet-handle" /> : null}
+            <div className="bottom-sheet-title" id={titleId}>{title}</div>
             {subtitle ? (
-              <div style={{ marginTop: 4, fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-                {subtitle}
-              </div>
+              <div className="bottom-sheet-subtitle" id={subtitleId}>{subtitle}</div>
             ) : null}
           </div>
 
@@ -82,25 +73,19 @@ export default function BottomSheet({
             type="button"
             className="btn-icon bottom-sheet-close"
             onClick={onClose}
-            aria-label="닫기"
-            title="닫기"
+            aria-label={closeLabel}
+            title={closeLabel}
           >
             <X size={20} />
           </button>
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 16 : 20 }}>
+        <div className={`bottom-sheet-body ${isMobile ? 'is-mobile' : 'is-desktop'}`}>
           {children}
         </div>
 
         {actions ? (
-          <div
-            style={{
-              padding: isMobile ? 16 : 18,
-              borderTop: '1px solid var(--border-color)',
-              background: 'var(--bg-surface)',
-            }}
-          >
+          <div className={`bottom-sheet-footer ${isMobile ? 'is-mobile' : 'is-desktop'}`}>
             {actions}
           </div>
         ) : null}

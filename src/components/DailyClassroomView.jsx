@@ -4,10 +4,7 @@ import { ArrowLeft, Calendar, Camera } from 'lucide-react';
 import {
   DAY_LABELS,
   generateTimeSlots,
-  getClassroomCanonicalKey,
-  parseSchedule,
   stripClassPrefix,
-  timeToSlotIndex,
 } from '../data/sampleData';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -25,19 +22,13 @@ import {
   validateQuickCreateDraft,
 } from '../lib/quickClassSchedule';
 import {
-  buildTimetableTooltip,
-  canTeacherOpenClass,
   collectGradeOptions,
   computeTimetableWindow,
   formatCollapsedTimeHint,
-  getClassColor,
-  getClassMeta,
   getTimetableCompareGridStyle,
   getTimetableDensity,
   getTimetableSlotHeight,
   rebaseBlocksToWindow,
-  resolveSlotClassroom,
-  resolveSlotTeachers,
   toggleCompareSelection,
 } from './timetableViewUtils';
 import {
@@ -48,11 +39,13 @@ import {
 } from '../lib/resourceCatalogs';
 import {
   applySlotMove,
-  buildEditableSlots,
   findScheduleConflicts,
   findQuickCreateConflicts,
-  isEditableScheduleClass,
 } from '../lib/timetableEditing';
+import {
+  buildDailyClassroomBlocks,
+  buildTimetableScheduleIndex,
+} from '../lib/timetableScheduleIndex';
 
 const ALL_DAYS = '__all_days__';
 
@@ -84,9 +77,7 @@ export default function DailyClassroomView({
   terms = [],
   embedded = false,
   floatingFilters = false,
-  subjectOptions = [],
-  selectedSubject = '\uC804\uCCB4',
-  onSelectSubject = () => {},
+  selectedClassroomNames = [],
 }) {
   const { isMobile } = useViewport();
   const toast = useToast();
@@ -111,10 +102,17 @@ export default function DailyClassroomView({
     () => buildClassroomMaster(data?.classroomCatalogs, allClasses),
     [allClasses, data?.classroomCatalogs]
   );
-  const classroomEntries = useMemo(
+  const allClassroomEntries = useMemo(
     () => classroomMaster.filter((entry) => entry.isVisible !== false).map((entry) => ({ key: entry.key, label: entry.name })),
     [classroomMaster]
   );
+  const classroomEntries = useMemo(() => {
+    if (!Array.isArray(selectedClassroomNames) || selectedClassroomNames.length === 0) {
+      return allClassroomEntries;
+    }
+    const selectedNameSet = new Set(selectedClassroomNames);
+    return allClassroomEntries.filter((entry) => selectedNameSet.has(entry.label));
+  }, [allClassroomEntries, selectedClassroomNames]);
   const teacherOptions = useMemo(
     () => teacherMaster.filter((entry) => entry.isVisible !== false).map((entry) => entry.name),
     [teacherMaster]
@@ -123,13 +121,23 @@ export default function DailyClassroomView({
     subjects: getResourceSubjectOptions([...teacherMaster, ...classroomMaster], allClasses),
     grades: collectGradeOptions(allClasses),
     teachers: teacherOptions,
-    classrooms: classroomEntries.map((entry) => entry.label),
+    classrooms: allClassroomEntries.map((entry) => entry.label),
     teacherOptionsBySubject: getSubjectOptionMap(teacherMaster),
     classroomOptionsBySubject: getSubjectOptionMap(classroomMaster),
-  }), [allClasses, classroomEntries, classroomMaster, teacherMaster, teacherOptions]);
+  }), [allClassroomEntries, allClasses, classroomMaster, teacherMaster, teacherOptions]);
   const classroomIndexMap = useMemo(() => new Map(classroomEntries.map((entry, index) => [entry.key, index])), [classroomEntries]);
   const canEditTimetable = Boolean(isStaff);
   const canExportImage = selectedDay !== ALL_DAYS;
+  const scheduleIndex = useMemo(
+    () => buildTimetableScheduleIndex(classes, {
+      canEditTimetable,
+      isStaff,
+      isTeacher,
+      user,
+      timeSlotCount: timeSlots.length,
+    }),
+    [classes, canEditTimetable, isStaff, isTeacher, timeSlots.length, user]
+  );
 
   useEffect(() => {
     if (!isMobile) {
@@ -187,52 +195,8 @@ export default function DailyClassroomView({
   }, []);
 
   const buildBlocksForDay = useCallback(
-    (targetDay) =>
-      classes.flatMap((cls, colorIndex) => {
-        const meta = getClassMeta(cls);
-        const editableState = isEditableScheduleClass(cls);
-        const editableSlots = buildEditableSlots(cls);
-
-        return parseSchedule(cls.schedule, cls).flatMap((slot, slotIndex) => {
-          if (slot.day !== targetDay) return [];
-
-          const classroom = resolveSlotClassroom(cls, slot);
-          const classroomKey = getClassroomCanonicalKey(classroom);
-          const columnIndex = classroomIndexMap.get(classroomKey);
-          if (!classroomKey || columnIndex === undefined) return [];
-
-          const teacherNames = resolveSlotTeachers(cls, slot);
-          const primaryTeacher = teacherNames[0] || cls.teacher || '-';
-          const canOpen = canTeacherOpenClass({ isStaff, isTeacher, user, teacherNames });
-          const palette = getClassColor(colorIndex);
-          const startSlot = Math.max(0, timeToSlotIndex(slot.start, 11));
-          const endSlot = Math.max(Math.min(timeToSlotIndex(slot.end, 11), timeSlots.length), startSlot + 1);
-          const editSlot = editableSlots[slotIndex];
-
-          return [{
-            key: `${cls.id}-${targetDay}-${classroomKey}-${slot.start}-${slot.end}`,
-            columnIndex,
-            startSlot,
-            endSlot,
-            backgroundColor: palette.bg,
-            borderColor: palette.border,
-            textColor: palette.text,
-            clickable: canOpen,
-            editable: canEditTimetable && editableState.editable,
-            editableReason: editableState.reason,
-            editData: editSlot ? { classItem: cls, slotId: editSlot.slotId, teacher: primaryTeacher, classroom } : null,
-            onClick: () => canOpen && setSelectedClassForDetails(cls),
-            variantDot: Boolean(meta.hasVariants),
-            variantDotTitle: editableState.editable ? '드래그로 이동할 수 있습니다.' : editableState.reason,
-            header: cls.subject ? `[${cls.subject}]` : '',
-            title: stripClassPrefix(cls.className),
-            sourceDay: slot.day,
-            detailLines: [{ label: '\uC120\uC0DD\uB2D8', value: primaryTeacher }],
-            tooltip: buildTimetableTooltip({ cls, teacher: primaryTeacher, classroom, meta }),
-          }];
-        });
-      }),
-    [classes, classroomIndexMap, canEditTimetable, isStaff, isTeacher, timeSlots.length, user]
+    (targetDay) => buildDailyClassroomBlocks(scheduleIndex, targetDay, classroomIndexMap, setSelectedClassForDetails),
+    [classroomIndexMap, scheduleIndex]
   );
 
   const targetsToRender = useMemo(() => {
@@ -553,15 +517,19 @@ export default function DailyClassroomView({
         floatingPanelTarget
       )}
       {isMobile ? (
-      <div className={`filter-bar ${floatingFilters ? 'filter-bar-floating' : 'timetable-axis-filter'}`} style={{ display: !isMobile && floatingFilters ? 'none' : undefined }}>
-        <div className="h-segment-container">
-          {dayTabs.map((dayLabel) => (
-            <button key={dayLabel} className={`h-segment-btn ${selectedDay === dayLabel ? 'active' : ''}`} onClick={() => setSelectedDay(dayLabel)}>
-              {dayLabel === ALL_DAYS ? '전체 보기' : `${dayLabel}요일`}
-            </button>
-          ))}
+        <div className="timetable-mobile-axis-picker" data-testid="daily-classroom-axis-picker">
+          <div className="timetable-mobile-axis-picker-head">
+            <span className="timetable-mobile-axis-picker-label">요일 선택</span>
+            <strong>{selectedDay === ALL_DAYS ? '전체 보기' : `${selectedDay}요일`}</strong>
+          </div>
+          <div className="h-segment-container timetable-mobile-axis-rail">
+            {dayTabs.map((dayLabel) => (
+              <button key={dayLabel} className={`h-segment-btn ${selectedDay === dayLabel ? 'active' : ''}`} onClick={() => setSelectedDay(dayLabel)}>
+                {dayLabel === ALL_DAYS ? '전체 보기' : `${dayLabel}요일`}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
       ) : null}
       {!isMobile ? (() => {
         const allDayKeys = [...DAY_LABELS];
@@ -607,6 +575,7 @@ export default function DailyClassroomView({
         <div ref={scheduleRef} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <MobileAgendaTimetable
             title={selectedDay === ALL_DAYS ? '\uC77C\uBCC4 \uAC15\uC758\uC2E4 \uC2DC\uAC04\uD45C' : selectedDay + '\uC694\uC77C \uAC15\uC758\uC2E4 \uC2DC\uAC04\uD45C'}
+            subtitle="요일을 먼저 고른 뒤 강의실별 일정을 빠르게 넘겨봅니다."
             options={classroomEntries.map((entry) => ({ key: entry.key, label: entry.label }))}
             selectedKey={selectedMobileClassroom}
             onSelectKey={setSelectedMobileClassroom}
@@ -617,6 +586,7 @@ export default function DailyClassroomView({
             onCreateSelection={handleCreateSelection}
             onMoveBlock={handleMoveBlock}
             onBlockClick={(block) => block.onClick?.()}
+            dataTestId="daily-classroom-mobile-agenda"
           />
         </div>
       ) : (

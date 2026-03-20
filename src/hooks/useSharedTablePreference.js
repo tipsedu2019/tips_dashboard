@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 function serialize(value) {
   try {
@@ -13,6 +13,7 @@ export function useSharedTablePreference({ storageKey, dataService, canPersist }
   const [isHydrated, setIsHydrated] = useState(false);
   const [pendingState, setPendingState] = useState(null);
   const lastSavedRef = useRef('');
+  const pendingSignatureRef = useRef('');
 
   useEffect(() => {
     let active = true;
@@ -35,6 +36,8 @@ export function useSharedTablePreference({ storageKey, dataService, canPersist }
         const nextState = preference?.value || preference || null;
         setExternalState(nextState);
         lastSavedRef.current = serialize(nextState);
+        pendingSignatureRef.current = serialize(nextState);
+        setPendingState(null);
         setIsHydrated(true);
       })
       .catch(() => {
@@ -42,6 +45,8 @@ export function useSharedTablePreference({ storageKey, dataService, canPersist }
           return;
         }
         setExternalState(null);
+        pendingSignatureRef.current = '';
+        setPendingState(null);
         setIsHydrated(true);
       });
 
@@ -64,7 +69,10 @@ export function useSharedTablePreference({ storageKey, dataService, canPersist }
       try {
         await dataService.setAppPreference(storageKey, pendingState);
         lastSavedRef.current = nextSerialized;
+        pendingSignatureRef.current = nextSerialized;
+        setPendingState(null);
       } catch {
+        pendingSignatureRef.current = '';
         // Local storage fallback remains active in useDataTableControls.
       }
     }, 400);
@@ -72,9 +80,23 @@ export function useSharedTablePreference({ storageKey, dataService, canPersist }
     return () => window.clearTimeout(timer);
   }, [canPersist, dataService, isHydrated, pendingState, storageKey]);
 
+  const queuePersist = useCallback((nextState) => {
+    const nextSerialized = serialize(nextState);
+    if (!nextSerialized) {
+      return;
+    }
+
+    if (nextSerialized === lastSavedRef.current || nextSerialized === pendingSignatureRef.current) {
+      return;
+    }
+
+    pendingSignatureRef.current = nextSerialized;
+    setPendingState(nextState);
+  }, []);
+
   return {
     externalState,
     isHydrated,
-    queuePersist: setPendingState,
+    queuePersist,
   };
 }

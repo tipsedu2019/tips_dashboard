@@ -626,7 +626,7 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
         <MetricCard
           icon={<Layout size={22} />}
           title={"\uC6B4\uC601 \uC218\uC5C5"}
-          value={`${stats.totalClasses}개`}
+          value={<span data-testid="stats-total-classes">{`${stats.totalClasses}개`}</span>}
           caption={`주간 총 ${formatHours(stats.totalWeeklyMinutes)} 운영 중`}
           collapsed={collapsedPanels.classes}
           onToggle={() => togglePanel('classes')}

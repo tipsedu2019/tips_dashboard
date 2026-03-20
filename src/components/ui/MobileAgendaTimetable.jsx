@@ -33,6 +33,7 @@ function buildVisibleRows(timeSlots, blocks, selectedIndex) {
 
 export default function MobileAgendaTimetable({
   title,
+  subtitle = '',
   options,
   selectedKey,
   onSelectKey,
@@ -43,6 +44,7 @@ export default function MobileAgendaTimetable({
   onCreateSelection,
   onMoveBlock,
   onBlockClick,
+  dataTestId = '',
 }) {
   const [moveModeBlockKey, setMoveModeBlockKey] = useState(null);
   const longPressTimer = useRef(null);
@@ -94,10 +96,18 @@ export default function MobileAgendaTimetable({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ fontSize: 16, fontWeight: 900 }}>{title}</div>
+    <div className="mobile-agenda-shell" data-testid={dataTestId || undefined} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="mobile-agenda-head" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="mobile-agenda-copy" style={{ display: 'grid', gap: subtitle ? 4 : 0 }}>
+          <div className="mobile-agenda-title" style={{ fontSize: 16, fontWeight: 900 }}>{title}</div>
+          {subtitle ? (
+            <div className="mobile-agenda-subtitle" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+              {subtitle}
+            </div>
+          ) : null}
+        </div>
         <div
+          className="mobile-agenda-option-rail"
           style={{
             display: 'flex',
             gap: 8,
@@ -124,24 +134,25 @@ export default function MobileAgendaTimetable({
 
       {movingBlock ? (
         <div
+          className="mobile-agenda-move-banner"
           style={{
-            padding: '10px 14px',
+            padding: '9px 12px',
             borderRadius: 16,
             background: 'rgba(33, 110, 78, 0.08)',
             border: '1px solid rgba(33, 110, 78, 0.18)',
             color: 'var(--accent-color)',
-            fontSize: 13,
+            fontSize: 12,
             fontWeight: 700,
           }}
         >
-          블록 이동 중입니다. 원하는 빈 시간칸을 눌러 이동하고, 다시 길게 누르면 취소됩니다.
+          이동 모드입니다. 빈 시간칸을 눌러 옮기고, 다시 길게 누르면 취소됩니다.
         </div>
       ) : null}
 
       <div
-        className="card-custom"
+        className="card-custom mobile-agenda-grid"
         style={{
-          borderRadius: 24,
+          borderRadius: 22,
           overflow: 'hidden',
         }}
       >
@@ -151,21 +162,23 @@ export default function MobileAgendaTimetable({
           return (
             <div
               key={`${selectedKey}-${row.slotIndex}`}
+              className="mobile-agenda-row"
               style={{
                 display: 'grid',
-                gridTemplateColumns: '72px minmax(0, 1fr)',
-                gap: 12,
-                padding: '10px 14px',
+                gridTemplateColumns: '58px minmax(0, 1fr)',
+                gap: 10,
+                padding: '8px 12px',
                 alignItems: 'stretch',
                 borderBottom: '1px solid var(--border-color)',
               }}
             >
               <div
+                className="mobile-agenda-time"
                 style={{
                   fontSize: 12,
                   fontWeight: 800,
                   color: 'var(--text-muted)',
-                  paddingTop: 8,
+                  paddingTop: 6,
                 }}
               >
                 {row.label}
@@ -174,13 +187,14 @@ export default function MobileAgendaTimetable({
               {block ? (
                 <button
                   type="button"
+                  className="mobile-agenda-block"
                   onClick={() => onBlockClick?.(block)}
                   onPointerDown={() => startLongPress(block)}
                   onPointerUp={stopLongPress}
                   onPointerLeave={stopLongPress}
                   style={{
-                    padding: 14,
-                    borderRadius: 18,
+                    padding: 12,
+                    borderRadius: 16,
                     border: `1px solid ${block.borderColor || 'rgba(0,0,0,0.08)'}`,
                     background: block.backgroundColor || 'var(--bg-surface-hover)',
                     color: block.textColor || 'var(--text-primary)',
@@ -196,7 +210,7 @@ export default function MobileAgendaTimetable({
                       {block.header ? (
                         <div style={{ fontSize: 11, fontWeight: 900, opacity: 0.9 }}>{block.header}</div>
                       ) : null}
-                      <div style={{ marginTop: 2, fontSize: 15, fontWeight: 900, lineHeight: 1.25 }}>{block.title}</div>
+                      <div style={{ marginTop: 2, fontSize: 14, fontWeight: 900, lineHeight: 1.28 }}>{block.title}</div>
                     </div>
                     {editable && block.editable ? (
                       <span
@@ -204,7 +218,7 @@ export default function MobileAgendaTimetable({
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 4,
-                          fontSize: 11,
+                          fontSize: 10,
                           fontWeight: 800,
                           opacity: 0.82,
                           whiteSpace: 'nowrap',
@@ -218,7 +232,7 @@ export default function MobileAgendaTimetable({
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {block.detailLines?.map((line) => (
-                      <div key={`${block.key}-${line.label}`} style={{ fontSize: 12, fontWeight: line.subtle ? 600 : 700, opacity: line.subtle ? 0.78 : 0.95 }}>
+                      <div key={`${block.key}-${line.label}`} style={{ fontSize: 11, lineHeight: 1.45, fontWeight: line.subtle ? 600 : 700, opacity: line.subtle ? 0.78 : 0.95 }}>
                         {line.value}
                       </div>
                     ))}
@@ -227,6 +241,7 @@ export default function MobileAgendaTimetable({
               ) : editable ? (
                 <button
                   type="button"
+                  className="mobile-agenda-empty"
                   onClick={() => {
                     if (movingBlock) {
                       onMoveBlock?.({
@@ -245,8 +260,8 @@ export default function MobileAgendaTimetable({
                     });
                   }}
                   style={{
-                    minHeight: 64,
-                    borderRadius: 18,
+                    minHeight: 56,
+                    borderRadius: 16,
                     border: '1px dashed rgba(33, 110, 78, 0.18)',
                     background: movingBlock ? 'rgba(33, 110, 78, 0.08)' : 'transparent',
                     color: movingBlock ? 'var(--accent-color)' : 'var(--text-muted)',
@@ -254,7 +269,7 @@ export default function MobileAgendaTimetable({
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 8,
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: 700,
                   }}
                 >
@@ -263,9 +278,10 @@ export default function MobileAgendaTimetable({
                 </button>
               ) : (
                 <div
+                  className="mobile-agenda-empty-state"
                   style={{
-                    minHeight: 64,
-                    borderRadius: 18,
+                    minHeight: 56,
+                    borderRadius: 16,
                     border: '1px dashed rgba(15, 23, 42, 0.08)',
                     background: 'transparent',
                   }}

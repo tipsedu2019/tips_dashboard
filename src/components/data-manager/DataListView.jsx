@@ -4,11 +4,20 @@ import {
   ArrowUp,
   CheckSquare,
   ClipboardList,
+  Clock3,
+  MapPin,
   Pencil,
   Square,
   Trash2,
+  UserRound,
+  Users,
 } from 'lucide-react';
 import useViewport from '../../hooks/useViewport';
+import {
+  getClassDisplayName,
+  getNormalizedClassStatus,
+  getScheduleSummary,
+} from './utils';
 
 function EmptyState({ title, description }) {
   return (
@@ -102,6 +111,121 @@ function PaginationBar({
         >
           다음
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ClassMobileCard({
+  item,
+  itemSelected,
+  selectable,
+  onEdit,
+  onDelete,
+  isBusy,
+  showActions,
+  handleRowMouseDown,
+}) {
+  const title = getClassDisplayName(item) || '-';
+  const status = getNormalizedClassStatus(item);
+  const chips = [status, item.subject, item.grade].filter(Boolean);
+  const studentCount = Array.isArray(item.studentIds) ? item.studentIds.length : 0;
+  const capacity = Number(item.capacity || 0);
+  const metaRows = [
+    { key: 'schedule', icon: Clock3, label: '시간', value: getScheduleSummary(item.schedule) },
+    { key: 'teacher', icon: UserRound, label: '선생님', value: item.teacher || '-' },
+    { key: 'classroom', icon: MapPin, label: '강의실', value: item.classroom || item.room || '-' },
+  ];
+
+  return (
+    <div
+      className={`card-custom data-list-mobile-card data-list-mobile-card-class ${itemSelected ? 'is-selected' : ''}`}
+      data-testid={`data-list-mobile-card-${item.id}`}
+      style={{
+        padding: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        border: itemSelected ? '1px solid rgba(33, 110, 78, 0.28)' : '1px solid var(--border-color)',
+        boxShadow: itemSelected ? '0 12px 28px rgba(33, 110, 78, 0.12)' : undefined,
+      }}
+    >
+      <div className="data-list-mobile-card-head">
+        <div className="data-list-mobile-card-copy">
+          <div className="data-list-mobile-card-head-row">
+            {selectable ? (
+              <button
+                type="button"
+                onClick={() => handleRowMouseDown(item.id, itemSelected, { preventDefault() {} })}
+                style={{ background: 'transparent', border: 'none', padding: 0, display: 'flex', alignItems: 'center' }}
+              >
+                {itemSelected ? <CheckSquare size={18} color="var(--accent-color)" /> : <Square size={18} color="var(--text-muted)" />}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="data-list-mobile-card-title"
+              onClick={() => onEdit?.(item)}
+              disabled={!onEdit}
+            >
+              {title}
+            </button>
+          </div>
+          <div className="data-list-mobile-card-chips">
+            {chips.map((chip) => (
+              <span key={`${item.id}-${chip}`} className="data-list-mobile-card-chip">
+                {chip}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {showActions ? (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => onEdit?.(item)}
+              className="btn-icon"
+              style={{ padding: 6, background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}
+              disabled={isBusy}
+            >
+              <Pencil size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete?.(item.id)}
+              className="btn-icon"
+              style={{ padding: 6, background: 'transparent', border: 'none', color: '#ef4444' }}
+              disabled={isBusy}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="data-list-mobile-class-meta">
+        {metaRows.map(({ key, icon: Icon, label, value }) => (
+          <div key={`${item.id}-${key}`} className="data-list-mobile-class-meta-item">
+            <div className="data-list-mobile-class-meta-label">
+              <Icon size={14} />
+              <span>{label}</span>
+            </div>
+            <div className="data-list-mobile-class-meta-value">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="data-list-mobile-class-footer">
+        <span className="data-list-mobile-class-footer-badge">
+          <Users size={13} />
+          {capacity > 0 ? `수강 ${studentCount}/${capacity}` : `수강 ${studentCount}명`}
+        </span>
+        {onEdit ? (
+          <button type="button" className="data-list-mobile-card-link" onClick={() => onEdit(item)}>
+            상세 보기
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -374,10 +498,27 @@ export default function DataListView({
             const item = row.item;
             const itemSelected = selectedIds?.has?.(item.id);
 
+            if (activeTab === 'classes') {
+              return (
+                <ClassMobileCard
+                  key={row.key || item.id}
+                  item={item}
+                  itemSelected={itemSelected}
+                  selectable={selectable}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  isBusy={isBusy}
+                  showActions={showActions}
+                  handleRowMouseDown={handleRowMouseDown}
+                />
+              );
+            }
+
             return (
               <div
                 key={row.key || item.id}
-                className="card-custom"
+                className="card-custom data-list-mobile-card"
+                data-testid={`data-list-mobile-card-${item.id}`}
                 style={{
                   padding: 16,
                   display: 'flex',

@@ -50,9 +50,12 @@ function registerResourceEntry(bucket, key, input = {}, fallbackIndex = 0) {
     name: name || current.name || key,
     subjects: nextSubjects,
     isVisible: input.isVisible ?? current.isVisible ?? true,
-    sortOrder: Number.isFinite(Number(input.sortOrder))
-      ? Number(input.sortOrder)
-      : current.sortOrder,
+    sortOrder:
+      current.source === 'master' && input.source === 'fallback'
+        ? current.sortOrder
+        : (Number.isFinite(Number(input.sortOrder))
+            ? Number(input.sortOrder)
+            : current.sortOrder),
     source:
       current.source === 'master' || input.source !== 'fallback'
         ? current.source
@@ -216,4 +219,3 @@ export function getSubjectOptionMap(master = []) {
 export function getResourceSubjectOptions(catalogs = [], classes = []) {
   return buildSubjectOptions(catalogs, classes);
 }
-

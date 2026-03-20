@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export function useBulkSelection(resetKey, currentIds) {
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -6,6 +6,7 @@ export function useBulkSelection(resetKey, currentIds) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPivotId, setDragPivotId] = useState(null);
   const [dragAction, setDragAction] = useState('select');
+  const currentIdSet = useMemo(() => new Set(currentIds), [currentIds]);
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
@@ -21,10 +22,10 @@ export function useBulkSelection(resetKey, currentIds) {
 
   useEffect(() => {
     setSelectedIds((previous) => {
-      const nextSelection = new Set([...previous].filter((id) => currentIds.includes(id)));
+      const nextSelection = new Set([...previous].filter((id) => currentIdSet.has(id)));
       return nextSelection.size === previous.size ? previous : nextSelection;
     });
-  }, [currentIds]);
+  }, [currentIdSet]);
 
   useEffect(() => {
     const handleMouseUp = () => {

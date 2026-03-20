@@ -69,7 +69,7 @@ function LegacyBadge({ label }) {
   );
 }
 
-function TermCard({ term, index, totalCount, compact, onChange, onMove, onDelete }) {
+function TermCard({ term, index, totalCount, compact, isCurrent, onSelectCurrent, onChange, onMove, onDelete }) {
   return (
     <div
       className="card-custom"
@@ -115,6 +115,22 @@ function TermCard({ term, index, totalCount, compact, onChange, onMove, onDelete
               >
                 {term.status}
               </span>
+              {isCurrent ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    background: 'rgba(59, 130, 246, 0.12)',
+                    color: '#1d4ed8',
+                    fontSize: 11,
+                    fontWeight: 800,
+                  }}
+                >
+                  현재 학기
+                </span>
+              ) : null}
               {term.legacyOnly ? <LegacyBadge label="기존 수업에서 가져옴" /> : null}
               {term.localOnly ? <LegacyBadge label="브라우저에 임시 저장됨" /> : null}
             </div>
@@ -122,6 +138,13 @@ function TermCard({ term, index, totalCount, compact, onChange, onMove, onDelete
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className={`action-chip ${isCurrent ? 'is-active' : ''}`}
+            onClick={onSelectCurrent}
+          >
+            {isCurrent ? '현재 학기' : '현재 학기로 지정'}
+          </button>
           <button type="button" className="action-chip" onClick={() => onMove(-1)} disabled={index === 0}>
             위로
           </button>
@@ -198,12 +221,21 @@ function TermCard({ term, index, totalCount, compact, onChange, onMove, onDelete
   );
 }
 
-export default function TermManagerModal({ open, terms = [], classes = [], onClose, dataService, onSaved }) {
+export default function TermManagerModal({
+  open,
+  terms = [],
+  classes = [],
+  onClose,
+  dataService,
+  onSaved,
+  currentTermPreference = null,
+}) {
   const toast = useToast();
   const { isMobile, isTablet } = useViewport();
   const [drafts, setDrafts] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
   const [deletedTermIds, setDeletedTermIds] = useState([]);
+  const [currentTermDraftId, setCurrentTermDraftId] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -214,9 +246,20 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
       .map((term, index) => normalizeTerm(term, index))
       .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, 'ko')));
 
-    setDrafts(nextDrafts.length > 0 ? nextDrafts : [normalizeTerm({ status: PREPARING_CLASS_STATUS }, 0)]);
+    const normalizedDrafts = nextDrafts.length > 0 ? nextDrafts : [normalizeTerm({ status: PREPARING_CLASS_STATUS }, 0)];
+    setDrafts(normalizedDrafts);
+    const preferredDraft = normalizedDrafts.find((term) => {
+      const sameId = currentTermPreference?.termId && String(term.id || '') === String(currentTermPreference.termId);
+      const sameYearAndName =
+        currentTermPreference?.academicYear &&
+        Number(term.academicYear || 0) === Number(currentTermPreference.academicYear) &&
+        term.name === currentTermPreference?.name;
+      const sameName = currentTermPreference?.name && term.name === currentTermPreference.name;
+      return sameId || sameYearAndName || sameName;
+    }) || normalizedDrafts[0] || null;
+    setCurrentTermDraftId(preferredDraft?.id || '');
     setDeletedTermIds([]);
-  }, [open, terms]);
+  }, [currentTermPreference, open, terms]);
 
   const compact = isMobile || isTablet;
   const duplicateNameExists = useMemo(() => {
@@ -292,10 +335,12 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
       setDeletedTermIds((current) => (current.includes(id) ? current : [...current, id]));
     }
 
-    setDrafts((current) => {
-      const next = current.filter((term) => term.id !== id).map((term, index) => ({ ...term, sortOrder: index }));
-      return next.length > 0 ? next : [normalizeTerm({ status: PREPARING_CLASS_STATUS }, 0)];
-    });
+    const nextDrafts = drafts.filter((term) => term.id !== id).map((term, index) => ({ ...term, sortOrder: index }));
+    const normalizedNextDrafts = nextDrafts.length > 0 ? nextDrafts : [normalizeTerm({ status: PREPARING_CLASS_STATUS }, 0)];
+    setDrafts(normalizedNextDrafts);
+    if (currentTermDraftId === id) {
+      setCurrentTermDraftId(normalizedNextDrafts[0]?.id || '');
+    }
   };
 
   const handleSave = async () => {
@@ -370,6 +415,29 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
         );
       }
 
+      const selectedCurrentDraft = drafts.find((term) => term.id === currentTermDraftId) || drafts[0] || null;
+      const nextCurrentTerm = selectedCurrentDraft
+        ? (() => {
+            const matchedTerm = savedTerms.find((term) => (
+              String(term.id || '') === String(selectedCurrentDraft.id || '')
+              || (
+                Number(term.academicYear || term.academic_year || 0) === Number(selectedCurrentDraft.academicYear || 0)
+                && String(term.name || '').trim() === String(selectedCurrentDraft.name || '').trim()
+              )
+            )) || null;
+
+            if (!matchedTerm) {
+              return null;
+            }
+
+            return {
+              termId: String(matchedTerm.id || ''),
+              academicYear: Number(matchedTerm.academicYear || matchedTerm.academic_year || 0) || null,
+              name: String(matchedTerm.name || '').trim(),
+            };
+          })()
+        : null;
+
       if (usedPermissionFallback) {
         toast.info('DB 쓰기 권한이 막혀 있어 이 브라우저에 임시 저장했습니다. Supabase RLS 정책을 열면 서버 저장으로 바로 전환됩니다.');
       } else if (persistedTerms && persistedTerms.length > 0) {
@@ -378,7 +446,7 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
         toast.info('학기 테이블이 없어 이 브라우저에 임시 저장했습니다. 기본 학기 필터와 수업 편집에서는 바로 사용할 수 있습니다.');
       }
 
-      onSaved?.(savedTerms);
+      onSaved?.(savedTerms, nextCurrentTerm);
       onClose();
     } catch (error) {
       toast.error(`학기 저장에 실패했습니다: ${getUserFriendlyDataError(error)}`);
@@ -466,6 +534,8 @@ export default function TermManagerModal({ open, terms = [], classes = [], onClo
               index={index}
               totalCount={drafts.length}
               compact={compact}
+              isCurrent={term.id === currentTermDraftId}
+              onSelectCurrent={() => setCurrentTermDraftId(term.id)}
               onChange={(patch) => updateDraft(term.id, patch)}
               onMove={(direction) => moveDraft(term.id, direction)}
               onDelete={() => removeDraft(term.id)}
