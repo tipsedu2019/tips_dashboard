@@ -107,17 +107,30 @@ test.describe('mobile smoke', () => {
     await page.goto(e2eUrl('/?role=staff'));
 
     await page.getByTestId('mobile-nav-timetable').click();
+    await expect(page.getByTestId('shell-timetable-section')).toBeVisible();
 
     const firstCard = page.locator('[data-testid^="data-list-mobile-card-"]').first();
     await expect(firstCard).toBeVisible();
 
-    await firstCard.getByRole('button', { name: '상세 보기' }).click();
+    const detailButton = page.locator('[data-testid^="data-list-mobile-card-detail-"]').first();
+    if (await detailButton.count()) {
+      await detailButton.evaluate((node) => node.scrollIntoView({ block: 'center', inline: 'nearest' }));
+      await detailButton.click();
+    } else {
+      const landingCardMain = firstCard.locator('.public-landing-card-main');
+      if (await landingCardMain.count()) {
+        await landingCardMain.click({ force: true });
+      } else {
+        await firstCard.getByRole('button', { name: '상세 보기' }).click({ force: true });
+      }
+    }
 
     const detailModal = page.locator('.modal-overlay').last();
-    await detailModal.locator('button').nth(3).click();
+    await expect(detailModal).toBeVisible();
+    await detailModal.getByRole('button', { name: '상세 정보' }).click();
     await expect(detailModal.getByRole('button', { name: '크게 보기' })).toBeVisible();
     await detailModal.getByRole('button', { name: '크게 보기' }).click();
-
     await expect(page.getByTestId('class-schedule-plan-sheet')).toBeVisible();
+    await expect(page.locator('.mobile-bottom-nav')).toHaveCSS('opacity', '0');
   });
 });

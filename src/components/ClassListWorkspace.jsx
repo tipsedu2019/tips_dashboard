@@ -229,6 +229,9 @@ export default function ClassListWorkspace({ classes, data, dataService, integra
         pageEnd={tableControls.pageEnd}
         onPageChange={tableControls.setPage}
         onPageSizeChange={tableControls.setPageSize}
+        mobileCardPrimaryActionLabel="상세 보기"
+        onMobileCardPrimaryAction={setSelectedClassForDetails}
+        mobileCardPrimaryActionTestIdPrefix="data-list-mobile-card-detail"
       />
     </>
   );
@@ -236,11 +239,17 @@ export default function ClassListWorkspace({ classes, data, dataService, integra
   return (
     <>
       {integrated ? (
-        <div className="card-custom class-list-workspace-panel animate-in">
+        <div
+          className="card-custom class-list-workspace-panel animate-in app-shell-surface class-list-workspace-shell"
+          data-testid="class-list-workspace-shell"
+        >
           {content}
         </div>
       ) : (
-        <div className="animate-in class-list-workspace-shell">
+        <div
+          className="animate-in class-list-workspace-shell app-shell-section"
+          data-testid="class-list-workspace-shell"
+        >
           {content}
         </div>
       )}

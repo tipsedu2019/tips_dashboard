@@ -351,6 +351,8 @@ export default function ManagementHeader({
   quickFilterKeys = [],
   quickFilterOptions = {},
   classesUnifiedFilterMode = false,
+  testId = '',
+  toolbarTestId = '',
 }) {
   const { isMobile } = useViewport();
   const columnSelectorRef = useRef(null);
@@ -470,7 +472,7 @@ export default function ManagementHeader({
     .join(' ');
 
   return (
-    <div className={rootClassName}>
+    <div className={rootClassName} data-testid={testId || undefined}>
       <div className={`management-header-top ${hideSummary ? 'is-compact' : ''}`}>
         {!hideSummary ? (
           <div className="management-header-copy">
@@ -483,7 +485,7 @@ export default function ManagementHeader({
         ) : null}
 
         {toolbarActions.length > 0 ? (
-          <div className="management-toolbar">
+          <div className="management-toolbar" data-testid={toolbarTestId || undefined}>
             {toolbarActions.map((action) => (
               <ToolbarAction key={action.label} action={action} disabled={isBusy || action.disabled} />
             ))}

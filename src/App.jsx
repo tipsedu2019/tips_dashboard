@@ -1190,7 +1190,7 @@ export default function App() {
   }
 
   const publicView = (
-    <>
+    <div className="public-app-shell" data-design-system="toss-refresh">
       {statusBanner && (
         <div className="public-mode-status-banner">
           <StatusBanner
@@ -1221,7 +1221,7 @@ export default function App() {
         />
       </Suspense>
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
-    </>
+    </div>
   );
 
   if (!user || isPublicMode) {
@@ -1239,7 +1239,11 @@ export default function App() {
 
 
   return (
-    <div className={`app-layout ${isMobile ? 'app-layout-mobile' : ''} ${isTablet ? 'app-layout-tablet' : ''} ${showMinimalSidebar ? 'sidebar-hidden' : ''}`}>
+    <div
+      className={`app-layout ${isMobile ? 'app-layout-mobile' : ''} ${isTablet ? 'app-layout-tablet' : ''} ${showMinimalSidebar ? 'sidebar-hidden' : ''}`}
+      data-design-system="toss-refresh"
+      data-testid="app-shell-root"
+    >
       {sidebarOpen && isCompact && (
         <div
           className="app-shell-overlay"
@@ -1598,6 +1602,7 @@ export default function App() {
             {TIMETABLE_VIEW_IDS.includes(currentView) && (
               <section
                 className={`workspace-surface app-shell-panel ${currentView === 'class-list' ? 'workspace-surface-allow-overflow' : ''}`}
+                data-testid="shell-timetable-section"
               >
                 <div className={`app-shell-toolbar-stack ${isCompact ? 'is-mobile' : ''}`}>
                   {isCompact && isUnifiedTimetableView ? renderTimetableMobileSummary() : null}

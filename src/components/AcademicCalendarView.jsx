@@ -1698,7 +1698,7 @@ function AcademicMonthGridV2({
                     const rangeActive = selectionRange && dateString >= selectionRange.start && dateString <= selectionRange.end;
 
                     return (
-                      <button
+                      <div
                         key={dateString}
                         ref={(node) => {
                           if (node) {
@@ -1707,7 +1707,8 @@ function AcademicMonthGridV2({
                             dayButtonRefs.current.delete(dateString);
                           }
                         }}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         className={`academic-day-cell ${!inMonth ? 'is-outside' : ''} ${rangeActive ? 'is-selected' : ''}`}
                         onMouseDown={() => {
                           if (!canWriteCalendar) return;
@@ -1769,7 +1770,7 @@ function AcademicMonthGridV2({
                             +{hiddenCounts[dateString]} 더보기
                           </button>
                         ) : null}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

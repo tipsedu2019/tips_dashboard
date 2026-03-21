@@ -264,6 +264,10 @@ export default function DataListView({
   pageEnd = 0,
   onPageChange,
   onPageSizeChange,
+  testId = '',
+  mobileCardPrimaryActionLabel = '',
+  onMobileCardPrimaryAction = null,
+  mobileCardPrimaryActionTestIdPrefix = '',
 }) {
   const { isMobile } = useViewport();
   const [editingCell, setEditingCell] = useState(null);
@@ -318,7 +322,7 @@ export default function DataListView({
     const visibleColumns = columns.slice(0, 6);
 
     return (
-      <div className="data-list-mobile-stack">
+      <div className="data-list-mobile-stack" data-testid={testId || undefined}>
         {listData.length === 0 ? (
           <div className="card-custom data-list-mobile-empty-card">
             <div className="data-list-empty-state">
@@ -349,15 +353,37 @@ export default function DataListView({
             const itemSelected = selectedIds?.has?.(item.id);
 
             if (activeTab === 'classes') {
+              const primaryAction = onMobileCardPrimaryAction || onEdit;
+              const shouldShowPrimaryAction = Boolean(mobileCardPrimaryActionLabel && primaryAction);
+
               return (
-                <div key={row.key || item.id} className="data-list-landing-card-wrap">
+                <div
+                  key={row.key || item.id}
+                  className="data-list-landing-card-wrap"
+                  data-testid={`data-list-mobile-card-${item.id}`}
+                >
                   <PublicLandingCard
                     classItem={item}
                     onOpenDetails={onEdit}
                     hideActions
+                    semanticButton={false}
                   />
-                  {showActions && (
+                  {(shouldShowPrimaryAction || showActions) && (
                     <div className="data-list-landing-card-actions">
+                      {shouldShowPrimaryAction && (
+                        <button
+                          type="button"
+                          onClick={() => primaryAction?.(item)}
+                          className={`${showActions ? 'btn-secondary' : 'btn-primary'} data-list-landing-action-btn`}
+                          data-testid={mobileCardPrimaryActionTestIdPrefix ? `${mobileCardPrimaryActionTestIdPrefix}-${item.id}` : undefined}
+                          disabled={isBusy}
+                        >
+                          <Clock3 size={14} />
+                          {mobileCardPrimaryActionLabel}
+                        </button>
+                      )}
+                      {showActions && (
+                        <>
                       <button
                         type="button"
                         onClick={() => onEdit?.(item)}
@@ -376,6 +402,8 @@ export default function DataListView({
                         <Trash2 size={14} />
                         삭제
                       </button>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -458,6 +486,7 @@ export default function DataListView({
   return (
     <div
       className={cardless ? 'data-list-shell data-list-shell-cardless' : 'card-custom data-list-shell'}
+      data-testid={testId || undefined}
     >
       <div className={`data-list-table-scroll ${cardless ? 'is-cardless' : ''}`}>
         <table className="data-list-table">
@@ -549,4 +578,3 @@ export default function DataListView({
     </div>
   );
 }
-

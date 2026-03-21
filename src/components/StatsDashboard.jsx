@@ -391,8 +391,11 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
   );
 
   return (
-    <div className="animate-in stats-dashboard">
-      <div className="page-header">
+    <div
+      className="animate-in stats-dashboard app-shell-section stats-dashboard-shell"
+      data-testid="stats-dashboard-shell"
+    >
+      <div className="page-header app-shell-page-header stats-dashboard-header" data-testid="stats-dashboard-header">
         <div>
           <h1>개요</h1>
           <p>주요 운영 지표와 충돌 알림을 빠르게 확인하고, 필요한 시간표 화면으로 바로 넘어갈 수 있습니다.</p>
@@ -631,4 +634,3 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
     </div>
   );
 }
-

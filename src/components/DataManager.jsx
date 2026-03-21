@@ -295,7 +295,10 @@ export default function DataManager({
   }
 
   return (
-    <div className="view-container">
+    <div
+      className="view-container data-manager-shell app-shell-section"
+      data-testid="data-manager-shell"
+    >
       <SchoolCatalogManagerModal
         open={isSchoolManagerOpen}
         schools={safeData.academicSchools}
@@ -338,7 +341,11 @@ export default function DataManager({
         />
       ) : null}
 
-      <section className="workspace-surface" style={{ padding: 20, marginBottom: 24 }}>
+      <section
+        className="workspace-surface data-manager-toolbar-shell app-shell-toolbar-surface"
+        data-testid="data-manager-toolbar"
+        style={{ padding: 20, marginBottom: 24 }}
+      >
         <div
           className="h-segment-container"
           style={{
@@ -383,7 +390,7 @@ export default function DataManager({
         </div>
       ) : null}
 
-      <div style={{ padding: '0 4px 24px' }}>
+      <div className="data-manager-content-shell app-shell-section-stack" style={{ padding: '0 4px 24px' }}>
         {activeTab === 'students' ? (
           <StudentManagerTab
             filteredData={tableControls.filteredData}
@@ -486,5 +493,4 @@ export default function DataManager({
     </div>
   );
 }
-
 

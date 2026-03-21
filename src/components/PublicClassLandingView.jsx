@@ -418,6 +418,7 @@ export function PublicLandingCard({
   onOpenDetails,
   onTogglePlanner,
   hideActions = false,
+  semanticButton = true,
 }) {
   const title = stripClassPrefix(classItem.className || classItem.name || '이름 없는 수업');
   const scheduleLines = buildScheduleLines(classItem);
@@ -436,12 +437,13 @@ export function PublicLandingCard({
       {rank !== undefined && <div className="public-landing-card-rank">{rank}</div>}
       <div className="public-landing-card-surface">
         <div
-          role={onOpenDetails ? "button" : undefined}
-          tabIndex={onOpenDetails ? 0 : undefined}
+          role={onOpenDetails && semanticButton ? "button" : undefined}
+          tabIndex={onOpenDetails && semanticButton ? 0 : undefined}
+          aria-label={onOpenDetails && semanticButton ? `${title} 상세 보기` : undefined}
           className={`public-landing-card-main ${!onOpenDetails ? 'is-static' : ''}`}
           onClick={onOpenDetails ? () => onOpenDetails(classItem) : undefined}
-          title={onOpenDetails ? `${title} 상세 보기` : undefined}
-          style={!onOpenDetails ? { cursor: 'default' } : {}}
+          title={onOpenDetails && semanticButton ? `${title} 상세 보기` : undefined}
+          style={!onOpenDetails || !semanticButton ? { cursor: 'default' } : {}}
         >
           <div className="public-landing-card-copy">
             <div className="public-landing-card-copy-top">
