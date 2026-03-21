@@ -3,6 +3,7 @@ import { Calendar, Download, Plus, Upload } from 'lucide-react';
 import ManagementHeader from './ManagementHeader';
 import DataListView from './DataListView';
 import TimetableUnifiedFilterPanel from '../ui/TimetableUnifiedFilterPanel';
+import DashboardClassFilterTabs from '../ui/DashboardClassFilterTabs';
 
 const QUICK_FILTER_KEYS = ['period', 'subject', 'grade', 'teacher', 'classroom'];
 
@@ -153,6 +154,15 @@ export default function ClassManagerTab({
         teacherOptions={quickFilterOptions.teacher}
         classroomOptions={quickFilterOptions.classroom}
         onChange={handleUnifiedFilterChange}
+      />
+
+      <DashboardClassFilterTabs
+        subjectOptions={quickFilterOptions.subject}
+        gradeOptions={quickFilterOptions.grade}
+        activeSubjects={Array.isArray(tableControls.filters.subject) ? tableControls.filters.subject : []}
+        activeGrades={Array.isArray(tableControls.filters.grade) ? tableControls.filters.grade : []}
+        onSubjectToggle={(values) => tableControls.setFilterValue('subject', values)}
+        onGradeToggle={(values) => tableControls.setFilterValue('grade', values)}
       />
 
       <ManagementHeader

@@ -159,22 +159,21 @@ function getStatusMeta(classItem) {
     if (seatsLeft <= 3) {
       return { priority: 1, tone: 'warning', label: '마감임박', detail: `마지막 ${seatsLeft}자리` };
     }
-    return { priority: 2, tone: 'accent', label: '모집중', detail: `대기 ${waitlist}명` };
+    return { priority: 2, tone: 'accent', label: '모집중', detail: '' };
   }
 
-  return { priority: 3, tone: 'neutral', label: '모집중', detail: '정원 문의' };
+  return { priority: 3, tone: 'accent', label: '모집중', detail: '' };
 }
 
 function getEnrollmentSummary(classItem) {
   const enrolled = Array.isArray(classItem?.studentIds) ? classItem.studentIds.length : 0;
   const capacity = Number(classItem?.capacity || 0);
-  const waitlist = Array.isArray(classItem?.waitlistIds) ? classItem.waitlistIds.length : 0;
 
   if (capacity > 0) {
-    return `정원 ${enrolled}/${capacity} · 대기 ${waitlist}명`;
+    return `정원 ${enrolled}/${capacity}`;
   }
 
-  return `수강 ${enrolled}명 · 정원 문의`;
+  return `정원 문의`;
 }
 
 function getDisplayFee(classItem) {
@@ -412,18 +411,20 @@ function PublicPlaceholderPanel({ item }) {
   );
 }
 
-function PublicLandingCard({
+export function PublicLandingCard({
   classItem,
   rank,
   isSelected,
   onOpenDetails,
   onTogglePlanner,
+  hideActions = false,
 }) {
   const title = stripClassPrefix(classItem.className || classItem.name || '이름 없는 수업');
   const scheduleLines = buildScheduleLines(classItem);
   const scheduleLabel = scheduleLines.join(' · ');
-  const teacher = splitLines(classItem.teacher, 1)[0] || '선생님 미정';
-  const classroom = splitLines(classItem.classroom || classItem.room, 1)[0] || '강의실 미정';
+  const teachers = splitLines(classItem.teacher, 5);
+  const classrooms = splitLines(classItem.classroom || classItem.room, 5);
+  const maxMetaLines = Math.max(teachers.length, classrooms.length, 1);
   const feeText = formatCurrency(getDisplayFee(classItem));
   const enrollmentSummary = getEnrollmentSummary(classItem);
   const statusMeta = getStatusMeta(classItem);
@@ -431,14 +432,16 @@ function PublicLandingCard({
   const grade = normalizeGrade(classItem.grade);
 
   return (
-    <article className={`public-landing-card ${isSelected ? 'is-selected' : ''}`} data-testid={`public-class-card-${classItem.id}`}>
-      <div className="public-landing-card-rank">{rank}</div>
+    <article className={`public-landing-card ${rank !== undefined ? 'has-rank' : ''} ${isSelected ? 'is-selected' : ''}`} data-testid={`public-class-card-${classItem?.id || 'unknown'}`}>
+      {rank !== undefined && <div className="public-landing-card-rank">{rank}</div>}
       <div className="public-landing-card-surface">
-        <button
-          type="button"
-          className="public-landing-card-main"
-          onClick={() => onOpenDetails(classItem)}
-          title={`${title} 상세 보기`}
+        <div
+          role={onOpenDetails ? "button" : undefined}
+          tabIndex={onOpenDetails ? 0 : undefined}
+          className={`public-landing-card-main ${!onOpenDetails ? 'is-static' : ''}`}
+          onClick={onOpenDetails ? () => onOpenDetails(classItem) : undefined}
+          title={onOpenDetails ? `${title} 상세 보기` : undefined}
+          style={!onOpenDetails ? { cursor: 'default' } : {}}
         >
           <div className="public-landing-card-copy">
             <div className="public-landing-card-copy-top">
@@ -453,45 +456,53 @@ function PublicLandingCard({
                 <CalendarDays size={14} />
                 <span>{scheduleLabel}</span>
               </div>
-              <div className="public-landing-card-meta-inline-row">
-                <div className="public-landing-card-meta-item">
-                  <UserRound size={14} />
-                  <span>{teacher}</span>
-                </div>
-                <div className="public-landing-card-meta-item">
-                  <MapPin size={14} />
-                  <span>{classroom}</span>
-                </div>
-                <div className="public-landing-card-meta-item public-landing-card-meta-item-secondary">
-                  <span>{enrollmentSummary}</span>
-                </div>
+              <div className="public-landing-card-meta-grid">
+                {Array.from({ length: maxMetaLines }).map((_, index) => (
+                  <div style={{ display: 'contents' }} key={`meta-${index}`}>
+                    <div className="public-landing-card-meta-item">
+                      <div className="public-landing-card-meta-icon">
+                        {index === 0 && <UserRound size={14} />}
+                      </div>
+                      <span>{teachers[index] || (index === 0 ? '선생님 미정' : '')}</span>
+                    </div>
+                    <div className="public-landing-card-meta-item">
+                      <div className="public-landing-card-meta-icon">
+                        {index === 0 && <MapPin size={14} />}
+                      </div>
+                      <span>{classrooms[index] || (index === 0 ? '강의실 미정' : '')}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
 
-          <ChevronRight size={18} className="public-landing-card-arrow" />
-        </button>
+          {onOpenDetails && <ChevronRight size={18} className="public-landing-card-arrow" />}
+        </div>
 
         <div className="public-landing-card-status-anchor">
-          <div className={`public-landing-status is-${statusMeta.tone}`}>
+          <div className={`public-landing-status is-${statusMeta.tone} ${statusMeta.detail ? 'is-animated' : ''}`}>
             <strong>{statusMeta.label}</strong>
-            <span>{statusMeta.detail}</span>
+            {statusMeta.detail && <span>{statusMeta.detail}</span>}
           </div>
         </div>
 
         <div className="public-landing-card-footer">
           <div className="public-landing-card-price-block">
             <strong>{feeText}</strong>
+            <span>{enrollmentSummary}</span>
           </div>
-          <button
-            type="button"
-            className={`public-landing-card-cart-button is-inline ${isSelected ? 'is-selected' : ''}`}
-            data-testid={`public-card-toggle-${classItem.id}`}
-            onClick={() => onTogglePlanner(classItem)}
-          >
-            {isSelected ? <Check size={14} /> : <BookOpen size={14} />}
-            <span>{isSelected ? '담김' : '담기'}</span>
-          </button>
+          {!hideActions && onTogglePlanner && (
+            <button
+              type="button"
+              className={`public-landing-card-cart-button is-inline ${isSelected ? 'is-selected' : ''}`}
+              data-testid={`public-card-toggle-${classItem?.id}`}
+              onClick={() => onTogglePlanner(classItem)}
+            >
+              {isSelected ? <Check size={14} /> : <BookOpen size={14} />}
+              <span>{isSelected ? '담김' : '담기'}</span>
+            </button>
+          )}
         </div>
       </div>
     </article>
@@ -1034,6 +1045,7 @@ export default function PublicClassLandingView({
         subtitle={plannerSummaryText}
         testId="public-planner-sheet"
         fullHeightOnMobile
+        maxWidth={900}
         actions={plannerActions}
       >
         <div className="public-planner-sheet-body">
@@ -1041,8 +1053,8 @@ export default function PublicClassLandingView({
             {plannerItems.map((item) => (
               <div key={`planner-item-${item.id}`} className="public-planner-selected-item">
                 <div className="public-planner-selected-copy">
-                  <strong>{stripClassPrefix(item.className || item.name || '?섏뾽')}</strong>
-                  <span>{buildScheduleLines(item).join(' 쨌 ')}</span>
+                  <strong>{stripClassPrefix(item.className || item.name || '수업')}</strong>
+                  <span>{buildScheduleLines(item).join(' · ')}</span>
                 </div>
                 <button type="button" className="public-planner-selected-remove" onClick={() => togglePlannerItem(item)}>
                   <Trash2 size={16} />
@@ -1059,8 +1071,9 @@ export default function PublicClassLandingView({
 
             <div className="public-planner-preview-chip-row">
               {plannerItems.map((item) => (
-                <span key={`planner-chip-${item.id}`} className="public-planner-preview-chip">
-                  {text(item.subject)} · {stripClassPrefix(item.className || item.name || '수업')}
+                <span key={`planner-chip-${item.id}`} className="public-planner-preview-chip" style={{ flexDirection: 'column', alignItems: 'flex-start', padding: '8px 14px', borderRadius: '14px', gap: '2px', height: 'auto' }}>
+                  <span>{text(item.subject)} · {stripClassPrefix(item.className || item.name || '수업')}</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.85 }}>{buildScheduleLines(item).join(', ')}</span>
                 </span>
               ))}
             </div>

@@ -6,6 +6,7 @@ import useViewport from '../hooks/useViewport';
 import ClassDetailModal from './ClassDetailModal';
 import DataListView from './data-manager/DataListView';
 import ManagementHeader from './data-manager/ManagementHeader';
+import DashboardClassFilterTabs from './ui/DashboardClassFilterTabs';
 import { buildClassColumns, getDefaultClassSearchText } from './data-manager/columnSchemas';
 import {
   buildClassroomMaster,
@@ -171,6 +172,15 @@ export default function ClassListWorkspace({ classes, data, dataService, integra
           ) : null}
         </section>
       ) : null}
+
+      <DashboardClassFilterTabs
+        subjectOptions={subjectOptions}
+        gradeOptions={quickFilterOptions.grade}
+        activeSubjects={Array.isArray(tableControls.filters.subject) ? tableControls.filters.subject : []}
+        activeGrades={Array.isArray(tableControls.filters.grade) ? tableControls.filters.grade : []}
+        onSubjectToggle={(values) => tableControls.setFilterValue('subject', values)}
+        onGradeToggle={(values) => tableControls.setFilterValue('grade', values)}
+      />
 
       <ManagementHeader
         title={CLASS_LIST_TITLE}

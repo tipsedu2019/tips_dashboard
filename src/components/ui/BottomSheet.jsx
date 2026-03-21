@@ -11,6 +11,7 @@ export default function BottomSheet({
   actions = null,
   maxWidth = 620,
   fullHeightOnMobile = false,
+  floatingOnMobile = false,
   closeLabel = '닫기',
   testId = '',
 }) {
@@ -46,10 +47,10 @@ export default function BottomSheet({
     <div
       onClick={onClose}
       role="presentation"
-      className={`bottom-sheet-overlay ${isMobile ? 'is-mobile' : 'is-desktop'}`}
+      className={`bottom-sheet-overlay ${isMobile ? 'is-mobile' : 'is-desktop'} ${isMobile && floatingOnMobile ? 'is-floating' : ''}`}
     >
       <div
-        className={`card animate-in bottom-sheet-shell ${isMobile ? 'is-mobile' : 'is-desktop'} ${isMobile && fullHeightOnMobile ? 'is-full-height' : ''}`}
+        className={`card animate-in bottom-sheet-shell ${isMobile ? 'is-mobile' : 'is-desktop'} ${isMobile && fullHeightOnMobile ? 'is-full-height' : ''} ${isMobile && floatingOnMobile ? 'is-floating' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

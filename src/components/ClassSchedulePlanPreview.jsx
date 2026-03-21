@@ -313,9 +313,12 @@ function MonthCard({
               }}
             >
               <div className="class-plan-day-number">{dayNumber}</div>
-              <div className="class-plan-day-entry">
+              <div className="class-plan-day-entry class-plan-day-entry-stack">
                 {primarySession?.sessionNumber ? (
-                  <span className="class-plan-day-session-pill">{primarySession.sessionNumber}회</span>
+                  <>
+                    <span className="class-plan-day-session-dot" />
+                    <span className="class-plan-day-session-num">{primarySession.sessionNumber}</span>
+                  </>
                 ) : canShowAddHint ? (
                   <span className="class-plan-day-add-hint" aria-hidden="true">
                     <Plus size={compact ? 10 : 12} />
@@ -330,34 +333,66 @@ function MonthCard({
   );
 }
 
-function SessionCards({ group }) {
+function SessionCards({ group, variant }) {
+  const isPublicDetail = variant === 'public-detail';
+
   return (
     <section className="class-plan-session-group" key={group.key}>
-      <header className="class-plan-session-group-header">
-        <strong>{group.label}</strong>
-        <span>{group.billingLabel}</span>
-      </header>
-      <div className="class-plan-session-card-list">
+      {!isPublicDetail && (
+        <header className="class-plan-session-group-header">
+          <strong>{group.label}</strong>
+          <span>{group.billingLabel}</span>
+        </header>
+      )}
+      <div className="class-plan-session-cards-grid">
         {group.sessions.map((session) => (
           <article
             key={`${group.key}-${session.date}-${session.originalDate || 'base'}-${session.sessionNumber || 'na'}`}
             className="class-plan-session-card"
           >
-            <div className="class-plan-session-card-top">
-              <span className="class-plan-session-billing">
-                <span
-                  className="class-plan-session-billing-dot"
-                  style={{ background: group.billingColor || session.billingColor || '#216e4e' }}
-                />
-                {group.billingLabel}
-              </span>
-              <SessionStatePill state={session.state} />
-            </div>
-            <strong className="class-plan-session-date">{formatPlannerDateLabel(session.date)}</strong>
-            <div className="class-plan-session-card-meta">
-              <span>{session.sessionNumber ? `${session.sessionNumber}회차` : '예외 일정'}</span>
-            </div>
-            <SessionMeta session={session} />
+            {isPublicDetail ? (
+              <>
+                <div className="class-plan-session-card-single-row">
+                  <div className="class-plan-session-info-group">
+                    <span className="class-plan-session-billing">
+                      <span
+                        className="class-plan-session-billing-dot"
+                        style={{ background: group.billingColor || session.billingColor || '#216e4e' }}
+                      />
+                      {group.billingLabel}
+                    </span>
+                    <span className="class-plan-session-divider">·</span>
+                    <strong className="class-plan-session-meta-number">
+                      {session.sessionNumber ? `${session.sessionNumber}회` : '예외 일정'}
+                    </strong>
+                    <span className="class-plan-session-divider">·</span>
+                    <span className="class-plan-session-date-inline">
+                      {formatPlannerDateLabel(session.date)}
+                    </span>
+                  </div>
+                  <SessionStatePill state={session.state} />
+                </div>
+                <SessionMeta session={session} />
+              </>
+            ) : (
+              <>
+                <div className="class-plan-session-card-top">
+                  <span className="class-plan-session-billing">
+                    <span
+                      className="class-plan-session-billing-dot"
+                      style={{ background: group.billingColor || session.billingColor || '#216e4e' }}
+                    />
+                    {group.billingLabel}
+                  </span>
+                  <SessionStatePill state={session.state} />
+                </div>
+                <strong className="class-plan-session-date">{formatPlannerDateLabel(session.date)}</strong>
+                <div className="class-plan-session-card-meta">
+                  <span>{session.sessionNumber ? `${session.sessionNumber}회차` : '예외 일정'}</span>
+                </div>
+                <SessionMeta session={session} />
+              </>
+            )}
           </article>
         ))}
       </div>
@@ -407,7 +442,7 @@ function SessionTable({ group, compact }) {
   );
 }
 
-function SessionList({ groups, isCompact }) {
+function SessionList({ groups, isCompact, variant }) {
   if (!groups.length) {
     return null;
   }
@@ -415,11 +450,13 @@ function SessionList({ groups, isCompact }) {
   if (isCompact) {
     return (
       <div className="class-plan-session-stack" data-testid="class-plan-session-list">
-        <div className="class-plan-session-panel-header">
-          <strong>회차 목록</strong>
-          <span>모바일 카드 보기</span>
-        </div>
-        {groups.map((group) => <SessionCards key={group.key} group={group} />)}
+        {variant !== 'public-detail' && (
+          <div className="class-plan-session-panel-header">
+            <strong>회차 목록</strong>
+            <span>모바일 카드 보기</span>
+          </div>
+        )}
+        {groups.map((group) => <SessionCards key={group.key} group={group} variant={variant} />)}
       </div>
     );
   }
@@ -551,7 +588,7 @@ export function ClassSchedulePlanPreview({
               ))}
             </div>
 
-            <SessionList groups={sessionGroups} isCompact={isCompact || isMobile} />
+            <SessionList groups={sessionGroups} isCompact={isCompact || isMobile} variant={variant} />
           </div>
         )}
       </div>

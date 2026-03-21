@@ -1,4 +1,4 @@
-﻿import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -12,6 +12,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
+import { PublicLandingCard } from '../PublicClassLandingView';
 import useViewport from '../../hooks/useViewport';
 import {
   getClassDisplayName,
@@ -105,110 +106,7 @@ function PaginationBar({
   );
 }
 
-function ClassMobileCard({
-  item,
-  itemSelected,
-  selectable,
-  onEdit,
-  onDelete,
-  isBusy,
-  showActions,
-  handleRowMouseDown,
-}) {
-  const title = getClassDisplayName(item) || '-';
-  const status = getNormalizedClassStatus(item);
-  const chips = [status, item.subject, item.grade].filter(Boolean);
-  const studentCount = Array.isArray(item.studentIds) ? item.studentIds.length : 0;
-  const capacity = Number(item.capacity || 0);
-  const metaRows = [
-    { key: 'schedule', icon: Clock3, label: '시간', value: getScheduleSummary(item.schedule) },
-    { key: 'teacher', icon: UserRound, label: '선생님', value: item.teacher || '-' },
-    { key: 'classroom', icon: MapPin, label: '강의실', value: item.classroom || item.room || '-' },
-  ];
-
-  return (
-    <div
-      className={`card-custom data-list-mobile-card data-list-mobile-card-class ${itemSelected ? 'is-selected' : ''}`}
-      data-testid={`data-list-mobile-card-${item.id}`}
-    >
-      <div className="data-list-mobile-card-head">
-        <div className="data-list-mobile-card-copy">
-          <div className="data-list-mobile-card-head-row">
-            {selectable ? (
-              <button
-                type="button"
-                onClick={() => handleRowMouseDown(item.id, itemSelected, { preventDefault() {} })}
-                className="data-list-selection-toggle"
-              >
-                {itemSelected ? <CheckSquare size={18} color="var(--accent-color)" /> : <Square size={18} color="var(--text-muted)" />}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="data-list-mobile-card-title"
-              onClick={() => onEdit?.(item)}
-              disabled={!onEdit}
-            >
-              {title}
-            </button>
-          </div>
-          <div className="data-list-mobile-card-chips">
-            {chips.map((chip) => (
-              <span key={`${item.id}-${chip}`} className="data-list-mobile-card-chip">
-                {chip}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {showActions ? (
-          <div className="data-list-mobile-card-actions">
-            <button
-              type="button"
-              onClick={() => onEdit?.(item)}
-              className="btn-icon data-list-card-action"
-              disabled={isBusy}
-            >
-              <Pencil size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete?.(item.id)}
-              className="btn-icon data-list-card-action is-danger"
-              disabled={isBusy}
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="data-list-mobile-class-meta">
-        {metaRows.map(({ key, icon: Icon, label, value }) => (
-          <div key={`${item.id}-${key}`} className="data-list-mobile-class-meta-item">
-            <div className="data-list-mobile-class-meta-label">
-              <Icon size={14} />
-              <span>{label}</span>
-            </div>
-            <div className="data-list-mobile-class-meta-value">{value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="data-list-mobile-class-footer">
-        <span className="data-list-mobile-class-footer-badge">
-          <Users size={13} />
-          {capacity > 0 ? `수강 ${studentCount}/${capacity}` : `수강 ${studentCount}명`}
-        </span>
-        {onEdit ? (
-          <button type="button" className="data-list-mobile-card-link" onClick={() => onEdit(item)}>
-            상세 보기
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
+/* ClassMobileCard removed — PublicLandingCard is used instead */
 
 const DataRow = memo(function DataRow({
   item,
@@ -452,17 +350,35 @@ export default function DataListView({
 
             if (activeTab === 'classes') {
               return (
-                <ClassMobileCard
-                  key={row.key || item.id}
-                  item={item}
-                  itemSelected={itemSelected}
-                  selectable={selectable}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  isBusy={isBusy}
-                  showActions={showActions}
-                  handleRowMouseDown={handleRowMouseDown}
-                />
+                <div key={row.key || item.id} className="data-list-landing-card-wrap">
+                  <PublicLandingCard
+                    classItem={item}
+                    onOpenDetails={onEdit}
+                    hideActions
+                  />
+                  {showActions && (
+                    <div className="data-list-landing-card-actions">
+                      <button
+                        type="button"
+                        onClick={() => onEdit?.(item)}
+                        className="btn-secondary data-list-landing-action-btn"
+                        disabled={isBusy}
+                      >
+                        <Pencil size={14} />
+                        편집
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete?.(item.id)}
+                        className="btn-secondary data-list-landing-action-btn is-danger"
+                        disabled={isBusy}
+                      >
+                        <Trash2 size={14} />
+                        삭제
+                      </button>
+                    </div>
+                  )}
+                </div>
               );
             }
 

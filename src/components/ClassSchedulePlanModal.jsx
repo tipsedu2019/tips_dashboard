@@ -2,6 +2,7 @@ import { CalendarDays, Clock3, MapPin, UserRound, Users, X } from 'lucide-react'
 import ClassSchedulePlanner from './data-manager/ClassSchedulePlanner';
 import ClassSchedulePlanPreview from './ClassSchedulePlanPreview';
 import useViewport from '../hooks/useViewport';
+import { PublicLandingCard } from './PublicClassLandingView';
 import BottomSheet from './ui/BottomSheet';
 
 function normalizeSummaryBadges(summaryBadges = []) {
@@ -72,47 +73,49 @@ export default function ClassSchedulePlanModal({
   const summaryFacts = buildMetaFacts(safeClass);
   const normalizedSummaryBadges = normalizeSummaryBadges(summaryBadges);
   const summaryEyebrow = [safeClass.subject, safeClass.grade].filter(Boolean).join(' · ') || '수업 계획';
-  const headerTitle = editable ? '수업 계획' : '수업 일정표';
+  const headerTitle = editable ? '수업 계획' : '팁스 수업 정보';
 
   const content = (
     <div data-testid="class-schedule-plan-modal" className="class-plan-sheet">
-      <div className={`class-plan-sheet-summary ${editable ? 'is-editable' : 'is-public'}`} data-testid="class-plan-sheet-summary">
-        <div className="class-plan-sheet-summary-head">
-          <span className="class-plan-sheet-eyebrow">{summaryEyebrow}</span>
-          <div className="class-plan-sheet-summary-copy">
-            {editable ? (
+      {editable ? (
+        <div className="class-plan-sheet-summary is-editable" data-testid="class-plan-sheet-summary">
+          <div className="class-plan-sheet-summary-head">
+            <span className="class-plan-sheet-eyebrow">{summaryEyebrow}</span>
+            <div className="class-plan-sheet-summary-copy">
               <p>요일, 기간, 휴강/보강 흐름을 먼저 정리하고 저장된 계획이 퍼블릭 상세와 관리자 화면에 같은 구조로 이어지게 만듭니다.</p>
-            ) : (
-              <p>수업 카드에서 보던 흐름을 그대로 이어서, 일정과 회차 구성을 한 번에 확인할 수 있습니다.</p>
-            )}
+            </div>
           </div>
-        </div>
 
-        <div className="class-plan-sheet-meta-grid">
-          {summaryFacts.map((fact) => {
-            const Icon = fact.icon;
-            return (
-              <div key={fact.key} className="class-plan-sheet-meta-item">
-                <span className="class-plan-sheet-meta-label">
-                  <Icon size={14} />
-                  {fact.label}
+          <div className="class-plan-sheet-meta-grid">
+            {summaryFacts.map((fact) => {
+              const Icon = fact.icon;
+              return (
+                <div key={fact.key} className="class-plan-sheet-meta-item">
+                  <span className="class-plan-sheet-meta-label">
+                    <Icon size={14} />
+                    {fact.label}
+                  </span>
+                  <strong>{fact.value}</strong>
+                </div>
+              );
+            })}
+          </div>
+
+          {normalizedSummaryBadges.length > 0 && (
+            <div className="class-plan-sheet-badge-row">
+              {normalizedSummaryBadges.map((badge) => (
+                <span key={badge.label} className={`class-schedule-modal-mobile-summary-chip is-${badge.tone || 'neutral'}`}>
+                  {badge.label}
                 </span>
-                <strong>{fact.value}</strong>
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          )}
         </div>
-
-        {normalizedSummaryBadges.length > 0 ? (
-          <div className="class-plan-sheet-badge-row">
-            {normalizedSummaryBadges.map((badge) => (
-              <span key={badge.label} className={`class-schedule-modal-mobile-summary-chip is-${badge.tone || 'neutral'}`}>
-                {badge.label}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      ) : (
+        <div className="class-plan-sheet-public-card-wrapper" style={{ padding: '16px 12px' }}>
+          <PublicLandingCard classItem={safeClass} hideActions={true} />
+        </div>
+      )}
 
       {warningBanner ? (
         <div className="class-plan-sheet-warning">
@@ -120,7 +123,7 @@ export default function ClassSchedulePlanModal({
         </div>
       ) : null}
 
-      <div className="class-plan-sheet-content">
+      <div className={`class-plan-sheet-content ${!editable ? 'is-public' : ''}`}>
         {editable ? (
           <ClassSchedulePlanner
             value={plan}
@@ -168,9 +171,10 @@ export default function ClassSchedulePlanModal({
         open={open}
         onClose={onClose}
         title={headerTitle}
-        subtitle={displayClassName}
+        subtitle={editable ? displayClassName : undefined}
         testId="class-schedule-plan-sheet"
         fullHeightOnMobile
+        floatingOnMobile={!editable}
       >
         <div>{content}</div>
       </BottomSheet>
