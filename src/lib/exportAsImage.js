@@ -7,19 +7,25 @@ const EXPORT_PRESETS = {
   },
 };
 
-export async function exportElementAsImage(element, filename, options = {}) {
+function getCaptureOptions(options = {}) {
+  const preset = EXPORT_PRESETS[options.preset] || {};
+  return {
+    width: options.width ?? preset.width ?? 794,
+    padding: options.padding ?? preset.padding ?? 32,
+    scale: options.scale ?? preset.scale ?? 2,
+    backgroundColor: options.backgroundColor ?? preset.backgroundColor ?? (
+      document.documentElement.getAttribute('data-theme') === 'dark'
+        ? '#111712'
+        : '#f6f7f3'
+    ),
+  };
+}
+
+async function renderElementToCanvas(element, options = {}) {
   if (!element) return;
 
   const originalStyle = element.style.cssText;
-  const preset = EXPORT_PRESETS[options.preset] || {};
-  const {
-    width = preset.width ?? 794,
-    padding = preset.padding ?? 32,
-    scale = preset.scale ?? 2,
-    backgroundColor = preset.backgroundColor ?? (document.documentElement.getAttribute('data-theme') === 'dark'
-      ? '#111712'
-      : '#f6f7f3'),
-  } = options;
+  const { width, padding, scale, backgroundColor } = getCaptureOptions(options);
 
   try {
     element.style.width = `${width}px`;
@@ -35,11 +41,43 @@ export async function exportElementAsImage(element, filename, options = {}) {
       windowWidth: width
     });
 
-    const link = document.createElement('a');
-    link.download = filename;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
+    return canvas;
   } finally {
     element.style.cssText = originalStyle;
   }
+}
+
+export async function captureElementAsPngBlob(element, options = {}) {
+  const canvas = await renderElementToCanvas(element, options);
+  if (!canvas) {
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error('PNG blob capture failed'));
+    }, 'image/png');
+  });
+}
+
+export function downloadBlob(blob, filename) {
+  if (!blob) {
+    return;
+  }
+
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = blobUrl;
+  link.click();
+  URL.revokeObjectURL(blobUrl);
+}
+
+export async function exportElementAsImage(element, filename, options = {}) {
+  const blob = await captureElementAsPngBlob(element, options);
+  downloadBlob(blob, filename);
 }

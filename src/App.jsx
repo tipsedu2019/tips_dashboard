@@ -49,7 +49,7 @@ const DataManager = lazy(() => import('./components/DataManager'));
 const StudentWeeklyView = lazy(() => import('./components/StudentWeeklyView'));
 const AcademicCalendarView = lazy(() => import('./components/AcademicCalendarView'));
 const CurriculumRoadmapView = lazy(() => import('./components/CurriculumRoadmapView'));
-const PublicClassListView = lazy(() => import('./components/PublicClassListView'));
+const PublicClassListView = lazy(() => import('./components/PublicClassLandingView'));
 const ClassListWorkspace = lazy(() => import('./components/ClassListWorkspace'));
 const StatsDashboard = lazy(() => import('./components/StatsDashboard'));
 
@@ -1216,6 +1216,8 @@ export default function App() {
           onLogin={() => setShowLogin(true)}
           showBackToDashboard={Boolean(user)}
           onBackToDashboard={() => setPublicModeAndSync(false)}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       </Suspense>
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}

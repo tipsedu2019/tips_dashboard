@@ -3,7 +3,7 @@ import { BookOpen, CalendarDays, Trash2 } from 'lucide-react';
 import { parseSchedule, splitClassroomList, splitTeacherList } from '../../data/sampleData';
 import { CLASS_STATUS_OPTIONS, computeClassStatus } from '../../lib/classStatus';
 import { normalizeClassroomText } from '../../lib/classroomUtils';
-import { buildSchedulePlanForSave } from '../../lib/classSchedulePlanner';
+import { buildSchedulePlanForSave, DAY_OPTIONS } from '../../lib/classSchedulePlanner';
 import { getAllManagedGrades } from '../../lib/schoolConfig';
 import {
   buildClassroomMaster,
@@ -313,6 +313,38 @@ export default function ClassEditor({
   const liveScheduleWarningBanner = liveScheduleConflicts.length > 0
     ? liveScheduleConflicts.map((warning) => formatLiveScheduleWarning(warning)).join(' / ')
     : null;
+  const livePlanPreview = useMemo(
+    () => buildSchedulePlanForSave(edited.schedulePlan, edited),
+    [edited]
+  );
+  const livePlanSelectedDays = useMemo(
+    () => (livePlanPreview?.selectedDays || [])
+      .map((value) => DAY_OPTIONS.find((day) => day.value === value)?.label)
+      .filter(Boolean)
+      .join(' · '),
+    [livePlanPreview]
+  );
+  const livePlanHasContent = Boolean(
+    livePlanPreview && (
+      (livePlanPreview.selectedDays || []).length > 0 ||
+      (livePlanPreview.sessions || []).length > 0 ||
+      (livePlanPreview.billingPeriods || []).some((period) => period?.startDate || period?.endDate)
+    )
+  );
+  const livePlanRange = useMemo(() => {
+    const periods = livePlanPreview?.billingPeriods || [];
+    if (!periods.length) {
+      return '아직 생성 전';
+    }
+
+    const firstPeriod = periods[0];
+    const lastPeriod = periods[periods.length - 1];
+    if (!firstPeriod?.startDate && !lastPeriod?.endDate) {
+      return '아직 생성 전';
+    }
+
+    return `${firstPeriod?.startDate || '-'} ~ ${lastPeriod?.endDate || '-'}`;
+  }, [livePlanPreview]);
 
   const handleSave = async () => {
     const nextErrors = {};
@@ -664,12 +696,12 @@ export default function ClassEditor({
 
         <SectionCard
           title="수업 계획"
-          description="수업 일정은 전용 모달에서 정리하고, 저장된 계획은 미리보기 카드와 상세 화면에서 그대로 이어집니다."
+          description="수업 흐름을 설계하고, 같은 CLASS PLAN 미리보기를 퍼블릭 상세와 관리자 화면에서 바로 확인합니다."
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
             <div style={{ flex: 1, minWidth: 280 }}>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                기본 과목과 반을 정한 뒤 주간 수업 요일과 시간, 휴강/보강, 기간별 운영 계획을 이어서 조정할 수 있습니다.
+                먼저 반복 요일과 기간을 정하고, 그다음 휴강/보강과 회차 조정을 이어서 검토하는 흐름으로 수업 계획을 정리합니다.
               </div>
               {planWarningBanner ? (
                 <div
@@ -694,11 +726,35 @@ export default function ClassEditor({
             </button>
           </div>
 
+          <div className="planner-selection-card" style={{ marginBottom: 16 }}>
+            <div className="planner-selected-heading">CLASS PLAN</div>
+            <div className="planner-selected-primary">
+              <strong>{edited.className || '수업명 미정'}</strong>
+              <span>{edited.subject || '과목 미정'} · {livePlanSelectedDays || '요일 선택 필요'}</span>
+            </div>
+
+            <div className="planner-inline-stats">
+              <div className="planner-inline-stat">
+                <span>반복 요일</span>
+                <strong>{livePlanSelectedDays || '미설정'}</strong>
+              </div>
+              <div className="planner-inline-stat">
+                <span>월 기준 회차</span>
+                <strong>{livePlanPreview?.globalSessionCount ? `${livePlanPreview.globalSessionCount}회` : '미설정'}</strong>
+              </div>
+              <div className="planner-inline-stat">
+                <span>기간 상태</span>
+                <strong>{livePlanRange}</strong>
+              </div>
+            </div>
+          </div>
+
           <ClassSchedulePlanPreview
-            plan={edited.schedulePlan}
+            plan={livePlanPreview}
             className={edited.className || ''}
             subject={edited.subject || ''}
-            emptyMessage="아직 저장한 수업 일정표가 없습니다."
+            variant="editor-summary"
+            emptyMessage={livePlanHasContent ? '아직 생성된 회차가 없습니다.' : '요일과 기간을 정하면 여기서 CLASS PLAN 미리보기를 바로 확인할 수 있습니다.'}
           />
         </SectionCard>
       </div>

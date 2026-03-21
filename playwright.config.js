@@ -24,7 +24,6 @@ export default defineConfig({
       name: 'mobile-chromium',
       use: {
         ...devices['Pixel 5'],
-        channel: 'chrome',
       },
     },
   ],

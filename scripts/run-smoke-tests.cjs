@@ -1,14 +1,18 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const babel = require('@babel/core');
 const { JSDOM } = require('jsdom');
+const Module = require('node:module');
 
 process.env.NODE_ENV = 'test';
 
 const workspaceRoot = path.resolve(__dirname, '..');
+process.env.NODE_PATH = path.join(workspaceRoot, 'node_modules');
+Module._initPaths();
 const sourceRoot = path.join(workspaceRoot, 'src');
-const compiledRoot = path.join(workspaceRoot, '.codex-temp', 'smoke-compiled');
+const compiledRoot = path.join(os.tmpdir(), `tips-smoke-compiled-${process.pid}`);
 const compiledSourceRoot = path.join(compiledRoot, 'src');
 
 function ensureDirectory(dirPath) {
@@ -151,7 +155,7 @@ const { AuthProvider } = require(path.join(compiledSourceRoot, 'contexts', 'Auth
 const { ToastProvider } = require(path.join(compiledSourceRoot, 'contexts', 'ToastContext.jsx'));
 const App = require(path.join(compiledSourceRoot, 'App.jsx')).default;
 const DataManager = require(path.join(compiledSourceRoot, 'components', 'DataManager.jsx')).default;
-const PublicClassListView = require(path.join(compiledSourceRoot, 'components', 'PublicClassListView.jsx')).default;
+const PublicClassListView = require(path.join(compiledSourceRoot, 'components', 'PublicClassLandingView.jsx')).default;
 const ClassListWorkspace = require(path.join(compiledSourceRoot, 'components', 'ClassListWorkspace.jsx')).default;
 const AcademicCalendarView = require(path.join(compiledSourceRoot, 'components', 'AcademicCalendarView.jsx')).default;
 const CurriculumRoadmapView = require(path.join(compiledSourceRoot, 'components', 'CurriculumRoadmapView.jsx')).default;
@@ -160,6 +164,7 @@ const ClassEditor = require(path.join(compiledSourceRoot, 'components', 'data-ma
 const { createE2EMockData } = require(path.join(compiledSourceRoot, 'testing', 'e2e', 'mockAppData.js'));
 const { e2eDataService } = require(path.join(compiledSourceRoot, 'testing', 'e2e', 'mockDataService.js'));
 const { ACTIVE_CLASS_STATUS } = require(path.join(compiledSourceRoot, 'lib', 'classStatus.js'));
+const { buildSchedulePlanForSave } = require(path.join(compiledSourceRoot, 'lib', 'classSchedulePlanner.js'));
 
 function setViewport(width, height = 900) {
   window.innerWidth = width;
@@ -428,101 +433,223 @@ async function renderClassEditor(overrides = {}) {
 }
 
 async function main() {
-  await runTest('public search empty state', async () => {
-    const user = userEvent.setup();
-    const data = createE2EMockData();
+  const publicClasses = [
+    {
+      id: 'public-class-1',
+      className: '고3 영어 실전 A',
+      subject: '영어',
+      grade: '고3',
+      teacher: '김아영',
+      classroom: '401',
+      room: '401',
+      schedule: '월 18:00-19:30',
+      status: ACTIVE_CLASS_STATUS,
+      studentIds: ['s1', 's2', 's3', 's4', 's5', 's6', 's7'],
+      waitlistIds: [],
+      capacity: 8,
+      tuition: 280000,
+    },
+    {
+      id: 'public-class-2',
+      className: '고3 수학 정규 B',
+      subject: '수학',
+      grade: '고3',
+      teacher: '박성현',
+      classroom: '402',
+      room: '402',
+      schedule: '수 19:00-20:30',
+      status: ACTIVE_CLASS_STATUS,
+      studentIds: ['s1', 's2', 's3', 's4'],
+      waitlistIds: [],
+      capacity: 8,
+      tuition: 300000,
+    },
+    {
+      id: 'public-class-3',
+      className: '중1 영어 기본',
+      subject: '영어',
+      grade: '중1',
+      teacher: '이선영',
+      classroom: '301',
+      room: '301',
+      schedule: '화 17:00-18:30',
+      status: ACTIVE_CLASS_STATUS,
+      studentIds: ['s1'],
+      waitlistIds: [],
+      capacity: 10,
+      tuition: 240000,
+    },
+    {
+      id: 'public-class-4',
+      className: '고3 영어 클리닉',
+      subject: '영어',
+      grade: '고3',
+      teacher: '정유진',
+      classroom: '403',
+      room: '403',
+      schedule: '월 18:30-20:00',
+      status: ACTIVE_CLASS_STATUS,
+      studentIds: ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8'],
+      waitlistIds: ['w1'],
+      capacity: 8,
+      tuition: 250000,
+    },
+  ];
+
+  await runTest('public mobile renders landing shell and condensed header', async () => {
     setViewport(390, 844);
 
-    render(React.createElement(PublicClassListView, {
-      classes: data.classes,
-      onLogin: () => {},
-    }));
+    render(
+      React.createElement(
+        ToastProvider,
+        null,
+        React.createElement(PublicClassListView, {
+          classes: publicClasses,
+          onLogin: () => {},
+          theme: 'light',
+        })
+      )
+    );
+
+    assert.ok(screen.getByTestId('public-class-list-view'));
+    assert.ok(screen.getByTestId('public-logo-button'));
+    assert.ok(screen.getByTestId('public-mobile-topbar'));
+    assert.ok(screen.getByTestId('public-subject-tabs'));
+    assert.ok(screen.getByTestId('public-grade-tabs'));
+    assert.ok(screen.getByTestId('public-card-list'));
+    assert.ok(screen.getByTestId('public-bottom-nav'));
+
+    Object.defineProperty(window, 'scrollY', { value: 80, writable: true, configurable: true });
+    window.dispatchEvent(new window.Event('scroll'));
+
+    await waitFor(() => {
+      assert.ok(document.querySelector('.public-landing-shell.is-condensed-header'));
+    });
+  });
+
+  await runTest('public mobile subject and grade tabs filter class cards', async () => {
+    const user = userEvent.setup();
+    setViewport(390, 844);
+
+    render(
+      React.createElement(
+        ToastProvider,
+        null,
+        React.createElement(PublicClassListView, {
+          classes: publicClasses,
+          onLogin: () => {},
+          theme: 'light',
+        })
+      )
+    );
+
+    await user.click(screen.getByTestId('public-grade-tab-중1'));
+    await waitFor(() => {
+      assert.ok(screen.getByText('중1 영어 기본'));
+    });
+
+    await user.click(screen.getByTestId('public-subject-tab-수학'));
+    await waitFor(() => {
+      assert.ok(screen.getByText('고3 수학 정규 B'));
+    });
+  });
+
+  await runTest('public mobile review and score tabs open new windows and keep the class list visible', async () => {
+    const user = userEvent.setup();
+    setViewport(390, 844);
+
+    const originalOpen = window.open;
+    const openCalls = [];
+    window.open = (...args) => {
+      openCalls.push(args);
+      return { closed: false, focus() {} };
+    };
+
+    try {
+      render(
+        React.createElement(
+          ToastProvider,
+          null,
+          React.createElement(PublicClassListView, {
+            classes: publicClasses,
+            onLogin: () => {},
+            theme: 'light',
+          })
+        )
+      );
+
+      await user.click(screen.getByTestId('public-bottom-nav-reviews'));
+      await user.click(screen.getByTestId('public-bottom-nav-scores'));
+
+      assert.equal(openCalls.length, 2);
+      assert.match(openCalls[0][0], /map\.naver\.com/);
+      assert.match(openCalls[1][0], /tipsedu\.notion\.site/);
+      assert.ok(screen.getByTestId('public-card-list'));
+      assert.equal(document.querySelector('.public-bottom-nav-button.is-active span')?.textContent, '수업');
+    } finally {
+      window.open = originalOpen;
+    }
+  });
+
+  await runTest('public mobile planner blocks conflicts and opens planner sheet', async () => {
+    const user = userEvent.setup();
+    setViewport(390, 844);
+
+    render(
+      React.createElement(
+        ToastProvider,
+        null,
+        React.createElement(PublicClassListView, {
+          classes: publicClasses,
+          onLogin: () => {},
+          theme: 'light',
+        })
+      )
+    );
+
+    await waitFor(() => {
+      assert.ok(screen.getByTestId('public-card-toggle-public-class-1'));
+    });
+
+    await user.click(screen.getByTestId('public-card-toggle-public-class-1'));
+
+    await waitFor(() => {
+      assert.ok(screen.getByTestId('public-planner-cta'));
+    });
+
+    await user.click(screen.getByTestId('public-card-toggle-public-class-4'));
+
+    await waitFor(() => {
+      assert.ok(document.querySelector('.toast-item'));
+    });
+
+    await user.click(screen.getByTestId('public-planner-cta'));
+    await waitFor(() => {
+      assert.ok(screen.getByTestId('public-planner-sheet'));
+    });
+  });
+
+  await runTest('public mobile search empty state', async () => {
+    const user = userEvent.setup();
+    setViewport(390, 844);
+
+    render(
+      React.createElement(
+        ToastProvider,
+        null,
+        React.createElement(PublicClassListView, {
+          classes: publicClasses,
+          onLogin: () => {},
+          theme: 'light',
+        })
+      )
+    );
 
     const searchInput = screen.getByTestId('public-class-search-input');
-    await user.clear(searchInput);
     await user.type(searchInput, 'zz-not-found-2026');
 
     await waitFor(() => {
-      assert.equal(screen.queryAllByTestId(/public-class-card-/).length, 0);
-    });
-  });
-
-  await runTest('public class card opens mobile schedule sheet', async () => {
-    const user = userEvent.setup();
-    const data = createE2EMockData();
-    setViewport(390, 844);
-
-    render(React.createElement(PublicClassListView, {
-      classes: data.classes,
-      onLogin: () => {},
-    }));
-
-    assert.ok(screen.getByTestId('public-class-list-view'));
-    assert.ok(screen.getByTestId('public-login-button'));
-
-    const classCards = screen.getAllByTestId(/public-class-card-/);
-    assert.ok(classCards.length > 0);
-
-    await user.click(classCards[0]);
-
-    await waitFor(() => {
-      assert.ok(screen.getByTestId('class-schedule-plan-modal'));
-      assert.ok(screen.getByTestId('class-schedule-plan-sheet'));
-      assert.ok(screen.getByTestId('class-schedule-mobile-summary'));
-    });
-
-    await user.keyboard('{Escape}');
-
-    await waitFor(() => {
-      assert.equal(screen.queryByTestId('class-schedule-plan-sheet'), null);
-      assert.ok(screen.getAllByTestId(/public-class-card-/).length > 0);
-    });
-  });
-
-  await runTest('public mobile quick subject chips narrow the class list', async () => {
-    const user = userEvent.setup();
-    const data = createE2EMockData();
-    setViewport(390, 844);
-
-    render(React.createElement(PublicClassListView, {
-      classes: data.classes,
-      onLogin: () => {},
-    }));
-
-    const initialCount = screen.getAllByTestId(/public-class-card-/).length;
-    const quickButtons = screen.getAllByTestId(/public-mobile-quick-subject-/);
-    assert.ok(quickButtons.length > 1);
-
-    await user.click(quickButtons[1]);
-
-    await waitFor(() => {
-      assert.ok(screen.getAllByTestId(/public-class-card-/).length < initialCount);
-    });
-  });
-
-  await runTest('public mobile filter sheet opens and resets active filters', async () => {
-    const user = userEvent.setup();
-    const data = createE2EMockData();
-    setViewport(390, 844);
-
-    render(React.createElement(PublicClassListView, {
-      classes: data.classes,
-      onLogin: () => {},
-    }));
-
-    await user.click(screen.getByTestId('public-filter-button'));
-
-    await waitFor(() => {
-      assert.ok(screen.getByTestId('public-filter-sheet'));
-    });
-
-    const filterSheet = screen.getByTestId('public-filter-sheet');
-    const subjectButtons = filterSheet.querySelectorAll('.public-filter-button-grid-subject button');
-    assert.ok(subjectButtons.length > 1);
-    await user.click(subjectButtons[1]);
-
-    await waitFor(() => {
-      assert.equal(screen.getAllByTestId(/public-class-card-/).length, 1);
+      assert.ok(screen.getByTestId('public-empty-state'));
     });
   });
 
@@ -1078,6 +1205,49 @@ async function main() {
     await waitFor(() => {
       const warningBox = screen.getByTestId('class-editor-live-conflicts');
       assert.ok((warningBox.textContent || '').trim().length > 0);
+    });
+  });
+
+  await runTest('class editor plan panel uses the shared class plan branding', async () => {
+    const seededPlan = buildSchedulePlanForSave(
+      {
+        selectedDays: [2, 4],
+        globalSessionCount: 4,
+        billingPeriods: [
+          {
+            id: 'period-1',
+            month: 5,
+            startDate: '2026-05-05',
+            endDate: '2026-05-28',
+          },
+        ],
+        sessionStates: {},
+      },
+      {
+        subject: '영어',
+        className: '중2A',
+        schedule: '화목 19:00-20:30',
+        startDate: '2026-05-05',
+        endDate: '2026-05-28',
+      }
+    );
+
+    await renderClassEditor({
+      cls: {
+        className: '중2A',
+        subject: '영어',
+        grade: '중2',
+        teacher: '강부희',
+        classroom: '별관 4강',
+        schedule: '화목 19:00-20:30',
+        schedulePlan: seededPlan,
+      },
+    });
+
+    await waitFor(() => {
+      assert.ok(screen.getAllByText('CLASS PLAN').length >= 1);
+      assert.ok(screen.getByTestId('class-plan-session-list'));
+      assert.equal(screen.queryByText('TIPS DASHBOARD'), null);
     });
   });
 

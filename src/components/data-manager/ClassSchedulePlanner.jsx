@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import ClassSchedulePlanPreview from '../ClassSchedulePlanPreview';
 import HelpTooltip from '../ui/HelpTooltip';
 import useViewport from '../../hooks/useViewport';
@@ -101,7 +101,7 @@ function summarizeEntries(entries = []) {
 }
 
 function compactSummary(summary) {
-  const parts = [`회차 ${summary.total}`];
+  const parts = [`총 ${summary.total}`];
   if (summary.exception > 0) {
     parts.push(`휴강 ${summary.exception}`);
   }
@@ -496,29 +496,68 @@ export default function ClassSchedulePlanner({
     );
   };
 
+  const selectedDayLabel = planner.selectedDays.length
+    ? planner.selectedDays
+        .map((value) => DAY_OPTIONS.find((day) => day.value === value)?.label)
+        .filter(Boolean)
+        .join(' · ')
+    : '요일 선택 필요';
+
+  const totalPlannedSessions = calculation.sessions.filter((session) => !['exception', 'tbd'].includes(session.state)).length;
+  const adjustmentCount = calculation.sessions.filter((session) => session.state !== 'active').length;
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: isCompact ? '1fr' : '340px minmax(0, 1fr)', gap: isCompact ? 12 : 16, alignItems: 'start', minWidth: 0 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {isCompact ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-            <ToggleChip compact fullWidth active={mobileSection === 'setup'} onClick={() => setMobileSection('setup')}>
-              기본
-            </ToggleChip>
-            <ToggleChip compact fullWidth active={mobileSection === 'periods'} onClick={() => setMobileSection('periods')}>
-              기간
-            </ToggleChip>
-            <ToggleChip compact fullWidth active={mobileSection === 'preview'} onClick={() => setMobileSection('preview')}>
-              미리보기
-            </ToggleChip>
-          </div>
-        ) : null}
-        <div className="card-custom" style={{ padding: isCompact ? 14 : 18, display: !isCompact || mobileSection === 'setup' ? 'block' : 'none' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <CalendarDays size={18} />
-            <div style={{ fontSize: 16, fontWeight: 800 }}>수업 계획 편집</div>
+    <div className="planner-surface">
+      {isCompact ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+          <ToggleChip compact fullWidth active={mobileSection === 'setup'} onClick={() => setMobileSection('setup')}>
+            기본
+          </ToggleChip>
+          <ToggleChip compact fullWidth active={mobileSection === 'periods'} onClick={() => setMobileSection('periods')}>
+            기간
+          </ToggleChip>
+          <ToggleChip compact fullWidth active={mobileSection === 'preview'} onClick={() => setMobileSection('preview')}>
+            미리보기
+          </ToggleChip>
+        </div>
+      ) : null}
+
+      <div className="planner-summary-bar">
+        <div className="planner-summary-copy">
+          <strong>{className || '새 수업 계획'}</strong>
+          <span>{subject || '과목 미정'} · {selectedDayLabel} · {planner.billingPeriods.length}개 기간</span>
+        </div>
+        <div className="planner-summary-actions">
+          <span className="planner-status-pill is-placed">총 {totalPlannedSessions}회 예정</span>
+          <span className={`planner-status-pill ${adjustmentCount > 0 ? 'is-unplaced' : 'is-placed'}`}>
+            조정 {adjustmentCount}건
+          </span>
+        </div>
+      </div>
+
+      <div className="planner-top-grid">
+        <section className="planner-panel" style={{ display: !isCompact || mobileSection === 'setup' ? 'block' : 'none' }}>
+          <div className="planner-title">기본 설정</div>
+          <div className="planner-copy">
+            과목, 공식 수업명, 반복 요일과 월 회차를 먼저 정리해 두면 오른쪽 미리보기와 퍼블릭 상세가 같은 구조로 이어집니다.
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="planner-inline-stats">
+            <div className="planner-inline-stat">
+              <span>선택 요일</span>
+              <strong>{selectedDayLabel}</strong>
+            </div>
+            <div className="planner-inline-stat">
+              <span>월 기준 회차</span>
+              <strong>{planner.globalSessionCount}회</strong>
+            </div>
+            <div className="planner-inline-stat">
+              <span>기간 수</span>
+              <strong>{planner.billingPeriods.length}개</strong>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16 }}>
             <div>
               <SectionLabel tooltip="수업 일정표 제목에 반영되는 과목입니다.">과목 선택</SectionLabel>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -575,9 +614,9 @@ export default function ClassSchedulePlanner({
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="card-custom" style={{ padding: isCompact ? 14 : 18, display: !isCompact || mobileSection === 'periods' ? 'block' : 'none' }}>
+        <section className="planner-panel" style={{ display: !isCompact || mobileSection === 'periods' ? 'block' : 'none' }}>
           <div
             style={{
               display: 'flex',
@@ -589,12 +628,12 @@ export default function ClassSchedulePlanner({
             }}
           >
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>청구 기간</div>
+              <div className="planner-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>기간 및 회차</span>
                 <HelpTooltip content="월별 기간을 나눠 시작일과 종료일을 관리합니다. 상세 관리에서는 날짜별 휴강·미정·보강을 세밀하게 바꿀 수 있습니다." />
               </div>
-              <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
-                기간별 일정과 휴강·보강을 관리합니다.
+              <div className="planner-copy" style={{ marginTop: 4 }}>
+                월별 운영 기간을 나누고, 기간마다 휴강/보강/미정 회차를 이어서 관리합니다.
               </div>
             </div>
 
@@ -734,20 +773,28 @@ export default function ClassSchedulePlanner({
               );
             })}
           </div>
-        </div>
-      </div>
+        </section>
 
-      <div style={{ display: !isCompact || mobileSection === 'preview' ? 'block' : 'none', minWidth: 0 }}>
-        <ClassSchedulePlanPreview
-        plan={persistedPlan}
-        className={className}
-        subject={subject}
-        interactive
-        allowExport
-        onToggleDate={handleCalendarToggle}
-        onSubstitution={handleSubstitution}
-        emptyMessage="수업명, 요일, 기간을 입력하면 일정표가 생성됩니다."
-        />
+        <section className="planner-panel" style={{ display: !isCompact || mobileSection === 'preview' ? 'block' : 'none', minWidth: 0 }}>
+          <div className="planner-title">실시간 미리보기</div>
+          <div className="planner-copy">
+            여기서 본 구성은 저장 후 퍼블릭 상세와 관리자 화면의 `CLASS PLAN` 미리보기에 같은 구조로 반영됩니다.
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <ClassSchedulePlanPreview
+              plan={persistedPlan}
+              className={className}
+              subject={subject}
+              interactive
+              allowExport
+              onToggleDate={handleCalendarToggle}
+              onSubstitution={handleSubstitution}
+              emptyMessage="수업명, 요일, 기간을 입력하면 수업 계획이 생성됩니다."
+              variant="planner-editor"
+            />
+          </div>
+        </section>
       </div>
     </div>
   );

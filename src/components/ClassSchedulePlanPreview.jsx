@@ -13,6 +13,7 @@ import {
 } from '../lib/classSchedulePlanner';
 
 const CALENDAR_DAY_HEADERS = ['일', '월', '화', '수', '목', '금', '토'];
+const HIDE_ADJACENT_DAY_VARIANTS = new Set(['public-detail', 'editor-summary']);
 
 function buildMonthCells(year, month) {
   const firstDay = new Date(year, month, 1);
@@ -41,6 +42,7 @@ function getPrimarySession(entries = []) {
   if (entries.length === 0) {
     return null;
   }
+
   return entries.find((entry) => entry.state !== 'makeup') || entries[0];
 }
 
@@ -89,11 +91,118 @@ function buildSessionGroups(sessions = [], billingPeriods = []) {
         key: period.id,
         label: getBillingHeading(period, periodSessions[0]),
         billingLabel: period.label || periodSessions[0]?.billingLabel || '청구월 미설정',
-        billingColor: period.color || periodSessions[0]?.billingColor,
+        billingColor: period.color || periodSessions[0]?.billingColor || '#216e4e',
         sessions: periodSessions,
       };
     })
     .filter(Boolean);
+}
+
+function getSelectedDayLabel(plan) {
+  if (!plan?.selectedDays?.length) {
+    return '요일 미설정';
+  }
+
+  const labels = plan.selectedDays
+    .map((value) => DAY_OPTIONS.find((item) => item.value === value)?.label)
+    .filter(Boolean);
+
+  return labels.length ? labels.join(' · ') : '요일 미설정';
+}
+
+function buildPreviewBadges(calculation, selectedDayLabel) {
+  const badges = [
+    {
+      key: 'days',
+      label: `선택 요일 ${selectedDayLabel}`,
+      tone: 'neutral',
+    },
+  ];
+
+  (calculation.billingPeriods || []).forEach((period) => {
+    badges.push({
+      key: `period-${period.id}`,
+      label: `${period.label} ${period.totalSessions || 0}회`,
+      tone: 'period',
+      color: period.color,
+    });
+  });
+
+  ['exception', 'tbd', 'makeup'].forEach((state) => {
+    badges.push({
+      key: `state-${state}`,
+      label: getStateBadgeLabel(state),
+      tone: state,
+    });
+  });
+
+  return badges;
+}
+
+function sanitizeFilePart(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'class-plan';
+}
+
+function PreviewBadge({ badge }) {
+  const tone = badge.tone === 'period'
+    ? {
+        background: `${badge.color || '#216e4e'}18`,
+        color: badge.color || '#216e4e',
+      }
+    : badge.tone === 'neutral'
+      ? {
+          background: 'rgba(15, 23, 42, 0.06)',
+          color: '#334155',
+        }
+      : getStateTone(badge.tone);
+
+  return (
+    <span
+      className="class-plan-preview-badge"
+      style={{
+        background: tone.background,
+        color: tone.color,
+      }}
+    >
+      {badge.label}
+    </span>
+  );
+}
+
+function SessionStatePill({ state }) {
+  const tone = getStateTone(state);
+
+  return (
+    <span
+      className="class-plan-session-state-pill"
+      style={{
+        background: tone.background,
+        color: tone.color,
+      }}
+    >
+      {getStateBadgeLabel(state)}
+    </span>
+  );
+}
+
+function SessionMeta({ session }) {
+  return (
+    <>
+      {session.memo ? (
+        <div className="class-plan-session-note">{session.memo}</div>
+      ) : null}
+      {session.state === 'exception' && session.makeupDate ? (
+        <div className="class-plan-session-note is-makeup">보강 {formatPlannerDateLabel(session.makeupDate)}</div>
+      ) : null}
+      {session.state === 'makeup' && session.originalDate ? (
+        <div className="class-plan-session-note is-cancelled">{formatPlannerDateLabel(session.originalDate)} 휴강 보강</div>
+      ) : null}
+    </>
+  );
 }
 
 function MonthCard({
@@ -108,40 +217,18 @@ function MonthCard({
   dropTarget,
   setDropTarget,
   compact = false,
+  variant = 'editor-summary',
 }) {
   const cells = useMemo(() => buildMonthCells(month.year, month.month), [month.month, month.year]);
+  const showAdjacentDayNumbers = !HIDE_ADJACENT_DAY_VARIANTS.has(variant);
 
   return (
-    <div
-      className="card-custom"
-      style={{
-        padding: compact ? 10 : 12,
-        borderRadius: compact ? 18 : 20,
-        boxShadow: '0 14px 28px rgba(0, 0, 0, 0.05)',
-      }}
-    >
-      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>
-        {month.year}년 {month.month + 1}월
-      </div>
+    <div className={`class-plan-month-card ${compact ? 'is-compact' : ''}`}>
+      <div className="class-plan-month-heading">{month.year}년 {month.month + 1}월</div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-          gap: compact ? 5 : 6,
-        }}
-      >
+      <div className="class-plan-month-grid">
         {CALENDAR_DAY_HEADERS.map((dayLabel) => (
-          <div
-            key={dayLabel}
-            style={{
-              textAlign: 'center',
-              fontSize: compact ? 10 : 11,
-              fontWeight: 800,
-              color: 'var(--text-muted)',
-              paddingBottom: 2,
-            }}
-          >
+          <div key={`${month.year}-${month.month}-${dayLabel}`} className="class-plan-month-weekday">
             {dayLabel}
           </div>
         ))}
@@ -154,37 +241,14 @@ function MonthCard({
           const isDragSource = dragSource === dateKey;
           const isDropTarget = dropTarget === dateKey;
           const canShowAddHint = interactive && cell.isCurrentMonth && !hasSession;
-
-          let background = cell.isCurrentMonth ? 'var(--bg-surface)' : 'rgba(139, 157, 144, 0.08)';
-          let color = cell.isCurrentMonth ? 'var(--text-primary)' : 'var(--text-muted)';
-          let border = '1px solid transparent';
-
-          if (primarySession) {
-            if (primarySession.state === 'exception') {
-              background = 'rgba(239, 68, 68, 0.12)';
-              color = '#b91c1c';
-            } else if (primarySession.state === 'tbd') {
-              background = 'rgba(245, 158, 11, 0.14)';
-              color = '#b45309';
-            } else if (primarySession.state === 'makeup') {
-              background = 'rgba(16, 185, 129, 0.14)';
-              color = '#047857';
-            } else {
-              background = primarySession.billingColor;
-              color = '#ffffff';
-            }
-            border = '1px solid rgba(0, 0, 0, 0.06)';
-          } else if (isDropTarget) {
-            background = 'rgba(33, 110, 78, 0.10)';
-            border = '2px dashed var(--accent-color)';
-          } else if (canShowAddHint) {
-            border = '1px dashed rgba(33, 110, 78, 0.14)';
-          }
+          const tone = hasSession ? getStateTone(primarySession.state) : null;
+          const CellTag = interactive ? 'button' : 'div';
+          const dayNumber = cell.isCurrentMonth || showAdjacentDayNumbers ? String(cell.date.getDate()) : '';
 
           return (
-            <button
+            <CellTag
               key={`${month.year}-${month.month}-${dateKey}`}
-              type="button"
+              {...(interactive ? { type: 'button' } : {})}
               draggable={interactive && Boolean(primarySession) && primarySession.state !== 'makeup'}
               onDragStart={(event) => {
                 if (!interactive || !primarySession || primarySession.state === 'makeup') {
@@ -224,10 +288,7 @@ function MonthCard({
                 }
               }}
               onClick={() => {
-                if (!interactive || !onToggleDate) {
-                  return;
-                }
-                if (primarySession?.state === 'makeup') {
+                if (!interactive || !onToggleDate || primarySession?.state === 'makeup') {
                   return;
                 }
                 onToggleDate(dateKey, {
@@ -236,60 +297,143 @@ function MonthCard({
                   isMakeup: primarySession?.state === 'makeup',
                 });
               }}
+              className={[
+                'class-plan-day-cell',
+                cell.isCurrentMonth ? 'is-current-month' : 'is-adjacent-month',
+                hasSession ? 'is-filled' : '',
+                isDropTarget ? 'is-drop-target' : '',
+                isDragSource ? 'is-drag-source' : '',
+                interactive ? 'is-interactive' : '',
+              ].filter(Boolean).join(' ')}
               style={{
-                minHeight: compact ? 52 : 58,
-                padding: compact ? '6px 7px' : '7px 8px',
-                borderRadius: compact ? 14 : 16,
-                border,
-                background,
-                color,
-                textAlign: 'left',
-                cursor: interactive ? (primarySession?.state === 'makeup' ? 'default' : 'pointer') : 'default',
-                boxShadow: isDragSource ? '0 14px 30px rgba(0, 0, 0, 0.16)' : 'none',
-                opacity: isDragSource ? 0.4 : cell.isCurrentMonth ? 1 : 0.72,
-                transition: 'all 0.18s ease',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
+                ...(tone ? {
+                  '--class-plan-cell-fill': tone.background,
+                  '--class-plan-cell-text': tone.color,
+                } : {}),
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
-                <span style={{ fontSize: compact ? 11 : 12, fontWeight: 800 }}>{cell.date.getDate()}</span>
+              <div className="class-plan-day-number">{dayNumber}</div>
+              <div className="class-plan-day-entry">
                 {primarySession?.sessionNumber ? (
-                  <span
-                    style={{
-                      minWidth: compact ? 18 : 20,
-                      height: compact ? 18 : 20,
-                      borderRadius: 999,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: compact ? 9 : 10,
-                      fontWeight: 900,
-                      background: primarySession.state === 'active'
-                        ? 'rgba(255, 255, 255, 0.22)'
-                        : 'rgba(255, 255, 255, 0.72)',
-                      color: primarySession.state === 'active' ? '#ffffff' : color,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {primarySession.sessionNumber}
+                  <span className="class-plan-day-session-pill">{primarySession.sessionNumber}회</span>
+                ) : canShowAddHint ? (
+                  <span className="class-plan-day-add-hint" aria-hidden="true">
+                    <Plus size={compact ? 10 : 12} />
                   </span>
                 ) : null}
               </div>
-
-              {canShowAddHint ? (
-                <div style={{ display: 'flex', justifyContent: 'center', color: 'var(--text-muted)', opacity: 0.55 }}>
-                  <Plus size={compact ? 10 : 12} />
-                </div>
-              ) : (
-                <div style={{ height: 12 }} />
-              )}
-            </button>
+            </CellTag>
           );
         })}
       </div>
     </div>
+  );
+}
+
+function SessionCards({ group }) {
+  return (
+    <section className="class-plan-session-group" key={group.key}>
+      <header className="class-plan-session-group-header">
+        <strong>{group.label}</strong>
+        <span>{group.billingLabel}</span>
+      </header>
+      <div className="class-plan-session-card-list">
+        {group.sessions.map((session) => (
+          <article
+            key={`${group.key}-${session.date}-${session.originalDate || 'base'}-${session.sessionNumber || 'na'}`}
+            className="class-plan-session-card"
+          >
+            <div className="class-plan-session-card-top">
+              <span className="class-plan-session-billing">
+                <span
+                  className="class-plan-session-billing-dot"
+                  style={{ background: group.billingColor || session.billingColor || '#216e4e' }}
+                />
+                {group.billingLabel}
+              </span>
+              <SessionStatePill state={session.state} />
+            </div>
+            <strong className="class-plan-session-date">{formatPlannerDateLabel(session.date)}</strong>
+            <div className="class-plan-session-card-meta">
+              <span>{session.sessionNumber ? `${session.sessionNumber}회차` : '예외 일정'}</span>
+            </div>
+            <SessionMeta session={session} />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SessionTable({ group, compact }) {
+  return (
+    <section className="class-plan-session-group" key={group.key}>
+      <header className="class-plan-session-group-header is-desktop">
+        <strong>{group.label}</strong>
+        <span>{group.billingLabel}</span>
+      </header>
+      <div className="class-plan-session-table-head" style={{ gridTemplateColumns: compact ? '72px 56px 1fr auto' : '76px 64px 1fr auto' }}>
+        <div>청구월</div>
+        <div>회차</div>
+        <div>수업일</div>
+        <div>상태</div>
+      </div>
+      <div className="class-plan-session-table-body">
+        {group.sessions.map((session) => (
+          <div
+            key={`${group.key}-${session.date}-${session.originalDate || 'base'}-${session.sessionNumber || 'na'}`}
+            className="class-plan-session-row"
+            style={{ gridTemplateColumns: compact ? '72px 56px 1fr auto' : '76px 64px 1fr auto' }}
+          >
+            <div className="class-plan-session-billing">
+              <span
+                className="class-plan-session-billing-dot"
+                style={{ background: group.billingColor || session.billingColor || '#216e4e' }}
+              />
+              {group.billingLabel}
+            </div>
+            <div className="class-plan-session-number">{session.sessionNumber ? `${session.sessionNumber}회` : '-'}</div>
+            <div className="class-plan-session-date-wrap">
+              <strong className="class-plan-session-date">{formatPlannerDateLabel(session.date)}</strong>
+              <SessionMeta session={session} />
+            </div>
+            <div className="class-plan-session-state-wrap">
+              <SessionStatePill state={session.state} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SessionList({ groups, isCompact }) {
+  if (!groups.length) {
+    return null;
+  }
+
+  if (isCompact) {
+    return (
+      <div className="class-plan-session-stack" data-testid="class-plan-session-list">
+        <div className="class-plan-session-panel-header">
+          <strong>회차 목록</strong>
+          <span>모바일 카드 보기</span>
+        </div>
+        {groups.map((group) => <SessionCards key={group.key} group={group} />)}
+      </div>
+    );
+  }
+
+  return (
+    <aside className="class-plan-session-panel" data-testid="class-plan-session-list">
+      <div className="class-plan-session-panel-header is-sticky">
+        <strong>회차 목록</strong>
+        <span>기간별 수업 구성</span>
+      </div>
+      <div className="class-plan-session-scroll">
+        {groups.map((group) => <SessionTable key={group.key} group={group} compact={false} />)}
+      </div>
+    </aside>
   );
 }
 
@@ -301,7 +445,8 @@ export function ClassSchedulePlanPreview({
   onToggleDate,
   onSubstitution,
   allowExport = false,
-  emptyMessage = '아직 생성된 수업 일정표가 없습니다.',
+  emptyMessage = '아직 생성한 수업 계획이 없습니다.',
+  variant = 'editor-summary',
 }) {
   const { isMobile, isCompact } = useViewport();
   const exportRef = useRef(null);
@@ -322,140 +467,71 @@ export function ClassSchedulePlanPreview({
     () => buildSessionGroups(calculation.sessions, calculation.billingPeriods),
     [calculation.billingPeriods, calculation.sessions]
   );
-
-  const fullClassName = getFullClassName(subject, className) || className || '수업 일정표';
-  const selectedDayLabel = plan?.selectedDays?.length > 0
-    ? plan.selectedDays
-        .map((value) => DAY_OPTIONS.find((day) => day.value === value)?.label)
-        .filter(Boolean)
-        .join(' · ')
-    : '미설정';
+  const selectedDayLabel = useMemo(() => getSelectedDayLabel(plan), [plan]);
+  const previewBadges = useMemo(
+    () => buildPreviewBadges(calculation, selectedDayLabel),
+    [calculation, selectedDayLabel]
+  );
+  const fullClassName = getFullClassName(subject, className) || className || '수업 계획';
+  const isSummaryVariant = variant !== 'planner-editor';
 
   const handleExport = async () => {
     if (!allowExport || !exportRef.current || calculation.sessions.length === 0) {
       return;
     }
 
-    await exportElementAsImage(
-      exportRef.current,
-      `팁스영어수학학원 [${subject || '영어'}] ${className || '수업'}_수업 일정표.png`,
-      {
-        preset: 'a4-portrait',
-        width: 794,
-        padding: 20,
-        scale: 4,
-        backgroundColor: '#ffffff',
-      }
-    );
+    const filename = `class-plan-${sanitizeFilePart(subject)}-${sanitizeFilePart(className)}.png`;
+
+    await exportElementAsImage(exportRef.current, filename, {
+      preset: 'a4-portrait',
+      width: 794,
+      padding: 20,
+      scale: 4,
+      backgroundColor: '#ffffff',
+    });
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: isCompact ? 8 : 10, minWidth: 0 }}>
-      {allowExport ? (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 800 }}>캘린더 뷰</div>
+    <div
+      className={`class-plan-preview class-plan-preview--${variant} ${isCompact ? 'is-compact' : ''}`}
+      data-testid="class-plan-preview"
+    >
+      <div ref={exportRef} className={`class-plan-preview-surface ${isSummaryVariant ? 'is-summary' : ''}`}>
+        <div className="class-plan-preview-header">
+          <div className="class-plan-preview-copy">
+            <span className="class-plan-preview-eyebrow">CLASS PLAN</span>
+            <strong className="class-plan-preview-title">{fullClassName}</strong>
+            <span className="class-plan-preview-subtitle">선택 요일 {selectedDayLabel}</span>
           </div>
-          <button type="button" className="btn-secondary" onClick={handleExport} disabled={calculation.sessions.length === 0}>
-            <Download size={16} />
-            이미지 저장
-          </button>
+
+          {allowExport ? (
+            <button type="button" className="btn-secondary class-plan-export-button" onClick={handleExport} disabled={calculation.sessions.length === 0}>
+              <Download size={16} />
+              이미지 저장
+            </button>
+          ) : null}
         </div>
-      ) : null}
 
-      <div
-        ref={exportRef}
-        className="card-custom"
-        style={{
-          padding: isCompact ? 12 : 16,
-          borderRadius: isCompact ? 20 : 24,
-          background: '#ffffff',
-          color: '#1e2920',
-          minWidth: 0,
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap', marginBottom: isCompact ? 10 : 12 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.3, color: '#216e4e' }}>
-              TIPS DASHBOARD
-            </div>
-            <div style={{ fontSize: isMobile ? 18 : 20, fontWeight: 900, marginTop: 4, lineHeight: 1.15, wordBreak: 'keep-all' }}>
-              {fullClassName}
-            </div>
-            <div style={{ marginTop: 6, fontSize: 12, color: '#5a6b5e' }}>
-              선택 요일: {selectedDayLabel}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {(calculation.billingPeriods || []).map((period) => (
-              <span
-                key={period.id}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '6px 10px',
-                  borderRadius: 999,
-                  background: `${period.color}18`,
-                  color: period.color,
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}
-              >
-                <span style={{ width: 9, height: 9, borderRadius: 999, background: period.color }} />
-                {period.label}
-              </span>
-            ))}
-
-            {['exception', 'tbd', 'makeup'].map((state) => {
-              const tone = getStateTone(state);
-              return (
-                <span
-                  key={state}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    padding: '7px 11px',
-                    borderRadius: 999,
-                    background: tone.background,
-                    color: tone.color,
-                    fontSize: 12,
-                    fontWeight: 800,
-                  }}
-                >
-                  {getStateBadgeLabel(state)}
-                </span>
-              );
-            })}
-          </div>
+        <div className="class-plan-preview-badge-row">
+          {previewBadges.map((badge) => (
+            <PreviewBadge key={badge.key} badge={badge} />
+          ))}
         </div>
 
         {calculation.sessions.length === 0 ? (
-          <div
-            style={{
-              borderRadius: 22,
-              border: '1px dashed rgba(33, 110, 78, 0.18)',
-              background: '#f7faf8',
-              padding: '40px 20px',
-              textAlign: 'center',
-              color: '#5a6b5e',
-            }}
-          >
-            <CalendarDays size={28} style={{ marginBottom: 12 }} />
-            <div style={{ fontSize: 15, fontWeight: 800 }}>{emptyMessage}</div>
+          <div className={`class-plan-empty-state ${isSummaryVariant ? 'is-summary' : ''}`}>
+            <CalendarDays size={24} />
+            <strong>{emptyMessage}</strong>
+            {variant === 'editor-summary' ? (
+              <span>요일과 기간을 정하면 미리보기와 상세 시트에 같은 구조로 반영됩니다.</span>
+            ) : null}
           </div>
         ) : (
           <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isCompact ? '1fr' : 'minmax(0, 1.34fr) minmax(320px, 380px)',
-              gap: isCompact ? 10 : 12,
-              alignItems: 'start',
-              minWidth: 0,
-            }}
+            className={`class-plan-preview-layout ${isCompact ? 'is-mobile' : 'is-desktop'}`}
+            data-testid="class-plan-preview-layout"
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: isCompact ? 10 : 12, minWidth: 0 }}>
+            <div className="class-plan-month-stack">
               {calculation.months.map((month) => (
                 <MonthCard
                   key={`${month.year}-${month.month}`}
@@ -470,154 +546,12 @@ export function ClassSchedulePlanPreview({
                   dropTarget={dropTarget}
                   setDropTarget={setDropTarget}
                   compact={isCompact}
+                  variant={variant}
                 />
               ))}
             </div>
 
-            <div
-              className="card-custom"
-              style={{
-                borderRadius: 22,
-                overflow: 'hidden',
-                borderColor: 'rgba(30, 41, 32, 0.08)',
-                display: 'flex',
-                flexDirection: 'column',
-                minWidth: 0,
-                position: isCompact ? 'static' : 'sticky',
-                top: 12,
-              }}
-            >
-              <div
-                style={{
-                  padding: '14px 16px',
-                  borderBottom: '1px solid rgba(30, 41, 32, 0.08)',
-                  fontSize: 16,
-                  fontWeight: 800,
-                }}
-              >
-                회차 목록
-              </div>
-
-              <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'visible', maxHeight: isCompact ? 'none' : 'calc(100vh - 240px)' }}>
-                {sessionGroups.map((group) => (
-                  <div
-                    key={group.key}
-                    style={{
-                      borderRadius: 16,
-                      border: '1px solid rgba(30, 41, 32, 0.08)',
-                      overflow: 'hidden',
-                      background: '#ffffff',
-                    }}
-                  >
-                    <div
-                      style={{
-                        padding: '10px 12px',
-                        background: '#f7faf8',
-                        borderBottom: '1px solid rgba(30, 41, 32, 0.08)',
-                        fontSize: 13,
-                        fontWeight: 900,
-                        color: '#2b4134',
-                      }}
-                    >
-                      {group.label}
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: isCompact ? '64px 52px 84px auto' : '72px 54px 98px auto',
-                        gap: 6,
-                        padding: '8px 10px 7px',
-                        fontSize: 11,
-                        fontWeight: 900,
-                        color: '#5a6b5e',
-                        borderBottom: '1px solid rgba(30, 41, 32, 0.08)',
-                      }}
-                    >
-                      <div>청구월</div>
-                      <div>회차</div>
-                      <div>수업일</div>
-                      <div>상태</div>
-                    </div>
-
-                    {group.sessions.map((session) => {
-                      const tone = getStateTone(session.state);
-                      return (
-                        <div
-                          key={`${group.key}-${session.billingId}-${session.date}-${session.originalDate || 'base'}`}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: isCompact ? '64px 52px 84px auto' : '72px 54px 98px auto',
-                            gap: 6,
-                            alignItems: 'start',
-                            padding: '8px 10px',
-                            borderBottom: '1px solid rgba(30, 41, 32, 0.06)',
-                          }}
-                        >
-                          <div style={{ fontSize: 12, fontWeight: 800, color: '#2b4134' }}>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                              <span
-                                style={{
-                                  width: 8,
-                                  height: 8,
-                                  borderRadius: 999,
-                                  background: group.billingColor || session.billingColor || '#216e4e',
-                                  flexShrink: 0,
-                                }}
-                              />
-                              <span>{group.billingLabel}</span>
-                            </span>
-                          </div>
-
-                          <div style={{ fontSize: 12, fontWeight: 800, color: '#2b4134' }}>
-                            {session.sessionNumber ? `${session.sessionNumber}회` : '-'}
-                          </div>
-
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 800, color: '#1e2920', whiteSpace: 'nowrap' }}>
-                              {formatPlannerDateLabel(session.date)}
-                            </div>
-                            {session.memo ? (
-                              <div style={{ marginTop: 4, fontSize: 11, color: '#5a6b5e', lineHeight: 1.45 }}>
-                                {session.memo}
-                              </div>
-                            ) : null}
-                            {session.state === 'exception' && session.makeupDate ? (
-                              <div style={{ marginTop: 4, fontSize: 11, color: '#047857', fontWeight: 700 }}>
-                                보강: {formatPlannerDateLabel(session.makeupDate)}
-                              </div>
-                            ) : null}
-                            {session.state === 'makeup' && session.originalDate ? (
-                              <div style={{ marginTop: 4, fontSize: 11, color: '#b91c1c', fontWeight: 700 }}>
-                                {formatPlannerDateLabel(session.originalDate)} 휴강 보강
-                              </div>
-                            ) : null}
-                          </div>
-
-                          <div>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '6px 10px',
-                                borderRadius: 999,
-                                fontSize: 11,
-                                fontWeight: 900,
-                                background: tone.background,
-                                color: tone.color,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {getStateBadgeLabel(session.state)}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <SessionList groups={sessionGroups} isCompact={isCompact || isMobile} />
           </div>
         )}
       </div>

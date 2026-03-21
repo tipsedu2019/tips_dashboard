@@ -19,6 +19,10 @@ vite-dev.log
 
 # Local Codex / skill / install helpers
 .codex/
+.codex-artifacts/
+.superpowers/
+test-results/
+playwright-report/
 docs/toss-skills-quickstart.md
 install-toss-skills.cmd
 scripts/install-toss-skills.ps1

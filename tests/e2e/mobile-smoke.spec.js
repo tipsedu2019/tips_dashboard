@@ -1,45 +1,96 @@
 import { expect, test } from '@playwright/test';
 
-const e2eUrl = (path = '/') => `${path.includes('?') ? `${path}&` : `${path}?`}e2e=1`;
+const e2eUrl = (path = '/', { publicView = false } = {}) => {
+  const [pathWithoutHash, hash = ''] = path.split('#');
+  const [pathname, query = ''] = pathWithoutHash.split('?');
+  const params = new URLSearchParams(query);
+
+  params.set('e2e', '1');
+  if (publicView) {
+    params.set('view', 'public');
+  }
+
+  return `${pathname}?${params.toString()}${hash ? `#${hash}` : ''}`;
+};
+
+async function waitForPublicLandingResults(page) {
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        document.querySelector('[data-testid="public-empty-state"]') ||
+          document.querySelector('[data-testid^="public-class-card-"]')
+      ),
+    null,
+    { timeout: 8_000 }
+  );
+}
 
 test.describe('mobile smoke', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
   });
 
-  test('renders the public timetable shell on mobile', async ({ page }) => {
-    await page.goto(e2eUrl('/'));
+  test('renders the public landing shell on mobile', async ({ page }) => {
+    await page.goto(e2eUrl('/', { publicView: true }));
 
-    await expect(page.getByText('팁스영어수학학원 수업시간표')).toBeVisible();
-    await expect(page.getByPlaceholder('수업명, 선생님, 강의실 검색')).toBeVisible();
-    await expect(page.getByRole('button', { name: '직원 로그인' })).toBeVisible();
+    await expect(page.getByTestId('public-mobile-topbar')).toBeVisible();
+    await expect(page.getByTestId('public-class-search-input')).toBeVisible();
+    await expect(page.getByTestId('public-logo-button')).toBeVisible();
+    await expect(page.getByTestId('public-subject-tabs')).toBeVisible();
+    await expect(page.getByTestId('public-grade-tabs')).toBeVisible();
+    await expect(page.getByTestId('public-card-list')).toBeVisible();
+    await expect(page.getByTestId('public-bottom-nav')).toBeVisible();
+  });
 
-    const subjectButtons = page.locator('.public-filter-button-grid-subject .h-segment-btn');
-    await expect(subjectButtons.first()).toBeVisible();
+  test('mobile public bottom nav swaps placeholder tabs', async ({ page }) => {
+    await page.goto(e2eUrl('/', { publicView: true }));
+
+    await page.getByTestId('public-bottom-nav-home').click();
+    await expect(page.getByTestId('public-placeholder-home')).toBeVisible();
+
+    await page.getByTestId('public-bottom-nav-classes').click();
+    await expect(page.getByTestId('public-card-list')).toBeVisible();
   });
 
   test('searching to a missing result shows the empty state', async ({ page }) => {
-    await page.goto(e2eUrl('/'));
+    await page.goto(e2eUrl('/', { publicView: true }));
 
-    const search = page.getByPlaceholder('수업명, 선생님, 강의실 검색');
+    const search = page.getByTestId('public-class-search-input');
     await search.fill('zz-not-found-2026');
 
-    await expect(page.getByText('조건에 맞는 수업이 없습니다.')).toBeVisible();
+    await expect(page.getByTestId('public-empty-state')).toBeVisible();
   });
 
   test('public class card opens the mobile schedule sheet', async ({ page }) => {
-    await page.goto(e2eUrl('/'));
+    await page.goto(e2eUrl('/', { publicView: true }));
+    await waitForPublicLandingResults(page);
 
-    const cards = page.locator('.public-class-card');
+    const cards = page.locator('[data-testid^="public-class-card-"]');
     const cardCount = await cards.count();
 
     if (cardCount === 0) {
-      await expect(page.getByText('조건에 맞는 수업이 없습니다.')).toBeVisible();
+      await expect(page.getByTestId('public-empty-state')).toBeVisible();
       return;
     }
 
-    await cards.first().click();
+    await cards.first().locator('.public-landing-card-main').click();
     await expect(page.getByTestId('class-schedule-plan-sheet')).toBeVisible();
+  });
+
+  test('planner CTA opens after adding a class', async ({ page }) => {
+    await page.goto(e2eUrl('/', { publicView: true }));
+    await waitForPublicLandingResults(page);
+
+    const plannerButtons = page.locator('[data-testid^="public-card-toggle-"]');
+    const count = await plannerButtons.count();
+
+    if (count === 0) {
+      await expect(page.getByTestId('public-empty-state')).toBeVisible();
+      return;
+    }
+
+    await plannerButtons.first().click();
+    await expect(page.getByTestId('public-planner-cta')).toBeVisible();
   });
 
   test('mobile academic hub switcher opens from the calendar tab', async ({ page }) => {
