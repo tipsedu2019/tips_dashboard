@@ -21,6 +21,7 @@ vite-dev.log
 .codex/
 .codex-artifacts/
 .superpowers/
+.worktrees/
 test-results/
 playwright-report/
 docs/toss-skills-quickstart.md
