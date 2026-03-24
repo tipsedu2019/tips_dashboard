@@ -1071,6 +1071,8 @@ export function calculateSchedulePlan(planInput) {
 
   return {
     billingPeriods,
+    selectedDays,
+    globalSessionCount,
     editorEntriesByPeriod,
     textbooks,
     sessions,

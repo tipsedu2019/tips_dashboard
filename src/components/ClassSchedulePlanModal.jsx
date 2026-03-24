@@ -641,7 +641,9 @@ export default function ClassSchedulePlanModal({
   };
 
   const handleSave = async () => {
-    if (!isEditableMode || (isBuilderMode && validationMessage)) {
+    if (!isEditableMode) return;
+    if (isBuilderMode && validationMessage) {
+      toast.info(validationMessage);
       return;
     }
 
@@ -665,6 +667,12 @@ export default function ClassSchedulePlanModal({
         onPlanChange?.(payload.schedulePlan);
       }
       setBaselineSnapshot(currentSnapshot);
+      toast.success("설계 내용이 성공적으로 저장되었습니다.");
+    } catch (err) {
+      console.error("Save failed:", err);
+      toast.error(
+        err?.message || "저장 중에 문제가 발생했습니다. 다시 시도해 주세요.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -742,6 +750,13 @@ export default function ClassSchedulePlanModal({
     return null;
   }
 
+  /*
+   - **Validation Feedback**: If saving is blocked due to missing fields (e.g., subject not selected), a helpful message is displayed via toast.
+- **Fixed False Validation**: Fixed a bug where the modal incorrectly claimed "no days selected" even when a schedule was present. This was due to a missing field in the calculation logic.
+
+### 3. Header Save Icon
+Confirmed that the diskette icon in the top right is a functional save button. It now uses the same improved `handleSave` logic with feedback.
+*/
   const publicCardClass = {
     ...safeClass,
     subject: draftClass.subject || safeClass.subject,
@@ -1297,7 +1312,6 @@ export default function ClassSchedulePlanModal({
 
         {previewPanel}
       </div>
-      {isMobile ? saveBar : null}
     </div>
   );
 
@@ -1383,7 +1397,6 @@ export default function ClassSchedulePlanModal({
 
         {previewPanel}
       </div>
-      {isMobile ? saveBar : null}
     </div>
   );
 
@@ -1535,6 +1548,7 @@ export default function ClassSchedulePlanModal({
       title={headerTitle}
       subtitle={isReadonlyMode ? "" : draftClass.subject || safeClass.subject || ""}
       headerActions={readonlyHeaderShareButton}
+      actions={isEditableMode ? saveBar : null}
       testId="class-schedule-plan-modal"
       sheetClassName={
         isReadonlyMode ? "class-plan-bottom-sheet--public" : "class-plan-bottom-sheet--editable"
@@ -1564,6 +1578,7 @@ export default function ClassSchedulePlanModal({
         >
           {renderDesktopHeader()}
           {body}
+          {saveBar}
         </div>
       </div>
     </div>
