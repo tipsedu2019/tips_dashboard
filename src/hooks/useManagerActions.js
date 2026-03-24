@@ -587,17 +587,23 @@ export function useManagerActions({
   const saveTextbook = async (textbook) => {
     setIsProcessing(true);
     try {
-      if ((data.textbooks || []).some((item) => item.id === textbook.id)) {
-        await dataService.updateTextbook(textbook.id, textbook);
-        toast.success('교재 정보를 저장했습니다.');
+      const isUpdate = (data.textbooks || []).some((item) => item.id === textbook.id);
+      let result = null;
+      if (isUpdate) {
+        result = await dataService.updateTextbook(textbook.id, textbook);
       } else {
-        await dataService.addTextbook(textbook);
-        toast.success('교재를 등록했습니다.');
+        result = await dataService.addTextbook(textbook);
       }
-      return true;
+
+      toast.success(isUpdate ? '교재 정보를 저장했습니다.' : '교재를 등록했습니다.');
+
+      return {
+        ok: true,
+        textbook: result?.textbook || textbook,
+      };
     } catch (error) {
       toast.error(`교재 저장에 실패했습니다. ${getErrorMessage(error)}`);
-      return false;
+      return { ok: false, textbook: null };
     } finally {
       setIsProcessing(false);
     }

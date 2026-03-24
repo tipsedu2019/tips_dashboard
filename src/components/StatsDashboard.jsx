@@ -18,32 +18,18 @@ import {
   splitTeacherList,
   stripClassPrefix,
 } from '../data/sampleData';
+import { calculateSchedulePlan, normalizeSchedulePlan } from '../lib/classSchedulePlanner';
 import { findExamConflictsForClasses } from '../lib/examScheduleUtils';
+import {
+  DashboardDataSurface,
+  DashboardMetricCard,
+  DashboardSectionIntro,
+  DashboardSummaryStrip,
+  DashboardTopRail,
+} from './ui/dashboard';
+import { Badge, TextButton } from './ui/tds';
 
 const SUMMARY_PANEL_STORAGE_KEY = 'tips-dashboard-summary-panels-v2';
-
-function MetricCard({ icon, title, value, caption, collapsed = false, onToggle, children }) {
-  return (
-    <div className="card stats-metric-card">
-      <div className="stats-metric-card-head">
-        <div className="stats-metric-card-title-group">
-          <div className="stats-metric-card-icon">
-            {icon}
-          </div>
-          <div className="stats-metric-card-label">{title}</div>
-        </div>
-        {onToggle ? <SummaryToggleButton collapsed={collapsed} onClick={onToggle} /> : null}
-      </div>
-      <div className="stats-metric-card-value">{value}</div>
-      {!collapsed ? (
-        <>
-          <div className="stats-metric-card-caption">{caption}</div>
-          {children ? <div className="stats-metric-card-body">{children}</div> : null}
-        </>
-      ) : null}
-    </div>
-  );
-}
 
 function ProportionalBar({ value, max, color, extraLabel }) {
   const pct = max > 0 ? Math.max(4, (value / max) * 100) : 0;
@@ -390,40 +376,118 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
     [classes, data.academicEventExamDetails, data.academicEvents, data.academicExamDays, data.academicSchools, data.students]
   );
 
+  const planningStats = useMemo(
+    () =>
+      classes.reduce(
+        (accumulator, classItem) => {
+          const normalizedPlan = normalizeSchedulePlan(
+            classItem.schedulePlan || classItem.schedule_plan || null,
+            {
+              className: classItem.className || classItem.name || '',
+              subject: classItem.subject || '',
+              schedule: classItem.schedule || '',
+              startDate: classItem.startDate || classItem.start_date || '',
+              endDate: classItem.endDate || classItem.end_date || '',
+              textbookIds: classItem.textbookIds || [],
+              textbooks: data.textbooks || [],
+            },
+          );
+          const calculatedPlan = calculateSchedulePlan(normalizedPlan);
+          const activeSessions = (calculatedPlan.sessions || []).filter(
+            (session) => session.scheduleState !== 'exception' && session.scheduleState !== 'tbd',
+          );
+          const totalSessions = activeSessions.length;
+          const completedSessions = activeSessions.filter(
+            (session) => session.progressStatus === 'done',
+          ).length;
+          const updatedSessions = activeSessions.filter(
+            (session) => session.progressStatus !== 'pending',
+          ).length;
+
+          if (totalSessions > 0) {
+            accumulator.managedClasses += 1;
+          }
+
+          accumulator.totalSessions += totalSessions;
+          accumulator.completedSessions += completedSessions;
+          accumulator.pendingSessions += Math.max(totalSessions - updatedSessions, 0);
+          return accumulator;
+        },
+        {
+          managedClasses: 0,
+          totalSessions: 0,
+          completedSessions: 0,
+          pendingSessions: 0,
+        },
+      ),
+    [classes, data.textbooks],
+  );
+
+  const summaryItems = useMemo(
+    () => [
+      { label: '운영 수업', value: `${stats.totalClasses}개` },
+      { label: '등록 인원', value: `${stats.totalEnrollee}명` },
+      { label: '주간 운영', value: formatHours(stats.totalWeeklyMinutes) },
+      { label: '계획 관리 반', value: `${planningStats.managedClasses}개` },
+      { label: '계획 총 회차', value: `${planningStats.totalSessions}회` },
+      { label: '계획 완료', value: `${planningStats.completedSessions}회` },
+      { label: '계획 대기', value: `${planningStats.pendingSessions}회` },
+    ],
+    [
+      planningStats.completedSessions,
+      planningStats.managedClasses,
+      planningStats.pendingSessions,
+      planningStats.totalSessions,
+      stats.totalClasses,
+      stats.totalEnrollee,
+      stats.totalWeeklyMinutes,
+    ],
+  );
+
   return (
     <div
       className="animate-in stats-dashboard app-shell-section stats-dashboard-shell"
       data-testid="stats-dashboard-shell"
     >
-      <div className="page-header app-shell-page-header stats-dashboard-header" data-testid="stats-dashboard-header">
-        <div>
-          <h1>개요</h1>
-          <p>주요 운영 지표와 충돌 알림을 빠르게 확인하고, 필요한 시간표 화면으로 바로 넘어갈 수 있습니다.</p>
-        </div>
-      </div>
+      <DashboardTopRail
+        className="stats-dashboard-top-rail"
+        testId="stats-dashboard-top-rail"
+      >
+        <DashboardSummaryStrip items={summaryItems} />
+      </DashboardTopRail>
+
+      <DashboardSectionIntro
+        eyebrow="운영 개요"
+        title="개요"
+        description="주요 운영 지표와 충돌 알림을 빠르게 확인하고, 필요한 시간표 화면으로 바로 넘어갈 수 있습니다."
+      />
 
       {conflictSummary.total > 0 && (
-        <div className="card stats-alert-card is-danger">
-          <div className="card-header stats-alert-card-head">
+        <DashboardDataSurface
+          className="stats-alert-card is-danger"
+          testId="stats-conflict-surface"
+          header={(
             <div className="stats-alert-card-heading">
               <AlertTriangle size={20} />
               <h2>충돌 알림</h2>
-              <div className="stats-alert-badge-row">
-                <span className="stats-alert-badge is-danger">
-                  학생 {conflictSummary.student.length}
-                </span>
-                <span className="stats-alert-badge is-warning">
-                  선생님 {conflictSummary.teacher.length}
-                </span>
-                <span className="stats-alert-badge is-info">
-                  강의실 {conflictSummary.classroom.length}
-                </span>
-              </div>
             </div>
-            <CollapseButton collapsed={collapsedPanels.conflicts} onClick={() => togglePanel('conflicts')} />
-          </div>
-          {!collapsedPanels.conflicts && (
-            <div className="card-body stats-alert-card-body">
+          )}
+          summary={(
+            <div className="stats-alert-badge-row">
+              <Badge type="red" badgeStyle="weak">학생 {conflictSummary.student.length}</Badge>
+              <Badge type="amber" badgeStyle="weak">선생님 {conflictSummary.teacher.length}</Badge>
+              <Badge type="blue" badgeStyle="weak">강의실 {conflictSummary.classroom.length}</Badge>
+            </div>
+          )}
+          actions={(
+            <CollapseButton
+              collapsed={collapsedPanels.conflicts}
+              onClick={() => togglePanel('conflicts')}
+            />
+          )}
+        >
+          {!collapsedPanels.conflicts ? (
+            <div className="stats-alert-card-body">
               {[
                 { key: 'student', title: '학생 시간 충돌', items: conflictSummary.student, accent: '#ef4444' },
                 { key: 'teacher', title: '선생님 시간 충돌', items: conflictSummary.teacher, accent: '#b45309' },
@@ -442,13 +506,15 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
                               <div className="stats-alert-entry-meta">{entry.meta}</div>
                             </div>
                             {entry.type === 'student' && (
-                              <button
-                                className="h-segment-btn stats-inline-action"
-                                onClick={() => onViewStudentSchedule(entry.id)}
+                              <TextButton
+                                className="stats-inline-action"
+                                onPress={() => onViewStudentSchedule(entry.id)}
                               >
-                                <ExternalLink size={12} />
-                                시간표 보기
-                              </button>
+                                <span className="tds-inline">
+                                  <ExternalLink size={12} />
+                                  시간표 보기
+                                </span>
+                              </TextButton>
                             )}
                           </div>
                           <div className="stats-alert-overlap-list">
@@ -476,24 +542,30 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
                   </section>
                 ))}
             </div>
-          )}
-        </div>
+          ) : null}
+        </DashboardDataSurface>
       )}
 
       {examConflictSummary.length > 0 && (
-        <div className="card stats-alert-card is-warning">
-          <div className="card-header stats-alert-card-head">
+        <DashboardDataSurface
+          className="stats-alert-card is-warning"
+          testId="stats-exam-conflict-surface"
+          header={(
             <div className="stats-alert-card-heading">
               <AlertTriangle size={20} />
               <h2>시험/수업 충돌 알림</h2>
-              <span className="stats-alert-badge is-warning">
-                {examConflictSummary.length}개 수업
-              </span>
             </div>
-            <CollapseButton collapsed={collapsedPanels.examConflicts} onClick={() => togglePanel('examConflicts')} />
-          </div>
-          {!collapsedPanels.examConflicts && (
-            <div className="card-body stats-alert-entry-grid">
+          )}
+          summary={<Badge type="amber" badgeStyle="weak">{examConflictSummary.length}개 수업</Badge>}
+          actions={(
+            <CollapseButton
+              collapsed={collapsedPanels.examConflicts}
+              onClick={() => togglePanel('examConflicts')}
+            />
+          )}
+        >
+          {!collapsedPanels.examConflicts ? (
+            <div className="stats-alert-entry-grid">
               {examConflictSummary.map((entry) => (
                 <div key={entry.classId} className="stats-alert-entry">
                   <div className="stats-alert-entry-title">{stripClassPrefix(entry.className)}</div>
@@ -515,71 +587,77 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          ) : null}
+        </DashboardDataSurface>
       )}
 
       <div className="stats-kpi-grid">
-        <MetricCard
+        <DashboardMetricCard
           icon={<Layout size={22} />}
-          title={"\uC6B4\uC601 \uC218\uC5C5"}
+          label={"\uC6B4\uC601 \uC218\uC5C5"}
           value={<span data-testid="stats-total-classes">{`${stats.totalClasses}개`}</span>}
-          caption={`주간 총 ${formatHours(stats.totalWeeklyMinutes)} 운영 중`}
-          collapsed={collapsedPanels.classes}
-          onToggle={() => togglePanel('classes')}
+          caption={collapsedPanels.classes ? '' : `주간 총 ${formatHours(stats.totalWeeklyMinutes)} 운영 중`}
+          actions={<SummaryToggleButton collapsed={collapsedPanels.classes} onClick={() => togglePanel('classes')} />}
         />
-        <MetricCard
+        <DashboardMetricCard
           icon={<Users size={22} />}
-          title={"\uB4F1\uB85D \uC778\uC6D0"}
+          label={"\uB4F1\uB85D \uC778\uC6D0"}
           value={`${stats.totalEnrollee}명`}
-          caption={`학생 기준 ${stats.uniqueStudents}명 · 수강 기준 ${stats.totalEnrollee}건`}
-          collapsed={collapsedPanels.enrolment}
-          onToggle={() => togglePanel('enrolment')}
+          caption={
+            collapsedPanels.enrolment
+              ? ''
+              : `학생 기준 ${stats.uniqueStudents}명 · 수강 기준 ${stats.totalEnrollee}건`
+          }
+          actions={<SummaryToggleButton collapsed={collapsedPanels.enrolment} onClick={() => togglePanel('enrolment')} />}
         >
-          <div className="stats-metric-chip-stack">
-            <div className="stats-metric-meta-row">
-              <span>{`대기 ${stats.totalWaitlist}명`}</span>
-              <span>{`대기 학생 ${stats.uniqueWaitlistStudents}명`}</span>
+          {!collapsedPanels.enrolment ? (
+            <div className="stats-metric-chip-stack">
+              <div className="stats-metric-meta-row">
+                <span>{`대기 ${stats.totalWaitlist}명`}</span>
+                <span>{`대기 학생 ${stats.uniqueWaitlistStudents}명`}</span>
+              </div>
+              <div className="stats-metric-chip-row">
+                {stats.gradeBreakdown.length > 0 ? stats.gradeBreakdown.map((entry) => (
+                  <span key={entry.grade} className="stats-metric-chip">
+                    {`${entry.grade} ${entry.count}명`}
+                  </span>
+                )) : (
+                  <span className="stats-metric-empty">{"\uD604\uC7AC \uD544\uD130 \uAE30\uC900 \uB4F1\uB85D \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</span>
+                )}
+              </div>
             </div>
-            <div className="stats-metric-chip-row">
-              {stats.gradeBreakdown.length > 0 ? stats.gradeBreakdown.map((entry) => (
-                <span key={entry.grade} className="stats-metric-chip">
-                  {`${entry.grade} ${entry.count}명`}
-                </span>
-              )) : (
-                <span className="stats-metric-empty">{"\uD604\uC7AC \uD544\uD130 \uAE30\uC900 \uB4F1\uB85D \uD559\uC0DD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</span>
-              )}
-            </div>
-          </div>
-        </MetricCard>
-        <MetricCard
+          ) : null}
+        </DashboardMetricCard>
+        <DashboardMetricCard
           icon={<User size={22} />}
-          title={"\uC120\uC0DD\uB2D8"}
+          label={"\uC120\uC0DD\uB2D8"}
           value={`${stats.totalTeachers}명`}
-          caption={"현재 필터 기준 수업 담당 인원"}
-          collapsed={collapsedPanels.teachers}
-          onToggle={() => togglePanel('teachers')}
+          caption={collapsedPanels.teachers ? '' : "현재 필터 기준 수업 담당 인원"}
+          actions={<SummaryToggleButton collapsed={collapsedPanels.teachers} onClick={() => togglePanel('teachers')} />}
         />
-        <MetricCard
+        <DashboardMetricCard
           icon={<Building2 size={22} />}
-          title={"\uAC15\uC758\uC2E4"}
+          label={"\uAC15\uC758\uC2E4"}
           value={`${stats.totalClassrooms}실`}
-          caption={"현재 필터 기준 사용 중인 강의실"}
-          collapsed={collapsedPanels.classrooms}
-          onToggle={() => togglePanel('classrooms')}
+          caption={collapsedPanels.classrooms ? '' : "현재 필터 기준 사용 중인 강의실"}
+          actions={<SummaryToggleButton collapsed={collapsedPanels.classrooms} onClick={() => togglePanel('classrooms')} />}
         />
       </div>
 
       <div className="stats-ranking-grid">
-        <div className="card stats-ranking-card">
-          <div className={`stats-ranking-card-head ${collapsedPanels.classroomUsage ? 'is-collapsed' : ''}`}>
-            <div className="stats-ranking-card-title">
-              <BarChart size={18} className="text-accent" />
-              <h2>강의실 사용량 TOP 5</h2>
+        <DashboardDataSurface
+          className="stats-ranking-card"
+          header={(
+            <div className={`stats-ranking-card-head ${collapsedPanels.classroomUsage ? 'is-collapsed' : ''}`}>
+              <div className="stats-ranking-card-title">
+                <BarChart size={18} className="text-accent" />
+                <h2>강의실 사용량 TOP 5</h2>
+              </div>
             </div>
-            <CollapseButton collapsed={collapsedPanels.classroomUsage} onClick={() => togglePanel('classroomUsage')} />
-          </div>
-          {!collapsedPanels.classroomUsage && (
+          )}
+          actions={<CollapseButton collapsed={collapsedPanels.classroomUsage} onClick={() => togglePanel('classroomUsage')} />}
+        >
+          {!collapsedPanels.classroomUsage ? (
             <div className="stats-ranking-list">
               {stats.topClassrooms.length > 0 ? stats.topClassrooms.map((entry, index) => (
                 <div key={entry.name} className="stats-ranking-row">
@@ -598,18 +676,22 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
                 <div className="stats-ranking-empty">표시할 데이터가 없습니다.</div>
               )}
             </div>
-          )}
-        </div>
+          ) : null}
+        </DashboardDataSurface>
 
-        <div className="card stats-ranking-card">
-          <div className={`stats-ranking-card-head ${collapsedPanels.teacherWorkload ? 'is-collapsed' : ''}`}>
-            <div className="stats-ranking-card-title">
-              <Users size={18} className="text-accent" />
-              <h2>선생님 담당량 TOP 5</h2>
+        <DashboardDataSurface
+          className="stats-ranking-card"
+          header={(
+            <div className={`stats-ranking-card-head ${collapsedPanels.teacherWorkload ? 'is-collapsed' : ''}`}>
+              <div className="stats-ranking-card-title">
+                <Users size={18} className="text-accent" />
+                <h2>선생님 담당량 TOP 5</h2>
+              </div>
             </div>
-            <CollapseButton collapsed={collapsedPanels.teacherWorkload} onClick={() => togglePanel('teacherWorkload')} />
-          </div>
-          {!collapsedPanels.teacherWorkload && (
+          )}
+          actions={<CollapseButton collapsed={collapsedPanels.teacherWorkload} onClick={() => togglePanel('teacherWorkload')} />}
+        >
+          {!collapsedPanels.teacherWorkload ? (
             <div className="stats-ranking-list">
               {stats.topTeachers.length > 0 ? stats.topTeachers.map((entry, index) => (
                 <div key={entry.name} className="stats-ranking-row">
@@ -628,8 +710,8 @@ export default function StatsDashboard({ classes, data, onViewStudentSchedule })
                 <div className="stats-ranking-empty">표시할 데이터가 없습니다.</div>
               )}
             </div>
-          )}
-        </div>
+          ) : null}
+        </DashboardDataSurface>
       </div>
     </div>
   );

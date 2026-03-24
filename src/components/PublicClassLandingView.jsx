@@ -1,32 +1,42 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Banknote,
   BookOpen,
   CalendarDays,
-  Check,
   ChevronRight,
   Home,
   MapPin,
   MessageCircle,
   Moon,
-  Search,
   Share2,
   Star,
   Sun,
   Trophy,
   Trash2,
   UserRound,
+  Users,
 } from 'lucide-react';
 import { ACTIVE_CLASS_STATUS, computeClassStatus } from '../lib/classStatus';
-import { CLASS_COLORS, generateTimeSlots, parseSchedule, stripClassPrefix } from '../data/sampleData';
+import {
+  CLASS_COLORS,
+  generateTimeSlots,
+  parseSchedule,
+  stripClassPrefix,
+} from '../data/sampleData';
 import useViewport from '../hooks/useViewport';
 import { useToast } from '../contexts/ToastContext';
 import { captureElementAsPngBlob, downloadBlob } from '../lib/exportAsImage';
 import ClassSchedulePlanModal from './ClassSchedulePlanModal';
 import BottomSheet from './ui/BottomSheet';
 import TimetableGrid from './ui/TimetableGrid';
+import { PublicClassLandingSkeleton } from './ui/PageLoader';
+import { Badge, Button, IconButton, SearchField, Tab } from './ui/tds';
 
 const PUBLIC_SUBJECT_TABS = ['영어', '수학'];
 const PUBLIC_GRADE_TABS = ['고3', '고2', '고1', '중3', '중2', '중1', '초6'];
+const DEFAULT_SUBJECT = '수학';
+const DEFAULT_GRADE = '초6';
+
 const PUBLIC_BOTTOM_NAV_ITEMS = [
   { id: 'home', label: '홈', icon: Home },
   { id: 'reviews', label: '리뷰', icon: Star },
@@ -37,7 +47,6 @@ const PUBLIC_BOTTOM_NAV_ITEMS = [
 
 const DAY_COLUMNS = ['월', '화', '수', '목', '금', '토', '일'];
 const DAY_INDEX_MAP = Object.fromEntries(DAY_COLUMNS.map((day, index) => [day, index]));
-const SCHEDULE_DAY_ORDER = ['월', '화', '수', '목', '금', '토', '일'];
 const SLOT_START_HOUR = 6;
 const SLOT_END_HOUR = 24;
 const SLOT_START_MINUTES = SLOT_START_HOUR * 60;
@@ -45,13 +54,52 @@ const FULL_TIME_SLOTS = generateTimeSlots(SLOT_START_HOUR, SLOT_END_HOUR);
 const DEFAULT_START_SLOT = 6;
 const DEFAULT_END_SLOT = 28;
 const CHANNEL_TALK_URL = 'https://tipsedu.channel.io/';
-const REVIEW_URL = 'https://map.naver.com/p/search/%ED%8C%81%EC%8A%A4%ED%95%99%EC%9B%90/place/1218797840?placePath=/review?bk_query=%ED%8C%81%EC%8A%A4%ED%95%99%EC%9B%90&entry=pll&fromNxList=true&fromPanelNum=2&locale=ko&searchText=%ED%8C%81%EC%8A%A4%ED%95%99%EC%9B%90&svcName=map_pcv5&timestamp=202603211127&from=map&placeSearchOption=bk_query%3D%25ED%258C%2581%25EC%258A%25A4%25ED%2595%2599%25EC%259B%2590%26entry%3Dpll%26fromNxList%3Dtrue%26x%3D126.585464%26y%3D33.521802&searchType=place&c=15.00,0,0,0,dh';
-const SCORE_URL = 'https://tipsedu.notion.site/81702b56937644e9a609b1f0b6b48105?v=d97e114279514356a2e70982379ed079';
+const REVIEW_URL =
+  'https://map.naver.com/p/search/%ED%8C%81%EC%8A%A4%ED%95%99%EC%9B%90/place/1218797840?placePath=%2Freview';
+const SCORE_URL =
+  'https://tipsedu.notion.site/81702b56937644e9a609b1f0b6b48105?v=d97e114279514356a2e70982379ed079';
 
 const SUBJECT_TONES = {
-  영어: { bg: 'rgba(46, 124, 255, 0.16)', border: 'rgba(46, 124, 255, 0.34)', text: '#1d4ed8' },
-  수학: { bg: 'rgba(15, 172, 112, 0.16)', border: 'rgba(15, 172, 112, 0.34)', text: '#047857' },
+  영어: { bg: '#e8eefb', border: '#cfd9ea', text: '#334155' },
+  수학: { bg: '#f1f4f7', border: '#dde3ea', text: '#191f28' },
 };
+
+const PLANNER_FALLBACK_TONES = [
+  { bg: '#eef2f7', border: '#d9e0e8', text: '#334155' },
+  { bg: '#fff3e1', border: '#ffd7a0', text: '#9a5b00' },
+  { bg: '#e8f7f1', border: '#c7ebdd', text: '#0c7a58' },
+  { bg: '#f4f1ff', border: '#dfd3ff', text: '#5d3fd3' },
+  { bg: '#ffeceb', border: '#ffc7c2', text: '#d14343' },
+  { bg: '#eef3ff', border: '#d7e3ff', text: '#2f5dd7' },
+];
+
+const PLANNER_TIMETABLE_TONES = [
+  {
+    bg: 'var(--tds-color-blue-50)',
+    border: 'var(--tds-color-blue-300)',
+    text: 'var(--tds-color-blue-700)',
+  },
+  {
+    bg: 'var(--tds-color-teal-50, #eafaf6)',
+    border: 'var(--tds-color-teal-300, #62d5b5)',
+    text: 'var(--tds-color-teal-600)',
+  },
+  {
+    bg: 'var(--tds-color-green-50)',
+    border: 'var(--tds-color-green-300)',
+    text: 'var(--tds-color-green-700)',
+  },
+  {
+    bg: 'var(--tds-color-orange-50)',
+    border: 'var(--tds-color-orange-300)',
+    text: 'var(--tds-color-orange-700)',
+  },
+  {
+    bg: 'var(--tds-color-red-50)',
+    border: 'var(--tds-color-red-300)',
+    text: 'var(--tds-color-red-700)',
+  },
+];
 
 function text(value) {
   return String(value || '').trim();
@@ -90,7 +138,7 @@ function buildScheduleLines(classItem) {
 
   return [...groupedByTime.entries()].map(([timeKey, days]) => {
     const orderedDays = [...new Set(days)]
-      .sort((left, right) => SCHEDULE_DAY_ORDER.indexOf(left) - SCHEDULE_DAY_ORDER.indexOf(right))
+      .sort((left, right) => DAY_COLUMNS.indexOf(left) - DAY_COLUMNS.indexOf(right))
       .join('');
 
     return `${orderedDays} ${timeKey}`;
@@ -118,7 +166,10 @@ function getSlotIndexForTimeValue(value) {
   if (Number.isNaN(minutes)) {
     return 0;
   }
-  return Math.max(0, Math.min(FULL_TIME_SLOTS.length, Math.round((minutes - SLOT_START_MINUTES) / 30)));
+  return Math.max(
+    0,
+    Math.min(FULL_TIME_SLOTS.length, Math.round((minutes - SLOT_START_MINUTES) / 30)),
+  );
 }
 
 function getToneForClass(classItem, index = 0) {
@@ -127,12 +178,39 @@ function getToneForClass(classItem, index = 0) {
     return SUBJECT_TONES[subject];
   }
 
-  const fallback = CLASS_COLORS[index % CLASS_COLORS.length] || CLASS_COLORS[0];
+  const fallback =
+    PLANNER_FALLBACK_TONES[index % PLANNER_FALLBACK_TONES.length] ||
+    CLASS_COLORS[index % CLASS_COLORS.length] ||
+    CLASS_COLORS[0];
+
   return {
     bg: fallback.bg,
     border: fallback.border,
     text: fallback.text,
   };
+}
+
+function hashPlannerToneSeed(value = '') {
+  return [...text(value)].reduce((accumulator, character) => {
+    return (accumulator * 31 + character.charCodeAt(0)) >>> 0;
+  }, 7);
+}
+
+function getPlannerToneForClass(classItem, index = 0) {
+  const seed = [
+    text(classItem?.id),
+    text(classItem?.subject),
+    normalizeGrade(classItem?.grade),
+    stripClassPrefix(classItem?.className || classItem?.name || ''),
+  ]
+    .filter(Boolean)
+    .join('|');
+
+  const toneIndex = seed
+    ? hashPlannerToneSeed(seed) % PLANNER_TIMETABLE_TONES.length
+    : index % PLANNER_TIMETABLE_TONES.length;
+
+  return PLANNER_TIMETABLE_TONES[toneIndex] || PLANNER_TIMETABLE_TONES[0];
 }
 
 function getClassSortKey(classItem) {
@@ -154,15 +232,41 @@ function getStatusMeta(classItem) {
     const seatsLeft = Math.max(0, capacity - enrolled);
 
     if (seatsLeft === 0) {
-      return { priority: 0, tone: 'danger', label: '마감', detail: `대기 ${waitlist}명` };
+      return {
+        priority: 0,
+        tone: 'danger',
+        badgeType: 'teal',
+        label: '마감',
+        detail: `대기 ${waitlist}명`,
+      };
     }
+
     if (seatsLeft <= 3) {
-      return { priority: 1, tone: 'warning', label: '마감임박', detail: `마지막 ${seatsLeft}자리` };
+      return {
+        priority: 1,
+        tone: 'warning',
+        badgeType: 'red',
+        label: '마감임박',
+        detail: `마지막 ${seatsLeft}자리`,
+      };
     }
-    return { priority: 2, tone: 'accent', label: '모집중', detail: '' };
+
+    return {
+      priority: 2,
+      tone: 'accent',
+      badgeType: 'green',
+      label: '모집중',
+      detail: '',
+    };
   }
 
-  return { priority: 3, tone: 'accent', label: '모집중', detail: '' };
+  return {
+    priority: 3,
+    tone: 'accent',
+    badgeType: 'green',
+    label: '모집중',
+    detail: '',
+  };
 }
 
 function getEnrollmentSummary(classItem) {
@@ -173,17 +277,43 @@ function getEnrollmentSummary(classItem) {
     return `정원 ${enrolled}/${capacity}`;
   }
 
-  return `정원 문의`;
+  return '정원 문의';
 }
 
 function getDisplayFee(classItem) {
   return Number(classItem?.fee || classItem?.tuition || 0);
 }
 
+function buildPlannerFieldText(value, fallback, limit = 3) {
+  const lines = splitLines(value, limit);
+  return lines.length ? lines.join(' · ') : fallback;
+}
+
 function sortClassesForLanding(items = []) {
+  const subjectOrder = new Map(PUBLIC_SUBJECT_TABS.map((subject, index) => [subject, index]));
+  const gradeOrder = new Map(PUBLIC_GRADE_TABS.map((grade, index) => [grade, index]));
+
   return items
     .slice()
-    .sort((left, right) => getClassSortKey(left).localeCompare(getClassSortKey(right), 'ko'));
+    .sort((left, right) => {
+      const subjectDiff =
+        (subjectOrder.get(text(left?.subject)) ?? PUBLIC_SUBJECT_TABS.length) -
+        (subjectOrder.get(text(right?.subject)) ?? PUBLIC_SUBJECT_TABS.length);
+
+      if (subjectDiff !== 0) {
+        return subjectDiff;
+      }
+
+      const gradeDiff =
+        (gradeOrder.get(normalizeGrade(left?.grade)) ?? PUBLIC_GRADE_TABS.length) -
+        (gradeOrder.get(normalizeGrade(right?.grade)) ?? PUBLIC_GRADE_TABS.length);
+
+      if (gradeDiff !== 0) {
+        return gradeDiff;
+      }
+
+      return getClassSortKey(left).localeCompare(getClassSortKey(right), 'ko');
+    });
 }
 
 function buildSectionKicker(selectedSubject, selectedGrade) {
@@ -204,16 +334,31 @@ function buildSectionTitle(selectedSubject, selectedGrade) {
   return '전체 수업';
 }
 
-function buildCounselContextLabel(context = {}) {
-  return [context.grade, context.subject, context.className]
-    .map((item) => text(item))
-    .filter(Boolean)
-    .join(' ');
+function buildPlannerSummaryText(items = []) {
+  if (!items.length) {
+    return '';
+  }
+
+  const counts = items.reduce((accumulator, item) => {
+    const subject = text(item?.subject) || '기타';
+    accumulator.set(subject, (accumulator.get(subject) || 0) + 1);
+    return accumulator;
+  }, new Map());
+
+  const subjectOrder = new Map(PUBLIC_SUBJECT_TABS.map((subject, index) => [subject, index]));
+
+  return [...counts.entries()]
+    .sort(
+      ([leftSubject], [rightSubject]) =>
+        (subjectOrder.get(leftSubject) ?? PUBLIC_SUBJECT_TABS.length) -
+        (subjectOrder.get(rightSubject) ?? PUBLIC_SUBJECT_TABS.length),
+    )
+    .map(([subject, count]) => `${subject} ${count}개`)
+    .join(', ');
 }
 
 function buildModalSummaryBadges(classItem, context = {}) {
   const badges = [];
-
   if (context.grade) {
     badges.push({ label: context.grade, tone: 'neutral' });
   }
@@ -254,7 +399,7 @@ function buildTimetableData(items = []) {
         startSlot,
         endSlot,
         scheduleLabel: `${slot.day} ${slot.start} - ${slot.end}`,
-        tone: getToneForClass(classItem, itemIndex),
+        tone: getPlannerToneForClass(classItem, itemIndex),
       });
     });
   });
@@ -295,7 +440,11 @@ function buildTimetableData(items = []) {
           detailLines: [
             { label: 'time', value: entry.scheduleLabel },
             { label: 'teacher', value: text(entry.classItem.teacher) || '선생님 미정', subtle: true },
-            { label: 'room', value: text(entry.classItem.classroom || entry.classItem.room) || '강의실 미정', subtle: true },
+            {
+              label: 'room',
+              value: text(entry.classItem.classroom || entry.classItem.room) || '강의실 미정',
+              subtle: true,
+            },
           ],
           columnIndex: entry.columnIndex,
           startSlot: entry.startSlot,
@@ -306,7 +455,7 @@ function buildTimetableData(items = []) {
         });
       } else {
         const primary = sortClassesForLanding(cluster.map((entry) => entry.classItem))[0];
-        const mergedTone = getToneForClass(primary, columnIndex);
+        const mergedTone = getPlannerToneForClass(primary, columnIndex);
 
         mergedEntries.push({
           key: `merged-${columnIndex}-${clusterStart}-${clusterFinish}`,
@@ -315,14 +464,19 @@ function buildTimetableData(items = []) {
           title: `${text(primary?.subject) || '수업'} 외 ${cluster.length - 1}개`,
           header: stripClassPrefix(primary?.className || '겹침 수업'),
           detailLines: [
-            { label: 'time', value: `${DAY_COLUMNS[columnIndex]} ${FULL_TIME_SLOTS[clusterStart]?.split('-')[0]} - ${FULL_TIME_SLOTS[clusterFinish - 1]?.split('-')[1]}` },
+            {
+              label: 'time',
+              value: `${DAY_COLUMNS[columnIndex]} ${FULL_TIME_SLOTS[clusterStart]?.split('-')[0]} - ${
+                FULL_TIME_SLOTS[clusterFinish - 1]?.split('-')[1]
+              }`,
+            },
           ],
           columnIndex,
           startSlot: clusterStart,
           endSlot: clusterFinish,
-          backgroundColor: 'rgba(15, 23, 42, 0.08)',
+          backgroundColor: mergedTone.bg,
           borderColor: mergedTone.border,
-          textColor: 'var(--text-primary)',
+          textColor: mergedTone.text,
         });
       }
 
@@ -392,20 +546,72 @@ function buildPlannerConflictMessage(candidate, conflict) {
   const candidateTitle = stripClassPrefix(candidate?.className || candidate?.name || '선택한 수업');
   const conflictTitle = stripClassPrefix(conflict?.className || conflict?.name || '기존 수업');
   const conflictLine = buildScheduleLines(conflict)[0] || '시간 미정';
-  return `${candidateTitle} 수업은 ${conflictTitle} (${conflictLine})과 시간이 겹쳐 담을 수 없습니다.`;
+  return `${candidateTitle} 수업은 ${conflictTitle} (${conflictLine})과 시간이 겹쳐 담을 수 없어요.`;
+}
+
+function buildPlannerMetaText(classItem) {
+  const teacher = text(classItem?.teacher) || '선생님 미정';
+  const classroom = text(classItem?.classroom || classItem?.room) || '강의실 미정';
+  return `${teacher} · ${classroom}`;
+}
+
+function FilledNavIcon({ name, size = 22 }) {
+  const commonProps = {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'currentColor',
+    'aria-hidden': 'true',
+    className: 'public-filled-nav-icon',
+  };
+
+  switch (name) {
+    case 'home':
+      return (
+        <svg {...commonProps}>
+          <path d="M12 3.4 4 9.84v8.41C4 19.77 5.23 21 6.75 21h3.1c.41 0 .75-.34.75-.75v-4.1c0-.41.34-.75.75-.75h1.3c.41 0 .75.34.75.75v4.1c0 .41.34.75.75.75h3.1C18.77 21 20 19.77 20 18.25V9.84L12 3.4Z" />
+        </svg>
+      );
+    case 'reviews':
+      return (
+        <svg {...commonProps}>
+          <path d="m12 3.1 2.73 5.53 6.1.89-4.41 4.3 1.04 6.07L12 17.04 6.54 19.9l1.04-6.07-4.41-4.3 6.1-.89L12 3.1Z" />
+        </svg>
+      );
+    case 'classes':
+      return (
+        <svg {...commonProps}>
+          <path d="M5 4.2A2.8 2.8 0 0 0 2.2 7v10.3c0 .83.67 1.5 1.5 1.5h1.45c.96 0 1.9.25 2.72.72l2.38 1.36a.5.5 0 0 0 .75-.43V7A2.8 2.8 0 0 0 8.2 4.2H5Z" />
+          <path d="M19 4.2A2.8 2.8 0 0 1 21.8 7v10.3c0 .83-.67 1.5-1.5 1.5h-1.45c-.96 0-1.9.25-2.72.72l-2.38 1.36a.5.5 0 0 1-.75-.43V7a2.8 2.8 0 0 1 2.8-2.8H19Z" />
+        </svg>
+      );
+    case 'scores':
+      return (
+        <svg {...commonProps}>
+          <path d="M6 3.5c-1.1 0-2 .9-2 2v2.2c0 2.55 1.77 4.77 4.25 5.33.46 1.22 1.32 2.24 2.45 2.86V18H8.9c-.77 0-1.4.63-1.4 1.4 0 .39.31.7.7.7h7.6c.39 0 .7-.31.7-.7 0-.77-.63-1.4-1.4-1.4H13.3v-2.11c1.13-.62 1.99-1.64 2.45-2.86C18.23 12.47 20 10.25 20 7.7V5.5c0-1.1-.9-2-2-2H6Zm0 2h-.6v2.2c0 1.22.62 2.3 1.57 2.94A6.31 6.31 0 0 1 6 7.7V5.5Zm12 0h-.6v2.2c0 1.06-.37 2.04-.97 2.84.95-.64 1.57-1.72 1.57-2.94V5.5Z" />
+        </svg>
+      );
+    case 'inquiry':
+      return (
+        <svg {...commonProps}>
+          <path d="M12 3.4c-4.75 0-8.6 3.42-8.6 7.65 0 2.31 1.16 4.38 2.99 5.79l-.75 3.01c-.12.48.32.88.78.71l3.57-1.31c.7.17 1.43.25 2.2.25 4.75 0 8.61-3.42 8.61-7.65S16.75 3.4 12 3.4Z" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 function PublicPlaceholderPanel({ item }) {
-  const Icon = item.icon;
   return (
     <section className="public-placeholder-panel" data-testid={`public-placeholder-${item.id}`}>
       <div className="public-placeholder-icon">
-        <Icon size={28} />
+        <FilledNavIcon name={item.id} size={28} />
       </div>
-      <strong>{item.label} 모바일 랜딩은 다음 단계에서 연결됩니다.</strong>
+      <strong>{item.label} 화면은 다음 단계에서 연결됩니다.</strong>
       <p>
-        지금은 퍼블릭 수업 랜딩과 장바구니형 시간표 경험을 우선 구현해두었습니다.
-        이 탭은 추후 동일한 톤으로 전용 랜딩을 연결할 수 있도록 자리만 마련해둔 상태입니다.
+        지금은 공개 수업 랜딩과 개인 시간표 조합 흐름을 우선 정리했습니다. 다른 메뉴도 같은 TDS 기준으로
+        이어서 맞출 수 있도록 구조를 정돈해 두었습니다.
       </p>
     </section>
   );
@@ -414,98 +620,159 @@ function PublicPlaceholderPanel({ item }) {
 export function PublicLandingCard({
   classItem,
   rank,
-  isSelected,
+  isSelected = false,
   onOpenDetails,
   onTogglePlanner,
   hideActions = false,
   semanticButton = true,
+  plannerActionLabel = '담기',
+  plannerSelectedActionLabel = '담김',
 }) {
   const title = stripClassPrefix(classItem.className || classItem.name || '이름 없는 수업');
   const scheduleLines = buildScheduleLines(classItem);
   const scheduleLabel = scheduleLines.join(' · ');
   const teachers = splitLines(classItem.teacher, 5);
   const classrooms = splitLines(classItem.classroom || classItem.room, 5);
-  const maxMetaLines = Math.max(teachers.length, classrooms.length, 1);
+  const teacherClassroomRows = Array.from(
+    { length: Math.max(teachers.length, classrooms.length, 1) },
+    (_, index) => ({
+      teacher: teachers[index] || (!teachers.length && index === 0 ? '선생님 미정' : ''),
+      classroom: classrooms[index] || (!classrooms.length && index === 0 ? '강의실 미정' : ''),
+    }),
+  ).filter((row) => row.teacher || row.classroom);
   const feeText = formatCurrency(getDisplayFee(classItem));
   const enrollmentSummary = getEnrollmentSummary(classItem);
   const statusMeta = getStatusMeta(classItem);
-  const subject = text(classItem.subject) || '수업';
+  const subject = text(classItem.subject) || '과목';
   const grade = normalizeGrade(classItem.grade);
+  const cardTone = getToneForClass(classItem, rank || 0);
 
   return (
-    <article className={`public-landing-card ${rank !== undefined ? 'has-rank' : ''} ${isSelected ? 'is-selected' : ''}`} data-testid={`public-class-card-${classItem?.id || 'unknown'}`}>
-      {rank !== undefined && <div className="public-landing-card-rank">{rank}</div>}
-      <div className="public-landing-card-surface">
+    <article
+      className={[
+        'public-landing-card',
+        rank !== undefined ? 'has-rank' : '',
+        rank === 1 ? 'is-featured' : '',
+        isSelected ? 'is-selected' : '',
+        onOpenDetails || onTogglePlanner ? 'is-interactive' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      data-testid={'public-class-card-' + (classItem?.id || 'unknown')}
+      style={{
+        '--public-card-accent-bg': cardTone.bg,
+        '--public-card-accent-border': cardTone.border,
+        '--public-card-accent-text': cardTone.text,
+      }}
+    >
+      {rank !== undefined ? <div className='public-landing-card-rank'>{rank}</div> : null}
+
+      <div className='public-landing-card-surface'>
         <div
-          role={onOpenDetails && semanticButton ? "button" : undefined}
+          role={onOpenDetails && semanticButton ? 'button' : undefined}
           tabIndex={onOpenDetails && semanticButton ? 0 : undefined}
-          aria-label={onOpenDetails && semanticButton ? `${title} 상세 보기` : undefined}
-          className={`public-landing-card-main ${!onOpenDetails ? 'is-static' : ''}`}
+          aria-label={onOpenDetails && semanticButton ? title + ' 상세 보기' : undefined}
+          className={['public-landing-card-main', !onOpenDetails ? 'is-static' : ''].filter(Boolean).join(' ')}
           onClick={onOpenDetails ? () => onOpenDetails(classItem) : undefined}
-          title={onOpenDetails && semanticButton ? `${title} 상세 보기` : undefined}
-          style={!onOpenDetails || !semanticButton ? { cursor: 'default' } : {}}
+          onKeyDown={
+            onOpenDetails
+              ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onOpenDetails(classItem);
+                  }
+                }
+              : undefined
+          }
         >
-          <div className="public-landing-card-copy">
-            <div className="public-landing-card-copy-top">
-              <div className="public-landing-card-heading">
-                <span className="public-landing-card-eyebrow">{subject} · {grade}</span>
-                <h3 className="public-landing-card-title">{title}</h3>
-              </div>
-            </div>
+          <div className='public-landing-card-heading'>
+            <span className='public-landing-card-eyebrow'>
+              {subject} · {grade}
+            </span>
+            <h3 className='public-landing-card-title'>{title}</h3>
+          </div>
 
-            <div className="public-landing-card-meta-list">
-              <div className="public-landing-card-meta-item public-landing-card-meta-item-schedule">
+          <div className='public-landing-card-meta-list'>
+            <div className='public-landing-card-meta-item public-landing-card-meta-item-schedule'>
+              <div className='public-landing-card-meta-icon'>
                 <CalendarDays size={14} />
-                <span>{scheduleLabel}</span>
               </div>
-              <div className="public-landing-card-meta-grid">
-                {Array.from({ length: maxMetaLines }).map((_, index) => (
-                  <div style={{ display: 'contents' }} key={`meta-${index}`}>
-                    <div className="public-landing-card-meta-item">
-                      <div className="public-landing-card-meta-icon">
-                        {index === 0 && <UserRound size={14} />}
-                      </div>
-                      <span>{teachers[index] || (index === 0 ? '선생님 미정' : '')}</span>
-                    </div>
-                    <div className="public-landing-card-meta-item">
-                      <div className="public-landing-card-meta-icon">
-                        {index === 0 && <MapPin size={14} />}
-                      </div>
-                      <span>{classrooms[index] || (index === 0 ? '강의실 미정' : '')}</span>
-                    </div>
+              <span>{scheduleLabel}</span>
+            </div>
+
+            <div className='public-landing-card-meta-grid'>
+              {teacherClassroomRows.flatMap((row, index) => [
+                <div className='public-landing-card-meta-item' key={'teacher-' + index}>
+                  <div className='public-landing-card-meta-icon'>
+                    <UserRound size={14} />
                   </div>
-                ))}
+                  <span>{row.teacher || '\u00A0'}</span>
+                </div>,
+                <div className='public-landing-card-meta-item' key={'room-' + index}>
+                  <div className='public-landing-card-meta-icon'>
+                    <MapPin size={14} />
+                  </div>
+                  <span>{row.classroom || '\u00A0'}</span>
+                </div>,
+              ])}
+
+              <div className='public-landing-card-meta-item public-landing-card-meta-item-price'>
+                <div className='public-landing-card-meta-icon'>
+                  <Banknote size={14} />
+                </div>
+                <span>{feeText}</span>
+              </div>
+
+              <div className='public-landing-card-meta-item public-landing-card-meta-item-capacity'>
+                <div className='public-landing-card-meta-icon'>
+                  <Users size={14} />
+                </div>
+                <span>{enrollmentSummary}</span>
               </div>
             </div>
           </div>
-
-          {onOpenDetails && <ChevronRight size={18} className="public-landing-card-arrow" />}
         </div>
 
-        <div className="public-landing-card-status-anchor">
-          <div className={`public-landing-status is-${statusMeta.tone} ${statusMeta.detail ? 'is-animated' : ''}`}>
-            <strong>{statusMeta.label}</strong>
-            {statusMeta.detail && <span>{statusMeta.detail}</span>}
-          </div>
+        <div className='public-landing-card-status-anchor'>
+          <Badge
+            size='medium'
+            type={statusMeta.badgeType}
+            badgeStyle='fill'
+            className={[
+              'public-landing-status-badge',
+              statusMeta.detail ? 'is-animated' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
+            {statusMeta.detail ? (
+              <>
+                <strong>{statusMeta.label}</strong>
+                <span>{statusMeta.detail}</span>
+              </>
+            ) : (
+              statusMeta.label
+            )}
+          </Badge>
         </div>
 
-        <div className="public-landing-card-footer">
-          <div className="public-landing-card-price-block">
-            <strong>{feeText}</strong>
-            <span>{enrollmentSummary}</span>
-          </div>
-          {!hideActions && onTogglePlanner && (
-            <button
-              type="button"
-              className={`public-landing-card-cart-button is-inline ${isSelected ? 'is-selected' : ''}`}
-              data-testid={`public-card-toggle-${classItem?.id}`}
-              onClick={() => onTogglePlanner(classItem)}
+        {!hideActions && onTogglePlanner ? (
+          <div className='public-landing-card-footer'>
+            <Button
+              type='primary'
+              style={isSelected ? 'weak' : 'fill'}
+              size='medium'
+              className='public-landing-card-cart-button'
+              data-testid={'public-card-toggle-' + classItem?.id}
+              onPress={(event) => {
+                event?.stopPropagation?.();
+                onTogglePlanner(classItem);
+              }}
             >
-              {isSelected ? <Check size={14} /> : <BookOpen size={14} />}
-              <span>{isSelected ? '담김' : '담기'}</span>
-            </button>
-          )}
-        </div>
+              {isSelected ? plannerSelectedActionLabel : plannerActionLabel}
+            </Button>
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -513,6 +780,7 @@ export function PublicLandingCard({
 
 export default function PublicClassLandingView({
   classes,
+  textbooks = [],
   isLoading = false,
   onLogin,
   showBackToDashboard = false,
@@ -522,18 +790,17 @@ export default function PublicClassLandingView({
 }) {
   const { isMobile, isCompact } = useViewport();
   const toast = useToast();
-  const safeTheme = theme || (
-    typeof document !== 'undefined'
+  const safeTheme =
+    theme ||
+    (typeof document !== 'undefined'
       ? document.documentElement.getAttribute('data-theme') || 'light'
-      : 'light'
-  );
+      : 'light');
 
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [activePublicTab, setActivePublicTab] = useState('classes');
-  const [selectedSubject, setSelectedSubject] = useState(PUBLIC_SUBJECT_TABS[0]);
-  const [selectedGrade, setSelectedGrade] = useState(PUBLIC_GRADE_TABS[0]);
-  const [isCondensedHeader, setIsCondensedHeader] = useState(false);
+  const [selectedSubject, setSelectedSubject] = useState(DEFAULT_SUBJECT);
+  const [selectedGrade, setSelectedGrade] = useState(DEFAULT_GRADE);
   const [plannerItems, setPlannerItems] = useState([]);
   const [plannerGrade, setPlannerGrade] = useState('');
   const [isPlannerSheetOpen, setIsPlannerSheetOpen] = useState(false);
@@ -542,27 +809,42 @@ export default function PublicClassLandingView({
 
   const cardListRef = useRef(null);
   const plannerPreviewRef = useRef(null);
+  const gradeTabRowRef = useRef(null);
+  const autoClearedSubjectRef = useRef(false);
+  const autoClearedGradeRef = useRef(false);
 
   const activeClasses = useMemo(
     () => (classes || []).filter((item) => computeClassStatus(item) === ACTIVE_CLASS_STATUS),
-    [classes]
+    [classes],
   );
 
   const availableSubjects = useMemo(
-    () => PUBLIC_SUBJECT_TABS.filter((subject) => activeClasses.some((item) => text(item.subject) === subject)),
-    [activeClasses]
+    () =>
+      PUBLIC_SUBJECT_TABS.filter((subject) =>
+        activeClasses.some((item) => text(item.subject) === subject),
+      ),
+    [activeClasses],
   );
 
   useEffect(() => {
     if (!availableSubjects.length) {
-      if (selectedSubject) {
-        setSelectedSubject('');
-      }
+      autoClearedSubjectRef.current = true;
+      setSelectedSubject('');
+      return;
+    }
+
+    if (!selectedSubject && autoClearedSubjectRef.current) {
+      autoClearedSubjectRef.current = false;
+      setSelectedSubject(
+        availableSubjects.includes(DEFAULT_SUBJECT) ? DEFAULT_SUBJECT : availableSubjects[0],
+      );
       return;
     }
 
     if (selectedSubject && !availableSubjects.includes(selectedSubject)) {
-      setSelectedSubject(availableSubjects[0]);
+      setSelectedSubject(
+        availableSubjects.includes(DEFAULT_SUBJECT) ? DEFAULT_SUBJECT : availableSubjects[0],
+      );
     }
   }, [availableSubjects, selectedSubject]);
 
@@ -587,58 +869,70 @@ export default function PublicClassLandingView({
   }, [activeClasses, deferredSearchQuery, selectedSubject]);
 
   const gradeCounts = useMemo(
-    () => Object.fromEntries(
-      PUBLIC_GRADE_TABS.map((grade) => [
-        grade,
-        subjectSearchFilteredClasses.filter((item) => isSameGrade(item, grade)).length,
-      ])
-    ),
-    [subjectSearchFilteredClasses]
+    () =>
+      Object.fromEntries(
+        PUBLIC_GRADE_TABS.map((grade) => [
+          grade,
+          subjectSearchFilteredClasses.filter((item) => isSameGrade(item, grade)).length,
+        ]),
+      ),
+    [subjectSearchFilteredClasses],
   );
 
   const availableGrades = useMemo(
     () => PUBLIC_GRADE_TABS.filter((grade) => gradeCounts[grade] > 0),
-    [gradeCounts]
+    [gradeCounts],
   );
 
   useEffect(() => {
     if (!availableGrades.length) {
-      if (selectedGrade) {
-        setSelectedGrade('');
-      }
+      autoClearedGradeRef.current = true;
+      setSelectedGrade('');
       return;
     }
 
-    if (selectedGrade && gradeCounts[selectedGrade] === 0) {
-      setSelectedGrade(availableGrades[0]);
+    if (!selectedGrade && autoClearedGradeRef.current) {
+      autoClearedGradeRef.current = false;
+      setSelectedGrade(availableGrades.includes(DEFAULT_GRADE) ? DEFAULT_GRADE : availableGrades[0]);
+      return;
     }
-  }, [availableGrades, gradeCounts, selectedGrade]);
+
+    if (selectedGrade && !availableGrades.includes(selectedGrade)) {
+      setSelectedGrade(availableGrades.includes(DEFAULT_GRADE) ? DEFAULT_GRADE : availableGrades[0]);
+    }
+  }, [availableGrades, selectedGrade]);
 
   const filteredClasses = useMemo(
-    () => sortClassesForLanding(
-      subjectSearchFilteredClasses.filter((item) => !selectedGrade || isSameGrade(item, selectedGrade))
-    ),
-    [selectedGrade, subjectSearchFilteredClasses]
+    () =>
+      sortClassesForLanding(
+        subjectSearchFilteredClasses.filter((item) => !selectedGrade || isSameGrade(item, selectedGrade)),
+      ),
+    [selectedGrade, subjectSearchFilteredClasses],
   );
 
   const plannerSelectedIds = useMemo(
     () => new Set(plannerItems.map((item) => item.id)),
-    [plannerItems]
+    [plannerItems],
   );
 
-  const plannerTimetable = useMemo(
-    () => buildTimetableData(plannerItems),
-    [plannerItems]
-  );
+  const plannerTimetable = useMemo(() => buildTimetableData(plannerItems), [plannerItems]);
+  const plannerSummaryText = useMemo(() => buildPlannerSummaryText(plannerItems), [plannerItems]);
 
-  const plannerSummaryText = useMemo(() => {
-    if (!plannerItems.length) {
-      return '선택한 수업이 아직 없습니다.';
-    }
+  const plannerHeadlineText = plannerItems.length
+    ? `내 시간표 ${plannerSummaryText || ''}`.trim()
+    : '내 시간표';
 
-    const summary = [...new Set(plannerItems.map((item) => text(item.subject)).filter(Boolean))].join(' · ');
-    return `${plannerGrade} · ${summary || '선택 수업'} · ${plannerItems.length}개`;
-  }, [plannerGrade, plannerItems]);
+  const plannerSubtitleText = plannerItems.length
+    ? `${plannerGrade || selectedGrade || '선택 학년'} 수업 시간표 · 이미지 공유 가능`
+    : '원하는 수업만 담아 나만의 수업 시간표를 바로 만들어보세요.';
+
+  const plannerPreviewTitleText = plannerItems.length
+    ? `${plannerGrade || selectedGrade || '선택 학년'} 수업 시간표`
+    : '내 수업 시간표';
+
+  const plannerShareText = plannerItems.length
+    ? `${plannerGrade || selectedGrade || '선택 학년'} · ${plannerSummaryText || '선택 수업'}`
+    : '선택한 수업이 아직 없어요.';
 
   const selectedClassBadges = useMemo(() => {
     if (!selectedClassItem) {
@@ -648,36 +942,44 @@ export default function PublicClassLandingView({
     const badges = buildModalSummaryBadges(selectedClassItem, {
       grade: normalizeGrade(selectedClassItem.grade),
       subject: selectedClassItem.subject,
-      source: 'list',
     });
 
     if (plannerSelectedIds.has(selectedClassItem.id)) {
-      badges.unshift({ label: '시간표에 담김', tone: 'accent' });
+      badges.unshift({ label: '내 시간표에 담김', tone: 'accent' });
     }
 
     return badges.slice(0, 4);
   }, [plannerSelectedIds, selectedClassItem]);
 
   useEffect(() => {
-    if (!isMobile) {
-      setIsCondensedHeader(false);
-      return undefined;
-    }
-
-    const handleScroll = () => {
-      setIsCondensedHeader(window.scrollY > 36);
-    };
-
-    handleScroll();
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [isMobile]);
-
-  useEffect(() => {
     if (plannerItems.length === 0) {
       setPlannerGrade('');
     }
   }, [plannerItems.length]);
+
+  const subjectTabItems = useMemo(
+    () =>
+      PUBLIC_SUBJECT_TABS.map((subject) => ({
+        value: subject,
+        label: subject,
+        disabled: !availableSubjects.includes(subject),
+        testId: `public-subject-tab-${subject}`,
+        className: 'public-landing-chip-tab',
+      })),
+    [availableSubjects],
+  );
+
+  const gradeTabItems = useMemo(
+    () =>
+      PUBLIC_GRADE_TABS.map((grade) => ({
+        value: grade,
+        label: grade,
+        disabled: gradeCounts[grade] === 0,
+        testId: `public-grade-tab-${grade}`,
+        className: 'public-landing-pill-tab',
+      })),
+    [gradeCounts],
+  );
 
   const openClassDetails = (classItem) => {
     setSelectedClassItem(classItem);
@@ -698,10 +1000,11 @@ export default function PublicClassLandingView({
     const popup = window.open(
       CHANNEL_TALK_URL,
       'tips-channel-talk',
-      'popup=yes,width=420,height=760,noopener,noreferrer'
+      'popup=yes,width=420,height=760,noopener,noreferrer',
     );
+
     if (!popup) {
-      toast.info('채널톡 새창이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.');
+      toast.info('채널톡 팝업이 차단되었어요. 브라우저에서 팝업을 허용해 주세요.');
     }
   };
 
@@ -710,14 +1013,9 @@ export default function PublicClassLandingView({
       return;
     }
 
-    const popup = window.open(
-      url,
-      '_blank',
-      'noopener,noreferrer'
-    );
-
+    const popup = window.open(url, '_blank', 'noopener,noreferrer');
     if (!popup) {
-      toast.info(`${label} 새창이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.`);
+      toast.info(`${label} 화면이 차단되었어요. 브라우저에서 팝업을 허용해 주세요.`);
     }
   };
 
@@ -727,12 +1025,14 @@ export default function PublicClassLandingView({
 
     if (plannerSelectedIds.has(classItem.id)) {
       setPlannerItems((current) => current.filter((item) => item.id !== classItem.id));
-      toast.info(`${title} 수업을 시간표에서 뺐습니다.`);
+      toast.info(`${title} 수업을 내 시간표에서 뺐습니다.`);
       return;
     }
 
     if (plannerGrade && plannerGrade !== normalizedGrade) {
-      toast.info(`현재 장바구니는 ${plannerGrade} 기준입니다. 전체 비우기 후 다른 학년을 담아주세요.`);
+      toast.info(
+        `현재 내 시간표는 ${plannerGrade} 기준입니다. 전체 비우기 후 다른 학년을 담아주세요.`,
+      );
       return;
     }
 
@@ -744,7 +1044,7 @@ export default function PublicClassLandingView({
 
     setPlannerItems((current) => [...current, classItem]);
     setPlannerGrade((current) => current || normalizedGrade);
-    toast.success('수업바구니에 수업을 담았어요.', {
+    toast.success('내 시간표에 수업을 담았어요.', {
       duration: 3800,
       actionLabel: '보러가기',
       onAction: () => setIsPlannerSheetOpen(true),
@@ -760,7 +1060,7 @@ export default function PublicClassLandingView({
 
   const openPlannerSheet = () => {
     if (!plannerItems.length) {
-      toast.info('먼저 수업을 시간표에 담아주세요.');
+      toast.info('먼저 수업을 내 시간표에 담아주세요.');
       return;
     }
     setIsPlannerSheetOpen(true);
@@ -784,14 +1084,15 @@ export default function PublicClassLandingView({
         throw new Error('planner share blob missing');
       }
 
-      const filename = `TIPS-${plannerGrade || 'public'}-주간시간표.png`;
+      const filename = `TIPS-${plannerGrade || 'public'}-수업-시간표.png`;
 
       if (typeof navigator !== 'undefined' && typeof File !== 'undefined' && navigator.share) {
         const file = new File([blob], filename, { type: 'image/png' });
+
         if (!navigator.canShare || navigator.canShare({ files: [file] })) {
           await navigator.share({
-            title: 'TIPS 주간 시간표',
-            text: plannerSummaryText,
+            title: 'TIPS 수업 시간표',
+            text: plannerShareText,
             files: [file],
           });
           toast.success('시간표 공유 화면을 열었습니다.');
@@ -805,6 +1106,7 @@ export default function PublicClassLandingView({
       if (error?.name === 'AbortError') {
         return;
       }
+
       console.error(error);
       toast.error('시간표 이미지를 만드는 중 문제가 생겼습니다.');
     } finally {
@@ -826,11 +1128,13 @@ export default function PublicClassLandingView({
   };
 
   const handleSelectSubject = (subject) => {
+    autoClearedSubjectRef.current = false;
     setSelectedSubject((current) => (current === subject ? '' : subject));
     scrollToCards();
   };
 
   const handleSelectGrade = (grade) => {
+    autoClearedGradeRef.current = false;
     setSelectedGrade((current) => (current === grade ? '' : grade));
     scrollToCards();
   };
@@ -857,8 +1161,9 @@ export default function PublicClassLandingView({
     }
   };
 
-  const handleLogoClick = () => {
+  const handleAccountAction = () => {
     setActivePublicTab('classes');
+
     if (showBackToDashboard && typeof onBackToDashboard === 'function') {
       onBackToDashboard();
       return;
@@ -866,121 +1171,128 @@ export default function PublicClassLandingView({
 
     if (typeof onLogin === 'function') {
       onLogin();
-      return;
     }
-
-    scrollToCards();
   };
 
   const plannerActions = (
     <div className="public-planner-sheet-footer-actions">
-      <button type="button" className="btn btn-secondary" onClick={clearPlanner} disabled={!plannerItems.length}>
-        <Trash2 size={16} />
+      <Button
+        type="primary"
+        style="fill"
+        size="medium"
+        onPress={clearPlanner}
+        disabled={!plannerItems.length}
+        leftAccessory={<Trash2 size={16} />}
+      >
         전체 비우기
-      </button>
-      <button type="button" className="btn btn-primary" onClick={handleSharePlanner} disabled={!plannerItems.length || isSharingPlanner}>
-        <Share2 size={16} />
+      </Button>
+      <Button
+        type="danger"
+        style="fill"
+        size="medium"
+        onPress={handleSharePlanner}
+        disabled={!plannerItems.length || isSharingPlanner}
+        leftAccessory={<Share2 size={16} />}
+      >
         {isSharingPlanner ? '이미지 준비 중' : '이미지 공유'}
-      </button>
+      </Button>
     </div>
   );
 
-  const selectedClassIsInPlanner = selectedClassItem ? plannerSelectedIds.has(selectedClassItem.id) : false;
+  const selectedClassIsInPlanner = selectedClassItem
+    ? plannerSelectedIds.has(selectedClassItem.id)
+    : false;
 
   return (
     <div
       data-testid="public-class-list-view"
-      className={`public-landing-shell ${isMobile ? 'is-mobile' : 'is-desktop'} ${safeTheme === 'dark' ? 'is-dark' : 'is-light'} ${isCondensedHeader ? 'is-condensed-header' : ''}`}
+      className={`public-landing-shell ${isMobile ? 'is-mobile' : 'is-desktop'} ${safeTheme === 'dark' ? 'is-dark' : 'is-light'}`}
     >
       <header className={`public-landing-topbar ${isMobile ? 'is-mobile' : 'is-desktop'}`} data-testid="public-mobile-topbar">
         <div className="public-landing-search-row">
-          <label className="public-landing-search-field">
-            <Search size={18} />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="public-landing-search-input"
-              data-testid="public-class-search-input"
-              placeholder="수업명, 선생님, 강의실"
-            />
-          </label>
+          <SearchField
+            value={searchQuery}
+            onChange={({ nativeEvent }) => setSearchQuery(nativeEvent.text)}
+            hasClearButton
+            className="public-landing-search-field"
+            data-testid="public-class-search-input"
+            placeholder="수업명, 선생님, 강의실"
+          />
 
-          <button
-            type="button"
-            className="public-topbar-icon-button"
-            data-testid="public-theme-toggle"
-            onClick={onToggleTheme}
-            aria-label="테마 전환"
-            title="테마 전환"
-          >
-            {safeTheme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
-          </button>
+          <IconButton
+            variant="border"
+            className="public-topbar-icon-button public-topbar-action-button"
+            label="테마 전환"
+            onPress={onToggleTheme}
+            icon={
+              safeTheme === 'dark' ? (
+                <Sun size={19} strokeWidth={2.1} />
+              ) : (
+                <Moon size={19} strokeWidth={2.1} />
+              )
+            }
+          />
 
-          <button
-            type="button"
+          <IconButton
+            variant="border"
             className="public-topbar-icon-button public-topbar-logo-button"
+            label={showBackToDashboard ? '대시보드로 돌아가기' : '팁스 로고'}
             data-testid="public-logo-button"
-            onClick={handleLogoClick}
-            aria-label={showBackToDashboard ? '직원 페이지로 이동' : '직원 로그인'}
-            title={showBackToDashboard ? '직원 페이지로 이동' : '직원 로그인'}
-          >
-            <img src="/logo_tips.png" alt="TIPS" />
-          </button>
+            onPress={handleAccountAction}
+            icon={
+              <img src="/logo_tips.png" alt="" aria-hidden="true" />
+            }
+          />
         </div>
 
         {activePublicTab === 'classes' ? (
           <>
-            <div className="public-landing-tab-row public-landing-tab-row-subject" data-testid="public-subject-tabs">
-              {PUBLIC_SUBJECT_TABS.map((subject) => (
-                <button
-                  key={subject}
-                  type="button"
-                  className={`public-landing-chip-tab ${selectedSubject === subject ? 'is-active' : ''}`}
-                  data-testid={`public-subject-tab-${subject}`}
-                  onClick={() => handleSelectSubject(subject)}
-                  disabled={!availableSubjects.includes(subject)}
-                >
-                  {subject}
-                </button>
-              ))}
-            </div>
+            <Tab
+              size="large"
+              value={selectedSubject}
+              onChange={handleSelectSubject}
+              items={subjectTabItems}
+              className="public-landing-tab-row public-landing-tab-row-subject public-landing-subject-tab"
+              data-testid="public-subject-tabs"
+            />
 
-            <div className="public-landing-tab-row public-landing-tab-row-grade" data-testid="public-grade-tabs">
-              {PUBLIC_GRADE_TABS.map((grade) => (
-                <button
-                  key={grade}
-                  type="button"
-                  className={`public-landing-pill-tab ${selectedGrade === grade ? 'is-active' : ''}`}
-                  data-testid={`public-grade-tab-${grade}`}
-                  onClick={() => handleSelectGrade(grade)}
-                  disabled={gradeCounts[grade] === 0}
-                >
-                  {grade}
-                </button>
-              ))}
-            </div>
+            <Tab
+              size="small"
+              fluid
+              value={selectedGrade}
+              onChange={handleSelectGrade}
+              items={gradeTabItems}
+              className="public-landing-tab-row public-landing-tab-row-grade public-landing-grade-tab"
+              data-testid="public-grade-tabs"
+              scrollerRef={gradeTabRowRef}
+            />
           </>
         ) : null}
       </header>
 
       <main className={`public-landing-main ${isCompact ? 'is-compact' : ''}`}>
         {activePublicTab !== 'classes' ? (
-          <PublicPlaceholderPanel item={PUBLIC_BOTTOM_NAV_ITEMS.find((item) => item.id === activePublicTab) || PUBLIC_BOTTOM_NAV_ITEMS[0]} />
+          <PublicPlaceholderPanel
+            item={PUBLIC_BOTTOM_NAV_ITEMS.find((item) => item.id === activePublicTab) || PUBLIC_BOTTOM_NAV_ITEMS[0]}
+          />
         ) : (
           <>
             <section className="public-landing-section-head">
-              <div>
-                <div className="public-landing-section-kicker">{buildSectionKicker(selectedSubject, selectedGrade)}</div>
-                <h1 className="public-landing-section-title">{buildSectionTitle(selectedSubject, selectedGrade)}</h1>
+              <div className="public-landing-section-copy">
+                <div className="public-landing-section-kicker">
+                  {buildSectionKicker(selectedSubject, selectedGrade)}
+                </div>
+                <h1 className="public-landing-section-title">
+                  {buildSectionTitle(selectedSubject, selectedGrade)}
+                </h1>
                 <p className="public-landing-section-description">
-                  카드로 빠르게 훑어보고, 필요한 수업만 담아서 나만의 주간 시간표를 바로 만들어보세요.
+                  원하는 수업만 담아서 나만의 수업 시간표를 바로 만들어보세요.
                 </p>
               </div>
-
             </section>
 
             {isLoading ? (
-              <section className="public-empty-state">수업 목록을 불러오는 중입니다.</section>
+              <PublicClassLandingSkeleton isMobile={isMobile} />
             ) : filteredClasses.length === 0 ? (
               <section className="public-empty-state" data-testid="public-empty-state">
                 조건에 맞는 수업이 없습니다.
@@ -1003,14 +1315,18 @@ export default function PublicClassLandingView({
                 {!isMobile ? (
                   <aside className="public-desktop-planner-panel">
                     <div className="public-desktop-planner-panel-head">
-                      <strong>내 시간표</strong>
-                      <span>{plannerItems.length}개 수업</span>
+                      <strong>{plannerHeadlineText}</strong>
+                      <p>{plannerSubtitleText}</p>
                     </div>
-                    <p>{plannerSummaryText}</p>
-                    <button type="button" className="btn btn-primary" onClick={openPlannerSheet}>
-                      <CalendarDays size={16} />
+                    <Button
+                      type="primary"
+                      style="fill"
+                      size="medium"
+                      className="public-planner-open-button btn btn-primary"
+                      onPress={openPlannerSheet}
+                    >
                       시간표 열기
-                    </button>
+                    </Button>
                   </aside>
                 ) : null}
               </div>
@@ -1021,17 +1337,21 @@ export default function PublicClassLandingView({
 
       <ClassSchedulePlanModal
         open={Boolean(selectedClassItem)}
+        mode="readonly"
         classItem={selectedClassItem}
         plan={selectedClassItem?.schedulePlan || selectedClassItem?.schedule_plan || null}
+        textbooksCatalog={textbooks}
         emptyMessage="아직 등록된 일정표가 없습니다."
         onClose={() => setSelectedClassItem(null)}
         primaryActionLabel="상담하기"
-        onPrimaryAction={() => handleOpenChannelTalk({
-          grade: normalizeGrade(selectedClassItem?.grade),
-          subject: selectedClassItem?.subject,
-          className: stripClassPrefix(selectedClassItem?.className || selectedClassItem?.name || '수업'),
-        })}
-        secondaryActionLabel={selectedClassIsInPlanner ? '시간표에서 빼기' : '시간표에 담기'}
+        onPrimaryAction={() =>
+          handleOpenChannelTalk({
+            grade: normalizeGrade(selectedClassItem?.grade),
+            subject: selectedClassItem?.subject,
+            className: stripClassPrefix(selectedClassItem?.className || selectedClassItem?.name || '수업'),
+          })
+        }
+        secondaryActionLabel={selectedClassIsInPlanner ? '내 시간표에서 빼기' : '내 시간표에 담기'}
         onSecondaryAction={() => {
           if (selectedClassItem) {
             togglePlannerItem(selectedClassItem);
@@ -1044,40 +1364,79 @@ export default function PublicClassLandingView({
         open={isPlannerSheetOpen}
         onClose={() => setIsPlannerSheetOpen(false)}
         title="내 시간표"
-        subtitle={plannerSummaryText}
+        subtitle={plannerSubtitleText}
         testId="public-planner-sheet"
         fullHeightOnMobile
-        maxWidth={900}
+        showHandleOnMobile={false}
+        maxWidth={isMobile ? 1320 : 1080}
         actions={plannerActions}
       >
         <div className="public-planner-sheet-body">
-          <div className="public-planner-selected-list">
-            {plannerItems.map((item) => (
-              <div key={`planner-item-${item.id}`} className="public-planner-selected-item">
-                <div className="public-planner-selected-copy">
-                  <strong>{stripClassPrefix(item.className || item.name || '수업')}</strong>
-                  <span>{buildScheduleLines(item).join(' · ')}</span>
-                </div>
-                <button type="button" className="public-planner-selected-remove" onClick={() => togglePlannerItem(item)}>
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-
           <div ref={plannerPreviewRef} className="public-planner-preview-card">
-            <div className="public-planner-preview-head">
-              <span className="public-planner-preview-eyebrow">TIPS MY TIMETABLE</span>
-              <strong>{plannerGrade ? `${plannerGrade} 주간 시간표` : '내 시간표'}</strong>
-            </div>
+            <div className="public-planner-sticky-top" data-testid="public-planner-sticky-top">
+              <div className="public-planner-selected-list">
+                {plannerItems.map((item) => (
+                  <div key={`planner-item-${item.id}`} className="public-planner-selected-item">
+                    <div className="public-planner-selected-copy">
+                      <div className="public-planner-selected-title-line">
+                        <span className="public-planner-selected-subject-badge">
+                          {text(item.subject) || '과목'}
+                        </span>
+                        <strong>{stripClassPrefix(item.className || item.name || '수업')}</strong>
+                      </div>
+                      <div className="public-planner-selected-info-row">
+                        <CalendarDays size={14} strokeWidth={2.1} aria-hidden="true" />
+                        <span>{buildScheduleLines(item).join(' · ')}</span>
+                      </div>
+                      <div className="public-planner-selected-info-row">
+                        <UserRound size={14} strokeWidth={2.1} aria-hidden="true" />
+                        <span>{buildPlannerFieldText(item.teacher, '선생님 미정')}</span>
+                      </div>
+                      <div className="public-planner-selected-info-row">
+                        <MapPin size={14} strokeWidth={2.1} aria-hidden="true" />
+                        <span>{buildPlannerFieldText(item.classroom || item.room, '강의실 미정')}</span>
+                      </div>
+                      <span
+                        className="public-planner-selected-meta"
+                        data-testid="public-planner-selected-meta"
+                      >
+                        {buildPlannerMetaText(item)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="public-planner-selected-remove"
+                      onClick={() => togglePlannerItem(item)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
 
-            <div className="public-planner-preview-chip-row">
-              {plannerItems.map((item) => (
-                <span key={`planner-chip-${item.id}`} className="public-planner-preview-chip" style={{ flexDirection: 'column', alignItems: 'flex-start', padding: '8px 14px', borderRadius: '14px', gap: '2px', height: 'auto' }}>
-                  <span>{text(item.subject)} · {stripClassPrefix(item.className || item.name || '수업')}</span>
-                  <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.85 }}>{buildScheduleLines(item).join(', ')}</span>
-                </span>
-              ))}
+              <div className="public-planner-preview-head">
+                <span className="public-planner-preview-eyebrow">TIPS MY TIMETABLE</span>
+                <strong>{plannerPreviewTitleText}</strong>
+              </div>
+
+              <div className="public-planner-preview-chip-row">
+                {plannerItems.map((item) => (
+                  <span key={`planner-chip-${item.id}`} className="public-planner-preview-chip">
+                    <span className="public-planner-preview-chip-title">
+                      {text(item.subject)} · {stripClassPrefix(item.className || item.name || '수업')}
+                    </span>
+                    <span className="public-planner-preview-chip-schedule">
+                      {buildScheduleLines(item).join(', ')}
+                    </span>
+                    <span
+                      className="public-planner-preview-chip-meta"
+                      data-testid="public-planner-preview-chip-meta"
+                    >
+                      {buildPlannerMetaText(item)}
+                    </span>
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div className="public-planner-preview-grid">
@@ -1088,65 +1447,62 @@ export default function PublicClassLandingView({
                 editable={false}
                 density="micro"
                 slotHeight={42}
+                timeColumnWidth={isMobile ? 84 : 72}
+                minColumnWidth={isMobile ? 90 : 94}
                 shellClassName="public-readonly-timetable public-planner-readonly-timetable"
               />
             </div>
           </div>
-
         </div>
       </BottomSheet>
 
-      {isMobile ? (
-        <>
-          {activePublicTab === 'classes' && plannerItems.length > 0 ? (
-            <div className="public-planner-floating-shell">
-              <button
-                type="button"
-                className="public-planner-floating-clear"
-                data-testid="public-planner-clear"
-                onClick={clearPlanner}
-                aria-label="전체 비우기"
-                title="전체 비우기"
-              >
-                <Trash2 size={17} />
-              </button>
+      {isMobile && activePublicTab === 'classes' && plannerItems.length > 0 ? (
+        <div className="public-planner-floating-shell">
+          <button
+            type="button"
+            className="public-planner-floating-clear"
+            data-testid="public-planner-clear"
+            onClick={clearPlanner}
+            aria-label="전체 비우기"
+            title="전체 비우기"
+          >
+            <Trash2 size={17} />
+          </button>
 
-              <button
-                type="button"
-                className="public-planner-floating-cta"
-                data-testid="public-planner-cta"
-                onClick={openPlannerSheet}
-              >
-                <CalendarDays size={18} />
-                <div className="public-planner-floating-copy">
-                  <strong>내 시간표 {plannerItems.length}개</strong>
-                  <span>{plannerGrade || selectedGrade} · 이미지 공유 가능</span>
-                </div>
-                <ChevronRight size={18} />
-              </button>
+          <button
+            type="button"
+            className="public-planner-floating-cta"
+            data-testid="public-planner-cta"
+            onClick={openPlannerSheet}
+          >
+            <CalendarDays size={18} />
+            <div className="public-planner-floating-copy">
+              <strong>{plannerHeadlineText}</strong>
+              <span>{plannerSubtitleText}</span>
             </div>
-          ) : null}
-
-          <nav className="public-bottom-nav" data-testid="public-bottom-nav">
-            {PUBLIC_BOTTOM_NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const isActive = activePublicTab === item.id || (item.id === 'classes' && activePublicTab === 'classes');
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`public-bottom-nav-button ${isActive ? 'is-active' : ''}`}
-                  data-testid={`public-bottom-nav-${item.id}`}
-                  onClick={() => handleBottomNavClick(item)}
-                >
-                  <Icon size={20} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </>
+            <ChevronRight size={18} />
+          </button>
+        </div>
       ) : null}
+
+      <nav className="public-bottom-nav" data-testid="public-bottom-nav">
+        {PUBLIC_BOTTOM_NAV_ITEMS.map((item) => {
+          const isActive = activePublicTab === item.id;
+
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`public-bottom-nav-button ${isActive ? 'is-active' : ''}`}
+              data-testid={`public-bottom-nav-${item.id}`}
+              onClick={() => handleBottomNavClick(item)}
+            >
+              <FilledNavIcon name={item.id} size={20} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }

@@ -20,29 +20,32 @@ import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import ConfirmDialog from './ui/ConfirmDialog';
 import BottomSheet from './ui/BottomSheet';
 import StatusBanner from './ui/StatusBanner';
+import { DashboardFilterSheet } from './ui/dashboard';
 import { useAuth } from '../contexts/AuthContext';
 import { getAcademicCalendarWriteState, getUserFriendlyDataError } from '../lib/dataErrorUtils';
 import { detectAcademicWorkbookFormat, parseHighSchoolMatrixWorkbook } from '../lib/academicWorkbookUtils';
 import {
   buildSchoolMaster,
-  getAllManagedGrades,
   getGradeOptionsForSelection,
   getGradeSortValue,
   getSchoolCategoryLabel,
   inferSchoolCategoryFromGrade,
   SCHOOL_CATEGORY_FILTER_OPTIONS,
+  SCHOOL_CATEGORY_OPTIONS,
 } from '../lib/schoolConfig';
 import useViewport from '../hooks/useViewport';
+import CurriculumRoadmapView from './CurriculumRoadmapView';
+import { Button, CheckboxMenu, SegmentedControl, Tab } from './ui/tds';
 
 const EVENT_TYPE_COLOR_PALETTE = ['#2f6f63', '#2563eb', '#7c3aed', '#0f766e', '#d97706', '#b91c1c', '#64748b', '#c2410c'];
 const DEFAULT_EVENT_COLOR = EVENT_TYPE_COLOR_PALETTE[0];
+const VACATION_MISC_EVENT_TYPE = '방학·휴일·기타';
 const DEFAULT_EVENT_TYPE_DEFINITIONS = [
   { id: 'exam-window', name: '시험기간', color: EVENT_TYPE_COLOR_PALETTE[0] },
   { id: 'english-exam-day', name: '영어시험일', color: EVENT_TYPE_COLOR_PALETTE[1] },
   { id: 'math-exam-day', name: '수학시험일', color: EVENT_TYPE_COLOR_PALETTE[2] },
   { id: 'field-trip', name: '체험학습', color: EVENT_TYPE_COLOR_PALETTE[3] },
-  { id: 'vacation-holiday', name: '방학·휴일', color: EVENT_TYPE_COLOR_PALETTE[4] },
-  { id: 'misc', name: '기타', color: EVENT_TYPE_COLOR_PALETTE[6] },
+  { id: 'vacation-misc', name: VACATION_MISC_EVENT_TYPE, color: EVENT_TYPE_COLOR_PALETTE[4] },
   { id: 'tips', name: '팁스', color: EVENT_TYPE_COLOR_PALETTE[7] },
 ];
 const DEFAULT_EVENT_TYPES = DEFAULT_EVENT_TYPE_DEFINITIONS.map((item) => item.name);
@@ -60,8 +63,7 @@ const ROADMAP_SUBJECT_BY_EVENT_TYPE = {
 };
 const ROADMAP_SCHEDULE_COLUMN_BY_EVENT_TYPE = {
   체험학습: 'field-trip',
-  '방학·휴일': 'vacation-holiday',
-  기타: 'misc',
+  [VACATION_MISC_EVENT_TYPE]: 'vacation-misc',
 };
 const EVENT_VIEW_STORAGE_KEY = 'tips-academic-view-v3';
 const NOTE_META_MARKER = '[[TIPS_META]]';
@@ -72,10 +74,9 @@ const ROADMAP_LINKABLE_EVENT_TYPES = new Set([
   '영어시험일',
   '수학시험일',
   '체험학습',
-  '방학·휴일',
-  '기타',
+  VACATION_MISC_EVENT_TYPE,
 ]);
-const SCHOOL_GRADE_REQUIRED_EVENT_TYPES = new Set(['시험기간', '영어시험일', '수학시험일', '체험학습', '방학·휴일', '기타']);
+const SCHOOL_GRADE_REQUIRED_EVENT_TYPES = new Set(['시험기간', '영어시험일', '수학시험일', '체험학습', VACATION_MISC_EVENT_TYPE]);
 const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
 function createId() {
@@ -131,6 +132,9 @@ function buildRoadmapIntentFromEvent(event) {
     schoolId: event?.schoolId || '',
     schoolName: event?.school || '',
     schoolKey: event?.school ? schoolKey(event.school) : '',
+    schoolCategory:
+      text(event?.category) ||
+      (text(event?.grade) && text(event?.grade) !== 'all' ? inferSchoolCategoryFromGrade(text(event?.grade)) : ''),
     grade: text(event?.grade) === 'all' ? '' : text(event?.grade),
     subject: text(event?.roadmapSubject) || inferRoadmapSubject(event),
     periodCode: text(event?.periodCode || event?.roadmapPeriodCode) || inferRoadmapPeriodCode(event),
@@ -330,12 +334,12 @@ function normalizeType(value) {
   if (next.includes('수학시험일')) return '수학시험일';
   if (next.includes('시험')) return '시험기간';
   if (next.includes('체험') || next.includes('학습')) return '체험학습';
-  if (next.includes('방학') || next.includes('개학')) return '방학·휴일';
-  if (next.includes('휴일') || next.includes('공휴일') || next.includes('대체휴일') || next.includes('휴강')) return '방학·휴일';
+  if (next.includes('방학') || next.includes('개학')) return VACATION_MISC_EVENT_TYPE;
+  if (next.includes('휴일') || next.includes('공휴일') || next.includes('대체휴일') || next.includes('휴강')) return VACATION_MISC_EVENT_TYPE;
   if (next.includes('팁스')) return '팁스';
   if (next.includes('학원') || next.includes('행사')) return '팁스';
-  if (next.includes('기타')) return '기타';
-  return next || '기타';
+  if (next.includes('기타')) return VACATION_MISC_EVENT_TYPE;
+  return next || VACATION_MISC_EVENT_TYPE;
 }
 
 function todayString() {
@@ -1231,8 +1235,8 @@ function AcademicEventEditorActions({
           type="button"
           className="academic-icon-button"
           onClick={onOpenRoadmap}
-          aria-label="교재·진도 열기"
-          title="교재·진도 열기"
+          aria-label="학교 연간일정표 열기"
+          title="학교 연간일정표 열기"
         >
           <BookOpen size={16} />
         </button>
@@ -1547,7 +1551,13 @@ function AcademicEventPopover({ event, anchor, typeColorMap, canEdit, onClose, o
                 <Pencil size={15} />
               </button>
               {canOpenRoadmap ? (
-                <button type="button" className="academic-icon-button" onClick={onOpenRoadmap} aria-label="교재·진도 열기">
+                <button
+                  type="button"
+                  className="academic-icon-button"
+                  onClick={onOpenRoadmap}
+                  aria-label="학교 연간일정표 열기"
+                  title="학교 연간일정표 열기"
+                >
                   <BookOpen size={15} />
                 </button>
               ) : null}
@@ -1556,7 +1566,13 @@ function AcademicEventPopover({ event, anchor, typeColorMap, canEdit, onClose, o
               </button>
             </>
           ) : canOpenRoadmap ? (
-            <button type="button" className="academic-icon-button" onClick={onOpenRoadmap} aria-label="교재·진도 열기">
+            <button
+              type="button"
+              className="academic-icon-button"
+              onClick={onOpenRoadmap}
+              aria-label="학교 연간일정표 열기"
+              title="학교 연간일정표 열기"
+            >
               <BookOpen size={15} />
             </button>
           ) : null}
@@ -1925,12 +1941,24 @@ export default function AcademicCalendarView({
   const [desktopEventPopover, setDesktopEventPopover] = useState(null);
   const [desktopDayPopover, setDesktopDayPopover] = useState(null);
   const [optimisticEvents, setOptimisticEvents] = useState([]);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState('calendar');
+  const [embeddedNavigationIntent, setEmbeddedNavigationIntent] = useState(null);
+
+  const effectiveNavigationIntent = embeddedNavigationIntent || navigationIntent;
 
   useEffect(() => {
     if (!isMobile && mobileViewMode !== 'month') {
       setMobileViewMode('month');
     }
   }, [isMobile, mobileViewMode]);
+
+  useEffect(() => {
+    if (!navigationIntent?.nonce) {
+      return;
+    }
+    setActiveWorkspaceTab('calendar');
+    setEmbeddedNavigationIntent(null);
+  }, [navigationIntent?.nonce]);
 
   const closeInlineComposer = () => {
     setInlineComposerDraft(null);
@@ -2075,13 +2103,8 @@ export default function AcademicCalendarView({
     [visibleSchools]
   );
   const gradeOptions = useMemo(() => {
-    if (selectedCategory === 'all') {
-      return [];
-    }
-    if (selectedSchoolKey === 'all') {
-      return getGradeOptionsForSelection(selectedCategory, null);
-    }
-    return getGradeOptionsForSelection(selectedCategory, schoolByKey[selectedSchoolKey] || null);
+    const selectedSchool = selectedSchoolKey === 'all' ? null : schoolByKey[selectedSchoolKey] || null;
+    return getGradeOptionsForSelection(selectedCategory, selectedSchool);
   }, [schoolByKey, selectedCategory, selectedSchoolKey]);
 
   useEffect(() => {
@@ -2091,10 +2114,6 @@ export default function AcademicCalendarView({
   }, [selectedSchoolKey, visibleSchoolKeys]);
 
   useEffect(() => {
-    if (selectedCategory === 'all') {
-      setSelectedGrades([]);
-      return;
-    }
     setSelectedGrades((current) => current.filter((grade) => gradeOptions.includes(grade)));
   }, [gradeOptions, selectedCategory]);
 
@@ -2166,17 +2185,10 @@ export default function AcademicCalendarView({
   const filteredEvents = useMemo(() => {
     return events.filter((event) => {
       if (selectedCategory !== 'all' && schoolByKey[event.schoolKey]?.category !== selectedCategory) return false;
-      if (selectedSchoolKey !== 'all' && event.schoolKey !== selectedSchoolKey) return false;
-      if (selectedGrades.length > 0) {
-        const eventGrades = getEventGradeTokens(event);
-        if (event.grade !== 'all' && eventGrades.length > 0 && !eventGrades.some((grade) => selectedGrades.includes(grade))) {
-          return false;
-        }
-      }
       if (!selectedTypes.includes(event.type)) return false;
       return true;
     });
-  }, [events, schoolByKey, selectedCategory, selectedGrades, selectedSchoolKey, selectedTypes]);
+  }, [events, schoolByKey, selectedCategory, selectedTypes]);
 
   const monthWeeks = useMemo(() => buildMonthWeeks(currentDate), [currentDate]);
   const miniCalendarWeeks = useMemo(() => buildMonthWeeks(currentDate, { forceSixRows: true }), [currentDate]);
@@ -2196,27 +2208,9 @@ export default function AcademicCalendarView({
   );
   const agendaGroups = useMemo(() => buildAgendaGroups(agendaEvents), [agendaEvents]);
   const dayEventMap = useMemo(() => buildVisibleDateEventMap(monthEvents, gridStart, gridEnd), [monthEvents, gridEnd, gridStart]);
-  const selectedSchoolLabel = selectedSchoolKey === 'all'
+  const selectedSchoolLabel = selectedCategory === 'all'
     ? '전체 학교'
-    : schoolByKey[selectedSchoolKey]?.name || '학교 미지정';
-  const mobileFilterSummary = useMemo(() => {
-    const tokens = [selectedSchoolLabel];
-
-    if (selectedGrades.length > 0) {
-      tokens.push(selectedGrades.length === 1 ? `학년 · ${selectedGrades[0]}` : `학년 ${selectedGrades.length}개`);
-    } else {
-      tokens.push('전체 학년');
-    }
-
-    if (selectedTypes.length === DEFAULT_EVENT_TYPES.length) {
-      tokens.push('전체 분류');
-    } else {
-      tokens.push(`분류 ${selectedTypes.length}개`);
-    }
-
-    return tokens;
-  }, [selectedGrades, selectedSchoolLabel, selectedTypes.length]);
-
+    : `${getSchoolCategoryLabel(selectedCategory, '전체')} 전체`;
   const writeState = useMemo(
     () => (calendarWriteIssue ? getAcademicCalendarWriteState(calendarWriteIssue, { canWriteCalendar }) : null),
     [calendarWriteIssue, canWriteCalendar]
@@ -2387,29 +2381,35 @@ export default function AcademicCalendarView({
   };
 
   useEffect(() => {
-    const nonce = navigationIntent?.nonce;
-    if (!navigationIntent || !nonce || handledNavigationIntentRef.current === nonce) {
+    const nonce = effectiveNavigationIntent?.nonce;
+    if (!effectiveNavigationIntent || !nonce || handledNavigationIntentRef.current === nonce) {
       return;
     }
 
     handledNavigationIntentRef.current = nonce;
 
     const matchedSchool =
-      schoolByKey[navigationIntent.schoolKey] ||
-      schoolCatalog.find((school) => school.id === navigationIntent.schoolId) ||
-      schoolCatalog.find((school) => schoolKey(school.name) === schoolKey(navigationIntent.schoolName)) ||
+      schoolByKey[effectiveNavigationIntent.schoolKey] ||
+      schoolCatalog.find((school) => school.id === effectiveNavigationIntent.schoolId) ||
+      schoolCatalog.find((school) => schoolKey(school.name) === schoolKey(effectiveNavigationIntent.schoolName)) ||
       null;
-    const targetEvent = navigationIntent.eventId
-      ? events.find((event) => event.id === navigationIntent.eventId) || null
+    const targetEvent = effectiveNavigationIntent.eventId
+      ? events.find((event) => event.id === effectiveNavigationIntent.eventId) || null
       : null;
-    const targetGrades = navigationIntent.grade
-      ? [navigationIntent.grade]
+    const targetGrades = effectiveNavigationIntent.grade
+      ? [effectiveNavigationIntent.grade]
       : (targetEvent ? getEventGradeTokens(targetEvent) : []);
-    const targetType = text(navigationIntent.eventType || targetEvent?.type);
-    const targetDate = text(navigationIntent.date || targetEvent?.start || targetEvent?.date);
+    const targetType = text(effectiveNavigationIntent.eventType || targetEvent?.type);
+    const targetDate = text(effectiveNavigationIntent.date || targetEvent?.start || targetEvent?.date);
+    const targetCategory =
+      text(effectiveNavigationIntent.schoolCategory) ||
+      matchedSchool?.category ||
+      (targetGrades[0] ? inferSchoolCategoryFromGrade(targetGrades[0]) : 'all');
     const isVisibleUnderCurrentFilters = targetEvent
       ? filteredEvents.some((event) => event.id === targetEvent.id)
       : false;
+
+    setSelectedCategory(targetCategory || 'all');
 
     if (targetDate) {
       const parsedDate = parseDate(targetDate);
@@ -2426,10 +2426,19 @@ export default function AcademicCalendarView({
     }
 
     pendingNavigationIntentRef.current = {
-      eventId: text(navigationIntent.eventId),
+      eventId: text(effectiveNavigationIntent.eventId),
       date: targetDate,
     };
-  }, [events, filteredEvents, navigationIntent, schoolByKey, schoolCatalog]);
+  }, [effectiveNavigationIntent, events, filteredEvents, schoolByKey, schoolCatalog]);
+
+  useEffect(() => {
+    if (!embeddedNavigationIntent?.nonce) {
+      return;
+    }
+    if (handledNavigationIntentRef.current === embeddedNavigationIntent.nonce) {
+      setEmbeddedNavigationIntent(null);
+    }
+  }, [embeddedNavigationIntent]);
 
   useEffect(() => {
     const pendingIntent = pendingNavigationIntentRef.current;
@@ -2524,11 +2533,9 @@ export default function AcademicCalendarView({
         const schoolRequiredMessage =
           normalizedType === '체험학습'
             ? '체험학습은 학교를 선택해 주세요.'
-            : normalizedType === '방학·휴일'
-              ? '방학·휴일은 학교를 선택해 주세요.'
-              : normalizedType === '기타'
-                ? '기타 일정은 학교를 선택해 주세요.'
-                : '시험 관련 일정은 학교를 선택해 주세요.';
+            : normalizedType === VACATION_MISC_EVENT_TYPE
+              ? '방학·휴일·기타 일정은 학교를 선택해 주세요.'
+              : '시험 관련 일정은 학교를 선택해 주세요.';
         toast.info(
           schoolRequiredMessage
         );
@@ -2542,11 +2549,9 @@ export default function AcademicCalendarView({
         const gradeRequiredMessage =
           normalizedType === '체험학습'
             ? '체험학습은 학년을 선택해 주세요.'
-            : normalizedType === '방학·휴일'
-              ? '방학·휴일은 학년을 선택해 주세요.'
-              : normalizedType === '기타'
-                ? '기타 일정은 학년을 선택해 주세요.'
-                : '시험 관련 일정은 학년을 선택해 주세요.';
+            : normalizedType === VACATION_MISC_EVENT_TYPE
+              ? '방학·휴일·기타 일정은 학년을 선택해 주세요.'
+              : '시험 관련 일정은 학년을 선택해 주세요.';
         toast.info(
           gradeRequiredMessage
         );
@@ -2918,12 +2923,31 @@ export default function AcademicCalendarView({
     [dayEventMap, desktopDayPopover]
   );
 
+  const goToPrevMonth = () =>
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+  const goToNextMonth = () =>
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  const goToCurrentMonth = () =>
+    setCurrentDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+
+  const categorySegmentItems = SCHOOL_CATEGORY_OPTIONS.map((option) => ({
+    value: option.value,
+    label: option.label,
+    disabled: !schoolCatalog.some((school) => school.category === option.value),
+    testId: `calendar-category-${option.value}`,
+  }));
+
+  const mobileViewModeItems = [
+    { value: 'month', label: '월간 보기', testId: 'calendar-mobile-mode-month' },
+    { value: 'agenda', label: '일정 목록', testId: 'calendar-mobile-mode-agenda' },
+  ];
+
   const miniCalendarPanel = (
     <div className="academic-mini-calendar card-custom">
       <div className="academic-mini-calendar-header">
-        <button type="button" className="academic-icon-button" onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}><ChevronLeft size={16} /></button>
+        <button type="button" className="academic-icon-button" onClick={goToPrevMonth}><ChevronLeft size={16} /></button>
         <strong>{monthLabel}</strong>
-        <button type="button" className="academic-icon-button" onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}><ChevronRight size={16} /></button>
+        <button type="button" className="academic-icon-button" onClick={goToNextMonth}><ChevronRight size={16} /></button>
       </div>
       <div className="academic-mini-weekdays">{WEEKDAY_LABELS.map((label) => <span key={label}>{label}</span>)}</div>
       <div className="academic-mini-grid">
@@ -2939,9 +2963,9 @@ export default function AcademicCalendarView({
         })}
       </div>
       <div className="academic-mini-calendar-footer">
-        <button type="button" className="action-chip academic-mini-calendar-today" onClick={() => setCurrentDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>
+        <Button type="primary" style="weak" size="medium" className="academic-mini-calendar-today" onPress={goToCurrentMonth}>
           오늘로 이동
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -2949,30 +2973,19 @@ export default function AcademicCalendarView({
   const filterPanelContent = (
     <div className="card-custom academic-sidebar-panel">
       <div className="academic-section-caption">필터</div>
-      <div className="academic-sidebar-field academic-sidebar-field-inline">
+      <div className="academic-sidebar-field academic-sidebar-field-stacked academic-sidebar-field-segmented">
         <span>학교 구분</span>
-        <select className="styled-input" value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>
-          {SCHOOL_CATEGORY_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+        <SegmentedControl
+          value={selectedCategory === 'all' ? null : selectedCategory}
+          onValueChange={(nextValue) =>
+            setSelectedCategory((current) => (current === nextValue ? 'all' : nextValue))
+          }
+          items={categorySegmentItems}
+          size="small"
+          alignment="fixed"
+          className="academic-filter-segmented"
+        />
       </div>
-      <div className="academic-sidebar-field academic-sidebar-field-inline">
-        <span>학교</span>
-        <select className="styled-input" value={selectedSchoolKey} onChange={(event) => setSelectedSchoolKey(event.target.value)}>
-          <option value="all">전체</option>
-          {visibleSchools.map((school) => <option key={schoolKey(school.name)} value={schoolKey(school.name)}>{school.name}</option>)}
-        </select>
-      </div>
-      {selectedCategory !== 'all' ? (
-        <div className="academic-sidebar-field academic-sidebar-field-inline academic-sidebar-field-inline-chips">
-          <span>학년</span>
-          <GradeMultiSelect
-            options={gradeOptions}
-            selectedValues={selectedGrades}
-            onChange={setSelectedGrades}
-            showClear={false}
-          />
-        </div>
-      ) : null}
       <div className="academic-sidebar-field academic-sidebar-field-stacked">
         <span>분류</span>
         <div className="academic-type-filter-wrap">
@@ -3015,12 +3028,93 @@ export default function AcademicCalendarView({
           <span className="management-mobile-overview-badge">{monthEvents.length}개 일정</span>
         </div>
         <div className="academic-calendar-mobile-summary-copy">
-          학교, 학년, 분류만 빠르게 조정하고 월간 보기와 일정 목록을 오갈 수 있습니다.
+          학교 구분과 분류만 빠르게 조정하고 월간 보기와 일정 목록을 오갈 수 있습니다.
         </div>
       </div>
       {filterPanelContent}
     </div>
   );
+
+  const mobileWorkspaceToolbar = isMobile ? (
+    <div className="card-custom academic-calendar-mobile-toolbar" data-testid="academic-calendar-mobile-toolbar">
+      <div className="academic-calendar-mobile-toolbar-head">
+        <div className="academic-calendar-mobile-month-copy">
+          <strong>{monthLabel}</strong>
+          <span>{selectedSchoolLabel} · {monthEvents.length}개 일정</span>
+        </div>
+        <div className="academic-toolbar-controls-mobile">
+          <button type="button" className="action-chip" aria-label="이전 달" onClick={goToPrevMonth}>
+            <ChevronLeft size={16} />
+          </button>
+          <button type="button" className="action-chip" onClick={goToCurrentMonth}>
+            오늘
+          </button>
+          <button type="button" className="action-chip" data-testid="calendar-top-rail-filter-button" onClick={() => setIsFilterSheetOpen(true)}>
+            <Settings2 size={16} />
+            필터
+          </button>
+          <button type="button" className="action-chip" aria-label="다음 달" onClick={goToNextMonth}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      <SegmentedControl
+        value={mobileViewMode}
+        onValueChange={setMobileViewMode}
+        items={mobileViewModeItems}
+        size="small"
+        alignment="fixed"
+        className="academic-calendar-mobile-view-switch"
+      />
+    </div>
+  ) : null;
+
+  const workspaceTabItems = [
+    { value: 'calendar', label: '캘린더', testId: 'academic-workspace-tab-calendar' },
+    { value: 'school-annual-board', label: '학교 연간일정표', testId: 'academic-workspace-tab-school-board' },
+  ];
+
+  const openEmbeddedCalendarIntent = (intent) => {
+    if (!intent) {
+      return;
+    }
+    setActiveWorkspaceTab('calendar');
+    setEmbeddedNavigationIntent({
+      ...intent,
+      nonce: intent.nonce || Date.now(),
+    });
+  };
+
+  const openEmbeddedSchoolAnnualBoard = (intent) => {
+    if (!intent) {
+      return;
+    }
+
+    const matchedSchool =
+      schoolByKey[intent.schoolKey] ||
+      schoolCatalog.find((school) => school.id === intent.schoolId) ||
+      schoolCatalog.find((school) => schoolKey(school.name) === schoolKey(intent.schoolName)) ||
+      null;
+    const schoolCategory =
+      text(intent.schoolCategory) ||
+      matchedSchool?.category ||
+      (text(intent.grade) ? inferSchoolCategoryFromGrade(text(intent.grade)) : 'all');
+
+    setActiveWorkspaceTab('school-annual-board');
+    setEmbeddedNavigationIntent({
+      ...intent,
+      tab: 'school',
+      subject: 'all-subjects',
+      schoolCategory: schoolCategory || 'all',
+      schoolId: '',
+      schoolKey: '',
+      schoolName: '',
+      grade: '',
+      periodCode: '',
+      nonce: intent.nonce || Date.now(),
+    });
+  };
 
   return (
     <div className="view-container academic-calendar-app">
@@ -3035,7 +3129,7 @@ export default function AcademicCalendarView({
         onClose={closeModal}
         onSave={saveEvent}
         onDelete={deleteEvent}
-        onOpenRoadmap={onOpenRoadmap}
+        onOpenRoadmap={openEmbeddedSchoolAnnualBoard}
         isSaving={isSaving}
         canEdit={canWriteCalendar}
         supportsExamDetails={supportsExamDetails}
@@ -3043,9 +3137,17 @@ export default function AcademicCalendarView({
 
       <AcademicDayDialog open={Boolean(dayDialogDate)} title={dayDialogDate ? formatDisplayDateWithWeekday(dayDialogDate) : ''} events={dayDialogEvents} onClose={() => setDayDialogDate('')} typeColorMap={typeColorMap} />
 
-      <BottomSheet open={isMobile && isFilterSheetOpen} onClose={() => setIsFilterSheetOpen(false)} title="캘린더 필터" subtitle="학교, 학년, 분류 기준으로 일정을 좁혀 볼 수 있습니다." maxWidth={520} testId="calendar-filter-sheet" actions={<div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" className="action-chip" onClick={() => setIsFilterSheetOpen(false)}>닫기</button></div>}>
+      <DashboardFilterSheet
+        open={isMobile && isFilterSheetOpen}
+        onClose={() => setIsFilterSheetOpen(false)}
+        onApply={() => setIsFilterSheetOpen(false)}
+        title="캘린더 필터"
+        subtitle="학교 구분과 분류 기준으로 일정을 좁혀 볼 수 있습니다."
+        maxWidth={520}
+        testId="calendar-filter-sheet"
+      >
         {mobileFilterContent}
-      </BottomSheet>
+      </DashboardFilterSheet>
 
       <ConfirmDialog {...dialogProps} />
 
@@ -3060,7 +3162,7 @@ export default function AcademicCalendarView({
           onDelete={() => deleteEventByTarget(desktopEventPopover.event)}
           onOpenRoadmap={() => {
             closeDesktopPopovers();
-            onOpenRoadmap?.(buildRoadmapIntentFromEvent(desktopEventPopover.event));
+            openEmbeddedSchoolAnnualBoard(buildRoadmapIntentFromEvent(desktopEventPopover.event));
           }}
         />
       ) : null}
@@ -3077,136 +3179,61 @@ export default function AcademicCalendarView({
       ) : null}
 
       <section className="workspace-surface academic-calendar-workspace">
-        {isMobile ? (
-          <div className="academic-calendar-mobile-stack">
-            <div className="academic-calendar-toolbar academic-calendar-toolbar-compact card-custom">
-              <div className="academic-calendar-mobile-month">
-                <button
-                  type="button"
-                  className="academic-icon-button"
-                  onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}
-                  aria-label="이전 달"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <div className="academic-calendar-mobile-month-copy">
-                  <strong>{monthLabel}</strong>
-                  <span>{monthEvents.length}개 일정</span>
-                </div>
-                <button
-                  type="button"
-                  className="academic-icon-button"
-                  onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}
-                  aria-label="다음 달"
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-
-              <div className="academic-toolbar-controls academic-toolbar-controls-mobile">
-                <button type="button" className="action-chip" onClick={() => setCurrentDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>
-                  오늘
-                </button>
-                <button
-                  type="button"
-                  className="action-chip"
-                  data-testid="calendar-filter-button"
-                  onClick={() => setIsFilterSheetOpen(true)}
-                >
-                  <Settings2 size={16} />
-                  필터
-                </button>
-                {canWriteCalendar ? (
-                  <button
-                    type="button"
-                    className="action-pill"
-                    data-testid="calendar-add-button"
-                    onClick={() => openCreateComposer(todayString())}
-                  >
-                    <Plus size={16} />
-                    일정 추가
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="card-custom academic-calendar-mobile-summary" data-testid="calendar-mobile-summary">
-              <div className="academic-calendar-mobile-summary-head">
-                <div>
-                  <span className="academic-section-caption">현재 필터</span>
-                  <strong>{selectedSchoolLabel}</strong>
-                </div>
-                <span className="management-mobile-overview-badge">{monthEvents.length}개 일정</span>
-              </div>
-              <div className="academic-calendar-mobile-summary-copy">
-                {mobileViewMode === 'month' ? '월간 격자에서 날짜를 누르면 세부 일정과 편집으로 바로 이어집니다.' : '목록 보기에서 날짜별 일정을 더 촘촘하게 훑어볼 수 있습니다.'}
-              </div>
-              <div className="academic-calendar-mobile-summary-chips">
-                {mobileFilterSummary.map((token) => (
-                  <span key={token} className="academic-calendar-mobile-summary-chip">
-                    {token}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="card-custom academic-calendar-mobile-toggle" data-testid="calendar-mobile-mode-switch">
-              <button
-                type="button"
-                className={`h-segment-btn ${mobileViewMode === 'month' ? 'active' : ''}`}
-                data-testid="calendar-mobile-mode-month"
-                aria-pressed={mobileViewMode === 'month'}
-                onClick={() => setMobileViewMode('month')}
-              >
-                월간 보기
-              </button>
-              <button
-                type="button"
-                className={`h-segment-btn ${mobileViewMode === 'agenda' ? 'active' : ''}`}
-                data-testid="calendar-mobile-mode-agenda"
-                aria-pressed={mobileViewMode === 'agenda'}
-                onClick={() => setMobileViewMode('agenda')}
-              >
-                일정 목록
-              </button>
-            </div>
-          </div>
-        ) : null}
-
         {writeState ? <StatusBanner variant={writeState.tone === 'danger' ? 'error' : 'warning'} title={writeState.title} message={writeState.message} /> : null}
-
-        <div className="academic-calendar-shell">
-          {!isMobile ? <aside className="academic-calendar-sidebar">{sidebarContent}</aside> : null}
-          <main ref={calendarMainRef} className="academic-calendar-main" onWheel={handleCalendarWheel}>
-            {inlineComposerDraft && inlineComposerAnchor ? (
-              <AcademicInlineComposer
-                draft={inlineComposerDraft}
-                anchor={inlineComposerAnchor}
-                composerRef={inlineComposerRef}
-                schoolCatalog={schoolCatalog}
-                typeDefinitions={eventTypeOptions}
-                onChange={updateInlineComposerDraft}
-                onClose={closeInlineComposer}
-                onSave={(draft) => saveEvent(draft, { source: 'inline' })}
-                onOpenRoadmap={onOpenRoadmap}
-                isSaving={isSaving}
-                supportsExamDetails={supportsExamDetails}
-              />
-            ) : null}
-            {!isMobile || mobileViewMode === 'month' ? (
-              <div data-testid="calendar-month-grid">
-                <AcademicMonthGridV2 currentDate={currentDate} weeks={monthWeeks} weekCount={monthWeeks.length} monthEvents={monthEvents} dayEventMap={dayEventMap} typeColorMap={typeColorMap} selectionAnchor={selectionAnchor} selectionRange={selectionRange} setSelectionAnchor={setSelectionAnchor} setSelectionRange={setSelectionRange} canWriteCalendar={canWriteCalendar} draggedEventId={draggedEventId} setDraggedEventId={setDraggedEventId} onOpenDay={openDayEvents} onOpenEvent={openExistingEvent} onCreateRange={openCreateComposer} onMoveEvent={moveEvent} visibleLaneCount={isMobile ? 1 : 3} dayButtonRefs={dayButtonRefs} />
-              </div>
-            ) : null}
-            {isMobile && mobileViewMode === 'agenda' ? (
-              <AcademicAgendaList
-                groups={agendaGroups}
-                onOpenEvent={openExistingEvent}
-                typeColorMap={typeColorMap}
-              />
-            ) : null}
-          </main>
+        <div className="academic-workspace-tabs" data-testid="academic-workspace-tabs">
+          <Tab
+            value={activeWorkspaceTab}
+            onChange={setActiveWorkspaceTab}
+            items={workspaceTabItems}
+            size={isMobile ? 'small' : 'large'}
+            fluid={isMobile}
+            className="academic-workspace-tab-control"
+          />
         </div>
+        {activeWorkspaceTab === 'calendar' ? mobileWorkspaceToolbar : null}
+
+        {activeWorkspaceTab === 'calendar' ? (
+          <div className="academic-calendar-shell">
+            {!isMobile ? <aside className="academic-calendar-sidebar">{sidebarContent}</aside> : null}
+            <main ref={calendarMainRef} className="academic-calendar-main" onWheel={handleCalendarWheel}>
+              {inlineComposerDraft && inlineComposerAnchor ? (
+                <AcademicInlineComposer
+                  draft={inlineComposerDraft}
+                  anchor={inlineComposerAnchor}
+                  composerRef={inlineComposerRef}
+                  schoolCatalog={schoolCatalog}
+                  typeDefinitions={eventTypeOptions}
+                  onChange={updateInlineComposerDraft}
+                  onClose={closeInlineComposer}
+                  onSave={(draft) => saveEvent(draft, { source: 'inline' })}
+                  onOpenRoadmap={openEmbeddedSchoolAnnualBoard}
+                  isSaving={isSaving}
+                  supportsExamDetails={supportsExamDetails}
+                />
+              ) : null}
+              {!isMobile || mobileViewMode === 'month' ? (
+                <div data-testid="calendar-month-grid">
+                  <AcademicMonthGridV2 currentDate={currentDate} weeks={monthWeeks} weekCount={monthWeeks.length} monthEvents={monthEvents} dayEventMap={dayEventMap} typeColorMap={typeColorMap} selectionAnchor={selectionAnchor} selectionRange={selectionRange} setSelectionAnchor={setSelectionAnchor} setSelectionRange={setSelectionRange} canWriteCalendar={canWriteCalendar} draggedEventId={draggedEventId} setDraggedEventId={setDraggedEventId} onOpenDay={openDayEvents} onOpenEvent={openExistingEvent} onCreateRange={openCreateComposer} onMoveEvent={moveEvent} visibleLaneCount={isMobile ? 1 : 3} dayButtonRefs={dayButtonRefs} />
+                </div>
+              ) : null}
+              {isMobile && mobileViewMode === 'agenda' ? (
+                <AcademicAgendaList
+                  groups={agendaGroups}
+                  onOpenEvent={openExistingEvent}
+                  typeColorMap={typeColorMap}
+                />
+              ) : null}
+            </main>
+          </div>
+        ) : (
+          <CurriculumRoadmapView
+            data={data}
+            dataService={dataService}
+            navigationIntent={embeddedNavigationIntent}
+            onOpenAcademicCalendar={openEmbeddedCalendarIntent}
+            embeddedMode="school-annual-board"
+          />
+        )}
       </section>
     </div>
   );

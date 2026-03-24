@@ -1,9 +1,23 @@
 import { Download, Plus, Upload } from 'lucide-react';
 import DataListView from './DataListView';
 import ManagementHeader from './ManagementHeader';
+import ManagementCommandBar from './ManagementCommandBar';
+import ManagementViewSettingsPanel from './ManagementViewSettingsPanel';
+
+function getActiveFilterCount(tableControls) {
+  return tableControls.columns.reduce((countValue, column) => {
+    const value = tableControls.filters[column.key];
+    if (Array.isArray(value)) {
+      return countValue + (value.length > 0 ? 1 : 0);
+    }
+    if (value && typeof value === 'object') {
+      return countValue + (value.min || value.max ? 1 : 0);
+    }
+    return countValue + (String(value || '').trim() ? 1 : 0);
+  }, 0);
+}
 
 export default function TextbookManagerTab({
-  filteredData,
   currentIds,
   tableControls,
   selectedIds,
@@ -21,50 +35,50 @@ export default function TextbookManagerTab({
   onDownloadSample,
   onUpload,
   isBusy,
-  sectionDescription,
 }) {
   return (
-    <>
-      <ManagementHeader
-        title="교재 관리"
-        count={tableControls.totalCount}
-        hideSummary
-        searchValue={tableControls.searchQuery}
-        onSearchChange={tableControls.setSearchQuery}
-        tableControls={tableControls}
-        searchPlaceholder="교재명, 출판사, 태그 검색"
-        description={sectionDescription}
-        toolbarActions={[
-          {
+    <div className="management-pane-shell">
+      <div className="management-top-shell">
+        <ManagementCommandBar
+          searchValue={tableControls.searchQuery}
+          onSearchChange={tableControls.setSearchQuery}
+          searchPlaceholder="교재명, 출판사, 태그 검색"
+          primaryAction={{
             label: '교재 등록',
             icon: <Plus size={16} />,
             onClick: onAddTextbook,
-            variant: 'primary',
-          },
-          {
-            label: '템플릿 다운로드',
-            icon: <Download size={16} />,
-            onClick: onDownloadSample,
-          },
-          {
-            label: '데이터 업로드',
-            icon: <Upload size={16} />,
-            kind: 'file',
-            onChange: async (event) => {
-              const file = event.target.files?.[0];
-              await onUpload(file);
-              event.target.value = '';
+          }}
+          overflowActions={[
+            {
+              label: '템플릿 다운로드',
+              icon: <Download size={16} />,
+              onClick: onDownloadSample,
             },
-          },
-        ]}
-        selectedCount={selectedIds.size}
-        currentCount={currentIds.length}
-        onToggleSelectAll={() => toggleSelectAll(currentIds)}
-        onDeleteSelected={handleDeleteSelected}
-        onBulkUpdate={onBulkUpdate}
-        bulkUpdateLabel="교재 항목 일괄 수정"
-        isBusy={isBusy}
-      />
+            {
+              label: '데이터 업로드',
+              icon: <Upload size={16} />,
+              kind: 'file',
+              onChange: async (event) => {
+                const file = event.target.files?.[0];
+                await onUpload(file);
+                event.target.value = '';
+              },
+            },
+          ]}
+          settingsContent={<ManagementViewSettingsPanel tableControls={tableControls} />}
+          settingsBadge={getActiveFilterCount(tableControls)}
+          isBusy={isBusy}
+        />
+
+        <ManagementHeader
+          selectedCount={selectedIds.size}
+          currentCount={currentIds.length}
+          onToggleSelectAll={() => toggleSelectAll(currentIds)}
+          onDeleteSelected={handleDeleteSelected}
+          onBulkUpdate={onBulkUpdate}
+          bulkUpdateLabel="교재 항목 일괄 수정"
+        />
+      </div>
 
       <DataListView
         columns={tableControls.visibleColumns}
@@ -96,6 +110,6 @@ export default function TextbookManagerTab({
         onPageChange={tableControls.setPage}
         onPageSizeChange={tableControls.setPageSize}
       />
-    </>
+    </div>
   );
 }

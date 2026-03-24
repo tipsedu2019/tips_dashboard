@@ -298,6 +298,9 @@ function TimetableGrid({
   const [dragState, setDragState] = useState(null);
   const [resizeState, setResizeState] = useState(null);
   const [suppressClick, setSuppressClick] = useState(false);
+  const shellRef = useRef(null);
+  const touchScrollStateRef = useRef(null);
+  const pointerScrollStateRef = useRef(null);
 
   const externalDragActive = Boolean(externalDraggingDraft?.classId);
   const sharedDragEnabled = Boolean(gridKey !== null && onSharedDragStart && onSharedDragUpdate);
@@ -602,10 +605,139 @@ function TimetableGrid({
   const previewLabel = formatPreviewLabel(columns, timeSlots, previewRange);
   const crosshairEnabled = !previewRange;
 
+  const handleTouchStart = useCallback((event) => {
+    if (event.touches.length !== 1) {
+      return;
+    }
+
+    const shell = shellRef.current;
+    if (!shell) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    touchScrollStateRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      scrollLeft: shell.scrollLeft,
+      axis: null,
+    };
+  }, []);
+
+  const handleTouchMove = useCallback((event) => {
+    if (event.touches.length !== 1) {
+      return;
+    }
+
+    const shell = shellRef.current;
+    const state = touchScrollStateRef.current;
+    if (!shell || !state) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    const deltaX = touch.clientX - state.startX;
+    const deltaY = touch.clientY - state.startY;
+
+    if (!state.axis) {
+      if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) {
+        return;
+      }
+      state.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? 'x' : 'y';
+    }
+
+    if (state.axis !== 'x') {
+      return;
+    }
+
+    shell.scrollLeft = state.scrollLeft - deltaX;
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+  }, []);
+
+  const clearTouchScrollState = useCallback(() => {
+    touchScrollStateRef.current = null;
+  }, []);
+
+  const handlePointerScrollStart = useCallback((event) => {
+    if (!event.pointerType || event.pointerType === 'mouse') {
+      return;
+    }
+
+    const shell = shellRef.current;
+    if (!shell) {
+      return;
+    }
+
+    pointerScrollStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: shell.scrollLeft,
+      axis: null,
+    };
+
+    try {
+      shell.setPointerCapture?.(event.pointerId);
+    } catch (error) {
+      // Synthetic pointer events in tests/devtools may not support capture.
+    }
+  }, []);
+
+  const handlePointerScrollMove = useCallback((event) => {
+    if (!event.pointerType || event.pointerType === 'mouse') {
+      return;
+    }
+
+    const shell = shellRef.current;
+    const state = pointerScrollStateRef.current;
+    if (!shell || !state || state.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - state.startX;
+    const deltaY = event.clientY - state.startY;
+
+    if (!state.axis) {
+      if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) {
+        return;
+      }
+      state.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? 'x' : 'y';
+    }
+
+    if (state.axis !== 'x') {
+      return;
+    }
+
+    shell.scrollLeft = state.scrollLeft - deltaX;
+    event.preventDefault();
+  }, []);
+
+  const clearPointerScrollState = useCallback((event) => {
+    const shell = shellRef.current;
+    const state = pointerScrollStateRef.current;
+
+    if (shell && state && event?.pointerId === state.pointerId) {
+      try {
+        shell.releasePointerCapture?.(event.pointerId);
+      } catch (error) {
+        // Ignore release failures for synthetic pointer events.
+      }
+    }
+
+    pointerScrollStateRef.current = null;
+  }, []);
+
   return (
     <div
+      ref={shellRef}
       className={['timetable-grid-shell', `is-${density}`, shellClassName].filter(Boolean).join(' ')}
-      style={{ overflowX: 'auto' }}
+      style={{
+        overflowX: density === 'micro' || density === 'nano' ? 'hidden' : 'auto',
+        minWidth: 0,
+        touchAction: 'pan-y pinch-zoom',
+      }}
       onMouseLeave={() => {
         setHoveredSlot(null);
         if (externalDragActive) {
@@ -613,6 +745,14 @@ function TimetableGrid({
         }
       }}
       onMouseUp={handlePointerUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={clearTouchScrollState}
+      onTouchCancel={clearTouchScrollState}
+      onPointerDown={handlePointerScrollStart}
+      onPointerMove={handlePointerScrollMove}
+      onPointerUp={clearPointerScrollState}
+      onPointerCancel={clearPointerScrollState}
     >
       {previewLabel ? (
         <div

@@ -1,5 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 
+import { IconButton } from './tds';
+
 export default function ViewHeader({
   icon,
   title,
@@ -8,30 +10,34 @@ export default function ViewHeader({
   actions = null,
   align = 'top',
   onBack = null,
-  backLabel = '이전 화면으로 돌아가기',
+  backLabel = 'Go back',
   backTitle = '',
 }) {
   return (
-    <div className={`view-header-shell ${align === 'center' ? 'is-center' : ''}`}>
+    <div className={`view-header-shell tds-list-header ${align === 'center' ? 'is-center' : ''}`}>
       <div className="view-header-copy">
         <div className="view-header-title-row">
-          {onBack ? (
-            <button
-              type="button"
-              className="view-header-back"
-              onClick={onBack}
-              title={backTitle || backLabel}
-              aria-label={backTitle || backLabel}
-            >
-              <ArrowLeft size={18} />
-            </button>
-          ) : null}
-          {icon ? <div className="view-header-icon">{icon}</div> : null}
-          <div>
-            {eyebrow ? <div className="view-header-eyebrow">{eyebrow}</div> : null}
-            <h1 className="view-title">{title}</h1>
+          <div className="view-header-leading">
+            <div className="tds-inline" style={{ alignItems: align === 'center' ? 'center' : 'flex-start' }}>
+              {onBack ? (
+                <IconButton
+                  variant="border"
+                  className="view-header-back"
+                  onPress={onBack}
+                  label={backTitle || backLabel}
+                  icon={<ArrowLeft size={18} />}
+                />
+              ) : null}
+              {icon ? <div className="view-header-icon">{icon}</div> : null}
+            </div>
+
+            <div className="view-header-title-group">
+              {eyebrow ? <div className="view-header-eyebrow">{eyebrow}</div> : null}
+              <h1 className="view-title">{title}</h1>
+            </div>
           </div>
         </div>
+
         {description ? <p className="view-subtitle">{description}</p> : null}
       </div>
 

@@ -1,5 +1,6 @@
 ﻿import { useMemo, useState } from 'react';
-import { BookOpen, CalendarDays, Trash2 } from 'lucide-react';
+import { BookOpen, CalendarDays, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { useEffect } from 'react';
 import { parseSchedule, splitClassroomList, splitTeacherList } from '../../data/sampleData';
 import { CLASS_STATUS_OPTIONS, computeClassStatus } from '../../lib/classStatus';
 import { normalizeClassroomText } from '../../lib/classroomUtils';
@@ -212,6 +213,7 @@ export default function ClassEditor({
   academicEventExamDetails = [],
   academicEvents = [],
   onSave,
+  onSaveTextbook,
   onCancel,
   isSaving,
 }) {
@@ -228,6 +230,11 @@ export default function ClassEditor({
   const [studentSearch, setStudentSearch] = useState('');
   const [errors, setErrors] = useState({});
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [availableTextbooks, setAvailableTextbooks] = useState(textbooks || []);
+
+  useEffect(() => {
+    setAvailableTextbooks(textbooks || []);
+  }, [textbooks]);
 
   const enrolledStudents = useMemo(
     () => (edited.studentIds || []).map((id) => students.find((student) => student.id === id)).filter(Boolean),
@@ -252,7 +259,10 @@ export default function ClassEditor({
       .slice(0, 6);
   }, [edited.studentIds, edited.waitlistIds, studentSearch, students]);
 
-  const selectedTextbook = (textbooks || []).find((item) => item.id === edited.textbookIds?.[0]) || null;
+  const selectedTextbooks = useMemo(
+    () => (edited.textbookIds || []).map((id) => (availableTextbooks || []).find((item) => item.id === id)).filter(Boolean),
+    [availableTextbooks, edited.textbookIds]
+  );
   const teacherMaster = useMemo(
     () => buildTeacherMaster(teacherCatalogs, allClasses),
     [allClasses, teacherCatalogs]
@@ -345,6 +355,91 @@ export default function ClassEditor({
 
     return `${firstPeriod?.startDate || '-'} ~ ${lastPeriod?.endDate || '-'}`;
   }, [livePlanPreview]);
+  const livePlanActualProgressCount = useMemo(
+    () => (livePlanPreview?.sessions || []).filter((session) => session.progressStatus && session.progressStatus !== 'pending').length,
+    [livePlanPreview]
+  );
+  const livePlanTextbookCount = (livePlanPreview?.textbooks || []).length || (edited.textbookIds || []).length;
+
+  const buildTextbookInfoText = (textbookIds, catalog = availableTextbooks) =>
+    (textbookIds || [])
+      .map((id) => (catalog || []).find((item) => item.id === id)?.title)
+      .filter(Boolean)
+      .join(', ');
+
+  useEffect(() => {
+    const nextTextbookInfo = buildTextbookInfoText(edited.textbookIds || [], availableTextbooks);
+    setEdited((current) => {
+      if ((current.textbookInfo || '') === nextTextbookInfo) {
+        return current;
+      }
+
+      return {
+        ...current,
+        textbookInfo: nextTextbookInfo,
+      };
+    });
+  }, [availableTextbooks, edited.textbookIds]);
+
+  const updateSelectedTextbooks = (updater) => {
+    setEdited((current) => {
+      const currentIds = [...(current.textbookIds || [])];
+      const nextIds = updater(currentIds);
+      return {
+        ...current,
+        textbookIds: nextIds,
+        textbookInfo: buildTextbookInfoText(nextIds),
+      };
+    });
+  };
+
+  const toggleTextbookSelection = (textbookId) => {
+    updateSelectedTextbooks((currentIds) =>
+      currentIds.includes(textbookId)
+        ? currentIds.filter((id) => id !== textbookId)
+        : [...currentIds, textbookId]
+    );
+  };
+
+  const moveTextbook = (textbookId, direction) => {
+    updateSelectedTextbooks((currentIds) => {
+      const index = currentIds.indexOf(textbookId);
+      if (index < 0) {
+        return currentIds;
+      }
+
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= currentIds.length) {
+        return currentIds;
+      }
+
+      const nextIds = [...currentIds];
+      const [item] = nextIds.splice(index, 1);
+      nextIds.splice(targetIndex, 0, item);
+      return nextIds;
+    });
+  };
+
+  const makePrimaryTextbook = (textbookId) => {
+    updateSelectedTextbooks((currentIds) => {
+      const filtered = currentIds.filter((id) => id !== textbookId);
+      return [textbookId, ...filtered];
+    });
+  };
+
+  const handlePlanTextbookSave = async (textbook) => {
+    const result = await onSaveTextbook?.(textbook);
+    if (result?.ok && result.textbook) {
+      setAvailableTextbooks((current) => {
+        const exists = current.some((item) => item.id === result.textbook.id);
+        if (exists) {
+          return current.map((item) => (item.id === result.textbook.id ? { ...item, ...result.textbook } : item));
+        }
+        return [...current, result.textbook];
+      });
+    }
+    return result;
+  };
 
   const handleSave = async () => {
     const nextErrors = {};
@@ -573,45 +668,144 @@ export default function ClassEditor({
             </Field>
 
             <Field label="교재 연결">
-              <select
-                className="styled-input"
-                value={edited.textbookIds?.[0] || ''}
-                onChange={(event) => {
-                  const textbookId = event.target.value;
-                  const textbook = textbooks.find((item) => item.id === textbookId);
-                  setEdited((current) => ({
-                    ...current,
-                    textbookIds: textbookId ? [textbookId] : [],
-                    textbookInfo: textbook ? textbook.title : '',
-                  }));
-                }}
-              >
-                <option value="">교재를 선택해 주세요</option>
-                {(textbooks || []).map((textbook) => (
-                  <option key={textbook.id} value={textbook.id}>
-                    {textbook.title}
-                  </option>
-                ))}
-              </select>
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 8,
+                    maxHeight: 220,
+                    overflowY: 'auto',
+                    padding: 4,
+                    borderRadius: 18,
+                    background: 'var(--bg-surface-hover)',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  {(availableTextbooks || []).map((textbook) => {
+                    const isSelected = (edited.textbookIds || []).includes(textbook.id);
+
+                    return (
+                      <button
+                        key={textbook.id}
+                        type="button"
+                        className={isSelected ? 'btn-primary' : 'btn-secondary'}
+                        onClick={() => toggleTextbookSelection(textbook.id)}
+                        style={{
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '12px 14px',
+                          borderRadius: 16,
+                          display: 'flex',
+                          gap: 12,
+                          textAlign: 'left',
+                          width: '100%',
+                        }}
+                      >
+                        <span style={{ minWidth: 0 }}>
+                          <strong style={{ display: 'block', fontSize: 13 }}>{textbook.title}</strong>
+                          <span style={{ display: 'block', fontSize: 11, opacity: 0.78 }}>
+                            {textbook.publisher || '출판사 미등록'}
+                          </span>
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 800 }}>{isSelected ? '선택됨' : '추가'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div
+                  style={{
+                    padding: '14px 16px',
+                    borderRadius: 18,
+                    background: 'var(--accent-light)',
+                    color: 'var(--accent-color)',
+                    lineHeight: 1.7,
+                    fontSize: 12,
+                  }}
+                >
+                  여러 권을 연결할 수 있고, 맨 위 교재가 대표 교재로 취급됩니다. 순서를 바꾸면 계획/실진도 입력 화면에도 같은 순서로 반영됩니다.
+                </div>
+              </div>
             </Field>
 
-            {selectedTextbook ? (
-              <div
-                style={{
-                  marginTop: 4,
-                  padding: '14px 16px',
-                  borderRadius: 16,
-                  background: 'var(--accent-light)',
-                  color: 'var(--accent-color)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, marginBottom: 4 }}>
-                  <BookOpen size={16} />
-                  {selectedTextbook.title}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                  수업 진도 기록은 연결된 교재 정보를 기준으로 이어집니다. 세부 일정과 차시 계획은 아래 수업 계획 카드에서 함께 관리할 수 있습니다.
-                </div>
+            {selectedTextbooks.length > 0 ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {selectedTextbooks.map((textbook, index) => (
+                  <div
+                    key={textbook.id}
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: 18,
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-surface)',
+                      display: 'grid',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                          <BookOpen size={16} />
+                          <strong style={{ fontSize: 14 }}>{textbook.title}</strong>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '4px 10px',
+                              borderRadius: 999,
+                              background: index === 0 ? 'rgba(37, 99, 235, 0.12)' : 'rgba(15, 23, 42, 0.08)',
+                              color: index === 0 ? '#1d4ed8' : '#475569',
+                              fontSize: 11,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {index === 0 ? '대표 교재' : '보조 교재'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{textbook.publisher || '출판사 미등록'}</div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ padding: '0 10px' }}
+                          onClick={() => makePrimaryTextbook(textbook.id)}
+                          disabled={index === 0}
+                        >
+                          대표
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          onClick={() => moveTextbook(textbook.id, 'up')}
+                          disabled={index === 0}
+                          aria-label="위로 이동"
+                        >
+                          <ChevronUp size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          onClick={() => moveTextbook(textbook.id, 'down')}
+                          disabled={index === selectedTextbooks.length - 1}
+                          aria-label="아래로 이동"
+                        >
+                          <ChevronDown size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          onClick={() => toggleTextbookSelection(textbook.id)}
+                          aria-label="교재 제거"
+                          style={{ color: '#ef4444' }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : null}
           </SectionCard>
@@ -735,18 +929,22 @@ export default function ClassEditor({
 
             <div className="planner-inline-stats">
               <div className="planner-inline-stat">
-                <span>반복 요일</span>
-                <strong>{livePlanSelectedDays || '미설정'}</strong>
+                <span>연결 교재</span>
+                <strong>{livePlanTextbookCount ? `${livePlanTextbookCount}권` : '미설정'}</strong>
               </div>
               <div className="planner-inline-stat">
-                <span>월 기준 회차</span>
-                <strong>{livePlanPreview?.globalSessionCount ? `${livePlanPreview.globalSessionCount}회` : '미설정'}</strong>
+                <span>생성된 회차</span>
+                <strong>{(livePlanPreview?.sessions || []).length ? `${livePlanPreview.sessions.length}회` : '미설정'}</strong>
               </div>
               <div className="planner-inline-stat">
-                <span>기간 상태</span>
-                <strong>{livePlanRange}</strong>
+                <span>실진도 입력</span>
+                <strong>{livePlanActualProgressCount ? `${livePlanActualProgressCount}회` : '아직 없음'}</strong>
               </div>
             </div>
+          </div>
+
+          <div style={{ marginBottom: 16, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+            {livePlanSelectedDays || '요일 선택 필요'} · {livePlanRange}
           </div>
 
           <ClassSchedulePlanPreview
@@ -761,19 +959,21 @@ export default function ClassEditor({
       <ClassSchedulePlanModal
         open={isPlanModalOpen}
         editable
+        mode="builder"
         classItem={edited}
         plan={edited.schedulePlan}
-        onPlanChange={(nextPlan) => setEdited((current) => ({ ...current, schedulePlan: nextPlan }))}
-        onSubjectChange={(nextSubject, nextPlan) => setEdited((current) => ({
-          ...current,
-          subject: nextSubject,
-          schedulePlan: nextPlan || current.schedulePlan,
-        }))}
-        onClassNameChange={(nextClassName, nextPlan) => setEdited((current) => ({
-          ...current,
-          className: nextClassName,
-          schedulePlan: nextPlan || current.schedulePlan,
-        }))}
+        textbooksCatalog={availableTextbooks}
+        onSaveTextbook={handlePlanTextbookSave}
+        onSaveDraft={({ classPatch, schedulePlan }) =>
+          setEdited((current) => ({
+            ...current,
+            subject: classPatch.subject,
+            className: classPatch.className,
+            textbookIds: classPatch.textbookIds,
+            textbookInfo: buildTextbookInfoText(classPatch.textbookIds, availableTextbooks),
+            schedulePlan,
+          }))
+        }
         warningBanner={[planWarningBanner, liveScheduleWarningBanner].filter(Boolean).join(' / ') || null}
         onClose={() => setIsPlanModalOpen(false)}
       />

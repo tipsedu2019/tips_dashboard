@@ -270,6 +270,7 @@ alter table public.academic_supplement_materials enable row level security;
 alter table public.academic_event_exam_details enable row level security;
 alter table public.academy_curriculum_plans enable row level security;
 alter table public.academy_curriculum_materials enable row level security;
+alter table public.textbooks enable row level security;
 alter table public.class_terms enable row level security;
 alter table public.app_preferences enable row level security;
 
@@ -445,6 +446,33 @@ create policy academy_curriculum_materials_authenticated_select
 drop policy if exists academy_curriculum_materials_teacher_write on public.academy_curriculum_materials;
 create policy academy_curriculum_materials_teacher_write
   on public.academy_curriculum_materials
+  for all
+  to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'staff', 'teacher')
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('admin', 'staff', 'teacher')
+    )
+  );
+
+drop policy if exists textbooks_authenticated_select on public.textbooks;
+create policy textbooks_authenticated_select
+  on public.textbooks
+  for select
+  to authenticated
+  using (true);
+
+drop policy if exists textbooks_teacher_write on public.textbooks;
+create policy textbooks_teacher_write
+  on public.textbooks
   for all
   to authenticated
   using (

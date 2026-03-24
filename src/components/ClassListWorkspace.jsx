@@ -173,14 +173,16 @@ export default function ClassListWorkspace({ classes, data, dataService, integra
         </section>
       ) : null}
 
-      <DashboardClassFilterTabs
-        subjectOptions={subjectOptions}
-        gradeOptions={quickFilterOptions.grade}
-        activeSubjects={Array.isArray(tableControls.filters.subject) ? tableControls.filters.subject : []}
-        activeGrades={Array.isArray(tableControls.filters.grade) ? tableControls.filters.grade : []}
-        onSubjectToggle={(values) => tableControls.setFilterValue('subject', values)}
-        onGradeToggle={(values) => tableControls.setFilterValue('grade', values)}
-      />
+      {!hideHeader ? (
+        <DashboardClassFilterTabs
+          subjectOptions={subjectOptions}
+          gradeOptions={quickFilterOptions.grade}
+          activeSubjects={Array.isArray(tableControls.filters.subject) ? tableControls.filters.subject : []}
+          activeGrades={Array.isArray(tableControls.filters.grade) ? tableControls.filters.grade : []}
+          onSubjectToggle={(values) => tableControls.setFilterValue('subject', values)}
+          onGradeToggle={(values) => tableControls.setFilterValue('grade', values)}
+        />
+      ) : null}
 
       <ManagementHeader
         title={CLASS_LIST_TITLE}

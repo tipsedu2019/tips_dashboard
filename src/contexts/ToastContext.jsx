@@ -1,7 +1,21 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle, ChevronRight, Info, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, Info } from 'lucide-react';
+
+import Toast from '../components/ui/tds/Toast';
 
 const ToastContext = createContext(null);
+
+function getToastIcon(type) {
+  if (type === 'success') {
+    return <CheckCircle size={20} />;
+  }
+
+  if (type === 'error') {
+    return <AlertCircle size={20} />;
+  }
+
+  return <Info size={20} />;
+}
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
@@ -50,38 +64,17 @@ export function ToastProvider({ children }) {
       <div className="toast-stack">
         {toasts.map((toastItem) => (
           <div key={toastItem.id} className={`animate-toast toast-item is-${toastItem.type}`}>
-            <div className="toast-item-icon">
-              {toastItem.type === 'success' && <CheckCircle size={20} />}
-              {toastItem.type === 'error' && <AlertCircle size={20} />}
-              {toastItem.type === 'info' && <Info size={20} />}
-            </div>
-
-            <span className="toast-item-message">{toastItem.message}</span>
-
-            {toastItem.actionLabel ? (
-              <button
-                type="button"
-                className="toast-item-action"
-                onClick={() => {
-                  toastItem.onAction?.();
-                  removeToast(toastItem.id);
-                }}
-              >
-                <span>{toastItem.actionLabel}</span>
-                <ChevronRight size={14} />
-              </button>
-            ) : null}
-
-            {!toastItem.actionLabel ? (
-              <button
-                type="button"
-                className="toast-item-close"
-                onClick={() => removeToast(toastItem.id)}
-                aria-label="닫기"
-              >
-                <X size={16} />
-              </button>
-            ) : null}
+            <Toast
+              type={toastItem.type}
+              text={toastItem.message}
+              icon={getToastIcon(toastItem.type)}
+              actionLabel={toastItem.actionLabel}
+              onAction={() => {
+                toastItem.onAction?.();
+                removeToast(toastItem.id);
+              }}
+              onClose={() => removeToast(toastItem.id)}
+            />
           </div>
         ))}
       </div>

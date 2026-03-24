@@ -26,8 +26,7 @@ import {
   computeTimetableWindow,
   formatCollapsedTimeHint,
   getTimetableCompareGridStyle,
-  getTimetableDensity,
-  getTimetableSlotHeight,
+  getTimetableLayoutMetrics,
   rebaseBlocksToWindow,
 } from './timetableViewUtils';
 import {
@@ -86,6 +85,9 @@ export default function ClassroomWeeklyView({
   embedded = false,
   floatingFilters = false,
   selectedClassroomNames = [],
+  desktopGridColumns = 4,
+  exportRequest = null,
+  onExportHandled = () => {},
 }) {
   const { isMobile } = useViewport();
   const toast = useToast();
@@ -99,6 +101,7 @@ export default function ClassroomWeeklyView({
   const [plannerMode, setPlannerMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const scheduleRef = useRef(null);
+  const lastHandledExportNonceRef = useRef(null);
 
   const timeSlots = useMemo(() => generateTimeSlots(11, 24).filter((slot) => !slot.startsWith('23:30-')), []);
   const teacherMaster = useMemo(
@@ -177,7 +180,6 @@ export default function ClassroomWeeklyView({
     return () => window.removeEventListener('tips-open-planner', openPlanner);
   }, []);
   const canEditTimetable = Boolean(isStaff);
-  const canExportImage = selectedClassroom !== ALL_CLASSROOMS && Boolean(selectedClassroomEntry);
   const classroomLabelByKey = useMemo(
     () => new Map(classroomEntries.map((entry) => [entry.key, entry.label])),
     [classroomEntries]
@@ -212,10 +214,18 @@ export default function ClassroomWeeklyView({
     () => Object.fromEntries(targetsToRender.map((entry) => [entry.key, buildBlocksForClassroom(entry.key)])),
     [buildBlocksForClassroom, targetsToRender]
   );
+  const visibleTargetsToRender = useMemo(
+    () => targetsToRender.filter((entry) => (blocksByClassroomKey[entry.key] || []).length > 0),
+    [blocksByClassroomKey, targetsToRender]
+  );
 
   const visibleWindow = useMemo(
-    () => computeTimetableWindow(Object.values(blocksByClassroomKey), timeSlots.length, { paddingSlots: 0, defaultVisibleSlots: 8, minVisibleSlots: 6 }),
-    [blocksByClassroomKey, timeSlots.length]
+    () => computeTimetableWindow(
+      visibleTargetsToRender.map((entry) => blocksByClassroomKey[entry.key] || []),
+      timeSlots.length,
+      { paddingSlots: 0, defaultVisibleSlots: 8, minVisibleSlots: 6 }
+    ),
+    [blocksByClassroomKey, timeSlots.length, visibleTargetsToRender]
   );
 
   const windowedTimeSlots = useMemo(
@@ -228,31 +238,33 @@ export default function ClassroomWeeklyView({
     [timeSlots, visibleWindow.endSlot, visibleWindow.startSlot]
   );
 
-  const timetableDensity = useMemo(
-    () => getTimetableDensity(Math.max(1, targetsToRender.length), visibleWindow.visibleSlotCount),
-    [targetsToRender.length, visibleWindow.visibleSlotCount]
+  const layoutMetrics = useMemo(
+    () =>
+      getTimetableLayoutMetrics({
+        compareCount: Math.max(1, visibleTargetsToRender.length),
+        visibleSlotCount: visibleWindow.visibleSlotCount,
+        columnCount: DAY_LABELS.length,
+      }),
+    [visibleTargetsToRender.length, visibleWindow.visibleSlotCount]
   );
+  const timetableDensity = layoutMetrics.density;
+  const slotHeight = layoutMetrics.slotHeight;
 
-  const slotHeight = useMemo(
-    () => getTimetableSlotHeight(timetableDensity),
-    [timetableDensity]
-  );
-
-  const handleSaveImage = useCallback(async () => {
-    if (!canExportImage) {
-      toast.info('이미지 저장은 단일 강의실을 선택했을 때만 사용할 수 있습니다.');
+  const handleSaveFullImage = useCallback(async () => {
+    if (!scheduleRef.current || visibleTargetsToRender.length === 0) {
+      toast.info('저장할 강의실 시간표가 없습니다.');
       return;
     }
 
     try {
-      await exportElementAsImage(scheduleRef.current, `classroom-${selectedClassroom}-weekly.png`, {
-        preset: 'a4-portrait',
+      await exportElementAsImage(scheduleRef.current, 'classroom-weekly-overview.png', {
+        preset: visibleTargetsToRender.length > 1 ? 'a4-landscape' : 'a4-portrait',
       });
-      toast.success('강의실 시간표 이미지를 저장했습니다.');
+      toast.success('현재 강의실 주간 시간표를 이미지로 저장했습니다.');
     } catch {
       toast.error('이미지 저장에 실패했습니다.');
     }
-  }, [canExportImage, selectedClassroom, toast]);
+  }, [toast, visibleTargetsToRender.length]);
 
   const handleSaveCardImage = useCallback(async (event, fileName) => {
     const card = event.currentTarget.closest('section');
@@ -264,6 +276,35 @@ export default function ClassroomWeeklyView({
       toast.error('시간표 카드 이미지 저장에 실패했습니다.');
     }
   }, [toast]);
+
+  useEffect(() => {
+    if (!exportRequest || exportRequest.view !== 'classroom-weekly') {
+      return;
+    }
+
+    if (lastHandledExportNonceRef.current === exportRequest.nonce) {
+      return;
+    }
+
+    let active = true;
+    lastHandledExportNonceRef.current = exportRequest.nonce;
+
+    const runExport = async () => {
+      try {
+        await handleSaveFullImage();
+      } finally {
+        if (active) {
+          onExportHandled();
+        }
+      }
+    };
+
+    void runExport();
+
+    return () => {
+      active = false;
+    };
+  }, [exportRequest, handleSaveFullImage, onExportHandled]);
 
   const handleCreateSelection = ({ columnIndex, startSlot, endSlot }) => {
     if (!selectedClassroomEntry) return;
@@ -425,12 +466,19 @@ export default function ClassroomWeeklyView({
   const renderGrid = (classroomEntry) => {
     const blocks = blocksByClassroomKey[classroomEntry.key] || [];
     const windowedBlocks = rebaseBlocksToWindow(blocks, visibleWindow.startSlot, visibleWindow.endSlot);
-    const compareActive = !isMobile && targetsToRender.length !== 1;
-    const showEditableEmptyGrid = !compareActive && canEditTimetable && classroomEntry.key === selectedClassroom && blocks.length === 0;
-    const showEmptyState = blocks.length === 0 && !showEditableEmptyGrid;
+    const compareActive = !isMobile && visibleTargetsToRender.length !== 1;
 
     return (
-      <section className="card timetable-compare-card" key={classroomEntry.key} style={{ position: 'relative', padding: 14, marginBottom: compareActive ? 0 : 18, breakInside: 'avoid' }}>
+      <section
+        className={['card', 'timetable-compare-card', `is-${timetableDensity}`].join(' ')}
+        key={classroomEntry.key}
+        style={{
+          position: 'relative',
+          padding: layoutMetrics.cardPadding,
+          marginBottom: compareActive ? 0 : 18,
+          breakInside: 'avoid',
+        }}
+      >
         <button
           type="button"
           className="timetable-card-camera"
@@ -439,40 +487,42 @@ export default function ClassroomWeeklyView({
         >
           <Camera size={14} />
         </button>
-        <h2 style={{ marginBottom: 10, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <h2
+          style={{
+            marginBottom: layoutMetrics.titleGap,
+            fontSize: layoutMetrics.titleFontSize,
+            fontWeight: 800,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
           <School size={18} className="text-accent" /> {classroomEntry.label}
         </h2>
-        {showEditableEmptyGrid ? (
-          <div style={{ marginBottom: 14, color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
-            {'\uBE48 \uC2DC\uAC04\uC744 \uB4DC\uB798\uADF8\uD558\uBA74 \uC774 \uAC15\uC758\uC2E4 \uAE30\uC900\uC73C\uB85C \uBC14\uB85C \uC218\uC5C5\uC744 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.'}
-          </div>
-        ) : null}
-        {showEmptyState ? (
-          <EmptyState message="해당 강의실에 배정된 수업이 없습니다." />
-        ) : (
-          <div className="timetable-window-shell">
-            {collapsedTimeHint.topLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.topLabel}</div> : null}
-            <TimetableGrid
-              gridKey={classroomEntry.key}
-              columns={DAY_LABELS}
-              timeSlots={windowedTimeSlots}
-              blocks={windowedBlocks}
-              slotOffset={visibleWindow.startSlot}
-              timeLabel={'\uC2DC\uAC04'}
-              editable={Boolean(canEditTimetable && (compareActive || classroomEntry.key === selectedClassroom))}
-              editableMode={compareActive ? 'move' : 'edit'}
-              onCreateSelection={handleCreateSelection}
-              onMoveBlock={handleMoveBlock}
-              sharedDragState={compareActive ? sharedMoveState : null}
-              onSharedDragStart={compareActive ? handleSharedMoveStart : undefined}
-              onSharedDragUpdate={compareActive ? handleSharedMoveUpdate : undefined}
-              slotHeight={slotHeight}
-              density={timetableDensity}
-              shellClassName="timetable-compact-shell"
-            />
-            {collapsedTimeHint.bottomLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.bottomLabel}</div> : null}
-          </div>
-        )}
+        <div className="timetable-window-shell">
+          {collapsedTimeHint.topLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.topLabel}</div> : null}
+          <TimetableGrid
+            gridKey={classroomEntry.key}
+            columns={DAY_LABELS}
+            timeSlots={windowedTimeSlots}
+            blocks={windowedBlocks}
+            slotOffset={visibleWindow.startSlot}
+            timeLabel={'\uC2DC\uAC04'}
+            editable={Boolean(canEditTimetable && (compareActive || visibleTargetsToRender.length === 1 || classroomEntry.key === selectedClassroom))}
+            editableMode={compareActive ? 'move' : 'edit'}
+            onCreateSelection={handleCreateSelection}
+            onMoveBlock={handleMoveBlock}
+            sharedDragState={compareActive ? sharedMoveState : null}
+            onSharedDragStart={compareActive ? handleSharedMoveStart : undefined}
+            onSharedDragUpdate={compareActive ? handleSharedMoveUpdate : undefined}
+            timeColumnWidth={layoutMetrics.timeColumnWidth}
+            minColumnWidth={layoutMetrics.minColumnWidth}
+            slotHeight={slotHeight}
+            density={timetableDensity}
+            shellClassName="timetable-compact-shell"
+          />
+          {collapsedTimeHint.bottomLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.bottomLabel}</div> : null}
+        </div>
       </section>
     );
   };
@@ -544,6 +594,10 @@ export default function ClassroomWeeklyView({
         <div className="card" style={{ padding: 28 }}>
           <EmptyState message="표시할 강의실 데이터가 없습니다." />
         </div>
+      ) : !isMobile && visibleTargetsToRender.length === 0 ? (
+        <div className="card" style={{ padding: 28 }}>
+          <EmptyState message="현재 필터에 맞는 강의실 시간표가 없습니다." />
+        </div>
       ) : isMobile ? (
         <div ref={scheduleRef} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <MobileAgendaTimetable
@@ -565,10 +619,15 @@ export default function ClassroomWeeklyView({
       ) : (
         <div
           ref={scheduleRef}
-          className={targetsToRender.length > 1 ? 'view-all-grid-container timetable-compare-layout' : 'timetable-single-layout'}
-          style={targetsToRender.length > 1 ? getTimetableCompareGridStyle(targetsToRender.length) : undefined}
+          className={
+            visibleTargetsToRender.length > 1
+              ? `view-all-grid-container timetable-compare-layout is-${timetableDensity}`
+              : 'timetable-single-layout'
+          }
+          data-grid-count={Math.min(visibleTargetsToRender.length, desktopGridColumns)}
+          style={visibleTargetsToRender.length > 1 ? getTimetableCompareGridStyle(visibleTargetsToRender.length, desktopGridColumns) : undefined}
         >
-          {targetsToRender.map(renderGrid)}
+          {visibleTargetsToRender.map(renderGrid)}
         </div>
       )}
 

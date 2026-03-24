@@ -19,6 +19,7 @@ import useViewport from '../hooks/useViewport';
 import { useToast } from '../contexts/ToastContext';
 import ClassSchedulePlanModal from './ClassSchedulePlanModal';
 import BottomSheet from './ui/BottomSheet';
+import { PublicTimetableSkeleton } from './ui/PageLoader';
 import TimetableGrid from './ui/TimetableGrid';
 
 const MOBILE_GRADE_FAMILIES = [
@@ -972,7 +973,7 @@ export default function PublicClassListView({
         )}
 
         {isLoading ? (
-          <div className="card-custom public-empty-state">수업시간표를 불러오는 중입니다.</div>
+          <PublicTimetableSkeleton />
         ) : subjectSearchFilteredClasses.length === 0 ? (
           <div className="card-custom public-empty-state" data-testid="public-empty-state">조건에 맞는 수업이 없습니다.</div>
         ) : currentPage ? (
@@ -1133,6 +1134,7 @@ export default function PublicClassListView({
 
       <ClassSchedulePlanModal
         open={Boolean(selectedClassState?.classItem)}
+        mode="readonly"
         classItem={selectedClassState?.classItem}
         plan={selectedClassState?.classItem?.schedulePlan || selectedClassState?.classItem?.schedule_plan || null}
         emptyMessage="아직 등록된 일정표가 없습니다."

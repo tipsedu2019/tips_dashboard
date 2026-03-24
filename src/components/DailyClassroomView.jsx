@@ -26,10 +26,8 @@ import {
   computeTimetableWindow,
   formatCollapsedTimeHint,
   getTimetableCompareGridStyle,
-  getTimetableDensity,
-  getTimetableSlotHeight,
+  getTimetableLayoutMetrics,
   rebaseBlocksToWindow,
-  toggleCompareSelection,
 } from './timetableViewUtils';
 import {
   buildClassroomMaster,
@@ -78,12 +76,15 @@ export default function DailyClassroomView({
   embedded = false,
   floatingFilters = false,
   selectedClassroomNames = [],
+  selectedDayKeys = [],
+  desktopGridColumns = 4,
+  exportRequest = null,
+  onExportHandled = () => {},
 }) {
   const { isMobile } = useViewport();
   const toast = useToast();
   const { isStaff, isTeacher, user } = useAuth();
   const [selectedDay, setSelectedDay] = useState(ALL_DAYS);
-  const [compareDayKeys, setCompareDayKeys] = useState(null);
   const [selectedMobileClassroom, setSelectedMobileClassroom] = useState('');
   const [selectedClassForDetails, setSelectedClassForDetails] = useState(null);
   const [createState, setCreateState] = useState(null);
@@ -92,6 +93,7 @@ export default function DailyClassroomView({
   const [plannerMode, setPlannerMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const scheduleRef = useRef(null);
+  const lastHandledExportNonceRef = useRef(null);
 
   const timeSlots = useMemo(() => generateTimeSlots(11, 24).filter((slot) => !slot.startsWith('23:30-')), []);
   const teacherMaster = useMemo(
@@ -127,7 +129,6 @@ export default function DailyClassroomView({
   }), [allClassroomEntries, allClasses, classroomMaster, teacherMaster, teacherOptions]);
   const classroomIndexMap = useMemo(() => new Map(classroomEntries.map((entry, index) => [entry.key, index])), [classroomEntries]);
   const canEditTimetable = Boolean(isStaff);
-  const canExportImage = selectedDay !== ALL_DAYS;
   const scheduleIndex = useMemo(
     () => buildTimetableScheduleIndex(classes, {
       canEditTimetable,
@@ -159,28 +160,6 @@ export default function DailyClassroomView({
     }
   }, [classroomEntries, isMobile, selectedMobileClassroom]);
   useEffect(() => {
-    if (isMobile) {
-      return;
-    }
-    setCompareDayKeys((current) => {
-      if (current === null) {
-        return current;
-      }
-      return current.filter((day) => DAY_LABELS.includes(day));
-    });
-  }, [isMobile]);
-  useEffect(() => {
-    if (isMobile) {
-      return;
-    }
-    const effectiveCompareKeys = compareDayKeys ?? [...DAY_LABELS];
-    if (effectiveCompareKeys.length === 1) {
-      setSelectedDay(effectiveCompareKeys[0]);
-      return;
-    }
-    setSelectedDay(ALL_DAYS);
-  }, [compareDayKeys, isMobile]);
-  useEffect(() => {
     if (!plannerMode) {
       return;
     }
@@ -198,27 +177,40 @@ export default function DailyClassroomView({
     (targetDay) => buildDailyClassroomBlocks(scheduleIndex, targetDay, classroomIndexMap, setSelectedClassForDetails),
     [classroomIndexMap, scheduleIndex]
   );
+  const effectiveDesktopDays = Array.isArray(selectedDayKeys)
+    ? selectedDayKeys.filter(Boolean)
+    : [];
 
   const targetsToRender = useMemo(() => {
     if (!isMobile) {
-      const effectiveCompareKeys = compareDayKeys ?? [...DAY_LABELS];
-      const compareSet = new Set(effectiveCompareKeys);
-      return DAY_LABELS.filter((dayLabel) => compareSet.has(dayLabel));
+      if (effectiveDesktopDays.length > 0) {
+        const selectedDaySet = new Set(effectiveDesktopDays);
+        return DAY_LABELS.filter((dayLabel) => selectedDaySet.has(dayLabel));
+      }
+      return DAY_LABELS;
     }
     if (selectedDay === ALL_DAYS) {
       return DAY_LABELS;
     }
     return [selectedDay];
-  }, [compareDayKeys, isMobile, selectedDay]);
+  }, [effectiveDesktopDays, isMobile, selectedDay]);
 
   const blocksByDay = useMemo(
     () => Object.fromEntries(targetsToRender.map((dayLabel) => [dayLabel, buildBlocksForDay(dayLabel)])),
     [buildBlocksForDay, targetsToRender]
   );
+  const visibleTargetsToRender = useMemo(
+    () => targetsToRender.filter((dayLabel) => (blocksByDay[dayLabel] || []).length > 0),
+    [blocksByDay, targetsToRender]
+  );
 
   const visibleWindow = useMemo(
-    () => computeTimetableWindow(Object.values(blocksByDay), timeSlots.length, { paddingSlots: 0, defaultVisibleSlots: 8, minVisibleSlots: 6 }),
-    [blocksByDay, timeSlots.length]
+    () => computeTimetableWindow(
+      visibleTargetsToRender.map((dayLabel) => blocksByDay[dayLabel] || []),
+      timeSlots.length,
+      { paddingSlots: 0, defaultVisibleSlots: 8, minVisibleSlots: 6 }
+    ),
+    [blocksByDay, timeSlots.length, visibleTargetsToRender]
   );
 
   const windowedTimeSlots = useMemo(
@@ -231,31 +223,33 @@ export default function DailyClassroomView({
     [timeSlots, visibleWindow.endSlot, visibleWindow.startSlot]
   );
 
-  const timetableDensity = useMemo(
-    () => getTimetableDensity(Math.max(1, targetsToRender.length), visibleWindow.visibleSlotCount),
-    [targetsToRender.length, visibleWindow.visibleSlotCount]
+  const layoutMetrics = useMemo(
+    () =>
+      getTimetableLayoutMetrics({
+        compareCount: Math.max(1, visibleTargetsToRender.length),
+        visibleSlotCount: visibleWindow.visibleSlotCount,
+        columnCount: classroomEntries.length,
+      }),
+    [classroomEntries.length, visibleTargetsToRender.length, visibleWindow.visibleSlotCount]
   );
+  const timetableDensity = layoutMetrics.density;
+  const slotHeight = layoutMetrics.slotHeight;
 
-  const slotHeight = useMemo(
-    () => getTimetableSlotHeight(timetableDensity),
-    [timetableDensity]
-  );
-
-  const handleSaveImage = useCallback(async () => {
-    if (!canExportImage) {
-      toast.info('이미지 저장은 단일 요일을 선택했을 때만 사용할 수 있습니다.');
+  const handleSaveFullImage = useCallback(async () => {
+    if (!scheduleRef.current || visibleTargetsToRender.length === 0) {
+      toast.info('저장할 일별 강의실 시간표가 없습니다.');
       return;
     }
 
     try {
-      await exportElementAsImage(scheduleRef.current, `daily-classroom-${selectedDay}.png`, {
-        preset: 'a4-portrait',
+      await exportElementAsImage(scheduleRef.current, 'daily-classroom-overview.png', {
+        preset: visibleTargetsToRender.length > 1 ? 'a4-landscape' : 'a4-portrait',
       });
-      toast.success('일별 강의실 시간표 이미지를 저장했습니다.');
+      toast.success('현재 일별 강의실 시간표를 이미지로 저장했습니다.');
     } catch {
       toast.error('이미지 저장에 실패했습니다.');
     }
-  }, [canExportImage, selectedDay, toast]);
+  }, [toast, visibleTargetsToRender.length]);
 
   const handleSaveCardImage = useCallback(async (event, fileName) => {
     const card = event.currentTarget.closest('section');
@@ -268,13 +262,43 @@ export default function DailyClassroomView({
     }
   }, [toast]);
 
+  useEffect(() => {
+    if (!exportRequest || exportRequest.view !== 'daily-classroom') {
+      return;
+    }
+
+    if (lastHandledExportNonceRef.current === exportRequest.nonce) {
+      return;
+    }
+
+    let active = true;
+    lastHandledExportNonceRef.current = exportRequest.nonce;
+
+    const runExport = async () => {
+      try {
+        await handleSaveFullImage();
+      } finally {
+        if (active) {
+          onExportHandled();
+        }
+      }
+    };
+
+    void runExport();
+
+    return () => {
+      active = false;
+    };
+  }, [exportRequest, handleSaveFullImage, onExportHandled]);
+
   const handleCreateSelection = ({ columnIndex, startSlot, endSlot }) => {
     const range = getRangeFromSlots(timeSlots, startSlot, endSlot);
     const classroom = classroomEntries[columnIndex]?.label || '';
+  const activeDay = effectiveDesktopDays[0] || selectedDay;
     setCreateState({
-      summary: { day: selectedDay, start: range.start, end: range.end, fixedAxisLabel: '\uAC15\uC758\uC2E4', fixedAxisValue: classroom },
+      summary: { day: activeDay, start: range.start, end: range.end, fixedAxisLabel: '\uAC15\uC758\uC2E4', fixedAxisValue: classroom },
       draft: buildQuickCreateDraft({
-        day: selectedDay,
+        day: activeDay,
         start: range.start,
         end: range.end,
         classroom,
@@ -282,17 +306,18 @@ export default function DailyClassroomView({
         defaultStatus,
         period: defaultPeriod,
       }),
-      slot: { day: selectedDay, ...range, classroom },
+      slot: { day: activeDay, ...range, classroom },
     });
   };
 
   const handleMoveBlock = useCallback(({ block, columnIndex, startSlot, gridKey }) => {
     const range = getRangeFromSlots(timeSlots, startSlot, startSlot + (block.endSlot - block.startSlot));
     const classroom = classroomEntries[columnIndex]?.label || '';
-    const day = gridKey || selectedDay;
+  const activeDay = effectiveDesktopDays[0] || selectedDay;
+    const day = gridKey || activeDay;
     setMoveState({
       block,
-      currentDay: block.sourceDay || selectedDay,
+      currentDay: block.sourceDay || activeDay,
       next: { day, ...range, classroom },
       warnings: findScheduleConflicts({
         classes,
@@ -302,7 +327,7 @@ export default function DailyClassroomView({
         classroom,
       }),
     });
-  }, [classes, classroomEntries, selectedDay, timeSlots]);
+  }, [classes, classroomEntries, effectiveDesktopDays, selectedDay, timeSlots]);
 
   const handleSharedMoveStart = useCallback(({ gridKey, block }) => {
     setSharedMoveState({
@@ -418,12 +443,19 @@ export default function DailyClassroomView({
   const renderGrid = (dayLabel) => {
     const blocks = blocksByDay[dayLabel] || [];
     const windowedBlocks = rebaseBlocksToWindow(blocks, visibleWindow.startSlot, visibleWindow.endSlot);
-    const compareActive = !isMobile && targetsToRender.length !== 1;
-    const showEditableEmptyGrid = !compareActive && canEditTimetable && dayLabel === selectedDay && blocks.length === 0;
-    const showEmptyState = blocks.length === 0 && !showEditableEmptyGrid;
+    const compareActive = !isMobile && visibleTargetsToRender.length !== 1;
 
     return (
-      <section className="card timetable-compare-card" key={dayLabel} style={{ position: 'relative', padding: 14, marginBottom: compareActive ? 0 : 18, breakInside: 'avoid' }}>
+      <section
+        className={['card', 'timetable-compare-card', `is-${timetableDensity}`].join(' ')}
+        key={dayLabel}
+        style={{
+          position: 'relative',
+          padding: layoutMetrics.cardPadding,
+          marginBottom: compareActive ? 0 : 18,
+          breakInside: 'avoid',
+        }}
+      >
         <button
           type="button"
           className="timetable-card-camera"
@@ -432,40 +464,42 @@ export default function DailyClassroomView({
         >
           <Camera size={14} />
         </button>
-        <h2 style={{ marginBottom: 10, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <h2
+          style={{
+            marginBottom: layoutMetrics.titleGap,
+            fontSize: layoutMetrics.titleFontSize,
+            fontWeight: 800,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
           <Calendar size={18} className="text-accent" /> {dayLabel}
         </h2>
-        {showEditableEmptyGrid ? (
-          <div style={{ marginBottom: 14, color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
-            {'\uBE48 \uC2DC\uAC04\uC744 \uB4DC\uB798\uADF8\uD558\uBA74 \uC774 \uC694\uC77C \uAE30\uC900\uC73C\uB85C \uBC14\uB85C \uC218\uC5C5\uC744 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.'}
-          </div>
-        ) : null}
-        {showEmptyState ? (
-          <EmptyState message="해당 요일에 배정된 수업이 없습니다." />
-        ) : (
-          <div className="timetable-window-shell">
-            {collapsedTimeHint.topLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.topLabel}</div> : null}
-            <TimetableGrid
-              gridKey={dayLabel}
-              columns={classroomEntries.map((entry) => entry.label)}
-              timeSlots={windowedTimeSlots}
-              blocks={windowedBlocks}
-              slotOffset={visibleWindow.startSlot}
-              timeLabel={'\uC2DC\uAC04'}
-              editable={Boolean(canEditTimetable && (compareActive || dayLabel === selectedDay))}
-              editableMode={compareActive ? 'move' : 'edit'}
-              onCreateSelection={handleCreateSelection}
-              onMoveBlock={handleMoveBlock}
-              sharedDragState={compareActive ? sharedMoveState : null}
-              onSharedDragStart={compareActive ? handleSharedMoveStart : undefined}
-              onSharedDragUpdate={compareActive ? handleSharedMoveUpdate : undefined}
-              slotHeight={slotHeight}
-              density={timetableDensity}
-              shellClassName="timetable-compact-shell"
-            />
-            {collapsedTimeHint.bottomLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.bottomLabel}</div> : null}
-          </div>
-        )}
+        <div className="timetable-window-shell">
+          {collapsedTimeHint.topLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.topLabel}</div> : null}
+          <TimetableGrid
+            gridKey={dayLabel}
+            columns={classroomEntries.map((entry) => entry.label)}
+            timeSlots={windowedTimeSlots}
+            blocks={windowedBlocks}
+            slotOffset={visibleWindow.startSlot}
+            timeLabel={'\uC2DC\uAC04'}
+            editable={Boolean(canEditTimetable && (compareActive || visibleTargetsToRender.length === 1 || dayLabel === selectedDay || effectiveDesktopDays.includes(dayLabel)))}
+            editableMode={compareActive ? 'move' : 'edit'}
+            onCreateSelection={handleCreateSelection}
+            onMoveBlock={handleMoveBlock}
+            sharedDragState={compareActive ? sharedMoveState : null}
+            onSharedDragStart={compareActive ? handleSharedMoveStart : undefined}
+            onSharedDragUpdate={compareActive ? handleSharedMoveUpdate : undefined}
+            timeColumnWidth={layoutMetrics.timeColumnWidth}
+            minColumnWidth={layoutMetrics.minColumnWidth}
+            slotHeight={slotHeight}
+            density={timetableDensity}
+            shellClassName="timetable-compact-shell"
+          />
+          {collapsedTimeHint.bottomLabel ? <div className="timetable-collapsed-time">~ {collapsedTimeHint.bottomLabel}</div> : null}
+        </div>
       </section>
     );
   };
@@ -500,7 +534,7 @@ export default function DailyClassroomView({
           termKey={termKey}
           termStatus={termStatus}
           terms={terms}
-          selectedBoardValue={selectedDay === ALL_DAYS ? '' : selectedDay}
+          selectedBoardValue={activeDay === ALL_DAYS ? '' : activeDay}
         />
       </div>
     );
@@ -531,45 +565,13 @@ export default function DailyClassroomView({
           </div>
         </div>
       ) : null}
-      {!isMobile ? (() => {
-        const allDayKeys = [...DAY_LABELS];
-        const effectiveCompareKeys = compareDayKeys ?? allDayKeys;
-        const hasAllDaysSelected = effectiveCompareKeys.length === allDayKeys.length;
-        return (
-          <div className="timetable-compare-toolbar">
-            <div className="timetable-compare-density">
-              <button
-                type="button"
-                className={`h-segment-btn ${hasAllDaysSelected ? 'active' : ''}`}
-                onClick={() => setCompareDayKeys((current) => {
-                  const base = current ?? allDayKeys;
-                  return base.length === allDayKeys.length ? [] : allDayKeys;
-                })}
-              >
-                전체 보기
-              </button>
-            </div>
-            <div className="timetable-compare-targets">
-              {DAY_LABELS.map((dayLabel) => (
-                <button
-                  key={dayLabel}
-                  type="button"
-                  className={`timetable-compare-chip ${effectiveCompareKeys.includes(dayLabel) ? 'is-active' : ''}`}
-                  onClick={() => setCompareDayKeys((current) => {
-                    const base = current ?? allDayKeys;
-                    return toggleCompareSelection(base, dayLabel);
-                  })}
-                >
-                  {`${dayLabel}요일`}
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      })() : null}
       {classroomEntries.length === 0 ? (
         <div className="card" style={{ padding: 28 }}>
           <EmptyState message="표시할 강의실 데이터가 없습니다." />
+        </div>
+      ) : !isMobile && visibleTargetsToRender.length === 0 ? (
+        <div className="card" style={{ padding: 28 }}>
+          <EmptyState message="현재 필터에 맞는 일별 강의실 시간표가 없습니다." />
         </div>
       ) : isMobile ? (
         <div ref={scheduleRef} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -592,10 +594,15 @@ export default function DailyClassroomView({
       ) : (
         <div
           ref={scheduleRef}
-          className={targetsToRender.length > 1 ? 'view-all-grid-container timetable-compare-layout' : 'timetable-single-layout'}
-          style={targetsToRender.length > 1 ? getTimetableCompareGridStyle(targetsToRender.length) : undefined}
+          className={
+            visibleTargetsToRender.length > 1
+              ? `view-all-grid-container timetable-compare-layout is-${timetableDensity}`
+              : 'timetable-single-layout'
+          }
+          data-grid-count={Math.min(visibleTargetsToRender.length, desktopGridColumns)}
+          style={visibleTargetsToRender.length > 1 ? getTimetableCompareGridStyle(visibleTargetsToRender.length, desktopGridColumns) : undefined}
         >
-          {targetsToRender.map(renderGrid)}
+          {visibleTargetsToRender.map(renderGrid)}
         </div>
       )}
 

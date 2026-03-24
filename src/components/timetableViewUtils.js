@@ -210,9 +210,6 @@ export function rebaseBlocksToWindow(blocks = [], startSlot = 0, endSlot = Numbe
 }
 
 export function getTimetableDensity(compareCount = 1, visibleSlotCount = 10) {
-  if (compareCount >= 4 || visibleSlotCount >= 12) {
-    return 'micro';
-  }
   if (compareCount >= 2 || visibleSlotCount >= 9) {
     return 'compact';
   }
@@ -220,13 +217,43 @@ export function getTimetableDensity(compareCount = 1, visibleSlotCount = 10) {
 }
 
 export function getTimetableSlotHeight(density = 'comfortable') {
-  if (density === 'micro') return 24;
   if (density === 'compact') return 30;
   return 38;
 }
 
-export function getTimetableCompareGridStyle(compareCount = 1) {
-  const columnCount = Math.max(1, Math.min(2, Number(compareCount) || 1));
+export function getTimetableLayoutMetrics({
+  compareCount = 1,
+  visibleSlotCount = 10,
+  columnCount = 7,
+} = {}) {
+  const density = getTimetableDensity(compareCount, visibleSlotCount);
+
+  if (density === 'compact') {
+    return {
+      density,
+      slotHeight: 30,
+      timeColumnWidth: 84,
+      minColumnWidth: 68,
+      cardPadding: 14,
+      titleGap: 10,
+      titleFontSize: 16,
+    };
+  }
+
+  return {
+    density,
+    slotHeight: 38,
+    timeColumnWidth: 108,
+    minColumnWidth: 90,
+    cardPadding: 14,
+    titleGap: 10,
+    titleFontSize: 16,
+  };
+}
+
+export function getTimetableCompareGridStyle(compareCount = 1, preferredColumns = 2) {
+  const requestedColumns = Math.min(4, Math.max(1, Number(preferredColumns) || 1));
+  const columnCount = Math.max(1, Math.min(requestedColumns, Number(compareCount) || 1));
   return {
     gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
   };

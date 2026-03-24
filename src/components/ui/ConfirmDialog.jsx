@@ -1,4 +1,5 @@
 import { AlertTriangle } from 'lucide-react';
+import { Button } from './tds';
 
 export default function ConfirmDialog({
   open,
@@ -41,12 +42,12 @@ export default function ConfirmDialog({
         </div>
 
         <div className="confirm-dialog-actions">
-          <button className="btn btn-secondary" type="button" onClick={onCancel}>
+          <Button style="weak" type="dark" size="medium" onPress={onCancel}>
             {cancelLabel}
-          </button>
-          <button className="btn btn-primary confirm-dialog-confirm" type="button" onClick={onConfirm}>
+          </Button>
+          <Button className="confirm-dialog-confirm" type={tone === 'danger' ? 'danger' : 'primary'} size="medium" onPress={onConfirm}>
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

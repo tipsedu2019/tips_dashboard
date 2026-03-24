@@ -28,3 +28,11 @@ install-toss-skills.cmd
 scripts/install-toss-skills.ps1
 scripts/install-superpowers.ps1
 scripts/start-vite-dev.ps1
+
+# Local debug / verification artifacts
+output/
+dev-server.log
+vite-ui-check.log
+debug.zip
+debug_xlsx/
+학원-수업계획-및-진도-공유-시스템/

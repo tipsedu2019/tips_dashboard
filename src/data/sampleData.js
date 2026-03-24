@@ -3,7 +3,7 @@ import {
   isClassroomAlias,
   normalizeClassroomText,
   normalizeSingleClassroomLabel,
-} from '../lib/classroomUtils';
+} from '../lib/classroomUtils.js';
 
 const DAY_SET = new Set(['월', '화', '수', '목', '금', '토', '일']);
 

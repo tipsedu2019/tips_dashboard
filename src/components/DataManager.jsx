@@ -1,26 +1,28 @@
-﻿import { useMemo, useState } from 'react';
-import { Book, Calendar, ClipboardList, Users } from 'lucide-react';
-import { useEffect } from 'react';
-import { useToast } from '../contexts/ToastContext';
-import ConfirmDialog from './ui/ConfirmDialog';
-import { useConfirmDialog } from '../hooks/useConfirmDialog';
-import { useBulkSelection } from '../hooks/useBulkSelection';
-import { useManagerActions } from '../hooks/useManagerActions';
-import { useDataTableControls } from '../hooks/useDataTableControls';
-import { useSharedTablePreference } from '../hooks/useSharedTablePreference';
-import { useAuth } from '../contexts/AuthContext';
-import StudentManagerTab from './data-manager/StudentManagerTab';
-import ClassManagerTab from './data-manager/ClassManagerTab';
-import TextbookManagerTab from './data-manager/TextbookManagerTab';
-import SchoolCatalogManagerModal from './data-manager/SchoolCatalogManagerModal';
-import ResourceCatalogManagerModal from './data-manager/ResourceCatalogManagerModal';
-import BulkUpdateModal from './data-manager/BulkUpdateModal';
-import ClassEditor from './data-manager/ClassEditor';
+﻿import { useMemo, useState } from "react";
+import { Book, Calendar, ClipboardList, Users } from "lucide-react";
+import { useEffect } from "react";
+import { useToast } from "../contexts/ToastContext";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import { DashboardInlineNotice } from "./ui/dashboard";
+import { Tab } from "./ui/tds";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import { useBulkSelection } from "../hooks/useBulkSelection";
+import { useManagerActions } from "../hooks/useManagerActions";
+import { useDataTableControls } from "../hooks/useDataTableControls";
+import { useSharedTablePreference } from "../hooks/useSharedTablePreference";
+import { useAuth } from "../contexts/AuthContext";
+import StudentManagerTab from "./data-manager/StudentManagerTab";
+import ClassManagerTab from "./data-manager/ClassManagerTab";
+import TextbookManagerTab from "./data-manager/TextbookManagerTab";
+import SchoolCatalogManagerModal from "./data-manager/SchoolCatalogManagerModal";
+import ResourceCatalogManagerModal from "./data-manager/ResourceCatalogManagerModal";
+import BulkUpdateModal from "./data-manager/BulkUpdateModal";
+import ClassEditor from "./data-manager/ClassEditor";
 import {
   StudentEditor,
   StudentManifestModal,
   TextbookEditor,
-} from './data-manager/DataManagerEditors';
+} from "./data-manager/DataManagerEditors";
 import {
   getClassSearchText,
   getStudentSearchText,
@@ -28,17 +30,17 @@ import {
   createEmptyClass,
   createEmptyStudent,
   createEmptyTextbook,
-} from './data-manager/utils';
+} from "./data-manager/utils";
 import {
   buildClassColumns,
   buildStudentColumns,
   buildTextbookColumns,
-} from './data-manager/columnSchemas';
+} from "./data-manager/columnSchemas";
 import {
   buildClassroomMaster,
   buildTeacherMaster,
   getResourceSubjectOptions,
-} from '../lib/resourceCatalogs';
+} from "../lib/resourceCatalogs";
 
 const EMPTY_DATA = {
   classes: [],
@@ -55,19 +57,22 @@ const EMPTY_DATA = {
 
 const TAB_META = {
   students: {
-    label: '\uD559\uC0DD \uAD00\uB9AC',
+    label: "\uD559\uC0DD\uAD00\uB9AC",
     icon: Users,
-    description: '\uD559\uC0DD \uB370\uC774\uD130\uB97C \uC815\uB9AC\uD558\uACE0 \uBC18 \uBC30\uC815, \uC5F0\uB77D\uCC98, \uD559\uAD50\u00B7\uD559\uB144 \uC815\uBCF4\uB97C \uD55C \uD654\uBA74\uC5D0\uC11C \uAD00\uB9AC\uD569\uB2C8\uB2E4.',
+    description:
+      "\uD559\uC0DD \uB370\uC774\uD130\uB97C \uC815\uB9AC\uD558\uACE0 \uBC18 \uBC30\uC815, \uC5F0\uB77D\uCC98, \uD559\uAD50\u00B7\uD559\uB144 \uC815\uBCF4\uB97C \uD55C \uD654\uBA74\uC5D0\uC11C \uAD00\uB9AC\uD569\uB2C8\uB2E4.",
   },
   classes: {
-    label: '\uC218\uC5C5 \uAD00\uB9AC',
+    label: "\uC218\uC5C5\uAD00\uB9AC",
     icon: Calendar,
-    description: '\uC218\uC5C5 \uC0C1\uD0DC, \uC2DC\uAC04\uD45C, \uB2F4\uB2F9 \uC120\uC0DD\uB2D8, \uAC15\uC758\uC2E4\uACFC \uC5F0\uACB0 \uD559\uC0DD \uC815\uBCF4\uB97C \uD55C \uACF3\uC5D0 \uC815\uB9AC\uD569\uB2C8\uB2E4.',
+    description:
+      "\uC218\uC5C5 \uC0C1\uD0DC, \uC2DC\uAC04\uD45C, \uB2F4\uB2F9 \uC120\uC0DD\uB2D8, \uAC15\uC758\uC2E4\uACFC \uC5F0\uACB0 \uD559\uC0DD \uC815\uBCF4\uB97C \uD55C \uACF3\uC5D0 \uC815\uB9AC\uD569\uB2C8\uB2E4.",
   },
   textbooks: {
-    label: '\uAD50\uC7AC \uAD00\uB9AC',
+    label: "\uAD50\uC7AC\uAD00\uB9AC",
     icon: Book,
-    description: '\uAD50\uC7AC, \uCD9C\uD310\uC0AC, \uCC38\uC870 \uBA54\uBAA8, \uC218\uC5C5 \uC5F0\uACB0 \uC815\uBCF4\uB97C \uC815\uB9AC\uD569\uB2C8\uB2E4.',
+    description:
+      "\uAD50\uC7AC, \uCD9C\uD310\uC0AC, \uCC38\uC870 \uBA54\uBAA8, \uC218\uC5C5 \uC5F0\uACB0 \uC815\uBCF4\uB97C \uC815\uB9AC\uD569\uB2C8\uB2E4.",
   },
 };
 
@@ -77,19 +82,21 @@ export default function DataManager({
   onOpenCurriculum,
   onOpenTermManager,
   navigationIntent = null,
+  fixedTab = null,
+  hideTabRow = false,
 }) {
   const safeData = useMemo(
     () => ({
       ...EMPTY_DATA,
       ...data,
     }),
-    [data]
+    [data],
   );
 
   const toast = useToast();
   const { isStaff } = useAuth();
   const { confirm, dialogProps } = useConfirmDialog();
-  const [activeTab, setActiveTab] = useState('students');
+  const [activeTab, setActiveTab] = useState(fixedTab || "students");
   const [editingStudent, setEditingStudent] = useState(null);
   const [editingClass, setEditingClass] = useState(null);
   const [editingTextbook, setEditingTextbook] = useState(null);
@@ -99,53 +106,67 @@ export default function DataManager({
   const [isClassroomManagerOpen, setIsClassroomManagerOpen] = useState(false);
 
   useEffect(() => {
+    if (fixedTab && activeTab !== fixedTab) {
+      setActiveTab(fixedTab);
+    }
+  }, [activeTab, fixedTab]);
+
+  useEffect(() => {
     if (!navigationIntent) {
       return;
     }
 
-    if (navigationIntent.tab) {
+    if (!fixedTab && navigationIntent.tab) {
       setActiveTab(navigationIntent.tab);
     }
 
     if (navigationIntent.openTerms) {
       onOpenTermManager?.();
     }
-  }, [navigationIntent, onOpenTermManager]);
+  }, [fixedTab, navigationIntent, onOpenTermManager]);
 
   const teacherMaster = useMemo(
     () => buildTeacherMaster(safeData.teacherCatalogs, safeData.classes),
-    [safeData.teacherCatalogs, safeData.classes]
+    [safeData.teacherCatalogs, safeData.classes],
   );
   const classroomMaster = useMemo(
     () => buildClassroomMaster(safeData.classroomCatalogs, safeData.classes),
-    [safeData.classroomCatalogs, safeData.classes]
+    [safeData.classroomCatalogs, safeData.classes],
   );
   const resourceSubjectOptions = useMemo(
-    () => getResourceSubjectOptions([...teacherMaster, ...classroomMaster], safeData.classes),
-    [classroomMaster, safeData.classes, teacherMaster]
+    () =>
+      getResourceSubjectOptions(
+        [...teacherMaster, ...classroomMaster],
+        safeData.classes,
+      ),
+    [classroomMaster, safeData.classes, teacherMaster],
   );
 
   const currentTabData = useMemo(() => {
-    if (activeTab === 'students') {
+    if (activeTab === "students") {
       return safeData.students || [];
     }
-    if (activeTab === 'classes') {
+    if (activeTab === "classes") {
       return safeData.classes || [];
     }
     return safeData.textbooks || [];
   }, [activeTab, safeData]);
 
   const columnDefinitions = useMemo(() => {
-    if (activeTab === 'students') {
+    if (activeTab === "students") {
       return buildStudentColumns({ data: safeData });
     }
-    if (activeTab === 'classes') {
+    if (activeTab === "classes") {
       return buildClassColumns({
         data: safeData,
         onOpenManifest: setViewingClassStudents,
         subjectOptions: resourceSubjectOptions,
-        teacherOptions: teacherMaster.filter((item) => item.isVisible !== false).map((item) => item.name),
-        classroomOptions: classroomMaster.filter((item) => item.isVisible !== false).map((item) => item.name),
+        teacherOptions: teacherMaster
+          .filter((item) => item.isVisible !== false)
+          .map((item) => item.name),
+        classroomOptions: classroomMaster
+          .filter((item) => item.isVisible !== false)
+          .map((item) => item.name),
       });
     }
     return buildTextbookColumns();
@@ -162,17 +183,26 @@ export default function DataManager({
     data: currentTabData,
     columns: columnDefinitions,
     searchAccessor: (item) => {
-      if (activeTab === 'students') {
+      if (activeTab === "students") {
         return getStudentSearchText(item);
       }
-      if (activeTab === 'classes') {
+      if (activeTab === "classes") {
         return getClassSearchText(item);
       }
       return getTextbookSearchText(item);
     },
-    defaultSortKey: activeTab === 'classes' ? 'className' : activeTab === 'students' ? 'name' : 'title',
-    externalState: sharedPreference.isHydrated ? sharedPreference.externalState : null,
-    onStateChange: sharedPreference.isHydrated ? sharedPreference.queuePersist : null,
+    defaultSortKey:
+      activeTab === "classes"
+        ? "className"
+        : activeTab === "students"
+          ? "name"
+          : "title",
+    externalState: sharedPreference.isHydrated
+      ? sharedPreference.externalState
+      : null,
+    onStateChange: sharedPreference.isHydrated
+      ? sharedPreference.queuePersist
+      : null,
   });
 
   const selection = useBulkSelection(activeTab, tableControls.currentIds);
@@ -191,12 +221,17 @@ export default function DataManager({
   const activeMeta = TAB_META[activeTab];
   const tabs = useMemo(
     () => [
-      { id: 'students', label: TAB_META.students.label, icon: Users },
-      { id: 'classes', label: TAB_META.classes.label, icon: Calendar },
-      { id: 'textbooks', label: TAB_META.textbooks.label, icon: Book },
+      { id: "students", label: TAB_META.students.label, icon: Users },
+      { id: "classes", label: TAB_META.classes.label, icon: Calendar },
+      { id: "textbooks", label: TAB_META.textbooks.label, icon: Book },
     ],
-    []
+    [],
   );
+  const shellTestId = fixedTab ? `${fixedTab}-manager-shell` : "data-manager-shell";
+  const toolbarTestId = fixedTab
+    ? `${fixedTab}-manager-toolbar`
+    : "data-manager-toolbar";
+  const shouldShowTabRow = !hideTabRow && !fixedTab;
 
   const handleSaveStudent = async (student) => {
     const saved = await actions.saveStudent(student);
@@ -214,9 +249,10 @@ export default function DataManager({
 
   const handleSaveTextbook = async (textbook) => {
     const saved = await actions.saveTextbook(textbook);
-    if (saved) {
+    if (saved?.ok) {
       setEditingTextbook(null);
     }
+    return saved;
   };
 
   const handleSaveSchools = async (rows, deletedIds) => {
@@ -224,7 +260,7 @@ export default function DataManager({
     if ((deletedIds || []).length > 0) {
       await dataService.deleteAcademicSchools(deletedIds);
     }
-    toast.success('학교 마스터를 저장했습니다.');
+    toast.success("학교 마스터를 저장했습니다.");
     setIsSchoolManagerOpen(false);
   };
 
@@ -233,7 +269,7 @@ export default function DataManager({
     if ((deletedIds || []).length > 0) {
       await dataService.deleteTeacherCatalogs(deletedIds);
     }
-    toast.success('선생님 마스터를 저장했습니다.');
+    toast.success("선생님 마스터를 저장했습니다.");
     setIsTeacherManagerOpen(false);
   };
 
@@ -242,7 +278,7 @@ export default function DataManager({
     if ((deletedIds || []).length > 0) {
       await dataService.deleteClassroomCatalogs(deletedIds);
     }
-    toast.success('강의실 마스터를 저장했습니다.');
+    toast.success("강의실 마스터를 저장했습니다.");
     setIsClassroomManagerOpen(false);
   };
 
@@ -277,6 +313,7 @@ export default function DataManager({
         requestConfirm={confirm}
         showToast={toast}
         onSave={handleSaveClass}
+        onSaveTextbook={actions.saveTextbook}
         onCancel={() => setEditingClass(null)}
         isSaving={actions.isProcessing}
       />
@@ -296,8 +333,8 @@ export default function DataManager({
 
   return (
     <div
-      className="view-container data-manager-shell app-shell-section"
-      data-testid="data-manager-shell"
+      className={`view-container data-manager-shell app-shell-section ${fixedTab ? "is-standalone-manager" : ""}`}
+      data-testid={shellTestId}
     >
       <SchoolCatalogManagerModal
         open={isSchoolManagerOpen}
@@ -341,57 +378,46 @@ export default function DataManager({
         />
       ) : null}
 
-      <section
-        className="workspace-surface data-manager-toolbar-shell app-shell-toolbar-surface"
-        data-testid="data-manager-toolbar"
-        style={{ padding: 20, marginBottom: 24 }}
-      >
+      {shouldShowTabRow ? (
         <div
-          className="h-segment-container"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 8,
-            padding: 6,
-            background: 'var(--bg-surface-hover)',
-            borderRadius: 24,
-          }}
+          className="dashboard-headless-toolbar dashboard-headless-toolbar-data-manager"
+          data-testid={toolbarTestId}
         >
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                className={`h-segment-btn ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-                style={{ padding: '13px 14px', fontSize: 14, justifyContent: 'center', minHeight: 52 }}
-              >
-                <Icon size={18} style={{ marginRight: 8 }} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {actions.isProcessing ? (
-        <div
-          style={{
-            margin: '0 0 20px',
-            padding: '14px 16px',
-            borderRadius: 16,
-            background: 'rgba(33, 110, 78, 0.08)',
-            border: '1px solid rgba(33, 110, 78, 0.16)',
-            color: 'var(--text-secondary)',
-          }}
-        >
-          요청을 처리하고 있습니다. 업로드나 일괄 수정이 완료될 때까지 잠시만 기다려 주세요.
+          <Tab
+            size="large"
+            value={activeTab}
+            onChange={setActiveTab}
+            items={tabs.map((tab) => {
+              const Icon = tab.icon;
+              return {
+                value: tab.id,
+                label: tab.label,
+                testId: `data-manager-tab-${tab.id}`,
+                className: "dashboard-workspace-tab-pill",
+                icon: <Icon size={16} aria-hidden="true" focusable="false" />,
+              };
+            })}
+            className="dashboard-workspace-tab-row dashboard-management-tab-row"
+            data-testid="data-manager-tab-row"
+          />
         </div>
       ) : null}
 
-      <div className="data-manager-content-shell app-shell-section-stack" style={{ padding: '0 4px 24px' }}>
-        {activeTab === 'students' ? (
+      {actions.isProcessing ? (
+        <div style={{ padding: "0 24px" }}>
+          <DashboardInlineNotice
+            title="요청을 처리하고 있습니다."
+            description="업로드나 일괄 수정이 완료될 때까지 잠시만 기다려 주세요."
+            variant="warning"
+          />
+        </div>
+      ) : null}
+
+      <div
+        className="data-manager-content-shell app-shell-section-stack"
+        style={{ padding: "12px 0 24px" }}
+      >
+        {activeTab === "students" ? (
           <StudentManagerTab
             filteredData={tableControls.filteredData}
             currentIds={tableControls.currentIds}
@@ -409,14 +435,16 @@ export default function DataManager({
             onDeleteStudent={actions.deleteStudent}
             onExport={actions.handleExportData}
             onDownloadSample={actions.handleDownloadSample}
-            onUpload={(file) => actions.handleSpreadsheetUpload(file, 'students')}
+            onUpload={(file) =>
+              actions.handleSpreadsheetUpload(file, "students")
+            }
             onManageSchools={() => setIsSchoolManagerOpen(true)}
             isBusy={actions.isProcessing}
             sectionDescription={activeMeta.description}
           />
         ) : null}
 
-        {activeTab === 'classes' ? (
+        {activeTab === "classes" ? (
           <ClassManagerTab
             filteredData={tableControls.filteredData}
             currentIds={tableControls.currentIds}
@@ -435,7 +463,9 @@ export default function DataManager({
             onDeleteClass={actions.deleteClass}
             onExport={actions.handleExportData}
             onDownloadSample={actions.handleDownloadSample}
-            onUpload={(file) => actions.handleSpreadsheetUpload(file, 'classes')}
+            onUpload={(file) =>
+              actions.handleSpreadsheetUpload(file, "classes")
+            }
             teacherMaster={teacherMaster}
             classroomMaster={classroomMaster}
             subjectOptions={resourceSubjectOptions}
@@ -448,7 +478,7 @@ export default function DataManager({
           />
         ) : null}
 
-        {activeTab === 'textbooks' ? (
+        {activeTab === "textbooks" ? (
           <TextbookManagerTab
             filteredData={tableControls.filteredData}
             currentIds={tableControls.currentIds}
@@ -467,7 +497,9 @@ export default function DataManager({
             onDeleteTextbook={actions.deleteTextbook}
             onExport={actions.handleExportData}
             onDownloadSample={actions.handleDownloadSample}
-            onUpload={(file) => actions.handleSpreadsheetUpload(file, 'textbooks')}
+            onUpload={(file) =>
+              actions.handleSpreadsheetUpload(file, "textbooks")
+            }
             isBusy={actions.isProcessing}
             sectionDescription={activeMeta.description}
             onOpenCurriculum={onOpenCurriculum}
@@ -493,4 +525,3 @@ export default function DataManager({
     </div>
   );
 }
-

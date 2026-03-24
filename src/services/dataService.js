@@ -989,43 +989,58 @@ export class DataService {
 
   async addTextbook(textbook) {
     const client = this._ensureClient();
+    const targetTextbook = {
+      ...textbook,
+      id: textbook?.id || generateId(),
+    };
     const { data } = await this._runTextbookMutation(
-      textbook,
+      targetTextbook,
       (payload) => client.from('textbooks').insert([payload]).select().single()
     );
-    this._notify({ tables: ['textbooks'] });
-    return this._processTextbook(data);
+    const savedTextbook = this._processTextbook(data);
+    await this._notify({ tables: ['textbooks'] });
+    return { textbook: savedTextbook };
   }
 
   async updateTextbook(id, updates) {
     const client = this._ensureClient();
-    await this._runTextbookMutation(
-      updates,
+    const targetTextbook = {
+      ...updates,
+      id,
+    };
+    const result = await this._runTextbookMutation(
+      targetTextbook,
       (payload) => {
         const { id: ignoredId, ...finalUpdates } = payload;
-        return client.from('textbooks').update(finalUpdates).eq('id', id);
+        return client.from('textbooks').update(finalUpdates).eq('id', id).select().maybeSingle();
       }
     );
-    this._notify({ tables: ['textbooks'] });
+
+    if (!result?.data) {
+      return this.addTextbook(targetTextbook);
+    }
+
+    const savedTextbook = this._processTextbook(result.data || targetTextbook);
+    await this._notify({ tables: ['textbooks'] });
+    return { textbook: savedTextbook };
   }
 
   async deleteTextbook(id) {
     const client = this._ensureClient();
     const { error } = await client.from('textbooks').delete().eq('id', id);
     if (error) throw error;
-    this._notify({ tables: ['textbooks'] });
+    await this._notify({ tables: ['textbooks'] });
   }
 
   async bulkDeleteTextbooks(ids) {
     const client = this._ensureClient();
     const { error } = await client.from('textbooks').delete().in('id', ids);
     if (error) throw error;
-    this._notify({ tables: ['textbooks'] });
+    await this._notify({ tables: ['textbooks'] });
   }
 
   async bulkUpdateTextbooks(ids, updates) {
     const client = this._ensureClient();
-
     if (updates.addTags) {
       const { data, error } = await client.from('textbooks').select('*').in('id', ids);
       if (error) throw error;
@@ -1045,7 +1060,7 @@ export class DataService {
       if (error) throw error;
     }
 
-    this._notify({ tables: ['textbooks'] });
+    await this._notify({ tables: ['textbooks'] });
   }
 
   async getStudents() {
@@ -2599,7 +2614,8 @@ export class DataService {
       publisher: textbookRow.publisher || '',
       price: Number(textbookRow.price || 0),
       tags: textbookRow.tags || [],
-      lessons: textbookRow.lessons || []
+      lessons: textbookRow.lessons || [],
+      updatedAt: textbookRow.updatedAt || textbookRow.updated_at || null,
     };
   }
 

@@ -1,9 +1,23 @@
 import { Download, Plus, Upload } from 'lucide-react';
 import ManagementHeader from './ManagementHeader';
+import ManagementCommandBar from './ManagementCommandBar';
+import ManagementViewSettingsPanel from './ManagementViewSettingsPanel';
 import DataListView from './DataListView';
 
+function getActiveFilterCount(tableControls) {
+  return tableControls.columns.reduce((countValue, column) => {
+    const value = tableControls.filters[column.key];
+    if (Array.isArray(value)) {
+      return countValue + (value.length > 0 ? 1 : 0);
+    }
+    if (value && typeof value === 'object') {
+      return countValue + (value.min || value.max ? 1 : 0);
+    }
+    return countValue + (String(value || '').trim() ? 1 : 0);
+  }, 0);
+}
+
 export default function StudentManagerTab({
-  filteredData,
   currentIds,
   tableControls,
   selectedIds,
@@ -21,52 +35,52 @@ export default function StudentManagerTab({
   onUpload,
   onManageSchools,
   isBusy,
-  sectionDescription,
 }) {
   return (
-    <>
-      <ManagementHeader
-        title="학생 관리"
-        count={tableControls.totalCount}
-        searchValue={tableControls.searchQuery}
-        onSearchChange={tableControls.setSearchQuery}
-        tableControls={tableControls}
-        searchPlaceholder="이름, 학교, 연락처, 고유번호 검색"
-        description={sectionDescription}
-        toolbarActions={[
-          {
+    <div className="management-pane-shell">
+      <div className="management-top-shell">
+        <ManagementCommandBar
+          searchValue={tableControls.searchQuery}
+          onSearchChange={tableControls.setSearchQuery}
+          searchPlaceholder="이름, 학교, 연락처, 고유번호 검색"
+          primaryAction={{
             label: '학생 등록',
             icon: <Plus size={16} />,
             onClick: onAddStudent,
-            variant: 'primary',
-          },
-          {
-            label: '템플릿 다운로드',
-            icon: <Download size={16} />,
-            onClick: onDownloadSample,
-          },
-          {
-            label: '데이터 업로드',
-            icon: <Upload size={16} />,
-            kind: 'file',
-            onChange: async (event) => {
-              const file = event.target.files?.[0];
-              await onUpload(file);
-              event.target.value = '';
+          }}
+          overflowActions={[
+            {
+              label: '템플릿 다운로드',
+              icon: <Download size={16} />,
+              onClick: onDownloadSample,
             },
-          },
-          {
-            label: '학교 마스터',
-            onClick: onManageSchools,
-          },
-        ]}
-        selectedCount={selectedIds.size}
-        currentCount={currentIds.length}
-        onToggleSelectAll={() => toggleSelectAll(currentIds)}
-        onDeleteSelected={handleDeleteSelected}
-        isBusy={isBusy}
-        hideSummary
-      />
+            {
+              label: '데이터 업로드',
+              icon: <Upload size={16} />,
+              kind: 'file',
+              onChange: async (event) => {
+                const file = event.target.files?.[0];
+                await onUpload(file);
+                event.target.value = '';
+              },
+            },
+            {
+              label: '학교 마스터',
+              onClick: onManageSchools,
+            },
+          ]}
+          settingsContent={<ManagementViewSettingsPanel tableControls={tableControls} />}
+          settingsBadge={getActiveFilterCount(tableControls)}
+          isBusy={isBusy}
+        />
+
+        <ManagementHeader
+          selectedCount={selectedIds.size}
+          currentCount={currentIds.length}
+          onToggleSelectAll={() => toggleSelectAll(currentIds)}
+          onDeleteSelected={handleDeleteSelected}
+        />
+      </div>
 
       <DataListView
         columns={tableControls.visibleColumns}
@@ -98,6 +112,6 @@ export default function StudentManagerTab({
         onPageChange={tableControls.setPage}
         onPageSizeChange={tableControls.setPageSize}
       />
-    </>
+    </div>
   );
 }
