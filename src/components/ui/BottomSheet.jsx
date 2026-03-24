@@ -21,6 +21,7 @@ export default function BottomSheet({
   onClose,
   title,
   subtitle,
+  headerActions = null,
   children,
   actions = null,
   maxWidth = 620,
@@ -104,13 +105,16 @@ export default function BottomSheet({
             ) : null}
           </div>
 
-          <IconButton
-            className="bottom-sheet-close"
-            variant="border"
-            onPress={onClose}
-            label={closeLabel}
-            icon={<X size={20} />}
-          />
+          <div className="bottom-sheet-header-actions">
+            {headerActions}
+            <IconButton
+              className="bottom-sheet-close"
+              variant="border"
+              onPress={onClose}
+              label={closeLabel}
+              icon={<X size={20} />}
+            />
+          </div>
         </div>
 
         <div className={`bottom-sheet-body ${isMobile ? 'is-mobile' : 'is-desktop'} ${bodyClassName}`}>

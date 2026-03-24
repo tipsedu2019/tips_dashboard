@@ -540,9 +540,6 @@ body {
 
 .class-schedule-modal-action-row
   .class-schedule-modal-secondary-action.tds-button {
-  background: var(--tds-color-blue-500);
-  color: #ffffff;
-  border-color: transparent;
   box-shadow: 0 18px 30px rgba(49, 130, 246, 0.22);
 }
 
@@ -576,13 +573,6 @@ body {
 [data-theme="dark"] .class-schedule-modal-action-row {
   border-top: 0;
   background: transparent;
-}
-
-[data-theme="dark"]
-  .class-schedule-modal-action-row
-  .class-schedule-modal-secondary-action.tds-button {
-  background: var(--tds-color-blue-400);
-  color: #ffffff;
 }
 
 [data-theme="dark"]
@@ -9196,6 +9186,13 @@ body::after {
   display: grid;
 }
 
+.bottom-sheet-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .bottom-sheet-handle {
   width: 48px;
   height: 5px;
@@ -14509,6 +14506,10 @@ textarea.styled-input:focus {
   padding: 0;
 }
 
+.class-plan-mobile-body--public {
+  overflow-y: auto;
+}
+
 .class-plan-builder-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
@@ -15324,6 +15325,8 @@ textarea.styled-input:focus {
 
 .class-plan-bottom-sheet--public .bottom-sheet-header {
   align-items: center;
+  border-bottom: 0;
+  background: transparent;
 }
 
 .class-plan-bottom-sheet--public .bottom-sheet-header-copy {
@@ -15334,6 +15337,16 @@ textarea.styled-input:focus {
 
 .class-plan-bottom-sheet--public .bottom-sheet-close {
   align-self: center;
+}
+
+.class-plan-bottom-sheet--public .class-plan-sheet-content.is-public {
+  overflow: visible;
+}
+
+.class-plan-desktop-header.is-public-detail {
+  border-bottom: 0;
+  background: transparent;
+  padding-bottom: 8px;
 }
 
 .class-plan-bottom-sheet__body--public.bottom-sheet-body.is-mobile {

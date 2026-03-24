@@ -5,9 +5,22 @@ import {
   applyCalendarDateToggle,
   buildSchedulePlanForSave,
   calculateSchedulePlan,
+  deriveSelectedDaysFromSchedule,
   getCalendarDaySurface,
   normalizeSchedulePlan,
 } from '../src/lib/classSchedulePlanner.js';
+import { parseSchedule } from '../src/data/sampleData.js';
+
+test('parseSchedule reads weekday time ranges from Korean schedule strings', () => {
+  assert.deepEqual(parseSchedule('월수 15:30-17:00'), [
+    { day: '월', start: '15:30', end: '17:00', override: null, teacher: null, classroom: null, classroomKey: '', teacherKey: '' },
+    { day: '수', start: '15:30', end: '17:00', override: null, teacher: null, classroom: null, classroomKey: '', teacherKey: '' },
+  ]);
+});
+
+test('deriveSelectedDaysFromSchedule seeds planner days from an existing class schedule', () => {
+  assert.deepEqual(deriveSelectedDaysFromSchedule('월수 15:30-17:00'), [1, 3]);
+});
 
 test('normalizeSchedulePlan migrates legacy v1 data into v2 textbook session entries', () => {
   const normalized = normalizeSchedulePlan(

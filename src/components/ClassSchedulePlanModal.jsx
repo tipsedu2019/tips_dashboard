@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   ChevronDown,
@@ -7,6 +7,7 @@ import {
   MapPin,
   Pencil,
   Save,
+  Share2,
   Trash2,
   UserRound,
   Users,
@@ -19,9 +20,12 @@ import ClassSchedulePlanPreview from "./ClassSchedulePlanPreview";
 import ClassScheduleProgressBoard from "./ClassScheduleProgressBoard";
 import TextbookQuickEditorModal from "./data-manager/TextbookQuickEditorModal";
 import useViewport from "../hooks/useViewport";
+import { useToast } from "../contexts/ToastContext";
 import { PublicLandingCard } from "./PublicClassLandingView";
 import BottomSheet from "./ui/BottomSheet";
-import { Badge, Button, Dialog, SegmentedControl, TextField } from "./ui/tds";
+import { captureElementAsPngBlob, downloadBlob } from "../lib/exportAsImage";
+import { getEditableClassNameSeed } from "../lib/classNameDisplay.js";
+import { Badge, Button, Dialog, IconButton, SegmentedControl, TextField } from "./ui/tds";
 import {
   applyCalendarDateSubstitution,
   applyCalendarDateToggle,
@@ -124,9 +128,7 @@ function hasActualEntryContent(entry = {}) {
 function createDraftClass(classItem = {}) {
   return {
     subject: String(classItem.subject || "").trim() || SUBJECT_OPTIONS[0],
-    className: String(
-      classItem.displayClassName || classItem.className || classItem.name || "",
-    ).trim(),
+    className: getEditableClassNameSeed(classItem),
     textbookIds: [...new Set((classItem.textbookIds || []).filter(Boolean))],
   };
 }
@@ -137,7 +139,7 @@ function buildPlanDefaults(
   textbooksCatalog = [],
 ) {
   return {
-    className: draftClass.className || classItem.className || classItem.name || "",
+    className: draftClass.className || getEditableClassNameSeed(classItem),
     subject: draftClass.subject || classItem.subject || "",
     schedule: classItem.schedule || "",
     startDate: classItem.startDate || "",
@@ -234,6 +236,16 @@ function getMobileChipToneClass(tone = "neutral") {
     return "is-accent";
   }
   return "is-neutral";
+}
+
+function sanitizeFilePart(value) {
+  return (
+    String(value || "")
+      .trim()
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "class-plan"
+  );
 }
 
 function BuilderStepper({ steps }) {
@@ -364,12 +376,15 @@ export default function ClassSchedulePlanModal({
   const isBuilderMode = resolvedMode === "builder";
   const isChecklistMode = resolvedMode === "checklist";
   const isEditableMode = !isReadonlyMode;
+  const toast = useToast();
+  const readonlyShareTargetRef = useRef(null);
 
   const [draftClass, setDraftClass] = useState(createDraftClass(safeClass));
   const [draftPlan, setDraftPlan] = useState(null);
   const [baselineSnapshot, setBaselineSnapshot] = useState("");
   const [textbookEditorState, setTextbookEditorState] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSharingPreview, setIsSharingPreview] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     settings: true,
@@ -413,9 +428,7 @@ export default function ClassSchedulePlanModal({
 
   const displayClassName =
     draftClass.className ||
-    safeClass.displayClassName ||
-    safeClass.className ||
-    safeClass.name ||
+    getEditableClassNameSeed(safeClass) ||
     "이름 없는 수업";
   const headerTitle = isBuilderMode
     ? "수업 설계"
@@ -510,6 +523,7 @@ export default function ClassSchedulePlanModal({
     [draftClass, draftDefaults, normalizedDraftPlan],
   );
   const isDirty = isEditableMode && baselineSnapshot !== currentSnapshot;
+  const canSharePreview = (calculated.sessions || []).length > 0;
   const subjectItems = useMemo(
     () => buildSubjectItems(draftClass.subject),
     [draftClass.subject],
@@ -669,6 +683,61 @@ export default function ClassSchedulePlanModal({
     return result;
   };
 
+  const handleSharePreview = async () => {
+    if (!readonlyShareTargetRef.current || !canSharePreview) {
+      toast.info("공유할 수업 계획 이미지가 아직 없습니다.");
+      return;
+    }
+
+    setIsSharingPreview(true);
+
+    try {
+      const blob = await captureElementAsPngBlob(readonlyShareTargetRef.current, {
+        preset: "a4-portrait",
+        width: 794,
+        padding: 20,
+        scale: 4,
+        backgroundColor: "#ffffff",
+      });
+
+      if (!blob) {
+        throw new Error("class plan share blob missing");
+      }
+
+      const filename = `class-plan-${sanitizeFilePart(draftClass.subject || safeClass.subject)}-${sanitizeFilePart(displayClassName)}.png`;
+
+      if (
+        typeof navigator !== "undefined" &&
+        typeof File !== "undefined" &&
+        navigator.share
+      ) {
+        const file = new File([blob], filename, { type: "image/png" });
+
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            title: `${displayClassName} 수업 계획`,
+            text: `${displayClassName} 수업 계획 이미지입니다.`,
+            files: [file],
+          });
+          toast.success("수업 계획 공유 화면을 열었습니다.");
+          return;
+        }
+      }
+
+      downloadBlob(blob, filename);
+      toast.info("공유를 지원하지 않아 이미지 다운로드로 대신했습니다.");
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+
+      console.error(error);
+      toast.error("수업 계획 이미지를 만드는 중 문제가 생겼습니다.");
+    } finally {
+      setIsSharingPreview(false);
+    }
+  };
+
   if (!open) {
     return null;
   }
@@ -752,6 +821,17 @@ export default function ClassSchedulePlanModal({
         <Save size={18} />
       </button>
     ) : null;
+  const readonlyHeaderShareButton = isReadonlyMode ? (
+    <IconButton
+      className="class-plan-header-share"
+      variant="border"
+      onPress={handleSharePreview}
+      label="이미지 공유"
+      icon={<Share2 size={18} />}
+      disabled={!canSharePreview || isSharingPreview}
+      data-testid="class-plan-share-button"
+    />
+  ) : null;
 
   const renderMobileSummary = () => {
     const items = isReadonlyMode
@@ -828,41 +908,44 @@ export default function ClassSchedulePlanModal({
 
   const renderDesktopHeader = () => (
     <header
-      className={`class-plan-desktop-header ${isEditableMode ? "is-editable" : "is-public-detail"}`}
+      className={`class-plan-desktop-header ${isEditableMode ? "is-editable" : "is-public-detail"}`.trim()}
     >
       <div className="class-plan-desktop-header-copy">
         <div className="class-plan-desktop-header-title">{headerTitle}</div>
-        <div
-          className="class-plan-desktop-header-main-row"
-          data-testid="class-plan-desktop-header-main-row"
-        >
-          <div className="class-plan-desktop-header-subtitle">{displayClassName}</div>
+        {isReadonlyMode ? null : (
+          <div
+            className="class-plan-desktop-header-main-row"
+            data-testid="class-plan-desktop-header-main-row"
+          >
+            <div className="class-plan-desktop-header-subtitle">{displayClassName}</div>
 
-          {headerTags.length > 0 ? (
-            <div className="class-plan-desktop-header-tags">
-              {headerTags.map((tag, index) => (
-                <span
-                  key={`${tag}-${index}`}
-                  className={`class-plan-desktop-header-tag ${index > 1 ? "is-neutral" : ""}`.trim()}
-                >
-                  {tag}
-                </span>
+            {headerTags.length > 0 ? (
+              <div className="class-plan-desktop-header-tags">
+                {headerTags.map((tag, index) => (
+                  <span
+                    key={`${tag}-${index}`}
+                    className={`class-plan-desktop-header-tag ${index > 1 ? "is-neutral" : ""}`.trim()}
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            <div
+              className="class-plan-desktop-header-meta"
+              data-testid="class-plan-desktop-header-meta"
+            >
+              {headerFacts.map((fact) => (
+                <HeaderFactChip key={fact.key} fact={fact} />
               ))}
             </div>
-          ) : null}
-
-          <div
-            className="class-plan-desktop-header-meta"
-            data-testid="class-plan-desktop-header-meta"
-          >
-            {headerFacts.map((fact) => (
-              <HeaderFactChip key={fact.key} fact={fact} />
-            ))}
           </div>
-        </div>
+        )}
       </div>
 
       <div className="class-plan-desktop-header-actions">
+        {readonlyHeaderShareButton}
         {desktopHeaderSaveButton}
         <button
           type="button"
@@ -1311,6 +1394,7 @@ export default function ClassSchedulePlanModal({
       (calculated.sessions || []).some(
         (session) => session.progressStatus && session.progressStatus !== "pending",
       );
+    const showReadonlySummary = false;
 
     return (
       <div className="class-plan-sheet-content is-public">
@@ -1323,7 +1407,8 @@ export default function ClassSchedulePlanModal({
             <PublicLandingCard classItem={publicCardClass} hideActions />
           </div>
 
-          <section className="class-plan-sheet-summary">
+          {showReadonlySummary ? (
+            <section className="class-plan-sheet-summary">
             <div className="class-plan-sheet-summary-copy">
               <span className="class-plan-sheet-eyebrow">Class Plan</span>
               <p>
@@ -1357,15 +1442,18 @@ export default function ClassSchedulePlanModal({
                 </div>
               ))}
             </div>
-          </section>
+            </section>
+          ) : null}
 
-          <ClassSchedulePlanPreview
-            plan={savedPreviewPlan}
-            className={displayClassName}
-            subject={draftClass.subject}
-            allowExport
-            emptyMessage={emptyMessage}
-          />
+          <div ref={readonlyShareTargetRef}>
+            <ClassSchedulePlanPreview
+              plan={savedPreviewPlan}
+              className={displayClassName}
+              subject={draftClass.subject}
+              allowExport={false}
+              emptyMessage={emptyMessage}
+            />
+          </div>
 
           {hasPlanBoardContent ? (
             <ClassScheduleProgressBoard
@@ -1408,7 +1496,7 @@ export default function ClassSchedulePlanModal({
               {secondaryActionLabel ? (
                 <Button
                   type="primary"
-                  style="weak"
+                  style="fill"
                   size="big"
                   onPress={onSecondaryAction}
                   className="class-schedule-modal-secondary-action"
@@ -1445,17 +1533,21 @@ export default function ClassSchedulePlanModal({
       open={open}
       onClose={handleRequestClose}
       title={headerTitle}
-      subtitle={isReadonlyMode ? draftClass.subject || safeClass.subject || "" : ""}
+      subtitle={isReadonlyMode ? "" : draftClass.subject || safeClass.subject || ""}
+      headerActions={readonlyHeaderShareButton}
       testId="class-schedule-plan-modal"
       sheetClassName={
         isReadonlyMode ? "class-plan-bottom-sheet--public" : "class-plan-bottom-sheet--editable"
       }
-      bodyClassName="class-plan-mobile-body"
+      bodyClassName={`class-plan-mobile-body ${isReadonlyMode ? "class-plan-mobile-body--public" : ""}`.trim()}
       fullHeightOnMobile={isEditableMode}
-      showHandleOnMobile
+      showHandleOnMobile={!isReadonlyMode}
     >
-      <div className="class-plan-sheet">
-        {renderMobileSummary()}
+      <div
+        className="class-plan-sheet"
+        data-testid={isReadonlyMode ? "class-schedule-plan-sheet" : undefined}
+      >
+        {isReadonlyMode ? null : renderMobileSummary()}
         {body}
       </div>
     </BottomSheet>
@@ -1466,7 +1558,10 @@ export default function ClassSchedulePlanModal({
         data-testid="class-schedule-plan-modal"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className={`class-plan-sheet ${isReadonlyMode ? "is-public-detail" : "is-editable"}`}>
+        <div
+          className={`class-plan-sheet ${isReadonlyMode ? "is-public-detail" : "is-editable"}`}
+          data-testid={isReadonlyMode ? "class-schedule-plan-sheet" : undefined}
+        >
           {renderDesktopHeader()}
           {body}
         </div>

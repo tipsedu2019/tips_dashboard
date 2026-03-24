@@ -4,6 +4,7 @@ import {
   parseSchedule,
   stripClassPrefix,
 } from '../../data/sampleData';
+import { getEditableClassNameSeed } from '../../lib/classNameDisplay.js';
 import { computeClassStatus } from '../../lib/classStatus';
 import { sortSubjectOptions } from '../../lib/subjectUtils';
 
@@ -111,7 +112,7 @@ export function parseListInput(value) {
 }
 
 export function getClassDisplayName(classItem) {
-  return stripClassPrefix(classItem?.className || classItem?.name || '');
+  return getEditableClassNameSeed(classItem);
 }
 
 export function getClassSearchText(classItem) {

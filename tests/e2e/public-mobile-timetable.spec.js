@@ -269,10 +269,189 @@ test.describe('public mobile timetable', () => {
 
     const sheet = page.getByTestId('class-schedule-plan-sheet');
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByText('CLASS PLAN')).toBeVisible();
+    await expect(sheet.getByTestId('class-plan-preview').getByText('CLASS PLAN')).toBeVisible();
     await expect(sheet.getByText('TIPS DASHBOARD')).toHaveCount(0);
     await expect(sheet.getByRole('button', { name: '내 시간표에 담기' })).toBeVisible();
     await expect(sheet.getByRole('button', { name: '상담하기' })).toBeVisible();
+  });
+
+  test('removes the duplicate mobile summary chrome and keeps the public detail body scrollable', async ({ page }) => {
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const sheet = page.getByTestId('class-schedule-plan-modal');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator('.class-schedule-modal-mobile-summary')).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const stack = document.querySelector('.class-plan-sheet-public-stack');
+      if (!(stack instanceof HTMLElement)) {
+        return;
+      }
+
+      const filler = document.createElement('div');
+      filler.setAttribute('data-testid', 'public-detail-scroll-sentinel');
+      filler.textContent = 'scroll target';
+      filler.style.height = '1600px';
+      filler.style.borderRadius = '20px';
+      filler.style.background = 'rgba(37, 99, 235, 0.08)';
+      filler.style.border = '1px dashed rgba(37, 99, 235, 0.24)';
+      filler.style.display = 'grid';
+      filler.style.placeItems = 'center';
+      filler.style.fontWeight = '700';
+      filler.style.color = '#1d4ed8';
+      stack.appendChild(filler);
+    });
+
+    const scrollResult = await page.evaluate(() => {
+      const content = document.querySelector('.class-plan-sheet-content.is-public');
+      const body = document.querySelector('.bottom-sheet-body');
+      if (!(content instanceof HTMLElement) || !(body instanceof HTMLElement)) {
+        return null;
+      }
+
+      const before = body.scrollTop;
+      body.scrollTo({ top: body.scrollHeight, behavior: 'auto' });
+
+      return {
+        contentOverflowY: getComputedStyle(content).overflowY,
+        before,
+        after: body.scrollTop,
+        clientHeight: body.clientHeight,
+        scrollHeight: body.scrollHeight,
+      };
+    });
+
+    expect(scrollResult).not.toBeNull();
+    expect(scrollResult.contentOverflowY).toBe('visible');
+    expect(scrollResult.scrollHeight).toBeGreaterThan(scrollResult.clientHeight);
+    expect(scrollResult.after).toBeGreaterThan(scrollResult.before);
+    await expect(page.getByTestId('public-detail-scroll-sentinel')).toBeInViewport();
+  });
+
+  test('keeps the public detail portrait header minimal', async ({ page }) => {
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const modal = page.getByTestId('class-schedule-plan-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.bottom-sheet-subtitle')).toHaveCount(0);
+    await expect(modal.locator('.class-plan-sheet-summary')).toHaveCount(0);
+
+    const headerStyle = await page.evaluate(() => {
+      const header = document.querySelector('.class-plan-bottom-sheet--public .bottom-sheet-header');
+      return header ? getComputedStyle(header).borderBottomWidth : null;
+    });
+
+    expect(headerStyle).toBe('0px');
+  });
+
+  test('shows only a share icon in the public detail portrait header', async ({ page }) => {
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const modal = page.getByTestId('class-schedule-plan-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.bottom-sheet-handle')).toHaveCount(0);
+    await expect(modal.getByText('이미지 저장')).toHaveCount(0);
+
+    const shareButton = modal.getByTestId('class-plan-share-button');
+    await expect(shareButton).toBeVisible();
+    await expect(shareButton).toHaveText('');
+  });
+
+  test('keeps the public detail landscape header minimal on compact screens', async ({ page }) => {
+    await page.setViewportSize({ width: 932, height: 430 });
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const modal = page.getByTestId('class-schedule-plan-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.class-plan-desktop-header-title')).toHaveText('수업 계획');
+    await expect(modal.locator('.class-plan-desktop-header-subtitle')).toHaveCount(0);
+    await expect(modal.locator('.class-plan-desktop-header-tags')).toHaveCount(0);
+    await expect(modal.locator('.class-plan-desktop-header-meta')).toHaveCount(0);
+    await expect(modal.locator('.class-plan-sheet-summary')).toHaveCount(0);
+
+    const headerStyle = await page.evaluate(() => {
+      const header = document.querySelector('.class-plan-desktop-header.is-public-detail');
+      return header ? getComputedStyle(header).borderBottomWidth : null;
+    });
+
+    expect(headerStyle).toBe('0px');
+  });
+
+  test('shows only a share icon in the public detail compact header', async ({ page }) => {
+    await page.setViewportSize({ width: 932, height: 430 });
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const modal = page.getByTestId('class-schedule-plan-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.getByText('이미지 저장')).toHaveCount(0);
+
+    const shareButton = modal.getByTestId('class-plan-share-button');
+    await expect(shareButton).toBeVisible();
+    await expect(shareButton).toHaveText('');
+  });
+
+  test('keeps the public detail desktop header minimal on pc screens', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const modal = page.getByTestId('class-schedule-plan-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.locator('.class-plan-desktop-header-title')).toHaveText('수업 계획');
+    await expect(modal.locator('.class-plan-desktop-header-subtitle')).toHaveCount(0);
+    await expect(modal.locator('.class-plan-desktop-header-tags')).toHaveCount(0);
+    await expect(modal.locator('.class-plan-desktop-header-meta')).toHaveCount(0);
+    await expect(modal.locator('.class-plan-sheet-summary')).toHaveCount(0);
+
+    const shareButton = modal.getByTestId('class-plan-share-button');
+    await expect(shareButton).toBeVisible();
+    await expect(shareButton).toHaveText('');
+
+    const headerStyle = await page.evaluate(() => {
+      const header = document.querySelector('.class-plan-desktop-header.is-public-detail');
+      return header ? getComputedStyle(header).borderBottomWidth : null;
+    });
+
+    expect(headerStyle).toBe('0px');
+  });
+
+  test('uses the shared fill CTA styling for the planner add button on desktop', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const modal = page.getByTestId('class-schedule-plan-modal');
+    await expect(modal).toBeVisible();
+
+    const addButton = modal.getByRole('button', { name: '내 시간표에 담기' });
+    await expect(addButton).toBeVisible();
+    await expect(addButton).toHaveClass(/tds-button--style-fill/);
   });
 
   test('keeps the planner toast visible with a go-to action after adding a class', async ({ page }) => {

@@ -14,6 +14,7 @@ import {
   buildTeacherMaster,
   getResourceSubjectOptions,
 } from '../lib/resourceCatalogs';
+import { compareClassDisplayNames } from '../lib/classNameDisplay.js';
 import { splitTeacherList } from '../data/sampleData';
 
 function text(value) {
@@ -247,39 +248,41 @@ export default function CurriculumProgressWorkspace({ data = {}, dataService }) 
   const filteredRows = useMemo(() => {
     const keyword = text(searchQuery).toLowerCase();
 
-    return rows.filter((row) => {
-      if (selectedTerm && text(row.classItem.period) !== selectedTerm) {
-        return false;
-      }
-      if (selectedSubject && text(row.classItem.subject) !== selectedSubject) {
-        return false;
-      }
-      if (selectedGrade && text(row.classItem.grade) !== selectedGrade) {
-        return false;
-      }
-      if (selectedTeacher) {
-        const teacherSet = new Set(row.teacherNames);
-        if (!teacherSet.has(selectedTeacher)) {
+    return rows
+      .filter((row) => {
+        if (selectedTerm && text(row.classItem.period) !== selectedTerm) {
           return false;
         }
-      }
-      if (!keyword) {
-        return true;
-      }
+        if (selectedSubject && text(row.classItem.subject) !== selectedSubject) {
+          return false;
+        }
+        if (selectedGrade && text(row.classItem.grade) !== selectedGrade) {
+          return false;
+        }
+        if (selectedTeacher) {
+          const teacherSet = new Set(row.teacherNames);
+          if (!teacherSet.has(selectedTeacher)) {
+            return false;
+          }
+        }
+        if (!keyword) {
+          return true;
+        }
 
-      const haystack = [
-        row.classItem.className,
-        row.classItem.name,
-        row.classItem.subject,
-        row.classItem.grade,
-        row.classItem.teacher,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+        const haystack = [
+          row.classItem.className,
+          row.classItem.name,
+          row.classItem.subject,
+          row.classItem.grade,
+          row.classItem.teacher,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
 
-      return haystack.includes(keyword);
-    });
+        return haystack.includes(keyword);
+      })
+      .sort((left, right) => compareClassDisplayNames(left.classItem, right.classItem));
   }, [rows, searchQuery, selectedTerm, selectedSubject, selectedGrade, selectedTeacher]);
 
   const activeRow = useMemo(
