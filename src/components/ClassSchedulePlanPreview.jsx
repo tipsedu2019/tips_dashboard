@@ -360,6 +360,20 @@ function buildPreviewBadges(sessionGroups) {
   return badges;
 }
 
+function buildCompactMonthFilterSummary({
+  selectedOptions = [],
+  placeholder = "월 선택",
+}) {
+  if (!selectedOptions.length) {
+    return placeholder;
+  }
+
+  const firstLabel = selectedOptions[0]?.label || placeholder;
+  const extraCount = Math.max(selectedOptions.length - 1, 0);
+
+  return extraCount > 0 ? `${firstLabel} 외 ${extraCount}개` : firstLabel;
+}
+
 function sanitizeFilePart(value) {
   return (
     String(value || "")
@@ -904,8 +918,10 @@ export function ClassSchedulePlanPreview({
                   label="수업 계획 월 필터"
                   placeholder="월 선택"
                   className="class-plan-preview-month-filter"
-                  maxPreview={2}
+                  maxPreview={1}
+                  showCountMeta={false}
                   showResetOption={false}
+                  summaryFormatter={buildCompactMonthFilterSummary}
                 />
               ) : null}
 

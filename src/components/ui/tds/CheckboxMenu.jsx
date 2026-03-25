@@ -20,6 +20,7 @@ export default function CheckboxMenu({
   selectionMode = 'multiple',
   showResetOption = true,
   emptySelectionMeansAll = false,
+  summaryFormatter,
 }) {
   const rootRef = useRef(null);
   const panelRef = useRef(null);
@@ -50,6 +51,10 @@ export default function CheckboxMenu({
     () => normalizedSelected.map((item) => labelByValue[item] || item),
     [labelByValue, normalizedSelected],
   );
+  const selectedOptions = useMemo(
+    () => normalizedOptions.filter((option) => normalizedSelected.includes(option.value)),
+    [normalizedOptions, normalizedSelected],
+  );
   const effectiveSelected = useMemo(() => {
     if (selectionMode === 'multiple' && emptySelectionMeansAll && normalizedSelected.length === 0) {
       return normalizedOptions.map((option) => option.value);
@@ -59,6 +64,21 @@ export default function CheckboxMenu({
   const selectedCountForMeta = useMemo(() => effectiveSelected.length, [effectiveSelected]);
 
   const summary = useMemo(() => {
+    if (typeof summaryFormatter === 'function') {
+      const formattedSummary = summaryFormatter({
+        maxPreview,
+        options: normalizedOptions,
+        placeholder,
+        selectedLabels,
+        selectedOptions,
+        selectedValues: normalizedSelected,
+      });
+
+      if (typeof formattedSummary === 'string' && formattedSummary.trim()) {
+        return formattedSummary;
+      }
+    }
+
     if (normalizedSelected.length === 0) {
       return placeholder;
     }
@@ -68,7 +88,15 @@ export default function CheckboxMenu({
     }
 
     return `${selectedLabels.slice(0, maxPreview).join(', ')} 외 ${selectedLabels.length - maxPreview}개`;
-  }, [maxPreview, normalizedSelected.length, placeholder, selectedLabels]);
+  }, [
+    maxPreview,
+    normalizedOptions,
+    normalizedSelected,
+    placeholder,
+    selectedLabels,
+    selectedOptions,
+    summaryFormatter,
+  ]);
 
   useEffect(() => {
     if (!open) {

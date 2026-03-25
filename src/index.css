@@ -15258,12 +15258,14 @@ textarea.styled-input:focus {
 .class-plan-preview-copy {
   display: grid;
   gap: 6px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .class-plan-preview-header-actions {
   display: flex;
   flex-wrap: wrap;
+  flex: 0 0 auto;
   justify-content: flex-end;
   align-items: flex-start;
   gap: 10px;
@@ -15271,12 +15273,27 @@ textarea.styled-input:focus {
 }
 
 .class-plan-preview-month-filter {
-  min-width: 180px;
-  max-width: 100%;
+  flex: 0 1 148px;
+  width: min(100%, 148px);
+  min-width: 136px;
+  max-width: 148px;
 }
 
 .class-plan-preview-month-filter .tds-checkbox-menu__panel {
   z-index: 4;
+}
+
+.class-plan-preview-month-filter .tds-checkbox-menu__trigger {
+  min-height: 42px;
+  padding-inline: 12px;
+}
+
+.class-plan-preview-month-filter .tds-checkbox-menu__trigger-copy {
+  gap: 0;
+}
+
+.class-plan-preview-month-filter .tds-checkbox-menu__trigger-label {
+  font-size: 13px;
 }
 
 .class-plan-preview-title {

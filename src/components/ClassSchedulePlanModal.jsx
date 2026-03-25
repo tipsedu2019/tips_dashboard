@@ -254,10 +254,15 @@ function buildMonthKey(year, month) {
   return `${year}-${String(month + 1).padStart(2, "0")}`;
 }
 
+function formatMonthFilterLabel(year, month) {
+  const shortYear = String(year || "").slice(-2);
+  return `${shortYear}년 ${month + 1}월`;
+}
+
 function buildMonthFilterOptions(months = []) {
   return (months || []).map((month) => ({
     value: buildMonthKey(month.year, month.month),
-    label: `${month.year}년 ${month.month + 1}월`,
+    label: formatMonthFilterLabel(month.year, month.month),
   }));
 }
 
