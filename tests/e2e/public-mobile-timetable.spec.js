@@ -614,7 +614,7 @@ test.describe('public mobile timetable', () => {
     expect(headerStyle).toBe('0px');
   });
 
-  test('shows image save and PDF share buttons in the public detail portrait header', async ({ page }) => {
+  test('shows icon-only save and pdf share buttons in the public detail portrait header', async ({ page }) => {
     await page.goto(e2eUrl('/'));
 
     const cards = page.locator('[data-testid^="public-class-card-"]');
@@ -624,8 +624,10 @@ test.describe('public mobile timetable', () => {
     const modal = page.getByTestId('class-schedule-plan-modal');
     await expect(modal).toBeVisible();
     await expect(modal.locator('.bottom-sheet-handle')).toHaveCount(0);
-    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('이미지 저장');
-    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('PDF 공유');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveAttribute('aria-label', '이미지 저장');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveAttribute('aria-label', 'PDF 공유');
   });
 
   test('downloads the public class plan image without showing a capture error toast on mobile', async ({
@@ -742,7 +744,7 @@ test.describe('public mobile timetable', () => {
     expect(headerStyle).toBe('0px');
   });
 
-  test('shows image save and PDF share buttons in the public detail compact header', async ({ page }) => {
+  test('shows icon-only save and pdf share buttons in the public detail compact header', async ({ page }) => {
     await page.setViewportSize({ width: 932, height: 430 });
     await page.goto(e2eUrl('/'));
 
@@ -752,8 +754,10 @@ test.describe('public mobile timetable', () => {
 
     const modal = page.getByTestId('class-schedule-plan-modal');
     await expect(modal).toBeVisible();
-    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('이미지 저장');
-    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('PDF 공유');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveAttribute('aria-label', '이미지 저장');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveAttribute('aria-label', 'PDF 공유');
   });
 
   test('keeps the public detail desktop header minimal on pc screens', async ({ page }) => {
@@ -772,8 +776,10 @@ test.describe('public mobile timetable', () => {
     await expect(modal.locator('.class-plan-desktop-header-meta')).toHaveCount(0);
     await expect(modal.locator('.class-plan-sheet-summary')).toHaveCount(0);
 
-    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('이미지 저장');
-    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('PDF 공유');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveAttribute('aria-label', '이미지 저장');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveAttribute('aria-label', 'PDF 공유');
 
     const headerStyle = await page.evaluate(() => {
       const header = document.querySelector('.class-plan-desktop-header.is-public-detail');

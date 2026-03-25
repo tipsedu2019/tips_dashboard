@@ -13690,19 +13690,14 @@ textarea.styled-input:focus {
 
 .class-plan-header-action-group {
   display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
+  flex-shrink: 0;
   gap: 8px;
 }
 
-.class-plan-header-action-button {
+.class-plan-header-icon-button {
   flex-shrink: 0;
-}
-
-.class-plan-header-action-button.tds-button {
-  min-height: 40px;
-  padding-inline: 14px;
+  align-self: center;
 }
 
 .class-plan-desktop-save {

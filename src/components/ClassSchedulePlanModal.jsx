@@ -30,7 +30,7 @@ import {
   exportElementAsPdf,
 } from "../lib/exportAsImage";
 import { getEditableClassNameSeed } from "../lib/classNameDisplay.js";
-import { Badge, Button, Dialog, IconButton, SegmentedControl, TextField } from "./ui/tds";
+import { Badge, Button, Dialog, SegmentedControl, TextField } from "./ui/tds";
 import {
   applyCalendarDateSubstitution,
   applyCalendarDateToggle,
@@ -1002,34 +1002,28 @@ Confirmed that the diskette icon in the top right is a functional save button. I
     ) : null;
   const readonlyHeaderActionButtons = isReadonlyMode ? (
     <div className="class-plan-header-action-group">
-      <Button
-        color="neutral"
-        variant="weak"
-        size="small"
-        leftAccessory={<Download size={16} />}
+      <button
+        type="button"
+        className="theme-toggle class-plan-header-icon-button"
         onClick={handleDownloadPreview}
         disabled={isSharingPreview}
-        className="class-plan-header-action-button"
         aria-label={isSharingPreview ? "이미지 저장 중" : "이미지 저장"}
         title={isSharingPreview ? "이미지 저장 중" : "이미지 저장"}
         data-testid="class-plan-download-button"
       >
-        {isSharingPreview ? "저장 중" : "이미지 저장"}
-      </Button>
-      <Button
-        color="neutral"
-        variant="weak"
-        size="small"
-        leftAccessory={<Share2 size={16} />}
+        <Download size={18} />
+      </button>
+      <button
+        type="button"
+        className="theme-toggle class-plan-header-icon-button"
         onClick={handleSharePreviewPdf}
         disabled={isExportingPreviewPdf}
-        className="class-plan-header-action-button"
         aria-label={isExportingPreviewPdf ? "PDF 공유 준비 중" : "PDF 공유"}
         title={isExportingPreviewPdf ? "PDF 공유 준비 중" : "PDF 공유"}
         data-testid="class-plan-pdf-share-button"
       >
-        {isExportingPreviewPdf ? "PDF 준비 중" : "PDF 공유"}
-      </Button>
+        <Share2 size={18} />
+      </button>
     </div>
   ) : null;
 
