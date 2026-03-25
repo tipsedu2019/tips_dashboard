@@ -278,19 +278,23 @@ export async function exportElementAsPdf(element, title = '시간표') {
     throw new Error('PDF export target is not available');
   }
 
-  const imageBlob = await captureElementAsPngBlob(element, {
-    preset: 'a4-landscape',
-  });
-  if (!imageBlob) {
-    throw new Error('PDF preview capture failed');
-  }
-
-  const imageSrc = await readBlobAsDataUrl(imageBlob);
   const popup = window.open('', '_blank', 'width=1440,height=960');
   if (!popup) {
     throw new Error('PDF preview window could not be opened');
   }
 
+  popup.document.write(buildPdfHtml(title, ''));
+  popup.document.close();
+
+  const imageBlob = await captureElementAsPngBlob(element, {
+    preset: 'a4-landscape',
+  });
+  if (!imageBlob) {
+    popup.close();
+    throw new Error('PDF preview capture failed');
+  }
+
+  const imageSrc = await readBlobAsDataUrl(imageBlob);
   popup.document.write(buildPdfHtml(title, imageSrc));
   popup.document.close();
 }

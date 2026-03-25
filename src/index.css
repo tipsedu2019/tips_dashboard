@@ -13688,6 +13688,23 @@ textarea.styled-input:focus {
   flex-shrink: 0;
 }
 
+.class-plan-header-action-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.class-plan-header-action-button {
+  flex-shrink: 0;
+}
+
+.class-plan-header-action-button.tds-button {
+  min-height: 40px;
+  padding-inline: 14px;
+}
+
 .class-plan-desktop-save {
   align-self: center;
 }

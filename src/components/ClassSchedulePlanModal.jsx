@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock3,
+  Download,
   MapPin,
   Pencil,
   Save,
@@ -23,7 +24,11 @@ import useViewport from "../hooks/useViewport";
 import { useToast } from "../contexts/ToastContext";
 import { PublicLandingCard } from "./PublicClassLandingView";
 import BottomSheet from "./ui/BottomSheet";
-import { captureElementAsPngBlob, downloadBlob } from "../lib/exportAsImage";
+import {
+  captureElementAsPngBlob,
+  downloadBlob,
+  exportElementAsPdf,
+} from "../lib/exportAsImage";
 import { getEditableClassNameSeed } from "../lib/classNameDisplay.js";
 import { Badge, Button, Dialog, IconButton, SegmentedControl, TextField } from "./ui/tds";
 import {
@@ -434,6 +439,7 @@ export default function ClassSchedulePlanModal({
   const [textbookEditorState, setTextbookEditorState] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSharingPreview, setIsSharingPreview] = useState(false);
+  const [isExportingPreviewPdf, setIsExportingPreviewPdf] = useState(false);
   const [selectedMonthKeys, setSelectedMonthKeys] = useState([]);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
@@ -835,6 +841,75 @@ export default function ClassSchedulePlanModal({
     }
   };
 
+  const previewCaptureFilename = `class-plan-${sanitizeFilePart(draftClass.subject || safeClass.subject)}-${sanitizeFilePart(displayClassName)}`;
+
+  const handleDownloadPreview = async () => {
+    if (!readonlyShareTargetRef.current || !canSharePreview) {
+      toast.info("저장할 수업 계획 이미지가 아직 없습니다.");
+      return;
+    }
+
+    setIsSharingPreview(true);
+    const captureTarget = readonlyShareTargetRef.current;
+
+    try {
+      captureTarget.setAttribute("data-capturing", "true");
+      const captureWidth = 960;
+      const capturePadding = 32;
+      const captureScale = isMobile ? 5 : 4;
+
+      const blob = await captureElementAsPngBlob(captureTarget, {
+        width: captureWidth,
+        padding: capturePadding,
+        scale: captureScale,
+        backgroundColor: "#f4f8ff",
+      });
+
+      if (!blob) {
+        throw new Error("class plan share blob missing");
+      }
+
+      downloadBlob(blob, `${previewCaptureFilename}.png`);
+      toast.success("이미지를 저장했어요.");
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+
+      console.error(error);
+      toast.error("수업 계획 이미지를 저장하는 중 문제가 생겼습니다.");
+    } finally {
+      captureTarget.removeAttribute("data-capturing");
+      setIsSharingPreview(false);
+    }
+  };
+
+  const handleSharePreviewPdf = async () => {
+    if (!readonlyShareTargetRef.current || !canSharePreview) {
+      toast.info("공유할 수업 계획 PDF가 아직 없습니다.");
+      return;
+    }
+
+    setIsExportingPreviewPdf(true);
+    const captureTarget = readonlyShareTargetRef.current;
+
+    try {
+      captureTarget.setAttribute("data-capturing", "true");
+      await exportElementAsPdf(captureTarget, `${displayClassName} 수업 계획`);
+      toast.success("PDF를 열었어요.");
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+
+      console.error(error);
+      toast.error("수업 계획 PDF를 준비하는 중 문제가 생겼습니다.");
+    } finally {
+      captureTarget.removeAttribute("data-capturing");
+      setIsExportingPreviewPdf(false);
+    }
+  };
+
   if (!open) {
     return null;
   }
@@ -925,18 +1000,37 @@ Confirmed that the diskette icon in the top right is a functional save button. I
         <Save size={18} />
       </button>
     ) : null;
-  const readonlyHeaderShareButton = isReadonlyMode ? (
-    <button
-      type="button"
-      className="theme-toggle class-plan-share-button"
-      onClick={handleSharePreview}
-      disabled={isSharingPreview}
-      aria-label={isSharingPreview ? "공유 준비 중" : "수업 계획 공유"}
-      title={isSharingPreview ? "공유 준비 중" : "수업 계획 공유"}
-      data-testid="class-plan-share-button"
-    >
-      <Share2 size={18} />
-    </button>
+  const readonlyHeaderActionButtons = isReadonlyMode ? (
+    <div className="class-plan-header-action-group">
+      <Button
+        color="neutral"
+        variant="weak"
+        size="small"
+        leftAccessory={<Download size={16} />}
+        onClick={handleDownloadPreview}
+        disabled={isSharingPreview}
+        className="class-plan-header-action-button"
+        aria-label={isSharingPreview ? "이미지 저장 중" : "이미지 저장"}
+        title={isSharingPreview ? "이미지 저장 중" : "이미지 저장"}
+        data-testid="class-plan-download-button"
+      >
+        {isSharingPreview ? "저장 중" : "이미지 저장"}
+      </Button>
+      <Button
+        color="neutral"
+        variant="weak"
+        size="small"
+        leftAccessory={<Share2 size={16} />}
+        onClick={handleSharePreviewPdf}
+        disabled={isExportingPreviewPdf}
+        className="class-plan-header-action-button"
+        aria-label={isExportingPreviewPdf ? "PDF 공유 준비 중" : "PDF 공유"}
+        title={isExportingPreviewPdf ? "PDF 공유 준비 중" : "PDF 공유"}
+        data-testid="class-plan-pdf-share-button"
+      >
+        {isExportingPreviewPdf ? "PDF 준비 중" : "PDF 공유"}
+      </Button>
+    </div>
   ) : null;
 
   const renderMobileSummary = () => {
@@ -1051,7 +1145,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
       </div>
 
       <div className="class-plan-desktop-header-actions">
-        {readonlyHeaderShareButton}
+        {readonlyHeaderActionButtons}
         {desktopHeaderSaveButton}
         <button
           type="button"
@@ -1757,7 +1851,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
       onClose={handleRequestClose}
       title={headerTitle}
       subtitle={isReadonlyMode ? "" : draftClass.subject || safeClass.subject || ""}
-      headerActions={readonlyHeaderShareButton}
+      headerActions={readonlyHeaderActionButtons}
       actions={isEditableMode ? (isMobile ? saveBar : null) : null}
       testId="class-schedule-plan-modal"
       sheetClassName={

@@ -614,7 +614,7 @@ test.describe('public mobile timetable', () => {
     expect(headerStyle).toBe('0px');
   });
 
-  test('shows only a share icon in the public detail portrait header', async ({ page }) => {
+  test('shows image save and PDF share buttons in the public detail portrait header', async ({ page }) => {
     await page.goto(e2eUrl('/'));
 
     const cards = page.locator('[data-testid^="public-class-card-"]');
@@ -624,46 +624,14 @@ test.describe('public mobile timetable', () => {
     const modal = page.getByTestId('class-schedule-plan-modal');
     await expect(modal).toBeVisible();
     await expect(modal.locator('.bottom-sheet-handle')).toHaveCount(0);
-    await expect(modal.getByText('이미지 저장')).toHaveCount(0);
-
-    const shareButton = modal.getByTestId('class-plan-share-button');
-    await expect(shareButton).toBeVisible();
-    await expect(shareButton).toHaveText('');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('이미지 저장');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('PDF 공유');
   });
 
-  test('shares the public class plan image without showing a capture error toast on mobile', async ({
+  test('downloads the public class plan image without showing a capture error toast on mobile', async ({
     page,
   }) => {
     await seedPublicMultiMonthState(page);
-    await page.addInitScript(() => {
-      window.__shareCalls = [];
-      window.__sharedFiles = [];
-      const navigatorPrototype = Object.getPrototypeOf(navigator);
-
-      Object.defineProperty(navigatorPrototype, 'canShare', {
-        configurable: true,
-        value: ({ files } = {}) => Array.isArray(files) && files.length > 0,
-      });
-      Object.defineProperty(navigatorPrototype, 'share', {
-        configurable: true,
-        value: async (payload) => {
-          if (payload?.files?.[0]) {
-            window.__sharedFiles.push(payload.files[0]);
-          }
-          window.__shareCalls.push({
-            title: payload?.title ?? '',
-            text: payload?.text ?? '',
-            files:
-              payload?.files?.map((file) => ({
-                name: file.name,
-                size: file.size,
-                type: file.type,
-              })) ?? [],
-          });
-        },
-      });
-    });
-
     await page.goto(e2eUrl('/'));
     const modal = await openPublicDetailModal(page);
 
@@ -673,80 +641,16 @@ test.describe('public mobile timetable', () => {
     await monthOptions.nth(2).click();
     await expect(monthOptions.nth(2)).toHaveAttribute('aria-checked', 'false');
 
-    const shareButton = modal.getByTestId('class-plan-share-button');
-    await expect(shareButton).toBeVisible();
-    await shareButton.click();
+    const downloadButton = modal.getByTestId('class-plan-download-button');
+    await expect(downloadButton).toBeVisible();
 
-    await expect
-      .poll(async () => page.evaluate(() => window.__shareCalls?.length ?? 0))
-      .toBe(1);
+    const downloadPromise = page.waitForEvent('download');
+    await downloadButton.click();
+    const download = await downloadPromise;
 
-    await expect(shareButton).toBeEnabled();
+    await expect(downloadButton).toBeEnabled();
     await expect(page.locator('.toast-item.is-error')).toHaveCount(0);
-
-    const shareCalls = await page.evaluate(() => window.__shareCalls ?? []);
-
-    expect(shareCalls).toHaveLength(1);
-    expect(shareCalls[0]?.files).toHaveLength(1);
-    expect(shareCalls[0]?.files[0]?.type).toBe('image/png');
-    expect(shareCalls[0]?.files[0]?.size).toBeGreaterThan(0);
-
-    const imageMetrics = await page.evaluate(async () => {
-      const file = window.__sharedFiles?.[0];
-      if (!file) {
-        return null;
-      }
-
-      const bitmap = await createImageBitmap(file);
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-
-      const context = canvas.getContext('2d');
-      context.drawImage(bitmap, 0, 0);
-
-      const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
-      const stepX = Math.max(1, Math.floor(width / 160));
-      const stepY = Math.max(1, Math.floor(height / 160));
-
-      let darkSamples = 0;
-      let nonLightSamples = 0;
-
-      for (let y = 0; y < height; y += stepY) {
-        for (let x = 0; x < width; x += stepX) {
-          const index = (y * width + x) * 4;
-          const red = data[index];
-          const green = data[index + 1];
-          const blue = data[index + 2];
-          const alpha = data[index + 3];
-
-          if (alpha < 16) {
-            continue;
-          }
-
-          if (red < 160 || green < 160 || blue < 160) {
-            darkSamples += 1;
-          }
-
-          if (red < 235 || green < 235 || blue < 235) {
-            nonLightSamples += 1;
-          }
-        }
-      }
-
-      return {
-        width,
-        height,
-        darkSamples,
-        nonLightSamples,
-      };
-    });
-
-    expect(imageMetrics).not.toBeNull();
-    expect(imageMetrics?.width).toBeGreaterThan(1000);
-    expect(imageMetrics?.height).toBeGreaterThan(imageMetrics?.width ?? 0);
-    expect(imageMetrics?.darkSamples).toBeGreaterThan(40);
-    expect(imageMetrics?.nonLightSamples).toBeGreaterThan(80);
+    expect(download.suggestedFilename()).toMatch(/class-plan-.*\.png$/);
   });
 
   test('prepares a portrait high-resolution share capture and keeps the add CTA blue on mobile', async ({
@@ -838,7 +742,7 @@ test.describe('public mobile timetable', () => {
     expect(headerStyle).toBe('0px');
   });
 
-  test('shows only a share icon in the public detail compact header', async ({ page }) => {
+  test('shows image save and PDF share buttons in the public detail compact header', async ({ page }) => {
     await page.setViewportSize({ width: 932, height: 430 });
     await page.goto(e2eUrl('/'));
 
@@ -848,11 +752,8 @@ test.describe('public mobile timetable', () => {
 
     const modal = page.getByTestId('class-schedule-plan-modal');
     await expect(modal).toBeVisible();
-    await expect(modal.getByText('이미지 저장')).toHaveCount(0);
-
-    const shareButton = modal.getByTestId('class-plan-share-button');
-    await expect(shareButton).toBeVisible();
-    await expect(shareButton).toHaveText('');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('이미지 저장');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('PDF 공유');
   });
 
   test('keeps the public detail desktop header minimal on pc screens', async ({ page }) => {
@@ -871,9 +772,8 @@ test.describe('public mobile timetable', () => {
     await expect(modal.locator('.class-plan-desktop-header-meta')).toHaveCount(0);
     await expect(modal.locator('.class-plan-sheet-summary')).toHaveCount(0);
 
-    const shareButton = modal.getByTestId('class-plan-share-button');
-    await expect(shareButton).toBeVisible();
-    await expect(shareButton).toHaveText('');
+    await expect(modal.getByTestId('class-plan-download-button')).toHaveText('이미지 저장');
+    await expect(modal.getByTestId('class-plan-pdf-share-button')).toHaveText('PDF 공유');
 
     const headerStyle = await page.evaluate(() => {
       const header = document.querySelector('.class-plan-desktop-header.is-public-detail');
