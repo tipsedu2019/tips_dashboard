@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
+    "@tanstack/react-virtual": "^3.13.23",
+    "date-fns": "^4.1.0",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.577.0",
     "papaparse": "^5.5.3",

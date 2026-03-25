@@ -1,4 +1,4 @@
-import { createE2EMockData } from './mockAppData';
+import { createE2EMockData } from './mockAppData.js';
 
 function clone(value) {
   if (typeof structuredClone === 'function') {
@@ -14,15 +14,38 @@ function createId(prefix = 'e2e') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-class E2EMockDataService {
-  constructor() {
+const MOCK_STATE_STORAGE_KEY = 'tips:e2e:mock-data-service:state:v1';
+const MOCK_PREFERENCES_STORAGE_KEY = 'tips:e2e:mock-data-service:preferences:v1';
+
+function resolveStorage(explicitStorage) {
+  if (explicitStorage) return explicitStorage;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    return window.localStorage;
+  }
+  return null;
+}
+
+export class E2EMockDataService {
+  constructor({ storage } = {}) {
     this.listeners = new Set();
+    this.storage = resolveStorage(storage);
     this.preferences = new Map();
     this.reset();
   }
 
   reset() {
-    this.state = createE2EMockData();
+    const persistedState = this._readJson(MOCK_STATE_STORAGE_KEY);
+    const persistedPreferences = this._readJson(MOCK_PREFERENCES_STORAGE_KEY);
+
+    this.state = persistedState || createE2EMockData();
+    this.preferences = new Map(
+      Array.isArray(persistedPreferences)
+        ? persistedPreferences
+            .filter((entry) => Array.isArray(entry) && entry.length === 2)
+            .map(([key, value]) => [key, value])
+        : []
+    );
+    this._persist();
   }
 
   _snapshot(overrides = {}) {
@@ -38,8 +61,39 @@ class E2EMockDataService {
 
   _emit() {
     const snapshot = this._snapshot();
+    this._persist();
     this.listeners.forEach((listener) => listener(snapshot));
     return snapshot;
+  }
+
+  _readJson(key) {
+    if (!this.storage?.getItem) {
+      return null;
+    }
+
+    try {
+      const raw = this.storage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  _writeJson(key, value) {
+    if (!this.storage?.setItem) {
+      return;
+    }
+
+    try {
+      this.storage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Ignore storage failures in the lightweight E2E service.
+    }
+  }
+
+  _persist() {
+    this._writeJson(MOCK_STATE_STORAGE_KEY, this.state);
+    this._writeJson(MOCK_PREFERENCES_STORAGE_KEY, [...this.preferences.entries()]);
   }
 
   _upsertById(collectionKey, rows = []) {
@@ -105,7 +159,145 @@ class E2EMockDataService {
       updatedAt: new Date().toISOString(),
     };
     this.preferences.set(key, next);
+    this._persist();
     return next;
+  }
+
+  async addClass(classObj) {
+    const saved = {
+      id: classObj.id || createId('class'),
+      ...clone(classObj),
+    };
+    this._upsertById('classes', [saved]);
+    this._emit();
+    return clone(saved);
+  }
+
+  async updateClass(id, updates) {
+    this.state.classes = (this.state.classes || []).map((item) => (
+      item.id === id ? { ...item, ...clone(updates), id } : item
+    ));
+    this._emit();
+    return true;
+  }
+
+  async deleteClass(id) {
+    this.state.classes = (this.state.classes || []).filter((item) => item.id !== id);
+    this.state.classScheduleSyncGroupMembers = (this.state.classScheduleSyncGroupMembers || []).filter(
+      (item) => item.classId !== id
+    );
+    this._emit();
+  }
+
+  async addProgressLog(log) {
+    const saved = {
+      id: log.id || createId('progress-log'),
+      classId: log.classId,
+      textbookId: log.textbookId || null,
+      chapterId: log.chapterId || null,
+      completedLessonIds: Array.isArray(log.completedLessonIds)
+        ? [...log.completedLessonIds]
+        : (log.chapterId ? [log.chapterId] : []),
+      date: log.date || new Date().toISOString(),
+      content: log.content || '',
+      homework: log.homework || '',
+    };
+    this.state.progressLogs = [...(this.state.progressLogs || []), saved];
+    this._emit();
+    return clone(saved);
+  }
+
+  async deleteProgressLog(logId) {
+    this.state.progressLogs = (this.state.progressLogs || []).filter((item) => item.id !== logId);
+    this._emit();
+  }
+
+  async upsertSessionProgressLog(log) {
+    const progressKey =
+      log.progressKey ||
+      [log.classId, log.sessionId, log.textbookId].map((value) => String(value || '').trim()).join(':');
+
+    const saved = {
+      id: log.id || createId('session-progress'),
+      classId: log.classId,
+      textbookId: log.textbookId || null,
+      progressKey,
+      sessionId: log.sessionId || '',
+      sessionOrder: Number(log.sessionOrder || 0),
+      status: log.status || 'pending',
+      rangeStart: log.rangeStart || '',
+      rangeEnd: log.rangeEnd || '',
+      rangeLabel: log.rangeLabel || '',
+      publicNote: log.publicNote || '',
+      teacherNote: log.teacherNote || '',
+      updatedAt: log.updatedAt || new Date().toISOString(),
+      content: log.content || log.rangeLabel || '',
+      homework: log.homework || '',
+      date: log.date || log.updatedAt || new Date().toISOString(),
+    };
+
+    const current = [...(this.state.progressLogs || [])];
+    const index = current.findIndex((item) => item.progressKey === progressKey);
+    if (index >= 0) {
+      current[index] = { ...current[index], ...saved, id: current[index].id || saved.id };
+    } else {
+      current.push(saved);
+    }
+    this.state.progressLogs = current;
+    this._emit();
+    return clone(index >= 0 ? current[index] : saved);
+  }
+
+  async deleteSessionProgressLog({ id = '', progressKey = '' } = {}) {
+    this.state.progressLogs = (this.state.progressLogs || []).filter((item) => {
+      if (id) {
+        return item.id !== id;
+      }
+      if (progressKey) {
+        return item.progressKey !== progressKey;
+      }
+      return true;
+    });
+    this._emit();
+  }
+
+  async upsertClassScheduleSyncGroup(group) {
+    const saved = {
+      id: group.id || createId('sync-group'),
+      termId: group.termId || group.term_id || null,
+      name: group.name || '',
+      subject: group.subject || '',
+      color: group.color || '#3182f6',
+      note: group.note || '',
+      updatedAt: new Date().toISOString(),
+    };
+    this._upsertById('classScheduleSyncGroups', [saved]);
+    this._emit();
+    return clone(saved);
+  }
+
+  async replaceClassScheduleSyncGroupMembers(groupId, members = []) {
+    const retained = (this.state.classScheduleSyncGroupMembers || []).filter((item) => item.groupId !== groupId);
+    const saved = members.map((member, index) => ({
+      id: member.id || createId('sync-member'),
+      groupId,
+      classId: member.classId,
+      sortOrder: member.sortOrder ?? index,
+      createdAt: new Date().toISOString(),
+    }));
+    this.state.classScheduleSyncGroupMembers = [...retained, ...saved];
+    this._emit();
+    return clone(saved);
+  }
+
+  async deleteClassScheduleSyncGroup(groupId) {
+    this.state.classScheduleSyncGroups = (this.state.classScheduleSyncGroups || []).filter(
+      (item) => item.id !== groupId
+    );
+    this.state.classScheduleSyncGroupMembers = (this.state.classScheduleSyncGroupMembers || []).filter(
+      (item) => item.groupId !== groupId
+    );
+    this._emit();
   }
 
   async upsertAcademicSchools(rows = []) {

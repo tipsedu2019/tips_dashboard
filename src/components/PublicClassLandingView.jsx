@@ -60,8 +60,8 @@ const SCORE_URL =
   'https://tipsedu.notion.site/81702b56937644e9a609b1f0b6b48105?v=d97e114279514356a2e70982379ed079';
 
 const SUBJECT_TONES = {
-  영어: { bg: '#e8eefb', border: '#cfd9ea', text: '#334155' },
-  수학: { bg: '#f1f4f7', border: '#dde3ea', text: '#191f28' },
+  영어: { bg: 'var(--tds-color-red-50, #fff1f2)', border: 'var(--tds-color-red-200, #fecdd3)', text: 'var(--tds-color-red-600, #e11d48)' },
+  수학: { bg: 'var(--tds-color-blue-50, #eff6ff)', border: 'var(--tds-color-blue-200, #bfdbfe)', text: 'var(--tds-color-blue-600, #2563eb)' },
 };
 
 const PLANNER_FALLBACK_TONES = [
@@ -317,9 +317,27 @@ function sortClassesForLanding(items = []) {
 }
 
 function buildSectionKicker(selectedSubject, selectedGrade) {
-  const subjectLabel = selectedSubject || '전체 과목';
+  const subjectLabel = selectedSubject ? (
+    <Badge
+      size="small"
+      type={text(selectedSubject) === '수학' ? 'blue' : text(selectedSubject) === '영어' ? 'red' : 'gray'}
+      badgeStyle="weak"
+    >
+      {selectedSubject}
+    </Badge>
+  ) : (
+    '전체 과목'
+  );
+
   const gradeLabel = selectedGrade || '전체 학년';
-  return `${subjectLabel} · ${gradeLabel}`;
+
+  return (
+    <div className="public-landing-section-kicker-content">
+      {subjectLabel}
+      {selectedSubject && selectedGrade ? <span className="public-landing-section-kicker-sep"> · </span> : null}
+      {gradeLabel}
+    </div>
+  );
 }
 
 function buildSectionTitle(selectedSubject, selectedGrade) {
@@ -436,7 +454,15 @@ function buildTimetableData(items = []) {
           type: 'single',
           classItem: entry.classItem,
           title: stripClassPrefix(entry.classItem.className || '이름 없는 수업'),
-          header: entry.classItem.subject || '수업',
+          header: (
+            <Badge
+              size="small"
+              type={text(entry.classItem.subject) === '수학' ? 'blue' : text(entry.classItem.subject) === '영어' ? 'red' : 'gray'}
+              badgeStyle="weak"
+            >
+              {text(entry.classItem.subject) || '수업'}
+            </Badge>
+          ),
           detailLines: [
             { label: 'time', value: entry.scheduleLabel },
             { label: 'teacher', value: text(entry.classItem.teacher) || '선생님 미정', subtle: true },
@@ -462,7 +488,15 @@ function buildTimetableData(items = []) {
           type: 'merged',
           classItems: cluster.map((entry) => entry.classItem),
           title: `${text(primary?.subject) || '수업'} 외 ${cluster.length - 1}개`,
-          header: stripClassPrefix(primary?.className || '겹침 수업'),
+          header: (
+            <Badge
+              size="small"
+              type={text(primary?.subject) === '수학' ? 'blue' : text(primary?.subject) === '영어' ? 'red' : 'gray'}
+              badgeStyle="weak"
+            >
+              {text(primary?.subject) || '수업'}
+            </Badge>
+          ),
           detailLines: [
             {
               label: 'time',
@@ -626,7 +660,7 @@ export function PublicLandingCard({
   hideActions = false,
   semanticButton = true,
   plannerActionLabel = '담기',
-  plannerSelectedActionLabel = '담김',
+  plannerSelectedActionLabel = '빼기',
 }) {
   const title = stripClassPrefix(classItem.className || classItem.name || '이름 없는 수업');
   const scheduleLines = buildScheduleLines(classItem);
@@ -686,9 +720,16 @@ export function PublicLandingCard({
           }
         >
           <div className='public-landing-card-heading'>
-            <span className='public-landing-card-eyebrow'>
-              {subject} · {grade}
-            </span>
+            <div className='public-landing-card-eyebrow-row'>
+              <Badge 
+                size='small' 
+                type={text(subject) === '수학' ? 'blue' : text(subject) === '영어' ? 'red' : 'gray'}
+                badgeStyle='weak'
+              >
+                {subject}
+              </Badge>
+              <span className='public-landing-card-grade-label'>{grade}</span>
+            </div>
             <h3 className='public-landing-card-title'>{title}</h3>
           </div>
 
@@ -781,6 +822,7 @@ export function PublicLandingCard({
 export default function PublicClassLandingView({
   classes,
   textbooks = [],
+  progressLogs = [],
   isLoading = false,
   onLogin,
   showBackToDashboard = false,
@@ -809,6 +851,7 @@ export default function PublicClassLandingView({
 
   const cardListRef = useRef(null);
   const plannerPreviewRef = useRef(null);
+  const plannerCaptureRef = useRef(null);
   const gradeTabRowRef = useRef(null);
   const autoClearedSubjectRef = useRef(false);
   const autoClearedGradeRef = useRef(false);
@@ -1067,16 +1110,23 @@ export default function PublicClassLandingView({
   };
 
   const handleSharePlanner = async () => {
-    if (!plannerPreviewRef.current || !plannerItems.length) {
+    if (!plannerCaptureRef.current || !plannerItems.length) {
       return;
     }
 
     setIsSharingPlanner(true);
 
     try {
-      const blob = await captureElementAsPngBlob(plannerPreviewRef.current, {
-        width: 1080,
-        padding: 28,
+      /* Temporarily expand to measure natural content width */
+      const el = plannerCaptureRef.current;
+      const savedWidth = el.style.width;
+      el.style.width = 'max-content';
+      const naturalWidth = Math.max(el.scrollWidth, 900) + 80; /* 80 = 2 × padding */
+      el.style.width = savedWidth;
+
+      const blob = await captureElementAsPngBlob(el, {
+        width: naturalWidth,
+        padding: 40,
         scale: 3,
       });
 
@@ -1341,6 +1391,7 @@ export default function PublicClassLandingView({
         classItem={selectedClassItem}
         plan={selectedClassItem?.schedulePlan || selectedClassItem?.schedule_plan || null}
         textbooksCatalog={textbooks}
+        progressLogs={progressLogs}
         emptyMessage="아직 등록된 일정표가 없습니다."
         onClose={() => setSelectedClassItem(null)}
         primaryActionLabel="상담하기"
@@ -1351,7 +1402,8 @@ export default function PublicClassLandingView({
             className: stripClassPrefix(selectedClassItem?.className || selectedClassItem?.name || '수업'),
           })
         }
-        secondaryActionLabel={selectedClassIsInPlanner ? '내 시간표에서 빼기' : '내 시간표에 담기'}
+        secondaryActionLabel={selectedClassIsInPlanner ? '빼기' : '담기'}
+        secondaryActionStyle={selectedClassIsInPlanner ? 'weak' : 'fill'}
         onSecondaryAction={() => {
           if (selectedClassItem) {
             togglePlannerItem(selectedClassItem);
@@ -1379,9 +1431,13 @@ export default function PublicClassLandingView({
                   <div key={`planner-item-${item.id}`} className="public-planner-selected-item">
                     <div className="public-planner-selected-copy">
                       <div className="public-planner-selected-title-line">
-                        <span className="public-planner-selected-subject-badge">
+                        <Badge
+                          size="small"
+                          type={text(item.subject) === '수학' ? 'blue' : text(item.subject) === '영어' ? 'red' : 'gray'}
+                          badgeStyle="weak"
+                        >
                           {text(item.subject) || '과목'}
-                        </span>
+                        </Badge>
                         <strong>{stripClassPrefix(item.className || item.name || '수업')}</strong>
                       </div>
                       <div className="public-planner-selected-info-row">
@@ -1414,43 +1470,53 @@ export default function PublicClassLandingView({
                 ))}
               </div>
 
-              <div className="public-planner-preview-head">
-                <span className="public-planner-preview-eyebrow">TIPS MY TIMETABLE</span>
-                <strong>{plannerPreviewTitleText}</strong>
-              </div>
+              <div ref={plannerCaptureRef} className="public-planner-capture-wrapper">
+                <div className="public-planner-preview-head">
+                  <span className="public-planner-preview-eyebrow">TIPS MY TIMETABLE</span>
+                  <strong>{plannerPreviewTitleText}</strong>
+                </div>
 
-              <div className="public-planner-preview-chip-row">
-                {plannerItems.map((item) => (
-                  <span key={`planner-chip-${item.id}`} className="public-planner-preview-chip">
-                    <span className="public-planner-preview-chip-title">
-                      {text(item.subject)} · {stripClassPrefix(item.className || item.name || '수업')}
+                <div className="public-planner-preview-chip-row">
+                  {plannerItems.map((item) => (
+                    <span key={`planner-chip-${item.id}`} className="public-planner-preview-chip">
+                      <span className="public-planner-preview-chip-title">
+                        <Badge
+                          size="small"
+                          type={text(item.subject) === '수학' ? 'blue' : text(item.subject) === '영어' ? 'red' : 'gray'}
+                          badgeStyle="weak"
+                        >
+                          {text(item.subject)}
+                        </Badge>
+                        <span className="public-planner-preview-chip-sep"> · </span>
+                        {stripClassPrefix(item.className || item.name || '수업')}
+                      </span>
+                      <span className="public-planner-preview-chip-schedule">
+                        {buildScheduleLines(item).join(', ')}
+                      </span>
+                      <span
+                        className="public-planner-preview-chip-meta"
+                        data-testid="public-planner-preview-chip-meta"
+                      >
+                        {buildPlannerMetaText(item)}
+                      </span>
                     </span>
-                    <span className="public-planner-preview-chip-schedule">
-                      {buildScheduleLines(item).join(', ')}
-                    </span>
-                    <span
-                      className="public-planner-preview-chip-meta"
-                      data-testid="public-planner-preview-chip-meta"
-                    >
-                      {buildPlannerMetaText(item)}
-                    </span>
-                  </span>
-                ))}
-              </div>
-            </div>
+                  ))}
+                </div>
 
-            <div className="public-planner-preview-grid">
-              <TimetableGrid
-                columns={DAY_COLUMNS}
-                timeSlots={plannerTimetable.timeSlots}
-                blocks={plannerTimetable.blocks}
-                editable={false}
-                density="micro"
-                slotHeight={42}
-                timeColumnWidth={isMobile ? 84 : 72}
-                minColumnWidth={isMobile ? 90 : 94}
-                shellClassName="public-readonly-timetable public-planner-readonly-timetable"
-              />
+                <div className="public-planner-preview-grid">
+                  <TimetableGrid
+                    columns={DAY_COLUMNS}
+                    timeSlots={plannerTimetable.timeSlots}
+                    blocks={plannerTimetable.blocks}
+                    editable={false}
+                    density="micro"
+                    slotHeight={42}
+                    timeColumnWidth={isMobile ? 84 : 72}
+                    minColumnWidth={isMobile ? 90 : 94}
+                    shellClassName="public-readonly-timetable public-planner-readonly-timetable"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>

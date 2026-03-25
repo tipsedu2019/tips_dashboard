@@ -8,6 +8,8 @@ const EMPTY_SNAPSHOT = {
   students: [],
   textbooks: [],
   progressLogs: [],
+  classScheduleSyncGroups: [],
+  classScheduleSyncGroupMembers: [],
   academicEvents: [],
   academicSchools: [],
   teacherCatalogs: [],
@@ -56,6 +58,12 @@ function generateId() {
     const value = char === 'x' ? random : (random & 0x3 | 0x8);
     return value.toString(16);
   });
+}
+
+function buildProgressKey(classId, sessionId, textbookId) {
+  return [classId, sessionId, textbookId]
+    .map((value) => String(value || '').trim())
+    .join(':');
 }
 
 function extractEmbeddedNoteMeta(note) {
@@ -164,7 +172,19 @@ export class DataService {
       { key: 'classTerms', table: 'class_terms', processor: '_processClassTerm', optional: true },
       { key: 'students', table: 'students', processor: '_processStudent' },
       { key: 'textbooks', table: 'textbooks', processor: '_processTextbook' },
-      { key: 'progressLogs', table: 'progress_logs', processor: '_processProgressLog' }
+      { key: 'progressLogs', table: 'progress_logs', processor: '_processProgressLog' },
+      {
+        key: 'classScheduleSyncGroups',
+        table: 'class_schedule_sync_groups',
+        processor: '_processClassScheduleSyncGroup',
+        optional: true,
+      },
+      {
+        key: 'classScheduleSyncGroupMembers',
+        table: 'class_schedule_sync_group_members',
+        processor: '_processClassScheduleSyncGroupMember',
+        optional: true,
+      }
     ];
   }
 
@@ -221,6 +241,8 @@ export class DataService {
       academic_exam_material_items: ['academicExamMaterialPlans'],
       academy_curriculum_period_plans: ['academyCurriculumPeriodItems'],
       academy_curriculum_period_items: ['academyCurriculumPeriodPlans'],
+      class_schedule_sync_groups: ['classScheduleSyncGroupMembers'],
+      class_schedule_sync_group_members: ['classScheduleSyncGroups'],
     };
 
     tableSet.forEach((tableName) => {
@@ -1133,6 +1155,40 @@ export class DataService {
     return (data || []).map((row) => this._processStudent(row));
   }
 
+  _buildSessionProgressPayload(log = {}) {
+    const classId = log.classId || log.class_id;
+    const textbookId = log.textbookId || log.textbook_id || null;
+    const sessionId = log.sessionId || log.session_id || '';
+    const progressKey =
+      log.progressKey ||
+      log.progress_key ||
+      buildProgressKey(classId, sessionId, textbookId);
+    const completedLessonIds = Array.isArray(log.completedLessonIds || log.completed_lesson_ids)
+      ? (log.completedLessonIds || log.completed_lesson_ids)
+      : (log.chapterId || log.chapter_id ? [log.chapterId || log.chapter_id] : []);
+
+    return {
+      id: log.id || generateId(),
+      class_id: classId,
+      textbook_id: textbookId,
+      chapter_id: log.chapterId || log.chapter_id || null,
+      completed_lesson_ids: completedLessonIds,
+      progress_key: progressKey,
+      session_id: sessionId,
+      session_order: Number(log.sessionOrder || log.session_order || 0) || 0,
+      status: log.status || 'pending',
+      range_start: log.rangeStart || log.range_start || null,
+      range_end: log.rangeEnd || log.range_end || null,
+      range_label: log.rangeLabel || log.range_label || null,
+      public_note: log.publicNote || log.public_note || null,
+      teacher_note: log.teacherNote || log.teacher_note || null,
+      date: log.date || null,
+      content: log.content || log.rangeLabel || log.range_label || null,
+      homework: log.homework || null,
+      updated_at: log.updatedAt || log.updated_at || new Date().toISOString(),
+    };
+  }
+
   async addProgressLog(log) {
     const client = this._ensureClient();
     const completedLessonIds = log.completedLessonIds || (log.chapterId ? [log.chapterId] : []);
@@ -1163,6 +1219,68 @@ export class DataService {
     return this._processProgressLog(result.data);
   }
 
+  async upsertSessionProgressLog(log) {
+    const client = this._ensureClient();
+    const payload = this._buildSessionProgressPayload(log);
+
+    let result = await client
+      .from('progress_logs')
+      .upsert(payload, { onConflict: 'progress_key' })
+      .select()
+      .single();
+
+    if (
+      result.error &&
+      (
+        this._isMissingColumnError(result.error, ['progress_key']) ||
+        this._isMissingColumnError(result.error, ['session_id'])
+      )
+    ) {
+      return this.addProgressLog({
+        classId: payload.class_id,
+        textbookId: payload.textbook_id,
+        chapterId: payload.chapter_id,
+        completedLessonIds: payload.completed_lesson_ids,
+        date: payload.date || payload.updated_at,
+        content: payload.content,
+        homework: payload.homework,
+      });
+    }
+
+    const optionalColumns = [
+      'session_order',
+      'status',
+      'range_start',
+      'range_end',
+      'range_label',
+      'public_note',
+      'teacher_note',
+      'updated_at',
+      'textbook_id',
+      'chapter_id',
+      'completed_lesson_ids',
+    ];
+
+    while (result.error) {
+      const missingColumn = optionalColumns.find((columnName) =>
+        this._isMissingColumnError(result.error, [columnName])
+      );
+      if (!missingColumn) {
+        break;
+      }
+      delete payload[missingColumn];
+      result = await client
+        .from('progress_logs')
+        .upsert(payload, { onConflict: 'progress_key' })
+        .select()
+        .single();
+    }
+
+    if (result.error) throw result.error;
+    await this._notify({ tables: ['progress_logs'] });
+    return this._processProgressLog(result.data);
+  }
+
   async deleteProgressLog(logId) {
     const client = this._ensureClient();
     const { error } = await client.from('progress_logs').delete().eq('id', logId);
@@ -1170,10 +1288,149 @@ export class DataService {
     this._notify({ tables: ['progress_logs'] });
   }
 
+  async deleteSessionProgressLog({ id = '', progressKey = '' } = {}) {
+    const client = this._ensureClient();
+    const safeId = String(id || '').trim();
+    const safeProgressKey = String(progressKey || '').trim();
+
+    if (!safeId && !safeProgressKey) {
+      return;
+    }
+
+    let query = client.from('progress_logs').delete();
+    query = safeId ? query.eq('id', safeId) : query.eq('progress_key', safeProgressKey);
+    const { error } = await query;
+
+    if (error) {
+      if (!safeId && this._isMissingColumnError(error, ['progress_key'])) {
+        return;
+      }
+      throw error;
+    }
+
+    await this._notify({ tables: ['progress_logs'] });
+  }
+
   async getProgressLogsForClass(classId) {
     const client = this._ensureClient();
     const { data } = await client.from('progress_logs').select('*').eq('class_id', classId);
     return (data || []).map((row) => this._processProgressLog(row));
+  }
+
+  async upsertClassScheduleSyncGroup(group) {
+    const client = this._ensureClient();
+    const payload = {
+      id: group.id || generateId(),
+      term_id: group.termId || group.term_id || null,
+      name: group.name || '',
+      subject: group.subject || '',
+      color: group.color || '#3182f6',
+      note: group.note || '',
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await client
+      .from('class_schedule_sync_groups')
+      .upsert(payload, { onConflict: 'id' })
+      .select()
+      .single();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'class_schedule_sync_groups')) {
+        return null;
+      }
+      throw error;
+    }
+
+    await this._notify({
+      tables: ['class_schedule_sync_groups', 'class_schedule_sync_group_members'],
+    });
+    return this._processClassScheduleSyncGroup(data);
+  }
+
+  async replaceClassScheduleSyncGroupMembers(groupId, members = []) {
+    const client = this._ensureClient();
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeGroupId) {
+      return [];
+    }
+
+    const { error: deleteError } = await client
+      .from('class_schedule_sync_group_members')
+      .delete()
+      .eq('group_id', safeGroupId);
+
+    if (deleteError) {
+      if (this._isMissingTableError(deleteError, 'class_schedule_sync_group_members')) {
+        return [];
+      }
+      throw deleteError;
+    }
+
+    const payload = (members || [])
+      .map((member, index) => ({
+        group_id: safeGroupId,
+        class_id: member.classId || member.class_id,
+        sort_order: member.sortOrder ?? member.sort_order ?? index,
+      }))
+      .filter((member) => member.class_id);
+
+    if (payload.length === 0) {
+      await this._notify({
+        tables: ['class_schedule_sync_groups', 'class_schedule_sync_group_members'],
+      });
+      return [];
+    }
+
+    const { data, error } = await client
+      .from('class_schedule_sync_group_members')
+      .insert(payload)
+      .select();
+
+    if (error) {
+      if (this._isMissingTableError(error, 'class_schedule_sync_group_members')) {
+        return [];
+      }
+      throw error;
+    }
+
+    await this._notify({
+      tables: ['class_schedule_sync_groups', 'class_schedule_sync_group_members'],
+    });
+    return (data || []).map((row) => this._processClassScheduleSyncGroupMember(row));
+  }
+
+  async deleteClassScheduleSyncGroup(groupId) {
+    const client = this._ensureClient();
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeGroupId) {
+      return;
+    }
+
+    const { error: memberError } = await client
+      .from('class_schedule_sync_group_members')
+      .delete()
+      .eq('group_id', safeGroupId);
+
+    if (memberError && !this._isMissingTableError(memberError, 'class_schedule_sync_group_members')) {
+      throw memberError;
+    }
+
+    const { error } = await client
+      .from('class_schedule_sync_groups')
+      .delete()
+      .eq('id', safeGroupId);
+
+    if (error) {
+      if (this._isMissingTableError(error, 'class_schedule_sync_groups')) {
+        return;
+      }
+      throw error;
+    }
+
+    await this._notify({
+      tables: ['class_schedule_sync_groups', 'class_schedule_sync_group_members'],
+    });
   }
 
   async getAcademicSchools() {
@@ -2629,10 +2886,45 @@ export class DataService {
       ...progressRow,
       classId: progressRow.class_id || progressRow.classId,
       textbookId: progressRow.textbook_id || progressRow.textbookId || null,
+      progressKey: progressRow.progress_key || progressRow.progressKey || '',
+      sessionId: progressRow.session_id || progressRow.sessionId || '',
+      sessionOrder: Number(progressRow.session_order || progressRow.sessionOrder || 0),
+      status: progressRow.status || 'pending',
+      rangeStart: progressRow.range_start || progressRow.rangeStart || '',
+      rangeEnd: progressRow.range_end || progressRow.rangeEnd || '',
+      rangeLabel: progressRow.range_label || progressRow.rangeLabel || '',
+      publicNote: progressRow.public_note || progressRow.publicNote || '',
+      teacherNote: progressRow.teacher_note || progressRow.teacherNote || '',
+      updatedAt: progressRow.updated_at || progressRow.updatedAt || progressRow.date || null,
       chapterId,
       completedLessonIds: completedLessonIds.length > 0
         ? completedLessonIds
         : (chapterId ? [chapterId] : [])
+    };
+  }
+
+  _processClassScheduleSyncGroup(groupRow) {
+    if (!groupRow) return null;
+    return {
+      ...groupRow,
+      termId: groupRow.term_id || groupRow.termId || '',
+      name: groupRow.name || '',
+      subject: groupRow.subject || '',
+      color: groupRow.color || '#3182f6',
+      note: groupRow.note || '',
+      createdAt: groupRow.created_at || groupRow.createdAt || null,
+      updatedAt: groupRow.updated_at || groupRow.updatedAt || null,
+    };
+  }
+
+  _processClassScheduleSyncGroupMember(memberRow) {
+    if (!memberRow) return null;
+    return {
+      ...memberRow,
+      groupId: memberRow.group_id || memberRow.groupId || '',
+      classId: memberRow.class_id || memberRow.classId || '',
+      sortOrder: memberRow.sort_order ?? memberRow.sortOrder ?? 0,
+      createdAt: memberRow.created_at || memberRow.createdAt || null,
     };
   }
 

@@ -496,6 +496,8 @@ function PublicClassCard({ classItem, compact, onOpenPlan }) {
 
 export default function PublicClassListView({
   classes,
+  textbooks = [],
+  progressLogs = [],
   isLoading = false,
   onLogin,
   showBackToDashboard = false,
@@ -1137,6 +1139,8 @@ export default function PublicClassListView({
         mode="readonly"
         classItem={selectedClassState?.classItem}
         plan={selectedClassState?.classItem?.schedulePlan || selectedClassState?.classItem?.schedule_plan || null}
+        textbooksCatalog={textbooks}
+        progressLogs={progressLogs}
         emptyMessage="아직 등록된 일정표가 없습니다."
         onClose={() => setSelectedClassState(null)}
         primaryActionLabel="이 시간 상담하기"

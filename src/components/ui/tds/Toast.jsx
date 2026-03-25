@@ -21,7 +21,7 @@ export default function Toast({
           color="#ffffff"
           variant="arrow"
           typography="t6"
-          onPress={onAction}
+          onClick={onAction}
         >
           {actionLabel}
         </TextButton>
@@ -31,7 +31,7 @@ export default function Toast({
           className="tds-toast__close"
           variant="clear"
           label="Close toast"
-          onPress={onClose}
+          onClick={onClose}
           color="#ffffff"
           icon={<X size={18} />}
           iconSize={18}

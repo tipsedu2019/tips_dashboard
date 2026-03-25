@@ -195,11 +195,18 @@
   min-width: 0;
 }
 
-.public-landing-card-eyebrow {
-  color: var(--public-card-accent-text, var(--text-secondary));
-  font-size: 12px;
+.public-landing-card-eyebrow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.public-landing-card-grade-label {
+  color: var(--text-secondary, #4e5968);
+  font-size: 13px;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1;
 }
 
 .public-landing-card-title {
@@ -772,4 +779,18 @@
   .public-landing-card-surface {
     --public-card-action-width: 92px;
   }
+}
+
+.public-planner-capture-wrapper {
+  background-color: var(--bg-surface-strong, #ffffff);
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 100%;
+  overflow: visible;
+}
+
+[data-theme='dark'] .public-planner-capture-wrapper {
+  background-color: #1a1e27;
 }

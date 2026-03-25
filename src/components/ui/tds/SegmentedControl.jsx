@@ -134,6 +134,10 @@ export default function SegmentedControl({
 
   const itemsMarkup = items.map((item) => {
     const isActive = selectedValues.includes(item.value);
+    const resolvedStyle = {
+      ...(item.style || {}),
+      ...(isActive ? item.activeStyle || {} : {}),
+    };
 
     return (
       <button
@@ -154,6 +158,7 @@ export default function SegmentedControl({
         ]
           .filter(Boolean)
           .join(' ')}
+        style={Object.keys(resolvedStyle).length > 0 ? resolvedStyle : undefined}
         onClick={() => {
           if (!item.disabled) {
             onValueChange?.(item.value);

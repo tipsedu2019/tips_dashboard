@@ -2,6 +2,7 @@ import { ChevronRight } from 'lucide-react';
 
 export default function TextButton({
   children,
+  onClick,
   onPress,
   typography = 't5',
   variant = 'clear',
@@ -11,6 +12,7 @@ export default function TextButton({
   fontWeight = 'bold',
   ...rest
 }) {
+  const clickHandler = onClick || onPress;
   const sizeMap = {
     t1: 'var(--tds-typo-t1-size)',
     t3: 'var(--tds-typo-t3-size)',
@@ -24,7 +26,7 @@ export default function TextButton({
     <button
       type="button"
       className={['tds-text-button', `tds-text-button--variant-${variant}`, className].filter(Boolean).join(' ')}
-      onClick={onPress}
+      onClick={clickHandler}
       disabled={disabled}
       style={{
         color: color || undefined,

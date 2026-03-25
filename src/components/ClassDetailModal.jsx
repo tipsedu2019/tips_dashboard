@@ -225,6 +225,7 @@ export default function ClassDetailModal({ cls, data, onClose, onNavigateToStude
 
               <ClassScheduleProgressBoard
                 plan={cls.schedulePlan || cls.schedule_plan || null}
+                classItem={cls}
                 className={cls.className || cls.name || ''}
                 subject={cls.subject || ''}
                 schedule={cls.schedule || ''}
@@ -232,6 +233,7 @@ export default function ClassDetailModal({ cls, data, onClose, onNavigateToStude
                 endDate={cls.endDate || cls.end_date || ''}
                 textbookIds={cls.textbookIds || []}
                 textbooksCatalog={data?.textbooks || []}
+                progressLogs={data?.progressLogs || []}
                 mode="actual"
                 title="현재 진도"
                 description="차시별 실제 진행 범위와 상태를 바로 확인할 수 있습니다."
@@ -323,6 +325,7 @@ export default function ClassDetailModal({ cls, data, onClose, onNavigateToStude
         }}
         plan={cls.schedulePlan || cls.schedule_plan || null}
         textbooksCatalog={data?.textbooks || []}
+        progressLogs={data?.progressLogs || []}
         onClose={() => setIsPlanModalOpen(false)}
       />
     </div>

@@ -2,6 +2,7 @@ export default function IconButton({
   children,
   icon = null,
   label = '',
+  onClick,
   onPress,
   variant = 'clear',
   color = '',
@@ -11,6 +12,7 @@ export default function IconButton({
   disabled = false,
   ...rest
 }) {
+  const clickHandler = onClick || onPress;
   const rootClassName = [
     'tds-icon-button',
     `tds-icon-button--variant-${variant}`,
@@ -23,7 +25,7 @@ export default function IconButton({
     <button
       type="button"
       className={rootClassName}
-      onClick={onPress}
+      onClick={clickHandler}
       aria-label={label}
       title={label}
       disabled={disabled}

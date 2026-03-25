@@ -1,4 +1,4 @@
-﻿import {
+import {
   Suspense,
   lazy,
   startTransition,
@@ -29,13 +29,14 @@ import { useAuth } from "./contexts/AuthContext";
 import { isE2EModeEnabled } from "./testing/e2e/e2eMode";
 import { e2eDataService } from "./testing/e2e/mockDataService";
 import LoginModal from "./components/SettingsModal";
+import ClassScheduleWorkspaceBoundary from "./components/class-schedule/ClassScheduleWorkspaceBoundary";
 import BottomSheet from "./components/ui/BottomSheet";
 import PageLoader from "./components/ui/PageLoader";
 import StatusBanner from "./components/ui/StatusBanner";
 import TermManagerModal from "./components/ui/TermManagerModal";
 import TimetableTopFilterBar from "./components/ui/TimetableTopFilterBar";
 import { Tab } from "./components/ui/tds";
-import useViewport from "./hooks/useViewport";
+import useViewport, { TABLET_BREAKPOINT } from "./hooks/useViewport";
 import { ACTIVE_CLASS_STATUS, computeClassStatus } from "./lib/classStatus";
 import {
   buildClassroomMaster,
@@ -65,12 +66,15 @@ const AcademicCalendarView = lazy(
 const CurriculumProgressWorkspace = lazy(
   () => import("./components/CurriculumProgressWorkspace"),
 );
+const ClassScheduleWorkspace = lazy(
+  () => import("./components/class-schedule/ClassScheduleWorkspace"),
+);
 const PublicClassListView = lazy(
   () => import("./components/PublicClassLandingView"),
 );
 const StatsDashboard = lazy(() => import("./components/StatsDashboard"));
 
-const ALL_OPTION = "\uC804\uCCB4";const LOCAL_TERM_STORAGE_KEY = "tips-dashboard:local-terms";
+const ALL_OPTION = "\uC804\uCCB4"; const LOCAL_TERM_STORAGE_KEY = "tips-dashboard:local-terms";
 const CURRENT_TERM_STORAGE_KEY = "tips-dashboard:current-term";
 const CURRENT_TERM_PREFERENCE_KEY = "tips-dashboard:current-term";
 const TIMETABLE_FILTER_STORAGE_KEY = "tips-dashboard:timetable-filters-v2";
@@ -133,6 +137,12 @@ const NAV_VIEWS = [
     icon: CalendarDays,
     staffOnly: false,
   },
+  {
+    id: "class-schedule",
+    label: "\uC218\uC5C5\uC77C\uC815",
+    icon: Calendar,
+    staffOnly: false,
+  },
   { id: "timetable", label: "\uC2DC\uAC04\uD45C", icon: LayoutGrid, staffOnly: false },
   {
     id: "curriculum-roadmap",
@@ -163,6 +173,7 @@ const NAV_VIEWS = [
 const DASHBOARD_BOTTOM_NAV_ITEMS = [
   { id: "stats", label: "\uB300\uC2DC\uBCF4\uB4DC", icon: BarChart2 },
   { id: "academic-calendar", label: "\uD559\uC0AC\uC77C\uC815", icon: CalendarDays },
+  { id: "class-schedule", label: "\uC218\uC5C5\uC77C\uC815", icon: Calendar },
   { id: "timetable", label: "\uC2DC\uAC04\uD45C", icon: LayoutGrid },
   {
     id: "curriculum-roadmap",
@@ -208,6 +219,11 @@ const DASHBOARD_VIEW_SUMMARIES = {
     title: "\uD559\uC0AC\uC77C\uC815",
     description:
       "\uD559\uC0AC \uCEA8\uB9B0\uB354\uC640 \uD559\uAD50 \uC5F0\uAC04\uC77C\uC815\uD45C\uB97C \uD55C \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0\uC11C \uD568\uAED8 \uAD00\uB9AC\uD569\uB2C8\uB2E4.",
+  },
+  "class-schedule": {
+    title: "\uC218\uC5C5\uC77C\uC815",
+    description:
+      "\uC218\uC5C5 \uC77C\uC815, \uC9C4\uB3C4, \uACF5\uAC1C \uD0C0\uC784\uB77C\uC778\uC744 \uD558\uB098\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0\uC11C \uC6B4\uC601\uD558\uB294 \uC0C8 \uC149 \uD654\uBA74\uC785\uB2C8\uB2E4.",
   },
   "curriculum-roadmap": {
     title: "\uC218\uC5C5\uACC4\uD68D",
@@ -297,6 +313,12 @@ function FilledNavIcon({ name, size = 20, fallbackIcon: FallbackIcon = null }) {
       return (
         <svg {...commonProps}>
           <path d="M7.2 2.5a1 1 0 0 1 1 1v.8h7.6v-.8a1 1 0 1 1 2 0v.8h.7A2.5 2.5 0 0 1 21 6.8v10.7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5V6.8a2.5 2.5 0 0 1 2.5-2.5h.7v-.8a1 1 0 0 1 1-1Zm-1.7 6.7h13V6.8a.5.5 0 0 0-.5-.5h-13a.5.5 0 0 0-.5.5v2.4Zm2.1 3.3a1 1 0 1 0 0 2h2.2a1 1 0 1 0 0-2H7.6Zm5 0a1 1 0 1 0 0 2h3.8a1 1 0 1 0 0-2h-3.8Zm-5 4a1 1 0 1 0 0 2h8.8a1 1 0 1 0 0-2H7.6Z" />
+        </svg>
+      );
+    case "class-schedule":
+      return (
+        <svg {...commonProps}>
+          <path d="M7 3.2a1 1 0 0 1 1 1V5h8v-.8a1 1 0 1 1 2 0V5h.8A2.2 2.2 0 0 1 21 7.2v11.1a2.2 2.2 0 0 1-2.2 2.2H5.2A2.2 2.2 0 0 1 3 18.3V7.2A2.2 2.2 0 0 1 5.2 5H6v-.8a1 1 0 0 1 1-1Zm-1.8 6v9.1a.2.2 0 0 0 .2.2h13.4a.2.2 0 0 0 .2-.2V9.2H5.2Zm2.1 2.2h3.4a1 1 0 1 1 0 2H7.3a1 1 0 1 1 0-2Zm6.1 0a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0v-4a1 1 0 0 1 1-1Zm4.1 2a1 1 0 0 1-1 1h-1.7a1 1 0 1 1 0-2h1.7a1 1 0 0 1 1 1Z" />
         </svg>
       );
     case "curriculum-roadmap":
@@ -447,8 +469,8 @@ function collectClassClassrooms(classItem) {
 function filterResourceNamesBySubjects(entries = [], selectedSubjects = []) {
   const normalizedSubjects = Array.isArray(selectedSubjects)
     ? selectedSubjects
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
     : [];
 
   if (normalizedSubjects.length === 0) {
@@ -467,8 +489,8 @@ function filterResourceNamesBySubjects(entries = [], selectedSubjects = []) {
 
       const subjects = Array.isArray(entry?.subjects)
         ? entry.subjects
-            .map((value) => String(value || "").trim())
-            .filter(Boolean)
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
         : [];
 
       return subjects.some((subject) => subjectSet.has(subject));
@@ -505,14 +527,17 @@ function buildStatusBanner(authError, data) {
 }
 
 export default function App() {
-  const { isMobile, isTablet, isCompact } = useViewport();
+  const { width, isMobile, isTablet, isCompact, isDesktop } = useViewport();
+  const defaultDashboardView = "stats";
   const activeDataService = isE2EModeEnabled() ? e2eDataService : dataService;
-  const [currentView, setCurrentView] = useState("stats");
+  const [currentView, setCurrentView] = useState(() => defaultDashboardView);
   const [data, setData] = useState({
     classes: [],
     students: [],
     textbooks: [],
     progressLogs: [],
+    classScheduleSyncGroups: [],
+    classScheduleSyncGroupMembers: [],
     classTerms: [],
     academicEvents: [],
     academicSchools: [],
@@ -536,7 +561,7 @@ export default function App() {
     error: null,
   });
   const [showLogin, setShowLogin] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isCompact);
   const [timetableFilters, setTimetableFilters] = useState(() =>
     normalizeTimetableFilters(
       readStoredJson(TIMETABLE_FILTER_STORAGE_KEY, DEFAULT_TIMETABLE_FILTERS),
@@ -579,20 +604,26 @@ export default function App() {
   const periodFlyoutCloseTimerRef = useRef(null);
 
   const { user, isStaff, isTeacher, logout, loading, authError } = useAuth();
-  const showMinimalSidebar = !isCompact;
+  const useBottomNavShell = true;
+  const forceDesktopLayout = isDesktop && width <= TABLET_BREAKPOINT;
+  const dashboardShellLayoutClass = useBottomNavShell
+    ? (isDesktop ? "dashboard-bottom-nav-desktop-shell" : "dashboard-bottom-nav-only")
+    : "";
+  const hasDesktopSidebar = !useBottomNavShell && !isCompact;
+  const showMinimalSidebar = hasDesktopSidebar && !sidebarOpen;
   const canAccessCurriculumRoadmap = isStaff || isTeacher;
 
   const changeView = (nextView, { closeSidebar = true } = {}) => {
     startTransition(() => {
       setCurrentView(nextView);
     });
-    if (closeSidebar) {
+    if (closeSidebar && isCompact) {
       setSidebarOpen(false);
     }
   };
 
   const goHome = () => {
-    changeView("stats");
+    changeView(defaultDashboardView);
   };
 
   const openCurriculumRoadmap = (intent = null) => {
@@ -750,6 +781,15 @@ export default function App() {
       changeView("curriculum-roadmap", { closeSidebar: false });
     }
   }, [currentView]);
+
+  useEffect(() => {
+    if (isCompact) {
+      setSidebarOpen(false);
+      return;
+    }
+
+    setSidebarOpen(true);
+  }, [isCompact]);
 
   useEffect(() => {
     if (!showMinimalSidebar) {
@@ -937,7 +977,7 @@ export default function App() {
         const sameYearAndName =
           currentTermPreference.academicYear &&
           Number(term.academicYear || 0) ===
-            Number(currentTermPreference.academicYear) &&
+          Number(currentTermPreference.academicYear) &&
           term.name === currentTermPreference.name;
         const sameName =
           currentTermPreference.name &&
@@ -1141,8 +1181,16 @@ export default function App() {
     : currentViewMeta.label;
   const dashboardViewSummaryMeta =
     DASHBOARD_VIEW_SUMMARIES[
-      TIMETABLE_VIEW_IDS.includes(currentView) ? "timetable" : currentView
+    TIMETABLE_VIEW_IDS.includes(currentView) ? "timetable" : currentView
     ] || DASHBOARD_VIEW_SUMMARIES.stats;
+  const sidebarWorkspaceViews = useMemo(
+    () => visibleViews.filter((view) => !MANAGER_VIEW_TAB_MAP[view.id]),
+    [visibleViews],
+  );
+  const sidebarManagerViews = useMemo(
+    () => visibleViews.filter((view) => MANAGER_VIEW_TAB_MAP[view.id]),
+    [visibleViews],
+  );
   const timetableSummaryTokens = useMemo(() => {
     const tokens = [];
     if (timetableFilters.term || currentTermName) {
@@ -1196,6 +1244,10 @@ export default function App() {
       return "academic-calendar";
     }
 
+    if (currentView === "class-schedule") {
+      return "class-schedule";
+    }
+
     if (currentView === "curriculum-roadmap") {
       return "curriculum-roadmap";
     }
@@ -1206,8 +1258,11 @@ export default function App() {
 
     return "stats";
   }, [currentView]);
+  const bottomNavItems = useMemo(() => DASHBOARD_BOTTOM_NAV_ITEMS.filter(
+    (item) => (!item.staffOnly || isStaff) && (!item.desktopOnly || !isMobile),
+  ), [isStaff, isMobile]);
 
-  const displayUserName = user?.name || user?.email || "\uC0AC\uC6A9\uC790";  const isDataBootstrapping = data.isLoading && !data.lastUpdated;
+  const displayUserName = user?.name || user?.email || "\uC0AC\uC6A9\uC790"; const isDataBootstrapping = data.isLoading && !data.lastUpdated;
   const isUnifiedTimetableView = TIMETABLE_VIEW_IDS.includes(currentView);
   useEffect(() => {
     setTimetableExportRequest(null);
@@ -1400,8 +1455,8 @@ export default function App() {
       setIsPublicMode(next);
       replacePublicMode(next);
       if (!next) {
-        setCurrentView("stats");
-        setSidebarOpen(false);
+        setCurrentView(defaultDashboardView);
+        setSidebarOpen(!isCompact);
       }
     };
 
@@ -1566,6 +1621,7 @@ export default function App() {
         <PublicClassListView
           classes={data.classes}
           textbooks={data.textbooks}
+          progressLogs={data.progressLogs}
           isLoading={isDataBootstrapping}
           onLogin={() => setShowLogin(true)}
           showBackToDashboard={Boolean(user)}
@@ -1593,15 +1649,179 @@ export default function App() {
 
   return (
     <div
-      className={`app-layout dashboard-bottom-nav-only ${isMobile ? "app-layout-mobile" : ""} ${isTablet ? "app-layout-tablet" : ""} ${showMinimalSidebar ? "sidebar-hidden" : ""}`}
+      className={`app-layout ${dashboardShellLayoutClass} ${forceDesktopLayout ? "app-layout-force-desktop" : ""} ${isMobile ? "app-layout-mobile" : ""} ${isTablet ? "app-layout-tablet" : ""} ${showMinimalSidebar ? "sidebar-hidden" : ""}`}
       data-design-system="toss-refresh"
       data-testid="app-shell-root"
     >
-      
+      {hasDesktopSidebar ? (
+        <aside className="sidebar" data-testid="dashboard-sidebar">
+          <div className="sidebar-header">
+            <div className="sidebar-header-shell">
+              <div className="sidebar-logo sidebar-logo-shell">
+                <button
+                  type="button"
+                  className="sidebar-brand-button"
+                  data-testid="dashboard-sidebar-home"
+                  onClick={goHome}
+                >
+                  <img
+                    src="/logo_tips.png"
+                    alt="TIPS"
+                    className="sidebar-brand-mark sidebar-logo-mark"
+                  />
+                  <div className="sidebar-logo-text">
+                    <p className="sidebar-brand-eyebrow">{displayUserName}</p>
+                    <h1 className="sidebar-brand-title">TIPS Dashboard</h1>
+                  </div>
+                </button>
+              </div>
+
+              {statusBanner ? (
+                <StatusBanner
+                  compact
+                  eyebrow="상태 알림"
+                  title={statusBanner.title}
+                  message={statusBanner.message}
+                  variant={statusBanner.variant}
+                />
+              ) : null}
+            </div>
+          </div>
+
+          <nav className="sidebar-nav" data-testid="dashboard-sidebar-nav">
+            <div className="sidebar-nav-section">워크스페이스</div>
+            {sidebarWorkspaceViews.map((view) => (
+              <button
+                key={view.id}
+                type="button"
+                data-testid={`mobile-nav-${view.id}`}
+                className={`sidebar-nav-item ${activeBottomNavTab === view.id ? "active" : ""}`}
+                aria-current={activeBottomNavTab === view.id ? "page" : undefined}
+                aria-label={view.label}
+                data-tooltip={showMinimalSidebar ? view.label : undefined}
+                onMouseEnter={(event) => openSidebarTooltip(event, view.label)}
+                onMouseLeave={closeSidebarTooltip}
+                onClick={() => navigateMobileTab(view.id)}
+              >
+                <span className="sidebar-link-icon" aria-hidden="true">
+                  <FilledNavIcon
+                    name={view.id}
+                    fallbackIcon={view.icon}
+                    size={20}
+                  />
+                </span>
+                <span>{view.label}</span>
+              </button>
+            ))}
+
+            {sidebarManagerViews.length > 0 ? (
+              <>
+                <div className="sidebar-nav-section">관리</div>
+                {sidebarManagerViews.map((view) => (
+                  <button
+                    key={view.id}
+                    type="button"
+                    data-testid={`mobile-nav-${view.id}`}
+                    className={`sidebar-nav-item ${activeBottomNavTab === view.id ? "active" : ""}`}
+                    aria-current={
+                      activeBottomNavTab === view.id ? "page" : undefined
+                    }
+                    aria-label={view.label}
+                    data-tooltip={showMinimalSidebar ? view.label : undefined}
+                    onMouseEnter={(event) =>
+                      openSidebarTooltip(event, view.label)
+                    }
+                    onMouseLeave={closeSidebarTooltip}
+                    onClick={() => navigateMobileTab(view.id)}
+                  >
+                    <span className="sidebar-link-icon" aria-hidden="true">
+                      <FilledNavIcon
+                        name={view.id}
+                        fallbackIcon={view.icon}
+                        size={20}
+                      />
+                    </span>
+                    <span>{view.label}</span>
+                  </button>
+                ))}
+              </>
+            ) : null}
+          </nav>
+
+          <div className="sidebar-footer sidebar-footer-shell">
+            <button
+              type="button"
+              className="sidebar-nav-item sidebar-footer-action"
+              data-testid="app-bottom-nav-theme"
+              onClick={toggleTheme}
+              title={
+                theme === "light"
+                  ? "다크 모드로 변경"
+                  : "라이트 모드로 변경"
+              }
+              aria-label={
+                theme === "light"
+                  ? "다크 모드로 변경"
+                  : "라이트 모드로 변경"
+              }
+            >
+              <span className="sidebar-link-icon" aria-hidden="true">
+                {theme === "light" ? (
+                  <Moon size={19} strokeWidth={2.1} />
+                ) : (
+                  <Sun size={19} strokeWidth={2.1} />
+                )}
+              </span>
+              <span>{theme === "light" ? "다크 모드" : "라이트 모드"}</span>
+            </button>
+            <button
+              type="button"
+              className="sidebar-nav-item sidebar-footer-action"
+              data-testid="app-bottom-nav-public"
+              onClick={() => setPublicModeAndSync(true)}
+              title="공개 페이지 열기"
+              aria-label="공개 페이지 열기"
+            >
+              <span className="sidebar-link-icon" aria-hidden="true">
+                <Eye size={19} strokeWidth={2.1} />
+              </span>
+              <span>공개 페이지</span>
+            </button>
+            <button
+              type="button"
+              className="sidebar-nav-item sidebar-footer-action sidebar-footer-action-danger"
+              data-testid="app-bottom-nav-logout"
+              onClick={logout}
+              title="로그아웃"
+              aria-label="로그아웃"
+            >
+              <span
+                className="sidebar-link-icon sidebar-link-icon-danger"
+                aria-hidden="true"
+              >
+                <LogOut size={19} strokeWidth={2.1} />
+              </span>
+              <span>로그아웃</span>
+            </button>
+          </div>
+        </aside>
+      ) : null}
 
       <main
         className={`main-content ${isMobile ? "main-content-mobile" : ""} ${isTablet ? "main-content-tablet" : ""} ${currentView === "academic-calendar" ? "main-content-academic-calendar" : ""}`}
       >
+        {statusBanner && !isMobile && (
+          <div className="shell-status-banner shell-status-banner-desktop">
+            <StatusBanner
+              compact
+              eyebrow="상태 알림"
+              title={statusBanner.title}
+              message={statusBanner.message}
+              variant={statusBanner.variant}
+            />
+          </div>
+        )}
+
         {statusBanner && isMobile && (
           <div className="shell-status-banner shell-status-banner-mobile">
             <StatusBanner
@@ -1613,18 +1833,6 @@ export default function App() {
             />
           </div>
         )}
-
-        {statusBanner && showMinimalSidebar && !isMobile ? (
-          <div className="shell-status-banner shell-status-banner-desktop">
-            <StatusBanner
-              compact
-              eyebrow="\uC0C1\uD0DC \uC54C\uB9BC"
-              title={statusBanner.title}
-              message={statusBanner.message}
-              variant={statusBanner.variant}
-            />
-          </div>
-        ) : null}
 
         <Suspense
           fallback={
@@ -1789,6 +1997,23 @@ export default function App() {
                 navigationIntent={academicCalendarIntent}
               />
             )}
+            {currentView === "class-schedule" && (
+              <ClassScheduleWorkspaceBoundary
+                resetKey={`${currentView}:${data.lastUpdated || ""}:${(data.classes || []).length}`}
+              >
+                <ClassScheduleWorkspace
+                  data={data}
+                  dataService={activeDataService}
+                  managedTerms={managedTerms}
+                  currentTermLabel={currentTermName}
+                  onOpenClassManager={() =>
+                    changeView("classes-manager", { closeSidebar: false })
+                  }
+                  onOpenPublicPage={() => setPublicModeAndSync(true)}
+                  onSyncNow={() => { }}
+                />
+              </ClassScheduleWorkspaceBoundary>
+            )}
             {currentView === "curriculum-roadmap" && (
               <CurriculumProgressWorkspace
                 data={data}
@@ -1838,10 +2063,11 @@ export default function App() {
         </div>
       </BottomSheet>
 
-      {user && !isPublicMode && (
+      {user && !isPublicMode && useBottomNavShell ? (
         <nav
           className="public-bottom-nav mobile-bottom-nav dashboard-shell-bottom-nav dashboard-shell-bottom-nav-unified"
           data-testid="app-bottom-nav"
+          style={{ "--dashboard-bottom-nav-item-count": bottomNavItems.length }}
         >
           {!isMobile ? (
             <div
@@ -1862,11 +2088,7 @@ export default function App() {
           ) : null}
 
           <div className="dashboard-shell-bottom-nav-grid">
-            {DASHBOARD_BOTTOM_NAV_ITEMS.filter(
-              (item) =>
-                (!item.staffOnly || isStaff) &&
-                (!item.desktopOnly || !isMobile),
-            ).map((item) => {
+            {bottomNavItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
@@ -1927,7 +2149,7 @@ export default function App() {
             </div>
           ) : null}
         </nav>
-      )}
+      ) : null}
 
       {user && !isPublicMode && isMobile ? (
         <div
@@ -1965,5 +2187,3 @@ export default function App() {
     </div>
   );
 }
-
-

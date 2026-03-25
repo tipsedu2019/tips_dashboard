@@ -1,5 +1,5 @@
-import { ACTIVE_CLASS_STATUS } from '../../lib/classStatus';
-import { buildSchoolMaster } from '../../lib/schoolConfig';
+import { ACTIVE_CLASS_STATUS } from '../../lib/classStatus.js';
+import { buildSchoolMaster } from '../../lib/schoolConfig.js';
 
 function formatDate(date) {
   const year = date.getFullYear();
@@ -8,9 +8,42 @@ function formatDate(date) {
   return `${year}-${month}-${day}`;
 }
 
+function createWeeklySchedulePlan({
+  startDate,
+  endDate,
+  textbookId,
+  billingId,
+  billingLabel,
+  sessionCount = 4,
+}) {
+  return {
+    version: 2,
+    selectedDays: [1],
+    globalSessionCount: sessionCount,
+    billingPeriods: [
+      {
+        id: billingId,
+        month: Number(String(startDate).slice(5, 7)),
+        startDate,
+        endDate,
+        label: billingLabel,
+      },
+    ],
+    textbooks: [
+      {
+        textbookId,
+        order: 0,
+        role: 'main',
+      },
+    ],
+  };
+}
+
 export function createE2EMockData() {
   const now = new Date();
   const currentYear = now.getFullYear();
+  const classPlanStart = formatDate(new Date(currentYear, now.getMonth(), 3));
+  const classPlanEnd = formatDate(new Date(currentYear, now.getMonth(), 31));
   const monthStart = new Date(currentYear, now.getMonth(), 10);
   const monthEnd = new Date(currentYear, now.getMonth(), 12);
   const fieldTripStart = new Date(currentYear, now.getMonth(), 15);
@@ -22,7 +55,7 @@ export function createE2EMockData() {
   const academicSchools = [
     {
       id: 'school-1',
-      name: '테스트중학교',
+      name: 'Tips Middle School',
       category: 'middle',
       color: '#1F6B5B',
       sortOrder: 0,
@@ -33,46 +66,101 @@ export function createE2EMockData() {
   const schoolMaster = buildSchoolMaster(academicSchools, []);
   const defaultSchool = schoolMaster[0] || {
     id: 'school-1',
-    name: '테스트중학교',
+    name: 'Tips Middle School',
     category: 'middle',
     color: '#1F6B5B',
-    grades: ['중3'],
+    grades: ['Middle'],
     sortOrder: 0,
   };
-  const defaultGrade = '중3';
+  const defaultGrade = 'Middle';
+
+  const textbooks = [
+    { id: 'textbook-1', title: 'Middle English Core', publisher: 'TIPS', subject: '영어' },
+    { id: 'textbook-2', title: 'Middle Math Core', publisher: 'TIPS', subject: '수학' },
+  ];
 
   const classes = [
     {
       id: 'class-1',
-      name: '중등 영어 A',
-      className: '중등 영어 A',
+      name: 'Middle English A',
+      className: 'Middle English A',
       subject: '영어',
       grade: defaultGrade,
-      teacher: '이정민',
+      teacher: 'Lee Teacher',
       classroom: '301',
       room: '301',
       roomRaw: '301',
-      schedule: '월 16:00-17:30',
+      schedule: 'Mon 16:00-17:30',
       status: ACTIVE_CLASS_STATUS,
       studentIds: ['student-1'],
       waitlistIds: [],
+      textbookIds: ['textbook-1'],
+      termId: 'term-1',
+      startDate: classPlanStart,
+      endDate: classPlanEnd,
+      schedulePlan: createWeeklySchedulePlan({
+        startDate: classPlanStart,
+        endDate: classPlanEnd,
+        textbookId: 'textbook-1',
+        billingId: 'billing-english-a',
+        billingLabel: 'English A Month',
+      }),
       capacity: 8,
       tuition: 250000,
     },
     {
       id: 'class-2',
-      name: '중등 수학 B',
-      className: '중등 수학 B',
+      name: 'Middle Math B',
+      className: 'Middle Math B',
       subject: '수학',
       grade: defaultGrade,
-      teacher: '박서준',
+      teacher: 'Park Teacher',
       classroom: '302',
       room: '302',
       roomRaw: '302',
-      schedule: '화 18:00-19:30',
+      schedule: 'Wed 18:00-19:30',
       status: ACTIVE_CLASS_STATUS,
       studentIds: [],
       waitlistIds: [],
+      textbookIds: ['textbook-2'],
+      termId: 'term-1',
+      startDate: classPlanStart,
+      endDate: classPlanEnd,
+      schedulePlan: createWeeklySchedulePlan({
+        startDate: classPlanStart,
+        endDate: classPlanEnd,
+        textbookId: 'textbook-2',
+        billingId: 'billing-math-b',
+        billingLabel: 'Math Month',
+      }),
+      capacity: 8,
+      tuition: 250000,
+    },
+    {
+      id: 'class-3',
+      name: 'Middle English B',
+      className: 'Middle English B',
+      subject: '영어',
+      grade: defaultGrade,
+      teacher: 'Lee Teacher',
+      classroom: '303',
+      room: '303',
+      roomRaw: '303',
+      schedule: 'Mon 18:00-19:30',
+      status: ACTIVE_CLASS_STATUS,
+      studentIds: [],
+      waitlistIds: [],
+      textbookIds: ['textbook-1'],
+      termId: 'term-1',
+      startDate: classPlanStart,
+      endDate: classPlanEnd,
+      schedulePlan: createWeeklySchedulePlan({
+        startDate: classPlanStart,
+        endDate: classPlanEnd,
+        textbookId: 'textbook-1',
+        billingId: 'billing-english-b',
+        billingLabel: 'English B Month',
+      }),
       capacity: 8,
       tuition: 250000,
     },
@@ -81,7 +169,7 @@ export function createE2EMockData() {
   const students = [
     {
       id: 'student-1',
-      name: '테스트 학생',
+      name: 'Kim Student',
       uid: 'S-001',
       school: defaultSchool.name,
       grade: defaultGrade,
@@ -94,13 +182,14 @@ export function createE2EMockData() {
   ];
 
   const teacherCatalogs = [
-    { id: 'teacher-1', name: '이정민', subjects: ['영어'], isVisible: true, sortOrder: 0 },
-    { id: 'teacher-2', name: '박서준', subjects: ['수학'], isVisible: true, sortOrder: 1 },
+    { id: 'teacher-1', name: 'Lee Teacher', subjects: ['영어'], isVisible: true, sortOrder: 0 },
+    { id: 'teacher-2', name: 'Park Teacher', subjects: ['수학'], isVisible: true, sortOrder: 1 },
   ];
 
   const classroomCatalogs = [
     { id: 'classroom-1', name: '301', subjects: ['영어'], isVisible: true, sortOrder: 0 },
     { id: 'classroom-2', name: '302', subjects: ['수학'], isVisible: true, sortOrder: 1 },
+    { id: 'classroom-3', name: '303', subjects: ['영어'], isVisible: true, sortOrder: 2 },
   ];
 
   return {
@@ -108,25 +197,93 @@ export function createE2EMockData() {
     classTerms: [
       {
         id: 'term-1',
-        name: '2026 1학기',
+        name: `${currentYear} Spring`,
         startDate: formatDate(new Date(currentYear, 2, 1)),
         endDate: formatDate(new Date(currentYear, 5, 30)),
         sortOrder: 0,
       },
     ],
     students,
-    textbooks: [
-      { id: 'textbook-1', title: '중등 영어 기본서', publisher: 'TIPS', subject: '영어' },
-      { id: 'textbook-2', title: '중등 수학 기본서', publisher: 'TIPS', subject: '수학' },
+    textbooks,
+    progressLogs: [
+      {
+        id: 'progress-class-1-session-1',
+        classId: 'class-1',
+        textbookId: 'textbook-1',
+        progressKey: 'class-1:session-1:textbook-1',
+        sessionId: 'session-1',
+        sessionOrder: 1,
+        status: 'done',
+        rangeLabel: 'Lesson 1',
+        publicNote: 'Started as planned',
+        updatedAt: `${classPlanStart}T10:00:00.000Z`,
+      },
+      {
+        id: 'progress-class-3-session-1',
+        classId: 'class-3',
+        textbookId: 'textbook-1',
+        progressKey: 'class-3:session-1:textbook-1',
+        sessionId: 'session-1',
+        sessionOrder: 1,
+        status: 'done',
+        rangeLabel: 'Lesson 1',
+        updatedAt: `${classPlanStart}T11:00:00.000Z`,
+      },
+      {
+        id: 'progress-class-3-session-2',
+        classId: 'class-3',
+        textbookId: 'textbook-1',
+        progressKey: 'class-3:session-2:textbook-1',
+        sessionId: 'session-2',
+        sessionOrder: 2,
+        status: 'done',
+        rangeLabel: 'Lesson 2',
+        updatedAt: `${classPlanStart}T12:00:00.000Z`,
+      },
+      {
+        id: 'progress-class-2-session-1',
+        classId: 'class-2',
+        textbookId: 'textbook-2',
+        progressKey: 'class-2:session-1:textbook-2',
+        sessionId: 'session-1',
+        sessionOrder: 1,
+        status: 'partial',
+        rangeLabel: 'Chapter 1',
+        teacherNote: 'Need one more worksheet',
+        updatedAt: `${classPlanStart}T13:00:00.000Z`,
+      },
     ],
-    progressLogs: [],
+    classScheduleSyncGroups: [
+      {
+        id: 'sync-group-1',
+        termId: 'term-1',
+        name: 'English Sync Group',
+        subject: '영어',
+        color: '#3182f6',
+        note: '',
+      },
+    ],
+    classScheduleSyncGroupMembers: [
+      {
+        id: 'sync-member-1',
+        groupId: 'sync-group-1',
+        classId: 'class-1',
+        sortOrder: 0,
+      },
+      {
+        id: 'sync-member-2',
+        groupId: 'sync-group-1',
+        classId: 'class-3',
+        sortOrder: 1,
+      },
+    ],
     academicEvents: [
       {
         id: 'event-assessment',
-        title: '3월 시험기간',
+        title: 'March Assessment Window',
         schoolId: defaultSchool.id,
         school: defaultSchool.name,
-        type: '시험기간',
+        type: 'Assessment',
         start: formatDate(monthStart),
         end: formatDate(monthEnd),
         grade: defaultGrade,
@@ -135,10 +292,10 @@ export function createE2EMockData() {
       },
       {
         id: 'event-english-exam',
-        title: '영어 시험일',
+        title: 'English Exam',
         schoolId: defaultSchool.id,
         school: defaultSchool.name,
-        type: '영어시험일',
+        type: 'English Exam',
         start: formatDate(monthStart),
         end: formatDate(monthStart),
         grade: defaultGrade,
@@ -147,10 +304,10 @@ export function createE2EMockData() {
       },
       {
         id: 'event-math-exam',
-        title: '수학 시험일',
+        title: 'Math Exam',
         schoolId: defaultSchool.id,
         school: defaultSchool.name,
-        type: '수학시험일',
+        type: 'Math Exam',
         start: formatDate(monthEnd),
         end: formatDate(monthEnd),
         grade: defaultGrade,
@@ -159,10 +316,10 @@ export function createE2EMockData() {
       },
       {
         id: 'event-field-trip',
-        title: '1차 체험학습',
+        title: 'Field Trip 1',
         schoolId: defaultSchool.id,
         school: defaultSchool.name,
-        type: '체험학습',
+        type: 'Field Trip',
         start: formatDate(fieldTripStart),
         end: formatDate(fieldTripEnd),
         grade: defaultGrade,
@@ -171,10 +328,10 @@ export function createE2EMockData() {
       },
       {
         id: 'event-field-trip-2',
-        title: '2차 체험학습',
+        title: 'Field Trip 2',
         schoolId: defaultSchool.id,
         school: defaultSchool.name,
-        type: '체험학습',
+        type: 'Field Trip',
         start: formatDate(fieldTripSingle),
         end: formatDate(fieldTripSingle),
         grade: defaultGrade,
@@ -183,10 +340,10 @@ export function createE2EMockData() {
       },
       {
         id: 'event-vacation',
-        title: '봄 방학',
+        title: 'Vacation Day',
         schoolId: defaultSchool.id,
         school: defaultSchool.name,
-        type: '방학·휴일',
+        type: 'Holiday',
         start: formatDate(vacationDay),
         end: formatDate(vacationDay),
         grade: defaultGrade,
@@ -195,10 +352,10 @@ export function createE2EMockData() {
       },
       {
         id: 'event-misc',
-        title: '기타 일정',
+        title: 'Misc Schedule',
         schoolId: defaultSchool.id,
         school: defaultSchool.name,
-        type: '기타',
+        type: 'Misc',
         start: formatDate(miscDay),
         end: formatDate(miscDay),
         grade: defaultGrade,
@@ -227,7 +384,7 @@ export function createE2EMockData() {
         schoolId: defaultSchool.id,
         grade: defaultGrade,
         examPeriodCode: 'S1_MID',
-        note: '초기 학교 메모',
+        note: 'Initial school memo',
         sortOrder: 0,
       },
     ],
@@ -236,7 +393,7 @@ export function createE2EMockData() {
         id: 'school-plan-item-1',
         planId: 'school-plan-1',
         materialCategory: 'textbook',
-        title: '중등 영어 기본서',
+        title: 'Middle English Core',
         publisher: 'TIPS',
         scopeDetail: 'Unit 1-2',
         note: '',
@@ -253,10 +410,10 @@ export function createE2EMockData() {
         catalogId: null,
         periodType: 'fixed',
         periodCode: 'S1_MID',
-        periodLabel: '1학기 중간',
+        periodLabel: 'Midterm',
         scopeType: 'class',
         classId: 'class-1',
-        note: '학원 진도 메모',
+        note: 'Academy roadmap memo',
         sortOrder: 0,
       },
     ],
@@ -266,7 +423,7 @@ export function createE2EMockData() {
         planId: 'academy-plan-1',
         materialCategory: 'textbook',
         textbookId: 'textbook-1',
-        title: '중등 영어 기본서',
+        title: 'Middle English Core',
         publisher: 'TIPS',
         planDetail: 'Chapter 1',
         note: '',

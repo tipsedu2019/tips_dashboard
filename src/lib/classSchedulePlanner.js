@@ -76,6 +76,27 @@ function createPlannerId() {
   return `plan-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function buildDeterministicSessionId(source = {}, countedSessions = null) {
+  const parts = ["session"];
+  if (Number.isFinite(Number(countedSessions)) && Number(countedSessions) > 0) {
+    parts.push(String(Math.round(Number(countedSessions))).padStart(3, "0"));
+  }
+
+  const sourceDate = String(source?.date || "").trim();
+  const billingId = String(source?.billingId || "").trim();
+  const scheduleState = String(source?.state || "active").trim();
+  const originalDate = String(source?.originalDate || "").trim();
+  const makeupDate = String(source?.makeupDate || "").trim();
+
+  if (sourceDate) parts.push(sourceDate);
+  if (billingId) parts.push(billingId);
+  if (originalDate) parts.push(originalDate);
+  if (makeupDate) parts.push(makeupDate);
+  if (scheduleState) parts.push(scheduleState);
+
+  return parts.join(":");
+}
+
 function clampMonth(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 1 || number > 12) {
@@ -775,7 +796,7 @@ function createSessionPayload({
   const progressStatus = getProgressStatusFromEntries(textbookEntries);
 
   return {
-    id: existing?.id || createPlannerId(),
+    id: existing?.id || buildDeterministicSessionId(source, countedSessions),
     billingId: source.billingId,
     billingLabel: source.billingLabel,
     billingColor: source.billingColor,

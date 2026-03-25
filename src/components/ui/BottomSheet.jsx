@@ -110,7 +110,7 @@ export default function BottomSheet({
             <IconButton
               className="bottom-sheet-close"
               variant="border"
-              onPress={onClose}
+              onClick={onClose}
               label={closeLabel}
               icon={<X size={20} />}
             />

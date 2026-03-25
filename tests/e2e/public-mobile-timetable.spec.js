@@ -369,6 +369,45 @@ test.describe('public mobile timetable', () => {
     await expect(shareButton).toHaveText('');
   });
 
+  test('prepares a two-column high-resolution share capture and keeps the add CTA blue on mobile', async ({
+    page,
+  }) => {
+    await page.goto(e2eUrl('/'));
+
+    const cards = page.locator('[data-testid^="public-class-card-"]');
+    await expect(cards.first()).toBeVisible();
+    await cards.first().locator('.public-landing-card-main').click();
+
+    const modal = page.getByTestId('class-schedule-plan-modal');
+    await expect(modal).toBeVisible();
+
+    const addButton = modal.locator('.class-schedule-modal-secondary-action');
+    await expect(addButton).toBeVisible();
+    await expect(page.getByTestId('class-plan-share-capture')).toHaveCount(1);
+
+    const captureMetrics = await page.evaluate(() => {
+      const addCta = document.querySelector(
+        '[data-testid="class-schedule-plan-modal"] .class-schedule-modal-secondary-action',
+      );
+      const capture = document.querySelector('[data-testid="class-plan-share-capture"]');
+      const layout = capture?.querySelector('[data-testid="class-plan-preview-layout"]');
+      const shareSurface = capture?.querySelector('.class-plan-preview-surface');
+      return {
+        addBackground: addCta ? getComputedStyle(addCta).backgroundColor : '',
+        columnCount: layout
+          ? getComputedStyle(layout).gridTemplateColumns.trim().split(/\s+/).length
+          : 0,
+        minCaptureWidth: capture?.getBoundingClientRect().width ?? 0,
+        sharePadding: shareSurface ? getComputedStyle(shareSurface).paddingLeft : '',
+      };
+    });
+
+    expect(captureMetrics.addBackground).toBe('rgb(49, 130, 246)');
+    expect(captureMetrics.columnCount).toBeGreaterThanOrEqual(2);
+    expect(captureMetrics.minCaptureWidth).toBeGreaterThanOrEqual(1200);
+    expect(captureMetrics.sharePadding).not.toBe('0px');
+  });
+
   test('keeps the public detail landscape header minimal on compact screens', async ({ page }) => {
     await page.setViewportSize({ width: 932, height: 430 });
     await page.goto(e2eUrl('/'));
@@ -449,7 +488,7 @@ test.describe('public mobile timetable', () => {
     const modal = page.getByTestId('class-schedule-plan-modal');
     await expect(modal).toBeVisible();
 
-    const addButton = modal.getByRole('button', { name: '내 시간표에 담기' });
+    const addButton = modal.locator('.class-schedule-modal-secondary-action');
     await expect(addButton).toBeVisible();
     await expect(addButton).toHaveClass(/tds-button--style-fill/);
   });

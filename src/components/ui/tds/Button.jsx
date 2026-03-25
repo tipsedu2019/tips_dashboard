@@ -1,18 +1,43 @@
-function resolveTypeClass(type) {
-  return `tds-button--type-${type || 'primary'}`;
+function resolveColorToken(color) {
+  const normalizedColor = String(color || 'primary').trim().toLowerCase();
+
+  if (normalizedColor === 'neutral' || normalizedColor === 'gray') {
+    return 'light';
+  }
+
+  return normalizedColor || 'primary';
 }
 
-function resolveStyleClass(style) {
-  return `tds-button--style-${style || 'fill'}`;
+function resolveTypeClass(color) {
+  return `tds-button--type-${resolveColorToken(color)}`;
+}
+
+function resolveVariantToken(variant) {
+  return String(variant || 'fill').trim().toLowerCase() || 'fill';
+}
+
+function resolveStyleClass(variant) {
+  return `tds-button--style-${resolveVariantToken(variant)}`;
 }
 
 function resolveSizeClass(size) {
-  return `tds-button--size-${size || 'big'}`;
+  const normalizedSize = String(size || 'big').trim().toLowerCase();
+  const mappedSize =
+    {
+      large: 'big',
+      xlarge: 'big',
+      small: 'tiny',
+    }[normalizedSize] || normalizedSize;
+
+  return `tds-button--size-${mappedSize || 'big'}`;
 }
 
 export default function Button({
   children,
+  onClick,
   onPress,
+  color = '',
+  variant = '',
   type = 'primary',
   style = 'fill',
   size = 'big',
@@ -26,11 +51,14 @@ export default function Button({
   containerStyle = null,
   ...rest
 }) {
+  const resolvedColor = color || type || 'primary';
+  const resolvedVariant = variant || style || 'fill';
+  const clickHandler = onClick || onPress;
   const isDisabled = disabled || loading;
   const rootClassName = [
     'tds-button',
-    resolveTypeClass(type),
-    resolveStyleClass(style),
+    resolveTypeClass(resolvedColor),
+    resolveStyleClass(resolvedVariant),
     resolveSizeClass(size),
     display === 'full' ? 'tds-button--display-full' : 'tds-button--display-block',
     loading ? 'is-loading' : '',
@@ -43,7 +71,7 @@ export default function Button({
     <button
       type="button"
       className={rootClassName}
-      onClick={onPress}
+      onClick={clickHandler}
       disabled={isDisabled}
       style={{ width: display === 'full' ? '100%' : undefined, ...viewStyle, ...containerStyle, ...textStyle }}
       {...rest}

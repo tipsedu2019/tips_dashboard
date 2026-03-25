@@ -77,6 +77,11 @@ test("schedule planner can run as a controls-only builder section when the modal
   assert.match(workspaceStyles, /\.planner-controls-column/);
   assert.match(workspaceStyles, /\.planner-preview-column/);
   assert.match(plannerSource, /!showPreview/);
+  assert.match(plannerSource, /controlsLayout = "stack"/);
+  assert.match(plannerSource, /controlsLayout === "split"/);
+  assert.match(modalSource, /controlsLayout="split"/);
+  assert.match(workspaceStyles, /\.planner-controls-column\.is-builder-split/);
+  assert.match(workspaceStyles, /\.planner-top-grid\.is-controls-only/);
   assert.doesNotMatch(
     plannerSource,
     /if\s*\(\s*planner\.billingPeriods\.length <= 1\s*\)\s*\{\s*return;\s*\}/,
@@ -123,6 +128,32 @@ test("preview uses explicit day labels, month colors, and the updated legend cop
     /\.class-plan-day-cell\.is-current-month\s*\{[\s\S]*color:\s*var\(--class-plan-cell-idle-text,\s*#94a3b8\);/,
   );
   assert.match(plannerLibSource, /\\uBCF4\\uAC15|\uBCF4\uAC15/);
+});
+
+test("preview renders every session list as a unified vertical month stepper instead of split card and table layouts", () => {
+  assert.match(previewSource, /function SessionVerticalStepper/);
+  assert.match(previewSource, /class-plan-session-vertical-list/);
+  assert.match(previewSource, /class-plan-session-vertical-group/);
+  assert.match(previewSource, /class-plan-stepper-stem/);
+  assert.match(previewSource, /class-plan-stepper-stem-fill/);
+  assert.doesNotMatch(previewSource, /function SessionCards/);
+  assert.doesNotMatch(previewSource, /function SessionTable/);
+  assert.doesNotMatch(previewSource, /compact=\{false\}/);
+  assert.match(workspaceStyles, /\.class-plan-session-vertical-list/);
+  assert.match(workspaceStyles, /\.class-plan-session-vertical-group/);
+  assert.match(previewSource, /hasSessionDetailContent/);
+  assert.match(
+    workspaceStyles,
+    /\.class-plan-session-card\.class-plan-session-vertical-item\.has-detail/,
+  );
+  assert.match(
+    workspaceStyles,
+    /\.class-plan-stepper-stem\s*\{[\s\S]*width:\s*24px;[\s\S]*border-radius:\s*999px;/,
+  );
+  assert.match(
+    workspaceStyles,
+    /\.class-plan-session-group-track\s*\{[\s\S]*linear-gradient\(/,
+  );
 });
 
 test("builder preview stays interactive and wires calendar toggle and drag substitution handlers", () => {

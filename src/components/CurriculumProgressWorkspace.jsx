@@ -490,6 +490,7 @@ export default function CurriculumProgressWorkspace({ data = {}, dataService }) 
         classItem={activeRow?.classItem || null}
         plan={activeRow?.classItem?.schedulePlan || activeRow?.classItem?.schedule_plan || null}
         textbooksCatalog={textbooks}
+        progressLogs={data?.progressLogs || []}
         onSaveDraft={modalMode === 'readonly' ? undefined : handleSaveDraft}
         onClose={() => {
           setActiveClassId('');

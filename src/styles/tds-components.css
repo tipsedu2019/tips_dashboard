@@ -1508,3 +1508,28 @@ textarea.styled-input:focus {
   border-radius: var(--tds-radius-full);
   background: var(--tds-color-red-500);
 }
+
+/* v2-oriented compatibility aliases for the local TDS wrapper layer */
+.tds-button--type-light.tds-button--style-fill {
+  background: var(--tds-color-grey-100);
+  color: var(--tds-color-grey-900);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.tds-button--type-light.tds-button--style-weak {
+  background: var(--tds-state-neutral-weak);
+  color: var(--tds-color-grey-700);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.tds-badge--style-fill.tds-badge--type-gray {
+  background: var(--tds-color-grey-600);
+  color: #ffffff;
+}
+
+.tds-badge--style-weak.tds-badge--type-gray {
+  background: var(--tds-color-grey-100);
+  color: var(--tds-color-grey-700);
+}

@@ -225,7 +225,9 @@ function getStepState(steps, stepKey) {
   return "todo";
 }
 
-function getMobileChipToneClass(tone = "neutral") {
+function getMobileChipToneClass(tone = "neutral", label = "") {
+  if (label === "수학") return "is-math";
+  if (label === "영어") return "is-english";
   if (tone === "warning") {
     return "is-warning";
   }
@@ -294,12 +296,12 @@ function BuilderSection({
           <div className="class-plan-builder-section-title-row">
             <strong>{title}</strong>
             {optional ? (
-              <Badge size="small" type="gray" badgeStyle="weak">
+              <Badge size="small" color="neutral" variant="weak">
                 선택 사항
               </Badge>
             ) : null}
             {complete ? (
-              <Badge size="small" type="blue" badgeStyle="weak">
+              <Badge size="small" color="primary" variant="weak">
                 완료
               </Badge>
             ) : null}
@@ -352,9 +354,11 @@ export default function ClassSchedulePlanModal({
   primaryActionLabel = "",
   onPrimaryAction,
   secondaryActionLabel = "",
+  secondaryActionStyle = "fill",
   onSecondaryAction,
   summaryBadges = [],
   textbooksCatalog = [],
+  progressLogs = [],
   onTextbookIdsChange,
   onSaveTextbook,
   defaultEditableTab = "schedule",
@@ -701,10 +705,9 @@ export default function ClassSchedulePlanModal({
 
     try {
       const blob = await captureElementAsPngBlob(readonlyShareTargetRef.current, {
-        preset: "a4-portrait",
-        width: 794,
-        padding: 20,
-        scale: 4,
+        width: 1440,
+        padding: 28,
+        scale: 3,
         backgroundColor: "#ffffff",
       });
 
@@ -786,25 +789,25 @@ Confirmed that the diskette icon in the top right is a functional save button. I
             "자동 저장은 꺼져 있고, 저장 버튼을 눌러야 반영됩니다."}
         </span>
       </div>
-      <div className="class-plan-save-bar-actions">
-        <Button
-          type="primary"
-          style="weak"
-          size={isMobile ? "big" : "medium"}
-          onPress={handleRequestClose}
-          disabled={isSaving}
-          data-testid="class-plan-cancel-button"
+        <div className="class-plan-save-bar-actions">
+          <Button
+            color="primary"
+            variant="weak"
+            size={isMobile ? "big" : "medium"}
+            onClick={handleRequestClose}
+            disabled={isSaving}
+            data-testid="class-plan-cancel-button"
         >
           닫기
         </Button>
-        <Button
-          type="primary"
-          style="fill"
-          size={isMobile ? "big" : "medium"}
-          onPress={handleSave}
-          loading={isSaving}
-          disabled={!isDirty || Boolean(validationMessage)}
-          data-testid="class-plan-save-button"
+          <Button
+            color="primary"
+            variant="fill"
+            size={isMobile ? "big" : "medium"}
+            onClick={handleSave}
+            loading={isSaving}
+            disabled={!isDirty || Boolean(validationMessage)}
+            data-testid="class-plan-save-button"
         >
           저장
         </Button>
@@ -837,15 +840,17 @@ Confirmed that the diskette icon in the top right is a functional save button. I
       </button>
     ) : null;
   const readonlyHeaderShareButton = isReadonlyMode ? (
-    <IconButton
-      className="class-plan-header-share"
-      variant="border"
-      onPress={handleSharePreview}
-      label="이미지 공유"
-      icon={<Share2 size={18} />}
-      disabled={!canSharePreview || isSharingPreview}
+    <button
+      type="button"
+      className="theme-toggle class-plan-share-button"
+      onClick={handleSharePreview}
+      disabled={isSharingPreview}
+      aria-label={isSharingPreview ? "공유 준비 중" : "수업 계획 공유"}
+      title={isSharingPreview ? "공유 준비 중" : "수업 계획 공유"}
       data-testid="class-plan-share-button"
-    />
+    >
+      <Share2 size={18} />
+    </button>
   ) : null;
 
   const renderMobileSummary = () => {
@@ -910,7 +915,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
             {chips.map((badge) => (
               <span
                 key={badge.label}
-                className={`class-schedule-modal-mobile-summary-chip ${getMobileChipToneClass(badge.tone)}`}
+                className={`class-schedule-modal-mobile-summary-chip ${getMobileChipToneClass(badge.tone, badge.label)}`}
               >
                 {badge.label}
               </span>
@@ -939,7 +944,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
                 {headerTags.map((tag, index) => (
                   <span
                     key={`${tag}-${index}`}
-                    className={`class-plan-desktop-header-tag ${index > 1 ? "is-neutral" : ""}`.trim()}
+                    className={`class-plan-desktop-header-tag ${String(tag || '').trim() === "수학" ? "is-math" : String(tag || '').trim() === "영어" ? "is-english" : index > 1 ? "is-neutral" : ""}`.trim()}
                   >
                     {tag}
                   </span>
@@ -976,14 +981,14 @@ Confirmed that the diskette icon in the top right is a functional save button. I
 
   const renderTextbooksSection = () => (
     <div className="class-plan-builder-textbooks">
-      <div className="class-plan-builder-textbook-actions">
-        <Button
-          type="primary"
-          style="fill"
-          size="medium"
-          onPress={() => setTextbookEditorState({ textbook: null })}
-          disabled={!onSaveTextbook}
-        >
+        <div className="class-plan-builder-textbook-actions">
+          <Button
+            color="primary"
+            variant="fill"
+            size="medium"
+            onClick={() => setTextbookEditorState({ textbook: null })}
+            disabled={!onSaveTextbook}
+          >
           새 교재 등록
         </Button>
       </div>
@@ -992,7 +997,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
         <div className="class-plan-builder-textbook-column">
           <div className="class-plan-builder-textbook-head">
             <strong>연결된 교재</strong>
-            <Badge size="small" type="blue" badgeStyle="weak">
+              <Badge size="small" color="primary" variant="weak">
               {selectedTextbooks.length}권
             </Badge>
           </div>
@@ -1012,8 +1017,8 @@ Confirmed that the diskette icon in the top right is a functional save button. I
                     <div className="class-plan-builder-textbook-meta">
                       <Badge
                         size="small"
-                        type={index === 0 ? "blue" : "teal"}
-                        badgeStyle="weak"
+                        color={index === 0 ? "primary" : "accent"}
+                        variant="weak"
                       >
                         {index === 0 ? "대표 교재" : "보조 교재"}
                       </Badge>
@@ -1085,7 +1090,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
         <div className="class-plan-builder-textbook-column">
           <div className="class-plan-builder-textbook-head">
             <strong>교재 카탈로그</strong>
-            <Badge size="small" type="teal" badgeStyle="weak">
+              <Badge size="small" color="accent" variant="weak">
               {textbooksCatalog.length}권
             </Badge>
           </div>
@@ -1145,7 +1150,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
     </aside>
   );
 
-  const renderBuilderWorkspace = () => (
+  const legacyRenderBuilderWorkspace = () => (
     <div className="class-plan-sheet-content class-plan-sheet-content--editable-workspace">
       <div
         className="class-plan-builder-layout"
@@ -1155,8 +1160,6 @@ Confirmed that the diskette icon in the top right is a functional save button. I
           {warningBanner ? (
             <div className="class-plan-sheet-warning">{warningBanner}</div>
           ) : null}
-
-          <BuilderStepper steps={steps} />
 
           <BuilderSection
             title="기본 설정"
@@ -1315,6 +1318,95 @@ Confirmed that the diskette icon in the top right is a functional save button. I
     </div>
   );
 
+  const renderBuilderWorkspace = () => (
+    <div className="class-plan-sheet-content class-plan-sheet-content--editable-workspace">
+      <div
+        className="class-plan-builder-layout"
+        data-testid="class-plan-builder-layout"
+      >
+        <div className="class-plan-builder-main">
+          {warningBanner ? (
+            <div className="class-plan-sheet-warning">{warningBanner}</div>
+          ) : null}
+
+          <BuilderSection
+            title="일정 생성"
+            description="기본 설정과 기간 및 회차를 함께 보면서 회차를 만들고 조정합니다."
+            complete={steps[1].complete}
+            open={expandedSections.schedule}
+            onToggle={() => toggleSection("schedule")}
+            testId="class-plan-builder-section-schedule"
+          >
+            <ClassSchedulePlanner
+              value={normalizedDraftPlan}
+              className={draftClass.className}
+              subject={draftClass.subject}
+              schedule={safeClass.schedule || ""}
+              startDate={safeClass.startDate || ""}
+              endDate={safeClass.endDate || ""}
+              onPlanChange={setDraftPlan}
+              onSubjectChange={(nextSubject, nextPlan) => {
+                setDraftClass((current) => ({ ...current, subject: nextSubject }));
+                if (nextPlan) {
+                  setDraftPlan(nextPlan);
+                }
+              }}
+              onClassNameChange={(nextClassName, nextPlan) => {
+                setDraftClass((current) => ({
+                  ...current,
+                  className: nextClassName,
+                }));
+                if (nextPlan) {
+                  setDraftPlan(nextPlan);
+                }
+              }}
+              showPreview={false}
+              showIdentityFields={false}
+              controlsLayout="split"
+            />
+          </BuilderSection>
+
+          <BuilderSection
+            title="진도 템플릿"
+            description="선택 사항으로 회차별 계획 범위와 메모를 미리 넣어둘 수 있습니다."
+            complete={steps[2].complete}
+            optional
+            open={expandedSections.progress}
+            onToggle={() => toggleSection("progress")}
+            testId="class-plan-builder-section-progress"
+          >
+            <ClassScheduleProgressEditor
+              value={normalizedDraftPlan}
+              className={draftClass.className}
+              subject={draftClass.subject}
+              schedule={safeClass.schedule || ""}
+              startDate={safeClass.startDate || ""}
+              endDate={safeClass.endDate || ""}
+              onPlanChange={setDraftPlan}
+              mode="plan"
+              compact={true}
+              textbooksCatalog={textbooksCatalog}
+              textbookIds={draftClass.textbookIds}
+            />
+          </BuilderSection>
+
+          <BuilderSection
+            title="교재 연결"
+            description="대표 교재와 보조 교재 순서를 정리합니다."
+            complete={steps[3].complete}
+            open={expandedSections.textbooks}
+            onToggle={() => toggleSection("textbooks")}
+            testId="class-plan-builder-section-textbooks"
+          >
+            {renderTextbooksSection()}
+          </BuilderSection>
+        </div>
+
+        {previewPanel}
+      </div>
+    </div>
+  );
+
   const renderChecklistWorkspace = () => (
     <div className="class-plan-sheet-content class-plan-sheet-content--editable-workspace">
       <div
@@ -1435,8 +1527,8 @@ Confirmed that the diskette icon in the top right is a functional save button. I
                   <Badge
                     key={badge.label}
                     size="small"
-                    type={badge.type || "blue"}
-                    badgeStyle="weak"
+                    color={badge.type || "primary"}
+                    variant="weak"
                   >
                     {badge.label}
                   </Badge>
@@ -1458,9 +1550,10 @@ Confirmed that the diskette icon in the top right is a functional save button. I
             </section>
           ) : null}
 
-          <div ref={readonlyShareTargetRef}>
+          <div>
             <ClassSchedulePlanPreview
               plan={savedPreviewPlan}
+              classItem={safeClass}
               className={displayClassName}
               subject={draftClass.subject}
               allowExport={false}
@@ -1478,6 +1571,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
               endDate={safeClass.endDate || ""}
               textbookIds={draftClass.textbookIds}
               textbooksCatalog={textbooksCatalog}
+              progressLogs={progressLogs}
               mode="plan"
               title="계획 진도"
               description="회차별로 설계된 계획 범위를 정리했습니다."
@@ -1488,6 +1582,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
           {hasActualBoardContent ? (
             <ClassScheduleProgressBoard
               plan={savedPreviewPlan}
+              classItem={safeClass}
               className={displayClassName}
               subject={draftClass.subject}
               schedule={safeClass.schedule || ""}
@@ -1495,6 +1590,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
               endDate={safeClass.endDate || ""}
               textbookIds={draftClass.textbookIds}
               textbooksCatalog={textbooksCatalog}
+              progressLogs={progressLogs}
               mode="actual"
               title="실제 진도"
               description="최근 수업에서 실제로 진행된 범위를 정리했습니다."
@@ -1506,30 +1602,47 @@ Confirmed that the diskette icon in the top right is a functional save button. I
 
           {primaryActionLabel || secondaryActionLabel ? (
             <div className="class-schedule-modal-action-row">
-              {secondaryActionLabel ? (
-                <Button
-                  type="primary"
-                  style="fill"
-                  size="big"
-                  onPress={onSecondaryAction}
-                  className="class-schedule-modal-secondary-action"
-                >
+                {secondaryActionLabel ? (
+                  <Button
+                    color="primary"
+                    variant={secondaryActionStyle}
+                    size="big"
+                    onClick={onSecondaryAction}
+                    className="class-schedule-modal-secondary-action"
+                  >
                   {secondaryActionLabel}
                 </Button>
               ) : null}
-              {primaryActionLabel ? (
-                <Button
-                  type="primary"
-                  style="fill"
-                  size="big"
-                  onPress={onPrimaryAction}
-                  className="class-schedule-modal-primary-action"
-                >
+                {primaryActionLabel ? (
+                  <Button
+                    color="primary"
+                    variant="fill"
+                    size="big"
+                    onClick={onPrimaryAction}
+                    className="class-schedule-modal-primary-action"
+                  >
                   {primaryActionLabel}
                 </Button>
               ) : null}
             </div>
           ) : null}
+
+          <div
+            ref={readonlyShareTargetRef}
+            className="class-plan-share-capture"
+            data-testid="class-plan-share-capture"
+            aria-hidden="true"
+          >
+            <ClassSchedulePlanPreview
+              plan={savedPreviewPlan}
+              classItem={safeClass}
+              className={displayClassName}
+              subject={draftClass.subject}
+              allowExport={false}
+              emptyMessage={emptyMessage}
+              variant="share-image"
+            />
+          </div>
         </div>
       </div>
     );
@@ -1548,7 +1661,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
       title={headerTitle}
       subtitle={isReadonlyMode ? "" : draftClass.subject || safeClass.subject || ""}
       headerActions={readonlyHeaderShareButton}
-      actions={isEditableMode ? saveBar : null}
+      actions={isEditableMode ? (isMobile ? saveBar : null) : null}
       testId="class-schedule-plan-modal"
       sheetClassName={
         isReadonlyMode ? "class-plan-bottom-sheet--public" : "class-plan-bottom-sheet--editable"
@@ -1578,7 +1691,6 @@ Confirmed that the diskette icon in the top right is a functional save button. I
         >
           {renderDesktopHeader()}
           {body}
-          {saveBar}
         </div>
       </div>
     </div>
@@ -1592,25 +1704,25 @@ Confirmed that the diskette icon in the top right is a functional save button. I
         open={showDiscardDialog}
         title="저장하지 않은 변경이 있습니다"
         description="지금 닫으면 이번에 수정한 일정과 진도 체크 내용이 사라집니다."
-        leftButton={
-          <Button
-            type="primary"
-            style="weak"
-            size="medium"
-            onPress={() => setShowDiscardDialog(false)}
-          >
+          leftButton={
+            <Button
+              color="primary"
+              variant="weak"
+              size="medium"
+              onClick={() => setShowDiscardDialog(false)}
+            >
             계속 편집
           </Button>
         }
-        rightButton={
-          <Button
-            type="primary"
-            style="fill"
-            size="medium"
-            onPress={() => {
-              setShowDiscardDialog(false);
-              onClose?.();
-            }}
+          rightButton={
+            <Button
+              color="primary"
+              variant="fill"
+              size="medium"
+              onClick={() => {
+                setShowDiscardDialog(false);
+                onClose?.();
+              }}
           >
             저장 안 하고 닫기
           </Button>

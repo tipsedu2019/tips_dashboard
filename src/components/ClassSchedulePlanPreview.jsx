@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Download } from "lucide-react";
 import { exportElementAsImage } from "../lib/exportAsImage";
 import useViewport from "../hooks/useViewport";
@@ -12,6 +12,16 @@ import {
   getStateTone,
   parseDateValue,
 } from "../lib/classSchedulePlanner";
+import {
+  buildSessionStepKey,
+  buildSessionStepStateMap,
+  hasSessionDetailContent,
+} from "../lib/classPlanStepper";
+import { Badge } from "./ui/tds";
+
+function text(value) {
+  return String(value || "").trim();
+}
 
 const CALENDAR_DAY_HEADERS = ["일", "월", "화", "수", "목", "금", "토"];
 const HIDE_ADJACENT_DAY_VARIANTS = new Set(["public-detail", "editor-summary"]);
@@ -135,6 +145,89 @@ function countGroupSessions(sessions = []) {
     (session) => session.state !== "makeup",
   ).length;
   return countedSessions || (sessions || []).length;
+}
+
+function useSessionGroupTrackLayout(sessionCount, firstSessionKey, lastSessionKey) {
+  const listRef = useRef(null);
+  const firstDotRef = useRef(null);
+  const lastDotRef = useRef(null);
+  const [trackVars, setTrackVars] = useState(null);
+
+  useLayoutEffect(() => {
+    if (sessionCount <= 1) {
+      setTrackVars(null);
+      return undefined;
+    }
+
+    const listNode = listRef.current;
+    const firstDotNode = firstDotRef.current;
+    const lastDotNode = lastDotRef.current;
+
+    if (!listNode || !firstDotNode || !lastDotNode) {
+      return undefined;
+    }
+
+    let frameId = null;
+
+    const measure = () => {
+      const listRect = listNode.getBoundingClientRect();
+      const firstRect = firstDotNode.getBoundingClientRect();
+      const lastRect = lastDotNode.getBoundingClientRect();
+      const nextTrackVars = {
+        "--track-top": `${Math.max(0, firstRect.top - listRect.top)}px`,
+        "--track-bottom": `${Math.max(0, listRect.bottom - lastRect.bottom)}px`,
+        "--track-left": `${Math.max(0, firstRect.left - listRect.left)}px`,
+        "--track-width": `${firstRect.width}px`,
+      };
+
+      setTrackVars((current) => {
+        if (
+          current?.["--track-top"] === nextTrackVars["--track-top"] &&
+          current?.["--track-bottom"] === nextTrackVars["--track-bottom"] &&
+          current?.["--track-left"] === nextTrackVars["--track-left"] &&
+          current?.["--track-width"] === nextTrackVars["--track-width"]
+        ) {
+          return current;
+        }
+
+        return nextTrackVars;
+      });
+    };
+
+    const scheduleMeasure = () => {
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+      frameId = requestAnimationFrame(measure);
+    };
+
+    scheduleMeasure();
+
+    const observer =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(scheduleMeasure)
+        : null;
+
+    observer?.observe(listNode);
+    observer?.observe(firstDotNode);
+    observer?.observe(lastDotNode);
+    window.addEventListener("resize", scheduleMeasure);
+
+    return () => {
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+    };
+  }, [firstSessionKey, lastSessionKey, sessionCount]);
+
+  return {
+    listRef,
+    firstDotRef,
+    lastDotRef,
+    trackVars,
+  };
 }
 
 function withAlpha(color, alpha) {
@@ -263,21 +356,6 @@ function getDayLabelMeta(session) {
   };
 }
 
-function SessionStatePill({ state }) {
-  const tone = getStateTone(state);
-
-  return (
-    <span
-      className="class-plan-session-state-pill"
-      style={{
-        background: tone.background,
-        color: tone.color,
-      }}
-    >
-      {getStateBadgeLabel(state)}
-    </span>
-  );
-}
 
 function SessionMeta({ session }) {
   return (
@@ -473,144 +551,125 @@ function MonthCard({
   );
 }
 
-function SessionCards({ group, variant }) {
-  const isPublicDetail = variant === "public-detail";
+function SessionStatePill({ state }) {
+  const statusLabels = {
+    session: "정상 수업",
+    active: "정상 수업",
+    force_active: "정상 수업",
+    exception: "휴강/보강",
+    makeup: "보강",
+    tbd: "미정",
+  };
+
+  const statusTones = {
+    session: "success",
+    active: "success",
+    force_active: "success",
+    exception: "warning",
+    makeup: "primary",
+    tbd: "gray",
+  };
 
   return (
-    <section className="class-plan-session-group" key={group.key}>
-      {!isPublicDetail && (
-        <header className="class-plan-session-group-header">
-          <strong>{group.label}</strong>
-        </header>
-      )}
-      <div className="class-plan-session-cards-grid">
-        {group.sessions.map((session) => (
-          <article
-            key={`${group.key}-${session.date}-${session.originalDate || "base"}-${session.sessionNumber || "na"}`}
-            className="class-plan-session-card"
-          >
-            {isPublicDetail ? (
-              <>
-                <div className="class-plan-session-card-single-row">
-                  <div className="class-plan-session-info-group">
-                    <span className="class-plan-session-billing">
-                      <span
-                        className="class-plan-session-billing-dot"
-                        style={{
-                          background:
-                            group.billingColor ||
-                            session.billingColor ||
-                            "#216e4e",
-                        }}
-                      />
-                      {group.billingLabel}
-                    </span>
-                    <span className="class-plan-session-divider">·</span>
-                    <strong className="class-plan-session-meta-number">
-                      {session.sessionNumber
-                        ? `${session.sessionNumber}회`
-                        : "예외 일정"}
-                    </strong>
-                    <span className="class-plan-session-divider">·</span>
-                    <span className="class-plan-session-date-inline">
-                      {formatPlannerDateLabel(session.date)}
-                    </span>
-                  </div>
-                  <SessionStatePill state={session.state} />
-                </div>
-                <SessionMeta session={session} />
-              </>
-            ) : (
-              <>
-                <div className="class-plan-session-card-top">
-                  <span className="class-plan-session-billing">
-                    <span
-                      className="class-plan-session-billing-dot"
-                      style={{
-                        background:
-                          group.billingColor ||
-                          session.billingColor ||
-                          "#216e4e",
-                      }}
-                    />
-                    {group.billingLabel}
-                  </span>
-                  <SessionStatePill state={session.state} />
-                </div>
-                <strong className="class-plan-session-date">
-                  {formatPlannerDateLabel(session.date)}
-                </strong>
-                <div className="class-plan-session-card-meta">
-                  <span>
-                    {session.sessionNumber
-                      ? `${session.sessionNumber}회차`
-                      : "예외 일정"}
-                  </span>
-                </div>
-                <SessionMeta session={session} />
-              </>
-            )}
-          </article>
-        ))}
-      </div>
-    </section>
+    <Badge size="small" color={statusTones[state] || "neutral"} variant="weak">
+      {statusLabels[state] || "정상 수업"}
+    </Badge>
   );
 }
 
-function SessionTable({ group, compact }) {
+/**
+ * Find the "active" step index — the session closest to today (on or before).
+ * Steps before activeIdx → done, step at activeIdx → active (current),
+ * steps after → pending.  Mirrors TDS ProgressStepper activeStepIndex.
+ */
+function SessionVerticalStepper({ group, variant, stepStates }) {
+  const isPublicDetail = variant === "public-detail";
+  const color = group.billingColor || "#216e4e";
+  const firstSession = group.sessions[0] || null;
+  const lastSession = group.sessions[group.sessions.length - 1] || null;
+  const firstSessionKey = firstSession
+    ? buildSessionStepKey(group.key, firstSession)
+    : group.key;
+  const lastSessionKey = lastSession
+    ? buildSessionStepKey(group.key, lastSession)
+    : group.key;
+  const { listRef, firstDotRef, lastDotRef, trackVars } =
+    useSessionGroupTrackLayout(
+      group.sessions.length,
+      firstSessionKey,
+      lastSessionKey,
+    );
+
   return (
-    <section className="class-plan-session-group" key={group.key}>
-      <header className="class-plan-session-group-header is-desktop">
-        <strong>{group.label}</strong>
-      </header>
+    <section
+      className="class-plan-session-group class-plan-session-vertical-group"
+      key={group.key}
+    >
+      {!isPublicDetail && (
+        <header className="class-plan-session-group-header">
+          <strong>{group.label}</strong>
+          <span>{countGroupSessions(group.sessions)}회</span>
+        </header>
+      )}
       <div
-        className="class-plan-session-table-head"
-        style={{
-          gridTemplateColumns: compact
-            ? "72px 56px 1fr auto"
-            : "76px 64px 1fr auto",
-        }}
+        className="class-plan-session-vertical-list"
+        ref={listRef}
+        style={{ "--stepper-color": color, ...trackVars }}
       >
-        <div>청구월</div>
-        <div>회차</div>
-        <div>수업일</div>
-        <div>상태</div>
-      </div>
-      <div className="class-plan-session-table-body">
-        {group.sessions.map((session) => (
-          <div
-            key={`${group.key}-${session.date}-${session.originalDate || "base"}-${session.sessionNumber || "na"}`}
-            className="class-plan-session-row"
-            style={{
-              gridTemplateColumns: compact
-                ? "72px 56px 1fr auto"
-                : "76px 64px 1fr auto",
-            }}
-          >
-            <div className="class-plan-session-billing">
-              <span
-                className="class-plan-session-billing-dot"
-                style={{
-                  background:
-                    group.billingColor || session.billingColor || "#216e4e",
-                }}
-              />
-              {group.billingLabel}
-            </div>
-            <div className="class-plan-session-number">
-              {session.sessionNumber ? `${session.sessionNumber}회` : "-"}
-            </div>
-            <div className="class-plan-session-date-wrap">
-              <strong className="class-plan-session-date">
-                {formatPlannerDateLabel(session.date)}
-              </strong>
-              <SessionMeta session={session} />
-            </div>
-            <div className="class-plan-session-state-wrap">
-              <SessionStatePill state={session.state} />
-            </div>
-          </div>
-        ))}
+        {group.sessions.length > 1 ? (
+          <div className="class-plan-session-group-track" aria-hidden="true" />
+        ) : null}
+        {group.sessions.map((session, index) => {
+          const sessionKey = buildSessionStepKey(group.key, session);
+          const stepState = stepStates.get(sessionKey) || "pending";
+          const isLast = index === group.sessions.length - 1;
+          const stemState = stepState === "done" ? "filled" : "empty";
+          const hasDetail = hasSessionDetailContent(session);
+
+          return (
+            <article
+              key={`${group.key}-${session.date}-${session.originalDate || "base"}-${session.sessionNumber || "na"}`}
+              className={`class-plan-session-card class-plan-session-vertical-item is-single-row is-step-${stepState} ${hasDetail ? "has-detail" : ""}`.trim()}
+            >
+              <div className="class-plan-session-stepper">
+                <div
+                  className={`class-plan-stepper-dot is-${stepState}`}
+                  ref={(node) => {
+                    if (index === 0) {
+                      firstDotRef.current = node;
+                    }
+                    if (isLast) {
+                      lastDotRef.current = node;
+                    }
+                  }}
+                  style={{ "--stepper-color": color }}
+                >
+                  {session.sessionNumber || ""}
+                </div>
+                {!isLast && (
+                  <div className="class-plan-stepper-stem" aria-hidden="true">
+                    <div className={`class-plan-stepper-stem-fill is-${stemState}`} />
+                  </div>
+                )}
+              </div>
+
+              <div className="class-plan-session-card-content">
+                <div className="class-plan-session-main-info">
+                  <div className="class-plan-session-date-stack">
+                    <span className="class-plan-session-date-label">
+                      {formatPlannerDateLabel(session.date)}
+                    </span>
+                    <SessionMeta session={session} />
+                  </div>
+                </div>
+
+                <div className="class-plan-session-status-info">
+                  <SessionStatePill state={session.state} />
+                </div>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -621,38 +680,40 @@ function SessionList({ groups, isCompact, variant }) {
     return null;
   }
 
-  if (isCompact) {
-    return (
-      <div
-        className="class-plan-session-stack"
-        data-testid="class-plan-session-list"
-      >
-        {variant !== "public-detail" && (
-          <div className="class-plan-session-panel-header">
-            <strong>회차 목록</strong>
-          </div>
-        )}
-        {groups.map((group) => (
-          <SessionCards key={group.key} group={group} variant={variant} />
-        ))}
-      </div>
-    );
-  }
+  const { stepStates } = useMemo(
+    () => buildSessionStepStateMap(groups),
+    [groups],
+  );
+
+  const ContainerTag = isCompact ? "div" : "aside";
+  const containerClass = isCompact
+    ? "class-plan-session-stack"
+    : "class-plan-session-panel";
+  const useStickyHeader = !isCompact && variant !== "share-image";
 
   return (
-    <aside
-      className="class-plan-session-panel"
+    <ContainerTag
+      className={containerClass}
       data-testid="class-plan-session-list"
     >
-      <div className="class-plan-session-panel-header is-sticky">
-        <strong>회차 목록</strong>
-      </div>
+      {variant !== "public-detail" ? (
+        <div
+          className={`class-plan-session-panel-header ${useStickyHeader ? "is-sticky" : ""}`.trim()}
+        >
+          <strong>회차 목록</strong>
+        </div>
+      ) : null}
       <div className="class-plan-session-scroll">
         {groups.map((group) => (
-          <SessionTable key={group.key} group={group} compact={false} />
+          <SessionVerticalStepper
+            key={group.key}
+            group={group}
+            variant={variant}
+            stepStates={stepStates}
+          />
         ))}
       </div>
-    </aside>
+    </ContainerTag>
   );
 }
 
@@ -698,11 +759,16 @@ export function ClassSchedulePlanPreview({
   const fullClassName =
     getFullClassName(subject, className) || className || "수업 계획";
   const isSummaryVariant = variant !== "planner-editor";
-  const useCompactPreviewLayout =
-    isCompact ||
-    isMobile ||
-    variant === "public-detail" ||
-    variant === "planner-editor";
+  const isShareImageVariant = variant === "share-image";
+  const useCompactPreviewLayout = isShareImageVariant
+    ? false
+    : isMobile ||
+      variant === "public-detail" ||
+      variant === "planner-editor";
+  const monthCardCompact = isShareImageVariant ? true : useCompactPreviewLayout;
+  const sessionListCompact = isShareImageVariant
+    ? false
+    : useCompactPreviewLayout;
 
   const handleExport = async () => {
     if (
@@ -731,13 +797,21 @@ export function ClassSchedulePlanPreview({
     >
       <div
         ref={exportRef}
-        className={`class-plan-preview-surface ${isSummaryVariant ? "is-summary" : ""}`}
+        className={`class-plan-preview-surface ${isSummaryVariant ? "is-summary" : ""} ${isShareImageVariant ? "is-share-image" : ""}`.trim()}
       >
         <div className="class-plan-preview-header">
           <div className="class-plan-preview-copy">
             <span className="class-plan-preview-eyebrow">CLASS PLAN</span>
             <strong className="class-plan-preview-title">
-              {fullClassName}
+              <Badge
+                size="small"
+                color={text(subject) === '수학' ? 'primary' : text(subject) === '영어' ? 'danger' : 'neutral'}
+                variant="weak"
+              >
+                {text(subject) || '과목'}
+              </Badge>
+              <span className="class-plan-preview-title-sep"> </span>
+              {className || "수업 계획"}
             </strong>
             <span className="class-plan-preview-subtitle">
               수업 요일 {selectedDayLabel}
@@ -778,7 +852,7 @@ export function ClassSchedulePlanPreview({
           </div>
         ) : (
           <div
-            className={`class-plan-preview-layout ${useCompactPreviewLayout ? "is-mobile" : "is-desktop"}`}
+            className={`class-plan-preview-layout ${useCompactPreviewLayout ? "is-mobile" : "is-desktop"} ${isShareImageVariant ? "is-share-sheet" : ""}`.trim()}
             data-testid="class-plan-preview-layout"
           >
             <div className="class-plan-month-stack">
@@ -799,7 +873,7 @@ export function ClassSchedulePlanPreview({
                   setDragSource={setDragSource}
                   dropTarget={dropTarget}
                   setDropTarget={setDropTarget}
-                  compact={useCompactPreviewLayout}
+                  compact={monthCardCompact}
                   variant={variant}
                 />
               ))}
@@ -807,7 +881,7 @@ export function ClassSchedulePlanPreview({
 
             <SessionList
               groups={sessionGroups}
-              isCompact={useCompactPreviewLayout}
+              isCompact={sessionListCompact}
               variant={variant}
             />
           </div>

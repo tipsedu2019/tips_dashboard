@@ -3,7 +3,12 @@ export function isE2EModeEnabled() {
     return false;
   }
 
-  return new URLSearchParams(window.location.search).get('e2e') === '1';
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('e2e') === '1') {
+    return true;
+  }
+
+  return Boolean(import.meta.env.DEV && params.get('role'));
 }
 
 export function getE2ERole() {

@@ -158,8 +158,11 @@ export default function ClassSchedulePlanner({
   onClassNameChange,
   showPreview = true,
   showIdentityFields = true,
+  controlsLayout = "stack",
 }) {
   const { isCompact } = useViewport();
+  const useSplitControlsLayout =
+    controlsLayout === "split" && !showPreview && !isCompact;
   const planner = useMemo(
     () =>
       normalizeSchedulePlan(value, {
@@ -606,7 +609,9 @@ export default function ClassSchedulePlanner({
     : "요일 선택 필요";
 
   return (
-    <div className="planner-surface planner-surface--workspace">
+    <div
+      className={`planner-surface planner-surface--workspace ${useSplitControlsLayout ? "planner-surface--builder-split" : ""}`.trim()}
+    >
       {isCompact && showPreview ? (
         <div
           style={{
@@ -642,16 +647,18 @@ export default function ClassSchedulePlanner({
         </div>
       ) : null}
 
-      <div className="planner-top-grid">
+      <div
+        className={`planner-top-grid ${!showPreview ? "is-controls-only" : ""}`.trim()}
+      >
         <div
-          className="planner-controls-column"
+          className={`planner-controls-column ${useSplitControlsLayout ? "is-builder-split" : ""}`.trim()}
           data-testid="planner-controls-column"
-            style={{
-              display:
-                !isCompact || !showPreview || mobileSection !== "preview"
-                  ? "grid"
-                  : "none",
-            }}
+          style={{
+            display:
+              !isCompact || !showPreview || mobileSection !== "preview"
+                ? "grid"
+                : "none",
+          }}
         >
           <section
             className="planner-panel planner-panel--setup"

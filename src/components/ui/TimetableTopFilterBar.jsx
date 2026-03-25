@@ -1,6 +1,14 @@
 import { Camera } from 'lucide-react';
 import { CheckboxMenu, SegmentedControl } from './tds';
 
+const ACTIVE_TIMETABLE_SEGMENT_STYLE = {
+  background: 'var(--ui-primary)',
+  color: '#ffffff',
+  borderColor: 'var(--ui-primary)',
+  boxShadow:
+    '0 10px 24px rgba(49, 130, 246, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.08)',
+};
+
 const gridOptions = [1, 2].map((count) => ({
   value: String(count),
   label: `${count}`,
@@ -29,12 +37,14 @@ export default function TimetableTopFilterBar({
     value: subject,
     label: subject,
     ariaLabel: `${subject} 선택`,
+    activeStyle: ACTIVE_TIMETABLE_SEGMENT_STYLE,
   }));
 
   const axisItems = axisOptions.map((option) => ({
     value: option,
     label: option,
     ariaLabel: `${axisLabel || option} 선택`,
+    activeStyle: ACTIVE_TIMETABLE_SEGMENT_STYLE,
   }));
 
   const toggleSelection = (currentValues, nextValue) => {
@@ -63,8 +73,14 @@ export default function TimetableTopFilterBar({
         .join(' ')}
       data-testid="timetable-top-filter-bar"
     >
-      <div className="timetable-top-filter-bar__main">
-        <div className="timetable-top-filter-bar__term">
+      <div
+        className="timetable-top-filter-bar__main"
+        data-testid="timetable-top-filter-bar-main"
+      >
+        <div
+          className="timetable-top-filter-bar__term"
+          data-testid="timetable-top-filter-bar-term"
+        >
           <CheckboxMenu
             value={selectedTerm ? [selectedTerm] : []}
             options={termOptions.map((term) => ({
@@ -85,7 +101,10 @@ export default function TimetableTopFilterBar({
           />
         </div>
 
-        <div className="timetable-top-filter-bar__segment timetable-top-filter-bar__segment--subject">
+        <div
+          className="timetable-top-filter-bar__segment timetable-top-filter-bar__segment--subject"
+          data-testid="timetable-top-filter-bar-subject"
+        >
           <SegmentedControl
             value={selectedSubjectValues[0] || ''}
             onValueChange={handleSubjectValueChange}
@@ -98,7 +117,10 @@ export default function TimetableTopFilterBar({
           />
         </div>
 
-        <div className="timetable-top-filter-bar__segment timetable-top-filter-bar__segment--axis">
+        <div
+          className="timetable-top-filter-bar__segment timetable-top-filter-bar__segment--axis"
+          data-testid="timetable-top-filter-bar-axis"
+        >
           <SegmentedControl
             value={selectedAxisValues}
             onValueChange={handleAxisValueChange}
@@ -112,13 +134,21 @@ export default function TimetableTopFilterBar({
         </div>
       </div>
 
-      <div className="timetable-top-filter-bar__slot">
+      <div
+        className="timetable-top-filter-bar__slot"
+        data-testid="timetable-top-filter-bar-slot"
+      >
         {!compact ? (
-          <div className="timetable-top-filter-bar__actions">
+          <div
+            className="timetable-top-filter-bar__actions"
+            data-testid="timetable-top-filter-bar-actions"
+          >
             <SegmentedControl
               value={String(gridCount)}
               onValueChange={(nextValue) =>
-                onGridCountChange?.(Math.min(2, Math.max(1, Number(nextValue) || 2)))
+                onGridCountChange?.(
+                  Math.min(2, Math.max(1, Number(nextValue) || 2)),
+                )
               }
               items={gridOptions}
               size="small"

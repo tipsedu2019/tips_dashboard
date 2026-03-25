@@ -11,6 +11,20 @@ const e2eUrl = (path = "/") => {
 };
 
 test.describe("global toss ui refresh", () => {
+  test("allows localhost role previews to boot the internal shell without an explicit e2e flag", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 960 });
+    await page.goto("/?role=staff");
+
+    await expect(page.getByTestId("app-shell-root")).toBeVisible();
+    await expect(page.locator(".sidebar")).toHaveCount(0);
+    await expect(page.getByTestId("app-bottom-nav")).toBeVisible();
+
+    await page.getByTestId("mobile-nav-curriculum-roadmap").click();
+    await expect(page.getByTestId("curriculum-progress-command-bar")).toBeVisible();
+  });
+
   test("applies toss design system tokens to the internal app shell", async ({
     page,
   }) => {
@@ -64,7 +78,7 @@ test.describe("global toss ui refresh", () => {
     await expect(page.getByTestId("textbooks-manager-shell")).toBeVisible();
   });
 
-  test("uses a unified dashboard bottom menu and removes legacy dashboard chrome on desktop", async ({
+  test("keeps the recent desktop bottom taskbar navigation instead of the old sidebar", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 960 });
@@ -72,6 +86,7 @@ test.describe("global toss ui refresh", () => {
 
     await expect(page.getByTestId("dashboard-shell-topbar")).toHaveCount(0);
     await expect(page.locator(".sidebar")).toHaveCount(0);
+    await expect(page.getByTestId("dashboard-sidebar-nav")).toHaveCount(0);
     await expect(page.getByTestId("app-bottom-nav")).toBeVisible();
     await expect(page.getByTestId("app-bottom-nav-theme")).toBeVisible();
     await expect(page.getByTestId("app-bottom-nav-public")).toBeVisible();
@@ -136,7 +151,31 @@ test.describe("global toss ui refresh", () => {
     await expect(page.getByTestId("public-placeholder-home")).toBeVisible();
   });
 
-  test("keeps dashboard actions integrated inside the fixed bottom menu on desktop", async ({
+  test("matches the desktop main bottom nav height to the public bottom nav height", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 960 });
+
+    await page.goto(e2eUrl("/?view=public"));
+    await expect(page.getByTestId("public-bottom-nav")).toBeVisible();
+
+    const publicNavHeight = await page.evaluate(() => {
+      const nav = document.querySelector('[data-testid="public-bottom-nav"]');
+      return nav?.getBoundingClientRect().height ?? 0;
+    });
+
+    await page.goto(e2eUrl("/?role=staff"));
+    await expect(page.getByTestId("app-bottom-nav")).toBeVisible();
+
+    const desktopNavHeight = await page.evaluate(() => {
+      const nav = document.querySelector('[data-testid="app-bottom-nav"]');
+      return nav?.getBoundingClientRect().height ?? 0;
+    });
+
+    expect(Math.abs(desktopNavHeight - publicNavHeight)).toBeLessThanOrEqual(2);
+  });
+
+  test("anchors dashboard actions inside the desktop bottom taskbar on desktop", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1600, height: 980 });
@@ -144,25 +183,13 @@ test.describe("global toss ui refresh", () => {
     await expect(page.getByTestId("app-shell-root")).toBeVisible();
 
     const dashboardShellMetrics = await page.evaluate(() => {
-      const nav = document.querySelector('[data-testid="app-bottom-nav"]');
-      const actions = document.querySelector(
-        '[data-testid="dashboard-bottom-nav-actions"]',
-      );
-      const leading = document.querySelector(
-        '[data-testid="dashboard-bottom-nav-leading"]',
-      );
-      const navGrid = document.querySelector(
-        ".dashboard-shell-bottom-nav-grid",
-      );
-      const main = document.querySelector(".main-content");
+      const bottomNav = document.querySelector('[data-testid="app-bottom-nav"]');
       const sidebar = document.querySelector(".sidebar");
+      const main = document.querySelector(".main-content");
       const topbar = document.querySelector(
         '[data-testid="dashboard-shell-topbar"]',
       );
-      const navRect = nav?.getBoundingClientRect();
-      const actionRect = actions?.getBoundingClientRect();
-      const leadingRect = leading?.getBoundingClientRect();
-      const gridRect = navGrid?.getBoundingClientRect();
+      const bottomNavRect = bottomNav?.getBoundingClientRect();
       const mainRect = main?.getBoundingClientRect();
       const themeButtonRect = document
         .querySelector('[data-testid="app-bottom-nav-theme"]')
@@ -170,60 +197,224 @@ test.describe("global toss ui refresh", () => {
       const publicButtonRect = document
         .querySelector('[data-testid="app-bottom-nav-public"]')
         ?.getBoundingClientRect();
+      const logoutButtonRect = document
+        .querySelector('[data-testid="app-bottom-nav-logout"]')
+        ?.getBoundingClientRect();
 
       return {
         hasSidebar: Boolean(sidebar),
+        hasBottomNav: Boolean(bottomNav),
         hasTopbar: Boolean(topbar),
-        navBottom: navRect?.bottom ?? 0,
-        navHeight: navRect?.height ?? 0,
         viewportHeight: window.innerHeight,
         viewportWidth: window.innerWidth,
-        leadingLeft: leadingRect?.left ?? 0,
-        actionTop: actionRect?.top ?? 0,
-        actionRight: actionRect?.right ?? 0,
-        gridBottom: gridRect?.bottom ?? 0,
-        gridCenter: gridRect ? gridRect.left + gridRect.width / 2 : 0,
+        bottomNavHeight: bottomNavRect?.height ?? 0,
+        bottomNavBottom: bottomNavRect?.bottom ?? 0,
+        bottomNavTop: bottomNavRect?.top ?? 0,
         mainWidth: mainRect?.width ?? 0,
-        themeButtonWidth: themeButtonRect?.width ?? 0,
-        themeButtonHeight: themeButtonRect?.height ?? 0,
-        publicButtonWidth: publicButtonRect?.width ?? 0,
-        publicButtonHeight: publicButtonRect?.height ?? 0,
+        themeButtonInside:
+          Boolean(themeButtonRect && bottomNavRect) &&
+          themeButtonRect.top >= bottomNavRect.top - 1 &&
+          themeButtonRect.bottom <= bottomNavRect.bottom + 1,
+        publicButtonInside:
+          Boolean(publicButtonRect && bottomNavRect) &&
+          publicButtonRect.top >= bottomNavRect.top - 1 &&
+          publicButtonRect.bottom <= bottomNavRect.bottom + 1,
+        logoutButtonInside:
+          Boolean(logoutButtonRect && bottomNavRect) &&
+          logoutButtonRect.top >= bottomNavRect.top - 1 &&
+          logoutButtonRect.bottom <= bottomNavRect.bottom + 1,
+        utilityButtonsAligned:
+          Boolean(themeButtonRect && publicButtonRect && logoutButtonRect) &&
+          Math.max(
+            Math.abs(themeButtonRect.top - publicButtonRect.top),
+            Math.abs(publicButtonRect.top - logoutButtonRect.top),
+          ) <= 6,
       };
     });
 
     expect(dashboardShellMetrics.hasSidebar).toBe(false);
+    expect(dashboardShellMetrics.hasBottomNav).toBe(true);
     expect(dashboardShellMetrics.hasTopbar).toBe(false);
+    expect(dashboardShellMetrics.bottomNavHeight).toBeGreaterThanOrEqual(56);
     expect(
       Math.abs(
-        dashboardShellMetrics.navBottom - dashboardShellMetrics.viewportHeight,
+        dashboardShellMetrics.bottomNavBottom -
+          dashboardShellMetrics.viewportHeight,
       ),
     ).toBeLessThanOrEqual(2);
-    expect(dashboardShellMetrics.navHeight).toBeLessThanOrEqual(58);
+    expect(dashboardShellMetrics.bottomNavTop).toBeGreaterThan(
+      dashboardShellMetrics.viewportHeight - 120,
+    );
     expect(dashboardShellMetrics.mainWidth).toBeGreaterThan(
-      dashboardShellMetrics.viewportWidth * 0.9,
+      dashboardShellMetrics.viewportWidth * 0.78,
     );
-    expect(dashboardShellMetrics.leadingLeft).toBeLessThanOrEqual(24);
-    expect(
-      Math.abs(
-        dashboardShellMetrics.gridCenter -
-          dashboardShellMetrics.viewportWidth / 2,
-      ),
-    ).toBeLessThanOrEqual(24);
-    expect(
-      Math.abs(
-        dashboardShellMetrics.actionRight - dashboardShellMetrics.viewportWidth,
-      ),
-    ).toBeLessThanOrEqual(40);
-    expect(dashboardShellMetrics.actionTop).toBeLessThan(
-      dashboardShellMetrics.gridBottom,
-    );
-    expect(dashboardShellMetrics.themeButtonWidth).toBeCloseTo(40, 0);
-    expect(dashboardShellMetrics.themeButtonHeight).toBeCloseTo(40, 0);
-    expect(dashboardShellMetrics.publicButtonWidth).toBeCloseTo(40, 0);
-    expect(dashboardShellMetrics.publicButtonHeight).toBeCloseTo(40, 0);
+    expect(dashboardShellMetrics.themeButtonInside).toBe(true);
+    expect(dashboardShellMetrics.publicButtonInside).toBe(true);
+    expect(dashboardShellMetrics.logoutButtonInside).toBe(true);
+    expect(dashboardShellMetrics.utilityButtonsAligned).toBe(true);
   });
 
-  test("removes the duplicate class list tab from timetable and keeps teacher classroom filters expanded", async ({
+  test("centers the desktop bottom nav icon group like the public bottom nav", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1600, height: 980 });
+    await page.goto(e2eUrl("/?role=staff"));
+    await expect(page.getByTestId("app-bottom-nav")).toBeVisible();
+
+    const navMetrics = await page.evaluate(() => {
+      const buttons = Array.from(
+        document.querySelectorAll('[data-testid^="mobile-nav-"]'),
+      );
+      const nav = document.querySelector('[data-testid="app-bottom-nav"]');
+      const logoutButton = document.querySelector(
+        '[data-testid="app-bottom-nav-logout"]',
+      );
+      const themeButton = document.querySelector(
+        '[data-testid="app-bottom-nav-theme"]',
+      );
+      const publicButton = document.querySelector(
+        '[data-testid="app-bottom-nav-public"]',
+      );
+      const navRect = nav?.getBoundingClientRect();
+      const buttonRects = buttons.map((button) =>
+        button.getBoundingClientRect(),
+      );
+      const groupLeft = Math.min(...buttonRects.map((rect) => rect.left));
+      const groupRight = Math.max(...buttonRects.map((rect) => rect.right));
+      const logoutRect = logoutButton?.getBoundingClientRect();
+      const themeRect = themeButton?.getBoundingClientRect();
+      const publicRect = publicButton?.getBoundingClientRect();
+
+      return {
+        viewportWidth: window.innerWidth,
+        navWidth: navRect?.width ?? 0,
+        groupWidth: groupRight - groupLeft,
+        groupCenter: (groupLeft + groupRight) / 2,
+        logoutLeftGap:
+          navRect && logoutRect ? logoutRect.left - navRect.left : Number.NaN,
+        publicRightGap:
+          navRect && publicRect ? navRect.right - publicRect.right : Number.NaN,
+        themeRightGap:
+          navRect && themeRect ? navRect.right - themeRect.right : Number.NaN,
+        publicToThemeGap:
+          themeRect && publicRect ? publicRect.left - themeRect.right : Number.NaN,
+      };
+    });
+
+    expect(
+      Math.abs(navMetrics.groupCenter - navMetrics.viewportWidth / 2),
+    ).toBeLessThanOrEqual(12);
+    expect(navMetrics.groupWidth).toBeLessThan(navMetrics.navWidth * 0.65);
+    expect(navMetrics.logoutLeftGap).toBeLessThanOrEqual(48);
+    expect(navMetrics.publicRightGap).toBeLessThanOrEqual(48);
+    expect(navMetrics.themeRightGap).toBeGreaterThan(navMetrics.publicRightGap);
+    expect(navMetrics.publicToThemeGap).toBeLessThanOrEqual(16);
+  });
+
+  test("keeps the desktop academic calendar tabs compact and lets the month grid fill the workspace", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1600, height: 980 });
+    await page.goto(e2eUrl("/?role=staff"));
+
+    await page.getByTestId("mobile-nav-academic-calendar").click();
+    await expect(page.getByTestId("academic-workspace-tabs")).toBeVisible();
+    await expect(page.getByTestId("calendar-month-grid")).toBeVisible();
+
+    const calendarMetrics = await page.evaluate(() => {
+      const shell = document.querySelector(".academic-calendar-shell");
+      const main = document.querySelector(".academic-calendar-main");
+      const monthGridWrapper = document.querySelector(
+        '[data-testid="calendar-month-grid"]',
+      );
+      const tabTrack = document.querySelector(
+        ".academic-workspace-tab-control .tds-tab__track",
+      );
+      const weekBlocks = Array.from(
+        document.querySelectorAll(".academic-week-block"),
+      );
+
+      const shellRect = shell?.getBoundingClientRect();
+      const mainRect = main?.getBoundingClientRect();
+      const wrapperRect = monthGridWrapper?.getBoundingClientRect();
+      const tabTrackRect = tabTrack?.getBoundingClientRect();
+
+      return {
+        viewportWidth: window.innerWidth,
+        shellHeight: shellRect?.height ?? 0,
+        mainHeight: mainRect?.height ?? 0,
+        wrapperHeight: wrapperRect?.height ?? 0,
+        trackWidth: tabTrackRect?.width ?? 0,
+        trackCenterDelta: tabTrackRect
+          ? Math.abs(
+              (tabTrackRect.left + tabTrackRect.right) / 2 -
+                window.innerWidth / 2,
+            )
+          : Number.POSITIVE_INFINITY,
+        weekBlockHeights: weekBlocks.map((block) =>
+          block.getBoundingClientRect().height,
+        ),
+      };
+    });
+
+    expect(calendarMetrics.wrapperHeight).toBeGreaterThan(
+      calendarMetrics.mainHeight * 0.75,
+    );
+    expect(calendarMetrics.trackWidth).toBeLessThan(
+      calendarMetrics.viewportWidth * 0.72,
+    );
+    expect(calendarMetrics.trackCenterDelta).toBeLessThanOrEqual(16);
+    expect(
+      Math.min(...calendarMetrics.weekBlockHeights),
+    ).toBeGreaterThanOrEqual(84);
+  });
+
+  test("gives the desktop academic calendar the same breathing room as manager workspaces and keeps the annual board scrollable", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1600, height: 980 });
+    await page.goto(e2eUrl("/?role=staff"));
+
+    await page.getByTestId("mobile-nav-academic-calendar").click();
+    await expect(page.getByTestId("academic-workspace-tabs")).toBeVisible();
+
+    const monthViewMetrics = await page.evaluate(() => {
+      const shell = document.querySelector('[data-testid="app-shell-root"]');
+      const workspace = document.querySelector(".academic-calendar-workspace");
+      const tabs = document.querySelector('[data-testid="academic-workspace-tabs"]');
+      const shellRect = shell?.getBoundingClientRect();
+      const workspaceRect = workspace?.getBoundingClientRect();
+      const tabsRect = tabs?.getBoundingClientRect();
+      return {
+        leftGap: workspaceRect && shellRect ? workspaceRect.left - shellRect.left : 0,
+        rightGap: workspaceRect && shellRect ? shellRect.right - workspaceRect.right : 0,
+        topGap: workspaceRect && tabsRect ? tabsRect.top - workspaceRect.top : 0,
+      };
+    });
+
+    expect(monthViewMetrics.leftGap).toBeGreaterThanOrEqual(16);
+    expect(monthViewMetrics.rightGap).toBeGreaterThanOrEqual(16);
+    expect(monthViewMetrics.topGap).toBeGreaterThanOrEqual(12);
+
+    await page.getByTestId("academic-workspace-tab-school-board").click();
+    await page.waitForTimeout(250);
+
+    const annualBoardMetrics = await page.evaluate(() => {
+      const report = document.querySelector(".academic-roadmap-embed__report");
+      const main = document.querySelector(".main-content.main-content-academic-calendar");
+      return {
+        overflowY: report ? getComputedStyle(report).overflowY : null,
+        mainOverflowY: main ? getComputedStyle(main).overflowY : null,
+        clientHeight: report?.clientHeight ?? 0,
+      };
+    });
+
+    expect(["auto", "scroll"]).toContain(annualBoardMetrics.overflowY);
+    expect(["auto", "scroll"]).toContain(annualBoardMetrics.mainOverflowY);
+    expect(annualBoardMetrics.clientHeight).toBeGreaterThan(0);
+  });
+
+  test("keeps the intentional compact timetable top filter bar on desktop", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1600, height: 980 });
@@ -234,37 +425,94 @@ test.describe("global toss ui refresh", () => {
     await expect(page.getByTestId("dashboard-class-filter-tabs")).toHaveCount(
       0,
     );
+    await expect(page.getByTestId("timetable-unified-filter")).toHaveCount(0);
+    await expect(page.getByTestId("timetable-top-filter-bar")).toBeVisible();
 
-    await expect(
-      page.getByRole("button", { name: "수업 시간표" }),
-    ).toHaveCount(0);
-
-    const classListFilterMetrics = await page.evaluate(() => {
-      const teacherGrid = document.querySelector(
-        ".timetable-unified-filter-section-teacher .timetable-unified-filter-chip-grid",
+    const compactTopBarMetrics = await page.evaluate(() => {
+      const topBar = document.querySelector(
+        '[data-testid="timetable-top-filter-bar"]',
       );
-      const classroomGrid = document.querySelector(
-        ".timetable-unified-filter-section-classroom .timetable-unified-filter-chip-grid",
+      const main = document.querySelector(
+        '[data-testid="timetable-top-filter-bar-main"]',
       );
-      const filterShell = document.querySelector(
-        '[data-testid="timetable-unified-filter"]',
+      const term = document.querySelector(
+        '[data-testid="timetable-top-filter-bar-term"] .tds-checkbox-menu__trigger',
       );
-      const filterStyle = filterShell ? getComputedStyle(filterShell) : null;
+      const subject = document.querySelector(
+        '[data-testid="timetable-top-filter-bar-subject"]',
+      );
+      const axis = document.querySelector(
+        '[data-testid="timetable-top-filter-bar-axis"]',
+      );
+      const slot = document.querySelector(
+        '[data-testid="timetable-top-filter-bar-slot"]',
+      );
+      const actions = document.querySelector(
+        '[data-testid="timetable-top-filter-bar-actions"]',
+      );
+      const subjectSegment = document.querySelector(
+        ".timetable-top-filter-bar__segmented-subject",
+      );
       return {
-        teacherOverflowY: teacherGrid
-          ? getComputedStyle(teacherGrid).overflowY
+        topBarDisplay: topBar ? getComputedStyle(topBar).display : null,
+        mainDisplay: main ? getComputedStyle(main).display : null,
+        slotJustifyContent: slot ? getComputedStyle(slot).justifyContent : null,
+        actionsDisplay: actions ? getComputedStyle(actions).display : null,
+        termMinHeight: term ? getComputedStyle(term).minHeight : null,
+        subjectMaxWidth: subjectSegment
+          ? getComputedStyle(subjectSegment).maxWidth
           : null,
-        classroomOverflowY: classroomGrid
-          ? getComputedStyle(classroomGrid).overflowY
-          : null,
-        filterBorderTopWidth: filterStyle?.borderTopWidth ?? null,
-        filterBoxShadow: filterStyle?.boxShadow ?? null,
+        subjectWidth: subject?.getBoundingClientRect().width ?? 0,
+        axisWidth: axis?.getBoundingClientRect().width ?? 0,
       };
     });
 
-    expect(classListFilterMetrics.teacherOverflowY).toBe("visible");
-    expect(classListFilterMetrics.classroomOverflowY).toBe("visible");
-    expect(classListFilterMetrics.filterBorderTopWidth).toBe("0px");
-    expect(classListFilterMetrics.filterBoxShadow).toBe("none");
+    expect(compactTopBarMetrics.topBarDisplay).toBe("flex");
+    expect(compactTopBarMetrics.mainDisplay).toBe("grid");
+    expect(compactTopBarMetrics.slotJustifyContent).toBe("flex-end");
+    expect(compactTopBarMetrics.actionsDisplay).toBe("flex");
+    expect(compactTopBarMetrics.termMinHeight).toBe("44px");
+    expect(compactTopBarMetrics.subjectMaxWidth).toBe("160px");
+    expect(compactTopBarMetrics.subjectWidth).toBeGreaterThan(0);
+    expect(compactTopBarMetrics.axisWidth).toBeGreaterThan(0);
+    expect(compactTopBarMetrics.subjectWidth).toBeLessThan(
+      compactTopBarMetrics.axisWidth,
+    );
+  });
+
+  test("gives the desktop timetable top rail a clear active contrast", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1600, height: 980 });
+    await page.goto(e2eUrl("/?role=staff"));
+
+    await page.getByTestId("mobile-nav-timetable").click();
+    await expect(page.getByTestId("shell-timetable-section")).toBeVisible();
+
+    const axisItem = page
+      .locator(".timetable-top-filter-bar__segmented-axis .tds-segmented__item")
+      .first();
+    await expect(axisItem).toBeVisible();
+    await axisItem.click();
+    await page.waitForTimeout(350);
+
+    const activeStyles = await page.evaluate(() => {
+      const activeItem = document.querySelector(
+        ".timetable-top-filter-bar__segmented-axis .tds-segmented__item.is-active",
+      );
+      const styles = activeItem ? getComputedStyle(activeItem) : null;
+
+      return {
+        backgroundColor: styles?.backgroundColor ?? null,
+        color: styles?.color ?? null,
+        borderColor: styles?.borderColor ?? null,
+        boxShadow: styles?.boxShadow ?? "",
+      };
+    });
+
+    expect(activeStyles.backgroundColor).toBe("rgb(49, 130, 246)");
+    expect(activeStyles.color).toBe("rgb(255, 255, 255)");
+    expect(activeStyles.borderColor).toBe("rgb(49, 130, 246)");
+    expect(activeStyles.boxShadow).not.toBe("none");
   });
 });
