@@ -70,10 +70,51 @@
   --tds-color-blue-800: #1957c2;
   --tds-color-blue-900: #194aa6;
 
+  --tds-color-red-50: #fff1f2;
+  --tds-color-red-100: #ffe4e6;
+  --tds-color-red-200: #fecdd3;
+  --tds-color-red-300: #fda4af;
+  --tds-color-red-400: #fb7185;
   --tds-color-red-500: #ef4444;
+  --tds-color-red-600: #dc2626;
+  --tds-color-red-700: #be123c;
+  --tds-color-red-800: #9f1239;
+  --tds-color-red-900: #881337;
+
+  --tds-color-green-50: #ecfdf5;
+  --tds-color-green-100: #d1fae5;
+  --tds-color-green-200: #a7f3d0;
+  --tds-color-green-300: #6ee7b7;
+  --tds-color-green-400: #34d399;
   --tds-color-green-500: #16a34a;
+  --tds-color-green-600: #15803d;
+  --tds-color-green-700: #166534;
+  --tds-color-green-800: #14532d;
+  --tds-color-green-900: #052e16;
+
+  --tds-color-orange-50: #fff7ed;
+  --tds-color-orange-100: #ffedd5;
+  --tds-color-orange-200: #fed7aa;
+  --tds-color-orange-300: #fdba74;
+  --tds-color-orange-400: #fb923c;
+  --tds-color-orange-500: #f59e0b;
+  --tds-color-orange-600: #ea580c;
+  --tds-color-orange-700: #c2410c;
+  --tds-color-orange-800: #9a3412;
+  --tds-color-orange-900: #7c2d12;
+
   --tds-color-amber-500: #f59e0b;
+
+  --tds-color-teal-50: #f0fdfa;
+  --tds-color-teal-100: #ccfbf1;
+  --tds-color-teal-200: #99f6e4;
+  --tds-color-teal-300: #5eead4;
+  --tds-color-teal-400: #2dd4bf;
   --tds-color-teal-500: #18a5a5;
+  --tds-color-teal-600: #0f766e;
+  --tds-color-teal-700: #115e59;
+  --tds-color-teal-800: #134e4a;
+  --tds-color-teal-900: #042f2e;
 
   --tds-surface-canvas: #f2f4f6;
   --tds-surface-surface: #ffffff;

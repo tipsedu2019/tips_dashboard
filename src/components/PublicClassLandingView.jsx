@@ -64,6 +64,17 @@ const SUBJECT_TONES = {
   수학: { bg: 'var(--tds-color-blue-50, #eff6ff)', border: 'var(--tds-color-blue-200, #bfdbfe)', text: 'var(--tds-color-blue-600, #2563eb)' },
 };
 
+const PLANNER_SUBJECT_TONES = {
+  수학: {
+    key: 'math',
+    timetable: { bg: '#eff6ff', border: '#93c5fd', text: '#1d4ed8' },
+  },
+  영어: {
+    key: 'english',
+    timetable: { bg: '#fff1f2', border: '#fda4af', text: '#be123c' },
+  },
+};
+
 const PLANNER_FALLBACK_TONES = [
   { bg: '#eef2f7', border: '#d9e0e8', text: '#334155' },
   { bg: '#fff3e1', border: '#ffd7a0', text: '#9a5b00' },
@@ -75,29 +86,29 @@ const PLANNER_FALLBACK_TONES = [
 
 const PLANNER_TIMETABLE_TONES = [
   {
-    bg: 'var(--tds-color-blue-50)',
-    border: 'var(--tds-color-blue-300)',
-    text: 'var(--tds-color-blue-700)',
+    bg: '#eff6ff',
+    border: '#93c5fd',
+    text: '#1d4ed8',
   },
   {
-    bg: 'var(--tds-color-teal-50, #eafaf6)',
-    border: 'var(--tds-color-teal-300, #62d5b5)',
-    text: 'var(--tds-color-teal-600)',
+    bg: '#eafaf6',
+    border: '#62d5b5',
+    text: '#0f766e',
   },
   {
-    bg: 'var(--tds-color-green-50)',
-    border: 'var(--tds-color-green-300)',
-    text: 'var(--tds-color-green-700)',
+    bg: '#ecfdf5',
+    border: '#86efac',
+    text: '#15803d',
   },
   {
-    bg: 'var(--tds-color-orange-50)',
-    border: 'var(--tds-color-orange-300)',
-    text: 'var(--tds-color-orange-700)',
+    bg: '#fff7ed',
+    border: '#fdba74',
+    text: '#c2410c',
   },
   {
-    bg: 'var(--tds-color-red-50)',
-    border: 'var(--tds-color-red-300)',
-    text: 'var(--tds-color-red-700)',
+    bg: '#fff1f2',
+    border: '#fda4af',
+    text: '#be123c',
   },
 ];
 
@@ -197,6 +208,11 @@ function hashPlannerToneSeed(value = '') {
 }
 
 function getPlannerToneForClass(classItem, index = 0) {
+  const subject = text(classItem?.subject);
+  if (PLANNER_SUBJECT_TONES[subject]) {
+    return PLANNER_SUBJECT_TONES[subject].timetable;
+  }
+
   const seed = [
     text(classItem?.id),
     text(classItem?.subject),
@@ -211,6 +227,26 @@ function getPlannerToneForClass(classItem, index = 0) {
     : index % PLANNER_TIMETABLE_TONES.length;
 
   return PLANNER_TIMETABLE_TONES[toneIndex] || PLANNER_TIMETABLE_TONES[0];
+}
+
+function getPlannerSubjectToneKey(subject) {
+  return PLANNER_SUBJECT_TONES[text(subject)]?.key || 'neutral';
+}
+
+function renderPlannerSubjectBadge(subject, className = '') {
+  return (
+    <span
+      className={[
+        'public-planner-subject-badge',
+        `is-${getPlannerSubjectToneKey(subject)}`,
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {text(subject) || '과목'}
+    </span>
+  );
 }
 
 function getClassSortKey(classItem) {
@@ -1116,10 +1152,12 @@ export default function PublicClassLandingView({
 
     setIsSharingPlanner(true);
 
+    const el = plannerCaptureRef.current;
+    const savedWidth = el.style.width;
+
     try {
-      /* Temporarily expand to measure natural content width */
-      const el = plannerCaptureRef.current;
-      const savedWidth = el.style.width;
+      /* Temporarily expand only during capture so the live sheet keeps its mobile width. */
+      el.setAttribute('data-capturing', 'true');
       el.style.width = 'max-content';
       const naturalWidth = Math.max(el.scrollWidth, 900) + 80; /* 80 = 2 × padding */
       el.style.width = savedWidth;
@@ -1160,6 +1198,8 @@ export default function PublicClassLandingView({
       console.error(error);
       toast.error('시간표 이미지를 만드는 중 문제가 생겼습니다.');
     } finally {
+      el.style.width = savedWidth;
+      el.removeAttribute('data-capturing');
       setIsSharingPlanner(false);
     }
   };

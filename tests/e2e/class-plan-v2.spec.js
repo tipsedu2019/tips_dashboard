@@ -69,13 +69,21 @@ test("keeps metadata in the desktop header, preview on the right, and header-lev
       page.locator(".class-plan-desktop-header-actions .class-plan-desktop-save"),
     ).toBeVisible();
     await expect(
+      page.locator('[data-testid="class-plan-builder-preview"] .class-plan-preview-eyebrow'),
+    ).toHaveText('TIPS CLASS PLAN');
+    await expect(
       page.locator('[data-testid="class-plan-builder-preview"] .class-plan-preview-subtitle'),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.locator(
         '[data-testid="class-plan-builder-preview"] .class-plan-preview-badge-row',
       ),
     ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-testid="class-plan-builder-preview"] .class-plan-export-button',
+      ),
+    ).toHaveCount(0);
 
     const workspaceMetrics = await page.evaluate(() => {
       const measure = (selector) => {

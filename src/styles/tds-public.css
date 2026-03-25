@@ -786,9 +786,14 @@
   border-radius: 24px;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.public-planner-capture-wrapper[data-capturing='true'] {
   width: max-content;
   min-width: 100%;
-  overflow: visible;
 }
 
 [data-theme='dark'] .public-planner-capture-wrapper {

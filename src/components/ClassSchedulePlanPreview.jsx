@@ -3,13 +3,10 @@ import { CalendarDays, Download } from "lucide-react";
 import { exportElementAsImage } from "../lib/exportAsImage";
 import useViewport from "../hooks/useViewport";
 import {
-  DAY_OPTIONS,
   calculateSchedulePlan,
   formatPlannerDateLabel,
   getCalendarDaySurface,
-  getFullClassName,
   getStateBadgeLabel,
-  getStateTone,
   parseDateValue,
 } from "../lib/classSchedulePlanner";
 import {
@@ -17,7 +14,7 @@ import {
   buildSessionStepStateMap,
   hasSessionDetailContent,
 } from "../lib/classPlanStepper";
-import { Badge } from "./ui/tds";
+import { Badge, CheckboxMenu } from "./ui/tds";
 
 function text(value) {
   return String(value || "").trim();
@@ -114,6 +111,19 @@ function buildSessionGroups(sessions = [], billingPeriods = []) {
       };
     })
     .filter(Boolean);
+}
+
+function buildMonthKey(year, month) {
+  return `${year}-${String(month + 1).padStart(2, "0")}`;
+}
+
+function getMonthKeyFromDateValue(dateValue) {
+  const parsedDate = parseDateValue(dateValue);
+  if (!parsedDate) {
+    return "";
+  }
+
+  return buildMonthKey(parsedDate.getFullYear(), parsedDate.getMonth());
 }
 
 function getSelectedDayLabel(plan) {
@@ -285,6 +295,47 @@ function buildMonthColorMap(months = [], sessionGroups = []) {
   });
 
   return monthColorMap;
+}
+
+function filterMonths(months = [], selectedMonthKeys = []) {
+  const selectedSet = new Set((selectedMonthKeys || []).filter(Boolean));
+  if (selectedSet.size === 0) {
+    return months;
+  }
+
+  return (months || []).filter((month) =>
+    selectedSet.has(buildMonthKey(month.year, month.month)),
+  );
+}
+
+function filterSessionsByDate(sessionsByDate = new Map(), selectedMonthKeys = []) {
+  const selectedSet = new Set((selectedMonthKeys || []).filter(Boolean));
+  if (selectedSet.size === 0) {
+    return sessionsByDate;
+  }
+
+  return [...sessionsByDate.entries()].reduce((result, [dateKey, entries]) => {
+    if (selectedSet.has(getMonthKeyFromDateValue(dateKey))) {
+      result.set(dateKey, entries);
+    }
+    return result;
+  }, new Map());
+}
+
+function filterSessionGroups(sessionGroups = [], selectedMonthKeys = []) {
+  const selectedSet = new Set((selectedMonthKeys || []).filter(Boolean));
+  if (selectedSet.size === 0) {
+    return sessionGroups;
+  }
+
+  return (sessionGroups || [])
+    .map((group) => ({
+      ...group,
+      sessions: (group.sessions || []).filter((session) =>
+        selectedSet.has(getMonthKeyFromDateValue(session.date)),
+      ),
+    }))
+    .filter((group) => group.sessions.length > 0);
 }
 
 function buildPreviewBadges(sessionGroups) {
@@ -732,6 +783,13 @@ export function ClassSchedulePlanPreview({
   const exportRef = useRef(null);
   const [dragSource, setDragSource] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
+  const previewProps = arguments[0] || {};
+  const {
+    selectedMonthKeys = [],
+    monthFilterOptions = [],
+    showMonthFilter = false,
+    onSelectedMonthKeysChange,
+  } = previewProps;
   const calculation = useMemo(() => calculateSchedulePlan(plan), [plan]);
   const sessionsByDate = useMemo(
     () =>
@@ -747,17 +805,31 @@ export function ClassSchedulePlanPreview({
     () => buildSessionGroups(calculation.sessions, calculation.billingPeriods),
     [calculation.billingPeriods, calculation.sessions],
   );
+  const normalizedSelectedMonthKeys = useMemo(
+    () =>
+      [...new Set((selectedMonthKeys || []).map((value) => String(value || "").trim()).filter(Boolean))],
+    [selectedMonthKeys],
+  );
+  const visibleMonths = useMemo(
+    () => filterMonths(calculation.months, normalizedSelectedMonthKeys),
+    [calculation.months, normalizedSelectedMonthKeys],
+  );
+  const visibleSessionsByDate = useMemo(
+    () => filterSessionsByDate(sessionsByDate, normalizedSelectedMonthKeys),
+    [normalizedSelectedMonthKeys, sessionsByDate],
+  );
+  const visibleSessionGroups = useMemo(
+    () => filterSessionGroups(sessionGroups, normalizedSelectedMonthKeys),
+    [normalizedSelectedMonthKeys, sessionGroups],
+  );
   const monthColorMap = useMemo(
-    () => buildMonthColorMap(calculation.months, sessionGroups),
-    [calculation.months, sessionGroups],
+    () => buildMonthColorMap(visibleMonths, visibleSessionGroups),
+    [visibleMonths, visibleSessionGroups],
   );
-  const selectedDayLabel = useMemo(() => getSelectedDayLabel(plan), [plan]);
   const previewBadges = useMemo(
-    () => buildPreviewBadges(sessionGroups),
-    [sessionGroups],
+    () => buildPreviewBadges(visibleSessionGroups),
+    [visibleSessionGroups],
   );
-  const fullClassName =
-    getFullClassName(subject, className) || className || "수업 계획";
   const isSummaryVariant = variant !== "planner-editor";
   const isShareImageVariant = variant === "share-image";
   const useCompactPreviewLayout = isShareImageVariant
@@ -769,12 +841,19 @@ export function ClassSchedulePlanPreview({
   const sessionListCompact = isShareImageVariant
     ? false
     : useCompactPreviewLayout;
+  const hasVisibleSessions = visibleSessionGroups.length > 0;
+  const shouldShowMonthFilter =
+    showMonthFilter &&
+    !isShareImageVariant &&
+    monthFilterOptions.length > 0 &&
+    typeof onSelectedMonthKeysChange === "function";
+  const shouldShowHeaderActions = shouldShowMonthFilter || allowExport;
 
   const handleExport = async () => {
     if (
       !allowExport ||
       !exportRef.current ||
-      calculation.sessions.length === 0
+      !hasVisibleSessions
     ) {
       return;
     }
@@ -801,7 +880,7 @@ export function ClassSchedulePlanPreview({
       >
         <div className="class-plan-preview-header">
           <div className="class-plan-preview-copy">
-            <span className="class-plan-preview-eyebrow">CLASS PLAN</span>
+            <span className="class-plan-preview-eyebrow">TIPS CLASS PLAN</span>
             <strong className="class-plan-preview-title">
               <Badge
                 size="small"
@@ -813,21 +892,35 @@ export function ClassSchedulePlanPreview({
               <span className="class-plan-preview-title-sep"> </span>
               {className || "수업 계획"}
             </strong>
-            <span className="class-plan-preview-subtitle">
-              수업 요일 {selectedDayLabel}
-            </span>
           </div>
 
-          {allowExport ? (
-            <button
-              type="button"
-              className="btn-secondary class-plan-export-button"
-              onClick={handleExport}
-              disabled={calculation.sessions.length === 0}
-            >
-              <Download size={16} />
-              이미지 저장
-            </button>
+          {shouldShowHeaderActions ? (
+            <div className="class-plan-preview-header-actions">
+              {shouldShowMonthFilter ? (
+                <CheckboxMenu
+                  value={normalizedSelectedMonthKeys}
+                  options={monthFilterOptions}
+                  onChange={onSelectedMonthKeysChange}
+                  label="수업 계획 월 필터"
+                  placeholder="월 선택"
+                  className="class-plan-preview-month-filter"
+                  maxPreview={2}
+                  showResetOption={false}
+                />
+              ) : null}
+
+              {allowExport ? (
+                <button
+                  type="button"
+                  className="btn-secondary class-plan-export-button"
+                  onClick={handleExport}
+                  disabled={!hasVisibleSessions}
+                >
+                  <Download size={16} />
+                  이미지 저장
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
@@ -837,7 +930,7 @@ export function ClassSchedulePlanPreview({
           ))}
         </div>
 
-        {calculation.sessions.length === 0 ? (
+        {!hasVisibleSessions ? (
           <div
             className={`class-plan-empty-state ${isSummaryVariant ? "is-summary" : ""}`}
           >
@@ -856,7 +949,7 @@ export function ClassSchedulePlanPreview({
             data-testid="class-plan-preview-layout"
           >
             <div className="class-plan-month-stack">
-              {calculation.months.map((month) => (
+              {visibleMonths.map((month) => (
                 <MonthCard
                   key={`${month.year}-${month.month}`}
                   month={month}
@@ -864,7 +957,7 @@ export function ClassSchedulePlanPreview({
                     monthColorMap.get(`${month.year}-${month.month}`) ||
                     "#216e4e"
                   }
-                  sessionsByDate={sessionsByDate}
+                  sessionsByDate={visibleSessionsByDate}
                   selectedDays={plan?.selectedDays || []}
                   interactive={interactive}
                   onToggleDate={onToggleDate}
@@ -880,7 +973,7 @@ export function ClassSchedulePlanPreview({
             </div>
 
             <SessionList
-              groups={sessionGroups}
+              groups={visibleSessionGroups}
               isCompact={sessionListCompact}
               variant={variant}
             />

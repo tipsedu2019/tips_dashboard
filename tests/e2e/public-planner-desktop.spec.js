@@ -37,6 +37,9 @@ async function openPlannerSheet(page) {
 }
 
 async function addEnglishAndMathToPlanner(page) {
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  await page.goto(e2eUrl('/'));
+
   let plannerButtons = page.locator('[data-testid^="public-card-toggle-"]');
   await expect(plannerButtons.first()).toBeVisible();
   await plannerButtons.first().click();
@@ -153,5 +156,50 @@ test.describe('public planner desktop sheet', () => {
 
     expect(blockStyle).not.toBeNull();
     expect(blockStyle?.alpha).toBe(1);
+  });
+
+  test('keeps planner subject badges visible on desktop and preserves any rendered timetable block tones', async ({ page }) => {
+    await openPlannerSheet(page);
+
+    const plannerVisuals = await page.evaluate(() => {
+      const badges = [
+        ...document.querySelectorAll('.public-planner-selected-item .tds-badge'),
+        ...document.querySelectorAll('.public-planner-preview-chip .tds-badge'),
+      ].map((badge) => {
+        const style = getComputedStyle(badge);
+        return {
+          background: style.backgroundColor || '',
+          color: style.color || '',
+        };
+      });
+
+      const blocks = [...document.querySelectorAll('.public-planner-preview-grid .timetable-block')].map((block) => {
+        const style = getComputedStyle(block);
+        return {
+          text: block.textContent?.replace(/\s+/g, ' ').trim() || '',
+          background: style.backgroundColor || '',
+          borderLeft: style.borderLeftColor || '',
+        };
+      });
+
+      return { badges, blocks };
+    });
+
+    const blocks = plannerVisuals.blocks;
+
+    expect(plannerVisuals.badges.length).toBeGreaterThan(0);
+    plannerVisuals.badges.forEach((badge) => {
+      expect(badge.background).not.toBe('rgba(0, 0, 0, 0)');
+      expect(badge.color).not.toBe('rgb(255, 255, 255)');
+    });
+
+    plannerVisuals.blocks.forEach((block) => {
+      expect(block.background).not.toBe('rgba(0, 0, 0, 0)');
+      expect(block.borderLeft).not.toBe('rgba(0, 0, 0, 0)');
+    });
+
+    const englishBlock = blocks.find((block) => block.text.includes('영어') || block.text.includes('중1C+1'));
+    const mathBlock = blocks.find((block) => block.text.includes('수학') || block.text.includes('중1 내신집중 1반'));
+
   });
 });

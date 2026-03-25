@@ -250,6 +250,46 @@ function sanitizeFilePart(value) {
   );
 }
 
+function buildMonthKey(year, month) {
+  return `${year}-${String(month + 1).padStart(2, "0")}`;
+}
+
+function buildMonthFilterOptions(months = []) {
+  return (months || []).map((month) => ({
+    value: buildMonthKey(month.year, month.month),
+    label: `${month.year}년 ${month.month + 1}월`,
+  }));
+}
+
+function getDefaultSelectedMonthKeys(months = [], now = new Date()) {
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const futureMonthKeys = (months || [])
+    .filter((month) => new Date(month.year, month.month, 1) >= currentMonthStart)
+    .map((month) => buildMonthKey(month.year, month.month));
+
+  if (futureMonthKeys.length > 0) {
+    return futureMonthKeys;
+  }
+
+  const latestMonth = (months || []).at(-1);
+  return latestMonth ? [buildMonthKey(latestMonth.year, latestMonth.month)] : [];
+}
+
+function normalizeSelectedMonthKeys(selectedMonthKeys = [], options = []) {
+  const availableValues = new Set(
+    (options || []).map((option) => String(option?.value || "").trim()).filter(Boolean),
+  );
+  const nextSelected = [...new Set((selectedMonthKeys || []).map((value) => String(value || "").trim()).filter(Boolean))]
+    .filter((value) => availableValues.has(value));
+
+  if (nextSelected.length > 0) {
+    return nextSelected;
+  }
+
+  const fallback = (options || []).at(-1)?.value;
+  return fallback ? [fallback] : [];
+}
+
 function BuilderStepper({ steps }) {
   return (
     <ol
@@ -389,6 +429,7 @@ export default function ClassSchedulePlanModal({
   const [textbookEditorState, setTextbookEditorState] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSharingPreview, setIsSharingPreview] = useState(false);
+  const [selectedMonthKeys, setSelectedMonthKeys] = useState([]);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     settings: true,
@@ -460,6 +501,36 @@ export default function ClassSchedulePlanModal({
     () => buildSchedulePlanForSave(normalizedDraftPlan, draftDefaults),
     [draftDefaults, normalizedDraftPlan],
   );
+  const readonlyCalculatedPlan = useMemo(
+    () => calculateSchedulePlan(savedPreviewPlan),
+    [savedPreviewPlan],
+  );
+  const monthFilterOptions = useMemo(
+    () => buildMonthFilterOptions(readonlyCalculatedPlan.months),
+    [readonlyCalculatedPlan.months],
+  );
+  const effectiveSelectedMonthKeys = useMemo(
+    () =>
+      normalizeSelectedMonthKeys(
+        selectedMonthKeys.length > 0
+          ? selectedMonthKeys
+          : getDefaultSelectedMonthKeys(readonlyCalculatedPlan.months),
+        monthFilterOptions,
+      ),
+    [monthFilterOptions, readonlyCalculatedPlan.months, selectedMonthKeys],
+  );
+  useEffect(() => {
+    if (!open || !isReadonlyMode) {
+      return;
+    }
+
+    setSelectedMonthKeys(
+      normalizeSelectedMonthKeys(
+        getDefaultSelectedMonthKeys(readonlyCalculatedPlan.months),
+        monthFilterOptions,
+      ),
+    );
+  }, [isReadonlyMode, monthFilterOptions, open, readonlyCalculatedPlan.months]);
   const selectedTextbooks = useMemo(
     () => buildSelectedTextbooks(draftClass.textbookIds, textbooksCatalog),
     [draftClass.textbookIds, textbooksCatalog],
@@ -620,6 +691,12 @@ export default function ClassSchedulePlanModal({
     }));
   };
 
+  const handleSelectedMonthKeysChange = (nextSelectedMonthKeys) => {
+    setSelectedMonthKeys(
+      normalizeSelectedMonthKeys(nextSelectedMonthKeys, monthFilterOptions),
+    );
+  };
+
   const handleRequestClose = () => {
     if (!isEditableMode || !isDirty) {
       onClose?.();
@@ -702,13 +779,16 @@ export default function ClassSchedulePlanModal({
     }
 
     setIsSharingPreview(true);
+    const captureTarget = readonlyShareTargetRef.current;
 
     try {
-      const blob = await captureElementAsPngBlob(readonlyShareTargetRef.current, {
-        width: 1440,
-        padding: 28,
-        scale: 3,
-        backgroundColor: "#ffffff",
+      captureTarget.setAttribute("data-capturing", "true");
+
+      const blob = await captureElementAsPngBlob(captureTarget, {
+        width: 960,
+        padding: 32,
+        scale: 4,
+        backgroundColor: "#f4f8ff",
       });
 
       if (!blob) {
@@ -745,6 +825,7 @@ export default function ClassSchedulePlanModal({
       console.error(error);
       toast.error("수업 계획 이미지를 만드는 중 문제가 생겼습니다.");
     } finally {
+      captureTarget.removeAttribute("data-capturing");
       setIsSharingPreview(false);
     }
   };
@@ -1143,7 +1224,7 @@ Confirmed that the diskette icon in the top right is a functional save button. I
         interactive={resolvedMode === "builder"}
         onToggleDate={handlePreviewCalendarToggle}
         onSubstitution={handlePreviewCalendarSubstitution}
-        allowExport
+        allowExport={false}
         emptyMessage={emptyMessage}
         variant="editor-summary"
       />
@@ -1558,6 +1639,10 @@ Confirmed that the diskette icon in the top right is a functional save button. I
               subject={draftClass.subject}
               allowExport={false}
               emptyMessage={emptyMessage}
+              selectedMonthKeys={effectiveSelectedMonthKeys}
+              monthFilterOptions={monthFilterOptions}
+              showMonthFilter
+              onSelectedMonthKeysChange={handleSelectedMonthKeysChange}
             />
           </div>
 
@@ -1633,15 +1718,22 @@ Confirmed that the diskette icon in the top right is a functional save button. I
             data-testid="class-plan-share-capture"
             aria-hidden="true"
           >
-            <ClassSchedulePlanPreview
-              plan={savedPreviewPlan}
-              classItem={safeClass}
-              className={displayClassName}
-              subject={draftClass.subject}
-              allowExport={false}
-              emptyMessage={emptyMessage}
-              variant="share-image"
-            />
+            <div className="class-plan-share-capture-stack">
+              <div className="class-plan-share-capture-card">
+                <PublicLandingCard classItem={publicCardClass} hideActions />
+              </div>
+
+              <ClassSchedulePlanPreview
+                plan={savedPreviewPlan}
+                classItem={safeClass}
+                className={displayClassName}
+                subject={draftClass.subject}
+                allowExport={false}
+                emptyMessage={emptyMessage}
+                variant="share-image"
+                selectedMonthKeys={effectiveSelectedMonthKeys}
+              />
+            </div>
           </div>
         </div>
       </div>

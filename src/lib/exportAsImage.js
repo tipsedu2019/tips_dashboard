@@ -28,17 +28,119 @@ function getCaptureOptions(options = {}) {
   };
 }
 
+function clampFraction(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+function parseSrgbChannel(token) {
+  if (!token) {
+    return null;
+  }
+
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.endsWith('%')) {
+    const parsedPercent = Number.parseFloat(trimmed.slice(0, -1));
+    return Number.isFinite(parsedPercent) ? clampFraction(parsedPercent / 100) : null;
+  }
+
+  const parsedValue = Number.parseFloat(trimmed);
+  return Number.isFinite(parsedValue) ? clampFraction(parsedValue) : null;
+}
+
+function normalizeCssColorFunctions(value) {
+  if (!value || !value.includes('color(')) {
+    return value;
+  }
+
+  return value.replace(/color\(\s*srgb\s+([^()]+?)\)/gi, (match, colorBody) => {
+    const [channelSection, alphaSection] = String(colorBody).split(/\s*\/\s*/);
+    const channels = String(channelSection)
+      .trim()
+      .split(/\s+/)
+      .map(parseSrgbChannel);
+
+    if (channels.length < 3 || channels.slice(0, 3).some((channel) => channel == null)) {
+      return match;
+    }
+
+    const [red, green, blue] = channels
+      .slice(0, 3)
+      .map((channel) => Math.round(clampFraction(channel) * 255));
+
+    if (!alphaSection) {
+      return `rgb(${red}, ${green}, ${blue})`;
+    }
+
+    const alpha = parseSrgbChannel(alphaSection);
+    if (alpha == null) {
+      return match;
+    }
+
+    return `rgba(${red}, ${green}, ${blue}, ${Number(clampFraction(alpha).toFixed(3))})`;
+  });
+}
+
+function sanitizeHtml2CanvasColors(element) {
+  if (!element || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+    return () => {};
+  }
+
+  const mutatedNodes = new Map();
+  const descendants = Array.from(element.querySelectorAll('*'));
+
+  descendants.forEach((node) => {
+    const computedStyle = window.getComputedStyle(node);
+
+    Array.from(computedStyle).forEach((propertyName) => {
+      const currentValue = computedStyle.getPropertyValue(propertyName);
+      if (!currentValue || !currentValue.includes('color(')) {
+        return;
+      }
+
+      const normalizedValue = normalizeCssColorFunctions(currentValue);
+      if (!normalizedValue || normalizedValue === currentValue || normalizedValue.includes('color(')) {
+        return;
+      }
+
+      if (!mutatedNodes.has(node)) {
+        mutatedNodes.set(node, node.getAttribute('style'));
+      }
+
+      node.style.setProperty(propertyName, normalizedValue, 'important');
+    });
+  });
+
+  return () => {
+    mutatedNodes.forEach((originalStyle, node) => {
+      if (originalStyle == null) {
+        node.removeAttribute('style');
+        return;
+      }
+      node.setAttribute('style', originalStyle);
+    });
+  };
+}
+
 async function renderElementToCanvas(element, options = {}) {
   if (!element) return;
 
   const originalStyle = element.style.cssText;
   const { width, padding, scale, backgroundColor } = getCaptureOptions(options);
+  let restoreSanitizedColors = null;
 
   try {
     element.style.width = `${width}px`;
     element.style.margin = '0 auto';
     element.style.padding = typeof padding === 'number' ? `${padding}px` : padding;
     element.style.backgroundColor = backgroundColor;
+    restoreSanitizedColors = sanitizeHtml2CanvasColors(element);
 
     const html2canvas = (await import('html2canvas')).default;
     const canvas = await html2canvas(element, {
@@ -50,6 +152,7 @@ async function renderElementToCanvas(element, options = {}) {
 
     return canvas;
   } finally {
+    restoreSanitizedColors?.();
     element.style.cssText = originalStyle;
   }
 }
