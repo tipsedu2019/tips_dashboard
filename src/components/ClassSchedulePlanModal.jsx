@@ -8,7 +8,6 @@ import {
   MapPin,
   Pencil,
   Save,
-  Share2,
   Trash2,
   UserRound,
   Users,
@@ -27,7 +26,6 @@ import BottomSheet from "./ui/BottomSheet";
 import {
   captureElementAsPngBlob,
   downloadBlob,
-  exportElementAsPdf,
 } from "../lib/exportAsImage";
 import { getEditableClassNameSeed } from "../lib/classNameDisplay.js";
 import { Badge, Button, Dialog, SegmentedControl, TextField } from "./ui/tds";
@@ -439,7 +437,6 @@ export default function ClassSchedulePlanModal({
   const [textbookEditorState, setTextbookEditorState] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSharingPreview, setIsSharingPreview] = useState(false);
-  const [isExportingPreviewPdf, setIsExportingPreviewPdf] = useState(false);
   const [selectedMonthKeys, setSelectedMonthKeys] = useState([]);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
@@ -794,11 +791,14 @@ export default function ClassSchedulePlanModal({
 
     try {
       captureTarget.setAttribute("data-capturing", "true");
+      const captureWidth = 960;
+      const capturePadding = 32;
+      const captureScale = isMobile ? 3 : 4;
 
       const blob = await captureElementAsPngBlob(captureTarget, {
-        width: 960,
-        padding: 32,
-        scale: 4,
+        width: captureWidth,
+        padding: capturePadding,
+        scale: captureScale,
         backgroundColor: "#f4f8ff",
       });
 
@@ -856,7 +856,7 @@ export default function ClassSchedulePlanModal({
       captureTarget.setAttribute("data-capturing", "true");
       const captureWidth = 960;
       const capturePadding = 32;
-      const captureScale = isMobile ? 5 : 4;
+      const captureScale = isMobile ? 3 : 4;
 
       const blob = await captureElementAsPngBlob(captureTarget, {
         width: captureWidth,
@@ -881,32 +881,6 @@ export default function ClassSchedulePlanModal({
     } finally {
       captureTarget.removeAttribute("data-capturing");
       setIsSharingPreview(false);
-    }
-  };
-
-  const handleSharePreviewPdf = async () => {
-    if (!readonlyShareTargetRef.current || !canSharePreview) {
-      toast.info("공유할 수업 계획 PDF가 아직 없습니다.");
-      return;
-    }
-
-    setIsExportingPreviewPdf(true);
-    const captureTarget = readonlyShareTargetRef.current;
-
-    try {
-      captureTarget.setAttribute("data-capturing", "true");
-      await exportElementAsPdf(captureTarget, `${displayClassName} 수업 계획`);
-      toast.success("PDF를 열었어요.");
-    } catch (error) {
-      if (error?.name === "AbortError") {
-        return;
-      }
-
-      console.error(error);
-      toast.error("수업 계획 PDF를 준비하는 중 문제가 생겼습니다.");
-    } finally {
-      captureTarget.removeAttribute("data-capturing");
-      setIsExportingPreviewPdf(false);
     }
   };
 
@@ -1012,17 +986,6 @@ Confirmed that the diskette icon in the top right is a functional save button. I
         data-testid="class-plan-download-button"
       >
         <Download size={18} />
-      </button>
-      <button
-        type="button"
-        className="theme-toggle class-plan-header-icon-button"
-        onClick={handleSharePreviewPdf}
-        disabled={isExportingPreviewPdf}
-        aria-label={isExportingPreviewPdf ? "PDF 공유 준비 중" : "PDF 공유"}
-        title={isExportingPreviewPdf ? "PDF 공유 준비 중" : "PDF 공유"}
-        data-testid="class-plan-pdf-share-button"
-      >
-        <Share2 size={18} />
       </button>
     </div>
   ) : null;
