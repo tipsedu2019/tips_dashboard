@@ -2,6 +2,10 @@ import { supabase, supabaseConfigError } from '../lib/supabase';
 import { computeClassStatus, normalizeClassStatus } from '../lib/classStatus';
 import { normalizeClassroomText } from '../lib/classroomUtils';
 import {
+  applyClassRosterMutation,
+  applyStudentEnrollmentMutation,
+  getClassRosterAffectedStudentIds,
+  getStudentEnrollmentAffectedClassIds,
   reconcileRosterRelations,
   syncClassRosterToStudents,
   syncStudentEnrollmentToClasses,
@@ -677,6 +681,71 @@ export class DataService {
     return safeLeft.every((value, index) => value === safeRight[index]);
   }
 
+  _getCachedClassById(id) {
+    const safeId = String(id || '').trim();
+    if (!safeId) {
+      return null;
+    }
+
+    return (this.cachedData.classes || []).find((classItem) => classItem.id === safeId) || null;
+  }
+
+  _getCachedStudentById(id) {
+    const safeId = String(id || '').trim();
+    if (!safeId) {
+      return null;
+    }
+
+    return (this.cachedData.students || []).find((student) => student.id === safeId) || null;
+  }
+
+  _toClassRow(classItem = {}) {
+    return {
+      ...classItem,
+      id: classItem.id,
+      name: classItem.name || classItem.className || '',
+      room: classItem.room ?? classItem.classroom ?? '',
+      term_id: classItem.term_id ?? classItem.termId ?? null,
+      student_ids: classItem.student_ids ?? classItem.studentIds ?? [],
+      textbook_ids: classItem.textbook_ids ?? classItem.textbookIds ?? [],
+      waitlist_ids: classItem.waitlist_ids ?? classItem.waitlistIds ?? [],
+      start_date: classItem.start_date ?? classItem.startDate ?? '',
+      end_date: classItem.end_date ?? classItem.endDate ?? '',
+      textbook_info: classItem.textbook_info ?? classItem.textbookInfo ?? null,
+      lessons: classItem.lessons ?? [],
+      schedule_plan: classItem.schedule_plan ?? classItem.schedulePlan ?? null,
+    };
+  }
+
+  _toStudentRow(student = {}) {
+    return {
+      ...student,
+      id: student.id,
+      parent_contact: student.parent_contact ?? student.parentContact ?? '',
+      enroll_date: student.enroll_date ?? student.enrollDate ?? '',
+      class_ids: student.class_ids ?? student.classIds ?? [],
+      waitlist_class_ids: student.waitlist_class_ids ?? student.waitlistClassIds ?? [],
+    };
+  }
+
+  _buildOptimisticClassRecord(id, updates = {}, fallbackClass = null) {
+    const baseRow = this._toClassRow(fallbackClass || this._getCachedClassById(id) || { id });
+    return this._processClass({
+      ...baseRow,
+      ...this._mapClassUpdates(updates),
+      id,
+    });
+  }
+
+  _buildOptimisticStudentRecord(id, updates = {}, fallbackStudent = null) {
+    const baseRow = this._toStudentRow(fallbackStudent || this._getCachedStudentById(id) || { id });
+    return this._processStudent({
+      ...baseRow,
+      ...this._mapStudentUpdates(updates),
+      id,
+    });
+  }
+
   async _getClassMembershipSnapshot(id) {
     const safeId = String(id || '').trim();
     if (!safeId) {
@@ -727,14 +796,33 @@ export class DataService {
     return data ? this._processStudent(data) : null;
   }
 
-  async _syncStudentsForClassRoster(classId, studentIds = [], waitlistIds = []) {
+  async _syncStudentsForClassRoster(
+    classId,
+    studentIds = [],
+    waitlistIds = [],
+    previousStudentIds = [],
+    previousWaitlistIds = [],
+  ) {
     const safeClassId = String(classId || '').trim();
     if (!safeClassId) {
       return;
     }
 
+    const affectedStudentIds = getClassRosterAffectedStudentIds({
+      previousStudentIds,
+      previousWaitlistIds,
+      studentIds,
+      waitlistIds,
+    });
+    if (affectedStudentIds.length === 0) {
+      return;
+    }
+
     const client = this._ensureClient();
-    const { data, error } = await client.from('students').select('id, class_ids, waitlist_class_ids');
+    const { data, error } = await client
+      .from('students')
+      .select('id, class_ids, waitlist_class_ids')
+      .in('id', affectedStudentIds);
     if (error) {
       throw error;
     }
@@ -781,14 +869,33 @@ export class DataService {
     );
   }
 
-  async _syncClassesForStudentEnrollment(studentId, classIds = [], waitlistClassIds = []) {
+  async _syncClassesForStudentEnrollment(
+    studentId,
+    classIds = [],
+    waitlistClassIds = [],
+    previousClassIds = [],
+    previousWaitlistClassIds = [],
+  ) {
     const safeStudentId = String(studentId || '').trim();
     if (!safeStudentId) {
       return;
     }
 
+    const affectedClassIds = getStudentEnrollmentAffectedClassIds({
+      previousClassIds,
+      previousWaitlistClassIds,
+      classIds,
+      waitlistClassIds,
+    });
+    if (affectedClassIds.length === 0) {
+      return;
+    }
+
     const client = this._ensureClient();
-    const { data, error } = await client.from('classes').select('id, student_ids, waitlist_ids');
+    const { data, error } = await client
+      .from('classes')
+      .select('id, student_ids, waitlist_ids')
+      .in('id', affectedClassIds);
     if (error) {
       throw error;
     }
@@ -1089,7 +1196,21 @@ export class DataService {
 
     if (result.error) throw result.error;
     const savedClass = this._processClass(result.data);
-    await this._syncStudentsForClassRoster(savedClass.id, savedClass.studentIds || [], savedClass.waitlistIds || []);
+    this._publishOptimisticData(applyClassRosterMutation({
+      classes: this.cachedData.classes || [],
+      students: this.cachedData.students || [],
+      classItem: savedClass,
+    }));
+    try {
+      await this._syncStudentsForClassRoster(
+        savedClass.id,
+        savedClass.studentIds || [],
+        savedClass.waitlistIds || [],
+      );
+    } catch (error) {
+      await this._notify({ tables: ['classes', 'students'] });
+      throw error;
+    }
     this._notify({ tables: ['classes'] });
     return savedClass;
   }
@@ -1097,7 +1218,8 @@ export class DataService {
   async updateClass(id, updates) {
     const client = this._ensureClient();
     const shouldSyncRoster = 'studentIds' in (updates || {}) || 'waitlistIds' in (updates || {});
-    const currentClass = shouldSyncRoster ? await this._getClassMembershipSnapshot(id) : null;
+    const cachedClass = this._getCachedClassById(id);
+    const currentClass = shouldSyncRoster ? await this._getClassMembershipSnapshot(id) : cachedClass;
     const nextStudentIds = 'studentIds' in (updates || {})
       ? (updates.studentIds || [])
       : (currentClass?.studentIds || []);
@@ -1110,8 +1232,25 @@ export class DataService {
     );
 
     if (result.error) throw result.error;
+    const optimisticClass = this._buildOptimisticClassRecord(id, updates, currentClass || cachedClass);
+    this._publishOptimisticData(applyClassRosterMutation({
+      classes: this.cachedData.classes || [],
+      students: this.cachedData.students || [],
+      classItem: optimisticClass,
+    }));
     if (shouldSyncRoster) {
-      await this._syncStudentsForClassRoster(id, nextStudentIds, nextWaitlistIds);
+      try {
+        await this._syncStudentsForClassRoster(
+          id,
+          nextStudentIds,
+          nextWaitlistIds,
+          currentClass?.studentIds || [],
+          currentClass?.waitlistIds || [],
+        );
+      } catch (error) {
+        await this._notify({ tables: ['classes', 'students'] });
+        throw error;
+      }
     }
     this._notify({ tables: ['classes'] });
     return true;
@@ -1119,9 +1258,26 @@ export class DataService {
 
   async deleteClass(id) {
     const client = this._ensureClient();
+    const currentClass = await this._getClassMembershipSnapshot(id);
     const { error } = await client.from('classes').delete().eq('id', id);
     if (error) throw error;
-    await this._syncStudentsForClassRoster(id, [], []);
+    this._publishOptimisticData(applyClassRosterMutation({
+      classes: this.cachedData.classes || [],
+      students: this.cachedData.students || [],
+      classId: id,
+    }));
+    try {
+      await this._syncStudentsForClassRoster(
+        id,
+        [],
+        [],
+        currentClass?.studentIds || [],
+        currentClass?.waitlistIds || [],
+      );
+    } catch (syncError) {
+      await this._notify({ tables: ['classes', 'students'] });
+      throw syncError;
+    }
     this._notify({ tables: ['classes'] });
   }
 
@@ -1311,11 +1467,21 @@ export class DataService {
     const { data, error } = await client.from('students').insert([payload]).select().single();
     if (error) throw error;
     const savedStudent = this._processStudent(data);
-    await this._syncClassesForStudentEnrollment(
-      savedStudent.id,
-      savedStudent.classIds || [],
-      savedStudent.waitlistClassIds || [],
-    );
+    this._publishOptimisticData(applyStudentEnrollmentMutation({
+      students: this.cachedData.students || [],
+      classes: this.cachedData.classes || [],
+      student: savedStudent,
+    }));
+    try {
+      await this._syncClassesForStudentEnrollment(
+        savedStudent.id,
+        savedStudent.classIds || [],
+        savedStudent.waitlistClassIds || [],
+      );
+    } catch (syncError) {
+      await this._notify({ tables: ['students', 'classes'] });
+      throw syncError;
+    }
     this._notify({ tables: ['students'] });
     return savedStudent;
   }
@@ -1323,7 +1489,8 @@ export class DataService {
   async updateStudent(id, updates) {
     const client = this._ensureClient();
     const shouldSyncEnrollment = 'classIds' in (updates || {}) || 'waitlistClassIds' in (updates || {});
-    const currentStudent = shouldSyncEnrollment ? await this._getStudentEnrollmentSnapshot(id) : null;
+    const cachedStudent = this._getCachedStudentById(id);
+    const currentStudent = shouldSyncEnrollment ? await this._getStudentEnrollmentSnapshot(id) : cachedStudent;
     const nextClassIds = 'classIds' in (updates || {})
       ? (updates.classIds || [])
       : (currentStudent?.classIds || []);
@@ -1333,17 +1500,51 @@ export class DataService {
     const finalUpdates = this._mapStudentUpdates(updates);
     const { error } = await client.from('students').update(finalUpdates).eq('id', id);
     if (error) throw error;
+    const optimisticStudent = this._buildOptimisticStudentRecord(id, updates, currentStudent || cachedStudent);
+    this._publishOptimisticData(applyStudentEnrollmentMutation({
+      students: this.cachedData.students || [],
+      classes: this.cachedData.classes || [],
+      student: optimisticStudent,
+    }));
     if (shouldSyncEnrollment) {
-      await this._syncClassesForStudentEnrollment(id, nextClassIds, nextWaitlistClassIds);
+      try {
+        await this._syncClassesForStudentEnrollment(
+          id,
+          nextClassIds,
+          nextWaitlistClassIds,
+          currentStudent?.classIds || [],
+          currentStudent?.waitlistClassIds || [],
+        );
+      } catch (syncError) {
+        await this._notify({ tables: ['students', 'classes'] });
+        throw syncError;
+      }
     }
     this._notify({ tables: ['students'] });
   }
 
   async deleteStudent(id) {
     const client = this._ensureClient();
+    const currentStudent = await this._getStudentEnrollmentSnapshot(id);
     const { error } = await client.from('students').delete().eq('id', id);
     if (error) throw error;
-    await this._syncClassesForStudentEnrollment(id, [], []);
+    this._publishOptimisticData(applyStudentEnrollmentMutation({
+      students: this.cachedData.students || [],
+      classes: this.cachedData.classes || [],
+      studentId: id,
+    }));
+    try {
+      await this._syncClassesForStudentEnrollment(
+        id,
+        [],
+        [],
+        currentStudent?.classIds || [],
+        currentStudent?.waitlistClassIds || [],
+      );
+    } catch (syncError) {
+      await this._notify({ tables: ['students', 'classes'] });
+      throw syncError;
+    }
     this._notify({ tables: ['students'] });
   }
 

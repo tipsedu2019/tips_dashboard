@@ -92,6 +92,63 @@ function normalizeClasses(classes = [], studentIds = new Set()) {
   return classMap;
 }
 
+function upsertItemById(items = [], nextItem) {
+  const safeId = normalizeId(nextItem?.id);
+  if (!safeId) {
+    return [...(items || [])];
+  }
+
+  const source = Array.isArray(items) ? items : [];
+  const existingIndex = source.findIndex((item) => normalizeId(item?.id) === safeId);
+  const normalizedItem = {
+    ...nextItem,
+    id: safeId,
+  };
+
+  if (existingIndex < 0) {
+    return [...source, normalizedItem];
+  }
+
+  return source.map((item, index) => (index === existingIndex ? normalizedItem : item));
+}
+
+function removeItemById(items = [], id) {
+  const safeId = normalizeId(id);
+  if (!safeId) {
+    return [...(items || [])];
+  }
+
+  return (Array.isArray(items) ? items : []).filter((item) => normalizeId(item?.id) !== safeId);
+}
+
+export function getClassRosterAffectedStudentIds({
+  previousStudentIds = [],
+  previousWaitlistIds = [],
+  studentIds = [],
+  waitlistIds = [],
+} = {}) {
+  return normalizeUniqueIds([
+    ...previousStudentIds,
+    ...previousWaitlistIds,
+    ...studentIds,
+    ...waitlistIds,
+  ]);
+}
+
+export function getStudentEnrollmentAffectedClassIds({
+  previousClassIds = [],
+  previousWaitlistClassIds = [],
+  classIds = [],
+  waitlistClassIds = [],
+} = {}) {
+  return normalizeUniqueIds([
+    ...previousClassIds,
+    ...previousWaitlistClassIds,
+    ...classIds,
+    ...waitlistClassIds,
+  ]);
+}
+
 export function syncClassRosterToStudents({
   students = [],
   classId = '',
@@ -139,6 +196,37 @@ export function syncClassRosterToStudents({
   });
 }
 
+export function applyClassRosterMutation({
+  students = [],
+  classes = [],
+  classId = '',
+  classItem = null,
+} = {}) {
+  const safeClassId = normalizeId(classItem?.id || classId);
+  if (!safeClassId) {
+    return {
+      students: [...(students || [])],
+      classes: [...(classes || [])],
+    };
+  }
+
+  const nextClasses = classItem
+    ? upsertItemById(classes, classItem)
+    : removeItemById(classes, safeClassId);
+
+  const nextStudents = syncClassRosterToStudents({
+    students,
+    classId: safeClassId,
+    studentIds: classItem?.studentIds || [],
+    waitlistIds: classItem?.waitlistIds || [],
+  });
+
+  return reconcileRosterRelations({
+    students: nextStudents,
+    classes: nextClasses,
+  });
+}
+
 export function syncStudentEnrollmentToClasses({
   classes = [],
   studentId = '',
@@ -183,6 +271,37 @@ export function syncStudentEnrollmentToClasses({
       studentIds: nextStudentIds,
       waitlistIds: nextWaitlistIds,
     };
+  });
+}
+
+export function applyStudentEnrollmentMutation({
+  students = [],
+  classes = [],
+  studentId = '',
+  student = null,
+} = {}) {
+  const safeStudentId = normalizeId(student?.id || studentId);
+  if (!safeStudentId) {
+    return {
+      students: [...(students || [])],
+      classes: [...(classes || [])],
+    };
+  }
+
+  const nextStudents = student
+    ? upsertItemById(students, student)
+    : removeItemById(students, safeStudentId);
+
+  const nextClasses = syncStudentEnrollmentToClasses({
+    classes,
+    studentId: safeStudentId,
+    classIds: student?.classIds || [],
+    waitlistClassIds: student?.waitlistClassIds || [],
+  });
+
+  return reconcileRosterRelations({
+    students: nextStudents,
+    classes: nextClasses,
   });
 }
 
