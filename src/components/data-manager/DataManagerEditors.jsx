@@ -5,6 +5,7 @@ import { CLASS_STATUS_OPTIONS, computeClassStatus } from '../../lib/classStatus'
 import { normalizeClassroomText } from '../../lib/classroomUtils';
 import {
   buildSchoolMaster,
+  getAllManagedGrades,
   getGradeOptionsForSelection,
   inferSchoolCategoryFromGrade,
   schoolKey,
@@ -772,10 +773,7 @@ export function StudentEditor({ student, classes, students = [], academicSchools
     () => schoolCatalog.filter((item) => item.category === selectedSchoolCategory),
     [schoolCatalog, selectedSchoolCategory]
   );
-  const gradeOptions = useMemo(
-    () => getGradeOptionsForSelection(selectedSchoolCategory, selectedSchool),
-    [selectedSchool, selectedSchoolCategory]
-  );
+  const allGradeOptions = useMemo(() => getAllManagedGrades(), []);
 
   const enrolledClasses = useMemo(
     () => (edited.classIds || []).map((id) => classes.find((classItem) => classItem.id === id)).filter(Boolean),
@@ -836,10 +834,32 @@ export function StudentEditor({ student, classes, students = [], academicSchools
               <select
                 className="styled-input"
                 value={edited.grade || ''}
-                onChange={(event) => setEdited((current) => ({ ...current, grade: event.target.value }))}
+                onChange={(event) => {
+                  const nextGrade = event.target.value;
+                  setEdited((current) => {
+                    const currentSchool = schoolCatalog.find(
+                      (item) => schoolKey(item.name) === schoolKey(current.school)
+                    ) || null;
+                    const nextCategory = inferSchoolCategoryFromGrade(
+                      nextGrade,
+                      currentSchool?.category || 'middle'
+                    );
+                    const shouldClearSchool = Boolean(
+                      currentSchool
+                      && nextGrade
+                      && currentSchool.category !== nextCategory
+                    );
+
+                    return {
+                      ...current,
+                      grade: nextGrade,
+                      school: shouldClearSchool ? '' : current.school,
+                    };
+                  });
+                }}
               >
                 <option value="">학년 선택</option>
-                {gradeOptions.map((grade) => (
+                {allGradeOptions.map((grade) => (
                   <option key={grade} value={grade}>{grade}</option>
                 ))}
               </select>

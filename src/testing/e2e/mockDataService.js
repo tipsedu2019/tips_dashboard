@@ -1,4 +1,9 @@
 import { createE2EMockData } from './mockAppData.js';
+import {
+  reconcileRosterRelations,
+  syncClassRosterToStudents,
+  syncStudentEnrollmentToClasses,
+} from '../../lib/enrollmentSync.js';
 
 function clone(value) {
   if (typeof structuredClone === 'function') {
@@ -37,7 +42,7 @@ export class E2EMockDataService {
     const persistedState = this._readJson(MOCK_STATE_STORAGE_KEY);
     const persistedPreferences = this._readJson(MOCK_PREFERENCES_STORAGE_KEY);
 
-    this.state = persistedState || createE2EMockData();
+    this.state = this._reconcileState(persistedState || createE2EMockData());
     this.preferences = new Map(
       Array.isArray(persistedPreferences)
         ? persistedPreferences
@@ -50,7 +55,7 @@ export class E2EMockDataService {
 
   _snapshot(overrides = {}) {
     return {
-      ...clone(this.state),
+      ...clone(this._reconcileState(this.state)),
       isConnected: true,
       isLoading: false,
       lastUpdated: new Date(),
@@ -60,10 +65,21 @@ export class E2EMockDataService {
   }
 
   _emit() {
+    this.state = this._reconcileState(this.state);
     const snapshot = this._snapshot();
     this._persist();
     this.listeners.forEach((listener) => listener(snapshot));
     return snapshot;
+  }
+
+  _reconcileState(state) {
+    return {
+      ...state,
+      ...reconcileRosterRelations({
+        students: state?.students || [],
+        classes: state?.classes || [],
+      }),
+    };
   }
 
   _readJson(key) {
@@ -169,6 +185,12 @@ export class E2EMockDataService {
       ...clone(classObj),
     };
     this._upsertById('classes', [saved]);
+    this.state.students = syncClassRosterToStudents({
+      students: this.state.students || [],
+      classId: saved.id,
+      studentIds: saved.studentIds || [],
+      waitlistIds: saved.waitlistIds || [],
+    });
     this._emit();
     return clone(saved);
   }
@@ -177,15 +199,70 @@ export class E2EMockDataService {
     this.state.classes = (this.state.classes || []).map((item) => (
       item.id === id ? { ...item, ...clone(updates), id } : item
     ));
+    const saved = (this.state.classes || []).find((item) => item.id === id);
+    this.state.students = syncClassRosterToStudents({
+      students: this.state.students || [],
+      classId: id,
+      studentIds: saved?.studentIds || [],
+      waitlistIds: saved?.waitlistIds || [],
+    });
     this._emit();
     return true;
   }
 
   async deleteClass(id) {
     this.state.classes = (this.state.classes || []).filter((item) => item.id !== id);
+    this.state.students = syncClassRosterToStudents({
+      students: this.state.students || [],
+      classId: id,
+      studentIds: [],
+      waitlistIds: [],
+    });
     this.state.classScheduleSyncGroupMembers = (this.state.classScheduleSyncGroupMembers || []).filter(
       (item) => item.classId !== id
     );
+    this._emit();
+  }
+
+  async addStudent(student) {
+    const saved = {
+      id: student.id || createId('student'),
+      ...clone(student),
+    };
+    this._upsertById('students', [saved]);
+    this.state.classes = syncStudentEnrollmentToClasses({
+      classes: this.state.classes || [],
+      studentId: saved.id,
+      classIds: saved.classIds || [],
+      waitlistClassIds: saved.waitlistClassIds || [],
+    });
+    this._emit();
+    return clone(saved);
+  }
+
+  async updateStudent(id, updates) {
+    this.state.students = (this.state.students || []).map((item) => (
+      item.id === id ? { ...item, ...clone(updates), id } : item
+    ));
+    const saved = (this.state.students || []).find((item) => item.id === id);
+    this.state.classes = syncStudentEnrollmentToClasses({
+      classes: this.state.classes || [],
+      studentId: id,
+      classIds: saved?.classIds || [],
+      waitlistClassIds: saved?.waitlistClassIds || [],
+    });
+    this._emit();
+    return true;
+  }
+
+  async deleteStudent(id) {
+    this.state.students = (this.state.students || []).filter((item) => item.id !== id);
+    this.state.classes = syncStudentEnrollmentToClasses({
+      classes: this.state.classes || [],
+      studentId: id,
+      classIds: [],
+      waitlistClassIds: [],
+    });
     this._emit();
   }
 

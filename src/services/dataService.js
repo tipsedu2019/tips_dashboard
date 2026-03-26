@@ -1,6 +1,11 @@
 import { supabase, supabaseConfigError } from '../lib/supabase';
 import { computeClassStatus, normalizeClassStatus } from '../lib/classStatus';
 import { normalizeClassroomText } from '../lib/classroomUtils';
+import {
+  reconcileRosterRelations,
+  syncClassRosterToStudents,
+  syncStudentEnrollmentToClasses,
+} from '../lib/enrollmentSync';
 
 const EMPTY_SNAPSHOT = {
   classes: [],
@@ -307,6 +312,13 @@ export class DataService {
       ...this.cachedData,
       ...nextData,
     };
+    this.cachedData = {
+      ...this.cachedData,
+      ...reconcileRosterRelations({
+        students: this.cachedData.students,
+        classes: this.cachedData.classes,
+      }),
+    };
 
     const uniqueErrorMessages = this._collectUniqueErrorMessages(errors);
 
@@ -324,11 +336,18 @@ export class DataService {
   }
 
   _publishOptimisticData(nextData = {}) {
-    const snapshot = this._snapshot(nextData);
     this.cachedData = {
       ...this.cachedData,
       ...nextData,
     };
+    this.cachedData = {
+      ...this.cachedData,
+      ...reconcileRosterRelations({
+        students: this.cachedData.students,
+        classes: this.cachedData.classes,
+      }),
+    };
+    const snapshot = this._snapshot(this.cachedData);
     this.listeners.forEach((listener) => listener(snapshot));
   }
 
@@ -647,6 +666,175 @@ export class DataService {
     return normalizeClassroomText(value);
   }
 
+  _sameIdList(left = [], right = []) {
+    const safeLeft = (Array.isArray(left) ? left : []).map((value) => String(value || '').trim());
+    const safeRight = (Array.isArray(right) ? right : []).map((value) => String(value || '').trim());
+
+    if (safeLeft.length !== safeRight.length) {
+      return false;
+    }
+
+    return safeLeft.every((value, index) => value === safeRight[index]);
+  }
+
+  async _getClassMembershipSnapshot(id) {
+    const safeId = String(id || '').trim();
+    if (!safeId) {
+      return null;
+    }
+
+    const cached = (this.cachedData.classes || []).find((classItem) => classItem.id === safeId);
+    if (cached) {
+      return cached;
+    }
+
+    const client = this._ensureClient();
+    const { data, error } = await client
+      .from('classes')
+      .select('id, student_ids, waitlist_ids')
+      .eq('id', safeId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data ? this._processClass(data) : null;
+  }
+
+  async _getStudentEnrollmentSnapshot(id) {
+    const safeId = String(id || '').trim();
+    if (!safeId) {
+      return null;
+    }
+
+    const cached = (this.cachedData.students || []).find((student) => student.id === safeId);
+    if (cached) {
+      return cached;
+    }
+
+    const client = this._ensureClient();
+    const { data, error } = await client
+      .from('students')
+      .select('id, class_ids, waitlist_class_ids')
+      .eq('id', safeId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data ? this._processStudent(data) : null;
+  }
+
+  async _syncStudentsForClassRoster(classId, studentIds = [], waitlistIds = []) {
+    const safeClassId = String(classId || '').trim();
+    if (!safeClassId) {
+      return;
+    }
+
+    const client = this._ensureClient();
+    const { data, error } = await client.from('students').select('id, class_ids, waitlist_class_ids');
+    if (error) {
+      throw error;
+    }
+
+    const originalStudents = (data || []).map((row) => this._processStudent(row));
+    const nextStudents = syncClassRosterToStudents({
+      students: originalStudents,
+      classId: safeClassId,
+      studentIds,
+      waitlistIds,
+    });
+
+    const originalById = new Map(originalStudents.map((student) => [student.id, student]));
+    const changedStudents = nextStudents
+      .filter((student) => {
+        const previous = originalById.get(student.id);
+        return !this._sameIdList(student.classIds, previous?.classIds || [])
+          || !this._sameIdList(student.waitlistClassIds, previous?.waitlistClassIds || []);
+      })
+      .map((student) => ({
+        id: student.id,
+        class_ids: student.classIds,
+        waitlist_class_ids: student.waitlistClassIds,
+      }));
+
+    if (changedStudents.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      changedStudents.map(async (student) => {
+        const { error: updateError } = await client
+          .from('students')
+          .update({
+            class_ids: student.class_ids,
+            waitlist_class_ids: student.waitlist_class_ids,
+          })
+          .eq('id', student.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+      })
+    );
+  }
+
+  async _syncClassesForStudentEnrollment(studentId, classIds = [], waitlistClassIds = []) {
+    const safeStudentId = String(studentId || '').trim();
+    if (!safeStudentId) {
+      return;
+    }
+
+    const client = this._ensureClient();
+    const { data, error } = await client.from('classes').select('id, student_ids, waitlist_ids');
+    if (error) {
+      throw error;
+    }
+
+    const originalClasses = (data || []).map((row) => this._processClass(row));
+    const nextClasses = syncStudentEnrollmentToClasses({
+      classes: originalClasses,
+      studentId: safeStudentId,
+      classIds,
+      waitlistClassIds,
+    });
+
+    const originalById = new Map(originalClasses.map((classItem) => [classItem.id, classItem]));
+    const changedClasses = nextClasses
+      .filter((classItem) => {
+        const previous = originalById.get(classItem.id);
+        return !this._sameIdList(classItem.studentIds, previous?.studentIds || [])
+          || !this._sameIdList(classItem.waitlistIds, previous?.waitlistIds || []);
+      })
+      .map((classItem) => ({
+        id: classItem.id,
+        student_ids: classItem.studentIds,
+        waitlist_ids: classItem.waitlistIds,
+      }));
+
+    if (changedClasses.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      changedClasses.map(async (classItem) => {
+        const { error: updateError } = await client
+          .from('classes')
+          .update({
+            student_ids: classItem.student_ids,
+            waitlist_ids: classItem.waitlist_ids,
+          })
+          .eq('id', classItem.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+      })
+    );
+  }
+
   _mapClassUpdates(updates) {
     const mapped = { ...updates };
 
@@ -900,18 +1088,31 @@ export class DataService {
     );
 
     if (result.error) throw result.error;
+    const savedClass = this._processClass(result.data);
+    await this._syncStudentsForClassRoster(savedClass.id, savedClass.studentIds || [], savedClass.waitlistIds || []);
     this._notify({ tables: ['classes'] });
-    return this._processClass(result.data);
+    return savedClass;
   }
 
   async updateClass(id, updates) {
     const client = this._ensureClient();
+    const shouldSyncRoster = 'studentIds' in (updates || {}) || 'waitlistIds' in (updates || {});
+    const currentClass = shouldSyncRoster ? await this._getClassMembershipSnapshot(id) : null;
+    const nextStudentIds = 'studentIds' in (updates || {})
+      ? (updates.studentIds || [])
+      : (currentClass?.studentIds || []);
+    const nextWaitlistIds = 'waitlistIds' in (updates || {})
+      ? (updates.waitlistIds || [])
+      : (currentClass?.waitlistIds || []);
     const { result } = await this._runClassMutation(
       () => this._mapClassUpdates(updates),
       (payload) => client.from('classes').update(payload).eq('id', id)
     );
 
     if (result.error) throw result.error;
+    if (shouldSyncRoster) {
+      await this._syncStudentsForClassRoster(id, nextStudentIds, nextWaitlistIds);
+    }
     this._notify({ tables: ['classes'] });
     return true;
   }
@@ -920,6 +1121,7 @@ export class DataService {
     const client = this._ensureClient();
     const { error } = await client.from('classes').delete().eq('id', id);
     if (error) throw error;
+    await this._syncStudentsForClassRoster(id, [], []);
     this._notify({ tables: ['classes'] });
   }
 
@@ -1108,15 +1310,32 @@ export class DataService {
 
     const { data, error } = await client.from('students').insert([payload]).select().single();
     if (error) throw error;
+    const savedStudent = this._processStudent(data);
+    await this._syncClassesForStudentEnrollment(
+      savedStudent.id,
+      savedStudent.classIds || [],
+      savedStudent.waitlistClassIds || [],
+    );
     this._notify({ tables: ['students'] });
-    return this._processStudent(data);
+    return savedStudent;
   }
 
   async updateStudent(id, updates) {
     const client = this._ensureClient();
+    const shouldSyncEnrollment = 'classIds' in (updates || {}) || 'waitlistClassIds' in (updates || {});
+    const currentStudent = shouldSyncEnrollment ? await this._getStudentEnrollmentSnapshot(id) : null;
+    const nextClassIds = 'classIds' in (updates || {})
+      ? (updates.classIds || [])
+      : (currentStudent?.classIds || []);
+    const nextWaitlistClassIds = 'waitlistClassIds' in (updates || {})
+      ? (updates.waitlistClassIds || [])
+      : (currentStudent?.waitlistClassIds || []);
     const finalUpdates = this._mapStudentUpdates(updates);
     const { error } = await client.from('students').update(finalUpdates).eq('id', id);
     if (error) throw error;
+    if (shouldSyncEnrollment) {
+      await this._syncClassesForStudentEnrollment(id, nextClassIds, nextWaitlistClassIds);
+    }
     this._notify({ tables: ['students'] });
   }
 
@@ -1124,6 +1343,7 @@ export class DataService {
     const client = this._ensureClient();
     const { error } = await client.from('students').delete().eq('id', id);
     if (error) throw error;
+    await this._syncClassesForStudentEnrollment(id, [], []);
     this._notify({ tables: ['students'] });
   }
 
