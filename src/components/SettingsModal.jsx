@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Lock, LogIn, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { normalizeLoginIdentifier } from '../lib/authUtils';
 
 export default function LoginModal({ onClose }) {
   const [userId, setUserId] = useState('');
@@ -13,7 +14,7 @@ export default function LoginModal({ onClose }) {
     setError('');
 
     try {
-      const normalizedId = userId.includes('@') ? userId : `${userId}@tips.com`;
+      const normalizedId = normalizeLoginIdentifier(userId);
       await login(normalizedId, password);
       onClose();
     } catch (loginError) {
@@ -62,6 +63,17 @@ export default function LoginModal({ onClose }) {
             }}
           >
             부원장, 선생님, 관리자 계정으로 로그인해 주세요.
+          </p>
+
+          <p
+            style={{
+              fontSize: 12,
+              color: 'var(--text-secondary)',
+              marginBottom: 20,
+              lineHeight: 1.5,
+            }}
+          >
+            휴대폰 번호 아이디를 입력하면 <strong>@tipsedu.co.kr</strong> 이 자동으로 붙습니다.
           </p>
 
           <form onSubmit={handleLogin}>

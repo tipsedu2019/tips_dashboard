@@ -581,6 +581,7 @@ create unique index if not exists class_schedule_sync_group_members_class_id_key
 
 alter table public.progress_logs
   add column if not exists progress_key text,
+  add column if not exists textbook_id uuid references public.textbooks(id) on delete set null,
   add column if not exists session_id text,
   add column if not exists session_order integer,
   add column if not exists status text,
@@ -712,3 +713,174 @@ create policy class_schedule_sync_group_members_staff_write
         and p.role in ('admin', 'staff')
     )
   );
+
+alter table public.profiles
+  add column if not exists name text,
+  add column if not exists login_id text,
+  add column if not exists must_change_password boolean not null default false;
+
+update public.profiles
+set must_change_password = false
+where must_change_password is null;
+
+update public.profiles p
+set
+  login_id = coalesce(nullif(p.login_id, ''), nullif(split_part(u.email, '@', 1), '')),
+  name = coalesce(
+    nullif(p.name, ''),
+    nullif(u.raw_user_meta_data->>'name', ''),
+    nullif(split_part(u.email, '@', 1), '')
+  )
+from auth.users u
+where u.id = p.id
+  and (
+    p.login_id is null
+    or p.login_id = ''
+    or p.name is null
+    or p.name = ''
+  );
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and indexname = 'profiles_login_id_key'
+  ) then
+    if not exists (
+      select 1
+      from public.profiles
+      where login_id is not null
+        and login_id <> ''
+      group by login_id
+      having count(*) > 1
+    ) then
+      create unique index profiles_login_id_key
+        on public.profiles (login_id)
+        where login_id is not null
+          and login_id <> '';
+    end if;
+  end if;
+end
+$$;
+
+create or replace function public.is_admin_or_staff()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role in ('admin', 'staff')
+  );
+$$;
+
+grant execute on function public.is_admin_or_staff() to authenticated;
+
+alter table public.profiles enable row level security;
+
+drop policy if exists profiles_select_self_or_staff on public.profiles;
+create policy profiles_select_self_or_staff
+  on public.profiles
+  for select
+  to authenticated
+  using (
+    id = auth.uid()
+    or public.is_admin_or_staff()
+  );
+
+drop policy if exists profiles_update_self_or_staff on public.profiles;
+create policy profiles_update_self_or_staff
+  on public.profiles
+  for update
+  to authenticated
+  using (
+    id = auth.uid()
+    or public.is_admin_or_staff()
+  )
+  with check (
+    id = auth.uid()
+    or public.is_admin_or_staff()
+  );
+
+drop policy if exists profiles_insert_staff on public.profiles;
+create policy profiles_insert_staff
+  on public.profiles
+  for insert
+  to authenticated
+  with check (public.is_admin_or_staff());
+
+drop policy if exists profiles_delete_staff on public.profiles;
+create policy profiles_delete_staff
+  on public.profiles
+  for delete
+  to authenticated
+  using (public.is_admin_or_staff());
+
+drop policy if exists academic_curriculum_profiles_teacher_write on public.academic_curriculum_profiles;
+drop policy if exists academic_curriculum_profiles_staff_write on public.academic_curriculum_profiles;
+create policy academic_curriculum_profiles_staff_write
+  on public.academic_curriculum_profiles
+  for all
+  to authenticated
+  using (public.is_admin_or_staff())
+  with check (public.is_admin_or_staff());
+
+drop policy if exists academic_supplement_materials_teacher_write on public.academic_supplement_materials;
+drop policy if exists academic_supplement_materials_staff_write on public.academic_supplement_materials;
+create policy academic_supplement_materials_staff_write
+  on public.academic_supplement_materials
+  for all
+  to authenticated
+  using (public.is_admin_or_staff())
+  with check (public.is_admin_or_staff());
+
+drop policy if exists academic_event_exam_details_teacher_write on public.academic_event_exam_details;
+drop policy if exists academic_event_exam_details_staff_write on public.academic_event_exam_details;
+create policy academic_event_exam_details_staff_write
+  on public.academic_event_exam_details
+  for all
+  to authenticated
+  using (public.is_admin_or_staff())
+  with check (public.is_admin_or_staff());
+
+drop policy if exists academy_curriculum_plans_teacher_write on public.academy_curriculum_plans;
+drop policy if exists academy_curriculum_plans_staff_write on public.academy_curriculum_plans;
+create policy academy_curriculum_plans_staff_write
+  on public.academy_curriculum_plans
+  for all
+  to authenticated
+  using (public.is_admin_or_staff())
+  with check (public.is_admin_or_staff());
+
+drop policy if exists academy_curriculum_materials_teacher_write on public.academy_curriculum_materials;
+drop policy if exists academy_curriculum_materials_staff_write on public.academy_curriculum_materials;
+create policy academy_curriculum_materials_staff_write
+  on public.academy_curriculum_materials
+  for all
+  to authenticated
+  using (public.is_admin_or_staff())
+  with check (public.is_admin_or_staff());
+
+drop policy if exists textbooks_teacher_write on public.textbooks;
+drop policy if exists textbooks_staff_write on public.textbooks;
+create policy textbooks_staff_write
+  on public.textbooks
+  for all
+  to authenticated
+  using (public.is_admin_or_staff())
+  with check (public.is_admin_or_staff());
+
+drop policy if exists progress_logs_teacher_write on public.progress_logs;
+drop policy if exists progress_logs_staff_write on public.progress_logs;
+create policy progress_logs_staff_write
+  on public.progress_logs
+  for all
+  to authenticated
+  using (public.is_admin_or_staff())
+  with check (public.is_admin_or_staff());

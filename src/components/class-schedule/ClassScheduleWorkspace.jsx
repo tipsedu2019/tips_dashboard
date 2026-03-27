@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useAuth } from "../../contexts/AuthContext";
 import { DashboardDataSurface } from "../ui/dashboard";
 import ClassSchedulePlanModal from "../ClassSchedulePlanModal";
 import { useViewport } from "../../hooks/useViewport";
@@ -110,6 +111,7 @@ export default function ClassScheduleWorkspace({
   managedTerms = [],
 }) {
   const { isMobile } = useViewport();
+  const { canEditClassSchedule } = useAuth();
   const [viewState, setViewState] = useState(() =>
     toMinimalTimelineViewState(DEFAULT_CLASS_SCHEDULE_VIEW_STATE),
   );
@@ -182,11 +184,11 @@ export default function ClassScheduleWorkspace({
   );
 
   useEffect(() => {
-    if (!dataService?.setAppPreference) return;
+    if (!canEditClassSchedule || !dataService?.setAppPreference) return;
     dataService.setAppPreference(VIEW_PREFERENCE_KEY, minimalViewState).catch((error) => {
       console.error("Failed to persist class schedule preference:", error);
     });
-  }, [dataService, minimalViewState]);
+  }, [canEditClassSchedule, dataService, minimalViewState]);
 
   const combinedProgressLogs = useMemo(
     () => buildCombinedProgressLogs(progressLogs, optimisticProgress),
@@ -373,6 +375,9 @@ export default function ClassScheduleWorkspace({
   }, []);
 
   useEffect(() => {
+    if (!canEditClassSchedule) {
+      return undefined;
+    }
     if (!draftDirty || !draft || !selectedRow || !selectedSession || !selectedEntry) {
       return undefined;
     }
@@ -429,7 +434,15 @@ export default function ClassScheduleWorkspace({
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [dataService, draft, draftDirty, selectedEntry, selectedRow, selectedSession]);
+  }, [
+    canEditClassSchedule,
+    dataService,
+    draft,
+    draftDirty,
+    selectedEntry,
+    selectedRow,
+    selectedSession,
+  ]);
 
   function setInspectorOpen(nextOpen) {
     setViewState((current) => ({
@@ -501,7 +514,7 @@ export default function ClassScheduleWorkspace({
     setModalState({
       open: true,
       row,
-      mode: "builder",
+      mode: canEditClassSchedule ? "builder" : "readonly",
     });
   }
 
@@ -510,6 +523,9 @@ export default function ClassScheduleWorkspace({
   }
 
   function handleDraftChange(patch = {}) {
+    if (!canEditClassSchedule) {
+      return;
+    }
     setDraft((current) => ({
       ...(current || createProgressDraft(selectedRow, selectedSession, selectedEntry)),
       ...patch,
@@ -519,6 +535,7 @@ export default function ClassScheduleWorkspace({
   }
 
   async function handleBuilderSave({ classPatch, schedulePlan }) {
+    if (!canEditClassSchedule) return;
     const classItem = modalState.row?.classItem;
     if (!classItem) return;
 
@@ -543,6 +560,7 @@ export default function ClassScheduleWorkspace({
   }
 
   async function handleChecklistSave({ classPatch, schedulePlan }) {
+    if (!canEditClassSchedule) return;
     const classItem = modalState.row?.classItem;
     if (!classItem || !schedulePlan) {
       setModalState({
@@ -589,7 +607,7 @@ export default function ClassScheduleWorkspace({
     setModalState({
       open: true,
       row,
-      mode: "checklist",
+      mode: canEditClassSchedule ? "checklist" : "readonly",
     });
   }
 
@@ -597,7 +615,7 @@ export default function ClassScheduleWorkspace({
     setModalState({
       open: true,
       row,
-      mode: "builder",
+      mode: canEditClassSchedule ? "builder" : "readonly",
     });
   }
 
@@ -641,6 +659,7 @@ export default function ClassScheduleWorkspace({
   }
 
   async function handleSaveSyncGroup() {
+    if (!canEditClassSchedule) return;
     const savedGroup = await dataService?.upsertClassScheduleSyncGroup?.({
       id: syncForm.id || undefined,
       termId: minimalViewState.filters.termId || null,
@@ -669,6 +688,7 @@ export default function ClassScheduleWorkspace({
   }
 
   async function handleDeleteSyncGroup(groupId) {
+    if (!canEditClassSchedule) return;
     await dataService?.deleteClassScheduleSyncGroup?.(groupId);
     setViewState((current) => ({
       ...current,
@@ -779,13 +799,18 @@ export default function ClassScheduleWorkspace({
 
           <DashboardDataSurface className="class-schedule-workspace__sync-surface">
             <ClassScheduleSyncGroupPanel
+              editable={canEditClassSchedule}
               groups={syncGroupCards}
               selectedGroupId={minimalViewState.selectedSyncGroupId}
               onSelectGroup={(groupId) => {
-                if (safeText(minimalViewState.selectedSyncGroupId) === safeText(groupId)) {
+                if (
+                  canEditClassSchedule &&
+                  safeText(minimalViewState.selectedSyncGroupId) === safeText(groupId)
+                ) {
                   handleOpenSyncConfig(groupId);
                   return;
                 }
+
                 setViewState((current) => ({
                   ...current,
                   selectedSyncGroupId: safeText(groupId),
@@ -817,7 +842,8 @@ export default function ClassScheduleWorkspace({
               row={selectedRow}
               selectedSession={selectedSession}
               selectedEntry={selectedEntry}
-              draft={draft}
+              canEditClassSchedule={canEditClassSchedule}
+              draft={canEditClassSchedule ? draft : null}
               saveState={saveState}
               onClose={() => setInspectorOpen(false)}
               onSelectSession={handleSelectSession}
@@ -833,7 +859,7 @@ export default function ClassScheduleWorkspace({
 
       <ClassSchedulePlanModal
         open={modalState.open}
-        editable={modalState.mode !== "readonly"}
+        editable={canEditClassSchedule && modalState.mode !== "readonly"}
         mode={modalState.mode}
         classItem={modalState.row?.classItem || null}
         plan={

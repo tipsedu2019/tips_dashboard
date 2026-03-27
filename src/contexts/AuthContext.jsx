@@ -6,21 +6,18 @@ import {
   supabase,
   supabaseConfigError,
 } from '../lib/supabase';
+import {
+  getRoleCapabilities,
+  normalizeDashboardRole,
+  normalizeLoginIdentifier,
+  shouldForcePasswordChange,
+} from '../lib/authUtils';
 import { getE2ERole, isE2EModeEnabled } from '../testing/e2e/e2eMode';
 
 const AuthContext = createContext(null);
 
 function normalizeEmail(value) {
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '');
-
-  if (!normalized) {
-    return '';
-  }
-
-  return normalized.includes('@') ? normalized : `${normalized}@tips.com`;
+  return normalizeLoginIdentifier(String(value || '').replace(/\s+/g, ''));
 }
 
 function createFallbackSet(values) {
@@ -76,6 +73,7 @@ function createFallbackUser(supabaseUser, role) {
     name: getFallbackName(supabaseUser),
     role,
     isFallbackRole: true,
+    mustChangePassword: shouldForcePasswordChange(supabaseUser),
   };
 }
 
@@ -245,10 +243,12 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const role = user?.role || 'viewer';
+  const role = normalizeDashboardRole(user?.role || 'viewer');
   const isAdmin = role === 'admin';
   const isStaff = role === 'staff' || role === 'admin';
   const isTeacher = role === 'teacher';
+  const mustChangePassword = shouldForcePasswordChange(user);
+  const capabilities = getRoleCapabilities(role);
 
   const value = useMemo(
     () => ({
@@ -258,6 +258,8 @@ export function AuthProvider({ children }) {
       isAdmin,
       isStaff,
       isTeacher,
+      mustChangePassword,
+      ...capabilities,
       loading,
       authError,
       login: async (email, password) => {
@@ -294,6 +296,40 @@ export function AuthProvider({ children }) {
 
         return true;
       },
+      changePassword: async (password) => {
+        if (!supabase) {
+          throw new Error(supabaseConfigError || '吏湲덉? Supabase???곌껐?????놁뒿?덈떎.');
+        }
+
+        const { data, error } = await supabase.auth.updateUser({ password });
+        if (error) {
+          throw error;
+        }
+
+        const userId = data?.user?.id || user?.id;
+        if (userId) {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .update({ must_change_password: false })
+            .eq('id', userId);
+
+          if (profileError) {
+            throw profileError;
+          }
+        }
+
+        setUser((current) => (
+          current
+            ? {
+                ...current,
+                mustChangePassword: false,
+                must_change_password: false,
+              }
+            : current
+        ));
+        setAuthError(null);
+        return true;
+      },
       logout: async () => {
         if (isE2EModeEnabled()) {
           return true;
@@ -312,7 +348,18 @@ export function AuthProvider({ children }) {
         return true;
       },
     }),
-    [authError, isAdmin, isStaff, isTeacher, loading, role, session, user]
+    [
+      authError,
+      capabilities,
+      isAdmin,
+      isStaff,
+      isTeacher,
+      loading,
+      mustChangePassword,
+      role,
+      session,
+      user,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -348,7 +395,15 @@ async function fetchProfile(supabaseUser, isStillActive, setUser, setAuthError, 
       ...supabaseUser,
       ...data,
       name: data.name || getFallbackName(supabaseUser),
-      role: data.role || 'viewer',
+      role: normalizeDashboardRole(data.role || 'viewer'),
+      loginId:
+        data.login_id ||
+        (supabaseUser?.email?.includes('@')
+          ? supabaseUser.email.split('@')[0]
+          : supabaseUser?.email || ''),
+      mustChangePassword:
+        shouldForcePasswordChange(data) ||
+        shouldForcePasswordChange(supabaseUser),
       isFallbackRole: false,
     });
     setAuthError(null);

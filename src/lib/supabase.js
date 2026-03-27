@@ -20,17 +20,17 @@ const supabaseAnonKey = trimEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
 export const fallbackAdminEmails = parseFallbackEmails(
   import.meta.env.VITE_FALLBACK_ADMIN_EMAILS,
-  ['admin@tips.com', 'yeoyuasset@naver.com']
+  ['admin@tipsedu.co.kr', 'admin@tips.com', 'yeoyuasset@naver.com']
 );
 
 export const fallbackStaffEmails = parseFallbackEmails(
   import.meta.env.VITE_FALLBACK_STAFF_EMAILS,
-  ['tipsacademy@naver.com']
+  ['staff@tipsedu.co.kr', 'tipsacademy@naver.com']
 );
 
 export const fallbackTeacherEmails = parseFallbackEmails(
   import.meta.env.VITE_FALLBACK_TEACHER_EMAILS,
-  ['teacher@tips.com', 'tipsedu@naver.com']
+  ['teacher@tipsedu.co.kr', 'teacher@tips.com', 'tipsedu@naver.com']
 );
 
 export const supabaseConfigError = !supabaseUrl || !supabaseAnonKey

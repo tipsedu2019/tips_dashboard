@@ -3,6 +3,7 @@ import { ClipboardList } from 'lucide-react';
 import ClassSchedulePlanModal from './ClassSchedulePlanModal';
 import { PublicLandingCard } from './PublicClassLandingView';
 import ManagementCommandBar from './data-manager/ManagementCommandBar';
+import { useAuth } from '../contexts/AuthContext';
 import { Badge, CheckboxMenu, SegmentedControl, StateView } from './ui/tds';
 import {
   buildSchedulePlanForSave,
@@ -155,6 +156,7 @@ function buildStatusTone(row) {
 }
 
 export default function CurriculumProgressWorkspace({ data = {}, dataService }) {
+  const { canEditCurriculumPlanning } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTerm, setSelectedTerm] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
@@ -292,7 +294,9 @@ export default function CurriculumProgressWorkspace({ data = {}, dataService }) 
 
   const handleOpenModal = (classId, nextMode) => {
     setActiveClassId(classId);
-    setModalMode(nextMode);
+    setModalMode(
+      canEditCurriculumPlanning || nextMode === 'readonly' ? nextMode : 'readonly'
+    );
   };
 
   const handleSaveDraft = async ({ classPatch, schedulePlan }) => {
@@ -485,13 +489,17 @@ export default function CurriculumProgressWorkspace({ data = {}, dataService }) 
 
       <ClassSchedulePlanModal
         open={Boolean(activeRow)}
-        editable={modalMode !== 'readonly'}
+        editable={canEditCurriculumPlanning && modalMode !== 'readonly'}
         mode={modalMode}
         classItem={activeRow?.classItem || null}
         plan={activeRow?.classItem?.schedulePlan || activeRow?.classItem?.schedule_plan || null}
         textbooksCatalog={textbooks}
         progressLogs={data?.progressLogs || []}
-        onSaveDraft={modalMode === 'readonly' ? undefined : handleSaveDraft}
+        onSaveDraft={
+          !canEditCurriculumPlanning || modalMode === 'readonly'
+            ? undefined
+            : handleSaveDraft
+        }
         onClose={() => {
           setActiveClassId('');
           setModalMode('readonly');

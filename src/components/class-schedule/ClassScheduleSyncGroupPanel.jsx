@@ -29,19 +29,30 @@ function GroupCard({ group, active = false, onSelect }) {
       </div>
 
       {group.warningText ? (
-        <div className="class-schedule-sync-panel__warning">
-          {group.warningText}
-        </div>
+        <div className="class-schedule-sync-panel__warning">{group.warningText}</div>
       ) : null}
     </button>
   );
 }
 
-function MemberItem({ item, checked, onToggle, onMoveUp, onMoveDown, disabled }) {
+function MemberItem({
+  item,
+  checked,
+  onToggle,
+  onMoveUp,
+  onMoveDown,
+  disabled,
+  editable = true,
+}) {
   return (
     <div className={`class-schedule-sync-panel__member${checked ? " is-selected" : ""}`}>
       <label className="class-schedule-sync-panel__member-main">
-        <input type="checkbox" checked={checked} onChange={() => onToggle(item.classId)} />
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={!editable}
+          onChange={() => onToggle(item.classId)}
+        />
         <div className="class-schedule-sync-panel__member-copy">
           <strong>{item.className}</strong>
           <span>
@@ -53,7 +64,7 @@ function MemberItem({ item, checked, onToggle, onMoveUp, onMoveDown, disabled })
         <button
           type="button"
           className="class-schedule-sync-panel__move-button"
-          disabled={disabled}
+          disabled={!editable || disabled}
           onClick={() => onMoveUp(item.classId)}
           aria-label={`${item.className} 위로 이동`}
         >
@@ -62,7 +73,7 @@ function MemberItem({ item, checked, onToggle, onMoveUp, onMoveDown, disabled })
         <button
           type="button"
           className="class-schedule-sync-panel__move-button"
-          disabled={disabled}
+          disabled={!editable || disabled}
           onClick={() => onMoveDown(item.classId)}
           aria-label={`${item.className} 아래로 이동`}
         >
@@ -74,12 +85,20 @@ function MemberItem({ item, checked, onToggle, onMoveUp, onMoveDown, disabled })
 }
 
 export default function ClassScheduleSyncGroupPanel({
+  editable = true,
   groups = [],
   selectedGroupId = "",
   onSelectGroup,
   configOpen = false,
   onCloseConfig,
-  formState,
+  formState = {
+    id: "",
+    name: "",
+    subject: "",
+    color: "#3182f6",
+    note: "",
+    memberIds: [],
+  },
   classCandidates = [],
   onChangeForm,
   onToggleMember,
@@ -94,30 +113,38 @@ export default function ClassScheduleSyncGroupPanel({
       <div className="class-schedule-sync-panel__header">
         <div className="class-schedule-sync-panel__header-copy">
           <strong>진도 동기화 그룹</strong>
-          <span>같은 진도로 운영할 반을 묶고, 반별 불일치 경고를 한 곳에서 관리합니다.</span>
+          <span>
+            같은 진도로 운영하는 반을 묶고, 반별 불일치 경고를 한곳에서 관리합니다.
+          </span>
         </div>
-        <button
-          type="button"
-          className="class-schedule-sync-panel__create-button"
-          onClick={onCreate}
-        >
-          새 그룹
-        </button>
+        {editable ? (
+          <button
+            type="button"
+            className="class-schedule-sync-panel__create-button"
+            onClick={onCreate}
+          >
+            새 그룹
+          </button>
+        ) : null}
       </div>
 
       {groups.length === 0 ? (
         <div className="class-schedule-sync-panel__empty">
           <div className="class-schedule-sync-panel__empty-copy">
             <strong>아직 설정된 동기화 그룹이 없습니다.</strong>
-            <span>같은 과목 반을 묶어 두면 회차 차이가 나는 순간 바로 경고를 볼 수 있습니다.</span>
+            <span>
+              같은 과목 반을 묶으면 차시 차이가 나는 순간 바로 경고를 볼 수 있습니다.
+            </span>
           </div>
-          <button
-            type="button"
-            className="class-schedule-sync-panel__empty-action"
-            onClick={onCreate}
-          >
-            첫 그룹 만들기
-          </button>
+          {editable ? (
+            <button
+              type="button"
+              className="class-schedule-sync-panel__empty-action"
+              onClick={onCreate}
+            >
+              첫 그룹 만들기
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="class-schedule-sync-panel__list">
@@ -137,7 +164,9 @@ export default function ClassScheduleSyncGroupPanel({
           <div className="class-schedule-sync-panel__editor-head">
             <div className="class-schedule-sync-panel__editor-copy">
               <strong>그룹 설정</strong>
-              <span>같은 과목 반만 묶을 수 있으며, 순서는 경고 비교 기준으로 사용됩니다.</span>
+              <span>
+                같은 과목 반만 묶을 수 있으며, 순서는 경고 비교 기준으로 사용됩니다.
+              </span>
             </div>
             <button
               type="button"
@@ -148,11 +177,18 @@ export default function ClassScheduleSyncGroupPanel({
             </button>
           </div>
 
+          {!editable ? (
+            <div className="class-schedule-sync-panel__warning">
+              이 계정은 동기화 그룹을 조회만 할 수 있습니다.
+            </div>
+          ) : null}
+
           <div className="class-schedule-sync-panel__editor-grid">
             <label className="class-schedule-sync-panel__field">
               <span>그룹명</span>
               <input
                 value={formState.name}
+                disabled={!editable}
                 onChange={(event) => onChangeForm({ name: event.target.value })}
               />
             </label>
@@ -160,15 +196,17 @@ export default function ClassScheduleSyncGroupPanel({
               <span>과목</span>
               <input
                 value={formState.subject}
+                disabled={!editable}
                 onChange={(event) => onChangeForm({ subject: event.target.value })}
               />
             </label>
             <label className="class-schedule-sync-panel__field">
-              <span>포인트 컬러</span>
+              <span>대표 색상</span>
               <input
                 type="color"
                 className="class-schedule-sync-panel__color-input"
                 value={formState.color}
+                disabled={!editable}
                 onChange={(event) => onChangeForm({ color: event.target.value })}
               />
             </label>
@@ -179,6 +217,7 @@ export default function ClassScheduleSyncGroupPanel({
             <textarea
               rows={3}
               value={formState.note}
+              disabled={!editable}
               onChange={(event) => onChangeForm({ note: event.target.value })}
             />
           </label>
@@ -193,12 +232,13 @@ export default function ClassScheduleSyncGroupPanel({
                 onMoveUp={onMoveMemberUp}
                 onMoveDown={onMoveMemberDown}
                 disabled={!formState.memberIds.includes(item.classId)}
+                editable={editable}
               />
             ))}
           </div>
 
           <div className="class-schedule-sync-panel__footer">
-            {formState.id ? (
+            {editable && formState.id ? (
               <button
                 type="button"
                 className="class-schedule-sync-panel__danger-button"
@@ -207,13 +247,15 @@ export default function ClassScheduleSyncGroupPanel({
                 삭제
               </button>
             ) : null}
-            <button
-              type="button"
-              className="class-schedule-sync-panel__primary-button"
-              onClick={onSave}
-            >
-              저장
-            </button>
+            {editable ? (
+              <button
+                type="button"
+                className="class-schedule-sync-panel__primary-button"
+                onClick={onSave}
+              >
+                저장
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

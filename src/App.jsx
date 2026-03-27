@@ -29,6 +29,7 @@ import { useAuth } from "./contexts/AuthContext";
 import { isE2EModeEnabled } from "./testing/e2e/e2eMode";
 import { e2eDataService } from "./testing/e2e/mockDataService";
 import LoginModal from "./components/SettingsModal";
+import ChangePasswordModal from "./components/ChangePasswordModal";
 import ClassScheduleWorkspaceBoundary from "./components/class-schedule/ClassScheduleWorkspaceBoundary";
 import BottomSheet from "./components/ui/BottomSheet";
 import PageLoader from "./components/ui/PageLoader";
@@ -603,7 +604,16 @@ export default function App() {
   const subjectFlyoutCloseTimerRef = useRef(null);
   const periodFlyoutCloseTimerRef = useRef(null);
 
-  const { user, isStaff, isTeacher, logout, loading, authError } = useAuth();
+  const {
+    user,
+    isStaff,
+    isTeacher,
+    canAccessDashboard,
+    mustChangePassword,
+    logout,
+    loading,
+    authError,
+  } = useAuth();
   const useBottomNavShell = true;
   const forceDesktopLayout = isDesktop && width <= TABLET_BREAKPOINT;
   const dashboardShellLayoutClass = useBottomNavShell
@@ -1631,10 +1641,11 @@ export default function App() {
         />
       </Suspense>
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      <ChangePasswordModal open={Boolean(user && mustChangePassword)} />
     </div>
   );
 
-  if (!user || isPublicMode) {
+  if (!user || !canAccessDashboard || isPublicMode) {
     return publicView;
   }
 
@@ -2184,6 +2195,7 @@ export default function App() {
       ) : null}
 
       {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      <ChangePasswordModal open={Boolean(user && mustChangePassword)} />
     </div>
   );
 }
