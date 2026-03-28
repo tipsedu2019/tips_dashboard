@@ -2,10 +2,15 @@ import fs from "node:fs";
 
 import Papa from "papaparse";
 
+import { normalizeLoginLocalPart } from "../../src/lib/authUtils.js";
+
 export const ACCOUNT_EMAIL_DOMAIN = "tipsedu.co.kr";
 export const DEFAULT_INITIAL_PASSWORD = "tips2019!!";
 
 const MANAGED_ROLES = new Set(["admin", "staff", "teacher"]);
+const NAME_HEADER = "\uC774\uB984";
+const LOGIN_ID_HEADER = "\uC544\uC774\uB514";
+const ROLE_HEADER = "\uC5ED\uD560";
 
 function cleanText(value) {
   return String(value ?? "").replace(/^\uFEFF/, "").trim();
@@ -26,9 +31,11 @@ export function buildStaffAccountRecord(
     password = DEFAULT_INITIAL_PASSWORD,
   } = {},
 ) {
-  const name = cleanText(row?.이름 ?? row?.name);
-  const loginId = cleanText(row?.아이디 ?? row?.loginId ?? row?.id);
-  const role = normalizeManagedRole(row?.역할 ?? row?.role);
+  const name = cleanText(row?.[NAME_HEADER] ?? row?.name);
+  const loginId = normalizeLoginLocalPart(
+    cleanText(row?.[LOGIN_ID_HEADER] ?? row?.loginId ?? row?.id),
+  );
+  const role = normalizeManagedRole(row?.[ROLE_HEADER] ?? row?.role);
 
   if (!name) {
     throw new Error("Missing staff name");
@@ -65,7 +72,7 @@ export function parseStaffCsvText(text, options = {}) {
 }
 
 export function decodeStaffCsvBuffer(buffer) {
-  const requiredHeaders = ["이름", "아이디", "역할"];
+  const requiredHeaders = [NAME_HEADER, LOGIN_ID_HEADER, ROLE_HEADER];
   const encodings = ["utf-8", "euc-kr"];
 
   for (const encoding of encodings) {

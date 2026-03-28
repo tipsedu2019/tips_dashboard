@@ -111,7 +111,7 @@ export default function ClassScheduleWorkspace({
   managedTerms = [],
 }) {
   const { isMobile } = useViewport();
-  const { canEditClassSchedule } = useAuth();
+  const { canEditClassSchedule, canEditClassSchedulePlanning } = useAuth();
   const [viewState, setViewState] = useState(() =>
     toMinimalTimelineViewState(DEFAULT_CLASS_SCHEDULE_VIEW_STATE),
   );
@@ -184,11 +184,11 @@ export default function ClassScheduleWorkspace({
   );
 
   useEffect(() => {
-    if (!canEditClassSchedule || !dataService?.setAppPreference) return;
+    if (!canEditClassSchedulePlanning || !dataService?.setAppPreference) return;
     dataService.setAppPreference(VIEW_PREFERENCE_KEY, minimalViewState).catch((error) => {
       console.error("Failed to persist class schedule preference:", error);
     });
-  }, [canEditClassSchedule, dataService, minimalViewState]);
+  }, [canEditClassSchedulePlanning, dataService, minimalViewState]);
 
   const combinedProgressLogs = useMemo(
     () => buildCombinedProgressLogs(progressLogs, optimisticProgress),
@@ -375,7 +375,7 @@ export default function ClassScheduleWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!canEditClassSchedule) {
+    if (!canEditClassSchedulePlanning) {
       return undefined;
     }
     if (!draftDirty || !draft || !selectedRow || !selectedSession || !selectedEntry) {
@@ -435,7 +435,7 @@ export default function ClassScheduleWorkspace({
       }
     };
   }, [
-    canEditClassSchedule,
+    canEditClassSchedulePlanning,
     dataService,
     draft,
     draftDirty,
@@ -514,7 +514,7 @@ export default function ClassScheduleWorkspace({
     setModalState({
       open: true,
       row,
-      mode: canEditClassSchedule ? "builder" : "readonly",
+      mode: canEditClassSchedulePlanning ? "builder" : "readonly",
     });
   }
 
@@ -523,7 +523,7 @@ export default function ClassScheduleWorkspace({
   }
 
   function handleDraftChange(patch = {}) {
-    if (!canEditClassSchedule) {
+    if (!canEditClassSchedulePlanning) {
       return;
     }
     setDraft((current) => ({
@@ -535,7 +535,7 @@ export default function ClassScheduleWorkspace({
   }
 
   async function handleBuilderSave({ classPatch, schedulePlan }) {
-    if (!canEditClassSchedule) return;
+    if (!canEditClassSchedulePlanning) return;
     const classItem = modalState.row?.classItem;
     if (!classItem) return;
 
@@ -560,7 +560,7 @@ export default function ClassScheduleWorkspace({
   }
 
   async function handleChecklistSave({ classPatch, schedulePlan }) {
-    if (!canEditClassSchedule) return;
+    if (!canEditClassSchedulePlanning) return;
     const classItem = modalState.row?.classItem;
     if (!classItem || !schedulePlan) {
       setModalState({
@@ -607,7 +607,7 @@ export default function ClassScheduleWorkspace({
     setModalState({
       open: true,
       row,
-      mode: canEditClassSchedule ? "checklist" : "readonly",
+      mode: canEditClassSchedulePlanning ? "checklist" : "readonly",
     });
   }
 
@@ -615,7 +615,7 @@ export default function ClassScheduleWorkspace({
     setModalState({
       open: true,
       row,
-      mode: canEditClassSchedule ? "builder" : "readonly",
+      mode: canEditClassSchedulePlanning ? "builder" : "readonly",
     });
   }
 
@@ -843,7 +843,7 @@ export default function ClassScheduleWorkspace({
               selectedSession={selectedSession}
               selectedEntry={selectedEntry}
               canEditClassSchedule={canEditClassSchedule}
-              draft={canEditClassSchedule ? draft : null}
+              draft={canEditClassSchedulePlanning ? draft : null}
               saveState={saveState}
               onClose={() => setInspectorOpen(false)}
               onSelectSession={handleSelectSession}
@@ -859,7 +859,7 @@ export default function ClassScheduleWorkspace({
 
       <ClassSchedulePlanModal
         open={modalState.open}
-        editable={canEditClassSchedule && modalState.mode !== "readonly"}
+        editable={canEditClassSchedulePlanning && modalState.mode !== "readonly"}
         mode={modalState.mode}
         classItem={modalState.row?.classItem || null}
         plan={

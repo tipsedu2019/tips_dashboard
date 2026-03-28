@@ -1,5 +1,21 @@
 export const DEFAULT_LOGIN_EMAIL_DOMAIN = "tipsedu.co.kr";
 
+export function normalizeLoginLocalPart(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  const digits = normalized.replace(/\D/g, "");
+  const isPhoneLike = /^[\d\s()+-]+$/.test(normalized);
+
+  if (isPhoneLike && digits.length >= 8) {
+    return digits.slice(-8);
+  }
+
+  return normalized;
+}
+
 export function normalizeLoginIdentifier(
   value,
   defaultDomain = DEFAULT_LOGIN_EMAIL_DOMAIN,
@@ -9,9 +25,14 @@ export function normalizeLoginIdentifier(
     return "";
   }
 
-  return normalized.includes("@")
-    ? normalized
-    : `${normalized}@${defaultDomain}`;
+  if (normalized.includes("@")) {
+    const atIndex = normalized.lastIndexOf("@");
+    const localPart = normalized.slice(0, atIndex);
+    const domainPart = normalized.slice(atIndex + 1) || defaultDomain;
+    return `${normalizeLoginLocalPart(localPart)}@${domainPart}`;
+  }
+
+  return `${normalizeLoginLocalPart(normalized)}@${defaultDomain}`;
 }
 
 export function normalizeDashboardRole(role) {
@@ -36,11 +57,14 @@ export function getRoleCapabilities(role) {
     normalizedRole === "admin" || normalizedRole === "staff";
   const canEditCurriculumPlanning =
     canManageAll || normalizedRole === "teacher";
+  const canEditClassSchedulePlanning =
+    canManageAll || normalizedRole === "teacher";
 
   return {
     canAccessDashboard: normalizedRole !== "viewer",
     canManageAll,
     canEditCurriculumPlanning,
+    canEditClassSchedulePlanning,
     canEditClassSchedule: canManageAll,
   };
 }

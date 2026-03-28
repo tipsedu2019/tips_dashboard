@@ -12,22 +12,33 @@ test("login identifier appends the tipsedu domain for bare ids", () => {
   assert.equal(DEFAULT_LOGIN_EMAIL_DOMAIN, "tipsedu.co.kr");
   assert.equal(
     normalizeLoginIdentifier("010-9954-2979"),
-    "010-9954-2979@tipsedu.co.kr",
+    "99542979@tipsedu.co.kr",
   );
+  assert.equal(normalizeLoginIdentifier("01099542979"), "99542979@tipsedu.co.kr");
+  assert.equal(normalizeLoginIdentifier("99542979"), "99542979@tipsedu.co.kr");
 });
 
 test("login identifier preserves explicit emails and trims whitespace", () => {
   assert.equal(
     normalizeLoginIdentifier("  010-9954-2979@tipsedu.co.kr  "),
-    "010-9954-2979@tipsedu.co.kr",
+    "99542979@tipsedu.co.kr",
   );
 });
 
-test("role capabilities keep viewer in public mode and teacher limited to curriculum planning", () => {
+test("login identifier keeps non-phone exceptions as-is", () => {
+  assert.equal(normalizeLoginIdentifier("tipsedu"), "tipsedu@tipsedu.co.kr");
+  assert.equal(
+    normalizeLoginIdentifier(" tipsedu@tipsedu.co.kr "),
+    "tipsedu@tipsedu.co.kr",
+  );
+});
+
+test("role capabilities allow teachers to edit schedule planning without getting full admin rights", () => {
   assert.deepEqual(getRoleCapabilities("admin"), {
     canAccessDashboard: true,
     canManageAll: true,
     canEditCurriculumPlanning: true,
+    canEditClassSchedulePlanning: true,
     canEditClassSchedule: true,
   });
 
@@ -35,6 +46,7 @@ test("role capabilities keep viewer in public mode and teacher limited to curric
     canAccessDashboard: true,
     canManageAll: true,
     canEditCurriculumPlanning: true,
+    canEditClassSchedulePlanning: true,
     canEditClassSchedule: true,
   });
 
@@ -42,6 +54,7 @@ test("role capabilities keep viewer in public mode and teacher limited to curric
     canAccessDashboard: true,
     canManageAll: false,
     canEditCurriculumPlanning: true,
+    canEditClassSchedulePlanning: true,
     canEditClassSchedule: false,
   });
 
@@ -49,6 +62,7 @@ test("role capabilities keep viewer in public mode and teacher limited to curric
     canAccessDashboard: false,
     canManageAll: false,
     canEditCurriculumPlanning: false,
+    canEditClassSchedulePlanning: false,
     canEditClassSchedule: false,
   });
 });

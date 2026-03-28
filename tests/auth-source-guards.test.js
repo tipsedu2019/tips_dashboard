@@ -25,5 +25,6 @@ test("teacher and staff permissions are enforced in the planning and class-sched
   assert.match(curriculumProgressSource, /useAuth/);
   assert.match(curriculumProgressSource, /canEditCurriculumPlanning/);
   assert.match(classScheduleSource, /useAuth/);
+  assert.match(classScheduleSource, /canEditClassSchedulePlanning/);
   assert.match(classScheduleSource, /canEditClassSchedule/);
 });
