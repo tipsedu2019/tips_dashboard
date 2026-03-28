@@ -19,9 +19,11 @@ test("login flow uses the tipsedu domain and mounts the forced password change m
 });
 
 test("teacher and staff permissions are enforced in the planning and class-schedule workspaces", () => {
+  const appSource = read("src/App.jsx");
   const curriculumProgressSource = read("src/components/CurriculumProgressWorkspace.jsx");
   const classScheduleSource = read("src/components/class-schedule/ClassScheduleWorkspace.jsx");
 
+  assert.match(appSource, /const bottomNavItems = useMemo\([\s\S]*canAccessCurriculumRoadmap/);
   assert.match(curriculumProgressSource, /useAuth/);
   assert.match(curriculumProgressSource, /canEditCurriculumPlanning/);
   assert.match(classScheduleSource, /useAuth/);

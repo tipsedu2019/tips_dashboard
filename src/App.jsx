@@ -1268,9 +1268,17 @@ export default function App() {
 
     return "stats";
   }, [currentView]);
-  const bottomNavItems = useMemo(() => DASHBOARD_BOTTOM_NAV_ITEMS.filter(
-    (item) => (!item.staffOnly || isStaff) && (!item.desktopOnly || !isMobile),
-  ), [isStaff, isMobile]);
+  const bottomNavItems = useMemo(
+    () =>
+      DASHBOARD_BOTTOM_NAV_ITEMS.filter((item) => {
+        const canAccessItem =
+          !item.staffOnly ||
+          isStaff ||
+          (item.id === "curriculum-roadmap" && canAccessCurriculumRoadmap);
+        return canAccessItem && (!item.desktopOnly || !isMobile);
+      }),
+    [canAccessCurriculumRoadmap, isMobile, isStaff],
+  );
 
   const displayUserName = user?.name || user?.email || "\uC0AC\uC6A9\uC790"; const isDataBootstrapping = data.isLoading && !data.lastUpdated;
   const isUnifiedTimetableView = TIMETABLE_VIEW_IDS.includes(currentView);
