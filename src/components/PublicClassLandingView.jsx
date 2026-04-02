@@ -55,7 +55,7 @@ const DEFAULT_START_SLOT = 6;
 const DEFAULT_END_SLOT = 28;
 const CHANNEL_TALK_URL = 'https://tipsedu.channel.io/';
 const REVIEW_URL =
-  'https://map.naver.com/p/search/%ED%8C%81%EC%8A%A4%ED%95%99%EC%9B%90/place/1218797840?placePath=%2Freview';
+  'https://my-google-ai-studio-applet-899286868308.us-west1.run.app/';
 const SCORE_URL =
   'https://tipsedu.notion.site/81702b56937644e9a609b1f0b6b48105?v=d97e114279514356a2e70982379ed079';
 
