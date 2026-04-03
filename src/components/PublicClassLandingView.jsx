@@ -57,7 +57,7 @@ const CHANNEL_TALK_URL = 'https://tipsedu.channel.io/';
 const REVIEW_URL =
   'https://my-google-ai-studio-applet-899286868308.us-west1.run.app/';
 const SCORE_URL =
-  'https://tipsedu.notion.site/81702b56937644e9a609b1f0b6b48105?v=d97e114279514356a2e70982379ed079';
+  'https://my-google-ai-studio-applet-1075121220662.us-west1.run.app/';
 
 const SUBJECT_TONES = {
   영어: { bg: 'var(--tds-color-red-50, #fff1f2)', border: 'var(--tds-color-red-200, #fecdd3)', text: 'var(--tds-color-red-600, #e11d48)' },
