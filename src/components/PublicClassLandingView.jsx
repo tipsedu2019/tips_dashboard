@@ -54,6 +54,7 @@ const FULL_TIME_SLOTS = generateTimeSlots(SLOT_START_HOUR, SLOT_END_HOUR);
 const DEFAULT_START_SLOT = 6;
 const DEFAULT_END_SLOT = 28;
 const CHANNEL_TALK_URL = 'https://tipsedu.channel.io/';
+const HOME_URL = 'https://service-941860332771.us-west1.run.app/';
 const REVIEW_URL =
   'https://my-google-ai-studio-applet-899286868308.us-west1.run.app/';
 const SCORE_URL =
@@ -1230,6 +1231,11 @@ export default function PublicClassLandingView({
   };
 
   const handleBottomNavClick = (item) => {
+    if (item.id === 'home') {
+      handleOpenExternalWindow(HOME_URL, '홈');
+      return;
+    }
+
     if (item.id === 'inquiry') {
       handleOpenChannelTalk({ grade: selectedGrade, subject: selectedSubject });
       return;
