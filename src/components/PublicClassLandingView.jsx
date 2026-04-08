@@ -54,11 +54,11 @@ const FULL_TIME_SLOTS = generateTimeSlots(SLOT_START_HOUR, SLOT_END_HOUR);
 const DEFAULT_START_SLOT = 6;
 const DEFAULT_END_SLOT = 28;
 const CHANNEL_TALK_URL = 'https://tipsedu.channel.io/';
-const HOME_URL = 'https://service-941860332771.us-west1.run.app/';
-const REVIEW_URL =
-  'https://my-google-ai-studio-applet-899286868308.us-west1.run.app/';
-const SCORE_URL =
-  'https://my-google-ai-studio-applet-1075121220662.us-west1.run.app/';
+const EMBEDDED_PUBLIC_VIEW_URLS = {
+  home: '/embedded/home/index.html',
+  reviews: '/embedded/reviews/index.html',
+  scores: '/embedded/scores/index.html',
+};
 
 const SUBJECT_TONES = {
   영어: { bg: 'var(--tds-color-red-50, #fff1f2)', border: 'var(--tds-color-red-200, #fecdd3)', text: 'var(--tds-color-red-600, #e11d48)' },
@@ -673,17 +673,17 @@ function FilledNavIcon({ name, size = 22 }) {
   }
 }
 
-function PublicPlaceholderPanel({ item }) {
+function PublicEmbeddedPanel({ label, src, tabId }) {
   return (
-    <section className="public-placeholder-panel" data-testid={`public-placeholder-${item.id}`}>
-      <div className="public-placeholder-icon">
-        <FilledNavIcon name={item.id} size={28} />
-      </div>
-      <strong>{item.label} 화면은 다음 단계에서 연결됩니다.</strong>
-      <p>
-        지금은 공개 수업 랜딩과 개인 시간표 조합 흐름을 우선 정리했습니다. 다른 메뉴도 같은 TDS 기준으로
-        이어서 맞출 수 있도록 구조를 정돈해 두었습니다.
-      </p>
+    <section className="public-embedded-panel" data-testid="public-embedded-panel">
+      <iframe
+        key={tabId}
+        title={`${label} 화면`}
+        src={src}
+        allow="autoplay"
+        className="public-embedded-frame"
+        data-testid={`public-embedded-frame-${tabId}`}
+      />
     </section>
   );
 }
@@ -1037,6 +1037,34 @@ export default function PublicClassLandingView({
     }
   }, [plannerItems.length]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleEmbeddedNavigation = (event) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      const data = event.data;
+      if (!data || data.type !== 'tips-public-nav') {
+        return;
+      }
+
+      const requestedTab = data.tab;
+      if (requestedTab !== 'classes' && !EMBEDDED_PUBLIC_VIEW_URLS[requestedTab]) {
+        return;
+      }
+
+      setActivePublicTab(requestedTab);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    window.addEventListener('message', handleEmbeddedNavigation);
+    return () => window.removeEventListener('message', handleEmbeddedNavigation);
+  }, []);
+
   const subjectTabItems = useMemo(
     () =>
       PUBLIC_SUBJECT_TABS.map((subject) => ({
@@ -1085,17 +1113,6 @@ export default function PublicClassLandingView({
 
     if (!popup) {
       toast.info('채널톡 팝업이 차단되었어요. 브라우저에서 팝업을 허용해 주세요.');
-    }
-  };
-
-  const handleOpenExternalWindow = (url, label) => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const popup = window.open(url, '_blank', 'noopener,noreferrer');
-    if (!popup) {
-      toast.info(`${label} 화면이 차단되었어요. 브라우저에서 팝업을 허용해 주세요.`);
     }
   };
 
@@ -1231,28 +1248,13 @@ export default function PublicClassLandingView({
   };
 
   const handleBottomNavClick = (item) => {
-    if (item.id === 'home') {
-      handleOpenExternalWindow(HOME_URL, '홈');
-      return;
-    }
-
     if (item.id === 'inquiry') {
       handleOpenChannelTalk({ grade: selectedGrade, subject: selectedSubject });
       return;
     }
 
-    if (item.id === 'reviews') {
-      handleOpenExternalWindow(REVIEW_URL, '리뷰');
-      return;
-    }
-
-    if (item.id === 'scores') {
-      handleOpenExternalWindow(SCORE_URL, '성적');
-      return;
-    }
-
     setActivePublicTab(item.id);
-    if (item.id === 'classes' && typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
@@ -1298,12 +1300,17 @@ export default function PublicClassLandingView({
   const selectedClassIsInPlanner = selectedClassItem
     ? plannerSelectedIds.has(selectedClassItem.id)
     : false;
+  const isEmbeddedPublicTab = Boolean(EMBEDDED_PUBLIC_VIEW_URLS[activePublicTab]);
+  const activeEmbeddedItem = isEmbeddedPublicTab
+    ? PUBLIC_BOTTOM_NAV_ITEMS.find((item) => item.id === activePublicTab) || null
+    : null;
 
   return (
     <div
       data-testid="public-class-list-view"
-      className={`public-landing-shell ${isMobile ? 'is-mobile' : 'is-desktop'} ${safeTheme === 'dark' ? 'is-dark' : 'is-light'}`}
+      className={`public-landing-shell ${isMobile ? 'is-mobile' : 'is-desktop'} ${safeTheme === 'dark' ? 'is-dark' : 'is-light'} ${isEmbeddedPublicTab ? 'has-embedded-view' : ''}`}
     >
+      {!isEmbeddedPublicTab ? (
       <header className={`public-landing-topbar ${isMobile ? 'is-mobile' : 'is-desktop'}`} data-testid="public-mobile-topbar">
         <div className="public-landing-search-row">
           <SearchField
@@ -1365,11 +1372,14 @@ export default function PublicClassLandingView({
           </>
         ) : null}
       </header>
+      ) : null}
 
-      <main className={`public-landing-main ${isCompact ? 'is-compact' : ''}`}>
-        {activePublicTab !== 'classes' ? (
-          <PublicPlaceholderPanel
-            item={PUBLIC_BOTTOM_NAV_ITEMS.find((item) => item.id === activePublicTab) || PUBLIC_BOTTOM_NAV_ITEMS[0]}
+      <main className={`public-landing-main ${isCompact ? 'is-compact' : ''} ${isEmbeddedPublicTab ? 'has-embedded-view' : ''}`}>
+        {isEmbeddedPublicTab ? (
+          <PublicEmbeddedPanel
+            tabId={activePublicTab}
+            label={activeEmbeddedItem?.label || '공개'}
+            src={EMBEDDED_PUBLIC_VIEW_URLS[activePublicTab]}
           />
         ) : (
           <>

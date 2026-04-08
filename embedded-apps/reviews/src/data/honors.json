@@ -1,0 +1,11 @@
+[
+  {"year": "2020", "term": "1학기 기말", "school": "아라중", "grade": "중2", "name": "강지민", "subject": "영어", "teacher": "정보영", "score": 100, "rank": "", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "동여중", "grade": "중3", "name": "강지영", "subject": "수학", "teacher": "강정은", "score": 100, "rank": "", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "아라중", "grade": "중1", "name": "고유림", "subject": "수학", "teacher": "팁스", "score": 100, "rank": "", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "대기고", "grade": "고3", "name": "김산", "subject": "영어", "teacher": "강부희", "score": 100, "rank": "1등급", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "오현중", "grade": "중3", "name": "김성찬", "subject": "영어", "teacher": "강부희", "score": 100, "rank": "", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "중앙중", "grade": "중3", "name": "김지후", "subject": "영어", "teacher": "강부희", "score": 100, "rank": "", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "동여중", "grade": "중2", "name": "양희영", "subject": "수학", "teacher": "팁스", "score": 100, "rank": "", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "신성여중", "grade": "중3", "name": "한효진", "subject": "수학", "teacher": "팁스", "score": 100, "rank": "", "grade_level": ""},
+  {"year": "2020", "term": "1학기 기말", "school": "동여중", "grade": "중2", "name": "한희주", "subject": "수학", "teacher": "팁스", "score": 100, "rank": "", "grade_level": ""}
+]
