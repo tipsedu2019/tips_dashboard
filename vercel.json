@@ -1,8 +1,43 @@
 {
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "source": "/reviews",
+      "destination": "/reviews/index.html"
+    },
+    {
+      "source": "/results",
+      "destination": "/results/index.html"
+    },
+    {
+      "source": "/classes",
+      "destination": "/classes/index.html"
+    },
+    {
+      "source": "/jeju",
+      "destination": "/jeju/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/admin/index.html"
+    },
+    {
+      "source": "/2024/(.*)",
+      "destination": "/api/gone"
+    },
+    {
+      "source": "/2025/(.*)",
+      "destination": "/api/gone"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/admin/(.*)",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive"
+        }
+      ]
     }
   ]
 }

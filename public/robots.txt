@@ -1,0 +1,26 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /embedded/
+
+User-agent: Googlebot
+Allow: /
+Disallow: /admin/
+
+User-agent: Yeti
+Allow: /
+Disallow: /admin/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /admin/
+
+User-agent: GPTBot
+Allow: /
+Disallow: /admin/
+
+User-agent: ClaudeBot
+Allow: /
+Disallow: /admin/
+
+Sitemap: https://tipsedu.co.kr/sitemap.xml

@@ -44,6 +44,7 @@ const PUBLIC_BOTTOM_NAV_ITEMS = [
   { id: 'scores', label: '성적', icon: Trophy },
   { id: 'inquiry', label: '문의', icon: MessageCircle },
 ];
+const PUBLIC_BOTTOM_NAV_IDS = new Set(PUBLIC_BOTTOM_NAV_ITEMS.map((item) => item.id));
 
 const DAY_COLUMNS = ['월', '화', '수', '목', '금', '토', '일'];
 const DAY_INDEX_MAP = Object.fromEntries(DAY_COLUMNS.map((day, index) => [day, index]));
@@ -620,6 +621,11 @@ function buildPlannerConflictMessage(candidate, conflict) {
   return `${candidateTitle} 수업은 ${conflictTitle} (${conflictLine})과 시간이 겹쳐 담을 수 없어요.`;
 }
 
+function resolveInitialPublicTab(tabId) {
+  const normalized = text(tabId);
+  return PUBLIC_BOTTOM_NAV_IDS.has(normalized) ? normalized : 'classes';
+}
+
 function buildPlannerMetaText(classItem) {
   const teacher = text(classItem?.teacher) || '선생님 미정';
   const classroom = text(classItem?.classroom || classItem?.room) || '강의실 미정';
@@ -861,6 +867,7 @@ export default function PublicClassLandingView({
   textbooks = [],
   progressLogs = [],
   isLoading = false,
+  initialPublicTab = 'classes',
   onLogin,
   showBackToDashboard = false,
   onBackToDashboard,
@@ -877,7 +884,9 @@ export default function PublicClassLandingView({
 
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const [activePublicTab, setActivePublicTab] = useState('classes');
+  const [activePublicTab, setActivePublicTab] = useState(() =>
+    resolveInitialPublicTab(initialPublicTab),
+  );
   const [selectedSubject, setSelectedSubject] = useState(DEFAULT_SUBJECT);
   const [selectedGrade, setSelectedGrade] = useState(DEFAULT_GRADE);
   const [plannerItems, setPlannerItems] = useState([]);

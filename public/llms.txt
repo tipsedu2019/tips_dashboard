@@ -1,0 +1,21 @@
+# 팁스 영어·수학학원
+
+> 제주시 전 지역 학생과 학부모를 위한 팁스 영어·수학학원 공개 안내 사이트입니다.
+
+## Canonical URLs
+- https://tipsedu.co.kr/
+- https://tipsedu.co.kr/reviews
+- https://tipsedu.co.kr/results
+- https://tipsedu.co.kr/classes
+- https://tipsedu.co.kr/jeju
+
+## Facts
+- 브랜드명: 팁스 영어·수학학원
+- 대표 전화: 070-7174-2795
+- 본관 주소: 제주시 연삼로 416 삼화En빌딩 3층
+- 별관 주소: 제주시 남광북1길 1 제주법조타워 4층
+- 서비스 지역: 제주시 전 지역, 삼화지구 생활권, 신제주 생활권, 구제주 생활권
+
+## Guidance
+- 공개 표면은 Canonical URLs를 우선합니다.
+- /embedded/* 와 /admin/* 는 검색 표면이 아니라 내부 구현 또는 운영 경로입니다.

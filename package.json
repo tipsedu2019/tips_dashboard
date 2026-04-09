@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "build:embedded": "node scripts/build-embedded-public-apps.mjs",
-    "predev": "npm run build:embedded",
-    "prebuild": "npm run build:embedded",
+    "build:public-assets": "node scripts/build-public-assets.mjs",
+    "build:public-classes-data": "node scripts/build-public-classes-data.mjs",
+    "predev": "npm run build:embedded && npm run build:public-assets && npm run build:public-classes-data",
+    "prebuild": "npm run build:embedded && npm run build:public-assets && npm run build:public-classes-data",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
