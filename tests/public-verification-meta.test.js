@@ -8,6 +8,7 @@ import { buildVerificationMetaTags } from "../src/public-seo/siteMeta.mjs";
 const root = path.resolve("C:/Antigravity/tips_dashboard");
 const googleVerification = "uK9pMmdIeGxpVhGMQ2Z1nwTyU_OMCRJdz7X26JZKKpE";
 const naverVerification = "38b4b7993c1d3c4852d621b9277e5eb04d03a5ba";
+const bingVerification = "3000DFC4474EBADCE4F0390685CCE0B7";
 
 function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
@@ -17,6 +18,7 @@ test("verification meta builder normalizes dns and full meta-tag inputs", () => 
   const markup = buildVerificationMetaTags({
     googleVerification: `google-site-verification=${googleVerification}`,
     naverVerification: `<meta name="naver-site-verification" content="${naverVerification}" />`,
+    bingVerification: `<meta name="msvalidate.01" content="${bingVerification}" />`,
   });
 
   assert.match(
@@ -29,9 +31,13 @@ test("verification meta builder normalizes dns and full meta-tag inputs", () => 
     markup,
     new RegExp(`name="naver-site-verification" content="${naverVerification}"`),
   );
+  assert.match(
+    markup,
+    new RegExp(`name="msvalidate\\.01" content="${bingVerification}"`),
+  );
 });
 
-test("public static entry surfaces expose google and naver verification meta tags", () => {
+test("public static entry surfaces expose search verification meta tags", () => {
   const publicEntries = [
     "index.html",
     "reviews/index.html",
@@ -55,6 +61,11 @@ test("public static entry surfaces expose google and naver verification meta tag
         `<meta\\s+name="naver-site-verification"\\s+content="${naverVerification}"`,
       ),
       `${relativePath} should include the Naver verification meta tag`,
+    );
+    assert.match(
+      html,
+      new RegExp(`<meta\\s+name="msvalidate\\.01"\\s+content="${bingVerification}"`),
+      `${relativePath} should include the Bing verification meta tag`,
     );
   });
 });
