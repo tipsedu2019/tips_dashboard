@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 
 import { ToastProvider } from "../contexts/ToastContext";
 import PublicClassLandingView from "../components/PublicClassLandingView";
-
-const PUBLIC_CLASSES_DATA_PATH = "/data/public-classes.json";
+import { loadPublicClassesData } from "./loadPublicClassesData.js";
 const THEME_STORAGE_KEY = "tips-public-theme";
 
 function getInitialPublicTab() {
@@ -75,28 +74,16 @@ function PublicClassesShell() {
 
     async function loadPublicClasses() {
       try {
-        const response = await fetch(PUBLIC_CLASSES_DATA_PATH, {
-          headers: {
-            Accept: "application/json",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to load public classes: ${response.status}`);
-        }
-
-        const payload = await response.json();
+        const payload = await loadPublicClassesData();
         if (cancelled) {
           return;
         }
 
         setState({
           isLoading: false,
-          classes: Array.isArray(payload?.classes) ? payload.classes : [],
-          textbooks: Array.isArray(payload?.textbooks) ? payload.textbooks : [],
-          progressLogs: Array.isArray(payload?.progressLogs)
-            ? payload.progressLogs
-            : [],
+          classes: payload.classes,
+          textbooks: payload.textbooks,
+          progressLogs: payload.progressLogs,
         });
       } catch (error) {
         console.error("[public-classes] failed to load data", error);

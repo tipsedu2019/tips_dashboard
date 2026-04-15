@@ -4,10 +4,44 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+import { createPublicClassesApiResponder } from './src/server/publicClassesApi.js'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const respondWithPublicClasses = createPublicClassesApiResponder()
+
+function publicClassesApiPlugin() {
+  return {
+    name: 'public-classes-api',
+    configureServer(server) {
+      server.middlewares.use('/api/public-classes', async (request, response, next) => {
+        if (!['GET', 'HEAD'].includes(request.method || 'GET')) {
+          next()
+          return
+        }
+
+        try {
+          const result = await respondWithPublicClasses()
+          response.statusCode = result.status
+          Object.entries(result.headers).forEach(([key, value]) => {
+            response.setHeader(key, value)
+          })
+
+          if (request.method === 'HEAD') {
+            response.end()
+            return
+          }
+
+          response.end(result.body)
+        } catch (error) {
+          next(error)
+        }
+      })
+    },
+  }
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), publicClassesApiPlugin()],
   server: {
     host: '0.0.0.0',
     port: 5175,
