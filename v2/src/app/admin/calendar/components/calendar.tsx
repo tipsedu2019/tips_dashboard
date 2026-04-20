@@ -1,5 +1,6 @@
 "use client"
 
+import { isSameDay } from "date-fns"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -29,6 +30,14 @@ interface CalendarProps {
   onSaveEvent?: (eventData: Partial<CalendarEvent>) => boolean | Promise<boolean>
   onDeleteEvent?: (eventId: number | string) => boolean | Promise<boolean>
   onMoveEvent?: (eventData: Partial<CalendarEvent>) => boolean | Promise<boolean>
+}
+
+function toCalendarDayKey(date?: Date | null) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return ""
+  }
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 }
 
 function resolveInitialCalendarDate(
@@ -81,7 +90,7 @@ export function Calendar({
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null)
   const [showCalendarSheet, setShowCalendarSheet] = useState(false)
   const [activeFilters, setActiveFilters] = useState<Record<string, boolean>>({})
-  const appliedInitialDateRef = useRef<number | null>(initialDate?.getTime() ?? null)
+  const appliedInitialDateRef = useRef<string>(toCalendarDayKey(initialDate))
   const appliedInitialEventIdRef = useRef<string>("")
 
   useEffect(() => {
@@ -132,18 +141,20 @@ export function Calendar({
   }, [visibleEvents])
 
   useEffect(() => {
-    const nextInitialTime = initialDate?.getTime() ?? null
-    if (
-      initialDate instanceof Date &&
-      !Number.isNaN(initialDate.getTime()) &&
-      appliedInitialDateRef.current !== nextInitialTime
-    ) {
-      appliedInitialDateRef.current = nextInitialTime
-      setSelectedDate(initialDate)
+    const nextInitialDayKey = toCalendarDayKey(initialDate)
+    if (!nextInitialDayKey || !(initialDate instanceof Date) || Number.isNaN(initialDate.getTime())) {
       return
     }
 
-  }, [initialDate, visibleEventDates.length])
+    const alreadyAppliedSameDay = appliedInitialDateRef.current === nextInitialDayKey
+    appliedInitialDateRef.current = nextInitialDayKey
+
+    if (alreadyAppliedSameDay || isSameDay(selectedDate, initialDate)) {
+      return
+    }
+
+    setSelectedDate(initialDate)
+  }, [initialDate])
 
   useEffect(() => {
     if (!initialEventId || appliedInitialEventIdRef.current === initialEventId) {

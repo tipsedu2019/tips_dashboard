@@ -616,7 +616,7 @@ export function CalendarMain({
                               openOverflow(day, dayEvents)
                             }}
                           >
-                            +{hiddenCount}
+                            +{hiddenCount}개
                           </button>
                         ) : null}
                       </div>
@@ -715,10 +715,7 @@ export function CalendarMain({
             <Card>
               <CardContent className="flex min-h-40 flex-col items-center justify-center gap-3 px-6 text-center">
                 <Badge variant="outline">일정 없음</Badge>
-                <div className="space-y-1">
-                  <p className="font-medium">표시할 일정이 없습니다.</p>
-                  <p className="text-sm text-muted-foreground">검색어나 필터를 조정하면 다른 일정을 바로 확인할 수 있습니다.</p>
-                </div>
+                <p className="font-medium">현재 조건에 맞는 일정이 없습니다.</p>
               </CardContent>
             </Card>
           ) : (
@@ -729,7 +726,7 @@ export function CalendarMain({
                     <h2 className="text-base font-semibold">{formatAgendaDay(group.date)}</h2>
                     <p className="text-sm text-muted-foreground">{group.events.length}개 일정</p>
                   </div>
-                  <Badge variant="outline">Agenda</Badge>
+                  <Badge variant="outline">목록</Badge>
                 </div>
 
                 <div className="space-y-3">
@@ -773,6 +770,7 @@ export function CalendarMain({
                               className="inline-flex size-8 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted"
                               aria-label={`${event.title} 연간 일정표에서 보기`}
                               title="연간 일정표에서 보기"
+                              onPointerDown={(pointerEvent) => pointerEvent.stopPropagation()}
                               onClick={(clickEvent) => clickEvent.stopPropagation()}
                             >
                               <ArrowUpRight className="size-3.5" />
@@ -943,6 +941,9 @@ export function CalendarMain({
                   className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted"
                   aria-label={`${event.title} 연간 일정표에서 보기`}
                   title="연간 일정표에서 보기"
+                  onPointerDown={(pointerEvent) => {
+                    pointerEvent.stopPropagation()
+                  }}
                   onClick={(clickEvent) => {
                     clickEvent.stopPropagation()
                     setOverflowDate(null)

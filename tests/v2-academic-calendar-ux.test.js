@@ -329,9 +329,10 @@ test("calendar main source exposes overflow, quick-add, existing-event drag-drop
   assert.match(source, /eachDayOfInterval\(\{ start, end \}\)/);
   assert.match(source, /handleSelectionFinish/);
   assert.match(source, /selectionAnchor\.getTime\(\) !== day\.getTime\(\)/);
-  assert.match(source, /Agenda/);
-  assert.match(source, /이 날 일정 추가/);
-  assert.match(source, /overflowEvents.length\}개 일정/);
+  assert.match(source, /목록/);
+  assert.doesNotMatch(source, /<Badge variant="outline">Agenda<\/Badge>/);
+  assert.match(source, /현재 조건에 맞는 일정이 없습니다/);
+  assert.match(source, /\+\{hiddenCount\}개/);
   assert.match(source, /선택한 날짜에 표시할 일정이 없습니다/);
   assert.match(source, /setOverflowDate\(null\)/);
   assert.match(source, /openOverflow\(day, dayEvents\)/);
@@ -356,6 +357,14 @@ test("calendar month overflow control stops range-selection pointer events befor
     source,
     /hiddenCount > 0[\s\S]*onPointerDown=\{\(pointerEvent\) => \{[\s\S]*pointerEvent\.stopPropagation\(\)[\s\S]*onClick=\{\(clickEvent\) => \{[\s\S]*openOverflow\(day, dayEvents\)/,
   );
+  assert.match(
+    source,
+    /title="연간 일정표에서 보기"[\s\S]*onPointerDown=\{\(pointerEvent\) => pointerEvent\.stopPropagation\(\)\}[\s\S]*onClick=\{\(clickEvent\) => clickEvent\.stopPropagation\(\)\}/,
+  );
+  assert.match(
+    source,
+    /title="연간 일정표에서 보기"[\s\S]*onPointerDown=\{\(pointerEvent\) => \{[\s\S]*pointerEvent\.stopPropagation\(\)[\s\S]*setOverflowDate\(null\)/,
+  );
 });
 
 test("calendar source wires left sidebar filters and event-move handoff into the workspace shell", () => {
@@ -372,7 +381,11 @@ test("calendar source wires left sidebar filters and event-move handoff into the
   assert.match(source, /prev\[key\] \?\? visible/);
   assert.match(source, /setShowCalendarSheet\(false\)/);
   assert.match(source, /appliedInitialDateRef/);
-  assert.match(source, /initialDate instanceof Date/);
+  assert.match(source, /toCalendarDayKey/);
+  assert.match(source, /isSameDay/);
+  assert.match(source, /const nextInitialDayKey = toCalendarDayKey\(initialDate\)/);
+  assert.match(source, /alreadyAppliedSameDay/);
+  assert.match(source, /setSelectedDate\(initialDate\)/);
   assert.match(source, /const handleNewEvent = \(date\?: Date\) => \{/);
   assert.match(source, /if \(date instanceof Date && !Number\.isNaN\(date\.getTime\(\)\)\) \{/);
   assert.match(source, /setSelectedDate\(date\)/);
