@@ -346,18 +346,6 @@ function buildSortingValue(
   ].filter(Boolean) as SortingState;
 }
 
-const WORKSPACE_META: Record<ManagementKind, { title: string }> = {
-  students: {
-    title: "학생 관리",
-  },
-  classes: {
-    title: "수업 관리",
-  },
-  textbooks: {
-    title: "교재 관리",
-  },
-};
-
 export function ManagementDataTable({
   kind,
   rows,
@@ -614,13 +602,16 @@ export function ManagementDataTable({
   const secondarySorting = sorting[1]?.id || "none";
   const primarySortDirection = sorting[0]?.desc ? "desc" : "asc";
   const secondarySortDirection = sorting[1]?.desc ? "desc" : "asc";
-  const workspaceMeta = WORKSPACE_META[kind];
   const currentPage = table.getState().pagination.pageIndex + 1;
   const totalPages = table.getPageCount() || 1;
   const pageSize = table.getState().pagination.pageSize;
   const visibleRangeStart = filteredRowCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const visibleRangeEnd = filteredRowCount === 0 ? 0 : Math.min(currentPage * pageSize, filteredRowCount);
-  const compactStats = stats.filter((stat) => stat.value !== undefined && stat.value !== null).slice(0, 2);
+  const captionSuffix = stats
+    .filter((stat) => stat.value !== undefined && stat.value !== null)
+    .slice(0, 2)
+    .map((stat) => `${stat.label} ${stat.value}`)
+    .join(" · ");
 
   const resetPreferences = () => {
     setColumnVisibility(defaultVisibility);
@@ -632,87 +623,74 @@ export function ManagementDataTable({
 
   return (
     <div className="w-full space-y-4">
-      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/95 p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center">
-            <div className="min-w-0 lg:w-[220px]">
-              <p className="truncate text-sm font-semibold text-foreground">{workspaceMeta.title}</p>
-              <p className="text-xs text-muted-foreground">검색 · 필터 · 컬럼 구성</p>
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-sm">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label="검색"
+              placeholder={`${emptyLabel} 검색`}
+              value={globalFilter ?? ""}
+              onChange={(event) => setGlobalFilter(String(event.target.value))}
+              className="pl-9"
+            />
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:w-[22rem]">
+            <div className="space-y-2">
+              <Label htmlFor="badge-filter" className="sr-only">
+                {badgeLabel}
+              </Label>
+              <Select
+                value={badgeFilter || "all"}
+                onValueChange={(value) => table.getColumn("badge")?.setFilterValue(value === "all" ? "" : value)}
+              >
+                <SelectTrigger className="w-full" id="badge-filter" aria-label={badgeLabel}>
+                  <SelectValue placeholder={badgeLabel} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 {badgeLabel}</SelectItem>
+                  {badgeOptions.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="relative w-full lg:max-w-sm">
-              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                aria-label="검색"
-                placeholder={`${emptyLabel} 검색`}
-                value={globalFilter ?? ""}
-                onChange={(event) => setGlobalFilter(String(event.target.value))}
-                className="pl-9"
-              />
+
+            <div className="space-y-2">
+              <Label htmlFor="status-filter" className="sr-only">
+                {statusLabel}
+              </Label>
+              <Select
+                value={statusFilter || "all"}
+                onValueChange={(value) => table.getColumn("status")?.setFilterValue(value === "all" ? "" : value)}
+              >
+                <SelectTrigger className="w-full" id="status-filter" aria-label={statusLabel}>
+                  <SelectValue placeholder={statusLabel} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 {statusLabel}</SelectItem>
+                  {statusOptions.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            {compactStats.map((stat) => (
-              <Badge key={stat.label} variant="outline" className="h-8 px-2 text-xs">
-                {stat.label} {stat.value}
-              </Badge>
-            ))}
+
+          <div className="flex flex-wrap items-center justify-end gap-2 xl:ml-auto">
             <Badge variant="outline" className="h-8 px-2 text-xs">표시 {filteredRowCount}건</Badge>
             <Badge variant="outline" className="h-8 px-2 text-xs">선택 {selectedRowCount}건</Badge>
+            <Badge variant="outline" className="h-8 px-2 text-xs">컬럼 {visibleColumns}개</Badge>
+            {grouping.length > 0 ? <Badge variant="outline" className="h-8 px-2 text-xs">그룹 {grouping.length}단</Badge> : null}
             <Button variant="outline" size="sm" className="shrink-0" onClick={onRefresh} disabled={loading}>
               <RefreshCw className="mr-2 size-4" />
               새로고침
             </Button>
-          </div>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-          <div className="space-y-2">
-            <Label htmlFor="badge-filter" className="text-sm font-medium">
-              {badgeLabel}
-            </Label>
-            <Select
-              value={badgeFilter || "all"}
-              onValueChange={(value) => table.getColumn("badge")?.setFilterValue(value === "all" ? "" : value)}
-            >
-              <SelectTrigger className="w-full" id="badge-filter">
-                <SelectValue placeholder={`${badgeLabel} 선택`} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체</SelectItem>
-                {badgeOptions.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="status-filter" className="text-sm font-medium">
-              {statusLabel}
-            </Label>
-            <Select
-              value={statusFilter || "all"}
-              onValueChange={(value) => table.getColumn("status")?.setFilterValue(value === "all" ? "" : value)}
-            >
-              <SelectTrigger className="w-full" id="status-filter">
-                <SelectValue placeholder={`${statusLabel} 선택`} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체</SelectItem>
-                {statusOptions.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-end justify-end gap-2">
-            <div className="flex flex-wrap justify-end gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline">컬럼 {visibleColumns}개</Badge>
-              {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
-            </div>
           </div>
         </div>
       </div>
@@ -734,9 +712,6 @@ export function ManagementDataTable({
             >
               <div className="border-b px-6 py-5">
                 <h3 className="text-base font-semibold tracking-tight">{emptyLabel} 표 설정</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  컬럼 보기/숨기기, 순서, 정렬, 그룹화를 조정하면 브라우저에 자동 저장됩니다.
-                </p>
               </div>
 
               <div className="max-h-[80vh] overflow-y-auto px-6 py-5">
@@ -744,7 +719,6 @@ export function ManagementDataTable({
                   <div className="space-y-4">
                     <div className="rounded-2xl border p-4">
                       <h3 className="text-sm font-semibold">그룹화</h3>
-                      <p className="mt-1 text-xs text-muted-foreground">최대 2단까지 묶어 볼 수 있습니다.</p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <div className="space-y-2">
                           <Label>1단 그룹</Label>
@@ -791,7 +765,6 @@ export function ManagementDataTable({
 
                     <div className="rounded-2xl border p-4">
                       <h3 className="text-sm font-semibold">정렬</h3>
-                      <p className="mt-1 text-xs text-muted-foreground">최대 2단까지 저장합니다.</p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <div className="space-y-2">
                           <Label>1차 컬럼</Label>
@@ -869,10 +842,7 @@ export function ManagementDataTable({
 
                   <div className="rounded-2xl border p-4 xl:min-w-0">
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold">컬럼 구성</h3>
-                        <p className="mt-1 text-xs text-muted-foreground">표시 여부와 순서를 저장합니다.</p>
-                      </div>
+                      <h3 className="text-sm font-semibold">컬럼 구성</h3>
                       <Button variant="ghost" size="sm" onClick={resetPreferences}>
                         기본값으로 복원
                       </Button>
@@ -930,7 +900,7 @@ export function ManagementDataTable({
           </Popover>
         </div>
         <Table>
-          <caption className="sr-only">{emptyLabel} 운영 목록</caption>
+          <caption className="sr-only">{emptyLabel} 운영 목록{captionSuffix ? ` · ${captionSuffix}` : ""}</caption>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
@@ -995,7 +965,7 @@ export function ManagementDataTable({
                     <Badge variant="outline">운영 목록 준비 상태</Badge>
                     <div className="space-y-1">
                       <p className="text-sm font-semibold">현재 조건에 맞는 {emptyLabel} 데이터가 없습니다.</p>
-                      <p className="text-sm text-muted-foreground">검색어와 필터 기준에 따라 목록을 비워 둔 상태입니다.</p>
+                      <p className="text-sm text-muted-foreground">검색과 필터 조건만 적용된 상태입니다.</p>
                     </div>
                   </div>
                 </TableCell>
