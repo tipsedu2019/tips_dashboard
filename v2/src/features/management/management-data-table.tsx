@@ -622,8 +622,8 @@ export function ManagementDataTable({
   };
 
   return (
-    <div className="w-full space-y-4">
-      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-sm">
+    <div className="w-full space-y-3">
+      <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-background px-3 py-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
           <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -682,16 +682,30 @@ export function ManagementDataTable({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 xl:ml-auto">
-            <Badge variant="outline" className="h-8 px-2 text-xs">표시 {filteredRowCount}건</Badge>
-            <Badge variant="outline" className="h-8 px-2 text-xs">선택 {selectedRowCount}건</Badge>
-            <Badge variant="outline" className="h-8 px-2 text-xs">컬럼 {visibleColumns}개</Badge>
-            {grouping.length > 0 ? <Badge variant="outline" className="h-8 px-2 text-xs">그룹 {grouping.length}단</Badge> : null}
+          <div className="flex items-center gap-2 xl:ml-auto">
+            <p className="hidden text-xs text-muted-foreground xl:block">
+              표시 {filteredRowCount}건 · 선택 {selectedRowCount}건 · 컬럼 {visibleColumns}개
+              {grouping.length > 0 ? ` · 그룹 ${grouping.length}단` : ""}
+            </p>
             <Button variant="outline" size="sm" className="shrink-0" onClick={onRefresh} disabled={loading}>
               <RefreshCw className="mr-2 size-4" />
               새로고침
             </Button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground xl:hidden">
+          <span>표시 {filteredRowCount}건</span>
+          <span>·</span>
+          <span>선택 {selectedRowCount}건</span>
+          <span>·</span>
+          <span>컬럼 {visibleColumns}개</span>
+          {grouping.length > 0 ? (
+            <>
+              <span>·</span>
+              <span>그룹 {grouping.length}단</span>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -960,13 +974,9 @@ export function ManagementDataTable({
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="h-40">
-                  <div className="mx-auto flex max-w-xl flex-col items-center gap-3 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-6 py-8 text-center">
-                    <Badge variant="outline">운영 목록 준비 상태</Badge>
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold">현재 조건에 맞는 {emptyLabel} 데이터가 없습니다.</p>
-                      <p className="text-sm text-muted-foreground">검색과 필터 조건만 적용된 상태입니다.</p>
-                    </div>
+                <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="h-32">
+                  <div className="mx-auto flex max-w-xl items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground">
+                    현재 조건에 맞는 {emptyLabel} 데이터가 없습니다.
                   </div>
                 </TableCell>
               </TableRow>
@@ -975,17 +985,11 @@ export function ManagementDataTable({
         </Table>
       </div>
 
-      <div className="flex flex-col gap-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1 text-sm text-muted-foreground">
-          <p className="font-medium text-foreground">페이지 이동</p>
-          <p>
-            페이지 {currentPage} / {totalPages}
-          </p>
-        </div>
+      <div className="flex flex-col gap-2 py-1 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-muted-foreground">
+          페이지 {currentPage} / {totalPages} · 표시 범위 {visibleRangeStart}–{visibleRangeEnd}
+        </p>
         <div className="flex items-center gap-2">
-          <Badge variant="outline">
-            표시 범위 {visibleRangeStart}–{visibleRangeEnd}
-          </Badge>
           <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
             이전
           </Button>

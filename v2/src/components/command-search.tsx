@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Command as CommandPrimitive } from "cmdk"
-import { BookOpenCheck, ExternalLink, Search, type LucideIcon } from "lucide-react"
+import { BookOpenCheck, Search, type LucideIcon } from "lucide-react"
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { buildAdminNavGroups } from "@/lib/navigation"
@@ -109,12 +109,6 @@ const AUXILIARY_COMMAND_ITEMS: SearchItem[] = [
     url: "/admin/manual",
     group: "사용설명",
     icon: BookOpenCheck,
-  },
-  {
-    title: "수업 소개 확인",
-    url: "/classes",
-    group: "외부 확인",
-    icon: ExternalLink,
   },
 ]
 
