@@ -12,6 +12,7 @@ import {
   Users,
 } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -191,9 +192,12 @@ export default function Page() {
       <SectionCards metrics={metrics} />
 
       <section className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold tracking-tight">운영 워크스페이스 바로가기</h2>
-          <p className="text-sm text-muted-foreground">핵심 운영 화면만 바로 열 수 있도록 정리했습니다.</p>
+        <div className="space-y-2">
+          <Badge variant="outline">관리자 전용 동선</Badge>
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold tracking-tight">운영 워크스페이스 바로가기</h2>
+            <p className="text-sm text-muted-foreground">핵심 운영 화면만 바로 열 수 있도록 정리했습니다.</p>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
