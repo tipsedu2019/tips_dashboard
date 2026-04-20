@@ -31,7 +31,7 @@ test("management page passes live stats into the shared data table", () => {
   assert.match(source, /stats=\{stats\}/);
 });
 
-test("management data table keeps the workspace minimal and removes broad summary theater from work pages", () => {
+test("management data table keeps the workspace minimal while using compact live-state pills and descriptive empty states", () => {
   const source = fs.readFileSync(managementTableFile, "utf8");
 
   for (const marker of [
@@ -40,13 +40,18 @@ test("management data table keeps the workspace minimal and removes broad summar
     "컬럼 구성",
     "이전",
     "다음",
-    "현재 조건에 맞는",
-    "표시 {filteredRowCount}건",
-    "선택 {selectedRowCount}건",
-    "컬럼 {visibleColumns}개",
-    "그룹 {grouping.length}단",
     'aria-label="현재 페이지 전체 선택"',
     'aria-label={`${emptyLabel} 항목 선택`}',
+    "normalizedGlobalFilter",
+    "hasActiveFilters",
+    "emptyStateTitle",
+    "emptyStateSummary",
+    "등록된 ${emptyLabel} 데이터가 없습니다.",
+    "현재 조건에 맞는 ${emptyLabel} 데이터가 없습니다.",
+    "관리 레코드가 아직 비어 있습니다.",
+    "검색·필터 결과가 비어 있습니다.",
+    "현재 조건 적용 중",
+    "검색어 {normalizedGlobalFilter}",
   ]) {
     assert.equal(source.includes(marker), true, `expected ${marker}`);
   }
@@ -64,7 +69,6 @@ test("management data table keeps the workspace minimal and removes broad summar
     "학생 관리",
     "수업 관리",
     "교재 관리",
-    "운영 목록 준비 상태",
     "검색과 필터 조건만 적용된 상태입니다.",
     "컬럼 보기/숨기기, 순서, 정렬, 그룹화를 조정하면 브라우저에 자동 저장됩니다.",
     "최대 2단까지 묶어 볼 수 있습니다.",
@@ -82,4 +86,13 @@ test("management data table keeps the workspace minimal and removes broad summar
   }
 
   assert.match(source, /<caption className="sr-only">/);
+});
+
+test("management records hook localizes missing-connection fallback errors", () => {
+  const source = fs.readFileSync(managementPageFile.replace("management-page.tsx", "use-management-records.ts"), "utf8");
+
+  assert.match(source, /Supabase 연결 설정을 확인해 주세요\./);
+  assert.match(source, /알 수 없는 연결 오류가 발생했습니다\./);
+  assert.equal(source.includes("Supabase is not configured."), false);
+  assert.equal(source.includes("Unknown error"), false);
 });

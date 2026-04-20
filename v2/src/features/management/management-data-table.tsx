@@ -593,6 +593,8 @@ export function ManagementDataTable({
 
   const badgeFilter = (table.getColumn("badge")?.getFilterValue() as string) || "";
   const statusFilter = (table.getColumn("status")?.getFilterValue() as string) || "";
+  const normalizedGlobalFilter = String(globalFilter || "").trim();
+  const hasActiveFilters = Boolean(normalizedGlobalFilter || badgeFilter || statusFilter);
   const filteredRowCount = table.getFilteredRowModel().rows.length;
   const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const visibleColumns = table.getVisibleLeafColumns().filter((column) => column.id !== "select").length;
@@ -612,6 +614,8 @@ export function ManagementDataTable({
     .slice(0, 2)
     .map((stat) => `${stat.label} ${stat.value}`)
     .join(" · ");
+  const emptyStateTitle = rows.length === 0 ? `등록된 ${emptyLabel} 데이터가 없습니다.` : `현재 조건에 맞는 ${emptyLabel} 데이터가 없습니다.`;
+  const emptyStateSummary = rows.length === 0 ? "관리 레코드가 아직 비어 있습니다." : hasActiveFilters ? "검색·필터 결과가 비어 있습니다." : "현재 표시 범위에 데이터가 없습니다.";
 
   const resetPreferences = () => {
     setColumnVisibility(defaultVisibility);
@@ -683,10 +687,6 @@ export function ManagementDataTable({
           </div>
 
           <div className="flex items-center gap-2 xl:ml-auto">
-            <p className="hidden text-xs text-muted-foreground xl:block">
-              표시 {filteredRowCount}건 · 선택 {selectedRowCount}건 · 컬럼 {visibleColumns}개
-              {grouping.length > 0 ? ` · 그룹 ${grouping.length}단` : ""}
-            </p>
             <Button variant="outline" size="sm" className="shrink-0" onClick={onRefresh} disabled={loading}>
               <RefreshCw className="mr-2 size-4" />
               새로고침
@@ -694,18 +694,14 @@ export function ManagementDataTable({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground xl:hidden">
-          <span>표시 {filteredRowCount}건</span>
-          <span>·</span>
-          <span>선택 {selectedRowCount}건</span>
-          <span>·</span>
-          <span>컬럼 {visibleColumns}개</span>
-          {grouping.length > 0 ? (
-            <>
-              <span>·</span>
-              <span>그룹 {grouping.length}단</span>
-            </>
-          ) : null}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="secondary">표시 {filteredRowCount}건</Badge>
+          <Badge variant="outline">선택 {selectedRowCount}건</Badge>
+          <Badge variant="outline">컬럼 {visibleColumns}개</Badge>
+          {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
+          {normalizedGlobalFilter ? <Badge variant="outline">검색어 {normalizedGlobalFilter}</Badge> : null}
+          {badgeFilter ? <Badge variant="outline">{badgeLabel} {badgeFilter}</Badge> : null}
+          {statusFilter ? <Badge variant="outline">{statusLabel} {statusFilter}</Badge> : null}
         </div>
       </div>
 
@@ -975,8 +971,13 @@ export function ManagementDataTable({
             ) : (
               <TableRow>
                 <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="h-32">
-                  <div className="mx-auto flex max-w-xl items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground">
-                    현재 조건에 맞는 {emptyLabel} 데이터가 없습니다.
+                  <div className="mx-auto flex max-w-xl flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center">
+                    <p className="text-sm font-medium text-foreground">{emptyStateTitle}</p>
+                    <p className="text-sm text-muted-foreground">{emptyStateSummary}</p>
+                    <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant="secondary">표시 {filteredRowCount}건</Badge>
+                      {hasActiveFilters ? <Badge variant="outline">현재 조건 적용 중</Badge> : null}
+                    </div>
                   </div>
                 </TableCell>
               </TableRow>
