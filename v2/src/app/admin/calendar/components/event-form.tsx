@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
@@ -421,39 +422,48 @@ export function EventForm({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>학년</Label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild disabled={isDisabled}>
-                  <Button variant="outline" className="w-full justify-between" disabled={isDisabled}>
-                    <span className="truncate">
-                      {selectedGradeBadges.length > 0 ? selectedGradeBadges.join(" · ") : "학년 선택"}
-                    </span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64">
-                  {(selectedSchool ? gradeOptions : allGradeOptions).map((option) => {
-                    const checked =
-                      option.value === "all"
-                        ? selectedGrades.includes("all")
-                        : selectedGrades.includes(option.value)
+              <div className="space-y-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild disabled={isDisabled}>
+                    <Button variant="outline" className="w-full justify-between" disabled={isDisabled}>
+                      <span className="truncate">
+                        {selectedGradeBadges.length > 0 ? selectedGradeBadges.join(" · ") : "학년 선택"}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-64">
+                    {(selectedSchool ? gradeOptions : allGradeOptions).map((option) => {
+                      const checked =
+                        option.value === "all"
+                          ? selectedGrades.includes("all")
+                          : selectedGrades.includes(option.value)
 
-                    return (
-                      <DropdownMenuCheckboxItem
-                        key={option.value}
-                        checked={checked}
-                        onCheckedChange={() => {
-                          const nextGrades = toggleGradeSelection(selectedGrades, option.value)
-                          setFormData((prev) => ({
-                            ...prev,
-                            grade: serializeGradeSelection(nextGrades),
-                          }))
-                        }}
-                      >
-                        {option.label}
-                      </DropdownMenuCheckboxItem>
-                    )
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={option.value}
+                          checked={checked}
+                          onCheckedChange={() => {
+                            const nextGrades = toggleGradeSelection(selectedGrades, option.value)
+                            setFormData((prev) => ({
+                              ...prev,
+                              grade: serializeGradeSelection(nextGrades),
+                            }))
+                          }}
+                        >
+                          {option.label}
+                        </DropdownMenuCheckboxItem>
+                      )
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedGradeBadges.map((gradeLabel) => (
+                    <Badge key={gradeLabel} variant="secondary">
+                      {gradeLabel}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2">

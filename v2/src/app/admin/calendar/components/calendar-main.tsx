@@ -56,6 +56,7 @@ import {
   getSingleDayEventsForDay,
   isMultiDayEvent,
   moveCalendarEventByAnchorDate,
+  sortEventsForCalendarDay,
 } from "../utils/calendar-grid.js"
 
 interface CalendarMainProps {
@@ -321,15 +322,7 @@ export function CalendarMain({
       .sort((left, right) => left.date.getTime() - right.date.getTime())
       .map((group) => ({
         ...group,
-        events: group.events.sort((left, right) => {
-          const leftRange = getEventRange(left)
-          const rightRange = getEventRange(right)
-          const startDifference = leftRange.start.getTime() - rightRange.start.getTime()
-          if (startDifference !== 0) {
-            return startDifference
-          }
-          return rightRange.end.getTime() - leftRange.end.getTime()
-        }),
+        events: sortEventsForCalendarDay(group.events, group.date),
       }))
   }, [filteredEvents])
 

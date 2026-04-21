@@ -16,6 +16,7 @@ import {
   serializeGradeSelection,
   moveCalendarEventByAnchorDate,
   moveCalendarEventToDate,
+  sortEventsForCalendarDay,
 } from "../v2/src/app/admin/calendar/utils/calendar-grid.js";
 import { buildAcademicEventMutationPayload } from "../v2/src/features/operations/academic-event-utils.js";
 import { buildAcademicCalendarTemplateModel } from "../v2/src/features/operations/academic-calendar-models.js";
@@ -263,6 +264,37 @@ test("grade helpers preserve multi-select db values as ordered selections and ba
   assert.deepEqual(getGradeBadgeLabels("all"), ["전체"]);
 });
 
+test("sortEventsForCalendarDay surfaces today-starting items before continued spans for dense day dialogs", () => {
+  const sorted = sortEventsForCalendarDay(
+    [
+      {
+        id: "continued-camp",
+        title: "수학 캠프",
+        date: new Date(2026, 3, 12, 12),
+        endDate: new Date(2026, 3, 16, 12),
+      },
+      {
+        id: "same-day-exam",
+        title: "영어 시험일",
+        date: new Date(2026, 3, 15, 12),
+        endDate: new Date(2026, 3, 15, 12),
+      },
+      {
+        id: "today-starting-multi",
+        title: "중간고사",
+        date: new Date(2026, 3, 15, 12),
+        endDate: new Date(2026, 3, 17, 12),
+      },
+    ],
+    new Date(2026, 3, 15, 12),
+  );
+
+  assert.deepEqual(
+    sorted.map((event) => event.id),
+    ["same-day-exam", "today-starting-multi", "continued-camp"],
+  );
+});
+
 test("calendar main source exposes overflow, quick-add, existing-event drag-drop hooks, annual-board shortcuts, and exam-range hover details", () => {
   const source = read("v2/src/app/admin/calendar/components/calendar-main.tsx");
   const linkSource = read("v2/src/features/operations/academic-calendar-links.ts");
@@ -288,6 +320,7 @@ test("calendar main source exposes overflow, quick-add, existing-event drag-drop
   assert.match(source, /\.filter\(\(label\) => label && label !== "전체"\)/);
   assert.doesNotMatch(source, /\.slice\(0, size === "month" \? 1 : 3\)/);
   assert.match(source, /renderEventContextBadges/);
+  assert.match(source, /sortEventsForCalendarDay/);
   assert.match(source, /hover:-translate-y-px hover:shadow-md/);
   assert.match(source, /{renderExamScopeHover\(event, "h-4 px-1 text-\[9px\]"\)}/);
   assert.match(source, /<span className="truncate">\{event\.title\}<\/span>/);
@@ -459,6 +492,9 @@ test("event form source uses exam-focused fields and compact row layout", () => 
   assert.match(source, /showExamTermField/);
   assert.match(source, /grade: serializeGradeSelection\(selectedGrades\)/);
   assert.match(source, /selectedGrades/);
+  assert.match(source, /import \{ Badge \} from "@\/components\/ui\/badge"/);
+  assert.match(source, /selectedGradeBadges\.map\(\(gradeLabel\) => \(/);
+  assert.match(source, /<Badge key=\{gradeLabel\} variant="secondary">/);
   assert.match(source, /학년 선택/);
   assert.doesNotMatch(source, /학년 미선택/);
   assert.doesNotMatch(source, /대상 학년 선택/);
