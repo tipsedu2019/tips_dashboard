@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { type MouseEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUpRight,
   Calendar as CalendarIcon,
@@ -255,6 +255,7 @@ export function CalendarMain({
   const [dragAnchorDate, setDragAnchorDate] = useState<Date | null>(null)
   const [dragTargetDate, setDragTargetDate] = useState<Date | null>(null)
   const pendingDragAnchorDateRef = useRef<Date | null>(null)
+  const didFinishRangeSelectionRef = useRef(false)
   const appliedInitialQueryRef = useRef("")
 
   useEffect(() => {
@@ -392,11 +393,32 @@ export function CalendarMain({
     }
 
     if (selectionAnchor.getTime() !== day.getTime()) {
+      didFinishRangeSelectionRef.current = true
       onRangeSelect?.(buildDateSelectionRange(selectionAnchor, day))
     }
 
     setSelectionAnchor(null)
     setSelectionTarget(null)
+  }
+
+  const handleDayNumberClick = (event: PointerEvent<HTMLButtonElement> | MouseEvent<HTMLButtonElement>, day: Date) => {
+    event.stopPropagation()
+    didFinishRangeSelectionRef.current = false
+    onDateSelect?.(day)
+  }
+
+  const handleDayCellClick = (day: Date, hasEvents: boolean) => {
+    if (didFinishRangeSelectionRef.current) {
+      didFinishRangeSelectionRef.current = false
+      return
+    }
+
+    if (!readOnly && !hasEvents) {
+      onEmptySlotClick?.(day)
+      return
+    }
+
+    onDateSelect?.(day)
   }
 
   const handleEventDrop = async (day: Date) => {
@@ -505,24 +527,24 @@ export function CalendarMain({
                         event.preventDefault()
                         void handleEventDrop(day)
                       }}
-                      onClick={() => {
-                        if (!readOnly && dayEvents.length === 0) {
-                          onEmptySlotClick?.(day)
-                          return
-                        }
-                        onDateSelect?.(day)
-                      }}
+                      onClick={() => handleDayCellClick(day, dayEvents.length > 0)}
                     >
                       <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
-                        <span
+                        <button
+                          type="button"
                           className={cn(
                             "text-sm font-medium",
                             isDayToday &&
                               "flex size-6 items-center justify-center rounded-md bg-primary text-xs text-primary-foreground",
                           )}
+                          aria-label={`${format(day, "M월 d일", { locale: ko })} 선택`}
+                          onPointerDown={(pointerEvent) => {
+                            pointerEvent.stopPropagation()
+                          }}
+                          onClick={(clickEvent) => handleDayNumberClick(clickEvent, day)}
                         >
                           {format(day, "d")}
-                        </span>
+                        </button>
                         {!readOnly ? (
                           <button
                             type="button"
@@ -822,10 +844,26 @@ export function CalendarMain({
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="학교명, 일정명, 유형 검색"
-                className="w-full pl-10"
+                className={cn("w-full pl-10", query ? "pr-16" : "")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && query) {
+                    event.preventDefault()
+                    setQuery("")
+                  }
+                }}
               />
+              {query ? (
+                <button
+                  type="button"
+                  aria-label="학사일정 검색어 지우기"
+                  className="absolute right-2 top-1/2 inline-flex h-7 -translate-y-1/2 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  onClick={() => setQuery("")}
+                >
+                  지우기
+                </button>
+              ) : null}
             </div>
 
             <div className="inline-flex w-fit items-center rounded-lg border bg-muted/20 p-1">
