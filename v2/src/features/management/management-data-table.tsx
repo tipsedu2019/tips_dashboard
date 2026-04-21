@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  X,
 } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -375,6 +376,7 @@ export function ManagementDataTable({
   const [grouping, setGrouping] = useState<GroupingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [columnSearchQuery, setColumnSearchQuery] = useState("");
   const [hydratedStorageKey, setHydratedStorageKey] = useState("");
 
   const rawColumnKeys = useMemo(
@@ -594,10 +596,27 @@ export function ManagementDataTable({
   const badgeFilter = (table.getColumn("badge")?.getFilterValue() as string) || "";
   const statusFilter = (table.getColumn("status")?.getFilterValue() as string) || "";
   const normalizedGlobalFilter = String(globalFilter || "").trim();
+  const normalizedColumnSearchQuery = columnSearchQuery.trim().toLowerCase();
   const hasActiveFilters = Boolean(normalizedGlobalFilter || badgeFilter || statusFilter);
   const filteredRowCount = table.getFilteredRowModel().rows.length;
   const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const visibleColumns = table.getVisibleLeafColumns().filter((column) => column.id !== "select").length;
+  const matchingColumnOrder = columnOrder.filter((columnId) => {
+    if (columnId === "select") {
+      return false;
+    }
+
+    const option = columnOptions.find((item) => item.id === columnId);
+    if (!option) {
+      return false;
+    }
+
+    if (!normalizedColumnSearchQuery) {
+      return true;
+    }
+
+    return `${option.label} ${columnId}`.toLowerCase().includes(normalizedColumnSearchQuery);
+  });
   const primaryGrouping = grouping[0] || "none";
   const secondaryGrouping = grouping[1] || "none";
   const primarySorting = sorting[0]?.id || "none";
@@ -623,6 +642,14 @@ export function ManagementDataTable({
     setSorting(buildDefaultSorting(kind, allColumnIds));
     setGrouping(buildDefaultGrouping(kind, allColumnIds));
     setExpanded({});
+    setColumnSearchQuery("");
+  };
+
+  const resetFilters = () => {
+    setGlobalFilter("");
+    table.getColumn("badge")?.setFilterValue("");
+    table.getColumn("status")?.setFilterValue("");
+    table.resetPagination();
   };
 
   return (
@@ -687,6 +714,12 @@ export function ManagementDataTable({
           </div>
 
           <div className="flex items-center gap-2 xl:ml-auto">
+            {hasActiveFilters ? (
+              <Button variant="ghost" size="sm" className="shrink-0" onClick={resetFilters}>
+                <X className="mr-2 size-4" />
+                조건 초기화
+              </Button>
+            ) : null}
             <Button variant="outline" size="sm" className="shrink-0" onClick={onRefresh} disabled={loading}>
               <RefreshCw className="mr-2 size-4" />
               새로고침
@@ -696,18 +729,26 @@ export function ManagementDataTable({
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="secondary">표시 {filteredRowCount}건</Badge>
-          <Badge variant="outline">선택 {selectedRowCount}건</Badge>
-          <Badge variant="outline">컬럼 {visibleColumns}개</Badge>
+          {selectedRowCount > 0 ? <Badge variant="outline">선택 {selectedRowCount}건</Badge> : null}
           {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
           {normalizedGlobalFilter ? <Badge variant="outline">검색어 {normalizedGlobalFilter}</Badge> : null}
           {badgeFilter ? <Badge variant="outline">{badgeLabel} {badgeFilter}</Badge> : null}
           {statusFilter ? <Badge variant="outline">{statusLabel} {statusFilter}</Badge> : null}
+          {!hasActiveFilters ? <span>검색·필터 없이 전체 목록을 보는 중입니다.</span> : null}
         </div>
       </div>
 
       <div className="rounded-md border">
         <div className="flex items-center justify-end border-b px-3 py-2">
-          <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <Popover
+            open={settingsOpen}
+            onOpenChange={(open) => {
+              setSettingsOpen(open);
+              if (!open) {
+                setColumnSearchQuery("");
+              }
+            }}
+          >
             <PopoverTrigger asChild>
               <Button variant="ghost" size="sm" aria-label="컬럼 구성" title="컬럼 구성">
                 <Settings2 className="mr-2 size-4" />
@@ -852,56 +893,78 @@ export function ManagementDataTable({
 
                   <div className="rounded-2xl border p-4 xl:min-w-0">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-semibold">컬럼 구성</h3>
+                      <div>
+                        <h3 className="text-sm font-semibold">컬럼 구성</h3>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          표시 {visibleColumns} / 전체 {columnOptions.length}열
+                        </p>
+                      </div>
                       <Button variant="ghost" size="sm" onClick={resetPreferences}>
                         기본값으로 복원
                       </Button>
                     </div>
 
-                    <div className="mt-4 grid gap-2 md:grid-cols-2">
-                      {columnOrder
-                        .filter((columnId) => columnId !== "select")
-                        .map((columnId, index, orderedIds) => {
-                          const option = columnOptions.find((item) => item.id === columnId);
-                          const column = table.getColumn(columnId);
-                          if (!option || !column) {
-                            return null;
-                          }
+                    <div className="mt-4 space-y-4">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={columnSearchQuery}
+                          onChange={(event) => setColumnSearchQuery(event.target.value)}
+                          placeholder="검색할 컬럼 이름"
+                          className="pl-9"
+                        />
+                      </div>
 
-                          return (
-                            <div key={columnId} className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2">
-                              <div className="flex min-w-0 items-center gap-3">
-                                <Checkbox
-                                  checked={column.getIsVisible()}
-                                  onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                                  disabled={!column.getCanHide()}
-                                />
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium">{option.label}</p>
-                                  <p className="truncate text-xs text-muted-foreground">{columnId.startsWith("raw:") ? "DB 원본 열" : "기본 열"}</p>
+                      {matchingColumnOrder.length === 0 ? (
+                        <div className="rounded-xl border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+                          일치하는 컬럼이 없습니다.
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 md:grid-cols-2">
+                          {matchingColumnOrder.map((columnId) => {
+                            const option = columnOptions.find((item) => item.id === columnId);
+                            const column = table.getColumn(columnId);
+                            const currentColumnIndex = columnOrder.indexOf(columnId);
+                            if (!option || !column || currentColumnIndex === -1) {
+                              return null;
+                            }
+
+                            return (
+                              <div key={columnId} className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <Checkbox
+                                    checked={column.getIsVisible()}
+                                    onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                                    disabled={!column.getCanHide()}
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium">{option.label}</p>
+                                    <p className="truncate text-xs text-muted-foreground">{columnId.startsWith("raw:") ? "DB 원본 열" : "기본 열"}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setColumnOrder((current) => reorderColumns(current, columnId, "up"))}
+                                    disabled={currentColumnIndex === 1}
+                                  >
+                                    <ArrowUp className="size-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setColumnOrder((current) => reorderColumns(current, columnId, "down"))}
+                                    disabled={currentColumnIndex === columnOrder.length - 1}
+                                  >
+                                    <ArrowDown className="size-4" />
+                                  </Button>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setColumnOrder((current) => reorderColumns(current, columnId, "up"))}
-                                  disabled={index === 0}
-                                >
-                                  <ArrowUp className="size-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setColumnOrder((current) => reorderColumns(current, columnId, "down"))}
-                                  disabled={index === orderedIds.length - 1}
-                                >
-                                  <ArrowDown className="size-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
