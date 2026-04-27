@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { getTimelineRowEstimate } from "../src/components/class-schedule/classScheduleWorkspaceUtils.js";
 
-const root = path.resolve("C:/Antigravity/tips_dashboard");
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 
 function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");

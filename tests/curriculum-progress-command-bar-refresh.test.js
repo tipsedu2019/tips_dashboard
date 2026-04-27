@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve('C:/Antigravity/tips_dashboard');
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 const workspacePath = path.join(root, 'src/components/CurriculumProgressWorkspace.jsx');
 const dataManagerPath = path.join(root, 'src/components/DataManager.jsx');
 const statsDashboardPath = path.join(root, 'src/components/StatsDashboard.jsx');
@@ -44,7 +46,10 @@ test('curriculum progress workspace keeps grade filters fully visible and aligns
   assert.match(source, /plannerSelectedActionLabel="수업 설계"/);
   assert.match(source, />\s*진도 체크\s*</);
   assert.match(source, /mode=\{modalMode\}/);
-  assert.match(source, /editable=\{modalMode !== 'readonly'\}/);
+  assert.match(
+    source,
+    /editable=\{canEditCurriculumPlanning && modalMode !== 'readonly'\}/,
+  );
 
   assert.match(
     dashboardCss,

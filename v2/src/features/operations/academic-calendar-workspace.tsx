@@ -10,7 +10,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/app/admin/calendar/components/calendar";
 
-import { buildAcademicEventMutationPayload, DEFAULT_ACADEMIC_EVENT_TYPES, getAcademicEventTypeLabel } from "./academic-event-utils.js";
+import {
+  buildAcademicEventMutationPayload,
+  buildAcademicEventMutationPayloadCandidates,
+  DEFAULT_ACADEMIC_EVENT_TYPES,
+  getAcademicEventTypeLabel,
+} from "./academic-event-utils.js";
 import { buildAcademicCalendarTemplateModel } from "./academic-calendar-models.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 
@@ -35,6 +40,80 @@ function parseSearchDate(value: string | null) {
 
   const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getMutationErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (error && typeof error === "object") {
+    const details = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const message = [details.message, details.details, details.hint, details.code]
+      .map((value) => text(value))
+      .filter(Boolean)
+      .join(" · ");
+    return message || fallback;
+  }
+  return text(error) || fallback;
+}
+
+function isMissingColumnError(error: unknown, columnName: string) {
+  const message = getMutationErrorMessage(error, "").toLowerCase();
+  const column = columnName.toLowerCase();
+  return (
+    message.includes(`'${column}'`) ||
+    message.includes(`\"${column}\"`) ||
+    message.includes(` ${column} `) ||
+    message.includes(`column ${column}`) ||
+    message.includes(`column '${column}'`) ||
+    message.includes(`column \"${column}\"`)
+  ) && (
+    message.includes("column") ||
+    message.includes("schema cache") ||
+    message.includes("could not find") ||
+    message.includes("does not exist")
+  );
+}
+
+function removeColumnFromPayload(payload: Record<string, unknown> | Record<string, unknown>[], columnName: string) {
+  const rows = Array.isArray(payload) ? payload : [payload];
+  rows.forEach((row) => {
+    delete row[columnName];
+  });
+}
+
+async function runAcademicEventMutation(
+  payload: Record<string, unknown>,
+  execute: (payload: Record<string, unknown>) => PromiseLike<{ error: unknown }>,
+) {
+  let lastError: unknown = null;
+
+  for (const candidate of buildAcademicEventMutationPayloadCandidates(payload)) {
+    const row = { ...candidate.payload } as Record<string, unknown>;
+    const skippedColumns: string[] = [];
+    let result = await execute(row);
+
+    while (result.error) {
+      const missingColumn = candidate.optionalColumns.find(
+        (columnName: string) => !skippedColumns.includes(columnName) && isMissingColumnError(result.error, columnName),
+      );
+      if (!missingColumn) {
+        break;
+      }
+
+      skippedColumns.push(missingColumn);
+      removeColumnFromPayload(row, missingColumn);
+      result = await execute(row);
+    }
+
+    if (!result.error) {
+      return { error: null };
+    }
+
+    lastError = result.error;
+  }
+
+  return { error: lastError };
 }
 
 function buildSidebarGroups(events: ReturnType<typeof buildAcademicCalendarTemplateModel>["events"]) {
@@ -149,6 +228,7 @@ export function AcademicCalendarWorkspace() {
       return false;
     }
 
+    const supabaseClient = supabase;
     const result = buildAcademicEventMutationPayload(
       {
         id: eventData.id,
@@ -179,25 +259,31 @@ export function AcademicCalendarWorkspace() {
       const existingId = text(eventData.id);
 
       if (existingId) {
-        const updatePayload = { ...result.payload } as Record<string, unknown>;
-        delete updatePayload.id;
-        const { error: updateError } = await supabase
-          .from("academic_events")
-          .update(updatePayload)
-          .eq("id", existingId);
+        const updateResult = await runAcademicEventMutation(
+          result.payload as Record<string, unknown>,
+          (payload) => {
+            const updatePayload = { ...payload } as Record<string, unknown>;
+            delete updatePayload.id;
+            return supabaseClient
+              .from("academic_events")
+              .update(updatePayload)
+              .eq("id", existingId);
+          },
+        );
 
-        if (updateError) {
-          throw updateError;
+        if (updateResult.error) {
+          throw updateResult.error;
         }
 
         toast.success("학사 일정이 업데이트되었습니다.");
       } else {
-        const { error: insertError } = await supabase
-          .from("academic_events")
-          .insert([result.payload]);
+        const insertResult = await runAcademicEventMutation(
+          result.payload as Record<string, unknown>,
+          (payload) => supabaseClient.from("academic_events").insert([payload]),
+        );
 
-        if (insertError) {
-          throw insertError;
+        if (insertResult.error) {
+          throw insertResult.error;
         }
 
         toast.success("새 학사 일정을 추가했습니다.");
@@ -207,7 +293,7 @@ export function AcademicCalendarWorkspace() {
       await refresh();
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "학사 일정 저장 중 오류가 발생했습니다.";
+      const message = getMutationErrorMessage(error, "학사 일정 저장 중 오류가 발생했습니다.");
       setMutationError(message);
       toast.error(message);
       return false;
@@ -272,9 +358,13 @@ export function AcademicCalendarWorkspace() {
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
             {isSeedCalendar ? <Badge variant="outline">기본 일정 세트</Badge> : null}
             {!canManageAll ? <Badge variant="outline">읽기 전용</Badge> : null}
-            <span>{isSeedCalendar ? "기본 일정 세트 표시 중" : "학사일정 조회 상태"}</span>
+            <span>
+              {isSeedCalendar
+                ? "현재는 TIPS 기본 일정 세트가 표시되고 있습니다"
+                : "학사일정 조회 전용 상태입니다"}
+            </span>
             {isSeedCalendar && !canManageAll ? <span>·</span> : null}
-            {!canManageAll ? <span>수정 기능 비활성화</span> : null}
+            {isSeedCalendar && !canManageAll ? <span>학사일정 조회 전용 상태입니다</span> : null}
           </div>
         </div>
       ) : null}

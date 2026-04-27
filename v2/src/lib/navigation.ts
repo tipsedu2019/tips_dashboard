@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   NotebookPen,
+  Settings2,
   Users,
 } from "lucide-react"
 
@@ -45,6 +46,54 @@ const workspaceMetaEntries: Array<{
   meta: AdminWorkspaceMeta
 }> = [
   {
+    match: "/admin/settings/schools",
+    meta: {
+      section: "설정",
+      title: "학교 설정",
+      summary: "학생 배정에 쓰는 학교 기준 정보를 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/settings/teachers",
+    meta: {
+      section: "설정",
+      title: "선생님 설정",
+      summary: "수업 배정에 쓰는 선생님 기준 정보를 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/settings/classrooms",
+    meta: {
+      section: "설정",
+      title: "강의실 설정",
+      summary: "수업 배정에 쓰는 강의실 기준 정보를 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/settings/class-groups",
+    meta: {
+      section: "설정",
+      title: "기간 설정",
+      summary: "시간표와 수업관리에 쓰는 기간 기준을 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/settings/terms",
+    meta: {
+      section: "설정",
+      title: "기간 설정",
+      summary: "시간표와 수업관리에 쓰는 기간 기준을 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/settings",
+    meta: {
+      section: "설정",
+      title: "설정",
+      summary: "운영 기준값과 표 구성을 관리합니다.",
+    },
+  },
+  {
     match: "/admin/academic-calendar/annual-board",
     meta: {
       section: "학사일정",
@@ -65,7 +114,7 @@ const workspaceMetaEntries: Array<{
     meta: {
       section: "수업일정",
       title: "수업일정 워크스페이스",
-      summary: "반 진행 상황, 동기 그룹, 최근 기록 메모를 빠르게 확인합니다.",
+      summary: "반 진행 상황, 기간, 최근 기록 메모를 빠르게 확인합니다.",
     },
   },
   {
@@ -74,6 +123,22 @@ const workspaceMetaEntries: Array<{
       section: "시간표",
       title: "시간표 비교 뷰",
       summary: "교사·강의실 축으로 운영 겹침과 주간 흐름을 점검합니다.",
+    },
+  },
+  {
+    match: "/admin/curriculum/lesson-design",
+    meta: {
+      section: "수업계획",
+      title: "수업 설계",
+      summary: "월별 회차 생성, 휴강, 보강 일정을 바로 조정합니다.",
+    },
+  },
+  {
+    match: "/admin/class-schedule/lesson-design",
+    meta: {
+      section: "수업계획",
+      title: "수업 설계",
+      summary: "월별 회차 생성, 휴강, 보강 일정을 바로 조정합니다.",
     },
   },
   {
@@ -93,6 +158,38 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
+    match: "/admin/schools",
+    meta: {
+      section: "설정",
+      title: "학교 설정",
+      summary: "학생 배정에 쓰는 학교 기준 정보를 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/teachers",
+    meta: {
+      section: "설정",
+      title: "선생님 설정",
+      summary: "수업 배정에 쓰는 선생님 기준 정보를 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/classrooms",
+    meta: {
+      section: "설정",
+      title: "강의실 설정",
+      summary: "수업 배정에 쓰는 강의실 기준 정보를 바로 수정합니다.",
+    },
+  },
+  {
+    match: "/admin/terms",
+    meta: {
+      section: "설정",
+      title: "기간 설정",
+      summary: "시간표와 수업관리에 쓰는 기간 기준을 바로 수정합니다.",
+    },
+  },
+  {
     match: "/admin/classes",
     meta: {
       section: "관리",
@@ -106,14 +203,6 @@ const workspaceMetaEntries: Array<{
       section: "관리",
       title: "교재관리",
       summary: "교재 메타와 차시 구성을 운영 관점에서 유지보수합니다.",
-    },
-  },
-  {
-    match: "/admin/manual",
-    meta: {
-      section: "사용설명",
-      title: "사용설명서",
-      summary: "운영 화면 구조와 주요 워크스페이스 이동 경로를 확인합니다.",
     },
   },
   {
@@ -162,8 +251,16 @@ export function buildAdminNavGroups({
 
   if (canManageAll) {
     managementItems.push(
-      { title: "학생관리", url: "/admin/students", icon: Users },
-      { title: "수업관리", url: "/admin/classes", icon: GraduationCap },
+      {
+        title: "학생관리",
+        url: "/admin/students",
+        icon: Users,
+      },
+      {
+        title: "수업관리",
+        url: "/admin/classes",
+        icon: GraduationCap,
+      },
       { title: "교재관리", url: "/admin/textbooks", icon: BookOpen },
     )
   }
@@ -174,6 +271,25 @@ export function buildAdminNavGroups({
     groups.push({
       label: "관리",
       items: managementItems,
+    })
+  }
+
+  if (canManageAll) {
+    groups.push({
+      label: "설정",
+      items: [
+        {
+          title: "설정",
+          url: "/admin/settings/schools",
+          icon: Settings2,
+          items: [
+            { title: "학교 설정", url: "/admin/settings/schools" },
+            { title: "선생님 설정", url: "/admin/settings/teachers" },
+            { title: "강의실 설정", url: "/admin/settings/classrooms" },
+            { title: "기간 설정", url: "/admin/settings/class-groups" },
+          ],
+        },
+      ],
     })
   }
 

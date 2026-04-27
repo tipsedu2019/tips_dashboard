@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -189,6 +190,8 @@ export function EventForm({
     subtextbookScopes: [createEmptyTextbookScopeItem()],
     note: "",
   })
+  const [formError, setFormError] = useState<string | null>(null)
+  const [deleteConfirming, setDeleteConfirming] = useState(false)
 
   useEffect(() => {
     if (!open) {
@@ -210,6 +213,8 @@ export function EventForm({
       subtextbookScopes: normalizeTextbookScopeItems(event?.subtextbookScopes || initialDraft?.subtextbookScopes),
       note: event?.note || event?.description || initialDraft?.note || initialDraft?.description || "",
     })
+    setFormError(null)
+    setDeleteConfirming(false)
   }, [defaultDate, defaultEndDate, event, initialDraft, open, typeOptions])
 
   const selectedSchool = useMemo(
@@ -283,29 +288,37 @@ export function EventForm({
     })
   }
 
+  const showFormError = (message: string) => {
+    setFormError(message)
+    toast.error(message)
+  }
+
   const handleSave = async () => {
     const nextDate = fromDateInputValue(formData.date)
     const nextEndDate = fromDateInputValue(formData.endDate || formData.date)
 
     if (!formData.title.trim()) {
-      toast.error("일정 제목을 입력해 주세요.")
+      showFormError("일정 제목을 입력해 주세요.")
       return
     }
 
     if (!nextDate) {
-      toast.error("시작일을 확인해 주세요.")
+      showFormError("시작일을 확인해 주세요.")
       return
     }
 
     if (!nextEndDate) {
-      toast.error("종료일을 확인해 주세요.")
+      showFormError("종료일을 확인해 주세요.")
       return
     }
 
-    if (!selectedSchool && readOnly === false) {
-      toast.error("학교를 선택해 주세요.")
+    if (schoolRequired && !selectedSchool && readOnly === false) {
+      showFormError("학교를 선택해 주세요.")
       return
     }
+
+    setFormError(null)
+    setDeleteConfirming(false)
 
     const saved = await onSave({
       id: event?.sourceId || event?.id,
@@ -340,6 +353,12 @@ export function EventForm({
       return
     }
 
+    if (!deleteConfirming) {
+      setFormError(null)
+      setDeleteConfirming(true)
+      return
+    }
+
     const deleted = await onDelete?.(event.sourceId || event.id)
     if (deleted !== false) {
       onOpenChange(false)
@@ -349,6 +368,7 @@ export function EventForm({
   const isDisabled = readOnly
   const showExamTermField = isExamTypeWithTerm(formData.typeLabel)
   const showScopeFields = isSubjectExamType(formData.typeLabel)
+  const schoolRequired = formData.typeLabel !== "팁스"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -358,6 +378,12 @@ export function EventForm({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {formError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{formError}</AlertDescription>
+            </Alert>
+          ) : null}
+
           <div className={cn("grid gap-4 md:grid-cols-2", showExamTermField && "xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]")}>
             <div className="space-y-2">
               <Label htmlFor="title">일정 제목</Label>
@@ -476,7 +502,7 @@ export function EventForm({
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="학교 선택" />
+                  <SelectValue placeholder={schoolRequired ? "학교 선택" : "선택 안 해도 됨"} />
                 </SelectTrigger>
                 <SelectContent>
                   {filteredSchoolOptions.map((school) => (
@@ -557,20 +583,31 @@ export function EventForm({
             />
           </div>
 
-          <div className="flex gap-3 pt-2">
-            {!readOnly ? (
-              <Button onClick={handleSave} className="flex-1 cursor-pointer">
-                {event ? "변경 저장" : "일정 추가"}
+          <div className="space-y-2 pt-2">
+            <div className="flex gap-3">
+              {!readOnly ? (
+                <Button onClick={handleSave} className="flex-1 cursor-pointer">
+                  {event ? "변경 저장" : "일정 추가"}
+                </Button>
+              ) : null}
+              {!readOnly && event && onDelete ? (
+                <Button
+                  onClick={handleDelete}
+                  variant={deleteConfirming ? "destructive" : "outline"}
+                  className="cursor-pointer"
+                >
+                  {deleteConfirming ? "삭제 확인" : "삭제"}
+                </Button>
+              ) : null}
+              <Button onClick={() => onOpenChange(false)} variant="outline" className="cursor-pointer">
+                닫기
               </Button>
+            </div>
+            {deleteConfirming ? (
+              <p className="text-right text-xs font-medium text-destructive">
+                한 번 더 누르면 일정이 삭제됩니다.
+              </p>
             ) : null}
-            {!readOnly && event && onDelete ? (
-              <Button onClick={handleDelete} variant="destructive" className="cursor-pointer">
-                삭제
-              </Button>
-            ) : null}
-            <Button onClick={() => onOpenChange(false)} variant="outline" className="cursor-pointer">
-              닫기
-            </Button>
           </div>
         </div>
       </DialogContent>

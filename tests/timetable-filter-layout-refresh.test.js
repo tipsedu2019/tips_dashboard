@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve('C:/Antigravity/tips_dashboard');
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 const appPath = path.join(root, 'src/App.jsx');
 const topFilterBarPath = path.join(root, 'src/components/ui/TimetableTopFilterBar.jsx');
 const segmentedControlPath = path.join(root, 'src/components/ui/tds/SegmentedControl.jsx');
@@ -45,7 +47,7 @@ test('timetable filter bar uses a narrower centered single-select subject segmen
   assert.match(dashboardCss, /max-width:\s*160px/);
   assert.match(
     dashboardCss,
-    /\.timetable-top-filter-bar__segmented-axis\s+\.tds-segmented__item\.is-active\s*\{[^}]*background:[^}]*color:[^}]*border-color:/,
+    /\.timetable-top-filter-bar__segmented-axis\.tds-segmented--alignment-(?:fluid|fixed)\s+\.tds-segmented__item\.is-active[\s\S]*border-color:/,
   );
   assert.match(topFilterBar, /import \{ Camera \} from 'lucide-react'/);
   assert.doesNotMatch(topFilterBar, />\s*PNG\s*</);

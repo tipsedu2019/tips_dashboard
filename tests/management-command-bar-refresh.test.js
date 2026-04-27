@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve('C:/Antigravity/tips_dashboard');
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 const studentTabPath = path.join(root, 'src/components/data-manager/StudentManagerTab.jsx');
 const classTabPath = path.join(root, 'src/components/data-manager/ClassManagerTab.jsx');
 const textbookTabPath = path.join(root, 'src/components/data-manager/TextbookManagerTab.jsx');

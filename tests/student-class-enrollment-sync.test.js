@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = path.resolve('C:/Antigravity/tips_dashboard');
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 const enrollmentSyncPath = path.join(root, 'src/lib/enrollmentSync.js');
 const studentEditorPath = path.join(root, 'src/components/data-manager/DataManagerEditors.jsx');
 

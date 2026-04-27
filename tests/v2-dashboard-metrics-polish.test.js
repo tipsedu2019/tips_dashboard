@@ -11,25 +11,29 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
 
-test("dashboard metric cards use operator-facing connection copy instead of migration/status placeholders", () => {
+test("dashboard metric panels keep production analytics compact and switchable", () => {
   const sectionCardsSource = read("v2/src/app/admin/dashboard/components/section-cards.tsx");
   const metricsHookSource = read("v2/src/hooks/use-tips-dashboard-metrics.ts");
 
   assert.match(sectionCardsSource, /badgeLabel: "연결 확인 중"/);
   assert.match(sectionCardsSource, /badgeLabel: "점검 필요"/);
   assert.match(sectionCardsSource, /badgeLabel: "실시간 연결"/);
-  assert.match(sectionCardsSource, /바로 확인할 수업 현황/);
-  assert.match(sectionCardsSource, /학생 배정과 등록 흐름 점검/);
-  assert.match(sectionCardsSource, /교재 운영 준비도 확인/);
-  assert.match(sectionCardsSource, /최근 수업 기록 반영 상태/);
-  assert.match(sectionCardsSource, /수업일정 기준/);
-  assert.match(sectionCardsSource, /학생관리 기준/);
-  assert.match(sectionCardsSource, /교재관리 기준/);
-  assert.match(sectionCardsSource, /진도 로그 기준/);
+  assert.match(sectionCardsSource, /type LoadSortBasis = "minutes" \| "enrollment"/);
+  assert.match(sectionCardsSource, /LOAD_SORT_OPTIONS/);
+  assert.match(sectionCardsSource, /주간 수업시수/);
+  assert.match(sectionCardsSource, /수강생수/);
+  assert.match(sectionCardsSource, /function GradeBreakdownPanel\(\{ rows, subjectRows \}/);
+  assert.match(sectionCardsSource, /전체 학년/);
+  assert.match(sectionCardsSource, /<GradeBreakdownPanel rows=\{gradeRows\} subjectRows=\{subjectRows\} \/>/);
+  assert.match(sectionCardsSource, /aria-pressed=\{isActive\}/);
+  assert.match(sectionCardsSource, /getLoadValue\(right, sortBasis\)/);
   assert.match(sectionCardsSource, /운영 지표를 불러오는 중입니다\./);
   assert.match(sectionCardsSource, /현재 운영 데이터 기준으로 집계했습니다\./);
   assert.match(sectionCardsSource, /운영 데이터 연결 상태에 문제가 감지되었습니다\./);
 
+  assert.equal(sectionCardsSource.includes("과목별 학생수"), false);
+  assert.equal(sectionCardsSource.includes("function BreakdownTable"), false);
+  assert.equal(sectionCardsSource.includes("LegacyLoadTable"), false);
   assert.equal(sectionCardsSource.includes("TrendingUp"), false);
   assert.equal(sectionCardsSource.includes("TrendingDown"), false);
   assert.equal(sectionCardsSource.includes("trend:"), false);

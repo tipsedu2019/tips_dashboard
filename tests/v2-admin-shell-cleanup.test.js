@@ -66,6 +66,16 @@ test("navigation exports route-aware workspace summaries for core admin pages wh
   assert.match(source, /사용설명서/);
   assert.match(source, /"\/admin\/curriculum"/);
   assert.match(source, /업데이트 대기 구간을 확인합니다/);
+  assert.match(source, /title: "학생관리"/);
+  assert.match(source, /title: "학교 마스터"/);
+  assert.match(source, /url: "\/admin\/schools"/);
+  assert.match(source, /title: "수업관리"/);
+  assert.match(source, /title: "선생님 마스터"/);
+  assert.match(source, /url: "\/admin\/teachers"/);
+  assert.match(source, /title: "강의실 마스터"/);
+  assert.match(source, /url: "\/admin\/classrooms"/);
+  assert.match(source, /title: "학기 마스터"/);
+  assert.match(source, /url: "\/admin\/terms"/);
   assert.equal(source.includes('label: "사용설명"'), false);
   assert.equal(source.includes('label: "외부 확인"'), false);
   assert.equal(source.includes('title: "수업 소개 확인"'), false);
@@ -106,4 +116,49 @@ test("command search stays admin-first, keeps only admin/manual destinations, an
   assert.equal(source.includes('group: "공개"'), false);
   assert.equal(source.includes('Search...'), false);
   assert.equal(source.includes('Command Search'), false);
+});
+
+test("admin navigation-derived search can surface live management master routes without adding public shortcuts", () => {
+  const navigationSource = fs.readFileSync(
+    path.join(root, "v2", "src", "lib", "navigation.ts"),
+    "utf8",
+  );
+  const commandSource = fs.readFileSync(
+    path.join(root, "v2", "src", "components", "command-search.tsx"),
+    "utf8",
+  );
+
+  for (const marker of [
+    'title: "학교 마스터"',
+    'url: "/admin/schools"',
+    'title: "선생님 마스터"',
+    'url: "/admin/teachers"',
+    'title: "강의실 마스터"',
+    'url: "/admin/classrooms"',
+    'title: "학기 마스터"',
+    'url: "/admin/terms"',
+  ]) {
+    assert.equal(navigationSource.includes(marker), true, `expected ${marker}`);
+  }
+
+  assert.match(commandSource, /buildAdminNavGroups/);
+  assert.match(commandSource, /group\.items\.flatMap/);
+  assert.equal(commandSource.includes('title: "학교 마스터"'), false);
+  assert.equal(commandSource.includes('title: "선생님 마스터"'), false);
+  assert.equal(commandSource.includes('title: "강의실 마스터"'), false);
+  assert.equal(commandSource.includes('title: "학기 마스터"'), false);
+});
+
+test("nav main keeps parent management menus clickable while using a separate submenu toggle", () => {
+  const source = fs.readFileSync(
+    path.join(root, "v2", "src", "components", "nav-main.tsx"),
+    "utf8",
+  );
+
+  assert.match(source, /SidebarMenuAction/);
+  assert.match(source, /<SidebarMenuButton asChild tooltip=\{item\.title\} className="cursor-pointer" isActive=\{isParentActive\}>/);
+  assert.match(source, /<Link href=\{item\.url\}>/);
+  assert.match(source, /<CollapsibleTrigger asChild>/);
+  assert.match(source, /aria-label=\{`\$\{item\.title\} 하위 메뉴 펼치기`\}/);
+  assert.equal(source.includes("defaultOpen={shouldBeOpen(item)}"), false);
 });

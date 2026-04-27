@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { buildVerificationMetaTags } from "../src/public-seo/siteMeta.mjs";
 
-const root = path.resolve("C:/Antigravity/tips_dashboard");
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 const googleVerification = "uK9pMmdIeGxpVhGMQ2Z1nwTyU_OMCRJdz7X26JZKKpE";
 const naverVerification = "38b4b7993c1d3c4852d621b9277e5eb04d03a5ba";
 const bingVerification = "3000DFC4474EBADCE4F0390685CCE0B7";

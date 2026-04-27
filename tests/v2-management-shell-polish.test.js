@@ -36,7 +36,6 @@ test("management data table keeps the workspace minimal while using compact live
 
   for (const marker of [
     "검색",
-    "새로고침",
     "조건 초기화",
     "컬럼 구성",
     "이전",
@@ -47,18 +46,78 @@ test("management data table keeps the workspace minimal while using compact live
     "normalizedColumnSearchQuery",
     "matchingColumnOrder",
     "hasActiveFilters",
+    "sortClassStudentSummariesAscending",
+    "sortClassFilterOptions",
+    "splitClassFilterValue",
+    "getClassFilterValues",
+    "CLASS_STATUS_FILTER_OPTIONS",
+    "getClassAcademicYear",
+    "getClassTerm",
+    "getClassStatusFilterValue",
+    "const [classYearFilter, setClassYearFilter] = useState(\"\")",
+    "const [classTermFilter, setClassTermFilter] = useState(\"\")",
+    "const classYearOptions = useMemo(",
+    "const classTermOptions = useMemo(() =>",
+    "periodFilteredRows",
+    "renderClassPeriodTabs",
+    "전체 {label}",
+    "selectedSubjectFilter",
+    'table.getColumn("teacher")?.setFilterValue("");',
+    'table.getColumn("classroom")?.setFilterValue("");',
+    "getClassCount",
+    "parseWeeklyMinutes",
+    "formatWeeklyMinutes",
+    "PAGE_SIZE_OPTIONS",
+    'aria-label="페이지당 표시 개수"',
+    "table.setPageSize(Number(value))",
+    "summaryLabel",
+    "주간 수업시수",
     "emptyStateTitle",
     "emptyStateSummary",
     "등록된 ${emptyLabel} 데이터가 없습니다.",
     "현재 조건에 맞는 ${emptyLabel} 데이터가 없습니다.",
     "관리 레코드가 아직 비어 있습니다.",
     "검색·필터 결과가 비어 있습니다.",
-    "검색·필터 없이 전체 목록을 보는 중입니다.",
-    "검색할 컬럼 이름",
-    "일치하는 컬럼이 없습니다.",
-    "표시 {visibleColumns} / 전체 {columnOptions.length}열",
-    "현재 조건 적용 중",
-    "검색어 {normalizedGlobalFilter}",
+    "columnSettingsControl",
+    'aria-label="컬럼 구성"',
+    '<Trash2 className="size-4" />',
+    '검색할 컬럼 이름',
+    '일치하는 컬럼이 없습니다.',
+    '표시 {visibleColumns} / 전체 {columnOptions.length}열',
+    '현재 조건 적용 중',
+    '검색어 {normalizedGlobalFilter}',
+    'CLASS_TABLE_COLUMN_IDS',
+    'id: "subject"',
+    'id: "grade"',
+    'id: "schedule"',
+    'id: "teacher"',
+    'id: "classroom"',
+    'id: "enrollmentStatus"',
+    'id: "capacity"',
+    'id: "weeklyHours"',
+    'id: "tuition"',
+    'id: "action"',
+    'kind === "classes" ? "수업명" : "이름"',
+    '요일/시간',
+    '수강 현황',
+    '주간 수업시간',
+    '수업료',
+    'renderEnrollmentRosterPopover("등록", registeredCount, registeredStudents)',
+    'renderEnrollmentRosterPopover("대기", waitlistCount, waitlistStudents)',
+    "capacityStatus ? <span",
+    "renderClassCapacityCell",
+    'const CLASS_FILTERS = [',
+    'function getClassFilterValue(row: ManagementRow, columnId: ClassFilterColumnId)',
+    'const classFilterOptions = useMemo(() =>',
+    'const activeClassFilters = kind === "classes" ? classFilterValues.filter((filter) => filter.value) : []',
+    '전체 {filter.label}',
+    'header.column.toggleSorting(sortState === "asc")',
+    '학생 등록',
+    '수업 등록',
+    '교재 등록',
+    'const hasCreateAction = typeof actions.onCreate === "function";',
+    'disabled={!hasCreateAction}',
+    '.filter((columnId) => columnId !== "select" && columnId !== "action")',
   ]) {
     assert.equal(source.includes(marker), true, `expected ${marker}`);
   }
@@ -72,11 +131,24 @@ test("management data table keeps the workspace minimal while using compact live
     "JSON 저장 가능",
     "선택됨",
     "JSON 내보내기",
+    "템플릿 다운로드",
+    "데이터 업로드",
+    "onEditRow",
+    "학교 마스터",
+    "선생님 마스터",
+    "강의실 마스터",
+    "학기 마스터",
+    "hasSchoolMasterAction",
+    "hasTeacherMasterAction",
+    "hasClassroomMasterAction",
+    "hasTermManagerAction",
     "검색 · 필터 · 컬럼 구성",
     "학생 관리",
     "수업 관리",
     "교재 관리",
     "검색과 필터 조건만 적용된 상태입니다.",
+    "검색·필터 없이 전체 목록을 보는 중입니다.",
+    "{visibleRangeStart}–{visibleRangeEnd} / {filteredRowCount}건",
     "컬럼 보기/숨기기, 순서, 정렬, 그룹화를 조정하면 브라우저에 자동 저장됩니다.",
     "최대 2단까지 묶어 볼 수 있습니다.",
     "최대 2단까지 저장합니다.",
@@ -93,6 +165,67 @@ test("management data table keeps the workspace minimal while using compact live
   }
 
   assert.match(source, /<caption className="sr-only">/);
+});
+
+test("management column settings hide raw DB source columns from the user-facing configurator", () => {
+  const source = fs.readFileSync(managementTableFile, "utf8");
+
+  for (const marker of [
+    "STUDENT_TABLE_COLUMN_IDS",
+    "TEXTBOOK_TABLE_COLUMN_IDS",
+    "id: \"school\"",
+    "id: \"contact\"",
+    "id: \"parentContact\"",
+    "id: \"publisher\"",
+    "id: \"price\"",
+    "id: \"updatedAt\"",
+    'const USER_FACING_COLUMN_IDS',
+    'const TABLE_COLUMN_IDS_BY_KIND',
+    'function getKindColumnIds(kind: ManagementKind)',
+    'return getKindColumnIds(kind).has(columnId) && USER_FACING_COLUMN_IDS.has(columnId);',
+    ".filter((columnId) => USER_FACING_COLUMN_IDS.has(columnId))",
+  ]) {
+    assert.equal(source.includes(marker), true, `expected ${marker}`);
+  }
+
+  for (const staleMarker of [
+    "DB 원본 열",
+    "rawColumns",
+    "...rawColumns",
+    "raw:school",
+    "raw:contact",
+    "raw:parent_contact",
+    "raw:teacher",
+    "raw:publisher",
+    "raw:price",
+    "raw:updated_at",
+  ]) {
+    assert.equal(source.includes(staleMarker), false, `unexpected raw DB column exposure ${staleMarker}`);
+  }
+});
+
+test("management column settings persist per-column widths alongside per-resource columns", () => {
+  const source = fs.readFileSync(managementTableFile, "utf8");
+
+  for (const marker of [
+    "type ColumnSizingState",
+    "const DEFAULT_COLUMN_WIDTHS",
+    "columnSizing: ColumnSizingState",
+    "function buildDefaultColumnSizing(columnIds: string[])",
+    "function normalizeColumnWidth(value: unknown, fallback: number)",
+    "const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});",
+    "onColumnSizingChange: setColumnSizing",
+    "columnResizeMode: \"onChange\"",
+    "setColumnSizing(sanitized.columnSizing)",
+    "setColumnSizing(defaultColumnSizing)",
+    'aria-label={`${option.label} 너비`}',
+    "id={`column-width-${kind}-${columnId}`}",
+    "setColumnSizing((current) => ({",
+    "style={getColumnSizeStyle(header.getSize())}",
+    "style={getColumnSizeStyle(cell.column.getSize())}",
+  ]) {
+    assert.equal(source.includes(marker), true, `expected ${marker}`);
+  }
 });
 
 test("management records hook localizes missing-connection fallback errors", () => {

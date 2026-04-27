@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Command as CommandPrimitive } from "cmdk"
-import { BookOpenCheck, Search, type LucideIcon } from "lucide-react"
+import { Search, type LucideIcon } from "lucide-react"
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { buildAdminNavGroups } from "@/lib/navigation"
@@ -101,16 +101,7 @@ interface SearchItem {
   icon?: LucideIcon
 }
 
-export const QUICK_SEARCH_SHORTCUT_LABEL = "Ctrl/⌘K"
-
-const AUXILIARY_COMMAND_ITEMS: SearchItem[] = [
-  {
-    title: "사용설명서",
-    url: "/admin/manual",
-    group: "사용설명",
-    icon: BookOpenCheck,
-  },
-]
+export const QUICK_SEARCH_SHORTCUT_LABEL = "Ctrl + K"
 
 function resolveCommandGroupLabel(label: string) {
   if (label === "운영") {
@@ -163,15 +154,6 @@ function createSearchItems({
       return items
     })
   })
-
-  for (const item of AUXILIARY_COMMAND_ITEMS) {
-    if (seen.has(item.url)) {
-      continue
-    }
-
-    seen.add(item.url)
-    navigationItems.push(item)
-  }
 
   return navigationItems
 }

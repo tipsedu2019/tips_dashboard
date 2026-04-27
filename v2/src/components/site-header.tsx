@@ -1,7 +1,9 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { ExternalLink } from "lucide-react"
 
 import { CommandSearch, SearchTrigger } from "@/components/command-search"
 import { ModeToggle } from "@/components/mode-toggle"
@@ -13,7 +15,6 @@ export function SiteHeader() {
   const pathname = usePathname()
   const [searchOpen, setSearchOpen] = React.useState(false)
   const workspaceMeta = React.useMemo(() => resolveAdminWorkspaceMeta(pathname), [pathname])
-  const showSummary = pathname === "/admin" || pathname === "/admin/dashboard"
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -36,18 +37,23 @@ export function SiteHeader() {
             <Separator orientation="vertical" className="hidden data-[orientation=vertical]:h-6 sm:block" />
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0 space-y-1.5">
-              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+            <div className="min-w-0 flex items-center gap-2 text-sm">
+              <p className="shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
                 {workspaceMeta.section}
               </p>
-              <div className="min-w-0 lg:flex lg:items-center lg:gap-3">
-                <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{workspaceMeta.title}</h1>
-                {showSummary ? <p className="text-sm text-muted-foreground">{workspaceMeta.summary}</p> : null}
-              </div>
+              <span className="text-muted-foreground/40">/</span>
+              <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{workspaceMeta.title}</h1>
             </div>
 
             <div className="flex items-center gap-2 lg:ml-4">
+              <Link
+                href="/"
+                className="hidden h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+              >
+                <ExternalLink className="size-3.5" />
+                홈페이지 확인
+              </Link>
               <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
                 <SearchTrigger onClick={() => setSearchOpen(true)} />
               </div>

@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const root = path.resolve("C:/Antigravity/tips_dashboard");
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 const moduleUrl = pathToFileURL(
   path.join(root, "src", "hooks", "useViewport.js"),
 ).href;

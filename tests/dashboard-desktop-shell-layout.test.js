@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve("C:/Antigravity/tips_dashboard");
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testDir, "..");
 const appPath = path.join(root, "src", "App.jsx");
 const cssPath = path.join(root, "src", "index.css");
 const dashboardCssPath = path.join(root, "src", "styles", "tds-dashboard.css");
@@ -38,7 +40,7 @@ test("desktop bottom-nav shell uses its own full-width app layout class", () => 
   );
   assert.match(
     css,
-    /\.app-layout\.dashboard-bottom-nav-desktop-shell\[data-design-system="toss-refresh"\][\s\S]*\.main-content\s*\{[\s\S]*padding:\s*18px clamp\(20px,\s*2\.2vw,\s*32px\) calc\(96px \+ var\(--shell-safe-bottom\)\);/,
+    /\.app-layout\.dashboard-bottom-nav-desktop-shell\[data-design-system="toss-refresh"\]\s*\{[\s\S]*--dashboard-bottom-nav-inline-padding:\s*clamp\(20px,\s*2\.2vw,\s*32px\);[\s\S]*\.main-content\s*\{[\s\S]*padding:\s*18px var\(--dashboard-bottom-nav-inline-padding\)\s*calc\(96px \+ var\(--shell-safe-bottom\)\);/,
   );
 });
 
@@ -58,7 +60,7 @@ test("desktop bottom navigation distributes every visible menu across the full w
   assert.match(source, /bottomNavItems\.map\(\(item\) => \{/);
   assert.match(
     css,
-    /\.app-layout\.dashboard-bottom-nav-desktop-shell\[data-design-system="toss-refresh"\][\s\S]*\.dashboard-shell-bottom-nav-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(var\(--dashboard-bottom-nav-item-count,\s*5\), minmax\(0,\s*1fr\)\);[\s\S]*width:\s*100%;/,
+    /\.app-layout\.dashboard-bottom-nav-desktop-shell\[data-design-system="toss-refresh"\][\s\S]*\.dashboard-shell-bottom-nav-grid\s*\{[\s\S]*display:\s*inline-flex;[\s\S]*justify-content:\s*center;[\s\S]*width:\s*max-content;[\s\S]*max-width:\s*min\(/,
   );
   assert.match(
     dashboardCss,

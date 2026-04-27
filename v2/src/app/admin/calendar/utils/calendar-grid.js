@@ -53,7 +53,6 @@ export function getEventGradeOptions() {
     { value: "고1", label: "고1" },
     { value: "고2", label: "고2" },
     { value: "고3", label: "고3" },
-    { value: "N수", label: "N수" },
   ]
 }
 
@@ -92,8 +91,8 @@ export function getGradeBadgeLabels(value) {
 const GRADE_COMPATIBILITY = {
   elementary: ["all", "초등"],
   middle: ["all", "중1", "중2", "중3"],
-  high: ["all", "고1", "고2", "고3", "N수"],
-  all: ["all", "초등", "중1", "중2", "중3", "고1", "고2", "고3", "N수"],
+  high: ["all", "고1", "고2", "고3"],
+  all: ["all", "초등", "중1", "중2", "중3", "고1", "고2", "고3"],
 }
 
 export function getGradeOptionsForSchoolCategory(category) {
