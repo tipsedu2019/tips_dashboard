@@ -12,9 +12,11 @@ import { Calendar } from "@/app/admin/calendar/components/calendar";
 
 import {
   buildAcademicEventMutationPayload,
-  buildAcademicEventMutationPayloadCandidates,
   DEFAULT_ACADEMIC_EVENT_TYPES,
   getAcademicEventTypeLabel,
+  getAcademicEventMutationErrorMessage,
+  getPersistedAcademicEventId,
+  runAcademicEventMutation,
 } from "./academic-event-utils.js";
 import { buildAcademicCalendarTemplateModel } from "./academic-calendar-models.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
@@ -40,80 +42,6 @@ function parseSearchDate(value: string | null) {
 
   const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function getMutationErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (error && typeof error === "object") {
-    const details = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
-    const message = [details.message, details.details, details.hint, details.code]
-      .map((value) => text(value))
-      .filter(Boolean)
-      .join(" · ");
-    return message || fallback;
-  }
-  return text(error) || fallback;
-}
-
-function isMissingColumnError(error: unknown, columnName: string) {
-  const message = getMutationErrorMessage(error, "").toLowerCase();
-  const column = columnName.toLowerCase();
-  return (
-    message.includes(`'${column}'`) ||
-    message.includes(`\"${column}\"`) ||
-    message.includes(` ${column} `) ||
-    message.includes(`column ${column}`) ||
-    message.includes(`column '${column}'`) ||
-    message.includes(`column \"${column}\"`)
-  ) && (
-    message.includes("column") ||
-    message.includes("schema cache") ||
-    message.includes("could not find") ||
-    message.includes("does not exist")
-  );
-}
-
-function removeColumnFromPayload(payload: Record<string, unknown> | Record<string, unknown>[], columnName: string) {
-  const rows = Array.isArray(payload) ? payload : [payload];
-  rows.forEach((row) => {
-    delete row[columnName];
-  });
-}
-
-async function runAcademicEventMutation(
-  payload: Record<string, unknown>,
-  execute: (payload: Record<string, unknown>) => PromiseLike<{ error: unknown }>,
-) {
-  let lastError: unknown = null;
-
-  for (const candidate of buildAcademicEventMutationPayloadCandidates(payload)) {
-    const row = { ...candidate.payload } as Record<string, unknown>;
-    const skippedColumns: string[] = [];
-    let result = await execute(row);
-
-    while (result.error) {
-      const missingColumn = candidate.optionalColumns.find(
-        (columnName: string) => !skippedColumns.includes(columnName) && isMissingColumnError(result.error, columnName),
-      );
-      if (!missingColumn) {
-        break;
-      }
-
-      skippedColumns.push(missingColumn);
-      removeColumnFromPayload(row, missingColumn);
-      result = await execute(row);
-    }
-
-    if (!result.error) {
-      return { error: null };
-    }
-
-    lastError = result.error;
-  }
-
-  return { error: lastError };
 }
 
 function buildSidebarGroups(events: ReturnType<typeof buildAcademicCalendarTemplateModel>["events"]) {
@@ -229,9 +157,10 @@ export function AcademicCalendarWorkspace() {
     }
 
     const supabaseClient = supabase;
+    const existingId = getPersistedAcademicEventId(eventData.id);
     const result = buildAcademicEventMutationPayload(
       {
-        id: eventData.id,
+        id: existingId,
         title: eventData.title,
         schoolId: eventData.schoolId,
         type: eventData.typeLabel,
@@ -256,12 +185,10 @@ export function AcademicCalendarWorkspace() {
     }
 
     try {
-      const existingId = text(eventData.id);
-
       if (existingId) {
         const updateResult = await runAcademicEventMutation(
           result.payload as Record<string, unknown>,
-          (payload) => {
+          (payload: Record<string, unknown>) => {
             const updatePayload = { ...payload } as Record<string, unknown>;
             delete updatePayload.id;
             return supabaseClient
@@ -279,7 +206,7 @@ export function AcademicCalendarWorkspace() {
       } else {
         const insertResult = await runAcademicEventMutation(
           result.payload as Record<string, unknown>,
-          (payload) => supabaseClient.from("academic_events").insert([payload]),
+          (payload: Record<string, unknown>) => supabaseClient.from("academic_events").insert([payload]),
         );
 
         if (insertResult.error) {
@@ -293,7 +220,7 @@ export function AcademicCalendarWorkspace() {
       await refresh();
       return true;
     } catch (error) {
-      const message = getMutationErrorMessage(error, "학사 일정 저장 중 오류가 발생했습니다.");
+      const message = getAcademicEventMutationErrorMessage(error, "학사 일정 저장 중 오류가 발생했습니다.");
       setMutationError(message);
       toast.error(message);
       return false;
@@ -321,10 +248,15 @@ export function AcademicCalendarWorkspace() {
     }
 
     try {
+      const persistedId = getPersistedAcademicEventId(eventId);
+      if (!persistedId) {
+        return false;
+      }
+
       const { error: deleteError } = await supabase
         .from("academic_events")
         .delete()
-        .eq("id", text(eventId));
+        .eq("id", persistedId);
 
       if (deleteError) {
         throw deleteError;

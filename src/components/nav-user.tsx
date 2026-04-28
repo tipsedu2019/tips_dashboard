@@ -27,8 +27,18 @@ type NavUserRecord = {
 }
 
 function getAvatarFallback(user: NavUserRecord) {
-  const seed = Array.from((user.name || user.email).replace(/\s+/g, ""))
-  return (seed[0] ?? "T") + (seed[1] ?? "")
+  const compactName = (user.name || "").replace(/\s+/g, "")
+  const nameLetters = Array.from(compactName)
+  const isKoreanName = /^[가-힣]+$/.test(compactName)
+
+  if (isKoreanName && nameLetters.length >= 2) {
+    return nameLetters.slice(1).join("")
+  }
+
+  const nameTokens = user.name.trim().split(/\s+/).filter(Boolean)
+  const nameToken = nameTokens[nameTokens.length - 1]
+  const seed = Array.from((nameToken || user.email || "T").replace(/\s+/g, ""))
+  return seed.slice(0, 2).join("") || "T"
 }
 
 function UserAvatar({ user }: { user: NavUserRecord }) {

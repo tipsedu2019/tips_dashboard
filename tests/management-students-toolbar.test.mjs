@@ -26,6 +26,14 @@ test("student management uses school filters instead of assignment status filter
   assert.match(source, /kind !== "students" && statusFilter/);
 });
 
+test("class-only column filters never access missing student or textbook columns", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(source, /kind === "classes" && allColumnIds\.includes\("subject"\) \? table\.getColumn\("subject"\) : undefined/);
+  assert.match(source, /const classFilterValues = kind === "classes"\s*\?\s*CLASS_FILTERS\.map/);
+  assert.match(source, /if \(kind === "classes"\) \{\s*for \(const filter of CLASS_FILTERS\)/);
+});
+
 test("student status badge can open a class roster popover", async () => {
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");

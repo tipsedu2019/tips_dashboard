@@ -284,6 +284,100 @@ test("ignores blank modern exam dates instead of falling back to legacy exam day
   assert.equal(conflicts.length, 0);
 });
 
+test("does not use legacy exam days when annual board has modern exam coverage without subject date", () => {
+  const classes = [
+    {
+      id: "math-a",
+      name: "Math A",
+      subject: "Math",
+      schedule_plan: {
+        sessions: [{ state: "active", date: "2026-04-28" }],
+      },
+      student_ids: ["student-1"],
+    },
+  ];
+  const students = [
+    { id: "student-1", name: "Student A", school: "Daegee High", grade: "G1" },
+  ];
+  const academicSchools = [{ id: "school-1", name: "Daegee High" }];
+  const academicEvents = [
+    {
+      id: "event-1",
+      title: "Midterm",
+      school_id: "school-1",
+      grade: "G1",
+      type: "시험기간",
+      start: "2026-04-28",
+      end: "2026-04-30",
+    },
+  ];
+  const academicExamDays = [
+    {
+      school_id: "school-1",
+      grade: "G1",
+      subject: "English",
+      exam_date: "2026-04-29",
+    },
+  ];
+
+  const conflicts = findExamConflictsForClasses(
+    classes,
+    students,
+    academicSchools,
+    academicExamDays,
+    [],
+    academicEvents,
+  );
+
+  assert.equal(conflicts.length, 0);
+});
+
+test("detects subject exam events saved directly on the annual board", () => {
+  const classes = [
+    {
+      id: "english-high-3",
+      name: "중앙여고3",
+      subject: "영어",
+      schedule_plan: {
+        sessions: [{ state: "active", date: "2026-04-29" }],
+      },
+      student_ids: ["student-1", "student-2"],
+    },
+  ];
+  const students = [
+    { id: "student-1", name: "김학생", school: "중앙여고", grade: "고3" },
+    { id: "student-2", name: "이학생", school: "중앙여고", grade: "고3" },
+  ];
+  const academicSchools = [{ id: "school-1", name: "중앙여고" }];
+  const academicEvents = [
+    {
+      id: "event-english-exam",
+      title: "영어 시험",
+      school_id: "school-1",
+      grade: "고3",
+      type: "영어시험일",
+      start: "2026-04-29",
+      end: "2026-04-29",
+    },
+  ];
+
+  const conflicts = findExamConflictsForClasses(
+    classes,
+    students,
+    academicSchools,
+    [],
+    [],
+    academicEvents,
+  );
+
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].title, "중앙여고3");
+  assert.equal(conflicts[0].conflicts.length, 1);
+  assert.equal(conflicts[0].conflicts[0].rule, "same-day-subject");
+  assert.equal(conflicts[0].conflicts[0].examDate, "2026-04-29");
+  assert.deepEqual(conflicts[0].conflicts[0].students, ["김학생", "이학생"]);
+});
+
 test("attaches class summaries to grade class breakdowns", () => {
   const metrics = buildDashboardMetrics({
     classes: [

@@ -29,7 +29,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { DEFAULT_ACADEMIC_EVENT_TYPES, getAcademicEventTypeLabel, isExamTypeWithTerm, isSubjectExamType } from "@/features/operations/academic-event-utils.js"
+import {
+  DEFAULT_ACADEMIC_EVENT_TYPES,
+  getAcademicEventTypeLabel,
+  getPersistedAcademicEventId,
+  isExamTypeWithTerm,
+  isSubjectExamType,
+} from "@/features/operations/academic-event-utils.js"
 import { type CalendarEvent, type TextbookScopeItem } from "../types"
 import {
   createEmptyTextbookScopeItem,
@@ -224,6 +230,7 @@ export function EventForm({
   const selectedGrades = useMemo(() => parseGradeSelection(formData.grade), [formData.grade])
   const selectedGradeBadges = useMemo(() => getGradeBadgeLabels(formData.grade), [formData.grade])
   const allGradeOptions = useMemo(() => getEventGradeOptions(), [])
+  const persistedEventId = getPersistedAcademicEventId(event?.sourceId || event?.id)
   const gradeOptions = useMemo(
     () => getGradeOptionsForSchoolCategory(selectedSchool?.category),
     [selectedSchool?.category],
@@ -321,8 +328,8 @@ export function EventForm({
     setDeleteConfirming(false)
 
     const saved = await onSave({
-      id: event?.sourceId || event?.id,
-      sourceId: event?.sourceId || event?.id,
+      id: persistedEventId,
+      sourceId: persistedEventId,
       title: formData.title,
       date: nextDate || new Date(),
       endDate: nextEndDate || nextDate || new Date(),
@@ -349,7 +356,7 @@ export function EventForm({
   }
 
   const handleDelete = async () => {
-    if (!event?.sourceId && !event?.id) {
+    if (!persistedEventId) {
       return
     }
 
@@ -359,13 +366,14 @@ export function EventForm({
       return
     }
 
-    const deleted = await onDelete?.(event.sourceId || event.id)
+    const deleted = await onDelete?.(persistedEventId)
     if (deleted !== false) {
       onOpenChange(false)
     }
   }
 
   const isDisabled = readOnly
+  const isEditingPersistedEvent = Boolean(persistedEventId)
   const showExamTermField = isExamTypeWithTerm(formData.typeLabel)
   const showScopeFields = isSubjectExamType(formData.typeLabel)
   const schoolRequired = formData.typeLabel !== "팁스"
@@ -374,7 +382,9 @@ export function EventForm({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{readOnly ? "학사 일정 상세" : event ? "학사 일정 수정" : "새 학사 일정 추가"}</DialogTitle>
+          <DialogTitle>
+            {readOnly ? "학사 일정 상세" : isEditingPersistedEvent ? "학사 일정 수정" : "새 학사 일정 추가"}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -587,10 +597,10 @@ export function EventForm({
             <div className="flex gap-3">
               {!readOnly ? (
                 <Button onClick={handleSave} className="flex-1 cursor-pointer">
-                  {event ? "변경 저장" : "일정 추가"}
+                  {isEditingPersistedEvent ? "변경 저장" : "일정 추가"}
                 </Button>
               ) : null}
-              {!readOnly && event && onDelete ? (
+              {!readOnly && isEditingPersistedEvent && onDelete ? (
                 <Button
                   onClick={handleDelete}
                   variant={deleteConfirming ? "destructive" : "outline"}

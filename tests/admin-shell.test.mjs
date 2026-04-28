@@ -18,6 +18,7 @@ test("nav user renders a profile avatar instead of the cart logo", async () => {
   const source = await readSource("src/components/nav-user.tsx");
 
   assert.match(source, /AvatarImage/);
+  assert.match(source, /nameLetters\.slice\(1\)\.join\(""\)/);
   assert.doesNotMatch(source, /<\s*Logo\b/);
 });
 
@@ -58,7 +59,8 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
   assert.match(source, /학생수 \(수강 기준\)/);
   assert.match(source, /수업당 학생수/);
   assert.doesNotMatch(source, /학생수 \(수강 기준\) \/ 운영 수업/);
-  assert.match(source, /UserCheck/);
+  assert.match(source, /Users/);
+  assert.doesNotMatch(source, /UserCheck/);
   assert.match(source, /운영 수업/);
   assert.doesNotMatch(source, /인원 기준 · 수강 기준/);
   assert.match(source, /withUnit\(getMetricValue\(summary\.uniqueRegisteredStudentCount, metrics\), "명"\)/);
@@ -104,6 +106,8 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /label="When"/);
   assert.match(source, /schoolLabel/);
   assert.match(source, /gradeLabel/);
+  assert.match(source, /\[row\.schoolLabel, row\.gradeLabel\]/);
+  assert.doesNotMatch(source, /\[row\.schoolLabel, row\.gradeLabel, row\.dateLabel\]/);
   assert.match(source, /text-destructive">\{row\.classTitle\}/);
   assert.match(source, /본과목 수업일/);
   assert.match(source, /타과목 시험일 전날/);
@@ -117,6 +121,13 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /수업: /);
   assert.match(source, /slice\(0, 3\)/);
   assert.match(source, /<ConflictBoard rows=\{conflictRows\} \/>[\s\S]*<div className="grid gap-4/);
+  assert.match(source, /splitBadgeLabels\(classItem\.teacherLabel\)/);
+  assert.match(source, /splitBadgeLabels\(classItem\.classroomLabel\)/);
+  assert.doesNotMatch(source, /classItem\.scheduleLabel\} · \{classItem\.teacherLabel\}/);
+  assert.match(source, /getBarScale\(schoolValue, gradeMax, 4\)/);
+  assert.match(source, /getBarScale\(gradeValue, schoolMax, 4\)/);
+  assert.doesNotMatch(source, /GradeSharePie/);
+  assert.doesNotMatch(source, /conic-gradient/);
   assert.doesNotMatch(source, /slice\(0, 4\)/);
   assert.doesNotMatch(source, /bucket\.classBreakdowns\?\.byGrade \|\| \[\]\)\.slice\(0, 5\)/);
 });
@@ -133,9 +144,10 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /grid-cols-\[3\.25rem_minmax\(0,1fr\)_3\.75rem\]/);
   assert.match(source, /has-data-\[slot=card-action\]:grid-cols-1/);
   assert.match(source, /sm:has-data-\[slot=card-action\]:grid-cols-\[1fr_auto\]/);
-  assert.match(source, /grid grid-cols-\[auto_minmax\(0,1fr\)_auto\]/);
-  assert.match(source, /sm:grid-cols-2/);
-  assert.match(source, /truncate text-sm font-semibold/);
+  assert.match(source, /grid grid-cols-\[auto_minmax\(0,1fr\)\]/);
+  assert.match(source, /sm:grid-cols-\[auto_minmax\(0,1fr\)_auto\]/);
+  assert.match(source, /!whitespace-normal break-keep bg-background/);
+  assert.match(source, /min-w-0 max-w-full text-sm font-semibold leading-5/);
   assert.match(pageSource, /px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6/);
 });
 

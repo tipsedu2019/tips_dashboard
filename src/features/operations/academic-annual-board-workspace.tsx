@@ -1,8 +1,8 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Pencil, Printer } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ImageDown, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/providers/auth-provider";
@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { exportElementAsImage } from "@/lib/export-as-image";
 import { cn } from "@/lib/utils";
 
 import { EventForm } from "@/app/admin/calendar/components/event-form";
@@ -34,7 +35,10 @@ import { getGradeBadgeLabels } from "@/app/admin/calendar/utils/calendar-grid.js
 import {
   buildAcademicEventMutationPayload,
   DEFAULT_ACADEMIC_EVENT_TYPES,
+  getAcademicEventMutationErrorMessage,
+  getPersistedAcademicEventId,
   isSubjectExamType,
+  runAcademicEventMutation,
 } from "./academic-event-utils.js";
 import {
   buildAcademicAnnualBoardModel,
@@ -187,6 +191,56 @@ function getTypeLabel(type: AcademicAnnualBoardType) {
   if (type === "방학·휴일·기타") return "방학·기타";
   if (type === "팁스") return "팁스";
   return type;
+}
+
+function sanitizeExportFileName(value: string) {
+  return text(value)
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 100) || "학교 연간 일정표";
+}
+
+function getAnnualBoardExportWidth(element: HTMLElement) {
+  const table = element.querySelector<HTMLElement>(".annual-board-table");
+  return Math.ceil(Math.max(element.offsetWidth, element.scrollWidth, table?.scrollWidth || 0));
+}
+
+function getAnnualBoardExportHeight(element: HTMLElement) {
+  return Math.ceil(Math.max(element.offsetHeight, element.scrollHeight));
+}
+
+function waitForAnimationFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+function prepareAnnualBoardImageExport(element: HTMLElement, width: number) {
+  const printSurface = element.closest<HTMLElement>(".annual-board-print-surface");
+  const scrollContainers = Array.from(element.querySelectorAll<HTMLElement>(".annual-board-export-scroll"));
+  const targets = [printSurface, element, ...scrollContainers].filter(Boolean) as HTMLElement[];
+  const snapshots = targets.map((node) => ({
+    node,
+    cssText: node.style.cssText,
+    scrollLeft: node.scrollLeft,
+  }));
+
+  if (printSurface) {
+    printSurface.style.overflow = "visible";
+  }
+  element.style.overflow = "visible";
+  scrollContainers.forEach((node) => {
+    node.scrollLeft = 0;
+    node.style.overflow = "visible";
+    node.style.width = `${width}px`;
+  });
+
+  return () => {
+    snapshots.forEach(({ node, cssText, scrollLeft }) => {
+      node.style.cssText = cssText;
+      node.scrollLeft = scrollLeft;
+    });
+  };
 }
 
 function formatOneDate(value?: string | null, options: { weekday?: boolean } = {}) {
@@ -444,8 +498,8 @@ function AnnualBoardSkeleton({ columns }: { columns: readonly string[] }) {
     <>
       {Array.from({ length: 5 }).map((_, rowIndex) => (
         <TableRow key={`annual-board-skeleton-${rowIndex}`}>
-          <TableCell className="sticky left-0 z-10 border-b border-r bg-background p-3">
-            <div className="h-4 w-20 rounded-sm bg-muted" />
+          <TableCell className="sticky left-0 z-10 w-[96px] border-b border-r bg-background px-2 py-3">
+            <div className="h-4 w-16 rounded-sm bg-muted" />
           </TableCell>
           {columns.map((column) => (
             <TableCell key={`${column}-${rowIndex}`} className="border-b border-r p-2">
@@ -679,11 +733,11 @@ function AnnualBoardMapView({
   const rowStyle = { "--annual-board-row-count": termRows.length } as CSSProperties;
 
   return (
-    <div className="overflow-x-auto">
-      <Table className="annual-board-table min-w-[1280px] table-fixed border-separate border-spacing-0 text-[12px]">
+    <div className="annual-board-export-scroll overflow-x-auto">
+      <Table className="annual-board-table min-w-[1228px] table-fixed border-separate border-spacing-0 text-[12px]">
         <TableHeader>
           <TableRow className="annual-board-table-header">
-            <TableHead className="sticky left-0 z-20 w-[148px] border-b border-r border-[#D9E1EA] bg-[#FFFFFF] px-3 py-2 text-[11px] font-semibold text-[#475467]">
+            <TableHead className="sticky left-0 z-20 w-[96px] border-b border-r border-[#D9E1EA] bg-[#FFFFFF] px-2 py-2 text-[11px] font-semibold text-[#475467]">
               학교
             </TableHead>
             <TableHead className="w-[52px] border-b border-r border-[#D9E1EA] bg-[#FFFFFF] px-2 py-2 text-[11px] font-semibold text-[#475467]">
@@ -720,7 +774,7 @@ function AnnualBoardMapView({
                   className={cn("annual-board-map-row align-top", rowIndex % 2 === 1 && "annual-board-map-row-alt", rowActive && "annual-board-row-active")}
                   style={rowStyle}
                 >
-                  <TableCell className="annual-board-school-cell sticky left-0 z-10 border-b border-r border-[#D9E1EA] px-3 py-3 align-top">
+                  <TableCell className="annual-board-school-cell sticky left-0 z-10 w-[96px] border-b border-r border-[#D9E1EA] px-2 py-3 align-top">
                     <span className={cn("annual-board-school-name block truncate text-[13px] font-semibold", rowActive && "annual-board-school-name-active")}>
                       {schoolRow.schoolName}
                     </span>
@@ -841,6 +895,8 @@ export function AcademicAnnualBoardWorkspace() {
   const [editingBoardEvent, setEditingBoardEvent] = useState<CalendarEvent | null>(null);
   const [boardDraft, setBoardDraft] = useState<Partial<CalendarEvent> | null>(null);
   const [showBoardEventForm, setShowBoardEventForm] = useState(false);
+  const [isSavingBoardImage, setIsSavingBoardImage] = useState(false);
+  const annualBoardExportRef = useRef<HTMLDivElement | null>(null);
   const isSeedCalendar = data.academicCalendarSource === "seed";
   const readOnly = !canManageAll || isSeedCalendar;
 
@@ -990,6 +1046,41 @@ export function AcademicAnnualBoardWorkspace() {
     setHoveredCell(null);
   };
 
+  const handleSaveBoardImage = async () => {
+    const element = annualBoardExportRef.current;
+    if (!element || isSavingBoardImage) {
+      return;
+    }
+
+    setIsSavingBoardImage(true);
+    setHoveredCell(null);
+
+    const exportWidth = getAnnualBoardExportWidth(element);
+    const restoreExportLayout = prepareAnnualBoardImageExport(element, exportWidth);
+
+    try {
+      await waitForAnimationFrame();
+      await exportElementAsImage(
+        element,
+        `${sanitizeExportFileName(`${printSummary} ${selectedSemester === "전체" ? "전체 시기" : selectedSemester}`)}.png`,
+        {
+          width: exportWidth,
+          height: getAnnualBoardExportHeight(element),
+          padding: 0,
+          scale: 3,
+          backgroundColor: "#ffffff",
+        },
+      );
+      toast.success("연간 일정표 이미지를 저장했습니다.");
+    } catch (exportError) {
+      console.error(exportError);
+      toast.error("연간 일정표 이미지 저장 중 오류가 발생했습니다.");
+    } finally {
+      restoreExportLayout();
+      setIsSavingBoardImage(false);
+    }
+  };
+
   const handleBoardEntryEdit = (
     row: {
       schoolId?: string;
@@ -999,10 +1090,12 @@ export function AcademicAnnualBoardWorkspace() {
     },
     entry: AcademicAnnualBoardEntry,
   ) => {
+    const persistedId = getPersistedAcademicEventId(entry.id);
+
     setBoardDraft(null);
     setEditingBoardEvent({
-      id: entry.id,
-      sourceId: entry.id,
+      id: persistedId,
+      sourceId: persistedId,
       title: entry.title,
       date: parseLocalDate(entry.start),
       endDate: parseLocalDate(entry.end || entry.start),
@@ -1075,9 +1168,10 @@ export function AcademicAnnualBoardWorkspace() {
       return false;
     }
 
+    const existingId = getPersistedAcademicEventId(eventData.id);
     const result = buildAcademicEventMutationPayload(
       {
-        id: eventData.id,
+        id: existingId,
         title: eventData.title,
         schoolId: eventData.schoolId,
         type: eventData.typeLabel,
@@ -1102,19 +1196,30 @@ export function AcademicAnnualBoardWorkspace() {
     }
 
     try {
-      const existingId = text(eventData.id);
+      const supabaseClient = supabase;
       if (existingId) {
-        const updatePayload = { ...result.payload } as Record<string, unknown>;
-        delete updatePayload.id;
-        const { error: updateError } = await supabase.from("academic_events").update(updatePayload).eq("id", existingId);
-        if (updateError) {
-          throw updateError;
+        const updateResult = await runAcademicEventMutation(
+          result.payload as Record<string, unknown>,
+          (payload: Record<string, unknown>) => {
+            const updatePayload = { ...payload } as Record<string, unknown>;
+            delete updatePayload.id;
+            return supabaseClient
+              .from("academic_events")
+              .update(updatePayload)
+              .eq("id", existingId);
+          },
+        );
+        if (updateResult.error) {
+          throw updateResult.error;
         }
         toast.success("학사 일정이 업데이트되었습니다.");
       } else {
-        const { error: insertError } = await supabase.from("academic_events").insert([result.payload]);
-        if (insertError) {
-          throw insertError;
+        const insertResult = await runAcademicEventMutation(
+          result.payload as Record<string, unknown>,
+          (payload: Record<string, unknown>) => supabaseClient.from("academic_events").insert([payload]),
+        );
+        if (insertResult.error) {
+          throw insertResult.error;
         }
         toast.success("새 학사 일정을 추가했습니다.");
       }
@@ -1126,7 +1231,7 @@ export function AcademicAnnualBoardWorkspace() {
       setHoveredCell(null);
       return true;
     } catch (saveError) {
-      const message = saveError instanceof Error ? saveError.message : "학사 일정 저장 중 오류가 발생했습니다.";
+      const message = getAcademicEventMutationErrorMessage(saveError, "학사 일정 저장 중 오류가 발생했습니다.");
       setMutationError(message);
       toast.error(message);
       return false;
@@ -1154,7 +1259,12 @@ export function AcademicAnnualBoardWorkspace() {
     }
 
     try {
-      const { error: deleteError } = await supabase.from("academic_events").delete().eq("id", text(eventId));
+      const persistedId = getPersistedAcademicEventId(eventId);
+      if (!persistedId) {
+        return false;
+      }
+
+      const { error: deleteError } = await supabase.from("academic_events").delete().eq("id", persistedId);
       if (deleteError) {
         throw deleteError;
       }
@@ -1200,7 +1310,7 @@ export function AcademicAnnualBoardWorkspace() {
           </div>
 
           <div className="annual-board-non-print flex flex-wrap items-end gap-3 border-b px-4 py-3">
-            <div className="grid flex-1 gap-3 xl:grid-cols-[112px_168px_168px_168px_112px]">
+            <div className="grid min-w-0 flex-1 gap-3 xl:grid-cols-[112px_168px_168px_minmax(168px,1fr)]">
               <div className="grid gap-2">
                 <Label htmlFor="annual-board-year" className="text-[11px] text-muted-foreground">연도</Label>
                 <Select value={model.selectedYear} onValueChange={setSelectedYear}>
@@ -1268,41 +1378,50 @@ export function AcademicAnnualBoardWorkspace() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-2">
-                <Label className="text-[11px] text-muted-foreground">인쇄</Label>
-                <Button type="button" size="sm" className="h-9 w-full rounded-sm bg-[#2F6FED] px-4 text-[12px] font-medium active:scale-[0.98]" onClick={() => window.print()}>
-                  <Printer data-icon="inline-start" />
-                  인쇄
-                </Button>
-              </div>
             </div>
-            {hasActiveFilters ? (
-              <div className="flex shrink-0 items-end gap-2">
+            <div className="ml-auto flex w-full shrink-0 justify-end gap-2 sm:w-auto">
+              {hasActiveFilters ? (
                 <Button type="button" variant="ghost" className="h-9 rounded-sm px-3 text-[12px] font-medium text-muted-foreground" onClick={handleResetFilters}>
                   필터 초기화
                 </Button>
-              </div>
-            ) : null}
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 rounded-sm bg-[#2F6FED] px-4 text-[12px] font-medium active:scale-[0.98]"
+                disabled={loading || isSavingBoardImage}
+                onClick={handleSaveBoardImage}
+              >
+                {isSavingBoardImage ? (
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <ImageDown data-icon="inline-start" />
+                )}
+                이미지 저장
+              </Button>
+            </div>
           </div>
 
-          <div className="annual-board-non-print border-b px-4 py-2.5">
-            <p className="text-[12px] font-medium text-muted-foreground">
-              {printSummary} · {selectedSemester === "전체" ? "전체 시기" : selectedSemester}
-            </p>
-          </div>
+          <div ref={annualBoardExportRef} className="annual-board-image-export-surface bg-background">
+            <div className="annual-board-non-print border-b px-4 py-2.5">
+              <p className="text-[12px] font-medium text-muted-foreground">
+                {printSummary} · {selectedSemester === "전체" ? "전체 시기" : selectedSemester}
+              </p>
+            </div>
 
-          <AnnualBoardMapView
-            loading={loading}
-            groupedSchoolRows={groupedSchoolRows}
-            gradeColumnLabels={activeGradeColumnLabels}
-            termRows={visibleTermRows}
-            selectedSemester={selectedSemester}
-            hoveredCell={hoveredCell}
-            readOnly={readOnly}
-            onHoverCell={setHoveredCell}
-            onEntryEdit={handleBoardEntryEdit}
-            onCellCreate={handleBoardCellCreate}
-          />
+            <AnnualBoardMapView
+              loading={loading}
+              groupedSchoolRows={groupedSchoolRows}
+              gradeColumnLabels={activeGradeColumnLabels}
+              termRows={visibleTermRows}
+              selectedSemester={selectedSemester}
+              hoveredCell={hoveredCell}
+              readOnly={readOnly}
+              onHoverCell={setHoveredCell}
+              onEntryEdit={handleBoardEntryEdit}
+              onCellCreate={handleBoardCellCreate}
+            />
+          </div>
         </div>
       </div>
 

@@ -6,6 +6,7 @@ import {
   splitTeacherList,
   stripClassPrefix,
 } from "../academic/records.js";
+import { normalizeAcademicEventType } from "../operations/academic-event-utils.js";
 
 function text(value) {
   return String(value || "").trim();
@@ -480,9 +481,42 @@ function resolveSchool(schools = [], student = {}) {
   );
 }
 
+function gradeSelectionOf(value) {
+  const raw = text(value || "all");
+  if (!raw || raw === "전체" || raw === "all") {
+    return ["all"];
+  }
+  return raw.split(",").map(text).filter(Boolean);
+}
+
+function matchesSchoolReference(item = {}, schoolId = "", schoolName = "") {
+  return (
+    (schoolId && text(item.schoolId || item.school_id) === schoolId) ||
+    normalizeSchoolKey(item.school || item.schoolName || item.school_name) === normalizeSchoolKey(schoolName)
+  );
+}
+
+function matchesGradeReference(item = {}, studentGrade = "") {
+  if (!studentGrade) return true;
+  const grades = gradeSelectionOf(item.grade || "all");
+  return grades.includes("all") || grades.includes(studentGrade);
+}
+
+function isModernExamCalendarEvent(event = {}) {
+  const type = normalizeAcademicEventType(event.type || event.typeLabel || event.type_label);
+  return type === "시험기간" || type === "영어시험일" || type === "수학시험일";
+}
+
+function subjectOfExamEventType(value) {
+  const type = normalizeAcademicEventType(value);
+  if (type === "영어시험일") return "영어";
+  if (type === "수학시험일") return "수학";
+  return "";
+}
+
 function buildExamDetailRows(academicEventExamDetails = [], academicEvents = []) {
   const eventMap = new Map((academicEvents || []).map((event) => [text(event.id), event]));
-  return (academicEventExamDetails || [])
+  const detailRows = (academicEventExamDetails || [])
     .map((detail) => {
       const event = eventMap.get(text(detail.academicEventId || detail.academic_event_id));
       return {
@@ -496,24 +530,46 @@ function buildExamDetailRows(academicEventExamDetails = [], academicEvents = [])
       };
     })
     .filter((row) => row.subject);
+
+  const subjectEventRows = (academicEvents || [])
+    .map((event) => {
+      const type = normalizeAcademicEventType(event.type || event.typeLabel || event.type_label);
+      const subject = subjectOfExamEventType(type);
+      if (!subject) return null;
+
+      return {
+        schoolId: text(event.schoolId || event.school_id),
+        school: text(event.school || event.schoolName || event.school_name),
+        grade: text(event.grade || "all"),
+        subject,
+        examDate: text(event.examDate || event.exam_date || event.start || event.start_date || event.date),
+        label: text(event.title || type || "시험"),
+        note: text(event.note),
+      };
+    })
+    .filter(Boolean);
+
+  return [...detailRows, ...subjectEventRows];
 }
 
-function getRelevantExamRows(student, academicSchools = [], detailRows = [], legacyExamDays = []) {
+function getRelevantExamRows(student, academicSchools = [], detailRows = [], legacyExamDays = [], academicEvents = []) {
   const school = resolveSchool(academicSchools, student);
   const schoolId = school ? text(school.id) : "";
   const schoolName = text(school?.name || student.school);
   const studentGrade = text(student.grade);
 
   const modernRows = (detailRows || []).filter((item) => {
-    const sameSchool =
-      (schoolId && item.schoolId === schoolId) ||
-      normalizeSchoolKey(item.school) === normalizeSchoolKey(schoolName);
-    if (!sameSchool) return false;
-    if (!studentGrade) return true;
-    return item.grade === studentGrade || item.grade === "all" || !item.grade;
+    if (!matchesSchoolReference(item, schoolId, schoolName)) return false;
+    return matchesGradeReference(item, studentGrade);
   });
 
-  if (modernRows.length > 0) {
+  const hasModernExamCoverage = (academicEvents || []).some((event) => {
+    if (!isModernExamCalendarEvent(event)) return false;
+    if (!matchesSchoolReference(event, schoolId, schoolName)) return false;
+    return matchesGradeReference(event, studentGrade);
+  });
+
+  if (modernRows.length > 0 || hasModernExamCoverage) {
     return {
       schoolName,
       grade: studentGrade || "all",
@@ -522,13 +578,8 @@ function getRelevantExamRows(student, academicSchools = [], detailRows = [], leg
   }
 
   const legacyRows = (legacyExamDays || []).filter((item) => {
-    const sameSchool =
-      (schoolId && text(item.schoolId || item.school_id) === schoolId) ||
-      normalizeSchoolKey(item.school) === normalizeSchoolKey(schoolName);
-    if (!sameSchool) return false;
-    if (!studentGrade) return true;
-    const grade = text(item.grade || "all");
-    return grade === studentGrade || grade === "all" || !grade;
+    if (!matchesSchoolReference(item, schoolId, schoolName)) return false;
+    return matchesGradeReference(item, studentGrade);
   });
 
   return {
@@ -546,8 +597,8 @@ function getRelevantExamRows(student, academicSchools = [], detailRows = [], leg
   };
 }
 
-function buildStudentExamLookup(student, academicSchools = [], detailRows = [], legacyExamDays = []) {
-  const examInfo = getRelevantExamRows(student, academicSchools, detailRows, legacyExamDays);
+function buildStudentExamLookup(student, academicSchools = [], detailRows = [], legacyExamDays = [], academicEvents = []) {
+  const examInfo = getRelevantExamRows(student, academicSchools, detailRows, legacyExamDays, academicEvents);
   const lookup = new Map();
 
   examInfo.rows.forEach((item) => {
@@ -644,7 +695,7 @@ export function getClassExamConflictsForDates(
   const conflictMap = new Map();
 
   enrolledStudents.forEach((student) => {
-    const examInfo = buildStudentExamLookup(student, academicSchools, detailRows, academicExamDays);
+    const examInfo = buildStudentExamLookup(student, academicSchools, detailRows, academicExamDays, academicEvents);
 
     sessionDates.forEach((sessionDate) => {
       const sameDaySubjects = examInfo.lookup.get(sessionDate);

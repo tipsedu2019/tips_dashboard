@@ -1650,7 +1650,9 @@ export function ManagementDataTable({
     [kind, rows],
   );
 
-  const selectedSubjectFilter = (table.getColumn("subject")?.getFilterValue() as string) || "";
+  const subjectColumn =
+    kind === "classes" && allColumnIds.includes("subject") ? table.getColumn("subject") : undefined;
+  const selectedSubjectFilter = (subjectColumn?.getFilterValue() as string) || "";
 
   const classFilterOptions = useMemo(() => {
     const emptyOptions: Record<ClassFilterColumnId, string[]> = {
@@ -1691,10 +1693,15 @@ export function ManagementDataTable({
   const statusColumn = allColumnIds.includes("status") ? table.getColumn("status") : undefined;
   const badgeFilter = (badgeColumn?.getFilterValue() as string) || "";
   const statusFilter = (statusColumn?.getFilterValue() as string) || "";
-  const classFilterValues = CLASS_FILTERS.map((filter) => ({
-    ...filter,
-    value: (table.getColumn(filter.id)?.getFilterValue() as string) || "",
-  }));
+  const classFilterValues = kind === "classes"
+    ? CLASS_FILTERS.map((filter) => ({
+        ...filter,
+        value: (table.getColumn(filter.id)?.getFilterValue() as string) || "",
+      }))
+    : CLASS_FILTERS.map((filter) => ({
+        ...filter,
+        value: "",
+      }));
   const activeClassFilters = kind === "classes" ? classFilterValues.filter((filter) => filter.value) : [];
   const normalizedClassGroupFilter = kind === "classes" ? effectiveClassGroupFilter : classGroupFilter;
   const normalizedClassStatusFilter = kind === "classes" ? statusFilter || DEFAULT_CLASS_STATUS_FILTER : statusFilter;
@@ -1808,8 +1815,10 @@ export function ManagementDataTable({
     } else if (kind !== "students") {
       statusColumn?.setFilterValue("");
     }
-    for (const filter of CLASS_FILTERS) {
-      table.getColumn(filter.id)?.setFilterValue("");
+    if (kind === "classes") {
+      for (const filter of CLASS_FILTERS) {
+        table.getColumn(filter.id)?.setFilterValue("");
+      }
     }
     table.resetPagination();
   };

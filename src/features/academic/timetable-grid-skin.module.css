@@ -150,13 +150,16 @@
   z-index: 5;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 2px;
-  border-left: 4px solid;
-  border-radius: 10px;
-  padding: 6px 10px;
+  gap: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-left: 3px solid;
+  border-radius: 8px;
+  padding: 6px 8px;
   text-align: center;
-  line-height: 1.3;
+  line-height: 1.22;
   box-shadow: var(--tt-block-shadow);
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
@@ -167,57 +170,115 @@
 }
 
 .scope :global(.timetable-block.is-compact) {
-  padding: 5px 8px;
+  gap: 2px;
+  padding: 5px 6px;
 }
 
 .scope :global(.block-subject),
-.scope :global(.block-name),
-.scope :global(.block-info) {
+.scope :global(.block-info),
+.scope :global(.block-value) {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .scope :global(.block-subject) {
-  font-size: 11px;
-  font-weight: 700;
-  opacity: 0.82;
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.55);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .scope :global(.block-name) {
-  font-size: 14px;
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  font-size: 13px;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .scope :global(.block-info) {
   display: flex;
+  max-width: 100%;
+  align-items: center;
   justify-content: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
+  gap: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .scope :global(.info-label) {
+  flex: 0 0 auto;
   border-radius: 999px;
-  background: var(--tt-info-label-bg);
-  padding: 1px 6px;
-  font-size: 10px;
-  font-weight: 700;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.scope :global(.block-value) {
+  min-width: 0;
+}
+
+.scope :global(.timetable-block.is-compact .block-subject) {
+  padding-inline: 5px;
+  font-size: 9px;
+}
+
+.scope :global(.timetable-block.is-compact .block-name) {
+  font-size: 12px;
+  line-height: 1.16;
+}
+
+.scope :global(.timetable-block.is-compact .block-info) {
+  font-size: 9px;
 }
 
 .scope :global(.timetable-floating-tooltip) {
   position: fixed;
   z-index: 2100;
-  min-width: 160px;
-  max-width: 280px;
-  padding: 12px 14px;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 12px;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--tt-tooltip-bg);
-  color: white;
-  white-space: pre-wrap;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  white-space: normal;
   font-size: 12px;
-  line-height: 1.6;
-  box-shadow: var(--tt-tooltip-shadow);
+  line-height: 1.55;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
   pointer-events: none;
+}
+
+.scope :global(.timetable-tooltip-text) {
+  white-space: pre-wrap;
+}
+
+.scope :global(.timetable-tooltip-title) {
+  margin-bottom: 4px;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
 }

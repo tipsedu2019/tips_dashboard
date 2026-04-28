@@ -609,6 +609,11 @@ function buildMaterialSectionsForDetails(details = [], event = {}, gradeKey = ""
     bucket.push(normalized)
   }
 
+  const pushLabeledNote = (bucket, label, value) => {
+    const cleaned = stripEmbeddedNoteMeta(value)
+    pushUnique(bucket, cleaned ? `${label} · ${cleaned}` : "")
+  }
+
   relevantDetails.forEach((detail) => {
     const match = findMatchingCurriculumPlan(detail, event, gradeKey, academyCurriculumPlans, academicCurriculumProfiles)
     const plan = match?.source === "plan" ? match.record : null
@@ -625,10 +630,10 @@ function buildMaterialSectionsForDetails(details = [], event = {}, gradeKey = ""
         .filter((material) => text(material?.plan_id || material?.planId) === text(plan?.id))
         .forEach((material) => {
           pushUnique(supplementItems, resolveCurriculumMaterialLabel(material, textbooks))
-          pushUnique(noteItems, text(material?.note) ? `부교재 메모 · ${text(material.note)}` : "")
+          pushLabeledNote(noteItems, "부교재 메모", material?.note)
         })
 
-      pushUnique(noteItems, text(plan?.note) ? `계획 메모 · ${text(plan.note)}` : "")
+      pushLabeledNote(noteItems, "계획 메모", plan?.note)
     }
 
     if (profile) {
@@ -641,10 +646,10 @@ function buildMaterialSectionsForDetails(details = [], event = {}, gradeKey = ""
         .filter((material) => text(material?.profile_id || material?.profileId) === text(profile?.id))
         .forEach((material) => {
           pushUnique(supplementItems, resolveCurriculumMaterialLabel(material, textbooks))
-          pushUnique(noteItems, text(material?.note) ? `부교재 메모 · ${text(material.note)}` : "")
+          pushLabeledNote(noteItems, "부교재 메모", material?.note)
         })
 
-      pushUnique(noteItems, text(profile?.note) ? `계획 메모 · ${text(profile.note)}` : "")
+      pushLabeledNote(noteItems, "계획 메모", profile?.note)
     }
 
     const examMaterialPlan = academicExamMaterialPlans.find((plan) => {
@@ -657,7 +662,7 @@ function buildMaterialSectionsForDetails(details = [], event = {}, gradeKey = ""
     })
 
     if (examMaterialPlan) {
-      pushUnique(noteItems, text(examMaterialPlan?.note) ? `계획 메모 · ${text(examMaterialPlan.note)}` : "")
+      pushLabeledNote(noteItems, "계획 메모", examMaterialPlan?.note)
 
       academicExamMaterialItems
         .filter((item) => text(item?.plan_id || item?.planId) === text(examMaterialPlan?.id))
@@ -672,14 +677,14 @@ function buildMaterialSectionsForDetails(details = [], event = {}, gradeKey = ""
             pushUnique(noteItems, label)
           }
           pushUnique(noteItems, text(item?.scope_detail || item?.scopeDetail) ? `${category.includes("supplement") || category.includes("sub") || category.includes("부교재") ? "부교재" : category.includes("textbook") || category.includes("main") || category.includes("교과서") ? "교과서" : "자료"} 범위 · ${text(item?.scope_detail || item?.scopeDetail)}` : "")
-          pushUnique(noteItems, text(item?.note) ? `메모 · ${text(item.note)}` : "")
+          pushLabeledNote(noteItems, "메모", item?.note)
         })
     }
 
     pushUnique(noteItems, text(detail?.textbook_scope) ? `교과서 범위 · ${text(detail.textbook_scope)}` : "")
     pushUnique(noteItems, text(detail?.supplement_scope) ? `부교재 범위 · ${text(detail.supplement_scope)}` : "")
     pushUnique(noteItems, text(detail?.other_scope) ? `기타 범위 · ${text(detail.other_scope)}` : "")
-    pushUnique(noteItems, text(detail?.note) ? `메모 · ${text(detail.note)}` : "")
+    pushLabeledNote(noteItems, "메모", detail?.note)
   })
 
   return [
@@ -748,7 +753,7 @@ function buildDerivedSubjectExamEntries(event, gradeKey, academicEventExamDetail
       materialSections,
       displaySections: buildDisplaySectionsForSubjectEntry(materialSections),
       color: getAcademicEventColor(boardType),
-      note: text(primaryDetail?.note) || event.note,
+      note: stripEmbeddedNoteMeta(text(primaryDetail?.note) || event.note),
     }
   })
 }
@@ -822,7 +827,7 @@ function buildFallbackSubjectExamEntries(event, gradeKey, academyCurriculumPlans
       materialSections,
       displaySections: buildDisplaySectionsForSubjectEntry(materialSections),
       color: getAcademicEventColor(boardType),
-      note: event.note,
+      note: stripEmbeddedNoteMeta(event.note),
     }]
   })
 }

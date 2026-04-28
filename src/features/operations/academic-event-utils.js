@@ -2,6 +2,14 @@ function text(value) {
   return String(value || "").trim();
 }
 
+const PERSISTED_ACADEMIC_EVENT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function getPersistedAcademicEventId(value) {
+  const id = text(value);
+  return PERSISTED_ACADEMIC_EVENT_ID_PATTERN.test(id) ? id : "";
+}
+
 function normalizeEndDate(start, end) {
   const startValue = text(start);
   const endValue = text(end);
@@ -239,4 +247,74 @@ export function buildAcademicEventMutationPayloadCandidates(payload = {}) {
       optionalColumns: ["school_id", "school", "color", "grade", "note", "category", "date"],
     },
   ];
+}
+
+export function getAcademicEventMutationErrorMessage(error, fallback = "") {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (error && typeof error === "object") {
+    const message = [error.message, error.details, error.hint, error.code]
+      .map((value) => text(value))
+      .filter(Boolean)
+      .join(" · ");
+    return message || fallback;
+  }
+  return text(error) || fallback;
+}
+
+function isMissingColumnError(error, columnName) {
+  const message = getAcademicEventMutationErrorMessage(error, "").toLowerCase();
+  const column = columnName.toLowerCase();
+  return (
+    message.includes(`'${column}'`) ||
+    message.includes(`"${column}"`) ||
+    message.includes(` ${column} `) ||
+    message.includes(`column ${column}`) ||
+    message.includes(`column '${column}'`) ||
+    message.includes(`column "${column}"`)
+  ) && (
+    message.includes("column") ||
+    message.includes("schema cache") ||
+    message.includes("could not find") ||
+    message.includes("does not exist")
+  );
+}
+
+function removeColumnFromPayload(payload, columnName) {
+  const rows = Array.isArray(payload) ? payload : [payload];
+  rows.forEach((row) => {
+    delete row[columnName];
+  });
+}
+
+export async function runAcademicEventMutation(payload = {}, execute) {
+  let lastError = null;
+
+  for (const candidate of buildAcademicEventMutationPayloadCandidates(payload)) {
+    const row = { ...candidate.payload };
+    const skippedColumns = [];
+    let result = await execute(row);
+
+    while (result.error) {
+      const missingColumn = candidate.optionalColumns.find(
+        (columnName) => !skippedColumns.includes(columnName) && isMissingColumnError(result.error, columnName),
+      );
+      if (!missingColumn) {
+        break;
+      }
+
+      skippedColumns.push(missingColumn);
+      removeColumnFromPayload(row, missingColumn);
+      result = await execute(row);
+    }
+
+    if (!result.error) {
+      return { error: null };
+    }
+
+    lastError = result.error;
+  }
+
+  return { error: lastError };
 }

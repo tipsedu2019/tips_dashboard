@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   BarChart3,
   Layers3,
-  UserCheck,
   Users,
 } from "lucide-react"
 
@@ -206,6 +205,13 @@ function getSummary(metrics: DashboardMetrics, bucket: DashboardBucket): Dashboa
 
 function normalizeText(value: string | undefined) {
   return String(value || "").replace(/\s+/g, "").toLowerCase()
+}
+
+function splitBadgeLabels(value: string | undefined) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function matchesSubject(subject: string | undefined, subjectKey: DashboardSubjectKey) {
@@ -420,7 +426,7 @@ function KpiStrip({
       title: "학생수 (수강 기준)",
       value: withUnit(getMetricValue(summary.registeredEnrollmentCount, metrics), "명"),
       sub: `대기 ${formatNumber(summary.waitlistEnrollmentCount)}명`,
-      icon: UserCheck,
+      icon: Users,
       tone: "text-primary",
     },
     {
@@ -528,8 +534,6 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
             const isExpanded = expandedKeys.has(expansionKey)
             const allSchoolRowsForGrade = row.schools || []
             const schoolRowsForGrade = isExpanded ? allSchoolRowsForGrade : allSchoolRowsForGrade.slice(0, 3)
-            const schoolMaxForGrade = getMaxValue(allSchoolRowsForGrade, basis)
-
             return (
               <div key={row.label} className="min-w-0 rounded-lg bg-background p-3">
                 <div className={cn(DISTRIBUTION_ROW_CLASS, "text-sm")}>
@@ -547,7 +551,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
                       <div key={school.label} className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
                         <span className="truncate font-medium text-muted-foreground">{school.label}</span>
                         <div className="h-1 overflow-hidden rounded-full bg-muted">
-                          <AnimatedBar percent={getBarScale(schoolValue, schoolMaxForGrade, 6)} className="bg-primary/65" />
+                          <AnimatedBar percent={getBarScale(schoolValue, gradeMax, 4)} className="bg-primary/65" />
                         </div>
                         <span className="text-right tabular-nums">{formatNumber(schoolValue)}{unit}</span>
                       </div>
@@ -584,7 +588,6 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
               const isExpanded = expandedKeys.has(expansionKey)
               const allGradeRowsForSchool = row.grades || []
               const gradeRowsForSchool = isExpanded ? allGradeRowsForSchool : allGradeRowsForSchool.slice(0, 3)
-              const gradeMaxForSchool = getMaxValue(allGradeRowsForSchool, basis)
 
               return (
                 <div key={row.label} className="min-w-0 rounded-lg bg-background p-3">
@@ -603,7 +606,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
                         <div key={grade.label} className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
                           <span className="font-medium text-muted-foreground">{grade.label}</span>
                           <div className="h-1 overflow-hidden rounded-full bg-muted">
-                            <AnimatedBar percent={getBarScale(gradeValue, gradeMaxForSchool, 6)} className="bg-primary/65" />
+                            <AnimatedBar percent={getBarScale(gradeValue, schoolMax, 4)} className="bg-primary/65" />
                           </div>
                           <span className="text-right tabular-nums">{formatNumber(gradeValue)}{unit}</span>
                         </div>
@@ -694,16 +697,32 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
                   <div className="mt-3 grid gap-2 border-t pt-3">
                     {classRows.map((classItem) => (
                       <div key={classItem.id} className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
-                        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5">
+                        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                           <Badge variant="outline" className="bg-primary/5 text-primary">{classItem.subject}</Badge>
-                          <span className="min-w-0 truncate text-sm font-semibold">{classItem.title}</span>
-                          <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <span className="min-w-0 max-w-full text-sm font-semibold leading-5">{classItem.title}</span>
+                            {splitBadgeLabels(classItem.teacherLabel).map((label) => (
+                              <Badge
+                                key={`teacher:${classItem.id}:${label}`}
+                                variant="outline"
+                                className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
+                              >
+                                {label}
+                              </Badge>
+                            ))}
+                            {splitBadgeLabels(classItem.classroomLabel).map((label) => (
+                              <Badge
+                                key={`classroom:${classItem.id}:${label}`}
+                                variant="outline"
+                                className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
+                              >
+                                {label}
+                              </Badge>
+                            ))}
+                          </div>
+                          <span className="col-start-2 justify-self-start text-xs font-medium tabular-nums text-muted-foreground sm:col-start-3 sm:justify-self-end">
                             {formatNumber(classItem.studentCount)}명
                           </span>
-                        </div>
-                        <div className="mt-2 grid min-w-0 gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-                          <span className="min-w-0 truncate">{classItem.scheduleLabel}</span>
-                          <span className="min-w-0 truncate sm:text-right">{classItem.teacherLabel} · {classItem.classroomLabel}</span>
                         </div>
                       </div>
                     ))}
@@ -758,7 +777,7 @@ function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1.5 sm:justify-end">
-                  {[row.schoolLabel, row.gradeLabel, row.dateLabel].filter(Boolean).map((label, index) => (
+                  {[row.schoolLabel, row.gradeLabel].filter(Boolean).map((label, index) => (
                     <Badge key={`${label}-${index}`} variant="outline" className="bg-muted/45">
                       {label}
                     </Badge>

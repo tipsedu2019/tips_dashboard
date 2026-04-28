@@ -18,6 +18,16 @@ function TimetableBlock({
   const tooltipRef = useRef(null);
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
   const [tooltipLayout, setTooltipLayout] = useState({ top: 0, left: 0, placement: 'top' });
+  const tooltipDetails = block.tooltipDetails || null;
+  const hasStructuredTooltip = Boolean(
+    tooltipDetails &&
+      (tooltipDetails.title || tooltipDetails.schedule || tooltipDetails.teacher || tooltipDetails.classroom)
+  );
+  const hasTooltip = hasStructuredTooltip || Boolean(block.tooltip);
+  const subjectLabel = block.subject || (block.header ? String(block.header).replace(/^\[|\]$/g, '') : '');
+  const tooltipBadgeItems = tooltipDetails
+    ? [tooltipDetails.teacher, tooltipDetails.classroom].filter(Boolean)
+    : [];
 
   const classNames = [
     'timetable-block',
@@ -30,7 +40,7 @@ function TimetableBlock({
   ].filter(Boolean).join(' ');
 
   const updateTooltipLayout = useCallback(() => {
-    if (!block.tooltip || !blockRef.current || !tooltipRef.current || typeof window === 'undefined') {
+    if (!hasTooltip || !blockRef.current || !tooltipRef.current || typeof window === 'undefined') {
       return;
     }
 
@@ -83,25 +93,29 @@ function TimetableBlock({
     }
 
     setTooltipLayout({ top, left, placement });
-  }, [block.tooltip]);
+  }, [hasTooltip]);
 
   useEffect(() => {
     if (!isTooltipOpen) {
       return undefined;
     }
 
-    updateTooltipLayout();
-    const syncTooltip = () => updateTooltipLayout();
+    let frameId = window.requestAnimationFrame(updateTooltipLayout);
+    const syncTooltip = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateTooltipLayout);
+    };
     window.addEventListener('resize', syncTooltip);
     window.addEventListener('scroll', syncTooltip, true);
     return () => {
+      window.cancelAnimationFrame(frameId);
       window.removeEventListener('resize', syncTooltip);
       window.removeEventListener('scroll', syncTooltip, true);
     };
   }, [isTooltipOpen, updateTooltipLayout]);
 
   const openTooltip = () => {
-    if (block.tooltip && !isGhost) {
+    if (hasTooltip && !isGhost) {
       setIsTooltipOpen(true);
     }
   };
@@ -173,7 +187,7 @@ function TimetableBlock({
           </>
         ) : null}
 
-        {block.header ? <div className="block-subject">{block.header}</div> : null}
+        {subjectLabel ? <div className="block-subject">{subjectLabel}</div> : null}
         <div className="block-name">{block.title}</div>
         {(block.detailLines || []).map((line, index) => (
           <div
@@ -186,12 +200,12 @@ function TimetableBlock({
                 {line.label}
               </span>
             ) : null}
-            {line.value}
+            <span className="block-value">{line.value}</span>
           </div>
         ))}
       </div>
 
-      {block.tooltip && isTooltipOpen && typeof document !== 'undefined'
+      {hasTooltip && isTooltipOpen && typeof document !== 'undefined'
         ? createPortal(
             <div
               ref={tooltipRef}
@@ -201,7 +215,27 @@ function TimetableBlock({
                 left: tooltipLayout.left,
               }}
             >
-              {block.tooltip}
+              {hasStructuredTooltip ? (
+                <>
+                  {tooltipDetails.title ? (
+                    <div className="timetable-tooltip-title">{tooltipDetails.title}</div>
+                  ) : null}
+                  {tooltipDetails.schedule ? (
+                    <div className="timetable-tooltip-schedule">{tooltipDetails.schedule}</div>
+                  ) : null}
+                  {tooltipBadgeItems.length ? (
+                    <div className="timetable-tooltip-badges">
+                      {tooltipBadgeItems.map((value) => (
+                        <span key={value} className="timetable-tooltip-badge">
+                          {value}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <span className="timetable-tooltip-text">{block.tooltip}</span>
+              )}
             </div>,
             document.body
           )

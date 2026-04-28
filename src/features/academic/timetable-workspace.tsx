@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
 import {
   CalendarDays,
   GraduationCap,
+  ImageDown,
+  Loader2,
   School,
   User,
   type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { pickDefaultPeriodValue } from "@/features/management/period-preferences";
+import { exportElementAsImage } from "@/lib/export-as-image";
 import { cn } from "@/lib/utils";
 
 import {
@@ -115,6 +119,53 @@ function buildSubjectFilterOptions(subjectOptions: string[]) {
   return ["", ...PRIMARY_SUBJECT_FILTERS, ...extras];
 }
 
+function sanitizeImageFileName(value: string) {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+}
+
+function getTimetableCaptureWidth(element: HTMLElement) {
+  const gridElement = element.querySelector<HTMLElement>(".timetable-grid");
+  const gridWidth = gridElement ? gridElement.scrollWidth + 32 : 0;
+  return Math.ceil(Math.max(element.offsetWidth, element.scrollWidth, gridWidth));
+}
+
+type TimetablePanelBlockSummary = {
+  key?: string;
+  classId?: string;
+  lessonKey?: string;
+  startSlot?: number;
+  endSlot?: number;
+};
+
+function formatWeeklyHours(hours: number) {
+  const safeHours = Math.round(Math.max(0, hours) * 10) / 10;
+  return Number.isInteger(safeHours) ? `${safeHours}시간` : `${safeHours.toFixed(1)}시간`;
+}
+
+function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
+  const lessonKeys = new Set(
+    blocks.map((block) => String(block.lessonKey || block.classId || block.key || "")).filter(Boolean),
+  );
+  const weeklyHours = blocks.reduce((total, block) => {
+    const startSlot = Number(block.startSlot);
+    const endSlot = Number(block.endSlot);
+    if (!Number.isFinite(startSlot) || !Number.isFinite(endSlot) || endSlot <= startSlot) {
+      return total;
+    }
+
+    return total + (endSlot - startSlot) * 0.5;
+  }, 0);
+
+  return {
+    lessonCount: lessonKeys.size,
+    weeklyHoursLabel: formatWeeklyHours(weeklyHours),
+  };
+}
+
 export function AcademicTimetableWorkspace() {
   const { data, loading, error } = useAcademicWorkspaceData();
   const [view, setView] = useState<TimetableView>("teacher-weekly");
@@ -125,6 +176,8 @@ export function AcademicTimetableWorkspace() {
   const [selectedTeachers, setSelectedTeachers] = useState<string[]>([]);
   const [selectedClassrooms, setSelectedClassrooms] = useState<string[]>([]);
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
+  const [savingPanelId, setSavingPanelId] = useState("");
+  const timetablePanelRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const workspace = useMemo(
     () =>
@@ -236,6 +289,7 @@ export function AcademicTimetableWorkspace() {
     () => ({
       ...workspace,
       rows: filteredRows,
+      timetableScheduleRows: workspace.rows,
     }),
     [filteredRows, workspace],
   );
@@ -269,6 +323,31 @@ export function AcademicTimetableWorkspace() {
     setSelectedTeachers([]);
     setSelectedClassrooms([]);
     setSelectedDays([]);
+  };
+
+  const handleSavePanelImage = async (panelId: string, panelTitle: string) => {
+    const element = timetablePanelRefs.current[panelId];
+    if (!element || savingPanelId) {
+      return;
+    }
+
+    const filename = `${sanitizeImageFileName(panelTitle || "시간표")}-시간표.png`;
+    setSavingPanelId(panelId);
+
+    try {
+      await exportElementAsImage(element, filename, {
+        width: getTimetableCaptureWidth(element),
+        padding: 0,
+        scale: 3,
+        backgroundColor: "#ffffff",
+      });
+      toast.success("시간표 이미지를 저장했습니다.");
+    } catch (captureError) {
+      console.error(captureError);
+      toast.error("시간표 이미지 저장 중 오류가 발생했습니다.");
+    } finally {
+      setSavingPanelId("");
+    }
   };
 
   if (loading) {
@@ -467,43 +546,77 @@ export function AcademicTimetableWorkspace() {
         >
           {grid.panels.map((panel) => {
             const PanelIcon = iconForView(view);
+            const isSavingPanel = savingPanelId === panel.id;
+            const panelSummary = getTimetablePanelSummary(panel.blocks);
 
             return (
               <section
                 key={panel.id}
-                className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm"
+                className="relative min-w-0 overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm"
               >
-                <div className="flex items-center gap-3 border-b border-border/70 bg-muted/15 px-4 py-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground">
-                    <PanelIcon className="size-4" />
+                <div
+                  ref={(node) => {
+                    timetablePanelRefs.current[panel.id] = node;
+                  }}
+                  className="min-w-0 bg-background"
+                >
+                  <div className="flex items-center gap-3 border-b border-border/70 bg-muted/15 px-4 py-3 pr-14">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground">
+                      <PanelIcon className="size-4" />
+                    </div>
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold tracking-tight text-foreground">
+                        {panel.title}
+                      </p>
+                      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                          수업 {panelSummary.lessonCount}개
+                        </span>
+                        <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                          주간 {panelSummary.weeklyHoursLabel}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold tracking-tight text-foreground">
-                      {panel.title}
-                    </p>
+
+                  <div
+                    className={cn(
+                      "min-w-0 p-4",
+                      panelLayout.allowHorizontalScroll
+                        ? "overflow-x-auto"
+                        : "overflow-x-hidden",
+                    )}
+                  >
+                    <LegacyTimetableGrid
+                      columns={panel.columns}
+                      timeSlots={grid.timeSlots}
+                      blocks={panel.blocks}
+                      editable={false}
+                      density={panelLayout.density}
+                      slotHeight={panelLayout.slotHeight}
+                      timeColumnWidth={panelLayout.timeColumnWidth}
+                      minColumnWidth={panelLayout.minColumnWidth}
+                      fitColumns={panelLayout.fitColumns}
+                    />
                   </div>
                 </div>
 
-                <div
-                  className={cn(
-                    "min-w-0 p-4",
-                    panelLayout.allowHorizontalScroll
-                      ? "overflow-x-auto"
-                      : "overflow-x-hidden",
-                  )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`${panel.title} 이미지 저장`}
+                  title="이미지 저장"
+                  disabled={Boolean(savingPanelId)}
+                  onClick={() => handleSavePanelImage(panel.id, panel.title)}
+                  className="absolute right-3 top-3 size-9 rounded-md border border-border/70 bg-background/95 text-muted-foreground shadow-sm hover:bg-primary/5 hover:text-primary disabled:opacity-60"
                 >
-                  <LegacyTimetableGrid
-                    columns={panel.columns}
-                    timeSlots={grid.timeSlots}
-                    blocks={panel.blocks}
-                    editable={false}
-                    density={panelLayout.density}
-                    slotHeight={panelLayout.slotHeight}
-                    timeColumnWidth={panelLayout.timeColumnWidth}
-                    minColumnWidth={panelLayout.minColumnWidth}
-                    fitColumns={panelLayout.fitColumns}
-                  />
-                </div>
+                  {isSavingPanel ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ImageDown className="size-4" />
+                  )}
+                </Button>
               </section>
             );
           })}

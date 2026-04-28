@@ -196,6 +196,67 @@
   }
 }
 
+.timetable-floating-tooltip {
+  position: fixed;
+  z-index: 2100;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  white-space: normal;
+  font-size: 12px;
+  line-height: 1.55;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  pointer-events: none;
+}
+
+.timetable-tooltip-text {
+  white-space: pre-wrap;
+}
+
+.timetable-tooltip-title {
+  margin-bottom: 4px;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.timetable-tooltip-schedule {
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.timetable-tooltip-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.timetable-tooltip-badge {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--muted);
+  padding: 3px 8px;
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
 /* Ensure consistent font rendering across different DPI levels */
 @media (-webkit-min-device-pixel-ratio: 1.5), (min-resolution: 144dpi) {
   body {
@@ -490,6 +551,16 @@ html {
   font-weight: 600;
 }
 
+.annual-board-image-export-surface[data-image-exporting="true"] .annual-board-value > span {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  color: inherit;
+}
+
 .annual-board-hover-card {
   background: var(--popover);
   border-color: var(--border);
@@ -613,7 +684,6 @@ html {
   }
 
   [data-slot="sidebar"],
-  [data-slot="sidebar-inset"],
   [data-slot="tooltip-content"] {
     display: none !important;
   }
