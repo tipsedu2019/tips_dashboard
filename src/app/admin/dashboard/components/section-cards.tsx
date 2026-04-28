@@ -5,7 +5,7 @@ import {
   AlertTriangle,
   BarChart3,
   Layers3,
-  SearchCheck,
+  UserCheck,
   Users,
 } from "lucide-react"
 
@@ -402,11 +402,6 @@ function KpiStrip({
   metrics: DashboardMetrics
   summary: DashboardBucketSummary
 }) {
-  const averageStudentsPerClass = getAverageMetricValue(
-    summary.uniqueRegisteredStudentCount,
-    summary.activeClassesCount,
-    metrics,
-  )
   const averageEnrollmentsPerClass = getAverageMetricValue(
     summary.registeredEnrollmentCount,
     summary.activeClassesCount,
@@ -423,8 +418,8 @@ function KpiStrip({
     {
       title: "학생수 (수강 기준)",
       value: getMetricValue(summary.registeredEnrollmentCount, metrics),
-      sub: `대기 ${formatNumber(summary.waitlistEnrollmentCount)}건`,
-      icon: SearchCheck,
+      sub: `대기 ${formatNumber(summary.waitlistEnrollmentCount)}명`,
+      icon: UserCheck,
       tone: "text-primary",
     },
     {
@@ -435,9 +430,8 @@ function KpiStrip({
       tone: "text-primary",
     },
     {
-      title: "수업당 학생수",
-      value: withUnit(averageStudentsPerClass, "명"),
-      sub: `인원 기준 · 수강 기준 ${withUnit(averageEnrollmentsPerClass, "명")}`,
+      title: "학생수 (수강 기준) / 운영 수업",
+      value: withUnit(averageEnrollmentsPerClass, "명"),
       icon: Users,
       tone: "text-primary",
     },
@@ -463,9 +457,11 @@ function KpiStrip({
                 </span>
               </CardAction>
             </CardHeader>
-            <CardContent className="px-4 text-sm font-medium text-muted-foreground">
-              {card.sub}
-            </CardContent>
+            {card.sub ? (
+              <CardContent className="px-4 text-sm font-medium text-muted-foreground">
+                {card.sub}
+              </CardContent>
+            ) : null}
           </Card>
         )
       })}
@@ -477,7 +473,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
   const [basis, setBasis] = useState<StudentBasis>("students")
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set())
   const getValue = (row: BreakdownRow) => (basis === "students" ? row.studentCount : row.enrollmentCount)
-  const unit = basis === "students" ? "명" : "건"
+  const unit = "명"
   const toggleExpanded = (key: string) => {
     setExpandedKeys((current) => {
       const next = new Set(current)
@@ -494,10 +490,8 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
       getValue(right) - getValue(left) ||
       left.label.localeCompare(right.label, "ko", { numeric: true })
     ))
-    .slice(0, 6)
   const schoolRows = [...bucket.studentBreakdowns.bySchool]
     .sort((left, right) => getValue(right) - getValue(left) || left.label.localeCompare(right.label, "ko", { numeric: true }))
-    .slice(0, 6)
   const gradeMax = getMaxValue(gradeRows, basis)
   const schoolMax = getMaxValue(schoolRows, basis)
 
@@ -639,7 +633,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
 function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
   const [openGradeKeys, setOpenGradeKeys] = useState<Set<string>>(() => new Set())
   const [expandedClassKeys, setExpandedClassKeys] = useState<Set<string>>(() => new Set())
-  const gradeRows = (bucket.classBreakdowns?.byGrade || []).slice(0, 5)
+  const gradeRows = bucket.classBreakdowns?.byGrade || []
   const classMax = getClassMaxValue(gradeRows)
   const toggleOpenGrade = (key: string) => {
     setOpenGradeKeys((current) => {
@@ -845,11 +839,11 @@ export function SectionCards({ metrics }: { metrics: DashboardMetrics }) {
         metrics={metrics}
       />
       <KpiStrip metrics={metrics} summary={summary} />
+      <ConflictBoard rows={conflictRows} />
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.85fr)]">
         <StudentDistributionPanel bucket={activeBucket} />
         <ClassOperationsPanel bucket={activeBucket} />
       </div>
-      <ConflictBoard rows={conflictRows} />
     </div>
   )
 }

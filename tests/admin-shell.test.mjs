@@ -56,8 +56,12 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
 
   assert.match(source, /학생수 \(인원 기준\)/);
   assert.match(source, /학생수 \(수강 기준\)/);
+  assert.match(source, /학생수 \(수강 기준\) \/ 운영 수업/);
+  assert.match(source, /UserCheck/);
   assert.match(source, /운영 수업/);
-  assert.match(source, /수업당 학생수/);
+  assert.doesNotMatch(source, /수업당 학생수/);
+  assert.doesNotMatch(source, /인원 기준 · 수강 기준/);
+  assert.match(source, /waitlistEnrollmentCount\)}명/);
   assert.match(source, /일정 충돌/);
   assert.match(source, /classSummaries/);
   assert.match(source, /scheduleLabel/);
@@ -77,6 +81,7 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
   assert.doesNotMatch(source, /subjectRows/);
   assert.doesNotMatch(source, /normalCount/);
   assert.doesNotMatch(source, /CheckCircle2/);
+  assert.doesNotMatch(source, /SearchCheck/);
 });
 
 test("dashboard exposes subject and division tabs with conflict process rows", async () => {
@@ -89,6 +94,8 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /고등부/);
   assert.match(source, /bg-primary text-primary-foreground/);
   assert.match(source, /AnimatedBar/);
+  assert.match(source, /const unit = "명"/);
+  assert.doesNotMatch(source, /basis === "students" \? "명" : "건"/);
   assert.match(source, /더 보기/);
   assert.match(source, /label="Who"/);
   assert.match(source, /본과목 수업일/);
@@ -102,7 +109,9 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /시험\/수업 충돌/);
   assert.doesNotMatch(source, /수업: /);
   assert.match(source, /slice\(0, 3\)/);
+  assert.match(source, /<ConflictBoard rows=\{conflictRows\} \/>[\s\S]*<div className="grid gap-4/);
   assert.doesNotMatch(source, /slice\(0, 4\)/);
+  assert.doesNotMatch(source, /bucket\.classBreakdowns\?\.byGrade \|\| \[\]\)\.slice\(0, 5\)/);
 });
 
 test("dashboard keeps dense cards readable on mobile widths", async () => {

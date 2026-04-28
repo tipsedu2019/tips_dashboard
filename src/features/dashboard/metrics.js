@@ -495,7 +495,7 @@ function buildExamDetailRows(academicEventExamDetails = [], academicEvents = [])
         note: text(detail.note),
       };
     })
-    .filter((row) => row.subject && row.examDate);
+    .filter((row) => row.subject);
 }
 
 function getRelevantExamRows(student, academicSchools = [], detailRows = [], legacyExamDays = []) {

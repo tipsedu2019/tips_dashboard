@@ -237,6 +237,53 @@ test("detects same-day and previous-day exam conflicts", () => {
   );
 });
 
+test("ignores blank modern exam dates instead of falling back to legacy exam days", () => {
+  const classes = [
+    {
+      id: "math-a",
+      name: "Math A",
+      subject: "Math",
+      schedule_plan: {
+        sessions: [{ state: "active", date: "2026-04-28" }],
+      },
+      student_ids: ["student-1"],
+    },
+  ];
+  const students = [
+    { id: "student-1", name: "Student A", school: "Daegee High", grade: "G1" },
+  ];
+  const academicSchools = [{ id: "school-1", name: "Daegee High" }];
+  const academicEvents = [{ id: "event-1", title: "Midterm", school_id: "school-1" }];
+  const academicExamDays = [
+    {
+      school_id: "school-1",
+      grade: "G1",
+      subject: "English",
+      exam_date: "2026-04-29",
+    },
+  ];
+  const academicEventExamDetails = [
+    {
+      academic_event_id: "event-1",
+      school_id: "school-1",
+      grade: "G1",
+      subject: "English",
+      exam_date: "",
+    },
+  ];
+
+  const conflicts = findExamConflictsForClasses(
+    classes,
+    students,
+    academicSchools,
+    academicExamDays,
+    academicEventExamDetails,
+    academicEvents,
+  );
+
+  assert.equal(conflicts.length, 0);
+});
+
 test("attaches class summaries to grade class breakdowns", () => {
   const metrics = buildDashboardMetrics({
     classes: [
