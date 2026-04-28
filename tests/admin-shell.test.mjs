@@ -56,11 +56,14 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
 
   assert.match(source, /학생수 \(인원 기준\)/);
   assert.match(source, /학생수 \(수강 기준\)/);
-  assert.match(source, /학생수 \(수강 기준\) \/ 운영 수업/);
+  assert.match(source, /수업당 학생수/);
+  assert.doesNotMatch(source, /학생수 \(수강 기준\) \/ 운영 수업/);
   assert.match(source, /UserCheck/);
   assert.match(source, /운영 수업/);
-  assert.doesNotMatch(source, /수업당 학생수/);
   assert.doesNotMatch(source, /인원 기준 · 수강 기준/);
+  assert.match(source, /withUnit\(getMetricValue\(summary\.uniqueRegisteredStudentCount, metrics\), "명"\)/);
+  assert.match(source, /withUnit\(getMetricValue\(summary\.registeredEnrollmentCount, metrics\), "명"\)/);
+  assert.match(source, /withUnit\(getMetricValue\(summary\.activeClassesCount, metrics\), "개"\)/);
   assert.match(source, /waitlistEnrollmentCount\)}명/);
   assert.match(source, /일정 충돌/);
   assert.match(source, /classSummaries/);
@@ -98,6 +101,10 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /basis === "students" \? "명" : "건"/);
   assert.match(source, /더 보기/);
   assert.match(source, /label="Who"/);
+  assert.match(source, /label="When"/);
+  assert.match(source, /schoolLabel/);
+  assert.match(source, /gradeLabel/);
+  assert.match(source, /text-destructive">\{row\.classTitle\}/);
   assert.match(source, /본과목 수업일/);
   assert.match(source, /타과목 시험일 전날/);
   assert.match(source, /본과목 시험일/);

@@ -323,3 +323,26 @@ test("attaches class summaries to grade class breakdowns", () => {
   assert.equal(summaries[0].teacherLabel, "Teacher A");
   assert.equal(summaries[0].classroomLabel, "Room 1");
 });
+
+test("uses class management grade before enrolled student grades for class breakdowns", () => {
+  const metrics = buildDashboardMetrics({
+    classes: [
+      {
+        id: "managed-grade-class",
+        name: "Managed Grade Class",
+        subject: "math",
+        grade: "고1",
+        schedule: "Mon 10:00-11:00",
+        student_ids: ["student-1", "student-2"],
+      },
+    ],
+    students: [
+      { id: "student-1", name: "A", school: "School A", grade: "고2" },
+      { id: "student-2", name: "B", school: "School B", grade: "고3" },
+    ],
+  });
+
+  assert.deepEqual(metrics.classBreakdowns.byGrade.map((row) => row.label), ["고1"]);
+  assert.equal(metrics.classBreakdowns.byGrade[0].classCount, 1);
+  assert.equal(metrics.classBreakdowns.byGrade[0].studentCount, 2);
+});

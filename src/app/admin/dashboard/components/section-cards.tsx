@@ -115,7 +115,8 @@ type ConflictBoardRow = {
   examLabel: string
   whatTargetLabel: string
   dateLabel: string
-  contextLabel: string
+  schoolLabel: string
+  gradeLabel: string
   whoLabel: string
   whyLabel: string
   affectedCount: number
@@ -251,7 +252,6 @@ function getConflictRows(
       if (!first) return null
 
       const affectedStudents = new Set(scopedConflicts.flatMap((conflict) => conflict.students || []))
-      const schoolGrade = [first.schoolName, first.grade].filter(Boolean).join(" ")
       const examLabel = getConflictExamLabel(first, classItem.subject)
       const isDayBeforeOtherSubject = first.rule === "day-before-other-subject" || first.message?.includes("전날")
       const whyLabel = isDayBeforeOtherSubject
@@ -267,7 +267,8 @@ function getConflictRows(
         examLabel,
         whatTargetLabel: isDayBeforeOtherSubject ? "타과목 시험일 전날" : "본과목 시험일",
         dateLabel: first.sessionDate || first.examDate,
-        contextLabel: [schoolGrade, first.sessionDate || first.examDate].filter(Boolean).join(" · "),
+        schoolLabel: first.schoolName || "",
+        gradeLabel: first.grade || "",
         whoLabel: studentNames.length > 0 ? studentNames.join(", ") : "영향 학생 없음",
         whyLabel,
         affectedCount: affectedStudents.size || first.students?.length || 0,
@@ -410,27 +411,27 @@ function KpiStrip({
   const cards = [
     {
       title: "학생수 (인원 기준)",
-      value: getMetricValue(summary.uniqueRegisteredStudentCount, metrics),
+      value: withUnit(getMetricValue(summary.uniqueRegisteredStudentCount, metrics), "명"),
       sub: `대기 ${formatNumber(summary.uniqueWaitlistStudentCount)}명`,
       icon: Users,
       tone: "text-primary",
     },
     {
       title: "학생수 (수강 기준)",
-      value: getMetricValue(summary.registeredEnrollmentCount, metrics),
+      value: withUnit(getMetricValue(summary.registeredEnrollmentCount, metrics), "명"),
       sub: `대기 ${formatNumber(summary.waitlistEnrollmentCount)}명`,
       icon: UserCheck,
       tone: "text-primary",
     },
     {
       title: "운영 수업",
-      value: getMetricValue(summary.activeClassesCount, metrics),
+      value: withUnit(getMetricValue(summary.activeClassesCount, metrics), "개"),
       sub: `주간 ${summary.weeklyHoursLabel}`,
       icon: Layers3,
       tone: "text-primary",
     },
     {
-      title: "학생수 (수강 기준) / 운영 수업",
+      title: "수업당 학생수",
       value: withUnit(averageEnrollmentsPerClass, "명"),
       icon: Users,
       tone: "text-primary",
@@ -746,17 +747,26 @@ function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
         <div className="grid gap-3 xl:grid-cols-3">
           {rows.slice(0, 3).map((row) => (
             <div key={row.id} className="min-w-0 rounded-xl border bg-background p-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className="bg-primary/5 text-primary">{row.subjectLabel}</Badge>
-                  <Badge variant="outline">{row.teacherLabel}</Badge>
-                  <span className="min-w-0 max-w-full text-sm font-semibold leading-5">{row.classTitle}</span>
-                  <AlertTriangle className="size-3.5 text-destructive" aria-hidden="true" />
-                  <span className="text-sm font-semibold leading-5 text-destructive">{row.examLabel}</span>
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant="outline" className="bg-primary/5 text-primary">{row.subjectLabel}</Badge>
+                    <Badge variant="outline">{row.teacherLabel}</Badge>
+                    <span className="min-w-0 max-w-full text-sm font-semibold leading-5 text-destructive">{row.classTitle}</span>
+                    <AlertTriangle className="size-3.5 text-destructive" aria-hidden="true" />
+                    <span className="text-sm font-semibold leading-5 text-destructive">{row.examLabel}</span>
+                  </div>
                 </div>
-                <div className="mt-1 text-xs font-medium text-destructive">{row.contextLabel}</div>
+                <div className="flex shrink-0 flex-wrap gap-1.5 sm:justify-end">
+                  {[row.schoolLabel, row.gradeLabel, row.dateLabel].filter(Boolean).map((label, index) => (
+                    <Badge key={`${label}-${index}`} variant="outline" className="bg-muted/45">
+                      {label}
+                    </Badge>
+                  ))}
+                </div>
               </div>
               <div className="mt-4 grid gap-2 text-xs">
+                <ProcessRow label="When" value={row.dateLabel} />
                 <ProcessRow
                   label="What"
                   value={(

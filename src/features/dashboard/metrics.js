@@ -412,9 +412,6 @@ function matchesDashboardDivisionLabel(value, divisionKey = "high") {
 }
 
 function inferClassGradeLabels(classItem = {}, studentsById = new Map()) {
-  const enrolledGrades = getStudentIds(classItem)
-    .map((studentId) => gradeText(studentsById.get(studentId)?.grade))
-    .filter(Boolean);
   const directGrades = [
     classItem.grade,
     classItem.gradeName,
@@ -427,8 +424,11 @@ function inferClassGradeLabels(classItem = {}, studentsById = new Map()) {
     ...(name.match(/[고중초]\s*\d/g) || []).map((item) => item.replace(/\s+/g, "")),
     ...(name.match(/Grade\s*(?:[1-9]|10|11|12)/gi) || []).map((item) => item.replace(/\s+/g, "")),
   ]);
+  const enrolledGrades = getStudentIds(classItem)
+    .map((studentId) => gradeText(studentsById.get(studentId)?.grade))
+    .filter(Boolean);
 
-  return unique([...enrolledGrades, ...directGrades, ...nameGrades]);
+  return directGrades.length > 0 ? unique(directGrades) : unique([...nameGrades, ...enrolledGrades]);
 }
 
 function matchesDashboardDivision(classItem = {}, studentsById = new Map(), divisionKey = "high") {
