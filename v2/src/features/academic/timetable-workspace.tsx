@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
 import {
   CalendarDays,
   GraduationCap,
@@ -76,6 +76,7 @@ const VIEW_OPTIONS: TimetableViewOption[] = [
 ];
 
 const GRID_OPTIONS = [1, 2] as const;
+const PRIMARY_SUBJECT_FILTERS = ["영어", "수학"];
 
 function TimetableWorkspaceSkeleton() {
   return (
@@ -98,11 +99,28 @@ function iconForView(view: TimetableView) {
   return VIEW_OPTIONS.find((option) => option.id === view)?.icon || User;
 }
 
+function normalizeSelections(values: string[], options: string[]) {
+  if (values.length === 0) {
+    return values;
+  }
+
+  const optionSet = new Set(options);
+  const nextValues = values.filter((value) => optionSet.has(value));
+  return nextValues.length === values.length ? values : nextValues;
+}
+
+function buildSubjectFilterOptions(subjectOptions: string[]) {
+  const primarySet = new Set(PRIMARY_SUBJECT_FILTERS);
+  const extras = subjectOptions.filter((option) => option && !primarySet.has(option));
+  return ["", ...PRIMARY_SUBJECT_FILTERS, ...extras];
+}
+
 export function AcademicTimetableWorkspace() {
   const { data, loading, error } = useAcademicWorkspaceData();
   const [view, setView] = useState<TimetableView>("teacher-weekly");
   const [classGroupId, setClassGroupId] = useState("");
   const [status, setStatus] = useState("수강");
+  const [subject, setSubject] = useState("");
   const [gridCount, setGridCount] = useState(2);
   const [selectedTeachers, setSelectedTeachers] = useState<string[]>([]);
   const [selectedClassrooms, setSelectedClassrooms] = useState<string[]>([]);
@@ -120,6 +138,7 @@ export function AcademicTimetableWorkspace() {
         filters: {
           classGroupId,
           status,
+          subject,
         },
       }),
     [
@@ -131,6 +150,7 @@ export function AcademicTimetableWorkspace() {
       data.classroomCatalogs,
       data.teacherCatalogs,
       status,
+      subject,
     ],
   );
   const defaultPeriodId = useMemo(
@@ -156,6 +176,23 @@ export function AcademicTimetableWorkspace() {
     }
   }, [status, workspace.statusOptions]);
 
+  useEffect(() => {
+    setSelectedTeachers((current) => normalizeSelections(current, workspace.teacherOptions));
+  }, [workspace.teacherOptions]);
+
+  useEffect(() => {
+    setSelectedClassrooms((current) => normalizeSelections(current, workspace.classroomOptions));
+  }, [workspace.classroomOptions]);
+
+  useEffect(() => {
+    setSelectedDays((current) => normalizeSelections(current, workspace.dayOptions));
+  }, [workspace.dayOptions]);
+
+  const subjectFilterOptions = useMemo(
+    () => buildSubjectFilterOptions(workspace.subjectOptions),
+    [workspace.subjectOptions],
+  );
+
   const activeSubFilterLabel =
     view === "teacher-weekly"
       ? "선생님"
@@ -163,20 +200,29 @@ export function AcademicTimetableWorkspace() {
         ? "강의실"
         : "요일";
 
+  const selectedTeacherSet = useMemo(() => new Set(selectedTeachers), [selectedTeachers]);
+  const selectedClassroomSet = useMemo(() => new Set(selectedClassrooms), [selectedClassrooms]);
+  const selectedDaySet = useMemo(() => new Set(selectedDays), [selectedDays]);
+
   const filteredRows = useMemo(
-    () =>
-      workspace.rows.filter((row) => {
+    () => {
+      const hasSelectedTeachers = selectedTeacherSet.size > 0;
+      const hasSelectedClassrooms = selectedClassroomSet.size > 0;
+      const hasSelectedDays = selectedDaySet.size > 0;
+
+      return workspace.rows.filter((row) => {
         if (view === "teacher-weekly") {
-          return selectedTeachers.length === 0 || selectedTeachers.includes(row.teacher);
+          return !hasSelectedTeachers || selectedTeacherSet.has(row.teacher);
         }
 
         if (view === "classroom-weekly") {
-          return selectedClassrooms.length === 0 || selectedClassrooms.includes(row.classroom);
+          return !hasSelectedClassrooms || selectedClassroomSet.has(row.classroom);
         }
 
-        return selectedDays.length === 0 || selectedDays.includes(row.day);
-      }),
-    [selectedClassrooms, selectedDays, selectedTeachers, view, workspace.rows],
+        return !hasSelectedDays || selectedDaySet.has(row.day);
+      });
+    },
+    [selectedClassroomSet, selectedDaySet, selectedTeacherSet, view, workspace.rows],
   );
 
   const axisSelectedTargets =
@@ -186,18 +232,23 @@ export function AcademicTimetableWorkspace() {
         ? selectedClassrooms
         : selectedDays;
 
+  const gridWorkspace = useMemo(
+    () => ({
+      ...workspace,
+      rows: filteredRows,
+    }),
+    [filteredRows, workspace],
+  );
+
   const grid = useMemo(
     () =>
       buildTimetableGridPanels({
-        workspace: {
-          ...workspace,
-          rows: filteredRows,
-        },
+        workspace: gridWorkspace,
         view,
         gridCount,
         selectedTargets: axisSelectedTargets,
       }),
-    [axisSelectedTargets, filteredRows, gridCount, view, workspace],
+    [axisSelectedTargets, gridCount, gridWorkspace, view],
   );
 
   const panelLayout = getTimetablePanelLayout({ view, gridCount });
@@ -205,7 +256,7 @@ export function AcademicTimetableWorkspace() {
   const toggleFilterValue = (
     value: string,
     currentValues: string[],
-    setter: (values: string[]) => void,
+    setter: Dispatch<SetStateAction<string[]>>,
   ) => {
     const hasValue = currentValues.includes(value);
     setter(hasValue ? currentValues.filter((item) => item !== value) : [...currentValues, value]);
@@ -214,6 +265,7 @@ export function AcademicTimetableWorkspace() {
   const resetFilters = () => {
     setClassGroupId(defaultPeriodId);
     setStatus("수강");
+    setSubject("");
     setSelectedTeachers([]);
     setSelectedClassrooms([]);
     setSelectedDays([]);
@@ -232,7 +284,7 @@ export function AcademicTimetableWorkspace() {
       ) : null}
 
       <div className="flex flex-col gap-4 border border-border/70 bg-background p-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,1.35fr)_auto]">
+        <div className="grid gap-3 xl:grid-cols-[minmax(180px,0.95fr)_minmax(190px,0.9fr)_minmax(180px,0.8fr)_minmax(320px,1.35fr)_auto]">
           <div className="space-y-2">
             <Label htmlFor="period-filter" className="text-[11px] text-muted-foreground">기간</Label>
             <Select
@@ -276,6 +328,24 @@ export function AcademicTimetableWorkspace() {
                   className="h-9 rounded-sm px-3 text-[12px] font-medium"
                 >
                   {option}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-[11px] text-muted-foreground">과목</Label>
+            <div className="flex flex-wrap gap-2">
+              {subjectFilterOptions.map((option) => (
+                <Button
+                  key={option || "all-subjects"}
+                  type="button"
+                  variant={subject === option ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setSubject(option)}
+                  className="h-9 min-w-12 rounded-sm px-3 text-[12px] font-medium"
+                >
+                  {option || "전체"}
                 </Button>
               ))}
             </div>
@@ -383,7 +453,7 @@ export function AcademicTimetableWorkspace() {
 
       {filteredRows.length === 0 || grid.panels.length === 0 ? (
         <div className="flex min-h-[420px] items-center justify-center border border-dashed border-border/60 bg-muted/10 px-6 text-center text-sm text-muted-foreground">
-          현재 조건에 맞는 시간표가 없습니다. 기간과 수업 상태를 확인해 주세요.
+          현재 조건에 맞는 시간표가 없습니다. 기간, 수업 상태, 과목을 확인해 주세요.
         </div>
       ) : (
         <div

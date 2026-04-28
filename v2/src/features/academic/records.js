@@ -1125,6 +1125,8 @@ function buildHalfHourSlots(startHour = 11, endHour = 24) {
   return slots.filter((slot) => !slot.startsWith("23:30-"));
 }
 
+const DEFAULT_TIMETABLE_TIME_SLOTS = buildHalfHourSlots();
+
 function minutesToSlotIndex(value, startHour = 11) {
   const minutes = timeToMinutes(value);
   const baseMinutes = startHour * 60;
@@ -1149,6 +1151,26 @@ function buildPaletteByClassId(rows = []) {
       TIMETABLE_BLOCK_PALETTES[paletteIndex % TIMETABLE_BLOCK_PALETTES.length],
     );
     paletteIndex += 1;
+  });
+
+  return map;
+}
+
+function groupTimetableRows(rows = [], getKey) {
+  const map = new Map();
+
+  rows.forEach((row) => {
+    const key = text(getKey(row));
+    if (!key) {
+      return;
+    }
+
+    const currentRows = map.get(key);
+    if (currentRows) {
+      currentRows.push(row);
+    } else {
+      map.set(key, [row]);
+    }
   });
 
   return map;
@@ -1197,8 +1219,8 @@ function sanitizeSelectedTargets(selectedTargets = [], axisOptions = []) {
   );
 }
 
-function buildTeacherWeeklyPanel(targetTeacher, workspace, paletteByClassId) {
-  const rows = workspace.rows.filter((row) => row.teacher === targetTeacher);
+function buildTeacherWeeklyPanel(targetTeacher, rowsByTeacher, paletteByClassId) {
+  const rows = rowsByTeacher.get(targetTeacher) || [];
   const blocks = rows.map((row) =>
     buildGridBlock(
       row,
@@ -1217,8 +1239,8 @@ function buildTeacherWeeklyPanel(targetTeacher, workspace, paletteByClassId) {
   };
 }
 
-function buildClassroomWeeklyPanel(targetClassroom, workspace, paletteByClassId) {
-  const rows = workspace.rows.filter((row) => row.classroom === targetClassroom);
+function buildClassroomWeeklyPanel(targetClassroom, rowsByClassroom, paletteByClassId) {
+  const rows = rowsByClassroom.get(targetClassroom) || [];
   const blocks = rows.map((row) =>
     buildGridBlock(
       row,
@@ -1237,10 +1259,10 @@ function buildClassroomWeeklyPanel(targetClassroom, workspace, paletteByClassId)
   };
 }
 
-function buildDailyTeacherPanel(targetDay, workspace, paletteByClassId) {
+function buildDailyTeacherPanel(targetDay, workspace, rowsByDay, paletteByClassId) {
   const columns = workspace.teacherOptions || [];
   const teacherIndex = new Map(columns.map((value, index) => [value, index]));
-  const rows = workspace.rows.filter((row) => row.day === targetDay);
+  const rows = rowsByDay.get(targetDay) || [];
   const blocks = rows
     .map((row) => {
       const columnIndex = teacherIndex.get(row.teacher);
@@ -1266,10 +1288,10 @@ function buildDailyTeacherPanel(targetDay, workspace, paletteByClassId) {
   };
 }
 
-function buildDailyClassroomPanel(targetDay, workspace, paletteByClassId) {
+function buildDailyClassroomPanel(targetDay, workspace, rowsByDay, paletteByClassId) {
   const columns = workspace.classroomOptions || [];
   const classroomIndex = new Map(columns.map((value, index) => [value, index]));
-  const rows = workspace.rows.filter((row) => row.day === targetDay);
+  const rows = rowsByDay.get(targetDay) || [];
   const blocks = rows
     .map((row) => {
       const columnIndex = classroomIndex.get(row.classroom);
@@ -1314,22 +1336,25 @@ export function buildTimetableGridPanels({
   const activeTargets =
     validTargets.length > 0 ? validTargets : axisOptions;
   const paletteByClassId = buildPaletteByClassId(safeWorkspace.rows);
+  const rowsByTeacher = groupTimetableRows(safeWorkspace.rows, (row) => row.teacher);
+  const rowsByClassroom = groupTimetableRows(safeWorkspace.rows, (row) => row.classroom);
+  const rowsByDay = groupTimetableRows(safeWorkspace.rows, (row) => row.day);
 
   const panels = activeTargets
     .map((target) => {
       if (view === "teacher-weekly") {
-        return buildTeacherWeeklyPanel(target, safeWorkspace, paletteByClassId);
+        return buildTeacherWeeklyPanel(target, rowsByTeacher, paletteByClassId);
       }
 
       if (view === "classroom-weekly") {
-        return buildClassroomWeeklyPanel(target, safeWorkspace, paletteByClassId);
+        return buildClassroomWeeklyPanel(target, rowsByClassroom, paletteByClassId);
       }
 
       if (view === "daily-teacher") {
-        return buildDailyTeacherPanel(target, safeWorkspace, paletteByClassId);
+        return buildDailyTeacherPanel(target, safeWorkspace, rowsByDay, paletteByClassId);
       }
 
-      return buildDailyClassroomPanel(target, safeWorkspace, paletteByClassId);
+      return buildDailyClassroomPanel(target, safeWorkspace, rowsByDay, paletteByClassId);
     })
     .filter((panel) => panel.columns.length > 0);
 
@@ -1338,7 +1363,7 @@ export function buildTimetableGridPanels({
     axisMode,
     axisOptions,
     activeTargets,
-    timeSlots: buildHalfHourSlots(),
+    timeSlots: DEFAULT_TIMETABLE_TIME_SLOTS,
     panels,
   };
 }

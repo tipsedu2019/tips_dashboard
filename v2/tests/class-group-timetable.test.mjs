@@ -141,6 +141,42 @@ test("status filter includes ended classes when the user chooses 종강", () => 
   assert.equal(workspace.rows[0].statusFilter, "종강");
 });
 
+test("timetable rows can be filtered by subject", () => {
+  const workspace = buildTimetableWorkspaceModel({
+    classes: [
+      {
+        id: "math-class",
+        name: "고1 수학",
+        subject: "수학",
+        grade: "고1",
+        teacher: "김성은",
+        classroom: "본관 2강",
+        schedule: "금 21:30-23:00",
+        status: "수강",
+      },
+      {
+        id: "english-class",
+        name: "고1 영어",
+        subject: "영어",
+        grade: "고1",
+        teacher: "한지현",
+        classroom: "별관 4강",
+        schedule: "수 19:30-21:30",
+        status: "수강",
+      },
+    ],
+    filters: {
+      status: "수강",
+      subject: "영어",
+    },
+  });
+
+  assert.deepEqual(workspace.rows.map((row) => row.classId), ["english-class"]);
+  assert.deepEqual(workspace.subjectOptions, ["수학", "영어"]);
+  assert.deepEqual(workspace.teacherOptions, ["한지현"]);
+  assert.deepEqual(workspace.classroomOptions, ["별관 4강"]);
+});
+
 test("classes without explicit groups fall back to a combined year and term group", () => {
   const workspace = buildTimetableWorkspaceModel({
     classes: [
