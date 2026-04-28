@@ -1,41 +1,56 @@
-dist
-node_modules
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+test-results/
+playwright-report/
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.pnpm-debug.log*
+dev-server.log
+vite-ui-check.log
 
-.DS_Store
-*.local
+# local workspace
 .codex-temp/
-.push-temp/
-tmp/
-vite-dev.log
-
-# Local Codex / skill / install helpers
 .codex/
 .codex-artifacts/
 .superpowers/
 .worktrees/
-test-results/
-playwright-report/
-docs/toss-skills-quickstart.md
-install-toss-skills.cmd
-scripts/install-toss-skills.ps1
-scripts/install-superpowers.ps1
-scripts/start-vite-dev.ps1
-
-# Local debug / verification artifacts
+tmp/
 output/
-dev-server.log
-vite-ui-check.log
 debug.zip
 debug_xlsx/
-학원-수업계획-및-진도-공유-시스템/
 
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
 .vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
