@@ -1,10 +1,11 @@
 "use client"
 
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import {
   AlertTriangle,
   BarChart3,
   Layers3,
+  SlidersHorizontal,
   Users,
 } from "lucide-react"
 
@@ -16,6 +17,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
 type DashboardSubjectKey = "all" | "english" | "math"
@@ -302,20 +312,14 @@ const DISTRIBUTION_ROW_CLASS =
 const CLASS_OPERATION_ROW_CLASS =
   "grid w-full grid-cols-[3.25rem_minmax(0,1fr)_3.75rem] items-center gap-2 rounded-md text-left transition-colors hover:bg-muted/45 active:translate-y-px sm:grid-cols-[4rem_minmax(0,1fr)_4.5rem] sm:gap-3"
 
+const DISTRIBUTION_PREVIEW_LIMIT = 6
+
 function AnimatedBar({ percent, className }: { percent: number; className?: string }) {
-  const [scale, setScale] = useState(0)
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      setScale(Math.min(100, Math.max(0, percent)) / 100)
-    })
-
-    return () => cancelAnimationFrame(frame)
-  }, [percent])
+  const scale = Math.min(100, Math.max(0, percent)) / 100
 
   return (
     <div
-      className={cn("h-full origin-left rounded-full transition-transform duration-700 ease-out", className)}
+      className={cn("h-full origin-left rounded-full transition-transform duration-500 ease-out", className)}
       style={{ transform: `scaleX(${scale})` }}
     />
   )
@@ -358,6 +362,79 @@ function SegmentedControl<T extends string>({
   )
 }
 
+function getActiveLabel<T extends string>(items: Array<{ key: T; label: string }>, value: T) {
+  return items.find((item) => item.key === value)?.label ?? value
+}
+
+function FilterRadioGroup<T extends string>({
+  label,
+  value,
+  items,
+  onChange,
+}: {
+  label: string
+  value: T
+  items: Array<{ key: T; label: string }>
+  onChange: (next: T) => void
+}) {
+  return (
+    <DropdownMenuRadioGroup value={value} onValueChange={(next) => onChange(next as T)}>
+      <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs text-muted-foreground">
+        {label}
+      </DropdownMenuLabel>
+      {items.map((item) => (
+        <DropdownMenuRadioItem key={item.key} value={item.key}>
+          {item.label}
+        </DropdownMenuRadioItem>
+      ))}
+    </DropdownMenuRadioGroup>
+  )
+}
+
+function DashboardFilterMenu({
+  subject,
+  division,
+  onSubjectChange,
+  onDivisionChange,
+}: {
+  subject: DashboardSubjectKey
+  division: DashboardDivisionKey
+  onSubjectChange: (next: DashboardSubjectKey) => void
+  onDivisionChange: (next: DashboardDivisionKey) => void
+}) {
+  const subjectLabel = getActiveLabel(SUBJECT_TABS, subject)
+  const divisionLabel = getActiveLabel(DIVISION_TABS, division)
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-9 max-w-full items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-muted/60 active:translate-y-px"
+        >
+          <SlidersHorizontal className="size-4 text-muted-foreground" />
+          <span className="truncate">{subjectLabel} · {divisionLabel}</span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-44">
+        <FilterRadioGroup
+          label="과목"
+          value={subject}
+          items={SUBJECT_TABS}
+          onChange={onSubjectChange}
+        />
+        <DropdownMenuSeparator />
+        <FilterRadioGroup
+          label="부서"
+          value={division}
+          items={DIVISION_TABS}
+          onChange={onDivisionChange}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function DashboardHeader({
   subject,
   division,
@@ -374,28 +451,19 @@ function DashboardHeader({
   return (
     <div className="min-w-0">
       <div className="min-w-0 space-y-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold tracking-tight">대시보드</h1>
-          {metrics.error || !metrics.isConnected ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <DashboardFilterMenu
+            subject={subject}
+            division={division}
+            onSubjectChange={onSubjectChange}
+            onDivisionChange={onDivisionChange}
+          />
+          {!metrics.isLoading && (metrics.error || !metrics.isConnected) ? (
             <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
               <AlertTriangle className="size-3.5" />
               연결 확인
             </Badge>
           ) : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <SegmentedControl
-            label="과목 보기"
-            value={subject}
-            items={SUBJECT_TABS}
-            onChange={onSubjectChange}
-          />
-          <SegmentedControl
-            label="부서 보기"
-            value={division}
-            items={DIVISION_TABS}
-            onChange={onDivisionChange}
-          />
         </div>
       </div>
     </div>
@@ -445,7 +513,7 @@ function KpiStrip({
   ]
 
   return (
-    <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid min-w-0 gap-3 md:grid-cols-2 lg:grid-cols-4">
       {cards.map((card) => {
         const Icon = card.icon
 
@@ -476,9 +544,50 @@ function KpiStrip({
   )
 }
 
+function DashboardLoadingState() {
+  return (
+    <>
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="min-h-34 rounded-xl border bg-card p-4 shadow-xs">
+            <div className="h-4 w-28 animate-pulse rounded bg-muted" />
+            <div className="mt-5 h-8 w-20 animate-pulse rounded bg-muted" />
+            <div className="mt-6 h-4 w-16 animate-pulse rounded bg-muted" />
+          </div>
+        ))}
+      </div>
+      <div className="h-12 rounded-xl border bg-muted/15" />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
+        <div className="min-h-[24rem] rounded-xl border bg-card p-5 shadow-xs">
+          <div className="h-5 w-36 animate-pulse rounded bg-muted" />
+          <div className="mt-8 grid gap-5">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="grid grid-cols-[5rem_minmax(0,1fr)_3rem] items-center gap-3">
+                <div className="h-4 animate-pulse rounded bg-muted" />
+                <div className="h-2 animate-pulse rounded-full bg-muted" />
+                <div className="h-4 animate-pulse rounded bg-muted" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="min-h-[24rem] rounded-xl border bg-card p-5 shadow-xs">
+          <div className="h-5 w-24 animate-pulse rounded bg-muted" />
+          <div className="mt-8 grid gap-4">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="h-10 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
   const [basis, setBasis] = useState<StudentBasis>("students")
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set())
+  const [showAllGrades, setShowAllGrades] = useState(false)
+  const [showAllSchools, setShowAllSchools] = useState(false)
   const getValue = (row: BreakdownRow) => (basis === "students" ? row.studentCount : row.enrollmentCount)
   const unit = "명"
   const toggleExpanded = (key: string) => {
@@ -501,6 +610,8 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
     .sort((left, right) => getValue(right) - getValue(left) || left.label.localeCompare(right.label, "ko", { numeric: true }))
   const gradeMax = getMaxValue(gradeRows, basis)
   const schoolMax = getMaxValue(schoolRows, basis)
+  const visibleGradeRows = showAllGrades ? gradeRows : gradeRows.slice(0, DISTRIBUTION_PREVIEW_LIMIT)
+  const visibleSchoolRows = showAllSchools ? schoolRows : schoolRows.slice(0, DISTRIBUTION_PREVIEW_LIMIT)
 
   return (
     <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
@@ -528,7 +639,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
             <span className="text-xs text-muted-foreground">{basis === "students" ? "인원 기준" : "수강 기준"}</span>
           </div>
           <div className="space-y-3">
-          {gradeRows.map((row) => {
+          {visibleGradeRows.map((row) => {
             const value = getValue(row)
             const expansionKey = `grade:${row.label}`
             const isExpanded = expandedKeys.has(expansionKey)
@@ -571,6 +682,15 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
               </div>
             )
           })}
+          {gradeRows.length > DISTRIBUTION_PREVIEW_LIMIT ? (
+            <button
+              type="button"
+              onClick={() => setShowAllGrades((current) => !current)}
+              className="w-fit rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 active:translate-y-px"
+            >
+              {showAllGrades ? "접기" : `전체 ${formatNumber(gradeRows.length)}개 보기`}
+            </button>
+          ) : null}
           {gradeRows.length === 0 ? (
             <EmptyLine label="선택 탭에 표시할 학생 데이터가 없습니다." />
           ) : null}
@@ -582,7 +702,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
             <span className="text-xs text-muted-foreground">{basis === "students" ? "인원 기준" : "수강 기준"}</span>
           </div>
           <div className="space-y-3">
-            {schoolRows.map((row) => {
+            {visibleSchoolRows.map((row) => {
               const value = getValue(row)
               const expansionKey = `school:${row.label}`
               const isExpanded = expandedKeys.has(expansionKey)
@@ -626,6 +746,15 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
                 </div>
               )
             })}
+            {schoolRows.length > DISTRIBUTION_PREVIEW_LIMIT ? (
+              <button
+                type="button"
+                onClick={() => setShowAllSchools((current) => !current)}
+                className="w-fit rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 active:translate-y-px"
+              >
+                {showAllSchools ? "접기" : `전체 ${formatNumber(schoolRows.length)}개 보기`}
+              </button>
+            ) : null}
             {schoolRows.length === 0 ? <EmptyLine label="학교별 데이터 없음" /> : null}
           </div>
         </section>
@@ -751,6 +880,19 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
 function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
   const affectedCount = rows.reduce((sum, row) => sum + row.affectedCount, 0)
 
+  if (rows.length === 0) {
+    return (
+      <div className="flex min-w-0 items-center justify-between gap-3 rounded-xl border bg-muted/15 px-4 py-3 text-sm">
+        <div className="flex min-w-0 items-center gap-2">
+          <AlertTriangle className="size-4 text-muted-foreground" />
+          <span className="font-medium">일정 충돌 없음</span>
+          <span className="hidden text-muted-foreground sm:inline">선택한 범위의 일정은 바로 운영할 수 있습니다.</span>
+        </div>
+        <Badge variant="outline">0</Badge>
+      </div>
+    )
+  }
+
   return (
     <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
       <CardHeader className="px-4 sm:px-5">
@@ -812,17 +954,11 @@ function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
             </div>
           ))}
         </div>
-        {rows.length === 0 ? (
-          <div className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-            선택 탭의 일정 충돌이 없습니다.
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2 border-t pt-4">
-            <Badge variant="outline">충돌 영향 학생 {formatNumber(affectedCount)}명</Badge>
-            <Badge variant="outline">대상 수업 {formatNumber(rows.length)}개</Badge>
-            <Badge variant="outline">오늘 확정 필요 {formatNumber(rows.length)}건</Badge>
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2 border-t pt-4">
+          <Badge variant="outline">충돌 영향 학생 {formatNumber(affectedCount)}명</Badge>
+          <Badge variant="outline">대상 수업 {formatNumber(rows.length)}개</Badge>
+          <Badge variant="outline">오늘 확정 필요 {formatNumber(rows.length)}건</Badge>
+        </div>
       </CardContent>
     </Card>
   )
@@ -858,6 +994,21 @@ export function SectionCards({ metrics }: { metrics: DashboardMetrics }) {
     [activeDivision, activeSubject, metrics.examConflicts],
   )
 
+  if (metrics.isLoading) {
+    return (
+      <div className="grid min-w-0 gap-4">
+        <DashboardHeader
+          subject={activeSubject}
+          division={activeDivision}
+          onSubjectChange={setActiveSubject}
+          onDivisionChange={setActiveDivision}
+          metrics={metrics}
+        />
+        <DashboardLoadingState />
+      </div>
+    )
+  }
+
   return (
     <div className="grid min-w-0 gap-4">
       <DashboardHeader
@@ -869,7 +1020,7 @@ export function SectionCards({ metrics }: { metrics: DashboardMetrics }) {
       />
       <KpiStrip metrics={metrics} summary={summary} />
       <ConflictBoard rows={conflictRows} />
-      <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.85fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
         <StudentDistributionPanel bucket={activeBucket} />
         <ClassOperationsPanel bucket={activeBucket} />
       </div>

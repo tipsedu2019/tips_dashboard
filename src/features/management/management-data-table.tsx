@@ -24,9 +24,11 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  Pencil,
   Plus,
   Search,
   Settings2,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
@@ -261,10 +263,37 @@ type ManagementTableActions = {
   onCreate?: () => void;
   onOpenRow?: (row: ManagementRow) => void;
   onDeleteRow?: (row: ManagementRow) => void;
+  onBulkUpdateRows?: (rows: ManagementRow[], change: { field: string; value: string }) => Promise<void> | void;
+  onBulkDeleteRows?: (rows: ManagementRow[]) => Promise<void> | void;
   onOpenSchoolMaster?: () => void;
   onOpenTeacherMaster?: () => void;
   onOpenClassroomMaster?: () => void;
   onOpenTermManager?: () => void;
+};
+
+type BulkEditField = {
+  id: string;
+  label: string;
+  placeholder: string;
+  options?: string[];
+};
+
+const BULK_EDIT_FIELDS: Record<ManagementKind, BulkEditField[]> = {
+  students: [
+    { id: "school_category", label: "학교 구분", placeholder: "고등/중등/초등", options: Array.from(STUDENT_SCHOOL_CATEGORY_OPTIONS) },
+    { id: "school", label: "학교", placeholder: "학교명" },
+    { id: "grade", label: "학년", placeholder: "고1" },
+  ],
+  classes: [
+    { id: "status", label: "수업 상태", placeholder: "수강", options: Array.from(CLASS_STATUS_FILTER_OPTIONS) },
+    { id: "subject", label: "과목", placeholder: "영어" },
+    { id: "teacher", label: "선생님", placeholder: "선생님명" },
+    { id: "classroom", label: "강의실", placeholder: "강의실" },
+  ],
+  textbooks: [
+    { id: "status", label: "상태", placeholder: "사용중" },
+    { id: "publisher", label: "출판사", placeholder: "출판사" },
+  ],
 };
 
 function getStatusColor(value: string) {
@@ -1170,6 +1199,101 @@ function buildSortingValue(
   ].filter(Boolean) as SortingState;
 }
 
+function ManagementBulkActionBar({
+  selectedCount,
+  fields,
+  field,
+  value,
+  pending,
+  onFieldChange,
+  onValueChange,
+  onApply,
+  onDelete,
+  onClear,
+}: {
+  selectedCount: number;
+  fields: BulkEditField[];
+  field: string;
+  value: string;
+  pending: boolean;
+  onFieldChange: (value: string) => void;
+  onValueChange: (value: string) => void;
+  onApply: () => void;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  if (selectedCount === 0 || fields.length === 0) {
+    return null;
+  }
+
+  const selectedField = fields.find((item) => item.id === field) || fields[0];
+  const valueOptions = selectedField.options || [];
+  const canApply = value.trim().length > 0 && !pending;
+
+  return (
+    <div className="flex flex-col gap-3 border border-primary/20 bg-primary/5 px-3 py-3 md:flex-row md:items-end md:justify-between">
+      <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-end">
+        <Badge variant="secondary" className="h-9 w-fit rounded-md px-3">
+          선택 {selectedCount}건
+        </Badge>
+        <div className="grid min-w-[9rem] gap-1.5">
+          <Label className="text-xs text-muted-foreground">수정 항목</Label>
+          <Select value={selectedField.id} onValueChange={onFieldChange}>
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {fields.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid min-w-[12rem] flex-1 gap-1.5">
+          <Label className="text-xs text-muted-foreground">변경 값</Label>
+          {valueOptions.length > 0 ? (
+            <Select value={value || "__empty__"} onValueChange={(nextValue) => onValueChange(nextValue === "__empty__" ? "" : nextValue)}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder={selectedField.placeholder} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__empty__">선택 안 함</SelectItem>
+                {valueOptions.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              value={value}
+              onChange={(event) => onValueChange(event.target.value)}
+              placeholder={selectedField.placeholder}
+              className="h-9"
+            />
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" size="sm" className="h-9" disabled={!canApply} onClick={onApply}>
+          <Pencil className="mr-2 size-4" />
+          일괄 수정
+        </Button>
+        <Button type="button" size="sm" variant="destructive" className="h-9" disabled={pending} onClick={onDelete}>
+          <Trash2 className="mr-2 size-4" />
+          일괄 삭제
+        </Button>
+        <Button type="button" size="sm" variant="ghost" className="h-9" disabled={pending} onClick={onClear}>
+          선택 해제
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function ManagementDataTable({
   kind,
   rows,
@@ -1208,6 +1332,9 @@ export function ManagementDataTable({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [columnSearchQuery, setColumnSearchQuery] = useState("");
   const [hydratedStorageKey, setHydratedStorageKey] = useState("");
+  const [bulkEditField, setBulkEditField] = useState(BULK_EDIT_FIELDS[kind][0]?.id || "");
+  const [bulkEditValue, setBulkEditValue] = useState("");
+  const [bulkActionPending, setBulkActionPending] = useState(false);
 
   const columns = useMemo<ColumnDef<ManagementRow>[]>(() => {
     const fixedColumns: ColumnDef<ManagementRow>[] = [
@@ -1436,6 +1563,13 @@ export function ManagementDataTable({
   const defaultColumnSizing = useMemo(() => buildDefaultColumnSizing(allColumnIds), [allColumnIds]);
 
   useEffect(() => {
+    setBulkEditField(BULK_EDIT_FIELDS[kind][0]?.id || "");
+    setBulkEditValue("");
+    setBulkActionPending(false);
+    setRowSelection({});
+  }, [kind]);
+
+  useEffect(() => {
     const fallback = sanitizePreferences(kind, null, allColumnIds, defaultVisibility, defaultColumnSizing);
     setHydratedStorageKey("");
 
@@ -1622,6 +1756,7 @@ export function ManagementDataTable({
       return row.original.searchText.toLowerCase().includes(normalized);
     },
     onGlobalFilterChange: setGlobalFilter,
+    autoResetAll: false,
     defaultColumn: {
       minSize: 72,
       size: 140,
@@ -1732,6 +1867,9 @@ export function ManagementDataTable({
     ? `수업 ${filteredClassRows.length}개, 등록 ${classRegisteredTotal}명, 대기 ${classWaitlistTotal}명, 주간 수업시수 ${formatWeeklyMinutes(classWeeklyMinutesTotal)}`
     : `표시 ${filteredRowCount}건`;
   const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
+  const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original);
+  const bulkEditFields = BULK_EDIT_FIELDS[kind];
+  const selectedBulkEditField = bulkEditFields.find((item) => item.id === bulkEditField) || bulkEditFields[0];
   const visibleColumns = columnOptions.filter((option) => table.getColumn(option.id)?.getIsVisible()).length;
   const matchingColumnOrder = columnOrder.filter((columnId) => {
     if (columnId === "select") {
@@ -2199,6 +2337,11 @@ export function ManagementDataTable({
           })),
         ].filter(Boolean) as ClassFilterPanelChip[]
       : [];
+  const activeStudentFilterCount = [
+    studentSchoolCategoryFilter,
+    studentSchoolFilter,
+    studentGradeFilter,
+  ].filter(Boolean).length;
 
   const renderStudentSchoolCategorySelect = () => (
     <div className="min-w-0">
@@ -2284,6 +2427,56 @@ export function ManagementDataTable({
     </div>
   );
 
+  async function submitBulkUpdate() {
+    if (!selectedRows.length || !selectedBulkEditField || !bulkEditValue.trim() || !actions.onBulkUpdateRows) {
+      return;
+    }
+
+    setBulkActionPending(true);
+    try {
+      await actions.onBulkUpdateRows(selectedRows, {
+        field: selectedBulkEditField.id,
+        value: bulkEditValue.trim(),
+      });
+      setBulkEditValue("");
+      setRowSelection({});
+    } finally {
+      setBulkActionPending(false);
+    }
+  }
+
+  async function submitBulkDelete() {
+    if (!selectedRows.length || !actions.onBulkDeleteRows) {
+      return;
+    }
+
+    setBulkActionPending(true);
+    try {
+      await actions.onBulkDeleteRows(selectedRows);
+      setRowSelection({});
+    } finally {
+      setBulkActionPending(false);
+    }
+  }
+
+  const bulkActionBar = (
+    <ManagementBulkActionBar
+      selectedCount={selectedRows.length}
+      fields={bulkEditFields}
+      field={bulkEditField}
+      value={bulkEditValue}
+      pending={bulkActionPending}
+      onFieldChange={(nextField) => {
+        setBulkEditField(nextField);
+        setBulkEditValue("");
+      }}
+      onValueChange={setBulkEditValue}
+      onApply={() => void submitBulkUpdate()}
+      onDelete={() => void submitBulkDelete()}
+      onClear={() => setRowSelection({})}
+    />
+  );
+
   return (
     <div className="w-full space-y-3">
       {kind === "classes" ? (
@@ -2299,30 +2492,50 @@ export function ManagementDataTable({
           createLabel={createLabel}
           onCreate={actions.onCreate}
           createDisabled={!hasCreateAction}
-          footerAction={
-            selectedRowCount > 0 ? (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setRowSelection({})}>
-                선택 해제
-              </Button>
-            ) : null
-          }
+          footerAction={null}
         />
       ) : (
         <div className="flex flex-col gap-2 border border-border/70 bg-background px-3 py-3">
           <div
             className={cn(
-              "grid gap-2",
+              kind === "students" ? "flex flex-wrap items-center gap-2" : "grid gap-2",
               kind === "students"
-                ? "md:grid-cols-2 xl:grid-cols-[minmax(9rem,0.8fr)_minmax(12rem,1fr)_minmax(9rem,0.8fr)_minmax(18rem,1.45fr)_9rem]"
+                ? ""
                 : "md:grid-cols-2 xl:grid-cols-[minmax(18rem,1fr)_minmax(14rem,1fr)_11rem_auto]",
             )}
           >
             {kind === "students" ? (
               <>
-                {renderStudentSchoolCategorySelect()}
-                {renderStudentSchoolSelect()}
-                {renderStudentGradeSelect()}
-                {searchControl}
+                <div className="min-w-[16rem] flex-1">{searchControl}</div>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" size="sm" className="h-9 shrink-0 rounded-md">
+                      <SlidersHorizontal className="mr-2 size-4" />
+                      필터
+                      {activeStudentFilterCount > 0 ? (
+                        <span className="ml-2 rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
+                          {activeStudentFilterCount}
+                        </span>
+                      ) : null}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-[min(34rem,calc(100vw-2rem))] p-3">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="grid min-w-0 gap-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground">학교 구분</Label>
+                        {renderStudentSchoolCategorySelect()}
+                      </div>
+                      <div className="grid min-w-0 gap-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground">학교</Label>
+                        {renderStudentSchoolSelect()}
+                      </div>
+                      <div className="grid min-w-0 gap-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground">학년</Label>
+                        {renderStudentGradeSelect()}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 {createControl}
               </>
             ) : (
@@ -2389,17 +2602,14 @@ export function ManagementDataTable({
             {studentSchoolFilter ? <Badge variant="outline">학교 {studentSchoolFilter}</Badge> : null}
             {studentGradeFilter ? <Badge variant="outline">학년 {studentGradeFilter}</Badge> : null}
             {resetControl}
-            {selectedRowCount > 0 ? (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setRowSelection({})}>
-                선택 해제
-              </Button>
-            ) : null}
           </div>
         </div>
       )}
 
-      <div className="overflow-hidden border border-border/70 bg-background">
-        <Table className="table-fixed">
+      {bulkActionBar}
+
+      <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
+        <Table className="min-w-[980px] table-fixed">
           <caption className="sr-only">{emptyLabel} 운영 목록{captionSuffix ? ` · ${captionSuffix}` : ""}</caption>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -2413,7 +2623,7 @@ export function ManagementDataTable({
                       key={header.id}
                       aria-sort={sortState === "asc" ? "ascending" : sortState === "desc" ? "descending" : undefined}
                       className={cn(
-                        "sticky top-0 z-10 border-b bg-background px-3 py-2 text-xs font-semibold text-foreground relative",
+                        "sticky top-0 z-10 border-b bg-muted/30 px-3 py-2 text-xs font-semibold text-foreground relative",
                         getPinnedColumnClassName(header.id),
                       )}
                       style={getColumnSizeStyle(header.getSize())}
@@ -2480,7 +2690,7 @@ export function ManagementDataTable({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  className="border-b transition-colors hover:bg-muted/30 last:border-b-0"
+                  className="border-b transition-colors hover:bg-muted/30 data-[state=selected]:bg-primary/5 last:border-b-0"
                 >
                   {row.getVisibleCells().map((cell) => {
                     if (cell.getIsGrouped()) {

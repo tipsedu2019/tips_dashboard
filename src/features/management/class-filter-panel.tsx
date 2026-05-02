@@ -1,12 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Plus, Search, X } from "lucide-react";
+import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -48,6 +49,7 @@ type ClassFilterPanelProps = {
   chips?: ClassFilterPanelChip[];
   showReset?: boolean;
   onReset?: () => void;
+  filterCount?: number;
   createLabel?: string;
   onCreate?: () => void;
   createDisabled?: boolean;
@@ -68,6 +70,7 @@ export function ClassFilterPanel({
   chips = [],
   showReset = false,
   onReset,
+  filterCount,
   createLabel,
   onCreate,
   createDisabled = false,
@@ -75,62 +78,75 @@ export function ClassFilterPanel({
   className,
 }: ClassFilterPanelProps) {
   const hasCreate = Boolean(createLabel);
+  const activeFilterCount = filterCount ?? chips.length;
 
   return (
     <div className={cn("flex flex-col gap-2 border border-border/70 bg-background px-3 py-3", className)}>
-      <div
-        className={cn(
-          "grid grid-cols-1 gap-2 md:grid-cols-2",
-          hasCreate
-            ? "xl:grid-cols-[minmax(9rem,0.8fr)_minmax(9rem,0.8fr)_minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(9rem,0.85fr)_minmax(9rem,0.85fr)_minmax(14rem,1.35fr)_8.5rem]"
-            : "xl:grid-cols-[minmax(9rem,0.8fr)_minmax(9rem,0.8fr)_minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(9rem,0.85fr)_minmax(9rem,0.85fr)_minmax(14rem,1.35fr)]",
-        )}
-      >
-        {selects.map((select) => {
-          const options = normalizeOptions(select.options);
-          const emptyValue = select.emptyValue || "all";
-          const value = select.value || (select.allowEmpty ? emptyValue : options[0]?.value || emptyValue);
-          const disabled = select.disabled || (!select.allowEmpty && options.length === 0);
-
-          return (
-            <div key={select.id} className="min-w-0">
-              <Label htmlFor={`${select.id}-filter`} className="sr-only">
-                {select.label}
-              </Label>
-              <Select value={value} disabled={disabled} onValueChange={select.onChange}>
-                <SelectTrigger className="h-9 w-full" id={`${select.id}-filter`} aria-label={select.label}>
-                  <SelectValue placeholder={select.label} />
-                </SelectTrigger>
-                <SelectContent>
-                  {select.allowEmpty ? (
-                    <SelectItem value={emptyValue}>{select.emptyLabel || `전체 ${select.label}`}</SelectItem>
-                  ) : null}
-                  {!select.allowEmpty && options.length === 0 ? (
-                    <SelectItem value={emptyValue} disabled>
-                      {select.emptyLabel || `${select.label} 없음`}
-                    </SelectItem>
-                  ) : null}
-                  {options.map((option) => (
-                    <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          );
-        })}
-
-        <div className="relative min-w-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[16rem] flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            aria-label="검색"
+            aria-label={searchPlaceholder}
             placeholder={searchPlaceholder}
             value={searchValue}
             onChange={(event) => onSearchChange(event.target.value)}
             className="h-9 pl-9"
           />
         </div>
+
+        {selects.length > 0 ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="outline" size="sm" className="h-9 shrink-0 rounded-md">
+                <SlidersHorizontal className="mr-2 size-4" />
+                필터
+                {activeFilterCount > 0 ? (
+                  <span className="ml-2 rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[min(34rem,calc(100vw-2rem))] p-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {selects.map((select) => {
+                  const options = normalizeOptions(select.options);
+                  const emptyValue = select.emptyValue || "all";
+                  const value = select.value || (select.allowEmpty ? emptyValue : options[0]?.value || emptyValue);
+                  const disabled = select.disabled || (!select.allowEmpty && options.length === 0);
+
+                  return (
+                    <div key={select.id} className="grid min-w-0 gap-1.5">
+                      <Label htmlFor={`${select.id}-filter`} className="text-xs font-medium text-muted-foreground">
+                        {select.label}
+                      </Label>
+                      <Select value={value} disabled={disabled} onValueChange={select.onChange}>
+                        <SelectTrigger className="h-9 w-full" id={`${select.id}-filter`} aria-label={select.label}>
+                          <SelectValue placeholder={select.label} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {select.allowEmpty ? (
+                            <SelectItem value={emptyValue}>{select.emptyLabel || `전체 ${select.label}`}</SelectItem>
+                          ) : null}
+                          {!select.allowEmpty && options.length === 0 ? (
+                            <SelectItem value={emptyValue} disabled>
+                              {select.emptyLabel || `${select.label} 없음`}
+                            </SelectItem>
+                          ) : null}
+                          {options.map((option) => (
+                            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : null}
 
         {hasCreate ? (
           <Button

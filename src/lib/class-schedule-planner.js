@@ -537,6 +537,31 @@ function createBillingPeriod(
   };
 }
 
+function ensureUniqueBillingPeriodIds(periods = []) {
+  const usedIds = new Set();
+  const baseCounts = new Map();
+
+  return periods.map((period, index) => {
+    const baseId =
+      String(period?.id || "").trim() ||
+      buildDeterministicBillingPeriodId(period, index, period?.endDate);
+    const nextCount = (baseCounts.get(baseId) || 0) + 1;
+    baseCounts.set(baseId, nextCount);
+
+    let resolvedId = baseId;
+    if (usedIds.has(resolvedId)) {
+      let suffix = nextCount;
+      do {
+        resolvedId = `${baseId}-${suffix}`;
+        suffix += 1;
+      } while (usedIds.has(resolvedId));
+    }
+
+    usedIds.add(resolvedId);
+    return resolvedId === period.id ? period : { ...period, id: resolvedId };
+  });
+}
+
 function createInitialBillingPeriods(
   rawPlan,
   defaults,
@@ -548,15 +573,17 @@ function createInitialBillingPeriods(
       return [];
     }
 
-    return rawPlan.billingPeriods.map((period, index) =>
-      createBillingPeriod(period, index, selectedDays, globalSessionCount),
+    return ensureUniqueBillingPeriodIds(
+      rawPlan.billingPeriods.map((period, index) =>
+        createBillingPeriod(period, index, selectedDays, globalSessionCount),
+      ),
     );
   }
 
   const startDate = String(defaults.startDate || "").trim();
   const endDate = String(defaults.endDate || "").trim();
 
-  return [
+  return ensureUniqueBillingPeriodIds([
     createBillingPeriod(
       {
         month: extractMonth(startDate),
@@ -567,7 +594,7 @@ function createInitialBillingPeriods(
       selectedDays,
       globalSessionCount,
     ),
-  ];
+  ]);
 }
 
 function normalizeRangeType(value, fallback = "custom") {
@@ -627,6 +654,16 @@ function normalizeTextbookCatalog(rawPlan, defaults = {}) {
             ? "main"
             : "supplement",
       alias: String(textbook?.alias || "").trim(),
+      area: String(textbook?.area || textbook?.category || "").trim(),
+      subSubject: String(
+        textbook?.subSubject || textbook?.sub_subject || textbook?.unit || "",
+      ).trim(),
+      startSessionId: String(
+        textbook?.startSessionId || textbook?.start_session_id || "",
+      ).trim(),
+      endSessionId: String(
+        textbook?.endSessionId || textbook?.end_session_id || "",
+      ).trim(),
     }))
     .filter((textbook) => textbook.textbookId)
     .sort((left, right) => left.order - right.order);
@@ -635,13 +672,15 @@ function normalizeTextbookCatalog(rawPlan, defaults = {}) {
     const rawMap = new Map(
       rawCatalog.map((textbook) => [textbook.textbookId, textbook]),
     );
-    return [
+    const combinedTextbookIds = [
       ...new Set(
-        idsFromDefaults
-          .map((value) => String(value || "").trim())
-          .filter(Boolean),
+        [
+          ...idsFromDefaults.map((value) => String(value || "").trim()),
+          ...rawCatalog.map((textbook) => textbook.textbookId),
+        ].filter(Boolean),
       ),
-    ].map((textbookId, index) => {
+    ];
+    return combinedTextbookIds.map((textbookId, index) => {
       const textbookMeta = (defaults.textbooks || []).find(
         (item) => String(item?.id || "") === textbookId,
       );
@@ -650,12 +689,25 @@ function normalizeTextbookCatalog(rawPlan, defaults = {}) {
         textbookId,
         order: index,
         role:
-          index === 0
+          previous?.role === "main"
             ? "main"
-            : previous?.role === "supplement"
-              ? "supplement"
+            : index === 0 && previous?.role !== "supplement"
+              ? "main"
               : "supplement",
         alias: previous?.alias || String(textbookMeta?.title || "").trim(),
+        area:
+          previous?.area ||
+          String(textbookMeta?.category || textbookMeta?.area || "").trim(),
+        subSubject:
+          previous?.subSubject ||
+          String(
+            textbookMeta?.subSubject ||
+              textbookMeta?.sub_subject ||
+              textbookMeta?.unit ||
+              "",
+          ).trim(),
+        startSessionId: previous?.startSessionId || "",
+        endSessionId: previous?.endSessionId || "",
       };
     });
   }
@@ -665,6 +717,10 @@ function normalizeTextbookCatalog(rawPlan, defaults = {}) {
     order: index,
     role:
       index === 0 && textbook.role !== "supplement" ? "main" : textbook.role,
+    area: String(textbook.area || "").trim(),
+    subSubject: String(textbook.subSubject || "").trim(),
+    startSessionId: String(textbook.startSessionId || "").trim(),
+    endSessionId: String(textbook.endSessionId || "").trim(),
   }));
 }
 
@@ -673,6 +729,9 @@ function normalizeTextbookEntry(entry = {}, textbook, order) {
     textbookId: textbook.textbookId,
     order,
     role: textbook.role,
+    alias: textbook.alias || "",
+    area: textbook.area || "",
+    subSubject: textbook.subSubject || "",
     plan: normalizePlanRange(entry.plan || entry),
     actual: normalizeActualRange(entry.actual || {}),
   };
@@ -698,6 +757,65 @@ function ensureTextbookEntries(textbooks = [], rawEntries = []) {
       index,
     ),
   );
+}
+
+function resolveTextbookSessionRangeIndex(sessionIndexById, sessionCount, sessionId, fallbackIndex) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return fallbackIndex;
+  }
+
+  const directIndex = sessionIndexById.get(normalizedSessionId);
+  return Number.isFinite(directIndex) ? directIndex : fallbackIndex;
+}
+
+function applyTextbookSessionRanges(sessions = [], textbooks = []) {
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return [];
+  }
+
+  const sessionIndexById = new Map(
+    sessions.map((session, index) => [String(session?.id || "").trim(), index]),
+  );
+  const textbookById = new Map(
+    textbooks.map((textbook) => [String(textbook?.textbookId || "").trim(), textbook]),
+  );
+  const lastSessionIndex = Math.max(0, sessions.length - 1);
+
+  return sessions.map((session, sessionIndex) => {
+    const textbookEntries = ensureTextbookEntries(
+      textbooks,
+      session.textbookEntries,
+    ).filter((entry) => {
+      const textbook = textbookById.get(String(entry?.textbookId || "").trim());
+      if (!textbook) {
+        return false;
+      }
+
+      const startIndex = resolveTextbookSessionRangeIndex(
+        sessionIndexById,
+        sessions.length,
+        textbook.startSessionId,
+        0,
+      );
+      const endIndex = resolveTextbookSessionRangeIndex(
+        sessionIndexById,
+        sessions.length,
+        textbook.endSessionId,
+        lastSessionIndex,
+      );
+      const firstActiveIndex = Math.min(startIndex, endIndex);
+      const lastActiveIndex = Math.max(startIndex, endIndex);
+
+      return sessionIndex >= firstActiveIndex && sessionIndex <= lastActiveIndex;
+    });
+
+    return {
+      ...session,
+      progressStatus: getProgressStatusFromEntries(textbookEntries),
+      textbookEntries,
+    };
+  });
 }
 
 function getSourceDateForSession(session = {}) {
@@ -956,9 +1074,10 @@ export function calculateSchedulePlan(planInput) {
   const selectedDays = uniqueSortedDays(safePlanInput.selectedDays);
   const globalSessionCount = getRecommendedSessionCount(selectedDays);
   const sessionStates = normalizeSessionStates(safePlanInput.sessionStates);
-  const billingPeriods = (safePlanInput.billingPeriods || []).map(
-    (period, index) =>
+  const billingPeriods = ensureUniqueBillingPeriodIds(
+    (safePlanInput.billingPeriods || []).map((period, index) =>
       createBillingPeriod(period, index, selectedDays, globalSessionCount),
+    ),
   );
   const textbooks = normalizeTextbookCatalog(safePlanInput, safePlanInput);
   const existingMaps = buildExistingSessionMaps(
@@ -1144,6 +1263,17 @@ export function calculateSchedulePlan(planInput) {
     );
   });
 
+  const rangedSessions = applyTextbookSessionRanges(sessions, textbooks);
+  const rangedSessionById = new Map(
+    rangedSessions.map((session) => [String(session?.id || "").trim(), session]),
+  );
+
+  Object.keys(editorEntriesByPeriod).forEach((periodId) => {
+    editorEntriesByPeriod[periodId] = (editorEntriesByPeriod[periodId] || []).map(
+      (session) => rangedSessionById.get(String(session?.id || "").trim()) || session,
+    );
+  });
+
   const months = [];
   if (minDate && maxDate) {
     let cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
@@ -1160,13 +1290,182 @@ export function calculateSchedulePlan(planInput) {
     globalSessionCount,
     editorEntriesByPeriod,
     textbooks,
-    sessions,
+    sessions: rangedSessions,
     months,
     overlapIds: [...overlapIds],
-    hasRenderableData: sessions.length > 0,
+    hasRenderableData: rangedSessions.length > 0,
     minDate,
     maxDate,
   };
+}
+
+function resolveTextbookEntryId(entry = {}, index = 0) {
+  const explicitId = String(entry?.id || "").trim();
+  if (explicitId) {
+    return explicitId;
+  }
+
+  const textbookId = String(
+    entry?.textbookId || entry?.textbook_id || entry?.id || "",
+  ).trim();
+  return `${textbookId || "textbook"}-${index}`;
+}
+
+function hasPlanRangeContent(range = {}) {
+  return Boolean(
+    String(range.start || "").trim() ||
+      String(range.end || "").trim() ||
+      String(range.label || "").trim() ||
+      String(range.memo || "").trim(),
+  );
+}
+
+function materializeSchedulePlanForTextbookEdit(planInput, defaults = {}) {
+  return normalizeSchedulePlan(planInput || {}, defaults);
+}
+
+function updateTextbookPlanEntries(planInput, defaults, updater) {
+  const materialized = materializeSchedulePlanForTextbookEdit(planInput, defaults);
+  const sessions = materialized.sessions.map((session, sessionIndex) => {
+    const textbookEntries = ensureTextbookEntries(
+      materialized.textbooks,
+      session.textbookEntries,
+    ).map((entry, entryIndex) =>
+      updater({
+        entry,
+        entryIndex,
+        entryId: resolveTextbookEntryId(entry, entryIndex),
+        session,
+        sessionIndex,
+      }),
+    );
+
+    return {
+      ...session,
+      progressStatus: getProgressStatusFromEntries(textbookEntries),
+      textbookEntries,
+    };
+  });
+
+  return normalizeSchedulePlan(
+    {
+      ...materialized,
+      sessions,
+    },
+    defaults,
+  );
+}
+
+export function applyTextbookPlanRange(planInput, defaults = {}, options = {}) {
+  const sessionId = String(options?.sessionId || "").trim();
+  const entryId = String(options?.entryId || "").trim();
+  const range = normalizePlanRange(
+    options?.range || options?.preset || options?.plan || {},
+  );
+
+  if (!sessionId || !entryId || !hasPlanRangeContent(range)) {
+    return materializeSchedulePlanForTextbookEdit(planInput, defaults);
+  }
+
+  return updateTextbookPlanEntries(planInput, defaults, ({ entry, entryId: currentEntryId, session }) => {
+    if (String(session?.id || "").trim() !== sessionId || currentEntryId !== entryId) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      plan: normalizePlanRange({
+        ...(entry.plan || {}),
+        ...range,
+      }),
+    };
+  });
+}
+
+export function applyTextbookPlanRangeField(planInput, defaults = {}, options = {}) {
+  const sessionId = String(options?.sessionId || "").trim();
+  const entryId = String(options?.entryId || "").trim();
+  const field = String(options?.field || "").trim();
+  const allowedFields = new Set(["start", "end", "label", "memo"]);
+
+  if (!sessionId || !entryId || !allowedFields.has(field)) {
+    return materializeSchedulePlanForTextbookEdit(planInput, defaults);
+  }
+
+  return updateTextbookPlanEntries(planInput, defaults, ({ entry, entryId: currentEntryId, session }) => {
+    if (String(session?.id || "").trim() !== sessionId || currentEntryId !== entryId) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      plan: normalizePlanRange({
+        ...(entry.plan || {}),
+        [field]: String(options?.value || ""),
+      }),
+    };
+  });
+}
+
+export function autoFillTextbookPlanRanges(planInput, defaults = {}, options = {}) {
+  const startSessionId = String(options?.startSessionId || options?.sessionId || "").trim();
+  const entryId = String(options?.entryId || "").trim();
+  const ranges = (Array.isArray(options?.ranges) ? options.ranges : options?.presets || [])
+    .map((range) => normalizePlanRange(range))
+    .filter(hasPlanRangeContent);
+
+  if (!startSessionId || !entryId || ranges.length === 0) {
+    return materializeSchedulePlanForTextbookEdit(planInput, defaults);
+  }
+
+  const materialized = materializeSchedulePlanForTextbookEdit(planInput, defaults);
+  const startIndex = materialized.sessions.findIndex(
+    (session) => String(session?.id || "").trim() === startSessionId,
+  );
+
+  if (startIndex < 0) {
+    return materialized;
+  }
+
+  let rangeIndex = 0;
+  return updateTextbookPlanEntries(materialized, defaults, ({ entry, entryId: currentEntryId, sessionIndex }) => {
+    if (sessionIndex < startIndex || currentEntryId !== entryId) {
+      return entry;
+    }
+
+    const range = ranges[rangeIndex % ranges.length];
+    rangeIndex += 1;
+
+    return {
+      ...entry,
+      plan: normalizePlanRange({
+        ...(entry.plan || {}),
+        ...range,
+      }),
+    };
+  });
+}
+
+export function autoFillAllTextbookPlanRanges(planInput, defaults = {}, options = {}) {
+  const startSessionId = String(options?.startSessionId || options?.sessionId || "").trim();
+  const rangesByEntryId =
+    options?.rangesByEntryId && typeof options.rangesByEntryId === "object" ? options.rangesByEntryId : {};
+
+  let nextPlan = materializeSchedulePlanForTextbookEdit(planInput, defaults);
+  Object.entries(rangesByEntryId).forEach(([entryId, ranges]) => {
+    const normalizedEntryId = String(entryId || "").trim();
+    if (!normalizedEntryId || !Array.isArray(ranges) || ranges.length === 0) {
+      return;
+    }
+
+    nextPlan = autoFillTextbookPlanRanges(nextPlan, defaults, {
+      startSessionId,
+      entryId: normalizedEntryId,
+      ranges,
+    });
+  });
+
+  return nextPlan;
 }
 
 export function buildSchedulePlanForSave(plan, defaults = {}) {
@@ -1199,6 +1498,10 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
             ? "main"
             : textbook.role,
       alias: textbook.alias || "",
+      area: textbook.area || "",
+      subSubject: textbook.subSubject || "",
+      startSessionId: textbook.startSessionId || "",
+      endSessionId: textbook.endSessionId || "",
     })),
     sessions: calculated.sessions.map((session) => ({
       id: session.id,
@@ -1218,13 +1521,16 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
         getProgressStatusFromEntries(session.textbookEntries),
       publicNote: session.publicNote || "",
       teacherNote: session.teacherNote || "",
-      textbookEntries: ensureTextbookEntries(
-        calculated.textbooks,
-        session.textbookEntries,
+      textbookEntries: (Array.isArray(session.textbookEntries)
+        ? session.textbookEntries
+        : []
       ).map((entry) => ({
         textbookId: entry.textbookId,
         order: entry.order,
         role: entry.role,
+        alias: entry.alias || "",
+        area: entry.area || "",
+        subSubject: entry.subSubject || "",
         plan: normalizePlanRange(entry.plan || DEFAULT_PLAN_RANGE),
         actual: normalizeActualRange(entry.actual || DEFAULT_ACTUAL_RANGE),
       })),

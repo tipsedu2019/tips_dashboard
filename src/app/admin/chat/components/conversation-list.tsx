@@ -51,6 +51,17 @@ function formatMessageTime(timestamp: string): string {
   }
 }
 
+function getStableOnlineStatus(conversation: Conversation) {
+  const seed = `${conversation.id}:${conversation.name}`
+  let hash = 0
+
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) % 997
+  }
+
+  return hash % 3 === 0
+}
+
 export function ConversationList({
   conversations,
   selectedConversation,
@@ -73,8 +84,7 @@ export function ConversationList({
 
   const getOnlineStatus = (conversation: Conversation) => {
     if (conversation.type === "direct" && conversation.participants.length === 1) {
-      // In a real app, you'd check user online status
-      return Math.random() > 0.5 // Mock online status
+      return getStableOnlineStatus(conversation)
     }
     return false
   }

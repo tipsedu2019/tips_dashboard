@@ -60,3 +60,30 @@ test("editable management titles expose pointer, hover, and focus feedback", asy
   assert.match(source, /focus-visible:ring-2/);
   assert.match(source, /hover:bg-muted\/30/);
 });
+
+test("management table disables TanStack render-time auto reset queues", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const tableOptions = source.match(/const table = useReactTable\(\{[\s\S]*?\n  \}\);/)?.[0] || "";
+
+  assert.match(tableOptions, /autoResetAll:\s*false/);
+});
+
+test("student and class tables expose bulk edit and delete actions for selected rows", async () => {
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(tableSource, /type BulkEditField/);
+  assert.match(tableSource, /const BULK_EDIT_FIELDS/);
+  assert.match(tableSource, /function ManagementBulkActionBar/);
+  assert.match(tableSource, /selectedRows/);
+  assert.match(tableSource, /actions\.onBulkUpdateRows/);
+  assert.match(tableSource, /actions\.onBulkDeleteRows/);
+  assert.match(tableSource, /bulkEditField/);
+  assert.match(tableSource, /일괄 수정/);
+  assert.match(tableSource, /일괄 삭제/);
+  assert.match(pageSource, /handleBulkUpdateRows/);
+  assert.match(pageSource, /handleBulkDeleteRows/);
+  assert.match(pageSource, /Promise\.all\(rows\.map/);
+  assert.match(pageSource, /onBulkUpdateRows: handleBulkUpdateRows/);
+  assert.match(pageSource, /onBulkDeleteRows: handleBulkDeleteRows/);
+});

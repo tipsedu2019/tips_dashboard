@@ -1,5 +1,4 @@
 import {
-  ACTIVE_CLASS_STATUS,
   computeClassStatus,
   ENDED_CLASS_STATUS,
   normalizeClassStatus,
@@ -409,11 +408,67 @@ function buildClassGroupContext(classes = [], classTerms = [], classGroups = [],
 }
 
 function getClassTextbookIds(classItem) {
+  const plan = classItem?.schedulePlan || classItem?.schedule_plan || {};
+  const planTextbookIds = toArray(plan?.textbooks)
+    .map((item) => text(item?.textbookId || item?.textbook_id || item?.id))
+    .filter(Boolean);
   return unique(
-    toArray(classItem?.textbook_ids || classItem?.textbookIds).map((value) =>
-      text(value),
-    ),
+    [
+      ...toArray(classItem?.textbook_ids || classItem?.textbookIds).map((value) =>
+        text(value),
+      ),
+      ...planTextbookIds,
+    ],
   );
+}
+
+function getTextbookTitle(book = {}) {
+  return text(book?.title || book?.name || book?.textbook_title || book?.textbookTitle);
+}
+
+function getTextbookPublisher(book = {}) {
+  return text(book?.publisher || book?.publisher_name || book?.publisherName);
+}
+
+function getTextbookCategory(book = {}) {
+  return text(book?.category || book?.area || book?.unit);
+}
+
+function getClassTextbookCatalog(classItem = {}, textbooks = []) {
+  const textbookById = new Map(textbooks.map((book) => [text(book?.id), book]));
+  const plan = classItem?.schedulePlan || classItem?.schedule_plan || {};
+  const planTextbooks = toArray(plan?.textbooks);
+  const planById = new Map(
+    planTextbooks
+      .map((entry, index) => {
+        const textbookId = text(entry?.textbookId || entry?.textbook_id || entry?.id);
+        return textbookId ? [textbookId, { ...entry, order: entry?.order ?? index }] : null;
+      })
+      .filter(Boolean),
+  );
+
+  return getClassTextbookIds(classItem)
+    .map((textbookId, index) => {
+      const textbook = textbookById.get(textbookId) || {};
+      const planEntry = planById.get(textbookId) || {};
+      const title = text(planEntry?.alias) || getTextbookTitle(textbook) || textbookId;
+      const area = text(planEntry?.area) || getTextbookCategory(textbook);
+      const subSubject = text(planEntry?.subSubject || planEntry?.sub_subject);
+      return {
+        textbookId,
+        title,
+        sourceTitle: getTextbookTitle(textbook) || title,
+        publisher: getTextbookPublisher(textbook),
+        subject: text(textbook?.subject),
+        category: getTextbookCategory(textbook),
+        area,
+        subSubject,
+        role: text(planEntry?.role) || (index === 0 ? "main" : "supplement"),
+        order: Number(planEntry?.order ?? index) || index,
+        scopeLabel: [area, subSubject].filter(Boolean).join(" · "),
+      };
+    })
+    .sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
 }
 
 function buildSearchText(parts = []) {
@@ -547,6 +602,47 @@ function getPlanSessions(classItem) {
   return toArray(plan?.sessions);
 }
 
+function formatCurriculumSessionDate(value) {
+  const rawValue = text(value);
+  if (!rawValue) {
+    return "";
+  }
+
+  const date = new Date(rawValue);
+  if (Number.isNaN(date.getTime())) {
+    return rawValue;
+  }
+
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getPlanRangeLabel(entry = {}) {
+  const plan = entry?.plan && typeof entry.plan === "object" ? entry.plan : entry;
+  const explicitLabel = text(plan?.label || plan?.rangeLabel || plan?.range_label);
+  if (explicitLabel) {
+    return explicitLabel;
+  }
+
+  const start = text(plan?.start || plan?.from || plan?.startRange || plan?.start_range);
+  const end = text(plan?.end || plan?.to || plan?.endRange || plan?.end_range);
+  return [start, end].filter(Boolean).join("~");
+}
+
+function summarizeSessionPlanEntries(entries = []) {
+  const labels = toArray(entries)
+    .map((entry) => getPlanRangeLabel(entry))
+    .filter(Boolean);
+  const hasMemo = toArray(entries).some((entry) => {
+    const plan = entry?.plan && typeof entry.plan === "object" ? entry.plan : entry;
+    return Boolean(text(plan?.memo || plan?.note || plan?.teacherNote || plan?.teacher_note));
+  });
+
+  return {
+    hasPlanContent: labels.length > 0 || hasMemo,
+    label: labels.slice(0, 2).join(" · "),
+  };
+}
+
 function createTimetableRow(classItem, classTerms, slot, classGroupsForClass = []) {
   const title = stripClassPrefix(classItem?.className || classItem?.name) || text(classItem?.name);
   const status = getClassStatus(classItem);
@@ -602,14 +698,9 @@ function createTimetableRow(classItem, classTerms, slot, classGroupsForClass = [
 
 function createCurriculumSessionSummaries(classItem, progressSummary) {
   const sessions = getPlanSessions(classItem);
-  const activeSessions = sessions.filter((session) => {
-    const scheduleState =
-      text(session?.scheduleState || session?.schedule_state || session?.state) || "active";
-    return scheduleState !== "exception" && scheduleState !== "tbd";
-  });
 
-  const plannedSummaries = activeSessions.map((session) => {
-    const sessionId = text(session?.id);
+  const plannedSummaries = sessions.map((session) => {
+    const sessionId = text(session?.id || session?.session_id);
     const sessionNumber = Number(session?.sessionNumber ?? session?.session_number ?? 0) || 0;
     const matchedLog =
       (sessionId ? progressSummary?.bySessionId?.get(sessionId) : null) ||
@@ -626,22 +717,48 @@ function createCurriculumSessionSummaries(classItem, progressSummary) {
     const noteSummary = text(matchedLog?.noteSummary);
     const hasActualContent =
       planStatus !== "pending" || Boolean(matchedLog?.hasActualContent);
+    const textbookEntries =
+      [
+        session?.textbookEntries,
+        session?.textbook_entries,
+        matchedLog?.textbookEntries,
+        matchedLog?.textbook_entries,
+      ].find((entries) => Array.isArray(entries) && entries.length > 0) || [];
+    const planSummary = summarizeSessionPlanEntries(textbookEntries);
+    const dateValue = text(session?.date || session?.session_date || session?.dateValue || session?.date_value);
+    const periodLabel = text(
+      session?.periodLabel ||
+        session?.period_label ||
+        session?.billingLabel ||
+        session?.billing_label,
+    );
+    const displayLabel = [
+      dateValue ? formatCurriculumSessionDate(dateValue) : "",
+      sessionNumber > 0 ? `${sessionNumber}회차` : sessionId || "기록 회차",
+    ].filter(Boolean).join(" · ");
 
     return {
       id: sessionId || text(matchedLog?.sessionId) || `${sessionNumber}`,
+      sessionId: sessionId || text(matchedLog?.sessionId),
       sessionNumber,
-      label: sessionNumber > 0 ? `${sessionNumber}회차` : sessionId || "기록 회차",
+      sessionOrder: sessionNumber,
+      label: displayLabel || "기록 회차",
       progressStatus,
       hasActualContent,
       updatedAt,
       noteSummary,
+      dateValue,
+      dateLabel: dateValue ? formatCurriculumSessionDate(dateValue) : "",
+      periodLabel,
+      hasPlanContent: planSummary.hasPlanContent,
+      planSummary: planSummary.label,
+      textbookEntryCount: toArray(textbookEntries).length,
     };
   });
 
-  const plannedKeys = new Set(
-    plannedSummaries.map(
-      (session) => `${text(session.id)}::${Number(session.sessionNumber || 0)}`,
-    ),
+  const plannedSessionIds = new Set(plannedSummaries.map((session) => text(session.sessionId)).filter(Boolean));
+  const plannedSessionOrders = new Set(
+    plannedSummaries.map((session) => Number(session.sessionOrder || 0)).filter((order) => order > 0),
   );
 
   const syntheticSeenKeys = new Set();
@@ -651,27 +768,59 @@ function createCurriculumSessionSummaries(classItem, progressSummary) {
     ...(progressSummary?.syntheticSessions || []),
   ]
     .filter((session) => {
-      const key = `${text(session?.sessionId)}::${Number(session?.sessionOrder || 0)}`;
-      if (plannedKeys.has(key) || syntheticSeenKeys.has(key)) {
+      const sessionId = text(session?.sessionId);
+      const sessionOrder = Number(session?.sessionOrder || 0);
+      if ((sessionId && plannedSessionIds.has(sessionId)) || (sessionOrder > 0 && plannedSessionOrders.has(sessionOrder))) {
+        return false;
+      }
+      const key = sessionId ? `id:${sessionId}` : `order:${sessionOrder}`;
+      if (syntheticSeenKeys.has(key)) {
         return false;
       }
       syntheticSeenKeys.add(key);
       return true;
     })
-    .map((session) => ({
-      id: text(session?.sessionId) || `${Number(session?.sessionOrder || 0)}`,
-      sessionNumber: Number(session?.sessionOrder || 0),
-      label:
-        Number(session?.sessionOrder || 0) > 0
-          ? `${Number(session?.sessionOrder || 0)}회차`
-          : text(session?.sessionId) || text(session?.sessionLabel) || "기록 회차",
-      progressStatus: normalizeProgressStatus(session?.progressStatus),
-      hasActualContent: Boolean(session?.hasActualContent),
-      updatedAt: text(session?.updatedAt),
-      noteSummary: text(session?.noteSummary),
-    }));
+    .map((session) => {
+      const sessionId = text(session?.sessionId);
+      const sessionOrder = Number(session?.sessionOrder || 0);
+      const dateValue = text(session?.dateValue || session?.date_value || session?.sessionDate || session?.session_date);
+      const displayLabel = [
+        dateValue ? formatCurriculumSessionDate(dateValue) : "",
+        sessionOrder > 0 ? `${sessionOrder}회차` : sessionId || text(session?.sessionLabel) || "기록 회차",
+      ].filter(Boolean).join(" · ");
+
+      return {
+        id: sessionId || `${sessionOrder}`,
+        sessionId,
+        sessionNumber: sessionOrder,
+        sessionOrder,
+        label: displayLabel || "기록 회차",
+        progressStatus: normalizeProgressStatus(session?.progressStatus),
+        hasActualContent: Boolean(session?.hasActualContent),
+        updatedAt: text(session?.updatedAt),
+        noteSummary: text(session?.noteSummary),
+        dateValue,
+        dateLabel: dateValue ? formatCurriculumSessionDate(dateValue) : "",
+        periodLabel: "",
+        hasPlanContent: false,
+        planSummary: "",
+        textbookEntryCount: 0,
+      };
+    });
 
   return [...plannedSummaries, ...syntheticSummaries].sort((left, right) => {
+    const leftDate = text(left.dateValue);
+    const rightDate = text(right.dateValue);
+    if (leftDate && rightDate && leftDate !== rightDate) {
+      return leftDate.localeCompare(rightDate);
+    }
+    if (leftDate && !rightDate) {
+      return -1;
+    }
+    if (!leftDate && rightDate) {
+      return 1;
+    }
+
     const sessionGap = Number(left.sessionNumber || 0) - Number(right.sessionNumber || 0);
     if (sessionGap !== 0) {
       return sessionGap;
@@ -688,21 +837,30 @@ function createCurriculumRow(classItem, classTerms, textbooks, progressSummaryBy
   const classroomNames = splitClassroomList(classItem?.classroom || classItem?.room);
   const classGroupIds = toArray(classGroupsForClass).map((group) => text(group?.id)).filter(Boolean);
   const classGroupNames = toArray(classGroupsForClass).map((group) => text(group?.name)).filter(Boolean);
-  const textbookIds = getClassTextbookIds(classItem);
-  const textbookSet = new Set(textbooks.map((book) => text(book?.id)));
-  const textbookCount = textbookIds.filter((bookId) => textbookSet.has(bookId)).length || textbookIds.length;
+  const textbookCatalog = getClassTextbookCatalog(classItem, textbooks);
+  const textbookCount = textbookCatalog.length;
+  const textbookTitles = textbookCatalog.map((book) => book.title).filter(Boolean);
   const status = getClassStatus(classItem);
   const statusFilter = getClassStatusFilterLabel(status);
   const progressSummary = progressSummaryByClass.get(id);
   const sessionSummaries = createCurriculumSessionSummaries(classItem, progressSummary);
   const totalSessions = sessionSummaries.length;
+  const progressTargetSessions = textbookCount > 0
+    ? sessionSummaries.filter((session) => Number(session.textbookEntryCount || 0) > 0)
+    : sessionSummaries;
+  const progressBasisSessions =
+    textbookCount > 0 && progressTargetSessions.length > 0
+      ? progressTargetSessions
+      : sessionSummaries;
+  const progressTargetSessionCount = progressBasisSessions.length;
+  const plannedSessions = sessionSummaries.filter((session) => session.hasPlanContent);
+  const plannedProgressSessions = progressBasisSessions.filter((session) => session.hasPlanContent);
   const completedSessions = sessionSummaries.filter(
     (session) => session.progressStatus === "done",
   ).length;
-  const updatedSessions = sessionSummaries.filter(
-    (session) => session.progressStatus !== "pending",
-  ).length;
-  const delayedSessions = Math.max(totalSessions - updatedSessions, 0);
+  const updatedSessions = plannedSessions.length;
+  const delayedSessions = Math.max(totalSessions - plannedSessions.length, 0);
+  const delayedProgressSessions = Math.max(progressTargetSessionCount - plannedProgressSessions.length, 0);
   const lastUpdatedAt = sessionSummaries
     .map((session) => text(session.updatedAt))
     .filter(Boolean)
@@ -717,18 +875,25 @@ function createCurriculumRow(classItem, classTerms, textbooks, progressSummaryBy
   const latestNoteSessionLabel =
     text(latestNotedSession?.label) || text(progressSummary?.latestNoteSessionLabel);
   const pendingSessionLabels = sessionSummaries
-    .filter((session) => session.progressStatus === "pending")
+    .filter((session) => !session.hasPlanContent)
     .map((session) => session.label)
     .filter(Boolean);
+  const nextSession =
+    sessionSummaries.find((session) => !session.hasPlanContent) ||
+    sessionSummaries[0] ||
+    null;
+  const textbookScopeLabels = unique(
+    textbookCatalog.flatMap((book) => [book.scopeLabel, book.category]).map((value) => text(value)),
+  );
 
   const stateLabel =
     totalSessions === 0
-      ? "계획 미설정"
-      : delayedSessions > 0
-        ? "업데이트 필요"
-        : completedSessions === totalSessions
-          ? "완료"
-          : "진행 중";
+      ? "회차 미생성"
+      : textbookCount === 0
+        ? "교재 미연결"
+        : plannedProgressSessions.length < progressTargetSessionCount
+          ? "진도 미배정"
+          : "계획 완료";
 
   return {
     id,
@@ -748,17 +913,32 @@ function createCurriculumRow(classItem, classTerms, textbooks, progressSummaryBy
     classGroupNames,
     classGroupLabel: classGroupNames.join(", ") || "미분류",
     textbookCount,
+    textbookCatalog,
+    textbookTitles,
+    textbookSummary:
+      textbookTitles.length > 0 ? textbookTitles.slice(0, 2).join(", ") : "교재 미연결",
+    textbookOverflowCount: Math.max(textbookTitles.length - 2, 0),
+    textbookScopeLabels,
     totalSessions,
     completedSessions,
     updatedSessions,
     delayedSessions,
+    plannedSessions: plannedSessions.length,
+    progressTargetSessions: progressTargetSessionCount,
+    delayedProgressSessions,
+    plannedProgressSessions: plannedProgressSessions.length,
     progressPercent:
-      totalSessions > 0 ? Math.round((updatedSessions / totalSessions) * 100) : 0,
+      totalSessions > 0 ? Math.round((plannedSessions.length / totalSessions) * 100) : 0,
+    progressTargetPercent:
+      progressTargetSessionCount > 0
+        ? Math.round((plannedProgressSessions.length / progressTargetSessionCount) * 100)
+        : 0,
     lastUpdatedAt,
     stateLabel,
     latestNoteSummary,
     latestNoteSessionLabel,
     pendingSessionLabels,
+    nextSession,
     sessionSummaries,
     searchText: buildSearchText([
       title,
@@ -766,6 +946,8 @@ function createCurriculumRow(classItem, classTerms, textbooks, progressSummaryBy
       classItem?.subject,
       classItem?.grade,
       term,
+      textbookTitles.join(" "),
+      textbookScopeLabels.join(" "),
       teacherNames.join(" "),
       classroomNames.join(" "),
       classGroupNames.join(" "),
@@ -1088,7 +1270,7 @@ export function buildCurriculumWorkspaceModel({
         0,
       ),
       completedSessions: rows.reduce(
-        (sum, row) => sum + Number(row.completedSessions || 0),
+        (sum, row) => sum + Number(row.plannedSessions || 0),
         0,
       ),
       pendingSessions: rows.reduce(
@@ -1099,6 +1281,10 @@ export function buildCurriculumWorkspaceModel({
         (sum, row) => sum + Number(row.textbookCount || 0),
         0,
       ),
+      unlinkedClassCount: rows.filter((row) => Number(row.textbookCount || 0) === 0).length,
+      noScheduleClassCount: rows.filter((row) => Number(row.totalSessions || 0) === 0).length,
+      updateNeededClassCount: rows.filter((row) => row.stateLabel === "진도 미배정").length,
+      completedClassCount: rows.filter((row) => row.stateLabel === "계획 완료").length,
     },
   };
 }
@@ -1131,10 +1317,6 @@ function minutesToSlotIndex(value, startHour = 11) {
   const minutes = timeToMinutes(value);
   const baseMinutes = startHour * 60;
   return Math.max(0, Math.floor((minutes - baseMinutes) / 30));
-}
-
-function clampGridCount(value) {
-  return Math.max(1, Math.min(2, Number(value) || 2));
 }
 
 function buildPaletteByClassId(rows = []) {
@@ -1398,11 +1580,9 @@ function buildDailyClassroomPanel(targetDay, workspace, rowsByDay, paletteByClas
 export function buildTimetableGridPanels({
   workspace,
   view = "teacher-weekly",
-  gridCount = 2,
   selectedTargets = [],
 } = {}) {
   const safeWorkspace = workspace || buildTimetableWorkspaceModel();
-  const safeGridCount = clampGridCount(gridCount);
   const axisMode =
     view === "teacher-weekly"
       ? "teacher"

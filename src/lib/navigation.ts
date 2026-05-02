@@ -86,6 +86,14 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
+    match: "/admin/settings/textbook-suppliers",
+    meta: {
+      section: "설정",
+      title: "교재 설정",
+      summary: "교재 분류, 출판사별 총판 연결을 관리합니다.",
+    },
+  },
+  {
     match: "/admin/settings",
     meta: {
       section: "설정",
@@ -145,8 +153,8 @@ const workspaceMetaEntries: Array<{
     match: "/admin/curriculum",
     meta: {
       section: "수업계획",
-      title: "커리큘럼 운영",
-      summary: "진행 회차와 최근 기록 메모를 바탕으로 업데이트 대기 구간을 확인합니다.",
+      title: "수업계획",
+      summary: "수업 일정과 교재 진도를 연결해 회차별 계획을 관리합니다.",
     },
   },
   {
@@ -279,7 +287,7 @@ export function buildAdminNavGroups({
       label: "설정",
       items: [
         {
-          title: "설정",
+          title: "환경 설정",
           url: "/admin/settings/schools",
           icon: Settings2,
           items: [
@@ -287,6 +295,7 @@ export function buildAdminNavGroups({
             { title: "선생님 설정", url: "/admin/settings/teachers" },
             { title: "강의실 설정", url: "/admin/settings/classrooms" },
             { title: "기간 설정", url: "/admin/settings/class-groups" },
+            { title: "교재 설정", url: "/admin/settings/textbook-suppliers" },
           ],
         },
       ],

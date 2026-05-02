@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -986,7 +987,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     );
   };
 
-  async function openRow(row: ManagementRow) {
+  const openRow = useCallback(async (row: ManagementRow) => {
     setSelectedRow(row);
     setForm(initialForm(kind, row));
     setTargetId("");
@@ -997,7 +998,55 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setDialogMode("detail");
     if (kind === "students") setRelatedRows(await service.listClasses());
     if (kind === "classes") setRelatedRows(await service.listStudents());
-  }
+  }, [kind]);
+
+  const handleBulkUpdateRows = useCallback(async (rows: ManagementRow[], change: { field: string; value: string }) => {
+    const value = text(change.value);
+    if (rows.length === 0 || !value) {
+      return;
+    }
+
+    setSaving(true);
+    setOperationError(null);
+    try {
+      await Promise.all(rows.map((row) => {
+        const payload = compact({ [change.field]: value }, kind, row);
+        if (kind === "students") return service.updateStudent(payload);
+        if (kind === "classes") return service.updateClass(payload);
+        return service.updateTextbook(payload);
+      }));
+      await refresh();
+    } catch (bulkError) {
+      setOperationError(getSaveErrorMessage(bulkError));
+    } finally {
+      setSaving(false);
+    }
+  }, [kind, refresh]);
+
+  const handleBulkDeleteRows = useCallback(async (rows: ManagementRow[]) => {
+    if (rows.length === 0) {
+      return;
+    }
+
+    if (!window.confirm(`${rows.length}개 ${config.emptyLabel} 데이터를 삭제할까요?`)) {
+      return;
+    }
+
+    setSaving(true);
+    setOperationError(null);
+    try {
+      await Promise.all(rows.map((row) => {
+        if (kind === "students") return service.deleteStudent(row.id);
+        if (kind === "classes") return service.deleteClass(row.id);
+        return service.deleteTextbook(row.id);
+      }));
+      await refresh();
+    } catch (bulkError) {
+      setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 삭제 중 오류가 발생했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }, [config.emptyLabel, kind, refresh]);
 
   const actions = useMemo(() => {
     const base = {
@@ -1010,6 +1059,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         setDialogMode("create" as const);
       },
       onOpenRow: openRow,
+      onBulkUpdateRows: handleBulkUpdateRows,
+      onBulkDeleteRows: handleBulkDeleteRows,
       onDeleteRow: async (row: ManagementRow) => {
         if (!window.confirm(`${row.title} 항목을 삭제할까요?`)) return;
         setSaving(true);
@@ -1035,7 +1086,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       };
     }
     return base;
-  }, [kind, router, refresh]);
+  }, [handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router, refresh]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1211,6 +1262,9 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>{dialogTitle}</DialogTitle>
+            <DialogDescription className="sr-only">
+              선택한 데이터를 확인하고 필요한 항목을 입력하거나 수정합니다.
+            </DialogDescription>
           </DialogHeader>
 
           {operationError ? (

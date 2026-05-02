@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, History, Link2, Plus, Trash2 } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -24,44 +25,143 @@ import {
   settingsTableHeadClass,
 } from "./settings-master-layout";
 import { useSettingsTableColumns, type SettingsTableColumn } from "./settings-table-columns";
-import { supabase } from "@/lib/supabase";
 
 type TeacherRecord = {
   id: string;
   name: string;
   subjects: string;
+  profileId: string;
+  accountEmail: string;
+  dashboardRole: DashboardRole;
   isVisible: boolean;
   sortOrder: string;
   isNew?: boolean;
 };
 
-const SUBJECT_OPTIONS = ["영어", "수학"] as const;
-const SUBJECT_FILTERS = ["전체", ...SUBJECT_OPTIONS] as const;
+type DashboardRole = "admin" | "staff" | "teacher" | "viewer";
+
+type AccountProfile = {
+  id: string;
+  name: string;
+  loginId: string;
+  email: string;
+  role: DashboardRole;
+  teacherCatalogId: string;
+};
+
+type AuditLog = {
+  id: string;
+  actorEmail: string;
+  actorRole: string;
+  action: string;
+  entityTable: string;
+  entityLabel: string;
+  changedAt: string;
+};
+
+const TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀"] as const;
+type TeamOption = (typeof TEAM_OPTIONS)[number];
+const TEAM_FILTERS = ["전체", ...TEAM_OPTIONS] as const;
+const TEAM_ALIASES: Record<string, TeamOption> = {
+  english: "영어팀",
+  "영어": "영어팀",
+  "영어팀": "영어팀",
+  math: "수학팀",
+  "수학": "수학팀",
+  "수학팀": "수학팀",
+  admin: "관리팀",
+  staff: "관리팀",
+  "관리": "관리팀",
+  "운영": "관리팀",
+  "관리팀": "관리팀",
+};
+const ROLE_OPTIONS = [
+  { value: "admin", label: "관리자" },
+  { value: "staff", label: "운영" },
+  { value: "teacher", label: "선생님" },
+  { value: "viewer", label: "보기만" },
+] satisfies Array<{ value: DashboardRole; label: string }>;
 const TEACHER_TABLE_COLUMNS = [
-  { id: "subjects", label: "과목" },
+  { id: "subjects", label: "팀" },
   { id: "name", label: "이름" },
+  { id: "account", label: "계정" },
+  { id: "role", label: "권한" },
   { id: "visible", label: "표시" },
   { id: "action", label: "작업", required: true },
 ] satisfies SettingsTableColumn[];
 
-function normalizeSubjectValue(subjects: string) {
-  const parsedSubjects = subjects
+function normalizeTeamValue(subjects: string) {
+  const parsedTeams = subjects
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
 
-  return SUBJECT_OPTIONS.find((subject) => parsedSubjects.includes(subject)) ?? SUBJECT_OPTIONS[0];
+  for (const team of parsedTeams) {
+    const normalized = TEAM_ALIASES[team] || TEAM_ALIASES[team.toLowerCase()];
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return TEAM_OPTIONS[0];
 }
 
-function toTeacherRecord(row: Record<string, unknown>, index: number): TeacherRecord {
+function normalizeRole(value: unknown): DashboardRole {
+  const role = String(value || "").trim().toLowerCase();
+  return ROLE_OPTIONS.some((option) => option.value === role) ? (role as DashboardRole) : "teacher";
+}
+
+function getRoleLabel(value: unknown) {
+  const role = normalizeRole(value);
+  return ROLE_OPTIONS.find((option) => option.value === role)?.label || "선생님";
+}
+
+function getAccountLabel(profile: AccountProfile) {
+  return profile.email || profile.loginId || profile.name || profile.id;
+}
+
+function toAccountProfile(row: Record<string, unknown>): AccountProfile {
+  return {
+    id: String(row.id || ""),
+    name: typeof row.name === "string" ? row.name : "",
+    loginId: typeof row.login_id === "string" ? row.login_id : "",
+    email: typeof row.email === "string" ? row.email : "",
+    role: normalizeRole(row.role),
+    teacherCatalogId: typeof row.teacher_catalog_id === "string" ? row.teacher_catalog_id : "",
+  };
+}
+
+function toAuditLog(row: Record<string, unknown>): AuditLog {
+  return {
+    id: String(row.id || createId()),
+    actorEmail: typeof row.actor_email === "string" ? row.actor_email : "",
+    actorRole: typeof row.actor_role === "string" ? row.actor_role : "",
+    action: typeof row.action === "string" ? row.action : "",
+    entityTable: typeof row.entity_table === "string" ? row.entity_table : "",
+    entityLabel: typeof row.entity_label === "string" ? row.entity_label : "",
+    changedAt: typeof row.changed_at === "string" ? row.changed_at : "",
+  };
+}
+
+function toTeacherRecord(row: Record<string, unknown>, index: number, profilesById = new Map<string, AccountProfile>()): TeacherRecord {
   const subjects = Array.isArray(row.subjects)
     ? row.subjects.filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(", ")
     : "";
+  const profileId = typeof row.profile_id === "string" ? row.profile_id : "";
+  const profile = profileId ? profilesById.get(profileId) : undefined;
+  const accountEmail = typeof row.account_email === "string" && row.account_email
+    ? row.account_email
+    : profile
+      ? getAccountLabel(profile)
+      : "";
 
   return {
     id: String(row.id || createId()),
     name: typeof row.name === "string" ? row.name : "",
-    subjects,
+    subjects: normalizeTeamValue(subjects),
+    profileId,
+    accountEmail,
+    dashboardRole: normalizeRole(row.dashboard_role || profile?.role),
     isVisible: row.is_visible !== false,
     sortOrder: String(row.sort_order ?? index),
   };
@@ -71,7 +171,10 @@ function createEmptyTeacher(nextSortOrder: number): TeacherRecord {
   return {
     id: createId(),
     name: "",
-    subjects: "영어",
+    subjects: TEAM_OPTIONS[0],
+    profileId: "",
+    accountEmail: "",
+    dashboardRole: "teacher",
     isVisible: true,
     sortOrder: String(nextSortOrder),
     isNew: true,
@@ -85,42 +188,56 @@ function reorderWithSequentialSort(rows: TeacherRecord[], fromIndex: number, toI
   return nextRows.map((row, index) => ({ ...row, sortOrder: String(index + 1) }));
 }
 
+function getAuditActionLabel(action: string) {
+  if (action === "INSERT") return "입력";
+  if (action === "UPDATE") return "수정";
+  if (action === "DELETE") return "삭제";
+  return action || "-";
+}
+
+function formatAuditTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return "-";
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export function TeacherMasterWorkspace() {
   const [rows, setRows] = useState<TeacherRecord[]>([]);
+  const [profiles, setProfiles] = useState<AccountProfile[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [isAccountSchemaReady, setIsAccountSchemaReady] = useState(true);
+  const [schemaWarning, setSchemaWarning] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [isDirty, setIsDirty] = useState(false);
-  const [subjectFilter, setSubjectFilter] = useState<(typeof SUBJECT_FILTERS)[number]>("전체");
+  const [teamFilter, setTeamFilter] = useState<(typeof TEAM_FILTERS)[number]>("전체");
   const { isColumnVisible, visibleColumnCount, columnSettingsControl } = useSettingsTableColumns(
-    "tips-settings-table:teachers:v1",
+    "tips-settings-table:teachers:v2",
     TEACHER_TABLE_COLUMNS,
   );
 
   const loadTeachers = useCallback(async () => {
-    if (!supabase) {
-      setRows([]);
-      setError(managementService.configError || "Supabase 연결 설정을 확인해 주세요.");
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
-      const { data, error: queryError } = await supabase
-        .from("teacher_catalogs")
-        .select("id, name, subjects, is_visible, sort_order")
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true });
-
-      if (queryError) {
-        throw queryError;
-      }
-
-      setRows((data || []).map((row, index) => toTeacherRecord(row as Record<string, unknown>, index + 1)));
+      const data = await managementService.listTeacherAccountSettingsData();
+      const nextProfiles: AccountProfile[] = (data.profiles || []).map((row: Record<string, unknown>) => toAccountProfile(row));
+      const profilesById = new Map<string, AccountProfile>(nextProfiles.map((profile) => [profile.id, profile]));
+      setProfiles(nextProfiles);
+      setAuditLogs((data.auditLogs || []).map((row: Record<string, unknown>) => toAuditLog(row)));
+      setIsAccountSchemaReady(data.isAccountSchemaReady !== false);
+      setSchemaWarning(data.schemaWarning || "");
+      setRows((data.teachers || []).map((row: Record<string, unknown>, index: number) => toTeacherRecord(row, index + 1, profilesById)));
       setDeletedIds([]);
       setIsDirty(false);
     } catch (loadError) {
@@ -143,8 +260,8 @@ export function TeacherMasterWorkspace() {
   }, [rows]);
 
   const filteredRows = useMemo(
-    () => rows.filter((row) => subjectFilter === "전체" || row.subjects.includes(subjectFilter)),
-    [rows, subjectFilter],
+    () => rows.filter((row) => teamFilter === "전체" || normalizeTeamValue(row.subjects) === teamFilter),
+    [rows, teamFilter],
   );
 
   const handleFieldChange = (id: string, field: keyof TeacherRecord, value: string | boolean) => {
@@ -152,8 +269,29 @@ export function TeacherMasterWorkspace() {
     setIsDirty(true);
   };
 
-  const handleSubjectsChange = (id: string, value: (typeof SUBJECT_OPTIONS)[number]) => {
+  const handleTeamChange = (id: string, value: TeamOption) => {
     handleFieldChange(id, "subjects", value);
+  };
+
+  const handleAccountChange = (id: string, value: string) => {
+    const profile = profiles.find((item) => item.id === value);
+    setRows((current) =>
+      current.map((row) =>
+        row.id === id
+          ? {
+              ...row,
+              profileId: profile ? profile.id : "",
+              accountEmail: profile ? getAccountLabel(profile) : row.accountEmail,
+              dashboardRole: profile ? profile.role : row.dashboardRole,
+            }
+          : row,
+      ),
+    );
+    setIsDirty(true);
+  };
+
+  const handleRoleChange = (id: string, value: string) => {
+    handleFieldChange(id, "dashboardRole", normalizeRole(value));
   };
 
   const handleAdd = () => {
@@ -165,7 +303,7 @@ export function TeacherMasterWorkspace() {
     const nextRows = rows.map((row, index) => ({
       ...row,
       name: row.name.trim(),
-      subjects: normalizeSubjectValue(row.subjects),
+      subjects: normalizeTeamValue(row.subjects),
       sortOrder: String(index + 1),
     }));
     if (nextRows.some((row) => !row.name)) {
@@ -185,7 +323,10 @@ export function TeacherMasterWorkspace() {
           nextRows.map((row, index) => ({
             id: row.id,
             name: row.name,
-            subjects: [normalizeSubjectValue(row.subjects)],
+            subjects: [normalizeTeamValue(row.subjects)],
+            profileId: row.profileId,
+            accountEmail: row.accountEmail,
+            dashboardRole: row.dashboardRole,
             isVisible: row.isVisible,
             sortOrder: index + 1,
           })),
@@ -226,14 +367,14 @@ export function TeacherMasterWorkspace() {
   return (
     <div className="flex flex-col gap-4 px-4 py-4 sm:px-6">
       <SettingsMasterHeader
-        filters={SUBJECT_FILTERS.map((filter) => (
+        filters={TEAM_FILTERS.map((filter) => (
           <Button
             key={filter}
             type="button"
-            variant={subjectFilter === filter ? "default" : "outline"}
+            variant={teamFilter === filter ? "default" : "outline"}
             size="sm"
             className="h-8 px-3 text-xs"
-            onClick={() => setSubjectFilter(filter)}
+            onClick={() => setTeamFilter(filter)}
           >
             {filter}
           </Button>
@@ -257,16 +398,23 @@ export function TeacherMasterWorkspace() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
+      {schemaWarning ? (
+        <Alert>
+          <AlertDescription>{schemaWarning}</AlertDescription>
+        </Alert>
+      ) : null}
 
       <SettingsTableFrame>
         <Table className="table-fixed">
           <caption className="sr-only">선생님 목록</caption>
           <TableHeader>
             <TableRow>
-              {isColumnVisible("subjects") ? <TableHead className={`w-[22%] ${settingsTableHeadClass}`}>과목</TableHead> : null}
-              {isColumnVisible("name") ? <TableHead className={`w-[26%] ${settingsTableHeadClass}`}>이름</TableHead> : null}
-              {isColumnVisible("visible") ? <TableHead className={`w-[10%] text-center ${settingsTableHeadClass}`}>표시</TableHead> : null}
-              {isColumnVisible("action") ? <TableHead className={`w-[42%] text-right ${settingsTableHeadClass}`}>작업</TableHead> : null}
+              {isColumnVisible("subjects") ? <TableHead className={`w-[14%] ${settingsTableHeadClass}`}>팀</TableHead> : null}
+              {isColumnVisible("name") ? <TableHead className={`w-[17%] ${settingsTableHeadClass}`}>이름</TableHead> : null}
+              {isColumnVisible("account") ? <TableHead className={`w-[29%] ${settingsTableHeadClass}`}>계정</TableHead> : null}
+              {isColumnVisible("role") ? <TableHead className={`w-[14%] ${settingsTableHeadClass}`}>권한</TableHead> : null}
+              {isColumnVisible("visible") ? <TableHead className={`w-[8%] text-center ${settingsTableHeadClass}`}>표시</TableHead> : null}
+              {isColumnVisible("action") ? <TableHead className={`w-[18%] text-right ${settingsTableHeadClass}`}>작업</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -281,7 +429,7 @@ export function TeacherMasterWorkspace() {
             ) : filteredRows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={visibleColumnCount} className="px-3 py-10 text-center text-sm text-muted-foreground">
-                  {subjectFilter === "전체" ? "등록된 선생님이 없습니다." : `${subjectFilter} 과목 선생님이 없습니다.`}
+                  {teamFilter === "전체" ? "등록된 선생님이 없습니다." : `${teamFilter} 선생님이 없습니다.`}
                 </TableCell>
               </TableRow>
             ) : (
@@ -291,14 +439,14 @@ export function TeacherMasterWorkspace() {
                 return (
                   <TableRow key={row.id}>
                     {isColumnVisible("subjects") ? <TableCell className={settingsTableCellClass}>
-                      <Select value={normalizeSubjectValue(row.subjects)} onValueChange={(value) => handleSubjectsChange(row.id, value as (typeof SUBJECT_OPTIONS)[number])}>
+                      <Select value={normalizeTeamValue(row.subjects)} onValueChange={(value) => handleTeamChange(row.id, value as TeamOption)}>
                         <SelectTrigger className="h-9">
-                          <SelectValue placeholder="과목" />
+                          <SelectValue placeholder="팀" />
                         </SelectTrigger>
                         <SelectContent>
-                          {SUBJECT_OPTIONS.map((subject) => (
-                            <SelectItem key={subject} value={subject}>
-                              {subject}
+                          {TEAM_OPTIONS.map((team) => (
+                            <SelectItem key={team} value={team}>
+                              {team}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -312,6 +460,53 @@ export function TeacherMasterWorkspace() {
                         onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
                         placeholder="선생님 이름"
                       />
+                    </TableCell> : null}
+                    {isColumnVisible("account") ? <TableCell className={settingsTableCellClass}>
+                      <div className="grid gap-1.5">
+                        <Select value={row.profileId || "unlinked"} onValueChange={(value) => handleAccountChange(row.id, value)}>
+                          <SelectTrigger className="h-9" disabled={!isAccountSchemaReady}>
+                            <SelectValue placeholder="연결된 계정" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unlinked">계정 미연결</SelectItem>
+                            {profiles.map((profile) => (
+                              <SelectItem key={profile.id} value={profile.id}>
+                                {getAccountLabel(profile)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="grid grid-cols-[1fr_auto] gap-1.5">
+                          <Input
+                            className="h-8 text-xs"
+                            value={row.accountEmail}
+                            onChange={(event) => handleFieldChange(row.id, "accountEmail", event.target.value)}
+                            placeholder="login@tipsedu.co.kr"
+                            aria-label="로그인 계정 이메일"
+                            disabled={!isAccountSchemaReady}
+                          />
+                          {row.profileId ? (
+                            <Badge variant="outline" className="h-8 rounded-md px-2 text-[11px]">
+                              <Link2 className="mr-1 size-3" />
+                              연결된 계정
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </div>
+                    </TableCell> : null}
+                    {isColumnVisible("role") ? <TableCell className={settingsTableCellClass}>
+                      <Select value={row.dashboardRole} onValueChange={(value) => handleRoleChange(row.id, value)} disabled={!isAccountSchemaReady}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="권한" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ROLE_OPTIONS.map((role) => (
+                            <SelectItem key={role.value} value={role.value}>
+                              {role.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </TableCell> : null}
                     {isColumnVisible("visible") ? <TableCell className={`${settingsTableCellClass} text-center`}>
                       <div className="flex justify-center">
@@ -338,6 +533,52 @@ export function TeacherMasterWorkspace() {
                   </TableRow>
                 );
               })
+            )}
+          </TableBody>
+        </Table>
+      </SettingsTableFrame>
+
+      <SettingsTableFrame>
+        <Table>
+          <caption className="sr-only">최근 변경 이력</caption>
+          <TableHeader>
+            <TableRow>
+              <TableHead className={`w-[18%] ${settingsTableHeadClass}`}>
+                <span className="inline-flex items-center gap-1.5">
+                  <History className="size-3.5" />
+                  최근 변경 이력
+                </span>
+              </TableHead>
+              <TableHead className={`w-[16%] ${settingsTableHeadClass}`}>구분</TableHead>
+              <TableHead className={`w-[28%] ${settingsTableHeadClass}`}>대상</TableHead>
+              <TableHead className={`w-[24%] ${settingsTableHeadClass}`}>실행자</TableHead>
+              <TableHead className={`w-[14%] text-right ${settingsTableHeadClass}`}>시간</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {auditLogs.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  기록된 이력이 없습니다.
+                </TableCell>
+              </TableRow>
+            ) : (
+              auditLogs.map((log) => (
+                <TableRow key={log.id}>
+                  <TableCell className={settingsTableCellClass}>
+                    <Badge variant="outline" className="rounded-md">
+                      {getAuditActionLabel(log.action)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className={settingsTableCellClass}>{log.entityTable}</TableCell>
+                  <TableCell className={settingsTableCellClass}>{log.entityLabel || "-"}</TableCell>
+                  <TableCell className={settingsTableCellClass}>
+                    <div className="truncate">{log.actorEmail || "-"}</div>
+                    <div className="text-xs text-muted-foreground">{getRoleLabel(log.actorRole)}</div>
+                  </TableCell>
+                  <TableCell className={`${settingsTableCellClass} text-right`}>{formatAuditTime(log.changedAt)}</TableCell>
+                </TableRow>
+              ))
             )}
           </TableBody>
         </Table>

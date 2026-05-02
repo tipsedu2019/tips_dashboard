@@ -30,6 +30,7 @@ type DashboardUser = User & {
   name?: string
   role?: DashboardRole
   loginId?: string
+  teacherCatalogId?: string
   mustChangePassword?: boolean
   isFallbackRole?: boolean
 }
@@ -154,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             (supabaseUser.email?.includes("@")
               ? supabaseUser.email.split("@")[0]
               : supabaseUser.email || ""),
+          teacherCatalogId: data.teacher_catalog_id || "",
           mustChangePassword:
             shouldForcePasswordChange(data) || shouldForcePasswordChange(supabaseUser),
           isFallbackRole: false,

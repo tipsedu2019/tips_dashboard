@@ -1,6 +1,7 @@
 import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supabase.ts";
 
 const DEFAULT_CLASS_STATUS = "수강";
+const DASHBOARD_ROLES = ["admin", "staff", "teacher", "viewer"];
 const CLASSROOM_ALIAS_MAP = new Map([
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],
@@ -40,6 +41,17 @@ function normalizeSubjectList(subjects) {
   return [...new Set((Array.isArray(subjects) ? subjects : []).map((subject) => trimText(subject)).filter(Boolean))];
 }
 
+function normalizeDashboardRole(value) {
+  const role = trimText(value).toLowerCase();
+  return DASHBOARD_ROLES.includes(role) ? role : "teacher";
+}
+
+function isMissingColumnError(error) {
+  const message = trimText(error?.message).toLowerCase();
+  return message.includes("column") &&
+    (message.includes("does not exist") || message.includes("schema cache") || message.includes("could not find"));
+}
+
 function resolveClient(client) {
   if (client) {
     return client;
@@ -77,6 +89,13 @@ export function buildResourceCatalogPayload(resources = [], options = {}) {
     subjects: normalizeSubjectList(resource?.subjects),
     is_visible: resource?.isVisible !== false,
     sort_order: resource?.sortOrder ?? resource?.sort_order ?? index,
+    ...(kind === "teacher"
+      ? {
+          profile_id: trimText(resource?.profileId || resource?.profile_id) || null,
+          account_email: trimText(resource?.accountEmail || resource?.account_email).toLowerCase() || null,
+          dashboard_role: normalizeDashboardRole(resource?.dashboardRole || resource?.dashboard_role),
+        }
+      : {}),
   }));
 }
 
@@ -129,6 +148,130 @@ async function deleteRows(client, table, ids = []) {
   if (error) {
     throw error;
   }
+}
+
+function stripTeacherAccountFields(row) {
+  const baseRow = { ...row };
+  delete baseRow.profile_id;
+  delete baseRow.account_email;
+  delete baseRow.dashboard_role;
+  return baseRow;
+}
+
+async function upsertTeacherCatalogRows(client, rows = []) {
+  try {
+    return await upsertRows(client, "teacher_catalogs", rows);
+  } catch (error) {
+    if (!isMissingColumnError(error)) {
+      throw error;
+    }
+    return upsertRows(client, "teacher_catalogs", rows.map(stripTeacherAccountFields));
+  }
+}
+
+async function syncLinkedTeacherProfiles(client, rows = []) {
+  const linkedRows = rows.filter((row) => trimText(row.profile_id));
+  if (linkedRows.length === 0) {
+    return [];
+  }
+
+  const updates = [];
+  for (const row of linkedRows) {
+    const profileId = trimText(row.profile_id);
+    const role = normalizeDashboardRole(row.dashboard_role);
+    const accountEmail = trimText(row.account_email).toLowerCase();
+    const loginId = accountEmail.includes("@") ? accountEmail.split("@")[0] : accountEmail;
+    const extendedPatch = {
+      role,
+      name: trimText(row.name),
+      email: accountEmail || null,
+      login_id: loginId || null,
+      teacher_catalog_id: trimText(row.id) || null,
+    };
+
+    let result = await client.from("profiles").update(extendedPatch).eq("id", profileId).select();
+    if (result.error && isMissingColumnError(result.error)) {
+      result = await client.from("profiles").update({ role }).eq("id", profileId).select();
+    }
+    if (result.error) {
+      throw result.error;
+    }
+    updates.push(...(result.data || []));
+  }
+
+  return updates;
+}
+
+async function selectTeacherCatalogsWithAccountFields(client) {
+  const extendedSelect = "id, name, subjects, is_visible, sort_order, profile_id, account_email, dashboard_role";
+  const baseSelect = "id, name, subjects, is_visible, sort_order";
+  const extended = await client
+    .from("teacher_catalogs")
+    .select(extendedSelect)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (!extended.error) {
+    return { rows: extended.data || [], isAccountSchemaReady: true, schemaWarning: "" };
+  }
+  if (!isMissingColumnError(extended.error)) {
+    throw extended.error;
+  }
+
+  const base = await client
+    .from("teacher_catalogs")
+    .select(baseSelect)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+  if (base.error) {
+    throw base.error;
+  }
+
+  return {
+    rows: base.data || [],
+    isAccountSchemaReady: false,
+    schemaWarning: "선생님 계정 연동 DB 마이그레이션이 아직 적용되지 않았습니다.",
+  };
+}
+
+async function selectAccountProfiles(client) {
+  const extended = await client
+    .from("profiles")
+    .select("id, name, login_id, email, role, teacher_catalog_id, updated_at")
+    .order("name", { ascending: true });
+
+  if (!extended.error) {
+    return extended.data || [];
+  }
+  if (!isMissingColumnError(extended.error)) {
+    throw extended.error;
+  }
+
+  const base = await client
+    .from("profiles")
+    .select("id, role, updated_at")
+    .order("updated_at", { ascending: false });
+  if (base.error) {
+    throw base.error;
+  }
+  return base.data || [];
+}
+
+async function selectRecentAuditLogs(client) {
+  const { data, error } = await client
+    .from("dashboard_audit_logs")
+    .select("id, actor_profile_id, actor_email, actor_role, action, entity_table, entity_id, entity_label, changed_at")
+    .in("entity_table", ["teacher_catalogs", "profiles"])
+    .order("changed_at", { ascending: false })
+    .limit(12);
+
+  if (!error) {
+    return data || [];
+  }
+  if (isMissingColumnError(error) || trimText(error.message).includes("dashboard_audit_logs")) {
+    return [];
+  }
+  throw error;
 }
 
 function toNumberOrNull(value) {
@@ -285,16 +428,32 @@ export function createManagementService(options = {}) {
 
     async upsertTeacherCatalogs(resources = []) {
       const client = ensureClient(supabase);
-      return upsertRows(
-        client,
-        "teacher_catalogs",
-        buildResourceCatalogPayload(resources, { kind: "teacher", generateId }),
-      );
+      const payload = buildResourceCatalogPayload(resources, { kind: "teacher", generateId });
+      const rows = await upsertTeacherCatalogRows(client, payload);
+      await syncLinkedTeacherProfiles(client, payload);
+      return rows;
     },
 
     async deleteTeacherCatalogs(ids = []) {
       const client = ensureClient(supabase);
       return deleteRows(client, "teacher_catalogs", ids);
+    },
+
+    async listTeacherAccountSettingsData() {
+      const client = ensureClient(supabase);
+      const teachersResult = await selectTeacherCatalogsWithAccountFields(client);
+      const [profiles, auditLogs] = await Promise.all([
+        selectAccountProfiles(client),
+        selectRecentAuditLogs(client),
+      ]);
+
+      return {
+        teachers: teachersResult.rows,
+        profiles,
+        auditLogs,
+        isAccountSchemaReady: teachersResult.isAccountSchemaReady,
+        schemaWarning: teachersResult.schemaWarning,
+      };
     },
 
     async upsertClassroomCatalogs(resources = []) {
@@ -339,7 +498,12 @@ export function createManagementService(options = {}) {
         return upsertRows(
           client,
           "class_schedule_sync_groups",
-          payload.map(({ sort_order, is_default, ...group }) => group),
+          payload.map((group) => {
+            const fallbackGroup = { ...group };
+            delete fallbackGroup.sort_order;
+            delete fallbackGroup.is_default;
+            return fallbackGroup;
+          }),
         );
       }
     },

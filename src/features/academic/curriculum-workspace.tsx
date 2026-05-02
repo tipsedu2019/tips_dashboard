@@ -1,17 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
+import { BookOpen, CalendarDays, CheckCircle2, ClipboardList, SlidersHorizontal } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,38 +29,48 @@ import { buildCurriculumWorkspaceModel } from "./records.js";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 
 const DEFAULT_CURRICULUM_STATUS_FILTER = "수강";
+const CURRICULUM_VIEW_MODES = [
+  { value: "all", label: "전체" },
+  { value: "unlinked", label: "교재 미연결" },
+  { value: "unscheduled", label: "회차 미생성" },
+  { value: "update", label: "진도 미배정" },
+  { value: "done", label: "계획 완료" },
+] as const;
+
+function rowMatchesViewMode(row: Record<string, unknown>, viewMode: string) {
+  if (viewMode === "unlinked") {
+    return Number(row.textbookCount || 0) === 0;
+  }
+  if (viewMode === "unscheduled") {
+    return Number(row.totalSessions || 0) === 0;
+  }
+  if (viewMode === "update") {
+    return text(row.stateLabel) === "진도 미배정";
+  }
+  if (viewMode === "done") {
+    return text(row.stateLabel) === "계획 완료";
+  }
+  return true;
+}
 
 function getStateVariant(stateLabel: string) {
   if (stateLabel.includes("완료")) {
     return "default" as const;
   }
-  if (stateLabel.includes("업데이트")) {
+  if (stateLabel.includes("미배정")) {
     return "destructive" as const;
   }
-  if (stateLabel.includes("미설정")) {
+  if (stateLabel.includes("미생성") || stateLabel.includes("미연결")) {
     return "outline" as const;
   }
   return "secondary" as const;
-}
-
-function formatUpdatedDate(value: string) {
-  if (!value) {
-    return "기록 전";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function text(value: unknown) {
   return String(value || "").trim();
 }
 
-function buildLessonDesignHref(classId: string) {
+function buildLessonDesignHref(classId: string, sessionId = "", sectionId = "") {
   const normalizedClassId = text(classId);
   if (!normalizedClassId) {
     return "/admin/curriculum";
@@ -73,19 +79,46 @@ function buildLessonDesignHref(classId: string) {
   const params = new URLSearchParams();
   params.set("classId", normalizedClassId);
   params.set("lessonDesign", "1");
+  const normalizedSessionId = text(sessionId);
+  if (normalizedSessionId) {
+    params.set("sessionId", normalizedSessionId);
+  }
+  const normalizedSectionId = text(sectionId);
+  if (normalizedSectionId) {
+    params.set("section", normalizedSectionId);
+  }
   return `/admin/curriculum/lesson-design?${params.toString()}`;
+}
+
+function getCurriculumDesignAction(row: Record<string, unknown>) {
+  const nextSession = (row.nextSession || {}) as Record<string, unknown>;
+  const sessionId = text(nextSession.id || nextSession.sessionId);
+
+  if (Number(row.textbookCount || 0) <= 0) {
+    return { label: "교재", sectionId: "lesson-design-textbooks", sessionId: "" };
+  }
+
+  if (Number(row.totalSessions || 0) <= 0) {
+    return { label: "일정", sectionId: "lesson-design-periods", sessionId: "" };
+  }
+
+  if (Number(row.delayedProgressSessions || 0) > 0) {
+    return { label: "진도", sectionId: "lesson-design-board", sessionId };
+  }
+
+  return { label: "보기", sectionId: "lesson-design-board", sessionId };
 }
 
 function formatTextbookCount(count: number) {
   return count > 0 ? `${count}권 연결` : "교재 미연결";
 }
 
-function formatProgressPrimary(completedSessions: number, totalSessions: number) {
+function formatProgressPrimary(plannedSessions: number, totalSessions: number) {
   if (totalSessions <= 0) {
     return "회차 설계 전";
   }
 
-  return `${completedSessions}/${totalSessions}회 완료`;
+  return `진도 ${plannedSessions}/${totalSessions}회`;
 }
 
 function formatProgressPercent(progressPercent: number, totalSessions: number) {
@@ -96,39 +129,38 @@ function formatProgressPercent(progressPercent: number, totalSessions: number) {
   return `${progressPercent}%`;
 }
 
-function formatProgressMeta(updatedSessions: number, delayedSessions: number, totalSessions: number) {
+function formatProgressMeta(plannedSessions: number, delayedSessions: number, totalSessions: number) {
   if (totalSessions <= 0) {
     return "수업 설계에서 회차 생성";
   }
 
-  return `업데이트 ${updatedSessions}회 · 대기 ${delayedSessions}회`;
+  return `배정 ${plannedSessions}회 · 미배정 ${delayedSessions}회`;
 }
 
 function CurriculumWorkspaceSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-36" />
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="border border-border/70 bg-background px-4 py-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, index) => (
             <Skeleton key={`filter-${index}`} className="h-10 w-full" />
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <div className="px-4 lg:px-6">
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-6 w-48" />
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(24rem,0.65fr)]">
+          <div className="border border-border/70 bg-background px-4 py-4">
             {Array.from({ length: 5 }).map((_, index) => (
-              <Skeleton key={`row-${index}`} className="h-16 w-full" />
+              <Skeleton key={`row-${index}`} className="mb-3 h-16 w-full" />
             ))}
-          </CardContent>
-        </Card>
+          </div>
+          <div className="border border-border/70 bg-background px-4 py-4">
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="mt-4 h-28 w-full" />
+            <Skeleton className="mt-3 h-28 w-full" />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -143,9 +175,11 @@ export function AcademicCurriculumWorkspace() {
   const [grade, setGrade] = useState("");
   const [teacher, setTeacher] = useState("");
   const [classroom, setClassroom] = useState("");
+  const [viewMode, setViewMode] = useState("all");
+  const [selectedClassId, setSelectedClassId] = useState("");
   const deferredSearch = useDeferredValue(search);
 
-  const model = useMemo(
+  const baseModel = useMemo(
     () =>
       buildCurriculumWorkspaceModel({
         classes: data.classes,
@@ -158,7 +192,7 @@ export function AcademicCurriculumWorkspace() {
         classroomCatalogs: data.classroomCatalogs,
         filters: {
           search: deferredSearch,
-          classGroupId: period,
+          classGroupId: "",
           status,
           subject,
           grade,
@@ -178,14 +212,53 @@ export function AcademicCurriculumWorkspace() {
       data.textbooks,
       deferredSearch,
       grade,
-      period,
       status,
       subject,
       teacher,
     ],
   );
-  const defaultPeriod = useMemo(() => pickDefaultPeriodValue(model.classGroupOptions), [model.classGroupOptions]);
-  const normalizedPeriod = period || defaultPeriod;
+  const defaultPeriod = useMemo(() => pickDefaultPeriodValue(baseModel.classGroupOptions), [baseModel.classGroupOptions]);
+  const normalizedPeriod =
+    period && baseModel.classGroupOptions.some((option) => option.value === period) ? period : defaultPeriod;
+  const model = useMemo(
+    () =>
+      buildCurriculumWorkspaceModel({
+        classes: data.classes,
+        classTerms: data.classTerms,
+        classGroups: data.classGroups,
+        classGroupMembers: data.classGroupMembers,
+        textbooks: data.textbooks,
+        progressLogs: data.progressLogs,
+        teacherCatalogs: data.teacherCatalogs,
+        classroomCatalogs: data.classroomCatalogs,
+        filters: {
+          search: deferredSearch,
+          classGroupId: normalizedPeriod,
+          status,
+          subject,
+          grade,
+          teacher,
+          classroom,
+        },
+      }),
+    [
+      classroom,
+      data.classGroupMembers,
+      data.classGroups,
+      data.classTerms,
+      data.classes,
+      data.classroomCatalogs,
+      data.progressLogs,
+      data.teacherCatalogs,
+      data.textbooks,
+      deferredSearch,
+      grade,
+      normalizedPeriod,
+      status,
+      subject,
+      teacher,
+    ],
+  );
   const hasNonDefaultPeriodFilter = Boolean(normalizedPeriod && normalizedPeriod !== defaultPeriod);
   const hasNonDefaultStatusFilter = status !== DEFAULT_CURRICULUM_STATUS_FILTER;
   const hasActiveFilters = Boolean(
@@ -195,30 +268,50 @@ export function AcademicCurriculumWorkspace() {
       subject ||
       grade ||
       teacher ||
-      classroom,
+      classroom ||
+      viewMode !== "all",
   );
-
-  useEffect(() => {
-    if (model.classGroupOptions.length === 0) {
-      if (period) {
-        setPeriod("");
-      }
-      return;
-    }
-
-    if (!model.classGroupOptions.some((option) => option.value === period)) {
-      setPeriod(defaultPeriod);
-    }
-  }, [defaultPeriod, model.classGroupOptions, period]);
+  const viewRows = useMemo(
+    () => model.rows.filter((row) => rowMatchesViewMode(row, viewMode)),
+    [model.rows, viewMode],
+  );
+  const viewRowSessionCount = useMemo(
+    () => viewRows.reduce((total, row) => total + Number(row.totalSessions || 0), 0),
+    [viewRows],
+  );
+  const viewRowTextbookCount = useMemo(
+    () => viewRows.reduce((total, row) => total + Number(row.textbookCount || 0), 0),
+    [viewRows],
+  );
+  const viewModeLabel = CURRICULUM_VIEW_MODES.find((mode) => mode.value === viewMode)?.label || "전체";
+  const curriculumWorkQueueItems = CURRICULUM_VIEW_MODES.map((mode) => ({
+    ...mode,
+    count:
+      mode.value === "all"
+        ? model.rows.length
+        : model.rows.filter((row) => rowMatchesViewMode(row, mode.value)).length,
+  }));
+  const selectedRow = useMemo(
+    () =>
+      viewRows.find((row) => row.id === selectedClassId) ||
+      viewRows[0] ||
+      null,
+    [selectedClassId, viewRows],
+  );
+  const selectedRowProgressAction = selectedRow ? getCurriculumDesignAction(selectedRow) : null;
+  const selectedProgressTargetSessionCount = selectedRow
+    ? selectedRow.progressTargetSessions ?? selectedRow.totalSessions
+    : 0;
 
   const resetFilters = () => {
     setSearch("");
-    setPeriod(defaultPeriod);
+    setPeriod("");
     setStatus(DEFAULT_CURRICULUM_STATUS_FILTER);
     setSubject("");
     setGrade("");
     setTeacher("");
     setClassroom("");
+    setViewMode("all");
   };
 
   const filterSelects: ClassFilterPanelSelect[] = [
@@ -319,7 +412,6 @@ export function AcademicCurriculumWorkspace() {
     grade ? { id: "grade", label: <>학년 {grade}</> } : null,
     teacher ? { id: "teacher", label: <>선생님 {teacher}</> } : null,
     classroom ? { id: "classroom", label: <>강의실 {classroom}</> } : null,
-    search.trim() ? { id: "search", label: <>검색어 {search.trim()}</> } : null,
   ].filter(Boolean) as ClassFilterPanelChip[];
 
   if (loading) {
@@ -342,118 +434,366 @@ export function AcademicCurriculumWorkspace() {
           searchValue={search}
           searchPlaceholder="수업 검색"
           onSearchChange={setSearch}
-          summaryLabel={`수업 ${model.summary.classCount}개, 계획 ${model.summary.managedClassCount}개, 교재 ${model.summary.linkedTextbooks}권`}
+          summaryLabel={`수업 ${viewRows.length}개 · 교재 미연결 ${model.summary.unlinkedClassCount}개 · 진도 필요 ${model.summary.updateNeededClassCount}개`}
           chips={filterChips}
           showReset={hasActiveFilters}
           onReset={resetFilters}
+          filterCount={filterChips.length}
+          footerAction={
+            <Popover>
+              <PopoverTrigger asChild>
+          <Button type="button" size="sm" variant="outline" className="h-7 rounded-md px-2 text-xs lg:hidden">
+                  <SlidersHorizontal className="mr-1.5 size-3.5" />
+                  보기
+                  <span className="ml-1.5 rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
+                    {viewModeLabel}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(22rem,calc(100vw-2rem))] p-3">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {CURRICULUM_VIEW_MODES.map((mode) => (
+                    <Button
+                      key={mode.value}
+                      type="button"
+                      size="sm"
+                      variant={viewMode === mode.value ? "default" : "outline"}
+                      className="justify-start rounded-md"
+                      onClick={() => setViewMode(mode.value)}
+                    >
+                      {mode.label}
+                    </Button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          }
         />
       </div>
 
       <div className="px-4 lg:px-6">
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>반별 계획</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {model.rows.length === 0 ? (
-                <div className="text-muted-foreground flex min-h-60 items-center justify-center rounded-xl border border-dashed text-sm">
-                  현재 조건에 맞는 계획 데이터가 없습니다.
-                </div>
-              ) : (
-                <ScrollArea className="h-[34rem] pr-4">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>수업</TableHead>
-                        <TableHead>교재</TableHead>
-                        <TableHead>진도</TableHead>
-                        <TableHead>업데이트</TableHead>
-                        <TableHead>상태/작업</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {model.rows.map((row) => (
+        <div data-testid="curriculum-work-queue" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          {curriculumWorkQueueItems.map((item) => (
+            <button
+              key={`curriculum-work-queue-${item.value}`}
+              type="button"
+              aria-pressed={viewMode === item.value}
+              className={[
+                "flex h-12 items-center justify-between rounded-md border px-3 text-left text-sm transition-colors",
+                viewMode === item.value
+                  ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                  : "border-border/70 bg-background hover:border-primary/40 hover:bg-muted/40",
+              ].join(" ")}
+              onClick={() => setViewMode(item.value)}
+            >
+              <span className="min-w-0 truncate font-medium">{item.label}</span>
+              <span
+                className={[
+                  "ml-3 rounded-md px-2 py-0.5 text-xs font-semibold",
+                  viewMode === item.value ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
+                ].join(" ")}
+              >
+                {item.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-4 lg:px-6">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(24rem,0.65fr)]">
+          <section className="overflow-hidden rounded-lg border border-border/70 bg-background">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="size-4 text-muted-foreground" />
+                <p className="text-sm font-semibold text-foreground">반별 수업계획</p>
+                <Badge variant="secondary">{viewRows.length}개</Badge>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {viewRowSessionCount}회차 · {viewRowTextbookCount}권
+              </div>
+            </div>
+            {viewRows.length === 0 ? (
+              <div className="text-muted-foreground flex min-h-72 items-center justify-center border border-dashed text-sm">
+                현재 조건에 맞는 계획 데이터가 없습니다.
+              </div>
+            ) : (
+              <ScrollArea className="h-[38rem]">
+                <Table className="min-w-[1040px] table-fixed">
+                  <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_var(--border)]">
+                    <TableRow>
+                      <TableHead className="w-[30%]">수업</TableHead>
+                      <TableHead className="w-[18%]">일정</TableHead>
+                      <TableHead className="w-[22%]">수업교재</TableHead>
+                      <TableHead className="w-[20%]">진도</TableHead>
+                      <TableHead className="w-[10%] text-right">작업</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {viewRows.map((row) => {
+                      const isSelected = selectedRow?.id === row.id;
+                      const rowDesignAction = getCurriculumDesignAction(row);
+                      const hasLinkedTextbooks = row.textbookCount > 0;
+                      const progressTargetSessionCount = row.progressTargetSessions ?? row.totalSessions;
+
+                      return (
                         <TableRow
                           key={row.id}
-                          className="transition-colors hover:bg-muted/30"
+                          aria-selected={isSelected}
+                          tabIndex={0}
+                          aria-label={`${row.title} 선택`}
+                          className={
+                            isSelected
+                              ? "cursor-pointer border-l-2 border-l-primary bg-primary/5 transition-colors hover:bg-primary/10"
+                              : "cursor-pointer transition-colors hover:bg-muted/30"
+                          }
+                          onClick={() => setSelectedClassId(row.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedClassId(row.id);
+                            }
+                          }}
                         >
                           <TableCell className="align-top">
-                            <div className="min-w-[15rem] space-y-2">
+                            <div className="min-w-0 space-y-2">
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge>{row.subject || "과목 미정"}</Badge>
-                                {row.grade ? (
-                                  <Badge variant="secondary">{row.grade}</Badge>
-                                ) : null}
+                                {row.grade ? <Badge variant="secondary">{row.grade}</Badge> : null}
+                                <Badge variant={getStateVariant(row.stateLabel)}>{row.stateLabel}</Badge>
                               </div>
                               <div>
-                                <Link
-                                  href={buildLessonDesignHref(row.id)}
-                                  className="font-medium underline-offset-4 hover:underline"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  {row.title}
-                                </Link>
-                                <p className="text-muted-foreground text-sm">
-                                  {row.term || "학기 미정"} · {row.teacherSummary || "선생님 미정"}
+                                <p className="truncate font-medium text-foreground">{row.title}</p>
+                                <p className="truncate text-sm text-muted-foreground">
+                                  {row.teacherSummary || "선생님 미정"} · {row.term || "학기 미정"}
                                 </p>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="align-top">
-                            <div className="space-y-1">
-                              <p className={row.textbookCount > 0 ? "font-medium" : "font-medium text-muted-foreground"}>
-                                {formatTextbookCount(row.textbookCount)}
-                              </p>
-                              <p className="text-muted-foreground text-sm">
-                                {row.schedule || "시간표 미정"}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell className="align-top">
-                            <div className="min-w-[12rem] space-y-2">
-                              <div className="flex items-center justify-between text-sm">
-                                <span>{formatProgressPrimary(row.completedSessions, row.totalSessions)}</span>
-                                <span className="text-muted-foreground">
-                                  {formatProgressPercent(row.progressPercent, row.totalSessions)}
-                                </span>
-                              </div>
-                              {row.totalSessions > 0 ? (
-                                <Progress value={row.progressPercent} />
-                              ) : (
-                                <div className="h-2 rounded-full bg-muted" />
-                              )}
-                              <p className="text-muted-foreground text-xs">
-                                {formatProgressMeta(row.updatedSessions, row.delayedSessions, row.totalSessions)}
+                          <TableCell className="align-top text-sm">
+                            <div className="min-w-0 space-y-1">
+                              <p className="truncate font-medium">{row.schedule || "시간표 미정"}</p>
+                              <p className="text-muted-foreground">
+                                {row.nextSession?.label || "회차 미생성"}
                               </p>
                             </div>
                           </TableCell>
                           <TableCell className="align-top text-sm">
-                            {formatUpdatedDate(row.lastUpdatedAt)}
-                          </TableCell>
-                          <TableCell className="align-top">
-                            <div className="flex min-w-[7rem] flex-col items-start gap-2">
-                              <Badge variant={getStateVariant(row.stateLabel)}>
-                                {row.stateLabel}
-                              </Badge>
-                              <Button asChild variant="outline" size="sm" className="h-7 rounded-sm px-2 text-xs">
-                                <Link
-                                  href={buildLessonDesignHref(row.id)}
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  수업 설계
-                                </Link>
-                              </Button>
+                            <div className="min-w-0 space-y-1">
+                              <p className={row.textbookCount > 0 ? "truncate font-medium" : "truncate font-medium text-muted-foreground"}>
+                                {row.textbookSummary || formatTextbookCount(row.textbookCount)}
+                                {row.textbookOverflowCount > 0 ? ` 외 ${row.textbookOverflowCount}권` : ""}
+                              </p>
+                              <p className="truncate text-muted-foreground">
+                                {row.textbookScopeLabels?.slice(0, 2).join(", ") || "영역 미정"}
+                              </p>
                             </div>
                           </TableCell>
+                          <TableCell className="align-top">
+                            {hasLinkedTextbooks ? (
+                              <div className="min-w-0 space-y-2">
+                                <div className="flex items-center justify-between text-sm">
+                                  <span>{formatProgressPrimary(row.plannedProgressSessions, progressTargetSessionCount)}</span>
+                                  <span className="text-muted-foreground">
+                                    {formatProgressPercent(row.progressTargetPercent, progressTargetSessionCount)}
+                                  </span>
+                                </div>
+                                {progressTargetSessionCount > 0 ? (
+                                  <Progress value={row.progressTargetPercent} />
+                                ) : (
+                                  <div className="h-2 rounded-full bg-muted" />
+                                )}
+                                <p className="text-muted-foreground text-xs">
+                                  {formatProgressMeta(row.plannedProgressSessions, row.delayedProgressSessions, progressTargetSessionCount)}
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs">
+                                <p className="font-medium text-foreground">교재 연결 필요</p>
+                                <p className="mt-1 text-muted-foreground">교재를 연결한 뒤 회차별 진도를 배정합니다.</p>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="align-top text-right">
+                            <Button asChild variant="outline" size="sm" className="h-8 rounded-sm px-2 text-xs">
+                              <Link
+                                href={buildLessonDesignHref(row.id, rowDesignAction.sessionId, rowDesignAction.sectionId)}
+                                aria-label={`${row.title} ${rowDesignAction.label}`}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {rowDesignAction.label}
+                              </Link>
+                            </Button>
+                          </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            )}
+          </section>
+
+          <section className="border border-border/70 bg-background xl:sticky xl:top-24 xl:self-start">
+            {selectedRow ? (
+              <div className="flex h-full flex-col">
+                <div className="border-b px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge>{selectedRow.subject || "과목 미정"}</Badge>
+                        {selectedRow.grade ? <Badge variant="secondary">{selectedRow.grade}</Badge> : null}
+                        <Badge variant={getStateVariant(selectedRow.stateLabel)}>{selectedRow.stateLabel}</Badge>
+                      </div>
+                      <div>
+                        <p className="truncate text-lg font-semibold text-foreground">{selectedRow.title}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {selectedRow.teacherSummary || "선생님 미정"} · {selectedRow.schedule || "시간표 미정"}
+                        </p>
+                      </div>
+                    </div>
+                    <div data-testid="curriculum-detail-actions" className="flex shrink-0 flex-wrap gap-2">
+                      <Button asChild size="sm" variant="outline" className="h-8 rounded-md px-2.5 text-xs">
+                        <Link href={buildLessonDesignHref(selectedRow.id, "", "lesson-design-periods")}>
+                          일정 생성
+                        </Link>
+                      </Button>
+                      {selectedRowProgressAction ? (
+                        <Button asChild size="sm" className="h-8 rounded-md px-2.5 text-xs">
+                          <Link
+                            href={buildLessonDesignHref(
+                              selectedRow.id,
+                              selectedRowProgressAction.sessionId,
+                              selectedRowProgressAction.sectionId,
+                            )}
+                          >
+                            {selectedRowProgressAction.label === "교재" ? "교재 연결" : "진도 생성"}
+                          </Link>
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <ScrollArea className="h-[35rem]">
+                  <div className="space-y-5 px-4 py-4">
+                    <div className="grid grid-cols-3 divide-x rounded-lg border text-sm">
+                      <div className="px-3 py-2">
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <CalendarDays className="size-3.5" />
+                          <span>회차</span>
+                        </div>
+                        <p className="mt-1 font-semibold">{selectedProgressTargetSessionCount}회</p>
+                      </div>
+                      <div className="px-3 py-2">
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <BookOpen className="size-3.5" />
+                          <span>교재</span>
+                        </div>
+                        <p className="mt-1 font-semibold">{selectedRow.textbookCount}권</p>
+                      </div>
+                      <div className="px-3 py-2">
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <CheckCircle2 className="size-3.5" />
+                          <span>진도</span>
+                        </div>
+                        <p className="mt-1 font-semibold">{selectedRow.plannedProgressSessions}회</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-foreground">수업교재</p>
+                        <Badge variant="outline">{selectedRow.textbookCount}권</Badge>
+                      </div>
+                      {selectedRow.textbookCatalog.length > 0 ? (
+                        <div className="space-y-2">
+                          {selectedRow.textbookCatalog.map((book) => (
+                            <div key={book.textbookId} className="rounded-lg border px-3 py-2 text-sm">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium text-foreground">{book.title}</p>
+                                  <p className="mt-0.5 text-xs text-muted-foreground">
+                                    {[book.publisher, book.scopeLabel || book.category].filter(Boolean).join(" · ") || "교재 정보"}
+                                  </p>
+                                </div>
+                                <Badge variant={book.role === "main" ? "default" : "secondary"}>
+                                  {book.role === "main" ? "주교재" : "부교재"}
+                                </Badge>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed px-3 py-5 text-sm text-muted-foreground">
+                          수업 설계에서 교재를 연결하세요.
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-foreground">회차 배치</p>
+                        <Badge variant="outline">
+                          {selectedRow.plannedProgressSessions}/{selectedProgressTargetSessionCount}
+                        </Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {selectedRow.sessionSummaries.slice(0, 8).map((session) => {
+                          const sessionStatusLabel = session.hasPlanContent ? "계획 완료" : "진도 미배정";
+                          const sessionHref = buildLessonDesignHref(
+                            selectedRow.id,
+                            session.sessionId || "",
+                            "lesson-design-periods",
+                          );
+                          const sessionMeta = [
+                            session.periodLabel,
+                            session.planSummary || "범위 미지정",
+                            session.textbookEntryCount > 0 ? `${session.textbookEntryCount}권` : "",
+                          ].filter(Boolean).join(" · ");
+
+                          return (
+                            <Link
+                              key={session.sessionId || `${session.sessionOrder}-${session.dateValue || session.label}`}
+                              href={sessionHref}
+                              className="block rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-muted/40"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="font-medium text-foreground">{session.label}</p>
+                                <Badge variant={getStateVariant(sessionStatusLabel)}>
+                                  {session.hasPlanContent ? "배정" : "대기"}
+                                </Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {sessionMeta || "범위 미지정"}
+                              </p>
+                            </Link>
+                          );
+                        })}
+                        {selectedRow.sessionSummaries.length === 0 ? (
+                          <div className="rounded-lg border border-dashed px-3 py-5 text-sm text-muted-foreground">
+                            수업일정 생성기로 회차를 먼저 만들 수 있습니다.
+                          </div>
+                        ) : null}
+                        {selectedRow.sessionSummaries.length > 8 ? (
+                          <Link
+                            href={buildLessonDesignHref(selectedRow.id, "", "lesson-design-periods")}
+                            className="block rounded-lg border border-dashed px-3 py-2 text-center text-sm font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                          >
+                            나머지 {selectedRow.sessionSummaries.length - 8}회 보기
+                          </Link>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
                 </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            ) : (
+              <div className="text-muted-foreground flex min-h-72 items-center justify-center border border-dashed text-sm">
+                선택 중인 수업이 없습니다.
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>

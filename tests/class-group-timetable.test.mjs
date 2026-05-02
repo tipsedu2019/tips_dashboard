@@ -141,6 +141,127 @@ test("status filter includes ended classes when the user chooses 종강", () => 
   assert.equal(workspace.rows[0].statusFilter, "종강");
 });
 
+test("curriculum rows count textbooks saved inside lesson schedule plans", () => {
+  const workspace = buildCurriculumWorkspaceModel({
+    classes: [
+      {
+        id: "math-plan",
+        name: "고1 수학",
+        subject: "수학",
+        grade: "고1",
+        teacher: "양소윤",
+        schedule: "금 21:30-23:00",
+        status: "수강",
+        schedule_plan: {
+          textbooks: [
+            {
+              textbookId: "book-main",
+              role: "main",
+              alias: "공통수학 주교재",
+              area: "대수",
+              subSubject: "공통수학1",
+            },
+          ],
+          sessions: [],
+        },
+      },
+    ],
+    textbooks: [
+      {
+        id: "book-main",
+        title: "원본 교재명",
+        subject: "수학",
+        category: "대수",
+        publisher: "테스트출판",
+      },
+    ],
+    filters: { status: "수강" },
+  });
+
+  assert.equal(workspace.rows[0].textbookCount, 1);
+  assert.equal(workspace.rows[0].textbookSummary, "공통수학 주교재");
+  assert.deepEqual(workspace.rows[0].textbookScopeLabels, ["대수 · 공통수학1", "대수"]);
+  assert.equal(workspace.summary.linkedTextbooks, 1);
+  assert.equal(workspace.summary.unlinkedClassCount, 0);
+});
+
+test("curriculum progress follows planned textbook ranges instead of lesson logs", () => {
+  const workspace = buildCurriculumWorkspaceModel({
+    classes: [
+      {
+        id: "plan-progress",
+        name: "고1 영어 독해",
+        subject: "영어",
+        grade: "고1",
+        teacher: "강부희",
+        schedule: "금 19:00-20:00",
+        status: "수강",
+        schedule_plan: {
+          textbooks: [
+            {
+              textbookId: "book-a",
+              alias: "독해 주교재",
+              area: "독해",
+              subSubject: "고1",
+            },
+          ],
+          sessions: [
+            {
+              id: "s-1",
+              sessionNumber: 1,
+              date: "2026-05-01",
+              billingLabel: "5월",
+              textbookEntries: [
+                {
+                  textbookId: "book-a",
+                  plan: { start: "p.10", end: "p.15", label: "Unit 1" },
+                },
+              ],
+            },
+            {
+              id: "s-2",
+              sessionNumber: 2,
+              date: "2026-05-08",
+              billingLabel: "5월",
+              textbookEntries: [
+                {
+                  textbookId: "book-a",
+                  plan: {},
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    textbooks: [{ id: "book-a", title: "독해 기본", publisher: "테스트" }],
+    progressLogs: [
+      {
+        class_id: "plan-progress",
+        session_id: "s-2",
+        status: "done",
+        updated_at: "2026-05-08T10:00:00.000Z",
+        content: "실수업 완료",
+      },
+    ],
+  });
+
+  const row = workspace.rows[0];
+  assert.equal(row.plannedSessions, 1);
+  assert.equal(row.updatedSessions, 1);
+  assert.equal(row.delayedSessions, 1);
+  assert.equal(row.progressPercent, 50);
+  assert.equal(row.stateLabel, "진도 미배정");
+  assert.equal(row.nextSession.sessionId, "s-2");
+  assert.equal(row.sessionSummaries[0].dateLabel, "2026.05.01");
+  assert.equal(row.sessionSummaries[0].planSummary, "Unit 1");
+  assert.equal(row.sessionSummaries[1].hasActualContent, true);
+  assert.equal(row.sessionSummaries[1].hasPlanContent, false);
+  assert.equal(workspace.summary.completedSessions, 1);
+  assert.equal(workspace.summary.pendingSessions, 1);
+  assert.equal(workspace.summary.updateNeededClassCount, 1);
+});
+
 test("timetable rows can be filtered by subject", () => {
   const workspace = buildTimetableWorkspaceModel({
     classes: [

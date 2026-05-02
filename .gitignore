@@ -14,6 +14,7 @@
 /coverage
 test-results/
 playwright-report/
+.playwright-mcp/
 
 # next.js
 /.next/
@@ -32,6 +33,7 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 dev-server.log
+dev-server*.log
 vite-ui-check.log
 
 # local workspace
@@ -44,12 +46,16 @@ tmp/
 output/
 debug.zip
 debug_xlsx/
+textbooks-master-after-comments.png
 
 # env files (can opt-in for committing if needed)
 .env*
 
 # vercel
 .vercel
+
+# supabase local CLI state
+/supabase/.temp/
 
 # typescript
 *.tsbuildinfo

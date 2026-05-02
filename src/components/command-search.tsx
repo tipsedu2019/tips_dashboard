@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Command as CommandPrimitive } from "cmdk"
 import { Search, type LucideIcon } from "lucide-react"
 
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { buildAdminNavGroups } from "@/lib/navigation"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
@@ -126,8 +126,9 @@ function createSearchItems({
 
     return group.items.flatMap((item) => {
       const items: SearchItem[] = []
+      const sameUrlChild = item.items?.find((subItem) => subItem.url === item.url)
 
-      if (!seen.has(item.url)) {
+      if (!sameUrlChild && !seen.has(item.url)) {
         seen.add(item.url)
         items.push({
           title: item.title,
@@ -199,6 +200,9 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[640px] overflow-hidden border border-zinc-200 p-0 shadow-2xl dark:border-zinc-800">
         <DialogTitle className="sr-only">운영 워크스페이스 빠른 이동</DialogTitle>
+        <DialogDescription className="sr-only">
+          메뉴와 관리 화면을 검색해서 바로 이동합니다.
+        </DialogDescription>
         <Command
           ref={commandRef}
           className="transition-transform duration-100 ease-out"

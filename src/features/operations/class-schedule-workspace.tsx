@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { CSSProperties } from "react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
-import { ArrowLeft, ArrowUpRight, Download } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BookOpen, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -25,12 +27,12 @@ import { AcademicFilterToolbar } from "@/features/academic/filter-toolbar";
 import {
   applyCalendarDateSubstitution,
   applyCalendarDateToggle,
+  applyTextbookPlanRangeField,
   buildSchedulePlanForSave,
   computeAutoEndDate,
   getSuggestedNextStartDate,
   normalizeSchedulePlan,
 } from "@/lib/class-schedule-planner";
-import { exportElementAsImage } from "@/lib/export-as-image";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +41,376 @@ import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 
 function text(value: unknown) {
   return String(value || "").trim();
+}
+
+function getTextbookTitle(book: Record<string, unknown> | null | undefined) {
+  return text(book?.title || book?.name || book?.textbook_title || book?.textbookTitle);
+}
+
+function getTextbookPublisher(book: Record<string, unknown> | null | undefined) {
+  return text(book?.publisher || book?.publisher_name || book?.publisherName);
+}
+
+function getTextbookCategory(book: Record<string, unknown> | null | undefined) {
+  return text(book?.category || book?.area || book?.unit);
+}
+
+function getTextbookSubject(book: Record<string, unknown> | null | undefined) {
+  return text(book?.subject);
+}
+
+function normalizeLessonSubjectKey(value: unknown) {
+  const normalized = text(value).replace(/\s+/g, "").toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.includes("수학") || normalized.includes("math")) {
+    return "math";
+  }
+  if (normalized.includes("영어") || normalized.includes("english")) {
+    return "english";
+  }
+  if (normalized.includes("기타") || normalized.includes("other")) {
+    return "other";
+  }
+  return normalized;
+}
+
+function getLessonSubjectDisplayLabel(value: unknown) {
+  const subjectKey = normalizeLessonSubjectKey(value);
+  if (subjectKey === "math") {
+    return "수학";
+  }
+  if (subjectKey === "english") {
+    return "영어";
+  }
+  if (subjectKey === "other") {
+    return "기타";
+  }
+  return text(value);
+}
+
+function buildLessonTextbookFilterOptions(
+  books: Record<string, unknown>[],
+  getter: (book: Record<string, unknown>) => string,
+) {
+  return [
+    ...new Set(
+      books
+        .map((book) => getter(book))
+        .map((value) => text(value))
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right, "ko"));
+}
+
+function buildLessonTextbookSubjectFilterOptions(books: Record<string, unknown>[]) {
+  return [
+    ...new Set(
+      books
+        .map((book) => normalizeLessonSubjectKey(getTextbookSubject(book)))
+        .filter(Boolean),
+    ),
+  ].sort((left, right) =>
+    getLessonSubjectDisplayLabel(left).localeCompare(getLessonSubjectDisplayLabel(right), "ko"),
+  );
+}
+
+function matchesLessonTextbookFilter(value: string, filter: string) {
+  return !filter || filter === "all" || value === filter;
+}
+
+function matchesLessonSubjectFilter(value: string, filter: string) {
+  return !filter || filter === "all" || normalizeLessonSubjectKey(value) === normalizeLessonSubjectKey(filter);
+}
+
+function getLessonSessionOptionLabel(session: Record<string, unknown> | null | undefined) {
+  const label = text(session?.label);
+  const dateLabel = text(session?.dateLabel);
+  return [label, dateLabel].filter(Boolean).join(" · ");
+}
+
+function getLessonTextbookScheduleRangeLabel(
+  book: Record<string, unknown>,
+  sessions: Record<string, unknown>[],
+) {
+  const startSessionId = text(book.startSessionId || book.start_session_id);
+  const endSessionId = text(book.endSessionId || book.end_session_id);
+  const startSession = sessions.find((session) => text(session.id) === startSessionId) || sessions[0];
+  const endSession =
+    sessions.find((session) => text(session.id) === endSessionId) ||
+    sessions[sessions.length - 1];
+
+  const startLabel = getLessonSessionOptionLabel(startSession);
+  const endLabel = getLessonSessionOptionLabel(endSession);
+  if (!startLabel && !endLabel) {
+    return "";
+  }
+  if (startLabel === endLabel) {
+    return startLabel;
+  }
+  return `${startLabel || "첫 회차"} ~ ${endLabel || "마지막 회차"}`;
+}
+
+function getLessonSessionSortTime(session: Record<string, unknown>) {
+  const dateValue = text(session.date || session.session_date || session.dateValue);
+  const time = Date.parse(`${dateValue}T00:00:00`);
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
+}
+
+function sortLessonSessionRecords(left: Record<string, unknown>, right: Record<string, unknown>) {
+  const dateGap = getLessonSessionSortTime(left) - getLessonSessionSortTime(right);
+  if (dateGap !== 0) {
+    return dateGap;
+  }
+
+  return (
+    Number(left.sessionNumber || left.session_number || 0) -
+    Number(right.sessionNumber || right.session_number || 0)
+  );
+}
+
+function findMatchingLessonSessionRecord(
+  sessions: Record<string, unknown>[] = [],
+  {
+    sessionId,
+    sessionNumber,
+    sessionDate,
+  }: {
+    sessionId: string;
+    sessionNumber: number;
+    sessionDate: string;
+  },
+) {
+  if (sessionId) {
+    return (
+      sessions.find((session) => text(session?.id || session?.session_id) === sessionId) ||
+      null
+    );
+  }
+
+  const hasSessionNumber = Number.isFinite(sessionNumber) && sessionNumber > 0;
+  if (!hasSessionNumber) {
+    return null;
+  }
+
+  if (sessionDate) {
+    const dateMatchedSession = sessions.find((session) => {
+      const candidateNumber = Number(session?.sessionNumber || session?.session_number || 0);
+      const candidateDate = text(session?.date || session?.session_date);
+      return candidateNumber === sessionNumber && candidateDate === sessionDate;
+    });
+    if (dateMatchedSession) {
+      return dateMatchedSession;
+    }
+  }
+
+  return (
+    sessions.find((session) => Number(session?.sessionNumber || session?.session_number || 0) === sessionNumber) ||
+    null
+  );
+}
+
+const LESSON_GRADE_TOKENS = ["중1", "중2", "중3", "고1", "고2", "고3"];
+const LESSON_MATCH_TOKENS = [
+  "공통수학2",
+  "공통수학1",
+  "공통수학",
+  "수학2",
+  "수학1",
+  "미적분",
+  "확률과통계",
+  "확통",
+  "기하",
+  "독해",
+  "어법",
+  "문법",
+  "듣기",
+  "내신",
+  "수능",
+  "모의고사",
+];
+
+function normalizeLessonMatchText(value: unknown) {
+  return text(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function extractLessonGradeTokens(value: unknown) {
+  const normalized = normalizeLessonMatchText(value);
+  return LESSON_GRADE_TOKENS.filter((token) => normalized.includes(token));
+}
+
+function extractLessonMatchTokens(value: unknown) {
+  const normalized = normalizeLessonMatchText(value);
+  return [
+    ...new Set(
+      LESSON_MATCH_TOKENS.filter((token) => normalized.includes(normalizeLessonMatchText(token))),
+    ),
+  ];
+}
+
+function buildTextbookMatchCorpus(book: Record<string, unknown> | null | undefined) {
+  return normalizeLessonMatchText(
+    [
+      getTextbookTitle(book),
+      getTextbookPublisher(book),
+      getTextbookCategory(book),
+      getTextbookSubject(book),
+    ].join(" "),
+  );
+}
+
+function scoreLessonTextbookCandidate(
+  book: Record<string, unknown>,
+  context: {
+    plannerClassName?: string;
+    plannerSubject?: string;
+    plannerGrade?: string;
+  } | null,
+) {
+  const plannerSubject = text(context?.plannerSubject) === "과목 미정" ? "" : text(context?.plannerSubject);
+  const bookSubject = getTextbookSubject(book);
+  const plannerSubjectKey = normalizeLessonSubjectKey(plannerSubject);
+  const bookSubjectKey = normalizeLessonSubjectKey(bookSubject);
+  const corpus = buildTextbookMatchCorpus(book);
+  let score = 0;
+
+  if (plannerSubjectKey && bookSubjectKey) {
+    score += bookSubjectKey === plannerSubjectKey ? 80 : -120;
+  }
+
+  const classText = `${text(context?.plannerClassName)} ${text(context?.plannerGrade)}`;
+  const classGrades = extractLessonGradeTokens(classText);
+  const bookGrades = extractLessonGradeTokens(corpus);
+  classGrades.forEach((gradeToken) => {
+    score += bookGrades.includes(gradeToken) ? 45 : 0;
+  });
+  if (classGrades.length > 0 && bookGrades.some((gradeToken) => !classGrades.includes(gradeToken))) {
+    score -= 35;
+  }
+
+  extractLessonMatchTokens(classText).forEach((token) => {
+    if (corpus.includes(normalizeLessonMatchText(token))) {
+      score += token.length >= 4 ? 30 : 20;
+    }
+  });
+
+  if (classGrades.some((gradeToken) => gradeToken === "고1" || gradeToken === "고2") && corpus.includes("수능대비")) {
+    score -= 15;
+  }
+
+  return score;
+}
+
+function parseLessonOutlineSource(value: unknown): unknown[] {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        return parseLessonOutlineSource(JSON.parse(trimmed));
+      } catch {
+        return [];
+      }
+    }
+    return trimmed
+      .split(/\r?\n|,|;/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return parseLessonOutlineSource(record.items || record.chapters || record.units || record.children);
+  }
+
+  return [];
+}
+
+function buildLessonOutlinePresets(book: Record<string, unknown> | undefined) {
+  const outlineSources = [
+    book?.toc,
+    book?.tableOfContents,
+    book?.table_of_contents,
+    book?.contents,
+    book?.chapters,
+    book?.units,
+    (book?.metadata as Record<string, unknown> | undefined)?.toc,
+  ];
+
+  return outlineSources
+    .flatMap(parseLessonOutlineSource)
+    .map((item, index) => {
+      const record = typeof item === "object" && item ? (item as Record<string, unknown>) : null;
+      const label =
+        text(record?.label || record?.title || record?.name || record?.chapter || record?.unit) ||
+        text(item) ||
+        `${index + 1}단원`;
+      return {
+        key: `outline-${index}-${label}`,
+        label,
+        start: text(record?.start || record?.from) || label,
+        end: text(record?.end || record?.to) || label,
+        memo: text(record?.memo || record?.note),
+      };
+    })
+    .filter((preset) => preset.label)
+    .slice(0, 8);
+}
+
+function buildDerivedLessonRangePresets({
+  textbookTitle,
+  area,
+  subSubject,
+}: {
+  textbookTitle: string;
+  area: string;
+  subSubject: string;
+}) {
+  const scope = [area, subSubject].filter(Boolean).join(" ");
+  const normalizedTitle = normalizeLessonMatchText(textbookTitle);
+  const baseSteps = ["1단원", "2단원", "개념", "유형", "실전", "오답"];
+  const domainSteps =
+    normalizedTitle.includes("독해") || normalizedTitle.includes("영어")
+      ? ["지문", "구문", "어휘", "문법", "실전", "오답"]
+      : normalizedTitle.includes("수능") || normalizedTitle.includes("모의고사")
+        ? ["대표유형", "기출", "실전", "오답", "약점보완", "마무리"]
+        : baseSteps;
+
+  return domainSteps.map((step, index) => ({
+    key: `derived-${index}-${step}`,
+    label: scope ? `${scope} ${step}` : step,
+    start: step,
+    end: step,
+    memo: "",
+  }));
+}
+
+function mergeLessonRangePresets(
+  outlinePresets: Array<{ key: string; label: string; start: string; end: string; memo: string }>,
+  derivedPresets: Array<{ key: string; label: string; start: string; end: string; memo: string }>,
+) {
+  const seen = new Set<string>();
+  return [...outlinePresets, ...derivedPresets]
+    .filter((preset) => {
+      const key = normalizeLessonMatchText(`${preset.label}:${preset.start}:${preset.end}`);
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
 }
 
 function formatProgress(completedSessions: number, sessionCount: number) {
@@ -71,44 +443,6 @@ function buildPublicClassHref(selectedRow: Record<string, unknown> | null) {
   const params = new URLSearchParams();
   params.set("q", title);
   return `/classes?${params.toString()}`;
-}
-
-function sanitizeFilePart(value: unknown) {
-  return (
-    text(value)
-      .replace(/[^\p{L}\p{N}]+/gu, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "lesson-design"
-  );
-}
-
-function buildLessonDesignExportFilename(
-  selectedRow: Record<string, unknown> | null,
-  selectedLessonSession: Record<string, unknown> | null,
-) {
-  const classTitle = sanitizeFilePart(selectedRow?.title || selectedRow?.className || selectedRow?.id);
-  const rawSessionLabel = text(
-    selectedLessonSession?.label || selectedLessonSession?.dateLabel || selectedLessonSession?.id,
-  );
-  const sessionLabel = rawSessionLabel ? sanitizeFilePart(rawSessionLabel) : "";
-
-  return sessionLabel
-    ? `lesson-design-${classTitle}-${sessionLabel}.png`
-    : `lesson-design-${classTitle}.png`;
-}
-
-function buildLessonDesignHref(
-  selectedRow: Record<string, unknown> | null,
-  sessionId: string = "",
-  sectionId: string = "",
-) {
-  const classId = text(selectedRow?.id);
-  if (!classId) {
-    return "/admin/curriculum";
-  }
-
-  const params = buildLessonDesignSearchParams({ classId, sessionId, sectionId });
-  return `/admin/curriculum?${params.toString()}`;
 }
 
 function buildLessonDesignPageHref(
@@ -248,204 +582,14 @@ function getActualEntryLabel(progressStatus: string) {
   return "실진도 대기";
 }
 
-function normalizeLessonProgressStatus(value: unknown) {
-  const status = text(value);
-  if (status === "done" || status === "partial") {
-    return status;
-  }
-  return "pending";
-}
-
-function buildLessonSessionProgressKey(classId: string, sessionId: string, textbookId: string) {
-  return [text(classId), text(sessionId), text(textbookId)].join(":");
-}
-
-function stripLessonProgressPlaceholder(value: unknown, placeholder: string) {
-  const normalized = text(value);
-  return normalized === placeholder ? "" : normalized;
-}
-
-function buildLessonSessionProgressDraft(
-  classId: string,
-  session: {
-    id: string;
-    content: string;
-    homework: string;
-    textbookEntries: Array<{
-      textbookId: string;
-      textbookTitle: string;
-      actualStatus: string;
-      actualLabel: string;
-      publicNote: string;
-      teacherNote: string;
-    }>;
-  } | null,
-) {
-  if (!session) {
-    return null;
-  }
-
-  const sourceEntries = session.textbookEntries.length > 0
-    ? session.textbookEntries
-    : [
-        {
-          textbookId: "",
-          textbookTitle: "회차 기록",
-          actualStatus: "pending",
-          actualLabel: "",
-          publicNote: "",
-          teacherNote: "",
-        },
-      ];
-
-  return {
-    content: stripLessonProgressPlaceholder(session.content, "수업 기록 없음"),
-    homework: stripLessonProgressPlaceholder(session.homework, "과제 없음"),
-    entries: sourceEntries.map((entry, index) => ({
-      id: `${text(entry.textbookId) || "session"}-${index}`,
-      textbookId: text(entry.textbookId),
-      textbookTitle: text(entry.textbookTitle) || `기록 ${index + 1}`,
-      progressKey: buildLessonSessionProgressKey(classId, text(session.id), text(entry.textbookId)),
-      status: normalizeLessonProgressStatus(entry.actualStatus),
-      rangeLabel: stripLessonProgressPlaceholder(entry.actualLabel, "실진도 기록 없음"),
-      publicNote: stripLessonProgressPlaceholder(entry.publicNote, "공개 메모 없음"),
-      teacherNote: stripLessonProgressPlaceholder(entry.teacherNote, "교사 메모 없음"),
-    })),
-  };
-}
-
-function isLessonSessionProgressEntryEmpty(
-  entry: {
-    status: string;
-    rangeLabel: string;
-    publicNote: string;
-    teacherNote: string;
-  },
-  sharedDraft: { content: string; homework: string },
-) {
-  return (
-    normalizeLessonProgressStatus(entry.status) === "pending" &&
-    !text(entry.rangeLabel) &&
-    !text(entry.publicNote) &&
-    !text(entry.teacherNote) &&
-    !text(sharedDraft.content) &&
-    !text(sharedDraft.homework)
-  );
-}
-
-function isMissingLessonProgressColumnError(error: unknown, columns: string[]) {
-  const message = text((error as { message?: string })?.message).toLowerCase();
-  return columns.some((column) => message.includes(column.toLowerCase()));
-}
-
-async function upsertLessonProgressLog(payload: Record<string, unknown>) {
-  if (!supabase) {
-    throw new Error("Supabase 연결을 확인할 수 없습니다.");
-  }
-
-  const result = await supabase
-    .from("progress_logs")
-    .upsert(payload, { onConflict: "progress_key" })
-    .select()
-    .single();
-
-  if (!result.error) {
-    return;
-  }
-
-  const missingProgressKey = isMissingLessonProgressColumnError(result.error, ["progress_key"]);
-  const missingSessionId = isMissingLessonProgressColumnError(result.error, ["session_id"]);
-
-  if (missingProgressKey && !missingSessionId) {
-    let existingQuery = supabase
-      .from("progress_logs")
-      .select("id")
-      .eq("class_id", text(payload.class_id))
-      .eq("session_id", text(payload.session_id));
-
-    if (payload.textbook_id) {
-      existingQuery = existingQuery.eq("textbook_id", text(payload.textbook_id));
-    } else {
-      existingQuery = existingQuery.is("textbook_id", null);
-    }
-
-    const existingResult = await existingQuery.maybeSingle();
-    if (existingResult.error) {
-      throw existingResult.error;
-    }
-
-    const { progress_key, ...payloadWithoutProgressKey } = payload;
-    if (existingResult.data?.id) {
-      const updateResult = await supabase
-        .from("progress_logs")
-        .update(payloadWithoutProgressKey)
-        .eq("id", existingResult.data.id)
-        .select()
-        .single();
-      if (updateResult.error) {
-        throw updateResult.error;
-      }
-      return;
-    }
-
-    const insertResult = await supabase
-      .from("progress_logs")
-      .insert(payloadWithoutProgressKey)
-      .select()
-      .single();
-    if (insertResult.error) {
-      throw insertResult.error;
-    }
-    return;
-  }
-
-  throw result.error;
-}
-
-async function deleteLessonProgressLog({
-  progressKey,
-  classId,
-  sessionId,
-  textbookId,
-}: {
-  progressKey: string;
-  classId: string;
-  sessionId: string;
-  textbookId: string;
-}) {
-  if (!supabase || (!progressKey && !classId && !sessionId)) {
-    return;
-  }
-
-  const deleteByProgressKey = progressKey
-    ? await supabase.from("progress_logs").delete().eq("progress_key", progressKey)
-    : { error: null as unknown };
-  if (!deleteByProgressKey.error) {
-    return;
-  }
-
-  if (!isMissingLessonProgressColumnError(deleteByProgressKey.error, ["progress_key"])) {
-    throw deleteByProgressKey.error;
-  }
-
-  let fallbackDelete = supabase
-    .from("progress_logs")
-    .delete()
-    .eq("class_id", classId)
-    .eq("session_id", sessionId);
-  fallbackDelete = textbookId ? fallbackDelete.eq("textbook_id", textbookId) : fallbackDelete.is("textbook_id", null);
-  const fallbackResult = await fallbackDelete;
-  if (fallbackResult.error) {
-    throw fallbackResult.error;
-  }
-}
-
 function buildTextbookEntrySummary(
   textbookEntries: Record<string, unknown>[] = [],
   textbookMap: Map<string, string>,
+  textbookById: Map<string, Record<string, unknown>> = new Map(),
 ) {
   return textbookEntries.map((entry, index) => {
     const textbookId = text(entry.textbookId || entry.textbook_id || entry.id);
+    const textbookRecord = textbookById.get(textbookId);
     const textbookTitle =
       text(entry.textbookTitle || entry.textbook_title) ||
       textbookMap.get(textbookId) ||
@@ -453,19 +597,31 @@ function buildTextbookEntrySummary(
       `교재 ${index + 1}`;
     const plan = ((entry.plan || {}) as Record<string, unknown>);
     const actual = ((entry.actual || {}) as Record<string, unknown>);
+    const area = text(entry.area || entry.category);
+    const subSubject = text(entry.subSubject || entry.sub_subject);
+    const alias = text(entry.alias);
     const actualStatus = text(actual.status);
     const planLabel = text(plan.label) || "계획 범위 미지정";
     const actualLabel = text(actual.label) || "실진도 기록 없음";
     const actualUpdatedAt = formatUpdatedDate(text(actual.updatedAt || actual.updated_at));
+    const rangePresets = mergeLessonRangePresets(
+      buildLessonOutlinePresets(textbookRecord),
+      buildDerivedLessonRangePresets({ textbookTitle, area, subSubject }),
+    );
 
     return {
       id: text(entry.id) || `${textbookId || "textbook"}-${index}`,
       textbookId,
       textbookTitle,
+      alias,
+      area,
+      subSubject,
       planStart: text(plan.start),
       planEnd: text(plan.end),
       planLabel,
       planMemo: text(plan.memo) || "계획 메모 없음",
+      rangePresets,
+      scopeLabel: [area, subSubject].filter(Boolean).join(" · "),
       actualLabel,
       actualStatus,
       actualStatusLabel: getActualEntryLabel(actualStatus),
@@ -601,11 +757,13 @@ function buildLessonDesignSaveReadiness({
 }
 
 const LESSON_DESIGN_SECTION_IDS = {
+  textbooks: "lesson-design-textbooks",
   periods: "lesson-design-periods",
   calendar: "lesson-design-calendar",
   board: "lesson-design-board",
 } as const;
 const LESSON_DESIGN_SELECTED_SESSION_EDITOR_ID = "lesson-design-selected-session-editor";
+const LESSON_DESIGN_PERIOD_DETAIL_ID_PREFIX = "lesson-design-period-detail-";
 
 const LESSON_DESIGN_SECTION_VALUES = new Set<string>(Object.values(LESSON_DESIGN_SECTION_IDS));
 const LESSON_DESIGN_SCHEDULE_STATE_VALUES = new Set([
@@ -643,29 +801,12 @@ function formatLessonMonthLabel(value: string) {
   return `${match[1]}.${match[2]}`;
 }
 
-function formatLessonMonthTabLabel(value: string) {
-  const raw = text(value);
-  const match = raw.match(/^(?:\d{4}[.-])?0?(\d{1,2})$/);
-  if (!match) {
-    return raw || "월 미정";
-  }
-
-  return `${Number(match[1])}월`;
+function getAllLessonMonthKeys(months: Array<{ key: string }>) {
+  return months.map((month) => text(month.key)).filter(Boolean);
 }
 
 function getDefaultLessonMonthKeys(months: Array<{ key: string }>) {
-  if (!months.length) {
-    return [] as string[];
-  }
-
-  const today = new Date();
-  const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-  const futureMonthKeys = months.filter((month) => month.key >= currentMonthKey).map((month) => month.key);
-  if (futureMonthKeys.length > 0) {
-    return futureMonthKeys[0] ? [futureMonthKeys[0]] : [];
-  }
-
-  return months[months.length - 1]?.key ? [months[months.length - 1].key] : [];
+  return getAllLessonMonthKeys(months);
 }
 
 function normalizeSelectedLessonMonthKeys(
@@ -816,6 +957,50 @@ function getScheduleStateSurface(scheduleState: string) {
   return {
     className: "border-emerald-500 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700",
     mutedClassName: "text-white/85",
+  };
+}
+
+function colorWithAlpha(color: string, alpha: number) {
+  const normalized = text(color);
+  const hex = normalized.replace("#", "");
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    const [r, g, b] = hex.split("").map((part) => parseInt(`${part}${part}`, 16));
+    return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
+  }
+
+  if (/^[0-9a-f]{6}$/i.test(hex)) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
+  }
+
+  return normalized || "#216e4e";
+}
+
+function getLessonCalendarMonthSurfaceStyle(accentColor: string): CSSProperties {
+  const color = text(accentColor) || "#216e4e";
+
+  return {
+    background: `linear-gradient(135deg, ${colorWithAlpha(color, 0.14)} 0%, ${colorWithAlpha(color, 0.045)} 100%)`,
+    borderColor: colorWithAlpha(color, 0.32),
+    boxShadow: `inset 4px 0 0 ${colorWithAlpha(color, 0.72)}`,
+  };
+}
+
+function getLessonCalendarSessionSurfaceStyle(scheduleState: string, accentColor: string): CSSProperties | undefined {
+  const state = text(scheduleState);
+  const color = text(accentColor) || "#216e4e";
+
+  if (state && state !== "active") {
+    return undefined;
+  }
+
+  return {
+    backgroundColor: color,
+    borderColor: color,
   };
 }
 
@@ -1164,6 +1349,34 @@ function buildLessonPeriodDiagnostics(
   };
 }
 
+function getLessonSessionIdentity(session: Record<string, unknown> | null | undefined) {
+  const explicitId = text(session?.id || session?.session_id);
+  if (explicitId) {
+    return `id:${explicitId}`;
+  }
+
+  return [
+    "session",
+    text(session?.dateValue || session?.date || session?.session_date),
+    text(session?.sessionNumber || session?.session_number),
+    text(session?.billingId || session?.billing_id || session?.periodId || session?.period_id),
+    text(session?.scheduleState || session?.schedule_state || session?.state || "active"),
+  ].join(":");
+}
+
+function uniqueLessonSessionsByIdentity<T extends Record<string, unknown>>(sessions: T[] = []) {
+  const seen = new Set<string>();
+
+  return sessions.filter((session) => {
+    const key = getLessonSessionIdentity(session);
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 function buildLessonDesignSnapshot(
   selectedRow: Record<string, unknown> | null,
   textbooks: Record<string, unknown>[] = [],
@@ -1178,18 +1391,12 @@ function buildLessonDesignSnapshot(
   const plan = (planOverride || classItem?.schedulePlan || classItem?.schedule_plan || null) as Record<string, unknown> | null;
   const actualSessions = Array.isArray(raw?.sessions)
     ? [...(raw.sessions as Record<string, unknown>[])]
-        .sort(
-          (left, right) =>
-            Number(left.sessionNumber || left.session_number || 0) - Number(right.sessionNumber || right.session_number || 0),
-        )
+        .sort(sortLessonSessionRecords)
     : [];
   const rawSessions =
     planOverride && Array.isArray(plan?.sessions)
       ? [...(plan.sessions as Record<string, unknown>[])]
-          .sort(
-            (left, right) =>
-              Number(left.sessionNumber || left.session_number || 0) - Number(right.sessionNumber || right.session_number || 0),
-          )
+          .sort(sortLessonSessionRecords)
       : actualSessions;
   const planSessions = Array.isArray(plan?.sessions)
     ? (plan.sessions as Record<string, unknown>[])
@@ -1207,16 +1414,55 @@ function buildLessonDesignSnapshot(
       ? (plan.selected_days as Array<string | number>)
       : [];
 
+  const textbookById = new Map(textbooks.map((book) => [text(book?.id), book]));
   const textbookMap = new Map(
-    textbooks.map((book) => [text(book?.id), text(book?.title || book?.name)]),
+    textbooks.map((book) => [text(book?.id), getTextbookTitle(book)]),
   );
   const rawTextbookIds = classItem?.textbook_ids || classItem?.textbookIds;
-  const textbookTitles = Array.isArray(rawTextbookIds)
-    ? rawTextbookIds
-        .map((value) => text(value))
-        .filter(Boolean)
-        .map((bookId) => textbookMap.get(bookId) || bookId || "교재 정보 없음")
+  const planTextbooks = Array.isArray(plan?.textbooks)
+    ? (plan.textbooks as Record<string, unknown>[])
     : [];
+  const textbookCatalogSource: Record<string, unknown>[] =
+    planTextbooks.length > 0
+      ? planTextbooks
+      : Array.isArray(rawTextbookIds)
+        ? rawTextbookIds.map((value, index) => ({
+            textbookId: text(value),
+            order: index,
+            role: index === 0 ? "main" : "supplement",
+          } as Record<string, unknown>))
+        : [];
+  const textbookCatalog = textbookCatalogSource
+    .flatMap((entry, index) => {
+      const textbookId = text(entry.textbookId || entry.textbook_id || entry.id);
+      if (!textbookId) {
+        return [];
+      }
+      const book = textbookById.get(textbookId) as Record<string, unknown> | undefined;
+      const title = text(entry.alias) || getTextbookTitle(book) || textbookId || "교재 정보 없음";
+      const publisher = getTextbookPublisher(book);
+      const area = text(entry.area || entry.category) || getTextbookCategory(book);
+      const subSubject = text(entry.subSubject || entry.sub_subject);
+      const startSessionId = text(entry.startSessionId || entry.start_session_id);
+      const endSessionId = text(entry.endSessionId || entry.end_session_id);
+      return [{
+        textbookId,
+        title,
+        sourceTitle: getTextbookTitle(book) || title,
+        publisher,
+        subject: getTextbookSubject(book),
+        category: getTextbookCategory(book),
+        area,
+        subSubject,
+        role: text(entry.role) || (index === 0 ? "main" : "supplement"),
+        order: Number(entry.order ?? index) || index,
+        scopeLabel: [area, subSubject].filter(Boolean).join(" · "),
+        startSessionId,
+        endSessionId,
+      }];
+    })
+    .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0));
+  const textbookTitles = textbookCatalog.map((book) => text(book?.title)).filter(Boolean);
 
   const periodSummaries = billingPeriods.map((period, index) => ({
     id: text(period.id || period.period_id) || `period-${index}`,
@@ -1227,43 +1473,44 @@ function buildLessonDesignSnapshot(
     rangeLabel: formatScheduleRange(text(period.startDate || period.start_date), text(period.endDate || period.end_date)),
     sessionCount: Number(period.sessionCount || period.session_count || period.totalSessions || period.total_sessions || 0),
   }));
-  const sessions = rawSessions.map((session) => {
+  const mappedSessions = rawSessions.map((session) => {
     const sessionNumber = Number(session.sessionNumber || session.session_number || 0);
     const sessionId = text(session.id || session.session_id);
     const sessionDate = text(session.date || session.session_date);
-    const matchedActualSession = actualSessions.find((actualSession) => {
-      const actualSessionId = text(actualSession?.id || actualSession?.session_id);
-      const actualSessionNumber = Number(actualSession?.sessionNumber || actualSession?.session_number || 0);
-      return (
-        (actualSessionId && actualSessionId === sessionId) ||
-        (actualSessionNumber > 0 && actualSessionNumber === sessionNumber)
-      );
+    const matchedActualSession = findMatchingLessonSessionRecord(actualSessions, {
+      sessionId,
+      sessionNumber,
+      sessionDate,
     });
     const sessionSource = (matchedActualSession || session) as Record<string, unknown>;
     const monthKey = buildLessonMonthKey(sessionDate);
-    const matchedPlanSession = planSessions.find((planSession) => {
-      const planSessionId = text(planSession?.id || planSession?.session_id);
-      const planSessionNumber = Number(planSession?.sessionNumber || planSession?.session_number || 0);
-      return (
-        (planSessionId && planSessionId === sessionId) ||
-        (planSessionNumber > 0 && planSessionNumber === sessionNumber)
-      );
+    const matchedPlanSession = findMatchingLessonSessionRecord(planSessions, {
+      sessionId,
+      sessionNumber,
+      sessionDate,
     });
-    const textbookEntries = Array.isArray(sessionSource.textbookEntries)
-      ? (sessionSource.textbookEntries as Record<string, unknown>[])
-      : Array.isArray(sessionSource.textbook_entries)
-        ? (sessionSource.textbook_entries as Record<string, unknown>[])
-        : Array.isArray(session.textbookEntries)
-          ? (session.textbookEntries as Record<string, unknown>[])
-          : Array.isArray(session.textbook_entries)
-            ? (session.textbook_entries as Record<string, unknown>[])
-            : Array.isArray(matchedPlanSession?.textbookEntries)
-              ? (matchedPlanSession.textbookEntries as Record<string, unknown>[])
-              : Array.isArray(matchedPlanSession?.textbook_entries)
-                ? (matchedPlanSession.textbook_entries as Record<string, unknown>[])
-                : [];
+    const textbookEntrySources = planOverride
+      ? [
+          session.textbookEntries,
+          session.textbook_entries,
+          matchedPlanSession?.textbookEntries,
+          matchedPlanSession?.textbook_entries,
+          sessionSource.textbookEntries,
+          sessionSource.textbook_entries,
+        ]
+      : [
+          sessionSource.textbookEntries,
+          sessionSource.textbook_entries,
+          session.textbookEntries,
+          session.textbook_entries,
+          matchedPlanSession?.textbookEntries,
+          matchedPlanSession?.textbook_entries,
+        ];
+    const textbookEntries = textbookEntrySources.find((entries) => Array.isArray(entries) && entries.length > 0) as
+        | Record<string, unknown>[]
+        | undefined;
     const scheduleContext = buildLessonScheduleContext(session, matchedPlanSession || null);
-    const textbookEntrySummaries = buildTextbookEntrySummary(textbookEntries, textbookMap);
+    const textbookEntrySummaries = buildTextbookEntrySummary(textbookEntries || [], textbookMap, textbookById);
     const sessionBillingId = text(
       session.billingId ||
         session.billing_id ||
@@ -1290,10 +1537,23 @@ function buildLessonDesignSnapshot(
       textbookEntrySummaries.find((entry) => entry.hasPlanContent || entry.hasActualContent) ||
       textbookEntrySummaries[0] ||
       null;
+    const assignedTextbookEntryCount = textbookEntrySummaries.filter((entry) => entry.hasPlanContent).length;
+    const textbookEntryPreview =
+      textbookEntrySummaries.length === 0
+        ? "교재 범위 미지정"
+        : primaryTextbookEntry?.hasPlanContent
+          ? primaryTextbookEntry.planLabel
+          : `${textbookEntrySummaries.length}권 범위 미배정`;
+    const generatedSessionLabel =
+      sessionNumber > 0
+        ? `${sessionNumber}회차`
+        : text(scheduleContext.scheduleStateLabel) !== "정상"
+          ? scheduleContext.scheduleStateLabel
+          : sessionId || "회차 미정";
 
     return {
       id: sessionId || `${sessionNumber}-${sessionDate || "undated"}-${text(session.scheduleState || session.schedule_state || "active")}`,
-      label: sessionNumber > 0 ? `${sessionNumber}회차` : "0회차",
+      label: generatedSessionLabel,
       sessionNumber,
       dateValue: sessionDate,
       dateLabel: formatScheduleDateLabel(sessionDate),
@@ -1324,16 +1584,17 @@ function buildLessonDesignSnapshot(
       updatedAt: formatUpdatedDate(text(sessionSource.updatedAt || sessionSource.updated_at)),
       textbookEntryLabel:
         textbookEntrySummaries.length > 0
-          ? `${textbookEntrySummaries.length}개 교재 범위`
+          ? assignedTextbookEntryCount > 0
+            ? `${assignedTextbookEntryCount}/${textbookEntrySummaries.length}권 배정`
+            : `${textbookEntrySummaries.length}권 미배정`
           : "교재 범위 미지정",
-      textbookEntryPreview: primaryTextbookEntry
-        ? `${primaryTextbookEntry.textbookTitle} · ${primaryTextbookEntry.planLabel}`
-        : "교재 범위 미지정",
+      textbookEntryPreview,
       textbookEntries: textbookEntrySummaries,
       periodId: matchedPeriod?.id || "",
       periodLabel: matchedPeriod?.label || "전체 운영 구간",
     };
   });
+  const sessions = uniqueLessonSessionsByIdentity(mappedSessions);
   const periodSummariesWithSessionCounts = periodSummaries.map((period) => {
     const calculatedSessionCount = sessions.filter(
       (session) =>
@@ -1371,6 +1632,7 @@ function buildLessonDesignSnapshot(
     text(selectedRow.title) ||
     "수업명 미정";
   const plannerSubject = text(plan?.subject || classItem?.subject || selectedRow.subject) || "과목 미정";
+  const plannerGrade = text(plan?.grade || classItem?.grade || selectedRow.grade);
   const plannerSchedule =
     text(plan?.schedule || classItem?.schedule || selectedRow.scheduleLabel) || "시간표 미정";
   const plannerGlobalSessionCount = selectedDays.length > 0 ? selectedDays.length * 4 : 0;
@@ -1404,6 +1666,7 @@ function buildLessonDesignSnapshot(
   return {
     plannerClassName,
     plannerSubject,
+    plannerGrade,
     plannerSchedule,
     plannerGlobalSessionCount,
     plannerSelectedDayCount,
@@ -1432,6 +1695,7 @@ function buildLessonDesignSnapshot(
     undatedSessionCount: undatedSessions.length,
     sessionCount: sessions.length,
     textbookTitles,
+    textbookCatalog,
     sessions,
   };
 }
@@ -1445,6 +1709,17 @@ function scrollLessonDesignSection(sectionId: string) {
     behavior: "smooth",
     block: "start",
     inline: "nearest",
+  });
+}
+
+function scrollLessonDesignSectionAfterRender(sectionId: string) {
+  if (typeof window === "undefined") {
+    scrollLessonDesignSection(sectionId);
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => scrollLessonDesignSection(sectionId));
   });
 }
 
@@ -1471,6 +1746,120 @@ function scrollLessonDesignSelectedSessionEditorAfterRender() {
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(scrollLessonDesignSelectedSessionEditor);
   });
+}
+
+function getLessonDesignPeriodDetailId(monthKey: string) {
+  return `${LESSON_DESIGN_PERIOD_DETAIL_ID_PREFIX}${text(monthKey)}`;
+}
+
+function scrollLessonDesignPeriodDetail(monthKey: string) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const target = document.getElementById(getLessonDesignPeriodDetailId(monthKey));
+  target?.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+    inline: "nearest",
+  });
+}
+
+function scrollLessonDesignPeriodDetailAfterRender(monthKey: string) {
+  if (typeof window === "undefined") {
+    scrollLessonDesignPeriodDetail(monthKey);
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => scrollLessonDesignPeriodDetail(monthKey));
+  });
+}
+
+function findLessonDesignElementByDataAttribute(attributeName: string, value: string) {
+  if (typeof document === "undefined" || !text(value)) {
+    return null;
+  }
+
+  return (
+    Array.from(document.querySelectorAll(`[${attributeName}]`)).find(
+      (element) => element.getAttribute(attributeName) === value,
+    ) || null
+  );
+}
+
+function scrollElementInsideContainerToCenter(container: Element, target: Element) {
+  const scrollContainer = container as HTMLElement;
+  const targetElement = target as HTMLElement;
+  const containerRect = scrollContainer.getBoundingClientRect();
+  const targetRect = targetElement.getBoundingClientRect();
+  const nextTop =
+    scrollContainer.scrollTop +
+    targetRect.top -
+    containerRect.top -
+    scrollContainer.clientHeight / 2 +
+    targetRect.height / 2;
+
+  scrollContainer.scrollTo({
+    top: Math.max(0, nextTop),
+    behavior: "smooth",
+  });
+}
+
+function scrollLessonDesignSessionPair(sessionId: string) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
+  calendarTarget?.scrollIntoView({
+    behavior: "smooth",
+    block: "center",
+    inline: "nearest",
+  });
+
+  const periodTarget = findLessonDesignElementByDataAttribute("data-lesson-period-session-id", sessionId);
+  const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]');
+
+  if (periodTarget && periodSidebar?.contains(periodTarget)) {
+    scrollElementInsideContainerToCenter(periodSidebar, periodTarget);
+    return;
+  }
+
+  periodTarget?.scrollIntoView({
+    behavior: "smooth",
+    block: "center",
+    inline: "nearest",
+  });
+}
+
+function scrollLessonDesignSessionPairAfterRender(sessionId: string) {
+  if (typeof window === "undefined") {
+    scrollLessonDesignSessionPair(sessionId);
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => scrollLessonDesignSessionPair(sessionId));
+  });
+}
+
+function resolveRequestedLessonDesignSession(
+  lessonDesignSnapshot: ReturnType<typeof buildLessonDesignSnapshot> | null | undefined,
+  requestedSessionId: string,
+  preferredSessionId: string = "",
+) {
+  const sessions = lessonDesignSnapshot?.sessions || [];
+  if (sessions.length === 0) {
+    return null;
+  }
+
+  return (
+    sessions.find((session) => session.id === requestedSessionId) ||
+    sessions.find((session) => session.id === preferredSessionId) ||
+    sessions[0] ||
+    null
+  );
 }
 
 function findLessonDesignSessionByDate(
@@ -1658,6 +2047,11 @@ function buildLessonCalendarMonths<
     };
     const dateKey = text(session.dateValue);
     const sessionBucket = existingMonth.sessionsByDate.get(dateKey) || [];
+    const sessionKey = getLessonSessionIdentity(session as Record<string, unknown>);
+    if (sessionBucket.some((existingSession) => getLessonSessionIdentity(existingSession as Record<string, unknown>) === sessionKey)) {
+      months.set(session.monthKey, existingMonth);
+      return;
+    }
     sessionBucket.push(session);
     existingMonth.sessionsByDate.set(dateKey, sessionBucket);
     existingMonth.activeCount += 1;
@@ -2061,25 +2455,25 @@ export function ClassScheduleWorkspace() {
   const [selectedClassId, setSelectedClassId] = useState("");
   const [lessonDesignOpen, setLessonDesignOpen] = useState(false);
   const [selectedLessonMonthKeys, setSelectedLessonMonthKeys] = useState<string[]>([]);
+  const [focusedLessonMonthKey, setFocusedLessonMonthKey] = useState("");
   const [selectedLessonPeriodId, setSelectedLessonPeriodId] = useState("all");
   const [selectedLessonScheduleState, setSelectedLessonScheduleState] = useState("all");
   const [selectedLessonSessionId, setSelectedLessonSessionId] = useState("");
   const [lessonMonthDetailsOpen, setLessonMonthDetailsOpen] = useState(false);
-  const [lessonProgressDraft, setLessonProgressDraft] = useState<ReturnType<typeof buildLessonSessionProgressDraft> | null>(null);
-  const [isLessonProgressSaving, setIsLessonProgressSaving] = useState(false);
-  const [lessonProgressSaveError, setLessonProgressSaveError] = useState("");
-  const [lessonProgressSaveNotice, setLessonProgressSaveNotice] = useState("");
   const [lessonPlanDraft, setLessonPlanDraft] = useState<Record<string, unknown> | null>(null);
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
   const [lessonDesignSaveError, setLessonDesignSaveError] = useState("");
   const [lessonDesignSaveNotice, setLessonDesignSaveNotice] = useState("");
-  const [lessonDesignExportError, setLessonDesignExportError] = useState("");
-  const [isLessonDesignExporting, setIsLessonDesignExporting] = useState(false);
+  const [lessonTextbookSearch, setLessonTextbookSearch] = useState("");
+  const [lessonTextbookSubjectFilter, setLessonTextbookSubjectFilter] = useState("current");
+  const [lessonTextbookCategoryFilter, setLessonTextbookCategoryFilter] = useState("all");
+  const [lessonTextbookPublisherFilter, setLessonTextbookPublisherFilter] = useState("all");
+  const [isLessonTextbookFinderOpen, setIsLessonTextbookFinderOpen] = useState(false);
   const [selectedLessonCalendarDate, setSelectedLessonCalendarDate] = useState("");
   const [lessonCalendarDragSource, setLessonCalendarDragSource] = useState("");
   const [lessonCalendarDropTarget, setLessonCalendarDropTarget] = useState("");
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
-  const lessonDesignExportRef = useRef<HTMLDivElement | null>(null);
+  const lessonPlanSourceKeyRef = useRef("");
   const deferredSearch = useDeferredValue(search);
 
   const model = useMemo(
@@ -2184,6 +2578,17 @@ export function ClassScheduleWorkspace() {
     () => ((selectedRow?.raw || null) as Record<string, unknown> | null)?.classItem as Record<string, unknown> | null,
     [selectedRow],
   );
+  const lessonPlanSourceKey = useMemo(() => {
+    const savedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
+    const rawTextbookIds = selectedRowClassItem?.textbook_ids || selectedRowClassItem?.textbookIds;
+    return JSON.stringify({
+      classId: text(selectedRow?.id),
+      savedPlan,
+      textbookIds: Array.isArray(rawTextbookIds)
+        ? rawTextbookIds.map((value) => text(value)).filter(Boolean)
+        : [],
+    });
+  }, [selectedRow?.id, selectedRowClassItem]);
   const lessonPlanDefaults = useMemo(() => {
     const savedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || null) as Record<string, unknown> | null;
     const rawTextbookIds = selectedRowClassItem?.textbook_ids || selectedRowClassItem?.textbookIds;
@@ -2216,6 +2621,82 @@ export function ClassScheduleWorkspace() {
     () => buildLessonDesignSnapshot(selectedRow, data.textbooks, lessonPlanForSave),
     [data.textbooks, lessonPlanForSave, selectedRow],
   );
+  const connectedLessonTextbookIds = useMemo(
+    () =>
+      new Set(
+        (lessonDesignSnapshot?.textbookCatalog || [])
+          .map((book) => text(book?.textbookId))
+          .filter(Boolean),
+      ),
+    [lessonDesignSnapshot],
+  );
+  const lessonTextbookFilterOptions = useMemo(
+    () => ({
+      subjects: buildLessonTextbookSubjectFilterOptions(data.textbooks),
+      categories: buildLessonTextbookFilterOptions(data.textbooks, getTextbookCategory),
+      publishers: buildLessonTextbookFilterOptions(data.textbooks, getTextbookPublisher),
+    }),
+    [data.textbooks],
+  );
+  const lessonTextbookOptions = useMemo(() => {
+    const availableBooks = data.textbooks.filter((book) => {
+      const id = text(book.id);
+      return Boolean(id) && !connectedLessonTextbookIds.has(id);
+    });
+    const plannerSubject =
+      text(lessonDesignSnapshot?.plannerSubject) === "과목 미정"
+        ? ""
+        : text(lessonDesignSnapshot?.plannerSubject);
+    const plannerSubjectKey = normalizeLessonSubjectKey(plannerSubject);
+    const subjectScopedBooks = availableBooks.filter((book) => {
+      const bookSubject = getTextbookSubject(book);
+      const bookSubjectKey = normalizeLessonSubjectKey(bookSubject);
+      if (lessonTextbookSubjectFilter === "current") {
+        return !plannerSubjectKey || !bookSubjectKey || bookSubjectKey === plannerSubjectKey;
+      }
+      return matchesLessonSubjectFilter(bookSubject, lessonTextbookSubjectFilter);
+    });
+
+    const query = text(lessonTextbookSearch).toLowerCase();
+    const scopedBooks = subjectScopedBooks.filter((book) => {
+      const category = getTextbookCategory(book);
+      const publisher = getTextbookPublisher(book);
+      return (
+        matchesLessonTextbookFilter(category, lessonTextbookCategoryFilter) &&
+        matchesLessonTextbookFilter(publisher, lessonTextbookPublisherFilter)
+      );
+    });
+    const searchedBooks = query
+      ? scopedBooks.filter((book) =>
+          [
+            getTextbookTitle(book),
+            getTextbookPublisher(book),
+            getTextbookCategory(book),
+            getTextbookSubject(book),
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(query),
+        )
+      : scopedBooks;
+
+    return searchedBooks
+      .sort((left, right) => {
+        const scoreGap =
+          scoreLessonTextbookCandidate(right, lessonDesignSnapshot) -
+          scoreLessonTextbookCandidate(left, lessonDesignSnapshot);
+        return scoreGap || getTextbookTitle(left).localeCompare(getTextbookTitle(right), "ko");
+      })
+      .slice(0, 18);
+  }, [
+    connectedLessonTextbookIds,
+    data.textbooks,
+    lessonDesignSnapshot,
+    lessonTextbookCategoryFilter,
+    lessonTextbookPublisherFilter,
+    lessonTextbookSearch,
+    lessonTextbookSubjectFilter,
+  ]);
 
   useEffect(() => {
     if (!selectedRow) {
@@ -2223,8 +2704,13 @@ export function ClassScheduleWorkspace() {
       setLessonDesignSaveError("");
       setLessonDesignSaveNotice("");
       lessonPlanDraftRef.current = null;
+      lessonPlanSourceKeyRef.current = "";
       return;
     }
+    if (lessonPlanSourceKeyRef.current === lessonPlanSourceKey) {
+      return;
+    }
+    lessonPlanSourceKeyRef.current = lessonPlanSourceKey;
 
     const savedPlan =
       ((selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>) || {};
@@ -2233,7 +2719,7 @@ export function ClassScheduleWorkspace() {
     lessonPlanDraftRef.current = normalizedSavedPlan;
     setLessonDesignSaveError("");
     setLessonDesignSaveNotice("");
-  }, [lessonPlanDefaults, selectedRow, selectedRowClassItem]);
+  }, [lessonPlanDefaults, lessonPlanSourceKey, selectedRow, selectedRowClassItem]);
 
   useEffect(() => {
     lessonPlanDraftRef.current =
@@ -2243,8 +2729,14 @@ export function ClassScheduleWorkspace() {
   useEffect(() => {
     if (!lessonDesignSnapshot) {
       setSelectedLessonMonthKeys([]);
+      setFocusedLessonMonthKey("");
       setSelectedLessonPeriodId("all");
       setSelectedLessonScheduleState("all");
+      setLessonTextbookSearch("");
+      setLessonTextbookSubjectFilter("current");
+      setLessonTextbookCategoryFilter("all");
+      setLessonTextbookPublisherFilter("all");
+      setIsLessonTextbookFinderOpen(false);
       return;
     }
 
@@ -2259,6 +2751,15 @@ export function ClassScheduleWorkspace() {
       return getDefaultLessonMonthKeys(lessonDesignSnapshot.monthSummaries);
     });
 
+    setFocusedLessonMonthKey((current) => {
+      const normalizedCurrent = normalizeSelectedLessonMonthKeys(
+        current ? [current] : [],
+        lessonDesignSnapshot.monthSummaries,
+        { fallbackToDefault: false },
+      );
+      return normalizedCurrent[0] || getDefaultLessonMonthKeys(lessonDesignSnapshot.monthSummaries)[0] || "";
+    });
+
     setSelectedLessonPeriodId((current) => {
       if (current === "all") {
         return current;
@@ -2270,20 +2771,35 @@ export function ClassScheduleWorkspace() {
     });
   }, [lessonDesignSnapshot]);
 
-  const filteredLessonSessions = useMemo(
-    () => lessonDesignSnapshot?.sessions || [],
-    [lessonDesignSnapshot],
-  );
+  const filteredLessonSessions = useMemo(() => {
+    const sessions = uniqueLessonSessionsByIdentity(lessonDesignSnapshot?.sessions || []);
+
+    return sessions.filter((session) => {
+      const matchesPeriod = selectedLessonPeriodId === "all" || session.periodId === selectedLessonPeriodId;
+      const matchesScheduleState =
+        selectedLessonScheduleState === "all" || session.scheduleState === selectedLessonScheduleState;
+
+      return matchesPeriod && matchesScheduleState;
+    });
+  }, [
+    lessonDesignSnapshot,
+    selectedLessonPeriodId,
+    selectedLessonScheduleState,
+  ]);
 
   const selectedLessonMonthSummaryMap = useMemo(
     () => new Map((lessonDesignSnapshot?.monthSummaries || []).map((month) => [month.key, month])),
     [lessonDesignSnapshot],
   );
-  const activeLessonMonthKey =
-    selectedLessonMonthKeys[0] ||
+  const defaultActiveLessonMonthKey =
     getDefaultLessonMonthKeys(lessonDesignSnapshot?.monthSummaries || [])[0] ||
+    selectedLessonMonthKeys[0] ||
     lessonDesignSnapshot?.monthSummaries[0]?.key ||
     "";
+  const activeLessonMonthKey =
+    focusedLessonMonthKey && selectedLessonMonthSummaryMap.has(focusedLessonMonthKey)
+      ? focusedLessonMonthKey
+      : defaultActiveLessonMonthKey;
 
   const selectedLessonMonthBadges = useMemo<Array<{ key: string; label: string }>>(
     () =>
@@ -2358,14 +2874,16 @@ export function ClassScheduleWorkspace() {
     [lessonSessionGroups, lessonFlowReferenceDate],
   );
 
-  const toggleLessonMonthKey = (monthKey: string) => {
-    setSelectedLessonMonthKeys(
-      normalizeSelectedLessonMonthKeys(
-        [monthKey],
-        lessonDesignSnapshot?.monthSummaries || [],
-        { fallbackToDefault: false },
-      ),
+  const focusLessonMonthKey = (monthKey: string) => {
+    const monthSummaries = lessonDesignSnapshot?.monthSummaries || [];
+    const focusedMonthKeys = normalizeSelectedLessonMonthKeys(
+      [monthKey],
+      monthSummaries,
+      { fallbackToDefault: false },
     );
+
+    setSelectedLessonMonthKeys(getAllLessonMonthKeys(monthSummaries));
+    setFocusedLessonMonthKey(focusedMonthKeys[0] || "");
     setSelectedLessonPeriodId("all");
     setSelectedLessonScheduleState("all");
   };
@@ -2376,11 +2894,13 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      setSelectedLessonMonthKeys(
+      const nextMonthKeys =
         mode === "all"
-          ? lessonDesignSnapshot.monthSummaries.map((month) => month.key)
-          : getDefaultLessonMonthKeys(lessonDesignSnapshot.monthSummaries),
-      );
+          ? getAllLessonMonthKeys(lessonDesignSnapshot.monthSummaries)
+          : getDefaultLessonMonthKeys(lessonDesignSnapshot.monthSummaries);
+
+      setSelectedLessonMonthKeys(nextMonthKeys);
+      setFocusedLessonMonthKey(nextMonthKeys[0] || "");
       setSelectedLessonPeriodId("all");
       setSelectedLessonScheduleState("all");
     },
@@ -2408,11 +2928,31 @@ export function ClassScheduleWorkspace() {
       null,
     [filteredLessonSessions, selectedLessonSessionId],
   );
-  useEffect(() => {
-    setLessonProgressDraft(buildLessonSessionProgressDraft(text(selectedRow?.id), selectedLessonSession));
-    setLessonProgressSaveError("");
-    setLessonProgressSaveNotice("");
-  }, [selectedLessonSession, selectedRow]);
+  const lastRequestedLessonSessionKeyRef = useRef("");
+  const pendingLessonSessionNavigationKeyRef = useRef("");
+  const markPendingLessonSessionSelection = useCallback(
+    (sessionId: string, row: Record<string, unknown> | null = selectedRow) => {
+      const resolvedSessionId = text(sessionId);
+      if (!resolvedSessionId) {
+        return;
+      }
+
+      const nextLessonSessionKey = `${text(row?.id || selectedRow?.id || selectedClassId)}:${resolvedSessionId}`;
+      lastRequestedLessonSessionKeyRef.current = nextLessonSessionKey;
+      pendingLessonSessionNavigationKeyRef.current = nextLessonSessionKey;
+      setSelectedLessonSessionId(resolvedSessionId);
+
+      const targetSession =
+        lessonDesignSnapshot?.sessions.find((session) => session.id === resolvedSessionId) ||
+        filteredLessonSessions.find((session) => session.id === resolvedSessionId) ||
+        null;
+      const targetDate = text(targetSession?.dateValue);
+      if (targetDate) {
+        setSelectedLessonCalendarDate(targetDate);
+      }
+    },
+    [filteredLessonSessions, lessonDesignSnapshot, selectedClassId, selectedRow],
+  );
   useEffect(() => {
     setLessonCalendarDragSource("");
     setLessonCalendarDropTarget("");
@@ -2431,26 +2971,49 @@ export function ClassScheduleWorkspace() {
     selectedLessonSessionIndex >= 0 && selectedLessonSessionIndex < filteredLessonSessions.length - 1
       ? filteredLessonSessions[selectedLessonSessionIndex + 1] || null
       : null;
-  const selectedLessonSessionGroup = useMemo(
-    () =>
-      lessonSessionGroups.find((group) =>
-        group.sessions.some((session) => session.id === selectedLessonSession?.id),
-      ) || null,
-    [lessonSessionGroups, selectedLessonSession],
+  const lessonTextbookProgressSessions = useMemo(
+    () => filteredLessonSessions.filter((session) => session.textbookEntries.length > 0),
+    [filteredLessonSessions],
   );
-  const selectedLessonSessionGroupIndex = useMemo(
-    () =>
-      selectedLessonSessionGroup?.sessions.findIndex(
-        (session) => session.id === selectedLessonSession?.id,
-      ) ?? -1,
-    [selectedLessonSession, selectedLessonSessionGroup],
+  const selectedLessonTextbookProgressSessionIndex = useMemo(
+    () => lessonTextbookProgressSessions.findIndex((session) => session.id === selectedLessonSession?.id),
+    [lessonTextbookProgressSessions, selectedLessonSession],
   );
-  const nextLessonSessionInGroup =
-    selectedLessonSessionGroup &&
-    selectedLessonSessionGroupIndex >= 0 &&
-    selectedLessonSessionGroupIndex < selectedLessonSessionGroup.sessions.length - 1
-      ? selectedLessonSessionGroup.sessions[selectedLessonSessionGroupIndex + 1] || null
+  const lessonTextbookCompletedSessionCount = useMemo(
+    () =>
+      lessonTextbookProgressSessions.filter((session) =>
+        session.textbookEntries.every((entry) => entry.hasPlanContent),
+      ).length,
+    [lessonTextbookProgressSessions],
+  );
+  const lessonTextbookSelectedCount = lessonDesignSnapshot?.textbookCatalog.length || 0;
+  const hasLessonTextbooks = lessonTextbookSelectedCount > 0;
+  const lessonTextbookPendingSessionCount =
+    lessonTextbookProgressSessions.length - lessonTextbookCompletedSessionCount;
+  const lessonTextbookOutOfRangeSessionCount = hasLessonTextbooks
+    ? Math.max(filteredLessonSessions.length - lessonTextbookProgressSessions.length, 0)
+    : 0;
+  const nextPendingLessonSession =
+    lessonTextbookProgressSessions.find((session) =>
+      session.textbookEntries.some((entry) => !entry.hasPlanContent),
+    ) || null;
+  const firstOutOfRangeLessonSession =
+    hasLessonTextbooks
+      ? filteredLessonSessions.find((session) => session.textbookEntries.length === 0) || null
       : null;
+  const selectedLessonSessionAssignedTextbookCount =
+    selectedLessonSession?.textbookEntries.filter((entry) => entry.hasPlanContent).length || 0;
+  const selectedLessonSessionOutsideTextbookRange = Boolean(
+    hasLessonTextbooks && selectedLessonSession && selectedLessonSession.textbookEntries.length === 0,
+  );
+  const selectedLessonSessionSummaryLabel = selectedLessonSession
+    ? [selectedLessonSession.label, selectedLessonSession.dateLabel].filter(Boolean).join(" · ")
+    : "";
+  const selectedLessonSessionRangeStateLabel = selectedLessonSessionOutsideTextbookRange
+    ? "기간 밖"
+    : selectedLessonSession && selectedLessonSession.textbookEntries.length > 0
+      ? `${selectedLessonSessionAssignedTextbookCount}/${selectedLessonSession.textbookEntries.length}권`
+      : "";
   const lessonDesignReadinessActions = useMemo(
     () => buildLessonDesignReadinessActions(lessonDesignSnapshot, selectedLessonSession),
     [lessonDesignSnapshot, selectedLessonSession],
@@ -2459,7 +3022,9 @@ export function ClassScheduleWorkspace() {
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       setLessonPlanDraft((current) => {
         const nextBase = (current || {}) as Record<string, unknown>;
-        return normalizeSchedulePlan(updater(nextBase), lessonPlanDefaults) as Record<string, unknown>;
+        const nextDraft = normalizeSchedulePlan(updater(nextBase), lessonPlanDefaults) as Record<string, unknown>;
+        lessonPlanDraftRef.current = nextDraft;
+        return nextDraft;
       });
       setLessonDesignSaveError("");
       setLessonDesignSaveNotice("");
@@ -2472,6 +3037,214 @@ export function ClassScheduleWorkspace() {
       return normalizeSchedulePlan(updater(nextBase), lessonPlanDefaults) as Record<string, unknown>;
     },
     [lessonPlanDefaults],
+  );
+  const applyLessonTextbookPlanRangeFields = useCallback(
+    (
+      current: Record<string, unknown>,
+      sessionId: string,
+      entryId: string,
+      range: { start?: string; end?: string; label?: string; memo?: string },
+    ) => {
+      const fields = [
+        ["start", text(range.start)] as const,
+        ["end", text(range.end)] as const,
+        ["label", text(range.label)] as const,
+        ["memo", text(range.memo)] as const,
+      ];
+
+      return fields.reduce<Record<string, unknown>>(
+        (nextDraft, [field, value]) =>
+          applyTextbookPlanRangeField(nextDraft, lessonPlanDefaults, {
+            sessionId,
+            entryId,
+            field,
+            value,
+          }) as Record<string, unknown>,
+        current,
+      );
+    },
+    [lessonPlanDefaults],
+  );
+  const handleAddLessonTextbook = useCallback((nextTextbookId: string) => {
+    const textbookId = text(nextTextbookId);
+    if (!textbookId) {
+      return;
+    }
+    const textbook = data.textbooks.find((book) => text(book.id) === textbookId);
+    const firstSessionId = text(filteredLessonSessions[0]?.id);
+    const selectedSessionId = text(selectedLessonSession?.id);
+    const endSessionId = text(filteredLessonSessions[filteredLessonSessions.length - 1]?.id);
+
+    updateLessonPlanDraft((current) => {
+      const currentBooks = Array.isArray(current.textbooks)
+        ? (current.textbooks as Record<string, unknown>[])
+        : [];
+      if (currentBooks.some((book) => text(book.textbookId || book.id) === textbookId)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        textbooks: [
+          ...currentBooks,
+          {
+            textbookId,
+            order: currentBooks.length,
+            role: currentBooks.length === 0 ? "main" : "supplement",
+            alias: getTextbookTitle(textbook),
+            area: getTextbookCategory(textbook),
+            subSubject: "",
+            startSessionId: currentBooks.length === 0 ? firstSessionId : selectedSessionId || firstSessionId,
+            endSessionId,
+          },
+        ],
+      };
+    });
+    setLessonTextbookSearch("");
+    setIsLessonTextbookFinderOpen(false);
+  }, [data.textbooks, filteredLessonSessions, selectedLessonSession, updateLessonPlanDraft]);
+  const handleRemoveLessonTextbook = useCallback(
+    (textbookId: string) => {
+      const targetTextbookId = text(textbookId);
+      if (!targetTextbookId) {
+        return;
+      }
+
+      updateLessonPlanDraft((current) => {
+        const remainingBooks = (Array.isArray(current.textbooks)
+          ? (current.textbooks as Record<string, unknown>[])
+          : []
+        )
+          .filter((book) => text(book.textbookId || book.id) !== targetTextbookId)
+          .map((book, index) => ({
+            ...book,
+            order: index,
+            role: index === 0 ? "main" : text(book.role) || "supplement",
+          }));
+
+        return {
+          ...current,
+          textbooks: remainingBooks,
+        };
+      });
+    },
+    [updateLessonPlanDraft],
+  );
+  const handleLessonTextbookCatalogRange = useCallback(
+    (
+      textbookId: string,
+      range: {
+        startSessionId?: string;
+        endSessionId?: string;
+      },
+    ) => {
+      const targetTextbookId = text(textbookId);
+      if (!targetTextbookId) {
+        return;
+      }
+
+      updateLessonPlanDraft((current) => {
+        const currentBooks = Array.isArray(current.textbooks)
+          ? (current.textbooks as Record<string, unknown>[])
+          : [];
+        return {
+          ...current,
+          textbooks: currentBooks.map((book, index) =>
+            text(book.textbookId || book.id) === targetTextbookId
+              ? {
+                  ...book,
+                  order: index,
+                  startSessionId: text(range.startSessionId),
+                  endSessionId: text(range.endSessionId),
+                }
+              : { ...book, order: index },
+          ),
+        };
+      });
+    },
+    [updateLessonPlanDraft],
+  );
+  const handleLessonTextbookCatalogChange = useCallback(
+    (
+      textbookId: string,
+      field: "role" | "alias" | "area" | "subSubject" | "startSessionId" | "endSessionId",
+      value: string,
+    ) => {
+      const targetTextbookId = text(textbookId);
+      if (!targetTextbookId) {
+        return;
+      }
+
+      updateLessonPlanDraft((current) => {
+        const currentBooks = Array.isArray(current.textbooks)
+          ? (current.textbooks as Record<string, unknown>[])
+          : [];
+        return {
+          ...current,
+          textbooks: currentBooks.map((book, index) => {
+            const isTarget = text(book.textbookId || book.id) === targetTextbookId;
+            if (!isTarget && field === "role" && value === "main") {
+              return { ...book, role: "supplement", order: index };
+            }
+            if (!isTarget) {
+              return { ...book, order: index };
+            }
+            return {
+              ...book,
+              order: index,
+              [field]: field === "role" ? (value === "main" ? "main" : "supplement") : value,
+            };
+          }),
+        };
+      });
+    },
+    [updateLessonPlanDraft],
+  );
+  const handleIncludeLessonSessionInTextbookRange = useCallback(
+    (sessionId: string) => {
+      const targetSessionId = text(sessionId);
+      const targetIndex = filteredLessonSessions.findIndex((session) => session.id === targetSessionId);
+      if (!targetSessionId || targetIndex < 0) {
+        return;
+      }
+
+      updateLessonPlanDraft((current) => {
+        const currentBooks = Array.isArray(current.textbooks)
+          ? (current.textbooks as Record<string, unknown>[])
+          : [];
+        if (currentBooks.length === 0) {
+          return current;
+        }
+
+        const lastSessionId = filteredLessonSessions[filteredLessonSessions.length - 1]?.id || targetSessionId;
+
+        return {
+          ...current,
+          textbooks: currentBooks.map((book) => {
+            const startSessionId = text(book.startSessionId || book.start_session_id);
+            const endSessionId = text(book.endSessionId || book.end_session_id);
+            const startIndex = startSessionId
+              ? filteredLessonSessions.findIndex((session) => session.id === startSessionId)
+              : 0;
+            const endIndex = endSessionId
+              ? filteredLessonSessions.findIndex((session) => session.id === endSessionId)
+              : filteredLessonSessions.length - 1;
+            const resolvedStartIndex = startIndex >= 0 ? startIndex : 0;
+            const resolvedEndIndex = endIndex >= 0 ? endIndex : filteredLessonSessions.length - 1;
+
+            if (targetIndex < resolvedStartIndex) {
+              return { ...book, startSessionId: targetSessionId };
+            }
+            if (targetIndex > resolvedEndIndex) {
+              return { ...book, endSessionId: targetSessionId || lastSessionId };
+            }
+            return book;
+          }),
+        };
+      });
+      markPendingLessonSessionSelection(targetSessionId);
+    },
+    [filteredLessonSessions, markPendingLessonSessionSelection, updateLessonPlanDraft],
   );
   const syncLessonDesignDraftSnapshot = useCallback(
     (
@@ -2501,125 +3274,21 @@ export function ClassScheduleWorkspace() {
         });
 
       if (nextFocusedSession?.monthKey) {
-        setSelectedLessonMonthKeys(
-          normalizeSelectedLessonMonthKeys(
-            [nextFocusedSession.monthKey],
-            nextLessonDesignSnapshot?.monthSummaries || [],
-          ),
-        );
+        setSelectedLessonMonthKeys(getAllLessonMonthKeys(nextLessonDesignSnapshot?.monthSummaries || []));
+        setFocusedLessonMonthKey(nextFocusedSession.monthKey);
       }
       setSelectedLessonPeriodId("all");
       setSelectedLessonScheduleState("all");
       if (nextFocusedSession?.id) {
-        setSelectedLessonSessionId(nextFocusedSession.id);
-      }
-    },
-    [data.textbooks, lessonPlanDefaults, selectedRow],
-  );
-  const handleLessonProgressSharedFieldChange = useCallback(
-    (field: "content" | "homework", value: string) => {
-      setLessonProgressDraft((current) => {
-        if (!current) {
-          return current;
+        const nextFocusedDate = text(nextFocusedSession.dateValue) || focusTargetDate || focusSourceDate;
+        if (nextFocusedDate) {
+          setSelectedLessonCalendarDate(nextFocusedDate);
         }
-        return {
-          ...current,
-          [field]: value,
-        };
-      });
-      setLessonProgressSaveError("");
-      setLessonProgressSaveNotice("");
-    },
-    [],
-  );
-  const handleLessonProgressEntryChange = useCallback(
-    (textbookId: string, field: "status" | "rangeLabel" | "publicNote" | "teacherNote", value: string) => {
-      setLessonProgressDraft((current) => {
-        if (!current) {
-          return current;
-        }
-        return {
-          ...current,
-          entries: current.entries.map((entry) =>
-            entry.textbookId === textbookId
-              ? {
-                  ...entry,
-                  [field]: field === "status" ? normalizeLessonProgressStatus(value) : value,
-                }
-              : entry,
-          ),
-        };
-      });
-      setLessonProgressSaveError("");
-      setLessonProgressSaveNotice("");
-    },
-    [],
-  );
-  const handleSaveLessonProgress = useCallback(async () => {
-    if (!selectedRow || !selectedLessonSession || !lessonProgressDraft || !supabase) {
-      return;
-    }
-
-    setIsLessonProgressSaving(true);
-    setLessonProgressSaveError("");
-    setLessonProgressSaveNotice("");
-
-    try {
-      const sharedDraft = {
-        content: text(lessonProgressDraft.content),
-        homework: text(lessonProgressDraft.homework),
-      };
-      const payloads = lessonProgressDraft.entries
-        .filter((entry) => !isLessonSessionProgressEntryEmpty(entry, sharedDraft))
-        .map((entry) => ({
-          class_id: text(selectedRow.id),
-          session_id: text(selectedLessonSession.id),
-          session_order: Number(selectedLessonSession.sessionNumber || 0),
-          textbook_id: text(entry.textbookId) || null,
-          progress_key: buildLessonSessionProgressKey(
-            text(selectedRow.id),
-            text(selectedLessonSession.id),
-            text(entry.textbookId),
-          ),
-          status: normalizeLessonProgressStatus(entry.status),
-          range_label: text(entry.rangeLabel) || null,
-          public_note: text(entry.publicNote) || null,
-          teacher_note: text(entry.teacherNote) || null,
-          content: sharedDraft.content || null,
-          homework: sharedDraft.homework || null,
-          date: text(selectedLessonSession.dateValue) || null,
-          updated_at: new Date().toISOString(),
-        }));
-      const deleteKeys = lessonProgressDraft.entries
-        .filter((entry) => isLessonSessionProgressEntryEmpty(entry, sharedDraft))
-        .map((entry) => text(entry.progressKey))
-        .filter(Boolean);
-
-      for (const payload of payloads) {
-        await upsertLessonProgressLog(payload);
+        markPendingLessonSessionSelection(nextFocusedSession.id);
       }
-      for (const progressKey of deleteKeys) {
-        const matchedEntry = lessonProgressDraft.entries.find((entry) => text(entry.progressKey) === progressKey);
-        await deleteLessonProgressLog({
-          progressKey,
-          classId: text(selectedRow.id),
-          sessionId: text(selectedLessonSession.id),
-          textbookId: text(matchedEntry?.textbookId),
-        });
-      }
-
-      await refresh();
-      setLessonProgressSaveNotice("실진도 기록을 저장했습니다.");
-    } catch (progressSaveError) {
-      setLessonProgressSaveError(
-        progressSaveError instanceof Error
-          ? progressSaveError.message
-          : "실진도 기록 저장에 실패했습니다.",
-      );
-    } finally {
-      setIsLessonProgressSaving(false);
-    }
-  }, [lessonProgressDraft, refresh, selectedLessonSession, selectedRow]);
+    },
+    [data.textbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
+  );
   const selectedLessonSessionDraftDate = resolveLessonSessionDraftDate(selectedLessonSession);
   const selectedLessonSessionDraftStateEntry = useMemo(() => {
     if (!selectedLessonSessionDraftDate || !normalizedLessonPlan) {
@@ -2638,10 +3307,6 @@ export function ClassScheduleWorkspace() {
     selectedLessonSessionDraftStateEntry,
   );
   const selectedLessonSessionEditableMakeupDate = getLessonSessionDraftMakeupDate(
-    selectedLessonSession,
-    selectedLessonSessionDraftStateEntry,
-  );
-  const selectedLessonSessionEditableIsForced = getLessonSessionDraftIsForced(
     selectedLessonSession,
     selectedLessonSessionDraftStateEntry,
   );
@@ -2664,32 +3329,6 @@ export function ClassScheduleWorkspace() {
           isForced: getLessonSessionDraftIsForced(session, currentState),
         });
       });
-    },
-    [updateLessonPlanDraft],
-  );
-  const handleLessonSessionStateCycle = useCallback(
-    (session: (typeof selectedLessonSession)) => {
-      if (!session || session.scheduleState === "force_active") {
-        return;
-      }
-      const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const sessionStates = ((current.sessionStates || {}) as Record<string, unknown>) || {};
-        const currentState = (sessionStates[sessionDate] || null) as Record<string, unknown> | null;
-        const currentScheduleState = getLessonSessionDraftState(session, currentState);
-        return applyLessonSessionStateChange(current, sessionDate, {
-          nextState: getNextRegularScheduleState(currentScheduleState),
-          memo: getLessonSessionDraftMemo(session, currentState),
-          makeupMemo: getLessonSessionDraftMakeupMemo(session, currentState),
-          makeupDate: getLessonSessionDraftMakeupDate(session, currentState),
-          isForced: false,
-        });
-      });
-      setSelectedLessonSessionId(text(session.id));
     },
     [updateLessonPlanDraft],
   );
@@ -2785,19 +3424,18 @@ export function ClassScheduleWorkspace() {
       const nextFocusedSession = findLessonDesignSessionByDate(lessonDesignSnapshot, dateKey);
       const nextMonthKey = nextFocusedSession?.monthKey || buildLessonMonthKey(dateKey);
       if (nextMonthKey) {
-        setSelectedLessonMonthKeys(
-          normalizeSelectedLessonMonthKeys([nextMonthKey], lessonDesignSnapshot.monthSummaries || []),
-        );
+        setSelectedLessonMonthKeys(getAllLessonMonthKeys(lessonDesignSnapshot.monthSummaries || []));
+        setFocusedLessonMonthKey(nextMonthKey);
       }
       setSelectedLessonPeriodId("all");
       setSelectedLessonScheduleState("all");
       if (nextFocusedSession?.id) {
-        setSelectedLessonSessionId(nextFocusedSession.id);
+        markPendingLessonSessionSelection(nextFocusedSession.id);
         setLessonMonthDetailsOpen(true);
-        scrollLessonDesignSelectedSessionEditorAfterRender();
+        scrollLessonDesignSessionPairAfterRender(nextFocusedSession.id);
       }
     },
-    [lessonDesignSnapshot],
+    [lessonDesignSnapshot, markPendingLessonSessionSelection],
   );
   const handleLessonCalendarToggle = useCallback(
     (dateKey: string, meta: { hasSession: boolean; hasBaseSession: boolean; isMakeup: boolean }) => {
@@ -2862,6 +3500,11 @@ export function ClassScheduleWorkspace() {
       meta: { hasSession: boolean; hasBaseSession: boolean; isMakeup: boolean },
     ) => {
       if (!dateKey) {
+        return;
+      }
+
+      if (meta.hasSession) {
+        handleLessonCalendarSelect(dateKey);
         return;
       }
 
@@ -2957,44 +3600,109 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      updateLessonPlanDraft((current) => {
-        const sessions = Array.isArray(current.sessions)
-          ? (current.sessions as Record<string, unknown>[])
-          : [];
+      updateLessonPlanDraft((current) =>
+        applyTextbookPlanRangeField(current, lessonPlanDefaults, {
+          sessionId,
+          entryId,
+          field,
+          value,
+        }) as Record<string, unknown>,
+      );
+      markPendingLessonSessionSelection(sessionId);
+    },
+    [lessonPlanDefaults, markPendingLessonSessionSelection, updateLessonPlanDraft],
+  );
+  const handleLessonTextbookPlanPreset = useCallback(
+    (
+      sessionId: string,
+      entryId: string,
+      preset: { start: string; end: string; label: string; memo?: string },
+    ) => {
+      if (!sessionId || !entryId) {
+        return;
+      }
 
-        return {
-          ...current,
-          sessions: sessions.map((session) => {
-            if (text(session.id) !== sessionId) {
-              return session;
+      updateLessonPlanDraft((current) =>
+        applyLessonTextbookPlanRangeFields(current, sessionId, entryId, preset),
+      );
+      markPendingLessonSessionSelection(sessionId);
+    },
+    [applyLessonTextbookPlanRangeFields, markPendingLessonSessionSelection, updateLessonPlanDraft],
+  );
+  const handleLessonTextbookPlanAutoFill = useCallback(
+    (
+      sessionId: string,
+      entryId: string,
+      ranges: { start: string; end: string; label: string; memo?: string }[],
+    ) => {
+      if (!sessionId || !entryId || ranges.length === 0) {
+        return;
+      }
+
+      updateLessonPlanDraft((current) => {
+        const startIndex = lessonTextbookProgressSessions.findIndex((session) => session.id === sessionId);
+        if (startIndex < 0) {
+          return current;
+        }
+
+        let rangeIndex = 0;
+        return lessonTextbookProgressSessions
+          .slice(startIndex)
+          .reduce<Record<string, unknown>>((nextDraft, session) => {
+            if (!session.textbookEntries.some((entry) => entry.id === entryId)) {
+              return nextDraft;
             }
 
-            const textbookEntries = Array.isArray(session.textbookEntries)
-              ? (session.textbookEntries as Record<string, unknown>[])
-              : [];
-
-            return {
-              ...session,
-              textbookEntries: textbookEntries.map((entry, index) => {
-                const resolvedEntryId = text(entry.id) || `${text(entry.textbookId || entry.textbook_id || entry.id) || "textbook"}-${index}`;
-                if (resolvedEntryId !== entryId) {
-                  return entry;
-                }
-
-                return {
-                  ...entry,
-                  plan: {
-                    ...((entry.plan || {}) as Record<string, unknown>),
-                    [field]: value,
-                  },
-                };
-              }),
-            };
-          }),
-        };
+            const range = ranges[rangeIndex % ranges.length];
+            rangeIndex += 1;
+            return applyLessonTextbookPlanRangeFields(nextDraft, session.id, entryId, range);
+          }, current);
       });
+      markPendingLessonSessionSelection(sessionId);
     },
-    [updateLessonPlanDraft],
+    [
+      applyLessonTextbookPlanRangeFields,
+      lessonTextbookProgressSessions,
+      markPendingLessonSessionSelection,
+      updateLessonPlanDraft,
+    ],
+  );
+  const handleLessonTextbookPlanAutoFillAll = useCallback(
+    (session: {
+      id: string;
+      textbookEntries: Array<{
+        id: string;
+        rangePresets: { start: string; end: string; label: string; memo?: string }[];
+      }>;
+    }) => {
+      if (!session?.id || session.textbookEntries.length === 0) {
+        return;
+      }
+
+      const rangesByEntryId = session.textbookEntries.reduce<
+        Record<string, { start: string; end: string; label: string; memo?: string }[]>
+      >((acc, entry) => {
+        if (entry.id && entry.rangePresets.length > 0) {
+          acc[entry.id] = entry.rangePresets;
+        }
+        return acc;
+      }, {});
+
+      if (Object.keys(rangesByEntryId).length === 0) {
+        return;
+      }
+
+      updateLessonPlanDraft((current) =>
+        session.textbookEntries.reduce<Record<string, unknown>>((nextDraft, entry) => {
+          const range = rangesByEntryId[entry.id]?.[0];
+          return range
+            ? applyLessonTextbookPlanRangeFields(nextDraft, session.id, entry.id, range)
+            : nextDraft;
+        }, current),
+      );
+      markPendingLessonSessionSelection(session.id);
+    },
+    [applyLessonTextbookPlanRangeFields, markPendingLessonSessionSelection, updateLessonPlanDraft],
   );
   const handleSaveLessonPlan = useCallback(async () => {
     if (!selectedRow || !lessonPlanForSave || !supabase) {
@@ -3028,7 +3736,7 @@ export function ClassScheduleWorkspace() {
   const openLessonDesignForRow = useCallback(
     (
       row: Record<string, unknown> | null,
-      options: { sessionId?: string } = {},
+      options: { sessionId?: string; monthKeys?: string[]; sectionId?: string } = {},
     ) => {
       if (!row) {
         return;
@@ -3039,13 +3747,18 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      setLessonDesignExportError("");
       setSelectedClassId(text(row.id));
       const targetSession =
         nextLessonDesignSnapshot.sessions.find((session) => session.id === options.sessionId) || null;
-      setSelectedLessonMonthKeys(
-        getDefaultLessonMonthKeys(nextLessonDesignSnapshot.monthSummaries),
+      const allMonthKeys = getAllLessonMonthKeys(nextLessonDesignSnapshot.monthSummaries);
+      const requestedMonthKeys = normalizeSelectedLessonMonthKeys(
+        options.monthKeys || [],
+        nextLessonDesignSnapshot.monthSummaries,
+        { fallbackToDefault: false },
       );
+      const nextSelectedMonthKeys = allMonthKeys;
+      setSelectedLessonMonthKeys(nextSelectedMonthKeys);
+      setFocusedLessonMonthKey(targetSession?.monthKey || requestedMonthKeys[0] || nextSelectedMonthKeys[0] || "");
       setSelectedLessonPeriodId("all");
       setSelectedLessonScheduleState("all");
       setSelectedLessonSessionId(
@@ -3053,6 +3766,10 @@ export function ClassScheduleWorkspace() {
           nextLessonDesignSnapshot.sessions.find((session) => session.progressLabel !== "완료")?.id ||
           nextLessonDesignSnapshot.sessions[0]?.id ||
           "",
+      );
+      setLessonMonthDetailsOpen(
+        resolveLessonDesignSectionId(options.sectionId || "") === LESSON_DESIGN_SECTION_IDS.periods &&
+          Boolean(targetSession?.id),
       );
       setLessonDesignOpen(true);
     },
@@ -3082,12 +3799,17 @@ export function ClassScheduleWorkspace() {
   );
 
   const isLessonDesignPage = pathname.endsWith("/lesson-design");
+  const requestedClassId = text(searchParams.get("classId"));
   const requestedSessionId = text(searchParams.get("sessionId"));
   const requestedLessonDesignSectionId = resolveLessonDesignSectionId(text(searchParams.get("section")));
-  const requestedLessonMonthKeys = text(searchParams.get("lessonMonths"))
-    .split(",")
-    .map((value) => text(value))
-    .filter(Boolean);
+  const requestedLessonMonthKeys = useMemo(
+    () =>
+      text(searchParams.get("lessonMonths"))
+        .split(",")
+        .map((value) => text(value))
+        .filter(Boolean),
+    [searchParams],
+  );
   const requestedLessonPeriodId = text(searchParams.get("lessonPeriod")) || "all";
   const requestedLessonScheduleState = resolveLessonDesignScheduleState(
     text(searchParams.get("lessonScheduleState")),
@@ -3096,18 +3818,28 @@ export function ClassScheduleWorkspace() {
 
   const closeLessonDesignWorkspace = useCallback(() => {
     setLessonDesignOpen(false);
-    setLessonDesignExportError("");
     router.replace(
       buildCurriculumWorkspaceHref(new URLSearchParams(searchParams.toString())),
       { scroll: false },
     );
   }, [router, searchParams]);
 
+  useEffect(() => {
+    if (!isLessonDesignPage || !searchParams.has("lessonMonths")) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete("lessonMonths");
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  }, [isLessonDesignPage, pathname, router, searchParams]);
+
   const navigateToLessonDesignSection = useCallback(
     (
       sectionId: string,
       row: Record<string, unknown> | null = selectedRow,
       sessionId: string = text(selectedLessonSession?.id),
+      options: { scroll?: boolean } = {},
     ) => {
       const resolvedSectionId = resolveLessonDesignSectionId(sectionId);
       if (!resolvedSectionId) {
@@ -3121,7 +3853,9 @@ export function ClassScheduleWorkspace() {
         });
       }
 
-      scrollLessonDesignSection(resolvedSectionId);
+      if (options.scroll !== false) {
+        scrollLessonDesignSectionAfterRender(resolvedSectionId);
+      }
     },
     [isLessonDesignPage, router, selectedLessonSession, selectedRow],
   );
@@ -3132,9 +3866,11 @@ export function ClassScheduleWorkspace() {
       {
         row = selectedRow,
         sectionId = LESSON_DESIGN_SECTION_IDS.calendar,
+        scrollMode = "editor",
       }: {
         row?: Record<string, unknown> | null;
         sectionId?: string;
+        scrollMode?: "editor" | "section" | "sync" | "none";
       } = {},
     ) => {
       const resolvedSessionId = text(sessionId);
@@ -3150,18 +3886,29 @@ export function ClassScheduleWorkspace() {
         null;
 
       if (scopedSession?.monthKey) {
-        setSelectedLessonMonthKeys([scopedSession.monthKey]);
+        setSelectedLessonMonthKeys(getAllLessonMonthKeys(lessonDesignSnapshot?.monthSummaries || []));
+        setFocusedLessonMonthKey(scopedSession.monthKey);
       }
       setSelectedLessonPeriodId("all");
       setLessonMonthDetailsOpen(true);
 
-      setSelectedLessonSessionId(resolvedSessionId);
-      navigateToLessonDesignSection(targetSectionId, targetRow, resolvedSessionId);
-      if (targetSectionId === LESSON_DESIGN_SECTION_IDS.periods) {
+      markPendingLessonSessionSelection(resolvedSessionId, targetRow);
+      navigateToLessonDesignSection(targetSectionId, targetRow, resolvedSessionId, {
+        scroll: scrollMode !== "none" && scrollMode !== "sync",
+      });
+      if (
+        scrollMode === "editor" &&
+        (targetSectionId === LESSON_DESIGN_SECTION_IDS.periods ||
+          targetSectionId === LESSON_DESIGN_SECTION_IDS.board)
+      ) {
         scrollLessonDesignSelectedSessionEditorAfterRender();
+      } else if (scrollMode === "sync") {
+        scrollLessonDesignSessionPairAfterRender(resolvedSessionId);
+      } else if (scrollMode === "none" && scopedSession?.monthKey) {
+        scrollLessonDesignPeriodDetailAfterRender(scopedSession.monthKey);
       }
     },
-    [filteredLessonSessions, lessonDesignSnapshot, navigateToLessonDesignSection, selectedRow],
+    [filteredLessonSessions, lessonDesignSnapshot, markPendingLessonSessionSelection, navigateToLessonDesignSection, selectedRow],
   );
 
   useEffect(() => {
@@ -3169,14 +3916,11 @@ export function ClassScheduleWorkspace() {
       return;
     }
 
+    const allLessonMonthKeys = getAllLessonMonthKeys(lessonDesignSnapshot.monthSummaries);
     const shouldSyncLessonMonths =
       searchParams.has("lessonMonths") &&
       !areSameLessonMonthSelection(
-        normalizeSelectedLessonMonthKeys(
-          requestedLessonMonthKeys,
-          lessonDesignSnapshot.monthSummaries,
-          { fallbackToDefault: false },
-        ),
+        allLessonMonthKeys,
         selectedLessonMonthKeys,
       );
     const shouldSyncLessonPeriod =
@@ -3192,13 +3936,7 @@ export function ClassScheduleWorkspace() {
     }
 
     if (shouldSyncLessonMonths) {
-      setSelectedLessonMonthKeys(
-        normalizeSelectedLessonMonthKeys(
-          requestedLessonMonthKeys,
-          lessonDesignSnapshot.monthSummaries,
-          { fallbackToDefault: false },
-        ),
-      );
+      setSelectedLessonMonthKeys(allLessonMonthKeys);
     }
     if (shouldSyncLessonPeriod) {
       setSelectedLessonPeriodId(requestedLessonPeriodId);
@@ -3208,6 +3946,7 @@ export function ClassScheduleWorkspace() {
     }
   }, [
     isLessonDesignPage,
+    lessonDesignOpen,
     lessonDesignSnapshot,
     requestedLessonMonthKeys,
     requestedLessonPeriodId,
@@ -3252,37 +3991,12 @@ export function ClassScheduleWorkspace() {
     }
   }, [closeLessonDesignWorkspace]);
 
-  const handleExportLessonDesign = useCallback(async () => {
-    if (!lessonDesignExportRef.current || !lessonDesignSnapshot) {
-      return;
-    }
-
-    setIsLessonDesignExporting(true);
-    setLessonDesignExportError("");
-
-    try {
-      await exportElementAsImage(
-        lessonDesignExportRef.current,
-        buildLessonDesignExportFilename(selectedRow, selectedLessonSession),
-        {
-          preset: "a4-landscape",
-          backgroundColor: "#ffffff",
-        },
-      );
-    } catch {
-      setLessonDesignExportError("이미지 저장에 실패했습니다. 브라우저 렌더 상태를 다시 확인해 주세요.");
-    } finally {
-      setIsLessonDesignExporting(false);
-    }
-  }, [lessonDesignSnapshot, selectedLessonSession, selectedRow]);
-
   useEffect(() => {
   
   if (loading) {
       return;
     }
 
-    const requestedClassId = text(searchParams.get("classId"));
     const requestedSessionId = text(searchParams.get("sessionId"));
     const shouldOpenLessonDesign =
       searchParams.get("lessonDesign") === "1" || pathname.endsWith("/lesson-design");
@@ -3320,7 +4034,7 @@ export function ClassScheduleWorkspace() {
 
     const targetSectionId =
       requestedLessonDesignSectionId ||
-      (requestedSessionId ? LESSON_DESIGN_SECTION_IDS.calendar : LESSON_DESIGN_SECTION_IDS.periods);
+      (requestedSessionId ? LESSON_DESIGN_SECTION_IDS.board : LESSON_DESIGN_SECTION_IDS.periods);
 
     if (!isLessonDesignPage) {
       router.replace(buildLessonDesignPageHref(targetRow, requestedSessionId || "", targetSectionId), {
@@ -3333,7 +4047,11 @@ export function ClassScheduleWorkspace() {
       return;
     }
 
-    openLessonDesignForRow(targetRow, { sessionId: requestedSessionId || undefined });
+    openLessonDesignForRow(targetRow, {
+      sessionId: requestedSessionId || undefined,
+      monthKeys: requestedLessonMonthKeys,
+      sectionId: targetSectionId,
+    });
   }, [
     allRowsModel.rows,
     lessonDesignOpen,
@@ -3341,30 +4059,84 @@ export function ClassScheduleWorkspace() {
     openLessonDesignForRow,
     isLessonDesignPage,
     pathname,
+    requestedClassId,
     router,
     searchParams,
     requestedLessonDesignSectionId,
+    requestedLessonMonthKeys,
     selectedClassId,
     selectedLessonSessionId,
   ]);
 
   useEffect(() => {
     if (!isLessonDesignPage || !lessonDesignOpen || !requestedSessionId) {
+      if (!requestedSessionId) {
+        lastRequestedLessonSessionKeyRef.current = "";
+        pendingLessonSessionNavigationKeyRef.current = "";
+      }
       return;
     }
 
-    const matchedRequestedSession =
-      filteredLessonSessions.find((session) => session.id === requestedSessionId) || null;
-    if (!matchedRequestedSession || selectedLessonSessionId === requestedSessionId) {
+    const resolvedRequestedSession = resolveRequestedLessonDesignSession(
+      lessonDesignSnapshot,
+      requestedSessionId,
+      selectedLessonSessionId,
+    );
+    if (!resolvedRequestedSession) {
       return;
     }
 
-    setSelectedLessonSessionId(requestedSessionId);
+    const requestedLessonSessionKey = `${requestedClassId}:${resolvedRequestedSession.id}`;
+    if (
+      pendingLessonSessionNavigationKeyRef.current &&
+      pendingLessonSessionNavigationKeyRef.current !== requestedLessonSessionKey
+    ) {
+      return;
+    }
+    if (pendingLessonSessionNavigationKeyRef.current === requestedLessonSessionKey) {
+      pendingLessonSessionNavigationKeyRef.current = "";
+    }
+    if (
+      lastRequestedLessonSessionKeyRef.current === requestedLessonSessionKey &&
+      selectedLessonSessionId === resolvedRequestedSession.id
+    ) {
+      return;
+    }
+
+    lastRequestedLessonSessionKeyRef.current = requestedLessonSessionKey;
+    if (resolvedRequestedSession.monthKey) {
+      setFocusedLessonMonthKey((current) =>
+        current === resolvedRequestedSession.monthKey ? current : resolvedRequestedSession.monthKey,
+      );
+    }
+    if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods) {
+      setLessonMonthDetailsOpen((current) => (current ? current : true));
+    }
+    if (selectedLessonSessionId !== resolvedRequestedSession.id) {
+      setSelectedLessonSessionId(resolvedRequestedSession.id);
+    }
+
+    if (resolvedRequestedSession.id !== requestedSessionId && selectedRow) {
+      const nextParams = buildLessonDesignSearchParams({
+        currentParams: new URLSearchParams(searchParams.toString()),
+        classId: requestedClassId,
+        sessionId: resolvedRequestedSession.id,
+        sectionId: requestedLessonDesignSectionId || LESSON_DESIGN_SECTION_IDS.board,
+        monthKeys: [],
+      });
+      router.replace(`/admin/curriculum/lesson-design?${nextParams.toString()}`, { scroll: false });
+    }
   }, [
-    filteredLessonSessions,
     isLessonDesignPage,
     lessonDesignOpen,
+    lessonDesignSnapshot,
+    requestedClassId,
+    requestedLessonDesignSectionId,
+    requestedLessonMonthKeys,
     requestedSessionId,
+    router,
+    searchParams,
+    selectedRow,
     selectedLessonSessionId,
   ]);
 
@@ -3382,7 +4154,12 @@ export function ClassScheduleWorkspace() {
       const nextParams = buildLessonDesignSearchParams({
         currentParams,
         classId: text(selectedRow.id),
-        sessionId: "",
+        sessionId: isLessonDesignPage ? selectedLessonSessionId : "",
+        sectionId:
+          isLessonDesignPage
+            ? requestedLessonDesignSectionId ||
+              (selectedLessonSessionId ? LESSON_DESIGN_SECTION_IDS.board : "")
+            : "",
         monthKeys:
           isLessonDesignPage &&
           lessonDesignSnapshot &&
@@ -3423,7 +4200,9 @@ export function ClassScheduleWorkspace() {
     selectedLessonMonthKeys,
     selectedLessonPeriodId,
     selectedLessonScheduleState,
-    selectedLessonSession,
+    lessonDesignSnapshot,
+    requestedLessonDesignSectionId,
+    selectedLessonSessionId,
     selectedRow,
   ]);
 
@@ -3432,31 +4211,125 @@ export function ClassScheduleWorkspace() {
     ? `${selectedRow.termName || "학기 미정"} · ${selectedRow.teacher || "선생님 미정"}`
     : "수업 설계";
 
-  const lessonDesignSnapshotSafe = lessonDesignSnapshot as NonNullable<typeof lessonDesignSnapshot>;
-  const renderLessonMonthSessionDetails = (sessions: typeof filteredLessonSessions) => (
-    <div className="mt-3 border-t">
-      <div className="space-y-2 px-2 py-3">
+  if (loading) {
+    return <ClassScheduleSkeleton />;
+  }
+
+  const lessonDesignActiveMode =
+    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.board ? "progress" : "schedule";
+  const isLessonDesignProgressMode = lessonDesignActiveMode === "progress";
+  const lessonTextbookSubjectFilterLabel =
+    lessonTextbookSubjectFilter === "current"
+      ? "수업 과목"
+      : lessonTextbookSubjectFilter === "all"
+        ? "전체 과목"
+        : getLessonSubjectDisplayLabel(lessonTextbookSubjectFilter);
+  const lessonTextbookCategoryFilterLabel =
+    lessonTextbookCategoryFilter === "all" ? "전체 구분" : lessonTextbookCategoryFilter;
+  const lessonTextbookPublisherFilterLabel =
+    lessonTextbookPublisherFilter === "all" ? "전체 출판사" : lessonTextbookPublisherFilter;
+  const lessonTextbookFilterSummary = [
+    lessonTextbookSubjectFilterLabel,
+    lessonTextbookCategoryFilter !== "all" ? lessonTextbookCategoryFilterLabel : "",
+    lessonTextbookPublisherFilter !== "all" ? lessonTextbookPublisherFilterLabel : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const activeLessonTextbookFilterCount = [
+    lessonTextbookSubjectFilter !== "current",
+    lessonTextbookCategoryFilter !== "all",
+    lessonTextbookPublisherFilter !== "all",
+  ].filter(Boolean).length;
+  const lessonTextbookFinderHasQuery =
+    Boolean(text(lessonTextbookSearch)) || activeLessonTextbookFilterCount > 0;
+  const isLessonTextbookFinderVisible =
+    !hasLessonTextbooks || isLessonTextbookFinderOpen || lessonTextbookFinderHasQuery;
+  const lessonDesignWorkQueueItems = isLessonDesignProgressMode
+    ? [
+        {
+          key: "textbooks",
+          label: "수업교재",
+          value: `${lessonTextbookSelectedCount}권`,
+          sectionId: LESSON_DESIGN_SECTION_IDS.textbooks,
+          targetSessionId: "",
+        },
+        {
+          key: "progress",
+          label: "진도",
+          value:
+            lessonTextbookProgressSessions.length > 0
+              ? `${lessonTextbookCompletedSessionCount}/${lessonTextbookProgressSessions.length}`
+              : "0/0",
+          sectionId: LESSON_DESIGN_SECTION_IDS.board,
+          targetSessionId: "",
+        },
+        {
+          key: "pending",
+          label: "미배정",
+          value: `${lessonTextbookPendingSessionCount}회`,
+          sectionId: LESSON_DESIGN_SECTION_IDS.board,
+          targetSessionId: nextPendingLessonSession?.id || "",
+        },
+        {
+          key: "out-of-range",
+          label: "기간 밖",
+          value: `${lessonTextbookOutOfRangeSessionCount}회`,
+          sectionId: LESSON_DESIGN_SECTION_IDS.board,
+          targetSessionId: firstOutOfRangeLessonSession?.id || "",
+        },
+        {
+          key: "selected",
+          label: "현재 회차",
+          value: selectedLessonSessionSummaryLabel || "회차 선택",
+          sectionId: LESSON_DESIGN_SECTION_IDS.board,
+          targetSessionId: "",
+        },
+      ]
+    : [];
+  const renderLessonMonthSessionDetails = (
+    sessions: typeof filteredLessonSessions,
+    options: { showScheduleControls?: boolean; showTextbookPlans?: boolean } = {},
+  ) => {
+    const showScheduleControls = options.showScheduleControls ?? true;
+    const showTextbookPlans = options.showTextbookPlans ?? true;
+    const hideSessionHeader = !showScheduleControls && showTextbookPlans && sessions.length === 1;
+
+    return (
+    <div className={cn("mt-3", !hideSessionHeader && "border-t")}>
+      <div className={cn("space-y-2", hideSessionHeader ? "py-0" : "px-2 py-3")}>
         {sessions.length > 0 ? (
           sessions.map((session) => {
             const isSelectedSession = selectedLessonSession?.id === session.id;
+            const hasSessionTextbookEntries = session.textbookEntries.length > 0;
+            const isSessionOutsideTextbookRange =
+              showTextbookPlans && hasLessonTextbooks && !hasSessionTextbookEntries;
             return (
-              <div
-                key={`month-session-edit-${session.id}`}
-                id={isSelectedSession ? LESSON_DESIGN_SELECTED_SESSION_EDITOR_ID : undefined}
-                className={cn(
-                  "overflow-hidden rounded-[1rem] border bg-background",
-                  isSelectedSession && "border-primary/50 shadow-sm",
+                <div
+                  key={`month-session-edit-${session.id}`}
+                  id={isSelectedSession ? LESSON_DESIGN_SELECTED_SESSION_EDITOR_ID : undefined}
+                  data-lesson-period-session-id={session.id}
+                  data-lesson-selected-editor={isSelectedSession ? "true" : "false"}
+                  className={cn(
+                    "overflow-hidden rounded-[1rem] border bg-background scroll-mt-28",
+                    isSelectedSession && "border-primary/50 shadow-sm",
                 )}
               >
+                {!hideSessionHeader ? (
                 <button
                   type="button"
                   aria-pressed={isSelectedSession}
+                  aria-current={isSelectedSession ? "true" : undefined}
                   className={cn(
-                    "flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted/30",
-                    isSelectedSession && "bg-primary/5",
+                    "flex w-full flex-wrap items-center justify-between gap-2 border-l-4 border-l-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted/30",
+                    isSelectedSession && "border-l-primary bg-primary/5",
                   )}
-                  onPointerDown={() => setSelectedLessonSessionId(session.id)}
-                  onClick={() => setSelectedLessonSessionId(session.id)}
+                  onPointerDown={() => markPendingLessonSessionSelection(session.id)}
+                  onClick={() =>
+                    focusLessonDesignSession(session.id, {
+                      sectionId: LESSON_DESIGN_SECTION_IDS.periods,
+                      scrollMode: "sync",
+                    })
+                  }
                 >
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-baseline gap-x-2">
@@ -3473,119 +4346,208 @@ export function ClassScheduleWorkspace() {
                     <Badge variant={getScheduleStateTone(session.scheduleState)}>
                       {session.scheduleStateLabel}
                     </Badge>
-                    {session.textbookEntries.length > 0 ? (
+                    {hasSessionTextbookEntries ? (
                       <Badge variant="outline">{session.textbookEntryLabel}</Badge>
+                    ) : isSessionOutsideTextbookRange ? (
+                      <Badge variant="outline">기간 밖</Badge>
                     ) : null}
                   </span>
                 </button>
+                ) : null}
 
                 {isSelectedSession && selectedLessonSession ? (
-                  <div className="border-t bg-background px-3 py-3">
-                    <div className="grid grid-cols-4 gap-1.5">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={
-                          selectedLessonSessionEditableState === "active" ||
-                          selectedLessonSessionEditableState === "force_active"
-                            ? "default"
-                            : "outline"
-                        }
-                        onClick={() => handleLessonSessionStateChange(selectedLessonSession, "active")}
-                      >
-                        정상
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={selectedLessonSessionEditableState === "exception" ? "destructive" : "outline"}
-                        onClick={() => handleLessonSessionStateChange(selectedLessonSession, "exception")}
-                      >
-                        휴강
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={selectedLessonSessionEditableState === "makeup" ? "default" : "outline"}
-                        onClick={() => handleLessonSessionStateChange(selectedLessonSession, "makeup")}
-                      >
-                        보강
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={selectedLessonSessionEditableState === "tbd" ? "secondary" : "outline"}
-                        onClick={() => handleLessonSessionStateChange(selectedLessonSession, "tbd")}
-                      >
-                        미정
-                      </Button>
-                    </div>
-
-                    <div className="mt-3 grid gap-2">
-                      <Textarea
-                        value={selectedLessonSessionEditableMemo}
-                        onChange={(event) => handleLessonSessionMemoChange(selectedLessonSession, event.target.value)}
-                        placeholder="메모"
-                        aria-label={`${selectedLessonSession.label} 메모`}
-                        rows={1}
-                        className="h-9 min-h-9 resize-none overflow-hidden py-2"
-                      />
-                      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                        <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                          <span>보강일</span>
-                          <Input
-                            type="date"
-                            value={selectedLessonSessionEditableMakeupDate}
-                            aria-label={`${selectedLessonSession.label} 보강일`}
-                            onChange={(event) =>
-                              handleLessonSessionMakeupDateDirectChange(selectedLessonSession, event.target.value)
-                            }
-                          />
-                        </label>
-                        <div className="flex flex-wrap gap-2">
+                  <div className={cn("bg-background", hideSessionHeader ? "py-0" : "border-t px-3 py-3")}>
+                    {showScheduleControls ? (
+                      <>
+                        <div className="grid grid-cols-4 gap-1.5">
                           <Button
                             type="button"
                             size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              handleLessonSessionSubstitution(
-                                selectedLessonSession,
-                                selectedLessonSessionEditableMakeupDate,
-                              )
+                            variant={
+                              selectedLessonSessionEditableState === "active" ||
+                              selectedLessonSessionEditableState === "force_active"
+                                ? "default"
+                                : "outline"
                             }
-                            disabled={!selectedLessonSessionEditableMakeupDate}
+                            onClick={() => handleLessonSessionStateChange(selectedLessonSession, "active")}
                           >
-                            보강 적용
+                            정상
                           </Button>
                           <Button
                             type="button"
                             size="sm"
-                            variant="outline"
-                            onClick={() => handleLessonSessionClearSubstitution(selectedLessonSession)}
+                            variant={selectedLessonSessionEditableState === "exception" ? "destructive" : "outline"}
+                            onClick={() => handleLessonSessionStateChange(selectedLessonSession, "exception")}
                           >
-                            보강 해제
+                            휴강
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={selectedLessonSessionEditableState === "makeup" ? "default" : "outline"}
+                            onClick={() => handleLessonSessionStateChange(selectedLessonSession, "makeup")}
+                          >
+                            보강
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={selectedLessonSessionEditableState === "tbd" ? "secondary" : "outline"}
+                            onClick={() => handleLessonSessionStateChange(selectedLessonSession, "tbd")}
+                          >
+                            미정
                           </Button>
                         </div>
-                      </div>
-                    </div>
 
-                    {selectedLessonSession.textbookEntries.length > 0 ? (
-                      <div className="mt-3 rounded-[1rem] border bg-muted/10 p-3">
+                        <div className="mt-3 grid gap-2">
+                          <Textarea
+                            value={selectedLessonSessionEditableMemo}
+                            onChange={(event) => handleLessonSessionMemoChange(selectedLessonSession, event.target.value)}
+                            placeholder="메모"
+                            aria-label={`${selectedLessonSession.label} 메모`}
+                            rows={1}
+                            className="h-9 min-h-9 resize-none overflow-hidden py-2"
+                          />
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                            <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                              <span>보강일</span>
+                              <Input
+                                type="date"
+                                value={selectedLessonSessionEditableMakeupDate}
+                                aria-label={`${selectedLessonSession.label} 보강일`}
+                                onChange={(event) =>
+                                  handleLessonSessionMakeupDateDirectChange(selectedLessonSession, event.target.value)
+                                }
+                              />
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  handleLessonSessionSubstitution(
+                                    selectedLessonSession,
+                                    selectedLessonSessionEditableMakeupDate,
+                                  )
+                                }
+                                disabled={!selectedLessonSessionEditableMakeupDate}
+                              >
+                                보강 적용
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleLessonSessionClearSubstitution(selectedLessonSession)}
+                              >
+                                보강 해제
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {showTextbookPlans ? (
+                      selectedLessonSession.textbookEntries.length > 0 ? (
+                      <div className={cn("rounded-[1rem] border bg-muted/10 p-3", hideSessionHeader ? "mt-0" : "mt-3")}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-medium text-foreground">계획 범위 편집</p>
-                          <Badge variant="outline">{selectedLessonSession.textbookEntries.length}개 교재</Badge>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">
+                              {hideSessionHeader ? "교재별 진도" : "진도 편집"}
+                            </p>
+                            {!hideSessionHeader ? (
+                              <p className="text-xs text-muted-foreground">
+                                {selectedLessonSession.label} · {selectedLessonSession.dateLabel}
+                              </p>
+                            ) : null}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="secondary">
+                                {Math.max(selectedLessonTextbookProgressSessionIndex + 1, 1)}/{lessonTextbookProgressSessions.length}회
+                              </Badge>
+                            <Badge variant="outline">
+                              {selectedLessonSessionAssignedTextbookCount}/{selectedLessonSession.textbookEntries.length}권 배정
+                            </Badge>
+                            {selectedLessonSession.textbookEntries.some((entry) => entry.rangePresets.length > 0) ? (
+                              <Button
+                                type="button"
+                                data-testid="auto-fill-current-session"
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => handleLessonTextbookPlanAutoFillAll(selectedLessonSession)}
+                              >
+                                현재 회차 자동 배정
+                              </Button>
+                            ) : null}
+                          </div>
                         </div>
                         <div className="mt-3 space-y-3">
                           {selectedLessonSession.textbookEntries.map((entry) => (
                             <div
                               key={`plan-editor-${selectedLessonSession.id}-${entry.id}`}
-                              className="rounded-[0.9rem] border bg-background p-3"
+                              className={cn(
+                                "rounded-[0.9rem] border border-l-4 bg-background p-3",
+                                entry.hasPlanContent ? "border-l-primary" : "border-l-muted-foreground/25",
+                              )}
                             >
                               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-sm font-medium text-foreground">{entry.textbookTitle}</p>
-                                <Badge variant="outline">{entry.planLabel || "표시 문구 없음"}</Badge>
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium text-foreground">{entry.textbookTitle}</p>
+                                  {entry.scopeLabel ? (
+                                    <p className="mt-0.5 text-xs text-muted-foreground">{entry.scopeLabel}</p>
+                                  ) : null}
+                                </div>
+                                <Badge variant={entry.hasPlanContent ? "secondary" : "outline"}>
+                                  {entry.hasPlanContent ? entry.planLabel : "미배정"}
+                                </Badge>
                               </div>
-                              <div className="grid gap-2 sm:grid-cols-2">
+                              {entry.rangePresets.length > 0 ? (
+                                <div className="mb-3 space-y-1.5">
+                                  <p className="text-xs font-medium text-muted-foreground">목차 프리셋</p>
+                                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                                    {entry.rangePresets.map((preset) => (
+                                      <Button
+                                        key={`${entry.id}-${preset.key}`}
+                                        type="button"
+                                        size="sm"
+                                        title={preset.label}
+                                        aria-label={`${entry.textbookTitle} ${preset.label}`}
+                                        aria-pressed={entry.planLabel === preset.label}
+                                        variant={entry.planLabel === preset.label ? "default" : "outline"}
+                                        className="h-8 justify-start rounded-md px-2 text-xs"
+                                        onClick={() =>
+                                          handleLessonTextbookPlanPreset(selectedLessonSession.id, entry.id, preset)
+                                        }
+                                      >
+                                        <span className="truncate">
+                                          {entry.scopeLabel && preset.label.startsWith(`${entry.scopeLabel} `)
+                                            ? preset.label.slice(entry.scopeLabel.length + 1)
+                                            : preset.label}
+                                        </span>
+                                      </Button>
+                                    ))}
+                                    <Button
+                                      type="button"
+                                      data-testid="auto-fill-following-sessions"
+                                      size="sm"
+                                      variant="secondary"
+                                      className="h-8 justify-start rounded-md px-2 text-xs"
+                                      onClick={() =>
+                                        handleLessonTextbookPlanAutoFill(
+                                          selectedLessonSession.id,
+                                          entry.id,
+                                          entry.rangePresets,
+                                        )
+                                      }
+                                    >
+                                      이후 회차 자동 배정
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                              <div className="grid gap-2 lg:grid-cols-4">
                                 <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
                                   <span>시작 범위</span>
                                   <Input
@@ -3614,7 +4576,7 @@ export function ClassScheduleWorkspace() {
                                     }
                                   />
                                 </label>
-                                <label className="space-y-1.5 text-xs font-medium text-muted-foreground sm:col-span-2">
+                                <label className="space-y-1.5 text-xs font-medium text-muted-foreground lg:col-span-2">
                                   <span>표시 문구</span>
                                   <Input
                                     value={entry.planLabel === "계획 범위 미지정" ? "" : entry.planLabel}
@@ -3628,7 +4590,7 @@ export function ClassScheduleWorkspace() {
                                     }
                                   />
                                 </label>
-                                <label className="space-y-1.5 text-xs font-medium text-muted-foreground sm:col-span-2">
+                                <label className="space-y-1.5 text-xs font-medium text-muted-foreground lg:col-span-4">
                                   <span>계획 메모</span>
                                   <Textarea
                                     value={entry.planMemo === "계획 메모 없음" ? "" : entry.planMemo}
@@ -3640,7 +4602,7 @@ export function ClassScheduleWorkspace() {
                                         event.target.value,
                                       )
                                     }
-                                    className="min-h-[64px]"
+                                    className="min-h-11"
                                   />
                                 </label>
                               </div>
@@ -3648,6 +4610,22 @@ export function ClassScheduleWorkspace() {
                           ))}
                         </div>
                       </div>
+                    ) : (
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[1rem] border border-dashed px-3 py-4 text-sm font-medium text-muted-foreground">
+                        <span>{hasLessonTextbooks ? "교재 기간 밖" : "교재 범위 미지정"}</span>
+                        {hasLessonTextbooks ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-md"
+                            onClick={() => handleIncludeLessonSessionInTextbookRange(selectedLessonSession.id)}
+                          >
+                            기간에 포함
+                          </Button>
+                        ) : null}
+                      </div>
+                      )
                     ) : null}
                   </div>
                 ) : null}
@@ -3659,25 +4637,33 @@ export function ClassScheduleWorkspace() {
         )}
       </div>
     </div>
-  );
+    );
+  };
 
   const lessonDesignWorkspaceContent = (
     lessonDesignSnapshot ? (
-      <div ref={lessonDesignExportRef} className="bg-background">
-        <div className="grid gap-0 p-6 2xl:grid-cols-[minmax(18rem,0.85fr)_minmax(30rem,1.35fr)_minmax(22rem,1fr)]">
+      <div className="bg-background">
+        <div
+          className={cn(
+            "grid min-w-0 gap-0 p-4 lg:p-6",
+            isLessonDesignProgressMode
+              ? "2xl:grid-cols-[minmax(24rem,0.9fr)_minmax(32rem,1.1fr)]"
+              : "2xl:grid-cols-[minmax(18rem,0.85fr)_minmax(34rem,1.45fr)]",
+          )}
+        >
           {lessonDesignSaveError ? (
-            <Alert variant="destructive" className="xl:col-span-2 2xl:col-span-3">
+            <Alert variant="destructive" className="xl:col-span-2 2xl:col-span-full">
               <AlertDescription>{lessonDesignSaveError}</AlertDescription>
             </Alert>
           ) : null}
           {lessonDesignSaveNotice ? (
-            <Alert className="xl:col-span-2 2xl:col-span-3">
+            <Alert className="xl:col-span-2 2xl:col-span-full">
               <AlertDescription>{lessonDesignSaveNotice}</AlertDescription>
             </Alert>
           ) : null}
           {!lessonDesignSnapshot.saveReadiness.ready &&
           (lessonDesignReadinessActions.length > 0 || lessonDesignSnapshot.saveReadiness.blockers.length > 0) ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-[1.5rem] border bg-background/90 px-4 py-3 xl:col-span-2 2xl:col-span-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-[1.5rem] border bg-background/90 px-4 py-3 xl:col-span-2 2xl:col-span-full">
               <span className="text-sm font-medium text-foreground">저장 전 확인</span>
               {lessonDesignReadinessActions.map((action) => (
                 <Button
@@ -3700,23 +4686,534 @@ export function ClassScheduleWorkspace() {
             </div>
           ) : null}
 
+          <div className="sticky top-0 z-20 border-b bg-background/95 pb-4 pt-1 backdrop-blur 2xl:col-span-full">
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                data-testid="lesson-design-mode-tabs"
+                className="grid min-w-0 flex-1 basis-[20rem] grid-cols-2 gap-1 rounded-lg border bg-muted/30 p-1"
+              >
+                <Button
+                  type="button"
+                  aria-pressed={!isLessonDesignProgressMode}
+                  className="h-10"
+                  variant={!isLessonDesignProgressMode ? "default" : "ghost"}
+                  onClick={() => navigateToLessonDesignSection(LESSON_DESIGN_SECTION_IDS.periods)}
+                >
+                  일정 생성
+                </Button>
+                <Button
+                  type="button"
+                  aria-pressed={isLessonDesignProgressMode}
+                  className="h-10"
+                  variant={isLessonDesignProgressMode ? "default" : "ghost"}
+                  onClick={() => navigateToLessonDesignSection(LESSON_DESIGN_SECTION_IDS.board)}
+                >
+                  진도 생성
+                </Button>
+              </div>
+              {isLessonDesignProgressMode ? (
+                <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto lg:hidden">
+                  {lessonTextbookProgressSessions.length > 0 ? (
+                    <>
+                      <Badge variant={lessonTextbookPendingSessionCount > 0 ? "outline" : "secondary"}>
+                        진도 {lessonTextbookCompletedSessionCount}/{lessonTextbookProgressSessions.length}
+                      </Badge>
+                      {lessonTextbookPendingSessionCount > 0 ? (
+                        <Badge variant="outline">미배정 {lessonTextbookPendingSessionCount}</Badge>
+                      ) : (
+                        <Badge variant="secondary">완료</Badge>
+                      )}
+                      {lessonTextbookOutOfRangeSessionCount > 0 ? (
+                        <Badge variant="outline">기간 밖 {lessonTextbookOutOfRangeSessionCount}</Badge>
+                      ) : null}
+                      {selectedLessonSession ? (
+                        <Badge
+                          variant={selectedLessonSessionOutsideTextbookRange ? "outline" : "secondary"}
+                          className="max-w-[16rem] truncate"
+                        >
+                          {selectedLessonSessionSummaryLabel}
+                          {selectedLessonSessionRangeStateLabel ? ` · ${selectedLessonSessionRangeStateLabel}` : ""}
+                        </Badge>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Badge variant="outline">교재 연결 전</Badge>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            {isLessonDesignProgressMode && lessonDesignWorkQueueItems.length > 0 ? (
+              <div data-testid="lesson-design-work-queue" className="mt-3 hidden gap-2 lg:grid lg:grid-cols-5">
+                {lessonDesignWorkQueueItems.map((item) => (
+                  <button
+                    key={`lesson-design-work-queue-${item.key}`}
+                    type="button"
+                    className="flex h-11 min-w-0 items-center justify-between rounded-md border border-border/70 bg-background px-3 text-left text-sm transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none"
+                    onClick={() => {
+                      if (item.targetSessionId) {
+                        focusLessonDesignSession(item.targetSessionId, { sectionId: item.sectionId });
+                        return;
+                      }
+                      scrollLessonDesignSection(item.sectionId);
+                    }}
+                  >
+                    <span className="min-w-0 truncate text-muted-foreground">{item.label}</span>
+                    <span className="ml-3 min-w-0 truncate font-semibold text-foreground">{item.value}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {isLessonDesignProgressMode ? (
+          <section id={LESSON_DESIGN_SECTION_IDS.textbooks} className="scroll-mt-28 border-b bg-background py-3 2xl:col-span-full">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <BookOpen className="size-4 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="text-lg font-semibold text-foreground">수업교재</p>
+                </div>
+              </div>
+              <div className="flex w-full flex-wrap justify-end gap-2 sm:min-w-[18rem] sm:flex-1">
+                {isLessonTextbookFinderVisible ? (
+                  <div className="relative min-w-[14rem] flex-1 sm:max-w-md">
+                    <Input
+                      value={lessonTextbookSearch}
+                      onChange={(event) => {
+                        setLessonTextbookSearch(event.target.value);
+                        setIsLessonTextbookFinderOpen(true);
+                      }}
+                      className="w-full pr-9"
+                      placeholder="교재명, 출판사 검색"
+                      aria-label="수업교재 검색"
+                    />
+                    {lessonTextbookSearch ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md"
+                        aria-label="수업교재 검색 지우기"
+                        onClick={() => {
+                          setLessonTextbookSearch("");
+                          if (!hasLessonTextbooks) {
+                            setIsLessonTextbookFinderOpen(true);
+                          }
+                        }}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {hasLessonTextbooks ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isLessonTextbookFinderVisible ? "secondary" : "outline"}
+                    className="h-9 shrink-0 rounded-md"
+                    aria-expanded={isLessonTextbookFinderVisible}
+                    aria-controls="lesson-textbook-finder"
+                    onPointerDown={() => {
+                      if (!isLessonTextbookFinderVisible) {
+                        setIsLessonTextbookFinderOpen(true);
+                      }
+                    }}
+                    onClick={() => {
+                      if (isLessonTextbookFinderVisible) {
+                        setIsLessonTextbookFinderOpen(false);
+                        setLessonTextbookSearch("");
+                        setLessonTextbookSubjectFilter("current");
+                        setLessonTextbookCategoryFilter("all");
+                        setLessonTextbookPublisherFilter("all");
+                        return;
+                      }
+                      setIsLessonTextbookFinderOpen(true);
+                    }}
+                  >
+                    <Plus className="mr-2 size-3.5" />
+                    {isLessonTextbookFinderVisible ? "목록 닫기" : "교재 추가"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            <div
+              className={cn(
+                "mt-3 grid gap-4",
+                isLessonTextbookFinderVisible && hasLessonTextbooks
+                  ? "xl:grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)]"
+                  : "xl:grid-cols-1",
+              )}
+            >
+              {isLessonTextbookFinderVisible ? (
+              <div id="lesson-textbook-finder" className="rounded-lg border bg-background p-3 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-foreground">교재 찾기</p>
+                    <Badge variant="outline">후보 {lessonTextbookOptions.length}</Badge>
+                  </div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 max-w-[16rem] justify-start rounded-md"
+                          aria-label={`교재 필터: ${lessonTextbookFilterSummary || "기본"}`}
+                        >
+                          <SlidersHorizontal className="mr-2 size-3.5 shrink-0" />
+                          <span className="shrink-0">필터</span>
+                          <span className="text-muted-foreground">·</span>
+                          <span className="truncate">{lessonTextbookFilterSummary || "기본"}</span>
+                          {activeLessonTextbookFilterCount > 0 ? (
+                            <span className="ml-2 rounded bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">
+                              {activeLessonTextbookFilterCount}
+                            </span>
+                          ) : null}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="end"
+                        sideOffset={8}
+                        className="max-h-[min(28rem,calc(100vh-10rem))] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto p-3"
+                      >
+                        <div className="grid gap-3">
+                          <div className="grid gap-1.5">
+                            <p className="text-xs font-medium text-muted-foreground">과목</p>
+                            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={lessonTextbookSubjectFilter === "current" ? "default" : "outline"}
+                                className="h-8 justify-start rounded-md"
+                                onClick={() => setLessonTextbookSubjectFilter("current")}
+                              >
+                                수업 과목
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={lessonTextbookSubjectFilter === "all" ? "default" : "outline"}
+                                className="h-8 justify-start rounded-md"
+                                onClick={() => setLessonTextbookSubjectFilter("all")}
+                              >
+                                전체
+                              </Button>
+                              {lessonTextbookFilterOptions.subjects.map((subject) => (
+                                <Button
+                                  key={`lesson-textbook-subject-${subject}`}
+                                  type="button"
+                                  size="sm"
+                                  variant={lessonTextbookSubjectFilter === subject ? "default" : "outline"}
+                                  className="h-8 justify-start rounded-md"
+                                  onClick={() => setLessonTextbookSubjectFilter(subject)}
+                                >
+                                  {getLessonSubjectDisplayLabel(subject)}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                            <span>구분</span>
+                            <select
+                              value={lessonTextbookCategoryFilter}
+                              onChange={(event) => setLessonTextbookCategoryFilter(event.target.value)}
+                              className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                              aria-label="교재 구분 필터"
+                            >
+                              <option value="all">전체 구분</option>
+                              {lessonTextbookFilterOptions.categories.map((category) => (
+                                <option key={`lesson-textbook-category-${category}`} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                            <span>출판사</span>
+                            <select
+                              value={lessonTextbookPublisherFilter}
+                              onChange={(event) => setLessonTextbookPublisherFilter(event.target.value)}
+                              className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                              aria-label="교재 출판사 필터"
+                            >
+                              <option value="all">전체 출판사</option>
+                              {lessonTextbookFilterOptions.publishers.map((publisher) => (
+                                <option key={`lesson-textbook-publisher-${publisher}`} value={publisher}>
+                                  {publisher}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {activeLessonTextbookFilterCount > 0 ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 justify-start rounded-md"
+                              onClick={() => {
+                                setLessonTextbookSubjectFilter("current");
+                                setLessonTextbookCategoryFilter("all");
+                                setLessonTextbookPublisherFilter("all");
+                              }}
+                            >
+                              필터 초기화
+                            </Button>
+                          ) : null}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+                {activeLessonTextbookFilterCount > 0 ? (
+                  <div
+                    data-testid="lesson-textbook-filter-chips"
+                    className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3"
+                  >
+                    {[lessonTextbookSubjectFilterLabel, lessonTextbookCategoryFilterLabel, lessonTextbookPublisherFilterLabel]
+                      .filter((label) => label && label !== "전체 구분" && label !== "전체 출판사")
+                      .map((label) => (
+                        <Badge key={`lesson-textbook-filter-chip-${label}`} variant="secondary" className="rounded-md">
+                          {label}
+                        </Badge>
+                      ))}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 rounded-md px-2 text-xs"
+                      onClick={() => {
+                        setLessonTextbookSubjectFilter("current");
+                        setLessonTextbookCategoryFilter("all");
+                        setLessonTextbookPublisherFilter("all");
+                      }}
+                    >
+                      필터 해제
+                    </Button>
+                  </div>
+                ) : null}
+                <div
+                  className={cn(
+                    "mt-3 overflow-y-auto rounded-lg border bg-muted/20 p-2",
+                    lessonTextbookSelectedCount > 0 ? "max-h-44" : "max-h-[22rem]",
+                  )}
+                >
+            {lessonTextbookOptions.length > 0 ? (
+              <div className="grid gap-2 md:grid-cols-2">
+                {lessonTextbookOptions.map((book) => {
+                  const bookId = text(book.id);
+                  return (
+                    <button
+                      key={bookId}
+                      type="button"
+                      data-testid={`lesson-textbook-candidate-${bookId}`}
+                      className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-left text-sm shadow-xs transition-all hover:border-primary/50 hover:bg-primary/5 active:scale-[0.99] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none"
+                      onClick={() => handleAddLessonTextbook(bookId)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-foreground">{getTextbookTitle(book)}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {[getTextbookPublisher(book), getTextbookCategory(book), getLessonSubjectDisplayLabel(getTextbookSubject(book))]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </span>
+                      <Plus className="size-4 shrink-0 text-primary" />
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed px-3 py-3 text-sm font-medium text-muted-foreground">
+                후보 없음
+              </div>
+            )}
+                </div>
+              </div>
+              ) : null}
+
+              {hasLessonTextbooks ? (
+              <div
+                className={cn(
+                  "rounded-lg border border-primary/20 bg-primary/5 p-3 shadow-xs xl:sticky xl:top-20",
+                  !isLessonTextbookFinderVisible && "xl:max-w-3xl",
+                )}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-foreground">교재 설정</p>
+                  <Badge variant="secondary">연결 {lessonTextbookSelectedCount}권</Badge>
+                </div>
+
+              <div className="mt-3 grid gap-3">
+                {lessonDesignSnapshot.textbookCatalog.map((book) => (
+                  <div key={book.textbookId} className="rounded-lg border bg-background p-3 shadow-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-foreground">{book.title}</p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {[book.publisher, book.sourceTitle !== book.title ? book.sourceTitle : ""]
+                            .filter(Boolean)
+                            .join(" · ") || "교재 정보"}
+                        </p>
+                        <p className="mt-1 text-xs font-medium text-primary">
+                          {getLessonTextbookScheduleRangeLabel(book, lessonDesignSnapshot.sessions)}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="size-8 shrink-0"
+                        aria-label={`${book.title} 연결 해제`}
+                        onClick={() => handleRemoveLessonTextbook(book.textbookId)}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="h-8 rounded-md px-3"
+                        onClick={() =>
+                          handleLessonTextbookCatalogRange(book.textbookId, {
+                            startSessionId: filteredLessonSessions[0]?.id || "",
+                            endSessionId: filteredLessonSessions[filteredLessonSessions.length - 1]?.id || "",
+                          })
+                        }
+                      >
+                        전체 기간
+                      </Button>
+                      {selectedLessonSession ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 rounded-md px-3"
+                          onClick={() =>
+                            handleLessonTextbookCatalogRange(book.textbookId, {
+                              startSessionId: selectedLessonSession.id,
+                              endSessionId: filteredLessonSessions[filteredLessonSessions.length - 1]?.id || selectedLessonSession.id,
+                            })
+                          }
+                        >
+                          현재 회차부터
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                        <span>역할</span>
+                        <select
+                          value={book.role === "main" ? "main" : "supplement"}
+                          onChange={(event) =>
+                            handleLessonTextbookCatalogChange(book.textbookId, "role", event.target.value)
+                          }
+                          className="border-input bg-background h-9 rounded-md border px-2 text-sm text-foreground shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                          aria-label={`${book.title} 역할`}
+                        >
+                          <option value="main">주교재</option>
+                          <option value="supplement">부교재</option>
+                        </select>
+                      </label>
+                      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                        <span>시작</span>
+                        <select
+                          value={book.startSessionId || ""}
+                          onChange={(event) =>
+                            handleLessonTextbookCatalogChange(book.textbookId, "startSessionId", event.target.value)
+                          }
+                          className="border-input bg-background h-9 rounded-md border px-2 text-sm text-foreground shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                          aria-label={`${book.title} 시작 회차`}
+                        >
+                          <option value="">첫 회차</option>
+                          {lessonDesignSnapshot.sessions.map((session) => (
+                            <option key={`${book.textbookId}-start-${session.id}`} value={session.id}>
+                              {getLessonSessionOptionLabel(session)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                        <span>종료</span>
+                        <select
+                          value={book.endSessionId || ""}
+                          onChange={(event) =>
+                            handleLessonTextbookCatalogChange(book.textbookId, "endSessionId", event.target.value)
+                          }
+                          className="border-input bg-background h-9 rounded-md border px-2 text-sm text-foreground shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                          aria-label={`${book.title} 종료 회차`}
+                        >
+                          <option value="">마지막 회차</option>
+                          {lessonDesignSnapshot.sessions.map((session) => (
+                            <option key={`${book.textbookId}-end-${session.id}`} value={session.id}>
+                              {getLessonSessionOptionLabel(session)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <details className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:col-span-3">
+                        <summary className="cursor-pointer font-medium text-foreground">교재 정보</summary>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                          <label className="grid gap-1.5">
+                            <span>표시명</span>
+                            <Input
+                              value={book.title}
+                              onChange={(event) =>
+                                handleLessonTextbookCatalogChange(book.textbookId, "alias", event.target.value)
+                              }
+                              aria-label={`${book.title} 표시명`}
+                            />
+                          </label>
+                          <label className="grid gap-1.5">
+                            <span>영역</span>
+                            <Input
+                              value={book.area}
+                              onChange={(event) =>
+                                handleLessonTextbookCatalogChange(book.textbookId, "area", event.target.value)
+                              }
+                              placeholder="영역"
+                              aria-label={`${book.title} 영역`}
+                            />
+                          </label>
+                          <label className="grid gap-1.5">
+                            <span>세부과목</span>
+                            <Input
+                              value={book.subSubject}
+                              onChange={(event) =>
+                                handleLessonTextbookCatalogChange(book.textbookId, "subSubject", event.target.value)
+                              }
+                              placeholder="세부과목"
+                              aria-label={`${book.title} 세부과목`}
+                            />
+                          </label>
+                        </div>
+                      </details>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              </div>
+              ) : null}
+            </div>
+          </section>
+          ) : null}
+
+          {!isLessonDesignProgressMode ? (
+            <>
           <section
             id={LESSON_DESIGN_SECTION_IDS.periods}
-            className="bg-background py-4 2xl:col-start-1 2xl:pr-5"
+            data-lesson-period-sidebar="true"
+            className="bg-background py-4 2xl:sticky 2xl:top-20 2xl:col-start-1 2xl:max-h-[calc(100vh-6rem)] 2xl:self-start 2xl:overflow-y-auto 2xl:pr-5"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-lg font-semibold text-foreground">일정 생성</p>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="outline" onClick={handleAddLessonPeriod}>
                   월 추가
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleSaveLessonPlan}
-                  disabled={isLessonDesignSaving || !lessonDesignSnapshot.saveReadiness.ready}
-                >
-                  {isLessonDesignSaving ? "저장 중" : "저장"}
                 </Button>
               </div>
             </div>
@@ -3730,21 +5227,30 @@ export function ClassScheduleWorkspace() {
                       .filter(
                         (session) =>
                           session.periodId === period.id ||
-                          (periodStartMonthKey && session.monthKey === periodStartMonthKey),
+                          (!text(session.periodId) && periodStartMonthKey && session.monthKey === periodStartMonthKey),
                       )
                       .sort(compareLessonSessionsByDate);
                     const periodMonthKey = periodStartMonthKey || periodSessions[0]?.monthKey || "";
-                    const isPeriodDetailsOpen = Boolean(periodMonthKey && activeLessonMonthKey === periodMonthKey && lessonMonthDetailsOpen);
+                    const periodSessionMonthKeys = [
+                      ...new Set(periodSessions.map((session) => text(session.monthKey)).filter(Boolean)),
+                    ];
+                    const periodHasActiveMonth = periodSessionMonthKeys.includes(activeLessonMonthKey);
                     const periodSelectedSession =
                       periodSessions.find((session) => session.id === selectedLessonSession?.id) ||
                       periodSessions[0] ||
                       null;
+                    const isPeriodDetailsOpen = Boolean(
+                      lessonMonthDetailsOpen &&
+                        ((periodMonthKey && activeLessonMonthKey === periodMonthKey) ||
+                          periodHasActiveMonth ||
+                          periodSessions.some((session) => session.id === selectedLessonSession?.id)),
+                    );
                     const handlePeriodDetailToggle = () => {
                       if (periodMonthKey) {
-                        toggleLessonMonthKey(periodMonthKey);
+                        focusLessonMonthKey(periodMonthKey);
                       }
                       if (periodSelectedSession) {
-                        setSelectedLessonSessionId(periodSelectedSession.id);
+                        markPendingLessonSessionSelection(periodSelectedSession.id);
                       }
                       setLessonMonthDetailsOpen((current) =>
                         periodMonthKey && activeLessonMonthKey === periodMonthKey ? !current : true,
@@ -3752,7 +5258,21 @@ export function ClassScheduleWorkspace() {
                     };
 
                     return (
-                      <div key={period.id} className="border-t px-2 py-4 first:border-t-0">
+                      <div
+                        key={period.id}
+                        id={getLessonDesignPeriodDetailId(periodMonthKey || period.id)}
+                        className="scroll-mt-24 border-t px-2 py-4 first:border-t-0"
+                      >
+                        {periodSessionMonthKeys.map((monthKey) =>
+                          monthKey === periodMonthKey ? null : (
+                            <span
+                              key={`${period.id}-${monthKey}-anchor`}
+                              id={getLessonDesignPeriodDetailId(monthKey)}
+                              className="block scroll-mt-24"
+                              aria-hidden="true"
+                            />
+                          ),
+                        )}
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-medium text-foreground">{period.label}</p>
@@ -3764,6 +5284,7 @@ export function ClassScheduleWorkspace() {
                                 type="button"
                                 size="sm"
                                 variant="outline"
+                                aria-label={`${period.label} ${isPeriodDetailsOpen ? "상세 닫기" : "상세 보기"}`}
                                 aria-expanded={isPeriodDetailsOpen}
                                 onClick={handlePeriodDetailToggle}
                               >
@@ -3774,10 +5295,12 @@ export function ClassScheduleWorkspace() {
                               type="button"
                               size="sm"
                               variant="outline"
+                              className="h-8 w-8 rounded-md p-0 text-destructive hover:text-destructive"
+                              aria-label={`${period.label} 삭제`}
                               onClick={() => handleRemoveLessonPeriod(period.id)}
                               disabled={lessonDesignSnapshot.billingPeriods.length <= 1}
                             >
-                              삭제
+                              <Trash2 className="size-4" aria-hidden="true" />
                             </Button>
                           </div>
                         </div>
@@ -3799,7 +5322,7 @@ export function ClassScheduleWorkspace() {
                             />
                           </div>
                         </div>
-                        {isPeriodDetailsOpen ? renderLessonMonthSessionDetails(periodSessions) : null}
+                        {isPeriodDetailsOpen ? renderLessonMonthSessionDetails(periodSessions, { showTextbookPlans: false }) : null}
                       </div>
                     );
                   })
@@ -3842,10 +5365,16 @@ export function ClassScheduleWorkspace() {
                         {lessonCalendarMonths.map((month) => {
                           const monthPreviewSessions = Array.from(month.sessionsByDate.values()).flat();
                           const accentColor = monthPreviewSessions[0]?.billingColor || "#216e4e";
+                          const monthSurfaceStyle = getLessonCalendarMonthSurfaceStyle(accentColor);
                           const cells = buildLessonCalendarCells(month.year, month.month);
 
                           return (
-                            <div key={month.key} className="border-t pt-5 first:border-t-0">
+                            <div
+                              key={month.key}
+                              data-lesson-calendar-month={month.key}
+                              className="rounded-[1.25rem] border px-4 py-5 shadow-xs"
+                              style={monthSurfaceStyle}
+                            >
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex items-center gap-3">
                                   <span className="h-10 w-1.5 rounded-full" style={{ backgroundColor: accentColor }} />
@@ -3857,10 +5386,55 @@ export function ClassScheduleWorkspace() {
                                 </div>
                               </div>
 
-                              <div className="mt-4">
-                                <div className="grid grid-cols-7 gap-1 text-[11px] font-medium text-muted-foreground">
+                              <div className="mt-4 space-y-3">
+                                <div data-testid="lesson-mobile-session-list" className="grid gap-2 md:hidden">
+                                  {monthPreviewSessions.map((session) => {
+                                    const mobileSessionSurface = getScheduleStateSurface(session.scheduleState);
+                                    const mobileSessionSurfaceStyle = getLessonCalendarSessionSurfaceStyle(
+                                      session.scheduleState,
+                                      session.billingColor || accentColor,
+                                    );
+                                    const mobileSessionDateKey = text(session.dateValue);
+                                    const isSelectedMobileSession = selectedLessonSession?.id === session.id;
+
+                                    return (
+                                      <button
+                                        key={`lesson-mobile-calendar-session-${session.id}`}
+                                        type="button"
+                                        style={mobileSessionSurfaceStyle}
+                                        className={cn(
+                                          "flex min-h-14 items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left shadow-xs transition-colors",
+                                          mobileSessionSurface.className,
+                                          isSelectedMobileSession &&
+                                            "ring-2 ring-primary/70 ring-offset-2 ring-offset-background",
+                                        )}
+                                        onClick={() => {
+                                          if (mobileSessionDateKey) {
+                                            setSelectedLessonCalendarDate(mobileSessionDateKey);
+                                          }
+                                          markPendingLessonSessionSelection(session.id);
+                                          setLessonMonthDetailsOpen(true);
+                                        }}
+                                      >
+                                        <span className="min-w-0">
+                                          <span className="block truncate text-sm font-semibold">{session.label}</span>
+                                          <span className={cn("block truncate text-xs", mobileSessionSurface.mutedClassName)}>
+                                            {session.dateLabel}
+                                          </span>
+                                        </span>
+                                        <Badge variant="secondary" className="shrink-0 rounded-md">
+                                          {session.scheduleStateLabel}
+                                        </Badge>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <div
+                                  data-testid="lesson-desktop-calendar"
+                                  className="hidden grid-cols-7 gap-1 text-[11px] font-medium text-muted-foreground md:grid"
+                                >
                                   {DAY_LABELS.map((dayLabel) => (
-                                    <div key={`${month.key}-${dayLabel}`} className="flex h-8 items-center justify-center rounded-md bg-muted/40">
+                                    <div key={`${month.key}-${dayLabel}`} className="flex h-8 items-center justify-center rounded-md bg-background/55">
                                       {dayLabel}
                                     </div>
                                   ))}
@@ -3871,6 +5445,14 @@ export function ClassScheduleWorkspace() {
                                   const primaryScheduleSurface = primarySession
                                     ? getScheduleStateSurface(primarySession.scheduleState)
                                     : null;
+                                  const primarySessionAccentColor = primarySession?.billingColor || accentColor;
+                                  const primarySessionSurfaceStyle = primarySession
+                                    ? getLessonCalendarSessionSurfaceStyle(
+                                        primarySession.scheduleState,
+                                        primarySessionAccentColor,
+                                      )
+                                    : undefined;
+                                  const activeTextbookEntries = isLessonDesignProgressMode ? primarySession?.textbookEntries || [] : [];
                                   const isSelectedCalendarSession = daySessions.some(
                                     (session) => session.id === selectedLessonSession?.id,
                                   ) || selectedLessonCalendarDate === dateKey;
@@ -3884,8 +5466,11 @@ export function ClassScheduleWorkspace() {
                                       key={`${month.key}-${dateKey}`}
                                       data-lesson-calendar-date={dateKey}
                                       data-lesson-calendar-state={primarySession?.scheduleState || ""}
+                                      data-lesson-calendar-session-id={primarySession?.id || ""}
+                                      data-lesson-calendar-accent={primarySessionAccentColor}
                                       {...(canToggleCalendarDate ? { type: "button" as const } : {})}
                                       draggable={Boolean(primarySession) && primarySession?.scheduleState !== "makeup"}
+                                      style={primarySessionSurfaceStyle}
                                       onDragStart={(event) => {
                                         if (!primarySession || primarySession.scheduleState === "makeup") {
                                           return;
@@ -3934,22 +5519,31 @@ export function ClassScheduleWorkspace() {
                                         primarySession
                                           ? primaryScheduleSurface?.className
                                           : canToggleCalendarDate
-                                            ? "bg-background/95 hover:border-primary/50 hover:bg-primary/5"
-                                            : cell.isCurrentMonth
-                                              ? "bg-background/95"
-                                              : "bg-background/40 text-muted-foreground/50",
+                                             ? "bg-background/75 hover:border-primary/50 hover:bg-background/95"
+                                             : cell.isCurrentMonth
+                                               ? "bg-background/65"
+                                               : "bg-background/35 text-muted-foreground/50",
                                         isSelectedCalendarSession && "ring-2 ring-primary/70 ring-offset-2 ring-offset-background",
                                         isCalendarDragSource && "opacity-70 ring-2 ring-primary/40",
                                         isCalendarDropTarget && "ring-2 ring-primary",
                                       )}
-                                      onClick={() => {
-                                        handleLessonCalendarDateClick(dateKey, {
-                                          hasSession: Boolean(primarySession),
-                                          hasBaseSession: Array.isArray(normalizedLessonPlan?.selectedDays)
-                                            ? (normalizedLessonPlan.selectedDays as Array<string | number>).map((value) => Number(value)).includes(cell.date.getDay())
-                                            : false,
-                                          isMakeup: primarySession?.scheduleState === "makeup" && Boolean(primarySession.originalDate),
-                                        });
+                                       onClick={() => {
+                                         if (primarySession) {
+                                           setSelectedLessonCalendarDate(dateKey);
+                                           focusLessonDesignSession(primarySession.id, {
+                                             sectionId: LESSON_DESIGN_SECTION_IDS.periods,
+                                             scrollMode: "sync",
+                                           });
+                                           return;
+                                         }
+
+                                          handleLessonCalendarDateClick(dateKey, {
+                                            hasSession: false,
+                                            hasBaseSession: Array.isArray(normalizedLessonPlan?.selectedDays)
+                                              ? (normalizedLessonPlan.selectedDays as Array<string | number>).map((value) => Number(value)).includes(cell.date.getDay())
+                                             : false,
+                                           isMakeup: false,
+                                         });
                                       }}
                                     >
                                       <p className="text-[11px] font-semibold">{cell.date.getDate()}</p>
@@ -3978,6 +5572,23 @@ export function ClassScheduleWorkspace() {
                                             >
                                               추가 {daySessions.length - 1}건
                                             </p>
+                                          ) : null}
+                                          {activeTextbookEntries.length > 0 ? (
+                                            <div className="flex max-w-full flex-wrap justify-center gap-1">
+                                              {activeTextbookEntries.slice(0, 2).map((entry) => (
+                                                <span
+                                                  key={`${primarySession.id}-${entry.id}`}
+                                                  className="max-w-[5.5rem] truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                                                >
+                                                  {entry.textbookTitle}
+                                                </span>
+                                              ))}
+                                              {activeTextbookEntries.length > 2 ? (
+                                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                                  +{activeTextbookEntries.length - 2}
+                                                </span>
+                                              ) : null}
+                                            </div>
                                           ) : null}
                                         </div>
                                       ) : null}
@@ -4017,10 +5628,13 @@ export function ClassScheduleWorkspace() {
                     )}
                   </div>
           </section>
+            </>
+          ) : null}
 
+          {isLessonDesignProgressMode && hasLessonTextbooks ? (
           <section
             id={LESSON_DESIGN_SECTION_IDS.board}
-            className="border-t bg-background py-6 2xl:col-start-3 2xl:row-span-2 2xl:border-l 2xl:border-t-0 2xl:pl-5"
+            className="relative z-[1] min-w-0 border-t bg-background py-6 2xl:col-start-1 2xl:pr-5"
           >
                     <div className="flex flex-wrap items-start justify-between gap-3">
 	                      <div className="space-y-1">
@@ -4038,6 +5652,18 @@ export function ClassScheduleWorkspace() {
                                   <div className="flex flex-wrap items-center gap-2">
                                     <Badge variant="secondary">{group.billingLabel}</Badge>
                                     <Badge variant="outline">{group.sessionCount}회</Badge>
+                                    {hasLessonTextbooks ? (
+                                      <>
+                                        <Badge variant="outline">
+                                          대상 {group.sessions.filter((session) => session.textbookEntries.length > 0).length}
+                                        </Badge>
+                                        {group.sessions.some((session) => session.textbookEntries.length === 0) ? (
+                                          <Badge variant="outline">
+                                            기간 밖 {group.sessions.filter((session) => session.textbookEntries.length === 0).length}
+                                          </Badge>
+                                        ) : null}
+                                      </>
+                                    ) : null}
                                   </div>
                                   <p className="text-xs text-muted-foreground">{group.rangeLabel}</p>
                                 </div>
@@ -4055,7 +5681,26 @@ export function ClassScheduleWorkspace() {
                                     .map((value) => text(value))
                                     .filter(Boolean)
                                     .join(" · ");
-                                  const sessionDetailLine = [sessionMemoLine, session.scheduleConnectionLabel]
+                                  const textbookPreviewLine =
+                                    session.textbookEntryPreview !== "교재 범위 미지정"
+                                      ? session.textbookEntryPreview
+                                      : "";
+                                  const isSessionOutsideTextbookRange =
+                                    hasLessonTextbooks && session.textbookEntries.length === 0;
+                                  const plannedTextbookCount = session.textbookEntries.filter((entry) => entry.hasPlanContent).length;
+                                  const sessionPlanStateLabel = isSessionOutsideTextbookRange
+                                    ? "기간 밖"
+                                    : session.textbookEntries.length > 0
+                                      ? `${plannedTextbookCount}/${session.textbookEntries.length}권`
+                                      : "교재 없음";
+                                  const isSessionPlanComplete =
+                                    session.textbookEntries.length > 0 &&
+                                    plannedTextbookCount === session.textbookEntries.length;
+                                  const sessionDetailLine = [
+                                    textbookPreviewLine,
+                                    sessionMemoLine,
+                                    session.scheduleConnectionLabel,
+                                  ]
                                     .map((value) => text(value))
                                     .filter(Boolean)
                                     .join(" · ");
@@ -4082,13 +5727,21 @@ export function ClassScheduleWorkspace() {
                                       />
                                       <button
                                       type="button"
+                                      data-testid={`lesson-board-session-${session.id}`}
+                                      data-session-id={session.id}
+                                      data-lesson-session-selected={isSelected ? "true" : "false"}
+                                      aria-pressed={isSelected}
+                                      aria-current={isSelected ? "true" : undefined}
                                       className={cn(
-                                        "relative flex w-full items-start gap-3 rounded-[1.1rem] border bg-background px-4 py-3 text-left transition-colors hover:bg-muted/30",
-                                        isSelected && "border-primary bg-primary/5 shadow-sm",
+                                        "relative flex min-h-[4.25rem] w-full cursor-pointer items-start gap-3 rounded-lg border border-l-4 border-l-transparent bg-background px-4 py-3 text-left shadow-xs transition-all hover:border-primary/30 hover:bg-muted/30 active:scale-[0.995] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
+                                        isSessionOutsideTextbookRange && "bg-muted/20 text-muted-foreground shadow-none hover:bg-muted/40",
+                                        isSelected && "border-primary border-l-primary bg-primary/5 shadow-sm ring-1 ring-primary/10",
                                       )}
+                                      onPointerDown={() => markPendingLessonSessionSelection(session.id)}
+                                      onMouseDown={() => markPendingLessonSessionSelection(session.id)}
                                       onClick={() =>
                                         focusLessonDesignSession(session.id, {
-                                          sectionId: LESSON_DESIGN_SECTION_IDS.periods,
+                                          sectionId: LESSON_DESIGN_SECTION_IDS.board,
                                         })
                                       }
                                     >
@@ -4098,14 +5751,24 @@ export function ClassScheduleWorkspace() {
 	                                            <span className="font-medium text-foreground">{session.label}</span>
 	                                            <span className="text-xs text-muted-foreground">{session.dateLabel}</span>
 	                                          </span>
-	                                          <Badge variant={getScheduleStateTone(session.scheduleState)}>
-	                                            {session.scheduleStateLabel}
-	                                          </Badge>
+                                            <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+                                              <Badge
+                                                variant={isSessionPlanComplete ? "secondary" : "outline"}
+                                                className="h-5 rounded-md px-1.5 text-[11px]"
+                                              >
+                                                {sessionPlanStateLabel}
+                                              </Badge>
+	                                            {session.scheduleStateLabel !== "정상" ? (
+                                                  <Badge variant={getScheduleStateTone(session.scheduleState)}>
+                                                    {session.scheduleStateLabel}
+                                                  </Badge>
+                                                ) : null}
+                                            </span>
 	                                        </div>
 
-	                                        {sessionDetailLine ? (
-	                                          <p className="text-xs text-muted-foreground">{sessionDetailLine}</p>
-	                                        ) : null}
+                                        {sessionDetailLine ? (
+                                          <p className="truncate text-xs text-muted-foreground">{sessionDetailLine}</p>
+                                        ) : null}
 	                                      </div>
 	                                    </button>
                                     </div>
@@ -4142,6 +5805,120 @@ export function ClassScheduleWorkspace() {
                     </div>
 
           </section>
+          ) : null}
+
+          {isLessonDesignProgressMode && hasLessonTextbooks ? (
+            <section className="relative z-[2] min-w-0 border-t bg-background py-6 2xl:sticky 2xl:top-20 2xl:col-start-2 2xl:self-start 2xl:border-l 2xl:border-t-0 2xl:pl-5">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
+                <div className="space-y-1">
+                  <p className="text-lg font-semibold text-foreground">
+                    {selectedLessonSession ? `${selectedLessonSession.label} 진도` : "진도 입력"}
+                  </p>
+                  {selectedLessonSession ? (
+                    <p className="text-xs text-muted-foreground">{selectedLessonSession.dateLabel}</p>
+                  ) : null}
+                </div>
+                {selectedLessonSession ? (
+                  <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                    <label className="sr-only" htmlFor="lesson-session-jump">
+                      회차
+                    </label>
+                    <select
+                      id="lesson-session-jump"
+                      value={selectedLessonSession.id}
+                      onChange={(event) =>
+                        focusLessonDesignSession(event.target.value, {
+                          sectionId: LESSON_DESIGN_SECTION_IDS.board,
+                        })
+                      }
+                      className="border-input bg-background h-9 max-w-[13rem] rounded-md border px-2 text-sm text-foreground shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                      aria-label="회차 바로 이동"
+                    >
+                      {filteredLessonSessions.map((session) => (
+                        <option key={`lesson-session-jump-${session.id}`} value={session.id}>
+                          {[session.label, session.dateLabel].filter(Boolean).join(" · ")}
+                        </option>
+                      ))}
+                    </select>
+                    {previousLessonSession ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9 rounded-md"
+                        onClick={() =>
+                          focusLessonDesignSession(previousLessonSession.id, {
+                            sectionId: LESSON_DESIGN_SECTION_IDS.board,
+                          })
+                        }
+                      >
+                        이전 회차
+                      </Button>
+                    ) : null}
+                    {nextLessonSession ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9 rounded-md"
+                        onClick={() =>
+                          focusLessonDesignSession(nextLessonSession.id, {
+                            sectionId: LESSON_DESIGN_SECTION_IDS.board,
+                          })
+                        }
+                      >
+                        다음 회차
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              {selectedLessonSession ? (
+                renderLessonMonthSessionDetails([selectedLessonSession], {
+                  showScheduleControls: false,
+                  showTextbookPlans: true,
+                })
+              ) : (
+                <div className="mt-4 rounded-[1.25rem] border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                  회차를 선택하세요.
+                </div>
+              )}
+            </section>
+          ) : null}
+          <div
+            data-testid="lesson-design-bottom-action-bar"
+            className="sticky bottom-3 z-30 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg shadow-black/5 backdrop-blur 2xl:col-span-full"
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Badge variant={lessonDesignSnapshot.saveReadiness.ready ? "secondary" : "outline"}>
+                {isLessonDesignProgressMode ? "진도 생성" : "일정 생성"}
+              </Badge>
+              {isLessonDesignProgressMode && lessonTextbookProgressSessions.length > 0 ? (
+                <Badge variant={lessonTextbookPendingSessionCount > 0 ? "outline" : "secondary"}>
+                  {lessonTextbookCompletedSessionCount}/{lessonTextbookProgressSessions.length}
+                </Badge>
+              ) : null}
+              {lessonDesignSnapshot.saveReadiness.blockers.length > 0
+                ? lessonDesignSnapshot.saveReadiness.blockers.slice(0, 2).map((item) => (
+                    <Badge key={`lesson-design-bottom-blocker-${item}`} variant="outline">
+                      {item}
+                    </Badge>
+                  ))
+                : null}
+            </div>
+            <Button
+              type="button"
+              className="h-9 rounded-md px-5"
+              onClick={handleSaveLessonPlan}
+              disabled={
+                isLessonDesignSaving ||
+                !lessonDesignSnapshot.saveReadiness.ready ||
+                (isLessonDesignProgressMode && !hasLessonTextbooks)
+              }
+            >
+              {isLessonDesignSaving ? "저장 중" : isLessonDesignProgressMode && !hasLessonTextbooks ? "교재 연결 필요" : "저장"}
+            </Button>
+          </div>
         </div>
       </div>
     ) : null
@@ -4643,6 +6420,9 @@ export function ClassScheduleWorkspace() {
       ) : (
         <Dialog open={lessonDesignOpen} onOpenChange={handleLessonDesignOpenChange}>
           <DialogContent className="flex h-[92vh] w-[98vw] max-w-[1600px] flex-col overflow-hidden gap-0 p-0 xl:h-[94vh]">
+            <DialogDescription className="sr-only">
+              수업 일정과 수업교재를 연결하고 회차별 진도를 설계합니다.
+            </DialogDescription>
             {lessonDesignWorkspaceContent}
           </DialogContent>
         </Dialog>

@@ -32,22 +32,24 @@ function sanitizeVisibility(columns: SettingsTableColumn[], value: unknown) {
   ) as Record<string, boolean>;
 }
 
+function readInitialVisibility(storageKey: string, columns: SettingsTableColumn[]) {
+  if (typeof window === "undefined") {
+    return buildDefaultVisibility(columns);
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(storageKey);
+    return sanitizeVisibility(columns, rawValue ? JSON.parse(rawValue) : null);
+  } catch {
+    window.localStorage.removeItem(storageKey);
+    return buildDefaultVisibility(columns);
+  }
+}
+
 export function useSettingsTableColumns(storageKey: string, columns: SettingsTableColumn[]) {
-  const [visibility, setVisibility] = useState<Record<string, boolean>>(() => buildDefaultVisibility(columns));
+  const [visibility, setVisibility] = useState<Record<string, boolean>>(() => readInitialVisibility(storageKey, columns));
   const [open, setOpen] = useState(false);
   const columnById = useMemo(() => new Map(columns.map((column) => [column.id, column])), [columns]);
-
-  useEffect(() => {
-    try {
-      const rawValue = typeof window !== "undefined" ? window.localStorage.getItem(storageKey) : null;
-      setVisibility(sanitizeVisibility(columns, rawValue ? JSON.parse(rawValue) : null));
-    } catch {
-      setVisibility(buildDefaultVisibility(columns));
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem(storageKey);
-      }
-    }
-  }, [columns, storageKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -55,11 +57,11 @@ export function useSettingsTableColumns(storageKey: string, columns: SettingsTab
     }
 
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(visibility));
+      window.localStorage.setItem(storageKey, JSON.stringify(sanitizeVisibility(columns, visibility)));
     } catch {
       // Table settings are convenience state only.
     }
-  }, [storageKey, visibility]);
+  }, [columns, storageKey, visibility]);
 
   const isColumnVisible = (columnId: string) => Boolean(visibility[columnId]);
   const visibleColumnCount = columns.filter((column) => isColumnVisible(column.id)).length || 1;
