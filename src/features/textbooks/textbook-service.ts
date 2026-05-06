@@ -18,6 +18,11 @@ import {
 
 type SupabaseClientLike = NonNullable<typeof sharedSupabase>;
 type Row = Record<string, unknown>;
+type TextbookOperationsDataScope = "management" | "request";
+type TextbookOperationsDataOptions = {
+  client?: SupabaseClientLike | null;
+  scope?: TextbookOperationsDataScope;
+};
 
 const OPTIONAL_TABLES = new Set([
   "textbook_publishers",
@@ -57,6 +62,12 @@ const TEXTBOOK_OPERATION_SCHEMA_ITEMS = [
   "textbook_purchase_order_lines.requested_textbook_title",
 ];
 const TEXTBOOK_PURCHASE_ORDER_LINE_SELECT = "*,requested_textbook_title";
+const TEXTBOOK_MASTER_REFERENCE_TABLES = [
+  { table: "textbook_stock_moves", column: "textbook_id" },
+  { table: "textbook_purchase_order_lines", column: "textbook_id" },
+  { table: "textbook_sale_lines", column: "textbook_id" },
+  { table: "textbook_stock_counts", column: "textbook_id" },
+];
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -109,6 +120,20 @@ function ensureClient(client?: SupabaseClientLike | null) {
   return resolved;
 }
 
+function resolveTextbookOperationsDataOptions(input?: SupabaseClientLike | TextbookOperationsDataOptions | null) {
+  if (input && typeof input === "object" && ("scope" in input || "client" in input)) {
+    return {
+      client: ensureClient((input as TextbookOperationsDataOptions).client),
+      scope: (input as TextbookOperationsDataOptions).scope || "management",
+    };
+  }
+
+  return {
+    client: ensureClient(input as SupabaseClientLike | null | undefined),
+    scope: "management" as TextbookOperationsDataScope,
+  };
+}
+
 async function readTable(client: SupabaseClientLike, table: string, columns = "*", missingTables?: string[]) {
   const { data, error } = await client.from(table).select(columns);
   if (error) {
@@ -123,6 +148,35 @@ async function readTable(client: SupabaseClientLike, table: string, columns = "*
     throw error;
   }
   return (data || []) as unknown as Row[];
+}
+
+async function collectReferencedTextbookIds(client: SupabaseClientLike, ids: string[]) {
+  const referencedIds = new Set<string>();
+
+  await Promise.all(
+    TEXTBOOK_MASTER_REFERENCE_TABLES.map(async ({ table, column }) => {
+      const { data, error } = await client
+        .from(table)
+        .select(column)
+        .in(column, ids);
+
+      if (error) {
+        if (OPTIONAL_TABLES.has(table) && (isMissingTableError(error) || isMissingColumnError(error))) {
+          return;
+        }
+        throw error;
+      }
+
+      for (const row of (data || []) as unknown as Row[]) {
+        const referencedId = text(row[column]);
+        if (referencedId) {
+          referencedIds.add(referencedId);
+        }
+      }
+    }),
+  );
+
+  return referencedIds;
 }
 
 function getCurrentMonth() {
@@ -146,15 +200,15 @@ function getInventoryQuantity(inventoryRow: Row | undefined, locationId: string)
   return numberValue(locationQuantities[locationId]);
 }
 
-export async function listTextbookOperationsData(clientInput?: SupabaseClientLike | null) {
-  const client = ensureClient(clientInput);
+export async function listTextbookOperationsData(clientInput?: SupabaseClientLike | TextbookOperationsDataOptions | null) {
+  const { client, scope } = resolveTextbookOperationsDataOptions(clientInput);
+  const canLoadManagementTables = scope === "management";
   const missingTables: string[] = [];
   const [
     textbooks,
     publishers,
     suppliers,
     publisherSupplierLinks,
-    textbookSubSubjectSettings,
     locations,
     purchaseOrders,
     purchaseOrderLines,
@@ -169,23 +223,23 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
   ] = await Promise.all([
     readTable(client, "textbooks", "*", missingTables),
     readTable(client, "textbook_publishers", "*", missingTables),
-    readTable(client, "textbook_suppliers", "*", missingTables),
-    readTable(client, "textbook_publisher_supplier_links", "*", missingTables),
-    readTable(client, "textbook_sub_subject_settings", "*", missingTables),
+    canLoadManagementTables ? readTable(client, "textbook_suppliers", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_publisher_supplier_links", "*", missingTables) : Promise.resolve([] as Row[]),
     readTable(client, "textbook_inventory_locations", "*", missingTables),
     readTable(client, "textbook_purchase_orders", "*", missingTables),
     readTable(client, "textbook_purchase_order_lines", TEXTBOOK_PURCHASE_ORDER_LINE_SELECT, missingTables),
-    readTable(client, "textbook_stock_moves", "*", missingTables),
-    readTable(client, "textbook_sales", "*", missingTables),
-    readTable(client, "textbook_sale_lines", "*", missingTables),
-    readTable(client, "textbook_stock_counts", "*", missingTables),
-    readTable(client, "textbook_monthly_closings", "*", missingTables),
-    readTable(client, "students", "*", missingTables),
+    canLoadManagementTables ? readTable(client, "textbook_stock_moves", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_sales", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_sale_lines", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_stock_counts", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_monthly_closings", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "students", "*", missingTables) : Promise.resolve([] as Row[]),
     readTable(client, "classes", "*", missingTables),
     readTable(client, "teacher_catalogs", "*", missingTables),
   ]);
   const missingOperationTables = [...new Set(missingTables)]
     .filter((table) => TEXTBOOK_OPERATION_SCHEMA_ITEMS.includes(table));
+  const textbookSubSubjectSettings: Row[] = [];
 
   return {
     textbooks,
@@ -249,12 +303,30 @@ export async function deleteTextbookMasters(idList: string[] | string, clientInp
   const client = ensureClient(clientInput);
   const ids = (Array.isArray(idList) ? idList : [idList]).map(text).filter(Boolean);
   if (ids.length === 0) {
-    return [];
+    return { ids: [], deletedIds: [], archivedIds: [] };
   }
 
-  const { error } = await client.from("textbooks").delete().in("id", ids);
-  if (error) throw error;
-  return ids;
+  const referencedIds = await collectReferencedTextbookIds(client, ids);
+  const deletedIds = ids.filter((id) => !referencedIds.has(id));
+  const archivedIds = ids.filter((id) => referencedIds.has(id));
+
+  if (archivedIds.length > 0) {
+    const { error: archiveError } = await client
+      .from("textbooks")
+      .update({
+        status: "inactive",
+        updated_at: new Date().toISOString().slice(0, 10),
+      })
+      .in("id", archivedIds);
+    if (archiveError) throw archiveError;
+  }
+
+  if (deletedIds.length > 0) {
+    const { error } = await client.from("textbooks").delete().in("id", deletedIds);
+    if (error) throw error;
+  }
+
+  return { ids, deletedIds, archivedIds };
 }
 
 export async function createPurchaseReceipt(record: Row, clientInput?: SupabaseClientLike | null) {
@@ -486,12 +558,84 @@ export async function deletePurchaseLifecycle(record: Row, clientInput?: Supabas
   return { purchaseOrderId, purchaseOrderLineId };
 }
 
+export async function returnPurchaseLifecycle(record: Row, clientInput?: SupabaseClientLike | null) {
+  const client = ensureClient(clientInput);
+  const purchaseOrderId = text(record.purchaseOrderId || record.purchase_order_id);
+  const purchaseOrderLineId = text(record.purchaseOrderLineId || record.purchase_order_line_id || record.id);
+  const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
+
+  if (!purchaseOrderLineId) {
+    throw new Error("반품할 입고 건을 확인하세요.");
+  }
+
+  const { data: line, error: lineError } = await client
+    .from("textbook_purchase_order_lines")
+    .select("*")
+    .eq("id", purchaseOrderLineId)
+    .single();
+  if (lineError) throw lineError;
+
+  const receivedQuantity = Math.max(0, numberValue((line as Row).received_quantity || (line as Row).receivedQuantity));
+  const textbookId = normalizeOptionalUuid((line as Row).textbook_id || (line as Row).textbookId);
+  const locationId = normalizeOptionalUuid((line as Row).location_id || (line as Row).locationId);
+  const unitCost = Math.max(0, numberValue((line as Row).unit_cost || (line as Row).unitCost));
+
+  if (!textbookId || receivedQuantity <= 0) {
+    return deletePurchaseLifecycle({ purchaseOrderId, purchaseOrderLineId }, client);
+  }
+
+  const { data: existingMoves, error: existingMoveError } = await client
+    .from("textbook_stock_moves")
+    .select("*")
+    .eq("purchase_order_line_id", purchaseOrderLineId)
+    .eq("move_type", "return_out");
+  if (existingMoveError) throw existingMoveError;
+
+  const stockMove = {
+    textbook_id: textbookId,
+    location_id: locationId,
+    purchase_order_line_id: purchaseOrderLineId,
+    move_type: "return_out",
+    quantity: -receivedQuantity,
+    unit_amount: unitCost,
+    amount: -receivedQuantity * unitCost,
+    memo: text(record.memo) || "공급처 반품",
+    created_by: createdBy,
+  };
+  const existingMove = ((existingMoves || []) as Row[])[0];
+
+  if (existingMove) {
+    const { error: updateMoveError } = await client
+      .from("textbook_stock_moves")
+      .update(stockMove)
+      .eq("id", existingMove.id);
+    if (updateMoveError) throw updateMoveError;
+  } else {
+    const { error: insertMoveError } = await client.from("textbook_stock_moves").insert(stockMove);
+    if (insertMoveError) throw insertMoveError;
+  }
+
+  if (purchaseOrderId) {
+    const { error: orderError } = await client
+      .from("textbook_purchase_orders")
+      .update({
+        status: "returned",
+        memo: text(record.memo) || "공급처 반품",
+      })
+      .eq("id", purchaseOrderId);
+    if (orderError) throw orderError;
+  }
+
+  return { purchaseOrderId, purchaseOrderLineId };
+}
+
 export async function createClassTextbookSale(record: Row, data: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
   const classes = (data.classes || []) as Row[];
   const students = (data.students || []) as Row[];
   const textbooks = (data.textbooks || []) as Row[];
   const inventory = (data.inventory || []) as Row[];
+  const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
   const classRecord = classes.find((item) => getRecordId(item) === text(record.classId || record.class_id));
   const textbook = textbooks.find((item) => getRecordId(item) === text(record.textbookId || record.textbook_id));
   const locationId = normalizeOptionalUuid(record.locationId || record.location_id || data.defaultLocationId);
@@ -525,6 +669,7 @@ export async function createClassTextbookSale(record: Row, data: Row, clientInpu
       charge_month: draft.sale.charge_month,
       status: saleStatus,
       memo: text(record.memo),
+      created_by: createdBy,
     })
     .select()
     .single();
@@ -557,7 +702,7 @@ export async function updateSaleLineStatus(record: Row, data: Row, clientInput?:
     throw new Error("출고 라인과 상태를 확인하세요.");
   }
 
-  if (targetStatus !== "issued") {
+  if (targetStatus !== "issued" && targetStatus !== "returned") {
     throw new Error("지원하지 않는 출고 상태입니다.");
   }
 
@@ -570,11 +715,12 @@ export async function updateSaleLineStatus(record: Row, data: Row, clientInput?:
   });
 
   if (transition.shouldCreateStockMove && transition.stockMove) {
+    const moveType = text(transition.stockMove.move_type || transition.stockMove.moveType);
     const { data: existingMoves, error: existingMoveError } = await client
       .from("textbook_stock_moves")
       .select("*")
       .eq("sale_line_id", saleLineId)
-      .eq("move_type", "sale_issue");
+      .eq("move_type", moveType);
     if (existingMoveError) throw existingMoveError;
 
     const existingMove = ((existingMoves || []) as Row[])[0];
@@ -603,6 +749,48 @@ export async function updateSaleLineStatus(record: Row, data: Row, clientInput?:
   if (error) throw error;
 
   return updated as Row;
+}
+
+export async function deleteSaleLineLifecycle(record: Row, clientInput?: SupabaseClientLike | null) {
+  const client = ensureClient(clientInput);
+  const saleLineId = text(record.saleLineId || record.sale_line_id || record.id);
+  const saleId = text(record.saleId || record.sale_id);
+
+  if (!saleLineId) {
+    throw new Error("취소할 출고 건을 확인하세요.");
+  }
+
+  const { error: moveError } = await client
+    .from("textbook_stock_moves")
+    .delete()
+    .eq("sale_line_id", saleLineId);
+  if (moveError) throw moveError;
+
+  const { data: deletedLines, error: lineError } = await client
+    .from("textbook_sale_lines")
+    .delete()
+    .eq("id", saleLineId)
+    .select("sale_id");
+  if (lineError) throw lineError;
+
+  const resolvedSaleId = saleId || text(((deletedLines || []) as Row[])[0]?.sale_id);
+  if (resolvedSaleId) {
+    const { data: remainingLines, error: remainingError } = await client
+      .from("textbook_sale_lines")
+      .select("id")
+      .eq("sale_id", resolvedSaleId);
+    if (remainingError) throw remainingError;
+
+    if ((remainingLines || []).length === 0) {
+      const { error: saleError } = await client
+        .from("textbook_sales")
+        .delete()
+        .eq("id", resolvedSaleId);
+      if (saleError) throw saleError;
+    }
+  }
+
+  return { saleId: resolvedSaleId, saleLineId };
 }
 
 export async function createStockCountAdjustment(record: Row, clientInput?: SupabaseClientLike | null) {
@@ -707,6 +895,26 @@ export async function upsertMonthlyClosing(record: Row, data: Row, clientInput?:
   return { closing, saved: saved as Row };
 }
 
+export async function updateMonthlyClosingStatus(record: Row, clientInput?: SupabaseClientLike | null) {
+  const client = ensureClient(clientInput);
+  const ids = Array.isArray(record.ids)
+    ? record.ids.map(text).filter(Boolean)
+    : [text(record.id || record.monthlyClosingId || record.monthly_closing_id)].filter(Boolean);
+  const status = text(record.status) || "locked";
+
+  if (ids.length === 0) {
+    throw new Error("정산 항목을 선택하세요.");
+  }
+
+  const { data: updated, error } = await client
+    .from("textbook_monthly_closings")
+    .update({ status })
+    .in("id", ids)
+    .select();
+  if (error) throw error;
+  return (updated || []) as Row[];
+}
+
 export const textbookService = {
   listTextbookOperationsData,
   upsertTextbookMaster,
@@ -714,8 +922,11 @@ export const textbookService = {
   createPurchaseReceipt,
   updatePurchaseLifecycle,
   deletePurchaseLifecycle,
+  returnPurchaseLifecycle,
   createClassTextbookSale,
   updateSaleLineStatus,
+  deleteSaleLineLifecycle,
   createStockCountAdjustment,
   upsertMonthlyClosing,
+  updateMonthlyClosingStatus,
 };

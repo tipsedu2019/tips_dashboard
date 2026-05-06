@@ -33,14 +33,30 @@ export function getTextbookActionErrorMessage(error) {
   const hint = text(error?.hint);
   const combined = [message, details, hint].filter(Boolean).join(" ");
   const lowerCombined = combined.toLowerCase();
+  const missingColumnMatch =
+    combined.match(/could not find the '([^']+)' column of '([^']+)' in the schema cache/i) ||
+    combined.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+of\s+relation\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i) ||
+    combined.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i);
+
+  if (
+    code === "42703" ||
+    code === "PGRST204" ||
+    (lowerCombined.includes("could not find") && lowerCombined.includes("column")) ||
+    (lowerCombined.includes("column") && lowerCombined.includes("does not exist"))
+  ) {
+    const column = text(missingColumnMatch?.[1]) || "unknown_column";
+    const table = text(missingColumnMatch?.[2]);
+    const schemaItem = table ? `${table}.${column}` : column;
+    return `교재 관리 DB 스키마가 최신이 아닙니다. 누락 컬럼: ${schemaItem}. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.`;
+  }
 
   if (
     code === "42P01" ||
     code === "PGRST205" ||
     lowerCombined.includes("could not find the table") ||
-    lowerCombined.includes("does not exist")
+    lowerCombined.includes("relation") && lowerCombined.includes("does not exist")
   ) {
-    return "교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. Supabase에 textbook 관리 테이블을 먼저 반영하세요.";
+    return "교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.";
   }
 
   if (message) {
@@ -217,7 +233,6 @@ export function buildTextbookSaleDraft({
 
   const lines = roster.map((student) => ({
     student_id: student.id,
-    student_name: student.name,
     class_id: classId,
     textbook_id: textbookId,
     charge_month: text(chargeMonth),
@@ -331,16 +346,11 @@ export function validatePurchaseLifecycleDraft(draft = {}) {
 export function buildSaleLineStatusTransition({
   line = {},
   targetStatus = "",
-  availableQuantity = 0,
 } = {}) {
   const target = text(targetStatus);
   const quantity = Math.max(1, numberValue(line.quantity) || 1);
 
   if (target === "issued") {
-    if (numberValue(availableQuantity) < quantity) {
-      throw new Error("stock shortage: 재고가 부족해 출고할 수 없습니다.");
-    }
-
     return {
       targetStatus: "issued",
       shouldCreateStockMove: true,
@@ -352,6 +362,23 @@ export function buildSaleLineStatusTransition({
         quantity: -quantity,
         unit_amount: numberValue(line.unit_price || line.unitPrice),
         amount: -quantity * numberValue(line.unit_price || line.unitPrice),
+        memo: text(line.student_name || line.studentName),
+      },
+    };
+  }
+
+  if (target === "returned") {
+    return {
+      targetStatus: "returned",
+      shouldCreateStockMove: true,
+      stockMove: {
+        textbook_id: text(line.textbook_id || line.textbookId),
+        location_id: text(line.location_id || line.locationId) || null,
+        sale_line_id: text(line.id) || null,
+        move_type: "return_in",
+        quantity,
+        unit_amount: numberValue(line.unit_price || line.unitPrice),
+        amount: quantity * numberValue(line.unit_price || line.unitPrice),
         memo: text(line.student_name || line.studentName),
       },
     };

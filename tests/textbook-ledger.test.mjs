@@ -72,6 +72,7 @@ test("sale draft creates one linked sale line per selected enrolled student", ()
       ["student-3", "class-1", "book-1", 1, 11000],
     ],
   );
+  assert.equal(draft.lines.some((line) => Object.hasOwn(line, "student_name")), false);
   assert.equal(draft.totalAmount, 22000);
 });
 
@@ -193,14 +194,13 @@ test("sale line transition issues stock directly from the pending issue state", 
 
   assert.equal(issued.shouldCreateStockMove, true);
   assert.equal(issued.stockMove.quantity, -1);
-  assert.throws(
-    () => buildSaleLineStatusTransition({
-      line: { id: "line-1", status: "charged", quantity: 2 },
-      targetStatus: "issued",
-      availableQuantity: 1,
-    }),
-    /stock/i,
-  );
+  const shortageIssued = buildSaleLineStatusTransition({
+    line: { id: "line-1", status: "charged", quantity: 2, textbook_id: "book-1" },
+    targetStatus: "issued",
+    availableQuantity: 1,
+  });
+  assert.equal(shortageIssued.shouldCreateStockMove, true);
+  assert.equal(shortageIssued.stockMove.quantity, -2);
 });
 
 test("kanban grouping keeps each purchase line in its current lifecycle status", () => {
@@ -260,6 +260,13 @@ test("textbook action errors expose Supabase messages instead of a generic failu
       code: "PGRST205",
       message: "Could not find the table 'public.textbook_purchase_orders' in the schema cache",
     }),
-    "교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. Supabase에 textbook 관리 테이블을 먼저 반영하세요.",
+    "교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({
+      code: "PGRST204",
+      message: "Could not find the 'student_name' column of 'textbook_sale_lines' in the schema cache",
+    }),
+    "교재 관리 DB 스키마가 최신이 아닙니다. 누락 컬럼: textbook_sale_lines.student_name. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.",
   );
 });
