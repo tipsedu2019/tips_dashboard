@@ -49,11 +49,15 @@ export function ModeToggle({ variant = "outline" }: ModeToggleProps) {
     toggleTheme(event)
   }
 
+  const nextThemeLabel = isDarkMode ? "라이트 모드로 전환" : "다크 모드로 전환"
+
   return (
     <Button
       variant={variant}
       size="icon"
       onClick={handleToggle}
+      aria-label={nextThemeLabel}
+      title={nextThemeLabel}
       className="cursor-pointer mode-toggle-button relative overflow-hidden"
     >
       {/* Show the icon for the mode you can switch TO */}
@@ -62,9 +66,7 @@ export function ModeToggle({ variant = "outline" }: ModeToggleProps) {
       ) : (
         <Moon className="h-[1.2rem] w-[1.2rem] transition-transform duration-300 rotate-0 scale-100" />
       )}
-      <span className="sr-only">
-        Switch to {isDarkMode ? "light" : "dark"} mode
-      </span>
+      <span className="sr-only">{nextThemeLabel}</span>
     </Button>
   )
 }

@@ -11,10 +11,7 @@ export const metadata: Metadata = {
   title: "TIPS Dashboard",
   description: "TIPS 운영, 학사 일정, 수업 관리 업무를 위한 통합 대시보드",
   icons: {
-    icon: [
-      { url: "/favicon-window.png", type: "image/png", sizes: "512x512" },
-      { url: "/favicon.ico", sizes: "any" },
-    ],
+    icon: [{ url: "/favicon-window.png", type: "image/png", sizes: "512x512" }],
     shortcut: "/favicon-window.png",
     apple: "/favicon.png",
   },

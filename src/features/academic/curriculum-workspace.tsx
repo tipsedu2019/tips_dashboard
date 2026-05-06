@@ -90,6 +90,14 @@ function buildLessonDesignHref(classId: string, sessionId = "", sectionId = "") 
   return `/admin/curriculum/lesson-design?${params.toString()}`;
 }
 
+function getSessionSummaryLinkKey(session: Record<string, unknown>, index: number) {
+  const stableId = text(session.sessionId || session.id);
+  const sessionOrder = text(session.sessionOrder ?? session.sessionNumber);
+  const dateValue = text(session.dateValue || session.dateLabel);
+  const label = text(session.label);
+  return [stableId || `session-${index}`, sessionOrder, dateValue, label, String(index)].filter(Boolean).join(":");
+}
+
 function getCurriculumDesignAction(row: Record<string, unknown>) {
   const nextSession = (row.nextSession || {}) as Record<string, unknown>;
   const sessionId = text(nextSession.id || nextSession.sessionId);
@@ -739,7 +747,7 @@ export function AcademicCurriculumWorkspace() {
                         </Badge>
                       </div>
                       <div className="space-y-2">
-                        {selectedRow.sessionSummaries.slice(0, 8).map((session) => {
+                        {selectedRow.sessionSummaries.slice(0, 8).map((session, sessionIndex) => {
                           const sessionStatusLabel = session.hasPlanContent ? "계획 완료" : "진도 미배정";
                           const sessionHref = buildLessonDesignHref(
                             selectedRow.id,
@@ -754,7 +762,7 @@ export function AcademicCurriculumWorkspace() {
 
                           return (
                             <Link
-                              key={session.sessionId || `${session.sessionOrder}-${session.dateValue || session.label}`}
+                              key={getSessionSummaryLinkKey(session, sessionIndex)}
                               href={sessionHref}
                               className="block rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-muted/40"
                             >

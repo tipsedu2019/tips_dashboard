@@ -1,44 +1,47 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 export function useFullscreen() {
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(() =>
+    typeof document !== "undefined" ? Boolean(document.fullscreenElement) : false,
+  )
 
   useEffect(() => {
+    if (typeof document === "undefined") {
+      return
+    }
+
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement)
     }
 
     document.addEventListener("fullscreenchange", handleFullscreenChange)
-    
-    // Initial check
-    setIsFullscreen(!!document.fullscreenElement)
 
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange)
     }
   }, [])
 
-  const enterFullscreen = () => {
-    if (!document.fullscreenElement) {
+  const enterFullscreen = useCallback(() => {
+    if (typeof document !== "undefined" && !document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(console.error)
     }
-  }
+  }, [])
 
-  const exitFullscreen = () => {
-    if (document.fullscreenElement) {
+  const exitFullscreen = useCallback(() => {
+    if (typeof document !== "undefined" && document.fullscreenElement) {
       document.exitFullscreen().catch(console.error)
     }
-  }
+  }, [])
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = useCallback(() => {
     if (isFullscreen) {
       exitFullscreen()
     } else {
       enterFullscreen()
     }
-  }
+  }, [enterFullscreen, exitFullscreen, isFullscreen])
 
   return {
     isFullscreen,

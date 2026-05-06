@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Calendar } from "@/components/ui/calendar"
 
 interface DatePickerProps {
@@ -10,18 +10,14 @@ interface DatePickerProps {
 }
 
 export function DatePicker({ selectedDate, onDateSelect, events = [] }: DatePickerProps) {
-  const [date, setDate] = useState<Date | undefined>(selectedDate || new Date())
+  const [fallbackDate] = useState(() => new Date())
+  const [uncontrolledDate, setUncontrolledDate] = useState<Date | undefined>(selectedDate || fallbackDate)
+  const date = selectedDate || uncontrolledDate
 
-  useEffect(() => {
-    if (selectedDate) {
-      setDate(selectedDate)
-    }
-  }, [selectedDate])
-
-  const handleDateSelect = (selectedDate: Date | undefined) => {
-    if (selectedDate) {
-      setDate(selectedDate)
-      onDateSelect?.(selectedDate)
+  const handleDateSelect = (nextDate: Date | undefined) => {
+    if (nextDate) {
+      setUncontrolledDate(nextDate)
+      onDateSelect?.(nextDate)
     }
   }
 

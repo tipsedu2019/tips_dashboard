@@ -4,11 +4,12 @@ import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 
-test("student detail uses linked selects for school category, school, and grade", async () => {
+test("student detail uses linked selects for status, school category, school, and grade", async () => {
   const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
   assert.match(source, /const STUDENT_SCHOOL_CATEGORY_OPTIONS = \["고등", "중등", "초등"\] as const/);
-  assert.match(source, /const STUDENT_SELECT_FIELD_NAMES = new Set\(\["school_category", "school", "grade"\]\)/);
+  assert.match(source, /const STUDENT_SELECT_FIELD_NAMES = new Set\(\["status", "school_category", "school", "grade"\]\)/);
+  assert.match(source, /\{ name: "status", label: "재원 상태"/);
   assert.match(source, /\{ name: "school_category", label: "학교 구분"/);
   assert.match(source, /if \(name === "school_category"\) return getStudentSchoolCategoryFromRaw\(raw\)/);
 });

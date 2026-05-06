@@ -15,15 +15,17 @@ test("class toolbar uses the shared class filter panel", async () => {
   assert.match(panelSource, /조건 초기화/);
 });
 
-test("student management uses school filters instead of assignment status filter", async () => {
+test("student management filters lifecycle status separately from school filters", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(source, /const STUDENT_SCHOOL_CATEGORY_OPTIONS = \["고등", "중등", "초등"\]/);
+  assert.match(source, /STUDENT_STATUS_OPTIONS/);
+  assert.match(source, /renderStudentStatusSelect/);
   assert.match(source, /renderStudentSchoolCategorySelect/);
   assert.match(source, /renderStudentSchoolSelect/);
   assert.match(source, /renderStudentGradeSelect/);
   assert.match(source, /studentSchoolCategoryFilter/);
-  assert.match(source, /kind !== "students" && statusFilter/);
+  assert.doesNotMatch(source, /kind !== "students" && statusFilter/);
 });
 
 test("class-only column filters never access missing student or textbook columns", async () => {
@@ -39,9 +41,10 @@ test("student status badge can open a class roster popover", async () => {
   const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
 
   assert.match(tableSource, /function renderStudentClassStatusPopover/);
+  assert.match(tableSource, /row\.statusValue \|\| row\.status/);
   assert.match(tableSource, /aria-label=\{`\$\{row\.title\} \$\{label\} 수업 \$\{count\}개 보기`\}/);
   assert.match(hookSource, /function attachStudentClassSummaries/);
-  assert.match(hookSource, /const classes = await readOptionalTable\("classes"\)/);
+  assert.match(hookSource, /const \[classes, classHistory, textbookSaleLines, textbooks\] = await Promise\.all/);
 });
 
 test("student name cells do not repeat school and grade subtitle", async () => {
@@ -68,6 +71,15 @@ test("management table disables TanStack render-time auto reset queues", async (
   assert.match(tableOptions, /autoResetAll:\s*false/);
 });
 
+test("management table keeps resize handles out of the keyboard command flow", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const resizeHandle = source.match(/header\.column\.getCanResize\(\)[\s\S]*?onDoubleClick=\{\(\) => header\.column\.resetSize\(\)\}/)?.[0] || "";
+
+  assert.match(resizeHandle, /aria-hidden="true"/);
+  assert.match(resizeHandle, /tabIndex=\{-1\}/);
+  assert.doesNotMatch(resizeHandle, /aria-label=\{`\$\{columnLabel\} 너비 조절`\}/);
+});
+
 test("student and class tables expose bulk edit and delete actions for selected rows", async () => {
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
@@ -79,11 +91,13 @@ test("student and class tables expose bulk edit and delete actions for selected 
   assert.match(tableSource, /actions\.onBulkUpdateRows/);
   assert.match(tableSource, /actions\.onBulkDeleteRows/);
   assert.match(tableSource, /bulkEditField/);
+  assert.match(tableSource, /deleteLabel=\{kind === "students" \? "일괄 퇴원" : "일괄 삭제"\}/);
   assert.match(tableSource, /일괄 수정/);
-  assert.match(tableSource, /일괄 삭제/);
+  assert.match(tableSource, /일괄 퇴원/);
   assert.match(pageSource, /handleBulkUpdateRows/);
   assert.match(pageSource, /handleBulkDeleteRows/);
   assert.match(pageSource, /Promise\.all\(rows\.map/);
+  assert.match(pageSource, /WITHDRAWN_STUDENT_STATUS/);
   assert.match(pageSource, /onBulkUpdateRows: handleBulkUpdateRows/);
   assert.match(pageSource, /onBulkDeleteRows: handleBulkDeleteRows/);
 });

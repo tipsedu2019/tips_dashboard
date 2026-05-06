@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useMemo, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -28,6 +28,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  STUDENT_STATUS_OPTIONS,
+  WITHDRAWN_STUDENT_STATUS,
+  normalizeStudentStatus,
+} from "@/lib/student-status";
 import { cn } from "@/lib/utils";
 
 import { ManagementDataTable } from "./management-data-table";
@@ -57,7 +62,7 @@ type ManagementServiceClient = {
 const service = managementService as unknown as ManagementServiceClient;
 
 const PAGE_CONFIG = {
-  students: { badgeLabel: "학년", statusLabel: "배정 상태", emptyLabel: "학생" },
+  students: { badgeLabel: "학년", statusLabel: "재원 상태", emptyLabel: "학생" },
   classes: { badgeLabel: "과목", statusLabel: "수업 상태", emptyLabel: "수업" },
   textbooks: { badgeLabel: "출판사", statusLabel: "구성 상태", emptyLabel: "교재" },
 } satisfies Record<ManagementKind, { badgeLabel: string; statusLabel: string; emptyLabel: string }>;
@@ -82,11 +87,12 @@ const STUDENT_GRADE_OPTIONS_BY_CATEGORY: Record<(typeof STUDENT_SCHOOL_CATEGORY_
   중등: ["중1", "중2", "중3"],
   초등: ["초1", "초2", "초3", "초4", "초5", "초6"],
 };
-const STUDENT_SELECT_FIELD_NAMES = new Set(["school_category", "school", "grade"]);
+const STUDENT_SELECT_FIELD_NAMES = new Set(["status", "school_category", "school", "grade"]);
 
 const FORM_FIELDS: Record<ManagementKind, Field[]> = {
   students: [
     { name: "name", label: "학생명", placeholder: "김학생", required: true },
+    { name: "status", label: "재원 상태", placeholder: "재원" },
     { name: "uid", label: "학생 UID", placeholder: "S-001" },
     { name: "school_category", label: "학교 구분", placeholder: "학교 구분" },
     { name: "school", label: "학교", placeholder: "학교" },
@@ -410,7 +416,11 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
     if (name === "enrollDate") return text(raw.enroll_date || raw.enrollDate).slice(0, 10);
     if (name === "name") return text(raw.name || raw.class_name || raw.className || row?.title);
     if (name === "school_category") return getStudentSchoolCategoryFromRaw(raw);
-    if (name === "status") return normalizeClassStatusForForm(raw.status || row?.status || row?.statusValue);
+    if (name === "status") {
+      return kind === "students"
+        ? normalizeStudentStatus(raw.status || row?.status || row?.statusValue)
+        : normalizeClassStatusForForm(raw.status || row?.status || row?.statusValue);
+    }
     if (name === "classroom") return text(raw.classroom || raw.room);
     if (name === "fee") return text(raw.fee || raw.tuition);
     if (name === "tags") return Array.isArray(raw.tags) ? raw.tags.join(", ") : text(raw.tags);
@@ -588,6 +598,93 @@ function renderFieldGrid(kind: ManagementKind, row: ManagementRow) {
   });
 }
 
+function normalizeHistoryRows(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    : [];
+}
+
+function getStudentClassHistory(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  return normalizeHistoryRows(raw.classHistory || raw.class_history);
+}
+
+function getStudentTextbookHistory(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  return normalizeHistoryRows(raw.textbookHistory || raw.textbook_history);
+}
+
+function formatHistoryDate(value: unknown) {
+  const normalized = text(value);
+  if (!normalized) {
+    return "-";
+  }
+  return normalized.replace("T", " ").slice(0, 16);
+}
+
+function renderStudentTimelineList(
+  label: string,
+  items: Record<string, unknown>[],
+  renderItem: (item: Record<string, unknown>, index: number) => ReactNode,
+) {
+  return (
+    <section className="overflow-hidden rounded-md border bg-background">
+      <div className="flex h-10 items-center justify-between border-b px-3">
+        <div className="text-sm font-semibold">{label}</div>
+        <Badge variant="secondary" className="h-6 rounded-full px-2">
+          {items.length}건
+        </Badge>
+      </div>
+      {items.length > 0 ? (
+        <div className="divide-y">
+          {items.slice(0, 8).map(renderItem)}
+        </div>
+      ) : (
+        <div className="px-3 py-5 text-sm text-muted-foreground">이력이 없습니다</div>
+      )}
+    </section>
+  );
+}
+
+function renderStudentHistoryPanel(row: ManagementRow) {
+  const classHistory = getStudentClassHistory(row);
+  const textbookHistory = getStudentTextbookHistory(row);
+
+  return (
+    <section className="space-y-3 border-t pt-4">
+      <div className="text-sm font-semibold">수업·교재 이력</div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {renderStudentTimelineList("수업 이력", classHistory, (item, index) => (
+          <div key={text(item.id) || `class-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <span className="truncate text-sm font-medium">{text(item.className || item.class_name) || "-"}</span>
+              <Badge variant="outline" className="shrink-0">{text(item.label || item.action) || "-"}</Badge>
+            </div>
+            <div className="truncate text-xs text-muted-foreground">
+              {[text(item.subject), text(item.teacher), formatHistoryDate(item.changedAt || item.changed_at)]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          </div>
+        ))}
+        {renderStudentTimelineList("교재 이력", textbookHistory, (item, index) => (
+          <div key={text(item.id) || `textbook-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <span className="truncate text-sm font-medium">{text(item.title) || "-"}</span>
+              <Badge variant="outline" className="shrink-0">{text(item.quantity) || "0"}권</Badge>
+            </div>
+            <div className="truncate text-xs text-muted-foreground">
+              {[text(item.className || item.class_name), text(item.status), formatHistoryDate(item.issuedAt || item.issued_at || item.createdAt || item.created_at)]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function getClassDetailItems(row: ManagementRow): DetailInfoItem[] {
   const raw = (row.raw || {}) as Record<string, unknown>;
   const scheduleLines = Array.isArray(raw.scheduleLines)
@@ -627,10 +724,10 @@ function getDetailMetrics(kind: ManagementKind, row: ManagementRow) {
 
   if (kind === "students") {
     return [
+      detailMetric("재원 상태", normalizeStudentStatus(raw.status || row.status)),
       detailMetric("수강 수업", getStudentEnrolledClassIds(row).length),
       detailMetric("대기 수업", getStudentWaitlistClassIds(row).length),
-      detailMetric("학교", text(raw.school) || "-"),
-      detailMetric("학년", text(raw.grade) || "-"),
+      detailMetric("교재 이력", getStudentTextbookHistory(row).length),
     ];
   }
 
@@ -748,6 +845,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     const category = getStudentSchoolCategoryFromForm(form);
 
     return {
+      status: [...STUDENT_STATUS_OPTIONS],
       school_category: [...STUDENT_SCHOOL_CATEGORY_OPTIONS],
       school: getStudentSchoolOptions(rawRows, category),
       grade: getStudentGradeOptions(rawRows, category),
@@ -1028,7 +1126,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       return;
     }
 
-    if (!window.confirm(`${rows.length}개 ${config.emptyLabel} 데이터를 삭제할까요?`)) {
+    const actionLabel = kind === "students" ? "퇴원 처리" : "삭제";
+    if (!window.confirm(`${rows.length}개 ${config.emptyLabel} 데이터를 ${actionLabel}할까요?`)) {
       return;
     }
 
@@ -1036,7 +1135,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setOperationError(null);
     try {
       await Promise.all(rows.map((row) => {
-        if (kind === "students") return service.deleteStudent(row.id);
+        if (kind === "students") return service.updateStudent({ ...(row.raw || {}), id: row.id, status: WITHDRAWN_STUDENT_STATUS });
         if (kind === "classes") return service.deleteClass(row.id);
         return service.deleteTextbook(row.id);
       }));
@@ -1062,10 +1161,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       onBulkUpdateRows: handleBulkUpdateRows,
       onBulkDeleteRows: handleBulkDeleteRows,
       onDeleteRow: async (row: ManagementRow) => {
-        if (!window.confirm(`${row.title} 항목을 삭제할까요?`)) return;
+        const actionLabel = kind === "students" ? "퇴원 처리" : "삭제";
+        if (!window.confirm(`${row.title} 항목을 ${actionLabel}할까요?`)) return;
         setSaving(true);
         try {
-          if (kind === "students") await service.deleteStudent(row.id);
+          if (kind === "students") await service.updateStudent({ ...(row.raw || {}), id: row.id, status: WITHDRAWN_STUDENT_STATUS });
           else if (kind === "classes") await service.deleteClass(row.id);
           else await service.deleteTextbook(row.id);
           await refresh();
@@ -1412,9 +1512,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                 </section>
               ) : null}
 
+              {kind === "students" ? renderStudentHistoryPanel(selectedRow) : null}
+
               <DialogFooter>
                 <Button type="button" onClick={handleDetailSave} disabled={saving}>{saving ? "저장 중" : "저장"}</Button>
-                <Button type="button" variant="destructive" onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving}>삭제</Button>
+                <Button type="button" variant="destructive" onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving}>
+                  {kind === "students" ? "퇴원 처리" : "삭제"}
+                </Button>
               </DialogFooter>
             </div>
           ) : (

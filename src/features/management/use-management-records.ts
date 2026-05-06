@@ -210,6 +210,103 @@ function attachStudentClassSummaries(
   };
 }
 
+function groupRowsByKey(rows: Record<string, unknown>[], key: string) {
+  return rows.reduce<Map<string, Record<string, unknown>[]>>((result, row) => {
+    const id = textValue(row[key]);
+    if (!id) {
+      return result;
+    }
+    const current = result.get(id) || [];
+    current.push(row);
+    result.set(id, current);
+    return result;
+  }, new Map());
+}
+
+function getStudentClassHistoryLabel(action: unknown, nextMode: unknown, previousMode: unknown) {
+  const normalizedAction = textValue(action);
+  const normalizedNextMode = textValue(nextMode);
+  const normalizedPreviousMode = textValue(previousMode);
+  const mode = normalizedNextMode || normalizedPreviousMode || normalizedAction;
+
+  if (normalizedAction === "removed") {
+    return "연결 해제";
+  }
+  if (mode === "waitlist") {
+    return "대기 등록";
+  }
+  return "수강 등록";
+}
+
+function toStudentClassHistorySummary(
+  historyRow: Record<string, unknown>,
+  classesById: Map<string, Record<string, unknown>>,
+) {
+  const classId = textValue(historyRow.class_id || historyRow.classId);
+  const classRow = classesById.get(classId);
+  return {
+    id: textValue(historyRow.id) || `${classId}-${textValue(historyRow.changed_at || historyRow.changedAt)}`,
+    classId,
+    className: textValue(classRow?.name || classRow?.class_name || classRow?.className) || classId,
+    subject: textValue(classRow?.subject),
+    teacher: textValue(classRow?.teacher || classRow?.teacher_name || classRow?.teacherName),
+    action: textValue(historyRow.action),
+    label: getStudentClassHistoryLabel(historyRow.action, historyRow.next_mode || historyRow.nextMode, historyRow.previous_mode || historyRow.previousMode),
+    previousMode: textValue(historyRow.previous_mode || historyRow.previousMode),
+    nextMode: textValue(historyRow.next_mode || historyRow.nextMode),
+    changedAt: textValue(historyRow.changed_at || historyRow.changedAt || historyRow.created_at || historyRow.createdAt),
+    memo: textValue(historyRow.memo),
+  };
+}
+
+function toStudentTextbookHistorySummary(
+  saleLine: Record<string, unknown>,
+  textbooksById: Map<string, Record<string, unknown>>,
+  classesById: Map<string, Record<string, unknown>>,
+) {
+  const textbookId = textValue(saleLine.textbook_id || saleLine.textbookId);
+  const classId = textValue(saleLine.class_id || saleLine.classId);
+  const textbook = textbooksById.get(textbookId);
+  const classRow = classesById.get(classId);
+  return {
+    id: textValue(saleLine.id) || `${textbookId}-${classId}-${textValue(saleLine.created_at || saleLine.createdAt)}`,
+    textbookId,
+    title: textValue(textbook?.title || textbook?.name || saleLine.textbook_title || saleLine.textbookTitle) || textbookId,
+    publisher: textValue(textbook?.publisher),
+    classId,
+    className: textValue(classRow?.name || classRow?.class_name || classRow?.className),
+    quantity: Number(saleLine.quantity || 0),
+    status: textValue(saleLine.status),
+    chargeMonth: textValue(saleLine.charge_month || saleLine.chargeMonth),
+    issuedAt: textValue(saleLine.issued_at || saleLine.issuedAt),
+    createdAt: textValue(saleLine.created_at || saleLine.createdAt),
+  };
+}
+
+function attachStudentHistorySummaries(
+  studentRow: Record<string, unknown>,
+  classHistoryByStudentId: Map<string, Record<string, unknown>[]>,
+  textbookHistoryByStudentId: Map<string, Record<string, unknown>[]>,
+  classesById: Map<string, Record<string, unknown>>,
+  textbooksById: Map<string, Record<string, unknown>>,
+) {
+  const studentId = textValue(studentRow.id);
+  const classHistory = (classHistoryByStudentId.get(studentId) || [])
+    .map((historyRow) => toStudentClassHistorySummary(historyRow, classesById))
+    .sort((left, right) => right.changedAt.localeCompare(left.changedAt));
+  const textbookHistory = (textbookHistoryByStudentId.get(studentId) || [])
+    .map((saleLine) => toStudentTextbookHistorySummary(saleLine, textbooksById, classesById))
+    .sort((left, right) => (right.issuedAt || right.createdAt).localeCompare(left.issuedAt || left.createdAt));
+
+  return {
+    ...studentRow,
+    class_history: classHistory,
+    classHistory,
+    textbook_history: textbookHistory,
+    textbookHistory,
+  };
+}
+
 function toClassGroupSummary(group: Record<string, unknown> | undefined, id: string) {
   const rawName = textValue(group?.name);
   return {
@@ -274,12 +371,30 @@ export function useManagementRecords(kind: ManagementKind) {
       let sourceRows = (data || []) as Record<string, unknown>[];
 
       if (kind === "students") {
-        const classes = await readOptionalTable("classes");
+        const [classes, classHistory, textbookSaleLines, textbooks] = await Promise.all([
+          readOptionalTable("classes"),
+          readOptionalTable("student_class_enrollment_history"),
+          readOptionalTable("textbook_sale_lines"),
+          readOptionalTable("textbooks"),
+        ]);
         const classesById = new Map(
           classes.map((classRow) => [textValue(classRow.id), classRow]),
         );
+        const textbooksById = new Map(
+          textbooks.map((textbook) => [textValue(textbook.id), textbook]),
+        );
+        const classHistoryByStudentId = groupRowsByKey(classHistory, "student_id");
+        const textbookHistoryByStudentId = groupRowsByKey(textbookSaleLines, "student_id");
 
-        sourceRows = sourceRows.map((row) => attachStudentClassSummaries(row, classesById));
+        sourceRows = sourceRows.map((row) =>
+          attachStudentHistorySummaries(
+            attachStudentClassSummaries(row, classesById),
+            classHistoryByStudentId,
+            textbookHistoryByStudentId,
+            classesById,
+            textbooksById,
+          ),
+        );
       }
 
       if (kind === "classes") {

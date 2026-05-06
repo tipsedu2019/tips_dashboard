@@ -30,28 +30,32 @@ export function SiteHeader() {
 
   return (
     <>
-      <header className="flex h-auto shrink-0 items-center border-b bg-background transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-auto">
+      <header className="sticky top-0 z-30 flex h-auto shrink-0 items-center border-b bg-background/95 backdrop-blur transition-[width,height] ease-linear supports-[backdrop-filter]:bg-background/80 group-has-data-[collapsible=icon]/sidebar-wrapper:h-auto">
         <div className="flex w-full items-start gap-3 px-4 py-3 lg:px-6">
           <div className="flex shrink-0 items-center gap-2 pt-1">
             <SidebarTrigger className="-ml-1 shrink-0" />
             <Separator orientation="vertical" className="hidden data-[orientation=vertical]:h-6 sm:block" />
           </div>
 
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <div className="min-w-0 flex items-center gap-2 text-sm">
-              <p className="shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
+              <p className="shrink-0 text-xs font-medium text-muted-foreground">
                 {workspaceMeta.section}
               </p>
               <span className="text-muted-foreground/40">/</span>
               <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{workspaceMeta.title}</h1>
             </div>
 
-            <div className="flex items-center gap-2 lg:ml-4">
+            <div className="flex min-w-0 items-center gap-2 sm:ml-4">
               <Link
                 href="/"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="홈페이지를 새 화면에서 확인"
+                title="홈페이지 확인"
                 className="hidden h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
               >
-                <ExternalLink className="size-3.5" />
+                <ExternalLink className="size-3.5" aria-hidden="true" />
                 홈페이지 확인
               </Link>
               <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">

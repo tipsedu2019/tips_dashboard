@@ -14,6 +14,9 @@ import { createId, managementService } from "./management-service.js";
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
+  SettingsWorkspaceShell,
+  settingsTableActionCellClass,
+  settingsTableActionHeadClass,
   settingsTableCellClass,
   settingsTableHeadClass,
 } from "./settings-master-layout";
@@ -185,7 +188,7 @@ export function TermMasterWorkspace() {
   };
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4 sm:px-6">
+    <SettingsWorkspaceShell>
       <SettingsMasterHeader
         actions={
           <>
@@ -217,7 +220,7 @@ export function TermMasterWorkspace() {
               {isColumnVisible("status") ? <TableHead className={`w-[16%] ${settingsTableHeadClass}`}>상태</TableHead> : null}
               {isColumnVisible("startDate") ? <TableHead className={`w-[16%] ${settingsTableHeadClass}`}>시작일</TableHead> : null}
               {isColumnVisible("endDate") ? <TableHead className={`w-[16%] ${settingsTableHeadClass}`}>종료일</TableHead> : null}
-              {isColumnVisible("action") ? <TableHead className={`w-[22%] text-right ${settingsTableHeadClass}`}>작업</TableHead> : null}
+              {isColumnVisible("action") ? <TableHead className={`w-[22%] ${settingsTableActionHeadClass}`}>작업</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -285,7 +288,7 @@ export function TermMasterWorkspace() {
                         onChange={(event) => handleFieldChange(row.id, "endDate", event.target.value)}
                       />
                     </TableCell> : null}
-                    {isColumnVisible("action") ? <TableCell className={settingsTableCellClass}>
+                    {isColumnVisible("action") ? <TableCell className={settingsTableActionCellClass}>
                       <div className="flex justify-end gap-2">
                         <Button type="button" variant="ghost" size="icon" className="size-8 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="학기 삭제">
                           <Trash2 className="size-4" />
@@ -299,6 +302,6 @@ export function TermMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
-    </div>
+    </SettingsWorkspaceShell>
   );
 }

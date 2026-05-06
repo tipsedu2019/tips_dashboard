@@ -15,6 +15,9 @@ import { readDefaultPeriodPreference, writeDefaultPeriodPreference } from "./per
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
+  SettingsWorkspaceShell,
+  settingsTableActionCellClass,
+  settingsTableActionHeadClass,
   settingsTableCellClass,
   settingsTableHeadClass,
 } from "./settings-master-layout";
@@ -229,7 +232,7 @@ export function ClassGroupMasterWorkspace() {
   };
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4 sm:px-6">
+    <SettingsWorkspaceShell>
       <SettingsMasterHeader
         actions={
           <>
@@ -258,7 +261,7 @@ export function ClassGroupMasterWorkspace() {
             <TableRow>
               {isColumnVisible("name") ? <TableHead className={`w-[52%] ${settingsTableHeadClass}`}>기간명</TableHead> : null}
               {isColumnVisible("default") ? <TableHead className={`w-[16%] ${settingsTableHeadClass}`}>기본값</TableHead> : null}
-              {isColumnVisible("action") ? <TableHead className={`w-[32%] text-right ${settingsTableHeadClass}`}>작업</TableHead> : null}
+              {isColumnVisible("action") ? <TableHead className={`w-[32%] ${settingsTableActionHeadClass}`}>작업</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -302,7 +305,7 @@ export function ClassGroupMasterWorkspace() {
                         {row.isDefault ? "기본" : "설정"}
                       </Button>
                     </TableCell> : null}
-                    {isColumnVisible("action") ? <TableCell className={settingsTableCellClass}>
+                    {isColumnVisible("action") ? <TableCell className={settingsTableActionCellClass}>
                       <div className="flex justify-end gap-2">
                         <Button type="button" variant="ghost" size="icon" className="size-8 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="기간 삭제">
                           <Trash2 className="size-4" />
@@ -316,6 +319,6 @@ export function ClassGroupMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
-    </div>
+    </SettingsWorkspaceShell>
   );
 }

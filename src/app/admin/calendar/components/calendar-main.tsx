@@ -274,16 +274,19 @@ export function CalendarMain({
     setQuery(initialQuery)
   }, [initialQuery])
 
-  const monthStart = startOfMonth(currentDate)
-  const monthEnd = endOfMonth(currentDate)
-  const calendarStart = new Date(monthStart)
-  const calendarEnd = new Date(monthEnd)
-  calendarStart.setDate(calendarStart.getDate() - monthStart.getDay())
-  calendarEnd.setDate(calendarEnd.getDate() + (6 - monthEnd.getDay()))
+  const calendarRange = useMemo(() => {
+    const monthStart = startOfMonth(currentDate)
+    const monthEnd = endOfMonth(currentDate)
+    const start = new Date(monthStart)
+    const end = new Date(monthEnd)
+    start.setDate(start.getDate() - monthStart.getDay())
+    end.setDate(end.getDate() + (6 - monthEnd.getDay()))
+    return { start, end }
+  }, [currentDate])
 
   const calendarDays = useMemo(
-    () => eachDayOfInterval({ start: calendarStart, end: calendarEnd }),
-    [calendarEnd, calendarStart],
+    () => eachDayOfInterval(calendarRange),
+    [calendarRange],
   )
 
   const calendarWeeks = useMemo(() => {

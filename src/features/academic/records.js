@@ -696,6 +696,57 @@ function createTimetableRow(classItem, classTerms, slot, classGroupsForClass = [
   };
 }
 
+function getCurriculumSessionSummaryIdentity(session) {
+  const sessionId = text(session?.sessionId || session?.id);
+  if (sessionId) {
+    return `id:${sessionId}`;
+  }
+
+  const sessionOrder = Number(session?.sessionOrder || session?.sessionNumber || 0);
+  const dateValue = text(session?.dateValue || session?.date_label || session?.dateLabel);
+  const label = text(session?.label);
+  return `fallback:${sessionOrder}:${dateValue}:${label}`;
+}
+
+function getCurriculumSessionSummaryScore(session) {
+  return (
+    (session?.hasPlanContent ? 100 : 0) +
+    Number(session?.textbookEntryCount || 0) * 10 +
+    (session?.hasActualContent ? 5 : 0) +
+    (text(session?.updatedAt) ? 1 : 0)
+  );
+}
+
+function pickCurriculumSessionSummary(current, candidate) {
+  const currentScore = getCurriculumSessionSummaryScore(current);
+  const candidateScore = getCurriculumSessionSummaryScore(candidate);
+  if (candidateScore > currentScore) {
+    return candidate;
+  }
+  if (candidateScore === currentScore && text(candidate?.updatedAt) > text(current?.updatedAt)) {
+    return candidate;
+  }
+  return current;
+}
+
+function dedupeCurriculumSessionSummaries(summaries) {
+  const keys = [];
+  const byKey = new Map();
+
+  for (const summary of summaries) {
+    const key = getCurriculumSessionSummaryIdentity(summary);
+    if (!byKey.has(key)) {
+      keys.push(key);
+      byKey.set(key, summary);
+      continue;
+    }
+
+    byKey.set(key, pickCurriculumSessionSummary(byKey.get(key), summary));
+  }
+
+  return keys.map((key) => byKey.get(key)).filter(Boolean);
+}
+
 function createCurriculumSessionSummaries(classItem, progressSummary) {
   const sessions = getPlanSessions(classItem);
 
@@ -808,7 +859,7 @@ function createCurriculumSessionSummaries(classItem, progressSummary) {
       };
     });
 
-  return [...plannedSummaries, ...syntheticSummaries].sort((left, right) => {
+  return dedupeCurriculumSessionSummaries([...plannedSummaries, ...syntheticSummaries]).sort((left, right) => {
     const leftDate = text(left.dateValue);
     const rightDate = text(right.dateValue);
     if (leftDate && rightDate && leftDate !== rightDate) {
@@ -1035,13 +1086,28 @@ function matchesSubjectCatalog(subjects = [], currentSubject = "") {
   if (!target || target === "전체") {
     return true;
   }
-  const normalizedSubjects = toArray(subjects).map((subject) => text(subject)).filter(Boolean);
+  const normalizedSubjects = normalizeCatalogSubjects(subjects);
   return normalizedSubjects.length === 0 || normalizedSubjects.includes(target);
 }
 
-function buildCatalogBackedOptions(catalogs = [], currentSubject = "", fallbackOptions = [], normalizer = text) {
+const TIMETABLE_EXCLUDED_TEACHER_TEAMS = new Set(["관리팀", "관리", "운영", "admin", "staff", "management"]);
+
+function normalizeCatalogSubjects(subjects = []) {
+  if (Array.isArray(subjects)) {
+    return subjects.map((subject) => text(subject)).filter(Boolean);
+  }
+
+  return normalizeList(subjects);
+}
+
+function isTimetableTeacherCatalogVisible(item = {}) {
+  const teams = normalizeCatalogSubjects(item?.subjects).map((subject) => subject.toLowerCase());
+  return !teams.some((team) => TIMETABLE_EXCLUDED_TEACHER_TEAMS.has(team));
+}
+
+function buildCatalogBackedOptions(catalogs = [], currentSubject = "", fallbackOptions = [], normalizer = text, catalogFilter = () => true) {
   const visibleCatalogOptions = toArray(catalogs)
-    .filter((item) => item?.is_visible !== false && matchesSubjectCatalog(item?.subjects, currentSubject))
+    .filter((item) => item?.is_visible !== false && catalogFilter(item) && matchesSubjectCatalog(item?.subjects, currentSubject))
     .sort((left, right) => Number(left?.sort_order || left?.sortOrder || 0) - Number(right?.sort_order || right?.sortOrder || 0) || text(left?.name).localeCompare(text(right?.name), "ko"))
     .map((item) => normalizer(item?.name))
     .filter(Boolean);
@@ -1078,6 +1144,8 @@ function buildTimetableOptions(classes, classTerms, rows, teacherCatalogs = [], 
       teacherCatalogs,
       currentSubject,
       rows.map((row) => row.teacher).filter((value) => value && !isClassroomToken(value)),
+      text,
+      isTimetableTeacherCatalogVisible,
     ),
     classroomOptions: buildCatalogBackedOptions(
       classroomCatalogs,

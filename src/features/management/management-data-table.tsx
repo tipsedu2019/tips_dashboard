@@ -1,4 +1,5 @@
 "use client";
+"use no memo";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -56,6 +57,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
 import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
   ClassFilterPanel,
@@ -64,50 +66,7 @@ import {
 } from "./class-filter-panel";
 import { pickDefaultPeriodValue } from "./period-preferences";
 
-const STORAGE_VERSION = 11;
-
-const RAW_COLUMN_LABELS: Record<string, string> = {
-  id: "ID",
-  uid: "학생 UID",
-  name: "이름",
-  class_name: "수업명",
-  className: "수업명",
-  academic_year: "연도",
-  academicYear: "연도",
-  year: "연도",
-  term: "학기",
-  period: "학기",
-  school_category: "학교 분류",
-  schoolCategory: "학교 분류",
-  school: "학교",
-  grade: "학년",
-  contact: "연락처",
-  parent_contact: "학부모 연락처",
-  enroll_date: "등록일",
-  class_ids: "수강 반 ID",
-  waitlist_class_ids: "대기 반 ID",
-  subject: "과목",
-  teacher: "선생님",
-  teacher_name: "선생님",
-  teacherName: "선생님",
-  schedule: "요일/시간",
-  room: "강의실",
-  classroom: "강의실",
-  capacity: "정원",
-  status: "상태",
-  textbook_ids: "교재 ID",
-  fee: "수업료",
-  tuition: "수업료",
-  publisher: "출판사",
-  title: "교재명",
-  price: "가격",
-  tags: "태그",
-  lessons: "단원",
-  updated_at: "수정일",
-  updatedAt: "수정일",
-  created_at: "생성일",
-  createdAt: "생성일",
-};
+const STORAGE_VERSION = 12;
 
 const STUDENT_TABLE_COLUMN_IDS = [
   "select",
@@ -280,6 +239,7 @@ type BulkEditField = {
 
 const BULK_EDIT_FIELDS: Record<ManagementKind, BulkEditField[]> = {
   students: [
+    { id: "status", label: "재원 상태", placeholder: "재원", options: Array.from(STUDENT_STATUS_OPTIONS) },
     { id: "school_category", label: "학교 구분", placeholder: "고등/중등/초등", options: Array.from(STUDENT_SCHOOL_CATEGORY_OPTIONS) },
     { id: "school", label: "학교", placeholder: "학교명" },
     { id: "grade", label: "학년", placeholder: "고1" },
@@ -297,7 +257,7 @@ const BULK_EDIT_FIELDS: Record<ManagementKind, BulkEditField[]> = {
 };
 
 function getStatusColor(value: string) {
-  if (value === "수강" || value === "수업 진행 중" || value === "assigned" || value === "has-lessons") {
+  if (value === "재원" || value === "수강" || value === "수업 진행 중" || value === "assigned" || value === "has-lessons") {
     return "text-green-600 bg-green-50 dark:text-green-400 dark:bg-green-900/20";
   }
 
@@ -305,7 +265,7 @@ function getStatusColor(value: string) {
     return "text-orange-600 bg-orange-50 dark:text-orange-400 dark:bg-orange-900/20";
   }
 
-  if (value === "unassigned" || value === "no-lessons" || value === "종강") {
+  if (value === "퇴원" || value === "unassigned" || value === "no-lessons" || value === "종강") {
     return "text-gray-600 bg-gray-50 dark:text-gray-400 dark:bg-gray-900/20";
   }
 
@@ -951,13 +911,14 @@ function renderStudentClassStatusPopover(row: ManagementRow) {
   const registeredCount = Number(row.metrics.classCount || 0);
   const waitlistCount = Number(row.metrics.waitlistCount || 0);
   const mode = registeredCount > 0 ? "registered" : waitlistCount > 0 ? "waitlist" : "none";
+  const lifecycleBadge = (
+    <Badge variant="secondary" className={getStatusColor(row.statusValue || row.status)}>
+      {row.status}
+    </Badge>
+  );
 
   if (mode === "none") {
-    return (
-      <Badge variant="secondary" className={getStatusColor(row.statusValue)}>
-        {row.status}
-      </Badge>
-    );
+    return lifecycleBadge;
   }
 
   const label = mode === "registered" ? "수강" : "대기";
@@ -968,56 +929,59 @@ function renderStudentClassStatusPopover(row: ManagementRow) {
   );
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "relative z-20 h-6 rounded-full px-2.5 text-xs font-medium",
-            mode === "registered"
-              ? "bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-950/50"
-              : "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-950/50",
-          )}
-          aria-label={`${row.title} ${label} 수업 ${count}개 보기`}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {label} {count}개
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="w-72 rounded-lg p-0 shadow-lg">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <div className="text-sm font-semibold">{label} 수업</div>
-          <Badge variant="secondary" className="h-5 rounded-full px-2 text-[11px]">
-            {count}개
-          </Badge>
-        </div>
-        <div className="max-h-72 overflow-y-auto p-2">
-          {sortedClassList.length > 0 ? (
-            <div className="grid gap-1">
-              {sortedClassList.map((classItem, index) => {
-                const formatted = formatStudentClassSummary(classItem);
-                return (
-                  <div
-                    key={`${row.id}-${mode}-${classItem.id || classItem.name || index}`}
-                    className="rounded-md px-2 py-1.5 hover:bg-muted/70"
-                  >
-                    <div className="truncate text-sm font-medium">{formatted.title}</div>
-                    {formatted.meta ? <div className="truncate text-xs text-muted-foreground">{formatted.meta}</div> : null}
-                    {formatted.schedule ? <div className="truncate text-xs text-muted-foreground">{formatted.schedule}</div> : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="px-2 py-5 text-center text-sm text-muted-foreground">
-              표시할 수업이 없습니다.
-            </div>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div className="flex flex-wrap items-center gap-1.5">
+      {lifecycleBadge}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "relative z-20 h-6 rounded-full px-2.5 text-xs font-medium",
+              mode === "registered"
+                ? "bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-950/50"
+                : "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-950/50",
+            )}
+            aria-label={`${row.title} ${label} 수업 ${count}개 보기`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {label} {count}개
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" sideOffset={8} className="w-72 rounded-lg p-0 shadow-lg">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <div className="text-sm font-semibold">{label} 수업</div>
+            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[11px]">
+              {count}개
+            </Badge>
+          </div>
+          <div className="max-h-72 overflow-y-auto p-2">
+            {sortedClassList.length > 0 ? (
+              <div className="grid gap-1">
+                {sortedClassList.map((classItem, index) => {
+                  const formatted = formatStudentClassSummary(classItem);
+                  return (
+                    <div
+                      key={`${row.id}-${mode}-${classItem.id || classItem.name || index}`}
+                      className="rounded-md px-2 py-1.5 hover:bg-muted/70"
+                    >
+                      <div className="truncate text-sm font-medium">{formatted.title}</div>
+                      {formatted.meta ? <div className="truncate text-xs text-muted-foreground">{formatted.meta}</div> : null}
+                      {formatted.schedule ? <div className="truncate text-xs text-muted-foreground">{formatted.schedule}</div> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="px-2 py-5 text-center text-sm text-muted-foreground">
+                표시할 수업이 없습니다.
+              </div>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }
 
@@ -1032,42 +996,6 @@ function renderPlainCell(value: unknown, className = "text-sm text-foreground") 
     return <span className="text-muted-foreground">-</span>;
   }
   return <span className={className}>{normalized}</span>;
-}
-
-function renderValue(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return <span className="text-muted-foreground">-</span>;
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return <span className="text-muted-foreground">[]</span>;
-    }
-
-    if (value.every((entry) => typeof entry !== "object" || entry === null)) {
-      return <span className="text-sm">{value.map((entry) => normalizeScalar(entry)).join(", ")}</span>;
-    }
-
-    return (
-      <pre className="max-w-[28rem] overflow-hidden text-ellipsis whitespace-pre-wrap break-all text-xs text-muted-foreground">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    );
-  }
-
-  if (typeof value === "object") {
-    return (
-      <pre className="max-w-[28rem] overflow-hidden text-ellipsis whitespace-pre-wrap break-all text-xs text-muted-foreground">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    );
-  }
-
-  if (typeof value === "boolean") {
-    return <span>{value ? "true" : "false"}</span>;
-  }
-
-  return <span className="text-sm">{String(value)}</span>;
 }
 
 function buildDefaultVisibility(kind: ManagementKind, columnIds: string[]) {
@@ -1205,6 +1133,7 @@ function ManagementBulkActionBar({
   field,
   value,
   pending,
+  deleteLabel = "일괄 삭제",
   onFieldChange,
   onValueChange,
   onApply,
@@ -1216,6 +1145,7 @@ function ManagementBulkActionBar({
   field: string;
   value: string;
   pending: boolean;
+  deleteLabel?: string;
   onFieldChange: (value: string) => void;
   onValueChange: (value: string) => void;
   onApply: () => void;
@@ -1284,7 +1214,7 @@ function ManagementBulkActionBar({
         </Button>
         <Button type="button" size="sm" variant="destructive" className="h-9" disabled={pending} onClick={onDelete}>
           <Trash2 className="mr-2 size-4" />
-          일괄 삭제
+          {deleteLabel}
         </Button>
         <Button type="button" size="sm" variant="ghost" className="h-9" disabled={pending} onClick={onClear}>
           선택 해제
@@ -1299,7 +1229,6 @@ export function ManagementDataTable({
   rows,
   stats,
   loading,
-  onRefresh,
   badgeLabel,
   statusLabel,
   emptyLabel,
@@ -1513,8 +1442,8 @@ export function ManagementDataTable({
               variant="ghost"
               size="icon"
               className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              aria-label={`${row.original.title} 삭제`}
-              title="삭제"
+              aria-label={`${row.original.title} ${kind === "students" ? "퇴원 처리" : "삭제"}`}
+              title={kind === "students" ? "퇴원 처리" : "삭제"}
               onClick={() => actions.onDeleteRow?.(row.original)}
             >
               <Trash2 className="size-4" />
@@ -1781,6 +1710,8 @@ export function ManagementDataTable({
     () =>
       kind === "classes"
         ? [...CLASS_STATUS_FILTER_OPTIONS]
+        : kind === "students"
+          ? [...STUDENT_STATUS_OPTIONS]
         : [...new Set(rows.map((row) => row.status).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko")),
     [kind, rows],
   );
@@ -1842,13 +1773,13 @@ export function ManagementDataTable({
   const normalizedClassStatusFilter = kind === "classes" ? statusFilter || DEFAULT_CLASS_STATUS_FILTER : statusFilter;
   const hasNonDefaultPeriodFilter = kind === "classes" && normalizedClassGroupFilter !== defaultPeriodFilter;
   const hasNonDefaultStatusFilter = kind === "classes" && normalizedClassStatusFilter !== DEFAULT_CLASS_STATUS_FILTER;
-  const hasActiveStudentFilters = kind === "students" && Boolean(studentSchoolCategoryFilter || studentSchoolFilter || studentGradeFilter);
+  const hasActiveStudentFilters = kind === "students" && Boolean(statusFilter || studentSchoolCategoryFilter || studentSchoolFilter || studentGradeFilter);
   const normalizedGlobalFilter = String(globalFilter || "").trim();
   const normalizedColumnSearchQuery = columnSearchQuery.trim().toLowerCase();
   const hasActiveFilters = Boolean(
     normalizedGlobalFilter ||
       badgeFilter ||
-      (kind === "classes" ? hasNonDefaultStatusFilter : kind === "students" ? false : statusFilter) ||
+      (kind === "classes" ? hasNonDefaultStatusFilter : statusFilter) ||
       (kind === "classes" ? hasNonDefaultPeriodFilter : false) ||
       activeClassFilters.length > 0 ||
       hasActiveStudentFilters,
@@ -1923,14 +1854,6 @@ export function ManagementDataTable({
     }
   }, [kind, normalizedClassStatusFilter, statusColumn, statusFilter]);
 
-  useEffect(() => {
-    if (kind !== "students" || !statusColumn || !statusFilter) {
-      return;
-    }
-
-    statusColumn.setFilterValue("");
-  }, [kind, statusColumn, statusFilter]);
-
   const resetPreferences = () => {
     setColumnVisibility(defaultVisibility);
     setColumnOrder(buildDefaultColumnOrder(kind, allColumnIds));
@@ -1950,7 +1873,7 @@ export function ManagementDataTable({
     badgeColumn?.setFilterValue("");
     if (kind === "classes") {
       statusColumn?.setFilterValue(DEFAULT_CLASS_STATUS_FILTER);
-    } else if (kind !== "students") {
+    } else {
       statusColumn?.setFilterValue("");
     }
     if (kind === "classes") {
@@ -2338,10 +2261,38 @@ export function ManagementDataTable({
         ].filter(Boolean) as ClassFilterPanelChip[]
       : [];
   const activeStudentFilterCount = [
+    statusFilter,
     studentSchoolCategoryFilter,
     studentSchoolFilter,
     studentGradeFilter,
   ].filter(Boolean).length;
+
+  const renderStudentStatusSelect = () => (
+    <div className="min-w-0">
+      <Label htmlFor="student-status-filter" className="sr-only">
+        재원 상태
+      </Label>
+      <Select
+        value={statusFilter || "all"}
+        onValueChange={(value) => {
+          statusColumn?.setFilterValue(value === "all" ? "" : value);
+          table.resetPagination();
+        }}
+      >
+        <SelectTrigger className="h-9 w-full" id="student-status-filter" aria-label="재원 상태">
+          <SelectValue placeholder="재원 상태" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">전체 상태</SelectItem>
+          {STUDENT_STATUS_OPTIONS.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 
   const renderStudentSchoolCategorySelect = () => (
     <div className="min-w-0">
@@ -2466,6 +2417,7 @@ export function ManagementDataTable({
       field={bulkEditField}
       value={bulkEditValue}
       pending={bulkActionPending}
+      deleteLabel={kind === "students" ? "일괄 퇴원" : "일괄 삭제"}
       onFieldChange={(nextField) => {
         setBulkEditField(nextField);
         setBulkEditValue("");
@@ -2519,8 +2471,12 @@ export function ManagementDataTable({
                       ) : null}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent align="end" className="w-[min(34rem,calc(100vw-2rem))] p-3">
-                    <div className="grid gap-3 sm:grid-cols-3">
+                  <PopoverContent align="end" className="w-[min(42rem,calc(100vw-2rem))] p-3">
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      <div className="grid min-w-0 gap-1.5">
+                        <Label className="text-xs font-medium text-muted-foreground">재원 상태</Label>
+                        {renderStudentStatusSelect()}
+                      </div>
                       <div className="grid min-w-0 gap-1.5">
                         <Label className="text-xs font-medium text-muted-foreground">학교 구분</Label>
                         {renderStudentSchoolCategorySelect()}
@@ -2597,7 +2553,7 @@ export function ManagementDataTable({
             {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
             {normalizedGlobalFilter ? <Badge variant="outline">검색어 {normalizedGlobalFilter}</Badge> : null}
             {badgeFilter ? <Badge variant="outline">{badgeLabel} {badgeFilter}</Badge> : null}
-            {kind !== "students" && statusFilter ? <Badge variant="outline">{statusLabel} {statusFilter}</Badge> : null}
+            {statusFilter ? <Badge variant="outline">{statusLabel} {statusFilter}</Badge> : null}
             {studentSchoolCategoryFilter ? <Badge variant="outline">학교 구분 {studentSchoolCategoryFilter}</Badge> : null}
             {studentSchoolFilter ? <Badge variant="outline">학교 {studentSchoolFilter}</Badge> : null}
             {studentGradeFilter ? <Badge variant="outline">학년 {studentGradeFilter}</Badge> : null}
@@ -2658,7 +2614,8 @@ export function ManagementDataTable({
                           {header.column.getCanResize() ? (
                             <button
                               type="button"
-                              aria-label={`${columnLabel} 너비 조절`}
+                              aria-hidden="true"
+                              tabIndex={-1}
                               className={cn(
                                 "absolute right-0 top-0 h-full w-2 cursor-col-resize border-l border-transparent transition-colors hover:border-border hover:bg-accent/30",
                                 header.column.getIsResizing() ? "border-primary bg-primary/15" : "",

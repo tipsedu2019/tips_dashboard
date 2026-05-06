@@ -41,12 +41,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     name: user?.name || "TIPS 사용자",
     email: user?.email || "viewer@tipsedu.co.kr",
     avatar: pickFirstString(
+      userMetadata.avatar_url,
+      userMetadata.picture,
       profileFields.avatar_url,
       profileFields.avatarUrl,
       profileFields.profile_image_url,
       profileFields.profileImageUrl,
-      userMetadata.avatar_url,
-      userMetadata.picture,
     ),
   }
 
@@ -60,7 +60,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               asChild
               className="group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center"
             >
-              <Link href={sidebarBrand.href}>
+              <Link href={sidebarBrand.href} aria-label="대시보드 홈으로 이동" title="대시보드">
                 <div className="flex aspect-square size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-sidebar-border/60 bg-white p-1 shadow-sm">
                   <Image
                     src={sidebarBrand.src}

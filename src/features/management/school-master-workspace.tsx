@@ -20,6 +20,9 @@ import { createId, managementService } from "./management-service.js";
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
+  SettingsWorkspaceShell,
+  settingsTableActionCellClass,
+  settingsTableActionHeadClass,
   settingsTableCellClass,
   settingsTableHeadClass,
 } from "./settings-master-layout";
@@ -345,7 +348,7 @@ export function SchoolMasterWorkspace() {
     : `${filteredRows.length}/${rows.length}개`;
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4 sm:px-6">
+    <SettingsWorkspaceShell>
       <SettingsMasterHeader
         filters={
           <>
@@ -450,7 +453,7 @@ export function SchoolMasterWorkspace() {
                 </TableHead>
               ) : null}
               {isColumnVisible("action") ? (
-                <TableHead className={`sticky right-0 z-10 w-[132px] text-right ${settingsTableHeadClass}`}>작업</TableHead>
+                <TableHead className={`w-[132px] ${settingsTableActionHeadClass}`}>작업</TableHead>
               ) : null}
             </TableRow>
           </TableHeader>
@@ -524,7 +527,7 @@ export function SchoolMasterWorkspace() {
                       </TableCell>
                     ) : null}
                     {isColumnVisible("action") ? (
-                      <TableCell className={`${settingsTableCellClass} sticky right-0 bg-background`}>
+                      <TableCell className={settingsTableActionCellClass}>
                         <div className="flex justify-end gap-1.5">
                           <Button
                             type="button"
@@ -569,6 +572,6 @@ export function SchoolMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
-    </div>
+    </SettingsWorkspaceShell>
   );
 }

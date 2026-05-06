@@ -1,4 +1,5 @@
 "use client"
+"use no memo"
 
 import * as React from "react"
 import {
@@ -48,6 +49,7 @@ export function DataTable<TData, TValue>({
   )
   const [sorting, setSorting] = React.useState<SortingState>([])
 
+  /* eslint-disable react-hooks/incompatible-library -- TanStack Table intentionally owns function-bearing table instances at this component boundary. */
   const table = useReactTable({
     data,
     columns,
@@ -69,6 +71,7 @@ export function DataTable<TData, TValue>({
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   })
+  /* eslint-enable react-hooks/incompatible-library */
 
   return (
     <div className="space-y-4">

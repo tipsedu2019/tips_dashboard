@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -171,6 +171,70 @@ function toggleGradeSelection(currentGrades: string[], grade: string) {
   return [...withoutAll, grade]
 }
 
+type EventFormData = {
+  title: string
+  schoolId: string
+  date: string
+  endDate: string
+  typeLabel: string
+  grade: string
+  examTerm: string
+  textbookScopes: TextbookScopeItem[]
+  subtextbookScopes: TextbookScopeItem[]
+  note: string
+}
+
+function buildEventFormData({
+  event,
+  initialDraft,
+  defaultDate,
+  defaultEndDate,
+  typeOptions,
+}: Pick<EventFormProps, "defaultDate" | "defaultEndDate" | "event" | "initialDraft" | "typeOptions">): EventFormData {
+  return {
+    title: event?.title || initialDraft?.title || "",
+    schoolId: event?.schoolId || initialDraft?.schoolId || "",
+    date:
+      toDateInputValue(event?.date) ||
+      toDateInputValue(initialDraft?.date as Date) ||
+      toDateInputValue(defaultDate || new Date()),
+    endDate:
+      toDateInputValue(event?.endDate || event?.date) ||
+      toDateInputValue((initialDraft?.endDate as Date) || (initialDraft?.date as Date)) ||
+      toDateInputValue(defaultEndDate || defaultDate || new Date()),
+    typeLabel: event?.typeLabel || initialDraft?.typeLabel || typeOptions?.[0] || fallbackTypeOptions[0],
+    grade: serializeGradeSelection(event?.grade || initialDraft?.grade || "all"),
+    examTerm: event?.examTerm || initialDraft?.examTerm || examTermOptions[0],
+    textbookScopes: normalizeTextbookScopeItems(event?.textbookScopes || initialDraft?.textbookScopes),
+    subtextbookScopes: normalizeTextbookScopeItems(event?.subtextbookScopes || initialDraft?.subtextbookScopes),
+    note: event?.note || event?.description || initialDraft?.note || initialDraft?.description || "",
+  }
+}
+
+function buildEventFormResetKey({
+  event,
+  initialDraft,
+  defaultDate,
+  defaultEndDate,
+  open,
+  typeOptions,
+}: Pick<EventFormProps, "defaultDate" | "defaultEndDate" | "event" | "initialDraft" | "open" | "typeOptions">) {
+  const draftDate = initialDraft?.date as Date | undefined
+  const draftEndDate = initialDraft?.endDate as Date | undefined
+
+  return [
+    open ? "open" : "closed",
+    event?.sourceId || event?.id || "new",
+    event?.title || initialDraft?.title || "",
+    event?.schoolId || initialDraft?.schoolId || "",
+    toDateInputValue(event?.date) || toDateInputValue(draftDate) || toDateInputValue(defaultDate),
+    toDateInputValue(event?.endDate) || toDateInputValue(draftEndDate) || toDateInputValue(defaultEndDate),
+    event?.typeLabel || initialDraft?.typeLabel || typeOptions?.[0] || fallbackTypeOptions[0],
+    serializeGradeSelection(event?.grade || initialDraft?.grade || "all"),
+    event?.examTerm || initialDraft?.examTerm || examTermOptions[0],
+  ].join("|")
+}
+
 export function EventForm({
   event,
   initialDraft,
@@ -184,44 +248,28 @@ export function EventForm({
   onSave,
   onDelete,
 }: EventFormProps) {
-  const [formData, setFormData] = useState({
-    title: "",
-    schoolId: "",
-    date: "",
-    endDate: "",
-    typeLabel: typeOptions[0] || fallbackTypeOptions[0],
-    grade: "all",
-    examTerm: examTermOptions[0],
-    textbookScopes: [createEmptyTextbookScopeItem()],
-    subtextbookScopes: [createEmptyTextbookScopeItem()],
-    note: "",
-  })
+  const formResetKey = buildEventFormResetKey({ event, initialDraft, defaultDate, defaultEndDate, open, typeOptions })
+  const [appliedFormResetKey, setAppliedFormResetKey] = useState(formResetKey)
+  const [formData, setFormData] = useState<EventFormData>(() =>
+    buildEventFormData({ event, initialDraft, defaultDate, defaultEndDate, typeOptions }),
+  )
   const [formError, setFormError] = useState<string | null>(null)
   const [deleteConfirming, setDeleteConfirming] = useState(false)
 
-  useEffect(() => {
-    if (!open) {
-      return
-    }
+  if (!open && appliedFormResetKey !== formResetKey) {
+    setAppliedFormResetKey(formResetKey)
+  }
 
-    setFormData({
-      title: event?.title || initialDraft?.title || "",
-      schoolId: event?.schoolId || initialDraft?.schoolId || "",
-      date: toDateInputValue(event?.date) || toDateInputValue(initialDraft?.date as Date) || toDateInputValue(defaultDate || new Date()),
-      endDate:
-        toDateInputValue(event?.endDate || event?.date) ||
-        toDateInputValue((initialDraft?.endDate as Date) || (initialDraft?.date as Date)) ||
-        toDateInputValue(defaultEndDate || defaultDate || new Date()),
-      typeLabel: event?.typeLabel || initialDraft?.typeLabel || typeOptions[0] || fallbackTypeOptions[0],
-      grade: serializeGradeSelection(event?.grade || initialDraft?.grade || "all"),
-      examTerm: event?.examTerm || initialDraft?.examTerm || examTermOptions[0],
-      textbookScopes: normalizeTextbookScopeItems(event?.textbookScopes || initialDraft?.textbookScopes),
-      subtextbookScopes: normalizeTextbookScopeItems(event?.subtextbookScopes || initialDraft?.subtextbookScopes),
-      note: event?.note || event?.description || initialDraft?.note || initialDraft?.description || "",
-    })
-    setFormError(null)
-    setDeleteConfirming(false)
-  }, [defaultDate, defaultEndDate, event, initialDraft, open, typeOptions])
+  if (open && appliedFormResetKey !== formResetKey) {
+    setAppliedFormResetKey(formResetKey)
+    setFormData(buildEventFormData({ event, initialDraft, defaultDate, defaultEndDate, typeOptions }))
+    if (formError) {
+      setFormError(null)
+    }
+    if (deleteConfirming) {
+      setDeleteConfirming(false)
+    }
+  }
 
   const selectedSchool = useMemo(
     () => schoolOptions.find((school) => school.id === formData.schoolId) || null,
@@ -240,11 +288,7 @@ export function EventForm({
     [formData.grade, schoolOptions],
   )
 
-  useEffect(() => {
-    if (!selectedSchool) {
-      return
-    }
-
+  if (selectedSchool) {
     const allowedGrades = getGradeOptionsForSchoolCategory(selectedSchool.category).map((option) => option.value)
     const nextGrades = selectedGrades.filter((grade) => grade === "all" || allowedGrades.includes(grade))
     const normalizedCurrent = serializeGradeSelection(selectedGrades)
@@ -252,17 +296,11 @@ export function EventForm({
     if (normalizedCurrent !== normalizedNext) {
       setFormData((prev) => ({ ...prev, grade: normalizedNext }))
     }
-  }, [selectedGrades, selectedSchool])
+  }
 
-  useEffect(() => {
-    if (!formData.schoolId) {
-      return
-    }
-
-    if (!filteredSchoolOptions.some((school) => school.id === formData.schoolId)) {
-      setFormData((prev) => ({ ...prev, schoolId: "" }))
-    }
-  }, [filteredSchoolOptions, formData.schoolId])
+  if (formData.schoolId && !filteredSchoolOptions.some((school) => school.id === formData.schoolId)) {
+    setFormData((prev) => ({ ...prev, schoolId: "" }))
+  }
 
   const handleScopeChange = (
     key: "textbookScopes" | "subtextbookScopes",

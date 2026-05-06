@@ -20,6 +20,9 @@ import { createId, managementService } from "./management-service.js";
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
+  SettingsWorkspaceShell,
+  settingsTableActionCellClass,
+  settingsTableActionHeadClass,
   settingsTableCellClass,
   settingsTableHeadClass,
 } from "./settings-master-layout";
@@ -224,7 +227,7 @@ export function ClassroomMasterWorkspace() {
   };
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4 sm:px-6">
+    <SettingsWorkspaceShell>
       <SettingsMasterHeader
         filters={SUBJECT_FILTERS.map((filter) => (
           <Button
@@ -266,7 +269,7 @@ export function ClassroomMasterWorkspace() {
               {isColumnVisible("subjects") ? <TableHead className={`w-[22%] ${settingsTableHeadClass}`}>과목</TableHead> : null}
               {isColumnVisible("name") ? <TableHead className={`w-[26%] ${settingsTableHeadClass}`}>이름</TableHead> : null}
               {isColumnVisible("visible") ? <TableHead className={`w-[10%] text-center ${settingsTableHeadClass}`}>표시</TableHead> : null}
-              {isColumnVisible("action") ? <TableHead className={`w-[42%] text-right ${settingsTableHeadClass}`}>작업</TableHead> : null}
+              {isColumnVisible("action") ? <TableHead className={`w-[42%] ${settingsTableActionHeadClass}`}>작업</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -322,7 +325,7 @@ export function ClassroomMasterWorkspace() {
                         />
                       </div>
                     </TableCell> : null}
-                    {isColumnVisible("action") ? <TableCell className={settingsTableCellClass}>
+                    {isColumnVisible("action") ? <TableCell className={settingsTableActionCellClass}>
                       <div className="flex justify-end gap-2">
                         <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={saving || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
                           <ArrowUp className="size-4" />
@@ -342,6 +345,6 @@ export function ClassroomMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
-    </div>
+    </SettingsWorkspaceShell>
   );
 }

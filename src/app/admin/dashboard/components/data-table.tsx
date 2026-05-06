@@ -1,4 +1,5 @@
 "use client"
+"use no memo"
 
 import * as React from "react"
 import {
@@ -381,6 +382,7 @@ export function DataTable({
     [focusDocuments]
   )
 
+  /* eslint-disable react-hooks/incompatible-library -- TanStack Table intentionally owns function-bearing table instances at this component boundary. */
   const pastPerformanceTable = useReactTable({
     data: pastPerformance,
     columns,
@@ -480,6 +482,7 @@ export function DataTable({
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   })
+  /* eslint-enable react-hooks/incompatible-library */
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event

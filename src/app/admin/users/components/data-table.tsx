@@ -1,4 +1,5 @@
 "use client"
+"use no memo"
 
 import { useState } from "react"
 import {
@@ -272,6 +273,7 @@ export function DataTable({ users, onDeleteUser, onEditUser, onAddUser }: DataTa
     },
   ]
 
+  /* eslint-disable react-hooks/incompatible-library -- TanStack Table intentionally owns function-bearing table instances at this component boundary. */
   const table = useReactTable({
     data: users,
     columns,
@@ -292,6 +294,7 @@ export function DataTable({ users, onDeleteUser, onEditUser, onAddUser }: DataTa
       globalFilter,
     },
   })
+  /* eslint-enable react-hooks/incompatible-library */
 
   const roleFilter = table.getColumn("role")?.getFilterValue() as string
   const planFilter = table.getColumn("plan")?.getFilterValue() as string

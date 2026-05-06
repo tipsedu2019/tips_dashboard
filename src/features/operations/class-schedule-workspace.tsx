@@ -4814,11 +4814,6 @@ export function ClassScheduleWorkspace() {
                     className="h-9 shrink-0 rounded-md"
                     aria-expanded={isLessonTextbookFinderVisible}
                     aria-controls="lesson-textbook-finder"
-                    onPointerDown={() => {
-                      if (!isLessonTextbookFinderVisible) {
-                        setIsLessonTextbookFinderOpen(true);
-                      }
-                    }}
                     onClick={() => {
                       if (isLessonTextbookFinderVisible) {
                         setIsLessonTextbookFinderOpen(false);
@@ -4842,7 +4837,7 @@ export function ClassScheduleWorkspace() {
               className={cn(
                 "mt-3 grid gap-4",
                 isLessonTextbookFinderVisible && hasLessonTextbooks
-                  ? "xl:grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)]"
+                  ? "xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]"
                   : "xl:grid-cols-1",
               )}
             >
@@ -5037,7 +5032,7 @@ export function ClassScheduleWorkspace() {
               {hasLessonTextbooks ? (
               <div
                 className={cn(
-                  "rounded-lg border border-primary/20 bg-primary/5 p-3 shadow-xs xl:sticky xl:top-20",
+                  "rounded-lg border border-primary/20 bg-primary/5 p-2 shadow-xs xl:sticky xl:top-20 xl:max-h-[calc(100vh-12rem)] xl:overflow-y-auto",
                   !isLessonTextbookFinderVisible && "xl:max-w-3xl",
                 )}
               >
@@ -5046,9 +5041,9 @@ export function ClassScheduleWorkspace() {
                   <Badge variant="secondary">연결 {lessonTextbookSelectedCount}권</Badge>
                 </div>
 
-              <div className="mt-3 grid gap-3">
+              <div className="mt-2 grid gap-2">
                 {lessonDesignSnapshot.textbookCatalog.map((book) => (
-                  <div key={book.textbookId} className="rounded-lg border bg-background p-3 shadow-xs">
+                  <div key={book.textbookId} className="rounded-lg border bg-background p-2 shadow-xs">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-foreground">{book.title}</p>
@@ -5072,12 +5067,12 @@ export function ClassScheduleWorkspace() {
                         <X className="size-4" />
                       </Button>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-2 flex flex-wrap gap-1.5">
                       <Button
                         type="button"
                         size="sm"
                         variant="secondary"
-                        className="h-8 rounded-md px-3"
+                        className="h-7 rounded-md px-2 text-xs"
                         onClick={() =>
                           handleLessonTextbookCatalogRange(book.textbookId, {
                             startSessionId: filteredLessonSessions[0]?.id || "",
@@ -5092,7 +5087,7 @@ export function ClassScheduleWorkspace() {
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="h-8 rounded-md px-3"
+                          className="h-7 rounded-md px-2 text-xs"
                           onClick={() =>
                             handleLessonTextbookCatalogRange(book.textbookId, {
                               startSessionId: selectedLessonSession.id,
@@ -5104,7 +5099,7 @@ export function ClassScheduleWorkspace() {
                         </Button>
                       ) : null}
                     </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <div className="mt-2 grid gap-2 md:grid-cols-[6rem_minmax(8rem,1fr)_minmax(8rem,1fr)]">
                       <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
                         <span>역할</span>
                         <select
@@ -5155,7 +5150,7 @@ export function ClassScheduleWorkspace() {
                           ))}
                         </select>
                       </label>
-                      <details className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground sm:col-span-3">
+                      <details className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground md:col-span-3">
                         <summary className="cursor-pointer font-medium text-foreground">교재 정보</summary>
                         <div className="mt-2 grid gap-2 sm:grid-cols-3">
                           <label className="grid gap-1.5">

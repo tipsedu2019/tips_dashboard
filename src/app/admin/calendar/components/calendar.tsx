@@ -1,7 +1,7 @@
 "use client"
 
 import { isSameDay } from "date-fns"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { CalendarMain } from "./calendar-main"
@@ -69,6 +69,12 @@ function resolveInitialCalendarDate(
   return normalizedDates.find((date) => date.getTime() >= today.getTime()) || normalizedDates[0]
 }
 
+function buildDefaultCalendarFilters(calendars?: CalendarGroup[]) {
+  return Object.fromEntries(
+    (calendars || []).flatMap((group) => group.items.map((item) => [item.id, item.visible])),
+  )
+}
+
 export function Calendar({
   events,
   eventDates,
@@ -89,25 +95,15 @@ export function Calendar({
   const [showEventForm, setShowEventForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null)
   const [showCalendarSheet, setShowCalendarSheet] = useState(false)
-  const [activeFilters, setActiveFilters] = useState<Record<string, boolean>>({})
-  const appliedInitialDateRef = useRef<string>(toCalendarDayKey(initialDate))
-  const appliedInitialEventIdRef = useRef<string>("")
+  const [filterOverrides, setFilterOverrides] = useState<Record<string, boolean>>({})
+  const [appliedInitialDateKey, setAppliedInitialDateKey] = useState(() => toCalendarDayKey(initialDate))
+  const [appliedInitialEventId, setAppliedInitialEventId] = useState("")
 
-  useEffect(() => {
-    setActiveFilters((prev) => {
-      const nextFilters = Object.fromEntries(
-        (calendars || []).flatMap((group) => group.items.map((item) => [item.id, item.visible])),
-      )
-
-      if (Object.keys(prev).length === 0) {
-        return nextFilters
-      }
-
-      return Object.fromEntries(
-        Object.entries(nextFilters).map(([key, visible]) => [key, prev[key] ?? visible]),
-      )
-    })
-  }, [calendars])
+  const defaultFilters = useMemo(() => buildDefaultCalendarFilters(calendars), [calendars])
+  const activeFilters = useMemo(
+    () => ({ ...defaultFilters, ...filterOverrides }),
+    [defaultFilters, filterOverrides],
+  )
 
   const visibleEvents = useMemo(
     () =>
@@ -140,39 +136,39 @@ export function Calendar({
     return [...counts.values()].sort((left, right) => left.date.getTime() - right.date.getTime())
   }, [visibleEvents])
 
-  useEffect(() => {
-    const nextInitialDayKey = toCalendarDayKey(initialDate)
-    if (!nextInitialDayKey || !(initialDate instanceof Date) || Number.isNaN(initialDate.getTime())) {
-      return
+  const nextInitialDateKey = toCalendarDayKey(initialDate)
+  if (
+    nextInitialDateKey &&
+    initialDate instanceof Date &&
+    !Number.isNaN(initialDate.getTime()) &&
+    appliedInitialDateKey !== nextInitialDateKey
+  ) {
+    setAppliedInitialDateKey(nextInitialDateKey)
+    if (!isSameDay(selectedDate, initialDate)) {
+      setSelectedDate(initialDate)
+    }
+  }
+
+  const matchedInitialEvent = useMemo(() => {
+    if (!initialEventId || appliedInitialEventId === initialEventId) {
+      return null
     }
 
-    const alreadyAppliedSameDay = appliedInitialDateRef.current === nextInitialDayKey
-    appliedInitialDateRef.current = nextInitialDayKey
+    return events.find((event) => String(event.sourceId || event.id) === initialEventId) || null
+  }, [appliedInitialEventId, events, initialEventId])
 
-    if (alreadyAppliedSameDay || isSameDay(selectedDate, initialDate)) {
-      return
+  if (initialEventId && matchedInitialEvent) {
+    setAppliedInitialEventId(initialEventId)
+    if (!isSameDay(selectedDate, matchedInitialEvent.date)) {
+      setSelectedDate(matchedInitialEvent.date)
     }
-
-    setSelectedDate(initialDate)
-  }, [initialDate])
-
-  useEffect(() => {
-    if (!initialEventId || appliedInitialEventIdRef.current === initialEventId) {
-      return
+    if (editingEvent?.id !== matchedInitialEvent.id) {
+      setEditingEvent(matchedInitialEvent)
     }
-
-    const matchedEvent = events.find(
-      (event) => String(event.sourceId || event.id) === initialEventId,
-    )
-    if (!matchedEvent) {
-      return
+    if (!showEventForm) {
+      setShowEventForm(true)
     }
-
-    appliedInitialEventIdRef.current = initialEventId
-    setSelectedDate(matchedEvent.date)
-    setEditingEvent(matchedEvent)
-    setShowEventForm(true)
-  }, [events, initialEventId])
+  }
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date)
@@ -234,7 +230,7 @@ export function Calendar({
   }
 
   const handleCalendarToggle = (calendarId: string, visible: boolean) => {
-    setActiveFilters((prev) => ({ ...prev, [calendarId]: visible }))
+    setFilterOverrides((prev) => ({ ...prev, [calendarId]: visible }))
   }
 
   return (

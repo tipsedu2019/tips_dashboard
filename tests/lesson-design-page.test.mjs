@@ -167,6 +167,10 @@ test("curriculum overview links each session to its range editor", async () => {
   const source = await readSource("src/features/academic/curriculum-workspace.tsx");
   const workspaceSource = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
+  assert.match(source, /function getSessionSummaryLinkKey/);
+  assert.match(source, /selectedRow\.sessionSummaries\.slice\(0, 8\)\.map\(\(session, sessionIndex\) =>/);
+  assert.match(source, /key=\{getSessionSummaryLinkKey\(session, sessionIndex\)\}/);
+  assert.doesNotMatch(source, /key=\{session\.sessionId \|\| `\$\{session\.sessionOrder\}/);
   assert.match(source, /buildLessonDesignHref\(\s*selectedRow\.id,\s*session\.sessionId \|\| "",\s*"lesson-design-periods"/);
   assert.match(workspaceSource, /sessionId: isLessonDesignPage \? selectedLessonSessionId : ""/);
   assert.match(source, /session\.planSummary \|\| "범위 미지정"/);
@@ -235,6 +239,7 @@ test("lesson design separates textbook finder and connected textbook ranges", as
   assert.match(source, /후보 \{lessonTextbookOptions\.length\}/);
   assert.match(source, /setIsLessonTextbookFinderOpen\(false\)/);
   assert.match(source, /setIsLessonTextbookFinderOpen\(true\)/);
+  assert.doesNotMatch(source, /onPointerDown=\{\(\) => \{\s*if \(!isLessonTextbookFinderVisible\)/);
   assert.match(source, /교재 추가/);
   assert.match(source, /목록 닫기/);
   assert.match(source, /수업교재 검색 지우기/);
@@ -256,6 +261,9 @@ test("lesson design separates textbook finder and connected textbook ranges", as
   assert.match(source, /aria-pressed=\{isSelected\}/);
   assert.match(source, /대상 \{group\.sessions\.filter\(\(session\) => session\.textbookEntries\.length > 0\)\.length\}/);
   assert.match(source, /lessonTextbookSelectedCount > 0 \? "max-h-44" : "max-h-\[22rem\]"/);
+  assert.match(source, /xl:max-h-\[calc\(100vh-12rem\)\] xl:overflow-y-auto/);
+  assert.match(source, /md:grid-cols-\[6rem_minmax\(8rem,1fr\)_minmax\(8rem,1fr\)\]/);
+  assert.match(source, /h-7 rounded-md px-2 text-xs/);
   assert.match(source, /\$\{textbookEntrySummaries\.length\}권 범위 미배정/);
   assert.doesNotMatch(source, /\$\{primaryTextbookEntry\.textbookTitle\} · 범위 미배정/);
   assert.doesNotMatch(source, /lessonTextbookWorkspaceSummary/);

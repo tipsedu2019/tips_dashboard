@@ -22,6 +22,22 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
 
+function normalizePath(path: string) {
+  const normalized = path.split(/[?#]/)[0]?.replace(/\/+$/, "") || "/"
+  return normalized === "" ? "/" : normalized
+}
+
+function isRouteActive(pathname: string, targetUrl: string) {
+  const current = normalizePath(pathname)
+  const target = normalizePath(targetUrl)
+
+  if (target === "/") {
+    return current === target
+  }
+
+  return current === target || current.startsWith(`${target}/`)
+}
+
 export function NavMain({
   label,
   items,
@@ -42,8 +58,8 @@ export function NavMain({
   const pathname = usePathname()
 
   const shouldBeOpen = React.useCallback((item: (typeof items)[number]) => {
-    if (item.isActive || pathname === item.url) return true
-    return item.items?.some((subItem) => pathname === subItem.url) || false
+    if (item.isActive || isRouteActive(pathname, item.url)) return true
+    return item.items?.some((subItem) => isRouteActive(pathname, subItem.url)) || false
   }, [pathname])
 
   const [openItems, setOpenItems] = React.useState<Record<string, boolean>>(() =>
@@ -98,8 +114,8 @@ export function NavMain({
                     <CollapsibleTrigger asChild>
                       <SidebarMenuAction
                         className="cursor-pointer"
-                        aria-label={`${item.title} 하위 메뉴 펼치기`}
-                        showOnHover
+                        aria-expanded={openItems[item.title] ?? false}
+                        aria-label={`${item.title} 하위 메뉴 ${openItems[item.title] ? "접기" : "펼치기"}`}
                       >
                         <ChevronRight className="transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                       </SidebarMenuAction>
@@ -108,7 +124,7 @@ export function NavMain({
                       <SidebarMenuSub>
                         {item.items?.map((subItem) => (
                           <SidebarMenuSubItem key={subItem.title}>
-                            <SidebarMenuSubButton asChild className="cursor-pointer" isActive={pathname === subItem.url}>
+                            <SidebarMenuSubButton asChild className="cursor-pointer" isActive={isRouteActive(pathname, subItem.url)}>
                               <Link href={subItem.url}>
                                 <span>{subItem.title}</span>
                               </Link>
@@ -119,7 +135,7 @@ export function NavMain({
                     </CollapsibleContent>
                   </>
                 ) : (
-                  <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={pathname === item.url}>
+                  <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isRouteActive(pathname, item.url)}>
                     <Link href={item.url}>
                       {item.icon && <item.icon />}
                       <span>{item.title}</span>

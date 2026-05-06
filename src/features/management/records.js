@@ -4,6 +4,11 @@ import {
   computeClassStatus,
   normalizeClassStatus,
 } from "../../lib/class-status.js";
+import {
+  ACTIVE_STUDENT_STATUS,
+  WITHDRAWN_STUDENT_STATUS,
+  normalizeStudentStatus,
+} from "../../lib/student-status.js";
 
 function text(value) {
   return String(value || "").trim();
@@ -95,7 +100,8 @@ export function normalizeStudentManagementRecord(row = {}) {
   const school = text(row.school) || "학교 미정";
   const grade = text(row.grade) || "학년 미정";
   const title = text(row.name) || "이름 미정";
-  const status = classIds.length
+  const status = normalizeStudentStatus(row.status);
+  const classStatus = classIds.length
     ? `수강 ${classIds.length}개`
     : waitlistClassIds.length
       ? `대기 ${waitlistClassIds.length}개`
@@ -109,12 +115,9 @@ export function normalizeStudentManagementRecord(row = {}) {
     badge: grade,
     badgeValue: grade,
     status,
-    statusValue: classIds.length
-      ? "assigned"
-      : waitlistClassIds.length
-        ? "waitlist"
-        : "unassigned",
+    statusValue: status,
     metaSummary: buildMetaSummary([
+      classStatus,
       row.uid ? `UID ${row.uid}` : "",
       row.contact ? `연락처 ${row.contact}` : "",
       row.parent_contact || row.parentContact
@@ -128,14 +131,23 @@ export function normalizeStudentManagementRecord(row = {}) {
       title,
       school,
       grade,
+      status,
+      classStatus,
       text(row.uid),
       text(row.contact),
       text(row.parent_contact || row.parentContact),
     ]
       .filter(Boolean)
       .join(" "),
-    raw: row,
+    raw: {
+      ...row,
+      status,
+      class_status: classStatus,
+      classStatus,
+    },
     metrics: {
+      status,
+      classStatus,
       classCount: classIds.length,
       waitlistCount: waitlistClassIds.length,
       school,
@@ -276,17 +288,15 @@ export function normalizeTextbookManagementRecord(row = {}) {
 
 export function buildStudentManagementStats(records = []) {
   const total = records.length;
+  const active = records.filter((record) => record.metrics.status === ACTIVE_STUDENT_STATUS).length;
+  const withdrawn = records.filter((record) => record.metrics.status === WITHDRAWN_STUDENT_STATUS).length;
   const assigned = records.filter((record) => record.metrics.classCount > 0).length;
-  const waitlist = records.filter((record) => record.metrics.waitlistCount > 0).length;
-  const schools = new Set(
-    records.map((record) => record.metrics.school).filter(Boolean),
-  ).size;
 
   return [
-    { label: "총 학생", value: String(total), hint: "현재 등록 학생 수" },
-    { label: "수강 배정", value: String(assigned), hint: "반이 연결된 학생" },
-    { label: "대기 학생", value: String(waitlist), hint: "대기 목록 포함 학생" },
-    { label: "학교 수", value: String(schools), hint: "연결된 학교 수" },
+    { label: "전체 학생", value: String(total), hint: "등록된 학생" },
+    { label: "재원", value: String(active), hint: "현재 재원 상태" },
+    { label: "퇴원", value: String(withdrawn), hint: "삭제하지 않고 보관" },
+    { label: "수업 연결", value: String(assigned), hint: "수강 중인 수업 연결" },
   ];
 }
 

@@ -262,6 +262,51 @@ test("curriculum progress follows planned textbook ranges instead of lesson logs
   assert.equal(workspace.summary.updateNeededClassCount, 1);
 });
 
+test("curriculum session summaries collapse duplicate generated session ids", () => {
+  const workspace = buildCurriculumWorkspaceModel({
+    classes: [
+      {
+        id: "duplicate-session-class",
+        name: "고1 수학",
+        subject: "수학",
+        grade: "고1",
+        teacher: "양소윤",
+        schedule: "화 18:00-20:00",
+        status: "수강",
+        schedule_plan: {
+          sessions: [
+            {
+              id: "session:008:2026-05-26:period-01-undated-open-1:active",
+              sessionNumber: 8,
+              date: "2026-05-26",
+              billingLabel: "5월",
+            },
+            {
+              id: "session:008:2026-05-26:period-01-undated-open-1:active",
+              sessionNumber: 8,
+              date: "2026-05-26",
+              billingLabel: "5월",
+              textbookEntries: [
+                {
+                  textbookId: "book-a",
+                  plan: { label: "중복 회차에서 남겨야 할 계획" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    textbooks: [{ id: "book-a", title: "공통수학", publisher: "테스트" }],
+    filters: { status: "수강" },
+  });
+
+  const row = workspace.rows[0];
+  assert.equal(row.sessionSummaries.length, 1);
+  assert.equal(row.sessionSummaries[0].sessionId, "session:008:2026-05-26:period-01-undated-open-1:active");
+  assert.equal(row.sessionSummaries[0].planSummary, "중복 회차에서 남겨야 할 계획");
+});
+
 test("timetable rows can be filtered by subject", () => {
   const workspace = buildTimetableWorkspaceModel({
     classes: [
@@ -296,6 +341,33 @@ test("timetable rows can be filtered by subject", () => {
   assert.deepEqual(workspace.subjectOptions, ["수학", "영어"]);
   assert.deepEqual(workspace.teacherOptions, ["한지현"]);
   assert.deepEqual(workspace.classroomOptions, ["별관 4강"]);
+});
+
+test("timetable teacher options exclude management team catalogs", () => {
+  const workspace = buildTimetableWorkspaceModel({
+    classes: [
+      {
+        id: "english-class",
+        name: "고1 영어",
+        subject: "영어",
+        grade: "고1",
+        teacher: "한지현",
+        classroom: "별관 4강",
+        schedule: "수 19:30-21:30",
+        status: "수강",
+      },
+    ],
+    teacherCatalogs: [
+      { name: "한지현", subjects: ["영어팀"], is_visible: true, sort_order: 1 },
+      { name: "운영실", subjects: ["관리팀"], is_visible: true, sort_order: 2 },
+      { name: "관리자", subjects: "관리", is_visible: true, sort_order: 3 },
+    ],
+    filters: {
+      status: "수강",
+    },
+  });
+
+  assert.deepEqual(workspace.teacherOptions, ["한지현"]);
 });
 
 test("classes without explicit groups fall back to a combined year and term group", () => {

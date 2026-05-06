@@ -3,10 +3,8 @@
 import { type ReactNode, useMemo, useState } from "react"
 import {
   AlertTriangle,
-  BarChart3,
-  Layers3,
+  ChevronDown,
   SlidersHorizontal,
-  Users,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -39,7 +37,6 @@ type BreakdownRow = {
   schools?: BreakdownRow[]
   grades?: BreakdownRow[]
 }
-
 type ClassSummaryRow = {
   id: string
   title: string
@@ -160,15 +157,30 @@ function formatNumber(value: number | undefined) {
   return Number(value || 0).toLocaleString("ko-KR")
 }
 
+function isMetricUnavailable(metrics: DashboardMetrics) {
+  return metrics.isLoading || Boolean(metrics.error) || !metrics.isConnected
+}
+
 function getMetricValue(value: number | undefined, metrics: DashboardMetrics) {
   if (metrics.isLoading) return "-"
-  if (metrics.error || !metrics.isConnected) return "확인 필요"
+  if (metrics.error || !metrics.isConnected) return "-"
   return formatNumber(value)
+}
+
+function getSupportingLabel(value: string | undefined, metrics: DashboardMetrics) {
+  if (isMetricUnavailable(metrics)) return undefined
+  if (!value || value === "0분") return undefined
+  return value
+}
+
+function getPositiveMetricSub(value: number | undefined, label: string, unit: string, metrics: DashboardMetrics) {
+  if (isMetricUnavailable(metrics) || !value) return undefined
+  return `${label} ${formatNumber(value)}${unit}`
 }
 
 function formatAverage(numerator: number | undefined, denominator: number | undefined) {
   const safeDenominator = Number(denominator || 0)
-  if (safeDenominator <= 0) return "0"
+  if (safeDenominator <= 0) return "-"
 
   return (Number(numerator || 0) / safeDenominator).toLocaleString("ko-KR", {
     maximumFractionDigits: 1,
@@ -177,12 +189,13 @@ function formatAverage(numerator: number | undefined, denominator: number | unde
 
 function getAverageMetricValue(numerator: number | undefined, denominator: number | undefined, metrics: DashboardMetrics) {
   if (metrics.isLoading) return "-"
-  if (metrics.error || !metrics.isConnected) return "확인 필요"
+  if (metrics.error || !metrics.isConnected) return "-"
+  if (Number(denominator || 0) <= 0) return "-"
   return formatAverage(numerator, denominator)
 }
 
 function withUnit(value: string, unit: string) {
-  return value === "-" || value === "확인 필요" ? value : `${value}${unit}`
+  return value === "-" ? value : `${value}${unit}`
 }
 
 function getBucket(metrics: DashboardMetrics, subject: DashboardSubjectKey, division: DashboardDivisionKey) {
@@ -209,7 +222,7 @@ function getSummary(metrics: DashboardMetrics, bucket: DashboardBucket): Dashboa
       bucket.summary?.schoolCount ?? bucket.studentBreakdowns.bySchool.filter((row) => row.studentCount > 0).length,
     gradeCount:
       bucket.summary?.gradeCount ?? bucket.studentBreakdowns.byGrade.filter((row) => row.studentCount > 0).length,
-    weeklyHoursLabel: bucket.summary?.weeklyHoursLabel ?? metrics.weeklyHoursLabel ?? "0분",
+    weeklyHoursLabel: bucket.summary?.weeklyHoursLabel ?? metrics.weeklyHoursLabel,
   }
 }
 
@@ -310,9 +323,14 @@ const DISTRIBUTION_ROW_CLASS =
   "grid grid-cols-[minmax(3.75rem,5.25rem)_minmax(0,1fr)_3.25rem] items-center gap-2 sm:grid-cols-[minmax(4.5rem,7rem)_minmax(0,1fr)_3.75rem]"
 
 const CLASS_OPERATION_ROW_CLASS =
-  "grid w-full grid-cols-[3.25rem_minmax(0,1fr)_3.75rem] items-center gap-2 rounded-md text-left transition-colors hover:bg-muted/45 active:translate-y-px sm:grid-cols-[4rem_minmax(0,1fr)_4.5rem] sm:gap-3"
+  "grid w-full grid-cols-[1rem_3.25rem_minmax(0,1fr)_3.75rem] items-center gap-2 px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow,transform] hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px sm:grid-cols-[1rem_4rem_minmax(0,1fr)_4.5rem] sm:gap-3"
 
-const DISTRIBUTION_PREVIEW_LIMIT = 6
+const DISTRIBUTION_PREVIEW_LIMIT = 5
+const CLASS_PREVIEW_LIMIT = 3
+const DISTRIBUTION_TOGGLE_ROW_CLASS =
+  "w-full rounded-md px-1 py-1 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px"
+const LIST_SCOPE_TOGGLE_CLASS =
+  "shrink-0 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px"
 
 function AnimatedBar({ percent, className }: { percent: number; className?: string }) {
   const scale = Math.min(100, Math.max(0, percent)) / 100
@@ -337,7 +355,7 @@ function SegmentedControl<T extends string>({
   onChange: (next: T) => void
 }) {
   return (
-    <div aria-label={label} className="inline-flex max-w-full rounded-lg border bg-muted/35 p-1">
+    <div role="group" aria-label={label} className="inline-flex max-w-full rounded-md border bg-muted/30 p-0.5">
       {items.map((item) => {
         const isActive = value === item.key
 
@@ -347,9 +365,9 @@ function SegmentedControl<T extends string>({
             type="button"
             onClick={() => onChange(item.key)}
             className={cn(
-              "min-w-14 rounded-md px-2.5 py-1.5 text-sm font-medium transition-[background-color,color,box-shadow] active:translate-y-px sm:min-w-16 sm:px-3",
+              "min-w-12 rounded-[5px] px-2.5 py-1.5 text-sm font-medium transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px sm:min-w-14 sm:px-3",
               isActive
-                ? "bg-primary text-primary-foreground shadow-xs"
+                ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
             aria-pressed={isActive}
@@ -362,8 +380,52 @@ function SegmentedControl<T extends string>({
   )
 }
 
+function ListScopeToggle({
+  label,
+  expanded,
+  visibleCount,
+  totalCount,
+  onClick,
+}: {
+  label: string
+  expanded: boolean
+  visibleCount: number
+  totalCount: number
+  onClick: () => void
+}) {
+  if (totalCount <= visibleCount) return null
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={expanded}
+      aria-label={expanded ? `${label} 상위 ${formatNumber(visibleCount)}개만 보기` : `${label} 전체 ${formatNumber(totalCount)}개 보기`}
+      className={LIST_SCOPE_TOGGLE_CLASS}
+    >
+      {expanded ? `상위 ${formatNumber(visibleCount)}` : `전체 ${formatNumber(totalCount)}`}
+    </button>
+  )
+}
+
 function getActiveLabel<T extends string>(items: Array<{ key: T; label: string }>, value: T) {
   return items.find((item) => item.key === value)?.label ?? value
+}
+
+function getScopedFilterLabel(label: string, value: string, isAll: boolean) {
+  return isAll ? `${label} 전체` : value
+}
+
+function getFilterSummary(
+  subject: DashboardSubjectKey,
+  division: DashboardDivisionKey,
+  subjectLabel: string,
+  divisionLabel: string,
+) {
+  if (subject === "all" && division === "all") return "전체 범위"
+  if (subject === "all") return divisionLabel
+  if (division === "all") return subjectLabel
+  return `${subjectLabel} · ${divisionLabel}`
 }
 
 function FilterRadioGroup<T extends string>({
@@ -383,7 +445,12 @@ function FilterRadioGroup<T extends string>({
         {label}
       </DropdownMenuLabel>
       {items.map((item) => (
-        <DropdownMenuRadioItem key={item.key} value={item.key}>
+        <DropdownMenuRadioItem
+          key={item.key}
+          value={item.key}
+          aria-label={`${label}: ${item.label}`}
+          className="cursor-pointer"
+        >
           {item.label}
         </DropdownMenuRadioItem>
       ))}
@@ -404,19 +471,30 @@ function DashboardFilterMenu({
 }) {
   const subjectLabel = getActiveLabel(SUBJECT_TABS, subject)
   const divisionLabel = getActiveLabel(DIVISION_TABS, division)
+  const subjectFilterLabel = getScopedFilterLabel("과목", subjectLabel, subject === "all")
+  const divisionFilterLabel = getScopedFilterLabel("부서", divisionLabel, division === "all")
+  const filterSummary = getFilterSummary(subject, division, subjectLabel, divisionLabel)
+  const activeFilterCount = Number(subject !== "all") + Number(division !== "all")
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex h-9 max-w-full items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-muted/60 active:translate-y-px"
+          aria-label={`대시보드 필터: ${subjectFilterLabel}, ${divisionFilterLabel}`}
+          className="inline-flex h-9 max-w-full items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium transition-[background-color,border-color,box-shadow,transform] hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px"
         >
           <SlidersHorizontal className="size-4 text-muted-foreground" />
-          <span className="truncate">{subjectLabel} · {divisionLabel}</span>
+          <span className="truncate">{filterSummary}</span>
+          {activeFilterCount > 0 ? (
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-primary px-1 text-xs font-semibold text-primary-foreground tabular-nums">
+              {activeFilterCount}
+            </span>
+          ) : null}
+          <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-44">
+      <DropdownMenuContent align="start" sideOffset={8} className="w-64 rounded-lg p-1.5">
         <FilterRadioGroup
           label="과목"
           value={subject}
@@ -441,32 +519,43 @@ function DashboardHeader({
   onSubjectChange,
   onDivisionChange,
   metrics,
+  conflictCount,
 }: {
   subject: DashboardSubjectKey
   division: DashboardDivisionKey
   onSubjectChange: (next: DashboardSubjectKey) => void
   onDivisionChange: (next: DashboardDivisionKey) => void
   metrics: DashboardMetrics
+  conflictCount: number
 }) {
+  const isDisconnected = !metrics.isLoading && (metrics.error || !metrics.isConnected)
+  const statusBadge = isDisconnected ? (
+    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+      <AlertTriangle className="size-3.5" />
+      연결 확인
+    </Badge>
+  ) : conflictCount > 0 ? (
+    <Badge variant="destructive" className="font-medium">
+      충돌 {formatNumber(conflictCount)}건
+    </Badge>
+  ) : null
+
   return (
-    <div className="min-w-0">
-      <div className="min-w-0 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <DashboardFilterMenu
-            subject={subject}
-            division={division}
-            onSubjectChange={onSubjectChange}
-            onDivisionChange={onDivisionChange}
-          />
-          {!metrics.isLoading && (metrics.error || !metrics.isConnected) ? (
-            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
-              <AlertTriangle className="size-3.5" />
-              연결 확인
-            </Badge>
-          ) : null}
-        </div>
+    <section aria-label="대시보드 작업 기준" className="min-w-0">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border bg-background px-2.5 py-2">
+        <DashboardFilterMenu
+          subject={subject}
+          division={division}
+          onSubjectChange={onSubjectChange}
+          onDivisionChange={onDivisionChange}
+        />
+        {statusBadge ? (
+          <div aria-label="운영 상태" className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+            {statusBadge}
+          </div>
+        ) : null}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -482,81 +571,85 @@ function KpiStrip({
     summary.activeClassesCount,
     metrics,
   )
+  const weeklyHoursLabel = getSupportingLabel(summary.weeklyHoursLabel, metrics)
   const cards = [
     {
-      title: "학생수 (인원 기준)",
+      title: "재원",
       value: withUnit(getMetricValue(summary.uniqueRegisteredStudentCount, metrics), "명"),
-      sub: `대기 ${formatNumber(summary.uniqueWaitlistStudentCount)}명`,
-      icon: Users,
-      tone: "text-primary",
+      sub: getPositiveMetricSub(summary.uniqueWaitlistStudentCount, "대기", "명", metrics),
     },
     {
-      title: "학생수 (수강 기준)",
+      title: "수강",
       value: withUnit(getMetricValue(summary.registeredEnrollmentCount, metrics), "명"),
-      sub: `대기 ${formatNumber(summary.waitlistEnrollmentCount)}명`,
-      icon: Users,
-      tone: "text-primary",
     },
     {
-      title: "운영 수업",
+      title: "수업",
       value: withUnit(getMetricValue(summary.activeClassesCount, metrics), "개"),
-      sub: `주간 ${summary.weeklyHoursLabel}`,
-      icon: Layers3,
-      tone: "text-primary",
+      sub: weeklyHoursLabel ? `주간 ${weeklyHoursLabel}` : undefined,
     },
     {
-      title: "수업당 학생수",
+      title: "수업당",
       value: withUnit(averageEnrollmentsPerClass, "명"),
-      icon: Users,
-      tone: "text-primary",
     },
   ]
 
   return (
-    <div className="grid min-w-0 gap-3 md:grid-cols-2 lg:grid-cols-4">
-      {cards.map((card) => {
-        const Icon = card.icon
-
+    <section
+      aria-label="핵심 운영 지표"
+      className="grid min-w-0 overflow-hidden rounded-xl border bg-background md:grid-cols-2 lg:grid-cols-4"
+    >
+      {cards.map((card, index) => {
         return (
-          <Card key={card.title} className="min-w-0 gap-3 rounded-xl py-4 shadow-xs">
-            <CardHeader className="grid-cols-[1fr_auto] gap-3 px-4">
-              <div className="min-w-0 space-y-2">
-                <div className="text-sm text-muted-foreground">{card.title}</div>
-                <CardTitle className="text-2xl font-semibold tracking-tight tabular-nums">
-                  {card.value}
-                </CardTitle>
-              </div>
-              <CardAction className="col-start-2 row-span-1 row-start-1">
-                <span className="inline-flex size-9 items-center justify-center rounded-lg bg-muted">
-                  <Icon className={cn("size-4", card.tone)} />
-                </span>
-              </CardAction>
-            </CardHeader>
-            {card.sub ? (
-              <CardContent className="px-4 text-sm font-medium text-muted-foreground">
-                {card.sub}
-              </CardContent>
-            ) : null}
-          </Card>
+          <div
+            key={card.title}
+            className={cn(
+              "min-w-0 px-4 py-3 sm:px-5",
+              index > 0 && "border-t md:border-t-0 md:border-l",
+              index === 2 && "md:border-l-0 lg:border-l",
+            )}
+          >
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="text-xs font-medium text-muted-foreground">{card.title}</div>
+              {card.sub ? (
+                <div className="truncate text-xs font-medium text-muted-foreground">
+                  {card.sub}
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-1.5 text-2xl font-semibold tracking-tight tabular-nums">
+              {card.value}
+            </div>
+          </div>
         )
       })}
-    </div>
+    </section>
   )
 }
 
 function DashboardLoadingState() {
   return (
     <>
-      <div className="grid min-w-0 gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <section
+        aria-label="대시보드 지표 불러오는 중"
+        className="grid min-w-0 overflow-hidden rounded-xl border bg-background md:grid-cols-2 lg:grid-cols-4"
+      >
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="min-h-34 rounded-xl border bg-card p-4 shadow-xs">
-            <div className="h-4 w-28 animate-pulse rounded bg-muted" />
-            <div className="mt-5 h-8 w-20 animate-pulse rounded bg-muted" />
-            <div className="mt-6 h-4 w-16 animate-pulse rounded bg-muted" />
+          <div
+            key={index}
+            className={cn(
+              "min-h-28 px-4 py-3",
+              index > 0 && "border-t md:border-t-0 md:border-l",
+              index === 2 && "md:border-l-0 lg:border-l",
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="h-4 w-14 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-20 animate-pulse rounded bg-muted" />
+            </div>
+            <div className="mt-4 h-8 w-20 animate-pulse rounded bg-muted" />
           </div>
         ))}
-      </div>
-      <div className="h-12 rounded-xl border bg-muted/15" />
+      </section>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
         <div className="min-h-[24rem] rounded-xl border bg-card p-5 shadow-xs">
           <div className="h-5 w-36 animate-pulse rounded bg-muted" />
@@ -612,162 +705,207 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
   const schoolMax = getMaxValue(schoolRows, basis)
   const visibleGradeRows = showAllGrades ? gradeRows : gradeRows.slice(0, DISTRIBUTION_PREVIEW_LIMIT)
   const visibleSchoolRows = showAllSchools ? schoolRows : schoolRows.slice(0, DISTRIBUTION_PREVIEW_LIMIT)
+  const hasDistributionRows = gradeRows.length > 0 || schoolRows.length > 0
 
   return (
-    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
-      <CardHeader className="has-data-[slot=card-action]:grid-cols-1 gap-3 px-4 sm:px-5 sm:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <BarChart3 className="size-4 text-primary" />
-          학생 분포 매트릭스
-        </CardTitle>
-        <CardAction className="col-start-1 row-span-1 row-start-2 justify-self-start sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:justify-self-end">
-          <SegmentedControl
-            label="학생 기준"
-            value={basis}
-            items={[
-              { key: "students", label: "인원 기준" },
-              { key: "enrollments", label: "수강 기준" },
-            ]}
-            onChange={setBasis}
-          />
-        </CardAction>
+    <Card className="min-w-0 gap-4 rounded-xl py-4 shadow-none">
+      <CardHeader className="has-data-[slot=card-action]:grid-cols-1 gap-3 border-b px-4 pb-3 sm:px-5 sm:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
+        <CardTitle className="text-base">학생 분포</CardTitle>
+        {hasDistributionRows ? (
+          <CardAction className="col-start-1 row-span-1 row-start-2 justify-self-start sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:justify-self-end">
+            <SegmentedControl
+              label="학생 기준"
+              value={basis}
+              items={[
+                { key: "students", label: "인원" },
+                { key: "enrollments", label: "수강" },
+              ]}
+              onChange={setBasis}
+            />
+          </CardAction>
+        ) : null}
       </CardHeader>
-      <CardContent className="grid min-w-0 gap-4 px-4 sm:px-5 xl:grid-cols-2">
-        <section className="min-w-0 rounded-xl border bg-muted/15 p-3">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold">학년별 학교 분포</h3>
-            <span className="text-xs text-muted-foreground">{basis === "students" ? "인원 기준" : "수강 기준"}</span>
-          </div>
-          <div className="space-y-3">
-          {visibleGradeRows.map((row) => {
-            const value = getValue(row)
-            const expansionKey = `grade:${row.label}`
-            const isExpanded = expandedKeys.has(expansionKey)
-            const allSchoolRowsForGrade = row.schools || []
-            const schoolRowsForGrade = isExpanded ? allSchoolRowsForGrade : allSchoolRowsForGrade.slice(0, 3)
-            return (
-              <div key={row.label} className="min-w-0 rounded-lg bg-background p-3">
-                <div className={cn(DISTRIBUTION_ROW_CLASS, "text-sm")}>
-                  <span className="truncate text-sm font-semibold">{row.label}</span>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <AnimatedBar percent={getBarScale(value, gradeMax)} className="bg-primary" />
-                  </div>
-                  <span className="text-right tabular-nums">{formatNumber(value)}{unit}</span>
-                </div>
-                <div className="mt-3 grid gap-1.5">
-                  {schoolRowsForGrade.map((school) => {
-                    const schoolValue = getValue(school)
-
-                    return (
-                      <div key={school.label} className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
-                        <span className="truncate font-medium text-muted-foreground">{school.label}</span>
-                        <div className="h-1 overflow-hidden rounded-full bg-muted">
-                          <AnimatedBar percent={getBarScale(schoolValue, gradeMax, 4)} className="bg-primary/65" />
-                        </div>
-                        <span className="text-right tabular-nums">{formatNumber(schoolValue)}{unit}</span>
-                      </div>
-                    )
-                  })}
-                  {schoolRowsForGrade.length === 0 ? <EmptyLine label="학교 분포 없음" /> : null}
-                  {allSchoolRowsForGrade.length > 3 ? (
-                    <button
-                      type="button"
-                      onClick={() => toggleExpanded(expansionKey)}
-                      className="w-fit rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 active:translate-y-px"
-                    >
-                      {isExpanded ? "접기" : "더 보기"}
-                    </button>
-                  ) : null}
-                </div>
+      <CardContent
+        className={cn(
+          "min-w-0 px-4 sm:px-5",
+          hasDistributionRows && "grid gap-4 xl:grid-cols-2 xl:divide-x",
+        )}
+      >
+        {hasDistributionRows ? (
+          <>
+            <section aria-label="학년별 학생 분포" className="min-w-0 xl:pr-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">학년별</h3>
+                <ListScopeToggle
+                  label="학년 분포"
+                  expanded={showAllGrades}
+                  visibleCount={DISTRIBUTION_PREVIEW_LIMIT}
+                  totalCount={gradeRows.length}
+                  onClick={() => setShowAllGrades((current) => !current)}
+                />
               </div>
-            )
-          })}
-          {gradeRows.length > DISTRIBUTION_PREVIEW_LIMIT ? (
-            <button
-              type="button"
-              onClick={() => setShowAllGrades((current) => !current)}
-              className="w-fit rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 active:translate-y-px"
-            >
-              {showAllGrades ? "접기" : `전체 ${formatNumber(gradeRows.length)}개 보기`}
-            </button>
-          ) : null}
-          {gradeRows.length === 0 ? (
-            <EmptyLine label="선택 탭에 표시할 학생 데이터가 없습니다." />
-          ) : null}
-          </div>
-        </section>
-        <section className="min-w-0 rounded-xl border bg-muted/15 p-3">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold">학교별 학년 분포</h3>
-            <span className="text-xs text-muted-foreground">{basis === "students" ? "인원 기준" : "수강 기준"}</span>
-          </div>
-          <div className="space-y-3">
-            {visibleSchoolRows.map((row) => {
-              const value = getValue(row)
-              const expansionKey = `school:${row.label}`
-              const isExpanded = expandedKeys.has(expansionKey)
-              const allGradeRowsForSchool = row.grades || []
-              const gradeRowsForSchool = isExpanded ? allGradeRowsForSchool : allGradeRowsForSchool.slice(0, 3)
-
-              return (
-                <div key={row.label} className="min-w-0 rounded-lg bg-background p-3">
-                  <div className={cn(DISTRIBUTION_ROW_CLASS, "text-sm")}>
-                    <span className="truncate font-semibold">{row.label}</span>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <AnimatedBar percent={getBarScale(value, schoolMax)} className="bg-primary" />
-                    </div>
-                    <span className="text-right tabular-nums">{formatNumber(value)}{unit}</span>
-                  </div>
-                  <div className="mt-3 grid gap-1.5">
-                    {gradeRowsForSchool.map((grade) => {
-                      const gradeValue = getValue(grade)
-
-                      return (
-                        <div key={grade.label} className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
-                          <span className="font-medium text-muted-foreground">{grade.label}</span>
-                          <div className="h-1 overflow-hidden rounded-full bg-muted">
-                            <AnimatedBar percent={getBarScale(gradeValue, schoolMax, 4)} className="bg-primary/65" />
+              <div role="list" className="grid gap-3">
+                {visibleGradeRows.map((row) => {
+                  const value = getValue(row)
+                  const expansionKey = `grade:${row.label}`
+                  const isExpanded = expandedKeys.has(expansionKey)
+                  const allSchoolRowsForGrade = row.schools || []
+                  const schoolRowsForGrade = isExpanded ? allSchoolRowsForGrade : []
+                  const canExpand = allSchoolRowsForGrade.length > 0
+                  return (
+                    <div key={row.label} role="listitem" className="min-w-0 border-b pb-3 last:border-b-0 last:pb-0">
+                      {canExpand ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(expansionKey)}
+                          aria-expanded={isExpanded}
+                          aria-label={`${row.label} 학교 분포 ${isExpanded ? "접기" : "펼치기"}`}
+                          className={cn(DISTRIBUTION_ROW_CLASS, DISTRIBUTION_TOGGLE_ROW_CLASS, "text-sm")}
+                        >
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <ChevronDown
+                              className={cn(
+                                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                                isExpanded && "rotate-180 text-primary",
+                              )}
+                              aria-hidden="true"
+                            />
+                            <span className="truncate text-sm font-semibold">{row.label}</span>
+                          </span>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <AnimatedBar percent={getBarScale(value, gradeMax)} className="bg-primary" />
                           </div>
-                          <span className="text-right tabular-nums">{formatNumber(gradeValue)}{unit}</span>
+                          <span className="text-right tabular-nums">{formatNumber(value)}{unit}</span>
+                        </button>
+                      ) : (
+                        <div className={cn(DISTRIBUTION_ROW_CLASS, "text-sm")}>
+                          <span className="truncate text-sm font-semibold">{row.label}</span>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <AnimatedBar percent={getBarScale(value, gradeMax)} className="bg-primary" />
+                          </div>
+                          <span className="text-right tabular-nums">{formatNumber(value)}{unit}</span>
                         </div>
-                      )
-                    })}
-                    {gradeRowsForSchool.length === 0 ? <EmptyLine label="학년 분포 없음" /> : null}
-                    {allGradeRowsForSchool.length > 3 ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleExpanded(expansionKey)}
-                        className="w-fit rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 active:translate-y-px"
-                      >
-                        {isExpanded ? "접기" : "더 보기"}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              )
-            })}
-            {schoolRows.length > DISTRIBUTION_PREVIEW_LIMIT ? (
-              <button
-                type="button"
-                onClick={() => setShowAllSchools((current) => !current)}
-                className="w-fit rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 active:translate-y-px"
-              >
-                {showAllSchools ? "접기" : `전체 ${formatNumber(schoolRows.length)}개 보기`}
-              </button>
-            ) : null}
-            {schoolRows.length === 0 ? <EmptyLine label="학교별 데이터 없음" /> : null}
-          </div>
-        </section>
+                      )}
+                      <div role="list" aria-label={`${row.label} 학교 분포`} className="mt-3 grid gap-1.5">
+                        {schoolRowsForGrade.map((school) => {
+                          const schoolValue = getValue(school)
+
+                          return (
+                            <div key={school.label} role="listitem" className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
+                              <span className="truncate font-medium text-muted-foreground">{school.label}</span>
+                              <div className="h-1 overflow-hidden rounded-full bg-muted">
+                                <AnimatedBar percent={getBarScale(schoolValue, gradeMax, 4)} className="bg-primary/65" />
+                              </div>
+                              <span className="text-right tabular-nums">{formatNumber(schoolValue)}{unit}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+                {gradeRows.length === 0 ? <EmptyLine label="학년 데이터 없음" /> : null}
+              </div>
+            </section>
+            <section aria-label="학교별 학생 분포" className="min-w-0 xl:pl-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">학교별</h3>
+                <ListScopeToggle
+                  label="학교 분포"
+                  expanded={showAllSchools}
+                  visibleCount={DISTRIBUTION_PREVIEW_LIMIT}
+                  totalCount={schoolRows.length}
+                  onClick={() => setShowAllSchools((current) => !current)}
+                />
+              </div>
+              <div role="list" className="grid gap-3">
+                {visibleSchoolRows.map((row) => {
+                  const value = getValue(row)
+                  const expansionKey = `school:${row.label}`
+                  const isExpanded = expandedKeys.has(expansionKey)
+                  const allGradeRowsForSchool = row.grades || []
+                  const gradeRowsForSchool = isExpanded ? allGradeRowsForSchool : []
+                  const canExpand = allGradeRowsForSchool.length > 0
+
+                  return (
+                    <div key={row.label} role="listitem" className="min-w-0 border-b pb-3 last:border-b-0 last:pb-0">
+                      {canExpand ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(expansionKey)}
+                          aria-expanded={isExpanded}
+                          aria-label={`${row.label} 학년 분포 ${isExpanded ? "접기" : "펼치기"}`}
+                          className={cn(DISTRIBUTION_ROW_CLASS, DISTRIBUTION_TOGGLE_ROW_CLASS, "text-sm")}
+                        >
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <ChevronDown
+                              className={cn(
+                                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                                isExpanded && "rotate-180 text-primary",
+                              )}
+                              aria-hidden="true"
+                            />
+                            <span className="truncate font-semibold">{row.label}</span>
+                          </span>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <AnimatedBar percent={getBarScale(value, schoolMax)} className="bg-primary" />
+                          </div>
+                          <span className="text-right tabular-nums">{formatNumber(value)}{unit}</span>
+                        </button>
+                      ) : (
+                        <div className={cn(DISTRIBUTION_ROW_CLASS, "text-sm")}>
+                          <span className="truncate font-semibold">{row.label}</span>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <AnimatedBar percent={getBarScale(value, schoolMax)} className="bg-primary" />
+                          </div>
+                          <span className="text-right tabular-nums">{formatNumber(value)}{unit}</span>
+                        </div>
+                      )}
+                      <div role="list" aria-label={`${row.label} 학년 분포`} className="mt-3 grid gap-1.5">
+                        {gradeRowsForSchool.map((grade) => {
+                          const gradeValue = getValue(grade)
+
+                          return (
+                            <div key={grade.label} role="listitem" className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
+                              <span className="font-medium text-muted-foreground">{grade.label}</span>
+                              <div className="h-1 overflow-hidden rounded-full bg-muted">
+                                <AnimatedBar percent={getBarScale(gradeValue, schoolMax, 4)} className="bg-primary/65" />
+                              </div>
+                              <span className="text-right tabular-nums">{formatNumber(gradeValue)}{unit}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+                {schoolRows.length === 0 ? <EmptyLine label="학교 데이터 없음" /> : null}
+              </div>
+            </section>
+          </>
+        ) : (
+          <EmptyLine label="학생 데이터 없음" />
+        )}
       </CardContent>
     </Card>
   )
 }
 
 function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
-  const [openGradeKeys, setOpenGradeKeys] = useState<Set<string>>(() => new Set())
+  const gradeRows = useMemo(
+    () => [...(bucket.classBreakdowns?.byGrade || [])].sort((left, right) => (
+      right.classCount - left.classCount ||
+      left.label.localeCompare(right.label, "ko", { numeric: true })
+    )),
+    [bucket.classBreakdowns?.byGrade],
+  )
+  const defaultOpenGradeKey = gradeRows[0] ? `class-grade:${gradeRows[0].label}` : undefined
+  const [openGradeKeys, setOpenGradeKeys] = useState<Set<string>>(
+    () => new Set(defaultOpenGradeKey ? [defaultOpenGradeKey] : []),
+  )
   const [expandedClassKeys, setExpandedClassKeys] = useState<Set<string>>(() => new Set())
-  const gradeRows = bucket.classBreakdowns?.byGrade || []
   const classMax = getClassMaxValue(gradeRows)
+
   const toggleOpenGrade = (key: string) => {
     setOpenGradeKeys((current) => {
       const next = new Set(current)
@@ -792,86 +930,102 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
   }
 
   return (
-    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
-      <CardHeader className="px-4 sm:px-5">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Layers3 className="size-4 text-primary" />
-          수업 운영
-        </CardTitle>
+    <Card className="min-w-0 gap-4 rounded-xl py-4 shadow-none">
+      <CardHeader className="border-b px-4 pb-3 sm:px-5">
+        <CardTitle className="text-base">수업 운영</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 px-4 sm:px-5">
-        <div className="grid gap-2">
-          {gradeRows.map((row) => {
-            const openKey = `class-grade:${row.label}`
-            const isOpen = openGradeKeys.has(openKey)
-            const isExpanded = expandedClassKeys.has(openKey)
-            const allClassRows = row.classSummaries || []
-            const classRows = isExpanded ? allClassRows : allClassRows.slice(0, 3)
+      <CardContent className="px-4 sm:px-5">
+        {gradeRows.length > 0 ? (
+          <div role="list" aria-label="학년별 수업 운영" className="overflow-hidden rounded-lg border bg-background">
+            {gradeRows.map((row) => {
+              const openKey = `class-grade:${row.label}`
+              const isOpen = openGradeKeys.has(openKey)
+              const isExpanded = expandedClassKeys.has(openKey)
+              const allClassRows = row.classSummaries || []
+              const classRows = isExpanded ? allClassRows : allClassRows.slice(0, CLASS_PREVIEW_LIMIT)
 
-            return (
-              <div key={row.label} className="min-w-0 rounded-lg border bg-background p-2.5">
-                <button
-                  type="button"
-                  onClick={() => toggleOpenGrade(openKey)}
-                  className={CLASS_OPERATION_ROW_CLASS}
-                  aria-expanded={isOpen}
-                >
-                  <span className="truncate px-1 text-sm font-medium">{row.label}</span>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <AnimatedBar percent={getBarScale(row.classCount, classMax)} className="bg-primary" />
-                  </div>
-                  <span className="px-1 text-right text-sm tabular-nums">{formatNumber(row.classCount)}개</span>
-                </button>
-                {isOpen ? (
-                  <div className="mt-3 grid gap-2 border-t pt-3">
-                    {classRows.map((classItem) => (
-                      <div key={classItem.id} className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
-                        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                          <Badge variant="outline" className="bg-primary/5 text-primary">{classItem.subject}</Badge>
-                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                            <span className="min-w-0 max-w-full text-sm font-semibold leading-5">{classItem.title}</span>
-                            {splitBadgeLabels(classItem.teacherLabel).map((label) => (
-                              <Badge
-                                key={`teacher:${classItem.id}:${label}`}
-                                variant="outline"
-                                className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
-                              >
-                                {label}
-                              </Badge>
-                            ))}
-                            {splitBadgeLabels(classItem.classroomLabel).map((label) => (
-                              <Badge
-                                key={`classroom:${classItem.id}:${label}`}
-                                variant="outline"
-                                className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
-                              >
-                                {label}
-                              </Badge>
-                            ))}
-                          </div>
-                          <span className="col-start-2 justify-self-start text-xs font-medium tabular-nums text-muted-foreground sm:col-start-3 sm:justify-self-end">
-                            {formatNumber(classItem.studentCount)}명
-                          </span>
+              return (
+                <div key={row.label} role="listitem" className="min-w-0 border-b last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => toggleOpenGrade(openKey)}
+                    className={CLASS_OPERATION_ROW_CLASS}
+                    aria-expanded={isOpen}
+                    aria-label={`${row.label} 수업 ${isOpen ? "접기" : "펼치기"}`}
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "size-4 text-muted-foreground transition-transform",
+                        isOpen && "rotate-180 text-primary",
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate px-1 text-sm font-medium">{row.label}</span>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <AnimatedBar percent={getBarScale(row.classCount, classMax)} className="bg-primary" />
+                    </div>
+                    <span className="px-1 text-right text-sm tabular-nums">{formatNumber(row.classCount)}개</span>
+                  </button>
+                  {isOpen ? (
+                    <div className="grid gap-1.5 border-t bg-muted/15 p-3">
+                      {allClassRows.length > CLASS_PREVIEW_LIMIT ? (
+                        <div className="flex justify-end">
+                          <ListScopeToggle
+                            label={`${row.label} 수업 목록`}
+                            expanded={isExpanded}
+                            visibleCount={CLASS_PREVIEW_LIMIT}
+                            totalCount={allClassRows.length}
+                            onClick={() => toggleExpandedClassList(openKey)}
+                          />
                         </div>
+                      ) : null}
+                      <div role="list" aria-label={`${row.label} 수업 목록`} className="grid gap-1.5">
+                        {classRows.map((classItem) => (
+                          <div
+                            key={classItem.id}
+                            role="listitem"
+                            className="min-w-0 border-l-2 border-l-primary/35 bg-background px-3 py-2"
+                          >
+                            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                              <Badge variant="outline" className="bg-primary/5 text-primary">{classItem.subject}</Badge>
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <span className="min-w-0 max-w-full text-sm font-semibold leading-5">{classItem.title}</span>
+                                {splitBadgeLabels(classItem.teacherLabel).map((label) => (
+                                  <Badge
+                                    key={`teacher:${classItem.id}:${label}`}
+                                    variant="outline"
+                                    className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
+                                  >
+                                    {label}
+                                  </Badge>
+                                ))}
+                                {splitBadgeLabels(classItem.classroomLabel).map((label) => (
+                                  <Badge
+                                    key={`classroom:${classItem.id}:${label}`}
+                                    variant="outline"
+                                    className="min-w-0 max-w-full shrink justify-start !overflow-visible !whitespace-normal break-keep bg-background px-1.5 text-[11px] font-medium leading-4 text-muted-foreground"
+                                  >
+                                    {label}
+                                  </Badge>
+                                ))}
+                              </div>
+                              <span className="col-start-2 justify-self-start text-xs font-medium tabular-nums text-muted-foreground sm:col-start-3 sm:justify-self-end">
+                                {formatNumber(classItem.studentCount)}명
+                              </span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                    {allClassRows.length === 0 ? <EmptyLine label="수업 정보 없음" /> : null}
-                    {allClassRows.length > 3 ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleExpandedClassList(openKey)}
-                        className="w-fit rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10 active:translate-y-px"
-                      >
-                        {isExpanded ? "접기" : "더 보기"}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            )
-          })}
-          {gradeRows.length === 0 ? <EmptyLine label="수업 데이터 없음" /> : null}
-        </div>
+                      {allClassRows.length === 0 ? <EmptyLine label="수업 정보 없음" /> : null}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <EmptyLine label="수업 데이터 없음" />
+        )}
       </CardContent>
     </Card>
   )
@@ -881,16 +1035,7 @@ function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
   const affectedCount = rows.reduce((sum, row) => sum + row.affectedCount, 0)
 
   if (rows.length === 0) {
-    return (
-      <div className="flex min-w-0 items-center justify-between gap-3 rounded-xl border bg-muted/15 px-4 py-3 text-sm">
-        <div className="flex min-w-0 items-center gap-2">
-          <AlertTriangle className="size-4 text-muted-foreground" />
-          <span className="font-medium">일정 충돌 없음</span>
-          <span className="hidden text-muted-foreground sm:inline">선택한 범위의 일정은 바로 운영할 수 있습니다.</span>
-        </div>
-        <Badge variant="outline">0</Badge>
-      </div>
-    )
+    return null
   }
 
   return (
@@ -927,9 +1072,9 @@ function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
                 </div>
               </div>
               <div className="mt-4 grid gap-2 text-xs">
-                <ProcessRow label="When" value={row.dateLabel} />
+                <ProcessRow label="일시" value={row.dateLabel} />
                 <ProcessRow
-                  label="What"
+                  label="충돌"
                   value={(
                     <span className="inline-flex flex-wrap items-center gap-1.5">
                       <span>본과목 수업일</span>
@@ -938,10 +1083,10 @@ function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
                     </span>
                   )}
                 />
-                <ProcessRow label="Who" value={row.whoLabel} />
-                <ProcessRow label="Why" value={row.whyLabel} />
+                <ProcessRow label="대상" value={row.whoLabel} />
+                <ProcessRow label="사유" value={row.whyLabel} />
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)]">
-                  <span className="text-muted-foreground">How</span>
+                  <span className="text-muted-foreground">처리</span>
                   <div className="flex flex-wrap gap-1.5">
                     {["보강 제안", "회차 휴강", "보호자 안내"].map((label) => (
                       <span key={label} className="rounded-md bg-muted px-2 py-1 font-medium">
@@ -975,7 +1120,7 @@ function ProcessRow({ label, value }: { label: string; value: ReactNode }) {
 
 function EmptyLine({ label }: { label: string }) {
   return (
-    <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+    <div className="px-3 py-6 text-center text-sm text-muted-foreground">
       {label}
     </div>
   )
@@ -1003,6 +1148,7 @@ export function SectionCards({ metrics }: { metrics: DashboardMetrics }) {
           onSubjectChange={setActiveSubject}
           onDivisionChange={setActiveDivision}
           metrics={metrics}
+          conflictCount={conflictRows.length}
         />
         <DashboardLoadingState />
       </div>
@@ -1017,12 +1163,17 @@ export function SectionCards({ metrics }: { metrics: DashboardMetrics }) {
         onSubjectChange={setActiveSubject}
         onDivisionChange={setActiveDivision}
         metrics={metrics}
+        conflictCount={conflictRows.length}
       />
       <KpiStrip metrics={metrics} summary={summary} />
       <ConflictBoard rows={conflictRows} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
-        <StudentDistributionPanel bucket={activeBucket} />
-        <ClassOperationsPanel bucket={activeBucket} />
+        <div className="order-2 min-w-0 lg:order-1">
+          <StudentDistributionPanel bucket={activeBucket} />
+        </div>
+        <div className="order-1 min-w-0 lg:order-2">
+          <ClassOperationsPanel key={`${activeSubject}:${activeDivision}`} bucket={activeBucket} />
+        </div>
       </div>
     </div>
   )

@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { Command as CommandPrimitive } from "cmdk"
-import { Search, type LucideIcon } from "lucide-react"
+import { ArrowRight, Search, type LucideIcon } from "lucide-react"
 
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { buildAdminNavGroups } from "@/lib/navigation"
@@ -32,7 +32,7 @@ const CommandInput = React.forwardRef<
   <CommandPrimitive.Input
     ref={ref}
     className={cn(
-      "mb-4 flex h-12 w-full border-none border-b border-zinc-200 bg-transparent px-4 py-3 text-[17px] outline-none placeholder:text-zinc-500 dark:border-zinc-800 dark:placeholder:text-zinc-400",
+      "mb-3 flex h-12 w-full border-none border-b border-zinc-200 bg-transparent px-4 py-3 text-[17px] outline-none placeholder:text-zinc-500 dark:border-zinc-800 dark:placeholder:text-zinc-400",
       className,
     )}
     {...props}
@@ -46,7 +46,7 @@ const CommandList = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive.List
     ref={ref}
-    className={cn("max-h-[400px] overflow-y-auto overflow-x-hidden pb-2", className)}
+    className={cn("max-h-[70vh] overflow-y-auto overflow-x-hidden pb-2 sm:max-h-[440px]", className)}
     {...props}
   />
 ))
@@ -58,7 +58,7 @@ const CommandEmpty = React.forwardRef<
 >((props, ref) => (
   <CommandPrimitive.Empty
     ref={ref}
-    className="flex h-12 items-center justify-center text-sm text-zinc-500 dark:text-zinc-400"
+    className="flex min-h-20 items-center justify-center px-6 text-center text-sm text-zinc-500 dark:text-zinc-400"
     {...props}
   />
 ))
@@ -71,7 +71,7 @@ const CommandGroup = React.forwardRef<
   <CommandPrimitive.Group
     ref={ref}
     className={cn(
-      "overflow-hidden px-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-zinc-500 dark:[&_[cmdk-group-heading]]:text-zinc-400 [&:not(:first-child)]:mt-2",
+      "overflow-hidden px-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-zinc-500 dark:[&_[cmdk-group-heading]]:text-zinc-400 [&:not(:first-child)]:mt-2",
       className,
     )}
     {...props}
@@ -86,7 +86,7 @@ const CommandItem = React.forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex h-12 cursor-pointer select-none items-center gap-2 rounded-lg px-4 text-sm text-zinc-700 outline-none transition-colors data-[disabled=true]:pointer-events-none data-[selected=true]:bg-zinc-100 data-[selected=true]:text-zinc-900 data-[disabled=true]:opacity-50 dark:text-zinc-300 dark:data-[selected=true]:bg-zinc-800 dark:data-[selected=true]:text-zinc-100 [&+[cmdk-item]]:mt-1",
+      "group relative flex min-h-12 cursor-pointer select-none items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-700 outline-none transition-[background-color,color,transform] data-[disabled=true]:pointer-events-none data-[selected=true]:translate-x-0.5 data-[selected=true]:bg-zinc-100 data-[selected=true]:text-zinc-900 data-[disabled=true]:opacity-50 dark:text-zinc-300 dark:data-[selected=true]:bg-zinc-800 dark:data-[selected=true]:text-zinc-100 [&+[cmdk-item]]:mt-1",
       className,
     )}
     {...props}
@@ -109,6 +109,14 @@ function resolveCommandGroupLabel(label: string) {
   }
 
   return label
+}
+
+function normalizeCommandPath(pathname: string) {
+  if (!pathname || pathname === "/") {
+    return "/"
+  }
+
+  return pathname.replace(/\/+$/, "")
 }
 
 function createSearchItems({
@@ -166,8 +174,9 @@ interface CommandSearchProps {
 
 export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
   const router = useRouter()
-  const commandRef = React.useRef<HTMLDivElement>(null)
+  const pathname = usePathname()
   const { canManageAll, canEditCurriculumPlanning } = useAuth()
+  const currentPath = React.useMemo(() => normalizeCommandPath(pathname), [pathname])
 
   const groupedItems = React.useMemo(() => {
     return createSearchItems({ canManageAll, canEditCurriculumPlanning }).reduce(
@@ -182,46 +191,54 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
     )
   }, [canEditCurriculumPlanning, canManageAll])
 
-  const handleSelect = (url: string) => {
-    router.push(url)
+  const handleSelect = React.useCallback((url: string) => {
     onOpenChange(false)
 
-    if (commandRef.current) {
-      commandRef.current.style.transform = "scale(0.96)"
-      setTimeout(() => {
-        if (commandRef.current) {
-          commandRef.current.style.transform = ""
-        }
-      }, 100)
+    if (normalizeCommandPath(url) !== currentPath) {
+      router.push(url)
     }
-  }
+  }, [currentPath, onOpenChange, router])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[640px] overflow-hidden border border-zinc-200 p-0 shadow-2xl dark:border-zinc-800">
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-[640px] overflow-hidden border border-zinc-200 p-0 shadow-2xl dark:border-zinc-800">
         <DialogTitle className="sr-only">운영 워크스페이스 빠른 이동</DialogTitle>
         <DialogDescription className="sr-only">
           메뉴와 관리 화면을 검색해서 바로 이동합니다.
         </DialogDescription>
-        <Command
-          ref={commandRef}
-          className="transition-transform duration-100 ease-out"
-        >
-          <CommandInput placeholder="무엇을 찾고 계신가요?" autoFocus />
+        <Command>
+          <CommandInput placeholder="메뉴, 기능, 주소 검색" autoFocus />
           <CommandList>
-            <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
+            <CommandEmpty>일치하는 메뉴가 없습니다.</CommandEmpty>
             {Object.entries(groupedItems).map(([group, items]) => (
-              <CommandGroup key={group} heading={group}>
+              <CommandGroup key={group} heading={`${group} ${items.length}개`}>
                 {items.map((item) => {
                   const Icon = item.icon
+                  const isCurrent = normalizeCommandPath(item.url) === currentPath
+
                   return (
                     <CommandItem
                       key={item.url}
-                      value={item.title}
+                      value={`${item.title} ${item.group} ${item.url}`}
+                      keywords={[item.group, item.url]}
+                      aria-current={isCurrent ? "page" : undefined}
                       onSelect={() => handleSelect(item.url)}
+                      className={isCurrent ? "bg-primary/5 text-primary data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary" : undefined}
                     >
-                      {Icon ? <Icon className="mr-2 h-4 w-4" /> : null}
-                      {item.title}
+                      {Icon ? (
+                        <Icon className={cn("size-4 shrink-0 text-zinc-500 dark:text-zinc-400", isCurrent && "text-primary")} />
+                      ) : null}
+                      <span className="grid min-w-0 flex-1 gap-0.5">
+                        <span className="truncate font-medium">{item.title}</span>
+                        <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{item.url}</span>
+                      </span>
+                      {isCurrent ? (
+                        <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                          현재
+                        </span>
+                      ) : (
+                        <ArrowRight className="size-4 shrink-0 text-zinc-400 opacity-0 transition-opacity group-data-[selected=true]:opacity-100" />
+                      )}
                     </CommandItem>
                   )
                 })}
@@ -237,10 +254,13 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
 export function SearchTrigger({ onClick }: { onClick: () => void }) {
   return (
     <button
+      type="button"
+      aria-label={`빠른 이동 열기, ${QUICK_SEARCH_SHORTCUT_LABEL}`}
+      title={`빠른 이동 (${QUICK_SEARCH_SHORTCUT_LABEL})`}
       onClick={onClick}
-      className="relative inline-flex h-8 w-full items-center justify-start gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 py-1 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pr-12 md:w-36 lg:w-56"
+      className="relative inline-flex h-8 w-full items-center justify-start gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 py-1 text-sm font-medium text-muted-foreground shadow-sm transition-[background-color,color,box-shadow,transform] hover:bg-accent hover:text-accent-foreground active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pr-12 md:w-36 lg:w-56"
     >
-      <Search className="mr-2 h-3.5 w-3.5" />
+      <Search className="h-3.5 w-3.5 shrink-0" />
       <span className="hidden lg:inline-flex">빠른 이동</span>
       <span className="inline-flex lg:hidden">빠른 이동</span>
       <kbd className="pointer-events-none absolute right-1.5 top-1.5 hidden h-4 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
