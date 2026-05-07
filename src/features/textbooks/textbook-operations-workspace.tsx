@@ -1929,6 +1929,7 @@ function TextbookOpsCommandCenter({
   ] satisfies Array<{ key: TextbookOpsQueueKey; label: string; value: number; tone: string }>;
   const activeQueueTotal = actionItems.reduce((sum, item) => sum + item.value, 0);
   const activeQueueItem = actionItems.find((item) => item.key === activeQueueKey);
+  const queueBadgeValue = activeQueueItem ? activeQueueItem.value : activeQueueTotal;
   const visibleActionItems = actionItems.filter((item) => item.value > 0 || item.key === activeQueueKey);
 
   if (activeQueueTotal <= 0) {
@@ -1947,14 +1948,13 @@ function TextbookOpsCommandCenter({
             title={activeQueueItem ? `${activeQueueItem.label} 보기` : `할 일 ${formatQuantity(activeQueueTotal)}건`}
           >
             <SlidersHorizontal className="size-3.5" />
-            <span>할 일</span>
+            <span className="max-w-[7rem] truncate">{activeQueueItem ? activeQueueItem.label : "할 일"}</span>
             <Badge
               variant={activeQueueKey ? "secondary" : "outline"}
               className={cn("h-5 rounded px-1.5 tabular-nums", activeQueueKey && "bg-primary-foreground text-primary")}
             >
-              {formatQuantity(activeQueueTotal)}
+              {formatQuantity(queueBadgeValue)}
             </Badge>
-            {activeQueueItem ? <span className="hidden max-w-[9rem] truncate text-xs sm:inline">{activeQueueItem.label}</span> : null}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-2">
@@ -2041,6 +2041,7 @@ export function TextbookOperationsWorkspace() {
   const [masterDialogOpen, setMasterDialogOpen] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
+  const [purchaseRequestInputMode, setPurchaseRequestInputMode] = useState<"catalog" | "manual">("catalog");
   const [selectedPurchaseLineId, setSelectedPurchaseLineId] = useState("");
   const [selectedPurchaseLineIds, setSelectedPurchaseLineIds] = useState<string[]>([]);
   const [bulkOrderDialogOpen, setBulkOrderDialogOpen] = useState(false);
@@ -2480,6 +2481,7 @@ export function TextbookOperationsWorkspace() {
   const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook || getTextbookById(data.textbooks, purchaseForm.requestedTextbookTitle);
   const explicitPurchaseTextbookId = getRecordId(explicitlySelectedPurchaseTextbook || {});
   const selectedPurchaseTextbookId = getRecordId(selectedPurchaseTextbook || {});
+  const purchaseRequestUsesCatalog = purchaseRequestInputMode === "catalog";
   const purchaseRequestTitle = text(purchaseForm.requestedTextbookTitle || getTextbookTitle(selectedPurchaseTextbook || {}) || purchaseForm.textbookId);
   const configuredPurchaseSupplierId =
     getConfiguredSupplierIdForTextbook(selectedPurchaseTextbook, data.publisherSupplierLinks, data.publishers) || purchaseForm.supplierId;
@@ -2526,6 +2528,13 @@ export function TextbookOperationsWorkspace() {
   const saleSubmitDisabled = !selectedSaleClass ||
     !selectedSaleTextbook ||
     saleDraft.lines.length === 0;
+  const saleSubmitHint = !selectedSaleClass
+    ? "수업을 선택하세요"
+    : !selectedSaleTextbook
+      ? "교재를 선택하세요"
+      : saleDraft.lines.length === 0
+        ? "출고 대상 학생이 없습니다"
+        : "출고 대기 저장";
   const selectedSaleStudentCount = selectedClassStudents.length;
   const includedSaleStudentCount = selectedClassStudents
     .filter((student) => !excludedStudentIds.includes(getRecordId(student)))
@@ -2639,6 +2648,7 @@ export function TextbookOperationsWorkspace() {
   const closingTeamMarginMetrics = ((closingPreview.teamMargins || []) as Array<{ team: string; marginAmount: number; saleQuantity: number }>)
     .filter((item) => item.team === "english" || item.team === "math")
     .filter((item) => closingForm.subject === "all" || item.team === closingForm.subject);
+  const closingTargetSubjects = closingForm.subject === "all" ? ["all", "english", "math"] : [closingForm.subject];
   const selectedClosingDetail = data.monthlyClosings.find((row) => getRecordId(row) === selectedClosingDetailId);
 
   function setPurchaseField(name: string, value: string) {
@@ -2729,12 +2739,14 @@ export function TextbookOperationsWorkspace() {
   function resetPurchaseForm() {
     setSelectedPurchaseLineId("");
     setPurchaseForm(emptyPurchaseForm);
+    setPurchaseRequestInputMode("catalog");
     setMessage("");
   }
 
   function openNewPurchaseDialog() {
     setSelectedPurchaseLineId("");
     setPurchaseForm({ ...emptyPurchaseForm, requestStage: "order" });
+    setPurchaseRequestInputMode("catalog");
     setMessage("");
     setPurchaseDialogOpen(true);
   }
@@ -2742,6 +2754,7 @@ export function TextbookOperationsWorkspace() {
   function openNewRequestDialog() {
     setSelectedPurchaseLineId("");
     setPurchaseForm({ ...emptyPurchaseForm, requestStage: "request" });
+    setPurchaseRequestInputMode("catalog");
     setMessage("");
     setPurchaseDialogOpen(true);
   }
@@ -2781,55 +2794,20 @@ export function TextbookOperationsWorkspace() {
   function closePurchaseDialog() {
     setPurchaseDialogOpen(false);
     resetPurchaseForm();
+    window.setTimeout(() => setPurchaseDialogOpen(false), 0);
   }
 
   function closeSaleDialog() {
     setSaleDialogOpen(false);
     setMessage("");
+    window.setTimeout(() => setSaleDialogOpen(false), 0);
   }
 
   function closeClosingDialog() {
     setClosingDialogOpen(false);
     setMessage("");
+    window.setTimeout(() => setClosingDialogOpen(false), 0);
   }
-
-  useEffect(() => {
-    function closeFromNativeEvent(event: MouseEvent | PointerEvent) {
-      if (!(event.target instanceof Element)) return;
-      const trigger = event.target.closest<HTMLElement>("[data-textbook-modal-dismiss]");
-      if (!trigger) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      const target = trigger.dataset.textbookModalDismiss;
-      if (target === "master") {
-        closeMasterDialog();
-      } else if (target === "purchase") {
-        closePurchaseDialog();
-      } else if (target === "bulk-order") {
-        closeBulkOrderDialog();
-      } else if (target === "sale") {
-        closeSaleDialog();
-      } else if (target === "closing") {
-        closeClosingDialog();
-      }
-    }
-
-    document.addEventListener("pointerdown", closeFromNativeEvent, true);
-    document.addEventListener("pointerup", closeFromNativeEvent, true);
-    document.addEventListener("mousedown", closeFromNativeEvent, true);
-    document.addEventListener("mouseup", closeFromNativeEvent, true);
-    document.addEventListener("click", closeFromNativeEvent, true);
-
-    return () => {
-      document.removeEventListener("pointerdown", closeFromNativeEvent, true);
-      document.removeEventListener("pointerup", closeFromNativeEvent, true);
-      document.removeEventListener("mousedown", closeFromNativeEvent, true);
-      document.removeEventListener("mouseup", closeFromNativeEvent, true);
-      document.removeEventListener("click", closeFromNativeEvent, true);
-    };
-  });
 
   function changeActiveTab(value: string) {
     if (!canManageTextbookOperations && value !== "requests") {
@@ -3053,6 +3031,7 @@ export function TextbookOperationsWorkspace() {
     setBulkOrderDialogOpen(false);
     setBulkOrderQuantities({});
     setMessage("");
+    window.setTimeout(() => setBulkOrderDialogOpen(false), 0);
   }
 
   function setBulkOrderQuantity(lineId: string, value: string) {
@@ -3291,6 +3270,7 @@ export function TextbookOperationsWorkspace() {
     const requestedTitle = getRequestedTextbookTitle(line);
     const textbook = getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId) || requestedTitle);
     setSelectedPurchaseLineId(getRecordId(line));
+    setPurchaseRequestInputMode(textbook ? "catalog" : "manual");
     setPurchaseForm({
       requestStage: nextStage,
       textbookId: getRecordId(textbook || {}) || text(line.textbook_id || line.textbookId),
@@ -3788,8 +3768,7 @@ export function TextbookOperationsWorkspace() {
     void runAction(
       "closing",
       async () => {
-        const subjects = closingForm.subject === "all" ? ["all", "english", "math"] : [closingForm.subject];
-        await Promise.all(subjects.map((subject) =>
+        await Promise.all(closingTargetSubjects.map((subject) =>
           textbookService.upsertMonthlyClosing({ ...closingForm, subject }, data as unknown as Row),
         ));
       },
@@ -3991,7 +3970,7 @@ export function TextbookOperationsWorkspace() {
               </Field>
             </div>
             <div className={dialogFooterClassName}>
-              <Button type="button" variant="outline" onClick={closeMasterDialog} aria-label="교재 등록 취소" title="취소" data-textbook-modal-dismiss="master">
+              <Button type="button" variant="outline" onClick={closeMasterDialog} aria-label="교재 등록 취소" title="취소">
                 취소
               </Button>
               <Button
@@ -4009,6 +3988,7 @@ export function TextbookOperationsWorkspace() {
       </Dialog>
       ) : null}
 
+      {purchaseDialogOpen ? (
       <Dialog open={purchaseDialogOpen} onOpenChange={(open) => (open ? setPurchaseDialogOpen(true) : closePurchaseDialog())}>
         <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
@@ -4021,34 +4001,65 @@ export function TextbookOperationsWorkspace() {
                 <section className="grid gap-2 rounded-lg border bg-muted/20 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-sm font-medium text-foreground">교재명</div>
-                    <div className="rounded-full bg-background px-2 py-1 text-xs text-muted-foreground">
-                      등록교재 우선 · 없으면 직접 입력
+                    <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="요청 교재 입력 방식">
+                      <Button
+                        type="button"
+                        variant={purchaseRequestUsesCatalog ? "default" : "ghost"}
+                        size="sm"
+                        className="h-7 rounded"
+                        aria-pressed={purchaseRequestUsesCatalog}
+                        onClick={() => {
+                          setPurchaseRequestInputMode("catalog");
+                          setPurchaseField("requestedTextbookTitle", "");
+                        }}
+                      >
+                        등록 교재
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={!purchaseRequestUsesCatalog ? "default" : "ghost"}
+                        size="sm"
+                        className="h-7 rounded"
+                        aria-pressed={!purchaseRequestUsesCatalog}
+                        onClick={() => {
+                          setPurchaseRequestInputMode("manual");
+                          setPurchaseField("textbookId", "");
+                        }}
+                      >
+                        직접 입력
+                      </Button>
                     </div>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem]">
-                    <TextbookSelect
-                      textbooks={activeTextbooks}
-                      value={explicitPurchaseTextbookId}
-                      onValueChange={(value) => setPurchaseField("textbookId", value)}
+                  {purchaseRequestUsesCatalog ? (
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem]">
+                      <TextbookSelect
+                        textbooks={activeTextbooks}
+                        value={explicitPurchaseTextbookId}
+                        onValueChange={(value) => {
+                          setPurchaseRequestInputMode("catalog");
+                          setPurchaseField("textbookId", value);
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label="등록 교재 선택 해제"
+                        disabled={!purchaseForm.textbookId}
+                        onClick={() => setPurchaseField("textbookId", "")}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Input
+                      value={purchaseForm.requestedTextbookTitle}
+                      onChange={(event) => setPurchaseField("requestedTextbookTitle", event.target.value)}
+                      aria-label="요청 교재명"
+                      placeholder="교재명을 그대로 입력"
+                      required
                     />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      aria-label="등록 교재 선택 해제"
-                      disabled={!purchaseForm.textbookId}
-                      onClick={() => setPurchaseField("textbookId", "")}
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                  <Input
-                    value={purchaseForm.requestedTextbookTitle}
-                    onChange={(event) => setPurchaseField("requestedTextbookTitle", event.target.value)}
-                    aria-label="요청 교재명"
-                    placeholder="등록 교재에 없으면 교재명을 직접 입력"
-                    required={!explicitPurchaseTextbookId}
-                  />
+                  )}
                 </section>
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
                   <Field label="수업">
@@ -4197,26 +4208,9 @@ export function TextbookOperationsWorkspace() {
               <Button
                 type="button"
                 variant="outline"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  closePurchaseDialog();
-                }}
-                onMouseDownCapture={(event) => {
-                  event.preventDefault();
-                  closePurchaseDialog();
-                }}
-                onMouseUpCapture={(event) => {
-                  event.preventDefault();
-                  closePurchaseDialog();
-                }}
-                onClickCapture={(event) => {
-                  event.preventDefault();
-                  closePurchaseDialog();
-                }}
                 onClick={closePurchaseDialog}
                 aria-label="교재 요청·주문 창 닫기"
                 title="닫기"
-                data-textbook-modal-dismiss="purchase"
               >
                 닫기
               </Button>
@@ -4242,7 +4236,9 @@ export function TextbookOperationsWorkspace() {
           </form>
         </DialogContent>
       </Dialog>
+      ) : null}
 
+      {bulkOrderDialogOpen ? (
       <Dialog open={bulkOrderDialogOpen} onOpenChange={(open) => (open ? setBulkOrderDialogOpen(true) : closeBulkOrderDialog())}>
         <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
@@ -4291,26 +4287,9 @@ export function TextbookOperationsWorkspace() {
               <Button
                 type="button"
                 variant="outline"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  closeBulkOrderDialog();
-                }}
-                onMouseDownCapture={(event) => {
-                  event.preventDefault();
-                  closeBulkOrderDialog();
-                }}
-                onMouseUpCapture={(event) => {
-                  event.preventDefault();
-                  closeBulkOrderDialog();
-                }}
-                onClickCapture={(event) => {
-                  event.preventDefault();
-                  closeBulkOrderDialog();
-                }}
                 onClick={closeBulkOrderDialog}
                 aria-label="선택 요청 일괄 주문 창 닫기"
                 title="닫기"
-                data-textbook-modal-dismiss="bulk-order"
               >
                 닫기
               </Button>
@@ -4322,7 +4301,9 @@ export function TextbookOperationsWorkspace() {
           </form>
         </DialogContent>
       </Dialog>
+      ) : null}
 
+      {saleDialogOpen ? (
       <Dialog open={saleDialogOpen} onOpenChange={(open) => (open ? setSaleDialogOpen(true) : closeSaleDialog())}>
         <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
@@ -4408,54 +4389,41 @@ export function TextbookOperationsWorkspace() {
                     </label>
                   );
                 }) : (
-                  <div className="px-2 py-6 text-center text-sm text-muted-foreground">수업을 선택하세요</div>
+                  <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                    {!selectedSaleClass ? "수업을 선택하세요" : !selectedSaleTextbook ? "교재를 선택하세요" : "대상 학생이 없습니다"}
+                  </div>
                 )}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
-              <Metric label="대상" value={`${formatQuantity(includedSaleStudentCount)}명`} />
-              <Metric label="수량" value={`${formatQuantity(saleDraft.totalQuantity)}권`} />
-              <Metric label="재고" value={`${formatQuantity(saleDraft.availableQuantity)}권`} />
-              <Metric
-                label="출고 후"
-                value={selectedSaleTextbook ? `${formatQuantity(saleProjectedEndingQuantity)}권` : "-"}
-                tone={saleProjectedEndingQuantity < 0 ? "danger" : "default"}
-              />
-              <Metric label="청구" value={saleProjectedAmount > 0 ? formatCurrency(saleProjectedAmount) : "-"} />
-              <Metric label="부족" value={`${formatQuantity(saleDraft.stockShortage)}권`} tone={saleDraft.hasStockShortage ? "danger" : "default"} />
-            </div>
+            {selectedSaleClass || selectedSaleTextbook ? (
+              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+                <Metric label="대상" value={`${formatQuantity(includedSaleStudentCount)}명`} />
+                <Metric label="수량" value={`${formatQuantity(saleDraft.totalQuantity)}권`} />
+                <Metric label="재고" value={selectedSaleTextbook ? `${formatQuantity(saleDraft.availableQuantity)}권` : "-"} />
+                <Metric
+                  label="출고 후"
+                  value={selectedSaleTextbook ? `${formatQuantity(saleProjectedEndingQuantity)}권` : "-"}
+                  tone={saleProjectedEndingQuantity < 0 ? "danger" : "default"}
+                />
+                <Metric label="청구" value={saleProjectedAmount > 0 ? formatCurrency(saleProjectedAmount) : "-"} />
+                <Metric label="부족" value={`${formatQuantity(saleDraft.stockShortage)}권`} tone={saleDraft.hasStockShortage ? "danger" : "default"} />
+              </div>
+            ) : null}
             <div className={dialogFooterClassName}>
               <Button
                 type="button"
                 variant="outline"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  closeSaleDialog();
-                }}
-                onMouseDownCapture={(event) => {
-                  event.preventDefault();
-                  closeSaleDialog();
-                }}
-                onMouseUpCapture={(event) => {
-                  event.preventDefault();
-                  closeSaleDialog();
-                }}
-                onClickCapture={(event) => {
-                  event.preventDefault();
-                  closeSaleDialog();
-                }}
                 onClick={closeSaleDialog}
                 aria-label="교재 출고 창 닫기"
                 title="닫기"
-                data-textbook-modal-dismiss="sale"
               >
                 닫기
               </Button>
               <Button
                 type="submit"
                 disabled={schemaDisabled || saving === "sale" || saleSubmitDisabled}
-                title={saleSubmitDisabled ? "수업과 교재를 선택하세요" : "출고 대기 저장"}
+                title={saleSubmitDisabled ? saleSubmitHint : "출고 대기 저장"}
               >
                 <Check className="mr-2 size-4" />
                 {saving === "sale" ? "저장 중" : "출고 대기 저장"}
@@ -4464,7 +4432,9 @@ export function TextbookOperationsWorkspace() {
           </form>
         </DialogContent>
       </Dialog>
+      ) : null}
 
+      {closingDialogOpen ? (
       <Dialog open={closingDialogOpen} onOpenChange={(open) => (open ? setClosingDialogOpen(true) : closeClosingDialog())}>
         <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-xl">
           <DialogHeader>
@@ -4496,6 +4466,7 @@ export function TextbookOperationsWorkspace() {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-2 text-sm">
+              <Metric label="저장" value={`${formatQuantity(closingTargetSubjects.length)}건`} />
               <Metric label="입고" value={`${formatQuantity(closingPreview.purchaseQuantity)}권`} />
               <Metric label="출고" value={`${formatQuantity(closingPreview.saleQuantity)}권`} />
               <Metric label="기말" value={`${formatQuantity(closingPreview.endingQuantity)}권`} />
@@ -4519,26 +4490,9 @@ export function TextbookOperationsWorkspace() {
               <Button
                 type="button"
                 variant="outline"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  closeClosingDialog();
-                }}
-                onMouseDownCapture={(event) => {
-                  event.preventDefault();
-                  closeClosingDialog();
-                }}
-                onMouseUpCapture={(event) => {
-                  event.preventDefault();
-                  closeClosingDialog();
-                }}
-                onClickCapture={(event) => {
-                  event.preventDefault();
-                  closeClosingDialog();
-                }}
                 onClick={closeClosingDialog}
                 aria-label="월마감 창 닫기"
                 title="닫기"
-                data-textbook-modal-dismiss="closing"
               >
                 닫기
               </Button>
@@ -4554,6 +4508,7 @@ export function TextbookOperationsWorkspace() {
           </form>
         </DialogContent>
       </Dialog>
+      ) : null}
 
       <ClosingDetailDialog
         open={Boolean(selectedClosingDetail)}
@@ -5031,7 +4986,7 @@ export function TextbookOperationsWorkspace() {
                     최근 {formatQuantity(Math.min(data.monthlyClosings.length, 12))}건
                   </Badge>
                 </div>
-                <Button type="button" onClick={openClosingDialog}>
+                <Button type="button" onClick={openClosingDialog} aria-label="월마감 추가" title="월마감 추가">
                   <ClipboardCheck className="mr-2 size-4" />
                   월마감 추가
                 </Button>
@@ -8745,6 +8700,8 @@ function MonthlyClosingTable({
                     variant="ghost"
                     size="sm"
                     className="h-7 rounded-md px-2 text-xs"
+                    aria-label={`${text(row.closing_month)} ${text(row.subject) === "all" ? "전체" : getSubjectLabel(row.subject)} 정산 상세 열기`}
+                    title={`${text(row.closing_month)} ${text(row.subject) === "all" ? "전체" : getSubjectLabel(row.subject)} 정산 상세`}
                     onClick={(event) => {
                       event.stopPropagation();
                       onInspectRow?.(row);
