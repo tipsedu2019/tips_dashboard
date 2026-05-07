@@ -81,8 +81,9 @@ export function normalizeTimetableClassroomName(value) {
     return "";
   }
 
-  const compact = raw.replace(/\s+/g, "");
-  return CLASSROOM_ALIAS_MAP.get(compact) || raw;
+  const withoutDayHint = raw.replace(/\s*\((?:월|화|수|목|금|토|일|[,\s/·])+\)\s*$/g, "").trim();
+  const compact = withoutDayHint.replace(/\s+/g, "");
+  return CLASSROOM_ALIAS_MAP.get(compact) || withoutDayHint;
 }
 
 export function stripClassPrefix(value) {
@@ -1087,7 +1088,10 @@ function matchesSubjectCatalog(subjects = [], currentSubject = "") {
     return true;
   }
   const normalizedSubjects = normalizeCatalogSubjects(subjects);
-  return normalizedSubjects.length === 0 || normalizedSubjects.includes(target);
+  const normalizedTarget = normalizeCatalogSubjectToken(target);
+  return normalizedSubjects.length === 0 || normalizedSubjects.some((subject) => (
+    subject === target || normalizeCatalogSubjectToken(subject) === normalizedTarget
+  ));
 }
 
 const TIMETABLE_EXCLUDED_TEACHER_TEAMS = new Set(["관리팀", "관리", "운영", "admin", "staff", "management"]);
@@ -1098,6 +1102,12 @@ function normalizeCatalogSubjects(subjects = []) {
   }
 
   return normalizeList(subjects);
+}
+
+function normalizeCatalogSubjectToken(value) {
+  return text(value)
+    .replace(/\s+/g, "")
+    .replace(/(과목|팀)$/g, "");
 }
 
 function isTimetableTeacherCatalogVisible(item = {}) {

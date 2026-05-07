@@ -1729,7 +1729,13 @@ function findLessonDesignElementByDataAttribute(attributeName: string, value: st
 function scrollElementInsideContainerToCenter(container: Element, target: Element) {
   const scrollContainer = container as HTMLElement;
   const targetElement = target as HTMLElement;
-  if (scrollContainer.scrollHeight <= scrollContainer.clientHeight + 1) {
+  const overflowY =
+    typeof window === "undefined" ? "" : window.getComputedStyle(scrollContainer).overflowY;
+  const canScrollInside =
+    scrollContainer.scrollHeight > scrollContainer.clientHeight + 1 &&
+    /^(auto|scroll|overlay)$/.test(overflowY);
+
+  if (!canScrollInside) {
     targetElement.scrollIntoView({
       behavior: "smooth",
       block: "center",
@@ -1758,22 +1764,21 @@ function scrollLessonDesignSessionPair(sessionId: string) {
     return;
   }
 
-  const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
-  calendarTarget?.scrollIntoView({
-    behavior: "smooth",
-    block: "center",
-    inline: "nearest",
-  });
-
   const periodTarget = findLessonDesignElementByDataAttribute("data-lesson-period-session-id", sessionId);
   const periodSidebar = document.querySelector('[data-lesson-period-sidebar="true"]');
 
   if (periodTarget && periodSidebar?.contains(periodTarget)) {
     scrollElementInsideContainerToCenter(periodSidebar, periodTarget);
-    return;
+  } else {
+    periodTarget?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
   }
 
-  periodTarget?.scrollIntoView({
+  const calendarTarget = findLessonDesignElementByDataAttribute("data-lesson-calendar-session-id", sessionId);
+  calendarTarget?.scrollIntoView({
     behavior: "smooth",
     block: "center",
     inline: "nearest",
@@ -3733,6 +3738,7 @@ export function ClassScheduleWorkspace() {
     text(searchParams.get("lessonScheduleState")),
   );
   const lastScrolledLessonDesignSectionKeyRef = useRef("");
+  const lastSyncedLessonSessionPairKeyRef = useRef("");
 
   const closeLessonDesignWorkspace = useCallback(() => {
     setLessonDesignOpen(false);
@@ -3889,7 +3895,13 @@ export function ClassScheduleWorkspace() {
     }
     lastScrolledLessonDesignSectionKeyRef.current = scrollKey;
 
+    const selectedSessionId = text(selectedLessonSession?.id);
     const animationFrameId = window.requestAnimationFrame(() => {
+      if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods && selectedSessionId) {
+        scrollLessonDesignSessionPair(selectedSessionId);
+        return;
+      }
+
       scrollLessonDesignSection(requestedLessonDesignSectionId);
     });
 
@@ -3897,6 +3909,30 @@ export function ClassScheduleWorkspace() {
   }, [
     isLessonDesignPage,
     lessonDesignSnapshot,
+    requestedLessonDesignSectionId,
+    selectedLessonSession,
+    selectedRow,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isLessonDesignPage ||
+      requestedLessonDesignSectionId !== LESSON_DESIGN_SECTION_IDS.periods ||
+      !selectedLessonSession?.id
+    ) {
+      lastSyncedLessonSessionPairKeyRef.current = "";
+      return;
+    }
+
+    const syncKey = [text(selectedRow?.id), selectedLessonSession.id, requestedLessonDesignSectionId].join(":");
+    if (lastSyncedLessonSessionPairKeyRef.current === syncKey) {
+      return;
+    }
+
+    lastSyncedLessonSessionPairKeyRef.current = syncKey;
+    scrollLessonDesignSessionPairAfterRender(selectedLessonSession.id);
+  }, [
+    isLessonDesignPage,
     requestedLessonDesignSectionId,
     selectedLessonSession,
     selectedRow,
@@ -4029,6 +4065,7 @@ export function ClassScheduleWorkspace() {
     }
     if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods) {
       setLessonMonthDetailsOpen((current) => (current ? current : true));
+      scrollLessonDesignSessionPairAfterRender(resolvedRequestedSession.id);
     }
     if (selectedLessonSessionId !== resolvedRequestedSession.id) {
       setSelectedLessonSessionId(resolvedRequestedSession.id);
@@ -5678,7 +5715,7 @@ export function ClassScheduleWorkspace() {
           {isLessonDesignProgressMode && hasLessonTextbooks ? (
             <section
               data-testid="lesson-design-progress-editor"
-              className="relative z-[2] min-w-0 border-t bg-background py-6 2xl:sticky 2xl:top-[calc(var(--header-height)+1rem)] 2xl:col-start-2 2xl:max-h-[calc(100dvh-var(--header-height)-6.5rem)] 2xl:self-start 2xl:overflow-y-auto 2xl:border-l 2xl:border-t-0 2xl:pl-5"
+              className="relative z-[2] min-w-0 overflow-x-hidden border-t bg-background py-6 2xl:sticky 2xl:top-[calc(var(--header-height)+1rem)] 2xl:col-start-2 2xl:max-h-[calc(100dvh-var(--header-height)-6.5rem)] 2xl:self-start 2xl:overflow-y-auto 2xl:border-l 2xl:border-t-0 2xl:pl-5"
             >
               <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
                 <div className="space-y-1">

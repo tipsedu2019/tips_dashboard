@@ -209,6 +209,7 @@ test("lesson design session query sync does not override local session clicks", 
 
   assert.match(source, /lastRequestedLessonSessionKeyRef/);
   assert.match(source, /pendingLessonSessionNavigationKeyRef/);
+  assert.match(source, /lastSyncedLessonSessionPairKeyRef/);
   assert.match(source, /markPendingLessonSessionSelection/);
   assert.match(source, /options: \{ sessionId\?: string; monthKeys\?: string\[\]; sectionId\?: string \}/);
   assert.match(source, /sectionId: targetSectionId/);
@@ -228,6 +229,7 @@ test("lesson design session query sync does not override local session clicks", 
   assert.match(source, /lastRequestedLessonSessionKeyRef\.current = requestedLessonSessionKey/);
   assert.match(source, /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.periods/);
   assert.match(source, /setLessonMonthDetailsOpen\(true\)/);
+  assert.match(source, /scrollLessonDesignSessionPairAfterRender\(resolvedRequestedSession\.id\)/);
   assert.match(source, /markPendingLessonSessionSelection\(periodSelectedSession\.id\)/);
   assert.doesNotMatch(source, /setSelectedLessonSessionId\(periodSelectedSession\.id\)/);
   assert.match(source, /options: \{ scroll\?: boolean \} = \{\}/);
@@ -235,6 +237,14 @@ test("lesson design session query sync does not override local session clicks", 
   assert.match(source, /scrollMode\?: "editor" \| "section" \| "sync" \| "none"/);
   assert.match(source, /scrollLessonDesignPeriodDetailAfterRender/);
   assert.match(source, /scrollLessonDesignSessionPairAfterRender/);
+  assert.match(
+    source,
+    /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.periods && selectedSessionId[\s\S]*scrollLessonDesignSessionPair\(selectedSessionId\)/,
+  );
+  assert.match(
+    source,
+    /requestedLessonDesignSectionId !== LESSON_DESIGN_SECTION_IDS\.periods[\s\S]*lastSyncedLessonSessionPairKeyRef\.current = ""[\s\S]*scrollLessonDesignSessionPairAfterRender\(selectedLessonSession\.id\)/,
+  );
   assert.match(source, /if \(meta\.hasSession\) \{[\s\S]*handleLessonCalendarSelect\(dateKey\);[\s\S]*return;/);
   assert.match(
     source,
@@ -350,10 +360,12 @@ test("lesson design keeps navigation, recovery, and save actions stable", async 
   assert.match(source, /data-testid="lesson-design-bottom-action-bar"/);
   assert.match(source, /fixed bottom-4 right-4 z-30/);
   assert.match(source, /data-testid="lesson-design-progress-editor"/);
+  assert.match(source, /data-testid="lesson-design-progress-editor"[\s\S]*overflow-x-hidden/);
   assert.match(source, /2xl:sticky 2xl:top-\[calc\(var\(--header-height\)\+1rem\)\]/);
   assert.match(source, /2xl:max-h-\[calc\(100dvh-var\(--header-height\)-6\.5rem\)\] 2xl:self-start 2xl:overflow-y-auto/);
   assert.match(source, /\[content-visibility:auto\]/);
-  assert.match(source, /scrollContainer\.scrollHeight <= scrollContainer\.clientHeight \+ 1/);
+  assert.match(source, /const canScrollInside =/);
+  assert.match(source, /window\.getComputedStyle\(scrollContainer\)\.overflowY/);
   assert.match(source, /const requestedLessonSessionKey = `\$\{requestedClassId\}:\$\{resolvedRequestedSession\.id\}`/);
   assert.match(source, /lastRequestedLessonSessionKeyRef\.current = requestedLessonSessionKey/);
   assert.match(source, /sessionId: resolvedRequestedSession\.id/);

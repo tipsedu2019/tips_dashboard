@@ -370,6 +370,59 @@ test("timetable teacher options exclude management team catalogs", () => {
   assert.deepEqual(workspace.teacherOptions, ["한지현"]);
 });
 
+test("timetable options keep settings order for team teachers and normalized classrooms", () => {
+  const workspace = buildTimetableWorkspaceModel({
+    classes: [
+      {
+        id: "class-a",
+        name: "고1 영어 A",
+        subject: "영어",
+        grade: "고1",
+        teacher: "한지현",
+        classroom: "본관 2강(토)",
+        schedule: "토 10:00-11:00",
+        status: "수강",
+      },
+      {
+        id: "class-b",
+        name: "고1 영어 B",
+        subject: "영어",
+        grade: "고1",
+        teacher: "오인환",
+        classroom: "본관 2강",
+        schedule: "월 10:00-11:00",
+        status: "수강",
+      },
+      {
+        id: "class-c",
+        name: "고1 영어 C",
+        subject: "영어",
+        grade: "고1",
+        teacher: "미등록",
+        classroom: "별관 5강(월수)",
+        schedule: "수 10:00-11:00",
+        status: "수강",
+      },
+    ],
+    teacherCatalogs: [
+      { name: "한지현", subjects: ["영어팀"], is_visible: true, sort_order: 20 },
+      { name: "오인환", subjects: ["영어팀"], is_visible: true, sort_order: 10 },
+    ],
+    classroomCatalogs: [
+      { name: "별관 5강", subjects: ["영어"], is_visible: true, sort_order: 1 },
+      { name: "본관 2강", subjects: ["영어"], is_visible: true, sort_order: 2 },
+    ],
+    filters: {
+      subject: "영어",
+      status: "수강",
+    },
+  });
+
+  assert.deepEqual(workspace.teacherOptions, ["오인환", "한지현", "미등록"]);
+  assert.deepEqual(workspace.classroomOptions, ["별관 5강", "본관 2강"]);
+  assert.deepEqual([...new Set(workspace.rows.map((row) => row.classroom))], ["본관 2강", "별관 5강"]);
+});
+
 test("classes without explicit groups fall back to a combined year and term group", () => {
   const workspace = buildTimetableWorkspaceModel({
     classes: [

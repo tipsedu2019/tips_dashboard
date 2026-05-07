@@ -426,6 +426,44 @@ test("attaches class summaries to grade class breakdowns", () => {
   assert.equal(metrics.classBreakdowns.byClassroom[0].classSummaries[0].id, "grade-class-large");
 });
 
+test("normalizes day-specific classroom labels in dashboard operations", () => {
+  const metrics = buildDashboardMetrics({
+    classes: [
+      {
+        id: "room-saturday",
+        name: "토요 수업",
+        subject: "math",
+        schedule: "토 10:00-11:00",
+        teacher: "Teacher A",
+        classroom: "본관 2강(토)",
+        student_ids: ["student-1", "student-2"],
+      },
+      {
+        id: "room-weekday",
+        name: "평일 수업",
+        subject: "math",
+        schedule: "월 10:00-11:00",
+        teacher: "Teacher B",
+        classroom: "본관 2강",
+        student_ids: ["student-3"],
+      },
+    ],
+    students: [
+      { id: "student-1", name: "A", grade: "고1" },
+      { id: "student-2", name: "B", grade: "고1" },
+      { id: "student-3", name: "C", grade: "고1" },
+    ],
+  });
+
+  assert.deepEqual(metrics.classBreakdowns.byClassroom.map((row) => row.label), ["본관 2강"]);
+  assert.equal(metrics.classBreakdowns.byClassroom[0].classCount, 2);
+  assert.equal(metrics.classBreakdowns.byClassroom[0].studentCount, 3);
+  assert.deepEqual(
+    metrics.classBreakdowns.byClassroom[0].classSummaries.map((row) => row.classroomLabel),
+    ["본관 2강", "본관 2강"],
+  );
+});
+
 test("uses class management grade before enrolled student grades for class breakdowns", () => {
   const metrics = buildDashboardMetrics({
     classes: [
