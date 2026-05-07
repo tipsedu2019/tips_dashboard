@@ -5,6 +5,9 @@ export function normalizeOptionalUuid(value: unknown): string | null;
 export function getTextbookActionErrorMessage(error: unknown): string;
 export function getTextbookTitle(row?: TextbookLedgerRow): string;
 export function getTextbookSalePrice(row?: TextbookLedgerRow): number;
+export function isTipsTextbookSource(row?: TextbookLedgerRow): boolean;
+export function getTextbookPurchaseUnitCost(row?: TextbookLedgerRow): number;
+export function getTextbookUnitMargin(row?: TextbookLedgerRow): number;
 export function getTextbookSubject(row?: TextbookLedgerRow): string;
 export function getRecordId(row?: TextbookLedgerRow): string;
 export function listIds(value: unknown): string[];
@@ -35,6 +38,9 @@ export function filterStockMovesForClosing(args?: {
   closingMonth?: string;
   subject?: string;
   textbooks?: TextbookLedgerRow[];
+  publishers?: TextbookLedgerRow[];
+  suppliers?: TextbookLedgerRow[];
+  publisherSupplierLinks?: TextbookLedgerRow[];
   stockMoves?: TextbookLedgerRow[];
 }): TextbookLedgerRow[];
 export function validateMonthlyClosingDraft(
@@ -92,6 +98,15 @@ export function buildTextbookMonthlyClosing(args?: {
   endingAmount: number;
   receivedAmount: number;
   supplierPaymentAmount: number;
+  paymentDifference: number;
+  textbookMarginAmount: number;
+  teamMargins: Array<{
+    team: string;
+    saleQuantity: number;
+    saleAmount: number;
+    purchaseCostAmount: number;
+    marginAmount: number;
+  }>;
   settlementDifference: number;
   needsReview: boolean;
 };

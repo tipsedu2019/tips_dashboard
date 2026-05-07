@@ -194,6 +194,12 @@
     -moz-osx-font-smoothing: grayscale;
     letter-spacing: var(--tracking-normal);
   }
+
+  [data-slot="dialog-content"][data-state="closed"],
+  [data-slot="dialog-overlay"][data-state="closed"] {
+    visibility: hidden;
+    pointer-events: none !important;
+  }
 }
 
 .timetable-floating-tooltip {

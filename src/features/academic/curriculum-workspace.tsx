@@ -29,6 +29,7 @@ import { buildCurriculumWorkspaceModel } from "./records.js";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 
 const DEFAULT_CURRICULUM_STATUS_FILTER = "수강";
+const CURRICULUM_CLASS_PAGE_SIZE = 40;
 const CURRICULUM_VIEW_MODES = [
   { value: "all", label: "전체" },
   { value: "unlinked", label: "교재 미연결" },
@@ -185,6 +186,7 @@ export function AcademicCurriculumWorkspace() {
   const [classroom, setClassroom] = useState("");
   const [viewMode, setViewMode] = useState("all");
   const [selectedClassId, setSelectedClassId] = useState("");
+  const [classListLimitsByScope, setClassListLimitsByScope] = useState<Record<string, number>>({});
   const deferredSearch = useDeferredValue(search);
 
   const baseModel = useMemo(
@@ -283,22 +285,54 @@ export function AcademicCurriculumWorkspace() {
     () => model.rows.filter((row) => rowMatchesViewMode(row, viewMode)),
     [model.rows, viewMode],
   );
-  const viewRowSessionCount = useMemo(
-    () => viewRows.reduce((total, row) => total + Number(row.totalSessions || 0), 0),
+  const classListScopeKey = [
+    normalizedPeriod || "none",
+    status || "all",
+    subject || "all",
+    grade || "all",
+    teacher || "all",
+    classroom || "all",
+    viewMode,
+    deferredSearch.trim(),
+    viewRows.length,
+  ].join(":");
+  const classListLimit = classListLimitsByScope[classListScopeKey] || CURRICULUM_CLASS_PAGE_SIZE;
+  const visibleViewRows = useMemo(() => viewRows.slice(0, classListLimit), [classListLimit, viewRows]);
+  const hasMoreViewRows = visibleViewRows.length < viewRows.length;
+  const viewRowTotals = useMemo(
+    () => {
+      let sessions = 0;
+      let textbooks = 0;
+      for (const row of viewRows) {
+        sessions += Number(row.totalSessions || 0);
+        textbooks += Number(row.textbookCount || 0);
+      }
+      return { sessions, textbooks };
+    },
     [viewRows],
   );
-  const viewRowTextbookCount = useMemo(
-    () => viewRows.reduce((total, row) => total + Number(row.textbookCount || 0), 0),
-    [viewRows],
-  );
+  const viewRowSessionCount = viewRowTotals.sessions;
+  const viewRowTextbookCount = viewRowTotals.textbooks;
   const viewModeLabel = CURRICULUM_VIEW_MODES.find((mode) => mode.value === viewMode)?.label || "전체";
-  const curriculumWorkQueueItems = CURRICULUM_VIEW_MODES.map((mode) => ({
-    ...mode,
-    count:
-      mode.value === "all"
-        ? model.rows.length
-        : model.rows.filter((row) => rowMatchesViewMode(row, mode.value)).length,
-  }));
+  const curriculumViewModeCounts = useMemo(() => {
+    const counts = Object.fromEntries(CURRICULUM_VIEW_MODES.map((mode) => [mode.value, 0])) as Record<string, number>;
+    for (const row of model.rows) {
+      counts.all += 1;
+      if (Number(row.textbookCount || 0) === 0) counts.unlinked += 1;
+      if (Number(row.totalSessions || 0) === 0) counts.unscheduled += 1;
+      if (text(row.stateLabel) === "진도 미배정") counts.update += 1;
+      if (text(row.stateLabel) === "계획 완료") counts.done += 1;
+    }
+    return counts;
+  }, [model.rows]);
+  const curriculumWorkQueueItems = useMemo(
+    () =>
+      CURRICULUM_VIEW_MODES.map((mode) => ({
+        ...mode,
+        count: curriculumViewModeCounts[mode.value] || 0,
+      })),
+    [curriculumViewModeCounts],
+  );
   const selectedRow = useMemo(
     () =>
       viewRows.find((row) => row.id === selectedClassId) ||
@@ -516,6 +550,7 @@ export function AcademicCurriculumWorkspace() {
                 <ClipboardList className="size-4 text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">반별 수업계획</p>
                 <Badge variant="secondary">{viewRows.length}개</Badge>
+                {hasMoreViewRows ? <Badge variant="outline">{visibleViewRows.length}/{viewRows.length}</Badge> : null}
               </div>
               <div className="text-xs text-muted-foreground">
                 {viewRowSessionCount}회차 · {viewRowTextbookCount}권
@@ -526,19 +561,20 @@ export function AcademicCurriculumWorkspace() {
                 현재 조건에 맞는 계획 데이터가 없습니다.
               </div>
             ) : (
-              <ScrollArea className="h-[38rem]">
-                <Table className="min-w-[1040px] table-fixed">
-                  <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_var(--border)]">
-                    <TableRow>
-                      <TableHead className="w-[30%]">수업</TableHead>
-                      <TableHead className="w-[18%]">일정</TableHead>
-                      <TableHead className="w-[22%]">수업교재</TableHead>
-                      <TableHead className="w-[20%]">진도</TableHead>
-                      <TableHead className="w-[10%] text-right">작업</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {viewRows.map((row) => {
+              <>
+                <ScrollArea className="h-[38rem] [contain-intrinsic-size:640px] [content-visibility:auto]">
+                  <Table className="min-w-[1040px] table-fixed">
+                    <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_var(--border)]">
+                      <TableRow>
+                        <TableHead className="w-[30%]">수업</TableHead>
+                        <TableHead className="w-[18%]">일정</TableHead>
+                        <TableHead className="w-[22%]">수업교재</TableHead>
+                        <TableHead className="w-[20%]">진도</TableHead>
+                        <TableHead className="w-[10%] text-right">작업</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {visibleViewRows.map((row) => {
                       const isSelected = selectedRow?.id === row.id;
                       const rowDesignAction = getCurriculumDesignAction(row);
                       const hasLinkedTextbooks = row.textbookCount > 0;
@@ -616,9 +652,8 @@ export function AcademicCurriculumWorkspace() {
                                 </p>
                               </div>
                             ) : (
-                              <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs">
-                                <p className="font-medium text-foreground">교재 연결 필요</p>
-                                <p className="mt-1 text-muted-foreground">교재를 연결한 뒤 회차별 진도를 배정합니다.</p>
+                              <div className="inline-flex h-8 items-center rounded-md border border-dashed bg-muted/20 px-2.5 text-xs font-medium text-muted-foreground">
+                                교재 연결 필요
                               </div>
                             )}
                           </TableCell>
@@ -635,10 +670,27 @@ export function AcademicCurriculumWorkspace() {
                           </TableCell>
                         </TableRow>
                       );
-                    })}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+                      })}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+                {hasMoreViewRows ? (
+                  <div className="flex justify-center border-t bg-background px-4 py-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-w-44"
+                      onClick={() => setClassListLimitsByScope((current) => ({
+                        ...current,
+                        [classListScopeKey]: (current[classListScopeKey] || CURRICULUM_CLASS_PAGE_SIZE) + CURRICULUM_CLASS_PAGE_SIZE,
+                      }))}
+                    >
+                      더 보기 · {visibleViewRows.length}/{viewRows.length}개
+                    </Button>
+                  </div>
+                ) : null}
+              </>
             )}
           </section>
 

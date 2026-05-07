@@ -42,6 +42,9 @@ type NavUserRecord = {
   avatar: string
 }
 
+const PROFILE_AVATAR_INITIAL_LIMIT = 20
+const PROFILE_AVATAR_BATCH_SIZE = 15
+
 function getAvatarFallback(user: NavUserRecord) {
   const compactName = (user.name || "").replace(/\s+/g, "")
   const nameLetters = Array.from(compactName)
@@ -83,11 +86,18 @@ export function NavUser({ user }: { user: NavUserRecord }) {
   const [confirmPassword, setConfirmPassword] = React.useState("")
   const [saving, setSaving] = React.useState(false)
   const [feedback, setFeedback] = React.useState<{ type: "success" | "error"; message: string } | null>(null)
+  const [avatarLimit, setAvatarLimit] = React.useState(PROFILE_AVATAR_INITIAL_LIMIT)
 
   React.useEffect(() => {
     setLocalAvatar(normalizedUserAvatar)
     setSelectedAvatar(normalizedUserAvatar)
   }, [normalizedUserAvatar])
+
+  React.useEffect(() => {
+    if (profileOpen) {
+      setAvatarLimit(PROFILE_AVATAR_INITIAL_LIMIT)
+    }
+  }, [profileOpen])
 
   const displayUser = React.useMemo(
     () => ({
@@ -96,6 +106,26 @@ export function NavUser({ user }: { user: NavUserRecord }) {
     }),
     [localAvatar, normalizedUserAvatar, user],
   )
+  const selectedPreset = React.useMemo(
+    () => profileAvatarPresets.find((preset) => preset.src === selectedAvatar),
+    [selectedAvatar],
+  )
+  const visibleProfileAvatarPresets = React.useMemo(() => {
+    const visiblePresets = profileAvatarPresets.slice(0, avatarLimit)
+    if (selectedPreset && !visiblePresets.some((preset) => preset.id === selectedPreset.id)) {
+      return [...visiblePresets, selectedPreset]
+    }
+    return visiblePresets
+  }, [avatarLimit, selectedPreset])
+  const hasMoreAvatars = avatarLimit < profileAvatarPresets.length
+
+  const handleAvatarSelect = React.useCallback((avatar: string) => {
+    setSelectedAvatar(avatar)
+  }, [])
+
+  const revealMoreAvatars = React.useCallback(() => {
+    setAvatarLimit((current) => Math.min(current + PROFILE_AVATAR_BATCH_SIZE, profileAvatarPresets.length))
+  }, [])
 
   const handleLogout = async () => {
     await logout()
@@ -121,7 +151,6 @@ export function NavUser({ user }: { user: NavUserRecord }) {
       return
     }
 
-    const selectedPreset = profileAvatarPresets.find((preset) => preset.src === selectedAvatar)
     const avatarChanged = Boolean(selectedAvatar && selectedAvatar !== (localAvatar || normalizedUserAvatar))
 
     if (!avatarChanged && !shouldChangePassword) {
@@ -173,6 +202,7 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                 size="lg"
                 aria-label={`${displayUser.name} 계정 메뉴 열기`}
                 title="계정 메뉴"
+                data-testid="admin-user-menu-trigger"
                 className="cursor-pointer data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
                 <UserAvatar user={displayUser} />
@@ -190,6 +220,7 @@ export function NavUser({ user }: { user: NavUserRecord }) {
               side={isMobile ? "bottom" : "right"}
               align="end"
               sideOffset={4}
+              data-testid="admin-user-menu"
             >
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
@@ -203,17 +234,21 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer" onSelect={() => setProfileOpen(true)}>
+              <DropdownMenuItem className="cursor-pointer" data-testid="admin-user-profile-settings" onSelect={() => setProfileOpen(true)}>
                 <UserRound />
                 프로필 설정
               </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer" onClick={handleLogout}>
+              <DropdownMenuItem className="cursor-pointer" data-testid="admin-user-logout" onClick={handleLogout}>
                 <LogOut />
                 로그아웃
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <DialogContent className="max-h-[calc(100dvh-2rem)] w-[min(920px,calc(100vw-2rem))] !max-w-[920px] overflow-hidden p-0">
+          <DialogContent
+            aria-label="프로필 설정"
+            data-testid="admin-profile-dialog"
+            className="max-h-[calc(100dvh-2rem)] w-[min(920px,calc(100vw-2rem))] !max-w-[920px] overflow-hidden p-0"
+          >
             <form onSubmit={handleProfileSave} className="grid min-h-0">
               <DialogHeader className="border-b px-5 py-4 sm:px-6">
                 <DialogTitle>프로필 설정</DialogTitle>
@@ -234,8 +269,12 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                     </Avatar>
                   </div>
                   <ScrollArea className="h-[316px]">
-                    <div className="grid grid-cols-5 gap-2 p-3 sm:grid-cols-10">
-                      {profileAvatarPresets.map((preset, index) => {
+                    <div
+                      className="grid grid-cols-5 gap-2 p-3 sm:grid-cols-10"
+                      data-testid="admin-profile-avatar-grid"
+                      data-visible-count={visibleProfileAvatarPresets.length}
+                    >
+                      {visibleProfileAvatarPresets.map((preset, index) => {
                         const selected = selectedAvatar === preset.src
                         return (
                           <button
@@ -243,7 +282,8 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                             type="button"
                             aria-label={`${preset.label} 선택`}
                             aria-pressed={selected}
-                            onClick={() => setSelectedAvatar(preset.src)}
+                            data-testid={`admin-profile-avatar-${preset.id}`}
+                            onClick={() => handleAvatarSelect(preset.src)}
                             className={cn(
                               "group relative grid aspect-square place-items-center rounded-xl border bg-background p-1 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:bg-muted",
                               selected && "border-primary bg-primary/5",
@@ -264,6 +304,19 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                         )
                       })}
                     </div>
+                    {hasMoreAvatars ? (
+                      <div className="px-3 pb-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 w-full rounded-md"
+                          data-testid="admin-profile-avatar-show-more"
+                          onClick={revealMoreAvatars}
+                        >
+                          더 보기
+                        </Button>
+                      </div>
+                    ) : null}
                   </ScrollArea>
                 </section>
                 <section className="grid content-start gap-4">

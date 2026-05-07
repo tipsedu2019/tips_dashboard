@@ -12,29 +12,27 @@ interface ModeToggleProps {
   variant?: "outline" | "ghost" | "default"
 }
 
+function getSystemDarkMode() {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+}
+
 export function ModeToggle({ variant = "outline" }: ModeToggleProps) {
   const { theme } = useTheme()
   const { toggleTheme } = useCircularTransition()
 
-  // Simple, reliable dark mode detection with re-sync
-  const [isDarkMode, setIsDarkMode] = React.useState(false)
+  const [systemDarkMode, setSystemDarkMode] = React.useState(getSystemDarkMode)
+  const isDarkMode = theme === "dark" || (theme !== "light" && systemDarkMode)
 
   React.useEffect(() => {
-    const updateMode = () => {
-      if (theme === "dark") {
-        setIsDarkMode(true)
-      } else if (theme === "light") {
-        setIsDarkMode(false)
-      } else {
-        setIsDarkMode(typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches)
-      }
+    if (theme === "dark" || theme === "light") {
+      return
     }
 
-    updateMode()
+    const updateMode = () => setSystemDarkMode(getSystemDarkMode())
 
-    // Listen for system theme changes
     const mediaQuery = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)") : null
     if (mediaQuery) {
+      updateMode()
       mediaQuery.addEventListener("change", updateMode)
     }
 
@@ -58,9 +56,10 @@ export function ModeToggle({ variant = "outline" }: ModeToggleProps) {
       onClick={handleToggle}
       aria-label={nextThemeLabel}
       title={nextThemeLabel}
+      data-testid="admin-theme-toggle"
+      data-theme-target={isDarkMode ? "light" : "dark"}
       className="cursor-pointer mode-toggle-button relative overflow-hidden"
     >
-      {/* Show the icon for the mode you can switch TO */}
       {isDarkMode ? (
         <Sun className="h-[1.2rem] w-[1.2rem] transition-transform duration-300 rotate-0 scale-100" />
       ) : (

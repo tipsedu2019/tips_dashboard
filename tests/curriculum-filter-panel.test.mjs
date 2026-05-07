@@ -41,10 +41,29 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
   const modelSource = await readFile(new URL("src/features/academic/records.js", root), "utf8");
 
-  assert.match(source, /const curriculumWorkQueueItems = CURRICULUM_VIEW_MODES\.map/);
+  assert.match(source, /const curriculumWorkQueueItems = useMemo/);
+  assert.match(source, /CURRICULUM_VIEW_MODES\.map/);
+  assert.match(source, /\[model\.rows\]/);
   assert.match(source, /data-testid="curriculum-work-queue"/);
-  assert.match(source, /const viewRowSessionCount = useMemo/);
-  assert.match(source, /const viewRowTextbookCount = useMemo/);
+  assert.match(source, /const viewRowSessionCount = viewRowTotals\.sessions/);
+  assert.match(source, /const viewRowTextbookCount = viewRowTotals\.textbooks/);
+  assert.match(source, /const CURRICULUM_CLASS_PAGE_SIZE = 40/);
+  assert.match(source, /const \[classListLimitsByScope, setClassListLimitsByScope\] = useState<Record<string, number>>\(\{\}\)/);
+  assert.match(source, /const classListScopeKey = \[/);
+  assert.match(source, /const classListLimit = classListLimitsByScope\[classListScopeKey\] \|\| CURRICULUM_CLASS_PAGE_SIZE/);
+  assert.match(source, /const visibleViewRows = useMemo\(\(\) => viewRows\.slice\(0, classListLimit\), \[classListLimit, viewRows\]\)/);
+  assert.match(source, /const hasMoreViewRows = visibleViewRows\.length < viewRows\.length/);
+  assert.match(source, /const viewRowTotals = useMemo/);
+  assert.match(source, /const curriculumViewModeCounts = useMemo/);
+  assert.match(source, /for \(const row of model\.rows\)/);
+  assert.match(source, /counts\.unlinked \+= 1/);
+  assert.match(source, /counts\.unscheduled \+= 1/);
+  assert.match(source, /counts\.update \+= 1/);
+  assert.match(source, /counts\.done \+= 1/);
+  assert.doesNotMatch(source, /rowMatchesViewMode\(row, mode\.value\)/);
+  assert.match(source, /\{visibleViewRows\.map\(\(row\) =>/);
+  assert.match(source, /setClassListLimitsByScope\(\(current\) => \(\{/);
+  assert.match(source, /\[classListScopeKey\]: \(current\[classListScopeKey\] \|\| CURRICULUM_CLASS_PAGE_SIZE\) \+ CURRICULUM_CLASS_PAGE_SIZE/);
   assert.match(source, /\{viewRowSessionCount\}회차 · \{viewRowTextbookCount\}권/);
   assert.doesNotMatch(source, /\{model\.summary\.totalSessions\}회차 · \{model\.summary\.linkedTextbooks\}권/);
   assert.match(source, /viewRows\.find\(\(row\) => row\.id === selectedClassId\) \|\|\s*viewRows\[0\] \|\|\s*null/);
@@ -56,6 +75,7 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /sticky top-0 z-10 bg-background/);
   assert.match(source, /min-w-\[1040px\]/);
   assert.match(source, /const hasLinkedTextbooks = row\.textbookCount > 0/);
+  assert.match(source, /inline-flex h-8 items-center rounded-md border border-dashed/);
   assert.match(modelSource, /const progressTargetSessions = textbookCount > 0/);
   assert.match(modelSource, /Number\(session\.textbookEntryCount \|\| 0\) > 0/);
   assert.doesNotMatch(modelSource, /scheduleState !== "exception" && scheduleState !== "tbd"/);
@@ -64,7 +84,7 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /formatProgressPercent\(row\.progressTargetPercent, progressTargetSessionCount\)/);
   assert.match(source, /formatProgressMeta\(row\.plannedProgressSessions, row\.delayedProgressSessions, progressTargetSessionCount\)/);
   assert.match(source, /교재 연결 필요/);
-  assert.match(source, /교재를 연결한 뒤 회차별 진도를 배정합니다\./);
+  assert.doesNotMatch(source, /교재를 연결한 뒤 회차별 진도를 배정합니다\./);
 });
 
 test("curriculum detail panel separates schedule and progress entry points", async () => {
@@ -104,4 +124,7 @@ test("shared class filter panel separates search and view state from filter coun
   assert.match(source, /filterCount\?: number/);
   assert.match(source, /const activeFilterCount = filterCount \?\? chips\.length/);
   assert.match(source, /aria-label=\{searchPlaceholder\}/);
+  assert.match(source, /data-testid="class-filter-popover-header"/);
+  assert.match(source, /<PopoverContent align="end" className="w-\[min\(34rem,calc\(100vw-2rem\)\)\] p-0">/);
+  assert.match(source, /<p className="truncate text-sm font-semibold text-foreground">필터<\/p>/);
 });

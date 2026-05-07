@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { flushSync } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import { Command as CommandPrimitive } from "cmdk"
 import { ArrowRight, Search, type LucideIcon } from "lucide-react"
@@ -102,6 +103,8 @@ interface SearchItem {
 }
 
 export const QUICK_SEARCH_SHORTCUT_LABEL = "Ctrl + K"
+const EMPTY_GROUPED_SEARCH_ITEMS = {} as Record<string, SearchItem[]>
+const EMPTY_GROUPED_SEARCH_ENTRIES: Array<[string, SearchItem[]]> = []
 
 function resolveCommandGroupLabel(label: string) {
   if (label === "운영") {
@@ -119,6 +122,13 @@ function normalizeCommandPath(pathname: string) {
   return pathname.replace(/\/+$/, "")
 }
 
+function commandTargetId(url: string) {
+  return normalizeCommandPath(url)
+    .replace(/^\/+/, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "root"
+}
+
 function createSearchItems({
   canManageAll,
   canEditCurriculumPlanning,
@@ -128,17 +138,17 @@ function createSearchItems({
 }): SearchItem[] {
   const navGroups = buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning })
   const seen = new Set<string>()
+  const navigationItems: SearchItem[] = []
 
-  const navigationItems = navGroups.flatMap((group) => {
+  for (const group of navGroups) {
     const groupLabel = resolveCommandGroupLabel(group.label)
 
-    return group.items.flatMap((item) => {
-      const items: SearchItem[] = []
+    for (const item of group.items) {
       const sameUrlChild = item.items?.find((subItem) => subItem.url === item.url)
 
       if (!sameUrlChild && !seen.has(item.url)) {
         seen.add(item.url)
-        items.push({
+        navigationItems.push({
           title: item.title,
           url: item.url,
           group: groupLabel,
@@ -152,19 +162,30 @@ function createSearchItems({
         }
 
         seen.add(subItem.url)
-        items.push({
+        navigationItems.push({
           title: subItem.title,
           url: subItem.url,
           group: groupLabel,
           icon: item.icon,
         })
       }
-
-      return items
-    })
-  })
+    }
+  }
 
   return navigationItems
+}
+
+function groupSearchItems(items: SearchItem[]) {
+  return items.reduce(
+    (accumulator, item) => {
+      if (!accumulator[item.group]) {
+        accumulator[item.group] = []
+      }
+      accumulator[item.group].push(item)
+      return accumulator
+    },
+    {} as Record<string, SearchItem[]>,
+  )
 }
 
 interface CommandSearchProps {
@@ -177,44 +198,70 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
   const pathname = usePathname()
   const { canManageAll, canEditCurriculumPlanning } = useAuth()
   const currentPath = React.useMemo(() => normalizeCommandPath(pathname), [pathname])
+  const prefetchedCommandRoutesRef = React.useRef(new Set<string>())
+
+  const prefetchCommandRoute = React.useCallback((url: string) => {
+    const targetPath = normalizeCommandPath(url)
+    if (targetPath === currentPath || prefetchedCommandRoutesRef.current.has(targetPath)) return
+
+    prefetchedCommandRoutesRef.current.add(targetPath)
+    router.prefetch(targetPath)
+  }, [currentPath, router])
 
   const groupedItems = React.useMemo(() => {
-    return createSearchItems({ canManageAll, canEditCurriculumPlanning }).reduce(
-      (accumulator, item) => {
-        if (!accumulator[item.group]) {
-          accumulator[item.group] = []
-        }
-        accumulator[item.group].push(item)
-        return accumulator
-      },
-      {} as Record<string, SearchItem[]>,
-    )
-  }, [canEditCurriculumPlanning, canManageAll])
+    if (!open) return EMPTY_GROUPED_SEARCH_ITEMS
+    return groupSearchItems(createSearchItems({ canManageAll, canEditCurriculumPlanning }))
+  }, [canEditCurriculumPlanning, canManageAll, open])
+
+  const groupedEntries = React.useMemo(
+    () => (open ? Object.entries(groupedItems) : EMPTY_GROUPED_SEARCH_ENTRIES),
+    [groupedItems, open],
+  )
 
   const handleSelect = React.useCallback((url: string) => {
-    onOpenChange(false)
+    const targetPath = normalizeCommandPath(url)
 
-    if (normalizeCommandPath(url) !== currentPath) {
-      router.push(url)
+    flushSync(() => {
+      onOpenChange(false)
+    })
+
+    if (targetPath !== currentPath) {
+      React.startTransition(() => {
+        router.push(targetPath)
+      })
     }
   }, [currentPath, onOpenChange, router])
 
+  if (!open) {
+    return null
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] max-w-[640px] overflow-hidden border border-zinc-200 p-0 shadow-2xl dark:border-zinc-800">
+      <DialogContent
+        aria-label="운영 워크스페이스 빠른 이동"
+        data-testid="admin-quick-search-dialog"
+        className="w-[calc(100vw-2rem)] max-w-[640px] overflow-hidden border border-zinc-200 p-0 shadow-2xl dark:border-zinc-800"
+      >
         <DialogTitle className="sr-only">운영 워크스페이스 빠른 이동</DialogTitle>
         <DialogDescription className="sr-only">
           메뉴와 관리 화면을 검색해서 바로 이동합니다.
         </DialogDescription>
-        <Command>
-          <CommandInput placeholder="메뉴, 기능, 주소 검색" autoFocus />
-          <CommandList>
+        <Command data-testid="admin-quick-search-command">
+          <CommandInput
+            aria-label="빠른 이동 검색"
+            data-testid="admin-quick-search-input"
+            placeholder="메뉴, 기능, 주소 검색"
+            autoFocus
+          />
+          <CommandList data-testid="admin-quick-search-list">
             <CommandEmpty>일치하는 메뉴가 없습니다.</CommandEmpty>
-            {Object.entries(groupedItems).map(([group, items]) => (
+            {groupedEntries.map(([group, items]) => (
               <CommandGroup key={group} heading={`${group} ${items.length}개`}>
                 {items.map((item) => {
                   const Icon = item.icon
                   const isCurrent = normalizeCommandPath(item.url) === currentPath
+                  const itemTargetId = commandTargetId(item.url)
 
                   return (
                     <CommandItem
@@ -222,6 +269,11 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
                       value={`${item.title} ${item.group} ${item.url}`}
                       keywords={[item.group, item.url]}
                       aria-current={isCurrent ? "page" : undefined}
+                      aria-label={`${item.title}로 이동`}
+                      data-testid={`admin-quick-search-item-${itemTargetId}`}
+                      onPointerEnter={() => prefetchCommandRoute(item.url)}
+                      onFocus={() => prefetchCommandRoute(item.url)}
+                      onClick={() => handleSelect(item.url)}
                       onSelect={() => handleSelect(item.url)}
                       className={isCurrent ? "bg-primary/5 text-primary data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary" : undefined}
                     >
@@ -257,6 +309,8 @@ export function SearchTrigger({ onClick }: { onClick: () => void }) {
       type="button"
       aria-label={`빠른 이동 열기, ${QUICK_SEARCH_SHORTCUT_LABEL}`}
       title={`빠른 이동 (${QUICK_SEARCH_SHORTCUT_LABEL})`}
+      data-testid="admin-quick-search-trigger"
+      data-shortcut-label={QUICK_SEARCH_SHORTCUT_LABEL}
       onClick={onClick}
       className="relative inline-flex h-8 w-full items-center justify-start gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 py-1 text-sm font-medium text-muted-foreground shadow-sm transition-[background-color,color,box-shadow,transform] hover:bg-accent hover:text-accent-foreground active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pr-12 md:w-36 lg:w-56"
     >

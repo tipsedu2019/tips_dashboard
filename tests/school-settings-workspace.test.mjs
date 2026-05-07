@@ -4,6 +4,7 @@ import test from "node:test";
 
 const workspacePath = "src/features/management/school-master-workspace.tsx";
 const columnsPath = "src/features/management/settings-table-columns.tsx";
+const commonColumnsPath = "src/components/data-table/data-table-columns.tsx";
 const layoutPath = "src/features/management/settings-master-layout.tsx";
 
 async function readWorkspace() {
@@ -36,14 +37,16 @@ test("school settings guards invalid edits and makes pending changes recoverable
 test("school settings table keeps actions reachable in dense lists", async () => {
   const source = await readWorkspace();
   const columnSource = await readFile(columnsPath, "utf8");
+  const commonColumnSource = await readFile(commonColumnsPath, "utf8");
 
   assert.match(source, /table-fixed min-w-\[720px\]/);
   assert.match(source, /settingsTableActionHeadClass/);
   assert.match(source, /settingsTableActionCellClass/);
   assert.match(source, /aria-label="학교명 검색 초기화"/);
-  assert.match(columnSource, /aria-label="컬럼 구성"/);
-  assert.match(columnSource, /초기화/);
-  assert.doesNotMatch(columnSource, /而щ읆|珥덇린|怨좎젙/);
+  assert.match(columnSource, /useDataTableColumns as useSettingsTableColumns/);
+  assert.match(commonColumnSource, /aria-label="컬럼 구성"/);
+  assert.match(commonColumnSource, /초기화/);
+  assert.doesNotMatch(commonColumnSource, /而щ읆|珥덇린|怨좎젙/);
 });
 
 test("shared settings layout keeps command actions available while scrolling", async () => {

@@ -17,6 +17,10 @@ export function SiteHeader() {
   const workspaceMeta = React.useMemo(() => resolveAdminWorkspaceMeta(pathname), [pathname])
 
   React.useEffect(() => {
+    setSearchOpen(false)
+  }, [pathname])
+
+  React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
@@ -33,7 +37,7 @@ export function SiteHeader() {
       <header className="sticky top-0 z-30 flex h-auto shrink-0 items-center border-b bg-background/95 backdrop-blur transition-[width,height] ease-linear supports-[backdrop-filter]:bg-background/80 group-has-data-[collapsible=icon]/sidebar-wrapper:h-auto">
         <div className="flex w-full items-start gap-3 px-4 py-3 lg:px-6">
           <div className="flex shrink-0 items-center gap-2 pt-1">
-            <SidebarTrigger className="-ml-1 shrink-0" />
+            <SidebarTrigger className="-ml-1 shrink-0" data-testid="admin-sidebar-toggle" />
             <Separator orientation="vertical" className="hidden data-[orientation=vertical]:h-6 sm:block" />
           </div>
 
@@ -53,6 +57,7 @@ export function SiteHeader() {
                 rel="noreferrer"
                 aria-label="홈페이지를 새 화면에서 확인"
                 title="홈페이지 확인"
+                data-testid="admin-public-site-link"
                 className="hidden h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
               >
                 <ExternalLink className="size-3.5" aria-hidden="true" />

@@ -172,6 +172,32 @@ test("textbook catalog keeps newly connected books alongside default class books
   assert.equal(normalized.textbooks[1].startSessionId, "session:002:2026-05-08:2026-05:active");
 });
 
+test("textbook range presets stay attached to the textbook catalog", () => {
+  const saved = buildSchedulePlanForSave(
+    {
+      ...createPlan(),
+      textbooks: [
+        {
+          textbookId: "book-a",
+          alias: "Book A",
+          rangePresets: [
+            { key: "u1", label: "Unit 1", start: "1", end: "10", memo: "core" },
+            { key: "u1-copy", label: "Unit 1", start: "1", end: "10" },
+            { key: "u2", label: "Unit 2", start: "11", end: "20" },
+          ],
+        },
+      ],
+    },
+    {},
+  );
+
+  assert.deepEqual(
+    saved.textbooks[0].rangePresets.map((preset) => preset.label),
+    ["Unit 1", "Unit 2"],
+  );
+  assert.equal(saved.textbooks[0].rangePresets[0].memo, "core");
+});
+
 test("duplicate legacy billing period ids are made unique before session ids are generated", () => {
   const saved = buildSchedulePlanForSave(
     {

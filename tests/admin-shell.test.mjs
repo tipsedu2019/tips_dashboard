@@ -32,7 +32,7 @@ test("nav user lets signed-in users edit avatar and password", async () => {
   assert.match(navUserSource, /프로필 설정/);
   assert.match(navUserSource, /supabase\.auth\.updateUser/);
   assert.match(navUserSource, /새 비밀번호/);
-  assert.match(navUserSource, /profileAvatarPresets\.map/);
+  assert.match(navUserSource, /visibleProfileAvatarPresets\.map/);
   assert.match(appSidebarSource, /userMetadata\.avatar_url[\s\S]*userMetadata\.picture[\s\S]*profileFields\.avatar_url/);
   assert.match(avatarSource, /Array\.from\(\{ length: 50 \}/);
   assert.match(avatarSource, /notion-face-/);
@@ -114,6 +114,7 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
   assert.match(source, /if \(rows\.length === 0\) \{\s*return null\s*\}/);
   assert.match(source, /classSummaries/);
   assert.match(source, /scheduleLabel/);
+  assert.match(source, /weeklyHoursLabel/);
   assert.match(source, /teacherLabel/);
   assert.match(source, /classroomLabel/);
   assert.match(source, /aria-expanded/);
@@ -124,9 +125,10 @@ test("dashboard focuses on student, enrollment, class, and conflict signals", as
   assert.doesNotMatch(source, /이번 주 ·/);
   assert.doesNotMatch(source, /교재/);
   assert.doesNotMatch(source, /진도/);
-  assert.doesNotMatch(source, /선생/);
   assert.doesNotMatch(source, /교사/);
-  assert.doesNotMatch(source, /강의실/);
+  assert.match(source, /CLASS_OPERATION_GROUP_TABS/);
+  assert.match(source, /\{ key: "teacher", label: "선생님" \}/);
+  assert.match(source, /\{ key: "classroom", label: "강의실" \}/);
   assert.doesNotMatch(source, /subjectRows/);
   assert.doesNotMatch(source, /normalCount/);
   assert.doesNotMatch(source, /SearchCheck/);
@@ -175,6 +177,7 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /const gradeRowsForSchool = isExpanded \? allGradeRowsForSchool : \[\]/);
   assert.match(source, /DISTRIBUTION_TOGGLE_ROW_CLASS/);
   assert.match(source, /aria-expanded=\{isExpanded\}/);
+  assert.match(source, /truncate pl-5 font-medium text-muted-foreground/);
   assert.match(source, /\$\{row\.label\} 학교 분포 \$\{isExpanded \? "접기" : "펼치기"\}/);
   assert.match(source, /\$\{row\.label\} 학년 분포 \$\{isExpanded \? "접기" : "펼치기"\}/);
   assert.match(source, /isExpanded && "rotate-180 text-primary"/);
@@ -183,24 +186,33 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /ListScopeToggle/);
   assert.match(source, /role="group" aria-label=\{label\}/);
   assert.match(source, /aria-pressed=\{expanded\}/);
-  assert.match(source, /expanded \? `상위 \$\{formatNumber\(visibleCount\)\}` : `전체 \$\{formatNumber\(totalCount\)\}`/);
+  assert.match(source, /const actionLabel = expanded \? "접기" : "전체 보기"/);
+  assert.match(source, /const countLabel = expanded \? `상위 \$\{formatNumber\(visibleCount\)\}개` : `\$\{formatNumber\(totalCount\)\}개`/);
   assert.match(source, /label="학년 분포"/);
   assert.match(source, /label="학교 분포"/);
   assert.match(source, /label=\{`\$\{row\.label\} 수업 목록`\}/);
   assert.match(source, /aria-label="학년별 학생 분포"/);
   assert.match(source, /aria-label="학교별 학생 분포"/);
-  assert.match(source, /aria-label="학년별 수업 운영"/);
+  assert.match(source, /aria-label=\{`\$\{groupLabel\}별 수업 운영`\}/);
+  assert.match(source, /label="수업 운영 보기"/);
+  assert.match(source, /value=\{groupMode\}/);
   assert.match(source, /role="listitem"/);
   assert.match(source, /classRows = isExpanded \? allClassRows : allClassRows\.slice\(0, CLASS_PREVIEW_LIMIT\)/);
-  assert.match(source, /const defaultOpenGradeKey = gradeRows\[0\] \? `class-grade:\$\{gradeRows\[0\]\.label\}` : undefined/);
-  assert.match(source, /new Set\(defaultOpenGradeKey \? \[defaultOpenGradeKey\] : \[\]\)/);
+  assert.match(source, /const groupRowsByMode = useMemo/);
+  assert.match(source, /byTeacher \|\| \[\]/);
+  assert.match(source, /byClassroom \|\| \[\]/);
+  assert.match(source, /function getClassOperationGroupKey/);
+  assert.match(source, /const defaultOpenGroupKey = groupRows\[0\] \? getClassOperationGroupKey\(groupMode, groupRows\[0\]\.label\) : undefined/);
+  assert.match(source, /const changeGroupMode = \(nextMode: ClassOperationGroupMode\)/);
+  assert.match(source, /new Set\(defaultOpenGroupKey \? \[defaultOpenGroupKey\] : \[\]\)/);
   assert.doesNotMatch(source, /\+\$\{formatNumber/);
-  assert.match(source, /label: "인원"/);
+  assert.match(source, /label: "재원"/);
   assert.match(source, /label: "수강"/);
+  assert.doesNotMatch(source, /label: "인원"/);
   assert.doesNotMatch(source, /INLINE_DISCLOSURE_BUTTON_CLASS/);
   assert.doesNotMatch(source, /LIST_DISCLOSURE_BUTTON_CLASS/);
   assert.match(source, /LIST_SCOPE_TOGGLE_CLASS/);
-  assert.match(source, /hover:text-foreground/);
+  assert.match(source, /hover:border-primary\/40/);
   assert.match(source, /hasDistributionRows/);
   assert.match(source, /<EmptyLine label="학생 데이터 없음" \/>/);
   assert.match(source, /<EmptyLine label="학년 데이터 없음" \/>/);
@@ -212,6 +224,10 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /학년별 학교 분포/);
   assert.doesNotMatch(source, /학교별 학년 분포/);
   assert.doesNotMatch(source, /totalClassCount/);
+  assert.match(source, /function formatWeeklyHoursLabel/);
+  assert.match(source, /합계 \{formatNumber\(row\.classCount\)\}개 · \{formatWeeklyHoursLabel\(row\.weeklyHoursLabel\)\} · \{formatNumber\(row\.studentCount\)\}명/);
+  assert.match(source, /\{formatNumber\(row\.studentCount\)\}명/);
+  assert.match(source, /formatWeeklyHoursLabel\(classItem\.weeklyHoursLabel\)[\s\S]*formatNumber\(classItem\.studentCount\)/);
   assert.match(source, /본과목 수업일/);
   assert.match(source, /타과목 시험일 전날/);
   assert.match(source, /본과목 시험일/);
@@ -222,7 +238,8 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /해당 과목 시험일 당일에는 수업을 진행하지 않습니다/);
   assert.doesNotMatch(source, /시험\/수업 충돌/);
   assert.doesNotMatch(source, /수업: /);
-  assert.match(source, /slice\(0, 3\)/);
+  assert.match(source, /const visibleRows = showAllConflicts \? rows : rows\.slice\(0, 3\)/);
+  assert.match(source, /label="일정 충돌"/);
   assert.match(source, /<ConflictBoard rows=\{conflictRows\} \/>[\s\S]*<div className="grid gap-4/);
   assert.match(source, /splitBadgeLabels\(classItem\.teacherLabel\)/);
   assert.match(source, /splitBadgeLabels\(classItem\.classroomLabel\)/);
@@ -245,11 +262,11 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /DISTRIBUTION_ROW_CLASS/);
   assert.match(source, /grid-cols-\[minmax\(3\.75rem,5\.25rem\)_minmax\(0,1fr\)_3\.25rem\]/);
   assert.match(source, /CLASS_OPERATION_ROW_CLASS/);
-  assert.match(source, /grid-cols-\[1rem_3\.25rem_minmax\(0,1fr\)_3\.75rem\]/);
+  assert.match(source, /grid-cols-\[1rem_minmax\(4\.5rem,7rem\)_minmax\(0,1fr\)_6\.25rem\]/);
   assert.match(source, /focus-visible:ring-2 focus-visible:ring-ring/);
-  assert.match(source, /defaultOpenGradeKey/);
+  assert.match(source, /defaultOpenGroupKey/);
   assert.match(source, /ChevronDown/);
-  assert.match(source, /aria-label=\{`\$\{row\.label\} 수업/);
+  assert.match(source, /aria-label=\{`\$\{row\.label\} \$\{groupLabel\} 수업/);
   assert.match(source, /key=\{`\$\{activeSubject\}:\$\{activeDivision\}`\}/);
   assert.match(source, /order-2 min-w-0 lg:order-1/);
   assert.match(source, /order-1 min-w-0 lg:order-2/);
@@ -295,9 +312,9 @@ test("sidebar submenu disclosure stays discoverable", async () => {
   const source = await readSource("src/components/nav-main.tsx");
 
   assert.match(source, /function isRouteActive/);
-  assert.match(source, /current\.startsWith\(`\$\{target\}\/`\)/);
-  assert.match(source, /aria-expanded=\{openItems\[item\.title\] \?\? false\}/);
-  assert.match(source, /하위 메뉴 \$\{openItems\[item\.title\] \? "접기" : "펼치기"\}/);
+  assert.match(source, /currentPath\.startsWith\(`\$\{target\}\/`\)/);
+  assert.match(source, /aria-expanded=\{openItems\[item\.url\] \?\? false\}/);
+  assert.match(source, /하위 메뉴 \$\{openItems\[item\.url\] \? "접기" : "펼치기"\}/);
   assert.doesNotMatch(source, /showOnHover/);
 });
 
@@ -326,6 +343,80 @@ test("global shell controls use Korean action labels", async () => {
   assert.match(headerSource, /rel="noreferrer"/);
   assert.match(navUserSource, /계정 메뉴 열기/);
   assert.match(appSidebarSource, /aria-label="대시보드 홈으로 이동"/);
+});
+
+test("global shell exposes stable browser-use targets", async () => {
+  const [navMainSource, commandSearchSource, headerSource, modeToggleSource, navUserSource, appSidebarSource, sidebarSource, dialogSource, globalsSource] = await Promise.all([
+    readSource("src/components/nav-main.tsx"),
+    readSource("src/components/command-search.tsx"),
+    readSource("src/components/site-header.tsx"),
+    readSource("src/components/mode-toggle.tsx"),
+    readSource("src/components/nav-user.tsx"),
+    readSource("src/components/app-sidebar.tsx"),
+    readSource("src/components/ui/sidebar.tsx"),
+    readSource("src/components/ui/dialog.tsx"),
+    readSource("src/app/globals.css"),
+  ]);
+
+  assert.match(appSidebarSource, /data-testid="admin-sidebar-brand"/);
+  assert.match(headerSource, /data-testid="admin-sidebar-toggle"/);
+  assert.match(headerSource, /data-testid="admin-public-site-link"/);
+  assert.match(navMainSource, /data-testid=\{`admin-nav-link-\$\{itemTargetId\}`\}/);
+  assert.match(navMainSource, /data-testid=\{`admin-nav-disclosure-\$\{itemTargetId\}`\}/);
+  assert.match(navMainSource, /data-testid=\{`admin-nav-sublink-\$\{navigationTargetId\(subItem\.url\)\}`\}/);
+  assert.match(commandSearchSource, /data-testid="admin-quick-search-trigger"/);
+  assert.match(commandSearchSource, /data-testid="admin-quick-search-dialog"/);
+  assert.match(commandSearchSource, /data-testid=\{`admin-quick-search-item-\$\{itemTargetId\}`\}/);
+  assert.match(commandSearchSource, /onClick=\{\(\) => handleSelect\(item\.url\)\}/);
+  assert.match(commandSearchSource, /flushSync\(\(\) => \{/);
+  assert.match(commandSearchSource, /aria-label="빠른 이동 검색"/);
+  assert.match(headerSource, /setSearchOpen\(false\)[\s\S]*\[pathname\]/);
+  assert.match(modeToggleSource, /data-testid="admin-theme-toggle"/);
+  assert.match(navUserSource, /data-testid="admin-user-menu-trigger"/);
+  assert.match(navUserSource, /data-testid="admin-profile-avatar-grid"/);
+  assert.match(sidebarSource, /data-testid="admin-sidebar-rail"/);
+  assert.match(appSidebarSource, /<SidebarRail \/>/);
+  assert.match(dialogSource, /data-\[state=closed\]:pointer-events-none data-\[state=closed\]:invisible/);
+  assert.match(globalsSource, /\[data-slot="dialog-content"\]\[data-state="closed"\]/);
+});
+
+test("global shell avoids hidden palette and avatar over-render work", async () => {
+  const [navMainSource, commandSearchSource, modeToggleSource, navUserSource, sidebarSource] = await Promise.all([
+    readSource("src/components/nav-main.tsx"),
+    readSource("src/components/command-search.tsx"),
+    readSource("src/components/mode-toggle.tsx"),
+    readSource("src/components/nav-user.tsx"),
+    readSource("src/components/ui/sidebar.tsx"),
+  ]);
+
+  assert.match(navMainSource, /useRouter/);
+  assert.match(navMainSource, /const currentPath = React\.useMemo/);
+  assert.match(navMainSource, /const prefetchedRoutesRef = React\.useRef/);
+  assert.match(navMainSource, /router\.prefetch\(target\)/);
+  assert.match(navMainSource, /key=\{item\.url\}/);
+  assert.match(navMainSource, /key=\{subItem\.url\}/);
+  assert.match(navMainSource, /openItems\[item\.url\]/);
+  assert.match(navMainSource, /onPointerEnter=\{\(\) => prefetchRoute\(item\.url\)\}/);
+  assert.match(navMainSource, /const routeStateByUrl = React\.useMemo/);
+  assert.match(navMainSource, /const isUrlActive = React\.useCallback/);
+  assert.match(navMainSource, /const handleItemOpenChange = React\.useCallback/);
+  assert.match(commandSearchSource, /const prefetchedCommandRoutesRef = React\.useRef/);
+  assert.match(commandSearchSource, /router\.prefetch\(targetPath\)/);
+  assert.match(commandSearchSource, /const targetPath = normalizeCommandPath\(url\)/);
+  assert.match(commandSearchSource, /onPointerEnter=\{\(\) => prefetchCommandRoute\(item\.url\)\}/);
+  assert.match(commandSearchSource, /if \(!open\) return EMPTY_GROUPED_SEARCH_ITEMS/);
+  assert.match(commandSearchSource, /if \(!open\) \{\s+return null\s+\}/);
+  assert.match(commandSearchSource, /const groupedEntries = React\.useMemo/);
+  assert.match(commandSearchSource, /function groupSearchItems/);
+  assert.match(commandSearchSource, /React\.startTransition/);
+  assert.doesNotMatch(commandSearchSource, /navGroups\.flatMap/);
+  assert.match(modeToggleSource, /React\.useState\(getSystemDarkMode\)/);
+  assert.match(modeToggleSource, /if \(theme === "dark" \|\| theme === "light"\)/);
+  assert.match(navUserSource, /const PROFILE_AVATAR_INITIAL_LIMIT = 20/);
+  assert.match(navUserSource, /profileAvatarPresets\.slice\(0, avatarLimit\)/);
+  assert.match(navUserSource, /const visibleProfileAvatarPresets = React\.useMemo/);
+  assert.match(navUserSource, /const revealMoreAvatars = React\.useCallback/);
+  assert.match(sidebarSource, /if \(openState === open\) return/);
 });
 
 test("public site links use the homepage label consistently", async () => {

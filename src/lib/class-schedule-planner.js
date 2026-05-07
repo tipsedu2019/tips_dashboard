@@ -51,12 +51,6 @@ const PERIOD_COLORS = [
   "#8b7a58",
 ];
 
-const SESSION_PROGRESS_PRIORITY = {
-  pending: 0,
-  partial: 1,
-  done: 2,
-};
-
 const DEFAULT_PLAN_RANGE = {
   rangeType: "custom",
   start: "",
@@ -634,6 +628,44 @@ function normalizeActualRange(actual = {}) {
   };
 }
 
+function normalizeTextbookRangePresets(rawPresets = []) {
+  if (!Array.isArray(rawPresets)) {
+    return [];
+  }
+
+  const seen = new Set();
+  return rawPresets
+    .map((preset, index) => {
+      const start = String(preset?.start || preset?.from || "").trim();
+      const end = String(preset?.end || preset?.to || "").trim();
+      const label =
+        String(preset?.label || preset?.title || preset?.name || "").trim() ||
+        [start, end].filter(Boolean).join(" ~ ");
+
+      if (!label && !start && !end) {
+        return null;
+      }
+
+      return {
+        key: String(preset?.key || preset?.id || `saved-${index}-${label || start || end}`).trim(),
+        label: label || start || end,
+        start: start || label || end,
+        end: end || start || label,
+        memo: String(preset?.memo || preset?.note || "").trim(),
+      };
+    })
+    .filter(Boolean)
+    .filter((preset) => {
+      const key = `${preset.label}:${preset.start}:${preset.end}`.replace(/\s+/g, "").toLowerCase();
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+}
+
 function normalizeTextbookCatalog(rawPlan, defaults = {}) {
   const rawTextbooks = Array.isArray(rawPlan?.textbooks)
     ? rawPlan.textbooks
@@ -664,6 +696,14 @@ function normalizeTextbookCatalog(rawPlan, defaults = {}) {
       endSessionId: String(
         textbook?.endSessionId || textbook?.end_session_id || "",
       ).trim(),
+      rangePresets: normalizeTextbookRangePresets(
+        textbook?.rangePresets ||
+          textbook?.range_presets ||
+          textbook?.lessonRangePresets ||
+          textbook?.lesson_range_presets ||
+          textbook?.presets ||
+          [],
+      ),
     }))
     .filter((textbook) => textbook.textbookId)
     .sort((left, right) => left.order - right.order);
@@ -708,6 +748,7 @@ function normalizeTextbookCatalog(rawPlan, defaults = {}) {
           ).trim(),
         startSessionId: previous?.startSessionId || "",
         endSessionId: previous?.endSessionId || "",
+        rangePresets: previous?.rangePresets || [],
       };
     });
   }
@@ -721,6 +762,7 @@ function normalizeTextbookCatalog(rawPlan, defaults = {}) {
     subSubject: String(textbook.subSubject || "").trim(),
     startSessionId: String(textbook.startSessionId || "").trim(),
     endSessionId: String(textbook.endSessionId || "").trim(),
+    rangePresets: normalizeTextbookRangePresets(textbook.rangePresets),
   }));
 }
 
@@ -1502,6 +1544,7 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
       subSubject: textbook.subSubject || "",
       startSessionId: textbook.startSessionId || "",
       endSessionId: textbook.endSessionId || "",
+      rangePresets: normalizeTextbookRangePresets(textbook.rangePresets),
     })),
     sessions: calculated.sessions.map((session) => ({
       id: session.id,

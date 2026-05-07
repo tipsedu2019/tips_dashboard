@@ -11,6 +11,13 @@ function arrayValue(value) {
   return Array.isArray(value) ? value : [];
 }
 
+export const TIPS_TEXTBOOK_SOURCE_NAME = "팁스서점";
+export const TEXTBOOK_EXTERNAL_PURCHASE_RATE = 0.9;
+
+function normalizeBusinessLabel(value) {
+  return text(value).replace(/\s+/g, "").toLowerCase();
+}
+
 export function normalizeBarcodeValue(value) {
   return text(value).replace(/\D/g, "");
 }
@@ -76,6 +83,50 @@ export function getTextbookTitle(row = {}) {
 
 export function getTextbookSalePrice(row = {}) {
   return numberValue(row.sale_price || row.salePrice || row.price || row.list_price || row.listPrice);
+}
+
+function getTextbookPublisherLabel(row = {}) {
+  return text(row.publisher || row.publisher_name || row.publisherName);
+}
+
+function getTextbookSupplierLabel(row = {}) {
+  return text(
+    row.supplier ||
+      row.supplier_name ||
+      row.supplierName ||
+      row.supplier_label ||
+      row.supplierLabel ||
+      row.default_supplier ||
+      row.defaultSupplier,
+  );
+}
+
+export function isTipsTextbookSource(row = {}) {
+  const tipsLabel = normalizeBusinessLabel(TIPS_TEXTBOOK_SOURCE_NAME);
+  return [
+    getTextbookPublisherLabel(row),
+    getTextbookSupplierLabel(row),
+  ].some((label) => normalizeBusinessLabel(label) === tipsLabel);
+}
+
+export function getTextbookPurchaseUnitCost(row = {}) {
+  const salePrice = getTextbookSalePrice(row);
+  if (salePrice <= 0) {
+    return 0;
+  }
+
+  return isTipsTextbookSource(row)
+    ? 0
+    : Math.round(salePrice * TEXTBOOK_EXTERNAL_PURCHASE_RATE);
+}
+
+export function getTextbookUnitMargin(row = {}) {
+  const salePrice = getTextbookSalePrice(row);
+  if (salePrice <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, salePrice - getTextbookPurchaseUnitCost(row));
 }
 
 export function getTextbookSubject(row = {}) {
@@ -261,11 +312,87 @@ export function filterStockMovesForClosing({
   closingMonth = "",
   subject = "all",
   textbooks = [],
+  publishers = [],
+  suppliers = [],
+  publisherSupplierLinks = [],
   stockMoves = [],
 } = {}) {
   const month = text(closingMonth);
   const targetSubject = text(subject);
   const textbooksById = new Map(arrayValue(textbooks).map((textbook) => [getRecordId(textbook), textbook]));
+  const publishersById = new Map(arrayValue(publishers).map((publisher) => [getRecordId(publisher), publisher]));
+  const suppliersById = new Map(arrayValue(suppliers).map((supplier) => [getRecordId(supplier), supplier]));
+
+  function getPublisherIdForTextbook(textbook = {}) {
+    const directPublisherId = text(textbook.publisher_id || textbook.publisherId);
+    if (directPublisherId) {
+      return directPublisherId;
+    }
+
+    const publisherLabel = getTextbookPublisherLabel(textbook);
+    if (!publisherLabel) {
+      return "";
+    }
+
+    const normalizedPublisherLabel = normalizeBusinessLabel(publisherLabel);
+    const publisher = arrayValue(publishers).find((row) =>
+      normalizeBusinessLabel(row.name || row.publisher || row.publisher_name || row.publisherName) === normalizedPublisherLabel);
+    return getRecordId(publisher || {});
+  }
+
+  function getConfiguredSupplierIdForTextbook(textbook = {}) {
+    const directSupplierId = text(
+      textbook.default_supplier_id ||
+        textbook.defaultSupplierId ||
+        textbook.supplier_id ||
+        textbook.supplierId,
+    );
+    if (directSupplierId) {
+      return directSupplierId;
+    }
+
+    const publisherId = getPublisherIdForTextbook(textbook);
+    if (!publisherId) {
+      return "";
+    }
+
+    const links = arrayValue(publisherSupplierLinks)
+      .filter((link) => text(link.publisher_id || link.publisherId) === publisherId)
+      .sort((left, right) => {
+        const leftPrimary = left.is_primary === true || left.isPrimary === true ? 1 : 0;
+        const rightPrimary = right.is_primary === true || right.isPrimary === true ? 1 : 0;
+        if (leftPrimary !== rightPrimary) return rightPrimary - leftPrimary;
+        return numberValue(left.priority) - numberValue(right.priority);
+      });
+
+    return text(links[0]?.supplier_id || links[0]?.supplierId);
+  }
+
+  function enrichMove(move = {}) {
+    const textbook = textbooksById.get(getMoveTextbookId(move));
+    if (!textbook) {
+      return move;
+    }
+
+    const publisherId = getPublisherIdForTextbook(textbook);
+    const publisher = publishersById.get(publisherId);
+    const supplierId = getConfiguredSupplierIdForTextbook(textbook);
+    const supplier = suppliersById.get(supplierId);
+    const publisherName = getTextbookPublisherLabel(textbook) || text(publisher?.name);
+    const supplierName = getTextbookSupplierLabel(textbook) || text(supplier?.name);
+
+    return {
+      ...move,
+      textbook,
+      subject: getTextbookSubject(textbook),
+      textbook_subject: getTextbookSubject(textbook),
+      publisher: publisherName,
+      publisher_name: publisherName,
+      supplier: supplierName,
+      supplier_name: supplierName,
+      sale_price: getTextbookSalePrice(textbook),
+    };
+  }
 
   return arrayValue(stockMoves).filter((move) => {
     const movedAt = text(move.moved_at || move.movedAt);
@@ -279,7 +406,7 @@ export function filterStockMovesForClosing({
 
     const textbook = textbooksById.get(getMoveTextbookId(move));
     return getTextbookSubject(textbook) === targetSubject;
-  });
+  }).map(enrichMove);
 }
 
 export function validateMonthlyClosingDraft(closing = {}, { memo = "" } = {}) {
@@ -472,6 +599,44 @@ function isAdjustmentMove(move = {}) {
   return text(move.move_type || move.moveType) === "stock_adjustment";
 }
 
+function isSaleIssueMove(move = {}) {
+  return text(move.move_type || move.moveType) === "sale_issue";
+}
+
+function getMoveUnitSalePrice(move = {}) {
+  const unitAmount = Math.abs(numberValue(move.unit_amount || move.unitAmount));
+  if (unitAmount) {
+    return unitAmount;
+  }
+
+  const quantity = Math.abs(getMoveQuantity(move));
+  const amount = Math.abs(getMoveAmount(move));
+  if (quantity > 0 && amount > 0) {
+    return amount / quantity;
+  }
+
+  return getTextbookSalePrice(move);
+}
+
+function getClosingTeamKey(move = {}) {
+  const subject = getTextbookSubject(move) || text(move.textbook_subject || move.textbookSubject);
+  if (subject === "english" || subject === "math") {
+    return subject;
+  }
+
+  return "other";
+}
+
+function createClosingTeamMargin(team) {
+  return {
+    team,
+    saleQuantity: 0,
+    saleAmount: 0,
+    purchaseCostAmount: 0,
+    marginAmount: 0,
+  };
+}
+
 export function buildTextbookMonthlyClosing({
   openingQuantity = 0,
   openingAmount = 0,
@@ -493,7 +658,40 @@ export function buildTextbookMonthlyClosing({
   const adjustmentAmount = sumAmount(adjustmentMoves);
   const endingQuantity = numberValue(openingQuantity) + purchaseQuantity - saleQuantity + adjustmentQuantity;
   const endingAmount = numberValue(openingAmount) + purchaseAmount - saleAmount + adjustmentAmount;
-  const settlementDifference = numberValue(receivedAmount) - numberValue(supplierPaymentAmount);
+  const teamMargins = {
+    english: createClosingTeamMargin("english"),
+    math: createClosingTeamMargin("math"),
+    other: createClosingTeamMargin("other"),
+  };
+
+  for (const move of moves.filter(isSaleIssueMove)) {
+    const quantity = Math.abs(getMoveQuantity(move));
+    if (quantity <= 0) {
+      continue;
+    }
+
+    const unitSalePrice = getMoveUnitSalePrice(move);
+    const pricingContext = {
+      ...move,
+      sale_price: unitSalePrice || getTextbookSalePrice(move),
+      price: unitSalePrice || getTextbookSalePrice(move),
+    };
+    const unitPurchaseCost = getTextbookPurchaseUnitCost(pricingContext);
+    const saleLineAmount = unitSalePrice * quantity;
+    const purchaseCostAmount = unitPurchaseCost * quantity;
+    const marginAmount = Math.max(0, saleLineAmount - purchaseCostAmount);
+    const teamKey = getClosingTeamKey(move);
+    const teamMargin = teamMargins[teamKey] || teamMargins.other;
+
+    teamMargin.saleQuantity += quantity;
+    teamMargin.saleAmount += saleLineAmount;
+    teamMargin.purchaseCostAmount += purchaseCostAmount;
+    teamMargin.marginAmount += marginAmount;
+  }
+
+  const textbookMarginAmount = Object.values(teamMargins).reduce((sum, item) => sum + item.marginAmount, 0);
+  const paymentDifference = numberValue(receivedAmount) - numberValue(supplierPaymentAmount);
+  const settlementDifference = textbookMarginAmount + paymentDifference;
 
   return {
     openingQuantity: numberValue(openingQuantity),
@@ -508,7 +706,10 @@ export function buildTextbookMonthlyClosing({
     endingAmount,
     receivedAmount: numberValue(receivedAmount),
     supplierPaymentAmount: numberValue(supplierPaymentAmount),
+    paymentDifference,
+    textbookMarginAmount,
+    teamMargins: Object.values(teamMargins),
     settlementDifference,
-    needsReview: settlementDifference !== 0 || endingQuantity < 0,
+    needsReview: paymentDifference !== 0 || endingQuantity < 0,
   };
 }

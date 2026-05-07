@@ -302,117 +302,6 @@ function scoreLessonTextbookCandidate(
   return score;
 }
 
-function parseLessonOutlineSource(value: unknown): unknown[] {
-  if (!value) {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return [];
-    }
-    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-      try {
-        return parseLessonOutlineSource(JSON.parse(trimmed));
-      } catch {
-        return [];
-      }
-    }
-    return trimmed
-      .split(/\r?\n|,|;/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return parseLessonOutlineSource(record.items || record.chapters || record.units || record.children);
-  }
-
-  return [];
-}
-
-function buildLessonOutlinePresets(book: Record<string, unknown> | undefined) {
-  const outlineSources = [
-    book?.toc,
-    book?.tableOfContents,
-    book?.table_of_contents,
-    book?.contents,
-    book?.chapters,
-    book?.units,
-    (book?.metadata as Record<string, unknown> | undefined)?.toc,
-  ];
-
-  return outlineSources
-    .flatMap(parseLessonOutlineSource)
-    .map((item, index) => {
-      const record = typeof item === "object" && item ? (item as Record<string, unknown>) : null;
-      const label =
-        text(record?.label || record?.title || record?.name || record?.chapter || record?.unit) ||
-        text(item) ||
-        `${index + 1}단원`;
-      return {
-        key: `outline-${index}-${label}`,
-        label,
-        start: text(record?.start || record?.from) || label,
-        end: text(record?.end || record?.to) || label,
-        memo: text(record?.memo || record?.note),
-      };
-    })
-    .filter((preset) => preset.label)
-    .slice(0, 8);
-}
-
-function buildDerivedLessonRangePresets({
-  textbookTitle,
-  area,
-  subSubject,
-}: {
-  textbookTitle: string;
-  area: string;
-  subSubject: string;
-}) {
-  const scope = [area, subSubject].filter(Boolean).join(" ");
-  const normalizedTitle = normalizeLessonMatchText(textbookTitle);
-  const baseSteps = ["1단원", "2단원", "개념", "유형", "실전", "오답"];
-  const domainSteps =
-    normalizedTitle.includes("독해") || normalizedTitle.includes("영어")
-      ? ["지문", "구문", "어휘", "문법", "실전", "오답"]
-      : normalizedTitle.includes("수능") || normalizedTitle.includes("모의고사")
-        ? ["대표유형", "기출", "실전", "오답", "약점보완", "마무리"]
-        : baseSteps;
-
-  return domainSteps.map((step, index) => ({
-    key: `derived-${index}-${step}`,
-    label: scope ? `${scope} ${step}` : step,
-    start: step,
-    end: step,
-    memo: "",
-  }));
-}
-
-function mergeLessonRangePresets(
-  outlinePresets: Array<{ key: string; label: string; start: string; end: string; memo: string }>,
-  derivedPresets: Array<{ key: string; label: string; start: string; end: string; memo: string }>,
-) {
-  const seen = new Set<string>();
-  return [...outlinePresets, ...derivedPresets]
-    .filter((preset) => {
-      const key = normalizeLessonMatchText(`${preset.label}:${preset.start}:${preset.end}`);
-      if (!key || seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 8);
-}
-
 function formatProgress(completedSessions: number, sessionCount: number) {
   if (!sessionCount) {
     return 0;
@@ -585,11 +474,9 @@ function getActualEntryLabel(progressStatus: string) {
 function buildTextbookEntrySummary(
   textbookEntries: Record<string, unknown>[] = [],
   textbookMap: Map<string, string>,
-  textbookById: Map<string, Record<string, unknown>> = new Map(),
 ) {
   return textbookEntries.map((entry, index) => {
     const textbookId = text(entry.textbookId || entry.textbook_id || entry.id);
-    const textbookRecord = textbookById.get(textbookId);
     const textbookTitle =
       text(entry.textbookTitle || entry.textbook_title) ||
       textbookMap.get(textbookId) ||
@@ -604,10 +491,6 @@ function buildTextbookEntrySummary(
     const planLabel = text(plan.label) || "계획 범위 미지정";
     const actualLabel = text(actual.label) || "실진도 기록 없음";
     const actualUpdatedAt = formatUpdatedDate(text(actual.updatedAt || actual.updated_at));
-    const rangePresets = mergeLessonRangePresets(
-      buildLessonOutlinePresets(textbookRecord),
-      buildDerivedLessonRangePresets({ textbookTitle, area, subSubject }),
-    );
 
     return {
       id: text(entry.id) || `${textbookId || "textbook"}-${index}`,
@@ -620,7 +503,6 @@ function buildTextbookEntrySummary(
       planEnd: text(plan.end),
       planLabel,
       planMemo: text(plan.memo) || "계획 메모 없음",
-      rangePresets,
       scopeLabel: [area, subSubject].filter(Boolean).join(" · "),
       actualLabel,
       actualStatus,
@@ -1377,6 +1259,81 @@ function uniqueLessonSessionsByIdentity<T extends Record<string, unknown>>(sessi
   });
 }
 
+function buildLessonDesignSessionSummary<
+  T extends {
+    monthKey?: string;
+    progressLabel?: string;
+    periodId?: string;
+    dateValue?: string;
+  },
+>(
+  sessions: T[] = [],
+  periodSummaries: Array<{
+    id: string;
+    label: string;
+    color: string;
+    startDate: string;
+    endDate: string;
+    rangeLabel: string;
+    sessionCount: number;
+  }> = [],
+) {
+  const monthSummaryMap = new Map<string, { key: string; label: string; sessionCount: number; pendingCount: number }>();
+  const periodSessionCounts = new Map(periodSummaries.map((period) => [period.id, 0]));
+  const undatedSessions: T[] = [];
+  let completedSessionCount = 0;
+  let updatedSessionCount = 0;
+
+  for (const session of sessions) {
+    const monthKey = text(session.monthKey);
+    const progressLabel = text(session.progressLabel);
+
+    if (progressLabel === "완료") {
+      completedSessionCount += 1;
+    }
+    if (progressLabel !== "대기") {
+      updatedSessionCount += 1;
+    }
+
+    if (monthKey) {
+      const monthSummary = monthSummaryMap.get(monthKey) || {
+        key: monthKey,
+        label: formatLessonMonthLabel(monthKey),
+        sessionCount: 0,
+        pendingCount: 0,
+      };
+      monthSummary.sessionCount += 1;
+      if (progressLabel === "대기") {
+        monthSummary.pendingCount += 1;
+      }
+      monthSummaryMap.set(monthKey, monthSummary);
+    } else {
+      undatedSessions.push(session);
+    }
+
+    for (const period of periodSummaries) {
+      if (
+        session.periodId === period.id ||
+        isDateWithinRange(text(session.dateValue), period.startDate, period.endDate)
+      ) {
+        periodSessionCounts.set(period.id, (periodSessionCounts.get(period.id) || 0) + 1);
+      }
+    }
+  }
+
+  return {
+    periodSummariesWithSessionCounts: periodSummaries.map((period) => ({
+      ...period,
+      sessionCount: period.sessionCount || periodSessionCounts.get(period.id) || 0,
+    })),
+    monthSummaries: [...monthSummaryMap.values()].sort((left, right) => left.key.localeCompare(right.key)),
+    undatedSessions,
+    completedSessionCount,
+    updatedSessionCount,
+    pendingSessionCount: Math.max(sessions.length - updatedSessionCount, 0),
+  };
+}
+
 function buildLessonDesignSnapshot(
   selectedRow: Record<string, unknown> | null,
   textbooks: Record<string, unknown>[] = [],
@@ -1510,7 +1467,7 @@ function buildLessonDesignSnapshot(
         | Record<string, unknown>[]
         | undefined;
     const scheduleContext = buildLessonScheduleContext(session, matchedPlanSession || null);
-    const textbookEntrySummaries = buildTextbookEntrySummary(textbookEntries || [], textbookMap, textbookById);
+    const textbookEntrySummaries = buildTextbookEntrySummary(textbookEntries || [], textbookMap);
     const sessionBillingId = text(
       session.billingId ||
         session.billing_id ||
@@ -1595,38 +1552,19 @@ function buildLessonDesignSnapshot(
     };
   });
   const sessions = uniqueLessonSessionsByIdentity(mappedSessions);
-  const periodSummariesWithSessionCounts = periodSummaries.map((period) => {
-    const calculatedSessionCount = sessions.filter(
-      (session) =>
-        session.periodId === period.id ||
-        isDateWithinRange(session.dateValue, period.startDate, period.endDate),
-    ).length;
-
-    return {
-      ...period,
-      sessionCount: period.sessionCount || calculatedSessionCount,
-    };
-  });
+  const sessionSummary = buildLessonDesignSessionSummary(sessions, periodSummaries);
+  const {
+    periodSummariesWithSessionCounts,
+    monthSummaries,
+    undatedSessions,
+    completedSessionCount,
+    updatedSessionCount,
+    pendingSessionCount,
+  } = sessionSummary;
   const periodDiagnostics = buildLessonPeriodDiagnostics(periodSummariesWithSessionCounts);
-
-  const monthSummaries = [...new Set(sessions.map((session) => session.monthKey).filter(Boolean))]
-    .sort()
-    .map((monthKey) => {
-      const monthSessions = sessions.filter((session) => session.monthKey === monthKey);
-      return {
-        key: monthKey,
-        label: formatLessonMonthLabel(monthKey),
-        sessionCount: monthSessions.length,
-        pendingCount: monthSessions.filter((session) => session.progressLabel === "대기").length,
-      };
-    });
-  const undatedSessions = sessions.filter((session) => !session.monthKey);
 
   const firstPeriod = periodSummariesWithSessionCounts[0] || null;
   const lastPeriod = periodSummariesWithSessionCounts[periodSummariesWithSessionCounts.length - 1] || null;
-  const completedSessionCount = sessions.filter((session) => session.progressLabel === "완료").length;
-  const updatedSessionCount = sessions.filter((session) => session.progressLabel !== "대기").length;
-  const pendingSessionCount = Math.max(sessions.length - updatedSessionCount, 0);
   const plannerClassName =
     text(plan?.className || plan?.class_name || classItem?.className || classItem?.class_name) ||
     text(selectedRow.title) ||
@@ -1791,6 +1729,15 @@ function findLessonDesignElementByDataAttribute(attributeName: string, value: st
 function scrollElementInsideContainerToCenter(container: Element, target: Element) {
   const scrollContainer = container as HTMLElement;
   const targetElement = target as HTMLElement;
+  if (scrollContainer.scrollHeight <= scrollContainer.clientHeight + 1) {
+    targetElement.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+    return;
+  }
+
   const containerRect = scrollContainer.getBoundingClientRect();
   const targetRect = targetElement.getBoundingClientRect();
   const nextTop =
@@ -2128,6 +2075,7 @@ function buildLessonSessionGroups<
     periodLabel: string;
     progressStatus: string;
     scheduleState: string;
+    textbookEntries?: Array<{ hasPlanContent?: boolean }>;
   },
 >( 
   sessions: T[] = [],
@@ -2166,6 +2114,21 @@ function buildLessonSessionGroups<
     .map((group) => {
       const normalizedSessions = [...group.sessions].sort(compareLessonSessionsByDate);
 
+      let textbookSessionCount = 0;
+      let outsideTextbookRangeCount = 0;
+      let pendingCount = 0;
+      for (const session of normalizedSessions) {
+        if (session.progressStatus !== "done") {
+          pendingCount += 1;
+        }
+        const textbookEntries = Array.isArray(session.textbookEntries) ? session.textbookEntries : [];
+        if (textbookEntries.length > 0) {
+          textbookSessionCount += 1;
+        } else {
+          outsideTextbookRangeCount += 1;
+        }
+      }
+
       return {
         ...group,
         label: normalizedSessions[0]?.monthLabel || group.label,
@@ -2174,7 +2137,9 @@ function buildLessonSessionGroups<
         billingColor: group.billingColor || normalizedSessions[0]?.billingColor || "#216e4e",
         sessions: normalizedSessions,
         sessionCount: countLessonGroupSessions(normalizedSessions),
-        pendingCount: normalizedSessions.filter((session) => session.progressStatus !== "done").length,
+        pendingCount,
+        textbookSessionCount,
+        outsideTextbookRangeCount,
       };
     });
 }
@@ -2475,6 +2440,7 @@ export function ClassScheduleWorkspace() {
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
   const deferredSearch = useDeferredValue(search);
+  const deferredLessonTextbookSearch = useDeferredValue(lessonTextbookSearch);
 
   const model = useMemo(
     () =>
@@ -2639,62 +2605,72 @@ export function ClassScheduleWorkspace() {
     [data.textbooks],
   );
   const lessonTextbookOptions = useMemo(() => {
-    const availableBooks = data.textbooks.filter((book) => {
-      const id = text(book.id);
-      return Boolean(id) && !connectedLessonTextbookIds.has(id);
-    });
     const plannerSubject =
       text(lessonDesignSnapshot?.plannerSubject) === "과목 미정"
         ? ""
         : text(lessonDesignSnapshot?.plannerSubject);
     const plannerSubjectKey = normalizeLessonSubjectKey(plannerSubject);
-    const subjectScopedBooks = availableBooks.filter((book) => {
+    const query = text(deferredLessonTextbookSearch).toLowerCase();
+    const candidates: Array<{ book: Record<string, unknown>; score: number; title: string }> = [];
+
+    for (const book of data.textbooks) {
+      const id = text(book.id);
+      if (!id || connectedLessonTextbookIds.has(id)) {
+        continue;
+      }
+
       const bookSubject = getTextbookSubject(book);
       const bookSubjectKey = normalizeLessonSubjectKey(bookSubject);
       if (lessonTextbookSubjectFilter === "current") {
-        return !plannerSubjectKey || !bookSubjectKey || bookSubjectKey === plannerSubjectKey;
+        if (plannerSubjectKey && bookSubjectKey && bookSubjectKey !== plannerSubjectKey) {
+          continue;
+        }
+      } else if (!matchesLessonSubjectFilter(bookSubject, lessonTextbookSubjectFilter)) {
+        continue;
       }
-      return matchesLessonSubjectFilter(bookSubject, lessonTextbookSubjectFilter);
-    });
 
-    const query = text(lessonTextbookSearch).toLowerCase();
-    const scopedBooks = subjectScopedBooks.filter((book) => {
       const category = getTextbookCategory(book);
       const publisher = getTextbookPublisher(book);
-      return (
-        matchesLessonTextbookFilter(category, lessonTextbookCategoryFilter) &&
-        matchesLessonTextbookFilter(publisher, lessonTextbookPublisherFilter)
-      );
-    });
-    const searchedBooks = query
-      ? scopedBooks.filter((book) =>
-          [
-            getTextbookTitle(book),
-            getTextbookPublisher(book),
-            getTextbookCategory(book),
-            getTextbookSubject(book),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(query),
-        )
-      : scopedBooks;
+      if (
+        !matchesLessonTextbookFilter(category, lessonTextbookCategoryFilter) ||
+        !matchesLessonTextbookFilter(publisher, lessonTextbookPublisherFilter)
+      ) {
+        continue;
+      }
 
-    return searchedBooks
+      const title = getTextbookTitle(book);
+      if (
+        query &&
+        ![title, publisher, category, bookSubject]
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      ) {
+        continue;
+      }
+
+      candidates.push({
+        book,
+        score: scoreLessonTextbookCandidate(book, lessonDesignSnapshot),
+        title,
+      });
+    }
+
+    return candidates
       .sort((left, right) => {
         const scoreGap =
-          scoreLessonTextbookCandidate(right, lessonDesignSnapshot) -
-          scoreLessonTextbookCandidate(left, lessonDesignSnapshot);
-        return scoreGap || getTextbookTitle(left).localeCompare(getTextbookTitle(right), "ko");
+          right.score - left.score;
+        return scoreGap || left.title.localeCompare(right.title, "ko");
       })
-      .slice(0, 18);
+      .slice(0, 18)
+      .map((item) => item.book);
   }, [
     connectedLessonTextbookIds,
     data.textbooks,
+    deferredLessonTextbookSearch,
     lessonDesignSnapshot,
     lessonTextbookCategoryFilter,
     lessonTextbookPublisherFilter,
-    lessonTextbookSearch,
     lessonTextbookSubjectFilter,
   ]);
 
@@ -2907,6 +2883,19 @@ export function ClassScheduleWorkspace() {
     [lessonDesignSnapshot],
   );
 
+  const filteredLessonSessionById = useMemo(
+    () => new Map(filteredLessonSessions.map((session) => [text(session.id), session])),
+    [filteredLessonSessions],
+  );
+  const lessonDesignSessionById = useMemo(
+    () => new Map((lessonDesignSnapshot?.sessions || []).map((session) => [text(session.id), session])),
+    [lessonDesignSnapshot],
+  );
+  const firstPendingLessonSession = useMemo(
+    () => filteredLessonSessions.find((session) => session.progressLabel !== "완료") || filteredLessonSessions[0] || null,
+    [filteredLessonSessions],
+  );
+
   useEffect(() => {
     if (!filteredLessonSessions.length) {
       setSelectedLessonSessionId("");
@@ -2914,19 +2903,19 @@ export function ClassScheduleWorkspace() {
     }
 
     setSelectedLessonSessionId((current) => {
-      if (current && filteredLessonSessions.some((session) => session.id === current)) {
+      if (current && filteredLessonSessionById.has(current)) {
         return current;
       }
-      return filteredLessonSessions.find((session) => session.progressLabel !== "완료")?.id || filteredLessonSessions[0]?.id || "";
+      return firstPendingLessonSession?.id || "";
     });
-  }, [filteredLessonSessions]);
+  }, [filteredLessonSessionById, filteredLessonSessions.length, firstPendingLessonSession]);
 
   const selectedLessonSession = useMemo(
     () =>
-      filteredLessonSessions.find((session) => session.id === selectedLessonSessionId) ||
+      filteredLessonSessionById.get(selectedLessonSessionId) ||
       filteredLessonSessions[0] ||
       null,
-    [filteredLessonSessions, selectedLessonSessionId],
+    [filteredLessonSessionById, filteredLessonSessions, selectedLessonSessionId],
   );
   const lastRequestedLessonSessionKeyRef = useRef("");
   const pendingLessonSessionNavigationKeyRef = useRef("");
@@ -2943,15 +2932,15 @@ export function ClassScheduleWorkspace() {
       setSelectedLessonSessionId(resolvedSessionId);
 
       const targetSession =
-        lessonDesignSnapshot?.sessions.find((session) => session.id === resolvedSessionId) ||
-        filteredLessonSessions.find((session) => session.id === resolvedSessionId) ||
+        lessonDesignSessionById.get(resolvedSessionId) ||
+        filteredLessonSessionById.get(resolvedSessionId) ||
         null;
       const targetDate = text(targetSession?.dateValue);
       if (targetDate) {
         setSelectedLessonCalendarDate(targetDate);
       }
     },
-    [filteredLessonSessions, lessonDesignSnapshot, selectedClassId, selectedRow],
+    [filteredLessonSessionById, lessonDesignSessionById, selectedClassId, selectedRow],
   );
   useEffect(() => {
     setLessonCalendarDragSource("");
@@ -2961,9 +2950,13 @@ export function ClassScheduleWorkspace() {
     setSelectedLessonCalendarDate("");
   }, [selectedClassId]);
 
+  const lessonSessionIndexById = useMemo(
+    () => new Map(filteredLessonSessions.map((session, index) => [text(session.id), index])),
+    [filteredLessonSessions],
+  );
   const selectedLessonSessionIndex = useMemo(
-    () => filteredLessonSessions.findIndex((session) => session.id === selectedLessonSession?.id),
-    [filteredLessonSessions, selectedLessonSession],
+    () => lessonSessionIndexById.get(text(selectedLessonSession?.id)) ?? -1,
+    [lessonSessionIndexById, selectedLessonSession],
   );
   const previousLessonSession =
     selectedLessonSessionIndex > 0 ? filteredLessonSessions[selectedLessonSessionIndex - 1] || null : null;
@@ -3001,6 +2994,50 @@ export function ClassScheduleWorkspace() {
     hasLessonTextbooks
       ? filteredLessonSessions.find((session) => session.textbookEntries.length === 0) || null
       : null;
+  const lessonSessionJumpOptions = useMemo(() => {
+    const optionsById = new Map<string, (typeof filteredLessonSessions)[number]>();
+    const addSession = (session: (typeof filteredLessonSessions)[number] | null | undefined) => {
+      const sessionId = text(session?.id);
+      if (!session || !sessionId) {
+        return;
+      }
+      optionsById.set(sessionId, session);
+    };
+
+    addSession(previousLessonSession);
+    addSession(selectedLessonSession);
+    addSession(nextLessonSession);
+    addSession(nextPendingLessonSession);
+    addSession(firstOutOfRangeLessonSession);
+
+    for (const session of lessonTextbookProgressSessions) {
+      if (optionsById.size >= 12) {
+        break;
+      }
+      if (session.textbookEntries.some((entry) => !entry.hasPlanContent)) {
+        addSession(session);
+      }
+    }
+
+    const options = Array.from(optionsById.values());
+    if (!options.length) {
+      return filteredLessonSessions.slice(0, 12);
+    }
+    return options.sort(
+      (left, right) =>
+        (lessonSessionIndexById.get(text(left.id)) ?? Number.MAX_SAFE_INTEGER) -
+        (lessonSessionIndexById.get(text(right.id)) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }, [
+    filteredLessonSessions,
+    firstOutOfRangeLessonSession,
+    lessonSessionIndexById,
+    lessonTextbookProgressSessions,
+    nextLessonSession,
+    nextPendingLessonSession,
+    previousLessonSession,
+    selectedLessonSession,
+  ]);
   const selectedLessonSessionAssignedTextbookCount =
     selectedLessonSession?.textbookEntries.filter((entry) => entry.hasPlanContent).length || 0;
   const selectedLessonSessionOutsideTextbookRange = Boolean(
@@ -3035,33 +3072,6 @@ export function ClassScheduleWorkspace() {
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       const nextBase = (lessonPlanDraftRef.current || {}) as Record<string, unknown>;
       return normalizeSchedulePlan(updater(nextBase), lessonPlanDefaults) as Record<string, unknown>;
-    },
-    [lessonPlanDefaults],
-  );
-  const applyLessonTextbookPlanRangeFields = useCallback(
-    (
-      current: Record<string, unknown>,
-      sessionId: string,
-      entryId: string,
-      range: { start?: string; end?: string; label?: string; memo?: string },
-    ) => {
-      const fields = [
-        ["start", text(range.start)] as const,
-        ["end", text(range.end)] as const,
-        ["label", text(range.label)] as const,
-        ["memo", text(range.memo)] as const,
-      ];
-
-      return fields.reduce<Record<string, unknown>>(
-        (nextDraft, [field, value]) =>
-          applyTextbookPlanRangeField(nextDraft, lessonPlanDefaults, {
-            sessionId,
-            entryId,
-            field,
-            value,
-          }) as Record<string, unknown>,
-        current,
-      );
     },
     [lessonPlanDefaults],
   );
@@ -3611,98 +3621,6 @@ export function ClassScheduleWorkspace() {
       markPendingLessonSessionSelection(sessionId);
     },
     [lessonPlanDefaults, markPendingLessonSessionSelection, updateLessonPlanDraft],
-  );
-  const handleLessonTextbookPlanPreset = useCallback(
-    (
-      sessionId: string,
-      entryId: string,
-      preset: { start: string; end: string; label: string; memo?: string },
-    ) => {
-      if (!sessionId || !entryId) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) =>
-        applyLessonTextbookPlanRangeFields(current, sessionId, entryId, preset),
-      );
-      markPendingLessonSessionSelection(sessionId);
-    },
-    [applyLessonTextbookPlanRangeFields, markPendingLessonSessionSelection, updateLessonPlanDraft],
-  );
-  const handleLessonTextbookPlanAutoFill = useCallback(
-    (
-      sessionId: string,
-      entryId: string,
-      ranges: { start: string; end: string; label: string; memo?: string }[],
-    ) => {
-      if (!sessionId || !entryId || ranges.length === 0) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const startIndex = lessonTextbookProgressSessions.findIndex((session) => session.id === sessionId);
-        if (startIndex < 0) {
-          return current;
-        }
-
-        let rangeIndex = 0;
-        return lessonTextbookProgressSessions
-          .slice(startIndex)
-          .reduce<Record<string, unknown>>((nextDraft, session) => {
-            if (!session.textbookEntries.some((entry) => entry.id === entryId)) {
-              return nextDraft;
-            }
-
-            const range = ranges[rangeIndex % ranges.length];
-            rangeIndex += 1;
-            return applyLessonTextbookPlanRangeFields(nextDraft, session.id, entryId, range);
-          }, current);
-      });
-      markPendingLessonSessionSelection(sessionId);
-    },
-    [
-      applyLessonTextbookPlanRangeFields,
-      lessonTextbookProgressSessions,
-      markPendingLessonSessionSelection,
-      updateLessonPlanDraft,
-    ],
-  );
-  const handleLessonTextbookPlanAutoFillAll = useCallback(
-    (session: {
-      id: string;
-      textbookEntries: Array<{
-        id: string;
-        rangePresets: { start: string; end: string; label: string; memo?: string }[];
-      }>;
-    }) => {
-      if (!session?.id || session.textbookEntries.length === 0) {
-        return;
-      }
-
-      const rangesByEntryId = session.textbookEntries.reduce<
-        Record<string, { start: string; end: string; label: string; memo?: string }[]>
-      >((acc, entry) => {
-        if (entry.id && entry.rangePresets.length > 0) {
-          acc[entry.id] = entry.rangePresets;
-        }
-        return acc;
-      }, {});
-
-      if (Object.keys(rangesByEntryId).length === 0) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) =>
-        session.textbookEntries.reduce<Record<string, unknown>>((nextDraft, entry) => {
-          const range = rangesByEntryId[entry.id]?.[0];
-          return range
-            ? applyLessonTextbookPlanRangeFields(nextDraft, session.id, entry.id, range)
-            : nextDraft;
-        }, current),
-      );
-      markPendingLessonSessionSelection(session.id);
-    },
-    [applyLessonTextbookPlanRangeFields, markPendingLessonSessionSelection, updateLessonPlanDraft],
   );
   const handleSaveLessonPlan = useCallback(async () => {
     if (!selectedRow || !lessonPlanForSave || !supabase) {
@@ -4455,13 +4373,15 @@ export function ClassScheduleWorkspace() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-foreground">
-                              {hideSessionHeader ? "교재별 진도" : "진도 편집"}
+                              {hideSessionHeader
+                                ? selectedLessonSessionSummaryLabel || "회차 진도"
+                                : "진도 편집"}
                             </p>
-                            {!hideSessionHeader ? (
-                              <p className="text-xs text-muted-foreground">
-                                {selectedLessonSession.label} · {selectedLessonSession.dateLabel}
-                              </p>
-                            ) : null}
+                            <p className="text-xs text-muted-foreground">
+                              {hideSessionHeader
+                                ? "교재별 진도"
+                                : `${selectedLessonSession.label} · ${selectedLessonSession.dateLabel}`}
+                            </p>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge variant="secondary">
@@ -4470,17 +4390,6 @@ export function ClassScheduleWorkspace() {
                             <Badge variant="outline">
                               {selectedLessonSessionAssignedTextbookCount}/{selectedLessonSession.textbookEntries.length}권 배정
                             </Badge>
-                            {selectedLessonSession.textbookEntries.some((entry) => entry.rangePresets.length > 0) ? (
-                              <Button
-                                type="button"
-                                data-testid="auto-fill-current-session"
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => handleLessonTextbookPlanAutoFillAll(selectedLessonSession)}
-                              >
-                                현재 회차 자동 배정
-                              </Button>
-                            ) : null}
                           </div>
                         </div>
                         <div className="mt-3 space-y-3">
@@ -4503,55 +4412,13 @@ export function ClassScheduleWorkspace() {
                                   {entry.hasPlanContent ? entry.planLabel : "미배정"}
                                 </Badge>
                               </div>
-                              {entry.rangePresets.length > 0 ? (
-                                <div className="mb-3 space-y-1.5">
-                                  <p className="text-xs font-medium text-muted-foreground">목차 프리셋</p>
-                                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                                    {entry.rangePresets.map((preset) => (
-                                      <Button
-                                        key={`${entry.id}-${preset.key}`}
-                                        type="button"
-                                        size="sm"
-                                        title={preset.label}
-                                        aria-label={`${entry.textbookTitle} ${preset.label}`}
-                                        aria-pressed={entry.planLabel === preset.label}
-                                        variant={entry.planLabel === preset.label ? "default" : "outline"}
-                                        className="h-8 justify-start rounded-md px-2 text-xs"
-                                        onClick={() =>
-                                          handleLessonTextbookPlanPreset(selectedLessonSession.id, entry.id, preset)
-                                        }
-                                      >
-                                        <span className="truncate">
-                                          {entry.scopeLabel && preset.label.startsWith(`${entry.scopeLabel} `)
-                                            ? preset.label.slice(entry.scopeLabel.length + 1)
-                                            : preset.label}
-                                        </span>
-                                      </Button>
-                                    ))}
-                                    <Button
-                                      type="button"
-                                      data-testid="auto-fill-following-sessions"
-                                      size="sm"
-                                      variant="secondary"
-                                      className="h-8 justify-start rounded-md px-2 text-xs"
-                                      onClick={() =>
-                                        handleLessonTextbookPlanAutoFill(
-                                          selectedLessonSession.id,
-                                          entry.id,
-                                          entry.rangePresets,
-                                        )
-                                      }
-                                    >
-                                      이후 회차 자동 배정
-                                    </Button>
-                                  </div>
-                                </div>
-                              ) : null}
                               <div className="grid gap-2 lg:grid-cols-4">
                                 <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
                                   <span>시작 범위</span>
                                   <Input
                                     value={entry.planStart}
+                                    aria-label={`${entry.textbookTitle} ${selectedLessonSession.label} 시작 범위`}
+                                    placeholder="예: p.12"
                                     onChange={(event) =>
                                       handleLessonTextbookPlanChange(
                                         selectedLessonSession.id,
@@ -4566,6 +4433,8 @@ export function ClassScheduleWorkspace() {
                                   <span>종료 범위</span>
                                   <Input
                                     value={entry.planEnd}
+                                    aria-label={`${entry.textbookTitle} ${selectedLessonSession.label} 종료 범위`}
+                                    placeholder="예: p.18"
                                     onChange={(event) =>
                                       handleLessonTextbookPlanChange(
                                         selectedLessonSession.id,
@@ -4580,6 +4449,8 @@ export function ClassScheduleWorkspace() {
                                   <span>표시 문구</span>
                                   <Input
                                     value={entry.planLabel === "계획 범위 미지정" ? "" : entry.planLabel}
+                                    aria-label={`${entry.textbookTitle} ${selectedLessonSession.label} 표시 문구`}
+                                    placeholder="예: 1단원 개념"
                                     onChange={(event) =>
                                       handleLessonTextbookPlanChange(
                                         selectedLessonSession.id,
@@ -4594,6 +4465,8 @@ export function ClassScheduleWorkspace() {
                                   <span>계획 메모</span>
                                   <Textarea
                                     value={entry.planMemo === "계획 메모 없음" ? "" : entry.planMemo}
+                                    aria-label={`${entry.textbookTitle} ${selectedLessonSession.label} 계획 메모`}
+                                    placeholder="메모"
                                     onChange={(event) =>
                                       handleLessonTextbookPlanChange(
                                         selectedLessonSession.id,
@@ -4645,7 +4518,7 @@ export function ClassScheduleWorkspace() {
       <div className="bg-background">
         <div
           className={cn(
-            "grid min-w-0 gap-0 p-4 lg:p-6",
+            "grid min-w-0 gap-0 p-4 pb-24 lg:p-6 lg:pb-24",
             isLessonDesignProgressMode
               ? "2xl:grid-cols-[minmax(24rem,0.9fr)_minmax(32rem,1.1fr)]"
               : "2xl:grid-cols-[minmax(18rem,0.85fr)_minmax(34rem,1.45fr)]",
@@ -4686,7 +4559,7 @@ export function ClassScheduleWorkspace() {
             </div>
           ) : null}
 
-          <div className="sticky top-0 z-20 border-b bg-background/95 pb-4 pt-1 backdrop-blur 2xl:col-span-full">
+          <div className="border-b bg-background pb-4 pt-1 2xl:col-span-full">
             <div className="flex flex-wrap items-center gap-2">
               <div
                 data-testid="lesson-design-mode-tabs"
@@ -5032,7 +4905,7 @@ export function ClassScheduleWorkspace() {
               {hasLessonTextbooks ? (
               <div
                 className={cn(
-                  "rounded-lg border border-primary/20 bg-primary/5 p-2 shadow-xs xl:sticky xl:top-20 xl:max-h-[calc(100vh-12rem)] xl:overflow-y-auto",
+                  "rounded-lg border border-primary/20 bg-primary/5 p-2 shadow-xs",
                   !isLessonTextbookFinderVisible && "xl:max-w-3xl",
                 )}
               >
@@ -5202,7 +5075,7 @@ export function ClassScheduleWorkspace() {
           <section
             id={LESSON_DESIGN_SECTION_IDS.periods}
             data-lesson-period-sidebar="true"
-            className="bg-background py-4 2xl:sticky 2xl:top-20 2xl:col-start-1 2xl:max-h-[calc(100vh-6rem)] 2xl:self-start 2xl:overflow-y-auto 2xl:pr-5"
+            className="bg-background py-4 2xl:col-start-1 2xl:pr-5"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-lg font-semibold text-foreground">일정 생성</p>
@@ -5646,18 +5519,18 @@ export function ClassScheduleWorkspace() {
                                 <div className="space-y-1">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <Badge variant="secondary">{group.billingLabel}</Badge>
-                                    <Badge variant="outline">{group.sessionCount}회</Badge>
-                                    {hasLessonTextbooks ? (
-                                      <>
-                                        <Badge variant="outline">
-                                          대상 {group.sessions.filter((session) => session.textbookEntries.length > 0).length}
-                                        </Badge>
-                                        {group.sessions.some((session) => session.textbookEntries.length === 0) ? (
-                                          <Badge variant="outline">
-                                            기간 밖 {group.sessions.filter((session) => session.textbookEntries.length === 0).length}
-                                          </Badge>
-                                        ) : null}
-                                      </>
+                                        <Badge variant="outline">{group.sessionCount}회</Badge>
+                                        {hasLessonTextbooks ? (
+                                          <>
+                                            <Badge variant="outline">
+                                              대상 {group.textbookSessionCount}
+                                            </Badge>
+                                            {group.outsideTextbookRangeCount > 0 ? (
+                                              <Badge variant="outline">
+                                                기간 밖 {group.outsideTextbookRangeCount}
+                                              </Badge>
+                                            ) : null}
+                                          </>
                                     ) : null}
                                   </div>
                                   <p className="text-xs text-muted-foreground">{group.rangeLabel}</p>
@@ -5700,11 +5573,11 @@ export function ClassScheduleWorkspace() {
                                     .filter(Boolean)
                                     .join(" · ");
 	                                  return (
-                                    <div key={session.id} className="relative pl-10">
+                                    <div key={session.id} className="relative pl-9 [contain-intrinsic-size:84px] [content-visibility:auto]">
                                       <span
                                         aria-hidden="true"
                                         className={cn(
-                                          "absolute left-2.5 w-px bg-border",
+                                          "absolute left-3 w-px -translate-x-1/2 bg-border",
                                           isFirstFlowItem ? "top-1/2" : "-top-3",
                                           isLastFlowItem ? "bottom-1/2" : "-bottom-3",
                                         )}
@@ -5712,7 +5585,7 @@ export function ClassScheduleWorkspace() {
                                       <span
                                         aria-hidden="true"
                                         className={cn(
-                                          "absolute left-0 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full border-4 border-background",
+                                          "absolute left-3 top-1/2 z-10 flex size-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background",
                                           isDoneFlow
                                             ? "bg-primary border-primary/20"
                                             : isCurrentFlow
@@ -5803,7 +5676,10 @@ export function ClassScheduleWorkspace() {
           ) : null}
 
           {isLessonDesignProgressMode && hasLessonTextbooks ? (
-            <section className="relative z-[2] min-w-0 border-t bg-background py-6 2xl:sticky 2xl:top-20 2xl:col-start-2 2xl:self-start 2xl:border-l 2xl:border-t-0 2xl:pl-5">
+            <section
+              data-testid="lesson-design-progress-editor"
+              className="relative z-[2] min-w-0 border-t bg-background py-6 2xl:sticky 2xl:top-[calc(var(--header-height)+1rem)] 2xl:col-start-2 2xl:max-h-[calc(100dvh-var(--header-height)-6.5rem)] 2xl:self-start 2xl:overflow-y-auto 2xl:border-l 2xl:border-t-0 2xl:pl-5"
+            >
               <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
                 <div className="space-y-1">
                   <p className="text-lg font-semibold text-foreground">
@@ -5829,9 +5705,9 @@ export function ClassScheduleWorkspace() {
                       className="border-input bg-background h-9 max-w-[13rem] rounded-md border px-2 text-sm text-foreground shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                       aria-label="회차 바로 이동"
                     >
-                      {filteredLessonSessions.map((session) => (
+                      {lessonSessionJumpOptions.map((session) => (
                         <option key={`lesson-session-jump-${session.id}`} value={session.id}>
-                          {[session.label, session.dateLabel].filter(Boolean).join(" · ")}
+                          {getLessonSessionOptionLabel(session)}
                         </option>
                       ))}
                     </select>
@@ -5882,9 +5758,9 @@ export function ClassScheduleWorkspace() {
           ) : null}
           <div
             data-testid="lesson-design-bottom-action-bar"
-            className="sticky bottom-3 z-30 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg shadow-black/5 backdrop-blur 2xl:col-span-full"
+            className="fixed bottom-4 right-4 z-30 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-xl border bg-background/95 px-3 py-2 shadow-lg shadow-black/5 backdrop-blur sm:right-6"
           >
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <Badge variant={lessonDesignSnapshot.saveReadiness.ready ? "secondary" : "outline"}>
                 {isLessonDesignProgressMode ? "진도 생성" : "일정 생성"}
               </Badge>
@@ -5893,17 +5769,10 @@ export function ClassScheduleWorkspace() {
                   {lessonTextbookCompletedSessionCount}/{lessonTextbookProgressSessions.length}
                 </Badge>
               ) : null}
-              {lessonDesignSnapshot.saveReadiness.blockers.length > 0
-                ? lessonDesignSnapshot.saveReadiness.blockers.slice(0, 2).map((item) => (
-                    <Badge key={`lesson-design-bottom-blocker-${item}`} variant="outline">
-                      {item}
-                    </Badge>
-                  ))
-                : null}
             </div>
             <Button
               type="button"
-              className="h-9 rounded-md px-5"
+              className="h-9 rounded-md px-5 shadow-none"
               onClick={handleSaveLessonPlan}
               disabled={
                 isLessonDesignSaving ||
@@ -6371,7 +6240,13 @@ export function ClassScheduleWorkspace() {
     <>
       {!isLessonDesignPage ? classScheduleWorkspaceContent : null}
       {isLessonDesignPage ? (
-        <div className="px-4 lg:px-6">
+        <div
+          data-testid="lesson-design-page-scroll"
+          role="region"
+          aria-label="수업 설계 작업 영역"
+          tabIndex={0}
+          className="h-[calc(100dvh-var(--header-height)-2rem)] overflow-y-auto overscroll-contain px-4 pb-28 outline-none lg:px-6"
+        >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b pb-3">
             <div className="min-w-0">
               <p className="truncate text-xl font-semibold text-foreground">{lessonDesignTitle}</p>

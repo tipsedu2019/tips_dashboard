@@ -1,0 +1,114 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Settings2 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+export type DataTableColumn = {
+  id: string;
+  label: string;
+  required?: boolean;
+};
+
+function buildDefaultVisibility(columns: DataTableColumn[]) {
+  return Object.fromEntries(columns.map((column) => [column.id, true])) as Record<string, boolean>;
+}
+
+function sanitizeVisibility(columns: DataTableColumn[], value: unknown) {
+  const defaultVisibility = buildDefaultVisibility(columns);
+  if (!value || typeof value !== "object") {
+    return defaultVisibility;
+  }
+
+  const saved = value as Record<string, unknown>;
+  return Object.fromEntries(
+    columns.map((column) => [
+      column.id,
+      column.required ? true : typeof saved[column.id] === "boolean" ? Boolean(saved[column.id]) : true,
+    ]),
+  ) as Record<string, boolean>;
+}
+
+function readInitialVisibility(storageKey: string, columns: DataTableColumn[]) {
+  if (typeof window === "undefined") {
+    return buildDefaultVisibility(columns);
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(storageKey);
+    return sanitizeVisibility(columns, rawValue ? JSON.parse(rawValue) : null);
+  } catch {
+    window.localStorage.removeItem(storageKey);
+    return buildDefaultVisibility(columns);
+  }
+}
+
+export function useDataTableColumns(storageKey: string, columns: DataTableColumn[]) {
+  const [visibility, setVisibility] = useState<Record<string, boolean>>(() => readInitialVisibility(storageKey, columns));
+  const [open, setOpen] = useState(false);
+  const columnById = useMemo(() => new Map(columns.map((column) => [column.id, column])), [columns]);
+  const sanitizedVisibility = useMemo(() => sanitizeVisibility(columns, visibility), [columns, visibility]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(sanitizedVisibility));
+    } catch {
+      // Table settings are convenience state only.
+    }
+  }, [sanitizedVisibility, storageKey]);
+
+  const isColumnVisible = (columnId: string) => Boolean(sanitizedVisibility[columnId]);
+  const visibleColumnCount = columns.filter((column) => isColumnVisible(column.id)).length || 1;
+  const resetVisibility = () => setVisibility(buildDefaultVisibility(columns));
+
+  const toggleColumn = (columnId: string, checked: boolean) => {
+    const column = columnById.get(columnId);
+    if (column?.required) {
+      return;
+    }
+    setVisibility((current) => ({ ...current, [columnId]: checked }));
+  };
+
+  const columnSettingsControl = (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0" aria-label="컬럼 구성" title="컬럼 구성">
+          <Settings2 className="size-4" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-64 rounded-lg p-2">
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+          <div className="text-sm font-semibold text-foreground">컬럼 구성</div>
+          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={resetVisibility}>
+            초기화
+          </Button>
+        </div>
+        <div className="grid gap-0.5">
+          {columns.map((column) => (
+            <label
+              key={column.id}
+              className="flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-muted/70"
+            >
+              <Checkbox
+                checked={isColumnVisible(column.id)}
+                disabled={column.required}
+                onCheckedChange={(checked) => toggleColumn(column.id, checked === true)}
+              />
+              <span className="min-w-0 flex-1 truncate">{column.label}</span>
+              {column.required ? <span className="text-[11px] text-muted-foreground">고정</span> : null}
+            </label>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+
+  return { isColumnVisible, visibleColumnCount, columnSettingsControl };
+}

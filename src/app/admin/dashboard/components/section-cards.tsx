@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils"
 type DashboardSubjectKey = "all" | "english" | "math"
 type DashboardDivisionKey = "all" | "middle" | "high"
 type StudentBasis = "students" | "enrollments"
+type ClassOperationGroupMode = "grade" | "teacher" | "classroom"
 
 type BreakdownRow = {
   label: string
@@ -46,10 +47,14 @@ type ClassSummaryRow = {
   classroomLabel: string
   studentCount: number
   enrollmentCount: number
+  weeklyMinutes?: number
+  weeklyHoursLabel?: string
 }
 
 type ClassBreakdownRow = BreakdownRow & {
   classCount: number
+  weeklyMinutes?: number
+  weeklyHoursLabel?: string
   classSummaries?: ClassSummaryRow[]
 }
 
@@ -74,6 +79,8 @@ type DashboardBucket = {
     bySubject: ClassBreakdownRow[]
     byGrade: ClassBreakdownRow[]
     bySchool: ClassBreakdownRow[]
+    byTeacher?: ClassBreakdownRow[]
+    byClassroom?: ClassBreakdownRow[]
   }
   summary?: DashboardBucketSummary
 }
@@ -140,6 +147,12 @@ const DIVISION_TABS: Array<{ key: DashboardDivisionKey; label: string }> = [
   { key: "high", label: "고등부" },
 ]
 
+const CLASS_OPERATION_GROUP_TABS: Array<{ key: ClassOperationGroupMode; label: string }> = [
+  { key: "grade", label: "학년" },
+  { key: "teacher", label: "선생님" },
+  { key: "classroom", label: "강의실" },
+]
+
 const EMPTY_BUCKET: DashboardBucket = {
   studentBreakdowns: {
     bySubject: [],
@@ -150,6 +163,8 @@ const EMPTY_BUCKET: DashboardBucket = {
     bySubject: [],
     byGrade: [],
     bySchool: [],
+    byTeacher: [],
+    byClassroom: [],
   },
 }
 
@@ -315,6 +330,18 @@ function getClassMaxValue(rows: ClassBreakdownRow[]) {
   return Math.max(1, ...rows.map((row) => row.classCount))
 }
 
+function sortClassOperationRows(rows: ClassBreakdownRow[]) {
+  return [...rows].sort((left, right) => (
+    right.classCount - left.classCount ||
+    right.studentCount - left.studentCount ||
+    left.label.localeCompare(right.label, "ko", { numeric: true })
+  ))
+}
+
+function getClassOperationGroupKey(mode: ClassOperationGroupMode, label: string) {
+  return `class-${mode}:${label}`
+}
+
 function getBarScale(value: number, max: number, minimum = 5) {
   return Math.min(100, Math.max(minimum, (value / Math.max(1, max)) * 100))
 }
@@ -323,14 +350,18 @@ const DISTRIBUTION_ROW_CLASS =
   "grid grid-cols-[minmax(3.75rem,5.25rem)_minmax(0,1fr)_3.25rem] items-center gap-2 sm:grid-cols-[minmax(4.5rem,7rem)_minmax(0,1fr)_3.75rem]"
 
 const CLASS_OPERATION_ROW_CLASS =
-  "grid w-full grid-cols-[1rem_3.25rem_minmax(0,1fr)_3.75rem] items-center gap-2 px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow,transform] hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px sm:grid-cols-[1rem_4rem_minmax(0,1fr)_4.5rem] sm:gap-3"
+  "grid w-full grid-cols-[1rem_minmax(4.5rem,7rem)_minmax(0,1fr)_6.25rem] items-center gap-2 px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow,transform] hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px sm:grid-cols-[1rem_minmax(5.5rem,9rem)_minmax(0,1fr)_6.75rem] sm:gap-3"
 
 const DISTRIBUTION_PREVIEW_LIMIT = 5
 const CLASS_PREVIEW_LIMIT = 3
 const DISTRIBUTION_TOGGLE_ROW_CLASS =
   "w-full rounded-md px-1 py-1 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px"
 const LIST_SCOPE_TOGGLE_CLASS =
-  "shrink-0 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px"
+  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-primary/25 bg-primary/5 px-2.5 text-xs font-semibold text-primary shadow-xs transition-[background-color,border-color,color,box-shadow,transform] hover:border-primary/40 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px"
+
+function formatWeeklyHoursLabel(label: string | undefined) {
+  return label && label !== "0분" ? `주 ${label}` : "시수 미정"
+}
 
 function AnimatedBar({ percent, className }: { percent: number; className?: string }) {
   const scale = Math.min(100, Math.max(0, percent)) / 100
@@ -394,16 +425,25 @@ function ListScopeToggle({
   onClick: () => void
 }) {
   if (totalCount <= visibleCount) return null
+  const actionLabel = expanded ? "접기" : "전체 보기"
+  const countLabel = expanded ? `상위 ${formatNumber(visibleCount)}개` : `${formatNumber(totalCount)}개`
 
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={expanded}
-      aria-label={expanded ? `${label} 상위 ${formatNumber(visibleCount)}개만 보기` : `${label} 전체 ${formatNumber(totalCount)}개 보기`}
+      aria-label={expanded ? `${label} 접고 상위 ${formatNumber(visibleCount)}개만 보기` : `${label} 전체 ${formatNumber(totalCount)}개 보기`}
       className={LIST_SCOPE_TOGGLE_CLASS}
     >
-      {expanded ? `상위 ${formatNumber(visibleCount)}` : `전체 ${formatNumber(totalCount)}`}
+      <ChevronDown
+        className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-180")}
+        aria-hidden="true"
+      />
+      <span>{actionLabel}</span>
+      <span className="rounded-[4px] bg-background/85 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-foreground shadow-xs">
+        {countLabel}
+      </span>
     </button>
   )
 }
@@ -717,7 +757,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
               label="학생 기준"
               value={basis}
               items={[
-                { key: "students", label: "인원" },
+                { key: "students", label: "재원" },
                 { key: "enrollments", label: "수강" },
               ]}
               onChange={setBasis}
@@ -792,7 +832,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
 
                           return (
                             <div key={school.label} role="listitem" className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
-                              <span className="truncate font-medium text-muted-foreground">{school.label}</span>
+                              <span className="truncate pl-5 font-medium text-muted-foreground">{school.label}</span>
                               <div className="h-1 overflow-hidden rounded-full bg-muted">
                                 <AnimatedBar percent={getBarScale(schoolValue, gradeMax, 4)} className="bg-primary/65" />
                               </div>
@@ -867,7 +907,7 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
 
                           return (
                             <div key={grade.label} role="listitem" className={cn(DISTRIBUTION_ROW_CLASS, "text-xs")}>
-                              <span className="font-medium text-muted-foreground">{grade.label}</span>
+                              <span className="truncate pl-5 font-medium text-muted-foreground">{grade.label}</span>
                               <div className="h-1 overflow-hidden rounded-full bg-muted">
                                 <AnimatedBar percent={getBarScale(gradeValue, schoolMax, 4)} className="bg-primary/65" />
                               </div>
@@ -892,22 +932,27 @@ function StudentDistributionPanel({ bucket }: { bucket: DashboardBucket }) {
 }
 
 function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
-  const gradeRows = useMemo(
-    () => [...(bucket.classBreakdowns?.byGrade || [])].sort((left, right) => (
-      right.classCount - left.classCount ||
-      left.label.localeCompare(right.label, "ko", { numeric: true })
-    )),
-    [bucket.classBreakdowns?.byGrade],
+  const [groupMode, setGroupMode] = useState<ClassOperationGroupMode>("grade")
+  const groupRowsByMode = useMemo(
+    () => ({
+      grade: sortClassOperationRows(bucket.classBreakdowns?.byGrade || []),
+      teacher: sortClassOperationRows(bucket.classBreakdowns?.byTeacher || []),
+      classroom: sortClassOperationRows(bucket.classBreakdowns?.byClassroom || []),
+    }),
+    [bucket.classBreakdowns?.byClassroom, bucket.classBreakdowns?.byGrade, bucket.classBreakdowns?.byTeacher],
   )
-  const defaultOpenGradeKey = gradeRows[0] ? `class-grade:${gradeRows[0].label}` : undefined
-  const [openGradeKeys, setOpenGradeKeys] = useState<Set<string>>(
-    () => new Set(defaultOpenGradeKey ? [defaultOpenGradeKey] : []),
+  const groupRows = groupRowsByMode[groupMode]
+  const groupLabel = getActiveLabel(CLASS_OPERATION_GROUP_TABS, groupMode)
+  const defaultOpenGroupKey = groupRows[0] ? getClassOperationGroupKey(groupMode, groupRows[0].label) : undefined
+  const [openGroupKeys, setOpenGroupKeys] = useState<Set<string>>(
+    () => new Set(defaultOpenGroupKey ? [defaultOpenGroupKey] : []),
   )
   const [expandedClassKeys, setExpandedClassKeys] = useState<Set<string>>(() => new Set())
-  const classMax = getClassMaxValue(gradeRows)
+  const classMax = getClassMaxValue(groupRows)
+  const hasClassGroups = Object.values(groupRowsByMode).some((rows) => rows.length > 0)
 
-  const toggleOpenGrade = (key: string) => {
-    setOpenGradeKeys((current) => {
+  const toggleOpenGroup = (key: string) => {
+    setOpenGroupKeys((current) => {
       const next = new Set(current)
       if (next.has(key)) {
         next.delete(key)
@@ -915,6 +960,19 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
         next.add(key)
       }
       return next
+    })
+  }
+  const changeGroupMode = (nextMode: ClassOperationGroupMode) => {
+    const nextRows = groupRowsByMode[nextMode]
+    const nextPrefix = `class-${nextMode}:`
+    const nextDefaultOpenKey = nextRows[0] ? getClassOperationGroupKey(nextMode, nextRows[0].label) : undefined
+    setGroupMode(nextMode)
+    if (!nextDefaultOpenKey) return
+    setOpenGroupKeys((current) => {
+      if ([...current].some((key) => key.startsWith(nextPrefix))) {
+        return current
+      }
+      return new Set([...current, nextDefaultOpenKey])
     })
   }
   const toggleExpandedClassList = (key: string) => {
@@ -931,15 +989,25 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
 
   return (
     <Card className="min-w-0 gap-4 rounded-xl py-4 shadow-none">
-      <CardHeader className="border-b px-4 pb-3 sm:px-5">
+      <CardHeader className="has-data-[slot=card-action]:grid-cols-1 gap-3 border-b px-4 pb-3 sm:px-5 sm:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
         <CardTitle className="text-base">수업 운영</CardTitle>
+        {hasClassGroups ? (
+          <CardAction className="col-start-1 row-span-1 row-start-2 justify-self-start sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:justify-self-end">
+            <SegmentedControl
+              label="수업 운영 보기"
+              value={groupMode}
+              items={CLASS_OPERATION_GROUP_TABS}
+              onChange={changeGroupMode}
+            />
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="px-4 sm:px-5">
-        {gradeRows.length > 0 ? (
-          <div role="list" aria-label="학년별 수업 운영" className="overflow-hidden rounded-lg border bg-background">
-            {gradeRows.map((row) => {
-              const openKey = `class-grade:${row.label}`
-              const isOpen = openGradeKeys.has(openKey)
+        {groupRows.length > 0 ? (
+          <div role="list" aria-label={`${groupLabel}별 수업 운영`} className="overflow-hidden rounded-lg border bg-background">
+            {groupRows.map((row) => {
+              const openKey = getClassOperationGroupKey(groupMode, row.label)
+              const isOpen = openGroupKeys.has(openKey)
               const isExpanded = expandedClassKeys.has(openKey)
               const allClassRows = row.classSummaries || []
               const classRows = isExpanded ? allClassRows : allClassRows.slice(0, CLASS_PREVIEW_LIMIT)
@@ -948,10 +1016,10 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
                 <div key={row.label} role="listitem" className="min-w-0 border-b last:border-b-0">
                   <button
                     type="button"
-                    onClick={() => toggleOpenGrade(openKey)}
+                    onClick={() => toggleOpenGroup(openKey)}
                     className={CLASS_OPERATION_ROW_CLASS}
                     aria-expanded={isOpen}
-                    aria-label={`${row.label} 수업 ${isOpen ? "접기" : "펼치기"}`}
+                    aria-label={`${row.label} ${groupLabel} 수업 ${isOpen ? "접기" : "펼치기"}`}
                   >
                     <ChevronDown
                       className={cn(
@@ -960,16 +1028,23 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
                       )}
                       aria-hidden="true"
                     />
-                    <span className="truncate px-1 text-sm font-medium">{row.label}</span>
+                    <span className="truncate px-1 text-sm font-medium" title={row.label}>{row.label}</span>
                     <div className="h-2 overflow-hidden rounded-full bg-muted">
                       <AnimatedBar percent={getBarScale(row.classCount, classMax)} className="bg-primary" />
                     </div>
-                    <span className="px-1 text-right text-sm tabular-nums">{formatNumber(row.classCount)}개</span>
+                    <span className="grid justify-items-end gap-0.5 px-1 text-right leading-none tabular-nums">
+                      <span className="text-sm font-semibold">{formatNumber(row.classCount)}개</span>
+                      <span className="text-[11px] font-medium text-muted-foreground">{formatWeeklyHoursLabel(row.weeklyHoursLabel)}</span>
+                      <span className="text-[11px] font-medium text-muted-foreground">{formatNumber(row.studentCount)}명</span>
+                    </span>
                   </button>
                   {isOpen ? (
                     <div className="grid gap-1.5 border-t bg-muted/15 p-3">
-                      {allClassRows.length > CLASS_PREVIEW_LIMIT ? (
-                        <div className="flex justify-end">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                          합계 {formatNumber(row.classCount)}개 · {formatWeeklyHoursLabel(row.weeklyHoursLabel)} · {formatNumber(row.studentCount)}명
+                        </span>
+                        {allClassRows.length > CLASS_PREVIEW_LIMIT ? (
                           <ListScopeToggle
                             label={`${row.label} 수업 목록`}
                             expanded={isExpanded}
@@ -977,8 +1052,8 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
                             totalCount={allClassRows.length}
                             onClick={() => toggleExpandedClassList(openKey)}
                           />
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
                       <div role="list" aria-label={`${row.label} 수업 목록`} className="grid gap-1.5">
                         {classRows.map((classItem) => (
                           <div
@@ -1009,8 +1084,9 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
                                   </Badge>
                                 ))}
                               </div>
-                              <span className="col-start-2 justify-self-start text-xs font-medium tabular-nums text-muted-foreground sm:col-start-3 sm:justify-self-end">
-                                {formatNumber(classItem.studentCount)}명
+                              <span className="col-start-2 grid justify-items-start gap-0.5 text-xs font-medium tabular-nums text-muted-foreground sm:col-start-3 sm:justify-items-end">
+                                <span>{formatWeeklyHoursLabel(classItem.weeklyHoursLabel)}</span>
+                                <span>{formatNumber(classItem.studentCount)}명</span>
                               </span>
                             </div>
                           </div>
@@ -1032,7 +1108,9 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
 }
 
 function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
+  const [showAllConflicts, setShowAllConflicts] = useState(false)
   const affectedCount = rows.reduce((sum, row) => sum + row.affectedCount, 0)
+  const visibleRows = showAllConflicts ? rows : rows.slice(0, 3)
 
   if (rows.length === 0) {
     return null
@@ -1046,12 +1124,19 @@ function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
           일정 충돌 보드
         </CardTitle>
         <CardAction className="flex items-center gap-2">
+          <ListScopeToggle
+            label="일정 충돌"
+            expanded={showAllConflicts}
+            visibleCount={3}
+            totalCount={rows.length}
+            onClick={() => setShowAllConflicts((current) => !current)}
+          />
           <Badge variant={rows.length > 0 ? "destructive" : "outline"}>{formatNumber(rows.length)}</Badge>
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-4 px-4 sm:px-5">
         <div className="grid gap-3 xl:grid-cols-3">
-          {rows.slice(0, 3).map((row) => (
+          {visibleRows.map((row) => (
             <div key={row.id} className="min-w-0 rounded-xl border bg-background p-4">
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">

@@ -94,7 +94,17 @@ test("monthly closing compares opening stock, movements, and cash settlement", (
   assert.equal(closing.adjustmentQuantity, -1);
   assert.equal(closing.endingQuantity, 10);
   assert.equal(closing.endingAmount, 96000);
-  assert.equal(closing.settlementDifference, -6000);
+  assert.equal(closing.paymentDifference, -6000);
+  assert.equal(closing.textbookMarginAmount, 4400);
+  assert.deepEqual(
+    closing.teamMargins.map((row) => [row.team, row.saleQuantity, row.saleAmount, row.purchaseCostAmount, row.marginAmount]),
+    [
+      ["english", 0, 0, 0, 0],
+      ["math", 0, 0, 0, 0],
+      ["other", 4, 44000, 39600, 4400],
+    ],
+  );
+  assert.equal(closing.settlementDifference, -1600);
   assert.equal(closing.needsReview, true);
 });
 

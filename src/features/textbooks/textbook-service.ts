@@ -48,6 +48,7 @@ const TEXTBOOK_OPERATION_TABLES = [
   "textbook_suppliers",
   "textbook_supplier_links",
   "textbook_publisher_supplier_links",
+  "textbook_sub_subject_settings",
   "textbook_inventory_locations",
   "textbook_purchase_orders",
   "textbook_purchase_order_lines",
@@ -209,6 +210,7 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
     publishers,
     suppliers,
     publisherSupplierLinks,
+    textbookSubSubjectSettings,
     locations,
     purchaseOrders,
     purchaseOrderLines,
@@ -225,6 +227,7 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
     readTable(client, "textbook_publishers", "*", missingTables),
     canLoadManagementTables ? readTable(client, "textbook_suppliers", "*", missingTables) : Promise.resolve([] as Row[]),
     canLoadManagementTables ? readTable(client, "textbook_publisher_supplier_links", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_sub_subject_settings", "*", missingTables) : Promise.resolve([] as Row[]),
     readTable(client, "textbook_inventory_locations", "*", missingTables),
     readTable(client, "textbook_purchase_orders", "*", missingTables),
     readTable(client, "textbook_purchase_order_lines", TEXTBOOK_PURCHASE_ORDER_LINE_SELECT, missingTables),
@@ -239,7 +242,6 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
   ]);
   const missingOperationTables = [...new Set(missingTables)]
     .filter((table) => TEXTBOOK_OPERATION_SCHEMA_ITEMS.includes(table));
-  const textbookSubSubjectSettings: Row[] = [];
 
   return {
     textbooks,
@@ -847,6 +849,65 @@ export async function createStockCountAdjustment(record: Row, clientInput?: Supa
   return count as Row;
 }
 
+export async function deleteInventoryHistory(record: Row, clientInput?: SupabaseClientLike | null) {
+  const client = ensureClient(clientInput);
+  const kind = text(record.kind || record.type);
+  const id = text(record.id || record.historyId || record.history_id);
+  const linkedMoveId = text(record.linkedMoveId || record.linked_move_id || record.adjustmentMoveId || record.adjustment_move_id);
+
+  if (!id) {
+    throw new Error("삭제할 재고 이력을 선택하세요.");
+  }
+
+  if (kind === "count") {
+    const { data: count, error: countReadError } = await client
+      .from("textbook_stock_counts")
+      .select("id,adjustment_move_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (countReadError) throw countReadError;
+
+    const adjustmentMoveId = text(count?.adjustment_move_id || linkedMoveId);
+    if (adjustmentMoveId) {
+      const { error: detachError } = await client
+        .from("textbook_stock_counts")
+        .update({ adjustment_move_id: null })
+        .eq("id", id);
+      if (detachError) throw detachError;
+    }
+
+    const { error: countDeleteError } = await client
+      .from("textbook_stock_counts")
+      .delete()
+      .eq("id", id);
+    if (countDeleteError) throw countDeleteError;
+
+    if (adjustmentMoveId) {
+      const { error: moveDeleteError } = await client
+        .from("textbook_stock_moves")
+        .delete()
+        .eq("id", adjustmentMoveId);
+      if (moveDeleteError) throw moveDeleteError;
+    }
+
+    return { kind: "count", id, linkedMoveId: adjustmentMoveId };
+  }
+
+  const { error: detachError } = await client
+    .from("textbook_stock_counts")
+    .update({ adjustment_move_id: null })
+    .eq("adjustment_move_id", id);
+  if (detachError) throw detachError;
+
+  const { error: moveDeleteError } = await client
+    .from("textbook_stock_moves")
+    .delete()
+    .eq("id", id);
+  if (moveDeleteError) throw moveDeleteError;
+
+  return { kind: "move", id };
+}
+
 export async function upsertMonthlyClosing(record: Row, data: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
   const closingMonth = text(record.closingMonth || record.closing_month) || getCurrentMonth();
@@ -855,6 +916,9 @@ export async function upsertMonthlyClosing(record: Row, data: Row, clientInput?:
     closingMonth,
     subject,
     textbooks: (data.textbooks || []) as Row[],
+    publishers: (data.publishers || []) as Row[],
+    suppliers: (data.suppliers || []) as Row[],
+    publisherSupplierLinks: (data.publisherSupplierLinks || data.publisher_supplier_links || []) as Row[],
     stockMoves: (data.stockMoves || []) as Row[],
   });
   const closing = buildTextbookMonthlyClosing({
@@ -927,6 +991,7 @@ export const textbookService = {
   updateSaleLineStatus,
   deleteSaleLineLifecycle,
   createStockCountAdjustment,
+  deleteInventoryHistory,
   upsertMonthlyClosing,
   updateMonthlyClosingStatus,
 };

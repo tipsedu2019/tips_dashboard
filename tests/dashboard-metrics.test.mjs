@@ -414,8 +414,16 @@ test("attaches class summaries to grade class breakdowns", () => {
   assert.equal(summaries[0].studentCount, 3);
   assert.equal(summaries[0].subject, "math");
   assert.equal(summaries[0].scheduleLabel, "Mon 10:00-11:00");
+  assert.equal(summaries[0].weeklyMinutes, 60);
+  assert.equal(summaries[0].weeklyHoursLabel, "1시간");
   assert.equal(summaries[0].teacherLabel, "Teacher A");
   assert.equal(summaries[0].classroomLabel, "Room 1");
+  assert.equal(metrics.classBreakdowns.byGrade[0].weeklyMinutes, 120);
+  assert.equal(metrics.classBreakdowns.byGrade[0].weeklyHoursLabel, "2시간");
+  assert.deepEqual(metrics.classBreakdowns.byTeacher.map((row) => row.label), ["Teacher A", "Teacher B"]);
+  assert.equal(metrics.classBreakdowns.byTeacher[0].classSummaries[0].id, "grade-class-large");
+  assert.deepEqual(metrics.classBreakdowns.byClassroom.map((row) => row.label), ["Room 1", "Room 2"]);
+  assert.equal(metrics.classBreakdowns.byClassroom[0].classSummaries[0].id, "grade-class-large");
 });
 
 test("uses class management grade before enrolled student grades for class breakdowns", () => {

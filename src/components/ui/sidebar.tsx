@@ -75,6 +75,8 @@ function SidebarProvider({
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value
+      if (openState === open) return
+
       if (setOpenProp) {
         setOpenProp(openState)
       } else {
@@ -297,6 +299,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     <button
       data-sidebar="rail"
       data-slot="sidebar-rail"
+      data-testid="admin-sidebar-rail"
       aria-label={label}
       tabIndex={-1}
       onClick={toggleSidebar}

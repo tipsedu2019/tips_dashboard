@@ -959,10 +959,13 @@ function createClassBreakdownAccumulator() {
     enrollmentCount: 0,
     studentIds: new Set(),
     classSummaries: new Map(),
+    weeklyMinutes: 0,
   };
 }
 
 function buildDashboardClassSummary(classItem = {}, studentIds = []) {
+  const weeklyMinutes = getWeeklyMinutesForClass(classItem);
+
   return {
     id: text(classItem.id) || classFullNameOf(classItem),
     title: classNameOf(classItem),
@@ -972,6 +975,8 @@ function buildDashboardClassSummary(classItem = {}, studentIds = []) {
     classroomLabel: splitClassroomList(classItem.classroom || classItem.room).join(", ") || "미정",
     studentCount: unique(studentIds).length,
     enrollmentCount: studentIds.length,
+    weeklyMinutes,
+    weeklyHoursLabel: formatDashboardHours(weeklyMinutes),
   };
 }
 
@@ -987,6 +992,7 @@ function pushClassBreakdown(map, label, classId, studentIds = [], classSummary =
   });
   if (classSummary) {
     current.classSummaries.set(classId, classSummary);
+    current.weeklyMinutes += Number(classSummary.weeklyMinutes || 0);
   }
   map.set(key, current);
 }
@@ -998,9 +1004,12 @@ function finalizeClassBreakdown(map, { order = "class-desc" } = {}) {
       classCount: payload.classIds.size,
       enrollmentCount: payload.enrollmentCount,
       studentCount: payload.studentIds.size,
+      weeklyMinutes: payload.weeklyMinutes,
+      weeklyHoursLabel: formatDashboardHours(payload.weeklyMinutes),
       classSummaries: [...payload.classSummaries.values()].sort((left, right) => (
         right.studentCount - left.studentCount ||
         right.enrollmentCount - left.enrollmentCount ||
+        right.weeklyMinutes - left.weeklyMinutes ||
         left.title.localeCompare(right.title, "ko", { numeric: true })
       )),
     }))
@@ -1028,19 +1037,30 @@ function buildClassBreakdowns(classes = [], students = []) {
   const byGrade = new Map();
   const bySubject = new Map();
   const bySchool = new Map();
+  const byTeacher = new Map();
+  const byClassroom = new Map();
 
   classes.forEach((classItem) => {
     const classId = text(classItem.id) || classFullNameOf(classItem);
     const registeredIds = getStudentIds(classItem);
     const gradeLabels = inferClassGradeLabels(classItem, studentsById);
     const subjectLabel = text(classItem.subject) || "미정";
+    const classSummary = buildDashboardClassSummary(classItem, registeredIds);
+    const teacherLabels = splitTeacherList(classItem.teacher || classItem.teacher_name || classItem.teacherName);
+    const classroomLabels = splitClassroomList(classItem.classroom || classItem.room);
     const schoolLabels = unique(
       registeredIds
         .map((studentId) => text(studentsById.get(studentId)?.school))
         .filter(Boolean),
     );
 
-    pushClassBreakdown(bySubject, subjectLabel, classId, registeredIds, buildDashboardClassSummary(classItem, registeredIds));
+    pushClassBreakdown(bySubject, subjectLabel, classId, registeredIds, classSummary);
+    (teacherLabels.length > 0 ? teacherLabels : ["미정"]).forEach((teacherLabel) => {
+      pushClassBreakdown(byTeacher, teacherLabel, classId, registeredIds, classSummary);
+    });
+    (classroomLabels.length > 0 ? classroomLabels : ["미정"]).forEach((classroomLabel) => {
+      pushClassBreakdown(byClassroom, classroomLabel, classId, registeredIds, classSummary);
+    });
 
     (gradeLabels.length > 0 ? gradeLabels : ["미정"]).forEach((gradeLabel) => {
       const studentIdsForGrade = registeredIds.filter((studentId) => (
@@ -1073,15 +1093,29 @@ function buildClassBreakdowns(classes = [], students = []) {
     byGrade: finalizeClassBreakdown(byGrade, { order: "class-desc" }),
     bySubject: finalizeClassBreakdown(bySubject, { order: "class-desc" }),
     bySchool: finalizeClassBreakdown(bySchool, { order: "student-desc" }),
+    byTeacher: finalizeClassBreakdown(byTeacher, { order: "class-desc" }),
+    byClassroom: finalizeClassBreakdown(byClassroom, { order: "class-desc" }),
   };
 }
 
-function getWeeklyMinutesForClasses(classes = []) {
-  return classes.reduce((sum, classItem) => (
-    sum + buildScheduleSlots(classItem).reduce((slotSum, slot) => (
-      slotSum + Math.max(0, timeToMinutes(slot.end) - timeToMinutes(slot.start))
-    ), 0)
+function getScheduleRangeMinutesFallback(schedule) {
+  return [...text(schedule).matchAll(/([0-9]{1,2}:\d{2})\s*-\s*([0-9]{1,2}:\d{2})/g)]
+    .reduce((sum, match) => sum + Math.max(0, timeToMinutes(match[2]) - timeToMinutes(match[1])), 0);
+}
+
+function getWeeklyMinutesForClass(classItem = {}) {
+  const slots = buildScheduleSlots(classItem);
+  if (slots.length === 0) {
+    return getScheduleRangeMinutesFallback(classItem.schedule);
+  }
+
+  return slots.reduce((slotSum, slot) => (
+    slotSum + Math.max(0, timeToMinutes(slot.end) - timeToMinutes(slot.start))
   ), 0);
+}
+
+function getWeeklyMinutesForClasses(classes = []) {
+  return classes.reduce((sum, classItem) => sum + getWeeklyMinutesForClass(classItem), 0);
 }
 
 function buildDashboardBucketSummary(classes = [], students = []) {
@@ -1175,6 +1209,8 @@ export function createEmptyDashboardMetrics() {
       bySubject: [],
       byGrade: [],
       bySchool: [],
+      byTeacher: [],
+      byClassroom: [],
     },
     analyticsBySubject: buildDashboardAnalyticsBySubject([], []),
     analyticsByView: buildEmptyDashboardAnalyticsView(),

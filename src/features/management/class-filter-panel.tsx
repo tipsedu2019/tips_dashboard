@@ -107,8 +107,24 @@ export function ClassFilterPanel({
                 ) : null}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-[min(34rem,calc(100vw-2rem))] p-3">
-              <div className="grid gap-3 sm:grid-cols-2">
+            <PopoverContent align="end" className="w-[min(34rem,calc(100vw-2rem))] p-0">
+              <div data-testid="class-filter-popover-header" className="flex items-center justify-between gap-3 border-b px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <SlidersHorizontal className="size-4 text-muted-foreground" />
+                  <p className="truncate text-sm font-semibold text-foreground">필터</p>
+                  {activeFilterCount > 0 ? (
+                    <Badge variant="secondary" className="rounded-md px-1.5 text-[11px] tabular-nums">
+                      {activeFilterCount}
+                    </Badge>
+                  ) : null}
+                </div>
+                {showReset ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onReset}>
+                    초기화
+                  </Button>
+                ) : null}
+              </div>
+              <div className="grid gap-3 p-3 sm:grid-cols-2">
                 {selects.map((select) => {
                   const options = normalizeOptions(select.options);
                   const emptyValue = select.emptyValue || "all";
