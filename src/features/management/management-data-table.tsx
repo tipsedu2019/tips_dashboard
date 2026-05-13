@@ -356,6 +356,10 @@ function normalizeScalar(value: unknown): string {
   return String(value);
 }
 
+function isUuidLike(value: unknown) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizeScalar(value));
+}
+
 function getClassFilterValue(row: ManagementRow, columnId: ClassFilterColumnId) {
   const raw = row.raw || {};
   if (columnId === "subject") return normalizeScalar(raw.subject || row.badge);
@@ -753,14 +757,19 @@ function normalizeClassStudentSummaries(value: unknown): ClassStudentSummary[] {
 
       return {
         id: normalizeScalar(item),
-        name: normalizeScalar(item),
       };
     })
     .filter((student) => student.name || student.id);
 }
 
 function formatClassStudentSummary(student: ClassStudentSummary) {
-  const name = student.name || student.id || "학생";
+  const rawName = student.name || "";
+  const rawId = student.id || "";
+  const name = rawName && !isUuidLike(rawName)
+    ? rawName
+    : rawId && !isUuidLike(rawId)
+      ? rawId
+      : "학생 정보 확인 필요";
   const school = student.school || "";
   const grade = school && student.grade?.startsWith(school.slice(-1))
     ? student.grade.slice(1)

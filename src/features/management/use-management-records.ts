@@ -149,9 +149,11 @@ function listValue(value: unknown): string[] {
 }
 
 function toClassStudentSummary(student: Record<string, unknown> | undefined, id: string) {
+  const studentName = textValue(student?.name);
+
   return {
     id,
-    name: textValue(student?.name) || id,
+    name: studentName || "학생 정보 확인 필요",
     school: textValue(student?.school),
     grade: textValue(student?.grade),
   };

@@ -18,6 +18,23 @@ test("student lifecycle status is a persisted student field", async () => {
   assert.match(migrationSource, /check \(status in \('재원', '퇴원'\)\)/);
 });
 
+test("class relation removal can clear orphaned student references", async () => {
+  const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
+  const assignSource = serviceSource.match(/async assignStudentToClass[\s\S]*?return \{ student: nextStudent, class: nextClass \};/)?.[0] || "";
+  const removeSource = serviceSource.match(/async removeStudentFromClass[\s\S]*?return \{ student: nextStudent, class: nextClass \};/)?.[0] || "";
+
+  assert.match(serviceSource, /function getClassWaitlistIds/);
+  assert.match(serviceSource, /function getClassStudentMode/);
+  assert.match(assignSource, /if \(!student \|\| !classItem\)/);
+  assert.match(removeSource, /const safeStudentId = trimText\(studentId\)/);
+  assert.match(removeSource, /const safeClassId = trimText\(classId\)/);
+  assert.match(removeSource, /if \(!student && !classItem\)/);
+  assert.match(removeSource, /getStudentClassMode\(student, safeClassId\) \|\| getClassStudentMode\(classItem, safeStudentId\)/);
+  assert.match(removeSource, /if \(nextStudent\) \{\s*await upsertStudentRows/);
+  assert.match(removeSource, /if \(nextClass\) \{\s*await upsertRows/);
+  assert.match(removeSource, /if \(previousMode && student && classItem\)/);
+});
+
 test("student delete actions become withdrawal actions instead of physical deletion", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");

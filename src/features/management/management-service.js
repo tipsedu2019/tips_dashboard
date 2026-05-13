@@ -373,6 +373,27 @@ function getStudentClassMode(student, classId) {
   return "";
 }
 
+function getClassWaitlistIds(classItem) {
+  return [
+    ...normalizeIdList(classItem?.waitlist_ids || classItem?.waitlistIds),
+    ...normalizeIdList(classItem?.waitlist_student_ids || classItem?.waitlistStudentIds),
+  ];
+}
+
+function getClassStudentMode(classItem, studentId) {
+  const safeStudentId = trimText(studentId);
+  if (!safeStudentId) {
+    return "";
+  }
+  if (normalizeIdList(classItem?.student_ids || classItem?.studentIds).includes(safeStudentId)) {
+    return "enrolled";
+  }
+  if (getClassWaitlistIds(classItem).includes(safeStudentId)) {
+    return "waitlist";
+  }
+  return "";
+}
+
 async function insertStudentClassHistory(client, rows = []) {
   const payload = rows.filter((row) => row.student_id && row.class_id);
   if (payload.length === 0) {
@@ -708,35 +729,37 @@ export function createManagementService(options = {}) {
 
     async assignStudentToClass({ studentId, classId, mode = "enrolled" } = {}) {
       const client = ensureClient(supabase);
+      const safeStudentId = trimText(studentId);
+      const safeClassId = trimText(classId);
       const [students, classes] = await Promise.all([
         selectRows(client, "students"),
         selectRows(client, "classes"),
       ]);
-      const student = findById(students, studentId);
-      const classItem = findById(classes, classId);
+      const student = findById(students, safeStudentId);
+      const classItem = findById(classes, safeClassId);
       if (!student || !classItem) {
         throw new Error("학생 또는 수업 데이터를 찾을 수 없습니다.");
       }
 
       const enrolled = mode === "enrolled";
-      const previousMode = getStudentClassMode(student, classId);
+      const previousMode = getStudentClassMode(student, safeClassId);
       const nextMode = enrolled ? "enrolled" : "waitlist";
       const nextStudent = {
         ...student,
-        class_ids: enrolled ? addUnique(student.class_ids, classId) : removeId(student.class_ids, classId),
-        waitlist_class_ids: enrolled ? removeId(student.waitlist_class_ids, classId) : addUnique(student.waitlist_class_ids, classId),
+        class_ids: enrolled ? addUnique(student.class_ids, safeClassId) : removeId(student.class_ids, safeClassId),
+        waitlist_class_ids: enrolled ? removeId(student.waitlist_class_ids, safeClassId) : addUnique(student.waitlist_class_ids, safeClassId),
       };
       const nextClass = {
         ...classItem,
-        student_ids: enrolled ? addUnique(classItem.student_ids, studentId) : removeId(classItem.student_ids, studentId),
-        waitlist_ids: enrolled ? removeId(classItem.waitlist_ids, studentId) : addUnique(classItem.waitlist_ids, studentId),
+        student_ids: enrolled ? addUnique(classItem.student_ids, safeStudentId) : removeId(classItem.student_ids, safeStudentId),
+        waitlist_ids: enrolled ? removeId(classItem.waitlist_ids, safeStudentId) : addUnique(classItem.waitlist_ids, safeStudentId),
       };
       await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
       await upsertRows(client, "classes", buildClassPayload(nextClass, { generateId }));
       if (previousMode !== nextMode) {
         await insertStudentClassHistory(client, [{
-          student_id: trimText(studentId),
-          class_id: trimText(classId),
+          student_id: safeStudentId,
+          class_id: safeClassId,
           action: nextMode,
           previous_mode: previousMode || null,
           next_mode: nextMode,
@@ -747,32 +770,49 @@ export function createManagementService(options = {}) {
 
     async removeStudentFromClass({ studentId, classId } = {}) {
       const client = ensureClient(supabase);
+      const safeStudentId = trimText(studentId);
+      const safeClassId = trimText(classId);
       const [students, classes] = await Promise.all([
         selectRows(client, "students"),
         selectRows(client, "classes"),
       ]);
-      const student = findById(students, studentId);
-      const classItem = findById(classes, classId);
-      if (!student || !classItem) {
+      const student = findById(students, safeStudentId);
+      const classItem = findById(classes, safeClassId);
+      if (!student && !classItem) {
         throw new Error("학생 또는 수업 데이터를 찾을 수 없습니다.");
       }
-      const previousMode = getStudentClassMode(student, classId);
-      const nextStudent = {
-        ...student,
-        class_ids: removeId(student.class_ids, classId),
-        waitlist_class_ids: removeId(student.waitlist_class_ids, classId),
-      };
-      const nextClass = {
-        ...classItem,
-        student_ids: removeId(classItem.student_ids, studentId),
-        waitlist_ids: removeId(classItem.waitlist_ids, studentId),
-      };
-      await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
-      await upsertRows(client, "classes", buildClassPayload(nextClass, { generateId }));
-      if (previousMode) {
+      const previousMode = getStudentClassMode(student, safeClassId) || getClassStudentMode(classItem, safeStudentId);
+      const nextStudent = student
+        ? {
+            ...student,
+            class_ids: removeId(student.class_ids || student.classIds, safeClassId),
+            classIds: removeId(student.class_ids || student.classIds, safeClassId),
+            waitlist_class_ids: removeId(student.waitlist_class_ids || student.waitlistClassIds, safeClassId),
+            waitlistClassIds: removeId(student.waitlist_class_ids || student.waitlistClassIds, safeClassId),
+          }
+        : null;
+      const nextWaitlistIds = removeId(getClassWaitlistIds(classItem), safeStudentId);
+      const nextClass = classItem
+        ? {
+            ...classItem,
+            student_ids: removeId(classItem.student_ids || classItem.studentIds, safeStudentId),
+            studentIds: removeId(classItem.student_ids || classItem.studentIds, safeStudentId),
+            waitlist_ids: nextWaitlistIds,
+            waitlistIds: nextWaitlistIds,
+            waitlist_student_ids: nextWaitlistIds,
+            waitlistStudentIds: nextWaitlistIds,
+          }
+        : null;
+      if (nextStudent) {
+        await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
+      }
+      if (nextClass) {
+        await upsertRows(client, "classes", buildClassPayload(nextClass, { generateId }));
+      }
+      if (previousMode && student && classItem) {
         await insertStudentClassHistory(client, [{
-          student_id: trimText(studentId),
-          class_id: trimText(classId),
+          student_id: safeStudentId,
+          class_id: safeClassId,
           action: "removed",
           previous_mode: previousMode,
           next_mode: null,

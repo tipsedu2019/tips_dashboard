@@ -461,8 +461,22 @@ function getSavedClassId(result: unknown, fallback: unknown) {
   return text(fallback);
 }
 
-function relatedTitle(record: RelatedRecord) {
-  return text(record.name || record.class_name || record.className || record.title || record.id);
+function isUuidLike(value: unknown) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text(value));
+}
+
+function getMissingRelatedTitle(kind: ManagementKind) {
+  if (kind === "classes") return "학생 정보 확인 필요";
+  if (kind === "students") return "수업 정보 확인 필요";
+  return "연결 정보 확인 필요";
+}
+
+function relatedTitle(record: RelatedRecord, fallbackLabel = "연결 정보 확인 필요") {
+  const title = text(record.name || record.class_name || record.className || record.title);
+  if (title && !isUuidLike(title)) return title;
+
+  const id = text(record.id);
+  return id && !isUuidLike(id) ? id : fallbackLabel;
 }
 
 function normalizeRelatedRecordList(value: unknown): RelatedRecord[] {
@@ -471,7 +485,7 @@ function normalizeRelatedRecordList(value: unknown): RelatedRecord[] {
     .map((item) => {
       if (item && typeof item === "object") return item as RelatedRecord;
       const id = text(item);
-      return id ? { id, name: id } : null;
+      return id ? { id } : null;
     })
     .filter((item): item is RelatedRecord => Boolean(item && text(item.id)));
 }
@@ -857,8 +871,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   );
   const resolveRelatedRecord = (id: string) => relatedRecordsById.get(id);
   const resolveRelatedTitle = (id: string) => {
+    const fallbackTitle = getMissingRelatedTitle(kind);
     const record = resolveRelatedRecord(id);
-    return record ? relatedTitle(record) : id;
+    if (record) return relatedTitle(record, fallbackTitle);
+    return isUuidLike(id) ? fallbackTitle : id;
   };
   const renderRelationList = (label: string, ids: string[], modeLabel: "수강" | "대기") => (
     <section className="overflow-hidden rounded-md border bg-background">
