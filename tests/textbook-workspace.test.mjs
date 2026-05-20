@@ -1119,7 +1119,7 @@ test("textbook workspace provides a research-backed operations command center", 
   assert.match(workspaceSource, /setPurchaseRequestFilter\("unregistered"\)/);
   assert.match(workspaceSource, /setPurchaseOrderFilter\("waiting"\)/);
   assert.match(workspaceSource, /setSalesProcessFilter\("waiting"\)/);
-  assert.match(workspaceSource, /setInventoryFilter\("shortage"\)/);
+  assert.match(workspaceSource, /changeInventoryFilter\("shortage"\)/);
   assert.match(workspaceSource, /aria-label="교재관리 할 일 보기"/);
   assert.match(workspaceSource, /aria-label="교재관리 할 일 목록"/);
   assert.match(workspaceSource, /onSelectQueue\(""\)/);
@@ -1291,7 +1291,7 @@ test("textbook workspace reduces idle clutter and exposes group totals", async (
   assert.match(workspaceSource, /showsProcessSearch \? \(/);
   assert.match(workspaceSource, /activeTab === "purchase" \|\|/);
   assert.match(workspaceSource, /value !== "requests" && value !== "purchase" && value !== "sales"[\s\S]*setOperationQuery\(""\)/);
-  assert.match(workspaceSource, /if \(value !== activeTab\) \{[\s\S]*setSelectedTextbookIds\(\[\]\);[\s\S]*setSelectedPurchaseLineIds\(\[\]\);[\s\S]*setSelectedSaleLineIds\(\[\]\);[\s\S]*setSelectedClosingIds\(\[\]\);[\s\S]*\}/);
+  assert.match(workspaceSource, /if \(value !== activeTab\) \{[\s\S]*clearMasterSelection\(\);[\s\S]*setSelectedPurchaseLineIds\(\[\]\);[\s\S]*setSelectedSaleLineIds\(\[\]\);[\s\S]*setSelectedClosingIds\(\[\]\);[\s\S]*\}/);
   assert.doesNotMatch(workspaceSource, /formatQuantity\(groupCount\)\}그룹/);
   assert.match(workspaceSource, /sticky bottom-3 z-20/);
   assert.match(workspaceSource, /const groupTotalQuantity = group\.rows\.reduce/);
@@ -1617,6 +1617,30 @@ test("textbook workspace third-pass polish tightens navigation and action ergono
   assert.match(workspaceSource, /\{formatQuantity\(includedSaleStudentCount\)\}\/\{formatQuantity\(selectedSaleStudentCount\)\}명/);
   assert.match(workspaceSource, /aria-label="신규 등록"/);
   assert.doesNotMatch(workspaceSource, /data-textbook-modal-dismiss="master"/);
+});
+
+test("textbook workspace keeps master filters reversible and avoids native delete confirms", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.doesNotMatch(workspaceSource, /window\.confirm/);
+  assert.match(workspaceSource, /const \[textbookDeleteDialogOpen, setTextbookDeleteDialogOpen\] = useState\(false\)/);
+  assert.match(workspaceSource, /<Dialog open=\{textbookDeleteDialogOpen\} onOpenChange=\{setTextbookDeleteDialogOpen\}>/);
+  assert.match(workspaceSource, /<DialogTitle>선택 교재 정리<\/DialogTitle>/);
+  assert.match(workspaceSource, /onClick=\{confirmDeleteSelectedTextbooks\}/);
+  assert.match(workspaceSource, /function clearMasterSelection\(\)/);
+  assert.match(workspaceSource, /setBulkTextbookPatch\(emptyBulkTextbookPatch\)/);
+  assert.match(workspaceSource, /function updateMasterSearchQuery\(value: string\)/);
+  assert.match(workspaceSource, /onChange=\{\(event\) => updateMasterSearchQuery\(event\.target\.value\)\}/);
+  assert.match(workspaceSource, /function changeInventoryFilter\(value: InventoryFilter\)/);
+  assert.match(workspaceSource, /function changeTextbookQualityFilter\(value: TextbookQualityFilter\)/);
+  assert.match(workspaceSource, /function changeSubjectGroupFilter\(value: string\)/);
+  assert.match(workspaceSource, /function changeSchoolLevelGroupFilter\(value: string\)/);
+  assert.match(workspaceSource, /onGradeLevelFilterChange=\{changeGradeLevelGroupFilter\}/);
+  assert.match(workspaceSource, /onCategoryFilterChange=\{changeCategoryGroupFilter\}/);
+  assert.match(workspaceSource, /onClear=\{clearMasterSelection\}/);
 });
 
 test("textbook workspace keeps teacher request access separate from management data", async () => {

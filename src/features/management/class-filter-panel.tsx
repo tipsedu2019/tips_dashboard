@@ -50,6 +50,7 @@ type ClassFilterPanelProps = {
   showReset?: boolean;
   onReset?: () => void;
   filterCount?: number;
+  primaryLabel?: string;
   createLabel?: string;
   onCreate?: () => void;
   createDisabled?: boolean;
@@ -71,6 +72,7 @@ export function ClassFilterPanel({
   showReset = false,
   onReset,
   filterCount,
+  primaryLabel,
   createLabel,
   onCreate,
   createDisabled = false,
@@ -79,6 +81,7 @@ export function ClassFilterPanel({
 }: ClassFilterPanelProps) {
   const hasCreate = Boolean(createLabel);
   const activeFilterCount = filterCount ?? chips.length;
+  const hasSearchValue = searchValue.trim().length > 0;
 
   return (
     <div className={cn("flex flex-col gap-2 border border-border/70 bg-background px-3 py-3", className)}>
@@ -90,16 +93,37 @@ export function ClassFilterPanel({
             placeholder={searchPlaceholder}
             value={searchValue}
             onChange={(event) => onSearchChange(event.target.value)}
-            className="h-9 pl-9"
+            className="h-9 pl-9 pr-9"
           />
+          {hasSearchValue ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md"
+              onClick={() => onSearchChange("")}
+              aria-label={`${searchPlaceholder} 지우기`}
+            >
+              <X className="size-3.5" />
+            </Button>
+          ) : null}
         </div>
 
         {selects.length > 0 ? (
           <Popover>
             <PopoverTrigger asChild>
-              <Button type="button" variant="outline" size="sm" className="h-9 shrink-0 rounded-md">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 max-w-full shrink-0 rounded-md"
+                aria-label={primaryLabel ? `필터 ${String(primaryLabel)}` : "필터"}
+              >
                 <SlidersHorizontal className="mr-2 size-4" />
-                필터
+                <span className="shrink-0">필터</span>
+                {primaryLabel ? (
+                  <span className="ml-2 max-w-[8rem] truncate text-muted-foreground">{primaryLabel}</span>
+                ) : null}
                 {activeFilterCount > 0 ? (
                   <span className="ml-2 rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
                     {activeFilterCount}
@@ -112,6 +136,11 @@ export function ClassFilterPanel({
                 <div className="flex min-w-0 items-center gap-2">
                   <SlidersHorizontal className="size-4 text-muted-foreground" />
                   <p className="truncate text-sm font-semibold text-foreground">필터</p>
+                  {primaryLabel ? (
+                    <Badge variant="outline" className="max-w-[10rem] truncate rounded-md px-1.5 text-[11px]">
+                      {primaryLabel}
+                    </Badge>
+                  ) : null}
                   {activeFilterCount > 0 ? (
                     <Badge variant="secondary" className="rounded-md px-1.5 text-[11px] tabular-nums">
                       {activeFilterCount}
@@ -179,7 +208,7 @@ export function ClassFilterPanel({
       </div>
 
       {summaryLabel || chips.length > 0 || showReset || footerAction ? (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
           {summaryLabel ? <Badge variant="secondary">{summaryLabel}</Badge> : null}
           {chips.map((chip) => (
             <Badge key={chip.id} variant="outline">

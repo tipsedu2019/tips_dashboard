@@ -101,3 +101,29 @@ test("student and class tables expose bulk edit and delete actions for selected 
   assert.match(pageSource, /onBulkUpdateRows: handleBulkUpdateRows/);
   assert.match(pageSource, /onBulkDeleteRows: handleBulkDeleteRows/);
 });
+
+test("management deletes use an in-app confirmation dialog", async () => {
+  const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.doesNotMatch(source, /window\.confirm/);
+  assert.match(source, /type DeleteRequest = \{ rows: ManagementRow\[\] \}/);
+  assert.match(source, /const \[deleteRequest, setDeleteRequest\] = useState<DeleteRequest \| null>\(null\)/);
+  assert.match(source, /setDeleteRequest\(\{ rows: \[row\] \}\)/);
+  assert.match(source, /<Dialog open=\{Boolean\(deleteRequest\)\}/);
+  assert.match(source, /onClick=\{handleConfirmDelete\}/);
+});
+
+test("management table keeps filter and search actions visible and reversible", async () => {
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
+
+  assert.match(panelSource, /primaryLabel\?: string/);
+  assert.match(panelSource, /aria-label=\{`\$\{searchPlaceholder\} 지우기`\}/);
+  assert.match(panelSource, /필터 \$\{String\(primaryLabel\)\}|필터 \$\{primaryLabel\}/);
+  assert.match(tableSource, /const DEFAULT_PAGE_SIZE = 20/);
+  assert.match(tableSource, /onSearchChange=\{updateGlobalFilter\}/);
+  assert.match(tableSource, /primaryLabel=\{activePeriodLabel\}/);
+  assert.match(tableSource, /setRowSelection\(\{\}\);[\s\S]*table\.resetPagination\(\);/);
+  assert.match(tableSource, /aria-busy=\{loading\}/);
+  assert.match(tableSource, /데이터를 불러오는 중입니다/);
+});

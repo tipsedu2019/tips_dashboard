@@ -40,6 +40,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -183,6 +184,12 @@ type TextbookHandoffGroup = {
   lines: TextbookHandoffLine[];
   totalQuantity: number;
   totalAmount: number;
+};
+type TextbookConfirmationRequest = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  onConfirm: () => void;
 };
 
 const subjectOptions = [
@@ -2039,6 +2046,8 @@ export function TextbookOperationsWorkspace() {
   const [bulkTextbookPatch, setBulkTextbookPatch] = useState(emptyBulkTextbookPatch);
   const [masterForm, setMasterForm] = useState(emptyMasterForm);
   const [masterDialogOpen, setMasterDialogOpen] = useState(false);
+  const [textbookDeleteDialogOpen, setTextbookDeleteDialogOpen] = useState(false);
+  const [confirmationRequest, setConfirmationRequest] = useState<TextbookConfirmationRequest | null>(null);
   const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
   const [purchaseRequestInputMode, setPurchaseRequestInputMode] = useState<"catalog" | "manual">("catalog");
@@ -2582,6 +2591,9 @@ export function TextbookOperationsWorkspace() {
         if (document.activeElement === masterSearchRef.current && query) {
           event.preventDefault();
           setQuery("");
+          setSelectedTextbookIds([]);
+          setBulkTextbookPatch(emptyBulkTextbookPatch);
+          setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
           return;
         }
         if (document.activeElement === operationSearchRef.current && operationQuery) {
@@ -2809,6 +2821,65 @@ export function TextbookOperationsWorkspace() {
     window.setTimeout(() => setClosingDialogOpen(false), 0);
   }
 
+  function clearMasterSelection() {
+    setSelectedTextbookIds([]);
+    setBulkTextbookPatch(emptyBulkTextbookPatch);
+  }
+
+  function updateMasterSearchQuery(value: string) {
+    setQuery(value);
+    clearMasterSelection();
+    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
+  }
+
+  function changeInventoryFilter(value: InventoryFilter) {
+    setInventoryFilter(value);
+    clearMasterSelection();
+    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
+  }
+
+  function changeTextbookQualityFilter(value: TextbookQualityFilter) {
+    setTextbookQualityFilter(value);
+    clearMasterSelection();
+    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
+  }
+
+  function changeSubjectGroupFilter(value: string) {
+    setSubjectGroupFilter(value);
+    setCategoryGroupFilter("all");
+    clearMasterSelection();
+    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
+  }
+
+  function changeSchoolLevelGroupFilter(value: string) {
+    setSchoolLevelGroupFilter(value);
+    setGradeLevelGroupFilter("all");
+    clearMasterSelection();
+    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
+  }
+
+  function changeGradeLevelGroupFilter(value: string) {
+    setGradeLevelGroupFilter(value);
+    clearMasterSelection();
+    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
+  }
+
+  function changeCategoryGroupFilter(value: string) {
+    setCategoryGroupFilter(value);
+    clearMasterSelection();
+    setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
+  }
+
+  function requestTextbookConfirmation(request: TextbookConfirmationRequest) {
+    setConfirmationRequest(request);
+  }
+
+  function confirmTextbookAction() {
+    const request = confirmationRequest;
+    setConfirmationRequest(null);
+    request?.onConfirm();
+  }
+
   function changeActiveTab(value: string) {
     if (!canManageTextbookOperations && value !== "requests") {
       setActiveTab("requests");
@@ -2818,7 +2889,7 @@ export function TextbookOperationsWorkspace() {
     }
 
     if (value !== activeTab) {
-      setSelectedTextbookIds([]);
+      clearMasterSelection();
       setSelectedPurchaseLineIds([]);
       setSelectedSaleLineIds([]);
       setSelectedClosingIds([]);
@@ -2841,7 +2912,7 @@ export function TextbookOperationsWorkspace() {
   }
 
   function clearTextbookListFilters(nextQuery = "") {
-    setQuery(nextQuery);
+    updateMasterSearchQuery(nextQuery);
     setInventoryFilter("all");
     setTextbookQualityFilter("all");
     setSubjectGroupFilter("all");
@@ -2849,6 +2920,7 @@ export function TextbookOperationsWorkspace() {
     setGradeLevelGroupFilter("all");
     setCategoryGroupFilter("all");
     setCollapsedTextbookGroups([]);
+    clearMasterSelection();
     setMasterListLimit(MASTER_TEXTBOOK_PAGE_SIZE);
   }
 
@@ -2859,14 +2931,13 @@ export function TextbookOperationsWorkspace() {
   function showSavedMasterTextbook(title: string) {
     setActiveTab("master");
     setOperationQuery("");
-    setSelectedTextbookIds([]);
     clearTextbookListFilters(title);
     window.setTimeout(() => masterSearchRef.current?.select(), 0);
   }
 
   function openInventoryShortageQueue() {
     changeActiveTab("inventory");
-    setInventoryFilter("shortage");
+    changeInventoryFilter("shortage");
   }
 
   function openTextbookOpsQueue(key: TextbookOpsQueueKey | "") {
@@ -2876,12 +2947,12 @@ export function TextbookOperationsWorkspace() {
       setPurchaseRequestFilter("all");
       setPurchaseOrderFilter("all");
       setSalesProcessFilter("all");
-      setInventoryFilter("all");
+      changeInventoryFilter("all");
       setPurchaseBoardScope("active");
       return;
     }
     if (key !== "stockRisk") {
-      setInventoryFilter("all");
+      changeInventoryFilter("all");
     }
     if (key === "unregistered") {
       setActiveTab("purchase");
@@ -3243,21 +3314,27 @@ export function TextbookOperationsWorkspace() {
       return;
     }
 
-    let deleteResult: Awaited<ReturnType<typeof textbookService.deleteTextbookMasters>> | undefined;
-    const confirmed =
-      typeof window === "undefined" ||
-      window.confirm(`${formatQuantity(selectedTextbookRows.length)}개 교재를 삭제하거나 미사용으로 전환할까요? 재고/주문/출고 이력이 있는 교재는 이력 보존을 위해 미사용으로 전환됩니다.`);
-    if (!confirmed) {
+    setTextbookDeleteDialogOpen(true);
+  }
+
+  function confirmDeleteSelectedTextbooks() {
+    if (selectedTextbookRows.length === 0) {
+      setTextbookDeleteDialogOpen(false);
       return;
     }
+
+    let deleteResult: Awaited<ReturnType<typeof textbookService.deleteTextbookMasters>> | undefined;
+    const targetIds = [...selectedTextbookIds];
+    const targetCount = selectedTextbookRows.length;
+    setTextbookDeleteDialogOpen(false);
 
     void runAction(
       "textbook-bulk-delete",
       async () => {
-        deleteResult = await textbookService.deleteTextbookMasters(selectedTextbookIds);
-        setSelectedTextbookIds([]);
+        deleteResult = await textbookService.deleteTextbookMasters(targetIds);
+        clearMasterSelection();
       },
-      () => getTextbookDeleteResultMessage(deleteResult, selectedTextbookRows.length),
+      () => getTextbookDeleteResultMessage(deleteResult, targetCount),
     );
   }
 
@@ -3423,31 +3500,32 @@ export function TextbookOperationsWorkspace() {
       return;
     }
 
-    const confirmed = typeof window === "undefined" || window.confirm(
-      isHistory
-        ? "선택한 출고 이력과 연결된 재고 이동 기록을 삭제할까요?"
-        : "출고 대기 건을 취소하고 삭제할까요?",
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      `sale-delete-${getRecordId(line)}`,
-      () => textbookService.deleteSaleLineLifecycle({
-        saleLineId: getRecordId(line),
-        saleId: text(line.sale_id || line.saleId),
-      }),
-      isHistory ? "출고 이력을 삭제했습니다." : "출고 대기 건을 삭제했습니다.",
-    );
+    requestTextbookConfirmation({
+      title: isHistory ? "출고 이력 삭제" : "출고 대기 취소",
+      description: isHistory
+        ? "선택한 출고 이력과 연결된 재고 이동 기록을 삭제합니다."
+        : "출고 대기 건을 취소하고 삭제합니다.",
+      confirmLabel: isHistory ? "이력 삭제" : "취소 삭제",
+      onConfirm: () => {
+        void runAction(
+          `sale-delete-${getRecordId(line)}`,
+          () => textbookService.deleteSaleLineLifecycle({
+            saleLineId: getRecordId(line),
+            saleId: text(line.sale_id || line.saleId),
+          }),
+          isHistory ? "출고 이력을 삭제했습니다." : "출고 대기 건을 삭제했습니다.",
+        );
+      },
+    });
   }
 
   function returnSaleLine(line: Row) {
-    const confirmed = typeof window === "undefined" || window.confirm("출고 완료 건을 고객 반품으로 처리할까요?");
-    if (!confirmed) {
-      return;
-    }
-    updateSaleLineStatus(line, "returned");
+    requestTextbookConfirmation({
+      title: "고객 반품 처리",
+      description: "출고 완료 건을 고객 반품으로 처리합니다.",
+      confirmLabel: "반품 처리",
+      onConfirm: () => updateSaleLineStatus(line, "returned"),
+    });
   }
 
   function issueSelectedSaleLines() {
@@ -3481,71 +3559,75 @@ export function TextbookOperationsWorkspace() {
     if (selectedCancelableSaleLines.length === 0) {
       return;
     }
-    const confirmed = typeof window === "undefined" || window.confirm(`${formatQuantity(selectedCancelableSaleLines.length)}건을 출고 전 취소로 삭제할까요?`);
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      "sale-bulk-cancel",
-      async () => {
-        await Promise.all(selectedCancelableSaleLines.map((line) =>
-          textbookService.deleteSaleLineLifecycle({
-            saleLineId: getRecordId(line),
-            saleId: text(line.sale_id || line.saleId),
-          }),
-        ));
-        setSelectedSaleLineIds([]);
+    requestTextbookConfirmation({
+      title: "출고 전 취소",
+      description: `${formatQuantity(selectedCancelableSaleLines.length)}건을 출고 전 취소로 삭제합니다.`,
+      confirmLabel: "취소 삭제",
+      onConfirm: () => {
+        void runAction(
+          "sale-bulk-cancel",
+          async () => {
+            await Promise.all(selectedCancelableSaleLines.map((line) =>
+              textbookService.deleteSaleLineLifecycle({
+                saleLineId: getRecordId(line),
+                saleId: text(line.sale_id || line.saleId),
+              }),
+            ));
+            setSelectedSaleLineIds([]);
+          },
+          `${formatQuantity(selectedCancelableSaleLines.length)}건을 출고 전 취소했습니다.`,
+        );
       },
-      `${formatQuantity(selectedCancelableSaleLines.length)}건을 출고 전 취소했습니다.`,
-    );
+    });
   }
 
   function returnSelectedSaleLines() {
     if (selectedReturnableSaleLines.length === 0) {
       return;
     }
-    const confirmed = typeof window === "undefined" || window.confirm(`${formatQuantity(selectedReturnableSaleLines.length)}건을 고객 반품으로 처리할까요?`);
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      "sale-bulk-return",
-      async () => {
-        await Promise.all(selectedReturnableSaleLines.map((line) =>
-          textbookService.updateSaleLineStatus({ saleLineId: getRecordId(line), status: "returned", createdBy: currentUserId }, data as unknown as Row),
-        ));
-        setSelectedSaleLineIds([]);
+    requestTextbookConfirmation({
+      title: "고객 반품 처리",
+      description: `${formatQuantity(selectedReturnableSaleLines.length)}건을 고객 반품으로 처리합니다.`,
+      confirmLabel: "반품 처리",
+      onConfirm: () => {
+        void runAction(
+          "sale-bulk-return",
+          async () => {
+            await Promise.all(selectedReturnableSaleLines.map((line) =>
+              textbookService.updateSaleLineStatus({ saleLineId: getRecordId(line), status: "returned", createdBy: currentUserId }, data as unknown as Row),
+            ));
+            setSelectedSaleLineIds([]);
+          },
+          `${formatQuantity(selectedReturnableSaleLines.length)}건을 고객 반품으로 처리했습니다.`,
+        );
       },
-      `${formatQuantity(selectedReturnableSaleLines.length)}건을 고객 반품으로 처리했습니다.`,
-    );
+    });
   }
 
   function deleteSelectedSaleHistoryLines() {
     if (!canDeleteTextbookHistory || selectedDeletableSaleLines.length === 0) {
       return;
     }
-    const confirmed =
-      typeof window === "undefined" ||
-      window.confirm(`${formatQuantity(selectedDeletableSaleLines.length)}건의 출고/반품 이력과 연결된 재고 이동 기록을 삭제할까요?`);
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      "sale-bulk-delete-history",
-      async () => {
-        await Promise.all(selectedDeletableSaleLines.map((line) =>
-          textbookService.deleteSaleLineLifecycle({
-            saleLineId: getRecordId(line),
-            saleId: text(line.sale_id || line.saleId),
-          }),
-        ));
-        setSelectedSaleLineIds([]);
+    requestTextbookConfirmation({
+      title: "출고 이력 삭제",
+      description: `${formatQuantity(selectedDeletableSaleLines.length)}건의 출고/반품 이력과 연결된 재고 이동 기록을 삭제합니다.`,
+      confirmLabel: "이력 삭제",
+      onConfirm: () => {
+        void runAction(
+          "sale-bulk-delete-history",
+          async () => {
+            await Promise.all(selectedDeletableSaleLines.map((line) =>
+              textbookService.deleteSaleLineLifecycle({
+                saleLineId: getRecordId(line),
+                saleId: text(line.sale_id || line.saleId),
+              }),
+            ));
+            setSelectedSaleLineIds([]);
+          },
+          `${formatQuantity(selectedDeletableSaleLines.length)}건의 출고/반품 이력을 삭제했습니다.`,
+        );
       },
-      `${formatQuantity(selectedDeletableSaleLines.length)}건의 출고/반품 이력을 삭제했습니다.`,
-    );
+    });
   }
 
   function movePurchaseLine(line: Row, order: Row | undefined, status: PurchaseKanbanStatus, draft?: PurchaseKanbanDraft) {
@@ -3567,64 +3649,70 @@ export function TextbookOperationsWorkspace() {
   }
 
   function deletePurchaseLine(line: Row, order: Row | undefined) {
-    const confirmed = typeof window === "undefined" || window.confirm("이 요청 건을 삭제할까요?");
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      `purchase-delete-${getRecordId(line)}`,
-      () => textbookService.deletePurchaseLifecycle({
-        purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
-        purchaseOrderLineId: getRecordId(line),
-      }),
-      "요청 건을 삭제했습니다.",
-    );
+    requestTextbookConfirmation({
+      title: "요청 삭제",
+      description: "이 요청 건을 삭제합니다.",
+      confirmLabel: "삭제",
+      onConfirm: () => {
+        void runAction(
+          `purchase-delete-${getRecordId(line)}`,
+          () => textbookService.deletePurchaseLifecycle({
+            purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
+            purchaseOrderLineId: getRecordId(line),
+          }),
+          "요청 건을 삭제했습니다.",
+        );
+      },
+    });
   }
 
   function returnPurchaseLine(line: Row, order: Row | undefined) {
-    const confirmed = typeof window === "undefined" || window.confirm("입고 완료 건을 공급처 반품으로 처리할까요?");
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      `purchase-return-${getRecordId(line)}`,
-      () => textbookService.returnPurchaseLifecycle({
-        purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
-        purchaseOrderLineId: getRecordId(line),
-        createdBy: currentUserId,
-        memo: "공급처 반품",
-      }),
-      "공급처 반품으로 처리했습니다.",
-    );
+    requestTextbookConfirmation({
+      title: "공급처 반품",
+      description: "입고 완료 건을 공급처 반품으로 처리합니다.",
+      confirmLabel: "반품 처리",
+      onConfirm: () => {
+        void runAction(
+          `purchase-return-${getRecordId(line)}`,
+          () => textbookService.returnPurchaseLifecycle({
+            purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
+            purchaseOrderLineId: getRecordId(line),
+            createdBy: currentUserId,
+            memo: "공급처 반품",
+          }),
+          "공급처 반품으로 처리했습니다.",
+        );
+      },
+    });
   }
 
   function returnSelectedPurchaseLines() {
     if (selectedReturnablePurchaseLines.length === 0) {
       return;
     }
-    const confirmed = typeof window === "undefined" || window.confirm(`${formatQuantity(selectedReturnablePurchaseLines.length)}건을 공급처 반품으로 처리할까요?`);
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      "purchase-bulk-return",
-      async () => {
-        await Promise.all(selectedReturnablePurchaseLines.map((line) => {
-          const order = getPurchaseLineOrder(line, purchaseOrdersById);
-          return textbookService.returnPurchaseLifecycle({
-            purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
-            purchaseOrderLineId: getRecordId(line),
-            createdBy: currentUserId,
-            memo: "공급처 반품",
-          });
-        }));
-        setSelectedPurchaseLineIds([]);
+    requestTextbookConfirmation({
+      title: "공급처 반품",
+      description: `${formatQuantity(selectedReturnablePurchaseLines.length)}건을 공급처 반품으로 처리합니다.`,
+      confirmLabel: "반품 처리",
+      onConfirm: () => {
+        void runAction(
+          "purchase-bulk-return",
+          async () => {
+            await Promise.all(selectedReturnablePurchaseLines.map((line) => {
+              const order = getPurchaseLineOrder(line, purchaseOrdersById);
+              return textbookService.returnPurchaseLifecycle({
+                purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
+                purchaseOrderLineId: getRecordId(line),
+                createdBy: currentUserId,
+                memo: "공급처 반품",
+              });
+            }));
+            setSelectedPurchaseLineIds([]);
+          },
+          `${formatQuantity(selectedReturnablePurchaseLines.length)}건을 공급처 반품으로 처리했습니다.`,
+        );
       },
-      `${formatQuantity(selectedReturnablePurchaseLines.length)}건을 공급처 반품으로 처리했습니다.`,
-    );
+    });
   }
 
   function setInventoryCountDraft(row: InventoryCountRow, value: string) {
@@ -3664,7 +3752,7 @@ export function TextbookOperationsWorkspace() {
     ).then((ok) => {
       if (ok) {
         setInventoryAuditFilter("done");
-        setQuery(row.title);
+        updateMasterSearchQuery(row.title);
         setInventoryCountDrafts((current) => {
           const next = { ...current };
           delete next[draftKey];
@@ -3715,7 +3803,7 @@ export function TextbookOperationsWorkspace() {
         setSelectedTextbookIds((current) => current.filter((id) => !readyRowIds.has(id)));
         setInventoryAuditFilter("done");
         if (readyRows.length === 1) {
-          setQuery(readyRows[0].title);
+          updateMasterSearchQuery(readyRows[0].title);
         }
       },
       `${formatQuantity(readyRows.length)}건의 실사 수량을 반영했습니다.`,
@@ -3727,20 +3815,22 @@ export function TextbookOperationsWorkspace() {
       return;
     }
 
-    const confirmed = typeof window === "undefined" || window.confirm("선택한 재고 이력을 삭제할까요? 재고 수량도 즉시 다시 계산됩니다.");
-    if (!confirmed) {
-      return;
-    }
-
-    void runAction(
-      `inventory-history-delete-${row.id}`,
-      () => textbookService.deleteInventoryHistory({
-        kind: row.kind,
-        id: row.sourceId,
-        linkedMoveId: row.linkedMoveId,
-      }),
-      "재고 이력을 삭제했습니다.",
-    );
+    requestTextbookConfirmation({
+      title: "재고 이력 삭제",
+      description: "선택한 재고 이력을 삭제합니다. 재고 수량도 즉시 다시 계산됩니다.",
+      confirmLabel: "이력 삭제",
+      onConfirm: () => {
+        void runAction(
+          `inventory-history-delete-${row.id}`,
+          () => textbookService.deleteInventoryHistory({
+            kind: row.kind,
+            id: row.sourceId,
+            linkedMoveId: row.linkedMoveId,
+          }),
+          "재고 이력을 삭제했습니다.",
+        );
+      },
+    });
   }
 
   function lockSelectedClosings() {
@@ -3815,6 +3905,42 @@ export function TextbookOperationsWorkspace() {
           <option key={option} value={option} />
         ))}
       </datalist>
+
+      <Dialog open={textbookDeleteDialogOpen} onOpenChange={setTextbookDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>선택 교재 정리</DialogTitle>
+            <DialogDescription>
+              {formatQuantity(selectedTextbookRows.length)}개 교재를 삭제하거나 미사용으로 전환합니다. 재고·주문·출고 이력이 있으면 기록 보존을 위해 미사용으로 전환됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTextbookDeleteDialogOpen(false)} disabled={saving === "textbook-bulk-delete"}>
+              취소
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmDeleteSelectedTextbooks} disabled={saving === "textbook-bulk-delete"}>
+              {saving === "textbook-bulk-delete" ? "정리 중" : "정리"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(confirmationRequest)} onOpenChange={(open) => !open && setConfirmationRequest(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{confirmationRequest?.title || "확인"}</DialogTitle>
+            <DialogDescription>{confirmationRequest?.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmationRequest(null)}>
+              취소
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmTextbookAction}>
+              {confirmationRequest?.confirmLabel || "확인"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {masterDialogOpen ? (
       <Dialog open={masterDialogOpen} onOpenChange={(open) => (open ? setMasterDialogOpen(true) : closeMasterDialog())}>
@@ -4626,9 +4752,9 @@ export function TextbookOperationsWorkspace() {
                 ref={masterSearchRef}
                 type="search"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => updateMasterSearchQuery(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Escape") setQuery("");
+                  if (event.key === "Escape") updateMasterSearchQuery("");
                 }}
                 className="pl-9 pr-9"
                 placeholder="교재명, ISBN, 바코드"
@@ -4644,7 +4770,7 @@ export function TextbookOperationsWorkspace() {
                   size="icon"
                   className="absolute right-1 top-1 size-8"
                   aria-label="검색 초기화"
-                  onClick={() => setQuery("")}
+                  onClick={() => updateMasterSearchQuery("")}
                 >
                   <X className="size-4" />
                 </Button>
@@ -4687,7 +4813,7 @@ export function TextbookOperationsWorkspace() {
                             size="sm"
                             className="h-8 justify-start rounded-md"
                             aria-pressed={inventoryFilter === filter}
-                            onClick={() => setInventoryFilter(filter)}
+                            onClick={() => changeInventoryFilter(filter)}
                           >
                             <span className="min-w-0 truncate">{inventoryFilterLabels[filter]}</span>
                             <span className={cn(
@@ -4712,7 +4838,7 @@ export function TextbookOperationsWorkspace() {
                               size="sm"
                               className="h-8 justify-start rounded-md"
                               aria-pressed={textbookQualityFilter === filter}
-                              onClick={() => setTextbookQualityFilter(filter)}
+                              onClick={() => changeTextbookQualityFilter(filter)}
                             >
                               <span className="min-w-0 truncate">{textbookQualityFilterLabels[filter]}</span>
                               <span className={cn(
@@ -4738,9 +4864,8 @@ export function TextbookOperationsWorkspace() {
                   aria-pressed={textbookQualityFilter === "inactive"}
                   aria-label="미사용 교재 보관함"
                   onClick={() => {
-                    setInventoryFilter("all");
-                    setTextbookQualityFilter((current) => current === "inactive" ? "all" : "inactive");
-                    setSelectedTextbookIds([]);
+                    changeInventoryFilter("all");
+                    changeTextbookQualityFilter(textbookQualityFilter === "inactive" ? "all" : "inactive");
                   }}
                 >
                   <Archive className="mr-2 size-3.5" />
@@ -4771,19 +4896,17 @@ export function TextbookOperationsWorkspace() {
           <TextbookListControls
             subjectFilter={subjectGroupFilter}
             onSubjectFilterChange={(value) => {
-              setSubjectGroupFilter(value);
-              setCategoryGroupFilter("all");
+              changeSubjectGroupFilter(value);
             }}
             schoolLevelFilter={schoolLevelGroupFilter}
             onSchoolLevelFilterChange={(value) => {
-              setSchoolLevelGroupFilter(value);
-              setGradeLevelGroupFilter("all");
+              changeSchoolLevelGroupFilter(value);
             }}
             gradeLevelFilter={gradeLevelGroupFilter}
-            onGradeLevelFilterChange={setGradeLevelGroupFilter}
+            onGradeLevelFilterChange={changeGradeLevelGroupFilter}
             gradeLevelOptions={gradeLevelGroupOptions}
             categoryFilter={categoryGroupFilter}
-            onCategoryFilterChange={setCategoryGroupFilter}
+            onCategoryFilterChange={changeCategoryGroupFilter}
             categoryOptions={categoryGroupOptions}
           />
         ) : null}
@@ -4800,7 +4923,7 @@ export function TextbookOperationsWorkspace() {
             onApply={applyBulkTextbookEdit}
             onSetStatus={applyBulkTextbookStatus}
             onDelete={deleteSelectedTextbooks}
-            onClear={() => setSelectedTextbookIds([])}
+            onClear={clearMasterSelection}
           />
 
           <TextbookTable

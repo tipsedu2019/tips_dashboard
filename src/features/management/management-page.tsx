@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 
 import { ManagementDataTable } from "./management-data-table";
 import { managementService } from "./management-service.js";
+import { pickDefaultPeriodValue } from "./period-preferences";
 
 type ManagementServiceClient = {
   createStudent: (record: Record<string, unknown>) => Promise<unknown>;
@@ -72,6 +73,7 @@ type RelatedRecord = Record<string, unknown>;
 type Field = { name: string; label: string; placeholder?: string; type?: string; required?: boolean; multiline?: boolean };
 type DetailInfoItem = { label: string; value: string | number };
 type ClassGroupOption = { id: string; name: string; subject?: string };
+type DeleteRequest = { rows: ManagementRow[] };
 
 const CLASS_STATUS_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 const CLASS_SELECT_FIELD_NAMES = new Set([
@@ -360,6 +362,18 @@ function getClassGroupOptionsFromRows(rows: ManagementRow[]) {
       text(left.subject).localeCompare(text(right.subject), "ko") ||
       left.name.localeCompare(right.name, "ko", { numeric: true }),
   );
+}
+
+function getDefaultClassGroupIdsForCreate(classGroupOptions: ClassGroupOption[]) {
+  const defaultGroupId = pickDefaultPeriodValue(
+    classGroupOptions.map((group) => ({
+      value: group.id,
+      label: group.name,
+      aliases: [group.id, group.name],
+    })),
+  );
+
+  return defaultGroupId ? stringifyClassGroupIds([defaultGroupId]) : "";
 }
 
 function getClassAcademicYearOption(record: Record<string, unknown>) {
@@ -774,6 +788,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
   const [operationError, setOperationError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [relatedRows, setRelatedRows] = useState<RelatedRecord[]>([]);
   const [targetId, setTargetId] = useState("");
   const [relationMode, setRelationMode] = useState<"enrolled" | "waitlist">("enrolled");
@@ -868,6 +883,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const classGroupOptions = useMemo(
     () => (kind === "classes" ? getClassGroupOptionsFromRows(rows) : []),
     [kind, rows],
+  );
+  const defaultClassGroupIdsForCreate = useMemo(
+    () => (kind === "classes" ? getDefaultClassGroupIdsForCreate(classGroupOptions) : ""),
+    [classGroupOptions, kind],
   );
   const resolveRelatedRecord = (id: string) => relatedRecordsById.get(id);
   const resolveRelatedTitle = (id: string) => {
@@ -1137,13 +1156,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     }
   }, [kind, refresh]);
 
-  const handleBulkDeleteRows = useCallback(async (rows: ManagementRow[]) => {
+  const deleteRows = useCallback(async (rows: ManagementRow[]) => {
     if (rows.length === 0) {
-      return;
-    }
-
-    const actionLabel = kind === "students" ? "퇴원 처리" : "삭제";
-    if (!window.confirm(`${rows.length}개 ${config.emptyLabel} 데이터를 ${actionLabel}할까요?`)) {
       return;
     }
 
@@ -1161,13 +1175,31 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     } finally {
       setSaving(false);
     }
-  }, [config.emptyLabel, kind, refresh]);
+  }, [kind, refresh]);
+
+  const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
+    if (rows.length === 0) {
+      return;
+    }
+
+    setDeleteRequest({ rows });
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    const rows = deleteRequest?.rows || [];
+    setDeleteRequest(null);
+    await deleteRows(rows);
+  }, [deleteRequest, deleteRows]);
 
   const actions = useMemo(() => {
     const base = {
       onCreate: () => {
         setSelectedRow(null);
-        setForm(initialForm(kind));
+        const nextForm = initialForm(kind);
+        if (kind === "classes" && defaultClassGroupIdsForCreate) {
+          nextForm.classGroupIds = defaultClassGroupIdsForCreate;
+        }
+        setForm(nextForm);
         setDetailRowQuery("");
         setRelationQuery("");
         setOperationError(null);
@@ -1176,20 +1208,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       onOpenRow: openRow,
       onBulkUpdateRows: handleBulkUpdateRows,
       onBulkDeleteRows: handleBulkDeleteRows,
-      onDeleteRow: async (row: ManagementRow) => {
-        const actionLabel = kind === "students" ? "퇴원 처리" : "삭제";
-        if (!window.confirm(`${row.title} 항목을 ${actionLabel}할까요?`)) return;
-        setSaving(true);
-        try {
-          if (kind === "students") await service.updateStudent({ ...(row.raw || {}), id: row.id, status: WITHDRAWN_STUDENT_STATUS });
-          else if (kind === "classes") await service.deleteClass(row.id);
-          else await service.deleteTextbook(row.id);
-          await refresh();
-        } catch (deleteError) {
-          setOperationError(deleteError instanceof Error ? deleteError.message : "삭제 중 오류가 발생했습니다.");
-        } finally {
-          setSaving(false);
-        }
+      onDeleteRow: (row: ManagementRow) => {
+        setDeleteRequest({ rows: [row] });
       },
     };
     if (kind === "students") return { ...base, onOpenSchoolMaster: () => router.push("/admin/settings/schools") };
@@ -1202,7 +1222,14 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       };
     }
     return base;
-  }, [handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router, refresh]);
+  }, [defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router]);
+
+  const deleteActionLabel = kind === "students" ? "퇴원 처리" : "삭제";
+  const deleteRequestCount = deleteRequest?.rows.length || 0;
+  const deleteTargetLabel =
+    deleteRequestCount === 1
+      ? deleteRequest?.rows[0]?.title || config.emptyLabel
+      : `${deleteRequestCount}개 ${config.emptyLabel}`;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1546,6 +1573,25 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
               </DialogFooter>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteRequest)} onOpenChange={(open) => !open && setDeleteRequest(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{deleteActionLabel}</DialogTitle>
+            <DialogDescription>
+              {deleteTargetLabel} {deleteActionLabel}할까요?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteRequest(null)} disabled={saving}>
+              취소
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleConfirmDelete} disabled={saving}>
+              {saving ? "처리 중" : deleteActionLabel}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

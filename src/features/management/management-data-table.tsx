@@ -114,6 +114,7 @@ const CLASS_STATUS_FILTER_OPTIONS = ["수강", "개강 준비", "종강"] as con
 const STUDENT_SCHOOL_CATEGORY_OPTIONS = ["고등", "중등", "초등"] as const;
 
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50, 100, 200, 300, 400, 500] as const;
+const DEFAULT_PAGE_SIZE = 20;
 
 const TEXTBOOK_TABLE_COLUMN_IDS = [
   "select",
@@ -1666,13 +1667,26 @@ export function ManagementDataTable({
   const table = useReactTable({
     data: tableSourceRows,
     columns,
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
+    onSortingChange: (updater) => {
+      setSorting(updater);
+      setRowSelection({});
+      setBulkEditValue("");
+    },
+    onColumnFiltersChange: (updater) => {
+      setColumnFilters(updater);
+      setRowSelection({});
+      setBulkEditValue("");
+    },
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
     onColumnSizingChange: setColumnSizing,
     onRowSelectionChange: setRowSelection,
-    onGroupingChange: setGrouping,
+    onGroupingChange: (updater) => {
+      setGrouping(updater);
+      setExpanded({});
+      setRowSelection({});
+      setBulkEditValue("");
+    },
     onExpandedChange: setExpanded,
     state: {
       sorting,
@@ -1701,6 +1715,11 @@ export function ManagementDataTable({
       maxSize: 420,
     },
     columnResizeMode: "onChange",
+    initialState: {
+      pagination: {
+        pageSize: DEFAULT_PAGE_SIZE,
+      },
+    },
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -1803,9 +1822,11 @@ export function ManagementDataTable({
     const raw = row.raw || {};
     return total + parseWeeklyMinutes(raw.weeklyHoursLabel || raw.weekly_hours_label || row.metrics.weeklyHoursLabel);
   }, 0);
-  const summaryLabel = kind === "classes"
-    ? `수업 ${filteredClassRows.length}개, 등록 ${classRegisteredTotal}명, 대기 ${classWaitlistTotal}명, 주간 수업시수 ${formatWeeklyMinutes(classWeeklyMinutesTotal)}`
-    : `표시 ${filteredRowCount}건`;
+  const summaryLabel = loading
+    ? `${emptyLabel} 불러오는 중`
+    : kind === "classes"
+      ? `수업 ${filteredClassRows.length}개, 등록 ${classRegisteredTotal}명, 대기 ${classWaitlistTotal}명, 주간 수업시수 ${formatWeeklyMinutes(classWeeklyMinutesTotal)}`
+      : `표시 ${filteredRowCount}건`;
   const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original);
   const bulkEditFields = BULK_EDIT_FIELDS[kind];
@@ -1871,6 +1892,9 @@ export function ManagementDataTable({
     setGrouping(buildDefaultGrouping(kind, allColumnIds));
     setExpanded({});
     setColumnSearchQuery("");
+    setRowSelection({});
+    setBulkEditValue("");
+    table.resetPagination();
   };
 
   const resetFilters = () => {
@@ -1879,6 +1903,9 @@ export function ManagementDataTable({
     setStudentSchoolCategoryFilter("");
     setStudentSchoolFilter("");
     setStudentGradeFilter("");
+    setRowSelection({});
+    setExpanded({});
+    setBulkEditValue("");
     badgeColumn?.setFilterValue("");
     if (kind === "classes") {
       statusColumn?.setFilterValue(DEFAULT_CLASS_STATUS_FILTER);
@@ -1891,6 +1918,35 @@ export function ManagementDataTable({
       }
     }
     table.resetPagination();
+  };
+
+  const updateGlobalFilter = (value: string) => {
+    setGlobalFilter(value);
+    setRowSelection({});
+    setBulkEditValue("");
+    table.resetPagination();
+  };
+
+  const updateGrouping = (nextGrouping: GroupingState) => {
+    setGrouping(nextGrouping);
+    setExpanded({});
+    setRowSelection({});
+    setBulkEditValue("");
+    table.resetPagination();
+  };
+
+  const updateSorting = (nextSorting: SortingState) => {
+    setSorting(nextSorting);
+    setRowSelection({});
+    setBulkEditValue("");
+    table.resetPagination();
+  };
+
+  const updatePageSize = (value: string) => {
+    setRowSelection({});
+    setBulkEditValue("");
+    table.setPageSize(Number(value));
+    table.setPageIndex(0);
   };
 
   const columnSettingsControl = (
@@ -1928,7 +1984,7 @@ export function ManagementDataTable({
                     <Label>1단 그룹</Label>
                     <Select
                       value={primaryGrouping}
-                      onValueChange={(value) => setGrouping(buildGroupingValue(value === "none" ? "" : value, secondaryGrouping === "none" ? "" : secondaryGrouping === value ? "" : secondaryGrouping))}
+                      onValueChange={(value) => updateGrouping(buildGroupingValue(value === "none" ? "" : value, secondaryGrouping === "none" ? "" : secondaryGrouping === value ? "" : secondaryGrouping))}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="없음" />
@@ -1947,7 +2003,7 @@ export function ManagementDataTable({
                     <Label>2단 그룹</Label>
                     <Select
                       value={secondaryGrouping}
-                      onValueChange={(value) => setGrouping(buildGroupingValue(primaryGrouping === "none" ? "" : primaryGrouping, value === "none" || value === primaryGrouping ? "" : value))}
+                      onValueChange={(value) => updateGrouping(buildGroupingValue(primaryGrouping === "none" ? "" : primaryGrouping, value === "none" || value === primaryGrouping ? "" : value))}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="없음" />
@@ -1974,7 +2030,7 @@ export function ManagementDataTable({
                     <Label>1차 컬럼</Label>
                     <Select
                       value={primarySorting}
-                      onValueChange={(value) => setSorting(buildSortingValue(value === "none" ? "" : value, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting === value ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
+                      onValueChange={(value) => updateSorting(buildSortingValue(value === "none" ? "" : value, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting === value ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="없음" />
@@ -1993,7 +2049,7 @@ export function ManagementDataTable({
                     <Label>1차 방향</Label>
                     <Select
                       value={primarySortDirection}
-                      onValueChange={(value) => setSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, value as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
+                      onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, value as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -2008,7 +2064,7 @@ export function ManagementDataTable({
                     <Label>2차 컬럼</Label>
                     <Select
                       value={secondarySorting}
-                      onValueChange={(value) => setSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", value === "none" || value === primarySorting ? "" : value, secondarySortDirection as "asc" | "desc"))}
+                      onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", value === "none" || value === primarySorting ? "" : value, secondarySortDirection as "asc" | "desc"))}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="없음" />
@@ -2029,7 +2085,7 @@ export function ManagementDataTable({
                     <Label>2차 방향</Label>
                     <Select
                       value={secondarySortDirection}
-                      onValueChange={(value) => setSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, value as "asc" | "desc"))}
+                      onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, value as "asc" | "desc"))}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -2151,9 +2207,21 @@ export function ManagementDataTable({
         aria-label="검색"
         placeholder={`${emptyLabel} 검색`}
         value={globalFilter ?? ""}
-        onChange={(event) => setGlobalFilter(String(event.target.value))}
-        className="h-9 pl-9"
+        onChange={(event) => updateGlobalFilter(String(event.target.value))}
+        className="h-9 pl-9 pr-9"
       />
+      {normalizedGlobalFilter ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md"
+          onClick={() => updateGlobalFilter("")}
+          aria-label={`${emptyLabel} 검색어 지우기`}
+        >
+          <X className="size-3.5" />
+        </Button>
+      ) : null}
     </div>
   );
 
@@ -2196,6 +2264,7 @@ export function ManagementDataTable({
                 return;
               }
               setClassGroupFilter(value);
+              setRowSelection({});
               table.resetPagination();
             },
           },
@@ -2209,6 +2278,7 @@ export function ManagementDataTable({
             })),
             onChange: (value) => {
               statusColumn?.setFilterValue(value);
+              setRowSelection({});
               table.resetPagination();
             },
           },
@@ -2232,6 +2302,7 @@ export function ManagementDataTable({
                   table.getColumn("teacher")?.setFilterValue("");
                   table.getColumn("classroom")?.setFilterValue("");
                 }
+                setRowSelection({});
                 table.resetPagination();
               },
             };
@@ -2239,9 +2310,16 @@ export function ManagementDataTable({
         ]
       : [];
 
+  const activePeriodLabel =
+    kind === "classes" && normalizedClassGroupFilter
+      ? getPeriodFilterLabel(periodOptions, normalizedClassGroupFilter)
+      : "";
   const classFilterChips: ClassFilterPanelChip[] =
     kind === "classes"
       ? [
+          activePeriodLabel
+            ? { id: "period", label: <>기간 {activePeriodLabel}</> }
+            : null,
           rows.length !== filteredRowCount
             ? { id: "total", label: <>전체 {rows.length}건</> }
             : null,
@@ -2253,12 +2331,6 @@ export function ManagementDataTable({
             : null,
           normalizedGlobalFilter
             ? { id: "search", label: <>검색어 {normalizedGlobalFilter}</> }
-            : null,
-          hasNonDefaultPeriodFilter
-            ? {
-                id: "period",
-                label: <>기간 {getPeriodFilterLabel(periodOptions, normalizedClassGroupFilter)}</>,
-              }
             : null,
           hasNonDefaultStatusFilter
             ? { id: "status", label: <>{statusLabel} {normalizedClassStatusFilter}</> }
@@ -2285,6 +2357,7 @@ export function ManagementDataTable({
         value={statusFilter || "all"}
         onValueChange={(value) => {
           statusColumn?.setFilterValue(value === "all" ? "" : value);
+          setRowSelection({});
           table.resetPagination();
         }}
       >
@@ -2314,6 +2387,7 @@ export function ManagementDataTable({
           setStudentSchoolCategoryFilter(value === "all" ? "" : value);
           setStudentSchoolFilter("");
           setStudentGradeFilter("");
+          setRowSelection({});
           table.resetPagination();
         }}
       >
@@ -2342,6 +2416,7 @@ export function ManagementDataTable({
         onValueChange={(value) => {
           setStudentSchoolFilter(value === "all" ? "" : value);
           setStudentGradeFilter("");
+          setRowSelection({});
           table.resetPagination();
         }}
       >
@@ -2369,6 +2444,7 @@ export function ManagementDataTable({
         value={studentGradeFilter || "all"}
         onValueChange={(value) => {
           setStudentGradeFilter(value === "all" ? "" : value);
+          setRowSelection({});
           table.resetPagination();
         }}
       >
@@ -2445,9 +2521,10 @@ export function ManagementDataTable({
           selects={classFilterSelects}
           searchValue={String(globalFilter || "")}
           searchPlaceholder={`${emptyLabel} 검색`}
-          onSearchChange={(value) => setGlobalFilter(value)}
+          onSearchChange={updateGlobalFilter}
           summaryLabel={summaryLabel}
           chips={classFilterChips}
+          primaryLabel={activePeriodLabel}
           showReset={hasActiveFilters}
           onReset={resetFilters}
           createLabel={createLabel}
@@ -2512,7 +2589,11 @@ export function ManagementDataTable({
                     </Label>
                     <Select
                       value={badgeFilter || "all"}
-                      onValueChange={(value) => badgeColumn.setFilterValue(value === "all" ? "" : value)}
+                      onValueChange={(value) => {
+                        badgeColumn.setFilterValue(value === "all" ? "" : value);
+                        setRowSelection({});
+                        table.resetPagination();
+                      }}
                     >
                       <SelectTrigger className="h-9 w-full" id="badge-filter" aria-label={badgeLabel}>
                         <SelectValue placeholder={badgeLabel} />
@@ -2535,7 +2616,11 @@ export function ManagementDataTable({
                   </Label>
                   <Select
                     value={statusFilter || "all"}
-                    onValueChange={(value) => statusColumn?.setFilterValue(value === "all" ? "" : value)}
+                    onValueChange={(value) => {
+                      statusColumn?.setFilterValue(value === "all" ? "" : value);
+                      setRowSelection({});
+                      table.resetPagination();
+                    }}
                   >
                     <SelectTrigger className="h-9 w-full" id="status-filter" aria-label={statusLabel}>
                       <SelectValue placeholder={statusLabel} />
@@ -2555,7 +2640,7 @@ export function ManagementDataTable({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
             <Badge variant="secondary">{summaryLabel}</Badge>
             {rows.length !== filteredRowCount ? <Badge variant="outline">전체 {rows.length}건</Badge> : null}
             {selectedRowCount > 0 ? <Badge variant="outline">선택 {selectedRowCount}건</Badge> : null}
@@ -2573,7 +2658,7 @@ export function ManagementDataTable({
 
       {bulkActionBar}
 
-      <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
+      <div className="overflow-x-auto rounded-lg border border-border/70 bg-background" aria-busy={loading}>
         <Table className="min-w-[980px] table-fixed">
           <caption className="sr-only">{emptyLabel} 운영 목록{captionSuffix ? ` · ${captionSuffix}` : ""}</caption>
           <TableHeader>
@@ -2602,7 +2687,11 @@ export function ManagementDataTable({
                               <button
                                 type="button"
                                 className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1 text-left font-semibold hover:bg-muted/70"
-                                onClick={() => header.column.toggleSorting(sortState === "asc")}
+                                onClick={() => {
+                                  setRowSelection({});
+                                  setBulkEditValue("");
+                                  header.column.toggleSorting(sortState === "asc");
+                                }}
                                 aria-label={`${columnLabel} ${sortState === "asc" ? "내림차순" : "오름차순"} 정렬`}
                               >
                                 <span className="min-w-0 truncate">
@@ -2644,13 +2733,25 @@ export function ManagementDataTable({
           </TableHeader>
           <TableBody>
             {loading ? (
-              Array.from({ length: 6 }).map((_, index) => (
-                <TableRow key={`loading-${index}`}>
-                  <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length}>
-                    <Skeleton className="h-10 w-full" />
+              <>
+                <TableRow>
+                  <TableCell
+                    colSpan={table.getVisibleLeafColumns().length || columns.length}
+                    className="px-3 py-2 text-sm text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {emptyLabel} 데이터를 불러오는 중입니다.
                   </TableCell>
                 </TableRow>
-              ))
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <TableRow key={`loading-${index}`}>
+                    <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length}>
+                      <Skeleton className="h-10 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </>
             ) : table.getRowModel().rows.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
@@ -2722,6 +2823,18 @@ export function ManagementDataTable({
                       <Badge variant="secondary">표시 {filteredRowCount}건</Badge>
                       {hasActiveFilters ? <Badge variant="outline">현재 조건 적용 중</Badge> : null}
                     </div>
+                    <div className="flex flex-wrap justify-center gap-2 pt-1">
+                      {hasActiveFilters ? (
+                        <Button type="button" variant="outline" size="sm" className="h-8" onClick={resetFilters}>
+                          조건 초기화
+                        </Button>
+                      ) : hasCreateAction ? (
+                        <Button type="button" size="sm" className="h-8" onClick={actions.onCreate}>
+                          <Plus className="mr-1.5 size-3.5" />
+                          {createLabel}
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 </TableCell>
               </TableRow>
@@ -2739,10 +2852,7 @@ export function ManagementDataTable({
             <span className="text-xs">페이지당</span>
             <Select
               value={String(pageSize)}
-              onValueChange={(value) => {
-                table.setPageSize(Number(value));
-                table.setPageIndex(0);
-              }}
+              onValueChange={updatePageSize}
             >
               <SelectTrigger className="h-8 w-[5.5rem]" aria-label="페이지당 표시 개수">
                 <SelectValue />

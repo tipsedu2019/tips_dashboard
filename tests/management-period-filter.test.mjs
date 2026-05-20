@@ -37,3 +37,13 @@ test("class detail period menu does not render checkbox buttons inside option bu
   assert.doesNotMatch(source, /<Checkbox\b/);
   assert.match(source, /<Check className="size-3" \/>/);
 });
+
+test("class creation preselects the default period so new classes stay visible", async () => {
+  const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(source, /import \{ pickDefaultPeriodValue \} from "\.\/period-preferences";/);
+  assert.match(source, /function getDefaultClassGroupIdsForCreate\(classGroupOptions: ClassGroupOption\[\]\)/);
+  assert.match(source, /const defaultGroupId = pickDefaultPeriodValue/);
+  assert.match(source, /const defaultClassGroupIdsForCreate = useMemo/);
+  assert.match(source, /if \(kind === "classes" && defaultClassGroupIdsForCreate\) \{\s*nextForm\.classGroupIds = defaultClassGroupIdsForCreate;\s*\}/);
+});
