@@ -30,6 +30,13 @@ test("teacher settings links teachers to login accounts and editable roles", asy
   assert.match(workspaceSource, /profileId/);
   assert.match(workspaceSource, /accountEmail/);
   assert.match(workspaceSource, /dashboardRole/);
+  assert.match(workspaceSource, /RefreshCw/);
+  assert.match(workspaceSource, /계정 새로고침/);
+  assert.match(workspaceSource, /visibilitychange/);
+  assert.match(
+    workspaceSource,
+    /window\.addEventListener\("focus", reloadOnFocus\)/,
+  );
   assert.match(workspaceSource, /계정/);
   assert.match(workspaceSource, /권한/);
   assert.match(workspaceSource, /최근 변경 이력/);
@@ -46,12 +53,18 @@ test("teacher settings uses fixed team groups instead of subject labels", async 
     "utf8",
   );
 
-  assert.match(workspaceSource, /TEAM_OPTIONS = \["영어팀", "수학팀", "관리팀"\]/);
-  assert.match(workspaceSource, /TEAM_FILTERS = \["전체", \.\.\.TEAM_OPTIONS\]/);
+  assert.match(
+    workspaceSource,
+    /TEAM_OPTIONS = \["영어팀", "수학팀", "관리팀"\]/,
+  );
+  assert.match(
+    workspaceSource,
+    /TEAM_FILTERS = \["전체", \.\.\.TEAM_OPTIONS\]/,
+  );
   assert.match(workspaceSource, /normalizeTeamValue/);
   assert.match(workspaceSource, /handleTeamChange/);
   assert.match(workspaceSource, /label: "팀"/);
-  assert.match(workspaceSource, />팀<\/TableHead>/);
+  assert.match(workspaceSource, />\s*팀\s*<\/TableHead>/);
   assert.match(workspaceSource, /placeholder="팀"/);
   assert.doesNotMatch(workspaceSource, /SUBJECT_OPTIONS/);
   assert.doesNotMatch(workspaceSource, /label: "과목"/);
@@ -60,19 +73,44 @@ test("teacher settings uses fixed team groups instead of subject labels", async 
 test("teacher account migration stores profile links, permissions, and audit history", async () => {
   const migrationSource = await readAllMigrationSource();
 
-  assert.match(migrationSource, /alter table public\.teacher_catalogs[\s\S]*profile_id uuid/);
+  assert.match(
+    migrationSource,
+    /alter table public\.teacher_catalogs[\s\S]*profile_id uuid/,
+  );
   assert.match(migrationSource, /account_email text/);
   assert.match(migrationSource, /dashboard_role text/);
   assert.match(migrationSource, /teacher_catalog_id uuid/);
   assert.match(migrationSource, /profiles_teacher_catalog_id_fkey/);
-  assert.match(migrationSource, /references public\.teacher_catalogs\(id\) on delete set null/);
-  assert.match(migrationSource, /create table if not exists public\.dashboard_audit_logs/);
+  assert.match(
+    migrationSource,
+    /references public\.teacher_catalogs\(id\) on delete set null/,
+  );
+  assert.match(
+    migrationSource,
+    /create table if not exists public\.dashboard_audit_logs/,
+  );
+  assert.match(
+    migrationSource,
+    /create or replace function public\.handle_new_dashboard_user/,
+  );
+  assert.match(migrationSource, /after insert on auth\.users/);
+  assert.match(migrationSource, /'viewer' as role/);
+  assert.match(migrationSource, /profiles_self_insert/);
   assert.match(migrationSource, /actor_profile_id uuid/);
   assert.match(migrationSource, /actor_email text/);
   assert.match(migrationSource, /entity_table text not null/);
-  assert.match(migrationSource, /create or replace function public\.log_dashboard_audit_event/);
+  assert.match(
+    migrationSource,
+    /create or replace function public\.log_dashboard_audit_event/,
+  );
 
-  for (const table of ["teacher_catalogs", "profiles", "students", "classes", "textbooks"]) {
+  for (const table of [
+    "teacher_catalogs",
+    "profiles",
+    "students",
+    "classes",
+    "textbooks",
+  ]) {
     assert.match(
       migrationSource,
       new RegExp(`create trigger dashboard_audit_${table}`),

@@ -1,20 +1,15 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import Link from "next/link"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { useForm } from "react-hook-form"
-import { useRouter, useSearchParams } from "next/navigation"
-import { z } from "zod"
-import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { useState } from "react";
+import Link from "next/link";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { useRouter, useSearchParams } from "next/navigation";
+import { z } from "zod";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Form,
   FormControl,
@@ -22,46 +17,49 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useAuth } from "@/providers/auth-provider"
+} from "@/components/ui/form";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useAuth } from "@/providers/auth-provider";
 
 const loginFormSchema = z.object({
   loginId: z.string().trim().min(1, "아이디를 입력해 주세요."),
   password: z.string().min(6, "비밀번호는 6자 이상 입력해 주세요."),
-})
+});
 
-type LoginFormValues = z.infer<typeof loginFormSchema>
+type LoginFormValues = z.infer<typeof loginFormSchema>;
 
 export function LoginForm1({
   className,
   ...props
 }: React.ComponentProps<"div">) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const { login, authError } = useAuth()
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { login, authError } = useAuth();
+  const didRegister = searchParams.get("registered") === "1";
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginFormSchema),
     defaultValues: {
       loginId: "",
       password: "",
     },
-  })
+  });
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
-      setSubmitError(null)
-      setIsSubmitting(true)
-      await login(values.loginId, values.password)
-      router.replace(searchParams.get("next") || "/admin/dashboard")
+      setSubmitError(null);
+      setIsSubmitting(true);
+      await login(values.loginId, values.password);
+      router.replace(searchParams.get("next") || "/admin/dashboard");
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "로그인에 실패했습니다.")
+      setSubmitError(
+        error instanceof Error ? error.message : "로그인에 실패했습니다.",
+      );
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  })
+  });
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -74,9 +72,18 @@ export function LoginForm1({
             <form onSubmit={onSubmit}>
               <div className="grid gap-6">
                 <div className="grid gap-4">
+                  {didRegister && !submitError && !authError ? (
+                    <Alert>
+                      <AlertDescription>
+                        가입이 완료되었습니다. 이메일 확인 후 로그인하세요.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                   {(submitError || authError) && (
                     <Alert variant="destructive">
-                      <AlertDescription>{submitError || authError}</AlertDescription>
+                      <AlertDescription>
+                        {submitError || authError}
+                      </AlertDescription>
                     </Alert>
                   )}
                   <FormField
@@ -114,16 +121,28 @@ export function LoginForm1({
                           </Link>
                         </div>
                         <FormControl>
-                          <Input type="password" autoComplete="current-password" {...field} />
+                          <Input
+                            type="password"
+                            autoComplete="current-password"
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <Button type="submit" className="w-full cursor-pointer" disabled={isSubmitting}>
+                  <Button
+                    type="submit"
+                    className="w-full cursor-pointer"
+                    disabled={isSubmitting}
+                  >
                     {isSubmitting ? "로그인 중..." : "로그인"}
                   </Button>
-                  <Button asChild variant="outline" className="w-full cursor-pointer">
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="w-full cursor-pointer"
+                  >
                     <Link href="/sign-up">계정 만들기</Link>
                   </Button>
                 </div>
@@ -133,5 +152,5 @@ export function LoginForm1({
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
