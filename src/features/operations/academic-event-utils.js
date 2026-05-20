@@ -187,6 +187,7 @@ export function buildAcademicEventMutationPayload(draft = {}, schoolOptions = []
     category: text(school?.category || draft.category) || "all",
     note: buildEmbeddedNote(draft.note, {
       examTerm: draft.examTerm,
+      rangeEnd: end !== start ? end : "",
       textbookScope: normalizeLegacyScopeValue(draft.textbookScope),
       subtextbookScope: normalizeLegacyScopeValue(draft.subtextbookScope),
       textbookScopes: Array.isArray(draft.textbookScopes) ? draft.textbookScopes : [],
@@ -228,7 +229,7 @@ export function buildAcademicEventMutationPayloadCandidates(payload = {}) {
         end,
         date: start,
       },
-      optionalColumns: ["school_id", "school", "color", "grade", "note", "category", "start", "end", "date"],
+      optionalColumns: ["school_id", "school", "color", "grade", "note", "category", "date"],
     },
     {
       payload: {
@@ -237,7 +238,7 @@ export function buildAcademicEventMutationPayloadCandidates(payload = {}) {
         end_date: end,
         date: start,
       },
-      optionalColumns: ["school_id", "school", "color", "grade", "note", "category", "start_date", "end_date", "date"],
+      optionalColumns: ["school_id", "school", "color", "grade", "note", "category", "date"],
     },
     {
       payload: {
