@@ -87,6 +87,11 @@ test("bare phone ids are normalized to full tipsedu email addresses", async () =
     authProviderSource,
     /signInWithPassword\(\{\s*email: normalizedEmail,\s*password,/,
   );
+  assert.match(authProviderSource, /profileByIdentity/);
+  assert.match(
+    authProviderSource,
+    /or\(`email\.eq\.\$\{normalizedEmail\},login_id\.eq\.\$\{normalizedLoginId\}`\)/,
+  );
 });
 
 test("self sign-up uses a receivable email and Supabase signUp", async () => {

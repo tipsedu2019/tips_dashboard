@@ -130,11 +130,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const fetchProfile = async (supabaseUser: User) => {
       try {
-        const { data, error } = await supabase!
+        const normalizedEmail = normalizeEmail(supabaseUser.email || "")
+        const normalizedLoginId = normalizedEmail.includes("@")
+          ? normalizedEmail.split("@")[0]
+          : normalizedEmail
+        const profileById = await supabase!
           .from("profiles")
           .select("*")
           .eq("id", supabaseUser.id)
           .maybeSingle()
+        let data = profileById.data
+        let error = profileById.error
+
+        if (!data && !error && normalizedEmail) {
+          const profileByIdentity = await supabase!
+            .from("profiles")
+            .select("*")
+            .or(`email.eq.${normalizedEmail},login_id.eq.${normalizedLoginId}`)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+          data = profileByIdentity.data
+          error = profileByIdentity.error
+        }
 
         if (!isActive) return
 

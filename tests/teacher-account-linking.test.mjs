@@ -94,6 +94,9 @@ test("teacher account migration stores profile links, permissions, and audit his
     /create or replace function public\.handle_new_dashboard_user/,
   );
   assert.match(migrationSource, /after insert on auth\.users/);
+  assert.match(migrationSource, /matched_profile_id/);
+  assert.match(migrationSource, /when unique_violation then/);
+  assert.match(migrationSource, /profiles_self_identity_select/);
   assert.match(migrationSource, /'viewer' as role/);
   assert.match(migrationSource, /profiles_self_insert/);
   assert.match(migrationSource, /actor_profile_id uuid/);
