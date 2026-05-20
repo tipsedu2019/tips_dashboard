@@ -12,7 +12,6 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      SUPABASE_PROJECT_REF: dqpccpblshdnqzbjvkxd
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +27,17 @@ jobs:
             echo "Missing required secret: SUPABASE_DB_PASSWORD"
             exit 1
           fi
+
+      - name: Resolve Supabase project ref
+        shell: bash
+        run: |
+          project_ref="$(sed -n 's/^project_id = "\(.*\)"$/\1/p' supabase/config.toml | head -n 1)"
+          if [ -z "${project_ref}" ]; then
+            echo "Missing project_id in supabase/config.toml"
+            exit 1
+          fi
+          echo "SUPABASE_PROJECT_REF=${project_ref}" >> "${GITHUB_ENV}"
+          echo "Using Supabase project ref from supabase/config.toml"
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
