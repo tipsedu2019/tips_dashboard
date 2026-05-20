@@ -314,6 +314,7 @@ export function ClassroomMasterWorkspace() {
                         value={row.name}
                         onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
                         placeholder="강의실 이름"
+                        aria-label={`${row.name || "새 강의실"} 강의실 이름`}
                       />
                     </TableCell> : null}
                     {isColumnVisible("visible") ? <TableCell className={`${settingsTableCellClass} text-center`}>

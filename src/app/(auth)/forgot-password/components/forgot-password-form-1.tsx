@@ -104,7 +104,7 @@ export function ForgotPasswordForm1({
                 <Link href="/sign-in">로그인으로 돌아가기</Link>
               </Button>
               <Button asChild variant="outline" className="w-full cursor-pointer">
-                <Link href="/sign-up">계정 만들기</Link>
+                <Link href="/sign-up">회원가입</Link>
               </Button>
             </div>
           </form>

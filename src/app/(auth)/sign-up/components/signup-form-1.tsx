@@ -123,7 +123,7 @@ export function SignupForm1({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">계정 만들기</CardTitle>
+          <CardTitle className="text-xl">회원가입</CardTitle>
         </CardHeader>
         <CardContent>
           <Form {...form}>

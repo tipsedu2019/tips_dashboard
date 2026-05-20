@@ -44,6 +44,14 @@ function navigationTargetId(url: string) {
     .replace(/^-+|-+$/g, "") || "root"
 }
 
+function getNavMoveLabel(title: string) {
+  return `${title} 이동`
+}
+
+function getNavSubmenuLabel(title: string, open: boolean) {
+  return `${title} 하위 메뉴 ${open ? "접기" : "펼치기"}`
+}
+
 export function NavMain({
   label,
   items,
@@ -149,7 +157,7 @@ export function NavMain({
                     <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isParentActive}>
                       <Link
                         href={item.url}
-                        aria-label={`${item.title}로 이동`}
+                        aria-label={getNavMoveLabel(item.title)}
                         title={item.title}
                         data-testid={`admin-nav-link-${itemTargetId}`}
                         onPointerEnter={() => prefetchRoute(item.url)}
@@ -163,7 +171,10 @@ export function NavMain({
                       <SidebarMenuAction
                         className="cursor-pointer"
                         aria-expanded={openItems[item.url] ?? false}
-                        aria-label={`${item.title} 하위 메뉴 ${openItems[item.url] ? "접기" : "펼치기"}`}
+                        aria-label={getNavSubmenuLabel(
+                          item.title,
+                          openItems[item.url] ?? false,
+                        )}
                         title={`${item.title} 하위 메뉴`}
                         data-testid={`admin-nav-disclosure-${itemTargetId}`}
                       >
@@ -177,7 +188,7 @@ export function NavMain({
                             <SidebarMenuSubButton asChild className="cursor-pointer" isActive={isUrlActive(subItem.url)}>
                               <Link
                                 href={subItem.url}
-                                aria-label={`${subItem.title}로 이동`}
+                                aria-label={getNavMoveLabel(subItem.title)}
                                 title={subItem.title}
                                 data-testid={`admin-nav-sublink-${navigationTargetId(subItem.url)}`}
                                 onPointerEnter={() => prefetchRoute(subItem.url)}
@@ -195,7 +206,7 @@ export function NavMain({
                   <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isUrlActive(item.url)}>
                     <Link
                       href={item.url}
-                      aria-label={`${item.title}로 이동`}
+                      aria-label={getNavMoveLabel(item.title)}
                       title={item.title}
                       data-testid={`admin-nav-link-${itemTargetId}`}
                       onPointerEnter={() => prefetchRoute(item.url)}

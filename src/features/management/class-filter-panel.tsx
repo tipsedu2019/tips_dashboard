@@ -86,10 +86,13 @@ export function ClassFilterPanel({
   return (
     <div className={cn("flex flex-col gap-2 border border-border/70 bg-background px-3 py-3", className)}>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[16rem] flex-1">
+        <div className="relative min-w-[16rem] flex-1" role="search" aria-label={searchPlaceholder}>
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            type="search"
             aria-label={searchPlaceholder}
+            autoComplete="off"
+            enterKeyHint="search"
             placeholder={searchPlaceholder}
             value={searchValue}
             onChange={(event) => onSearchChange(event.target.value)}

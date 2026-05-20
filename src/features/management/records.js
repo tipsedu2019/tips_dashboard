@@ -36,8 +36,10 @@ function formatDurationLabel(totalMinutes) {
   if (!Number.isFinite(safeMinutes) || safeMinutes <= 0) {
     return "시간 미정";
   }
-  const hours = safeMinutes / 60;
-  return Number.isInteger(hours) ? `${hours}시간` : `${hours.toFixed(1)}시간`;
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+  if (hours <= 0) return `${minutes}분`;
+  return minutes > 0 ? `${hours}시간 ${minutes}분` : `${hours}시간`;
 }
 
 function normalizeScheduleLines(value) {
@@ -70,12 +72,12 @@ function normalizeClassGroups(value) {
 }
 
 function computeWeeklyClassMinutes(schedule) {
-  const pattern = /([0-9]{1,2}:\d{2})\s*-\s*([0-9]{1,2}:\d{2})/g;
+  const pattern = /([월화수목금토일]+)?\s*([0-9]{1,2}:\d{2})\s*-\s*([0-9]{1,2}:\d{2})/g;
   let match = pattern.exec(text(schedule));
   let totalMinutes = 0;
 
   while (match) {
-    const [, start, end] = match;
+    const [, days, start, end] = match;
     const [startHour, startMinute] = start.split(":").map(Number);
     const [endHour, endMinute] = end.split(":").map(Number);
     if (
@@ -84,7 +86,8 @@ function computeWeeklyClassMinutes(schedule) {
       Number.isFinite(endHour) &&
       Number.isFinite(endMinute)
     ) {
-      totalMinutes += Math.max(0, endHour * 60 + endMinute - (startHour * 60 + startMinute));
+      const dayCount = Math.max(1, [...new Set(text(days).split(""))].filter(Boolean).length);
+      totalMinutes += Math.max(0, endHour * 60 + endMinute - (startHour * 60 + startMinute)) * dayCount;
     }
     match = pattern.exec(text(schedule));
   }

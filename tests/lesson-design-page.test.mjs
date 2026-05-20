@@ -277,6 +277,8 @@ test("lesson design separates textbook finder and connected textbook ranges", as
   assert.match(source, /setIsLessonTextbookFinderOpen\(true\)/);
   assert.match(source, /const deferredLessonTextbookSearch = useDeferredValue\(lessonTextbookSearch\)/);
   assert.match(source, /const query = text\(deferredLessonTextbookSearch\)\.toLowerCase\(\)/);
+  assert.match(source, /type="search"[\s\S]*value=\{lessonTextbookSearch\}/);
+  assert.match(source, /autoComplete="off"[\s\S]*enterKeyHint="search"/);
   assert.match(source, /const candidates: Array<\{ book: Record<string, unknown>; score: number; title: string \}> = \[\]/);
   assert.match(source, /for \(const book of data\.textbooks\)/);
   assert.match(source, /score: scoreLessonTextbookCandidate\(book, lessonDesignSnapshot\)/);

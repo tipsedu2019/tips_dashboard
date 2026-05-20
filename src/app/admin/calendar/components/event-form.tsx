@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -288,18 +289,53 @@ export function EventForm({
     [formData.grade, schoolOptions],
   )
 
-  if (selectedSchool) {
-    const allowedGrades = getGradeOptionsForSchoolCategory(selectedSchool.category).map((option) => option.value)
-    const nextGrades = selectedGrades.filter((grade) => grade === "all" || allowedGrades.includes(grade))
-    const normalizedCurrent = serializeGradeSelection(selectedGrades)
-    const normalizedNext = serializeGradeSelection(nextGrades)
-    if (normalizedCurrent !== normalizedNext) {
-      setFormData((prev) => ({ ...prev, grade: normalizedNext }))
-    }
+  const handleSchoolChange = (schoolId: string) => {
+    const nextSchool = schoolOptions.find((school) => school.id === schoolId) || null
+
+    setFormData((prev) => {
+      if (!nextSchool) {
+        return { ...prev, schoolId }
+      }
+
+      const currentGrades = parseGradeSelection(prev.grade)
+      const allowedGrades = getGradeOptionsForSchoolCategory(nextSchool.category).map((option) => option.value)
+      const nextGrades = currentGrades.filter((grade) => grade === "all" || allowedGrades.includes(grade))
+
+      return {
+        ...prev,
+        schoolId,
+        grade: serializeGradeSelection(nextGrades),
+      }
+    })
   }
 
-  if (formData.schoolId && !filteredSchoolOptions.some((school) => school.id === formData.schoolId)) {
-    setFormData((prev) => ({ ...prev, schoolId: "" }))
+  const handleGradeToggle = (grade: string) => {
+    const nextGrades = toggleGradeSelection(selectedGrades, grade)
+    const nextGradeValue = serializeGradeSelection(nextGrades)
+
+    setFormData((prev) => ({
+      ...prev,
+      grade: nextGradeValue,
+      schoolId:
+        prev.schoolId && getSchoolOptionsForGrade(nextGradeValue, schoolOptions).some((school) => school.id === prev.schoolId)
+          ? prev.schoolId
+          : "",
+    }))
+  }
+
+  const handleStartDateChange = (date: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      date,
+      endDate: !prev.endDate || prev.endDate === prev.date || prev.endDate < date ? date : prev.endDate,
+    }))
+  }
+
+  const handleEndDateChange = (endDate: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      endDate,
+    }))
   }
 
   const handleScopeChange = (
@@ -354,6 +390,11 @@ export function EventForm({
 
     if (!nextEndDate) {
       showFormError("종료일을 확인해 주세요.")
+      return
+    }
+
+    if (nextEndDate < nextDate) {
+      showFormError("종료일은 시작일보다 빠를 수 없습니다.")
       return
     }
 
@@ -423,6 +464,7 @@ export function EventForm({
           <DialogTitle>
             {readOnly ? "학사 일정 상세" : isEditingPersistedEvent ? "학사 일정 수정" : "새 학사 일정 추가"}
           </DialogTitle>
+          <DialogDescription className="sr-only">학사 일정 정보를 입력하고 저장합니다.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
@@ -516,13 +558,7 @@ export function EventForm({
                         <DropdownMenuCheckboxItem
                           key={option.value}
                           checked={checked}
-                          onCheckedChange={() => {
-                            const nextGrades = toggleGradeSelection(selectedGrades, option.value)
-                            setFormData((prev) => ({
-                              ...prev,
-                              grade: serializeGradeSelection(nextGrades),
-                            }))
-                          }}
+                          onCheckedChange={() => handleGradeToggle(option.value)}
                         >
                           {option.label}
                         </DropdownMenuCheckboxItem>
@@ -545,9 +581,7 @@ export function EventForm({
               <Select
                 value={formData.schoolId}
                 disabled={isDisabled}
-                onValueChange={(value) =>
-                  setFormData((prev) => ({ ...prev, schoolId: value }))
-                }
+                onValueChange={handleSchoolChange}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={schoolRequired ? "학교 선택" : "선택 안 해도 됨"} />
@@ -571,9 +605,7 @@ export function EventForm({
                 type="date"
                 value={formData.date}
                 disabled={isDisabled}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, date: event.target.value }))
-                }
+                onChange={(event) => handleStartDateChange(event.target.value)}
               />
             </div>
 
@@ -584,9 +616,8 @@ export function EventForm({
                 type="date"
                 value={formData.endDate}
                 disabled={isDisabled}
-                onChange={(event) =>
-                  setFormData((prev) => ({ ...prev, endDate: event.target.value }))
-                }
+                min={formData.date || undefined}
+                onChange={(event) => handleEndDateChange(event.target.value)}
               />
             </div>
           </div>

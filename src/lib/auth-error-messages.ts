@@ -3,6 +3,17 @@ export function getAuthErrorMessage(error: unknown, fallbackMessage: string) {
   const message = rawMessage.trim()
   const normalizedMessage = message.toLowerCase()
 
+  if (normalizedMessage.includes("invalid login credentials")) {
+    return "아이디 또는 비밀번호가 올바르지 않습니다."
+  }
+
+  if (
+    normalizedMessage.includes("email not confirmed") ||
+    normalizedMessage.includes("email address not confirmed")
+  ) {
+    return "이메일 확인 후 로그인하세요."
+  }
+
   if (
     normalizedMessage.includes("email rate limit") ||
     (normalizedMessage.includes("rate limit") && normalizedMessage.includes("email"))

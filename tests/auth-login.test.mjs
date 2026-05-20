@@ -53,13 +53,22 @@ test("sign-in form accepts a login id instead of requiring an email address", as
   assert.match(source, /name="loginId"/);
   assert.match(source, /<FormLabel>아이디<\/FormLabel>/);
   assert.match(source, /type="text"/);
+  assert.match(source, /inputMode="text"/);
   assert.match(source, /placeholder="01087547830"/);
   assert.match(source, /autoComplete="username"/);
   assert.match(source, /await login\(values\.loginId, values\.password\)/);
+  assert.match(source, /const redirectTarget = searchParams\.get\("next"\) \|\| "\/admin\/dashboard"/);
+  assert.match(source, /if \(!loading && user\) \{/);
+  assert.match(source, /router\.replace\(redirectTarget\)/);
+  assert.match(source, /getAuthErrorMessage/);
+  assert.match(source, /setSubmitError\(getAuthErrorMessage\(error,/);
+  assert.match(source, /<CardTitle className="text-xl">TIPS 로그인<\/CardTitle>/);
   assert.match(source, /href="\/sign-up"/);
+  assert.match(source, /<Link href="\/sign-up">회원가입<\/Link>/);
   assert.doesNotMatch(source, /z\.string\(\)\.email/);
   assert.doesNotMatch(source, /type="email"/);
   assert.doesNotMatch(source, /your-id@tipsedu\.co\.kr/);
+  assert.doesNotMatch(source, /계정 만들기/);
 });
 
 test("bare phone ids are normalized to full tipsedu email addresses", async () => {
@@ -87,6 +96,9 @@ test("bare phone ids are normalized to full tipsedu email addresses", async () =
     authProviderSource,
     /signInWithPassword\(\{\s*email: normalizedEmail,\s*password,/,
   );
+  assert.match(authProviderSource, /getAuthErrorMessage/);
+  assert.match(authProviderSource, /로그인 상태를 확인하지 못했습니다/);
+  assert.match(authProviderSource, /로그아웃에 실패했습니다/);
   assert.match(authProviderSource, /profileByIdentity/);
   assert.match(
     authProviderSource,
@@ -126,8 +138,10 @@ test("self sign-up uses a receivable email and Supabase signUp", async () => {
   assert.doesNotMatch(source, /window\.location\.origin/);
   assert.match(source, /full_name:\s*name/);
   assert.match(source, /placeholder="name@gmail\.com"/);
+  assert.match(source, /<CardTitle className="text-xl">회원가입<\/CardTitle>/);
   assert.doesNotMatch(source, /console\.log\("Signup attempt:/);
   assert.doesNotMatch(source, /Sign up with Google/);
+  assert.doesNotMatch(source, /<CardTitle className="text-xl">계정 만들기<\/CardTitle>/);
 });
 
 test("registered sign-in explains the next step and viewer accounts can open the dashboard", async () => {
@@ -166,7 +180,9 @@ test("forgot-password uses the receivable email reset flow", async () => {
   assert.match(source, /<Label htmlFor="email">Google 이메일<\/Label>/);
   assert.match(source, /placeholder="name@gmail\.com"/);
   assert.match(source, /href="\/sign-up"/);
+  assert.match(source, /<Link href="\/sign-up">회원가입<\/Link>/);
   assert.doesNotMatch(source, /your-id@tipsedu\.co\.kr/);
+  assert.doesNotMatch(source, /계정 만들기/);
 });
 
 test("reset-password lets a recovery session set a new password", async () => {
@@ -208,6 +224,10 @@ test("auth email sending rate limit errors are translated for operators", async 
 
   assert.match(source, /email rate limit/);
   assert.match(source, /rate limit/);
+  assert.match(source, /invalid login credentials/);
+  assert.match(source, /아이디 또는 비밀번호가 올바르지 않습니다/);
+  assert.match(source, /email not confirmed/);
+  assert.match(source, /이메일 확인 후 로그인하세요/);
   assert.match(source, /메일 발송 한도를 초과했습니다/);
   assert.match(source, /이미 가입된 이메일입니다/);
 });

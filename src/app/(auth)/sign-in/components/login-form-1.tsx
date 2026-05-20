@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/providers/auth-provider";
+import { getAuthErrorMessage } from "@/lib/auth-error-messages";
 
 const loginFormSchema = z.object({
   loginId: z.string().trim().min(1, "아이디를 입력해 주세요."),
@@ -34,7 +35,8 @@ export function LoginForm1({
 }: React.ComponentProps<"div">) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login, authError } = useAuth();
+  const { login, authError, user, loading } = useAuth();
+  const redirectTarget = searchParams.get("next") || "/admin/dashboard";
   const didRegister = searchParams.get("registered") === "1";
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,16 +48,20 @@ export function LoginForm1({
     },
   });
 
+  useEffect(() => {
+    if (!loading && user) {
+      router.replace(redirectTarget);
+    }
+  }, [loading, redirectTarget, router, user]);
+
   const onSubmit = form.handleSubmit(async (values) => {
     try {
       setSubmitError(null);
       setIsSubmitting(true);
       await login(values.loginId, values.password);
-      router.replace(searchParams.get("next") || "/admin/dashboard");
+      router.replace(redirectTarget);
     } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message : "로그인에 실패했습니다.",
-      );
+      setSubmitError(getAuthErrorMessage(error, "로그인에 실패했습니다."));
     } finally {
       setIsSubmitting(false);
     }
@@ -65,7 +71,7 @@ export function LoginForm1({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">관리자 로그인</CardTitle>
+          <CardTitle className="text-xl">TIPS 로그인</CardTitle>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -95,11 +101,15 @@ export function LoginForm1({
                         <FormControl>
                           <Input
                             type="text"
-                            inputMode="email"
+                            inputMode="text"
                             autoCapitalize="none"
                             autoComplete="username"
                             placeholder="01087547830"
                             {...field}
+                            onChange={(event) => {
+                              field.onChange(event);
+                              setSubmitError(null);
+                            }}
                           />
                         </FormControl>
                         <FormMessage />
@@ -125,6 +135,10 @@ export function LoginForm1({
                             type="password"
                             autoComplete="current-password"
                             {...field}
+                            onChange={(event) => {
+                              field.onChange(event);
+                              setSubmitError(null);
+                            }}
                           />
                         </FormControl>
                         <FormMessage />
@@ -143,7 +157,7 @@ export function LoginForm1({
                     variant="outline"
                     className="w-full cursor-pointer"
                   >
-                    <Link href="/sign-up">계정 만들기</Link>
+                    <Link href="/sign-up">회원가입</Link>
                   </Button>
                 </div>
               </div>

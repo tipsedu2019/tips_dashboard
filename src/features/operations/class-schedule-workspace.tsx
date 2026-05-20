@@ -4688,6 +4688,7 @@ export function ClassScheduleWorkspace() {
                 {isLessonTextbookFinderVisible ? (
                   <div className="relative min-w-[14rem] flex-1 sm:max-w-md">
                     <Input
+                      type="search"
                       value={lessonTextbookSearch}
                       onChange={(event) => {
                         setLessonTextbookSearch(event.target.value);
@@ -4696,6 +4697,8 @@ export function ClassScheduleWorkspace() {
                       className="w-full pr-9"
                       placeholder="교재명, 출판사 검색"
                       aria-label="수업교재 검색"
+                      autoComplete="off"
+                      enterKeyHint="search"
                     />
                     {lessonTextbookSearch ? (
                       <Button

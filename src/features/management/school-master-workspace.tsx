@@ -371,14 +371,17 @@ export function SchoolMasterWorkspace() {
         }
         actions={
           <>
-            <div className="relative w-full min-w-[220px] sm:w-72">
+            <div className="relative w-full min-w-[220px] sm:w-72" role="search" aria-label="학교명 검색">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                type="search"
                 className="h-9 pr-9 pl-9"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="학교명 검색"
                 aria-label="학교명 검색"
+                autoComplete="off"
+                enterKeyHint="search"
               />
               {query ? (
                 <button
@@ -511,6 +514,7 @@ export function SchoolMasterWorkspace() {
                             value={row.name}
                             onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
                             placeholder="학교명"
+                            aria-label={`${row.name || "새 학교"} 학교명`}
                             aria-invalid={isInvalid}
                           />
                           {row.isNew ? (

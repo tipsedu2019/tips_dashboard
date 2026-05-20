@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TIPS Dashboard 목표 UI 보드</title>
+  <style>
+    :root { color-scheme: light; --bg:#f6f7f9; --text:#111827; --muted:#657282; --line:#dfe4ec; --blue:#2563eb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; }
+    main { max-width: 1680px; margin: 0 auto; padding: 48px 40px 72px; }
+    header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; margin-bottom: 32px; }
+    h1 { margin: 0; font-size: 32px; letter-spacing: -0.02em; }
+    p { margin: 8px 0 0; color: var(--muted); }
+    .principles { display: flex; gap: 8px; flex-wrap: wrap; }
+    .principles span { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 8px 12px; font-size: 13px; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 28px; }
+    .screen-card { background: #fff; border: 1px solid var(--line); border-radius: 24px; overflow: hidden; box-shadow: 0 24px 60px -36px rgba(15,23,42,.36); }
+    .screen-head { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+    .screen-head span { color: var(--blue); font-weight: 800; font-size: 13px; }
+    .screen-head strong { font-size: 15px; }
+    img { display: block; width: 100%; height: auto; background: #fff; }
+    @media (min-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>TIPS Dashboard 최종 목표 UI 보드</h1>
+        <p>메뉴별 구현 기준 이미지. 같은 쉘, 다른 업무 표면, 최소한의 설명.</p>
+      </div>
+      <div class="principles">
+        <span>Design is how it works</span>
+        <span>Simplicity as precision</span>
+        <span>One clear next action</span>
+        <span>No unnecessary chrome</span>
+      </div>
+    </header>
+    <section class="grid">
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>01. dashboard</span>
+        <strong>대시보드</strong>
+      </div>
+      <img src="screens/01-dashboard.svg" alt="대시보드 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>02. academic-calendar</span>
+        <strong>학사일정</strong>
+      </div>
+      <img src="screens/02-academic-calendar.svg" alt="학사일정 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>03. timetable</span>
+        <strong>시간표</strong>
+      </div>
+      <img src="screens/03-timetable.svg" alt="시간표 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>04. curriculum</span>
+        <strong>수업계획</strong>
+      </div>
+      <img src="screens/04-curriculum.svg" alt="수업계획 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>05. lesson-design</span>
+        <strong>수업설계</strong>
+      </div>
+      <img src="screens/05-lesson-design.svg" alt="수업설계 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>06. students</span>
+        <strong>학생관리</strong>
+      </div>
+      <img src="screens/06-students.svg" alt="학생관리 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>07. classes</span>
+        <strong>수업관리</strong>
+      </div>
+      <img src="screens/07-classes.svg" alt="수업관리 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>08. textbooks</span>
+        <strong>교재관리</strong>
+      </div>
+      <img src="screens/08-textbooks.svg" alt="교재관리 목표 화면" />
+    </article>
+  
+    <article class="screen-card">
+      <div class="screen-head">
+        <span>09. textbook-settings</span>
+        <strong>교재 설정</strong>
+      </div>
+      <img src="screens/09-textbook-settings.svg" alt="교재 설정 목표 화면" />
+    </article>
+  </section>
+  </main>
+</body>
+</html>

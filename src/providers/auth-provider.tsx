@@ -25,6 +25,7 @@ import {
   shouldForcePasswordChange,
   type DashboardRole,
 } from "@/lib/auth-utils"
+import { getAuthErrorMessage } from "@/lib/auth-error-messages"
 
 type DashboardUser = User & {
   name?: string
@@ -252,7 +253,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ data, error }) => {
         if (!isActive) return
         if (error) {
-          setAuthError(error.message)
+          setAuthError(getAuthErrorMessage(error, "로그인 상태를 확인하지 못했습니다."))
           setLoading(false)
           return
         }
@@ -260,7 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((error) => {
         if (!isActive) return
-        setAuthError(error.message)
+        setAuthError(getAuthErrorMessage(error, "로그인 상태를 확인하지 못했습니다."))
         setLoading(false)
       })
 
@@ -320,7 +321,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const { error } = await supabase.auth.signOut()
         if (error) {
-          setAuthError(error.message)
+          setAuthError(getAuthErrorMessage(error, "로그아웃에 실패했습니다."))
           return false
         }
 

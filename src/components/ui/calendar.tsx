@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
 } from "lucide-react"
 import { DayButton, DayPicker, getDefaultClassNames } from "react-day-picker"
+import { ko } from "date-fns/locale"
 
 import { cn } from "@/lib/utils"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -17,6 +18,7 @@ function Calendar({
   captionLayout = "label",
   buttonVariant = "ghost",
   formatters,
+  labels,
   components,
   ...props
 }: React.ComponentProps<typeof DayPicker> & {
@@ -34,10 +36,18 @@ function Calendar({
         className
       )}
       captionLayout={captionLayout}
+      locale={ko}
       formatters={{
         formatMonthDropdown: (date) =>
-          date.toLocaleString("default", { month: "short" }),
+          date.toLocaleString("ko-KR", { month: "short" }),
         ...formatters,
+      }}
+      labels={{
+        labelNav: () => "달력 월 이동",
+        labelGrid: (date) => `${date.getFullYear()}년 ${date.getMonth() + 1}월 달력`,
+        labelPrevious: () => "이전 달로 이동",
+        labelNext: () => "다음 달로 이동",
+        ...labels,
       }}
       classNames={{
         root: cn("w-fit", defaultClassNames.root),

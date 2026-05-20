@@ -30,6 +30,9 @@ test("teacher settings links teachers to login accounts and editable roles", asy
   assert.match(workspaceSource, /profileId/);
   assert.match(workspaceSource, /accountEmail/);
   assert.match(workspaceSource, /dashboardRole/);
+  assert.match(workspaceSource, /aria-label=\{`\$\{row\.name \|\| "새 선생님"\} 이름`\}/);
+  assert.match(workspaceSource, /placeholder="이메일 또는 아이디"/);
+  assert.match(workspaceSource, /aria-label="로그인 계정 이메일 또는 아이디"/);
   assert.match(workspaceSource, /RefreshCw/);
   assert.match(workspaceSource, /계정 새로고침/);
   assert.match(workspaceSource, /visibilitychange/);
@@ -41,6 +44,10 @@ test("teacher settings links teachers to login accounts and editable roles", asy
   assert.match(workspaceSource, /권한/);
   assert.match(workspaceSource, /최근 변경 이력/);
   assert.match(workspaceSource, /연결된 계정/);
+  assert.match(workspaceSource, /function formatAccountIdentifier/);
+  assert.match(workspaceSource, /아이디 \$\{trimmed\}/);
+  assert.match(workspaceSource, /계정 \$\{profile\.id\.slice\(0, 8\)\}/);
+  assert.match(workspaceSource, /연결됨/);
   assert.match(serviceSource, /listTeacherAccountSettingsData/);
   assert.match(serviceSource, /syncLinkedTeacherProfiles/);
   assert.match(serviceSource, /teacher_catalogs/);

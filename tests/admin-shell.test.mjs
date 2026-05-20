@@ -253,6 +253,22 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /bucket\.classBreakdowns\?\.byGrade \|\| \[\]\)\.slice\(0, 5\)/);
 });
 
+test("dashboard metrics renders the core snapshot before optional enrichment", async () => {
+  const source = await readSource("src/hooks/use-tips-dashboard-metrics.ts");
+
+  assert.match(source, /const DASHBOARD_CORE_TABLE_TIMEOUT_MS = 15000/);
+  assert.match(source, /const DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS = 5000/);
+  assert.match(source, /classes:\s*\[[\s\S]*"schedule_plan"[\s\S]*"student_ids"[\s\S]*"waitlist_student_ids"/);
+  assert.match(source, /students:\s*\[[\s\S]*"school"[\s\S]*"grade"[\s\S]*"class_ids"/);
+  assert.match(source, /academic_events: "id,title,type,type_label,school_id,school,school_name,grade,exam_date,start,start_date,date,note"/);
+  assert.match(source, /function isMissingColumnError/);
+  assert.match(source, /result = await queryTable\(tableName, "\*", optional, timeoutMs\)/);
+  assert.match(source, /if \(optional \|\| isMissingRelationError\(result\.error\)\)/);
+  assert.match(source, /const \[classes, students\] = await Promise\.all/);
+  assert.match(source, /buildMetrics\(\{\s*classes,\s*students,\s*\}\)/);
+  assert.match(source, /readTable\("class_terms", \{ optional: true \}\)/);
+});
+
 test("dashboard keeps dense cards readable on mobile widths", async () => {
   const [source, pageSource] = await Promise.all([
     readSource("src/app/admin/dashboard/components/section-cards.tsx"),
@@ -298,6 +314,7 @@ test("quick search trigger shows Ctrl + K", async () => {
   assert.match(source, /keywords=\{\[item\.group, item\.url\]\}/);
   assert.match(source, /value=\{`\$\{item\.title\} \$\{item\.group\} \$\{item\.url\}`\}/);
   assert.match(source, /aria-current=\{isCurrent \? "page" : undefined\}/);
+  assert.match(source, /aria-label=\{`빠른 이동: \$\{item\.title\}`\}/);
   assert.match(source, /현재/);
   assert.match(source, /<ArrowRight/);
   assert.match(source, /aria-label=\{`빠른 이동 열기, \$\{QUICK_SEARCH_SHORTCUT_LABEL\}`\}/);
@@ -312,9 +329,14 @@ test("sidebar submenu disclosure stays discoverable", async () => {
   const source = await readSource("src/components/nav-main.tsx");
 
   assert.match(source, /function isRouteActive/);
+  assert.match(source, /function getNavMoveLabel/);
+  assert.match(source, /return `\$\{title\} 이동`/);
+  assert.match(source, /function getNavSubmenuLabel/);
   assert.match(source, /currentPath\.startsWith\(`\$\{target\}\/`\)/);
   assert.match(source, /aria-expanded=\{openItems\[item\.url\] \?\? false\}/);
-  assert.match(source, /하위 메뉴 \$\{openItems\[item\.url\] \? "접기" : "펼치기"\}/);
+  assert.match(source, /aria-label=\{getNavSubmenuLabel\(/);
+  assert.doesNotMatch(source, /\$\{item\.title\}로 이동/);
+  assert.doesNotMatch(source, /\$\{subItem\.title\}로 이동/);
   assert.doesNotMatch(source, /showOnHover/);
 });
 
@@ -331,6 +353,8 @@ test("global shell controls use Korean action labels", async () => {
   assert.match(sidebarSource, /운영 메뉴와 계정 메뉴를 표시합니다/);
   assert.match(sidebarSource, /사이드바 펼치기/);
   assert.match(sidebarSource, /사이드바 접기/);
+  assert.match(sidebarSource, /className=\{cn\("size-8", className\)\}/);
+  assert.match(sidebarSource, /absolute top-0 right-0 flex aspect-square w-8/);
   assert.match(sidebarSource, /aria-current=\{isActive \? "page" : undefined\}/);
   assert.doesNotMatch(sidebarSource, /Toggle Sidebar/);
 

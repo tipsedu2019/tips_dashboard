@@ -31,7 +31,51 @@ const EMPTY_METRICS = {
   error: null as string | null,
 } satisfies DashboardMetricsState
 
-const DASHBOARD_TABLE_TIMEOUT_MS = 8000
+const DASHBOARD_CORE_TABLE_TIMEOUT_MS = 15000
+const DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS = 5000
+
+type DashboardTableReadOptions = {
+  optional?: boolean
+  columns?: string
+  timeoutMs?: number
+}
+
+type SupabaseTableResult = {
+  data?: unknown[] | null
+  error?: unknown | null
+}
+
+const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
+  classes: [
+    "id",
+    "name",
+    "subject",
+    "status",
+    "schedule",
+    "schedule_plan",
+    "teacher",
+    "room",
+    "grade",
+    "student_ids",
+    "waitlist_student_ids",
+  ].join(","),
+  students: [
+    "id",
+    "name",
+    "school",
+    "grade",
+    "status",
+    "class_ids",
+    "waitlist_class_ids",
+  ].join(","),
+  class_terms: "id,academic_year,name,status,start_date,end_date,sort_order",
+  class_schedule_sync_groups: "id,term_id,name,subject,sort_order,is_default",
+  class_schedule_sync_group_members: "group_id,class_id,sort_order",
+  academic_schools: "id,name,category",
+  academic_exam_days: "id,school_id,grade,subject,exam_date",
+  academic_event_exam_details: "id,academic_event_id,school_id,grade,subject,exam_date",
+  academic_events: "id,title,type,type_label,school_id,school,school_name,grade,exam_date,start,start_date,date,note",
+}
 
 function isMissingRelationError(error: unknown) {
   const code = typeof error === "object" && error ? String((error as { code?: string }).code || "") : ""
@@ -45,17 +89,28 @@ function isMissingRelationError(error: unknown) {
   )
 }
 
-function withTableTimeout<T>(request: PromiseLike<T>, tableName: string, optional: boolean): Promise<T> {
+function isMissingColumnError(error: unknown) {
+  const code = typeof error === "object" && error ? String((error as { code?: string }).code || "") : ""
+  const message = error instanceof Error ? error.message : String((error as { message?: string })?.message || "")
+
+  return code === "PGRST204" || message.includes("Could not find") || message.includes("column")
+}
+
+function withTableTimeout<T>(
+  request: PromiseLike<T>,
+  tableName: string,
+  { optional, timeoutMs }: { optional: boolean; timeoutMs: number },
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<T>((resolve, reject) => {
     timer = setTimeout(() => {
       if (optional) {
-        resolve([] as T)
+        resolve({ data: [], error: null } as T)
         return
       }
 
       reject(new Error(`${tableName} 데이터를 불러오지 못했습니다.`))
-    }, DASHBOARD_TABLE_TIMEOUT_MS)
+    }, timeoutMs)
   })
 
   return Promise.race([Promise.resolve(request), timeout]).finally(() => {
@@ -65,14 +120,30 @@ function withTableTimeout<T>(request: PromiseLike<T>, tableName: string, optiona
   })
 }
 
-async function readTable(tableName: string, optional = false): Promise<unknown[]> {
+async function queryTable(tableName: string, columns: string, optional: boolean, timeoutMs: number) {
+  return withTableTimeout<SupabaseTableResult>(
+    supabase!.from(tableName).select(columns) as unknown as PromiseLike<SupabaseTableResult>,
+    tableName,
+    { optional, timeoutMs },
+  )
+}
+
+async function readTable(tableName: string, options: DashboardTableReadOptions = {}): Promise<unknown[]> {
   if (!supabase) {
     return []
   }
 
-  const result = await withTableTimeout(supabase.from(tableName).select("*"), tableName, optional)
+  const optional = options.optional ?? false
+  const columns = options.columns || DASHBOARD_TABLE_COLUMNS[tableName] || "*"
+  const timeoutMs = options.timeoutMs || (optional ? DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS : DASHBOARD_CORE_TABLE_TIMEOUT_MS)
+  let result = await queryTable(tableName, columns, optional, timeoutMs)
+
+  if (result.error && columns !== "*" && isMissingColumnError(result.error)) {
+    result = await queryTable(tableName, "*", optional, timeoutMs)
+  }
+
   if (result.error) {
-    if (optional && isMissingRelationError(result.error)) {
+    if (optional || isMissingRelationError(result.error)) {
       return []
     }
     throw result.error
@@ -100,9 +171,24 @@ export function useTipsDashboardMetrics() {
       }
 
       try {
+        const [classes, students] = await Promise.all([
+          readTable("classes"),
+          readTable("students"),
+        ])
+
+        if (isMounted) {
+          setMetrics({
+            ...buildMetrics({
+              classes,
+              students,
+            }),
+            isLoading: false,
+            isConnected: true,
+            error: null,
+          })
+        }
+
         const [
-          classes,
-          students,
           classTerms,
           classGroups,
           classGroupMembers,
@@ -111,15 +197,13 @@ export function useTipsDashboardMetrics() {
           academicEventExamDetails,
           academicEvents,
         ] = await Promise.all([
-          readTable("classes"),
-          readTable("students"),
-          readTable("class_terms", true),
-          readTable("class_schedule_sync_groups", true),
-          readTable("class_schedule_sync_group_members", true),
-          readTable("academic_schools", true),
-          readTable("academic_exam_days", true),
-          readTable("academic_event_exam_details", true),
-          readTable("academic_events", true),
+          readTable("class_terms", { optional: true }),
+          readTable("class_schedule_sync_groups", { optional: true }),
+          readTable("class_schedule_sync_group_members", { optional: true }),
+          readTable("academic_schools", { optional: true }),
+          readTable("academic_exam_days", { optional: true }),
+          readTable("academic_event_exam_details", { optional: true }),
+          readTable("academic_events", { optional: true }),
         ])
 
         if (isMounted) {

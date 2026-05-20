@@ -143,8 +143,19 @@ function getRoleLabel(value: unknown) {
   );
 }
 
+function formatAccountIdentifier(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.includes("@")) return trimmed;
+  if (/^\d+$/.test(trimmed)) return `아이디 ${trimmed}`;
+  return trimmed;
+}
+
 function getAccountLabel(profile: AccountProfile) {
-  return profile.email || profile.loginId || profile.name || profile.id;
+  if (profile.email) return formatAccountIdentifier(profile.email);
+  if (profile.loginId) return formatAccountIdentifier(profile.loginId);
+  if (profile.name) return profile.name;
+  return `계정 ${profile.id.slice(0, 8)}`;
 }
 
 function toAccountProfile(row: Record<string, unknown>): AccountProfile {
@@ -604,7 +615,6 @@ export function TeacherMasterWorkspace() {
                 const currentIndex = rows.findIndex(
                   (item) => item.id === row.id,
                 );
-
                 return (
                   <TableRow key={row.id}>
                     {isColumnVisible("subjects") ? (
@@ -642,6 +652,7 @@ export function TeacherMasterWorkspace() {
                             )
                           }
                           placeholder="선생님 이름"
+                          aria-label={`${row.name || "새 선생님"} 이름`}
                         />
                       </TableCell>
                     ) : null}
@@ -671,7 +682,17 @@ export function TeacherMasterWorkspace() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <div className="grid grid-cols-[1fr_auto] gap-1.5">
+                          {row.profileId ? (
+                            <div className="flex justify-end">
+                              <Badge
+                                variant="outline"
+                                className="h-8 rounded-md px-2 text-[11px]"
+                              >
+                                <Link2 className="mr-1 size-3" />
+                                연결됨
+                              </Badge>
+                            </div>
+                          ) : (
                             <Input
                               className="h-8 text-xs"
                               value={row.accountEmail}
@@ -682,20 +703,11 @@ export function TeacherMasterWorkspace() {
                                   event.target.value,
                                 )
                               }
-                              placeholder="login@tipsedu.co.kr"
-                              aria-label="로그인 계정 이메일"
+                              placeholder="이메일 또는 아이디"
+                              aria-label="로그인 계정 이메일 또는 아이디"
                               disabled={!isAccountSchemaReady}
                             />
-                            {row.profileId ? (
-                              <Badge
-                                variant="outline"
-                                className="h-8 rounded-md px-2 text-[11px]"
-                              >
-                                <Link2 className="mr-1 size-3" />
-                                연결된 계정
-                              </Badge>
-                            ) : null}
-                          </div>
+                          )}
                         </div>
                       </TableCell>
                     ) : null}

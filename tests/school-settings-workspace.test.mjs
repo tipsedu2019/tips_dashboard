@@ -15,6 +15,10 @@ test("school settings adds visible rows and exposes search with category counts"
   const source = await readWorkspace();
 
   assert.match(source, /const \[query, setQuery\] = useState\(""\)/);
+  assert.match(source, /role="search" aria-label="학교명 검색"/);
+  assert.match(source, /type="search"/);
+  assert.match(source, /autoComplete="off"/);
+  assert.match(source, /enterKeyHint="search"/);
   assert.match(source, /placeholder="학교명 검색"/);
   assert.match(source, /const categoryCounts = useMemo/);
   assert.match(source, /createEmptySchool\(nextSortOrder, categoryFilter\)/);
@@ -42,6 +46,7 @@ test("school settings table keeps actions reachable in dense lists", async () =>
   assert.match(source, /table-fixed min-w-\[720px\]/);
   assert.match(source, /settingsTableActionHeadClass/);
   assert.match(source, /settingsTableActionCellClass/);
+  assert.match(source, /aria-label=\{`\$\{row\.name \|\| "새 학교"\} 학교명`\}/);
   assert.match(source, /aria-label="학교명 검색 초기화"/);
   assert.match(columnSource, /useDataTableColumns as useSettingsTableColumns/);
   assert.match(commonColumnSource, /aria-label="컬럼 구성"/);

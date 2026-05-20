@@ -41,6 +41,19 @@ test("textbook settings tabs keep explicit pointer fallbacks", async () => {
   );
 });
 
+test("textbook settings search behaves like a real search field", async () => {
+  const source = await readFile(
+    new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /role="search" aria-label=\{toolbarPlaceholder\}/);
+  assert.match(source, /type="search"/);
+  assert.match(source, /aria-label=\{toolbarPlaceholder\}/);
+  assert.match(source, /autoComplete="off"/);
+  assert.match(source, /enterKeyHint="search"/);
+});
+
 test("textbook supplier tab shows linked publisher names instead of count-only spacing", async () => {
   const source = await readFile(
     new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),

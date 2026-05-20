@@ -1,7 +1,7 @@
 "use client";
 "use no memo";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   type ColumnDef,
   type ColumnFiltersState,
@@ -357,6 +357,10 @@ function normalizeScalar(value: unknown): string {
   return String(value);
 }
 
+function formatDelimitedLabel(value: unknown) {
+  return normalizeScalar(value).replace(/\s*,\s*/g, ", ");
+}
+
 function isUuidLike(value: unknown) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizeScalar(value));
 }
@@ -700,7 +704,10 @@ function formatWeeklyMinutes(totalMinutes: number) {
   const safeMinutes = Math.max(0, Math.round(totalMinutes));
   const hours = Math.floor(safeMinutes / 60);
   const minutes = safeMinutes % 60;
-  return `${String(hours).padStart(2, "0")}시간${String(minutes).padStart(2, "0")}분`;
+  if (hours <= 0) {
+    return `${minutes}분`;
+  }
+  return minutes > 0 ? `${hours}시간 ${minutes}분` : `${hours}시간`;
 }
 
 function formatManagementCurrency(value: unknown) {
@@ -1262,6 +1269,7 @@ export function ManagementDataTable({
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState("");
+  const deferredGlobalFilter = useDeferredValue(globalFilter);
   const [classGroupFilter, setClassGroupFilter] = useState("");
   const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState("");
   const [studentSchoolFilter, setStudentSchoolFilter] = useState("");
@@ -1404,14 +1412,14 @@ export function ManagementDataTable({
         id: "teacher",
         accessorFn: (row) => normalizeScalar((row.raw || {}).teacher || (row.raw || {}).teacher_name || (row.raw || {}).teacherName),
         header: "선생님",
-        cell: ({ row }) => renderPlainCell((row.original.raw || {}).teacher || (row.original.raw || {}).teacher_name || (row.original.raw || {}).teacherName),
+        cell: ({ row }) => renderPlainCell(formatDelimitedLabel((row.original.raw || {}).teacher || (row.original.raw || {}).teacher_name || (row.original.raw || {}).teacherName)),
         filterFn: (row, _, value) => !value || getClassFilterValues(row.original, "teacher").includes(String(value)),
       },
       {
         id: "classroom",
         accessorFn: (row) => normalizeScalar((row.raw || {}).classroom || (row.raw || {}).room),
         header: "강의실",
-        cell: ({ row }) => renderPlainCell((row.original.raw || {}).classroom || (row.original.raw || {}).room),
+        cell: ({ row }) => renderPlainCell(formatDelimitedLabel((row.original.raw || {}).classroom || (row.original.raw || {}).room)),
         filterFn: (row, _, value) => !value || getClassFilterValues(row.original, "classroom").includes(String(value)),
       },
       {
@@ -1695,7 +1703,7 @@ export function ManagementDataTable({
       columnOrder,
       columnSizing,
       rowSelection,
-      globalFilter,
+      globalFilter: deferredGlobalFilter,
       grouping,
       expanded,
     },
@@ -1859,11 +1867,13 @@ export function ManagementDataTable({
   const pageSize = table.getState().pagination.pageSize;
   const visibleRangeStart = filteredRowCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const visibleRangeEnd = filteredRowCount === 0 ? 0 : Math.min(currentPage * pageSize, filteredRowCount);
-  const captionSuffix = stats
-    .filter((stat) => stat.value !== undefined && stat.value !== null)
-    .slice(0, 2)
-    .map((stat) => `${stat.label} ${stat.value}`)
-    .join(" · ");
+  const captionSuffix = kind === "classes"
+    ? summaryLabel
+    : stats
+      .filter((stat) => stat.value !== undefined && stat.value !== null)
+      .slice(0, 2)
+      .map((stat) => `${stat.label} ${stat.value}`)
+      .join(" · ");
   const emptyStateTitle = rows.length === 0 ? `등록된 ${emptyLabel} 데이터가 없습니다.` : `현재 조건에 맞는 ${emptyLabel} 데이터가 없습니다.`;
   const emptyStateSummary = rows.length === 0 ? "관리 레코드가 아직 비어 있습니다." : hasActiveFilters ? "검색·필터 결과가 비어 있습니다." : "현재 표시 범위에 데이터가 없습니다.";
   const createLabel = kind === "students" ? "학생 등록" : kind === "classes" ? "수업 등록" : "교재 등록";
@@ -2201,10 +2211,13 @@ export function ManagementDataTable({
   );
 
   const searchControl = (
-    <div className="relative min-w-0">
+    <div className="relative min-w-0" role="search" aria-label={`${emptyLabel} 검색`}>
       <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
-        aria-label="검색"
+        type="search"
+        aria-label={`${emptyLabel} 검색`}
+        autoComplete="off"
+        enterKeyHint="search"
         placeholder={`${emptyLabel} 검색`}
         value={globalFilter ?? ""}
         onChange={(event) => updateGlobalFilter(String(event.target.value))}
@@ -2558,6 +2571,10 @@ export function ManagementDataTable({
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent align="end" className="w-[min(42rem,calc(100vw-2rem))] p-3">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">필터</div>
+                      {resetControl}
+                    </div>
                     <div className="grid gap-3 sm:grid-cols-4">
                       <div className="grid min-w-0 gap-1.5">
                         <Label className="text-xs font-medium text-muted-foreground">재원 상태</Label>
@@ -2712,15 +2729,21 @@ export function ManagementDataTable({
                           {header.column.getCanResize() ? (
                             <button
                               type="button"
-                              aria-hidden="true"
-                              tabIndex={-1}
+                              aria-label={`${columnLabel} 열 너비 조절`}
+                              title={`${columnLabel} 열 너비 조절`}
                               className={cn(
-                                "absolute right-0 top-0 h-full w-2 cursor-col-resize border-l border-transparent transition-colors hover:border-border hover:bg-accent/30",
+                                "absolute right-0 top-0 h-full w-4 cursor-col-resize border-l border-transparent transition-colors hover:border-border hover:bg-accent/30 focus-visible:border-primary focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                 header.column.getIsResizing() ? "border-primary bg-primary/15" : "",
                               )}
                               onMouseDown={header.getResizeHandler()}
                               onTouchStart={header.getResizeHandler()}
                               onDoubleClick={() => header.column.resetSize()}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  header.column.resetSize();
+                                }
+                              }}
                             />
                           ) : null}
                         </>

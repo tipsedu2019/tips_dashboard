@@ -70,7 +70,16 @@ const PAGE_CONFIG = {
 
 type FormState = Record<string, string>;
 type RelatedRecord = Record<string, unknown>;
-type Field = { name: string; label: string; placeholder?: string; type?: string; required?: boolean; multiline?: boolean };
+type Field = {
+  name: string;
+  label: string;
+  placeholder?: string;
+  type?: string;
+  required?: boolean;
+  multiline?: boolean;
+  inputMode?: "text" | "search" | "tel" | "url" | "email" | "numeric" | "decimal";
+  autoComplete?: string;
+};
 type DetailInfoItem = { label: string; value: string | number };
 type ClassGroupOption = { id: string; name: string; subject?: string };
 type DeleteRequest = { rows: ManagementRow[] };
@@ -93,14 +102,14 @@ const STUDENT_SELECT_FIELD_NAMES = new Set(["status", "school_category", "school
 
 const FORM_FIELDS: Record<ManagementKind, Field[]> = {
   students: [
-    { name: "name", label: "학생명", placeholder: "김학생", required: true },
+    { name: "name", label: "학생명", placeholder: "김학생", required: true, autoComplete: "off" },
     { name: "status", label: "재원 상태", placeholder: "재원" },
-    { name: "uid", label: "학생 UID", placeholder: "S-001" },
+    { name: "uid", label: "학생 UID", placeholder: "S-001", autoComplete: "off" },
     { name: "school_category", label: "학교 구분", placeholder: "학교 구분" },
     { name: "school", label: "학교", placeholder: "학교" },
     { name: "grade", label: "학년", placeholder: "학년" },
-    { name: "contact", label: "연락처", placeholder: "010-0000-0000" },
-    { name: "parentContact", label: "학부모 연락처", placeholder: "010-0000-0000" },
+    { name: "contact", label: "연락처", placeholder: "010-0000-0000", inputMode: "tel", autoComplete: "tel" },
+    { name: "parentContact", label: "학부모 연락처", placeholder: "010-0000-0000", inputMode: "tel", autoComplete: "tel" },
     { name: "enrollDate", label: "등록일", type: "date" },
   ],
   classes: [
@@ -1031,6 +1040,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
               {field.multiline ? (
                 <Textarea
                   id={id}
+                  name={field.name}
                   value={value}
                   placeholder={field.placeholder}
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
@@ -1055,7 +1065,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
               ) : (
                 <Input
                   id={id}
+                  name={field.name}
                   type={field.type || "text"}
+                  inputMode={field.inputMode}
+                  autoComplete={field.autoComplete || "off"}
+                  autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
                   value={value}
                   placeholder={field.placeholder}
                   required={field.required}

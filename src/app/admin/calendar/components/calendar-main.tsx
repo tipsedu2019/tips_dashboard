@@ -35,6 +35,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -544,7 +545,8 @@ export function CalendarMain({
                         {!readOnly ? (
                           <button
                             type="button"
-                            className="opacity-0 transition-opacity group-hover:opacity-100 text-[11px] text-muted-foreground"
+                            className="inline-flex h-7 min-w-7 items-center justify-center rounded-md px-2 text-xs font-medium text-muted-foreground opacity-0 transition-[opacity,background-color,color,box-shadow] hover:bg-background hover:text-foreground hover:shadow-sm focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                            aria-label={`${format(day, "M월 d일", { locale: ko })} 일정 추가`}
                             onPointerDown={(pointerEvent) => {
                               pointerEvent.stopPropagation()
                             }}
@@ -836,10 +838,14 @@ export function CalendarMain({
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative min-w-0 flex-1 sm:w-64">
+            <div className="relative min-w-0 flex-1 sm:w-64" role="search" aria-label="학사일정 검색">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                type="search"
+                aria-label="학사일정 검색"
                 placeholder="학교명, 일정명, 유형 검색"
+                autoComplete="off"
+                enterKeyHint="search"
                 className={cn("w-full pl-10", query ? "pr-16" : "")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -911,6 +917,7 @@ export function CalendarMain({
                 <DialogTitle>
                   {overflowDate ? format(overflowDate, "M월 d일 일정", { locale: ko }) : "일정"}
                 </DialogTitle>
+                <DialogDescription className="sr-only">선택한 날짜의 학사 일정을 확인하고 이동합니다.</DialogDescription>
                 {overflowDate ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{format(overflowDate, "EEEE", { locale: ko })}</Badge>

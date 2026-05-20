@@ -269,7 +269,7 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
                       value={`${item.title} ${item.group} ${item.url}`}
                       keywords={[item.group, item.url]}
                       aria-current={isCurrent ? "page" : undefined}
-                      aria-label={`${item.title}로 이동`}
+                      aria-label={`빠른 이동: ${item.title}`}
                       data-testid={`admin-quick-search-item-${itemTargetId}`}
                       onPointerEnter={() => prefetchCommandRoute(item.url)}
                       onFocus={() => prefetchCommandRoute(item.url)}

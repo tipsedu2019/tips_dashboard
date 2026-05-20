@@ -775,12 +775,16 @@ export function TextbookSupplierSettingsWorkspace() {
           </TabsList>
 
           <div className="mt-3 flex flex-col gap-3 rounded-lg border border-border/70 bg-background p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1" role="search" aria-label={toolbarPlaceholder}>
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={toolbarPlaceholder}
+              aria-label={toolbarPlaceholder}
+              autoComplete="off"
+              enterKeyHint="search"
               className="h-10 w-full max-w-xl pl-9 pr-10"
             />
             {isSearchActive ? (
