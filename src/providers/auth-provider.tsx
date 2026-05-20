@@ -50,7 +50,7 @@ type AuthContextValue = {
   canEditCurriculumPlanning: boolean
   canEditClassSchedulePlanning: boolean
   canEditClassSchedule: boolean
-  login: (email: string, password: string) => Promise<boolean>
+  login: (identifier: string, password: string) => Promise<boolean>
   logout: () => Promise<boolean>
 }
 
@@ -276,13 +276,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authError,
       mustChangePassword,
       ...capabilities,
-      login: async (email: string, password: string) => {
+      login: async (identifier: string, password: string) => {
         if (!supabase) {
           throw new Error(supabaseConfigError || "지금은 Supabase에 연결할 수 없습니다.")
         }
 
         setAuthError(null)
-        const normalizedEmail = normalizeEmail(email)
+        const normalizedEmail = normalizeEmail(identifier)
         const { error } = await supabase.auth.signInWithPassword({
           email: normalizedEmail,
           password,

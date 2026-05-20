@@ -19,30 +19,11 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { getAuthErrorMessage } from "@/lib/auth-error-messages"
 import { supabase, supabaseConfigError } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
 
-const BLOCKED_EMAIL_DOMAIN = "tipsedu.co.kr"
-
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase()
-}
-
-function isBlockedEmail(value: string) {
-  return normalizeEmail(value).endsWith(`@${BLOCKED_EMAIL_DOMAIN}`)
-}
-
-const signupFormSchema = z
+const resetPasswordSchema = z
   .object({
-    name: z.string().trim().min(1, "이름을 입력해 주세요."),
-    email: z
-      .string()
-      .trim()
-      .email("수신 가능한 이메일 주소를 입력해 주세요.")
-      .refine((value) => !isBlockedEmail(value), {
-        message: "tipsedu.co.kr 주소는 메일을 받을 수 없어 가입에 사용할 수 없습니다.",
-      }),
     password: z.string().min(8, "비밀번호는 8자 이상 입력해 주세요."),
     confirmPassword: z.string().min(8, "비밀번호를 한 번 더 입력해 주세요."),
   })
@@ -51,9 +32,9 @@ const signupFormSchema = z
     path: ["confirmPassword"],
   })
 
-type SignupFormValues = z.infer<typeof signupFormSchema>
+type ResetPasswordValues = z.infer<typeof resetPasswordSchema>
 
-export function SignupForm1({
+export function ResetPasswordForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
@@ -61,11 +42,9 @@ export function SignupForm1({
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const form = useForm<SignupFormValues>({
-    resolver: zodResolver(signupFormSchema),
+  const form = useForm<ResetPasswordValues>({
+    resolver: zodResolver(resetPasswordSchema),
     defaultValues: {
-      name: "",
-      email: "",
       password: "",
       confirmPassword: "",
     },
@@ -76,45 +55,29 @@ export function SignupForm1({
     setError(null)
 
     if (!supabase) {
-      setError(supabaseConfigError || "가입을 시작할 수 없습니다.")
+      setError(supabaseConfigError || "비밀번호를 변경할 수 없습니다.")
       return
     }
 
-    const email = normalizeEmail(values.email)
-    const name = values.name.trim()
-
     try {
       setIsSubmitting(true)
-      const { data, error: signupError } = await supabase.auth.signUp({
-        email,
+      const { error: updateError } = await supabase.auth.updateUser({
         password: values.password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/sign-in`,
-          data: {
-            name,
-            full_name: name,
-          },
-        },
       })
 
-      if (signupError) {
-        throw signupError
+      if (updateError) {
+        throw updateError
       }
 
-      if (data.session) {
-        router.replace("/admin/dashboard")
-        return
-      }
-
-      setMessage("가입 확인 메일을 보냈습니다. 메일 확인 후 로그인하세요.")
+      setMessage("비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.")
       form.reset({
-        name: "",
-        email: "",
         password: "",
         confirmPassword: "",
       })
-    } catch (signupError) {
-      setError(getAuthErrorMessage(signupError, "가입에 실패했습니다."))
+      await supabase.auth.signOut()
+      window.setTimeout(() => router.replace("/sign-in"), 800)
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "비밀번호 변경에 실패했습니다.")
     } finally {
       setIsSubmitting(false)
     }
@@ -124,7 +87,7 @@ export function SignupForm1({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">계정 만들기</CardTitle>
+          <CardTitle className="text-xl">새 비밀번호 설정</CardTitle>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -138,41 +101,10 @@ export function SignupForm1({
                   )}
                   <FormField
                     control={form.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>이름</FormLabel>
-                        <FormControl>
-                          <Input autoComplete="name" placeholder="이름" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="email"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Google 이메일</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="email"
-                            autoComplete="email"
-                            placeholder="name@gmail.com"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
                     name="password"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>비밀번호</FormLabel>
+                        <FormLabel>새 비밀번호</FormLabel>
                         <FormControl>
                           <Input type="password" autoComplete="new-password" {...field} />
                         </FormControl>
@@ -185,7 +117,7 @@ export function SignupForm1({
                     name="confirmPassword"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>비밀번호 확인</FormLabel>
+                        <FormLabel>새 비밀번호 확인</FormLabel>
                         <FormControl>
                           <Input type="password" autoComplete="new-password" {...field} />
                         </FormControl>
@@ -194,7 +126,7 @@ export function SignupForm1({
                     )}
                   />
                   <Button type="submit" className="w-full cursor-pointer" disabled={isSubmitting}>
-                    {isSubmitting ? "가입 중..." : "가입하기"}
+                    {isSubmitting ? "변경 중..." : "비밀번호 변경"}
                   </Button>
                   <Button asChild variant="ghost" className="w-full cursor-pointer">
                     <Link href="/sign-in">로그인으로 돌아가기</Link>

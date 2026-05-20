@@ -12,7 +12,7 @@ export function normalizeLoginLocalPart(value: string) {
   const isPhoneLike = /^[\d\s()+-]+$/.test(normalized)
 
   if (isPhoneLike && digits.length >= 8) {
-    return digits.slice(-8)
+    return digits
   }
 
   return normalized

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -26,7 +27,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useAuth } from "@/providers/auth-provider"
 
 const loginFormSchema = z.object({
-  email: z.string().email("이메일 형식을 확인해 주세요."),
+  loginId: z.string().trim().min(1, "아이디를 입력해 주세요."),
   password: z.string().min(6, "비밀번호는 6자 이상 입력해 주세요."),
 })
 
@@ -44,7 +45,7 @@ export function LoginForm1({
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginFormSchema),
     defaultValues: {
-      email: "",
+      loginId: "",
       password: "",
     },
   })
@@ -53,7 +54,7 @@ export function LoginForm1({
     try {
       setSubmitError(null)
       setIsSubmitting(true)
-      await login(values.email, values.password)
+      await login(values.loginId, values.password)
       router.replace(searchParams.get("next") || "/admin/dashboard")
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "로그인에 실패했습니다.")
@@ -80,14 +81,17 @@ export function LoginForm1({
                   )}
                   <FormField
                     control={form.control}
-                    name="email"
+                    name="loginId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>이메일</FormLabel>
+                        <FormLabel>아이디</FormLabel>
                         <FormControl>
                           <Input
-                            type="email"
-                            placeholder="your-id@tipsedu.co.kr"
+                            type="text"
+                            inputMode="email"
+                            autoCapitalize="none"
+                            autoComplete="username"
+                            placeholder="01087547830"
                             {...field}
                           />
                         </FormControl>
@@ -102,15 +106,15 @@ export function LoginForm1({
                       <FormItem>
                         <div className="flex items-center">
                           <FormLabel>비밀번호</FormLabel>
-                          <a
+                          <Link
                             href="/forgot-password"
                             className="ml-auto text-sm underline-offset-4 hover:underline"
                           >
                             비밀번호 찾기
-                          </a>
+                          </Link>
                         </div>
                         <FormControl>
-                          <Input type="password" {...field} />
+                          <Input type="password" autoComplete="current-password" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -118,6 +122,9 @@ export function LoginForm1({
                   />
                   <Button type="submit" className="w-full cursor-pointer" disabled={isSubmitting}>
                     {isSubmitting ? "로그인 중..." : "로그인"}
+                  </Button>
+                  <Button asChild variant="outline" className="w-full cursor-pointer">
+                    <Link href="/sign-up">계정 만들기</Link>
                   </Button>
                 </div>
               </div>
