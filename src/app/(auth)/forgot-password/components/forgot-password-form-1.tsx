@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { getAuthErrorMessage } from "@/lib/auth-error-messages"
+import { getAuthRedirectUrl } from "@/lib/auth-redirect-url"
 import { supabase, supabaseConfigError } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
 
@@ -55,7 +56,7 @@ export function ForgotPasswordForm1({
     try {
       setIsSubmitting(true)
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: getAuthRedirectUrl("/reset-password"),
       })
 
       if (resetError) {

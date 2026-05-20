@@ -1,7 +1,7 @@
 import Link from "next/link"
 import type { LucideIcon } from "lucide-react"
 
-import { Logo } from "@/components/logo"
+import { AuthBrandLink } from "@/components/auth/auth-brand-link"
 import { Button } from "@/components/ui/button"
 
 type AuthErrorAction = {
@@ -27,12 +27,7 @@ export function AuthErrorScreen({
     <main className="flex min-h-[100dvh] items-center justify-center bg-background px-5 py-10">
       <section className="w-full max-w-md rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
         <div className="mb-8 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-sm font-semibold">
-            <span className="flex size-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Logo size={22} />
-            </span>
-            TIPS Dashboard
-          </Link>
+          <AuthBrandLink />
           <span className="font-mono text-xs font-medium text-muted-foreground">{code}</span>
         </div>
 

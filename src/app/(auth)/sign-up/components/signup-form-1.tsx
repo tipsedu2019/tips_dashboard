@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { getAuthErrorMessage } from "@/lib/auth-error-messages"
+import { getAuthRedirectUrl } from "@/lib/auth-redirect-url"
 import { supabase, supabaseConfigError } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
 
@@ -89,7 +90,7 @@ export function SignupForm1({
         email,
         password: values.password,
         options: {
-          emailRedirectTo: `${window.location.origin}/sign-in`,
+          emailRedirectTo: getAuthRedirectUrl("/sign-in"),
           data: {
             name,
             full_name: name,

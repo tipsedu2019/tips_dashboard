@@ -53,6 +53,48 @@ SMTP Password: [Resend SMTP password]
 
 저장 후 Authentication > Rate Limits에서 이메일 발송 한도를 운영에 맞게 조정한다.
 
+## Auth URL Configuration
+
+메일 확인 링크가 모바일에서 `localhost:3000`으로 열리지 않도록 운영 도메인을 기본값으로 둔다.
+
+```text
+Site URL: https://tipsedu.co.kr
+Redirect URLs:
+- https://tipsedu.co.kr/sign-in
+- https://tipsedu.co.kr/reset-password
+- https://tipsedu.co.kr/**
+```
+
+로컬 개발 화면에서 회원가입을 눌러도 앱 코드는 인증 메일 redirect URL을 운영 도메인으로 생성한다.
+
+## Auth Email Templates
+
+Supabase Dashboard > Authentication > Emails > Templates에서 사용자에게 발송되는 문구를 한국어로 유지한다.
+
+Confirm sign up:
+
+```text
+Subject: TIPS Dashboard 회원가입을 확인해 주세요
+Body:
+<h2>TIPS Dashboard 가입 확인</h2>
+
+<p>아래 버튼을 눌러 이메일 인증을 완료해 주세요.</p>
+<p><a href="{{ .ConfirmationURL }}">이메일 인증하기</a></p>
+<p>요청하지 않았다면 이 메일은 무시하셔도 됩니다.</p>
+```
+
+Reset password:
+
+```text
+Subject: TIPS Dashboard 비밀번호 재설정 안내
+Body:
+<h2>TIPS Dashboard 비밀번호 재설정</h2>
+
+<p>아래 버튼을 눌러 새 비밀번호를 설정해 주세요.</p>
+<p><a href="{{ .ConfirmationURL }}">비밀번호 재설정하기</a></p>
+<p>요청하지 않았다면 이 메일은 무시하셔도 됩니다.</p>
+```
+
 ## 확인
 
 1. `/sign-up`에서 실제 수신 가능한 Gmail로 가입

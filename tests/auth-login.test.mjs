@@ -9,8 +9,10 @@ async function readSource(pathname) {
 }
 
 test("auth pages use the official logo instead of the cart mark", async () => {
-  const [brandSource, ...pageSources] = await Promise.all([
+  const [brandSource, logoSource, errorScreenSource, ...pageSources] = await Promise.all([
     readSource("src/components/auth/auth-brand-link.tsx"),
+    readSource("src/components/logo.tsx"),
+    readSource("src/app/(auth)/errors/components/auth-error-screen.tsx"),
     readSource("src/app/(auth)/sign-in/page.tsx"),
     readSource("src/app/(auth)/forgot-password/page.tsx"),
     readSource("src/app/(auth)/sign-up/page.tsx"),
@@ -22,6 +24,14 @@ test("auth pages use the official logo instead of the cart mark", async () => {
   assert.match(brandSource, /alt="TIPS 로고"/);
   assert.doesNotMatch(brandSource, /@\/components\/logo/);
   assert.doesNotMatch(brandSource, /<\s*Logo\b/);
+  assert.match(logoSource, /from "next\/image"/);
+  assert.match(logoSource, /src="\/logo_tips\.png"/);
+  assert.match(logoSource, /alt = "TIPS 로고"/);
+  assert.doesNotMatch(logoSource, /<\s*svg\b/);
+  assert.doesNotMatch(logoSource, /M26 24\.75/);
+  assert.match(errorScreenSource, /AuthBrandLink/);
+  assert.doesNotMatch(errorScreenSource, /@\/components\/logo/);
+  assert.doesNotMatch(errorScreenSource, /<\s*Logo\b/);
 
   for (const source of pageSources) {
     assert.match(source, /<AuthBrandLink \/>/);
@@ -65,13 +75,15 @@ test("self sign-up uses a receivable email and Supabase signUp", async () => {
   const source = await readSource("src/app/(auth)/sign-up/components/signup-form-1.tsx");
 
   assert.match(source, /getAuthErrorMessage/);
+  assert.match(source, /getAuthRedirectUrl/);
   assert.match(source, /BLOCKED_EMAIL_DOMAIN = "tipsedu\.co\.kr"/);
   assert.match(source, /name:\s*z\.string\(\)\.trim\(\)\.min\(1, "이름을 입력해 주세요\."\)/);
   assert.match(source, /email:\s*z[\s\S]*email\("수신 가능한 이메일 주소를 입력해 주세요\."\)/);
   assert.match(source, /tipsedu\.co\.kr 주소는 메일을 받을 수 없어 가입에 사용할 수 없습니다\./);
   assert.match(source, /password:\s*z\.string\(\)\.min\(8, "비밀번호는 8자 이상 입력해 주세요\."\)/);
   assert.match(source, /supabase\.auth\.signUp/);
-  assert.match(source, /emailRedirectTo:\s*`\$\{window\.location\.origin\}\/sign-in`/);
+  assert.match(source, /emailRedirectTo:\s*getAuthRedirectUrl\("\/sign-in"\)/);
+  assert.doesNotMatch(source, /window\.location\.origin/);
   assert.match(source, /full_name:\s*name/);
   assert.match(source, /placeholder="name@gmail\.com"/);
   assert.doesNotMatch(source, /console\.log\("Signup attempt:/);
@@ -82,9 +94,11 @@ test("forgot-password uses the receivable email reset flow", async () => {
   const source = await readSource("src/app/(auth)/forgot-password/components/forgot-password-form-1.tsx");
 
   assert.match(source, /getAuthErrorMessage/);
+  assert.match(source, /getAuthRedirectUrl/);
   assert.match(source, /BLOCKED_EMAIL_DOMAIN = "tipsedu\.co\.kr"/);
   assert.match(source, /resetPasswordForEmail\(normalizedEmail/);
-  assert.match(source, /redirectTo:\s*`\$\{window\.location\.origin\}\/reset-password`/);
+  assert.match(source, /redirectTo:\s*getAuthRedirectUrl\("\/reset-password"\)/);
+  assert.doesNotMatch(source, /window\.location\.origin/);
   assert.match(source, /tipsedu\.co\.kr 주소는 메일을 받을 수 없습니다/);
   assert.match(source, /<Label htmlFor="email">Google 이메일<\/Label>/);
   assert.match(source, /placeholder="name@gmail\.com"/);
@@ -104,6 +118,15 @@ test("reset-password lets a recovery session set a new password", async () => {
   assert.match(formSource, /router\.replace\("\/sign-in"\)/);
   assert.match(formSource, /새 비밀번호 설정/);
   assert.match(formSource, /비밀번호 변경/);
+});
+
+test("auth email redirects use the production origin when running locally", async () => {
+  const source = await readSource("src/lib/auth-redirect-url.ts");
+
+  assert.match(source, /DEFAULT_AUTH_REDIRECT_ORIGIN = "https:\/\/tipsedu\.co\.kr"/);
+  assert.match(source, /LOCAL_AUTH_HOSTNAMES = new Set\(\["localhost", "127\.0\.0\.1", "::1"\]\)/);
+  assert.match(source, /NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN/);
+  assert.match(source, /LOCAL_AUTH_HOSTNAMES\.has\(hostname\)/);
 });
 
 test("auth email sending rate limit errors are translated for operators", async () => {
