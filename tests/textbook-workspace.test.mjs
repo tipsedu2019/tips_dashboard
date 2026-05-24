@@ -1724,9 +1724,9 @@ test("textbook workspace locks 50 daily-operation polish safeguards", async () =
     /setSelectedPurchaseLineIds\(\[\]\)/,
     /setSelectedSaleLineIds\(\[\]\)/,
     /onRefresh=\{refreshTextbookData\}/,
-    /formatLoadedAt\(lastLoadedAt\)/,
-    /formatQuantity\(loadDurationMs\)/,
-    /schemaDisabled \? "확인 필요" : "정상"/,
+    /value: "확인 필요"/,
+    /tone: "danger" as const/,
+    /hidden: !schemaDisabled/,
     /disabled=\{loading\}/,
     /animate-spin/,
     /role="status"/,
@@ -1759,6 +1759,10 @@ test("textbook workspace locks 50 daily-operation polish safeguards", async () =
   for (const safeguard of safeguards) {
     assert.match(workspaceSource, safeguard);
   }
+  assert.doesNotMatch(workspaceSource, /\{ id: "queue", label: "할 일"/);
+  assert.doesNotMatch(workspaceSource, /\{ id: "loaded", label: "갱신"/);
+  assert.doesNotMatch(workspaceSource, /\{ id: "speed", label: "응답"/);
+  assert.doesNotMatch(workspaceSource, /schemaDisabled \? "확인 필요" : "정상"/);
 });
 
 test("textbook workspace locks 50 master data-entry safeguards", async () => {

@@ -100,6 +100,7 @@ export function LoginForm1({
                         <FormLabel>아이디</FormLabel>
                         <FormControl>
                           <Input
+                            data-testid="sign-in-login-id"
                             type="text"
                             inputMode="text"
                             autoCapitalize="none"
@@ -132,6 +133,7 @@ export function LoginForm1({
                         </div>
                         <FormControl>
                           <Input
+                            data-testid="sign-in-password"
                             type="password"
                             autoComplete="current-password"
                             {...field}

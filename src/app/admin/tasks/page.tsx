@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { OpsTaskWorkspace } from "@/features/tasks/ops-task-workspace"
 
-export default function LegacyAdminRedirectPage() {
-  redirect("/admin/dashboard");
+export default function AdminTasksPage() {
+  return <OpsTaskWorkspace workspace="todo" />
 }

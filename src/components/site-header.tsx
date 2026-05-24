@@ -58,10 +58,10 @@ export function SiteHeader() {
                 aria-label="홈페이지를 새 화면에서 확인"
                 title="홈페이지 확인"
                 data-testid="admin-public-site-link"
-                className="hidden h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+                className="hidden size-8 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
               >
                 <ExternalLink className="size-3.5" aria-hidden="true" />
-                홈페이지 확인
+                <span className="sr-only">홈페이지 확인</span>
               </Link>
               <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
                 <SearchTrigger onClick={() => setSearchOpen(true)} />

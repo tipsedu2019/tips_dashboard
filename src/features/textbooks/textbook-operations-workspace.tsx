@@ -2776,11 +2776,8 @@ export function TextbookOperationsWorkspace() {
     { id: "result", label: "표시", value: `${formatQuantity(activeTabResultCount)}건` },
     { id: "filters", label: "필터", value: `${formatQuantity(textbookListFilterCount)}개`, hidden: textbookListFilterCount <= 0 },
     { id: "selection", label: "선택", value: `${formatQuantity(activeWorkflowSelectionCount)}건`, hidden: activeWorkflowSelectionCount <= 0 },
-    { id: "queue", label: "할 일", value: `${formatQuantity(operationQueueTotal)}건`, hidden: operationQueueTotal <= 0 },
     { id: "search", label: "검색", value: activeTab === "master" || activeTab === "inventory" ? query : activeOperationSearchQuery, hidden: !(activeTab === "master" || activeTab === "inventory" ? text(query) : activeOperationSearchQuery) },
-    { id: "loaded", label: "갱신", value: formatLoadedAt(lastLoadedAt), hidden: !lastLoadedAt },
-    { id: "speed", label: "응답", value: `${formatQuantity(loadDurationMs)}ms`, hidden: loadDurationMs <= 0 },
-    { id: "schema", label: "DB", value: schemaDisabled ? "확인 필요" : "정상", tone: schemaDisabled ? ("danger" as const) : ("default" as const) },
+    { id: "schema", label: "DB", value: "확인 필요", tone: "danger" as const, hidden: !schemaDisabled },
   ].filter((item) => !item.hidden);
 
   useEffect(() => {

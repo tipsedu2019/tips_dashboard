@@ -2,11 +2,17 @@ import type { LucideIcon } from "lucide-react"
 import {
   BookOpen,
   CalendarDays,
+  ClipboardCheck,
+  FileCheck2,
   GraduationCap,
   LayoutDashboard,
   LayoutGrid,
   NotebookPen,
+  Repeat2,
   Settings2,
+  SpellCheck,
+  UserMinus,
+  UserPlus,
   Users,
 } from "lucide-react"
 
@@ -121,7 +127,7 @@ const workspaceMetaEntries: Array<{
     match: "/admin/class-schedule",
     meta: {
       section: "수업일정",
-      title: "수업일정 워크스페이스",
+      title: "수업일정",
       summary: "반 진행 상황, 기간, 최근 기록 메모를 빠르게 확인합니다.",
     },
   },
@@ -214,6 +220,54 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
+    match: "/admin/registration",
+    meta: {
+      section: "운영",
+      title: "등록",
+      summary: "문의부터 등록완료까지 등록 흐름만 처리합니다.",
+    },
+  },
+  {
+    match: "/admin/transfer",
+    meta: {
+      section: "운영",
+      title: "전반",
+      summary: "전 수업과 후 수업을 연결해 전반 업무를 처리합니다.",
+    },
+  },
+  {
+    match: "/admin/withdrawal",
+    meta: {
+      section: "운영",
+      title: "퇴원",
+      summary: "퇴원일, 사유, 메이크에듀 처리와 비용 체크를 정리합니다.",
+    },
+  },
+  {
+    match: "/admin/word-retests",
+    meta: {
+      section: "운영",
+      title: "단어 재시험",
+      summary: "본관과 별관 단어 재시험 요청, 응시, 점수를 처리합니다.",
+    },
+  },
+  {
+    match: "/admin/approvals",
+    meta: {
+      section: "운영",
+      title: "전자결재",
+      summary: "월간 보고서 제출과 결재 대기 문서를 처리합니다.",
+    },
+  },
+  {
+    match: "/admin/tasks",
+    meta: {
+      section: "운영",
+      title: "할 일",
+      summary: "받은함, 오늘, 예정, 보드로 할 일을 정리합니다.",
+    },
+  },
+  {
     match: "/admin/dashboard",
     meta: defaultWorkspaceMeta,
   },
@@ -233,6 +287,24 @@ export function buildAdminNavGroups({
   const overview: NavGroup = {
     label: "운영",
     items: [
+      {
+        title: "할 일",
+        url: "/admin/tasks",
+        icon: ClipboardCheck,
+        items: [
+          { title: "오늘", url: "/admin/tasks?list=today" },
+          { title: "지연", url: "/admin/tasks?list=filters&filter=overdue" },
+          { title: "내 담당", url: "/admin/tasks?list=mine" },
+          { title: "전체 일정", url: "/admin/tasks?list=calendar" },
+          { title: "보드", url: "/admin/tasks?list=board" },
+          { title: "미정리", url: "/admin/tasks?list=filters&filter=unassigned" },
+        ],
+      },
+      { title: "등록", url: "/admin/registration", icon: UserPlus },
+      { title: "전반", url: "/admin/transfer", icon: Repeat2 },
+      { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
+      { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+      { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
       { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
       {
         title: "학사일정",

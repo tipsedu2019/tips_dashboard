@@ -46,19 +46,7 @@ type SupabaseTableResult = {
 }
 
 const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
-  classes: [
-    "id",
-    "name",
-    "subject",
-    "status",
-    "schedule",
-    "schedule_plan",
-    "teacher",
-    "room",
-    "grade",
-    "student_ids",
-    "waitlist_student_ids",
-  ].join(","),
+  classes: "*",
   students: [
     "id",
     "name",
@@ -74,7 +62,7 @@ const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
   academic_schools: "id,name,category",
   academic_exam_days: "id,school_id,grade,subject,exam_date",
   academic_event_exam_details: "id,academic_event_id,school_id,grade,subject,exam_date",
-  academic_events: "id,title,type,type_label,school_id,school,school_name,grade,exam_date,start,start_date,date,note",
+  academic_events: "*",
 }
 
 function isMissingRelationError(error: unknown) {
