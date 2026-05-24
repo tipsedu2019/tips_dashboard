@@ -22,7 +22,6 @@ create table if not exists public.approval_requests (
   constraint approval_requests_type_check check (request_type in ('monthly_report', 'general')),
   constraint approval_requests_status_check check (status in ('draft', 'submitted', 'reviewing', 'approved', 'returned', 'canceled'))
 );
-
 alter table public.approval_requests
   add column if not exists subject text not null default 'general',
   add column if not exists template_key text not null default 'free',
@@ -237,4 +236,3 @@ with check (
       )
   )
 );
-
