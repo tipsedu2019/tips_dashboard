@@ -7,7 +7,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint src tests middleware.ts next.config.ts"
+    "lint": "eslint src tests middleware.ts next.config.ts",
+    "verify:ops-samples": "node scripts/verify-ops-task-sample-workflow.mjs",
+    "verify:ops-samples:cli": "node scripts/verify-ops-task-sample-workflow.mjs --run --cli",
+    "verify:ops-browser": "node scripts/verify-ops-task-browser-workflow.mjs",
+    "verify:admin-guard": "node scripts/verify-admin-guard-smoke.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

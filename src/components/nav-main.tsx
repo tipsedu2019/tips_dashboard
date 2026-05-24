@@ -3,7 +3,7 @@
 import * as React from "react"
 import { ChevronRight, type LucideIcon } from "lucide-react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import {
   Collapsible,
@@ -27,18 +27,85 @@ function normalizePath(path: string) {
   return normalized === "" ? "/" : normalized
 }
 
-function isRouteActive(currentPath: string, targetUrl: string) {
-  const target = normalizePath(targetUrl)
+const LEGACY_TODO_VIEW_SEARCH: Record<string, { list: string; filter?: string }> = {
+  all: { list: "filters", filter: "all" },
+  inbox: { list: "inbox" },
+  today: { list: "today" },
+  upcoming: { list: "upcoming" },
+  board: { list: "board" },
+  calendar: { list: "calendar" },
+  completed: { list: "completed" },
+  overdue: { list: "filters", filter: "overdue" },
+  mine: { list: "filters", filter: "mine" },
+  priority: { list: "filters", filter: "priority" },
+  unassigned: { list: "filters", filter: "unassigned" },
+  confirmation: { list: "filters", filter: "all" },
+}
 
-  if (target === "/") {
-    return currentPath === target
+function normalizeSearch(path: string, search: string) {
+  const params = new URLSearchParams(search.replace(/^\?/, ""))
+  if (path === "/admin/tasks") {
+    const legacyView = params.get("view") || ""
+    const legacyRoute = LEGACY_TODO_VIEW_SEARCH[legacyView]
+    if (!params.get("list") && legacyRoute) {
+      params.set("list", legacyRoute.list)
+      if (legacyRoute.filter && legacyRoute.filter !== "all") {
+        params.set("filter", legacyRoute.filter)
+      } else {
+        params.delete("filter")
+      }
+      params.delete("view")
+      params.delete("focus")
+    }
+  }
+  params.sort()
+  const normalized = params.toString()
+
+  return normalized ? `?${normalized}` : ""
+}
+
+function splitInternalHref(url: string) {
+  try {
+    const parsed = new URL(url, "http://tips.local")
+
+    return {
+      path: normalizePath(parsed.pathname),
+      search: normalizeSearch(normalizePath(parsed.pathname), parsed.search),
+    }
+  } catch {
+    const [path = "/", search = ""] = url.split("?")
+    const normalizedPath = normalizePath(path)
+
+    return {
+      path: normalizedPath,
+      search: normalizeSearch(normalizedPath, search),
+    }
+  }
+}
+
+function normalizeHref(url: string) {
+  const { path, search } = splitInternalHref(url)
+
+  return `${path}${search}`
+}
+
+function isRouteActive(currentHref: string, targetUrl: string) {
+  const current = splitInternalHref(currentHref)
+  const target = splitInternalHref(targetUrl)
+
+  if (target.search && target.path === current.path) {
+    return target.search === current.search
   }
 
-  return currentPath === target || currentPath.startsWith(`${target}/`)
+  if (target.path === "/") {
+    return current.path === target.path
+  }
+
+  return current.path === target.path || current.path.startsWith(`${target.path}/`)
 }
 
 function navigationTargetId(url: string) {
-  return normalizePath(url)
+  return normalizeHref(url)
     .replace(/^\/+/, "")
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "root"
@@ -71,30 +138,35 @@ export function NavMain({
 }) {
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const currentPath = React.useMemo(() => normalizePath(pathname), [pathname])
+  const currentSearch = searchParams.toString()
+  const currentHref = React.useMemo(() => (
+    currentSearch ? `${currentPath}?${currentSearch}` : currentPath
+  ), [currentPath, currentSearch])
   const prefetchedRoutesRef = React.useRef(new Set<string>())
 
   const prefetchRoute = React.useCallback((url: string) => {
-    const target = normalizePath(url)
-    if (target === currentPath || prefetchedRoutesRef.current.has(target)) return
+    const target = normalizeHref(url)
+    if (target === currentHref || prefetchedRoutesRef.current.has(target)) return
 
     prefetchedRoutesRef.current.add(target)
     router.prefetch(target)
-  }, [currentPath, router])
+  }, [currentHref, router])
 
   const routeStateByUrl = React.useMemo(() => {
     const routes = new Map<string, boolean>()
 
     for (const item of items) {
-      routes.set(item.url, isRouteActive(currentPath, item.url))
+      routes.set(item.url, isRouteActive(currentHref, item.url))
 
       for (const subItem of item.items || []) {
-        routes.set(subItem.url, isRouteActive(currentPath, subItem.url))
+        routes.set(subItem.url, isRouteActive(currentHref, subItem.url))
       }
     }
 
     return routes
-  }, [currentPath, items])
+  }, [currentHref, items])
 
   const isUrlActive = React.useCallback((url: string) => routeStateByUrl.get(url) ?? false, [routeStateByUrl])
 

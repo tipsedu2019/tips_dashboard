@@ -93,14 +93,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarContent>
       <SidebarFooter>
         {!user?.isFallbackRole && user?.email ? null : (
-          <div className="rounded-lg border border-dashed border-sidebar-border px-3 py-2 text-xs text-sidebar-foreground/70">
-            <div className="flex items-center gap-2 font-medium">
-              <Lock className="size-3.5" />
-              임시 권한 사용 중
-            </div>
-            <p className="mt-1 leading-relaxed">
-              프로필이 없으면 환경 변화에 등록한 계정으로 임시 권한이 부여됩니다.
-            </p>
+          <div className="flex items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/70">
+            <Lock className="size-3.5" />
+            <span className="truncate">임시 권한</span>
           </div>
         )}
         <NavUser user={displayUser} />

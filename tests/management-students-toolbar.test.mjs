@@ -57,6 +57,18 @@ test("management list search exposes the current data type to operators", async 
   assert.doesNotMatch(source, /aria-label="검색"/);
 });
 
+test("management table empty state stays compact and action-first", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(source, /const emptyStateTitle = rows\.length === 0 \? `\$\{emptyLabel\} 없음` : `\$\{emptyLabel\} 결과 없음`/);
+  assert.doesNotMatch(source, /emptyStateSummary/);
+  assert.doesNotMatch(source, /관리 레코드가 아직 비어 있습니다/);
+  assert.doesNotMatch(source, /현재 조건 적용 중/);
+  assert.doesNotMatch(source, /border border-dashed border-border\/70/);
+  assert.match(source, /<span className="text-sm font-medium text-muted-foreground">\{emptyStateTitle\}<\/span>/);
+  assert.match(source, /hasActiveFilters \? \([\s\S]*조건 초기화[\s\S]*\) : hasCreateAction \? \(/);
+});
+
 test("class-only column filters never access missing student or textbook columns", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 

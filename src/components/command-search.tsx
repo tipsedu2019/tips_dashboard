@@ -108,7 +108,7 @@ const EMPTY_GROUPED_SEARCH_ENTRIES: Array<[string, SearchItem[]]> = []
 
 function resolveCommandGroupLabel(label: string) {
   if (label === "운영") {
-    return "운영 워크스페이스"
+    return "운영"
   }
 
   return label
@@ -239,11 +239,11 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        aria-label="운영 워크스페이스 빠른 이동"
+        aria-label="빠른 이동"
         data-testid="admin-quick-search-dialog"
         className="w-[calc(100vw-2rem)] max-w-[640px] overflow-hidden border border-zinc-200 p-0 shadow-2xl dark:border-zinc-800"
       >
-        <DialogTitle className="sr-only">운영 워크스페이스 빠른 이동</DialogTitle>
+        <DialogTitle className="sr-only">빠른 이동</DialogTitle>
         <DialogDescription className="sr-only">
           메뉴와 관리 화면을 검색해서 바로 이동합니다.
         </DialogDescription>
@@ -251,7 +251,7 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
           <CommandInput
             aria-label="빠른 이동 검색"
             data-testid="admin-quick-search-input"
-            placeholder="메뉴, 기능, 주소 검색"
+            placeholder="이동할 메뉴 검색"
             autoFocus
           />
           <CommandList data-testid="admin-quick-search-list">
@@ -280,10 +280,7 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
                       {Icon ? (
                         <Icon className={cn("size-4 shrink-0 text-zinc-500 dark:text-zinc-400", isCurrent && "text-primary")} />
                       ) : null}
-                      <span className="grid min-w-0 flex-1 gap-0.5">
-                        <span className="truncate font-medium">{item.title}</span>
-                        <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{item.url}</span>
-                      </span>
+                      <span className="min-w-0 flex-1 truncate font-medium">{item.title}</span>
                       {isCurrent ? (
                         <span className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
                           현재

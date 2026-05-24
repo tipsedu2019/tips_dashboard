@@ -51,6 +51,8 @@ test("sign-in form accepts a login id instead of requiring an email address", as
     /loginId:\s*z\.string\(\)\.trim\(\)\.min\(1, "아이디를 입력해 주세요\."\)/,
   );
   assert.match(source, /name="loginId"/);
+  assert.match(source, /data-testid="sign-in-login-id"/);
+  assert.match(source, /data-testid="sign-in-password"/);
   assert.match(source, /<FormLabel>아이디<\/FormLabel>/);
   assert.match(source, /type="text"/);
   assert.match(source, /inputMode="text"/);

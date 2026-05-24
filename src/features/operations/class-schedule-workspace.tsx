@@ -5889,9 +5889,8 @@ export function ClassScheduleWorkspace() {
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-foreground">수업 목록</p>
-              <p className="text-xs text-muted-foreground">반 진행 현황을 행 단위로 비교하는 스프레드시트형 보기</p>
             </div>
-            <div className="text-xs text-muted-foreground">행 {model.rows.length}</div>
+            <Badge variant="outline">{model.rows.length}개</Badge>
           </div>
           <div className="px-4 py-4">
             {model.rows.length === 0 ? (
@@ -5971,9 +5970,6 @@ export function ClassScheduleWorkspace() {
                                 <span>{row.completedSessions}/{row.sessionCount}회 완료</span>
                                 <span className="font-medium text-foreground">{progressPercent}%</span>
                               </div>
-                              <p className="text-xs text-muted-foreground">
-                                계획 {row.latestPlannedSessionIndex}회차 · 실제 {row.latestActualSessionIndex}회차
-                              </p>
                             </div>
                           </TableCell>
                           <TableCell className="align-top">

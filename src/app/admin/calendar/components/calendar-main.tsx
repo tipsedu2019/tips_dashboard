@@ -10,6 +10,7 @@ import {
   Grid3X3,
   List,
   Menu,
+  Plus,
   Search,
   School,
   Sparkles,
@@ -545,7 +546,7 @@ export function CalendarMain({
                         {!readOnly ? (
                           <button
                             type="button"
-                            className="inline-flex h-7 min-w-7 items-center justify-center rounded-md px-2 text-xs font-medium text-muted-foreground opacity-0 transition-[opacity,background-color,color,box-shadow] hover:bg-background hover:text-foreground hover:shadow-sm focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,background-color,color,box-shadow] hover:bg-background hover:text-foreground hover:shadow-sm focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
                             aria-label={`${format(day, "M월 d일", { locale: ko })} 일정 추가`}
                             onPointerDown={(pointerEvent) => {
                               pointerEvent.stopPropagation()
@@ -555,7 +556,7 @@ export function CalendarMain({
                               onEmptySlotClick?.(day)
                             }}
                           >
-                            추가
+                            <Plus className="size-3.5" aria-hidden="true" />
                           </button>
                         ) : null}
                       </div>

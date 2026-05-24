@@ -43,6 +43,47 @@ test("nav user lets signed-in users edit avatar and password", async () => {
   assert.doesNotMatch(avatarSource, /renderProp/);
 });
 
+test("sidebar keeps fallback permission status compact", async () => {
+  const source = await readSource("src/components/app-sidebar.tsx");
+
+  assert.match(source, /<span className="truncate">임시 권한<\/span>/);
+  assert.doesNotMatch(source, /임시 권한 사용 중/);
+  assert.doesNotMatch(source, /프로필이 없으면/);
+  assert.doesNotMatch(source, /leading-relaxed/);
+});
+
+test("todo navigation exposes direct queues and keeps query links distinct", async () => {
+  const [navigationSource, navMainSource] = await Promise.all([
+    readSource("src/lib/navigation.ts"),
+    readSource("src/components/nav-main.tsx"),
+  ]);
+
+  for (const url of [
+    "/admin/tasks?list=today",
+    "/admin/tasks?list=filters&filter=overdue",
+    "/admin/tasks?list=mine",
+    "/admin/tasks?list=calendar",
+    "/admin/tasks?list=board",
+    "/admin/tasks?list=filters&filter=unassigned",
+  ]) {
+    assert.ok(navigationSource.includes(`url: "${url}"`), url);
+  }
+
+  assert.doesNotMatch(navigationSource, /filter=confirmation/);
+  assert.doesNotMatch(navMainSource, /filter: "confirmation"/);
+
+  assert.match(navMainSource, /useSearchParams/);
+  assert.match(navMainSource, /function normalizeHref/);
+  assert.match(navMainSource, /const LEGACY_TODO_VIEW_SEARCH: Record<string, \{ list: string; filter\?: string \}>/);
+  assert.match(navMainSource, /const legacyRoute = LEGACY_TODO_VIEW_SEARCH\[legacyView\]/);
+  assert.match(navMainSource, /params\.set\("list", legacyRoute\.list\)/);
+  assert.match(navMainSource, /params\.set\("filter", legacyRoute\.filter\)/);
+  assert.match(navMainSource, /const currentHref = React\.useMemo/);
+  assert.match(navMainSource, /navigationTargetId\(url: string\)[\s\S]*normalizeHref\(url\)/);
+  assert.match(navMainSource, /target\.search && target\.path === current\.path/);
+  assert.match(navMainSource, /router\.prefetch\(target\)/);
+});
+
 test("root metadata points browser icons at the favicon asset", async () => {
   const source = await readSource("src/app/layout.tsx");
 
@@ -258,9 +299,9 @@ test("dashboard metrics renders the core snapshot before optional enrichment", a
 
   assert.match(source, /const DASHBOARD_CORE_TABLE_TIMEOUT_MS = 15000/);
   assert.match(source, /const DASHBOARD_OPTIONAL_TABLE_TIMEOUT_MS = 5000/);
-  assert.match(source, /classes:\s*\[[\s\S]*"schedule_plan"[\s\S]*"student_ids"[\s\S]*"waitlist_student_ids"/);
+  assert.match(source, /classes: "\*"/);
   assert.match(source, /students:\s*\[[\s\S]*"school"[\s\S]*"grade"[\s\S]*"class_ids"/);
-  assert.match(source, /academic_events: "id,title,type,type_label,school_id,school,school_name,grade,exam_date,start,start_date,date,note"/);
+  assert.match(source, /academic_events: "\*"/);
   assert.match(source, /function isMissingColumnError/);
   assert.match(source, /result = await queryTable\(tableName, "\*", optional, timeoutMs\)/);
   assert.match(source, /if \(optional \|\| isMissingRelationError\(result\.error\)\)/);
@@ -303,6 +344,19 @@ test("lesson-design routes resolve to the actual design workspace title", async 
   assert.match(source, /title: "수업 설계"/);
 });
 
+test("class schedule list heading avoids explanatory copy", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const navigationSource = await readSource("src/lib/navigation.ts");
+
+  assert.match(source, />수업 목록<\/p>/);
+  assert.match(source, /<Badge variant="outline">\{model\.rows\.length\}개<\/Badge>/);
+  assert.doesNotMatch(source, /스프레드시트형 보기/);
+  assert.doesNotMatch(source, />행 \{model\.rows\.length\}<\/div>/);
+  assert.match(navigationSource, /match: "\/admin\/class-schedule"/);
+  assert.match(navigationSource, /title: "수업일정"/);
+  assert.doesNotMatch(navigationSource, /수업일정 워크스페이스/);
+});
+
 test("quick search trigger shows Ctrl + K", async () => {
   const source = await readSource("src/components/command-search.tsx");
 
@@ -310,7 +364,10 @@ test("quick search trigger shows Ctrl + K", async () => {
   assert.match(source, /function normalizeCommandPath/);
   assert.match(source, /const currentPath = React\.useMemo/);
   assert.match(source, /QUICK_SEARCH_SHORTCUT_LABEL = "Ctrl \+ K"/);
-  assert.match(source, /placeholder="메뉴, 기능, 주소 검색"/);
+  assert.match(source, /return "운영"/);
+  assert.match(source, /aria-label="빠른 이동"/);
+  assert.match(source, /<DialogTitle className="sr-only">빠른 이동<\/DialogTitle>/);
+  assert.match(source, /placeholder="이동할 메뉴 검색"/);
   assert.match(source, /keywords=\{\[item\.group, item\.url\]\}/);
   assert.match(source, /value=\{`\$\{item\.title\} \$\{item\.group\} \$\{item\.url\}`\}/);
   assert.match(source, /aria-current=\{isCurrent \? "page" : undefined\}/);
@@ -320,7 +377,10 @@ test("quick search trigger shows Ctrl + K", async () => {
   assert.match(source, /aria-label=\{`빠른 이동 열기, \$\{QUICK_SEARCH_SHORTCUT_LABEL\}`\}/);
   assert.match(source, /title=\{`빠른 이동 \(\$\{QUICK_SEARCH_SHORTCUT_LABEL\}\)`\}/);
   assert.match(source, /heading=\{`\$\{group\} \$\{items\.length\}개`\}/);
-  assert.match(source, /\{item\.url\}/);
+  assert.match(source, /keywords=\{\[item\.group, item\.url\]\}/);
+  assert.doesNotMatch(source, /운영 워크스페이스/);
+  assert.doesNotMatch(source, /<span className="truncate text-xs text-zinc-500 dark:text-zinc-400">\{item\.group\}<\/span>/);
+  assert.doesNotMatch(source, /<span className="truncate text-xs text-zinc-500 dark:text-zinc-400">\{item\.url\}<\/span>/);
   assert.doesNotMatch(source, /setTimeout/);
   assert.doesNotMatch(source, /style\.transform/);
 });
@@ -332,7 +392,7 @@ test("sidebar submenu disclosure stays discoverable", async () => {
   assert.match(source, /function getNavMoveLabel/);
   assert.match(source, /return `\$\{title\} 이동`/);
   assert.match(source, /function getNavSubmenuLabel/);
-  assert.match(source, /currentPath\.startsWith\(`\$\{target\}\/`\)/);
+  assert.match(source, /current\.path\.startsWith\(`\$\{target\.path\}\/`\)/);
   assert.match(source, /aria-expanded=\{openItems\[item\.url\] \?\? false\}/);
   assert.match(source, /aria-label=\{getNavSubmenuLabel\(/);
   assert.doesNotMatch(source, /\$\{item\.title\}로 이동/);
@@ -400,7 +460,8 @@ test("global shell exposes stable browser-use targets", async () => {
   assert.match(navUserSource, /data-testid="admin-profile-avatar-grid"/);
   assert.match(sidebarSource, /data-testid="admin-sidebar-rail"/);
   assert.match(appSidebarSource, /<SidebarRail \/>/);
-  assert.match(dialogSource, /data-\[state=closed\]:pointer-events-none data-\[state=closed\]:invisible/);
+  assert.match(dialogSource, /data-\[state=closed\]:pointer-events-none data-\[state=closed\]:hidden data-\[state=closed\]:invisible/);
+  assert.match(dialogSource, /absolute top-4 right-4 z-30/);
   assert.match(globalsSource, /\[data-slot="dialog-content"\]\[data-state="closed"\]/);
 });
 

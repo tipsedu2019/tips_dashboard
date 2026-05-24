@@ -1874,10 +1874,10 @@ export function ManagementDataTable({
       .slice(0, 2)
       .map((stat) => `${stat.label} ${stat.value}`)
       .join(" · ");
-  const emptyStateTitle = rows.length === 0 ? `등록된 ${emptyLabel} 데이터가 없습니다.` : `현재 조건에 맞는 ${emptyLabel} 데이터가 없습니다.`;
-  const emptyStateSummary = rows.length === 0 ? "관리 레코드가 아직 비어 있습니다." : hasActiveFilters ? "검색·필터 결과가 비어 있습니다." : "현재 표시 범위에 데이터가 없습니다.";
+  const emptyStateTitle = rows.length === 0 ? `${emptyLabel} 없음` : `${emptyLabel} 결과 없음`;
   const createLabel = kind === "students" ? "학생 등록" : kind === "classes" ? "수업 등록" : "교재 등록";
   const hasCreateAction = typeof actions.onCreate === "function";
+  const showSummaryBadge = loading || hasActiveFilters || rows.length !== filteredRowCount;
 
   useEffect(() => {
     if (kind !== "classes" || !statusColumn) {
@@ -2535,7 +2535,7 @@ export function ManagementDataTable({
           searchValue={String(globalFilter || "")}
           searchPlaceholder={`${emptyLabel} 검색`}
           onSearchChange={updateGlobalFilter}
-          summaryLabel={summaryLabel}
+          summaryLabel={showSummaryBadge ? summaryLabel : ""}
           chips={classFilterChips}
           primaryLabel={activePeriodLabel}
           showReset={hasActiveFilters}
@@ -2658,7 +2658,7 @@ export function ManagementDataTable({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-            <Badge variant="secondary">{summaryLabel}</Badge>
+            {showSummaryBadge ? <Badge variant="secondary">{summaryLabel}</Badge> : null}
             {rows.length !== filteredRowCount ? <Badge variant="outline">전체 {rows.length}건</Badge> : null}
             {selectedRowCount > 0 ? <Badge variant="outline">선택 {selectedRowCount}건</Badge> : null}
             {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
@@ -2839,25 +2839,18 @@ export function ManagementDataTable({
             ) : (
               <TableRow>
                 <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="h-28 px-3 py-6">
-                  <div className="mx-auto flex max-w-xl flex-col items-center justify-center gap-2 border border-dashed border-border/70 px-4 py-5 text-center">
-                    <p className="text-sm font-medium text-foreground">{emptyStateTitle}</p>
-                    <p className="text-sm text-muted-foreground">{emptyStateSummary}</p>
-                    <div className="flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant="secondary">표시 {filteredRowCount}건</Badge>
-                      {hasActiveFilters ? <Badge variant="outline">현재 조건 적용 중</Badge> : null}
-                    </div>
-                    <div className="flex flex-wrap justify-center gap-2 pt-1">
-                      {hasActiveFilters ? (
-                        <Button type="button" variant="outline" size="sm" className="h-8" onClick={resetFilters}>
-                          조건 초기화
-                        </Button>
-                      ) : hasCreateAction ? (
-                        <Button type="button" size="sm" className="h-8" onClick={actions.onCreate}>
-                          <Plus className="mr-1.5 size-3.5" />
-                          {createLabel}
-                        </Button>
-                      ) : null}
-                    </div>
+                  <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 text-center">
+                    <span className="text-sm font-medium text-muted-foreground">{emptyStateTitle}</span>
+                    {hasActiveFilters ? (
+                      <Button type="button" variant="outline" size="sm" className="h-8" onClick={resetFilters}>
+                        조건 초기화
+                      </Button>
+                    ) : hasCreateAction ? (
+                      <Button type="button" size="sm" className="h-8" onClick={actions.onCreate}>
+                        <Plus className="mr-1.5 size-3.5" />
+                        {createLabel}
+                      </Button>
+                    ) : null}
                   </div>
                 </TableCell>
               </TableRow>

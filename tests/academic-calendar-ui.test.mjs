@@ -11,7 +11,8 @@ test("calendar day add action is keyboard visible and large enough to click", as
   );
 
   assert.match(source, /aria-label=\{`\$\{format\(day, "M월 d일", \{ locale: ko \}\)\} 일정 추가`\}/);
-  assert.match(source, /inline-flex h-7 min-w-7/);
+  assert.match(source, /inline-flex size-7/);
+  assert.match(source, /<Plus className="size-3\.5" aria-hidden="true" \/>/);
   assert.match(source, /focus-visible:opacity-100/);
   assert.match(source, /focus-visible:ring-2 focus-visible:ring-ring/);
   assert.match(source, /hover:bg-background hover:text-foreground/);
