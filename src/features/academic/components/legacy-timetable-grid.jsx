@@ -315,7 +315,6 @@ function TimetableGrid({
   onResizeBlock,
   onDiscardBlock,
   onDropDraftItem,
-  showResizeHandles = false,
   invalidRanges = [],
   warningRanges = [],
   externalDraggingDraft = null,
@@ -715,7 +714,7 @@ function TimetableGrid({
 
     try {
       shell.setPointerCapture?.(event.pointerId);
-    } catch (error) {
+    } catch {
       // Synthetic pointer events in tests/devtools may not support capture.
     }
   }, []);
@@ -756,7 +755,7 @@ function TimetableGrid({
     if (shell && state && event?.pointerId === state.pointerId) {
       try {
         shell.releasePointerCapture?.(event.pointerId);
-      } catch (error) {
+      } catch {
         // Ignore release failures for synthetic pointer events.
       }
     }
@@ -886,7 +885,7 @@ function TimetableGrid({
                       event.preventDefault();
                       try {
                         event.dataTransfer.dropEffect = 'copy';
-                      } catch (error) {
+                      } catch {
                         // ignore unsupported dropEffect writes
                       }
                       updateExternalPreview(columnIndex, rowIndex, activeBlock);

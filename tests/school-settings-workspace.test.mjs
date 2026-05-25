@@ -44,6 +44,9 @@ test("school settings table keeps actions reachable in dense lists", async () =>
   const commonColumnSource = await readFile(commonColumnsPath, "utf8");
 
   assert.match(source, /table-fixed min-w-\[720px\]/);
+  assert.match(source, /data-testid="school-settings-mobile-list"/);
+  assert.match(source, /data-testid=\{`school-settings-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(source, /<div className="hidden md:block">[\s\S]*<SettingsTableFrame>/);
   assert.match(source, /settingsTableActionHeadClass/);
   assert.match(source, /settingsTableActionCellClass/);
   assert.match(source, /aria-label=\{`\$\{row\.name \|\| "새 학교"\} 학교명`\}/);

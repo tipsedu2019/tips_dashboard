@@ -80,7 +80,6 @@ type Field = {
   inputMode?: "text" | "search" | "tel" | "url" | "email" | "numeric" | "decimal";
   autoComplete?: string;
 };
-type DetailInfoItem = { label: string; value: string | number };
 type ClassGroupOption = { id: string; name: string; subject?: string };
 type DeleteRequest = { rows: ManagementRow[] };
 
@@ -130,57 +129,6 @@ const FORM_FIELDS: Record<ManagementKind, Field[]> = {
     { name: "price", label: "가격", type: "number", placeholder: "9500" },
     { name: "tags", label: "태그", placeholder: "수능, 독해", multiline: true },
   ],
-};
-
-const DETAIL_FIELD_LABELS: Record<string, string> = {
-  id: "ID",
-  uid: "학생 UID",
-  name: "이름",
-  class_name: "수업명",
-  className: "수업명",
-  class_groups: "기간",
-  classGroups: "기간",
-  class_group_names: "기간",
-  classGroupNames: "기간",
-  title: "교재명",
-  subject: "과목",
-  school_category: "학교 구분",
-  schoolCategory: "학교 구분",
-  school_level: "학교 구분",
-  schoolLevel: "학교 구분",
-  school: "학교",
-  grade: "학년",
-  contact: "연락처",
-  parent_contact: "학부모 연락처",
-  parentContact: "학부모 연락처",
-  enroll_date: "등록일",
-  enrollDate: "등록일",
-  teacher: "선생님",
-  teacher_name: "선생님",
-  teacherName: "선생님",
-  schedule: "요일/시간",
-  classroom: "강의실",
-  room: "강의실",
-  capacity: "정원",
-  fee: "수업료",
-  tuition: "수업료",
-  status: "상태",
-  publisher: "출판사",
-  price: "가격",
-  updated_at: "수정일",
-  updatedAt: "수정일",
-};
-
-const DETAIL_FIELD_ORDER: Record<ManagementKind, string[]> = {
-  students: ["name", "uid", "school_category", "schoolCategory", "school_level", "schoolLevel", "school", "grade", "contact", "parent_contact", "parentContact", "enroll_date", "enrollDate", "status"],
-  classes: ["class_name", "className", "name", "class_group_names", "classGroupNames", "status", "subject", "grade", "teacher", "teacher_name", "teacherName", "schedule", "classroom", "room", "capacity", "fee", "tuition"],
-  textbooks: ["title", "name", "subject", "publisher", "price", "tags", "lessons", "updated_at", "updatedAt"],
-};
-
-const DETAIL_FIELD_VISIBLE_KEYS: Record<ManagementKind, string[]> = {
-  students: ["name", "uid", "school_category", "schoolCategory", "school_level", "schoolLevel", "school", "grade", "contact", "parent_contact", "parentContact", "enroll_date", "enrollDate", "status"],
-  classes: ["class_name", "className", "name", "class_group_names", "classGroupNames", "status", "subject", "grade", "teacher", "teacher_name", "teacherName", "schedule", "classroom", "room", "capacity", "fee", "tuition"],
-  textbooks: ["title", "name", "subject", "publisher", "price", "tags", "lessons", "updated_at", "updatedAt"],
 };
 
 function text(value: unknown) {
@@ -426,12 +374,6 @@ function getLabel(kind: ManagementKind) {
   return "교재 등록";
 }
 
-function getEditLabel(kind: ManagementKind) {
-  if (kind === "students") return "학생 정보 수정";
-  if (kind === "classes") return "수업 정보 수정";
-  return "교재 정보 수정";
-}
-
 function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormState {
   const raw = (row?.raw || {}) as Record<string, unknown>;
   const valueFor = (name: string) => {
@@ -539,12 +481,6 @@ function relatedMeta(record?: RelatedRecord) {
     .join(" · ");
 }
 
-function formatMoney(value: unknown) {
-  const amount = Number(text(value).replace(/,/g, ""));
-  if (!Number.isFinite(amount) || amount <= 0) return "";
-  return `${new Intl.NumberFormat("ko-KR").format(amount)}원`;
-}
-
 function idList(value: unknown) {
   return Array.isArray(value) ? value.map((item) => text(item)).filter(Boolean) : [];
 }
@@ -586,19 +522,6 @@ function updateRelationOnRow(row: ManagementRow, kind: ManagementKind, id: strin
   return { ...row, raw };
 }
 
-function formatFieldLabel(key: string) {
-  return DETAIL_FIELD_LABELS[key] || key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim();
-}
-
-function renderFieldValue(value: unknown) {
-  if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "-";
-  return text(value) || "-";
-}
-
-function getVisibleDetailKeys(kind: ManagementKind) {
-  return new Set(DETAIL_FIELD_VISIBLE_KEYS[kind]);
-}
-
 function getStudentEnrolledClassIds(row: ManagementRow) {
   const raw = (row.raw || {}) as Record<string, unknown>;
   return idList(raw.class_ids || raw.classIds);
@@ -617,22 +540,6 @@ function getClassEnrolledStudentIds(row: ManagementRow) {
 function getClassWaitlistStudentIds(row: ManagementRow) {
   const raw = (row.raw || {}) as Record<string, unknown>;
   return idList(raw.waitlist_student_ids || raw.waitlistStudentIds || raw.waitlist_ids || raw.waitlistIds);
-}
-
-function renderFieldGrid(kind: ManagementKind, row: ManagementRow) {
-  const raw = (row.raw || {}) as Record<string, unknown>;
-  const visibleKeys = getVisibleDetailKeys(kind);
-  const orderedKeys = DETAIL_FIELD_ORDER[kind].filter((key) => visibleKeys.has(key) && Object.prototype.hasOwnProperty.call(raw, key));
-
-  return orderedKeys.map((key) => {
-    const value = raw[key];
-    return (
-      <div key={key} className="border-b py-2 text-sm">
-        <div className="text-xs text-muted-foreground">{formatFieldLabel(key)}</div>
-        <div className="break-all">{renderFieldValue(value)}</div>
-      </div>
-    );
-  });
 }
 
 function normalizeHistoryRows(value: unknown) {
@@ -720,24 +627,6 @@ function renderStudentHistoryPanel(row: ManagementRow) {
       </div>
     </section>
   );
-}
-
-function getClassDetailItems(row: ManagementRow): DetailInfoItem[] {
-  const raw = (row.raw || {}) as Record<string, unknown>;
-  const scheduleLines = Array.isArray(raw.scheduleLines)
-    ? raw.scheduleLines.map((line) => text(line)).filter(Boolean)
-    : Array.isArray(raw.schedule_lines)
-      ? raw.schedule_lines.map((line) => text(line)).filter(Boolean)
-      : [];
-  const schedule = scheduleLines.length > 0 ? scheduleLines.join(" / ") : text(raw.schedule);
-  const tuition = text(raw.tuition_label || raw.tuitionLabel) || formatMoney(raw.fee || raw.tuition);
-
-  return [
-    { label: "선생님", value: text(raw.teacher || raw.teacher_name || raw.teacherName) || "-" },
-    { label: "강의실", value: text(raw.classroom || raw.room) || "-" },
-    { label: "요일/시간", value: schedule || "-" },
-    { label: "수업료", value: tuition || "-" },
-  ];
 }
 
 function detailMetric(label: string, value: string | number, tone = "default") {
@@ -874,21 +763,21 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       ),
     } satisfies Record<string, string[]>;
   }, [kind, rows]);
+  const studentSchoolCategory = getStudentSchoolCategoryFromForm(form);
   const studentSelectOptions = useMemo(() => {
     if (kind !== "students") {
       return {} as Record<string, string[]>;
     }
 
     const rawRows = rows.map((row) => (row.raw || {}) as Record<string, unknown>);
-    const category = getStudentSchoolCategoryFromForm(form);
 
     return {
       status: [...STUDENT_STATUS_OPTIONS],
       school_category: [...STUDENT_SCHOOL_CATEGORY_OPTIONS],
-      school: getStudentSchoolOptions(rawRows, category),
-      grade: getStudentGradeOptions(rawRows, category),
+      school: getStudentSchoolOptions(rawRows, studentSchoolCategory),
+      grade: getStudentGradeOptions(rawRows, studentSchoolCategory),
     } satisfies Record<string, string[]>;
-  }, [form.grade, form.school_category, form.schoolCategory, kind, rows]);
+  }, [kind, rows, studentSchoolCategory]);
   const classGroupOptions = useMemo(
     () => (kind === "classes" ? getClassGroupOptionsFromRows(rows) : []),
     [kind, rows],
@@ -952,16 +841,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         </div>
       )}
     </section>
-  );
-  const renderDetailInfo = (items: DetailInfoItem[]) => (
-    <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-      {items.map((item) => (
-        <div key={item.label} className="border-b py-2 text-sm">
-          <div className="text-xs text-muted-foreground">{item.label}</div>
-          <div className="break-words font-medium">{item.value}</div>
-        </div>
-      ))}
-    </div>
   );
   const getEditableFieldOptions = (fieldName: string, value: string) => {
     if (kind === "students" && STUDENT_SELECT_FIELD_NAMES.has(fieldName)) {

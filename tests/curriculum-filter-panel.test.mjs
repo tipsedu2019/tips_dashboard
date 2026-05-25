@@ -55,6 +55,9 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /const hasMoreViewRows = visibleViewRows\.length < viewRows\.length/);
   assert.match(source, /const viewRowTotals = useMemo/);
   assert.match(source, /const curriculumViewModeCounts = useMemo/);
+  assert.match(source, /data-testid="curriculum-mobile-list"/);
+  assert.match(source, /data-testid=\{`curriculum-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(source, /<ScrollArea className="hidden h-\[38rem\] \[contain-intrinsic-size:640px\] \[content-visibility:auto\] md:block">/);
   assert.match(source, /for \(const row of model\.rows\)/);
   assert.match(source, /counts\.unlinked \+= 1/);
   assert.match(source, /counts\.unscheduled \+= 1/);

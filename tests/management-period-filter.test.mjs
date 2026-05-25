@@ -6,10 +6,14 @@ const root = new URL("../", import.meta.url);
 
 test("class period filter is built from configured periods only", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const groupSource = await readFile(new URL("src/features/management/class-group-master-workspace.tsx", root), "utf8");
 
   assert.match(source, /function getAvailableClassGroupOptions/);
   assert.match(source, /raw\.availableClassGroups/);
   assert.doesNotMatch(source, /rows\.flatMap\(getClassGroupValues\)/);
+  assert.match(groupSource, /data-testid="class-group-settings-mobile-list"/);
+  assert.match(groupSource, /data-testid=\{`class-group-settings-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(groupSource, /<div className="hidden md:block">[\s\S]*<SettingsTableFrame>/);
 });
 
 test("explicit class group membership wins over legacy year term labels", async () => {

@@ -562,7 +562,100 @@ export function AcademicCurriculumWorkspace() {
               </div>
             ) : (
               <>
-                <ScrollArea className="h-[38rem] [contain-intrinsic-size:640px] [content-visibility:auto]">
+                <div data-testid="curriculum-mobile-list" className="grid gap-2 p-3 md:hidden">
+                  {visibleViewRows.map((row) => {
+                    const isSelected = selectedRow?.id === row.id;
+                    const rowDesignAction = getCurriculumDesignAction(row);
+                    const hasLinkedTextbooks = row.textbookCount > 0;
+                    const progressTargetSessionCount = row.progressTargetSessions ?? row.totalSessions;
+
+                    return (
+                      <article
+                        key={`mobile-${row.id}`}
+                        data-testid={`curriculum-mobile-card-${row.id}`}
+                        role="button"
+                        tabIndex={0}
+                        data-selected={isSelected ? "true" : "false"}
+                        aria-label={`${row.title} 선택`}
+                        className={[
+                          "rounded-md border bg-background p-3 shadow-xs transition-colors",
+                          isSelected ? "border-primary bg-primary/5" : "hover:border-primary/40 hover:bg-muted/30",
+                        ].join(" ")}
+                        onClick={() => setSelectedClassId(row.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedClassId(row.id);
+                          }
+                        }}
+                      >
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge>{row.subject || "과목 미정"}</Badge>
+                            {row.grade ? <Badge variant="secondary">{row.grade}</Badge> : null}
+                            <Badge variant={getStateVariant(row.stateLabel)}>{row.stateLabel}</Badge>
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-foreground">{row.title}</p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {row.teacherSummary || "선생님 미정"} · {row.term || "학기 미정"}
+                            </p>
+                          </div>
+
+                          <div className="grid gap-2 text-xs">
+                            <div className="rounded-md bg-muted/40 px-2 py-1.5">
+                              <p className="font-medium">{row.schedule || "시간표 미정"}</p>
+                              <p className="text-muted-foreground">{row.nextSession?.label || "회차 미생성"}</p>
+                            </div>
+                            <div className="rounded-md bg-muted/40 px-2 py-1.5">
+                              <p className={row.textbookCount > 0 ? "font-medium" : "font-medium text-muted-foreground"}>
+                                {row.textbookSummary || formatTextbookCount(row.textbookCount)}
+                                {row.textbookOverflowCount > 0 ? ` 외 ${row.textbookOverflowCount}권` : ""}
+                              </p>
+                              <p className="truncate text-muted-foreground">
+                                {row.textbookScopeLabels?.slice(0, 2).join(", ") || "영역 미정"}
+                              </p>
+                            </div>
+                          </div>
+
+                          {hasLinkedTextbooks ? (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span>{formatProgressPrimary(row.plannedProgressSessions, progressTargetSessionCount)}</span>
+                                <span className="text-muted-foreground">
+                                  {formatProgressPercent(row.progressTargetPercent, progressTargetSessionCount)}
+                                </span>
+                              </div>
+                              {progressTargetSessionCount > 0 ? <Progress value={row.progressTargetPercent} /> : <div className="h-2 rounded-full bg-muted" />}
+                              <p className="text-xs text-muted-foreground">
+                                {formatProgressMeta(row.plannedProgressSessions, row.delayedProgressSessions, progressTargetSessionCount)}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="inline-flex h-8 items-center rounded-md border border-dashed bg-muted/20 px-2.5 text-xs font-medium text-muted-foreground">
+                              교재 연결 필요
+                            </div>
+                          )}
+
+                          <div className="flex justify-end">
+                            <Button asChild variant="outline" size="sm" className="h-8 rounded-sm px-2 text-xs">
+                              <Link
+                                href={buildLessonDesignHref(row.id, rowDesignAction.sessionId, rowDesignAction.sectionId)}
+                                aria-label={`${row.title} ${rowDesignAction.label}`}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {rowDesignAction.label}
+                              </Link>
+                            </Button>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+
+                <ScrollArea className="hidden h-[38rem] [contain-intrinsic-size:640px] [content-visibility:auto] md:block">
                   <Table className="min-w-[1040px] table-fixed">
                     <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_var(--border)]">
                       <TableRow>

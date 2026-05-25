@@ -66,7 +66,7 @@ import {
 } from "./class-filter-panel";
 import { pickDefaultPeriodValue } from "./period-preferences";
 
-const STORAGE_VERSION = 12;
+const STORAGE_VERSION = 13;
 
 const STUDENT_TABLE_COLUMN_IDS = [
   "select",
@@ -112,6 +112,7 @@ const DEFAULT_CLASS_STATUS_FILTER = "수강";
 const CLASS_STATUS_FILTER_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 
 const STUDENT_SCHOOL_CATEGORY_OPTIONS = ["고등", "중등", "초등"] as const;
+const STUDENT_STATUS_SORT_ORDER = ["재원", "퇴원"] as const;
 
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50, 100, 200, 300, 400, 500] as const;
 const DEFAULT_PAGE_SIZE = 20;
@@ -178,6 +179,7 @@ const DEFAULT_TABLE_CONFIG: Record<
   students: {
     visibleColumnIds: [...STUDENT_TABLE_COLUMN_IDS],
     sorting: [
+      { id: "status", desc: false },
       { id: "title", desc: false },
     ],
     grouping: [],
@@ -355,6 +357,21 @@ function normalizeScalar(value: unknown): string {
     }
   }
   return String(value);
+}
+
+function compareStudentStatusForTable(left: unknown, right: unknown) {
+  const leftValue = normalizeScalar(left);
+  const rightValue = normalizeScalar(right);
+  const leftRank = STUDENT_STATUS_SORT_ORDER.indexOf(leftValue as (typeof STUDENT_STATUS_SORT_ORDER)[number]);
+  const rightRank = STUDENT_STATUS_SORT_ORDER.indexOf(rightValue as (typeof STUDENT_STATUS_SORT_ORDER)[number]);
+  const normalizedLeftRank = leftRank === -1 ? STUDENT_STATUS_SORT_ORDER.length : leftRank;
+  const normalizedRightRank = rightRank === -1 ? STUDENT_STATUS_SORT_ORDER.length : rightRank;
+
+  if (normalizedLeftRank !== normalizedRightRank) {
+    return normalizedLeftRank - normalizedRightRank;
+  }
+
+  return leftValue.localeCompare(rightValue, "ko", { numeric: true });
 }
 
 function formatDelimitedLabel(value: unknown) {
@@ -1487,8 +1504,11 @@ export function ManagementDataTable({
             <Badge variant="secondary" className={getStatusColor(kind === "classes" ? getClassStatusFilterValue(row.original) : row.original.statusValue)}>
               {row.original.status}
             </Badge>
-          ),
+        ),
         filterFn: (row, columnId, value) => !value || row.getValue(columnId) === value,
+        sortingFn: kind === "students"
+          ? (rowA, rowB) => compareStudentStatusForTable(rowA.original.statusValue || rowA.original.status, rowB.original.statusValue || rowB.original.status)
+          : undefined,
       },
       {
         id: "metaSummary",
@@ -2527,6 +2547,204 @@ export function ManagementDataTable({
     />
   );
 
+  const classMobileList = kind === "classes" ? (
+    <div className="grid gap-2 md:hidden" aria-label={`${emptyLabel} 모바일 목록`}>
+      {loading ? (
+        Array.from({ length: 5 }).map((_, index) => (
+          <div key={`class-mobile-loading-${index}`} className="rounded-lg border border-border/70 bg-background p-3">
+            <Skeleton className="h-5 w-36" />
+            <Skeleton className="mt-3 h-4 w-64" />
+            <Skeleton className="mt-3 h-16 w-full" />
+          </div>
+        ))
+      ) : table.getRowModel().rows.length ? (
+        table.getRowModel().rows.map((row) => {
+          const record = row.original;
+          const raw = record.raw || {};
+          const subject = normalizeScalar(raw.subject || record.badge);
+          const grade = normalizeScalar(raw.grade);
+          const teacher = formatDelimitedLabel(raw.teacher || raw.teacher_name || raw.teacherName);
+          const classroom = formatDelimitedLabel(raw.classroom || raw.room);
+          const capacity = getClassCapacity(record);
+          const weeklyHours = normalizeScalar(raw.weeklyHoursLabel || raw.weekly_hours_label || record.metrics.weeklyHoursLabel);
+          const tuition = normalizeScalar(raw.tuitionLabel || raw.tuition_label) || formatManagementCurrency(raw.fee || raw.tuition);
+
+          return (
+            <article key={`class-mobile-${row.id}`} className="rounded-lg border border-border/70 bg-background p-3">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  checked={row.getIsSelected()}
+                  onCheckedChange={(value) => row.toggleSelected(!!value)}
+                  aria-label={`${record.title} 선택`}
+                  className="mt-1 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                    {subject ? <Badge className="rounded-md px-2 py-0.5">{subject}</Badge> : null}
+                    {grade ? <Badge variant="secondary" className="rounded-md px-2 py-0.5">{grade}</Badge> : null}
+                    <Badge variant="secondary" className={cn("rounded-md px-2 py-0.5", getStatusColor(getClassStatusFilterValue(record)))}>
+                      {record.status}
+                    </Badge>
+                  </div>
+                  <button
+                    type="button"
+                    className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    onClick={() => actions.onOpenRow?.(record)}
+                  >
+                    {record.title}
+                  </button>
+                  <div className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                    {teacher ? <span className="min-w-0 break-keep">{teacher}</span> : null}
+                    {classroom ? <span className="min-w-0 break-keep">{classroom}</span> : null}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={`${record.title} 삭제`}
+                  title="삭제"
+                  onClick={() => actions.onDeleteRow?.(record)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+              <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
+                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
+                  <dt className="text-muted-foreground">요일/시간</dt>
+                  <dd className="min-w-0 text-foreground [&>div]:min-w-0 [&_span]:break-keep">
+                    {renderClassScheduleCell(row.original)}
+                  </dd>
+                </div>
+                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
+                  <dt className="text-muted-foreground">수강</dt>
+                  <dd className="min-w-0 [&>div]:min-w-0">{renderEnrollmentStatusCell(record)}</dd>
+                </div>
+                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
+                  <dt className="text-muted-foreground">운영</dt>
+                  <dd className="min-w-0 break-keep text-foreground">
+                    {[capacity > 0 ? `정원 ${capacity}` : "", weeklyHours, tuition].filter(Boolean).join(" · ") || "-"}
+                  </dd>
+                </div>
+              </dl>
+            </article>
+          );
+        })
+      ) : (
+        <div className="rounded-lg border border-border/70 bg-background px-3 py-8 text-center">
+          <span className="text-sm font-medium text-muted-foreground">{emptyStateTitle}</span>
+          {hasActiveFilters ? (
+            <div className="mt-3">
+              <Button type="button" variant="outline" size="sm" className="h-8" onClick={resetFilters}>
+                조건 초기화
+              </Button>
+            </div>
+          ) : hasCreateAction ? (
+            <div className="mt-3">
+              <Button type="button" size="sm" className="h-8" onClick={actions.onCreate}>
+                <Plus className="mr-1.5 size-3.5" />
+                {createLabel}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  const studentMobileList = kind === "students" ? (
+    <div className="grid gap-2 md:hidden" aria-label={`${emptyLabel} 모바일 학생 목록`}>
+      {loading ? (
+        Array.from({ length: 5 }).map((_, index) => (
+          <div key={`student-mobile-loading-${index}`} className="rounded-lg border border-border/70 bg-background p-3">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="mt-3 h-4 w-48" />
+            <Skeleton className="mt-3 h-16 w-full" />
+          </div>
+        ))
+      ) : table.getRowModel().rows.length ? (
+        table.getRowModel().rows.map((row) => {
+          const record = row.original;
+          const raw = record.raw || {};
+          const school = normalizeScalar(raw.school);
+          const grade = normalizeScalar(raw.grade);
+          const contact = normalizeScalar(raw.contact);
+          const parentContact = normalizeScalar(raw.parent_contact || raw.parentContact);
+
+          return (
+            <article
+              key={`student-mobile-${row.id}`}
+              data-testid={`student-mobile-card-${row.id}`}
+              className="rounded-lg border border-border/70 bg-background p-3"
+            >
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  checked={row.getIsSelected()}
+                  onCheckedChange={(value) => row.toggleSelected(!!value)}
+                  aria-label={`${record.title} 선택`}
+                  className="mt-1 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                    {renderStudentClassStatusPopover(record)}
+                    {school ? <Badge variant="secondary" className="rounded-md px-2 py-0.5">{school}</Badge> : null}
+                    {grade ? <Badge variant="outline" className="rounded-md px-2 py-0.5">{grade}</Badge> : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    onClick={() => actions.onOpenRow?.(record)}
+                  >
+                    {record.title}
+                  </button>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={`${record.title} 퇴원 처리`}
+                  title="퇴원 처리"
+                  onClick={() => actions.onDeleteRow?.(record)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+
+              <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
+                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
+                  <dt className="text-muted-foreground">학생 연락처</dt>
+                  <dd className="min-w-0 break-keep text-foreground">{contact || "-"}</dd>
+                </div>
+                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
+                  <dt className="text-muted-foreground">학부모</dt>
+                  <dd className="min-w-0 break-keep text-foreground">{parentContact || "-"}</dd>
+                </div>
+              </dl>
+            </article>
+          );
+        })
+      ) : (
+        <div className="rounded-lg border border-border/70 bg-background px-3 py-8 text-center">
+          <span className="text-sm font-medium text-muted-foreground">{emptyStateTitle}</span>
+          {hasActiveFilters ? (
+            <div className="mt-3">
+              <Button type="button" variant="outline" size="sm" className="h-8" onClick={resetFilters}>
+                조건 초기화
+              </Button>
+            </div>
+          ) : hasCreateAction ? (
+            <div className="mt-3">
+              <Button type="button" size="sm" className="h-8" onClick={actions.onCreate}>
+                <Plus className="mr-1.5 size-3.5" />
+                {createLabel}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="w-full space-y-3">
       {kind === "classes" ? (
@@ -2675,7 +2893,10 @@ export function ManagementDataTable({
 
       {bulkActionBar}
 
-      <div className="overflow-x-auto rounded-lg border border-border/70 bg-background" aria-busy={loading}>
+      {studentMobileList}
+      {classMobileList}
+
+      <div className={cn("overflow-x-auto rounded-lg border border-border/70 bg-background", (kind === "classes" || kind === "students") && "hidden md:block")} aria-busy={loading}>
         <Table className="min-w-[980px] table-fixed">
           <caption className="sr-only">{emptyLabel} 운영 목록{captionSuffix ? ` · ${captionSuffix}` : ""}</caption>
           <TableHeader>

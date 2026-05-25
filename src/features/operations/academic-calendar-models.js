@@ -258,31 +258,6 @@ export function buildAcademicCalendarTemplateModel({
   };
 }
 
-function createEmptyMonthBucket() {
-  return {
-    count: 0,
-    highlights: [],
-    typeLabels: [],
-  };
-}
-
-function buildMonthBuckets() {
-  return {
-    "01": createEmptyMonthBucket(),
-    "02": createEmptyMonthBucket(),
-    "03": createEmptyMonthBucket(),
-    "04": createEmptyMonthBucket(),
-    "05": createEmptyMonthBucket(),
-    "06": createEmptyMonthBucket(),
-    "07": createEmptyMonthBucket(),
-    "08": createEmptyMonthBucket(),
-    "09": createEmptyMonthBucket(),
-    "10": createEmptyMonthBucket(),
-    "11": createEmptyMonthBucket(),
-    "12": createEmptyMonthBucket(),
-  };
-}
-
 function buildScopeSummary(event) {
   const scopeLabels = [
     ...(Array.isArray(event.textbookScopes) ? event.textbookScopes : [])

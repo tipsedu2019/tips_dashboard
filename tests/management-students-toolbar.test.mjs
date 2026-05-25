@@ -35,6 +35,17 @@ test("student management filters lifecycle status separately from school filters
   assert.doesNotMatch(source, /kind !== "students" && statusFilter/);
 });
 
+test("student management opens with active students before withdrawn records", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const studentDefaultConfig = source.match(/students:\s*\{[\s\S]*?\n\s*\},\n\s*classes:/)?.[0] || "";
+
+  assert.match(source, /const STORAGE_VERSION = 13/);
+  assert.match(source, /const STUDENT_STATUS_SORT_ORDER = \["재원", "퇴원"\]/);
+  assert.match(source, /function compareStudentStatusForTable/);
+  assert.match(studentDefaultConfig, /\{ id: "status", desc: false \},\s*\{ id: "title", desc: false \}/);
+  assert.match(source, /sortingFn: kind === "students"[\s\S]*compareStudentStatusForTable/);
+});
+
 test("student edit dialog optimizes first entry and phone fields", async () => {
   const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
@@ -151,6 +162,27 @@ test("class table caption announces operational totals instead of status counts"
   assert.match(source, /classWeeklyMinutesTotal/);
   assert.match(source, /return minutes > 0 \? `\$\{hours\}시간 \$\{minutes\}분` : `\$\{hours\}시간`/);
   assert.doesNotMatch(source, /padStart\(2, "0"\).*시간/);
+});
+
+test("class management uses mobile cards instead of a clipped wide table", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(source, /const classMobileList = kind === "classes" \? \(/);
+  assert.match(source, /className="grid gap-2 md:hidden"/);
+  assert.match(source, /row\.toggleSelected\(\!\!value\)/);
+  assert.match(source, /renderClassScheduleCell\(row\.original\)/);
+  assert.match(source, /\(kind === "classes" \|\| kind === "students"\) && "hidden md:block"/);
+});
+
+test("student management uses mobile cards instead of a clipped wide table", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(source, /const studentMobileList = kind === "students" \? \(/);
+  assert.match(source, /aria-label=\{`\$\{emptyLabel\} 모바일 학생 목록`\}/);
+  assert.match(source, /data-testid=\{`student-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(source, /renderStudentClassStatusPopover\(record\)/);
+  assert.match(source, /parent_contact \|\| raw\.parentContact/);
+  assert.match(source, /\(kind === "classes" \|\| kind === "students"\) && "hidden md:block"/);
 });
 
 test("class weekly hours count compact Korean weekday groups", () => {

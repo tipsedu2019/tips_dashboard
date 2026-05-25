@@ -1426,15 +1426,15 @@ function assertManagementSyncReady(input: OpsTaskInput) {
   if (input.type === "registration" && isRegistrationWorkflowComplete(input)) {
     if (!text(input.registration?.classStartDate)) missingFields.push("수업시작일")
     if (!hasManagementReference(input.studentId, input.studentName)) missingFields.push("학생")
-    if (!hasManagementReference(input.classId, input.className)) missingFields.push("수업")
-    if (!hasManagementReference(input.textbookId, input.textbookTitle)) missingFields.push("교재")
+    if (!hasManagementReference(input.classId)) missingFields.push("수업")
+    if (!hasManagementReference(input.textbookId)) missingFields.push("교재")
     getMissingRegistrationCheckLabels(input.registration).forEach((label) => missingFields.push(label))
   }
 
   if (input.type === "withdrawal" && input.status === "done") {
     if (!text(input.withdrawal?.withdrawalDate)) missingFields.push("퇴원일")
-    if (!hasManagementReference(input.studentId, input.studentName)) missingFields.push("학생")
-    if (!hasManagementReference(input.classId, input.className)) missingFields.push("수업")
+    if (!hasManagementReference(input.studentId)) missingFields.push("학생")
+    if (!hasManagementReference(input.classId)) missingFields.push("수업")
     getMissingWithdrawalCheckLabels(input.withdrawal).forEach((label) => missingFields.push(label))
   }
 
@@ -1442,21 +1442,21 @@ function assertManagementSyncReady(input: OpsTaskInput) {
     const transfer = input.transfer || {}
     if (!text(transfer.fromClassEndDate)) missingFields.push("전 수업 종료일")
     if (!text(transfer.toClassStartDate)) missingFields.push("후 수업 시작일")
-    if (!hasManagementReference(input.studentId, input.studentName)) missingFields.push("학생")
-    if (!hasManagementReference(transfer.fromClassId, transfer.fromClassName)) missingFields.push("전 수업")
-    if (!hasManagementReference(transfer.toClassId || input.classId, transfer.toClassName || input.className)) {
+    if (!hasManagementReference(input.studentId)) missingFields.push("학생")
+    if (!hasManagementReference(transfer.fromClassId)) missingFields.push("전 수업")
+    if (!hasManagementReference(transfer.toClassId || input.classId)) {
       missingFields.push("후 수업")
     }
-    if (isSameManagementReference(transfer.fromClassId || transfer.fromClassName, transfer.toClassId || input.classId || transfer.toClassName || input.className)) missingFields.push("다른 수업")
+    if (isSameManagementReference(transfer.fromClassId, transfer.toClassId || input.classId)) missingFields.push("다른 수업")
     getMissingTransferCheckLabels(input.transfer).forEach((label) => missingFields.push(label))
   }
 
   if (input.type === "word_retest" && input.status === "done") {
     const wordRetest = input.wordRetest || {}
-    if (!hasManagementReference(input.studentId, input.studentName, wordRetest.studentName)) missingFields.push("학생")
-    if (!hasManagementReference(input.classId, input.className, wordRetest.className)) missingFields.push("수업")
-    if (!hasManagementReference(wordRetest.teacherId, wordRetest.teacherName)) missingFields.push("선생님")
-    if (!hasManagementReference(input.textbookId, input.textbookTitle, wordRetest.textbookName)) missingFields.push("교재")
+    if (!hasManagementReference(input.studentId)) missingFields.push("학생")
+    if (!hasManagementReference(input.classId)) missingFields.push("수업")
+    if (!hasManagementReference(wordRetest.teacherId)) missingFields.push("선생님")
+    if (!hasManagementReference(input.textbookId)) missingFields.push("교재")
     if (!text(wordRetest.branch)) missingFields.push("지점")
     if (!text(wordRetest.testAt)) missingFields.push("응시일시")
     if (!text(wordRetest.unit)) missingFields.push("단원")
@@ -1471,8 +1471,8 @@ function assertManagementSyncReady(input: OpsTaskInput) {
 async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
   if (input.type === "registration" && isRegistrationWorkflowComplete(input)) {
     const student = hasManagementReference(input.studentId) ? await resolveOpsStudent(input) : null
-    const classRow = await resolveOpsClass(input.classId, input.className)
-    const textbook = await resolveOpsTextbook(input.textbookId, input.textbookTitle)
+    const classRow = await selectOpsRowById("classes", input.classId || "")
+    const textbook = await selectOpsRowById("textbooks", input.textbookId || "")
 
     if (hasManagementReference(input.studentId)) assertResolvedManagementRecord(student, "등록 완료 전에 학생 정보를 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "등록 완료 전에 등록할 수업을 다시 선택하세요.")
@@ -1480,8 +1480,8 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
   }
 
   if (input.type === "withdrawal" && input.status === "done") {
-    const student = await resolveOpsStudent(input)
-    const classRow = await resolveOpsClass(input.classId, input.className, input.withdrawal?.teacherName)
+    const student = await selectOpsRowById("students", input.studentId || "")
+    const classRow = await selectOpsRowById("classes", input.classId || "")
 
     assertResolvedManagementRecord(student, "퇴원 완료 전에 기존 학생을 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "퇴원 완료 전에 기존 수업을 다시 선택하세요.")
@@ -1490,25 +1490,23 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
 
   if (input.type === "transfer" && input.status === "done") {
     const transfer = input.transfer || {}
-    const student = await resolveOpsStudent(input)
-    const fromClass = await resolveOpsClass(transfer.fromClassId, transfer.fromClassName, transfer.fromTeacherName)
-    const toClass = await resolveOpsClass(transfer.toClassId || input.classId, transfer.toClassName || input.className, transfer.toTeacherName)
+    const student = await selectOpsRowById("students", input.studentId || "")
+    const fromClass = await selectOpsRowById("classes", transfer.fromClassId || "")
+    const toClass = await selectOpsRowById("classes", transfer.toClassId || input.classId || "")
 
     assertResolvedManagementRecord(student, "전반 완료 전에 기존 학생을 다시 선택하세요.")
     assertResolvedManagementRecord(fromClass, "전반 완료 전에 전 수업을 다시 선택하세요.")
     assertResolvedManagementRecord(toClass, "전반 완료 전에 후 수업을 다시 선택하세요.")
+    assertDifferentOpsClass(fromClass, toClass, "전반 완료 전에 전 수업과 후 수업을 다르게 선택하세요.")
     assertOpsStudentInClass(student, fromClass, "전반 완료 전에 학생이 전 수업 명단에 있는지 확인하세요.")
   }
 
   if (input.type === "word_retest" && input.status === "done") {
     const wordRetest = input.wordRetest || {}
-    const student = await resolveOpsStudent({
-      ...input,
-      studentName: input.studentName || wordRetest.studentName,
-    })
-    const classRow = await resolveOpsClass(input.classId, input.className || wordRetest.className, wordRetest.teacherName)
-    const textbook = await resolveOpsTextbook(input.textbookId, input.textbookTitle || wordRetest.textbookName)
-    const teacher = await resolveOpsTeacher(wordRetest.teacherId, wordRetest.teacherName)
+    const student = await selectOpsRowById("students", input.studentId || "")
+    const classRow = await selectOpsRowById("classes", input.classId || "")
+    const textbook = await selectOpsRowById("textbooks", input.textbookId || "")
+    const teacher = await selectOpsRowById("teacher_catalogs", wordRetest.teacherId || "")
 
     assertResolvedManagementRecord(student, "단어 재시험 완료 전에 기존 학생을 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "단어 재시험 완료 전에 기존 수업을 다시 선택하세요.")
@@ -1566,6 +1564,37 @@ async function findOpsStudentByName(input: OpsTaskInput) {
 
 async function resolveOpsStudent(input: OpsTaskInput) {
   return await selectOpsRowById("students", input.studentId || "") || await findOpsStudentByName(input)
+}
+
+function matchesOpsRegistrationStudent(row: Row, input: OpsTaskInput) {
+  const registration = input.registration || {}
+  const identityFields = [
+    { input: text(registration.studentPhone), row: text(row.contact) },
+    { input: text(registration.parentPhone), row: text(row.parent_contact) },
+  ].filter((field) => Boolean(field.input))
+  const supportingFields = [
+    { input: text(registration.schoolName), row: text(row.school) },
+  ].filter((field) => Boolean(field.input))
+
+  if (identityFields.length === 0) return false
+  return identityFields.every((field) => field.row === field.input) && supportingFields.every((field) => field.row === field.input)
+}
+
+async function resolveOpsRegistrationStudent(input: OpsTaskInput) {
+  const byId = await selectOpsRowById("students", input.studentId || "")
+  if (byId) return byId
+  if (!supabase) return null
+
+  const studentName = text(input.studentName)
+  if (!studentName) return null
+
+  const { data, error } = await supabase.from("students").select("*").eq("name", studentName).limit(20)
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return null
+    throw error
+  }
+
+  return (((data || []) as unknown as Row[]).find((row) => matchesOpsRegistrationStudent(row, input))) || null
 }
 
 async function ensureOpsStudent(input: OpsTaskInput, existingStudent?: Row | null) {
@@ -1681,6 +1710,12 @@ function hasOpsClassTextbookLink(classRow: Row | null, textbookId: string) {
 
 function assertOpsStudentInClass(student: Row | null, classRow: Row | null, message: string) {
   if (!hasOpsStudentClassRosterLink(student, classRow)) throw new Error(message)
+}
+
+function assertDifferentOpsClass(firstClass: Row | null, secondClass: Row | null, message: string) {
+  const firstClassId = text(firstClass?.id)
+  const secondClassId = text(secondClass?.id)
+  if (firstClassId && secondClassId && firstClassId === secondClassId) throw new Error(message)
 }
 
 async function assertOpsRosterLinked(studentId: string, classId: string, message: string) {
@@ -2125,7 +2160,7 @@ async function syncRegistrationPipelineStatusForTaskStatus(task: OpsTask, status
 
 async function syncRegistrationManagementLinks(taskId: string, input: OpsTaskInput) {
   const completed = isRegistrationWorkflowComplete(input)
-  const existingStudent = completed ? await resolveOpsStudent(input) : null
+  const existingStudent = completed ? await resolveOpsRegistrationStudent(input) : null
   const student = completed ? await ensureOpsStudent(input, existingStudent) : await resolveOpsStudent(input)
   const shouldDeleteCreatedStudent = completed && !existingStudent && Boolean(text(student?.id))
   const classRow = await resolveOpsClass(input.classId, input.className)
@@ -2236,6 +2271,7 @@ async function syncTransferManagementLinks(taskId: string, input: OpsTaskInput) 
     assertResolvedManagementRecord(student, "전반 완료 전에 기존 학생을 연결하세요.")
     assertResolvedManagementRecord(fromClass, "전반 완료 전에 전 수업을 연결하세요.")
     assertResolvedManagementRecord(toClass, "전반 완료 전에 후 수업을 연결하세요.")
+    assertDifferentOpsClass(fromClass, toClass, "전반 완료 전에 전 수업과 후 수업을 다르게 선택하세요.")
     assertOpsStudentInClass(student, fromClass, "전반 완료 전에 학생이 전 수업 명단에 있는지 확인하세요.")
     const fromClassLabel = text(fromClass.name) || text(transfer.fromClassName)
     const toClassLabel = text(toClass.name) || text(transfer.toClassName || input.className)

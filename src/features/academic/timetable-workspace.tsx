@@ -560,15 +560,15 @@ export function AcademicTimetableWorkspace() {
                   }}
                   className="min-w-0 bg-background"
                 >
-                  <div className="flex items-center gap-3 border-b border-border/70 bg-muted/15 px-4 py-3 pr-14">
+                  <div className="flex items-start gap-3 border-b border-border/70 bg-muted/15 px-4 py-3 pr-12 sm:items-center sm:pr-14">
                     <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground">
                       <PanelIcon className="size-4" />
                     </div>
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
                       <p className="truncate text-sm font-semibold tracking-tight text-foreground">
                         {panel.title}
                       </p>
-                      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                      <div className="flex max-w-full flex-wrap items-center gap-1.5">
                         <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
                           수업 {panelSummary.lessonCount}개
                         </span>

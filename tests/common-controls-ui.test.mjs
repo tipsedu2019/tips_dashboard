@@ -21,6 +21,9 @@ test("settings row text inputs announce the edited row", async () => {
   assert.match(teacherSource, /aria-label=\{`\$\{row\.name \|\| "새 선생님"\} 이름`\}/);
   assert.match(schoolSource, /aria-label=\{`\$\{row\.name \|\| "새 학교"\} 학교명`\}/);
   assert.match(classroomSource, /aria-label=\{`\$\{row\.name \|\| "새 강의실"\} 강의실 이름`\}/);
+  assert.match(classroomSource, /data-testid="classroom-settings-mobile-list"/);
+  assert.match(classroomSource, /data-testid=\{`classroom-settings-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(classroomSource, /<div className="hidden md:block">[\s\S]*<SettingsTableFrame>/);
 });
 
 test("select menus can show long option lists inside modals", async () => {

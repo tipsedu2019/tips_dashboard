@@ -97,6 +97,9 @@ test("annual board keeps the school column compact", async () => {
   const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
 
   assert.match(source, /annual-board-table min-w-\[1228px\]/);
+  assert.match(source, /data-testid="annual-board-mobile-list"/);
+  assert.match(source, /data-testid=\{`annual-board-mobile-school-\$\{schoolRow\.schoolKey\}`\}/);
+  assert.match(source, /annual-board-export-scroll hidden overflow-x-auto md:block/);
   assert.match(source, /sticky left-0 z-20 w-\[96px\]/);
   assert.match(source, /annual-board-school-cell sticky left-0 z-10 w-\[96px\]/);
   assert.doesNotMatch(source, /w-\[148px\]/);

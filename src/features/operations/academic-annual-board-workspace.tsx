@@ -309,15 +309,6 @@ function formatSubjectDateLabel(entry?: AcademicAnnualBoardEntry | null, options
   return "시험일 미입력";
 }
 
-function formatEventSummaryLabel(entries: AcademicAnnualBoardEntry[], options: { compact?: boolean } = {}) {
-  if (entries.length === 0) {
-    return "—";
-  }
-  const first = entries[0];
-  const rangeLabel = formatRangeLabel(first, options);
-  return entries.length > 1 ? `${rangeLabel} · ${entries.length}건` : rangeLabel;
-}
-
 function getEntryByTerm(row: AcademicAnnualBoardRow, type: AcademicAnnualBoardType, examTerm: ExamTerm) {
   return (row.typeBuckets[type] || []).find((entry) => text(entry.examTerm) === examTerm) || null;
 }
@@ -733,7 +724,118 @@ function AnnualBoardMapView({
   const rowStyle = { "--annual-board-row-count": termRows.length } as CSSProperties;
 
   return (
-    <div className="annual-board-export-scroll overflow-x-auto">
+    <>
+    <div data-testid="annual-board-mobile-list" className="grid gap-3 md:hidden">
+      {loading ? (
+        Array.from({ length: 3 }).map((_, index) => (
+          <div key={`annual-board-mobile-loading-${index}`} className="rounded-[6px] border border-[#D9E1EA] bg-white p-3">
+            <div className="h-4 w-28 rounded bg-slate-100" />
+            <div className="mt-3 grid gap-2">
+              <div className="h-16 rounded bg-slate-50" />
+              <div className="h-16 rounded bg-slate-50" />
+            </div>
+          </div>
+        ))
+      ) : groupedSchoolRows.length === 0 ? (
+        <div className="rounded-[6px] border border-dashed border-[#D9E1EA] bg-white px-4 py-10 text-center text-sm font-medium text-[#475467]">
+          조건에 맞는 일정 없음
+        </div>
+      ) : (
+        groupedSchoolRows.map((schoolRow) => (
+          <section
+            key={`annual-board-mobile-${schoolRow.schoolKey}`}
+            data-testid={`annual-board-mobile-school-${schoolRow.schoolKey}`}
+            className="rounded-[6px] border border-[#D9E1EA] bg-white"
+          >
+            <div className="border-b border-[#D9E1EA] px-3 py-2.5">
+              <p className="truncate text-[14px] font-semibold text-[#172033]">{schoolRow.schoolName}</p>
+            </div>
+            <div className="grid gap-3 p-3">
+              {gradeColumnLabels.map((gradeLabel) => {
+                const gradeRow = schoolRow.gradeMap.get(gradeLabel) || null;
+
+                return (
+                  <div key={`annual-board-mobile-${schoolRow.schoolKey}-${gradeLabel}`} className="rounded-[5px] border border-[#E6EBF1]">
+                    <div className="border-b border-[#E6EBF1] bg-[#F8FAFC] px-2.5 py-2 text-[12px] font-semibold text-[#344054]">
+                      {gradeLabel}
+                    </div>
+                    {gradeRow ? (
+                      <div className="grid gap-2 p-2">
+                        {termRows.map((termRow) => {
+                          if (termRow.kind === "event") {
+                            const entries = getEventEntriesForSemester(gradeRow, termRow.type, selectedSemester);
+                            const state = getCellStateForEntries(entries, termRow.type);
+                            return (
+                              <div key={`${gradeRow.id}-mobile-${termRow.key}`} className="grid gap-1">
+                                <p className="text-[11px] font-semibold text-[#667085]">{termRow.label}</p>
+                                <AnnualBoardValueCell
+                                  schoolRow={schoolRow}
+                                  gradeLabel={gradeLabel}
+                                  row={gradeRow}
+                                  termRow={termRow}
+                                  type={termRow.type}
+                                  label={getEventCellLabel(entries, { compact: true })}
+                                  entries={entries}
+                                  state={state}
+                                  readOnly={readOnly}
+                                  hoveredCell={hoveredCell}
+                                  onHoverCell={onHoverCell}
+                                  onEntryEdit={onEntryEdit}
+                                  onCellCreate={onCellCreate}
+                                />
+                              </div>
+                            );
+                          }
+
+                          const periodEntry = getEntryByTerm(gradeRow, "시험기간", termRow.examTerm);
+                          const englishEntry = getEntryByTerm(gradeRow, "영어시험일", termRow.examTerm);
+                          const mathEntry = getEntryByTerm(gradeRow, "수학시험일", termRow.examTerm);
+                          const cells = [
+                            { type: "시험기간" as const, entry: periodEntry, label: getBoardCellLabel(periodEntry, "시험기간", { compact: true }) },
+                            { type: "영어시험일" as const, entry: englishEntry, label: getBoardCellLabel(englishEntry, "영어시험일", { compact: true }).replace("시험일 미입력", "미입력") },
+                            { type: "수학시험일" as const, entry: mathEntry, label: getBoardCellLabel(mathEntry, "수학시험일", { compact: true }).replace("시험일 미입력", "미입력") },
+                          ];
+
+                          return (
+                            <div key={`${gradeRow.id}-mobile-${termRow.key}`} className="grid gap-1">
+                              <p className="text-[11px] font-semibold text-[#667085]">{termRow.label}</p>
+                              <div className="grid grid-cols-3 gap-1">
+                                {cells.map((cell) => (
+                                  <AnnualBoardValueCell
+                                    key={`${gradeRow.id}-mobile-${termRow.key}-${cell.type}`}
+                                    schoolRow={schoolRow}
+                                    gradeLabel={gradeLabel}
+                                    row={gradeRow}
+                                    termRow={termRow}
+                                    type={cell.type}
+                                    label={cell.label}
+                                    entries={cell.entry ? [cell.entry] : []}
+                                    state={getEntryState(cell.entry, cell.type)}
+                                    readOnly={readOnly}
+                                    hoveredCell={hoveredCell}
+                                    onHoverCell={onHoverCell}
+                                    onEntryEdit={onEntryEdit}
+                                    onCellCreate={onCellCreate}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-6 text-center text-[12px] font-medium text-[#98A2B3]">없음</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
+    </div>
+
+    <div className="annual-board-export-scroll hidden overflow-x-auto md:block">
       <Table className="annual-board-table min-w-[1228px] table-fixed border-separate border-spacing-0 text-[12px]">
         <TableHeader>
           <TableRow className="annual-board-table-header">
@@ -877,6 +979,7 @@ function AnnualBoardMapView({
         </TableBody>
       </Table>
     </div>
+    </>
   );
 }
 

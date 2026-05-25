@@ -373,6 +373,38 @@ test("lesson design keeps navigation, recovery, and save actions stable", async 
   assert.match(source, /sessionId: resolvedRequestedSession\.id/);
 });
 
+test("class schedule overview keeps dense list columns from colliding", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const listSection = source.slice(
+    source.indexOf('<p className="text-sm font-semibold text-foreground">수업 목록</p>'),
+    source.indexOf('<p className="text-sm font-semibold text-foreground">동기 그룹</p>'),
+  );
+
+  assert.match(listSection, /<Table className="min-w-\[980px\] table-fixed">/);
+  assert.match(listSection, /<colgroup>/);
+  assert.match(listSection, /<col className="w-\[24%\]" \/>/);
+  assert.match(listSection, /<col className="w-\[28%\]" \/>/);
+  assert.match(listSection, /<col className="w-\[18%\]" \/>/);
+  assert.match(listSection, /<TableCell className="align-top whitespace-normal">/);
+  assert.match(listSection, /className="min-w-0 space-y-2/);
+  assert.match(listSection, /className="font-medium leading-5 break-keep"/);
+});
+
+test("class schedule overview uses mobile cards instead of a clipped wide table", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const listSection = source.slice(
+    source.indexOf('<p className="text-sm font-semibold text-foreground">수업 목록</p>'),
+    source.indexOf('<p className="text-sm font-semibold text-foreground">동기 그룹</p>'),
+  );
+
+  assert.match(listSection, /data-testid="class-schedule-mobile-list"/);
+  assert.match(listSection, /className="grid gap-2 md:hidden"/);
+  assert.match(listSection, /data-testid=\{`class-schedule-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(listSection, /row\.scheduleLabel \|\| "시간표 미정"/);
+  assert.match(listSection, /계획 \{row\.latestPlannedSessionIndex\}회차 · 실제 \{row\.latestActualSessionIndex\}회차/);
+  assert.match(listSection, /<ScrollArea className="hidden h-\[34rem\] pr-4 md:block">/);
+});
+
 test("lesson design exposes a compact PC work queue only when it adds progress value", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 

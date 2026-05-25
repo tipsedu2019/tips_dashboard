@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/providers/auth-provider"
@@ -98,6 +98,8 @@ function AdminShellLoadingState() {
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const queryString = searchParams.toString()
   const { user, loading, canAccessDashboard } = useAuth()
 
   useEffect(() => {
@@ -106,7 +108,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     }
 
     if (!user) {
-      const next = pathname ? `?next=${encodeURIComponent(pathname)}` : ""
+      const nextPath = queryString ? `${pathname}?${queryString}` : pathname
+      const next = nextPath ? `?next=${encodeURIComponent(nextPath)}` : ""
       router.replace(`/sign-in${next}`)
       return
     }
@@ -114,7 +117,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (!canAccessDashboard) {
       router.replace("/errors/forbidden")
     }
-  }, [canAccessDashboard, loading, pathname, router, user])
+  }, [canAccessDashboard, loading, pathname, queryString, router, user])
 
   if (loading || !user || !canAccessDashboard) {
     return <AdminShellLoadingState />

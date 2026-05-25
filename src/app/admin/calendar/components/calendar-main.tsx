@@ -331,6 +331,11 @@ export function CalendarMain({
       }))
   }, [filteredEvents])
 
+  const mobileMonthEventGroups = useMemo(
+    () => listEventGroups.filter((group) => isSameMonth(group.date, currentDate)),
+    [currentDate, listEventGroups],
+  )
+
   const monthSegments = useMemo(
     () => buildMonthEventSegments(calendarDays, filteredEvents.filter((event) => isMultiDayEvent(event))) as MonthEventSegment[],
     [calendarDays, filteredEvents],
@@ -446,11 +451,83 @@ export function CalendarMain({
     }
   }
 
+  const renderMobileMonthAgenda = () => {
+    return (
+      <div data-testid="academic-calendar-mobile-month-agenda" className="grid gap-2 p-4 md:hidden">
+        {mobileMonthEventGroups.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+            일정 없음
+          </div>
+        ) : (
+          mobileMonthEventGroups.map((group) => (
+            <section
+              key={`mobile-month-${format(group.date, "yyyy-MM-dd")}`}
+              data-testid={`academic-calendar-mobile-day-${format(group.date, "yyyy-MM-dd")}`}
+              className="rounded-lg border border-border/70 bg-background px-3 py-3"
+            >
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  className="min-w-0 text-left text-sm font-semibold text-foreground"
+                  onClick={() => onDateSelect?.(group.date)}
+                >
+                  {formatAgendaDay(group.date)}
+                </button>
+                <Badge variant="outline">{group.events.length}개</Badge>
+              </div>
+
+              <div className="grid gap-2">
+                {group.events.map((event) => {
+                  const annualBoardHref = buildAcademicAnnualBoardEventHref(event, group.date)
+
+                  return (
+                    <div
+                      key={`mobile-month-${format(group.date, "yyyy-MM-dd")}-${event.id}`}
+                      className="flex min-w-0 items-stretch gap-2 rounded-md border bg-muted/20 p-2"
+                    >
+                      <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", event.color)} aria-hidden="true" />
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => onEventClick?.(event)}
+                      >
+                        <div className="flex min-w-0 flex-wrap items-center gap-1">
+                          {renderExamScopeHover(event)}
+                          <span className="min-w-0 font-medium leading-5 break-keep">{event.title}</span>
+                          <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                            {getAcademicEventTypeLabel(event.typeLabel || event.type)}
+                          </Badge>
+                          {renderEventContextBadges(event, "list")}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{formatEventRange(event)}</p>
+                      </button>
+                      <Link
+                        href={annualBoardHref}
+                        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-muted"
+                        aria-label={`${event.title} 연간 일정표 바로가기`}
+                        title="연간 일정표 바로가기"
+                        onClick={(clickEvent) => clickEvent.stopPropagation()}
+                      >
+                        <ArrowUpRight className="size-3.5" />
+                      </Link>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          ))
+        )}
+      </div>
+    )
+  }
+
   const renderCalendarGrid = () => {
     const weekDays = ["일", "월", "화", "수", "목", "금", "토"]
 
     return (
-      <div className="flex-1 bg-background">
+      <>
+      {renderMobileMonthAgenda()}
+      <div className="hidden flex-1 bg-background md:block">
         <div className="grid grid-cols-7 border-b">
           {weekDays.map((day) => (
             <div
@@ -725,6 +802,7 @@ export function CalendarMain({
           })}
         </div>
       </div>
+      </>
     )
   }
 

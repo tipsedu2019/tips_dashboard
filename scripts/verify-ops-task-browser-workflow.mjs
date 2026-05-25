@@ -15,6 +15,328 @@ const DEFAULT_QUICK_ADD_SAMPLE_COUNT = 1
 const DEFAULT_OPERATION_SAMPLE_COUNT = 1
 const MAX_INITIAL_TEMPLATE_CONTROLS = 22
 const MAX_INITIAL_SELECT_OPTIONS = 16
+const SIGN_IN_EXPECTED_TEXTS = ["TIPS 로그인", "아이디", "비밀번호"]
+function buildAdminPublicSmokeRoute(path, name, expectedSearchIncludes) {
+  return {
+    path,
+    name,
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes,
+  }
+}
+
+const CORE_ADMIN_PUBLIC_SMOKE_ROUTES = [
+  {
+    path: "/admin/dashboard",
+    name: "protected-dashboard-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fdashboard",
+  },
+  {
+    path: "/admin/tasks?taskId=missing-task-for-smoke",
+    name: "protected-tasks-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Ftasks%3FtaskId%3Dmissing-task-for-smoke",
+  },
+  {
+    path: "/admin/approvals",
+    name: "protected-approvals-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fapprovals",
+  },
+  {
+    path: "/admin/registration",
+    name: "protected-registration-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fregistration",
+  },
+  {
+    path: "/admin/transfer",
+    name: "protected-transfer-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Ftransfer",
+  },
+  {
+    path: "/admin/withdrawal",
+    name: "protected-withdrawal-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fwithdrawal",
+  },
+  {
+    path: "/admin/students",
+    name: "protected-students-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fstudents",
+  },
+  {
+    path: "/admin/classes",
+    name: "protected-classes-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fclasses",
+  },
+  {
+    path: "/admin/textbooks",
+    name: "protected-textbooks-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Ftextbooks",
+  },
+  {
+    path: "/admin/curriculum",
+    name: "protected-curriculum-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fcurriculum",
+  },
+  {
+    path: "/admin/class-schedule/lesson-design",
+    name: "protected-lesson-design-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fclass-schedule%2Flesson-design",
+  },
+  {
+    path: "/admin/timetable",
+    name: "protected-timetable-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Ftimetable",
+  },
+  {
+    path: "/admin/academic-calendar",
+    name: "protected-academic-calendar-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Facademic-calendar",
+  },
+  {
+    path: "/admin/academic-calendar/annual-board",
+    name: "protected-annual-board-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Facademic-calendar%2Fannual-board",
+  },
+  {
+    path: "/admin/settings/schools",
+    name: "protected-settings-schools-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fsettings%2Fschools",
+  },
+]
+
+const ADMIN_ALIAS_PUBLIC_SMOKE_ROUTES = [
+  buildAdminPublicSmokeRoute("/admin", "admin-root-redirect", "next=%2Fadmin"),
+  buildAdminPublicSmokeRoute("/admin/calendar", "admin-calendar-alias-redirect", "next=%2Fadmin%2Fcalendar"),
+  buildAdminPublicSmokeRoute("/admin/manual", "admin-manual-alias-redirect", "next=%2Fadmin%2Fmanual"),
+  buildAdminPublicSmokeRoute("/admin/schools", "admin-schools-alias-redirect", "next=%2Fadmin%2Fschools"),
+  buildAdminPublicSmokeRoute("/admin/teachers", "admin-teachers-alias-redirect", "next=%2Fadmin%2Fteachers"),
+  buildAdminPublicSmokeRoute("/admin/classrooms", "admin-classrooms-alias-redirect", "next=%2Fadmin%2Fclassrooms"),
+  buildAdminPublicSmokeRoute("/admin/terms", "admin-terms-alias-redirect", "next=%2Fadmin%2Fterms"),
+  buildAdminPublicSmokeRoute("/admin/settings", "admin-settings-root-redirect", "next=%2Fadmin%2Fsettings"),
+  buildAdminPublicSmokeRoute("/admin/settings/account", "admin-settings-account-redirect", "next=%2Fadmin%2Fsettings%2Faccount"),
+  buildAdminPublicSmokeRoute("/admin/settings/appearance", "admin-settings-appearance-redirect", "next=%2Fadmin%2Fsettings%2Fappearance"),
+  buildAdminPublicSmokeRoute("/admin/settings/connections", "admin-settings-connections-redirect", "next=%2Fadmin%2Fsettings%2Fconnections"),
+  buildAdminPublicSmokeRoute("/admin/settings/notifications", "admin-settings-notifications-redirect", "next=%2Fadmin%2Fsettings%2Fnotifications"),
+  buildAdminPublicSmokeRoute("/admin/settings/terms", "admin-settings-terms-redirect", "next=%2Fadmin%2Fsettings%2Fterms"),
+  buildAdminPublicSmokeRoute("/admin/settings/user", "admin-settings-user-redirect", "next=%2Fadmin%2Fsettings%2Fuser"),
+]
+
+const LEGACY_AUTH_PUBLIC_SMOKE_ROUTES = [
+  {
+    path: "/sign-in-2",
+    name: "legacy-sign-in-2",
+    expectedTexts: [...SIGN_IN_EXPECTED_TEXTS, "로그인"],
+    expectedPath: "/sign-in",
+  },
+  {
+    path: "/sign-in-3",
+    name: "legacy-sign-in-3",
+    expectedTexts: [...SIGN_IN_EXPECTED_TEXTS, "로그인"],
+    expectedPath: "/sign-in",
+  },
+  {
+    path: "/sign-up-2",
+    name: "legacy-sign-up-2",
+    expectedTexts: ["회원가입"],
+    expectedPath: "/sign-up",
+  },
+  {
+    path: "/sign-up-3",
+    name: "legacy-sign-up-3",
+    expectedTexts: ["회원가입"],
+    expectedPath: "/sign-up",
+  },
+  {
+    path: "/forgot-password-2",
+    name: "legacy-forgot-password-2",
+    expectedTexts: ["비밀번호"],
+    expectedPath: "/forgot-password",
+  },
+  {
+    path: "/forgot-password-3",
+    name: "legacy-forgot-password-3",
+    expectedTexts: ["비밀번호"],
+    expectedPath: "/forgot-password",
+  },
+]
+const LEGACY_ADMIN_PUBLIC_SMOKE_ROUTES = [
+  {
+    path: "/admin/chat",
+    name: "legacy-admin-chat-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fchat",
+  },
+  {
+    path: "/admin/mail",
+    name: "legacy-admin-mail-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fmail",
+  },
+  {
+    path: "/admin/pricing",
+    name: "legacy-admin-pricing-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fpricing",
+  },
+  {
+    path: "/admin/faqs",
+    name: "legacy-admin-faqs-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Ffaqs",
+  },
+  {
+    path: "/admin/dashboard-2",
+    name: "legacy-admin-dashboard-2-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fdashboard-2",
+  },
+  {
+    path: "/admin/users",
+    name: "legacy-admin-users-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fusers",
+  },
+  {
+    path: "/admin/settings/billing",
+    name: "legacy-admin-settings-billing-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fsettings%2Fbilling",
+  },
+]
+const PUBLIC_SMOKE_ROUTES = [
+  {
+    path: "/landing",
+    name: "landing-alias-redirect",
+    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
+    expectedPath: "/sign-in",
+    expectedSearchIncludes: "next=%2Fadmin%2Fdashboard",
+  },
+  {
+    path: "/sign-in",
+    name: "sign-in",
+    expectedTexts: ["TIPS 로그인", "아이디", "비밀번호", "로그인"],
+    expectedPath: "/sign-in",
+  },
+  ...LEGACY_AUTH_PUBLIC_SMOKE_ROUTES,
+  ...CORE_ADMIN_PUBLIC_SMOKE_ROUTES,
+  ...ADMIN_ALIAS_PUBLIC_SMOKE_ROUTES,
+  ...LEGACY_ADMIN_PUBLIC_SMOKE_ROUTES,
+]
+
+const AUTHENTICATED_CORE_SMOKE_ROUTES = [
+  {
+    path: "/admin/dashboard",
+    name: "dashboard",
+    expectedTexts: ["대시보드"],
+  },
+  {
+    path: "/admin/students",
+    name: "management-students",
+    expectedTexts: ["학생관리"],
+  },
+  {
+    path: "/admin/classes",
+    name: "management-classes",
+    expectedTexts: ["수업관리"],
+  },
+  {
+    path: "/admin/textbooks",
+    name: "management-textbooks",
+    expectedTexts: ["교재관리"],
+  },
+  {
+    path: "/admin/curriculum",
+    name: "curriculum-planning",
+    expectedTexts: ["수업계획"],
+  },
+  {
+    path: "/admin/class-schedule",
+    name: "class-schedule",
+    expectedTexts: ["수업일정"],
+  },
+  {
+    path: "/admin/class-schedule/lesson-design",
+    name: "lesson-design",
+    expectedTexts: ["수업 설계"],
+  },
+  {
+    path: "/admin/timetable",
+    name: "timetable",
+    expectedTexts: ["시간표"],
+  },
+  {
+    path: "/admin/academic-calendar",
+    name: "academic-calendar",
+    expectedTexts: ["캘린더"],
+  },
+  {
+    path: "/admin/academic-calendar/annual-board",
+    name: "academic-annual-board",
+    expectedTexts: ["학교 연간 일정표"],
+  },
+  {
+    path: "/admin/settings/schools",
+    name: "settings-schools",
+    expectedTexts: ["학교 설정"],
+  },
+  {
+    path: "/admin/settings/teachers",
+    name: "settings-teachers",
+    expectedTexts: ["선생님 설정"],
+  },
+  {
+    path: "/admin/settings/classrooms",
+    name: "settings-classrooms",
+    expectedTexts: ["강의실 설정"],
+  },
+  {
+    path: "/admin/settings/class-groups",
+    name: "settings-class-groups",
+    expectedTexts: ["기간 설정"],
+  },
+  {
+    path: "/admin/settings/textbook-suppliers",
+    name: "settings-textbook-suppliers",
+    expectedTexts: ["교재 설정"],
+  },
+]
 
 const ROUTES = [
   { path: "/admin/tasks?list=today", name: "todo-today", expectedTexts: ["할 일", "오늘", "추가"], interaction: "quick-add" },
@@ -26,6 +348,7 @@ const ROUTES = [
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 추가"], interaction: "open-create" },
   { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["단어 재시험", "단어 재시험 추가"], interaction: "open-create" },
   { path: "/admin/approvals", name: "approvals", expectedTexts: ["전자결재", "영어", "수학", "자유"], interaction: "approval-draft" },
+  ...AUTHENTICATED_CORE_SMOKE_ROUTES,
 ]
 
 const VIEWPORTS = [
@@ -97,9 +420,81 @@ function isEnabledEnv(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase())
 }
 
+function listMissingEnv(requirements) {
+  return requirements.filter((requirement) => !requirement.value).map((requirement) => requirement.name)
+}
+
+function buildOpsBrowserAuthPreflight() {
+  const loginId = env("OPS_BROWSER_LOGIN_ID", env("OPS_BROWSER_EMAIL"))
+  const password = env("OPS_BROWSER_PASSWORD")
+  const storageStatePath = env("OPS_BROWSER_STORAGE_STATE")
+  const useSupabaseStorage = env("OPS_BROWSER_SUPABASE_STORAGE", "1") !== "0"
+  const useTemporaryUser = isEnabledEnv(env("OPS_BROWSER_TEMP_USER"))
+  const supabaseUrl = env("SUPABASE_URL", env("NEXT_PUBLIC_SUPABASE_URL", env("VITE_SUPABASE_URL")))
+  const supabaseAnonKey = env("NEXT_PUBLIC_SUPABASE_ANON_KEY", env("VITE_SUPABASE_ANON_KEY"))
+  const serviceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY", env("SUPABASE_SERVICE_KEY"))
+  const storageStateFileExists = Boolean(storageStatePath && existsSync(storageStatePath))
+  const storageStateMissing = storageStatePath
+    ? storageStateFileExists
+      ? []
+      : ["OPS_BROWSER_STORAGE_STATE file"]
+    : ["OPS_BROWSER_STORAGE_STATE"]
+  const uiLoginMissing = listMissingEnv([
+    { name: "OPS_BROWSER_LOGIN_ID/OPS_BROWSER_EMAIL", value: loginId },
+    { name: "OPS_BROWSER_PASSWORD", value: password },
+  ])
+  const supabaseStorageMissing = useSupabaseStorage
+    ? listMissingEnv([
+        { name: "SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL/VITE_SUPABASE_URL", value: supabaseUrl },
+        { name: "NEXT_PUBLIC_SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY", value: supabaseAnonKey },
+        { name: "OPS_BROWSER_LOGIN_ID/OPS_BROWSER_EMAIL", value: loginId },
+        { name: "OPS_BROWSER_PASSWORD", value: password },
+      ])
+    : ["OPS_BROWSER_SUPABASE_STORAGE=1"]
+  const tempUserMissing = useTemporaryUser
+    ? listMissingEnv([
+        { name: "SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL/VITE_SUPABASE_URL", value: supabaseUrl },
+        { name: "NEXT_PUBLIC_SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY", value: supabaseAnonKey },
+        { name: "SUPABASE_SERVICE_ROLE_KEY", value: serviceRoleKey },
+      ])
+    : ["OPS_BROWSER_TEMP_USER=1"]
+
+  const authModes = {
+    "storage-state-file": {
+      configured: Boolean(storageStatePath),
+      ready: storageStateFileExists,
+      missing: storageStateMissing,
+    },
+    "ui-login": {
+      configured: Boolean(loginId || password),
+      ready: uiLoginMissing.length === 0,
+      missing: uiLoginMissing,
+    },
+    "supabase-storage": {
+      configured: useSupabaseStorage,
+      ready: useSupabaseStorage && supabaseStorageMissing.length === 0,
+      missing: supabaseStorageMissing,
+    },
+    "temp-user-storage": {
+      configured: useTemporaryUser,
+      ready: useTemporaryUser && tempUserMissing.length === 0,
+      missing: tempUserMissing,
+    },
+  }
+  const canRunAuthenticatedWorkflow = Object.values(authModes).some((mode) => mode.ready)
+  const canCreateCompletionFixtures = Boolean(serviceRoleKey || (loginId && password))
+
+  return {
+    canRunAuthenticatedWorkflow,
+    canCreateCompletionFixtures,
+    authModes,
+    hint: "Set OPS_BROWSER_STORAGE_STATE, OPS_BROWSER_TEMP_USER=1, or OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD in .env.ops-browser.local.",
+  }
+}
+
 function requireEnabled() {
-  if (ENABLED) return true
-  console.log("Skipped. Set OPS_BROWSER_WORKFLOW=1 and add OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD, OPS_BROWSER_STORAGE_STATE, or OPS_BROWSER_TEMP_USER=1 to verify authenticated ops screens.")
+  if (ENABLED || isEnabledEnv(env("OPS_BROWSER_WORKFLOW"))) return true
+  console.log("Skipped. Set OPS_BROWSER_WORKFLOW=1 and add OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD, OPS_BROWSER_STORAGE_STATE, or OPS_BROWSER_TEMP_USER=1 to verify authenticated ops screens. Set OPS_BROWSER_PUBLIC_SMOKE=1 to verify public sign-in and protected-route redirects. Set OPS_BROWSER_PREFLIGHT=1 to check authenticated workflow prerequisites.")
   return false
 }
 
@@ -1380,6 +1775,86 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
   }
 }
 
+async function inspectPublicSmokeRoute(page, baseUrl, route) {
+  const consoleMessages = []
+  const pageErrors = []
+  const onConsole = (message) => {
+    if (message.type() === "error") consoleMessages.push(message.text())
+  }
+  const onPageError = (error) => pageErrors.push(error.message)
+  page.on("console", onConsole)
+  page.on("pageerror", onPageError)
+
+  try {
+    await page.goto(joinUrl(baseUrl, route.path), { waitUntil: "networkidle" })
+    const url = new URL(page.url())
+    const bodyText = await page.locator("body").innerText({ timeout: 10000 })
+    const metrics = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }))
+
+    if (url.pathname !== route.expectedPath) {
+      throw new Error(`${route.name} expected ${route.expectedPath} but reached ${url.pathname}.`)
+    }
+    if (route.expectedSearchIncludes && !url.search.includes(route.expectedSearchIncludes)) {
+      throw new Error(`${route.name} search did not include ${route.expectedSearchIncludes}. Reached ${url.pathname}${url.search}.`)
+    }
+    if (bodyText.length < 20) throw new Error(`${route.name} rendered too little content.`)
+    for (const expectedText of route.expectedTexts) {
+      if (!bodyText.includes(expectedText)) throw new Error(`${route.name} is missing visible text: ${expectedText}.`)
+    }
+    if (metrics.scrollWidth > metrics.viewportWidth + 8) {
+      throw new Error(`${route.name} has horizontal overflow: ${metrics.scrollWidth}px over ${metrics.viewportWidth}px.`)
+    }
+    if (consoleMessages.length > 0 || pageErrors.length > 0) {
+      throw new Error(`${route.name} has browser errors: ${[...consoleMessages, ...pageErrors].join(" | ")}`)
+    }
+
+    return {
+      name: route.name,
+      path: route.path,
+      ok: true,
+      reachedPath: url.pathname,
+      scrollWidth: metrics.scrollWidth,
+      viewportWidth: metrics.viewportWidth,
+    }
+  } finally {
+    page.off("console", onConsole)
+    page.off("pageerror", onPageError)
+  }
+}
+
+async function runPublicSmokeViewport(browser, baseUrl, viewport) {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+  })
+  const page = await context.newPage()
+  try {
+    const routes = []
+    for (const route of PUBLIC_SMOKE_ROUTES) {
+      routes.push(await inspectPublicSmokeRoute(page, baseUrl, route))
+    }
+    return { viewport: viewport.name, routes }
+  } finally {
+    await context.close()
+  }
+}
+
+async function runPublicSmoke(baseUrl) {
+  const { chromium } = await importPlaywright()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const viewports = []
+    for (const viewport of VIEWPORTS) {
+      viewports.push(await runPublicSmokeViewport(browser, baseUrl, viewport))
+    }
+    console.log(JSON.stringify({ ok: true, baseUrl, authMode: "public-smoke", viewports }, null, 2))
+  } finally {
+    await browser.close()
+  }
+}
+
 async function runViewport(browser, baseUrl, candidates, password, viewport, storageStatePath, artifactDir) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -1410,11 +1885,27 @@ async function runViewport(browser, baseUrl, candidates, password, viewport, sto
 }
 
 async function run() {
-  if (!requireEnabled()) return
   loadEnvFile(resolve(ROOT, ".env.ops-browser.local"))
   loadEnvFile(resolve(ROOT, ".env.local"))
 
   const baseUrl = env("OPS_BROWSER_BASE_URL", DEFAULT_BASE_URL)
+  if (isEnabledEnv(env("OPS_BROWSER_PREFLIGHT"))) {
+    const authPreflight = buildOpsBrowserAuthPreflight()
+    console.log(JSON.stringify({ ok: authPreflight.canRunAuthenticatedWorkflow, baseUrl, authPreflight }, null, 2))
+    if (!authPreflight.canRunAuthenticatedWorkflow) process.exitCode = 1
+    return
+  }
+
+  const publicSmoke = isEnabledEnv(env("OPS_BROWSER_PUBLIC_SMOKE"))
+  const workflowEnabled = ENABLED || isEnabledEnv(env("OPS_BROWSER_WORKFLOW"))
+  if (!workflowEnabled) {
+    if (publicSmoke) {
+      await runPublicSmoke(baseUrl)
+      return
+    }
+    if (!requireEnabled()) return
+  }
+
   const loginId = env("OPS_BROWSER_LOGIN_ID", env("OPS_BROWSER_EMAIL"))
   const password = env("OPS_BROWSER_PASSWORD")
   const storageStatePath = env("OPS_BROWSER_STORAGE_STATE")

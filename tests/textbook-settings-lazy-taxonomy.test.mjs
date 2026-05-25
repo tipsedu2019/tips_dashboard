@@ -66,3 +66,22 @@ test("textbook supplier tab shows linked publisher names instead of count-only s
   assert.match(source, /<TableHead className=\{`w-\[42%\] \$\{settingsTableHeadClass\}`\}>총판<\/TableHead>/);
   assert.match(source, /<TableHead className=\{`w-\[46%\] \$\{settingsTableHeadClass\}`\}>연결 출판사<\/TableHead>/);
 });
+
+test("textbook settings uses mobile edit cards for publisher and supplier tables", async () => {
+  const source = await readFile(
+    new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /data-testid="textbook-publishers-mobile-list"/);
+  assert.match(source, /data-testid=\{`textbook-publisher-mobile-card-\$\{publisher\.id\}`\}/);
+  assert.match(source, /data-testid="textbook-suppliers-mobile-list"/);
+  assert.match(source, /data-testid=\{`textbook-supplier-mobile-card-\$\{supplier\.id\}`\}/);
+  assert.match(source, /data-testid="textbook-subsubjects-mobile-list"/);
+  assert.match(source, /data-testid=\{`textbook-subsubject-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(source, /className="grid gap-2 md:hidden"/);
+  assert.match(source, /<div className="hidden md:block">[\s\S]*<SettingsTableFrame>/);
+  assert.match(source, /<div className="hidden md:block">[\s\S]*<Table className="min-w-\[720px\] table-fixed">/);
+  assert.match(source, /PublisherSubjectSelect/);
+  assert.match(source, /togglePublisherSupplier\(publisher\.id, supplier\.id, checked === true\)/);
+});

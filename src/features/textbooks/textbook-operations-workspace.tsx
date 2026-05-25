@@ -4320,6 +4320,7 @@ export function TextbookOperationsWorkspace() {
                 size="sm"
                 className="h-8 self-start sm:self-auto"
                 onClick={() => void refresh()}
+                aria-label={lastLoadedAt ? `다시 불러오기 · ${formatLoadedAt(lastLoadedAt)} · ${loadDurationMs}ms` : "다시 불러오기"}
               >
                 다시 불러오기
               </Button>
@@ -7143,7 +7144,157 @@ function TextbookTable({
   }, [amountMode, locationColumns, rows]);
 
   return (
-    <div className="overflow-x-auto rounded-lg border [contain-intrinsic-size:720px] [content-visibility:auto]" aria-label="교재 목록">
+    <div className="space-y-2" aria-label="교재 목록">
+      <div data-testid="textbook-master-mobile-list" className="grid gap-2 md:hidden">
+        {sortedGroupedRows.map((group) => {
+          const isCollapsed = collapsedGroups.includes(group.label);
+          const GroupIcon = isCollapsed ? ChevronRight : ChevronDown;
+          const groupTotalQuantity = group.rows.reduce((sum, row) => sum + numberValue(row.totalQuantity), 0);
+
+          return (
+            <section key={`mobile-${group.label}`} className="overflow-hidden rounded-md border bg-background">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-auto w-full justify-start rounded-none border-b px-3 py-2 text-left"
+                aria-expanded={!isCollapsed}
+                onClick={() => onToggleGroup?.(group.label)}
+              >
+                <GroupIcon className="mr-2 size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{group.label}</span>
+                <span className="ml-2 shrink-0 text-xs font-medium text-muted-foreground">
+                  {formatQuantity(group.rows.length)}종 · 재고 {formatQuantity(groupTotalQuantity)}
+                </span>
+              </Button>
+              {isCollapsed ? null : (
+                <div className="grid min-w-0 gap-2 p-2">
+                  {group.rows.map((row) => {
+                    const rowId = getRecordId(row);
+                    const rowA11yLabel = getTextbookIdentityLabel(row);
+                    const totalQuantity = numberValue(row.totalQuantity);
+                    const publisherLabel = getKnownPublisherLabel(row);
+                    const locationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
+                    const amountValue = amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue;
+                    const gradeLabel = getTextbookGradeLabel(getTextbookGradeLevel(row)) || getTextbookSchoolLevelLabel(getTextbookSchoolLevel(row)) || "-";
+                    const subSubjectLabel = getTextbookSubSubject(row) || "-";
+                    const categorySummary = compactUniqueLabels([getSubjectLabel(row.subject), gradeLabel, subSubjectLabel]).join(" · ") || "-";
+                    const qualityIssues = getTextbookQualityIssues(row, duplicateTitleKeys);
+                    const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
+                    const locationSummary = locationColumns
+                      .map((location) => ({
+                        label: location.label,
+                        quantity: numberValue(locationQuantities[location.id]),
+                      }))
+                      .filter((location) => location.quantity !== 0)
+                      .slice(0, 3);
+
+                    return (
+                      <article
+                        key={rowId}
+                        data-testid={`textbook-master-mobile-card-${rowId}`}
+                        className={cn(
+                          "min-w-0 rounded-md border bg-background p-3 shadow-xs",
+                          qualityIssues.inactive && "bg-muted/20 text-muted-foreground",
+                        )}
+                      >
+                        <div className="flex min-w-0 items-start gap-3">
+                          {hasSelection ? (
+                            <Checkbox
+                              checked={selectedIdSet.has(rowId)}
+                              onCheckedChange={(value) => onBulkSelectionChange?.(rowId, !!value)}
+                              title={`${rowA11yLabel} 선택`}
+                              aria-label={`${rowA11yLabel} 선택`}
+                              className="mt-1 shrink-0"
+                            />
+                          ) : null}
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div className="flex min-w-0 items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                {onSelectTextbook ? (
+                                  <button
+                                    type="button"
+                                    aria-label={`${rowA11yLabel} 열기`}
+                                    title={rowA11yLabel}
+                                    className="block max-w-full truncate text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    onClick={() => onSelectTextbook(row)}
+                                  >
+                                    {getTextbookTitle(row)}
+                                  </button>
+                                ) : (
+                                  <p className="truncate text-sm font-semibold">{getTextbookTitle(row)}</p>
+                                )}
+                                {publisherLabel ? <p className="truncate text-xs text-muted-foreground">{publisherLabel}</p> : null}
+                              </div>
+                              {onSelectTextbook ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-8 shrink-0 rounded-md"
+                                  aria-label={`${rowA11yLabel} 편집`}
+                                  title={`${getTextbookTitle(row)} 편집`}
+                                  onClick={() => onSelectTextbook(row)}
+                                >
+                                  <Pencil className="size-3.5" />
+                                </Button>
+                              ) : null}
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5">
+                              <Badge variant="secondary" className="rounded px-1.5 text-[11px]">{categorySummary}</Badge>
+                              {qualityIssueLabels.length > 0 ? (
+                                <Badge variant="outline" className="rounded px-1.5 text-[11px] text-amber-700">
+                                  정리 {formatQuantity(qualityIssueLabels.length)}
+                                </Badge>
+                              ) : null}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="rounded-md bg-muted/40 px-2 py-1.5">
+                                <p className="text-muted-foreground">합계</p>
+                                <p className={cn("font-semibold tabular-nums", inventoryQuantityTone(totalQuantity))}>
+                                  {formatQuantity(totalQuantity)}
+                                </p>
+                              </div>
+                              <div className="rounded-md bg-muted/40 px-2 py-1.5 text-right">
+                                <p className="text-muted-foreground">{amountHeader}</p>
+                                <p className="font-semibold tabular-nums">{formatCurrency(amountValue)}</p>
+                              </div>
+                            </div>
+
+                            {locationSummary.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                                {locationSummary.map((location) => (
+                                  <span key={`${rowId}-${location.label}`} className="rounded border px-1.5 py-0.5 tabular-nums">
+                                    {location.label} {formatQuantity(location.quantity)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
+        {rows.length === 0 ? (
+          <div className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+            <span>{emptyLabel}</span>
+            {emptyActionLabel && onEmptyAction ? (
+              <Button type="button" variant="outline" size="sm" className="h-8 rounded-md" onClick={onEmptyAction}>
+                {emptyActionLabel}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-lg border [contain-intrinsic-size:720px] [content-visibility:auto] md:block">
       <Table className="min-w-[920px] table-fixed">
         <caption className="sr-only">교재 마스터 목록</caption>
         <TableHeader className="sticky top-0 z-10 bg-background">
@@ -7319,6 +7470,7 @@ function TextbookTable({
           ) : null}
         </TableBody>
       </Table>
+      </div>
     </div>
   );
 }

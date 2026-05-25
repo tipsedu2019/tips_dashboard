@@ -252,7 +252,7 @@ export function NavUser({ user }: { user: NavUserRecord }) {
             <form onSubmit={handleProfileSave} className="grid min-h-0">
               <DialogHeader className="border-b px-5 py-4 sm:px-6">
                 <DialogTitle>프로필 설정</DialogTitle>
-                <DialogDescription>
+                <DialogDescription className="sr-only">
                   아바타를 고르고 새 비밀번호를 입력하면 계정에 바로 반영됩니다.
                 </DialogDescription>
               </DialogHeader>
@@ -261,7 +261,6 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                   <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
                     <div>
                       <div className="text-sm font-semibold">프리셋 아바타</div>
-                      <div className="text-muted-foreground text-xs">노션 스타일 얼굴 50개</div>
                     </div>
                     <Avatar className="size-12 rounded-2xl border bg-background shadow-xs">
                       <AvatarImage src={selectedAvatar} alt="선택한 프로필 아바타" />

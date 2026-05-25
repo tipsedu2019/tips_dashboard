@@ -102,6 +102,20 @@ test("/admin/tasks is a focused Todoist-style todo workspace", async () => {
   assert.doesNotMatch(workspaceSource, /DropdownMenu/);
 });
 
+test("operation dialogs keep accessible descriptions hidden from the visual workflow", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(workspaceSource, /DialogDescription,/);
+  assert.match(
+    workspaceSource,
+    /<DialogDescription className="sr-only">[\s\S]*?운영 업무를 입력하고 저장합니다\.[\s\S]*?<\/DialogDescription>/,
+  );
+  assert.match(
+    workspaceSource,
+    /<DialogDescription className="sr-only">[\s\S]*?선택한 운영 업무의 처리 상태를 확인합니다\.[\s\S]*?<\/DialogDescription>/,
+  );
+});
+
 test("/admin/tasks removes the legacy sample table implementation", async () => {
   for (const pathname of [
     "src/app/admin/tasks/components/add-task-modal.tsx",
@@ -148,6 +162,13 @@ test("todo workspace supports board calendar filters and legacy query links", as
     "tasks={visibleTasks}",
     'if (todoView === "mine") return isOpenTask(task) && isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)',
     'mine: openGeneralTasks.filter((task) => isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)).length',
+    'const deepLinkedTaskId = searchParams.get("taskId") || ""',
+    'const deepLinkedTask = taskById.get(deepLinkedTaskId)',
+    'syncTaskDeepLink(null)',
+    "setSelectedTask(deepLinkedTask)",
+    "setDetailOpen(true)",
+    "syncTaskDeepLink(task.id)",
+    "syncTaskDeepLink(null)",
   ]);
 
   assert.ok(source.includes(`label: "${ko.board}"`));
@@ -155,6 +176,7 @@ test("todo workspace supports board calendar filters and legacy query links", as
   assert.ok(source.includes(`label: "${ko.unassigned}"`));
   assert.ok(source.includes(`aria-label="${ko.todo} ${ko.board}"`));
   assert.ok(source.includes("const todoTaskSource = scopedTasks"));
+  assert.match(source, /const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto/);
   assert.doesNotMatch(source, /todoFilter === "confirmation"/);
   assert.doesNotMatch(source, /confirmationByTaskId=\\{confirmationByTaskId\\}/);
   assertIncludesAll(source, [
@@ -181,10 +203,19 @@ test("quick add keeps Todoist-like shortcuts without extra UI", async () => {
     "p4",
     "const koreanMeridiemTime = normalized.match",
     "const koreanHourTime = normalized.match",
+    "function quickDateTimeForWeekdayInCalendarWeek",
+    "function quickDateTimeForNextCalendarWeekday",
+    "pendingWeekdayModifier = \"next\"",
+    "pendingWeekdayModifier = \"this\"",
+    "const forceThisWeekday = pendingWeekdayModifier === \"this\"",
+    "quickDateTimeForNextCalendarWeekday(weekday)",
+    "const match = token.match(/^(마감|마감일|예정|예정일|기한|일정|due)[:：](.*)$/i)",
     'token.trim().toLowerCase().replace(/까지$/, "")',
     "const relative = normalized.match",
     "const monthDay = normalized.match",
     "let pendingAssigneeLookup = false",
+    "let pendingDueLookup = false",
+    "if (pendingDueLookup) {",
     "const applyDateToken = (dateToken: string) =>",
     'normalizedDateToken.endsWith("까지")',
     'applyDateToken(normalizedDateToken.replace(/까지$/, ""))',
@@ -192,6 +223,8 @@ test("quick add keeps Todoist-like shortcuts without extra UI", async () => {
     '["담당", "담당자", "assignee", "assign"].includes(normalized)',
     "const dueDirective = getQuickAddDueDirective(token)",
     "applyDateToken(dueDirective.value)",
+    "pendingDueLookup = true",
+    '["마감", "마감일", "예정", "예정일", "기한", "일정", "due"].includes(normalized)',
     "parsed.assigneeId",
     "parsed.priority",
     "parsed.memo",
@@ -204,21 +237,32 @@ test("simple todo details stay completion focused", async () => {
     source.indexOf("function getSecondaryTaskStatusOptions"),
     source.indexOf("function shouldShowDetailStatusBadge"),
   );
+  const detailDialogSource = source.slice(
+    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={Boolean(deleteTarget)}"),
+  );
 
   assertIncludesAll(source, [
     'if (task.type === "general") return []',
     "function shouldShowDetailStatusBadge",
     'task.type !== "general" || isClosedOpsTask(task)',
     "shouldShowDetailStatusBadge(selectedTaskFresh)",
-    "삭제하시겠습니까?",
+    'deleteTarget?.title ? `${deleteTarget.title} 삭제할까요?` : "삭제할까요?"',
     "deleteTargetRemovesCompletedOperation",
-    "완료 이력 삭제",
+    '`${deleteTarget?.title || "완료된 운영 업무"} 이력 삭제할까요?`',
     "이력 삭제",
     "삭제 완료",
+    'selectedTaskFresh.comments.length > 0 ? `댓글 ${selectedTaskFresh.comments.length}` : "댓글 추가"',
+    'selectedTaskFresh.attachments.length > 0 ? `첨부 ${selectedTaskFresh.attachments.length}` : "첨부 추가"',
   ]);
 
   assert.doesNotMatch(secondaryStatusSource, /task\.type === "general"\) \{[\s\S]*OPS_TASK_STATUSES/);
-  assert.doesNotMatch(source, /삭제할까요/);
+  assert.doesNotMatch(source, /삭제하시겠습니까/);
+  assert.doesNotMatch(source, /상세 정보/);
+  assert.doesNotMatch(source, /댓글 없음/);
+  assert.doesNotMatch(source, /첨부 없음/);
+  assert.doesNotMatch(source, /완료 조건/);
+  assert.doesNotMatch(detailDialogSource, /<DialogDescription(?! className="sr-only")/);
 });
 
 test("assignee search and quick add match profile login ids", async () => {
@@ -331,6 +375,10 @@ test("registration keeps the Notion pipeline as first-class state", async () => 
 
 test("operation forms use staged fields and linked management selectors", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const formDialogSource = source.slice(
+    source.indexOf("<Dialog open={formOpen}"),
+    source.indexOf("<Dialog open={detailOpen}"),
+  );
 
   assertIncludesAll(source, [
     '"registration_contact"',
@@ -355,6 +403,14 @@ test("operation forms use staged fields and linked management selectors", async 
     "fillTransferFrom: true",
     "fillTransferTo: true",
     "fillWordRetest: true",
+    "getStudentRosterClassIds",
+    "selectedWordRetestStudent",
+    "selectedWordRetestClassId",
+    "selectedWordRetestTeacherId",
+    "getWordRetestClassOptions(classes, selectedWordRetestStudent, selectedWordRetestClassId)",
+    "getWordRetestTeacherOptions(teachers, selectedWordRetestTeacherId)",
+    "classItem.id === selectedClassId",
+    "teacher.id === selectedTeacherId",
     "openManualField",
     "shouldShowManualField",
     'const defaultAssigneeId = currentUserId || ""',
@@ -364,6 +420,7 @@ test("operation forms use staged fields and linked management selectors", async 
     "{getTaskTypeLabel(form.type)}",
   ]);
 
+  assert.doesNotMatch(formDialogSource, /<DialogDescription(?! className="sr-only")/);
   assert.match(source, />\s*\uc120\uc0dd\ub2d8\s*<\/button>/);
   assert.match(source, />\s*\uc870\uad50\s*<\/button>/);
 });
@@ -380,12 +437,13 @@ test("management sync connects registration transfer withdrawal and word retest 
   assertIncludesAll(workspaceSource, [
     "getOperationCompletionBlockers",
     "hasLinkedRecord(input.studentId)",
-    "hasLinkedRecord(input.classId || input.className)",
-    "hasLinkedRecord(input.textbookId || input.textbookTitle)",
+    "!hasLinkedRecord(input.classId)",
+    "!hasLinkedRecord(input.textbookId)",
+    "fromClass && toClass && fromClass.id === toClass.id",
     "findStudentOptionByReference",
     "findClassOptionByReference",
-    "findTextbookOptionByReference",
-    "findTeacherOptionByReference",
+    "findTextbookOption(textbooks, input.textbookId, indexes)",
+    "findTeacherOption(teachers, wordRetest.teacherId, indexes)",
     "wordRetest.teacherName",
     "blockers.push",
     "wordRetest.teacherId",
@@ -399,8 +457,8 @@ test("management sync connects registration transfer withdrawal and word retest 
     "점수 없음",
     "function CompletionBlockerActionPanel",
     "function CompletionBlockerInlineChips",
-    "function CompletionReadinessPreview",
     "getCompletionBlockerActionLabel([blocker])",
+    "{formCompletionBlockers.length > 0 && (",
     "showNeed",
     "isOwnGeneralTask",
     "[task.requestedBy, task.assigneeId, task.secondaryAssigneeId].includes(currentUserId)",
@@ -411,18 +469,27 @@ test("management sync connects registration transfer withdrawal and word retest 
     "입력 필요",
     "선택 필요",
   ]);
+  assert.doesNotMatch(workspaceSource, /currentFormCompletionBlockers/);
+  assert.doesNotMatch(workspaceSource, /getCompletionReadinessInput/);
+  assert.doesNotMatch(workspaceSource, /isCompletionReadinessStep/);
+  assert.doesNotMatch(workspaceSource, /ManagementSyncPreview/);
+  assert.doesNotMatch(workspaceSource, /CompletionReadinessPreview/);
+  assert.doesNotMatch(workspaceSource, />\s*완료 전\s*<\/span>/);
 
   assertIncludesAll(serviceSource, [
     "assertManagementSyncReady",
     "assertManagementSyncRecordsReady",
-    "hasManagementReference(input.classId, input.className)",
-    "hasManagementReference(wordRetest.teacherId, wordRetest.teacherName)",
+    "hasManagementReference(input.classId)",
+    "hasManagementReference(input.textbookId)",
+    "hasManagementReference(wordRetest.teacherId)",
+    "hasManagementReference(transfer.fromClassId)",
+    "hasManagementReference(transfer.toClassId || input.classId)",
     'return current === "absent" ? "absent" : "done"',
     "function shouldRequireWordRetestScore",
     "function inferClassBranch",
     "inferClassBranch(classRow)",
     "!isWordRetestAbsent(wordRetest) && !hasWordRetestScore(wordRetest)",
-    "isSameManagementReference(transfer.fromClassId || transfer.fromClassName",
+    "isSameManagementReference(transfer.fromClassId, transfer.toClassId || input.classId)",
     "ensureOpsStudent",
     "assignOpsStudentToClass",
     "assignOpsTextbookToClass",
@@ -431,6 +498,15 @@ test("management sync connects registration transfer withdrawal and word retest 
     "syncWithdrawalManagementLinks",
     "syncTransferManagementLinks",
     "syncWordRetestManagementLinks",
+    "function assertDifferentOpsClass",
+    "assertDifferentOpsClass(fromClass, toClass",
+    "전반 완료 전에 전 수업과 후 수업을 다르게 선택하세요.",
+    "resolveOpsRegistrationStudent",
+    "matchesOpsRegistrationStudent",
+    "identityFields.length === 0",
+    "supportingFields",
+    "return null",
+    "const existingStudent = completed ? await resolveOpsRegistrationStudent(input) : null",
     "const firstDelete = await supabase.from(\"ops_tasks\").delete().eq(\"id\", taskId)",
     "export async function deleteOpsTask",
     "MANAGEMENT_INPUT_FIELDS",
@@ -714,11 +790,42 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     "/admin/tasks?list=today",
     "/admin/tasks?list=board",
     "/admin/tasks?list=calendar",
+    "/admin/dashboard",
     "/admin/registration",
     "/admin/transfer",
     "/admin/withdrawal",
     "/admin/word-retests",
     "/admin/approvals",
+    "AUTHENTICATED_CORE_SMOKE_ROUTES",
+    "/admin/students",
+    "/admin/classes",
+    "/admin/textbooks",
+    "/admin/curriculum",
+    "/admin/class-schedule",
+    "/admin/class-schedule/lesson-design",
+    "/admin/timetable",
+    "/admin/academic-calendar",
+    "/admin/academic-calendar/annual-board",
+    "/admin/settings/schools",
+    "/admin/settings/teachers",
+    "/admin/settings/classrooms",
+    "/admin/settings/class-groups",
+    "/admin/settings/textbook-suppliers",
+    "management-students",
+    "dashboard",
+    "management-classes",
+    "management-textbooks",
+    "curriculum-planning",
+    "class-schedule",
+    "lesson-design",
+    "timetable",
+    "academic-calendar",
+    "academic-annual-board",
+    "settings-schools",
+    "settings-teachers",
+    "settings-classrooms",
+    "settings-class-groups",
+    "settings-textbook-suppliers",
     "verifyQuickAddInteraction",
     "verifySingleQuickAddInteraction",
     "내일 오전 10시까지",
@@ -770,6 +877,62 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     "OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD",
     "OPS_BROWSER_SUPABASE_STORAGE",
     "OPS_BROWSER_TEMP_USER",
+    "OPS_BROWSER_PREFLIGHT",
+    "buildOpsBrowserAuthPreflight",
+    "canRunAuthenticatedWorkflow",
+    "storage-state-file",
+    "temp-user-storage",
+    "ui-login",
+    "missing",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "OPS_BROWSER_PUBLIC_SMOKE",
+    "PUBLIC_SMOKE_ROUTES",
+    "CORE_ADMIN_PUBLIC_SMOKE_ROUTES",
+    "LEGACY_AUTH_PUBLIC_SMOKE_ROUTES",
+    "LEGACY_ADMIN_PUBLIC_SMOKE_ROUTES",
+    "ADMIN_ALIAS_PUBLIC_SMOKE_ROUTES",
+    "runPublicSmoke",
+    'authMode: "public-smoke"',
+    "landing-alias-redirect",
+    "next=%2Fadmin%2Fdashboard",
+    "admin-root-redirect",
+    "admin-calendar-alias-redirect",
+    "admin-manual-alias-redirect",
+    "admin-schools-alias-redirect",
+    "admin-teachers-alias-redirect",
+    "admin-classrooms-alias-redirect",
+    "admin-terms-alias-redirect",
+    "admin-settings-root-redirect",
+    "admin-settings-account-redirect",
+    "admin-settings-appearance-redirect",
+    "admin-settings-connections-redirect",
+    "admin-settings-notifications-redirect",
+    "admin-settings-terms-redirect",
+    "admin-settings-user-redirect",
+    "protected-tasks-redirect",
+    "protected-dashboard-redirect",
+    "protected-approvals-redirect",
+    "protected-registration-redirect",
+    "protected-transfer-redirect",
+    "protected-withdrawal-redirect",
+    "protected-students-redirect",
+    "protected-classes-redirect",
+    "protected-textbooks-redirect",
+    "protected-curriculum-redirect",
+    "protected-timetable-redirect",
+    "protected-academic-calendar-redirect",
+    "protected-settings-schools-redirect",
+    "legacy-admin-chat-redirect",
+    "legacy-sign-in-2",
+    "legacy-sign-up-2",
+    "legacy-forgot-password-2",
+    "expectedSearchIncludes",
+    "next=%2Fadmin%2Ftasks%3FtaskId%3Dmissing-task-for-smoke",
+    "next=%2Fadmin%2Fapprovals",
+    "next=%2Fadmin%2Fcalendar",
+    "next=%2Fadmin%2Fmanual",
+    "next=%2Fadmin%2Fsettings%2Fschools",
+    "next=%2Fadmin%2Fsettings%2Fnotifications",
     "createStorageStateFromSupabase",
     "createTemporaryBrowserUserStorage",
     "auth.admin.createUser",

@@ -6,7 +6,7 @@ import { Moon, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/hooks/use-theme"
 import { useCircularTransition } from "@/hooks/use-circular-transition"
-import "./theme-customizer/circular-transition.css"
+import "./mode-toggle-transition.css"
 
 interface ModeToggleProps {
   variant?: "outline" | "ghost" | "default"

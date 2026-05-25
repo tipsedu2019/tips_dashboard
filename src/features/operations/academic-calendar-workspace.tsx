@@ -98,7 +98,7 @@ function buildSidebarGroups(events: ReturnType<typeof buildAcademicCalendarTempl
 export function AcademicCalendarWorkspace() {
   const searchParams = useSearchParams();
   const { canManageAll } = useAuth();
-  const { data, loading, error, refresh } = useOperationsWorkspaceData();
+  const { data, error, refresh } = useOperationsWorkspaceData();
   const [mutationError, setMutationError] = useState<string | null>(null);
   const initialDate = useMemo(() => parseSearchDate(searchParams.get("date")), [searchParams]);
   const initialEventId = useMemo(() => text(searchParams.get("eventId")), [searchParams]);

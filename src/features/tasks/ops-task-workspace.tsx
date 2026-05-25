@@ -86,10 +86,6 @@ type StatusUndoState = {
   previousStatus: OpsTaskStatus
   nextStatus: OpsTaskStatus
 }
-type ManagementSyncPreviewItem = {
-  label: string
-  value: string
-}
 type TaskScheduleItem = {
   label: string
   value: string
@@ -142,7 +138,7 @@ const LINKED_SELECT_QUERY_OPTION_LIMIT = 50
 const LINKED_SELECT_MANUAL_VALUE = "__manual__"
 const HORIZONTAL_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 const HORIZONTAL_MUTED_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md bg-muted/45 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 
 const TODO_VIEW_TABS: Array<{ key: TodoViewKey; label: string }> = [
   { key: "inbox", label: "받은함" },
@@ -327,9 +323,31 @@ function isWordRetestClassOption(classItem?: OpsClassOption) {
   return isEnglishOperationOption([classItem.subject, classItem.meta, classItem.label].filter(Boolean).join(" "))
 }
 
-function getWordRetestClassOptions(classes: OpsClassOption[]) {
+function getStudentRosterClassIds(student: OpsStudentOption | undefined, classes: OpsClassOption[]) {
+  if (!student) return []
+  const linkedIds = new Set(student.classIds)
+  classes.forEach((classItem) => {
+    if (classItem.studentIds.includes(student.id)) linkedIds.add(classItem.id)
+  })
+  return [...linkedIds]
+}
+
+function uniqueClassOptions(classes: OpsClassOption[]) {
+  const seenIds = new Set<string>()
+  return classes.filter((classItem) => {
+    if (seenIds.has(classItem.id)) return false
+    seenIds.add(classItem.id)
+    return true
+  })
+}
+
+function getWordRetestClassOptions(classes: OpsClassOption[], student?: OpsStudentOption, selectedClassId = "") {
   const englishClasses = classes.filter(isWordRetestClassOption)
-  return englishClasses.length > 0 ? englishClasses : classes
+  const baseClasses = englishClasses.length > 0 ? englishClasses : classes
+  const studentClassIds = getStudentRosterClassIds(student, classes)
+  const studentClasses = baseClasses.filter((classItem) => studentClassIds.includes(classItem.id))
+  const selectedClass = classes.find((classItem) => classItem.id === selectedClassId)
+  return uniqueClassOptions([selectedClass, ...(studentClasses.length > 0 ? studentClasses : baseClasses)].filter(Boolean) as OpsClassOption[])
 }
 
 function isWordRetestTeacherOption(teacher?: OpsTeacherOption) {
@@ -338,9 +356,20 @@ function isWordRetestTeacherOption(teacher?: OpsTeacherOption) {
   return teacher.subjects.some((subject) => isEnglishOperationOption(subject)) || isEnglishOperationOption(meta)
 }
 
-function getWordRetestTeacherOptions(teachers: OpsTeacherOption[]) {
+function uniqueTeacherOptions(teachers: OpsTeacherOption[]) {
+  const seenIds = new Set<string>()
+  return teachers.filter((teacher) => {
+    if (seenIds.has(teacher.id)) return false
+    seenIds.add(teacher.id)
+    return true
+  })
+}
+
+function getWordRetestTeacherOptions(teachers: OpsTeacherOption[], selectedTeacherId = "") {
   const englishTeachers = teachers.filter(isWordRetestTeacherOption)
-  return englishTeachers.length > 0 ? englishTeachers : teachers
+  const baseTeachers = englishTeachers.length > 0 ? englishTeachers : teachers
+  const selectedTeacher = teachers.find((teacher) => teacher.id === selectedTeacherId)
+  return uniqueTeacherOptions([selectedTeacher, ...baseTeachers].filter(Boolean) as OpsTeacherOption[])
 }
 
 function getUnknownErrorMessage(error: unknown) {
@@ -429,17 +458,6 @@ function inputFromTaskForCompletionCheck(task: OpsTask): OpsTaskInput {
   return { ...inputFromTaskForPreview(task), status: "done" }
 }
 
-function getCompletionReadinessInput(input: OpsTaskInput): OpsTaskInput {
-  const nextInput = cloneForm({ ...input, status: "done" })
-  if (nextInput.type === "registration") {
-    nextInput.registration = {
-      ...(nextInput.registration || {}),
-      pipelineStatus: findRegistrationPipelineStatus("7.") || nextInput.registration?.pipelineStatus || "7. 등록 완료",
-    }
-  }
-  return nextInput
-}
-
 function getCompletionIntentForBlockedEdit(task: OpsTask, blockers: string[]): FormCompletionIntent | null {
   if (blockers.length === 0 || task.type === "general") return null
   if (task.type === "registration") {
@@ -471,14 +489,6 @@ function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null)
   if (intent.registrationPipelineStatus) return `저장 후 ${getCompactRegistrationPipelineLabel(intent.registrationPipelineStatus)}`
   if (intent.status === "done") return "저장 후 완료"
   return "저장"
-}
-
-function isCompletionReadinessStep(type: OpsTaskType, step: FormDetailStepKey) {
-  if (type === "registration") return step === "registration_checks"
-  if (type === "withdrawal") return step === "withdrawal_checks"
-  if (type === "transfer") return step === "transfer_checks"
-  if (type === "word_retest") return step === "word_retest_scores"
-  return false
 }
 
 function isRegistrationPipelineComplete(input: OpsTaskInput) {
@@ -608,14 +618,6 @@ function findClassOptionByReference(classes: OpsClassOption[], indexes: OpsTaskO
   return findLinkedOptionByReference(classes, (id) => findClassOption(classes, id, indexes), ...references)
 }
 
-function findTextbookOptionByReference(textbooks: OpsTextbookOption[], indexes: OpsTaskOptionIndexes, ...references: unknown[]) {
-  return findLinkedOptionByReference(textbooks, (id) => findTextbookOption(textbooks, id, indexes), ...references)
-}
-
-function findTeacherOptionByReference(teachers: OpsTeacherOption[], indexes: OpsTaskOptionIndexes, ...references: unknown[]) {
-  return findLinkedOptionByReference(teachers, (id) => findTeacherOption(teachers, id, indexes), ...references)
-}
-
 function hasRosterLink(student: OpsStudentOption | undefined, classItem: OpsClassOption | undefined) {
   if (!student || !classItem) return false
   return (
@@ -672,47 +674,51 @@ function getOperationCompletionBlockers(
     if (!String(input.registration?.classStartDate || "").trim()) blockers.push("수업시작일")
     if (!hasNewRegistrationStudent(input)) blockers.push("학생")
     if (hasLinkedRecord(input.studentId) && !findStudentOption(students, input.studentId, indexes)) blockers.push("학생")
-    if (!hasLinkedRecord(input.classId || input.className)) blockers.push("수업")
-    if (hasLinkedRecord(input.classId || input.className) && !findClassOptionByReference(classes, indexes, input.classId, input.className)) blockers.push("수업")
-    if (!hasLinkedRecord(input.textbookId || input.textbookTitle)) blockers.push("교재")
-    if (hasLinkedRecord(input.textbookId || input.textbookTitle) && !findTextbookOptionByReference(textbooks, indexes, input.textbookId, input.textbookTitle)) blockers.push("교재")
+    if (!hasLinkedRecord(input.classId)) blockers.push("수업")
+    if (hasLinkedRecord(input.classId) && !findClassOption(classes, input.classId, indexes)) blockers.push("수업")
+    if (!hasLinkedRecord(input.textbookId)) blockers.push("교재")
+    if (hasLinkedRecord(input.textbookId) && !findTextbookOption(textbooks, input.textbookId, indexes)) blockers.push("교재")
     getMissingRegistrationCheckLabels(input.registration).forEach((label) => blockers.push(label))
   }
 
   if (input.type === "withdrawal" && input.status === "done") {
     if (!String(input.withdrawal?.withdrawalDate || "").trim()) blockers.push("퇴원일")
-    if (!hasLinkedRecord(input.studentId || input.studentName)) blockers.push("학생")
-    if (hasLinkedRecord(input.studentId || input.studentName) && !findStudentOptionByReference(students, indexes, input.studentId, input.studentName)) blockers.push("학생")
-    if (!hasLinkedRecord(input.classId || input.className)) blockers.push("수업")
-    if (hasLinkedRecord(input.classId || input.className) && !findClassOptionByReference(classes, indexes, input.classId, input.className)) blockers.push("수업")
+    if (!hasLinkedRecord(input.studentId)) blockers.push("학생")
+    if (hasLinkedRecord(input.studentId) && !findStudentOption(students, input.studentId, indexes)) blockers.push("학생")
+    if (!hasLinkedRecord(input.classId)) blockers.push("수업")
+    if (hasLinkedRecord(input.classId) && !findClassOption(classes, input.classId, indexes)) blockers.push("수업")
     getMissingWithdrawalCheckLabels(input.withdrawal).forEach((label) => blockers.push(label))
   }
 
   if (input.type === "transfer" && input.status === "done") {
     const transfer = input.transfer || {}
+    const student = findStudentOption(students, input.studentId, indexes)
+    const fromClass = findClassOption(classes, transfer.fromClassId, indexes)
+    const toClass = findClassOption(classes, transfer.toClassId || input.classId, indexes)
+
     if (!String(transfer.fromClassEndDate || "").trim()) blockers.push("전 수업 종료일")
     if (!String(transfer.toClassStartDate || "").trim()) blockers.push("후 수업 시작일")
-    if (!hasLinkedRecord(input.studentId || input.studentName)) blockers.push("학생")
-    if (hasLinkedRecord(input.studentId || input.studentName) && !findStudentOptionByReference(students, indexes, input.studentId, input.studentName)) blockers.push("학생")
-    if (!hasLinkedRecord(transfer.fromClassId || transfer.fromClassName)) blockers.push("전 수업")
-    if (hasLinkedRecord(transfer.fromClassId || transfer.fromClassName) && !findClassOptionByReference(classes, indexes, transfer.fromClassId, transfer.fromClassName)) blockers.push("전 수업")
-    if (!hasLinkedRecord(transfer.toClassId || input.classId || transfer.toClassName || input.className)) blockers.push("후 수업")
-    if (hasLinkedRecord(transfer.toClassId || input.classId || transfer.toClassName || input.className) && !findClassOptionByReference(classes, indexes, transfer.toClassId, input.classId, transfer.toClassName, input.className)) blockers.push("후 수업")
-    if (isSameLinkedRecord(transfer.fromClassId || transfer.fromClassName, transfer.toClassId || input.classId || transfer.toClassName || input.className)) blockers.push("다른 수업")
+    if (!hasLinkedRecord(input.studentId)) blockers.push("학생")
+    if (hasLinkedRecord(input.studentId) && !student) blockers.push("학생")
+    if (!hasLinkedRecord(transfer.fromClassId)) blockers.push("전 수업")
+    if (hasLinkedRecord(transfer.fromClassId) && !fromClass) blockers.push("전 수업")
+    if (!hasLinkedRecord(transfer.toClassId || input.classId)) blockers.push("후 수업")
+    if (hasLinkedRecord(transfer.toClassId || input.classId) && !toClass) blockers.push("후 수업")
+    if ((fromClass && toClass && fromClass.id === toClass.id) || isSameLinkedRecord(transfer.fromClassId, transfer.toClassId || input.classId)) blockers.push("다른 수업")
     getMissingTransferCheckLabels(input.transfer).forEach((label) => blockers.push(label))
   }
 
   if (input.type === "word_retest" && input.status === "done") {
     const wordRetest = input.wordRetest || {}
-    if (!hasLinkedRecord(input.studentId || input.studentName || wordRetest.studentName)) blockers.push("학생")
-    if (hasLinkedRecord(input.studentId || input.studentName || wordRetest.studentName) && !findStudentOptionByReference(students, indexes, input.studentId, input.studentName, wordRetest.studentName)) blockers.push("학생")
-    if (!hasLinkedRecord(input.classId || input.className || wordRetest.className)) blockers.push("수업")
-    if (hasLinkedRecord(input.classId || input.className || wordRetest.className) && !findClassOptionByReference(classes, indexes, input.classId, input.className, wordRetest.className)) blockers.push("수업")
-    if (!hasLinkedRecord(wordRetest.teacherId || wordRetest.teacherName)) blockers.push("선생님")
-    if (hasLinkedRecord(wordRetest.teacherId || wordRetest.teacherName) && !findTeacherOptionByReference(teachers, indexes, wordRetest.teacherId, wordRetest.teacherName)) blockers.push("선생님")
+    if (!hasLinkedRecord(input.studentId)) blockers.push("학생")
+    if (hasLinkedRecord(input.studentId) && !findStudentOption(students, input.studentId, indexes)) blockers.push("학생")
+    if (!hasLinkedRecord(input.classId)) blockers.push("수업")
+    if (hasLinkedRecord(input.classId) && !findClassOption(classes, input.classId, indexes)) blockers.push("수업")
+    if (!hasLinkedRecord(wordRetest.teacherId)) blockers.push("선생님")
+    if (hasLinkedRecord(wordRetest.teacherId) && !findTeacherOption(teachers, wordRetest.teacherId, indexes)) blockers.push("선생님")
     if (!String(wordRetest.branch || "").trim()) blockers.push("지점")
-    if (!hasLinkedRecord(input.textbookId || input.textbookTitle || wordRetest.textbookName)) blockers.push("교재")
-    if (hasLinkedRecord(input.textbookId || input.textbookTitle || wordRetest.textbookName) && !findTextbookOptionByReference(textbooks, indexes, input.textbookId, input.textbookTitle, wordRetest.textbookName)) blockers.push("교재")
+    if (!hasLinkedRecord(input.textbookId)) blockers.push("교재")
+    if (hasLinkedRecord(input.textbookId) && !findTextbookOption(textbooks, input.textbookId, indexes)) blockers.push("교재")
     if (!String(wordRetest.testAt || "").trim()) blockers.push("응시일시")
     if (!String(wordRetest.unit || "").trim()) blockers.push("단원")
     if (shouldRequireWordRetestScore(wordRetest)) blockers.push("점수")
@@ -851,71 +857,10 @@ function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): Fo
   return null
 }
 
-function getDisplayName(value: unknown, fallback = "미지정") {
-  return String(value || "").trim() || fallback
-}
-
-function hasManagementSyncPreviewValue(item: ManagementSyncPreviewItem) {
-  return item.value.trim().length > 0 && item.value !== "미지정"
-}
-
 function blurActiveElementBeforeDialog() {
   if (typeof document === "undefined") return
   const activeElement = document.activeElement
   if (activeElement instanceof HTMLElement) activeElement.blur()
-}
-
-function getManagementSyncPreviewItems(input: OpsTaskInput) {
-  const studentName = getDisplayName(input.studentName)
-  const className = getDisplayName(input.className)
-  const textbookTitle = getDisplayName(input.textbookTitle)
-
-  if (input.type === "registration") {
-    const items = [
-      {
-        label: input.studentId ? "기존 학생 업데이트" : "학생관리 추가",
-        value: studentName,
-      },
-      {
-        label: "수업명단 등록",
-        value: className,
-      },
-      {
-        label: "교재 연결",
-        value: textbookTitle,
-      },
-    ] satisfies ManagementSyncPreviewItem[]
-    return items.filter(hasManagementSyncPreviewValue)
-  }
-
-  if (input.type === "withdrawal") {
-    const items = [
-      { label: "수업명단 제거", value: className },
-      { label: "퇴원 처리", value: studentName },
-    ] satisfies ManagementSyncPreviewItem[]
-    return items.filter(hasManagementSyncPreviewValue)
-  }
-
-  if (input.type === "transfer") {
-    const transfer = input.transfer || {}
-    const items = [
-      { label: "전 수업 제거", value: getDisplayName(transfer.fromClassName) },
-      { label: "후 수업 등록", value: getDisplayName(transfer.toClassName || input.className) },
-      { label: "재원 유지", value: studentName },
-    ] satisfies ManagementSyncPreviewItem[]
-    return items.filter(hasManagementSyncPreviewValue)
-  }
-
-  if (input.type === "word_retest") {
-    const wordRetest = input.wordRetest || {}
-    const items = [
-      { label: "선생님 연결", value: getDisplayName(wordRetest.teacherName) },
-      { label: "응시 정보 연결", value: [studentName, getDisplayName(wordRetest.className || input.className), getDisplayName(wordRetest.textbookName || input.textbookTitle)].filter((value) => value !== "미지정").join(" · ") || "미지정" },
-    ] satisfies ManagementSyncPreviewItem[]
-    return items.filter(hasManagementSyncPreviewValue)
-  }
-
-  return [] satisfies ManagementSyncPreviewItem[]
 }
 
 function dateLabel(value: string) {
@@ -1028,15 +973,6 @@ function getAutoSyncedEvents(task: OpsTask) {
   return task.events.filter((event) => event.eventType === "auto_synced")
 }
 
-function shouldShowManagementSyncPreview(task: OpsTask) {
-  return (
-    task.type !== "general" &&
-    !isClosedOpsTask(task) &&
-    getAutoSyncedEvents(task).length === 0 &&
-    getManagementSyncPreviewItems(inputFromTaskForPreview(task)).length > 0
-  )
-}
-
 function getTaskOrganizationFixes(task: OpsTask) {
   if (isClosedOpsTask(task)) return []
 
@@ -1108,8 +1044,26 @@ function quickDateTimeForNextWeekday(targetDay: number, forceNextWeek = false) {
   return quickDateTimeFromDate(date)
 }
 
+function quickDateTimeForWeekdayInCalendarWeek(targetDay: number, weekOffset: number) {
+  const date = new Date()
+  const currentDay = date.getDay()
+  const mondayOffset = currentDay === 0 ? -6 : 1 - currentDay
+  const targetOffset = targetDay === 0 ? 6 : targetDay - 1
+  date.setDate(date.getDate() + mondayOffset + (weekOffset * 7) + targetOffset)
+  date.setHours(9, 0, 0, 0)
+  return quickDateTimeFromDate(date)
+}
+
+function quickDateTimeForThisWeekday(targetDay: number) {
+  return quickDateTimeForWeekdayInCalendarWeek(targetDay, 0)
+}
+
+function quickDateTimeForNextCalendarWeekday(targetDay: number) {
+  return quickDateTimeForWeekdayInCalendarWeek(targetDay, 1)
+}
+
 function quickDateTimeForNextWeekStart() {
-  return quickDateTimeForNextWeekday(1, true)
+  return quickDateTimeForNextCalendarWeekday(1)
 }
 
 function quickDateTimeForMonthDay(month: number, day: number) {
@@ -1447,7 +1401,7 @@ function getQuickAddAssigneeDirective(token: string) {
 }
 
 function getQuickAddDueDirective(token: string) {
-  const match = token.match(/^(마감|예정|due)[:：](.*)$/i)
+  const match = token.match(/^(마감|마감일|예정|예정일|기한|일정|due)[:：](.*)$/i)
   if (!match) return null
   return { value: match[2].trim() }
 }
@@ -1806,31 +1760,15 @@ function OperationChecklistSummary({
   autoItems?: ChecklistStatusItem[]
   manualItems: ChecklistStatusItem[]
 }) {
-  const manualDoneCount = manualItems.filter((item) => item.checked).length
+  const items = [
+    ...autoItems.map((item) => ({ item, mode: "auto" as const })),
+    ...manualItems.map((item) => ({ item, mode: "manual" as const })),
+  ]
 
   return (
-    <section className="grid gap-3 rounded-md border bg-background p-3 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-semibold">완료 조건</h3>
-        <Badge variant={manualDoneCount === manualItems.length ? "default" : "outline"}>
-          수동 {manualDoneCount}/{manualItems.length}
-        </Badge>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {autoItems.length > 0 && (
-          <div className="grid gap-2">
-            <div className="text-xs font-medium text-muted-foreground">자동 반영</div>
-            <div className="flex flex-wrap gap-1.5">
-              {autoItems.map((item) => <ChecklistStatusPill key={item.label} item={item} mode="auto" />)}
-            </div>
-          </div>
-        )}
-        <div className="grid gap-2">
-          <div className="text-xs font-medium text-muted-foreground">수동 확인</div>
-          <div className="flex flex-wrap gap-1.5">
-            {manualItems.map((item) => <ChecklistStatusPill key={item.label} item={item} mode="manual" />)}
-          </div>
-        </div>
+    <section className="rounded-md border bg-background p-2.5 text-sm">
+      <div className="flex flex-wrap gap-1.5">
+        {items.map(({ item, mode }) => <ChecklistStatusPill key={`${mode}-${item.label}`} item={item} mode={mode} />)}
       </div>
     </section>
   )
@@ -2088,6 +2026,7 @@ function parseTodoistQuickAdd(
   let pendingMeridiem: QuickAddMeridiem | "" = ""
   let pendingWeekdayModifier: QuickAddWeekdayModifier = ""
   let pendingAssigneeLookup = false
+  let pendingDueLookup = false
   let collectingQuickAddMemo = false
   const labels: string[] = []
   const titleTokens: string[] = []
@@ -2154,12 +2093,12 @@ function parseTodoistQuickAdd(
       }
       if (["다음주", "nextweek"].includes(normalizedDateToken)) {
         setDueAt(quickDateTimeForNextWeekStart())
-        pendingWeekdayModifier = ""
+        pendingWeekdayModifier = "next"
         return true
       }
       if (["이번주", "thisweek"].includes(normalizedDateToken)) {
-        setDueAt(quickDateTimeForNextWeekday(5))
-        pendingWeekdayModifier = ""
+        setDueAt(quickDateTimeForThisWeekday(5))
+        pendingWeekdayModifier = "this"
         return true
       }
       if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedDateToken)) {
@@ -2167,11 +2106,16 @@ function parseTodoistQuickAdd(
         pendingWeekdayModifier = ""
         return true
       }
+      const forceThisWeekday = pendingWeekdayModifier === "this" || normalizedDateToken.startsWith("이번") || normalizedDateToken.startsWith("this")
       const forceNextWeekday = pendingWeekdayModifier === "next" || normalizedDateToken.startsWith("다음") || normalizedDateToken.startsWith("next")
       const weekdayText = normalizedDateToken.replace(/^다음/, "").replace(/^이번/, "").replace(/^next/, "").replace(/^this/, "")
       const weekday = weekdayTokens.get(weekdayText)
       if (weekday !== undefined) {
-        setDueAt(quickDateTimeForNextWeekday(weekday, forceNextWeekday))
+        setDueAt(forceThisWeekday
+          ? quickDateTimeForThisWeekday(weekday)
+          : forceNextWeekday
+            ? quickDateTimeForNextCalendarWeekday(weekday)
+            : quickDateTimeForNextWeekday(weekday))
         pendingWeekdayModifier = ""
         return true
       }
@@ -2191,6 +2135,10 @@ function parseTodoistQuickAdd(
       labels.push(normalizeQuickAddMemoToken(token))
       return
     }
+    if (pendingDueLookup) {
+      pendingDueLookup = false
+      if (applyDateToken(token)) return
+    }
     if (pendingAssigneeLookup) {
       pendingAssigneeLookup = false
       applyAssignee(token)
@@ -2203,7 +2151,9 @@ function parseTodoistQuickAdd(
       return
     }
     const dueDirective = getQuickAddDueDirective(token)
-    if (dueDirective?.value && applyDateToken(dueDirective.value)) {
+    if (dueDirective) {
+      if (dueDirective.value) applyDateToken(dueDirective.value)
+      else pendingDueLookup = true
       return
     }
     const assigneeDirective = getQuickAddAssigneeDirective(token)
@@ -2214,6 +2164,10 @@ function parseTodoistQuickAdd(
     }
     if (["담당", "담당자", "assignee", "assign"].includes(normalized)) {
       pendingAssigneeLookup = true
+      return
+    }
+    if (["마감", "마감일", "예정", "예정일", "기한", "일정", "due"].includes(normalized)) {
+      pendingDueLookup = true
       return
     }
     if (applyDateToken(normalized)) return
@@ -2430,6 +2384,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
+  const syncTaskDeepLink = useCallback((nextTaskId: string | null) => {
+    const searchParams = new URLSearchParams(window.location.search)
+    if (nextTaskId) {
+      searchParams.set("taskId", nextTaskId)
+    } else {
+      searchParams.delete("taskId")
+    }
+    const queryString = searchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }, [])
+
   const tasks = data?.tasks || EMPTY_TASKS
   const students = data?.students || EMPTY_STUDENT_OPTIONS
   const classes = data?.classes || EMPTY_CLASS_OPTIONS
@@ -2448,6 +2413,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     () => new Map(tasks.map((task) => [task.id, task])),
     [tasks],
   )
+  useEffect(() => {
+    const deepLinkedTaskId = searchParams.get("taskId") || ""
+    if (!deepLinkedTaskId || !data) return
+    const deepLinkedTask = taskById.get(deepLinkedTaskId)
+    if (!deepLinkedTask) {
+      syncTaskDeepLink(null)
+      return
+    }
+    setSelectedTask(deepLinkedTask)
+    setDetailOpen(true)
+  }, [data, searchParams, syncTaskDeepLink, taskById])
   const profileLabelById = useMemo(
     () => new Map((data?.profiles || []).map((profile) => [profile.id, profile.label])),
     [data?.profiles],
@@ -2626,17 +2602,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const nextFormStepLabel = nextFormDetailStep ? `다음: ${nextFormDetailStep.label}` : ""
   const showTemplateDueAt = isTemplateForm && form.type !== "word_retest"
   const isFormDirty = formOpen && serializeOpsTaskInput(form) !== formBaselineRef.current
-  const currentFormCompletionBlockers = useMemo(() => {
-    if (!isTemplateForm || !isCompletionReadinessStep(form.type, activeFormDetailStep)) return EMPTY_COMPLETION_BLOCKERS
-    return getOperationCompletionBlockers(
-      getCompletionReadinessInput(form),
-      students,
-      classes,
-      textbooks,
-      teachers,
-      optionIndexes,
-    )
-  }, [activeFormDetailStep, classes, form, isTemplateForm, optionIndexes, students, teachers, textbooks])
   const formDialogTitle = editingTask
     ? form.type === "general"
       ? "할 일 수정"
@@ -2671,6 +2636,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     const nextForm = applyFormCompletionIntent(formFromTask(task), inferredCompletionIntent)
     blurActiveElementBeforeDialog()
     setDetailOpen(false)
+    syncTaskDeepLink(null)
     setEditingTask(task)
     setForm(nextForm)
     formBaselineRef.current = serializeOpsTaskInput(nextForm)
@@ -2688,6 +2654,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     blurActiveElementBeforeDialog()
     setSelectedTask(task)
     setDetailOpen(true)
+    syncTaskDeepLink(task.id)
     setMessage("")
     setFormCompletionBlockers([])
     setFormCompletionIntent(null)
@@ -2696,6 +2663,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setCommentBody("")
     setAttachmentName("")
     setAttachmentLink("")
+  }
+
+  function handleDetailOpenChange(nextOpen: boolean) {
+    setDetailOpen(nextOpen)
+    if (!nextOpen) syncTaskDeepLink(null)
   }
 
   function closeForm() {
@@ -3190,6 +3162,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       await deleteOpsTask(taskId)
       setDeleteTarget(null)
       setDetailOpen(false)
+      syncTaskDeepLink(null)
       removeTaskFromState(taskId)
       const itemLabel = deleteTarget.type === "general" ? "할 일" : getTaskTypeLabel(deleteTarget.type)
       setNotice(`${itemLabel} 삭제 완료`)
@@ -3593,7 +3566,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           <DialogHeader className="sticky top-0 z-20 -mx-6 -mt-6 border-b bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/85">
             <DialogTitle>{formDialogTitle}</DialogTitle>
             <DialogDescription className="sr-only">
-              {isTemplateForm ? `${getTaskTypeLabel(form.type)} 입력` : "할 일 입력"}
+              운영 업무를 입력하고 저장합니다.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-4">
@@ -3749,12 +3722,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   updateTransfer={updateTransfer}
                   updateWordRetest={updateWordRetest}
                 />
-                {formCompletionBlockers.length === 0 && currentFormCompletionBlockers.length > 0 && (
-                  <CompletionReadinessPreview
-                    blockers={currentFormCompletionBlockers}
-                    onSelect={(blocker) => setFormDetailStep(getCompletionBlockerFormStep(form.type, [blocker]) || activeFormDetailStep)}
-                  />
-                )}
               </section>
             )}
 
@@ -3780,9 +3747,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 )}
               </section>
             )}
-
-            {isTemplateForm && <ManagementSyncPreview input={form} />}
-
             <div className="sticky bottom-0 z-20 -mx-6 -mb-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:justify-end">
               {confirmingFormClose && (
                 <div role="alert" className="flex w-full items-center justify-between gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive sm:mr-auto sm:w-auto">
@@ -3845,7 +3809,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className={[
           "max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
           selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : "sm:max-w-5xl",
@@ -3853,7 +3817,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           <DialogHeader>
             <DialogTitle>{selectedTaskFresh?.title || "상세"}</DialogTitle>
             <DialogDescription className="sr-only">
-              상세 정보
+              선택한 운영 업무의 처리 상태를 확인합니다.
             </DialogDescription>
           </DialogHeader>
           {notice && (
@@ -3910,7 +3874,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 />
                 {selectedTaskFresh.type !== "general" && <TypeDetail task={selectedTaskFresh} />}
                 {selectedTaskFresh.type !== "general" && <AutoSyncResultSummary task={selectedTaskFresh} />}
-                {shouldShowManagementSyncPreview(selectedTaskFresh) && <ManagementSyncPreview input={inputFromTaskForPreview(selectedTaskFresh)} />}
                 {selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   {detailPrimaryAction && (
@@ -3966,7 +3929,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
               <div className="flex flex-col gap-3">
                 <details className="rounded-lg border p-4" open={selectedTaskFresh.comments.length > 0}>
-                  <summary className="cursor-pointer text-sm font-semibold">댓글 {selectedTaskFresh.comments.length}</summary>
+                  <summary className="cursor-pointer text-sm font-semibold">
+                    {selectedTaskFresh.comments.length > 0 ? `댓글 ${selectedTaskFresh.comments.length}` : "댓글 추가"}
+                  </summary>
                   <CommentPanelContent
                     task={selectedTaskFresh}
                     commentBody={commentBody}
@@ -3977,9 +3942,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 </details>
 
                 {selectedTaskFresh.type !== "general" && <details className="rounded-lg border p-4" open={selectedTaskFresh.attachments.length > 0}>
-                  <summary className="cursor-pointer text-sm font-semibold">첨부 {selectedTaskFresh.attachments.length}</summary>
+                  <summary className="cursor-pointer text-sm font-semibold">
+                    {selectedTaskFresh.attachments.length > 0 ? `첨부 ${selectedTaskFresh.attachments.length}` : "첨부 추가"}
+                  </summary>
                   <div className="mt-3 flex flex-col gap-2">
-                    {selectedTaskFresh.attachments.length === 0 && <p className="text-sm text-muted-foreground">첨부 없음</p>}
                     {selectedTaskFresh.attachments.map((attachment) => (
                       <a
                         key={attachment.id}
@@ -4037,10 +4003,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {deleteTargetRemovesCompletedOperation ? "완료 이력 삭제" : deleteTarget?.title ? `${deleteTarget.title} 삭제` : "삭제"}
+              {deleteTargetRemovesCompletedOperation
+                ? `${deleteTarget?.title || "완료된 운영 업무"} 이력 삭제할까요?`
+                : deleteTarget?.title ? `${deleteTarget.title} 삭제할까요?` : "삭제할까요?"}
             </DialogTitle>
-            <DialogDescription>
-              {deleteTargetRemovesCompletedOperation ? `${deleteTarget?.title || "완료된 운영 업무"}와 연결 이력을 삭제합니다.` : "삭제하시겠습니까?"}
+            <DialogDescription className="sr-only">
+              선택한 운영 업무의 삭제 또는 닫기 처리를 확인합니다.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -4088,12 +4056,15 @@ function TypeSpecificFields({
   const transfer = form.transfer || {}
   const wordRetest = form.wordRetest || {}
   const wordRetestAbsent = isWordRetestAbsent(wordRetest)
-  const wordRetestClassOptions = getWordRetestClassOptions(classes)
-  const wordRetestTeacherOptions = getWordRetestTeacherOptions(teachers)
   const findStudent = (id: string) => students.find((student) => student.id === id)
   const findClass = (id: string) => classes.find((classItem) => classItem.id === id)
   const findTeacher = (id: string) => teachers.find((teacher) => teacher.id === id)
   const findTextbook = (id: string) => textbooks.find((textbook) => textbook.id === id)
+  const selectedWordRetestStudent = form.type === "word_retest" ? findStudent(form.studentId || "") : undefined
+  const selectedWordRetestClassId = form.type === "word_retest" ? form.classId || "" : ""
+  const selectedWordRetestTeacherId = form.type === "word_retest" ? wordRetest.teacherId || "" : ""
+  const wordRetestClassOptions = getWordRetestClassOptions(classes, selectedWordRetestStudent, selectedWordRetestClassId)
+  const wordRetestTeacherOptions = getWordRetestTeacherOptions(teachers, selectedWordRetestTeacherId)
   const [manualLinkedFields, setManualLinkedFields] = useState<Record<string, boolean>>({})
 
   function openManualField(field: string) {
@@ -4127,7 +4098,7 @@ function TypeSpecificFields({
   }
 
   function findStudentPrimaryClass(student: OpsStudentOption, options: { wordRetestOnly?: boolean } = {}) {
-    const classIds = student.classIds.filter((id) => {
+    const classIds = getStudentRosterClassIds(student, classes).filter((id) => {
       const classItem = findClass(id)
       if (!classItem) return false
       if (options.wordRetestOnly && !isWordRetestClassOption(classItem)) return false
@@ -5349,8 +5320,7 @@ function CompletionBlockerActionPanel({
   if (blockers.length === 0) return null
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-2 text-sm" role="group" aria-label="완료 전 필요한 입력">
-      <span className="shrink-0 rounded-full bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">완료 전</span>
+    <div className="flex flex-wrap items-center gap-1.5 text-sm" role="group" aria-label="완료 전 필요한 입력">
       {blockers.map((blocker) => (
         <button
           key={blocker}
@@ -5408,49 +5378,6 @@ function CompletionBlockerInlineChips({
         )
       })}
     </span>
-  )
-}
-
-function CompletionReadinessPreview({
-  blockers,
-  onSelect,
-}: {
-  blockers: string[]
-  onSelect: (blocker: string) => void
-}) {
-  if (blockers.length === 0) return null
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-2 text-sm" role="group" aria-label="완료 전 필요한 입력">
-      <span className="shrink-0 rounded-full bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">완료 전</span>
-      {blockers.map((blocker) => (
-        <button
-          key={blocker}
-          type="button"
-          onClick={() => onSelect(blocker)}
-          className="inline-flex min-h-8 items-center rounded-md border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-xs transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {getCompletionBlockerActionLabel([blocker])}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function ManagementSyncPreview({ input }: { input: OpsTaskInput }) {
-  const items = getManagementSyncPreviewItems(input)
-  if (items.length === 0) return null
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
-      <span className="font-semibold">연동</span>
-      {items.map((item) => (
-        <span key={`${item.label}-${item.value}`} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-muted px-2 py-1">
-          <span className="shrink-0 text-muted-foreground">{item.label}</span>
-          <span className="truncate font-medium">{item.value}</span>
-        </span>
-      ))}
-    </div>
   )
 }
 
@@ -5512,7 +5439,6 @@ function CommentPanelContent({
   return (
     <div className="mt-3 flex flex-col gap-3">
       <div className="flex flex-col gap-2">
-        {task.comments.length === 0 && <p className="text-sm text-muted-foreground">댓글 없음</p>}
         {task.comments.map((comment) => (
           <div key={comment.id} className="rounded-md bg-muted p-2 text-sm">
             <div className="mb-1 flex justify-between gap-2 text-xs text-muted-foreground">

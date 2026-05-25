@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -261,6 +262,94 @@ export function ClassroomMasterWorkspace() {
         </Alert>
       ) : null}
 
+      <div data-testid="classroom-settings-mobile-list" className="grid gap-2 md:hidden">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <div key={`classroom-mobile-loading-${index}`} className="rounded-md border p-3">
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ))
+        ) : filteredRows.length === 0 ? (
+          <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            {subjectFilter === "전체" ? "등록된 강의실이 없습니다." : `${subjectFilter} 과목 강의실이 없습니다.`}
+          </div>
+        ) : (
+          filteredRows.map((row) => {
+            const currentIndex = rows.findIndex((item) => item.id === row.id);
+
+            return (
+              <article
+                key={row.id}
+                data-testid={`classroom-settings-mobile-card-${row.id}`}
+                className={row.isNew ? "rounded-md border border-primary/30 bg-primary/5 p-3" : "rounded-md border bg-background p-3"}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Badge variant="secondary" className="rounded px-1.5 text-[11px]">
+                        {normalizeSubjectValue(row.subjects)}
+                      </Badge>
+                      {row.isVisible ? (
+                        <Badge variant="outline" className="rounded px-1.5 text-[11px]">
+                          표시
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="rounded px-1.5 text-[11px] text-muted-foreground">
+                          숨김
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 gap-1.5">
+                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={saving || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
+                        <ArrowUp className="size-4" />
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={saving || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
+                        <ArrowDown className="size-4" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="size-8 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="강의실 삭제">
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Select value={normalizeSubjectValue(row.subjects)} onValueChange={(value) => handleSubjectsChange(row.id, value as (typeof SUBJECT_OPTIONS)[number])}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="과목" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SUBJECT_OPTIONS.map((subject) => (
+                          <SelectItem key={subject} value={subject}>
+                            {subject}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      name="classroom-name"
+                      className="h-9"
+                      value={row.name}
+                      onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
+                      placeholder="강의실 이름"
+                      aria-label={`${row.name || "새 강의실"} 강의실 이름`}
+                    />
+                    <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                      <span>표시</span>
+                      <Checkbox
+                        aria-label="강의실 표시 여부"
+                        checked={row.isVisible}
+                        onCheckedChange={(checked) => handleFieldChange(row.id, "isVisible", checked === true)}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      <div className="hidden md:block">
       <SettingsTableFrame>
         <Table className="table-fixed">
           <caption className="sr-only">강의실 목록</caption>
@@ -346,6 +435,7 @@ export function ClassroomMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
+      </div>
     </SettingsWorkspaceShell>
   );
 }

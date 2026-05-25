@@ -254,6 +254,57 @@ export function ClassGroupMasterWorkspace() {
         </Alert>
       ) : null}
 
+      <div data-testid="class-group-settings-mobile-list" className="grid gap-2 md:hidden">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <div key={`class-group-mobile-loading-${index}`} className="rounded-md border p-3">
+              <Skeleton className="h-20 w-full" />
+            </div>
+          ))
+        ) : rows.length === 0 ? (
+          <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            등록된 기간이 없습니다.
+          </div>
+        ) : (
+          rows.map((row) => (
+            <article
+              key={row.id}
+              data-testid={`class-group-settings-mobile-card-${row.id}`}
+              className={row.isNew ? "rounded-md border border-primary/30 bg-primary/5 p-3" : "rounded-md border bg-background p-3"}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Input
+                      name="class-group-name"
+                      className="h-9"
+                      value={row.name}
+                      onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
+                      placeholder="2026 1학기"
+                    />
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="기간 삭제">
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  variant={row.isDefault ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 w-full justify-center"
+                  onClick={() => handleSetDefault(row)}
+                  disabled={saving}
+                >
+                  {row.isDefault ? <CheckCircle2 className="mr-1.5 size-3.5" /> : null}
+                  {row.isDefault ? "기본" : "기본값으로 설정"}
+                </Button>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+
+      <div className="hidden md:block">
       <SettingsTableFrame>
         <Table className="table-fixed">
           <caption className="sr-only">기간 목록</caption>
@@ -319,6 +370,7 @@ export function ClassGroupMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
+      </div>
     </SettingsWorkspaceShell>
   );
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -432,6 +433,116 @@ export function SchoolMasterWorkspace() {
         </Alert>
       ) : null}
 
+      <div data-testid="school-settings-mobile-list" className="grid gap-2 md:hidden">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <div key={`school-mobile-loading-${index}`} className="rounded-md border p-3">
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ))
+        ) : filteredRows.length === 0 ? (
+          <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            {query ? "검색 결과가 없습니다." : categoryFilter === "전체" ? "등록된 학교가 없습니다." : `${categoryFilter} 학교가 없습니다.`}
+          </div>
+        ) : (
+          filteredRows.map((row) => {
+            const currentIndex = rows.findIndex((item) => item.id === row.id);
+            const normalizedName = normalizeSchoolName(row.name);
+            const hasDuplicateName = normalizedName ? duplicateNameSet.has(normalizedName) : false;
+            const isInvalid = invalidRows.has(row.id);
+
+            return (
+              <article
+                key={row.id}
+                data-testid={`school-settings-mobile-card-${row.id}`}
+                className={row.isNew ? "rounded-md border border-primary/30 bg-primary/5 p-3" : "rounded-md border bg-background p-3"}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Badge variant="secondary" className="rounded px-1.5 text-[11px]">
+                        {normalizeSchoolCategory(row.category) || "분류 미정"}
+                      </Badge>
+                      {row.isNew ? <Badge className="rounded px-1.5 text-[11px]">신규</Badge> : null}
+                      {hasDuplicateName ? (
+                        <Badge variant="destructive" className="rounded px-1.5 text-[11px]">
+                          중복
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 gap-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-8"
+                        onClick={() => handleMoveRow(row.id, "up")}
+                        disabled={saving || currentIndex <= 0}
+                        aria-label="학교 순서 위로 이동"
+                      >
+                        <ArrowUp className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-8"
+                        onClick={() => handleMoveRow(row.id, "down")}
+                        disabled={saving || currentIndex === rows.length - 1}
+                        aria-label="학교 순서 아래로 이동"
+                      >
+                        <ArrowDown className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-destructive hover:text-destructive"
+                        onClick={() => handleDelete(row)}
+                        disabled={saving}
+                        aria-label="학교 삭제"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Select
+                      value={normalizeSchoolCategory(row.category)}
+                      onValueChange={(value) =>
+                        handleCategoryChange(row.id, value as Exclude<(typeof CATEGORY_FILTERS)[number], "전체">)
+                      }
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="분류" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CATEGORY_FILTERS.filter((filter) => filter !== "전체").map((filter) => (
+                          <SelectItem key={filter} value={filter}>
+                            {filter}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      name="school-name"
+                      className={`h-9 ${isInvalid ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
+                      value={row.name}
+                      onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
+                      placeholder="학교명"
+                      aria-label={`${row.name || "새 학교"} 학교명`}
+                      aria-invalid={isInvalid}
+                    />
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      <div className="hidden md:block">
       <SettingsTableFrame>
         <Table className="table-fixed min-w-[720px]">
           <caption className="sr-only">학교 마스터 목록</caption>
@@ -576,6 +687,7 @@ export function SchoolMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
+      </div>
     </SettingsWorkspaceShell>
   );
 }

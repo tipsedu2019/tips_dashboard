@@ -239,6 +239,86 @@ function SubSubjectSettingsPanel({
           ))}
         </div>
       </div>
+      <div data-testid="textbook-subsubjects-mobile-list" className="grid gap-2 p-3 md:hidden">
+        {activeRows.length === 0 ? (
+          <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
+            표시할 세부과목이 없습니다.
+          </div>
+        ) : (
+          activeRows.map((row, index) => (
+            <section
+              key={`textbook-subsubject-mobile-card-${row.id}`}
+              data-testid={`textbook-subsubject-mobile-card-${row.id}`}
+              className="rounded-lg border border-border/70 bg-background px-3 py-3"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground">
+                    {row.name || "새 세부과목"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {SUBJECT_LABELS[row.subject] || row.subject}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Checkbox
+                    aria-label={`${row.name || "세부과목"} 표시 여부`}
+                    checked={row.isVisible}
+                    onCheckedChange={(checked) => onVisibleChange(row.id, checked === true)}
+                  />
+                  <span className="text-xs text-muted-foreground">표시</span>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Input
+                  value={row.name}
+                  onChange={(event) => onNameChange(row.id, event.target.value)}
+                  className="h-9"
+                  placeholder="세부과목명"
+                  aria-label={`${SUBJECT_LABELS[row.subject] || row.subject} 세부과목명`}
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-8"
+                    onClick={() => onMove(row.id, "up")}
+                    disabled={saving || index === 0}
+                    aria-label={`${row.name || "세부과목"} 위로 이동`}
+                  >
+                    <ArrowUp className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-8"
+                    onClick={() => onMove(row.id, "down")}
+                    disabled={saving || index === activeRows.length - 1}
+                    aria-label={`${row.name || "세부과목"} 아래로 이동`}
+                  >
+                    <ArrowDown className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-destructive hover:text-destructive"
+                    onClick={() => onDelete(row)}
+                    disabled={saving}
+                    aria-label={`${row.name || "세부과목"} 삭제`}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            </section>
+          ))
+        )}
+      </div>
+      <div className="hidden md:block">
       <Table className="min-w-[720px] table-fixed">
         <caption className="sr-only">교재 세부과목 설정</caption>
         <TableHeader>
@@ -321,6 +401,7 @@ function SubSubjectSettingsPanel({
           )}
         </TableBody>
       </Table>
+      </div>
     </SettingsTableFrame>
   );
 }
@@ -856,6 +937,109 @@ export function TextbookSupplierSettingsWorkspace() {
           ) : null}
 
             <TabsContent value="publishers" className="mt-3 min-w-0">
+              <div data-testid="textbook-publishers-mobile-list" className="grid gap-2 md:hidden">
+                {loading ? (
+                  Array.from({ length: 6 }).map((_, index) => (
+                    <Skeleton key={`publisher-mobile-loading-${index}`} className="h-56 w-full" />
+                  ))
+                ) : filteredPublishers.length === 0 ? (
+                  <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
+                    표시할 출판사가 없습니다.
+                  </div>
+                ) : (
+                  filteredPublishers.map((publisher) => (
+                    <section
+                      key={`textbook-publisher-mobile-card-${publisher.id}`}
+                      data-testid={`textbook-publisher-mobile-card-${publisher.id}`}
+                      className="rounded-lg border border-border/70 bg-background px-3 py-3"
+                    >
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {publisher.name || "새 출판사"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {subjectLabel(publisher.subjects)} · {formatQuantity(getPublisherTextbookCount(publisher))}종
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0 text-destructive hover:text-destructive"
+                          onClick={() => handleDeletePublisher(publisher)}
+                          disabled={saving}
+                          aria-label="출판사 삭제"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+
+                      <div className="grid gap-2">
+                        <div className="grid gap-1.5">
+                          <span className="text-xs font-medium text-muted-foreground">과목</span>
+                          <PublisherSubjectSelect
+                            publisher={publisher}
+                            onSubjectChange={(subject, checked) => togglePublisherSubject(publisher.id, subject, checked)}
+                          />
+                        </div>
+
+                        <div className="grid gap-1.5">
+                          <span className="text-xs font-medium text-muted-foreground">출판사</span>
+                          <Input
+                            value={publisher.name}
+                            onChange={(event) => setPublisherField(publisher.id, "name", event.target.value)}
+                            className="h-9"
+                            placeholder="출판사명"
+                          />
+                        </div>
+
+                        <div className="grid gap-1.5">
+                          <span className="text-xs font-medium text-muted-foreground">총판</span>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button type="button" variant="outline" className="h-9 w-full justify-between overflow-hidden px-3">
+                                <span className="truncate">
+                                  {publisher.supplierIds.length > 0
+                                    ? publisher.supplierIds
+                                        .map((supplierId) => suppliersById.get(supplierId)?.name)
+                                        .filter(Boolean)
+                                        .join(", ")
+                                    : "총판 선택"}
+                                </span>
+                                <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="start" className="w-72 p-2">
+                              <div className="grid max-h-72 gap-1 overflow-y-auto">
+                                {suppliers.map((supplier) => (
+                                  <label
+                                    key={supplier.id}
+                                    className="flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-muted/70"
+                                  >
+                                    <Checkbox
+                                      checked={publisher.supplierIds.includes(supplier.id)}
+                                      onCheckedChange={(checked) =>
+                                        togglePublisherSupplier(publisher.id, supplier.id, checked === true)
+                                      }
+                                    />
+                                    <span className="truncate">{supplier.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+
+                        <Badge variant="secondary" className="h-8 w-fit justify-center rounded-md px-2 text-xs">
+                          교재 {formatQuantity(getPublisherTextbookCount(publisher))}종
+                        </Badge>
+                      </div>
+                    </section>
+                  ))
+                )}
+              </div>
+              <div className="hidden md:block">
               <SettingsTableFrame>
                 <Table className="min-w-[900px] table-fixed">
                   <caption className="sr-only">출판사별 총판 설정</caption>
@@ -961,9 +1145,98 @@ export function TextbookSupplierSettingsWorkspace() {
                   </TableBody>
                 </Table>
               </SettingsTableFrame>
+              </div>
             </TabsContent>
 
             <TabsContent value="suppliers" className="mt-3 min-w-0">
+              <div data-testid="textbook-suppliers-mobile-list" className="grid gap-2 md:hidden">
+                {loading ? (
+                  Array.from({ length: 6 }).map((_, index) => (
+                    <Skeleton key={`supplier-mobile-loading-${index}`} className="h-36 w-full" />
+                  ))
+                ) : filteredSuppliers.length === 0 ? (
+                  <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
+                    표시할 총판이 없습니다.
+                  </div>
+                ) : (
+                  filteredSuppliers.map((supplier) => {
+                    const linkCount = publisherLinkCounts.get(supplier.id) || 0;
+                    const linkedPublisherNames = publisherNamesBySupplierId.get(supplier.id) || [];
+                    const visiblePublisherNames = linkedPublisherNames.slice(0, 3);
+                    const hiddenPublisherCount = Math.max(linkedPublisherNames.length - visiblePublisherNames.length, 0);
+
+                    return (
+                      <section
+                        key={`textbook-supplier-mobile-card-${supplier.id}`}
+                        data-testid={`textbook-supplier-mobile-card-${supplier.id}`}
+                        className="rounded-lg border border-border/70 bg-background px-3 py-3"
+                      >
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-foreground">
+                              {supplier.name || "새 총판"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">연결 출판사 {linkCount}개</p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 shrink-0 text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteSupplier(supplier)}
+                            disabled={saving}
+                            aria-label="총판 삭제"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <div className="grid gap-1.5">
+                            <span className="text-xs font-medium text-muted-foreground">총판</span>
+                            <Input
+                              value={supplier.name}
+                              onChange={(event) => setSupplierField(supplier.id, "name", event.target.value)}
+                              className="h-9"
+                              placeholder="총판명"
+                            />
+                          </div>
+
+                          <div className="flex min-h-9 flex-wrap items-center gap-1.5">
+                            {visiblePublisherNames.length > 0 ? (
+                              <>
+                                {visiblePublisherNames.map((publisherName) => (
+                                  <Badge
+                                    key={`${supplier.id}-mobile-${publisherName}`}
+                                    variant="secondary"
+                                    className="max-w-full justify-center truncate rounded-md px-2 text-xs"
+                                  >
+                                    {publisherName}
+                                  </Badge>
+                                ))}
+                                {hiddenPublisherCount > 0 ? (
+                                  <Badge variant="outline" className="rounded-md px-2 text-xs">
+                                    +{hiddenPublisherCount}
+                                  </Badge>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">연결 출판사 없음</span>
+                            )}
+                            <Badge
+                              variant="outline"
+                              className={cn("ml-auto min-w-10 justify-center rounded-md", linkCount === 0 && "text-muted-foreground")}
+                            >
+                              {linkCount}
+                            </Badge>
+                          </div>
+                        </div>
+                      </section>
+                    );
+                  })
+                )}
+              </div>
+              <div className="hidden md:block">
               <SettingsTableFrame>
                 <Table className="min-w-[760px] table-fixed">
                   <caption className="sr-only">교재 총판 목록</caption>
@@ -1057,6 +1330,7 @@ export function TextbookSupplierSettingsWorkspace() {
                   </TableBody>
                 </Table>
               </SettingsTableFrame>
+              </div>
             </TabsContent>
 
             <TabsContent value="subSubjects" className="mt-3 min-w-0">

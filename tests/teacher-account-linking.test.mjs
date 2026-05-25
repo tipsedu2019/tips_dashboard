@@ -77,6 +77,24 @@ test("teacher settings uses fixed team groups instead of subject labels", async 
   assert.doesNotMatch(workspaceSource, /label: "과목"/);
 });
 
+test("teacher settings uses mobile edit cards instead of a clipped wide table", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/management/teacher-master-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /data-testid="teacher-settings-mobile-list"/);
+  assert.match(workspaceSource, /className="grid gap-2 md:hidden"/);
+  assert.match(workspaceSource, /data-testid=\{`teacher-settings-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(workspaceSource, /normalizeTeamValue\(row\.subjects\)/);
+  assert.match(workspaceSource, /handleAccountChange\(row\.id, value\)/);
+  assert.match(workspaceSource, /aria-label="선생님 모바일 편집 목록"/);
+  assert.match(workspaceSource, /<div className="hidden md:block">[\s\S]*<SettingsTableFrame>/);
+  assert.match(workspaceSource, /data-testid="teacher-audit-mobile-list"/);
+  assert.match(workspaceSource, /data-testid=\{`teacher-audit-mobile-card-\$\{log\.id\}`\}/);
+  assert.match(workspaceSource, /formatAuditTime\(log\.changedAt\)/);
+});
+
 test("teacher account migration stores profile links, permissions, and audit history", async () => {
   const migrationSource = await readAllMigrationSource();
 

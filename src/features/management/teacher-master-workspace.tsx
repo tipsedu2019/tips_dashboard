@@ -549,6 +549,184 @@ export function TeacherMasterWorkspace() {
         </Alert>
       ) : null}
 
+      <div
+        data-testid="teacher-settings-mobile-list"
+        aria-label="선생님 모바일 편집 목록"
+        className="grid gap-2 md:hidden"
+      >
+        {loading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={`teacher-mobile-loading-${index}`} className="h-48 w-full" />
+          ))
+        ) : filteredRows.length === 0 ? (
+          <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
+            {teamFilter === "전체"
+              ? "등록된 선생님이 없습니다."
+              : `${teamFilter} 선생님이 없습니다.`}
+          </div>
+        ) : (
+          filteredRows.map((row) => {
+            const currentIndex = rows.findIndex((item) => item.id === row.id);
+
+            return (
+              <section
+                key={`teacher-settings-mobile-card-${row.id}`}
+                data-testid={`teacher-settings-mobile-card-${row.id}`}
+                className="rounded-lg border border-border/70 bg-background px-3 py-3"
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">
+                      {row.name || "새 선생님"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {normalizeTeamValue(row.subjects)} · {getRoleLabel(row.dashboardRole)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Checkbox
+                      aria-label="선생님 표시 여부"
+                      checked={row.isVisible}
+                      onCheckedChange={(checked) =>
+                        handleFieldChange(row.id, "isVisible", checked === true)
+                      }
+                    />
+                    <span className="text-xs text-muted-foreground">표시</span>
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="grid gap-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">팀</span>
+                    <Select
+                      value={normalizeTeamValue(row.subjects)}
+                      onValueChange={(value) => handleTeamChange(row.id, value as TeamOption)}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="팀" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TEAM_OPTIONS.map((team) => (
+                          <SelectItem key={team} value={team}>
+                            {team}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">이름</span>
+                    <Input
+                      name="teacher-name-mobile"
+                      className="h-9"
+                      value={row.name}
+                      onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
+                      placeholder="선생님 이름"
+                      aria-label={`${row.name || "새 선생님"} 이름`}
+                    />
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">계정</span>
+                    <Select
+                      value={row.profileId || "unlinked"}
+                      onValueChange={(value) => handleAccountChange(row.id, value)}
+                    >
+                      <SelectTrigger className="h-9" disabled={!isAccountSchemaReady}>
+                        <SelectValue placeholder="연결된 계정" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unlinked">계정 미연결</SelectItem>
+                        {profiles.map((profile) => (
+                          <SelectItem key={profile.id} value={profile.id}>
+                            {getAccountLabel(profile)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {row.profileId ? (
+                      <Badge variant="outline" className="h-8 w-fit rounded-md px-2 text-[11px]">
+                        <Link2 className="mr-1 size-3" />
+                        연결됨
+                      </Badge>
+                    ) : (
+                      <Input
+                        className="h-8 text-xs"
+                        value={row.accountEmail}
+                        onChange={(event) =>
+                          handleFieldChange(row.id, "accountEmail", event.target.value)
+                        }
+                        placeholder="이메일 또는 아이디"
+                        aria-label="로그인 계정 이메일 또는 아이디"
+                        disabled={!isAccountSchemaReady}
+                      />
+                    )}
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">권한</span>
+                    <Select
+                      value={row.dashboardRole}
+                      onValueChange={(value) => handleRoleChange(row.id, value)}
+                      disabled={!isAccountSchemaReady}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="권한" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ROLE_OPTIONS.map((role) => (
+                          <SelectItem key={role.value} value={role.value}>
+                            {role.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="size-8"
+                      onClick={() => handleMoveRow(row.id, "up")}
+                      disabled={saving || currentIndex <= 0}
+                      aria-label="선생님 순서 위로 이동"
+                    >
+                      <ArrowUp className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="size-8"
+                      onClick={() => handleMoveRow(row.id, "down")}
+                      disabled={saving || currentIndex === rows.length - 1}
+                      aria-label="선생님 순서 아래로 이동"
+                    >
+                      <ArrowDown className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(row)}
+                      disabled={saving}
+                      aria-label="선생님 삭제"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              </section>
+            );
+          })
+        )}
+      </div>
+
+      <div className="hidden md:block">
       <SettingsTableFrame>
         <Table className="table-fixed">
           <caption className="sr-only">선생님 목록</caption>
@@ -800,7 +978,49 @@ export function TeacherMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
+      </div>
 
+      <div data-testid="teacher-audit-mobile-list" className="grid gap-2 md:hidden">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <History className="size-4" />
+          최근 변경 이력
+        </div>
+        {auditLogs.length === 0 ? (
+          <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
+            기록된 이력이 없습니다.
+          </div>
+        ) : (
+          auditLogs.map((log) => (
+            <section
+              key={`teacher-audit-mobile-card-${log.id}`}
+              data-testid={`teacher-audit-mobile-card-${log.id}`}
+              className="rounded-lg border border-border/70 bg-background px-3 py-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant="outline" className="rounded-md">
+                      {getAuditActionLabel(log.action)}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{log.entityTable}</span>
+                  </div>
+                  <p className="mt-2 truncate text-sm font-medium text-foreground">
+                    {log.entityLabel || "-"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {log.actorEmail || "-"} · {getRoleLabel(log.actorRole)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {formatAuditTime(log.changedAt)}
+                </span>
+              </div>
+            </section>
+          ))
+        )}
+      </div>
+
+      <div className="hidden md:block">
       <SettingsTableFrame>
         <Table>
           <caption className="sr-only">최근 변경 이력</caption>
@@ -867,6 +1087,7 @@ export function TeacherMasterWorkspace() {
           </TableBody>
         </Table>
       </SettingsTableFrame>
+      </div>
     </SettingsWorkspaceShell>
   );
 }

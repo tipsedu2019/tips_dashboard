@@ -294,24 +294,6 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Logo carousel animation */
-@keyframes logo-scroll {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-144rem); /* 12 items * 12rem = 144rem */
-  }
-}
-
-.animate-logo-scroll {
-  animation: logo-scroll 30s linear infinite;
-}
-
-.animate-logo-scroll:hover {
-  animation-play-state: paused;
-}
-
 .annual-board-workspace {
   --annual-board-bg: #f6f8fb;
   --annual-board-surface: #ffffff;

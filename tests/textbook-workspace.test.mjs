@@ -1181,6 +1181,9 @@ test("textbook workspace keeps list and process controls responsive and focused"
   );
 
   assert.match(workspaceSource, /canManageTextbookOperations \? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6" : "grid-cols-1"/);
+  assert.match(workspaceSource, /data-testid="textbook-master-mobile-list"/);
+  assert.match(workspaceSource, /data-testid=\{`textbook-master-mobile-card-\$\{rowId\}`\}/);
+  assert.match(workspaceSource, /hidden overflow-x-auto rounded-lg border \[contain-intrinsic-size:720px\] \[content-visibility:auto\] md:block/);
   assert.match(workspaceSource, /<Table className="min-w-\[920px\] table-fixed">/);
   assert.match(workspaceSource, /교재 상태 필터 열기/);
   assert.match(workspaceSource, /type PurchaseRequestFilter = "all" \| "unregistered" \| "orderable"/);

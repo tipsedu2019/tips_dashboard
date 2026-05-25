@@ -5898,8 +5898,99 @@ export function ClassScheduleWorkspace() {
                 선택한 조건에 맞는 수업일정이 없습니다.
               </div>
             ) : (
-              <ScrollArea className="h-[34rem] pr-4">
-                <Table className="table-fixed">
+              <>
+                <div data-testid="class-schedule-mobile-list" className="grid gap-2 md:hidden">
+                  {model.rows.map((row) => {
+                    const progressPercent = formatProgress(row.completedSessions, row.sessionCount);
+                    const isSelected = selectedClassId === row.id;
+
+                    return (
+                      <article
+                        key={`class-schedule-mobile-card-${row.id}`}
+                        data-testid={`class-schedule-mobile-card-${row.id}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={isSelected}
+                        className={cn(
+                          "min-w-0 rounded-lg border bg-background px-3 py-3 text-sm transition-colors",
+                          isSelected ? "border-primary bg-muted/60" : "border-border/70",
+                        )}
+                        onClick={() => setSelectedClassId(row.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedClassId(row.id);
+                          }
+                        }}
+                      >
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Badge>{row.subject || "과목 미정"}</Badge>
+                              {row.grade ? <Badge variant="secondary">{row.grade}</Badge> : null}
+                              {row.syncGroupName ? <Badge variant="outline">{row.syncGroupName}</Badge> : null}
+                            </div>
+                            <Link
+                              href={buildLessonDesignPageHref(
+                                row,
+                                row.nextActionSessionId || "",
+                                row.nextActionSessionId
+                                  ? LESSON_DESIGN_SECTION_IDS.board
+                                  : LESSON_DESIGN_SECTION_IDS.periods,
+                              )}
+                              className="block text-base font-semibold leading-5 break-keep underline-offset-4 hover:underline"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              {row.title}
+                            </Link>
+                            <p className="text-muted-foreground leading-5 break-keep">
+                              {row.termName || "학기 미정"} · {row.teacher || "선생님 미정"}
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-sm font-semibold text-foreground">{progressPercent}%</span>
+                        </div>
+
+                        <div className="mt-3 grid gap-2">
+                          <div className="min-w-0 rounded-md bg-muted/40 px-3 py-2">
+                            <p className="font-medium leading-5 break-keep">{row.scheduleLabel || "시간표 미정"}</p>
+                            <p className="text-muted-foreground leading-5">
+                              계획 {row.latestPlannedSessionIndex}회차 · 실제 {row.latestActualSessionIndex}회차
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-primary"
+                                style={{ width: `${progressPercent}%` }}
+                              />
+                            </div>
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {row.completedSessions}/{row.sessionCount}회
+                            </span>
+                          </div>
+
+                          {row.warningText ? (
+                            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                              {row.warningText}
+                            </div>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                <ScrollArea className="hidden h-[34rem] pr-4 md:block">
+                <Table className="min-w-[980px] table-fixed">
+                  <colgroup>
+                    <col className="w-[24%]" />
+                    <col className="w-[28%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[18%]" />
+                  </colgroup>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="sticky top-0 z-10 bg-background">반</TableHead>
@@ -5926,8 +6017,8 @@ export function ClassScheduleWorkspace() {
                           aria-selected={selectedClassId === row.id}
                           onClick={() => setSelectedClassId(row.id)}
                         >
-                          <TableCell className="align-top">
-                            <div className="min-w-[15rem] space-y-2">
+                          <TableCell className="align-top whitespace-normal">
+                            <div className="min-w-0 space-y-2">
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge>{row.subject || "과목 미정"}</Badge>
                                 {row.grade ? (
@@ -5943,45 +6034,45 @@ export function ClassScheduleWorkspace() {
                                       ? LESSON_DESIGN_SECTION_IDS.board
                                       : LESSON_DESIGN_SECTION_IDS.periods,
                                   )}
-                                  className="inline-flex text-left font-medium underline-offset-4 hover:underline"
+                                  className="inline-flex max-w-full text-left font-medium leading-5 break-keep underline-offset-4 hover:underline"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                   }}
                                 >
                                   {row.title}
                                 </Link>
-                                <p className="text-muted-foreground text-sm">
+                                <p className="text-muted-foreground text-sm leading-5 break-keep">
                                   {row.termName || "학기 미정"} · {row.teacher || "선생님 미정"}
                                 </p>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="align-top">
-                            <div className="min-w-[12rem] space-y-2 text-sm">
-                              <p className="font-medium">{row.scheduleLabel || "시간표 미정"}</p>
-                              <p className="text-muted-foreground">
+                          <TableCell className="align-top whitespace-normal">
+                            <div className="min-w-0 space-y-2 text-sm leading-5">
+                              <p className="font-medium leading-5 break-keep">{row.scheduleLabel || "시간표 미정"}</p>
+                              <p className="text-muted-foreground leading-5">
                                 계획 {row.latestPlannedSessionIndex}회차 · 실제 {row.latestActualSessionIndex}회차
                               </p>
                             </div>
                           </TableCell>
-                          <TableCell className="align-top">
-                            <div className="min-w-[12rem] space-y-1.5 text-sm">
-                              <div className="flex items-center justify-between gap-3">
+                          <TableCell className="align-top whitespace-normal">
+                            <div className="min-w-0 space-y-1.5 text-sm">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
                                 <span>{row.completedSessions}/{row.sessionCount}회 완료</span>
                                 <span className="font-medium text-foreground">{progressPercent}%</span>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="align-top">
+                          <TableCell className="align-top whitespace-normal">
                             {row.syncGroupName ? (
                               <Badge variant="outline">{row.syncGroupName}</Badge>
                             ) : (
                               <span className="text-muted-foreground text-sm">미연결</span>
                             )}
                           </TableCell>
-                          <TableCell className="align-top">
+                          <TableCell className="align-top whitespace-normal">
                             {row.warningText ? (
-                              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                                 {row.warningText}
                               </div>
                             ) : (
@@ -5994,6 +6085,7 @@ export function ClassScheduleWorkspace() {
                   </TableBody>
                 </Table>
               </ScrollArea>
+              </>
             )}
           </div>
         </section>

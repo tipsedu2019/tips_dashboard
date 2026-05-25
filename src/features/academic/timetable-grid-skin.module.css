@@ -110,6 +110,7 @@
 
 .scope :global(.timetable-cell) {
   position: relative;
+  overflow: hidden;
   height: 38px;
   border-right: 1px solid var(--tt-grid-border);
   border-bottom: 1px solid var(--tt-grid-border);

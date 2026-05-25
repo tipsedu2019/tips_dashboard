@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 
 async function readSource(pathname) {
   return readFile(new URL(pathname, root), "utf8");
+}
+
+async function fileExists(pathname) {
+  try {
+    await access(new URL(pathname, root));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test("auth pages use the official logo instead of the cart mark", async () => {
@@ -38,6 +47,36 @@ test("auth pages use the official logo instead of the cart mark", async () => {
     assert.match(source, /<AuthBrandLink \/>/);
     assert.doesNotMatch(source, /@\/components\/logo/);
     assert.doesNotMatch(source, /<\s*Logo\b/);
+  }
+});
+
+test("legacy auth variant routes redirect without keeping template components", async () => {
+  const redirects = [
+    ["src/app/(auth)/sign-in-2/page.tsx", "/sign-in"],
+    ["src/app/(auth)/sign-in-3/page.tsx", "/sign-in"],
+    ["src/app/(auth)/sign-up-2/page.tsx", "/sign-up"],
+    ["src/app/(auth)/sign-up-3/page.tsx", "/sign-up"],
+    ["src/app/(auth)/forgot-password-2/page.tsx", "/forgot-password"],
+    ["src/app/(auth)/forgot-password-3/page.tsx", "/forgot-password"],
+  ];
+  const removedTemplateComponents = [
+    "src/app/(auth)/sign-in-2/components/login-form-2.tsx",
+    "src/app/(auth)/sign-in-3/components/login-form-3.tsx",
+    "src/app/(auth)/sign-up-2/components/signup-form-2.tsx",
+    "src/app/(auth)/sign-up-3/components/signup-form-3.tsx",
+    "src/app/(auth)/forgot-password-2/components/forgot-password-form-2.tsx",
+    "src/app/(auth)/forgot-password-3/components/forgot-password-form-3.tsx",
+  ];
+
+  for (const [pathname, target] of redirects) {
+    const source = await readSource(pathname);
+    assert.match(source, /from "next\/navigation"/);
+    assert.match(source, new RegExp(`redirect\\("${target}"\\)`));
+    assert.doesNotMatch(source, /components\//);
+  }
+
+  for (const pathname of removedTemplateComponents) {
+    assert.equal(await fileExists(pathname), false, `${pathname} should be removed`);
   }
 });
 
@@ -106,6 +145,18 @@ test("bare phone ids are normalized to full tipsedu email addresses", async () =
     authProviderSource,
     /or\(`email\.eq\.\$\{normalizedEmail\},login_id\.eq\.\$\{normalizedLoginId\}`\)/,
   );
+});
+
+test("stale refresh token sessions recover to a clean sign-in state", async () => {
+  const source = await readSource("src/providers/auth-provider.tsx");
+
+  assert.match(source, /function isStaleRefreshTokenError/);
+  assert.match(source, /invalid refresh token/);
+  assert.match(source, /refresh token not found/);
+  assert.match(source, /refresh token already used/);
+  assert.match(source, /await client\.auth\.signOut\(\{ scope: "local" \}\)/);
+  assert.match(source, /resetAnonymousSession\(\)/);
+  assert.doesNotMatch(source, /Invalid Refresh Token/);
 });
 
 test("self sign-up uses a receivable email and Supabase signUp", async () => {

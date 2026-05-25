@@ -51,6 +51,8 @@ test("timetable panel headers show lesson count and weekly hours", async () => {
   assert.match(source, /new Set\(/);
   assert.match(source, /block\.lessonKey \|\| block\.classId \|\| block\.key/);
   assert.match(source, /weeklyHoursLabel:\s*formatWeeklyHours/);
+  assert.match(source, /flex-col gap-1\.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2/);
+  assert.match(source, /flex max-w-full flex-wrap items-center gap-1\.5/);
   assert.match(source, /수업 \{panelSummary\.lessonCount\}개/);
   assert.match(source, /주간 \{panelSummary\.weeklyHoursLabel\}/);
   assert.match(source, /timetableScheduleRows:\s*workspace\.rows/);
@@ -61,6 +63,7 @@ test("compact timetable blocks keep class names readable", async () => {
   const globals = await readSource("src/app/globals.css");
 
   assert.match(css, /-webkit-line-clamp:\s*2/);
+  assert.match(css, /\.scope :global\(\.timetable-cell\) \{[\s\S]*overflow:\s*hidden/);
   assert.match(css, /word-break:\s*keep-all/);
   assert.match(css, /\.scope :global\(\.block-value\)/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\)/);

@@ -33,6 +33,23 @@ test("academic calendar search is named and keyboard ready", async () => {
   assert.match(source, /enterKeyHint="search"/);
 });
 
+test("academic calendar month view switches to readable mobile agenda cards", async () => {
+  const source = await readFile(
+    new URL("src/app/admin/calendar/components/calendar-main.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /data-testid="academic-calendar-mobile-month-agenda"/);
+  assert.match(source, /className="grid gap-2 p-4 md:hidden"/);
+  assert.match(source, /const mobileMonthEventGroups = useMemo/);
+  assert.match(source, /listEventGroups\.filter\(\(group\) => isSameMonth\(group\.date, currentDate\)\)/);
+  assert.match(source, /mobileMonthEventGroups\.map\(\(group\) => \(/);
+  assert.match(source, /data-testid=\{`academic-calendar-mobile-day-\$\{format\(group\.date, "yyyy-MM-dd"\)\}`\}/);
+  assert.match(source, /formatAgendaDay\(group\.date\)/);
+  assert.match(source, /formatEventRange\(event\)/);
+  assert.match(source, /className="hidden flex-1 bg-background md:block"/);
+});
+
 test("shared date picker defaults to Korean calendar labels", async () => {
   const source = await readFile(
     new URL("src/components/ui/calendar.tsx", root),

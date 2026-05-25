@@ -64,3 +64,5 @@ TEMP_SHOULD_NOT_REDIRECT
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel

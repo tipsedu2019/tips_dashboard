@@ -107,6 +107,17 @@ function buildReadonlyMessage(hasProfileError: boolean) {
     : "프로필 정보가 없어 읽기 전용 권한으로 접속했습니다."
 }
 
+function isStaleRefreshTokenError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "")
+  const normalized = message.toLowerCase()
+
+  return (
+    normalized.includes("invalid refresh token") ||
+    normalized.includes("refresh token not found") ||
+    normalized.includes("refresh token already used")
+  )
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<DashboardUser | null>(null)
@@ -127,6 +138,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       return `${nextSession.user.id}:${nextSession.expires_at || ""}`
+    }
+
+    const resetAnonymousSession = () => {
+      lastResolvedSessionKeyRef.current = "anonymous"
+      profileRequestRef.current = { key: "", promise: null }
+      setSession(null)
+      setUser(null)
+      setAuthError(null)
+      setLoading(false)
     }
 
     const fetchProfile = async (supabaseUser: User) => {
@@ -204,12 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        lastResolvedSessionKeyRef.current = sessionKey
-        profileRequestRef.current = { key: "", promise: null }
-        setSession(null)
-        setUser(null)
-        setAuthError(null)
-        setLoading(false)
+        resetAnonymousSession()
         return
       }
 
@@ -248,11 +263,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return undefined
     }
 
-    supabase.auth
+    const client = supabase
+
+    client.auth
       .getSession()
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (!isActive) return
         if (error) {
+          if (isStaleRefreshTokenError(error)) {
+            await client.auth.signOut({ scope: "local" })
+            if (!isActive) return
+            resetAnonymousSession()
+            return
+          }
           setAuthError(getAuthErrorMessage(error, "로그인 상태를 확인하지 못했습니다."))
           setLoading(false)
           return
@@ -267,7 +290,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = client.auth.onAuthStateChange((_event, nextSession) => {
       void applyResolvedUser(nextSession)
     })
 

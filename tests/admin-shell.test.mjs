@@ -1,11 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 
 async function readSource(pathname) {
   return readFile(new URL(pathname, root), "utf8");
+}
+
+async function listFiles(pathname) {
+  const directory = new URL(pathname, root);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const childPathname = `${pathname}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...await listFiles(childPathname));
+    } else {
+      files.push(childPathname);
+    }
+  }
+
+  return files;
+}
+
+async function pathExists(pathname) {
+  try {
+    await access(new URL(pathname, root));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test("sidebar defaults to icon collapse mode", async () => {
@@ -31,8 +57,10 @@ test("nav user lets signed-in users edit avatar and password", async () => {
 
   assert.match(navUserSource, /프로필 설정/);
   assert.match(navUserSource, /supabase\.auth\.updateUser/);
+  assert.match(navUserSource, /<DialogDescription className="sr-only">/);
   assert.match(navUserSource, /새 비밀번호/);
   assert.match(navUserSource, /visibleProfileAvatarPresets\.map/);
+  assert.doesNotMatch(navUserSource, /노션 스타일 얼굴/);
   assert.match(appSidebarSource, /userMetadata\.avatar_url[\s\S]*userMetadata\.picture[\s\S]*profileFields\.avatar_url/);
   assert.match(avatarSource, /Array\.from\(\{ length: 50 \}/);
   assert.match(avatarSource, /notion-face-/);
@@ -84,6 +112,44 @@ test("todo navigation exposes direct queues and keeps query links distinct", asy
   assert.match(navMainSource, /router\.prefetch\(target\)/);
 });
 
+test("legacy admin redirect routes do not keep template implementation files", async () => {
+  const redirectOnlyRoutes = [
+    "src/app/admin/chat",
+    "src/app/admin/dashboard-2",
+    "src/app/admin/faqs",
+    "src/app/admin/mail",
+    "src/app/admin/pricing",
+    "src/app/admin/users",
+    "src/app/admin/settings/billing",
+  ];
+
+  for (const pathname of redirectOnlyRoutes) {
+    const pageSource = await readSource(`${pathname}/page.tsx`);
+    const files = await listFiles(pathname);
+
+    assert.match(pageSource, /redirect\("\/admin\/dashboard"\)/);
+    assert.deepEqual(files, [`${pathname}/page.tsx`]);
+  }
+});
+
+test("academic calendar alias does not keep unused sample calendar templates", async () => {
+  const aliasSource = await readSource("src/app/admin/calendar/page.tsx");
+
+  assert.match(aliasSource, /redirect\("\/admin\/academic-calendar"\)/);
+
+  for (const pathname of [
+    "src/app/admin/calendar/components/calendar-unified.tsx",
+    "src/app/admin/calendar/components/quick-actions.tsx",
+    "src/app/admin/calendar/use-calendar.ts",
+    "src/app/admin/calendar/data.ts",
+    "src/app/admin/calendar/data/events.json",
+    "src/app/admin/calendar/data/event-dates.json",
+    "src/app/admin/calendar/data/calendars.json",
+  ]) {
+    assert.equal(await pathExists(pathname), false, pathname);
+  }
+});
+
 test("root metadata points browser icons at the favicon asset", async () => {
   const source = await readSource("src/app/layout.tsx");
 
@@ -112,6 +178,27 @@ test("dashboard omits introductory briefing copy and redundant workspace heading
   assert.doesNotMatch(source, /오늘의 운영 포인트/);
   assert.doesNotMatch(source, /현재 운영 스냅샷/);
   assert.doesNotMatch(source, /운영 워크스페이스 바로가기/);
+});
+
+test("dashboard does not keep unused sample chart and table assets", async () => {
+  const pageSource = await readSource("src/app/admin/dashboard/page.tsx");
+
+  assert.match(pageSource, /OpsTaskDashboardSummary/);
+  assert.match(pageSource, /SectionCards/);
+  assert.doesNotMatch(pageSource, /ChartAreaInteractive/);
+  assert.doesNotMatch(pageSource, /DataTable/);
+
+  for (const pathname of [
+    "src/app/admin/dashboard/components/chart-area-interactive.tsx",
+    "src/app/admin/dashboard/components/data-table.tsx",
+    "src/app/admin/dashboard/schemas/task-schema.ts",
+    "src/app/admin/dashboard/data/data.json",
+    "src/app/admin/dashboard/data/focus-documents-data.json",
+    "src/app/admin/dashboard/data/key-personnel-data.json",
+    "src/app/admin/dashboard/data/past-performance-data.json",
+  ]) {
+    assert.equal(await pathExists(pathname), false, pathname);
+  }
 });
 
 test("dashboard focuses on student, enrollment, class, and conflict signals", async () => {
@@ -502,6 +589,27 @@ test("global shell avoids hidden palette and avatar over-render work", async () 
   assert.match(navUserSource, /const visibleProfileAvatarPresets = React\.useMemo/);
   assert.match(navUserSource, /const revealMoreAvatars = React\.useCallback/);
   assert.match(sidebarSource, /if \(openState === open\) return/);
+});
+
+test("admin shell does not keep unused floating template controls", async () => {
+  for (const pathname of [
+    "src/components/layouts/base-layout.tsx",
+    "src/components/upgrade-to-pro-button.tsx",
+    "src/components/dynamic-imports.ts",
+    "src/components/theme-customizer.tsx",
+    "src/components/theme-customizer/index.tsx",
+    "src/components/theme-customizer/main.tsx",
+    "src/components/theme-customizer/theme-tab.tsx",
+    "src/components/theme-customizer/layout-tab.tsx",
+    "src/components/theme-customizer/circular-transition.css",
+    "src/hooks/use-fullscreen.ts",
+  ]) {
+    assert.equal(await pathExists(pathname), false, pathname);
+  }
+
+  const modeToggleSource = await readSource("src/components/mode-toggle.tsx");
+  assert.match(modeToggleSource, /"\.\/mode-toggle-transition\.css"/);
+  assert.doesNotMatch(modeToggleSource, /theme-customizer/);
 });
 
 test("public site links use the homepage label consistently", async () => {
