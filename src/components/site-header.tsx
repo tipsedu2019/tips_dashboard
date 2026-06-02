@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ExternalLink } from "lucide-react"
+import { House, WandSparkles } from "lucide-react"
 
 import { CommandSearch, SearchTrigger } from "@/components/command-search"
 import { ModeToggle } from "@/components/mode-toggle"
@@ -60,8 +60,20 @@ export function SiteHeader() {
                 data-testid="admin-public-site-link"
                 className="hidden size-8 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
               >
-                <ExternalLink className="size-3.5" aria-hidden="true" />
+                <House className="size-3.5" aria-hidden="true" />
                 <span className="sr-only">홈페이지 확인</span>
+              </Link>
+              <Link
+                href="https://tipsedu.co.kr/test-gen"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="변형문제 생성을 새 화면에서 열기"
+                title="변형문제 생성"
+                data-testid="admin-english-test-generator-link"
+                className="hidden size-8 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+              >
+                <WandSparkles className="size-3.5" aria-hidden="true" />
+                <span className="sr-only">변형문제 생성</span>
               </Link>
               <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
                 <SearchTrigger onClick={() => setSearchOpen(true)} />

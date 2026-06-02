@@ -112,6 +112,29 @@ test("todo navigation exposes direct queues and keeps query links distinct", asy
   assert.match(navMainSource, /router\.prefetch\(target\)/);
 });
 
+test("global header uses clear icons for homepage and variation problem generator shortcuts", async () => {
+  const [headerSource, navigationSource, commandSearchSource] = await Promise.all([
+    readSource("src/components/site-header.tsx"),
+    readSource("src/lib/navigation.ts"),
+    readSource("src/components/command-search.tsx"),
+  ]);
+
+  assert.match(headerSource, /House/);
+  assert.match(headerSource, /WandSparkles/);
+  assert.doesNotMatch(headerSource, /ExternalLink/);
+  assert.doesNotMatch(headerSource, /FileQuestion/);
+  assert.match(headerSource, /<House className="size-3\.5" aria-hidden="true" \/>/);
+  assert.match(headerSource, /<WandSparkles className="size-3\.5" aria-hidden="true" \/>/);
+  assert.match(headerSource, /href="https:\/\/tipsedu\.co\.kr\/test-gen"/);
+  assert.match(headerSource, /aria-label="변형문제 생성을 새 화면에서 열기"/);
+  assert.match(headerSource, /title="변형문제 생성"/);
+  assert.match(headerSource, /data-testid="admin-english-test-generator-link"/);
+  assert.match(headerSource, /data-testid="admin-public-site-link"[\s\S]*data-testid="admin-english-test-generator-link"/);
+
+  assert.doesNotMatch(navigationSource, /변형문제 생성/);
+  assert.doesNotMatch(commandSearchSource, /변형문제 생성/);
+});
+
 test("legacy admin redirect routes do not keep template implementation files", async () => {
   const redirectOnlyRoutes = [
     "src/app/admin/chat",
