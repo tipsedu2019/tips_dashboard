@@ -30,6 +30,7 @@ import {
   applyTextbookPlanRangeField,
   buildSchedulePlanForSave,
   computeAutoEndDate,
+  getNextBillingPeriodMonth,
   getSuggestedNextStartDate,
   normalizeSchedulePlan,
 } from "@/lib/class-schedule-planner";
@@ -3577,10 +3578,11 @@ export function ClassScheduleWorkspace() {
         Number(current.globalSessionCount || 0),
       );
       const nextPeriodIndex = billingPeriods.length + 1;
+      const nextMonth = lastPeriod ? getNextBillingPeriodMonth(lastPeriod) : 1;
       billingPeriods.push({
         id: `period-${Date.now()}-${nextPeriodIndex}`,
-        month: nextPeriodIndex,
-        label: `${nextPeriodIndex}월`,
+        month: nextMonth,
+        label: `${nextMonth}월`,
         startDate,
         endDate,
       });

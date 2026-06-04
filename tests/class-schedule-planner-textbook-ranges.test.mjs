@@ -6,6 +6,7 @@ import {
   autoFillAllTextbookPlanRanges,
   autoFillTextbookPlanRanges,
   buildSchedulePlanForSave,
+  getNextBillingPeriodMonth,
   normalizeSchedulePlan,
 } from "../src/lib/class-schedule-planner.js";
 
@@ -226,4 +227,31 @@ test("duplicate legacy billing period ids are made unique before session ids are
 
   assert.equal(new Set(saved.billingPeriods.map((period) => period.id)).size, saved.billingPeriods.length);
   assert.equal(new Set(saved.sessions.map((session) => session.id)).size, saved.sessions.length);
+});
+
+test("billing period months follow manual sequence instead of end date month", () => {
+  const saved = buildSchedulePlanForSave(
+    {
+      subject: "math",
+      className: "Manual billing month",
+      selectedDays: [3, 0],
+      billingPeriods: [
+        {
+          id: "may-period",
+          month: "5",
+          label: "5월",
+          startDate: "2026-05-27",
+          endDate: "2026-07-01",
+        },
+      ],
+      textbooks: [],
+      sessions: [],
+    },
+    {},
+  );
+
+  assert.equal(saved.billingPeriods[0].month, 5);
+  assert.equal(saved.billingPeriods[0].label, "5월");
+  assert.equal(getNextBillingPeriodMonth(saved.billingPeriods[0]), 6);
+  assert.equal(getNextBillingPeriodMonth({ month: "2026-12" }), 1);
 });

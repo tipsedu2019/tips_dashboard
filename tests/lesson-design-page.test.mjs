@@ -42,6 +42,18 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.doesNotMatch(source, /setSelectedLessonScheduleState\(value\)/);
 });
 
+test("lesson design period add follows the previous period month sequence", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const plannerSource = await readSource("src/lib/class-schedule-planner.js");
+
+  assert.match(source, /getNextBillingPeriodMonth/);
+  assert.match(source, /const nextMonth = lastPeriod \? getNextBillingPeriodMonth\(lastPeriod\) : 1;/);
+  assert.match(source, /month: nextMonth/);
+  assert.match(source, /label: `\$\{nextMonth\}월`/);
+  assert.doesNotMatch(source, /month: nextPeriodIndex/);
+  assert.match(plannerSource, /export function getNextBillingPeriodMonth/);
+});
+
 test("lesson design session timeline connects through centered markers", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
