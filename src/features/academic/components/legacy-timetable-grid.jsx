@@ -867,6 +867,7 @@ function TimetableGrid({
                     key={`${column}-${rowIndex}`}
                     className={[
                       'timetable-cell',
+                      blockStart || ghostStartsHere || externalGhostStartsHere ? 'has-block-start' : '',
                       isHoveredColumn || isHoveredRow ? 'hover-highlight' : '',
                       isPreviewCell && previewRange?.mode === 'selection' ? 'selection-preview' : '',
                       isPreviewCell && ['move', 'resize', 'external'].includes(previewRange?.mode || '') ? 'move-preview' : '',

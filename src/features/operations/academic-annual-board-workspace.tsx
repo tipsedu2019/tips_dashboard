@@ -40,6 +40,7 @@ import {
   isSubjectExamType,
   runAcademicEventMutation,
 } from "./academic-event-utils.js";
+import { postAcademicCalendarAutomationEvent } from "./academic-calendar-automation";
 import {
   buildAcademicAnnualBoardModel,
   type AcademicAnnualBoardEntry,
@@ -1300,8 +1301,9 @@ export function AcademicAnnualBoardWorkspace() {
 
     try {
       const supabaseClient = supabase;
+      let academicMutation: Awaited<ReturnType<typeof runAcademicEventMutation>>;
       if (existingId) {
-        const updateResult = await runAcademicEventMutation(
+        academicMutation = await runAcademicEventMutation(
           result.payload as Record<string, unknown>,
           (payload: Record<string, unknown>) => {
             const updatePayload = { ...payload } as Record<string, unknown>;
@@ -1312,21 +1314,25 @@ export function AcademicAnnualBoardWorkspace() {
               .eq("id", existingId);
           },
         );
-        if (updateResult.error) {
-          throw updateResult.error;
+        if (academicMutation.error) {
+          throw academicMutation.error;
         }
         toast.success("학사 일정이 업데이트되었습니다.");
       } else {
-        const insertResult = await runAcademicEventMutation(
+        academicMutation = await runAcademicEventMutation(
           result.payload as Record<string, unknown>,
           (payload: Record<string, unknown>) => supabaseClient.from("academic_events").insert([payload]),
         );
-        if (insertResult.error) {
-          throw insertResult.error;
+        if (academicMutation.error) {
+          throw academicMutation.error;
         }
         toast.success("새 학사 일정을 추가했습니다.");
       }
 
+      await postAcademicCalendarAutomationEvent({
+        eventData,
+        savedPayload: academicMutation.payload,
+      });
       setMutationError(null);
       await refresh();
       setBoardDraft(null);

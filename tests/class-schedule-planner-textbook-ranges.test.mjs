@@ -6,6 +6,7 @@ import {
   autoFillAllTextbookPlanRanges,
   autoFillTextbookPlanRanges,
   buildSchedulePlanForSave,
+  getNextBillingPeriodMonth,
   normalizeSchedulePlan,
 } from "../src/lib/class-schedule-planner.js";
 
@@ -226,4 +227,34 @@ test("duplicate legacy billing period ids are made unique before session ids are
 
   assert.equal(new Set(saved.billingPeriods.map((period) => period.id)).size, saved.billingPeriods.length);
   assert.equal(new Set(saved.sessions.map((session) => session.id)).size, saved.sessions.length);
+});
+
+test("billing period months follow manual sequence instead of end date month", () => {
+  const saved = buildSchedulePlanForSave(
+    {
+      subject: "english",
+      className: "Cross month periods",
+      selectedDays: [0, 3],
+      billingPeriods: [
+        {
+          id: "period-may",
+          month: 5,
+          startDate: "2026-05-06",
+          endDate: "2026-05-31",
+        },
+        {
+          id: "period-june",
+          month: getNextBillingPeriodMonth({ month: 5, endDate: "2026-05-31" }),
+          startDate: "2026-05-27",
+          endDate: "2026-07-01",
+        },
+      ],
+      textbooks: [],
+      sessions: [],
+    },
+    {},
+  );
+
+  assert.deepEqual(saved.billingPeriods.map((period) => period.month), [5, 6]);
+  assert.deepEqual(saved.billingPeriods.map((period) => period.label), ["5월", "6월"]);
 });

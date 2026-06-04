@@ -92,6 +92,30 @@ test("academic event mutation preserves multi-day end date on start_date end_dat
   assert.equal("end" in successfulPayload, false);
 });
 
+test("academic event mutation returns the persisted payload id for automation source keys", async () => {
+  const attempts = [];
+  const result = await runAcademicEventMutation(
+    {
+      title: "중앙여고 1학기 기말고사",
+      school_id: "school-high",
+      school: "중앙여고",
+      type: DEFAULT_ACADEMIC_EVENT_TYPES[0],
+      start: "2026-07-07",
+      end: "2026-07-10",
+      grade: "고3",
+      category: "high",
+    },
+    async (payload) => {
+      attempts.push({ ...payload });
+      return { error: null, data: [{ id: payload.id }] };
+    },
+  );
+
+  assert.equal(result.error, null);
+  assert.equal(result.payload.id, attempts[0].id);
+  assert.deepEqual(result.data, [{ id: attempts[0].id }]);
+});
+
 test("academic event payload keeps range end metadata for date-only fallback schemas", () => {
   const result = buildAcademicEventMutationPayload(
     {

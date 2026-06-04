@@ -292,7 +292,7 @@ const AUTHENTICATED_CORE_SMOKE_ROUTES = [
     expectedTexts: ["수업일정"],
   },
   {
-    path: "/admin/class-schedule/lesson-design",
+    path: "/admin/curriculum/lesson-design",
     name: "lesson-design",
     expectedTexts: ["수업 설계"],
   },
@@ -1288,6 +1288,24 @@ async function waitForBodyToExclude(page, text, timeoutMs = 10000) {
   throw new Error(`Page still contained deleted sample text: ${text}`)
 }
 
+async function clickStableText(page, text, label) {
+  let lastError = null
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const target = page.getByText(text, { exact: false }).first()
+    try {
+      await target.waitFor({ state: "visible", timeout: 5000 })
+      await target.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {})
+      await target.click({ timeout: 5000 })
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt === 1) await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {})
+      await page.waitForTimeout(300)
+    }
+  }
+  throw new Error(`${label} could not be clicked after list re-render retries: ${lastError?.message || "unknown click failure"}`)
+}
+
 async function verifySingleQuickAddInteraction(page, sampleIndex) {
   const sampleTitle = `${UI_SAMPLE_PREFIX} ${Date.now()}-${sampleIndex}-${Math.random().toString(36).slice(2, 8)}`
   const editedTitle = `${sampleTitle} 수정`
@@ -1295,9 +1313,9 @@ async function verifySingleQuickAddInteraction(page, sampleIndex) {
   if (!(await input.count().catch(() => 0))) throw new Error("Todo quick-add input was not found.")
 
   try {
-    await input.fill(`${sampleTitle} 내일 오전 10시까지`)
+    await input.fill(`${sampleTitle} 오늘 오후 11시까지`)
     const preview = page.getByTestId("todo-quick-add-preview")
-    await preview.getByText("내일 10:00", { exact: false }).waitFor({ state: "visible", timeout: 5000 })
+    await preview.getByText("오늘 23:00", { exact: false }).waitFor({ state: "visible", timeout: 5000 })
       .catch(() => {
         throw new Error("Todo quick-add preview did not parse the Korean due suffix.")
       })
@@ -1306,9 +1324,7 @@ async function verifySingleQuickAddInteraction(page, sampleIndex) {
     await waitUntilEnabled(addButton, "Todo add button")
     await addButton.click()
 
-    const createdRow = page.getByText(sampleTitle, { exact: false }).first()
-    await createdRow.waitFor({ state: "visible", timeout: 10000 })
-    await createdRow.click()
+    await clickStableText(page, sampleTitle, "created todo row")
 
     const detailDialog = page.getByRole("dialog").filter({ hasText: sampleTitle }).first()
     await detailDialog.waitFor({ state: "visible", timeout: 5000 })
@@ -1331,9 +1347,7 @@ async function verifySingleQuickAddInteraction(page, sampleIndex) {
     await saveButton.click()
     await editDialog.waitFor({ state: "hidden", timeout: 10000 }).catch(() => {})
 
-    const editedRow = page.getByText(editedTitle, { exact: false }).first()
-    await editedRow.waitFor({ state: "visible", timeout: 10000 })
-    await editedRow.click()
+    await clickStableText(page, editedTitle, "edited todo row")
 
     const editedDetailDialog = page.getByRole("dialog").filter({ hasText: editedTitle }).first()
     await editedDetailDialog.waitFor({ state: "visible", timeout: 5000 })
@@ -1736,7 +1750,7 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
   page.on("pageerror", onPageError)
 
   try {
-    await page.goto(joinUrl(baseUrl, route.path), { waitUntil: "networkidle" })
+    await page.goto(joinUrl(baseUrl, route.path), { waitUntil: "domcontentloaded" })
     const url = new URL(page.url())
     const bodyText = await waitForRouteText(page, route)
     const metrics = await page.evaluate(() => ({

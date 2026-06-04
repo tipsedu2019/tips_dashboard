@@ -15,13 +15,24 @@ test("project root is promoted to the v2 Next app", () => {
   assert.equal(fs.existsSync(path.join(repoRoot, "next.config.ts")), true);
 
   const packageJson = JSON.parse(read("package.json"));
-  assert.equal(packageJson.scripts.dev, "next dev");
-  assert.equal(packageJson.scripts.build, "next build");
+  assert.match(packageJson.scripts.dev, /^next dev(?: --webpack)?$/);
+  assert.match(packageJson.scripts.build, /^next build(?: --webpack)?$/);
+});
+
+test("dashboard root redirects to the admin workspace", () => {
+  const source = read("src/app/page.tsx");
+  const proxySource = read("src/proxy.ts");
+
+  assert.match(source, /next\/navigation/);
+  assert.match(source, /redirect\("\/admin\/dashboard"\)/);
+  assert.equal(source.includes("제주 영어·수학"), false);
+  assert.equal(source.includes("/classes"), false);
+  assert.match(proxySource, /pathname === "\/"/);
+  assert.match(proxySource, /NextResponse\.redirect\(new URL\("\/admin\/dashboard"/);
 });
 
 test("public routes no longer redirect to legacy static bundles", () => {
   for (const route of [
-    "src/app/page.tsx",
     "src/app/classes/page.tsx",
     "src/app/reviews/page.tsx",
     "src/app/results/page.tsx",

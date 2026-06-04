@@ -42,6 +42,17 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.doesNotMatch(source, /setSelectedLessonScheduleState\(value\)/);
 });
 
+test("lesson design period add follows the previous period month sequence", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+
+  assert.match(source, /getNextBillingPeriodMonth/);
+  assert.match(source, /const nextMonth = lastPeriod \? getNextBillingPeriodMonth\(lastPeriod\) : 1/);
+  assert.match(source, /month: nextMonth/);
+  assert.match(source, /label: `\$\{nextMonth\}월`/);
+  assert.doesNotMatch(source, /month: nextPeriodIndex/);
+  assert.doesNotMatch(source, /label: `\$\{nextPeriodIndex\}월`/);
+});
+
 test("lesson design session timeline connects through centered markers", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
@@ -102,7 +113,7 @@ test("lesson design connects textbooks before assigning session ranges", async (
   assert.match(source, /getLessonSubjectDisplayLabel/);
   assert.match(source, /const allMonthKeys = getAllLessonMonthKeys\(nextLessonDesignSnapshot\.monthSummaries\)/);
   assert.match(source, /const nextSelectedMonthKeys = allMonthKeys/);
-  assert.match(source, /setFocusedLessonMonthKey\(targetSession\?\.monthKey \|\| requestedMonthKeys\[0\] \|\| nextSelectedMonthKeys\[0\] \|\| ""\)/);
+  assert.match(source, /setFocusedLessonMonthKey\(text\(targetSession\?\.monthKey\) \|\| requestedMonthKeys\[0\] \|\| nextSelectedMonthKeys\[0\] \|\| ""\)/);
   assert.match(source, /monthKeys: requestedLessonMonthKeys/);
   assert.match(source, /\.find\(\(entries\) => Array\.isArray\(entries\) && entries\.length > 0\)/);
   assert.match(source, /const textbookEntrySources = planOverride/);
@@ -211,7 +222,7 @@ test("lesson design session query sync does not override local session clicks", 
   assert.match(source, /pendingLessonSessionNavigationKeyRef/);
   assert.match(source, /lastSyncedLessonSessionPairKeyRef/);
   assert.match(source, /markPendingLessonSessionSelection/);
-  assert.match(source, /options: \{ sessionId\?: string; monthKeys\?: string\[\]; sectionId\?: string \}/);
+  assert.match(source, /options: \{ sessionId\?: string; sessionOrder\?: string \| number; monthKeys\?: string\[\]; sectionId\?: string \}/);
   assert.match(source, /sectionId: targetSectionId/);
   assert.match(source, /requestedLessonSessionKey/);
   assert.match(source, /const nextLessonSessionKey = `\$\{text\(row\?\.id \|\| selectedRow\?\.id \|\| selectedClassId\)\}:\$\{resolvedSessionId\}`/);
@@ -224,12 +235,12 @@ test("lesson design session query sync does not override local session clicks", 
   assert.match(source, /pendingLessonSessionNavigationKeyRef\.current = ""/);
   assert.match(
     source,
-    /lastRequestedLessonSessionKeyRef\.current === requestedLessonSessionKey &&\s*selectedLessonSessionId === resolvedRequestedSession\.id/,
+    /lastRequestedLessonSessionKeyRef\.current === requestedLessonSessionKey &&\s*selectedLessonSessionId === resolvedRequestedSessionId/,
   );
   assert.match(source, /lastRequestedLessonSessionKeyRef\.current = requestedLessonSessionKey/);
   assert.match(source, /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.periods/);
   assert.match(source, /setLessonMonthDetailsOpen\(true\)/);
-  assert.match(source, /scrollLessonDesignSessionPairAfterRender\(resolvedRequestedSession\.id\)/);
+  assert.match(source, /scrollLessonDesignSessionPairAfterRender\(resolvedRequestedSessionId\)/);
   assert.match(source, /markPendingLessonSessionSelection\(periodSelectedSession\.id\)/);
   assert.doesNotMatch(source, /setSelectedLessonSessionId\(periodSelectedSession\.id\)/);
   assert.match(source, /options: \{ scroll\?: boolean \} = \{\}/);
@@ -353,6 +364,7 @@ test("lesson design keeps navigation, recovery, and save actions stable", async 
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
   assert.match(source, /function resolveRequestedLessonDesignSession/);
+  assert.match(source, /function getLessonDesignSessionOrder/);
   assert.match(source, /scrollLessonDesignSectionAfterRender/);
   assert.match(source, /data-testid="lesson-design-mode-tabs"/);
   assert.match(source, /data-testid="lesson-design-page-scroll"/);
@@ -368,9 +380,29 @@ test("lesson design keeps navigation, recovery, and save actions stable", async 
   assert.match(source, /\[content-visibility:auto\]/);
   assert.match(source, /const canScrollInside =/);
   assert.match(source, /window\.getComputedStyle\(scrollContainer\)\.overflowY/);
-  assert.match(source, /const requestedLessonSessionKey = `\$\{requestedClassId\}:\$\{resolvedRequestedSession\.id\}`/);
+  assert.match(source, /const requestedLessonSessionKey = `\$\{requestedClassId\}:\$\{resolvedRequestedSessionId\}`/);
   assert.match(source, /lastRequestedLessonSessionKeyRef\.current = requestedLessonSessionKey/);
-  assert.match(source, /sessionId: resolvedRequestedSession\.id/);
+  assert.match(source, /sessionId: resolvedRequestedSessionId/);
+  assert.match(source, /sessionOrder\?: string \| number/);
+  assert.match(source, /const requestedLessonSessionOrder = getLessonDesignSessionOrder\(searchParams\.get\("sessionOrder"\)\)/);
+  assert.match(source, /params\.set\("sessionOrder", String\(resolvedSessionOrder\)\)/);
+  assert.match(source, /params\.delete\("sessionOrder"\)/);
+  assert.match(source, /findMatchingLessonSessionRecord\(sessions, \{/);
+  assert.match(source, /sessionNumber: requestedSessionOrder/);
+  assert.match(source, /resolveRequestedLessonDesignSession\(\s*lessonDesignSnapshot,\s*requestedSessionId,\s*selectedLessonSessionId,\s*requestedLessonSessionOrder,/);
+});
+
+test("lesson design save posts a curriculum automation event after plan persistence", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+
+  assert.match(source, /async function postCurriculumPlanAutomationEvent/);
+  assert.match(source, /supabase\.auth\.getSession\(\)/);
+  assert.match(source, /fetch\("\/api\/ops-task-automations\/trigger"/);
+  assert.match(source, /trigger: "curriculum\.plan_saved"/);
+  assert.match(source, /sourceType: "curriculum"/);
+  assert.match(source, /classItem: \{/);
+  assert.match(source, /nextSessionDate:/);
+  assert.match(source, /await postCurriculumPlanAutomationEvent\(/);
 });
 
 test("class schedule overview keeps dense list columns from colliding", async () => {

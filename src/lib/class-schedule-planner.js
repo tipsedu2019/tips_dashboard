@@ -100,7 +100,14 @@ function buildDeterministicSessionId(source = {}, countedSessions = null) {
 }
 
 function clampMonth(value) {
-  const number = Number(value);
+  const rawValue = String(value ?? "").trim();
+  const yearMonthMatch = rawValue.match(/^\d{4}-(\d{1,2})$/);
+  const monthLabelMatch = rawValue.match(/^(\d{1,2})\s*월?$/);
+  const number = yearMonthMatch
+    ? Number(yearMonthMatch[1])
+    : monthLabelMatch
+      ? Number(monthLabelMatch[1])
+      : Number(value);
   if (!Number.isFinite(number) || number < 1 || number > 12) {
     return 1;
   }
@@ -495,6 +502,13 @@ function extractMonth(dateString) {
   return date ? date.getMonth() + 1 : 1;
 }
 
+export function getNextBillingPeriodMonth(period = {}) {
+  const currentMonth = clampMonth(
+    period.month || period.label || extractMonth(period.startDate || period.endDate),
+  );
+  return currentMonth >= 12 ? 1 : currentMonth + 1;
+}
+
 function buildDeterministicBillingPeriodId(period = {}, index = 0, resolvedEndDate = "") {
   const explicitId = String(period.id || "").trim();
   if (explicitId) {
@@ -516,9 +530,11 @@ function createBillingPeriod(
   const startDate = String(period.startDate || "").trim();
   const resolvedEndDate = String(period.endDate || "").trim() || computeAutoEndDate(startDate, selectedDays, sessionCount);
   const monthAnchorDate = resolvedEndDate || startDate;
-  const month = monthAnchorDate
-    ? extractMonth(monthAnchorDate)
-    : clampMonth(period.month || extractMonth(startDate));
+  const month = period.month
+    ? clampMonth(period.month)
+    : monthAnchorDate
+      ? extractMonth(monthAnchorDate)
+      : clampMonth(extractMonth(startDate));
 
   return {
     id: buildDeterministicBillingPeriodId(period, index, resolvedEndDate),

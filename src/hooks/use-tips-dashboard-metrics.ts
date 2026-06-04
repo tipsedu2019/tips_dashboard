@@ -63,6 +63,25 @@ const DASHBOARD_TABLE_COLUMNS: Record<string, string> = {
   academic_exam_days: "id,school_id,grade,subject,exam_date",
   academic_event_exam_details: "id,academic_event_id,school_id,grade,subject,exam_date",
   academic_events: "*",
+  ops_tasks: [
+    "id",
+    "title",
+    "type",
+    "status",
+    "subject",
+    "campus",
+    "student_name",
+    "class_name",
+    "completed_at",
+    "created_at",
+    "updated_at",
+  ].join(","),
+  ops_registration_details: "task_id,pipeline_status,class_start_date,inquiry_at,level_test_at,consultation_at,school_grade,school_name",
+  ops_withdrawal_details: "task_id,withdrawal_date,withdrawal_session,teacher_name,school_grade",
+}
+
+function text(value: unknown) {
+  return String(value || "").trim()
 }
 
 function isMissingRelationError(error: unknown) {
@@ -140,6 +159,66 @@ async function readTable(tableName: string, options: DashboardTableReadOptions =
   return result.data || []
 }
 
+function indexByTaskId(rows: unknown[]) {
+  const map = new Map<string, Record<string, unknown>>()
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue
+    const record = row as Record<string, unknown>
+    const taskId = text(record.task_id)
+    if (taskId) map.set(taskId, record)
+  }
+  return map
+}
+
+function buildDashboardOpsTasks(
+  tasks: unknown[],
+  registrationRows: unknown[],
+  withdrawalRows: unknown[],
+) {
+  const registrationsByTaskId = indexByTaskId(registrationRows)
+  const withdrawalsByTaskId = indexByTaskId(withdrawalRows)
+
+  return tasks
+    .map((row) => {
+      if (!row || typeof row !== "object") return null
+      const task = row as Record<string, unknown>
+      const id = text(task.id)
+      if (!id) return null
+      const registration = registrationsByTaskId.get(id)
+      const withdrawal = withdrawalsByTaskId.get(id)
+
+      return {
+        id,
+        title: text(task.title),
+        type: text(task.type),
+        status: text(task.status),
+        subject: text(task.subject),
+        campus: text(task.campus),
+        studentName: text(task.student_name),
+        className: text(task.class_name),
+        completedAt: text(task.completed_at),
+        createdAt: text(task.created_at),
+        updatedAt: text(task.updated_at),
+        registration: registration ? {
+          pipelineStatus: text(registration.pipeline_status),
+          classStartDate: text(registration.class_start_date),
+          inquiryAt: text(registration.inquiry_at),
+          levelTestAt: text(registration.level_test_at),
+          consultationAt: text(registration.consultation_at),
+          schoolGrade: text(registration.school_grade),
+          schoolName: text(registration.school_name),
+        } : undefined,
+        withdrawal: withdrawal ? {
+          withdrawalDate: text(withdrawal.withdrawal_date),
+          withdrawalSession: text(withdrawal.withdrawal_session),
+          teacherName: text(withdrawal.teacher_name),
+          schoolGrade: text(withdrawal.school_grade),
+        } : undefined,
+      }
+    })
+    .filter(Boolean)
+}
+
 export function useTipsDashboardMetrics() {
   const [metrics, setMetrics] = useState<DashboardMetricsState>(EMPTY_METRICS)
 
@@ -184,6 +263,9 @@ export function useTipsDashboardMetrics() {
           academicExamDays,
           academicEventExamDetails,
           academicEvents,
+          opsTasks,
+          opsRegistrationDetails,
+          opsWithdrawalDetails,
         ] = await Promise.all([
           readTable("class_terms", { optional: true }),
           readTable("class_schedule_sync_groups", { optional: true }),
@@ -192,7 +274,11 @@ export function useTipsDashboardMetrics() {
           readTable("academic_exam_days", { optional: true }),
           readTable("academic_event_exam_details", { optional: true }),
           readTable("academic_events", { optional: true }),
+          readTable("ops_tasks", { optional: true }),
+          readTable("ops_registration_details", { optional: true }),
+          readTable("ops_withdrawal_details", { optional: true }),
         ])
+        const dashboardOpsTasks = buildDashboardOpsTasks(opsTasks, opsRegistrationDetails, opsWithdrawalDetails)
 
         if (isMounted) {
           setMetrics({
@@ -206,6 +292,7 @@ export function useTipsDashboardMetrics() {
               academicExamDays,
               academicEventExamDetails,
               academicEvents,
+              opsTasks: dashboardOpsTasks,
             }),
             isLoading: false,
             isConnected: true,

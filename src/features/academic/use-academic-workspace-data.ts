@@ -6,6 +6,31 @@ import { supabase } from "@/lib/supabase";
 
 type AcademicWorkspaceRow = Record<string, unknown>;
 
+type AcademicOperationImpactTask = {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  classId: string;
+  className: string;
+  studentName: string;
+  dueAt: string;
+  updatedAt: string;
+  registrationClassStartDate: string;
+  registrationClassStartSession: string;
+  registrationPipelineStatus: string;
+  withdrawalDate: string;
+  withdrawalSession: string;
+  fromClassId: string;
+  fromClassName: string;
+  fromClassEndDate: string;
+  fromClassEndSession: string;
+  toClassId: string;
+  toClassName: string;
+  toClassStartDate: string;
+  toClassStartSession: string;
+};
+
 type AcademicWorkspaceData = {
   classes: AcademicWorkspaceRow[];
   classTerms: AcademicWorkspaceRow[];
@@ -15,6 +40,7 @@ type AcademicWorkspaceData = {
   progressLogs: AcademicWorkspaceRow[];
   teacherCatalogs: AcademicWorkspaceRow[];
   classroomCatalogs: AcademicWorkspaceRow[];
+  operationTasks: AcademicOperationImpactTask[];
 };
 
 const EMPTY_DATA: AcademicWorkspaceData = {
@@ -26,6 +52,7 @@ const EMPTY_DATA: AcademicWorkspaceData = {
   progressLogs: [],
   teacherCatalogs: [],
   classroomCatalogs: [],
+  operationTasks: [],
 };
 
 const ACADEMIC_TABLE_TIMEOUT_MS = 8000;
@@ -76,6 +103,74 @@ async function readTable(table: string, optional = false) {
   return data || [];
 }
 
+async function readOptionalTable(table: string) {
+  try {
+    return await readTable(table, true);
+  } catch {
+    return [];
+  }
+}
+
+function text(value: unknown) {
+  return String(value || "").trim();
+}
+
+function byTaskId(rows: AcademicWorkspaceRow[]) {
+  const entries: Array<[string, AcademicWorkspaceRow]> = [];
+  rows.forEach((row) => {
+    const taskId = text(row.task_id);
+    if (taskId) entries.push([taskId, row]);
+  });
+  return new Map(entries);
+}
+
+async function readOperationImpactTasks(): Promise<AcademicOperationImpactTask[]> {
+  const taskRows = await readOptionalTable("ops_tasks");
+  const operationRows = taskRows.filter((row) => ["registration", "transfer", "withdrawal"].includes(text(row.type)));
+  if (operationRows.length === 0) return [];
+
+  const [registrationRows, withdrawalRows, transferRows] = await Promise.all([
+    readOptionalTable("ops_registration_details"),
+    readOptionalTable("ops_withdrawal_details"),
+    readOptionalTable("ops_transfer_details"),
+  ]);
+  const registrationByTaskId = byTaskId(registrationRows);
+  const withdrawalByTaskId = byTaskId(withdrawalRows);
+  const transferByTaskId = byTaskId(transferRows);
+
+  return operationRows.map((row) => {
+    const taskId = text(row.id);
+    const registration = registrationByTaskId.get(taskId) || {};
+    const withdrawal = withdrawalByTaskId.get(taskId) || {};
+    const transfer = transferByTaskId.get(taskId) || {};
+
+    return {
+      id: taskId,
+      title: text(row.title),
+      type: text(row.type),
+      status: text(row.status),
+      classId: text(row.class_id),
+      className: text(row.class_name),
+      studentName: text(row.student_name),
+      dueAt: text(row.due_at),
+      updatedAt: text(row.updated_at),
+      registrationClassStartDate: text(registration.class_start_date),
+      registrationClassStartSession: text(registration.class_start_session),
+      registrationPipelineStatus: text(registration.pipeline_status),
+      withdrawalDate: text(withdrawal.withdrawal_date),
+      withdrawalSession: text(withdrawal.withdrawal_session),
+      fromClassId: text(transfer.from_class_id),
+      fromClassName: text(transfer.from_class_name),
+      fromClassEndDate: text(transfer.from_class_end_date),
+      fromClassEndSession: text(transfer.from_class_end_session),
+      toClassId: text(transfer.to_class_id),
+      toClassName: text(transfer.to_class_name),
+      toClassStartDate: text(transfer.to_class_start_date),
+      toClassStartSession: text(transfer.to_class_start_session),
+    };
+  });
+}
+
 export function useAcademicWorkspaceData() {
   const [data, setData] = useState<AcademicWorkspaceData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
@@ -102,6 +197,7 @@ export function useAcademicWorkspaceData() {
         progressLogs,
         teacherCatalogs,
         classroomCatalogs,
+        operationTasks,
       ] = await Promise.all([
         readTable("classes"),
         readTable("class_terms", true),
@@ -111,6 +207,7 @@ export function useAcademicWorkspaceData() {
         readTable("progress_logs"),
         readTable("teacher_catalogs", true),
         readTable("classroom_catalogs", true),
+        readOperationImpactTasks(),
       ]);
 
       setData({
@@ -122,6 +219,7 @@ export function useAcademicWorkspaceData() {
         progressLogs,
         teacherCatalogs,
         classroomCatalogs,
+        operationTasks,
       });
       setError(null);
     } catch (fetchError) {

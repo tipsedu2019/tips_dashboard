@@ -43,6 +43,7 @@ type AuthContextValue = {
   isAdmin: boolean
   isStaff: boolean
   isTeacher: boolean
+  isAssistant: boolean
   loading: boolean
   authError: string | null
   mustChangePassword: boolean
@@ -51,6 +52,8 @@ type AuthContextValue = {
   canEditCurriculumPlanning: boolean
   canEditClassSchedulePlanning: boolean
   canEditClassSchedule: boolean
+  canUseAssistantOperations: boolean
+  defaultAdminPath: string
   login: (identifier: string, password: string) => Promise<boolean>
   logout: () => Promise<boolean>
 }
@@ -304,6 +307,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = role === "admin"
   const isStaff = role === "staff" || role === "admin"
   const isTeacher = role === "teacher"
+  const isAssistant = role === "assistant"
   const capabilities = getRoleCapabilities(role)
   const mustChangePassword = shouldForcePasswordChange(user || undefined)
 
@@ -315,6 +319,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       isStaff,
       isTeacher,
+      isAssistant,
       loading,
       authError,
       mustChangePassword,
@@ -351,7 +356,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return true
       },
     }),
-    [authError, capabilities, isAdmin, isStaff, isTeacher, loading, mustChangePassword, role, session, user],
+    [authError, capabilities, isAdmin, isStaff, isTeacher, isAssistant, loading, mustChangePassword, role, session, user],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

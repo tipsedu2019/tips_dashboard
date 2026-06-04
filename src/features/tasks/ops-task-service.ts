@@ -3,9 +3,20 @@ import { ACTIVE_STUDENT_STATUS, WITHDRAWN_STUDENT_STATUS } from "@/lib/student-s
 
 import {
   REGISTRATION_PIPELINE_STATUSES,
+  buildGoogleChatTaskNotificationPayload,
+  buildOpsRecurringTaskOccurrence,
+  buildOpsTriggeredTaskDraft,
+  buildRegistrationTextbookSaleDraft,
+  getRegistrationCompletionChecklistItems,
+  getRegistrationDuplicateCompletionBlockers,
+  getTransferCompletionChecklistItems,
   getOpsTaskCalendarItems,
+  getOpsTaskScheduleCompletionBlockers,
   getTaskTypeLabel,
+  getWithdrawalCompletionChecklistItems,
+  isWordRetestScoreValue,
   summarizeOpsTasks,
+  toDateKey,
 } from "./ops-task-model"
 
 export type OpsTaskType =
@@ -29,6 +40,7 @@ export type OpsTaskPriority = "low" | "normal" | "high" | "urgent"
 type Row = Record<string, unknown>
 type OpsTaskLinkPatchValue = string | null
 type OpsCompletionRollback = () => Promise<void>
+type JsonObject = Record<string, unknown>
 
 export type OpsProfileOption = {
   id: string
@@ -54,6 +66,13 @@ export type OpsStudentOption = OpsLinkedOption & {
   waitlistClassIds: string[]
 }
 
+type OpsClassPlanSessionOption = {
+  sessionId: string
+  sessionOrder: number
+  date: string
+  planned: boolean
+}
+
 export type OpsClassOption = OpsLinkedOption & {
   subject: string
   grade: string
@@ -62,6 +81,10 @@ export type OpsClassOption = OpsLinkedOption & {
   studentIds: string[]
   waitlistIds: string[]
   textbookIds: string[]
+  sessionCount: number
+  plannedSessionCount: number
+  unplannedSessionCount: number
+  planSessions: OpsClassPlanSessionOption[]
 }
 
 export type OpsTextbookOption = OpsLinkedOption & {
@@ -87,6 +110,8 @@ export type OpsRegistrationDetail = {
   levelTestAt?: string
   levelTestPlace?: string
   levelTestMaterialLink?: string
+  levelTestResult?: string
+  principalReviewNote?: string
   counselor?: string
   phoneConsultationAt?: string
   visitConsultationAt?: string
@@ -94,6 +119,7 @@ export type OpsRegistrationDetail = {
   classStartDate?: string
   classStartSession?: string
   textbookReady?: boolean
+  principalPlacementChecked?: boolean
   admissionNoticeSent?: boolean
   paymentChecked?: boolean
   makeeduRegistered?: boolean
@@ -113,6 +139,7 @@ export type OpsWithdrawalDetail = {
   completedLessonHours?: string
   fourWeekLessonHours?: string
   timetableRosterUpdated?: boolean
+  studentStatusUpdated?: boolean
   makeeduWithdrawalDone?: boolean
   feeProcessed?: boolean
   textbookFeeProcessed?: boolean
@@ -187,6 +214,12 @@ export type OpsTaskEvent = {
   createdAt: string
 }
 
+export type OpsTaskChecklistItem = {
+  id: string
+  label: string
+  checked: boolean
+}
+
 export type OpsTask = {
   id: string
   title: string
@@ -210,6 +243,12 @@ export type OpsTask = {
   dueAt: string
   completedAt: string
   memo: string
+  checklistItems: OpsTaskChecklistItem[]
+  automationRuleId: string
+  automationSourceType: string
+  automationSourceId: string
+  automationSourceKey: string
+  automationGeneratedAt: string
   createdAt: string
   updatedAt: string
   registration?: OpsRegistrationDetail
@@ -221,6 +260,74 @@ export type OpsTask = {
   events: OpsTaskEvent[]
 }
 
+export type OpsTaskAutomationKind = "recurring" | "trigger"
+
+export type OpsTaskAutomationRule = {
+  id: string
+  name: string
+  kind: OpsTaskAutomationKind
+  target: string
+  triggerKey: string
+  enabled: boolean
+  recurrence: JsonObject
+  conditions: JsonObject
+  action: JsonObject
+  assignee: JsonObject
+  due: JsonObject
+  notification: JsonObject
+  notificationChannelId: string
+  status: OpsTaskAutomationRuleStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export type OpsTaskAutomationRunHistoryItem = {
+  id: string
+  status: string
+  ranAt: string
+  sourceKey: string
+  scheduledFor: string
+  taskId: string
+  taskTitle: string
+  errorMessage: string
+}
+
+export type OpsTaskAutomationDeliveryHistoryItem = {
+  id: string
+  status: string
+  lastAttemptAt: string
+  nextRetryAt: string
+  errorMessage: string
+}
+
+export type OpsTaskAutomationRuleStatus = {
+  lastRunAt: string
+  lastRunStatus: string
+  lastRunError: string
+  lastTaskId: string
+  lastTaskTitle: string
+  nextRunAt: string
+  pendingDeliveryCount: number
+  failedDeliveryCount: number
+  lastDeliveryStatus: string
+  lastDeliveryAt: string
+  lastDeliveryError: string
+  recentRuns: OpsTaskAutomationRunHistoryItem[]
+  recentDeliveries: OpsTaskAutomationDeliveryHistoryItem[]
+}
+
+export type OpsTaskNotificationChannel = {
+  id: string
+  name: string
+  teamKey: string
+  description: string
+  webhookSecretRef: string
+  webhookUrlLast4: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 export type OpsTaskWorkspaceData = {
   tasks: OpsTask[]
   profiles: OpsProfileOption[]
@@ -228,6 +335,8 @@ export type OpsTaskWorkspaceData = {
   classes: OpsClassOption[]
   textbooks: OpsTextbookOption[]
   teachers: OpsTeacherOption[]
+  automationRules: OpsTaskAutomationRule[]
+  notificationChannels: OpsTaskNotificationChannel[]
   schemaReady: boolean
   error: string | null
 }
@@ -250,10 +359,41 @@ export type OpsTaskInput = {
   dueAt?: string
   completedAt?: string
   memo?: string
+  checklistItems?: OpsTaskChecklistItem[]
+  automationRuleId?: string
+  automationSourceType?: string
+  automationSourceId?: string
+  automationSourceKey?: string
+  automationGeneratedAt?: string
   registration?: OpsRegistrationDetail
   withdrawal?: OpsWithdrawalDetail
   transfer?: OpsTransferDetail
   wordRetest?: OpsWordRetestDetail
+}
+
+export type OpsTaskAutomationRuleInput = {
+  name: string
+  kind: OpsTaskAutomationKind
+  target?: string
+  triggerKey?: string
+  enabled?: boolean
+  recurrence?: JsonObject
+  conditions?: JsonObject
+  action?: JsonObject
+  assignee?: JsonObject
+  due?: JsonObject
+  notification?: JsonObject
+  notificationChannelId?: string
+}
+
+export type OpsTaskNotificationChannelInput = {
+  name: string
+  teamKey: string
+  description?: string
+  webhookSecretRef?: string
+  webhookUrl?: string
+  webhookUrlLast4?: string
+  isActive?: boolean
 }
 
 export const emptyOpsTaskWorkspaceData: OpsTaskWorkspaceData = {
@@ -263,6 +403,8 @@ export const emptyOpsTaskWorkspaceData: OpsTaskWorkspaceData = {
   classes: [],
   textbooks: [],
   teachers: [],
+  automationRules: [],
+  notificationChannels: [],
   schemaReady: true,
   error: null,
 }
@@ -334,10 +476,20 @@ function nullableNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function nullableWordRetestScore(value: unknown) {
+  const trimmed = text(value)
+  if (!isWordRetestScoreValue(trimmed)) return null
+  return Number(trimmed)
+}
+
 function normalizeIdList(value: unknown) {
   return Array.isArray(value)
     ? [...new Set(value.map((item) => text(item)).filter(Boolean))]
     : []
+}
+
+function arrayValue(value: unknown): Row[] {
+  return Array.isArray(value) ? value.filter((item): item is Row => Boolean(item && typeof item === "object")) : []
 }
 
 function addUniqueId(values: unknown, value: string) {
@@ -365,6 +517,99 @@ function withoutOpsStudentClass(student: Row | null, classId: unknown) {
 
 function optionMeta(parts: unknown[]) {
   return parts.map(text).filter(Boolean).join(" · ")
+}
+
+function objectValue(value: unknown): Row {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Row
+  if (typeof value !== "string" || !value.trim()) return {}
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Row : {}
+  } catch {
+    return {}
+  }
+}
+
+function hasClassPlanContent(session: Row) {
+  const entries = arrayValue(session.textbookEntries || session.textbook_entries)
+  return entries.some((entry) => {
+    const parsedPlan = objectValue(entry.plan)
+    const plan = Object.keys(parsedPlan).length > 0 ? parsedPlan : entry
+    return Boolean(
+      text(plan.label || plan.rangeLabel || plan.range_label) ||
+        text(plan.start || plan.from || plan.startRange || plan.start_range) ||
+        text(plan.end || plan.to || plan.endRange || plan.end_range) ||
+        text(plan.memo || plan.note || plan.teacherNote || plan.teacher_note),
+    )
+  })
+}
+
+function getClassPlanSessionOrder(session: Row, index: number) {
+  const rawOrder = session.sessionOrder ?? session.session_order ?? session.sessionNumber ?? session.session_number ?? session.number ?? session.order
+  const order = Number(rawOrder)
+  return Number.isFinite(order) && order > 0 ? order : index + 1
+}
+
+function getClassPlanSessionSummaries(sessions: Row[]): OpsClassPlanSessionOption[] {
+  return sessions.map((session, index) => ({
+    sessionId: text(session.id || session.sessionId || session.session_id),
+    sessionOrder: getClassPlanSessionOrder(session, index),
+    date: text(session.date || session.sessionDate || session.session_date || session.dateValue || session.date_value),
+    planned: hasClassPlanContent(session),
+  }))
+}
+
+function getClassPlanMetrics(row: Row) {
+  const plan = objectValue(row.schedule_plan || row.schedulePlan)
+  const sessions = arrayValue(plan.sessions)
+  const planSessions = getClassPlanSessionSummaries(sessions)
+  const plannedSessionCount = planSessions.filter((session) => session.planned).length
+  return {
+    sessionCount: sessions.length,
+    plannedSessionCount,
+    unplannedSessionCount: Math.max(sessions.length - plannedSessionCount, 0),
+    planSessions,
+  }
+}
+
+function toOpsClassPlanReference(row: Row | null) {
+  if (!row) return null
+  const planMetrics = getClassPlanMetrics(row)
+  return {
+    id: text(row.id),
+    label: text(row.name),
+    textbookIds: getClassPlanTextbookIds(row),
+    sessionCount: planMetrics.sessionCount,
+    plannedSessionCount: planMetrics.plannedSessionCount,
+    unplannedSessionCount: planMetrics.unplannedSessionCount,
+    planSessions: planMetrics.planSessions,
+  }
+}
+
+function getClassPlanTextbookIds(row: Row) {
+  const plan = objectValue(row.schedule_plan || row.schedulePlan)
+  return [
+    ...new Set(
+      arrayValue(plan.textbooks)
+        .map(({ textbookId, textbook_id, id }) => text(textbookId || textbook_id || id))
+        .filter(Boolean),
+    ),
+  ]
+}
+
+function getClassRegistrationTextbookIds(row: Row | null) {
+  if (!row) return []
+  return [
+    ...new Set([
+      ...normalizeIdList(row.textbook_ids),
+      ...getClassPlanTextbookIds(row),
+    ]),
+  ]
+}
+
+function getSingleClassPlanTextbookId(row: Row | null) {
+  const textbookIds = getClassRegistrationTextbookIds(row)
+  return textbookIds.length === 1 ? textbookIds[0] : ""
 }
 
 function createOpsId() {
@@ -396,6 +641,31 @@ function normalizePriority(value: unknown): OpsTaskPriority {
     return priority
   }
   return "normal"
+}
+
+function parseOpsTaskChecklistItems(value: unknown): OpsTaskChecklistItem[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item, index) => {
+      if (typeof item === "string") {
+        const label = text(item)
+        return label ? { id: `item-${index + 1}`, label, checked: false } : null
+      }
+      if (!item || typeof item !== "object") return null
+      const row = item as Row
+      const label = text(row.label || row.title || row.text || row.name)
+      if (!label) return null
+      return {
+        id: text(row.id) || `item-${index + 1}`,
+        label,
+        checked: row.checked === true || row.done === true || row.completed === true,
+      }
+    })
+    .filter((item): item is OpsTaskChecklistItem => Boolean(item))
+}
+
+function normalizeOpsTaskChecklistItems(value: unknown): OpsTaskChecklistItem[] {
+  return parseOpsTaskChecklistItems(value)
 }
 
 function isMissingRelationError(error: unknown) {
@@ -602,6 +872,8 @@ function mapRegistration(row: Row | undefined): OpsRegistrationDetail | undefine
     levelTestAt: text(row.level_test_at),
     levelTestPlace: text(row.level_test_place),
     levelTestMaterialLink: text(row.level_test_material_link),
+    levelTestResult: text(row.level_test_result),
+    principalReviewNote: text(row.principal_review_note),
     counselor: text(row.counselor),
     phoneConsultationAt: text(row.phone_consultation_at),
     visitConsultationAt: text(row.visit_consultation_at),
@@ -609,6 +881,7 @@ function mapRegistration(row: Row | undefined): OpsRegistrationDetail | undefine
     classStartDate: text(row.class_start_date),
     classStartSession: text(row.class_start_session),
     textbookReady: bool(row.textbook_ready),
+    principalPlacementChecked: bool(row.principal_placement_checked),
     admissionNoticeSent: bool(row.admission_notice_sent),
     paymentChecked: bool(row.payment_checked),
     makeeduRegistered: bool(row.makeedu_registered),
@@ -631,6 +904,7 @@ function mapWithdrawal(row: Row | undefined): OpsWithdrawalDetail | undefined {
     completedLessonHours: numberText(row.completed_lesson_hours),
     fourWeekLessonHours: numberText(row.four_week_lesson_hours),
     timetableRosterUpdated: bool(row.timetable_roster_updated),
+    studentStatusUpdated: bool(row.student_status_updated),
     makeeduWithdrawalDone: bool(row.makeedu_withdrawal_done),
     feeProcessed: bool(row.fee_processed),
     textbookFeeProcessed: bool(row.textbook_fee_processed),
@@ -760,6 +1034,12 @@ function mapTask(
     dueAt: text(row.due_at),
     completedAt: text(row.completed_at),
     memo: text(row.memo),
+    checklistItems: parseOpsTaskChecklistItems(row.checklist_items),
+    automationRuleId: text(row.automation_rule_id),
+    automationSourceType: text(row.automation_source_type),
+    automationSourceId: text(row.automation_source_id),
+    automationSourceKey: text(row.automation_source_key),
+    automationGeneratedAt: text(row.automation_generated_at),
     createdAt: text(row.created_at),
     updatedAt: text(row.updated_at),
     registration: registration.get(id),
@@ -772,76 +1052,197 @@ function mapTask(
   }
 }
 
+function normalizeAutomationKind(value: unknown): OpsTaskAutomationKind {
+  return text(value) === "trigger" ? "trigger" : "recurring"
+}
+
+function emptyAutomationRuleStatus(): OpsTaskAutomationRuleStatus {
+  return {
+    lastRunAt: "",
+    lastRunStatus: "",
+    lastRunError: "",
+    lastTaskId: "",
+    lastTaskTitle: "",
+    nextRunAt: "",
+    pendingDeliveryCount: 0,
+    failedDeliveryCount: 0,
+    lastDeliveryStatus: "",
+    lastDeliveryAt: "",
+    lastDeliveryError: "",
+    recentRuns: [],
+    recentDeliveries: [],
+  }
+}
+
+function automationDateValue(row: Row, ...keys: string[]) {
+  const values = keys.map((key) => text(row[key])).filter(Boolean).sort()
+  return values[values.length - 1] || ""
+}
+
+function recurringFrequencyForModel(value: unknown) {
+  const frequency = text(value)
+  if (frequency === "monthly") return "monthly_date"
+  if (frequency === "last_weekday") return "monthly_last_weekday"
+  return frequency
+}
+
+function buildAutomationRunHistory(
+  rule: OpsTaskAutomationRule,
+  runs: Row[],
+  taskTitleById: Map<string, string>,
+): OpsTaskAutomationRunHistoryItem[] {
+  return runs
+    .filter((run) => text(run.rule_id) === rule.id)
+    .sort((left, right) => automationDateValue(right, "ran_at", "created_at").localeCompare(automationDateValue(left, "ran_at", "created_at")))
+    .slice(0, 5)
+    .map((run) => {
+      const taskId = text(run.task_id)
+      return {
+        id: text(run.id),
+        status: text(run.status),
+        ranAt: automationDateValue(run, "ran_at", "created_at"),
+        sourceKey: text(run.source_key),
+        scheduledFor: text(run.scheduled_for),
+        taskId,
+        taskTitle: taskTitleById.get(taskId) || "",
+        errorMessage: text(run.error_message),
+      }
+    })
+}
+
+function buildAutomationDeliveryHistory(
+  rule: OpsTaskAutomationRule,
+  deliveries: Row[],
+): OpsTaskAutomationDeliveryHistoryItem[] {
+  return deliveries
+    .filter((delivery) => text(delivery.rule_id) === rule.id)
+    .sort((left, right) => automationDateValue(right, "last_attempt_at", "updated_at", "created_at").localeCompare(automationDateValue(left, "last_attempt_at", "updated_at", "created_at")))
+    .slice(0, 5)
+    .map((delivery) => ({
+      id: text(delivery.id),
+      status: text(delivery.status),
+      lastAttemptAt: automationDateValue(delivery, "last_attempt_at", "updated_at", "created_at"),
+      nextRetryAt: text(delivery.next_retry_at),
+      errorMessage: text(delivery.error_message),
+    }))
+}
+
+function nextRunAtForAutomationRule(rule: OpsTaskAutomationRule, runs: Row[]) {
+  if (rule.kind !== "recurring" || rule.enabled === false) return ""
+  const latestScheduledFor = runs
+    .filter((run) => text(run.rule_id) === rule.id)
+    .map((run) => toDateKey(run.scheduled_for))
+    .filter(Boolean)
+    .sort()
+    .slice(-1)[0]
+  const occurrence = buildOpsRecurringTaskOccurrence({
+    id: rule.id,
+    enabled: rule.enabled,
+    title: text(rule.action.title || rule.name),
+    frequency: recurringFrequencyForModel(rule.recurrence.frequency),
+    interval: rule.recurrence.interval,
+    weekdays: rule.recurrence.weekdays,
+    monthDay: rule.recurrence.monthDay,
+    weekday: rule.recurrence.weekday,
+    startDate: rule.recurrence.startDate,
+    endDate: rule.recurrence.endDate,
+    createLeadDays: rule.recurrence.createLeadDays,
+    dueTime: rule.recurrence.dueTime || rule.due.dueTime,
+    timezoneOffset: rule.recurrence.timezoneOffset || rule.due.timezoneOffset,
+    lastScheduledFor: latestScheduledFor,
+  }, { fromDate: new Date() }) as { dueAt?: string; scheduledFor?: string } | null
+  return text(occurrence?.dueAt || occurrence?.scheduledFor)
+}
+
+function buildAutomationRuleStatus(
+  rule: OpsTaskAutomationRule,
+  runs: Row[],
+  deliveries: Row[],
+  taskTitleById: Map<string, string>,
+): OpsTaskAutomationRuleStatus {
+  const ruleRuns = runs
+    .filter((run) => text(run.rule_id) === rule.id)
+    .sort((left, right) => automationDateValue(right, "ran_at", "created_at").localeCompare(automationDateValue(left, "ran_at", "created_at")))
+  const latestRun = ruleRuns[0]
+  const ruleDeliveries = deliveries
+    .filter((delivery) => text(delivery.rule_id) === rule.id)
+    .sort((left, right) => automationDateValue(right, "last_attempt_at", "updated_at", "created_at").localeCompare(automationDateValue(left, "last_attempt_at", "updated_at", "created_at")))
+  const latestDelivery = ruleDeliveries[0]
+  const lastTaskId = text(latestRun?.task_id)
+  const recentRuns = buildAutomationRunHistory(rule, runs, taskTitleById)
+  const recentDeliveries = buildAutomationDeliveryHistory(rule, deliveries)
+  return {
+    lastRunAt: automationDateValue(latestRun || {}, "ran_at", "created_at"),
+    lastRunStatus: text(latestRun?.status),
+    lastRunError: text(latestRun?.error_message),
+    lastTaskId,
+    lastTaskTitle: taskTitleById.get(lastTaskId) || "",
+    nextRunAt: nextRunAtForAutomationRule(rule, runs),
+    pendingDeliveryCount: ruleDeliveries.filter((delivery) => text(delivery.status) === "pending").length,
+    failedDeliveryCount: ruleDeliveries.filter((delivery) => text(delivery.status) === "failed").length,
+    lastDeliveryStatus: text(latestDelivery?.status),
+    lastDeliveryAt: automationDateValue(latestDelivery || {}, "last_attempt_at", "updated_at", "created_at"),
+    lastDeliveryError: text(latestDelivery?.error_message),
+    recentRuns,
+    recentDeliveries,
+  }
+}
+
+function mapAutomationRule(row: Row, status: OpsTaskAutomationRuleStatus = emptyAutomationRuleStatus()): OpsTaskAutomationRule {
+  return {
+    id: text(row.id),
+    name: text(row.name),
+    kind: normalizeAutomationKind(row.kind),
+    target: text(row.target),
+    triggerKey: text(row.trigger_key),
+    enabled: row.enabled !== false,
+    recurrence: objectValue(row.recurrence),
+    conditions: objectValue(row.conditions),
+    action: objectValue(row.action),
+    assignee: objectValue(row.assignee),
+    due: objectValue(row.due),
+    notification: objectValue(row.notification),
+    notificationChannelId: text(row.notification_channel_id),
+    status,
+    createdAt: text(row.created_at),
+    updatedAt: text(row.updated_at),
+  }
+}
+
+function mapNotificationChannel(row: Row): OpsTaskNotificationChannel {
+  return {
+    id: text(row.id),
+    name: text(row.name),
+    teamKey: text(row.team_key),
+    description: text(row.description),
+    webhookSecretRef: text(row.webhook_secret_ref),
+    webhookUrlLast4: text(row.webhook_url_last4),
+    isActive: row.is_active !== false,
+    createdAt: text(row.created_at),
+    updatedAt: text(row.updated_at),
+  }
+}
+
 export type OpsTodoDashboardSummaryData = {
   tasks: OpsTask[]
+  classes: OpsClassOption[]
+  students: OpsStudentOption[]
+  textbooks: OpsTextbookOption[]
+  teachers: OpsTeacherOption[]
   schemaReady: boolean
   error: string | null
 }
 
 export async function loadOpsTodoDashboardSummaryData(): Promise<OpsTodoDashboardSummaryData> {
-  if (!supabase) {
-    return {
-      tasks: [],
-      schemaReady: false,
-      error: "Supabase 연결 설정이 필요합니다.",
-    }
-  }
-
-  try {
-    const [taskResult, profileRows] = await Promise.all([
-      supabase
-        .from("ops_tasks")
-        .select("id,title,type,status,priority,requested_by,assignee_id,secondary_assignee_id,student_id,class_id,textbook_id,student_name,class_name,textbook_title,campus,subject,due_at,completed_at,memo,created_at,updated_at")
-        .eq("type", "general")
-        .not("status", "in", "(\"done\",\"canceled\")"),
-      readTable("profiles", "id,name,email,role,login_id", true),
-    ])
-
-    if (taskResult.error) throw taskResult.error
-
-    const profiles = buildProfileLookup(profileRows)
-    const emptyRegistration = new Map<string, OpsRegistrationDetail>()
-    const emptyWithdrawal = new Map<string, OpsWithdrawalDetail>()
-    const emptyTransfer = new Map<string, OpsTransferDetail>()
-    const emptyWordRetest = new Map<string, OpsWordRetestDetail>()
-    const emptyComments = new Map<string, OpsTaskComment[]>()
-    const emptyAttachments = new Map<string, OpsTaskAttachment[]>()
-    const emptyEvents = new Map<string, OpsTaskEvent[]>()
-    const tasks = ((taskResult.data || []) as unknown as Row[])
-      .map((row) => mapTask(
-        row,
-        profiles,
-        emptyRegistration,
-        emptyWithdrawal,
-        emptyTransfer,
-        emptyWordRetest,
-        emptyComments,
-        emptyAttachments,
-        emptyEvents,
-      ))
-      .sort((left, right) => (
-        String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
-      ))
-
-    return {
-      tasks,
-      schemaReady: true,
-      error: null,
-    }
-  } catch (error) {
-    if (isMissingRelationError(error)) {
-      return {
-        tasks: [],
-        schemaReady: false,
-        error: "업무 DB 마이그레이션을 적용한 뒤 새로고침하세요.",
-      }
-    }
-
-    return {
-      tasks: [],
-      schemaReady: false,
-      error: error instanceof Error ? error.message : "할 일 요약을 불러오지 못했습니다.",
-    }
+  const workspaceData = await loadOpsTaskWorkspaceData({ includeManagementOptions: true })
+  return {
+    tasks: workspaceData.tasks,
+    classes: workspaceData.classes,
+    students: workspaceData.students,
+    textbooks: workspaceData.textbooks,
+    teachers: workspaceData.teachers,
+    schemaReady: workspaceData.schemaReady,
+    error: workspaceData.error,
   }
 }
 
@@ -875,6 +1276,10 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
       classRows,
       textbookRows,
       teacherRows,
+      automationRuleRows,
+      notificationChannelRows,
+      automationRunRows,
+      notificationDeliveryRows,
     ] = await Promise.all([
       taskReadPromise,
       readTable("profiles", "id,name,email,role,login_id", true),
@@ -882,13 +1287,25 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
         ? readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true)
         : Promise.resolve([]),
       includeManagementOptions
-        ? readTableWithFallback("classes", "id,name,subject,grade,teacher,room,student_ids,waitlist_ids,textbook_ids,status", "id,name,subject,grade,teacher,room,student_ids,waitlist_ids", true)
+        ? readTableWithFallback("classes", "id,name,subject,grade,teacher,room,student_ids,waitlist_ids,textbook_ids,status,schedule_plan", "id,name,subject,grade,teacher,room,student_ids,waitlist_ids,status", true)
         : Promise.resolve([]),
       includeManagementOptions
         ? readTable("textbooks", "id,title,name,publisher,subject", true)
         : Promise.resolve([]),
       includeManagementOptions
         ? readTableWithFallback("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email", "id,name,subjects,is_visible,sort_order", true)
+        : Promise.resolve([]),
+      includeManagementOptions
+        ? readTable("ops_task_automation_rules", "*", true)
+        : Promise.resolve([]),
+      includeManagementOptions
+        ? readTable("ops_task_notification_channels", "*", true)
+        : Promise.resolve([]),
+      includeManagementOptions
+        ? readTable("ops_task_automation_runs", "id,rule_id,task_id,status,error_message,ran_at,created_at,scheduled_for,source_key", true)
+        : Promise.resolve([]),
+      includeManagementOptions
+        ? readTable("ops_task_notification_deliveries", "id,rule_id,status,error_message,last_attempt_at,next_retry_at,created_at,updated_at", true)
         : Promise.resolve([]),
     ])
 
@@ -935,6 +1352,8 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
       taskId: text(row.task_id),
       ...mapWordRetest(row)!,
     })))
+    const taskTitleById = new Map(taskRows.map((row) => [text(row.id), text(row.title)]))
+    const mappedAutomationRules = automationRuleRows.map((row) => mapAutomationRule(row))
 
     const profileLabelCounts = new Map<string, number>()
     profileRows.forEach((row) => {
@@ -974,18 +1393,31 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
         classIds: normalizeIdList(row.class_ids),
         waitlistClassIds: normalizeIdList(row.waitlist_class_ids),
       } satisfies OpsStudentOption)),
-      classes: classRows.map((row) => ({
-        id: text(row.id),
-        label: text(row.name) || text(row.id),
-        meta: optionMeta([row.subject, row.teacher, row.room]),
-        subject: text(row.subject),
-        grade: text(row.grade),
-        teacher: text(row.teacher),
-        room: text(row.room),
-        studentIds: normalizeIdList(row.student_ids),
-        waitlistIds: normalizeIdList(row.waitlist_ids),
-        textbookIds: normalizeIdList(row.textbook_ids),
-      } satisfies OpsClassOption)),
+      classes: classRows.map((row) => {
+        const planMetrics = getClassPlanMetrics(row)
+        const textbookIds = [
+          ...new Set([
+            ...normalizeIdList(row.textbook_ids),
+            ...getClassPlanTextbookIds(row),
+          ]),
+        ]
+        return {
+          id: text(row.id),
+          label: text(row.name) || text(row.id),
+          meta: optionMeta([row.subject, row.teacher, row.room]),
+          subject: text(row.subject),
+          grade: text(row.grade),
+          teacher: text(row.teacher),
+          room: text(row.room),
+          studentIds: normalizeIdList(row.student_ids),
+          waitlistIds: normalizeIdList(row.waitlist_ids),
+          textbookIds,
+          sessionCount: planMetrics.sessionCount,
+          plannedSessionCount: planMetrics.plannedSessionCount,
+          unplannedSessionCount: planMetrics.unplannedSessionCount,
+          planSessions: planMetrics.planSessions,
+        } satisfies OpsClassOption
+      }),
       textbooks: textbookRows.map((row) => ({
         id: text(row.id),
         label: text(row.title) || text(row.name) || text(row.id),
@@ -1005,6 +1437,15 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
           sortOrder: numberValue(row.sort_order),
         } satisfies OpsTeacherOption))
         .sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label, "ko")),
+      automationRules: mappedAutomationRules
+        .map((rule) => ({
+          ...rule,
+          status: buildAutomationRuleStatus(rule, automationRunRows, notificationDeliveryRows, taskTitleById),
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name, "ko") || left.id.localeCompare(right.id)),
+      notificationChannels: notificationChannelRows
+        .map(mapNotificationChannel)
+        .sort((left, right) => left.name.localeCompare(right.name, "ko") || left.teamKey.localeCompare(right.teamKey)),
       schemaReady: true,
       error: null,
     }
@@ -1112,6 +1553,8 @@ function didMutateOpsTask(data: unknown) {
 
 function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: boolean; completedAtFallback?: string } = {}) {
   const completedAt = nullableDate(input.completedAt) || (input.status === "done" ? nullableDate(options.completedAtFallback) : null)
+  const automationGeneratedAt = nullableDate(input.automationGeneratedAt)
+    || (text(input.automationSourceKey) ? new Date().toISOString() : null)
   const row = {
     title: input.title,
     type: input.type,
@@ -1130,6 +1573,12 @@ function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: 
     due_at: nullableDate(input.dueAt),
     completed_at: completedAt,
     memo: nullable(input.memo),
+    checklist_items: normalizeOpsTaskChecklistItems(input.checklistItems),
+    automation_rule_id: nullable(input.automationRuleId),
+    automation_source_type: nullable(input.automationSourceType),
+    automation_source_id: nullable(input.automationSourceId),
+    automation_source_key: nullable(input.automationSourceKey),
+    automation_generated_at: automationGeneratedAt,
   }
   if (!options.preserveManagementLinks) return row
 
@@ -1149,6 +1598,367 @@ function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: 
   return rowWithoutManagementLinks
 }
 
+function jsonValue(value: unknown) {
+  return objectValue(value)
+}
+
+function teamKeyValue(value: unknown) {
+  return text(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 49)
+}
+
+function googleChatWebhookLast4(value: unknown) {
+  const rawValue = text(value)
+  if (!rawValue) return ""
+  return rawValue.slice(-4)
+}
+
+function buildAutomationRuleRow(input: OpsTaskAutomationRuleInput) {
+  return {
+    name: text(input.name) || "자동화 규칙",
+    kind: input.kind === "trigger" ? "trigger" : "recurring",
+    target: nullable(input.target),
+    trigger_key: nullable(input.triggerKey),
+    enabled: input.enabled !== false,
+    recurrence: jsonValue(input.recurrence),
+    conditions: jsonValue(input.conditions),
+    action: jsonValue(input.action),
+    assignee: jsonValue(input.assignee),
+    due: jsonValue(input.due),
+    notification: jsonValue(input.notification),
+    notification_channel_id: nullable(input.notificationChannelId),
+  }
+}
+
+function buildNotificationChannelRow(input: OpsTaskNotificationChannelInput) {
+  const teamKey = teamKeyValue(input.teamKey) || "google-chat"
+  const webhookSecretRef = text(input.webhookSecretRef) || `google_chat_webhook:${teamKey}`
+  const last4 = text(input.webhookUrlLast4) || googleChatWebhookLast4(input.webhookUrl)
+  return {
+    name: text(input.name) || teamKey,
+    team_key: teamKey,
+    description: nullable(input.description),
+    webhook_secret_ref: webhookSecretRef,
+    webhook_url_last4: nullable(last4),
+    is_active: input.isActive !== false,
+  }
+}
+
+function isRegistrationPipelineDone(value: unknown) {
+  return text(value).startsWith("7.")
+}
+
+const OPERATION_AUTOMATION_DATE_PATHS = [
+  "dueAt",
+  "registration.inquiryAt",
+  "registration.levelTestAt",
+  "registration.phoneConsultationAt",
+  "registration.visitConsultationAt",
+  "registration.consultationAt",
+  "registration.classStartDate",
+  "withdrawal.withdrawalDate",
+  "transfer.fromClassEndDate",
+  "transfer.toClassStartDate",
+  "wordRetest.testAt",
+]
+
+function readAutomationInputPath(root: OpsTask | OpsTaskInput, path: string) {
+  return path.split(".").filter(Boolean).reduce<unknown>((current, key) => (
+    current && typeof current === "object" ? (current as Row)[key] : undefined
+  ), root)
+}
+
+function hasNewOrChangedOperationDate(previousTask: OpsTask, input: OpsTaskInput) {
+  return OPERATION_AUTOMATION_DATE_PATHS.some((path) => {
+    const previousDate = toDateKey(readAutomationInputPath(previousTask, path))
+    const nextDate = toDateKey(readAutomationInputPath(input, path))
+    return Boolean(nextDate && nextDate !== previousDate)
+  })
+}
+
+function completionTriggerKeyForOperation(previousTask: OpsTask, input: OpsTaskInput) {
+  if (input.type === "general") return ""
+
+  if (input.type === "registration") {
+    const previousPipeline = previousTask.registration?.pipelineStatus
+    const nextPipeline = input.registration?.pipelineStatus
+    if (!isRegistrationPipelineDone(previousPipeline) && isRegistrationPipelineDone(nextPipeline)) {
+      return "registration.completed"
+    }
+  }
+
+  if (previousTask.status !== "done" && input.status === "done") {
+    if (input.type === "transfer") return "transfer.completed"
+    if (input.type === "withdrawal") return "withdrawal.completed"
+    if (input.type === "word_retest") return "word_retest.completed"
+  }
+
+  return ""
+}
+
+function triggerKeysForTaskAutomation(previousTask: OpsTask, input: OpsTaskInput) {
+  const triggers: string[] = []
+  const completionTrigger = completionTriggerKeyForOperation(previousTask, input)
+  if (completionTrigger) triggers.push(completionTrigger)
+
+  triggers.push("ops.updated")
+
+  const previousAssigneeId = text(previousTask.assigneeId)
+  const nextAssigneeId = text(input.assigneeId)
+  if (!previousAssigneeId && nextAssigneeId) {
+    triggers.push("ops.assignee_assigned")
+  }
+
+  if (hasNewOrChangedOperationDate(previousTask, input)) {
+    triggers.push("ops.date_confirmed")
+  }
+
+  return [...new Set(triggers)]
+}
+
+function buildTriggeredAutomationEvent(previousTask: OpsTask, input: OpsTaskInput, trigger: string) {
+  return {
+    trigger,
+    sourceType: input.type,
+    sourceId: previousTask.id,
+    occurredAt: new Date().toISOString(),
+    task: {
+      id: previousTask.id,
+      type: input.type,
+      title: input.title,
+      status: input.status || previousTask.status,
+      requestedBy: previousTask.requestedBy,
+      assigneeId: input.assigneeId || previousTask.assigneeId,
+      studentId: input.studentId || previousTask.studentId,
+      studentName: input.studentName || previousTask.studentName,
+      classId: input.classId || previousTask.classId,
+      className: input.className || previousTask.className,
+      registration: input.registration || previousTask.registration,
+      withdrawal: input.withdrawal || previousTask.withdrawal,
+      transfer: input.transfer || previousTask.transfer,
+      wordRetest: input.wordRetest || previousTask.wordRetest,
+    },
+    teacher: {
+      profileId: input.assigneeId || previousTask.assigneeId,
+      name: previousTask.assigneeLabel,
+    },
+  }
+}
+
+function automationRuleToModelRule(rule: OpsTaskAutomationRule) {
+  return {
+    id: rule.id,
+    enabled: rule.enabled,
+    target: rule.target,
+    trigger: rule.triggerKey,
+    conditions: rule.conditions,
+    action: rule.action,
+    assignee: rule.assignee,
+    due: rule.due,
+    notification: rule.notification,
+  }
+}
+
+function automationSourceKeyFor(rule: OpsTaskAutomationRule, event: ReturnType<typeof buildTriggeredAutomationEvent>) {
+  return [rule.id, event.sourceType, event.sourceId, event.trigger].filter(Boolean).join(":")
+}
+
+async function loadTriggerAutomationRules(trigger: string, sourceType: OpsTaskType) {
+  if (!supabase || !trigger) return []
+  const { data, error } = await supabase
+    .from("ops_task_automation_rules")
+    .select("*")
+    .eq("kind", "trigger")
+    .eq("enabled", true)
+
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return []
+    throw error
+  }
+
+  return ((data || []) as Row[])
+    .map((row) => mapAutomationRule(row))
+    .filter((rule) => (
+      rule.triggerKey === trigger &&
+      (!rule.target || rule.target === sourceType)
+    ))
+}
+
+async function loadExistingAutomationTasks(sourceKeys: string[]) {
+  if (!supabase) return []
+  const keys = sourceKeys.map(text).filter(Boolean)
+  if (keys.length === 0) return []
+  const { data, error } = await supabase
+    .from("ops_tasks")
+    .select("id,automation_source_key")
+    .in("automation_source_key", keys)
+
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return []
+    throw error
+  }
+
+  return ((data || []) as Row[]).map((row) => ({
+    id: text(row.id),
+    automationSourceKey: text(row.automation_source_key),
+  }))
+}
+
+async function writeAutomationRun(input: {
+  rule: OpsTaskAutomationRule
+  sourceType: string
+  sourceId: string
+  sourceKey: string
+  eventKey: string
+  taskId?: string
+  status: "created" | "updated" | "skipped" | "failed"
+  payload?: Row
+  errorMessage?: string
+}) {
+  if (!supabase || !input.sourceKey) return
+  const { error } = await supabase.from("ops_task_automation_runs").insert({
+    rule_id: nullable(input.rule.id),
+    source_type: text(input.sourceType) || "ops",
+    source_id: text(input.sourceId) || "unknown",
+    source_key: input.sourceKey,
+    event_key: nullable(input.eventKey),
+    task_id: nullable(input.taskId),
+    status: input.status,
+    payload: input.payload || {},
+    error_message: nullable(input.errorMessage),
+  })
+  if (error && text((error as { code?: string }).code) !== "23505") {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return
+    throw error
+  }
+}
+
+async function updateExistingAutomationTaskDue(taskId: string, dueAt: string) {
+  if (!supabase || !taskId) return
+  const { error } = await supabase
+    .from("ops_tasks")
+    .update({ due_at: nullableDate(dueAt) })
+    .eq("id", taskId)
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return
+    throw error
+  }
+}
+
+async function enqueueAutomationNotification(rule: OpsTaskAutomationRule, task: OpsTaskInput & { id: string }) {
+  if (!supabase) return
+  const notification = rule.notification || {}
+  const channelId = rule.notificationChannelId || text(notification.channelId)
+  if (notification.enabled === false || !channelId) return
+  const payload = buildGoogleChatTaskNotificationPayload({ task, event: "created" }) as { text?: string; thread?: { threadKey?: string } }
+  const { error } = await supabase.from("ops_task_notification_deliveries").insert({
+    task_id: nullable(task.id),
+    rule_id: nullable(rule.id),
+    channel_id: nullable(channelId),
+    thread_key: nullable(payload.thread?.threadKey),
+    payload,
+    status: "pending",
+  })
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return
+    throw error
+  }
+}
+
+async function createTriggeredOpsTaskFollowUps(previousTask: OpsTask, input: OpsTaskInput) {
+  if (!supabase) return
+  const triggers = triggerKeysForTaskAutomation(previousTask, input)
+  if (triggers.length === 0) return
+
+  for (const trigger of triggers) {
+    const event = buildTriggeredAutomationEvent(previousTask, input, trigger)
+    const rules = await loadTriggerAutomationRules(trigger, input.type)
+    if (rules.length === 0) continue
+    const sourceKeys = rules.map((rule) => automationSourceKeyFor(rule, event))
+    const existingTasks = await loadExistingAutomationTasks(sourceKeys)
+
+    for (const rule of rules) {
+      const sourceKey = automationSourceKeyFor(rule, event)
+      const draft = buildOpsTriggeredTaskDraft(automationRuleToModelRule(rule), event, existingTasks) as {
+        dedupeKey: string
+        task: OpsTaskInput
+        updateTask?: { id: string; patch: { dueAt: string } }
+      } | null
+
+      if (!draft) {
+        await writeAutomationRun({
+          rule,
+          sourceType: event.sourceType,
+          sourceId: event.sourceId,
+          sourceKey,
+          eventKey: trigger,
+          status: "skipped",
+          payload: { reason: "not_applicable_or_duplicate" },
+        })
+        continue
+      }
+
+      if (draft.updateTask) {
+        try {
+          await updateExistingAutomationTaskDue(draft.updateTask.id, draft.updateTask.patch.dueAt)
+          await writeAutomationRun({
+            rule,
+            sourceType: event.sourceType,
+            sourceId: event.sourceId,
+            sourceKey: draft.dedupeKey,
+            eventKey: trigger,
+            taskId: draft.updateTask.id,
+            status: "updated",
+            payload: { reason: "duplicate_update_due", patch: draft.updateTask.patch, taskTitle: draft.task.title },
+          })
+        } catch (error) {
+          await writeAutomationRun({
+            rule,
+            sourceType: event.sourceType,
+            sourceId: event.sourceId,
+            sourceKey: draft.dedupeKey,
+            eventKey: trigger,
+            status: "failed",
+            payload: { reason: "duplicate_update_due", patch: draft.updateTask.patch, taskTitle: draft.task.title },
+            errorMessage: error instanceof Error ? error.message : text(error),
+          })
+        }
+        continue
+      }
+
+      try {
+        const taskId = await createOpsTask(draft.task)
+        existingTasks.push({ id: taskId, automationSourceKey: draft.dedupeKey })
+        await writeAutomationRun({
+          rule,
+          sourceType: event.sourceType,
+          sourceId: event.sourceId,
+          sourceKey: draft.dedupeKey,
+          eventKey: trigger,
+          taskId,
+          status: "created",
+          payload: { taskTitle: draft.task.title },
+        })
+        await enqueueAutomationNotification(rule, { ...draft.task, id: taskId })
+      } catch (error) {
+        await writeAutomationRun({
+          rule,
+          sourceType: event.sourceType,
+          sourceId: event.sourceId,
+          sourceKey: draft.dedupeKey,
+          eventKey: trigger,
+          status: "failed",
+          payload: { taskTitle: draft.task.title },
+          errorMessage: error instanceof Error ? error.message : text(error),
+        })
+      }
+    }
+  }
+}
+
 function buildRegistrationRow(taskId: string, detail: OpsRegistrationDetail = {}) {
   return {
     task_id: taskId,
@@ -1162,6 +1972,8 @@ function buildRegistrationRow(taskId: string, detail: OpsRegistrationDetail = {}
     level_test_at: nullableDate(detail.levelTestAt),
     level_test_place: nullable(detail.levelTestPlace),
     level_test_material_link: nullable(detail.levelTestMaterialLink),
+    level_test_result: nullable(detail.levelTestResult),
+    principal_review_note: nullable(detail.principalReviewNote),
     counselor: nullable(detail.counselor),
     phone_consultation_at: nullableDate(detail.phoneConsultationAt),
     visit_consultation_at: nullableDate(detail.visitConsultationAt),
@@ -1169,6 +1981,7 @@ function buildRegistrationRow(taskId: string, detail: OpsRegistrationDetail = {}
     class_start_date: nullableDate(detail.classStartDate),
     class_start_session: nullable(detail.classStartSession),
     textbook_ready: Boolean(detail.textbookReady),
+    principal_placement_checked: Boolean(detail.principalPlacementChecked),
     admission_notice_sent: Boolean(detail.admissionNoticeSent),
     payment_checked: Boolean(detail.paymentChecked),
     makeedu_registered: Boolean(detail.makeeduRegistered),
@@ -1191,6 +2004,7 @@ function buildWithdrawalRow(taskId: string, detail: OpsWithdrawalDetail = {}) {
     completed_lesson_hours: nullableNumber(detail.completedLessonHours),
     four_week_lesson_hours: nullableNumber(detail.fourWeekLessonHours),
     timetable_roster_updated: Boolean(detail.timetableRosterUpdated),
+    student_status_updated: Boolean(detail.studentStatusUpdated),
     makeedu_withdrawal_done: Boolean(detail.makeeduWithdrawalDone),
     fee_processed: Boolean(detail.feeProcessed),
     textbook_fee_processed: Boolean(detail.textbookFeeProcessed),
@@ -1232,9 +2046,9 @@ function buildWordRetestRow(taskId: string, detail: OpsWordRetestDetail = {}) {
     textbook_name: nullable(detail.textbookName),
     unit: nullable(detail.unit),
     request_note: nullable(detail.requestNote),
-    first_score: nullableNumber(detail.firstScore),
-    second_score: nullableNumber(detail.secondScore),
-    third_score: nullableNumber(detail.thirdScore),
+    first_score: nullableWordRetestScore(detail.firstScore),
+    second_score: nullableWordRetestScore(detail.secondScore),
+    third_score: nullableWordRetestScore(detail.thirdScore),
     retest_status: nullable(detail.retestStatus) || "not_started",
   }
 }
@@ -1299,6 +2113,12 @@ function inputFromTask(task: OpsTask, status: OpsTaskStatus = task.status): OpsT
     dueAt: task.dueAt,
     completedAt: task.completedAt,
     memo: task.memo,
+    checklistItems: task.checklistItems,
+    automationRuleId: task.automationRuleId,
+    automationSourceType: task.automationSourceType,
+    automationSourceId: task.automationSourceId,
+    automationSourceKey: task.automationSourceKey,
+    automationGeneratedAt: task.automationGeneratedAt,
     registration: task.registration,
     withdrawal: task.withdrawal,
     transfer: task.transfer,
@@ -1312,29 +2132,21 @@ function isRegistrationWorkflowComplete(input: OpsTaskInput) {
 }
 
 function getMissingRegistrationCheckLabels(registration?: OpsRegistrationDetail) {
-  return [
-    { checked: Boolean(registration?.admissionNoticeSent), label: "입학안내문" },
-    { checked: Boolean(registration?.paymentChecked), label: "수납" },
-    { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록" },
-    { checked: Boolean(registration?.makeeduInvoiceSent), label: "청구서 발송" },
-    { checked: Boolean(registration?.textbookBillingIssued), label: "교재 청구출고표" },
-  ].filter((item) => !item.checked).map((item) => item.label)
+  return getRegistrationCompletionChecklistItems(registration)
+    .filter((item: { checked: boolean }) => !item.checked)
+    .map((item: { label: string }) => item.label)
 }
 
 function getMissingWithdrawalCheckLabels(withdrawal?: OpsWithdrawalDetail) {
-  return [
-    { checked: Boolean(withdrawal?.makeeduWithdrawalDone), label: "메이크에듀 퇴원처리" },
-    { checked: Boolean(withdrawal?.feeProcessed), label: "수업료 처리" },
-    { checked: Boolean(withdrawal?.textbookFeeProcessed), label: "교재비 처리" },
-  ].filter((item) => !item.checked).map((item) => item.label)
+  return getWithdrawalCompletionChecklistItems(withdrawal)
+    .filter((item: { auto?: boolean; checked: boolean }) => !item.auto && !item.checked)
+    .map((item: { label: string }) => item.label)
 }
 
 function getMissingTransferCheckLabels(transfer?: OpsTransferDetail) {
-  return [
-    { checked: Boolean(transfer?.makeeduTransferDone), label: "메이크에듀 전반처리" },
-    { checked: Boolean(transfer?.feeProcessed), label: "수업료 처리" },
-    { checked: Boolean(transfer?.textbookFeeProcessed), label: "교재비 처리" },
-  ].filter((item) => !item.checked).map((item) => item.label)
+  return getTransferCompletionChecklistItems(transfer)
+    .filter((item: { auto?: boolean; checked: boolean }) => !item.auto && !item.checked)
+    .map((item: { label: string }) => item.label)
 }
 
 function findRegistrationPipelineStatus(prefix: string, fallback = "") {
@@ -1368,6 +2180,74 @@ async function markRegistrationTextbookReady(taskId: string) {
   await writeEvent(taskId, "auto_checked", "교재 준비", "", "완료")
 }
 
+async function ensureRegistrationTextbookIssueDraft(
+  taskId: string,
+  input: OpsTaskInput,
+  student: Row,
+  classRow: Row,
+  textbook: Row,
+) {
+  if (!supabase) return
+  const draft = buildRegistrationTextbookSaleDraft({ input, student, classRow, textbook })
+  if (!draft) return
+
+  const existingLine = await supabase
+    .from("textbook_sale_lines")
+    .select("id")
+    .eq("student_id", draft.line.student_id)
+    .eq("class_id", draft.line.class_id)
+    .eq("textbook_id", draft.line.textbook_id)
+    .eq("charge_month", draft.line.charge_month)
+    .in("status", ["charged", "paid", "issued"])
+    .limit(1)
+  if (existingLine.error) {
+    if (isMissingRelationError(existingLine.error) || isMissingColumnError(existingLine.error)) return
+    throw existingLine.error
+  }
+  if ((existingLine.data || []).length > 0) {
+    await writeAutoSyncEventOnce(taskId, "교재 청구/출고", `${draft.line.charge_month} 기존 출고 대기`)
+    return
+  }
+
+  const existingSale = await supabase
+    .from("textbook_sales")
+    .select("id")
+    .eq("class_id", draft.sale.class_id)
+    .eq("charge_month", draft.sale.charge_month)
+    .limit(1)
+  if (existingSale.error) {
+    if (isMissingRelationError(existingSale.error) || isMissingColumnError(existingSale.error)) return
+    throw existingSale.error
+  }
+
+  let saleId = text(((existingSale.data || []) as Row[])[0]?.id)
+  if (!saleId) {
+    const saleResult = await supabase
+      .from("textbook_sales")
+      .insert(draft.sale)
+      .select("id")
+      .single()
+    if (saleResult.error) {
+      if (isMissingRelationError(saleResult.error) || isMissingColumnError(saleResult.error)) return
+      throw saleResult.error
+    }
+    saleId = text((saleResult.data as Row | null)?.id)
+  }
+  if (!saleId) return
+
+  const lineResult = await supabase
+    .from("textbook_sale_lines")
+    .insert({ sale_id: saleId, ...draft.line })
+    .select("id")
+    .single()
+  if (lineResult.error) {
+    if (isMissingRelationError(lineResult.error) || isMissingColumnError(lineResult.error)) return
+    throw lineResult.error
+  }
+
+  await writeAutoSyncEventOnce(taskId, "교재 청구/출고", `${draft.line.charge_month} 출고 대기 생성`)
+}
+
 function getWordRetestDetailStatusForTaskStatus(status: OpsTaskStatus, currentRetestStatus?: string) {
   const current = text(currentRetestStatus)
 
@@ -1385,7 +2265,7 @@ function hasManagementReference(...values: unknown[]) {
 }
 
 function hasWordRetestScore(wordRetest?: OpsWordRetestDetail) {
-  return [wordRetest?.firstScore, wordRetest?.secondScore, wordRetest?.thirdScore].some((score) => Boolean(text(score)))
+  return [wordRetest?.firstScore, wordRetest?.secondScore, wordRetest?.thirdScore].some((score) => isWordRetestScoreValue(score))
 }
 
 function isWordRetestAbsent(wordRetest?: OpsWordRetestDetail) {
@@ -1410,14 +2290,52 @@ function isSameManagementReference(first: unknown, second: unknown) {
 }
 
 const MANAGEMENT_LINK_FIELDS = new Set(["학생", "수업", "교재", "전 수업", "후 수업", "선생님"])
-const MANAGEMENT_INPUT_FIELDS = new Set(["수업시작일", "퇴원일", "전 수업 종료일", "후 수업 시작일", "응시일시", "단원", "점수"])
+const MANAGEMENT_INPUT_FIELDS = new Set([
+  "수업시작일",
+  "수업시작회차",
+  "원장 분석",
+  "퇴원일",
+  "퇴원회차",
+  "진행 수업시수",
+  "4주 기준 수업시수",
+  "전 수업 종료일",
+  "후 수업 시작일",
+  "전 수업 종료회차",
+  "후 수업 시작회차",
+  "응시일시",
+  "단원",
+  "점수",
+])
 const MANAGEMENT_CHOICE_FIELDS = new Set(["다른 수업"])
+const MANAGEMENT_FIX_FIELDS = new Set(["일정 충돌", "회차 충돌", "회차 공백", "수업시수 충돌"])
+const MANAGEMENT_CHECK_FIELDS = new Set([
+  "수업계획 회차",
+  "전 수업계획 회차",
+  "후 수업계획 회차",
+  "수업계획 진도",
+  "전 수업계획 진도",
+  "후 수업계획 진도",
+  "수업계획 교재",
+  "전 수업계획 교재",
+  "후 수업계획 교재",
+])
 
 function managementMissingFieldLabel(field: string) {
   if (MANAGEMENT_INPUT_FIELDS.has(field)) return `${field} 입력 필요`
+  if (MANAGEMENT_FIX_FIELDS.has(field)) return `${field} 수정 필요`
   if (MANAGEMENT_CHOICE_FIELDS.has(field)) return `${field} 선택 필요`
   if (MANAGEMENT_LINK_FIELDS.has(field)) return `${field} 연결 필요`
+  if (MANAGEMENT_CHECK_FIELDS.has(field)) return `${field} 확인 필요`
   return `${field} 확인 필요`
+}
+
+function assertOpsTaskSchedulePlanReady(input: OpsTaskInput, classes: Array<ReturnType<typeof toOpsClassPlanReference>>) {
+  const blockers = getOpsTaskScheduleCompletionBlockers(input, {
+    classes: classes.filter((classItem): classItem is NonNullable<typeof classItem> => Boolean(classItem)),
+  })
+  if (blockers.length > 0) {
+    throw new Error(`${getTaskTypeLabel(input.type)} 완료 전: ${blockers.map(managementMissingFieldLabel).join(", ")}`)
+  }
 }
 
 function assertManagementSyncReady(input: OpsTaskInput) {
@@ -1427,7 +2345,8 @@ function assertManagementSyncReady(input: OpsTaskInput) {
     if (!text(input.registration?.classStartDate)) missingFields.push("수업시작일")
     if (!hasManagementReference(input.studentId, input.studentName)) missingFields.push("학생")
     if (!hasManagementReference(input.classId)) missingFields.push("수업")
-    if (!hasManagementReference(input.textbookId)) missingFields.push("교재")
+    if (!hasManagementReference(input.textbookId, input.textbookTitle, input.classId)) missingFields.push("교재")
+    if (!text(input.registration?.principalReviewNote)) missingFields.push("원장 분석")
     getMissingRegistrationCheckLabels(input.registration).forEach((label) => missingFields.push(label))
   }
 
@@ -1456,12 +2375,14 @@ function assertManagementSyncReady(input: OpsTaskInput) {
     if (!hasManagementReference(input.studentId)) missingFields.push("학생")
     if (!hasManagementReference(input.classId)) missingFields.push("수업")
     if (!hasManagementReference(wordRetest.teacherId)) missingFields.push("선생님")
-    if (!hasManagementReference(input.textbookId)) missingFields.push("교재")
-    if (!text(wordRetest.branch)) missingFields.push("지점")
+    if (!hasManagementReference(input.textbookId, input.textbookTitle, input.classId)) missingFields.push("교재")
+    if (!hasManagementReference(wordRetest.branch, input.campus, input.classId)) missingFields.push("지점")
     if (!text(wordRetest.testAt)) missingFields.push("응시일시")
     if (!text(wordRetest.unit)) missingFields.push("단원")
     if (shouldRequireWordRetestScore(wordRetest)) missingFields.push("점수")
   }
+
+  getOpsTaskScheduleCompletionBlockers(input).forEach((field) => missingFields.push(field))
 
   if (missingFields.length > 0) {
     throw new Error(`${getTaskTypeLabel(input.type)} 완료 전: ${missingFields.map(managementMissingFieldLabel).join(", ")}`)
@@ -1470,13 +2391,15 @@ function assertManagementSyncReady(input: OpsTaskInput) {
 
 async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
   if (input.type === "registration" && isRegistrationWorkflowComplete(input)) {
+    await assertRegistrationDuplicateResolved(input)
     const student = hasManagementReference(input.studentId) ? await resolveOpsStudent(input) : null
     const classRow = await selectOpsRowById("classes", input.classId || "")
-    const textbook = await selectOpsRowById("textbooks", input.textbookId || "")
+    const textbook = await resolveOpsRegistrationTextbook(input, classRow)
 
     if (hasManagementReference(input.studentId)) assertResolvedManagementRecord(student, "등록 완료 전에 학생 정보를 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "등록 완료 전에 등록할 수업을 다시 선택하세요.")
     assertResolvedManagementRecord(textbook, "등록 완료 전에 등록 교재를 다시 선택하세요.")
+    assertOpsTaskSchedulePlanReady(input, [toOpsClassPlanReference(classRow)])
   }
 
   if (input.type === "withdrawal" && input.status === "done") {
@@ -1485,6 +2408,7 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
 
     assertResolvedManagementRecord(student, "퇴원 완료 전에 기존 학생을 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "퇴원 완료 전에 기존 수업을 다시 선택하세요.")
+    assertOpsTaskSchedulePlanReady(input, [toOpsClassPlanReference(classRow)])
     assertOpsStudentInClass(student, classRow, "퇴원 완료 전에 학생이 해당 수업 명단에 있는지 확인하세요.")
   }
 
@@ -1498,6 +2422,7 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
     assertResolvedManagementRecord(fromClass, "전반 완료 전에 전 수업을 다시 선택하세요.")
     assertResolvedManagementRecord(toClass, "전반 완료 전에 후 수업을 다시 선택하세요.")
     assertDifferentOpsClass(fromClass, toClass, "전반 완료 전에 전 수업과 후 수업을 다르게 선택하세요.")
+    assertOpsTaskSchedulePlanReady(input, [toOpsClassPlanReference(fromClass), toOpsClassPlanReference(toClass)])
     assertOpsStudentInClass(student, fromClass, "전반 완료 전에 학생이 전 수업 명단에 있는지 확인하세요.")
   }
 
@@ -1505,7 +2430,7 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
     const wordRetest = input.wordRetest || {}
     const student = await selectOpsRowById("students", input.studentId || "")
     const classRow = await selectOpsRowById("classes", input.classId || "")
-    const textbook = await selectOpsRowById("textbooks", input.textbookId || "")
+    const textbook = await resolveOpsWordRetestTextbook(input, classRow)
     const teacher = await selectOpsRowById("teacher_catalogs", wordRetest.teacherId || "")
 
     assertResolvedManagementRecord(student, "단어 재시험 완료 전에 기존 학생을 다시 선택하세요.")
@@ -1597,6 +2522,31 @@ async function resolveOpsRegistrationStudent(input: OpsTaskInput) {
   return (((data || []) as unknown as Row[]).find((row) => matchesOpsRegistrationStudent(row, input))) || null
 }
 
+async function findRegistrationDuplicateStudentRows(input: OpsTaskInput) {
+  if (!supabase || input.type !== "registration") return []
+  const studentName = text(input.studentName)
+  if (!studentName) return []
+
+  const { data, error } = await supabase
+    .from("students")
+    .select("id,name,grade,school,contact,parent_contact")
+    .eq("name", studentName)
+    .limit(20)
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return []
+    throw error
+  }
+  return (data || []) as unknown as Row[]
+}
+
+async function assertRegistrationDuplicateResolved(input: OpsTaskInput) {
+  if (input.type !== "registration" || !isRegistrationWorkflowComplete(input)) return
+
+  const duplicateRows = await findRegistrationDuplicateStudentRows(input)
+  const blockers = getRegistrationDuplicateCompletionBlockers(input, duplicateRows)
+  if (blockers.length > 0) throw new Error("등록 완료 전에 기존 학생 후보를 연결하세요.")
+}
+
 async function ensureOpsStudent(input: OpsTaskInput, existingStudent?: Row | null) {
   if (!supabase) return null
   const existing = existingStudent === undefined ? await resolveOpsStudent(input) : existingStudent
@@ -1664,6 +2614,23 @@ async function resolveOpsTextbook(textbookId?: string, textbookTitle?: string) {
     throw byName.error
   }
   return ((byName.data || []) as unknown as Row[])[0] || null
+}
+
+async function resolveOpsRegistrationTextbook(input: OpsTaskInput, classRow: Row | null) {
+  const textbook = await resolveOpsTextbook(input.textbookId, input.textbookTitle)
+  if (textbook) return textbook
+
+  const classTextbookId = getSingleClassPlanTextbookId(classRow)
+  return classTextbookId ? await resolveOpsTextbook(classTextbookId) : null
+}
+
+async function resolveOpsWordRetestTextbook(input: OpsTaskInput, classRow: Row | null) {
+  const wordRetest = input.wordRetest || {}
+  const textbook = await resolveOpsTextbook(input.textbookId, input.textbookTitle || wordRetest.textbookName)
+  if (textbook) return textbook
+
+  const classTextbookId = getSingleClassPlanTextbookId(classRow)
+  return classTextbookId ? await resolveOpsTextbook(classTextbookId) : null
 }
 
 async function resolveOpsTeacher(teacherId?: string, teacherName?: string) {
@@ -2164,7 +3131,7 @@ async function syncRegistrationManagementLinks(taskId: string, input: OpsTaskInp
   const student = completed ? await ensureOpsStudent(input, existingStudent) : await resolveOpsStudent(input)
   const shouldDeleteCreatedStudent = completed && !existingStudent && Boolean(text(student?.id))
   const classRow = await resolveOpsClass(input.classId, input.className)
-  const textbook = await resolveOpsTextbook(input.textbookId, input.textbookTitle)
+  const textbook = await resolveOpsRegistrationTextbook(input, classRow)
 
   await updateOpsTaskLinkFields(taskId, {
     student_id: text(student?.id) || null,
@@ -2186,6 +3153,7 @@ async function syncRegistrationManagementLinks(taskId: string, input: OpsTaskInp
     try {
       await assignOpsStudentToClass(student, classRow, "registration_completed")
       await assignOpsTextbookToClass(classRow, textbook)
+      await ensureRegistrationTextbookIssueDraft(taskId, input, student, classRow, textbook)
       await markRegistrationTextbookReady(taskId)
     } catch (error) {
       try {
@@ -2208,6 +3176,15 @@ async function markWithdrawalRosterUpdated(taskId: string) {
     .upsert({ task_id: taskId, timetable_roster_updated: true })
   if (error) throw error
   await writeEvent(taskId, "auto_checked", "시간표 명단 변경", "", "완료")
+}
+
+async function markWithdrawalStudentStatusUpdated(taskId: string) {
+  if (!supabase) return
+  const { error } = await supabase
+    .from("ops_withdrawal_details")
+    .upsert({ task_id: taskId, student_status_updated: true })
+  if (error) throw error
+  await writeEvent(taskId, "auto_checked", "학생 상태 변경", "", "완료")
 }
 
 async function markTransferRosterUpdated(taskId: string) {
@@ -2239,6 +3216,7 @@ async function syncWithdrawalManagementLinks(taskId: string, input: OpsTaskInput
     try {
       await removeOpsStudentFromClass(student, classRow, "withdrawal_completed")
       await setOpsStudentStatus(student, WITHDRAWN_STUDENT_STATUS)
+      await markWithdrawalStudentStatusUpdated(taskId)
       await markWithdrawalRosterUpdated(taskId)
     } catch (error) {
       try {
@@ -2302,7 +3280,7 @@ async function syncWordRetestManagementLinks(taskId: string, input: OpsTaskInput
     studentName: input.studentName || wordRetest.studentName,
   })
   const classRow = await resolveOpsClass(input.classId, input.className || wordRetest.className, wordRetest.teacherName)
-  const textbook = await resolveOpsTextbook(input.textbookId, input.textbookTitle || wordRetest.textbookName)
+  const textbook = await resolveOpsWordRetestTextbook(input, classRow)
   const teacher = await resolveOpsTeacher(wordRetest.teacherId, wordRetest.teacherName)
 
   if (input.status === "done") {
@@ -2398,11 +3376,19 @@ export async function createOpsTask(input: OpsTaskInput) {
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
 
-  const { data, error } = await supabase
+  const row = buildTaskRow(input, { completedAtFallback: new Date().toISOString() })
+  let { data, error } = await supabase
     .from("ops_tasks")
-    .insert(buildTaskRow(input, { completedAtFallback: new Date().toISOString() }))
+    .insert(row)
     .select("id")
     .single()
+  if (error && isMissingColumnError(error)) {
+    ;({ data, error } = await supabase
+      .from("ops_tasks")
+      .insert(stripMissingMigrationColumns(row, ["checklist_items"]))
+      .select("id")
+      .single())
+  }
 
   if (error) throw error
   const taskId = text((data as Row).id)
@@ -2450,11 +3436,19 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
       throw error
     }
 
-    const { data, error } = await supabase
+    const row = buildTaskRow(input, { preserveManagementLinks: true, completedAtFallback: new Date().toISOString() })
+    let { data, error } = await supabase
       .from("ops_tasks")
-      .update(buildTaskRow(input, { preserveManagementLinks: true, completedAtFallback: new Date().toISOString() }))
+      .update(row)
       .eq("id", taskId)
       .select("id")
+    if (error && isMissingColumnError(error)) {
+      ;({ data, error } = await supabase
+        .from("ops_tasks")
+        .update(stripMissingMigrationColumns(row, ["checklist_items"]))
+        .eq("id", taskId)
+        .select("id"))
+    }
 
     if (error || !didMutateOpsTask(data)) {
       await rollbackAppliedCompletionSync(rollbackCompletionSync, completionSyncApplied, error)
@@ -2462,15 +3456,24 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
       throw new Error("업무 데이터를 다시 불러오세요.")
     }
     await writeEvent(taskId, "updated", "task", "", input.title)
+    await createTriggeredOpsTaskFollowUps(existingTask, input)
     clearOpsTaskWorkspaceDataCache()
     return
   }
 
-  const { data, error } = await supabase
+  const row = buildTaskRow(input)
+  let { data, error } = await supabase
     .from("ops_tasks")
-    .update(buildTaskRow(input))
+    .update(row)
     .eq("id", taskId)
     .select("id")
+  if (error && isMissingColumnError(error)) {
+    ;({ data, error } = await supabase
+      .from("ops_tasks")
+      .update(stripMissingMigrationColumns(row, ["checklist_items"]))
+      .eq("id", taskId)
+      .select("id"))
+  }
 
   if (error) throw error
   if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
@@ -2478,6 +3481,59 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
   await upsertDetail(taskId, input)
   await syncOpsTaskManagementLinks(taskId, input)
   await writeEvent(taskId, "updated", "task", "", input.title)
+  await createTriggeredOpsTaskFollowUps(existingTask, input)
+  clearOpsTaskWorkspaceDataCache()
+}
+
+export async function createOpsTaskAutomationRule(input: OpsTaskAutomationRuleInput) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase
+    .from("ops_task_automation_rules")
+    .insert(buildAutomationRuleRow(input))
+    .select("id")
+    .single()
+
+  if (error) throw error
+  clearOpsTaskWorkspaceDataCache()
+  return text((data as Row).id)
+}
+
+export async function updateOpsTaskAutomationRule(ruleId: string, input: OpsTaskAutomationRuleInput) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase
+    .from("ops_task_automation_rules")
+    .update(buildAutomationRuleRow(input))
+    .eq("id", ruleId)
+    .select("id")
+
+  if (error) throw error
+  if (!didMutateOpsTask(data)) throw new Error("자동화 규칙을 다시 불러오세요.")
+  clearOpsTaskWorkspaceDataCache()
+}
+
+export async function createOpsTaskNotificationChannel(input: OpsTaskNotificationChannelInput) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase
+    .from("ops_task_notification_channels")
+    .insert(buildNotificationChannelRow(input))
+    .select("id")
+    .single()
+
+  if (error) throw error
+  clearOpsTaskWorkspaceDataCache()
+  return text((data as Row).id)
+}
+
+export async function updateOpsTaskNotificationChannel(channelId: string, input: OpsTaskNotificationChannelInput) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase
+    .from("ops_task_notification_channels")
+    .update(buildNotificationChannelRow(input))
+    .eq("id", channelId)
+    .select("id")
+
+  if (error) throw error
+  if (!didMutateOpsTask(data)) throw new Error("Google Chat 채널을 다시 불러오세요.")
   clearOpsTaskWorkspaceDataCache()
 }
 
@@ -2491,6 +3547,7 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
 
   if (status === "done") {
     const nextInput = inputFromTask(currentTask, status)
+    assertManagementSyncReady(nextInput)
     await assertManagementSyncRecordsReady(nextInput)
     rollbackCompletionSync = await prepareOpsCompletionStatusRollback(currentTask, nextInput)
     try {
@@ -2522,6 +3579,8 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
   }
   if (currentTask.type === "registration") await syncRegistrationPipelineStatusForTaskStatus(currentTask, status)
   await writeEvent(currentTask.id, "status_changed", "status", currentTask.status, status)
+  const nextInput = inputFromTask(currentTask, status)
+  await createTriggeredOpsTaskFollowUps(currentTask, nextInput)
   clearOpsTaskWorkspaceDataCache()
 }
 

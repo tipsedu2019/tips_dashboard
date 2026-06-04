@@ -60,6 +60,7 @@ create table if not exists public.ops_withdrawal_details (
   completed_lesson_hours numeric(8,2),
   four_week_lesson_hours numeric(8,2),
   timetable_roster_updated boolean not null default false,
+  student_status_updated boolean not null default false,
   makeedu_withdrawal_done boolean not null default false,
   fee_processed boolean not null default false,
   textbook_fee_processed boolean not null default false,

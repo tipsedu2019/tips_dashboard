@@ -54,6 +54,8 @@ TEMP_SHOULD_NOT_REDIRECT
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+env.local
 
 # vercel
 .vercel

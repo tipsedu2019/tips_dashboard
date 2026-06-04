@@ -508,10 +508,11 @@ export function ApprovalWorkspace() {
     return requests.filter((request) => request.status === "returned")
   }, [data.requests, userId, view])
 
-  const approverOptions = useMemo(
-    () => data.profiles.filter((profile) => ["admin", "staff", "super_admin", "manager"].includes(profile.role) && profile.id !== userId),
-    [data.profiles, userId],
-  )
+  const approverOptions = useMemo(() => {
+    const approvalManagerOptions = data.profiles.filter((profile) => ["admin", "staff", "super_admin", "manager"].includes(profile.role))
+    const nonRequesterApprovers = approvalManagerOptions.filter((profile) => profile.id !== userId)
+    return nonRequesterApprovers.length > 0 ? nonRequesterApprovers : approvalManagerOptions
+  }, [data.profiles, userId])
   const recommendedApprovalLine = useMemo(() => {
     return findRecommendedApprovalLine(input.subject, user?.name || user?.email || "", approverOptions)
   }, [approverOptions, input.subject, user?.email, user?.name])

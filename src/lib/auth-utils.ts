@@ -1,6 +1,6 @@
 export const DEFAULT_LOGIN_EMAIL_DOMAIN = "tipsedu.co.kr";
 
-export type DashboardRole = "admin" | "staff" | "teacher" | "viewer";
+export type DashboardRole = "admin" | "staff" | "teacher" | "assistant" | "viewer";
 
 export function normalizeLoginLocalPart(value: string) {
   const normalized = String(value || "")
@@ -51,6 +51,7 @@ export function normalizeDashboardRole(
   if (normalized === "admin") return "admin";
   if (normalized === "staff") return "staff";
   if (normalized === "teacher") return "teacher";
+  if (normalized === "assistant") return "assistant";
 
   return "viewer";
 }
@@ -58,6 +59,7 @@ export function normalizeDashboardRole(
 export function getRoleCapabilities(role: string | null | undefined) {
   const normalizedRole = normalizeDashboardRole(role);
   const canManageAll = normalizedRole === "admin" || normalizedRole === "staff";
+  const canUseAssistantOperations = normalizedRole === "assistant";
   const canEditCurriculumPlanning =
     canManageAll || normalizedRole === "teacher";
   const canEditClassSchedulePlanning =
@@ -69,6 +71,8 @@ export function getRoleCapabilities(role: string | null | undefined) {
     canEditCurriculumPlanning,
     canEditClassSchedulePlanning,
     canEditClassSchedule: canManageAll,
+    canUseAssistantOperations,
+    defaultAdminPath: canUseAssistantOperations ? "/admin/tasks" : "/admin/dashboard",
   };
 }
 

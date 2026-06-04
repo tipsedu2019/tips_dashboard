@@ -74,10 +74,7 @@ export function createPublicClassesSupabaseClient(env = process.env) {
     env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || env.VITE_SUPABASE_URL || "",
   ).trim();
   const apiKey = String(
-    env.SUPABASE_SERVICE_ROLE_KEY ||
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      env.VITE_SUPABASE_ANON_KEY ||
-      "",
+    env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || "",
   ).trim();
 
   if (!url || !apiKey) {
@@ -119,13 +116,9 @@ function mapPublicClass(row) {
     fee: Number(row.fee || row.tuition || 0),
     tuition: Number(row.tuition || row.fee || 0),
     capacity: Number(row.capacity || 0),
-    studentIds: Array.isArray(row.student_ids) ? row.student_ids : [],
-    waitlistIds: Array.isArray(row.waitlist_ids) ? row.waitlist_ids : [],
+    enrollmentCount: Array.isArray(row.student_ids) ? row.student_ids.length : 0,
+    waitlistCount: Array.isArray(row.waitlist_ids) ? row.waitlist_ids.length : 0,
     textbookIds: Array.isArray(row.textbook_ids) ? row.textbook_ids : [],
-    textbookInfo: row.textbook_info || null,
-    lessons: Array.isArray(row.lessons) ? row.lessons : [],
-    schedulePlan: row.schedule_plan || null,
-    schedule_plan: row.schedule_plan || null,
     startDate: row.start_date || "",
     endDate: row.end_date || "",
     start_date: row.start_date || "",
@@ -162,7 +155,6 @@ function mapPublicProgressLog(row) {
     rangeEnd: row.range_end || "",
     rangeLabel: row.range_label || "",
     publicNote: row.public_note || "",
-    teacherNote: row.teacher_note || "",
     updatedAt: row.updated_at || row.date || null,
     completedLessonIds,
   };

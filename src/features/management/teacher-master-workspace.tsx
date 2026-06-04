@@ -59,7 +59,7 @@ type TeacherRecord = {
   isNew?: boolean;
 };
 
-type DashboardRole = "admin" | "staff" | "teacher" | "viewer";
+type DashboardRole = "admin" | "staff" | "teacher" | "assistant" | "viewer";
 
 type AccountProfile = {
   id: string;
@@ -80,7 +80,7 @@ type AuditLog = {
   changedAt: string;
 };
 
-const TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀"] as const;
+const TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀", "조교팀"] as const;
 type TeamOption = (typeof TEAM_OPTIONS)[number];
 const TEAM_FILTERS = ["전체", ...TEAM_OPTIONS] as const;
 const TEAM_ALIASES: Record<string, TeamOption> = {
@@ -95,11 +95,16 @@ const TEAM_ALIASES: Record<string, TeamOption> = {
   관리: "관리팀",
   운영: "관리팀",
   관리팀: "관리팀",
+  assistant: "조교팀",
+  assist: "조교팀",
+  조교: "조교팀",
+  조교팀: "조교팀",
 };
 const ROLE_OPTIONS = [
   { value: "admin", label: "관리자" },
   { value: "staff", label: "운영" },
   { value: "teacher", label: "선생님" },
+  { value: "assistant", label: "조교" },
   { value: "viewer", label: "보기만" },
 ] satisfies Array<{ value: DashboardRole; label: string }>;
 const TEACHER_TABLE_COLUMNS = [
@@ -134,6 +139,13 @@ function normalizeRole(value: unknown): DashboardRole {
   return ROLE_OPTIONS.some((option) => option.value === role)
     ? (role as DashboardRole)
     : "teacher";
+}
+
+function resolveRoleForTeam(subjects: string, value: unknown): DashboardRole {
+  const team = normalizeTeamValue(subjects);
+  const role = normalizeRole(value);
+
+  return team === "조교팀" ? "assistant" : role;
 }
 
 function getRoleLabel(value: unknown) {
@@ -204,13 +216,15 @@ function toTeacherRecord(
         ? getAccountLabel(profile)
         : "";
 
+  const team = normalizeTeamValue(subjects);
+
   return {
     id: String(row.id || createId()),
     name: typeof row.name === "string" ? row.name : "",
-    subjects: normalizeTeamValue(subjects),
+    subjects: team,
     profileId,
     accountEmail,
-    dashboardRole: normalizeRole(row.dashboard_role || profile?.role),
+    dashboardRole: resolveRoleForTeam(team, row.dashboard_role || profile?.role),
     isVisible: row.is_visible !== false,
     sortOrder: String(row.sort_order ?? index),
   };
@@ -381,7 +395,18 @@ export function TeacherMasterWorkspace() {
   };
 
   const handleTeamChange = (id: string, value: TeamOption) => {
-    handleFieldChange(id, "subjects", value);
+    setRows((current) =>
+      current.map((row) =>
+        row.id === id
+          ? {
+              ...row,
+              subjects: value,
+              dashboardRole: value === "조교팀" ? "assistant" : row.dashboardRole,
+            }
+          : row,
+      ),
+    );
+    setIsDirty(true);
   };
 
   const handleAccountChange = (id: string, value: string) => {
@@ -417,6 +442,7 @@ export function TeacherMasterWorkspace() {
       ...row,
       name: row.name.trim(),
       subjects: normalizeTeamValue(row.subjects),
+      dashboardRole: resolveRoleForTeam(row.subjects, row.dashboardRole),
       sortOrder: String(index + 1),
     }));
     if (nextRows.some((row) => !row.name)) {

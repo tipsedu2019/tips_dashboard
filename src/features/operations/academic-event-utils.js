@@ -311,7 +311,7 @@ export async function runAcademicEventMutation(payload = {}, execute) {
     }
 
     if (!result.error) {
-      return { error: null };
+      return { error: null, data: result.data || null, payload: row };
     }
 
     lastError = result.error;

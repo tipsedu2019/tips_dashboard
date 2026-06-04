@@ -132,11 +132,13 @@ function commandTargetId(url: string) {
 function createSearchItems({
   canManageAll,
   canEditCurriculumPlanning,
+  canUseAssistantOperations,
 }: {
   canManageAll: boolean
   canEditCurriculumPlanning: boolean
+  canUseAssistantOperations: boolean
 }): SearchItem[] {
-  const navGroups = buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning })
+  const navGroups = buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations })
   const seen = new Set<string>()
   const navigationItems: SearchItem[] = []
 
@@ -196,7 +198,7 @@ interface CommandSearchProps {
 export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const { canManageAll, canEditCurriculumPlanning } = useAuth()
+  const { canManageAll, canEditCurriculumPlanning, canUseAssistantOperations } = useAuth()
   const currentPath = React.useMemo(() => normalizeCommandPath(pathname), [pathname])
   const prefetchedCommandRoutesRef = React.useRef(new Set<string>())
 
@@ -210,8 +212,8 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
 
   const groupedItems = React.useMemo(() => {
     if (!open) return EMPTY_GROUPED_SEARCH_ITEMS
-    return groupSearchItems(createSearchItems({ canManageAll, canEditCurriculumPlanning }))
-  }, [canEditCurriculumPlanning, canManageAll, open])
+    return groupSearchItems(createSearchItems({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations }))
+  }, [canEditCurriculumPlanning, canManageAll, canUseAssistantOperations, open])
 
   const groupedEntries = React.useMemo(
     () => (open ? Object.entries(groupedItems) : EMPTY_GROUPED_SEARCH_ENTRIES),

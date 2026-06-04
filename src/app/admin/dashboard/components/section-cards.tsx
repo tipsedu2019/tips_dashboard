@@ -85,6 +85,26 @@ type DashboardBucket = {
   summary?: DashboardBucketSummary
 }
 
+type OperationProcessRow = {
+  label: string
+  total: number
+  completed: number
+  canceled: number
+  open: number
+  conversionRate?: number
+  completionRate?: number
+}
+
+type OperationProcessTypeStats = OperationProcessRow & {
+  byPeriod: OperationProcessRow[]
+  byDepartment: OperationProcessRow[]
+}
+
+type OperationProcessStats = {
+  registration: OperationProcessTypeStats
+  withdrawal: OperationProcessTypeStats
+}
+
 type ExamConflictClass = {
   classId: string
   title: string
@@ -115,6 +135,7 @@ type DashboardMetrics = {
   classBreakdowns?: DashboardBucket["classBreakdowns"]
   analyticsBySubject?: Partial<Record<DashboardSubjectKey, DashboardBucket>>
   analyticsByView?: Partial<Record<DashboardSubjectKey, Partial<Record<DashboardDivisionKey, DashboardBucket>>>>
+  operationProcessStats?: OperationProcessStats
   isLoading: boolean
   isConnected: boolean
   error: string | null
@@ -168,8 +189,24 @@ const EMPTY_BUCKET: DashboardBucket = {
   },
 }
 
+const EMPTY_OPERATION_PROCESS_ROW: OperationProcessTypeStats = {
+  label: "",
+  total: 0,
+  completed: 0,
+  canceled: 0,
+  open: 0,
+  conversionRate: 0,
+  completionRate: 0,
+  byPeriod: [],
+  byDepartment: [],
+}
+
 function formatNumber(value: number | undefined) {
   return Number(value || 0).toLocaleString("ko-KR")
+}
+
+function formatRate(value: number | undefined) {
+  return `${Number(value || 0).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`
 }
 
 function isMetricUnavailable(metrics: DashboardMetrics) {
@@ -1107,6 +1144,109 @@ function ClassOperationsPanel({ bucket }: { bucket: DashboardBucket }) {
   )
 }
 
+function getOperationProcessRows(stats: OperationProcessStats | undefined, key: "byPeriod" | "byDepartment") {
+  const registrationRows = stats?.registration?.[key] || []
+  const withdrawalRows = stats?.withdrawal?.[key] || []
+
+  return [
+    ...registrationRows.map((row) => ({ ...row, kind: "등록", rateLabel: "전환율", rate: row.conversionRate })),
+    ...withdrawalRows.map((row) => ({ ...row, kind: "퇴원", rateLabel: "완료율", rate: row.completionRate })),
+  ]
+    .sort((left, right) => (
+      right.total - left.total ||
+      right.completed - left.completed ||
+      left.label.localeCompare(right.label, "ko", { numeric: true })
+    ))
+    .slice(0, 6)
+}
+
+function OperationProcessSummary({
+  label,
+  rateLabel,
+  stats,
+}: {
+  label: string
+  rateLabel: string
+  stats: OperationProcessTypeStats
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border bg-background p-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{label}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            진행 {formatNumber(stats.open)} · 완료 {formatNumber(stats.completed)}
+            {stats.canceled ? ` · 이탈 ${formatNumber(stats.canceled)}` : ""}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-xl font-semibold tabular-nums">{formatNumber(stats.total)}</div>
+          <div className="text-xs font-medium text-muted-foreground">{rateLabel} {formatRate(stats.conversionRate ?? stats.completionRate)}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OperationProcessList({
+  title,
+  rows,
+}: {
+  title: string
+  rows: Array<OperationProcessRow & { kind: string; rateLabel: string; rate?: number }>
+}) {
+  return (
+    <section aria-label={title} className="min-w-0">
+      <h3 className="mb-2 text-sm font-semibold">{title}</h3>
+      <div role="list" className="overflow-hidden rounded-lg border bg-background">
+        {rows.length > 0 ? rows.map((row) => (
+          <div key={`${title}:${row.kind}:${row.label}`} role="listitem" className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b px-3 py-2.5 last:border-b-0">
+            <Badge variant="outline" className="bg-primary/5 text-primary">{row.kind}</Badge>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{row.label}</div>
+              <div className="text-xs text-muted-foreground">
+                완료 {formatNumber(row.completed)} · 진행 {formatNumber(row.open)}
+              </div>
+            </div>
+            <div className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              <div className="font-semibold text-foreground">{formatNumber(row.total)}건</div>
+              <div>{row.rateLabel} {formatRate(row.rate)}</div>
+            </div>
+          </div>
+        )) : <EmptyLine label={`${title} 데이터 없음`} />}
+      </div>
+    </section>
+  )
+}
+
+function OperationProcessPanel({ stats }: { stats: OperationProcessStats | undefined }) {
+  const registrationStats = stats?.registration || EMPTY_OPERATION_PROCESS_ROW
+  const withdrawalStats = stats?.withdrawal || EMPTY_OPERATION_PROCESS_ROW
+  const periodRows = getOperationProcessRows(stats, "byPeriod")
+  const departmentRows = getOperationProcessRows(stats, "byDepartment")
+  const hasStats = registrationStats.total > 0 || withdrawalStats.total > 0
+
+  if (!hasStats) return null
+
+  return (
+    <Card className="min-w-0 gap-4 rounded-xl py-4 shadow-none">
+      <CardHeader className="border-b px-4 pb-3 sm:px-5">
+        <CardTitle className="text-base">등록/퇴원 운영</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-4 px-4 sm:px-5">
+        <div className="grid gap-3 md:grid-cols-2">
+          <OperationProcessSummary label="등록" rateLabel="전환율" stats={registrationStats} />
+          <OperationProcessSummary label="퇴원" rateLabel="완료율" stats={withdrawalStats} />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <OperationProcessList title="기간별" rows={periodRows} />
+          <OperationProcessList title="부서별" rows={departmentRows} />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function ConflictBoard({ rows }: { rows: ConflictBoardRow[] }) {
   const [showAllConflicts, setShowAllConflicts] = useState(false)
   const affectedCount = rows.reduce((sum, row) => sum + row.affectedCount, 0)
@@ -1251,6 +1391,7 @@ export function SectionCards({ metrics }: { metrics: DashboardMetrics }) {
         conflictCount={conflictRows.length}
       />
       <KpiStrip metrics={metrics} summary={summary} />
+      <OperationProcessPanel stats={metrics.operationProcessStats} />
       <ConflictBoard rows={conflictRows} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.85fr)]">
         <div className="order-2 min-w-0 lg:order-1">

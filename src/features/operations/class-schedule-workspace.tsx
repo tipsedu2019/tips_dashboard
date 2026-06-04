@@ -30,6 +30,7 @@ import {
   applyTextbookPlanRangeField,
   buildSchedulePlanForSave,
   computeAutoEndDate,
+  getNextBillingPeriodMonth,
   getSuggestedNextStartDate,
   normalizeSchedulePlan,
 } from "@/lib/class-schedule-planner";
@@ -41,6 +42,12 @@ import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 
 function text(value: unknown) {
   return String(value || "").trim();
+}
+
+function getLessonDesignSessionOrder(value: unknown) {
+  const matchedSession = text(value).match(/\d+/);
+  const sessionOrder = matchedSession ? Number(matchedSession[0]) : Number(value);
+  return Number.isFinite(sessionOrder) && sessionOrder > 0 ? sessionOrder : 0;
 }
 
 function getTextbookTitle(book: Record<string, unknown> | null | undefined) {
@@ -168,6 +175,74 @@ function sortLessonSessionRecords(left: Record<string, unknown>, right: Record<s
     Number(left.sessionNumber || left.session_number || 0) -
     Number(right.sessionNumber || right.session_number || 0)
   );
+}
+
+function getNextLessonPlanSessionDate(sessions: Record<string, unknown>[] = []) {
+  const today = new Date().toISOString().slice(0, 10);
+  const dates = sessions
+    .map((session) => text(session.dateValue || session.date || session.session_date))
+    .filter(Boolean)
+    .sort();
+  return dates.find((date) => date >= today) || dates[0] || "";
+}
+
+async function postCurriculumPlanAutomationEvent(
+  row: Record<string, unknown> | null,
+  lessonDesignSnapshot: { sessions?: Record<string, unknown>[]; plannerClassName?: string; plannerSubject?: string; plannerGrade?: string } | null,
+) {
+  if (!row || !supabase) return false;
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) return false;
+
+  const classItem = (row.classItem && typeof row.classItem === "object" ? row.classItem : row) as Record<string, unknown>;
+  const classId = text(classItem.id || row.id);
+  if (!classId) return false;
+
+  const className = text(lessonDesignSnapshot?.plannerClassName || classItem.name || classItem.className || row.title);
+  const subject = text(lessonDesignSnapshot?.plannerSubject || classItem.subject || row.subject);
+  const grade = text(lessonDesignSnapshot?.plannerGrade || classItem.grade || row.grade);
+  const teacherName = text(classItem.teacher || row.teacher);
+  const nextSessionDate = getNextLessonPlanSessionDate(lessonDesignSnapshot?.sessions || []);
+
+  try {
+    await fetch("/api/ops-task-automations/trigger", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        trigger: "curriculum.plan_saved",
+        sourceType: "curriculum",
+        sourceId: classId,
+        task: {
+          id: classId,
+          type: "curriculum",
+          title: `${className || "수업"} 수업계획`,
+          classId,
+          className,
+          subject,
+        },
+        classItem: {
+          id: classId,
+          name: className,
+          subject,
+          grade,
+          teacher: teacherName,
+          nextSessionDate: nextSessionDate,
+        },
+        teacher: {
+          name: teacherName,
+          team: text(classItem.teacherTeam || classItem.teacher_team || row.teacherTeam || row.teacher_team) || "선생님팀",
+        },
+      }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function findMatchingLessonSessionRecord(
@@ -338,13 +413,14 @@ function buildLessonDesignPageHref(
   selectedRow: Record<string, unknown> | null,
   sessionId: string = "",
   sectionId: string = "",
+  sessionOrder: string | number = "",
 ) {
   const classId = text(selectedRow?.id);
   if (!classId) {
     return "/admin/curriculum/lesson-design";
   }
 
-  const params = buildLessonDesignSearchParams({ classId, sessionId, sectionId });
+  const params = buildLessonDesignSearchParams({ classId, sessionId, sectionId, sessionOrder });
   return `/admin/curriculum/lesson-design?${params.toString()}`;
 }
 
@@ -364,6 +440,7 @@ function buildLessonDesignSearchParams({
   currentParams,
   classId,
   sessionId = "",
+  sessionOrder = "",
   sectionId = "",
   monthKeys = [],
   periodId = "all",
@@ -373,6 +450,7 @@ function buildLessonDesignSearchParams({
   currentParams?: URLSearchParams;
   classId: string;
   sessionId?: string;
+  sessionOrder?: string | number;
   sectionId?: string;
   monthKeys?: string[];
   periodId?: string;
@@ -388,6 +466,12 @@ function buildLessonDesignSearchParams({
     params.set("sessionId", resolvedSessionId);
   } else {
     params.delete("sessionId");
+  }
+  const resolvedSessionOrder = getLessonDesignSessionOrder(sessionOrder);
+  if (!resolvedSessionId && resolvedSessionOrder) {
+    params.set("sessionOrder", String(resolvedSessionOrder));
+  } else {
+    params.delete("sessionOrder");
   }
 
   const resolvedSectionId = resolveLessonDesignSectionId(sectionId);
@@ -433,6 +517,7 @@ function clearLessonDesignSearchParams(currentParams: URLSearchParams) {
   params.delete("lessonDesign");
   params.delete("classId");
   params.delete("sessionId");
+  params.delete("sessionOrder");
   params.delete("section");
   params.delete("lessonMonths");
   params.delete("lessonPeriod");
@@ -1800,14 +1885,21 @@ function resolveRequestedLessonDesignSession(
   lessonDesignSnapshot: ReturnType<typeof buildLessonDesignSnapshot> | null | undefined,
   requestedSessionId: string,
   preferredSessionId: string = "",
+  requestedSessionOrder: number = 0,
 ) {
   const sessions = lessonDesignSnapshot?.sessions || [];
   if (sessions.length === 0) {
     return null;
   }
 
+  const requestedSession = findMatchingLessonSessionRecord(sessions, {
+    sessionId: requestedSessionId,
+    sessionNumber: requestedSessionOrder,
+    sessionDate: "",
+  });
+
   return (
-    sessions.find((session) => session.id === requestedSessionId) ||
+    requestedSession ||
     sessions.find((session) => session.id === preferredSessionId) ||
     sessions[0] ||
     null
@@ -3577,10 +3669,11 @@ export function ClassScheduleWorkspace() {
         Number(current.globalSessionCount || 0),
       );
       const nextPeriodIndex = billingPeriods.length + 1;
+      const nextMonth = lastPeriod ? getNextBillingPeriodMonth(lastPeriod) : 1;
       billingPeriods.push({
         id: `period-${Date.now()}-${nextPeriodIndex}`,
-        month: nextPeriodIndex,
-        label: `${nextPeriodIndex}월`,
+        month: nextMonth,
+        label: `${nextMonth}월`,
         startDate,
         endDate,
       });
@@ -3646,6 +3739,7 @@ export function ClassScheduleWorkspace() {
         throw updateError;
       }
 
+      await postCurriculumPlanAutomationEvent(selectedRow, lessonDesignSnapshot);
       await refresh();
       setLessonDesignSaveNotice("수업계획을 저장했습니다.");
     } catch (saveError) {
@@ -3655,11 +3749,11 @@ export function ClassScheduleWorkspace() {
     } finally {
       setIsLessonDesignSaving(false);
     }
-  }, [lessonPlanForSave, refresh, selectedRow]);
+  }, [lessonDesignSnapshot, lessonPlanForSave, refresh, selectedRow]);
   const openLessonDesignForRow = useCallback(
     (
       row: Record<string, unknown> | null,
-      options: { sessionId?: string; monthKeys?: string[]; sectionId?: string } = {},
+      options: { sessionId?: string; sessionOrder?: string | number; monthKeys?: string[]; sectionId?: string } = {},
     ) => {
       if (!row) {
         return;
@@ -3671,8 +3765,15 @@ export function ClassScheduleWorkspace() {
       }
 
       setSelectedClassId(text(row.id));
-      const targetSession =
-        nextLessonDesignSnapshot.sessions.find((session) => session.id === options.sessionId) || null;
+      const requestedSessionOrder = getLessonDesignSessionOrder(options.sessionOrder);
+      const targetSession = text(options.sessionId) || requestedSessionOrder
+        ? resolveRequestedLessonDesignSession(
+            nextLessonDesignSnapshot,
+            text(options.sessionId),
+            "",
+            requestedSessionOrder,
+          )
+        : null;
       const allMonthKeys = getAllLessonMonthKeys(nextLessonDesignSnapshot.monthSummaries);
       const requestedMonthKeys = normalizeSelectedLessonMonthKeys(
         options.monthKeys || [],
@@ -3681,18 +3782,18 @@ export function ClassScheduleWorkspace() {
       );
       const nextSelectedMonthKeys = allMonthKeys;
       setSelectedLessonMonthKeys(nextSelectedMonthKeys);
-      setFocusedLessonMonthKey(targetSession?.monthKey || requestedMonthKeys[0] || nextSelectedMonthKeys[0] || "");
+      setFocusedLessonMonthKey(text(targetSession?.monthKey) || requestedMonthKeys[0] || nextSelectedMonthKeys[0] || "");
       setSelectedLessonPeriodId("all");
       setSelectedLessonScheduleState("all");
       setSelectedLessonSessionId(
-        targetSession?.id ||
+        text(targetSession?.id) ||
           nextLessonDesignSnapshot.sessions.find((session) => session.progressLabel !== "완료")?.id ||
           nextLessonDesignSnapshot.sessions[0]?.id ||
           "",
       );
       setLessonMonthDetailsOpen(
         resolveLessonDesignSectionId(options.sectionId || "") === LESSON_DESIGN_SECTION_IDS.periods &&
-          Boolean(targetSession?.id),
+          Boolean(text(targetSession?.id)),
       );
       setLessonDesignOpen(true);
     },
@@ -3724,6 +3825,7 @@ export function ClassScheduleWorkspace() {
   const isLessonDesignPage = pathname.endsWith("/lesson-design");
   const requestedClassId = text(searchParams.get("classId"));
   const requestedSessionId = text(searchParams.get("sessionId"));
+  const requestedLessonSessionOrder = getLessonDesignSessionOrder(searchParams.get("sessionOrder"));
   const requestedLessonDesignSectionId = resolveLessonDesignSectionId(text(searchParams.get("section")));
   const requestedLessonMonthKeys = useMemo(
     () =>
@@ -3988,10 +4090,10 @@ export function ClassScheduleWorkspace() {
 
     const targetSectionId =
       requestedLessonDesignSectionId ||
-      (requestedSessionId ? LESSON_DESIGN_SECTION_IDS.board : LESSON_DESIGN_SECTION_IDS.periods);
+      (requestedSessionId || requestedLessonSessionOrder ? LESSON_DESIGN_SECTION_IDS.board : LESSON_DESIGN_SECTION_IDS.periods);
 
     if (!isLessonDesignPage) {
-      router.replace(buildLessonDesignPageHref(targetRow, requestedSessionId || "", targetSectionId), {
+      router.replace(buildLessonDesignPageHref(targetRow, requestedSessionId || "", targetSectionId, requestedLessonSessionOrder), {
         scroll: false,
       });
       return;
@@ -4003,6 +4105,7 @@ export function ClassScheduleWorkspace() {
 
     openLessonDesignForRow(targetRow, {
       sessionId: requestedSessionId || undefined,
+      sessionOrder: requestedLessonSessionOrder || undefined,
       monthKeys: requestedLessonMonthKeys,
       sectionId: targetSectionId,
     });
@@ -4018,13 +4121,14 @@ export function ClassScheduleWorkspace() {
     searchParams,
     requestedLessonDesignSectionId,
     requestedLessonMonthKeys,
+    requestedLessonSessionOrder,
     selectedClassId,
     selectedLessonSessionId,
   ]);
 
   useEffect(() => {
-    if (!isLessonDesignPage || !lessonDesignOpen || !requestedSessionId) {
-      if (!requestedSessionId) {
+    if (!isLessonDesignPage || !lessonDesignOpen || (!requestedSessionId && !requestedLessonSessionOrder)) {
+      if (!requestedSessionId && !requestedLessonSessionOrder) {
         lastRequestedLessonSessionKeyRef.current = "";
         pendingLessonSessionNavigationKeyRef.current = "";
       }
@@ -4035,12 +4139,14 @@ export function ClassScheduleWorkspace() {
       lessonDesignSnapshot,
       requestedSessionId,
       selectedLessonSessionId,
+      requestedLessonSessionOrder,
     );
     if (!resolvedRequestedSession) {
       return;
     }
 
-    const requestedLessonSessionKey = `${requestedClassId}:${resolvedRequestedSession.id}`;
+    const resolvedRequestedSessionId = text(resolvedRequestedSession.id);
+    const requestedLessonSessionKey = `${requestedClassId}:${resolvedRequestedSessionId}`;
     if (
       pendingLessonSessionNavigationKeyRef.current &&
       pendingLessonSessionNavigationKeyRef.current !== requestedLessonSessionKey
@@ -4052,30 +4158,31 @@ export function ClassScheduleWorkspace() {
     }
     if (
       lastRequestedLessonSessionKeyRef.current === requestedLessonSessionKey &&
-      selectedLessonSessionId === resolvedRequestedSession.id
+      selectedLessonSessionId === resolvedRequestedSessionId
     ) {
       return;
     }
 
     lastRequestedLessonSessionKeyRef.current = requestedLessonSessionKey;
-    if (resolvedRequestedSession.monthKey) {
+    const resolvedRequestedMonthKey = text(resolvedRequestedSession.monthKey);
+    if (resolvedRequestedMonthKey) {
       setFocusedLessonMonthKey((current) =>
-        current === resolvedRequestedSession.monthKey ? current : resolvedRequestedSession.monthKey,
+        current === resolvedRequestedMonthKey ? current : resolvedRequestedMonthKey,
       );
     }
     if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods) {
       setLessonMonthDetailsOpen((current) => (current ? current : true));
-      scrollLessonDesignSessionPairAfterRender(resolvedRequestedSession.id);
+      scrollLessonDesignSessionPairAfterRender(resolvedRequestedSessionId);
     }
-    if (selectedLessonSessionId !== resolvedRequestedSession.id) {
-      setSelectedLessonSessionId(resolvedRequestedSession.id);
+    if (selectedLessonSessionId !== resolvedRequestedSessionId) {
+      setSelectedLessonSessionId(resolvedRequestedSessionId);
     }
 
-    if (resolvedRequestedSession.id !== requestedSessionId && selectedRow) {
+    if ((resolvedRequestedSessionId !== requestedSessionId || requestedLessonSessionOrder) && selectedRow) {
       const nextParams = buildLessonDesignSearchParams({
         currentParams: new URLSearchParams(searchParams.toString()),
         classId: requestedClassId,
-        sessionId: resolvedRequestedSession.id,
+        sessionId: resolvedRequestedSessionId,
         sectionId: requestedLessonDesignSectionId || LESSON_DESIGN_SECTION_IDS.board,
         monthKeys: [],
       });
@@ -4088,6 +4195,7 @@ export function ClassScheduleWorkspace() {
     requestedClassId,
     requestedLessonDesignSectionId,
     requestedLessonMonthKeys,
+    requestedLessonSessionOrder,
     requestedSessionId,
     router,
     searchParams,

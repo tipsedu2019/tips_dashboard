@@ -23,8 +23,8 @@ const CLASSROOM_ALIAS_MAP = new Map([
   ["별3강", "별관 3강"],
   ["별5", "별관 5강"],
   ["별5강", "별관 5강"],
-  ["별7", "별관 5강"],
-  ["별7강", "별관 5강"],
+  ["별7", "별관 7강"],
+  ["별7강", "별관 7강"],
 ]);
 
 function text(value) {
@@ -887,6 +887,7 @@ function createCurriculumRow(classItem, classTerms, textbooks, progressSummaryBy
   const term = getClassTermName(classItem, classTerms);
   const teacherNames = splitTeacherList(classItem?.teacher);
   const classroomNames = splitClassroomList(classItem?.classroom || classItem?.room);
+  const scheduleSlots = parseAcademicSchedule(classItem?.schedule, classItem);
   const classGroupIds = toArray(classGroupsForClass).map((group) => text(group?.id)).filter(Boolean);
   const classGroupNames = toArray(classGroupsForClass).map((group) => text(group?.name)).filter(Boolean);
   const textbookCatalog = getClassTextbookCatalog(classItem, textbooks);
@@ -959,6 +960,7 @@ function createCurriculumRow(classItem, classTerms, textbooks, progressSummaryBy
     classroomNames,
     classroomSummary: classroomNames.join(", "),
     schedule: text(classItem?.schedule),
+    scheduleSlots,
     status,
     statusFilter,
     classGroupIds,

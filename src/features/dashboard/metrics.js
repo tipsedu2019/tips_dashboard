@@ -1178,6 +1178,129 @@ function buildEmptyDashboardAnalyticsView() {
   return buildDashboardAnalyticsByView([], []);
 }
 
+function ratePercent(numerator, denominator) {
+  const safeDenominator = Number(denominator || 0);
+  if (safeDenominator <= 0) return 0;
+  return Number(((Number(numerator || 0) / safeDenominator) * 100).toFixed(1));
+}
+
+function monthKeyFromValue(value) {
+  const raw = text(value);
+  if (!raw) return "날짜 미정";
+  const direct = raw.match(/^(\d{4}-\d{2})/);
+  if (direct) return direct[1];
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "날짜 미정";
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function operationDepartmentLabel(task = {}) {
+  return text(task.subject || task.department || task.campus || task.assigneeLabel || task.assignee_label) || "미분류";
+}
+
+function registrationProcessDate(task = {}) {
+  return (
+    text(task.registration?.classStartDate || task.registration?.class_start_date) ||
+    text(task.completedAt || task.completed_at) ||
+    text(task.createdAt || task.created_at)
+  );
+}
+
+function withdrawalProcessDate(task = {}) {
+  return (
+    text(task.withdrawal?.withdrawalDate || task.withdrawal?.withdrawal_date) ||
+    text(task.completedAt || task.completed_at) ||
+    text(task.createdAt || task.created_at)
+  );
+}
+
+function registrationProcessState(task = {}) {
+  const pipelineStatus = text(task.registration?.pipelineStatus || task.registration?.pipeline_status);
+  const status = text(task.status);
+  if (pipelineStatus.startsWith("7.") || status === "done") return "completed";
+  if (pipelineStatus.startsWith("8.") || pipelineStatus.startsWith("9.") || status === "canceled") return "canceled";
+  return "open";
+}
+
+function withdrawalProcessState(task = {}) {
+  const status = text(task.status);
+  if (status === "done") return "completed";
+  if (status === "canceled") return "canceled";
+  return "open";
+}
+
+function createOperationProcessBucket(label) {
+  return {
+    label,
+    total: 0,
+    completed: 0,
+    canceled: 0,
+    open: 0,
+    conversionRate: 0,
+    completionRate: 0,
+  };
+}
+
+function finalizeOperationProcessBucket(row) {
+  return {
+    ...row,
+    conversionRate: ratePercent(row.completed, row.total),
+    completionRate: ratePercent(row.completed, row.total),
+  };
+}
+
+function addOperationProcessBucket(map, label, state) {
+  const key = text(label) || "미분류";
+  const row = map.get(key) || createOperationProcessBucket(key);
+  row.total += 1;
+  row[state] += 1;
+  map.set(key, row);
+}
+
+function buildOperationProcessTypeStats(tasks = [], kind) {
+  const byPeriod = new Map();
+  const byDepartment = new Map();
+  const summary = createOperationProcessBucket(kind === "registration" ? "등록" : "퇴원");
+  const getState = kind === "registration" ? registrationProcessState : withdrawalProcessState;
+  const getDate = kind === "registration" ? registrationProcessDate : withdrawalProcessDate;
+
+  for (const task of tasks) {
+    const state = getState(task);
+    summary.total += 1;
+    summary[state] += 1;
+    addOperationProcessBucket(byPeriod, monthKeyFromValue(getDate(task)), state);
+    addOperationProcessBucket(byDepartment, operationDepartmentLabel(task), state);
+  }
+
+  return {
+    ...finalizeOperationProcessBucket(summary),
+    byPeriod: [...byPeriod.values()]
+      .map(finalizeOperationProcessBucket)
+      .sort((left, right) => right.label.localeCompare(left.label, "ko", { numeric: true })),
+    byDepartment: [...byDepartment.values()]
+      .map(finalizeOperationProcessBucket)
+      .sort((left, right) => (
+        right.total - left.total ||
+        right.completed - left.completed ||
+        left.label.localeCompare(right.label, "ko", { numeric: true })
+      )),
+  };
+}
+
+function buildOperationProcessStats(opsTasks = []) {
+  return {
+    registration: buildOperationProcessTypeStats(
+      opsTasks.filter((task) => text(task.type) === "registration"),
+      "registration",
+    ),
+    withdrawal: buildOperationProcessTypeStats(
+      opsTasks.filter((task) => text(task.type) === "withdrawal"),
+      "withdrawal",
+    ),
+  };
+}
+
 export function createEmptyDashboardMetrics() {
   return {
     activeClassesCount: 0,
@@ -1214,6 +1337,7 @@ export function createEmptyDashboardMetrics() {
     },
     analyticsBySubject: buildDashboardAnalyticsBySubject([], []),
     analyticsByView: buildEmptyDashboardAnalyticsView(),
+    operationProcessStats: buildOperationProcessStats([]),
     teacherLoad: [],
     classroomLoad: [],
     riskCount: 0,
@@ -1232,6 +1356,7 @@ export function buildDashboardMetrics({
   academicExamDays = [],
   academicEventExamDetails = [],
   academicEvents = [],
+  opsTasks = [],
 } = {}) {
   const activeClasses = classes.filter(isActiveClass);
   const timetable = buildTimetableWorkspaceModel({
@@ -1256,6 +1381,7 @@ export function buildDashboardMetrics({
   const classroomLoad = buildResourceLoadFromClasses(activeClasses, "classroom", students);
   const analyticsBySubject = buildDashboardAnalyticsBySubject(activeClasses, students);
   const analyticsByView = buildDashboardAnalyticsByView(activeClasses, students);
+  const operationProcessStats = buildOperationProcessStats(opsTasks);
 
   return {
     activeClassesCount: activeClasses.length,
@@ -1277,6 +1403,7 @@ export function buildDashboardMetrics({
     classBreakdowns: buildClassBreakdowns(activeClasses, students),
     analyticsBySubject,
     analyticsByView,
+    operationProcessStats,
     teacherLoad: teacherLoad.length ? teacherLoad : buildLoad(timetable.rows, "teacher"),
     classroomLoad: classroomLoad.length ? classroomLoad : buildLoad(timetable.rows, "classroom"),
     riskCount: collisionSummary.total + examConflicts.length,

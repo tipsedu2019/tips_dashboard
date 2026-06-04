@@ -2,7 +2,7 @@ import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supab
 import { normalizeStudentStatus } from "../../lib/student-status.js";
 
 const DEFAULT_CLASS_STATUS = "수강";
-const DASHBOARD_ROLES = ["admin", "staff", "teacher", "viewer"];
+const DASHBOARD_ROLES = ["admin", "staff", "teacher", "assistant", "viewer"];
 const CLASSROOM_ALIAS_MAP = new Map([
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],

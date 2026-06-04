@@ -60,13 +60,19 @@ test("timetable panel headers show lesson count and weekly hours", async () => {
 
 test("compact timetable blocks keep class names readable", async () => {
   const css = await readSource("src/features/academic/timetable-grid-skin.module.css");
+  const component = await readSource("src/features/academic/components/legacy-timetable-grid.jsx");
   const globals = await readSource("src/app/globals.css");
 
   assert.match(css, /-webkit-line-clamp:\s*2/);
   assert.match(css, /\.scope :global\(\.timetable-cell\) \{[\s\S]*overflow:\s*hidden/);
+  assert.match(css, /\.scope :global\(\.timetable-cell\.has-block-start\) \{[\s\S]*overflow:\s*visible/);
+  assert.match(css, /\.scope :global\(\.timetable-cell\.has-block-start\) \{[\s\S]*z-index:\s*6/);
   assert.match(css, /word-break:\s*keep-all/);
+  assert.match(css, /\.scope :global\(\.timetable-block\) \{[\s\S]*justify-content:\s*flex-start/);
+  assert.match(css, /\.scope :global\(\.timetable-block\) \{[\s\S]*min-height:\s*0/);
   assert.match(css, /\.scope :global\(\.block-value\)/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\)/);
+  assert.match(component, /blockStart \|\| ghostStartsHere \|\| externalGhostStartsHere \? 'has-block-start' : ''/);
   assert.match(globals, /\.timetable-floating-tooltip/);
   assert.match(globals, /\.timetable-tooltip-title/);
   assert.match(globals, /\.timetable-tooltip-badge/);

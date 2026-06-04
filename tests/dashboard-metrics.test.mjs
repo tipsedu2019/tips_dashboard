@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 
 import {
   buildDashboardMetrics,
@@ -485,4 +486,121 @@ test("uses class management grade before enrolled student grades for class break
   assert.deepEqual(metrics.classBreakdowns.byGrade.map((row) => row.label), ["고1"]);
   assert.equal(metrics.classBreakdowns.byGrade[0].classCount, 1);
   assert.equal(metrics.classBreakdowns.byGrade[0].studentCount, 2);
+});
+
+test("builds registration and withdrawal operation process stats for the dashboard", () => {
+  const metrics = buildDashboardMetrics({
+    classes: [],
+    students: [],
+    opsTasks: [
+      {
+        id: "reg-done",
+        type: "registration",
+        status: "done",
+        subject: "영어",
+        createdAt: "2026-05-01T09:00:00+09:00",
+        completedAt: "2026-05-08T09:00:00+09:00",
+        registration: {
+          pipelineStatus: "7. 등록 완료",
+          classStartDate: "2026-05-10",
+        },
+      },
+      {
+        id: "reg-open",
+        type: "registration",
+        status: "in_progress",
+        subject: "수학",
+        createdAt: "2026-05-03T09:00:00+09:00",
+        registration: {
+          pipelineStatus: "5. 등록 신청",
+        },
+      },
+      {
+        id: "reg-canceled",
+        type: "registration",
+        status: "canceled",
+        subject: "영어",
+        createdAt: "2026-04-20T09:00:00+09:00",
+        registration: {
+          pipelineStatus: "8. 미등록",
+        },
+      },
+      {
+        id: "withdrawal-done",
+        type: "withdrawal",
+        status: "done",
+        subject: "수학",
+        createdAt: "2026-05-05T09:00:00+09:00",
+        withdrawal: {
+          withdrawalDate: "2026-05-31",
+        },
+      },
+      {
+        id: "withdrawal-open",
+        type: "withdrawal",
+        status: "in_progress",
+        subject: "영어",
+        createdAt: "2026-04-05T09:00:00+09:00",
+        withdrawal: {
+          withdrawalDate: "2026-04-30",
+        },
+      },
+    ],
+  });
+
+  assert.equal(metrics.operationProcessStats.registration.total, 3);
+  assert.equal(metrics.operationProcessStats.registration.completed, 1);
+  assert.equal(metrics.operationProcessStats.registration.canceled, 1);
+  assert.equal(metrics.operationProcessStats.registration.open, 1);
+  assert.equal(metrics.operationProcessStats.registration.conversionRate, 33.3);
+
+  const registrationMay = metrics.operationProcessStats.registration.byPeriod.find((row) => row.label === "2026-05");
+  assert.equal(registrationMay.total, 2);
+  assert.equal(registrationMay.completed, 1);
+
+  const registrationEnglish = metrics.operationProcessStats.registration.byDepartment.find((row) => row.label === "영어");
+  assert.equal(registrationEnglish.total, 2);
+  assert.equal(registrationEnglish.completed, 1);
+  assert.equal(registrationEnglish.canceled, 1);
+
+  assert.equal(metrics.operationProcessStats.withdrawal.total, 2);
+  assert.equal(metrics.operationProcessStats.withdrawal.completed, 1);
+  assert.equal(metrics.operationProcessStats.withdrawal.open, 1);
+  assert.equal(metrics.operationProcessStats.withdrawal.completionRate, 50);
+
+  const withdrawalMay = metrics.operationProcessStats.withdrawal.byPeriod.find((row) => row.label === "2026-05");
+  assert.equal(withdrawalMay.total, 1);
+  assert.equal(withdrawalMay.completed, 1);
+
+  const withdrawalMath = metrics.operationProcessStats.withdrawal.byDepartment.find((row) => row.label === "수학");
+  assert.equal(withdrawalMath.total, 1);
+  assert.equal(withdrawalMath.completed, 1);
+});
+
+test("dashboard loads and renders registration withdrawal operation stats", async () => {
+  const root = new URL("../", import.meta.url);
+  const [hookSource, sectionCardsSource] = await Promise.all([
+    readFile(new URL("src/hooks/use-tips-dashboard-metrics.ts", root), "utf8"),
+    readFile(new URL("src/app/admin/dashboard/components/section-cards.tsx", root), "utf8"),
+  ]);
+
+  for (const value of [
+    'readTable("ops_tasks"',
+    'readTable("ops_registration_details"',
+    'readTable("ops_withdrawal_details"',
+    "buildDashboardOpsTasks",
+  ]) {
+    assert.ok(hookSource.includes(value), value);
+  }
+
+  for (const value of [
+    "operationProcessStats",
+    "OperationProcessPanel",
+    "등록/퇴원 운영",
+    "기간별",
+    "부서별",
+    "전환율",
+  ]) {
+    assert.ok(sectionCardsSource.includes(value), value);
+  }
 });

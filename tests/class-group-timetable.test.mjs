@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCurriculumWorkspaceModel,
   buildTimetableWorkspaceModel,
+  normalizeTimetableClassroomName,
 } from "../src/features/academic/records.js";
 
 test("timetable rows can be filtered by many-to-many class groups", () => {
@@ -139,6 +140,34 @@ test("status filter includes ended classes when the user chooses 종강", () => 
 
   assert.equal(workspace.rows.length, 1);
   assert.equal(workspace.rows[0].statusFilter, "종강");
+});
+
+test("classroom aliases keep annex room numbers distinct", () => {
+  assert.equal(normalizeTimetableClassroomName("별5"), "별관 5강");
+  assert.equal(normalizeTimetableClassroomName("별7"), "별관 7강");
+  assert.equal(normalizeTimetableClassroomName("별7강"), "별관 7강");
+});
+
+test("curriculum rows expose parsed timetable slots for detail panels", () => {
+  const workspace = buildCurriculumWorkspaceModel({
+    classes: [
+      {
+        id: "math-class",
+        name: "고1 공통수학",
+        subject: "수학",
+        grade: "고1",
+        teacher: "양소윤, 김성은",
+        classroom: "별관 7강",
+        schedule: "금 21:30-23:00 (김성은, 본관 2강) 토 15:30-17:00",
+        status: "수강",
+      },
+    ],
+  });
+
+  assert.deepEqual(workspace.rows[0].scheduleSlots, [
+    { day: "금", start: "21:30", end: "23:00", teacher: "김성은", classroom: "본관 2강" },
+    { day: "토", start: "15:30", end: "17:00", teacher: "양소윤", classroom: "별관 7강" },
+  ]);
 });
 
 test("curriculum rows count textbooks saved inside lesson schedule plans", () => {
