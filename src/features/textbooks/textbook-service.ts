@@ -3,11 +3,14 @@ import { supabase as sharedSupabase, supabaseConfigError } from "@/lib/supabase"
 import {
   buildPurchaseLifecycleDraft,
   buildSaleLineStatusTransition,
+  buildTeacherTextbookIssueDraft,
   buildTextbookInventorySnapshot,
   buildTextbookMonthlyClosing,
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
   getRecordId,
+  getTextbookByReference,
+  getTextbookCopyScope,
   getTextbookSalePrice,
   listIds,
   normalizeBarcodeValue,
@@ -61,8 +64,17 @@ const TEXTBOOK_OPERATION_TABLES = [
 const TEXTBOOK_OPERATION_SCHEMA_ITEMS = [
   ...TEXTBOOK_OPERATION_TABLES,
   "textbook_purchase_order_lines.requested_textbook_title",
+  "textbook_purchase_order_lines.copy_scope",
+  "textbook_sale_lines.copy_scope",
+  "textbook_sale_lines.teacher_id",
+  "textbook_sale_lines.teacher_name",
+  "textbook_stock_moves.copy_scope",
+  "textbook_stock_counts.copy_scope",
 ];
-const TEXTBOOK_PURCHASE_ORDER_LINE_SELECT = "*,requested_textbook_title";
+const TEXTBOOK_PURCHASE_ORDER_LINE_SELECT = "*,requested_textbook_title,copy_scope";
+const TEXTBOOK_STOCK_MOVE_SELECT = "*,copy_scope";
+const TEXTBOOK_SALE_LINE_SELECT = "*,copy_scope,teacher_id,teacher_name";
+const TEXTBOOK_STOCK_COUNT_SELECT = "*,copy_scope";
 const TEXTBOOK_MASTER_REFERENCE_TABLES = [
   { table: "textbook_stock_moves", column: "textbook_id" },
   { table: "textbook_purchase_order_lines", column: "textbook_id" },
@@ -195,6 +207,10 @@ function getClassStudents(classRecord: Row, students: Row[]) {
   return enrolledIds.map((id) => studentsById.get(id) || { id, name: id });
 }
 
+function getTeacherName(row: Row | undefined) {
+  return text(row?.name || row?.teacher_name || row?.teacherName || row?.title || row?.id);
+}
+
 function getInventoryQuantity(inventoryRow: Row | undefined, locationId: string) {
   const locationQuantities = (inventoryRow?.locationQuantities || {}) as Record<string, unknown>;
   if (!locationId) return numberValue(inventoryRow?.totalQuantity);
@@ -231,10 +247,10 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
     readTable(client, "textbook_inventory_locations", "*", missingTables),
     readTable(client, "textbook_purchase_orders", "*", missingTables),
     readTable(client, "textbook_purchase_order_lines", TEXTBOOK_PURCHASE_ORDER_LINE_SELECT, missingTables),
-    canLoadManagementTables ? readTable(client, "textbook_stock_moves", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_stock_moves", TEXTBOOK_STOCK_MOVE_SELECT, missingTables) : Promise.resolve([] as Row[]),
     canLoadManagementTables ? readTable(client, "textbook_sales", "*", missingTables) : Promise.resolve([] as Row[]),
-    canLoadManagementTables ? readTable(client, "textbook_sale_lines", "*", missingTables) : Promise.resolve([] as Row[]),
-    canLoadManagementTables ? readTable(client, "textbook_stock_counts", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_sale_lines", TEXTBOOK_SALE_LINE_SELECT, missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readTable(client, "textbook_stock_counts", TEXTBOOK_STOCK_COUNT_SELECT, missingTables) : Promise.resolve([] as Row[]),
     canLoadManagementTables ? readTable(client, "textbook_monthly_closings", "*", missingTables) : Promise.resolve([] as Row[]),
     canLoadManagementTables ? readTable(client, "students", "*", missingTables) : Promise.resolve([] as Row[]),
     readTable(client, "classes", "*", missingTables),
@@ -339,12 +355,14 @@ export async function createPurchaseReceipt(record: Row, clientInput?: SupabaseC
   const locationId = normalizeOptionalUuid(record.locationId || record.location_id);
   const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
   const unitCost = Math.max(0, numberValue(record.unitCost || record.unit_cost));
+  const copyScope = getTextbookCopyScope(record);
   const lifecycle = validatePurchaseLifecycleDraft(buildPurchaseLifecycleDraft({
     stage: text(record.stage || record.requestStage || record.request_stage) || "receive",
     requestedQuantity: numberValue(record.requestedQuantity || record.requested_quantity),
     orderedQuantity: numberValue(record.orderedQuantity || record.ordered_quantity),
     receivedQuantity: numberValue(record.receivedQuantity || record.received_quantity),
     statementNumber: text(record.statementNumber || record.statement_number),
+    copyScope,
   }));
 
   if (lifecycle.stage === "request" && !textbookId && !requestedTextbookTitle) {
@@ -384,6 +402,7 @@ export async function createPurchaseReceipt(record: Row, clientInput?: SupabaseC
       requested_quantity: lifecycle.requestedQuantity,
       ordered_quantity: lifecycle.orderedQuantity,
       received_quantity: lifecycle.receivedQuantity,
+      copy_scope: copyScope,
       unit_cost: unitCost,
       memo: text(record.memo),
     })
@@ -401,6 +420,7 @@ export async function createPurchaseReceipt(record: Row, clientInput?: SupabaseC
       unit_amount: unitCost,
       amount: lifecycle.receivedQuantity * unitCost,
       memo: text(record.memo),
+      copy_scope: copyScope,
       created_by: createdBy,
     });
     if (moveError) throw moveError;
@@ -419,12 +439,14 @@ export async function updatePurchaseLifecycle(record: Row, clientInput?: Supabas
   const locationId = normalizeOptionalUuid(record.locationId || record.location_id);
   const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
   const unitCost = Math.max(0, numberValue(record.unitCost || record.unit_cost));
+  const copyScope = getTextbookCopyScope(record);
   const lifecycle = validatePurchaseLifecycleDraft(buildPurchaseLifecycleDraft({
     stage: text(record.stage || record.requestStage || record.request_stage) || "receive",
     requestedQuantity: numberValue(record.requestedQuantity || record.requested_quantity),
     orderedQuantity: numberValue(record.orderedQuantity || record.ordered_quantity),
     receivedQuantity: numberValue(record.receivedQuantity || record.received_quantity),
     statementNumber: text(record.statementNumber || record.statement_number),
+    copyScope,
   }));
 
   if (!purchaseOrderId || !purchaseOrderLineId) {
@@ -467,6 +489,7 @@ export async function updatePurchaseLifecycle(record: Row, clientInput?: Supabas
       requested_quantity: lifecycle.requestedQuantity,
       ordered_quantity: lifecycle.orderedQuantity,
       received_quantity: lifecycle.receivedQuantity,
+      copy_scope: copyScope,
       unit_cost: unitCost,
       memo: text(record.memo),
     })
@@ -501,6 +524,7 @@ export async function updatePurchaseLifecycle(record: Row, clientInput?: Supabas
       unit_amount: unitCost,
       amount: lifecycle.receivedQuantity * unitCost,
       memo: text(record.memo),
+      copy_scope: copyScope,
       created_by: createdBy,
     };
     const existingMove = ((existingMoves || []) as Row[])[0];
@@ -581,6 +605,7 @@ export async function returnPurchaseLifecycle(record: Row, clientInput?: Supabas
   const textbookId = normalizeOptionalUuid((line as Row).textbook_id || (line as Row).textbookId);
   const locationId = normalizeOptionalUuid((line as Row).location_id || (line as Row).locationId);
   const unitCost = Math.max(0, numberValue((line as Row).unit_cost || (line as Row).unitCost));
+  const copyScope = getTextbookCopyScope(line as Row);
 
   if (!textbookId || receivedQuantity <= 0) {
     return deletePurchaseLifecycle({ purchaseOrderId, purchaseOrderLineId }, client);
@@ -602,6 +627,7 @@ export async function returnPurchaseLifecycle(record: Row, clientInput?: Supabas
     unit_amount: unitCost,
     amount: -receivedQuantity * unitCost,
     memo: text(record.memo) || "공급처 반품",
+    copy_scope: copyScope,
     created_by: createdBy,
   };
   const existingMove = ((existingMoves || []) as Row[])[0];
@@ -668,6 +694,68 @@ export async function createClassTextbookSale(record: Row, data: Row, clientInpu
     .from("textbook_sales")
     .insert({
       class_id: draft.sale.class_id || null,
+      charge_month: draft.sale.charge_month,
+      status: saleStatus,
+      memo: text(record.memo),
+      created_by: createdBy,
+    })
+    .select()
+    .single();
+  if (saleError) throw saleError;
+
+  const linePayload = draft.lines.map((line) => ({
+    sale_id: sale.id,
+    ...line,
+    status: saleStatus,
+  }));
+  const { data: lines, error: linesError } = await client
+    .from("textbook_sale_lines")
+    .insert(linePayload)
+    .select();
+  if (linesError) throw linesError;
+
+  return { sale: sale as Row, lines: (lines || []) as Row[], draft };
+}
+
+export async function createTeacherTextbookIssue(record: Row, data: Row, clientInput?: SupabaseClientLike | null) {
+  const client = ensureClient(clientInput);
+  const textbooks = (data.textbooks || []) as Row[];
+  const inventory = (data.inventory || []) as Row[];
+  const teacherCatalogs = (data.teacherCatalogs || data.teacher_catalogs || []) as Row[];
+  const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
+  const textbook = getTextbookByReference(textbooks, record.textbookId || record.textbook_id || record.requestedTextbookTitle);
+  const teacherId = normalizeOptionalUuid(record.teacherId || record.teacher_id);
+  const teacher = teacherId
+    ? teacherCatalogs.find((item) => getRecordId(item) === teacherId)
+    : undefined;
+  const teacherName = text(record.teacherName || record.teacher_name) || getTeacherName(teacher);
+  const locationId = normalizeOptionalUuid(record.locationId || record.location_id || data.defaultLocationId);
+  const inventoryRow = inventory.find((item) => getRecordId(item) === getRecordId(textbook || {}));
+  const availableQuantity = getInventoryQuantity(inventoryRow, locationId || "");
+
+  if (!textbook) {
+    throw new Error("교사용으로 출고할 교재를 선택하세요.");
+  }
+
+  if (!teacherName) {
+    throw new Error("교사용 교재를 받을 선생님을 선택하세요.");
+  }
+
+  const draft = buildTeacherTextbookIssueDraft({
+    textbook,
+    teacherId: teacherId || "",
+    teacherName,
+    chargeMonth: text(record.chargeMonth || record.charge_month) || getCurrentMonth(),
+    locationId: locationId || "",
+    quantity: Math.max(1, numberValue(record.quantity) || 1),
+    availableQuantity,
+  });
+
+  const saleStatus = "charged";
+  const { data: sale, error: saleError } = await client
+    .from("textbook_sales")
+    .insert({
+      class_id: null,
       charge_month: draft.sale.charge_month,
       status: saleStatus,
       memo: text(record.memo),
@@ -988,6 +1076,7 @@ export const textbookService = {
   deletePurchaseLifecycle,
   returnPurchaseLifecycle,
   createClassTextbookSale,
+  createTeacherTextbookIssue,
   updateSaleLineStatus,
   deleteSaleLineLifecycle,
   createStockCountAdjustment,

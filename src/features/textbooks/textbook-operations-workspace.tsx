@@ -71,10 +71,13 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 import {
+  buildTeacherTextbookIssueDraft,
   buildTextbookMonthlyClosing,
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
   getRecordId,
+  getTextbookByReference,
+  getTextbookCopyScope,
   getTextbookPurchaseUnitCost,
   getTextbookSalePrice,
   getTextbookActionErrorMessage,
@@ -83,6 +86,7 @@ import {
   groupSaleLinesByStatus,
   listIds,
   normalizeBarcodeValue,
+  normalizeTextbookLookupValue,
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
 import {
@@ -124,6 +128,7 @@ type PurchaseKanbanStatus = "requested" | "ordered" | "partially_received" | "re
 type PurchaseKanbanDraft = {
   textbookId: string;
   requestedTextbookTitle: string;
+  copyScope: "student" | "teacher";
   classId: string;
   supplierId: string;
   locationId: string;
@@ -226,6 +231,11 @@ const statusAliases: Record<string, string> = {
   "미사용": "inactive",
 };
 
+const textbookCopyScopeOptions = [
+  { value: "student", label: "학생용" },
+  { value: "teacher", label: "교사용" },
+] as const;
+
 const emptyMasterForm = {
   id: "",
   title: "",
@@ -253,6 +263,7 @@ const emptyBulkTextbookPatch = {
 
 const emptyPurchaseForm = {
   requestStage: "request",
+  copyScope: "student",
   textbookId: "",
   requestedTextbookTitle: "",
   classId: "",
@@ -264,6 +275,17 @@ const emptyPurchaseForm = {
   receivedQuantity: "",
   unitCost: "",
   statementNumber: "",
+  memo: "",
+};
+
+const emptySaleForm = {
+  copyScope: "student",
+  classId: "",
+  textbookId: "",
+  teacherName: "",
+  quantity: "1",
+  chargeMonth: currentMonth(),
+  locationId: "",
   memo: "",
 };
 
@@ -342,6 +364,7 @@ function buildPurchaseProcessColumns(mode: "request" | "order", showSelection: b
     mode === "order" ? { id: "unitCost", label: "단가" } : null,
     { id: "eventAt", label: "처리일시" },
     { id: "requester", label: "요청자" },
+    { id: "copyScope", label: "대상" },
     { id: "textbook", label: "교재명", required: true },
     { id: "location", label: "위치" },
     { id: "class", label: "수업" },
@@ -502,7 +525,7 @@ function getCategoryLabel(row: Row) {
 }
 
 function getTextbookTitleKey(row: Row) {
-  return getTextbookTitle(row).trim().replace(/\s+/g, " ").toLowerCase();
+  return normalizeTextbookLookupValue(getTextbookTitle(row), { compact: true });
 }
 
 function getTaxonomyCategoryLabel(row: Row) {
@@ -910,28 +933,16 @@ function getConfiguredTextbookPurchaseUnitCost(textbook: Row | undefined, suppli
   return getTextbookPurchaseUnitCost(getTextbookPurchasePricingContext(textbook, supplierId, suppliers));
 }
 
+function getTextbookCopyScopeLabel(value: unknown) {
+  return getTextbookCopyScope({ copyScope: value }) === "teacher" ? "교사용" : "학생용";
+}
+
 function normalizeTextbookLookup(value: unknown) {
-  return text(value).replace(/\s+/g, " ").toLowerCase();
+  return normalizeTextbookLookupValue(value);
 }
 
 function getTextbookById(textbooks: Row[], id: string) {
-  const reference = text(id);
-  if (!reference) return undefined;
-
-  const exactMatch = textbooks.find((textbook) => getRecordId(textbook) === reference);
-  if (exactMatch) return exactMatch;
-
-  const normalizedReference = normalizeTextbookLookup(reference);
-  return textbooks.find((textbook) => {
-    const candidates = [
-      getTextbookTitle(textbook),
-      textbook.name,
-      textbook.isbn13,
-      textbook.isbn,
-      textbook.barcode,
-    ];
-    return candidates.some((candidate) => normalizeTextbookLookup(candidate) === normalizedReference);
-  });
+  return getTextbookByReference(textbooks, id);
 }
 
 function buildTextbookLookupMap(textbooks: Row[]) {
@@ -950,19 +961,26 @@ function buildTextbookLookupMap(textbooks: Row[]) {
       if (key && !lookup.has(key)) {
         lookup.set(key, textbook);
       }
+      const compactKey = normalizeTextbookLookupValue(alias, { compact: true });
+      if (compactKey && !lookup.has(compactKey)) {
+        lookup.set(compactKey, textbook);
+      }
     }
   }
   return lookup;
 }
 
 function getTextbookFromLookup(lookup: Map<string, Row>, reference: unknown) {
-  return lookup.get(normalizeTextbookLookup(reference));
+  return lookup.get(normalizeTextbookLookup(reference)) ||
+    lookup.get(normalizeTextbookLookupValue(reference, { compact: true }));
 }
 
 function buildTextbookSearchIndex(row: Row): TextbookSearchIndex {
+  const compactTitle = normalizeTextbookLookupValue(getTextbookTitle(row), { compact: true });
   return {
     haystack: [
       getTextbookTitle(row),
+      compactTitle,
       row.subject,
       getSubjectLabel(row.subject),
       getTaxonomyCategoryLabel(row),
@@ -1030,6 +1048,15 @@ function getStudentsByClass(classRecord: Row | undefined, students: Row[]) {
 function getStudentNameById(studentsById: Map<string, Row>, id: string) {
   const student = studentsById.get(id);
   return text(student?.name || student?.student_name || student?.studentName || id) || "-";
+}
+
+function getSaleLineRecipientName(line: Row, studentsById: Map<string, Row>) {
+  if (getTextbookCopyScope(line) === "teacher") {
+    return text(line.teacher_name || line.teacherName) || "선생님 미지정";
+  }
+
+  const studentId = text(line.student_id || line.studentId);
+  return text(line.student_name || getStudentNameById(studentsById, studentId)) || "-";
 }
 
 function getClassStudentCount(classRecord: Row | undefined, students: Row[]) {
@@ -1376,6 +1403,13 @@ function getElementById(id: string) {
   return element;
 }
 
+function getHandoffCaptureElement(elementId: string) {
+  const element = getElementById(elementId);
+  return element.matches("[data-handoff-capture-target]")
+    ? element
+    : element.querySelector<HTMLElement>("[data-handoff-capture-target]") || element;
+}
+
 async function writeClipboardText(value: string) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -1393,8 +1427,7 @@ async function writeClipboardText(value: string) {
   document.body.removeChild(textarea);
 }
 
-async function copyOrDownloadHandoffImage(elementId: string, filename: string) {
-  const element = getElementById(elementId);
+async function copyOrDownloadHandoffImage(element: HTMLElement, filename: string) {
   const blob = await captureElementAsPngBlob(element, {
     width: Math.max(720, Math.ceil(element.scrollWidth)),
     padding: 0,
@@ -1418,8 +1451,7 @@ async function copyOrDownloadHandoffImage(elementId: string, filename: string) {
   return "downloaded" as const;
 }
 
-function printHandoffElement(elementId: string, title: string) {
-  const element = getElementById(elementId);
+function printHandoffElement(element: HTMLElement, title: string) {
   const printWindow = window.open("", "_blank", "noopener,noreferrer,width=960,height=720");
   if (!printWindow) {
     throw new Error("인쇄 창을 열 수 없습니다.");
@@ -1435,6 +1467,8 @@ function printHandoffElement(elementId: string, title: string) {
     body { margin: 0; background: #ffffff; color: #111827; font-family: "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; }
     main { padding: 24px; }
     [data-handoff-toolbar] { display: none !important; }
+    [data-handoff-scroll] { max-height: none !important; overflow: visible !important; }
+    [data-handoff-print-root] { max-height: none !important; overflow: visible !important; }
     [data-handoff-card] { break-inside: avoid; page-break-inside: avoid; }
     table { width: 100%; border-collapse: collapse; }
     th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; }
@@ -1520,6 +1554,7 @@ function buildPurchaseCardDraft(line: Row, order: Row | undefined): PurchaseKanb
   return {
     textbookId: text(line.textbook_id || line.textbookId),
     requestedTextbookTitle: text(line.requested_textbook_title || line.requestedTextbookTitle || line.textbook_title || line.textbookTitle),
+    copyScope: getTextbookCopyScope(line),
     classId: text(line.class_id || line.classId),
     supplierId: text(order?.supplier_id || order?.supplierId),
     locationId: text(line.location_id || line.locationId),
@@ -1599,13 +1634,13 @@ function matchesSaleLineQuery({
 }) {
   const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
   const classItem = getClassById(classes, text(line.class_id || sale?.class_id || sale?.classId));
-  const studentId = text(line.student_id || line.studentId);
   const studentsById = new Map(students.map((student) => [getRecordId(student), student]));
   const status = text(line.status || sale?.status || "charged");
   return matchesSearchQuery(query, [
     textbook ? getTextbookTitle(textbook) : text(line.textbook_id || line.textbookId),
+    getTextbookCopyScopeLabel(getTextbookCopyScope(line)),
     getClassName(classItem || {}),
-    text(line.student_name || getStudentNameById(studentsById, studentId)),
+    getSaleLineRecipientName(line, studentsById),
     getLocationName(locations, text(line.location_id || line.locationId || sale?.location_id || sale?.locationId)),
     saleStatusLabels[status] || status,
     text(line.charge_month || sale?.charge_month || sale?.chargeMonth),
@@ -1697,12 +1732,14 @@ function buildPurchaseSupplierHandoffGroups({
       id: getRecordId(line) || `${supplierId}-${group.lines.length}`,
       title: textbookTitle,
       detail: [
+        getTextbookCopyScopeLabel(draft.copyScope),
         getPublisherLabel(textbook || {}),
         classRecord ? getClassName(classRecord) : "",
         getLocationName(locations, draft.locationId),
       ].filter(Boolean).join(" · "),
       note: [
         purchaseStatusLabel(status, draft.orderedQuantity, draft.receivedQuantity),
+        getTextbookCopyScopeLabel(draft.copyScope),
         draft.requestBy ? `요청 ${draft.requestBy}` : "",
         receivedQuantity > 0 && receivedQuantity < quantity ? `잔여 ${formatQuantity(quantity - receivedQuantity)}권` : "",
       ].filter(Boolean).join(" · "),
@@ -1750,7 +1787,7 @@ function buildMakeEduBillingHandoffGroups({
   for (const line of rows) {
     const sale = salesById.get(text(line.sale_id || line.saleId));
     const status = getSaleLineStatus(line, sale);
-    if (!isBillableSaleLineStatus(status)) {
+    if (getTextbookCopyScope(line) === "teacher" || !isBillableSaleLineStatus(status)) {
       continue;
     }
 
@@ -1764,7 +1801,7 @@ function buildMakeEduBillingHandoffGroups({
     const classItem = getClassById(classes, text(line.class_id || line.classId || sale?.class_id || sale?.classId));
     const studentId = text(line.student_id || line.studentId);
     const student = studentsById.get(studentId);
-    const studentName = text(line.student_name || getStudentNameById(studentsById, studentId)) || "-";
+    const studentName = getSaleLineRecipientName(line, studentsById);
     const group = groups.get(key) || {
       id: key,
       title: feeName,
@@ -1912,6 +1949,7 @@ function buildPurchasePayloadFromDraft(
     purchaseOrderLineId: getRecordId(line),
     textbookId: draft.textbookId,
     requestedTextbookTitle: draft.requestedTextbookTitle,
+    copyScope: draft.copyScope,
     classId: draft.classId,
     supplierId: draft.supplierId,
     locationId: draft.locationId,
@@ -2168,13 +2206,7 @@ export function TextbookOperationsWorkspace() {
   const [inventoryCountLocationId, setInventoryCountLocationId] = useState("");
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
-  const [saleForm, setSaleForm] = useState({
-    classId: "",
-    textbookId: "",
-    chargeMonth: currentMonth(),
-    locationId: "",
-    memo: "",
-  });
+  const [saleForm, setSaleForm] = useState(emptySaleForm);
   const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>("all");
   const [selectedSaleLineIds, setSelectedSaleLineIds] = useState<string[]>([]);
   const [saleDialogOpen, setSaleDialogOpen] = useState(false);
@@ -2652,11 +2684,16 @@ export function TextbookOperationsWorkspace() {
     ? purchaseCurrentLocationQuantity + numberValue(purchaseForm.receivedQuantity)
     : purchaseCurrentLocationQuantity;
   const configuredPurchaseTotalCost = configuredPurchaseUnitCost * purchaseStageQuantity;
+  const purchaseCopyScope = getTextbookCopyScope(purchaseForm);
   const selectedClassId = saleForm.classId;
+  const saleCopyScope = getTextbookCopyScope(saleForm);
+  const isTeacherSale = saleCopyScope === "teacher";
   const selectedSaleClass = getClassById(data.classes, selectedClassId);
   const selectedSaleTextbook = getTextbookById(data.textbooks, saleForm.textbookId);
   const selectedSaleInventory = inventoryById.get(saleForm.textbookId);
   const saleAvailableQuantity = getInventoryQuantity(selectedSaleInventory, saleLocationId);
+  const saleTeacherName = text(saleForm.teacherName);
+  const saleTeacherQuantity = Math.max(1, numberValue(saleForm.quantity) || 1);
   const selectedClassStudents = getStudentsByClass(selectedSaleClass, data.students);
   const normalizedSaleChargeMonth = normalizeMonthInput(saleForm.chargeMonth);
   const saleStudentSearchQuery = normalizeStoredTextInput(saleStudentQuery).toLowerCase();
@@ -2675,9 +2712,10 @@ export function TextbookOperationsWorkspace() {
   );
   const saleDuplicateLines = useMemo(
     () => {
-      if (!selectedClassId || !saleForm.textbookId || !normalizedSaleChargeMonth) return [];
+      if (isTeacherSale || !selectedClassId || !saleForm.textbookId || !normalizedSaleChargeMonth) return [];
       const salesById = new Map(data.sales.map((sale) => [getRecordId(sale), sale]));
       return activeSaleLines.filter((line) => {
+        if (getTextbookCopyScope(line) === "teacher") return false;
         const sale = salesById.get(text(line.sale_id || line.saleId));
         const status = getSaleLineStatus(line, sale);
         if (!isBillableSaleLineStatus(status)) return false;
@@ -2686,36 +2724,51 @@ export function TextbookOperationsWorkspace() {
           getSaleLineMonth(line, sale) === normalizedSaleChargeMonth;
       });
     },
-    [activeSaleLines, data.sales, normalizedSaleChargeMonth, saleForm.textbookId, selectedClassId],
+    [activeSaleLines, data.sales, isTeacherSale, normalizedSaleChargeMonth, saleForm.textbookId, selectedClassId],
   );
   const saleDuplicateStudentCount = useMemo(
     () => new Set(saleDuplicateLines.map((line) => text(line.student_id || line.studentId)).filter(Boolean)).size || saleDuplicateLines.length,
     [saleDuplicateLines],
   );
-  const saleDraft = selectedSaleClass && selectedSaleTextbook
-    ? buildTextbookSaleDraft({
-        classRecord: selectedSaleClass,
-        students: selectedClassStudents,
-        textbook: selectedSaleTextbook,
-        chargeMonth: normalizedSaleChargeMonth,
-        excludedStudentIds,
-        locationId: saleLocationId,
-        availableQuantity: saleAvailableQuantity,
-      })
-    : { lines: [], totalAmount: 0, totalQuantity: 0, availableQuantity: saleAvailableQuantity, stockShortage: 0, hasStockShortage: false };
-  const saleSubmitDisabled = !selectedSaleClass ||
-    !selectedSaleTextbook ||
-    saleDraft.lines.length === 0 ||
-    saleDuplicateLines.length > 0;
-  const saleSubmitHint = !selectedSaleClass
-    ? "수업을 선택하세요"
-    : !selectedSaleTextbook
-      ? "교재를 선택하세요"
-      : saleDraft.lines.length === 0
-        ? "출고 대상 학생이 없습니다"
-        : saleDuplicateLines.length > 0
-          ? "이미 같은 월 출고가 있습니다"
-        : "출고 대기 저장";
+  const saleDraft = isTeacherSale
+    ? selectedSaleTextbook
+      ? buildTeacherTextbookIssueDraft({
+          textbook: selectedSaleTextbook,
+          teacherName: saleTeacherName,
+          quantity: saleTeacherQuantity,
+          chargeMonth: normalizedSaleChargeMonth,
+          locationId: saleLocationId,
+          availableQuantity: saleAvailableQuantity,
+        })
+      : { lines: [], totalAmount: 0, totalQuantity: 0, availableQuantity: saleAvailableQuantity, stockShortage: 0, hasStockShortage: false }
+    : selectedSaleClass && selectedSaleTextbook
+      ? buildTextbookSaleDraft({
+          classRecord: selectedSaleClass,
+          students: selectedClassStudents,
+          textbook: selectedSaleTextbook,
+          chargeMonth: normalizedSaleChargeMonth,
+          excludedStudentIds,
+          locationId: saleLocationId,
+          availableQuantity: saleAvailableQuantity,
+        })
+      : { lines: [], totalAmount: 0, totalQuantity: 0, availableQuantity: saleAvailableQuantity, stockShortage: 0, hasStockShortage: false };
+  const saleSubmitDisabled = isTeacherSale
+    ? !selectedSaleTextbook || !saleTeacherName || saleTeacherQuantity <= 0
+    : !selectedSaleClass ||
+      !selectedSaleTextbook ||
+      saleDraft.lines.length === 0 ||
+      saleDuplicateLines.length > 0;
+  const saleSubmitHint = !selectedSaleClass ? "수업을 선택하세요" : !selectedSaleTextbook ? "교재를 선택하세요" : saleDraft.lines.length === 0
+    ? "출고 대상 학생이 없습니다"
+    : saleDuplicateLines.length > 0
+      ? "이미 같은 월 출고가 있습니다"
+      : "출고 대기 저장";
+  const teacherSaleSubmitHint = !selectedSaleTextbook
+    ? "교재를 선택하세요"
+    : !saleTeacherName
+      ? "선생님을 선택하세요"
+      : "교사용 출고 대기 저장";
+  const effectiveSaleSubmitHint = isTeacherSale ? teacherSaleSubmitHint : saleSubmitHint;
   const selectedSaleStudentCount = selectedClassStudents.length;
   const includedSaleStudentCount = selectedClassStudents
     .filter((student) => !excludedStudentIds.includes(getRecordId(student)))
@@ -2891,6 +2944,13 @@ export function TextbookOperationsWorkspace() {
         };
       }
 
+      if (name === "copyScope") {
+        return {
+          ...current,
+          copyScope: getTextbookCopyScope({ copyScope: value }),
+        };
+      }
+
       if (name === "requestedTextbookTitle") {
         return { ...current, requestedTextbookTitle: normalizeInlineTextInput(value) };
       }
@@ -2939,8 +2999,23 @@ export function TextbookOperationsWorkspace() {
 
   function setSaleField(name: string, value: string) {
     setSaleForm((current) => {
+      if (name === "copyScope") {
+        return {
+          ...current,
+          copyScope: getTextbookCopyScope({ copyScope: value }),
+          classId: value === "teacher" ? "" : current.classId,
+          teacherName: value === "teacher" ? current.teacherName : "",
+          quantity: value === "teacher" ? current.quantity || "1" : "1",
+        };
+      }
       if (name === "chargeMonth") {
         return { ...current, chargeMonth: normalizeMonthInput(value, currentMonth()) };
+      }
+      if (name === "teacherName") {
+        return { ...current, teacherName: value };
+      }
+      if (name === "quantity") {
+        return { ...current, quantity: normalizeQuantityInput(value) || "" };
       }
       if (name === "memo") {
         return { ...current, memo: normalizeInlineTextInput(value) };
@@ -3038,13 +3113,7 @@ export function TextbookOperationsWorkspace() {
   }
 
   function resetSaleForm() {
-    setSaleForm({
-      classId: "",
-      textbookId: "",
-      chargeMonth: currentMonth(),
-      locationId: "",
-      memo: "",
-    });
+    setSaleForm({ ...emptySaleForm, chargeMonth: currentMonth() });
     setExcludedStudentIds([]);
     setSaleStudentQuery("");
   }
@@ -3666,6 +3735,7 @@ export function TextbookOperationsWorkspace() {
     setPurchaseRequestInputMode(textbook ? "catalog" : "manual");
     setPurchaseForm({
       requestStage: nextStage,
+      copyScope: getTextbookCopyScope(line),
       textbookId: getRecordId(textbook || {}) || text(line.textbook_id || line.textbookId),
       requestedTextbookTitle: requestedTitle || getTextbookTitle(textbook || {}) || text(line.textbook_id || line.textbookId),
       classId: text(line.class_id || line.classId),
@@ -3757,6 +3827,8 @@ export function TextbookOperationsWorkspace() {
       requestedQuantity,
       orderedQuantity,
       receivedQuantity,
+      copyScope: purchaseCopyScope,
+      copy_scope: purchaseCopyScope,
       supplierId: configuredPurchaseSupplierId,
       unitCost: String(configuredPurchaseUnitCost),
       locationId: selectedLocationId,
@@ -3785,7 +3857,7 @@ export function TextbookOperationsWorkspace() {
 
   function submitSale(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saleDuplicateLines.length > 0) {
+    if (!isTeacherSale && saleDuplicateLines.length > 0) {
       setActionErrorMessage("이미 같은 월에 같은 수업·교재 출고가 있습니다. 기존 출고 내역을 먼저 확인하세요.");
       return;
     }
@@ -3794,17 +3866,33 @@ export function TextbookOperationsWorkspace() {
       ...saleForm,
       chargeMonth: normalizedSaleChargeMonth,
       locationId: saleLocationId,
+      copy_scope: saleCopyScope,
       memo: normalizeStoredTextInput(saleForm.memo),
       excludedStudentIds,
       createdBy: currentUserId,
     };
     void runAction(
       "sale",
-      () => textbookService.createClassTextbookSale(
-        salePayload,
-        data as unknown as Row,
-      ),
-      "출고 대기 목록에 추가했습니다.",
+      () => isTeacherSale
+        ? textbookService.createTeacherTextbookIssue(
+            {
+              ...salePayload,
+              copyScope: "teacher",
+              copy_scope: "teacher",
+              teacherName: saleTeacherName,
+              quantity: saleTeacherQuantity,
+            },
+            data as unknown as Row,
+          )
+        : textbookService.createClassTextbookSale(
+            {
+              ...salePayload,
+              copyScope: "student",
+              copy_scope: "student",
+            },
+            data as unknown as Row,
+          ),
+      isTeacherSale ? "교사용 출고 대기 목록에 추가했습니다." : "출고 대기 목록에 추가했습니다.",
     ).then((ok) => {
       if (ok) {
         setActiveTab("sales");
@@ -4714,6 +4802,23 @@ export function TextbookOperationsWorkspace() {
                     </div>
                   ) : null}
                 </section>
+                <Field label="대상">
+                  <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="요청 대상">
+                    {textbookCopyScopeOptions.map((option) => (
+                      <Button
+                        key={option.value}
+                        type="button"
+                        variant={purchaseCopyScope === option.value ? "default" : "ghost"}
+                        size="sm"
+                        className="h-8 rounded"
+                        aria-pressed={purchaseCopyScope === option.value}
+                        onClick={() => setPurchaseField("copyScope", option.value)}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                </Field>
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
                   <Field label="수업">
                     <ClassSelect classes={data.classes} value={purchaseForm.classId} onValueChange={(value) => setPurchaseField("classId", value)} />
@@ -4761,6 +4866,23 @@ export function TextbookOperationsWorkspace() {
                 </Field>
                 <Field label="수업">
                   <ClassSelect classes={data.classes} value={purchaseForm.classId} onValueChange={(value) => setPurchaseField("classId", value)} />
+                </Field>
+                <Field label="대상">
+                  <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="주문 대상">
+                    {textbookCopyScopeOptions.map((option) => (
+                      <Button
+                        key={option.value}
+                        type="button"
+                        variant={purchaseCopyScope === option.value ? "default" : "ghost"}
+                        size="sm"
+                        className="h-8 rounded"
+                        aria-pressed={purchaseCopyScope === option.value}
+                        onClick={() => setPurchaseField("copyScope", option.value)}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
                 </Field>
               </div>
             )}
@@ -4816,11 +4938,17 @@ export function TextbookOperationsWorkspace() {
                 ) : null}
               </div>
             ) : null}
-            {purchaseFieldVisibility.classFit ? (
+            {purchaseFieldVisibility.classFit && purchaseCopyScope === "student" ? (
               <div className="grid grid-cols-3 gap-2 text-sm">
                 <Metric label="학생" value={`학생 ${formatQuantity(purchaseClassStudentCount)}명`} />
                 <Metric label="요청" value={`${formatQuantity(purchaseForm.requestedQuantity)}권`} />
                 <Metric label="판단" value={purchaseQuantityFit.label} tone={purchaseQuantityFit.tone} />
+              </div>
+            ) : null}
+            {purchaseFieldVisibility.classFit && purchaseCopyScope === "teacher" ? (
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <Metric label="대상" value="교사용" />
+                <Metric label="요청" value={`${formatQuantity(purchaseForm.requestedQuantity)}권`} />
               </div>
             ) : null}
             {purchaseFieldVisibility.orderedQuantity || purchaseFieldVisibility.receivedQuantity ? (
@@ -4966,17 +5094,49 @@ export function TextbookOperationsWorkspace() {
         <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>출고 추가</DialogTitle>
-            <DialogDescription className="sr-only">수업과 교재를 선택해 학생별 출고 대기 내역을 생성합니다.</DialogDescription>
+            <DialogDescription className="sr-only">수업 또는 선생님과 교재를 선택해 출고 대기 내역을 생성합니다.</DialogDescription>
           </DialogHeader>
           <form onSubmit={submitSale} className="grid gap-3" aria-busy={saving === "sale"}>
+            <Field label="대상">
+              <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="출고 대상">
+                {textbookCopyScopeOptions.map((option) => (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant={saleCopyScope === option.value ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8 rounded"
+                    aria-pressed={saleCopyScope === option.value}
+                    onClick={() => {
+                      setSaleField("copyScope", option.value);
+                      setExcludedStudentIds([]);
+                      setSaleStudentQuery("");
+                    }}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            </Field>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="수업" required>
-                <ClassSelect classes={data.classes} value={saleForm.classId} onValueChange={(value) => {
-                  setSaleField("classId", value);
-                  setExcludedStudentIds([]);
-                  setSaleStudentQuery("");
-                }} />
-              </Field>
+              {!isTeacherSale ? (
+                <Field label="수업" required>
+                  <ClassSelect classes={data.classes} value={saleForm.classId} onValueChange={(value) => {
+                    setSaleField("classId", value);
+                    setExcludedStudentIds([]);
+                    setSaleStudentQuery("");
+                  }} />
+                </Field>
+              ) : (
+                <Field label="선생님" required>
+                  <TeacherSelect
+                    teachers={data.teacherCatalogs}
+                    value={saleForm.teacherName}
+                    onValueChange={(value) => setSaleField("teacherName", value)}
+                    ariaLabel="교사용 수령 선생님 선택"
+                  />
+                </Field>
+              )}
               <Field label="교재" required>
                 <TextbookSelect textbooks={activeTextbooks} value={saleForm.textbookId} onValueChange={(value) => setSaleField("textbookId", value)} />
               </Field>
@@ -4989,7 +5149,19 @@ export function TextbookOperationsWorkspace() {
                 <LocationSelect locations={locations} value={saleLocationId} onValueChange={(value) => setSaleField("locationId", value)} ariaLabel="출고 위치 선택" />
               </Field>
             </div>
+            {isTeacherSale ? (
+              <Field label="수량" required>
+                <Input
+                  value={saleForm.quantity}
+                  onChange={(event) => setSaleField("quantity", event.target.value)}
+                  inputMode="numeric"
+                  min="1"
+                  aria-label="교사용 출고 수량"
+                />
+              </Field>
+            ) : null}
 
+            {!isTeacherSale ? (
             <div className="rounded-md border">
               <div className="flex items-center justify-between border-b px-3 py-2">
                 <span className="text-sm font-medium">학생</span>
@@ -5077,6 +5249,7 @@ export function TextbookOperationsWorkspace() {
                 )}
               </div>
             </div>
+            ) : null}
 
             <Field label="메모">
               <Textarea
@@ -5089,7 +5262,7 @@ export function TextbookOperationsWorkspace() {
               />
             </Field>
 
-            {saleDuplicateLines.length > 0 ? (
+            {!isTeacherSale && saleDuplicateLines.length > 0 ? (
               <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">
                 이미 {normalizedSaleChargeMonth}에 같은 수업·교재 출고 {formatQuantity(saleDuplicateStudentCount)}명분이 있습니다.
               </div>
@@ -5097,7 +5270,11 @@ export function TextbookOperationsWorkspace() {
 
             {selectedSaleClass || selectedSaleTextbook ? (
               <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
-                <Metric label="대상" value={`${formatQuantity(includedSaleStudentCount)}명`} />
+                {isTeacherSale ? (
+                  <Metric label="대상" value={saleTeacherName || "선생님 미지정"} />
+                ) : (
+                  <Metric label="대상" value={`${formatQuantity(includedSaleStudentCount)}명`} />
+                )}
                 <Metric label="수량" value={`${formatQuantity(saleDraft.totalQuantity)}권`} />
                 <Metric label="재고" value={selectedSaleTextbook ? `${formatQuantity(saleDraft.availableQuantity)}권` : "-"} />
                 <Metric
@@ -5122,7 +5299,7 @@ export function TextbookOperationsWorkspace() {
               <Button
                 type="submit"
                 disabled={schemaDisabled || saving === "sale" || saleSubmitDisabled}
-                title={saleSubmitDisabled ? saleSubmitHint : "출고 대기 저장"}
+                title={saleSubmitDisabled ? effectiveSaleSubmitHint : "출고 대기 저장"}
               >
                 <Check className="mr-2 size-4" />
                 {saving === "sale" ? "저장 중" : "출고 대기 저장"}
@@ -5886,7 +6063,7 @@ function TextbookHandoffDialog({
                 variant="outline"
                 disabled={groups.length === 0}
                 onClick={() => runAction(() => {
-                  printHandoffElement(allDomId, title);
+                  printHandoffElement(getHandoffCaptureElement(allDomId), title);
                   return "PDF 준비됨";
                 })}
               >
@@ -5901,8 +6078,8 @@ function TextbookHandoffDialog({
               {emptyLabel}
             </div>
           ) : (
-            <div id={allDomId} className="max-h-[62dvh] min-h-0 overflow-y-auto pr-1">
-              <div className="grid gap-3">
+            <div id={allDomId} data-handoff-scroll className="max-h-[62dvh] min-h-0 overflow-y-auto pr-1">
+              <div data-handoff-capture-target data-handoff-print-root className="grid gap-3 bg-white">
                 {groups.map((group) => {
                   const groupDomId = getHandoffDomId(idPrefix, group.id);
                   const filename = `${title}-${group.title}`;
@@ -5933,7 +6110,7 @@ function TextbookHandoffDialog({
                             variant="outline"
                             className="h-8"
                             onClick={() => runAction(async () => {
-                              const result = await copyOrDownloadHandoffImage(groupDomId, filename);
+                              const result = await copyOrDownloadHandoffImage(getHandoffCaptureElement(groupDomId), filename);
                               return result === "copied" ? "이미지 복사됨" : "이미지 저장됨";
                             })}
                           >
@@ -5946,7 +6123,7 @@ function TextbookHandoffDialog({
                             variant="outline"
                             className="h-8"
                             onClick={() => runAction(() => {
-                              printHandoffElement(groupDomId, group.title);
+                              printHandoffElement(getHandoffCaptureElement(groupDomId), group.title);
                               return "PDF 준비됨";
                             })}
                           >
@@ -5956,7 +6133,7 @@ function TextbookHandoffDialog({
                         </div>
                       </div>
 
-                      <div id={groupDomId} data-handoff-card className="rounded-md bg-white p-4 text-slate-950">
+                      <div id={groupDomId} data-handoff-card data-handoff-capture-target data-handoff-print-root className="rounded-md bg-white p-4 text-slate-950">
                         <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
                           <div className="min-w-0">
                             <div className="text-base font-semibold">{group.title}</div>
@@ -6088,6 +6265,7 @@ function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[];
     label: getTextbookTitle(textbook),
     description: getSubjectLabel(textbook.subject),
     searchText: [
+      normalizeTextbookLookupValue(getTextbookTitle(textbook), { compact: true }),
       textbook.publisher,
       textbook.category,
       getTaxonomyCategoryLabel(textbook),
@@ -7173,6 +7351,7 @@ function TextbookTable({
                     const rowId = getRecordId(row);
                     const rowA11yLabel = getTextbookIdentityLabel(row);
                     const totalQuantity = numberValue(row.totalQuantity);
+                    const teacherQuantity = numberValue(row.teacherQuantity);
                     const publisherLabel = getKnownPublisherLabel(row);
                     const locationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
                     const amountValue = amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue;
@@ -7256,6 +7435,9 @@ function TextbookTable({
                                 <p className={cn("font-semibold tabular-nums", inventoryQuantityTone(totalQuantity))}>
                                   {formatQuantity(totalQuantity)}
                                 </p>
+                                {teacherQuantity > 0 ? (
+                                  <p className="text-[11px] text-muted-foreground">교사용 {formatQuantity(teacherQuantity)}</p>
+                                ) : null}
                               </div>
                               <div className="rounded-md bg-muted/40 px-2 py-1.5 text-right">
                                 <p className="text-muted-foreground">{amountHeader}</p>
@@ -7365,6 +7547,7 @@ function TextbookTable({
                 const rowId = getRecordId(row);
                 const rowA11yLabel = getTextbookIdentityLabel(row);
                 const totalQuantity = numberValue(row.totalQuantity);
+                const teacherQuantity = numberValue(row.teacherQuantity);
                 const publisherLabel = getKnownPublisherLabel(row);
                 const locationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
                 const amountValue = amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue;
@@ -7422,6 +7605,9 @@ function TextbookTable({
                     ))}
                     <TableCell className={cn("text-right font-medium tabular-nums", inventoryQuantityTone(totalQuantity))}>
                       {formatQuantity(totalQuantity)}
+                      {teacherQuantity > 0 ? (
+                        <div className="text-[11px] font-normal text-muted-foreground">교사용 {formatQuantity(teacherQuantity)}</div>
+                      ) : null}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(amountValue)}</TableCell>
                     {onSelectTextbook ? (
@@ -8740,6 +8926,7 @@ function PurchaseProcessTable({
                         ) : null}
                         {isPurchaseColumnVisible("eventAt") ? <TableHead className="w-[118px]">처리일시</TableHead> : null}
                         {isPurchaseColumnVisible("requester") ? <TableHead className="w-[104px]">요청자</TableHead> : null}
+                        {isPurchaseColumnVisible("copyScope") ? <TableHead className="w-[82px]">대상</TableHead> : null}
                         {isPurchaseColumnVisible("textbook") ? <TableHead>교재명</TableHead> : null}
                         {isPurchaseColumnVisible("location") ? <TableHead className="w-[88px]">위치</TableHead> : null}
                         {isPurchaseColumnVisible("class") ? <TableHead className="w-[140px]">수업</TableHead> : null}
@@ -8823,6 +9010,13 @@ function PurchaseProcessTable({
                               <TableCell className="text-muted-foreground">{formatCompactDateTime(getPurchaseEventAt(line, order, status))}</TableCell>
                             ) : null}
                             {isPurchaseColumnVisible("requester") ? <TableCell className="max-w-[104px] truncate">{draft.requestBy || "-"}</TableCell> : null}
+                            {isPurchaseColumnVisible("copyScope") ? (
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-md">
+                                  {getTextbookCopyScopeLabel(draft.copyScope)}
+                                </Badge>
+                              </TableCell>
+                            ) : null}
                             {isPurchaseColumnVisible("textbook") ? (
                             <TableCell>
                               <button
@@ -8956,6 +9150,7 @@ function PurchaseProcessTable({
                         {mode === "order" && isPurchaseColumnVisible("unitCost") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("eventAt") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("requester") ? <TableCell /> : null}
+                        {isPurchaseColumnVisible("copyScope") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("textbook") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("location") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("class") ? <TableCell /> : null}
@@ -9602,7 +9797,7 @@ function SalesProcessTable({
                         </TableHead>
                         <TableHead className="w-[112px]">진행상태</TableHead>
                         <TableHead className="w-[96px]">출고월</TableHead>
-                        <TableHead className="w-[120px]">학생</TableHead>
+                        <TableHead className="w-[132px]">대상</TableHead>
                         <TableHead className="w-[150px]">수업</TableHead>
                         <TableHead>교재명</TableHead>
                         <TableHead className="w-[88px]">위치</TableHead>
@@ -9620,8 +9815,8 @@ function SalesProcessTable({
                         const status = rawStatus === "paid" ? "charged" : rawStatus;
                         const quantity = numberValue(line.quantity) || 1;
                         const textbookTitle = textbook ? getTextbookTitle(textbook) : text(line.textbook_id);
-                        const studentId = text(line.student_id || line.studentId);
-                        const studentName = text(line.student_name || getStudentNameById(studentsById, studentId)) || "-";
+                        const copyScope = getTextbookCopyScope(line);
+                        const studentName = getSaleLineRecipientName(line, studentsById);
                         const locationName = getLocationName(locations, text(line.location_id || line.locationId || sale?.location_id || sale?.locationId)) || "-";
                         const isTerminalSaleStatus = status === "issued" || status === "cancelled" || status === "returned";
                         const canDeleteThisLine = canDeleteHistory && Boolean(onDeleteLine);
@@ -9644,7 +9839,10 @@ function SalesProcessTable({
                               </Badge>
                             </TableCell>
                             <TableCell className="tabular-nums">{text(line.charge_month || sale?.charge_month) || "-"}</TableCell>
-                            <TableCell className="max-w-[120px] truncate" title={studentName}>{studentName}</TableCell>
+                            <TableCell className="max-w-[132px]" title={studentName}>
+                              <div className="min-w-0 truncate">{studentName}</div>
+                              <div className="text-xs text-muted-foreground">{getTextbookCopyScopeLabel(copyScope)}</div>
+                            </TableCell>
                             <TableCell className="max-w-[150px] truncate" title={classItem ? getClassName(classItem) : "-"}>{classItem ? getClassName(classItem) : "-"}</TableCell>
                             <TableCell>
                               <div className="max-w-[360px] truncate font-medium" title={textbookTitle}>{textbookTitle}</div>

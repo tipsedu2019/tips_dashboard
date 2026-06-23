@@ -478,6 +478,27 @@ test("textbook workspace follows request order receipt and issue process", async
   assert.match(serviceSource, /updateSaleLineStatus/);
 });
 
+test("textbook workspace manages teacher copies across purchase, issue, and stock", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
+  const ledgerSource = await readFile(new URL("src/features/textbooks/textbook-ledger.js", root), "utf8");
+
+  assert.match(workspaceSource, /copyScope/);
+  assert.match(workspaceSource, /학생용/);
+  assert.match(workspaceSource, /교사용/);
+  assert.match(workspaceSource, /teacherName/);
+  assert.match(workspaceSource, /createTeacherTextbookIssue/);
+  assert.match(workspaceSource, /getTextbookCopyScopeLabel/);
+  assert.match(workspaceSource, /copy_scope/);
+  assert.match(serviceSource, /createTeacherTextbookIssue/);
+  assert.match(serviceSource, /copy_scope: copyScope/);
+  assert.match(ledgerSource, /buildTeacherTextbookIssueDraft/);
+  assert.match(ledgerSource, /teacherQuantity/);
+});
+
 test("textbook workspace exports supplier orders and MakeEdu billing handoffs", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
@@ -503,6 +524,20 @@ test("textbook workspace exports supplier orders and MakeEdu billing handoffs", 
   assert.match(workspaceSource, /getStudentGradeLabel/);
   assert.doesNotMatch(workspaceSource, /syncMakeEduTextbookPayments/);
   assert.doesNotMatch(workspaceSource, /makeEduImportDialogOpen/);
+});
+
+test("textbook handoff exports use a printable capture target instead of the scroll shell", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /getHandoffCaptureElement/);
+  assert.match(workspaceSource, /data-handoff-capture-target/);
+  assert.match(workspaceSource, /data-handoff-print-root/);
+  assert.match(workspaceSource, /\[data-handoff-scroll\]/);
+  assert.match(workspaceSource, /printHandoffElement\(getHandoffCaptureElement\(allDomId\)/);
+  assert.match(workspaceSource, /copyOrDownloadHandoffImage\(getHandoffCaptureElement\(groupDomId\)/);
 });
 
 test("textbook workspace keeps purchase and sale cases in grouped process tables", async () => {

@@ -13,9 +13,86 @@ function arrayValue(value) {
 
 export const TIPS_TEXTBOOK_SOURCE_NAME = "팁스서점";
 export const TEXTBOOK_EXTERNAL_PURCHASE_RATE = 0.9;
+export const TEXTBOOK_COPY_SCOPE_STUDENT = "student";
+export const TEXTBOOK_COPY_SCOPE_TEACHER = "teacher";
 
 function normalizeBusinessLabel(value) {
   return text(value).replace(/\s+/g, "").toLowerCase();
+}
+
+export function normalizeTextbookLookupValue(value, { compact = false } = {}) {
+  const normalized = text(value).normalize("NFKC").toLowerCase();
+  if (compact) {
+    return normalized.replace(/[^\p{L}\p{N}]+/gu, "");
+  }
+
+  return normalized.replace(/\s+/g, " ");
+}
+
+export function getTextbookByReference(textbooks = [], reference = "") {
+  const target = text(reference);
+  if (!target) {
+    return undefined;
+  }
+
+  const exactMatch = arrayValue(textbooks).find((textbook) => getRecordId(textbook) === target);
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const normalizedTarget = normalizeTextbookLookupValue(target);
+  const compactTarget = normalizeTextbookLookupValue(target, { compact: true });
+
+  return arrayValue(textbooks).find((textbook) => {
+    const aliases = [
+      getTextbookTitle(textbook),
+      textbook.name,
+      textbook.textbook_title,
+      textbook.textbookTitle,
+      textbook.isbn13,
+      textbook.isbn,
+      textbook.barcode,
+    ];
+
+    return aliases.some((alias) => {
+      const normalizedAlias = normalizeTextbookLookupValue(alias);
+      return normalizedAlias === normalizedTarget ||
+        (compactTarget && normalizeTextbookLookupValue(alias, { compact: true }) === compactTarget);
+    });
+  });
+}
+
+export function normalizeTextbookCopyScope(value) {
+  const normalized = normalizeBusinessLabel(value);
+  if (
+    normalized === "teacher" ||
+    normalized === "teachercopy" ||
+    normalized === "teacheredition" ||
+    normalized === "teacheruse" ||
+    normalized === "교사용" ||
+    normalized === "선생님용" ||
+    normalized === "교사용교재"
+  ) {
+    return TEXTBOOK_COPY_SCOPE_TEACHER;
+  }
+
+  return TEXTBOOK_COPY_SCOPE_STUDENT;
+}
+
+export function getTextbookCopyScope(row = {}) {
+  return normalizeTextbookCopyScope(
+    row.copy_scope ||
+      row.copyScope ||
+      row.stock_scope ||
+      row.stockScope ||
+      row.issue_scope ||
+      row.issueScope ||
+      row.target_scope ||
+      row.targetScope ||
+      row.audience ||
+      row.copy_type ||
+      row.copyType,
+  );
 }
 
 export function normalizeBarcodeValue(value) {
@@ -217,13 +294,29 @@ export function buildTextbookInventorySnapshot({
       const locationQuantities = Object.fromEntries(
         orderedLocations.map((location) => [location.id, 0]),
       );
+      const studentLocationQuantities = Object.fromEntries(
+        orderedLocations.map((location) => [location.id, 0]),
+      );
+      const teacherLocationQuantities = Object.fromEntries(
+        orderedLocations.map((location) => [location.id, 0]),
+      );
       let totalQuantity = 0;
+      let studentQuantity = 0;
+      let teacherQuantity = 0;
       let stockValue = 0;
 
       for (const move of moves) {
         const locationId = getMoveLocationId(move);
         const quantity = getMoveQuantity(move);
+        const copyScope = getTextbookCopyScope(move);
         locationQuantities[locationId] = numberValue(locationQuantities[locationId]) + quantity;
+        if (copyScope === TEXTBOOK_COPY_SCOPE_TEACHER) {
+          teacherLocationQuantities[locationId] = numberValue(teacherLocationQuantities[locationId]) + quantity;
+          teacherQuantity += quantity;
+        } else {
+          studentLocationQuantities[locationId] = numberValue(studentLocationQuantities[locationId]) + quantity;
+          studentQuantity += quantity;
+        }
         totalQuantity += quantity;
         stockValue += getMoveAmount(move);
       }
@@ -234,7 +327,11 @@ export function buildTextbookInventorySnapshot({
         title: getTextbookTitle(textbook),
         salePrice: getTextbookSalePrice(textbook),
         locationQuantities,
+        studentLocationQuantities,
+        teacherLocationQuantities,
         totalQuantity,
+        studentQuantity,
+        teacherQuantity,
         stockValue,
         locationSummary: orderedLocations
           .map((location) => ({
@@ -291,6 +388,7 @@ export function buildTextbookSaleDraft({
     unit_price: unitPrice,
     location_id: text(locationId) || null,
     status: "charged",
+    copy_scope: TEXTBOOK_COPY_SCOPE_STUDENT,
   }));
 
   return {
@@ -305,6 +403,48 @@ export function buildTextbookSaleDraft({
     availableQuantity: numberValue(availableQuantity),
     stockShortage: Math.max(0, lines.reduce((sum, line) => sum + numberValue(line.quantity), 0) - numberValue(availableQuantity)),
     hasStockShortage: lines.reduce((sum, line) => sum + numberValue(line.quantity), 0) > numberValue(availableQuantity),
+  };
+}
+
+export function buildTeacherTextbookIssueDraft({
+  textbook = {},
+  teacherId = "",
+  teacherName = "",
+  chargeMonth = "",
+  locationId = "",
+  quantity = 1,
+  availableQuantity = 0,
+} = {}) {
+  const textbookId = getRecordId(textbook);
+  const safeQuantity = Math.max(1, numberValue(quantity) || 1);
+  const unitPrice = getTextbookSalePrice(textbook);
+  const resolvedTeacherName = text(teacherName);
+  const line = {
+    student_id: null,
+    class_id: null,
+    teacher_id: normalizeOptionalUuid(teacherId),
+    teacher_name: resolvedTeacherName,
+    textbook_id: textbookId,
+    charge_month: text(chargeMonth),
+    quantity: safeQuantity,
+    unit_price: unitPrice,
+    location_id: text(locationId) || null,
+    status: "charged",
+    copy_scope: TEXTBOOK_COPY_SCOPE_TEACHER,
+  };
+
+  return {
+    sale: {
+      class_id: null,
+      charge_month: text(chargeMonth),
+      status: "draft",
+    },
+    lines: [line],
+    totalQuantity: safeQuantity,
+    totalAmount: safeQuantity * unitPrice,
+    availableQuantity: numberValue(availableQuantity),
+    stockShortage: Math.max(0, safeQuantity - numberValue(availableQuantity)),
+    hasStockShortage: safeQuantity > numberValue(availableQuantity),
   };
 }
 
@@ -423,6 +563,7 @@ export function buildPurchaseLifecycleDraft({
   orderedQuantity = 0,
   receivedQuantity = 0,
   statementNumber = "",
+  copyScope = TEXTBOOK_COPY_SCOPE_STUDENT,
 } = {}) {
   const normalizedStage = text(stage) || "receive";
   const requested = Math.max(0, numberValue(requestedQuantity));
@@ -444,6 +585,7 @@ export function buildPurchaseLifecycleDraft({
     orderedQuantity: ordered,
     receivedQuantity: received,
     statementNumber: text(statementNumber),
+    copyScope: normalizeTextbookCopyScope(copyScope),
     status,
     createsStockMove: normalizedStage === "receive" && received > 0,
   };
@@ -476,6 +618,8 @@ export function buildSaleLineStatusTransition({
 } = {}) {
   const target = text(targetStatus);
   const quantity = Math.max(1, numberValue(line.quantity) || 1);
+  const copyScope = getTextbookCopyScope(line);
+  const recipientMemo = text(line.teacher_name || line.teacherName || line.student_name || line.studentName);
 
   if (target === "issued") {
     return {
@@ -489,7 +633,8 @@ export function buildSaleLineStatusTransition({
         quantity: -quantity,
         unit_amount: numberValue(line.unit_price || line.unitPrice),
         amount: -quantity * numberValue(line.unit_price || line.unitPrice),
-        memo: text(line.student_name || line.studentName),
+        memo: recipientMemo,
+        copy_scope: copyScope,
       },
     };
   }
@@ -506,7 +651,8 @@ export function buildSaleLineStatusTransition({
         quantity,
         unit_amount: numberValue(line.unit_price || line.unitPrice),
         amount: quantity * numberValue(line.unit_price || line.unitPrice),
-        memo: text(line.student_name || line.studentName),
+        memo: recipientMemo,
+        copy_scope: copyScope,
       },
     };
   }

@@ -75,6 +75,31 @@ test("textbook purchase requests can be captured before master registration", as
   assert.match(combinedSource, /textbook_purchase_order_lines_requested_title_idx/);
 });
 
+test("textbook management schema separates student and teacher copy lifecycles", async () => {
+  const migrationDir = new URL("supabase/migrations/", root);
+  const migrationNames = await readdir(migrationDir);
+  const combinedSource = (
+    await Promise.all(
+      migrationNames
+        .filter((name) => name.endsWith(".sql"))
+        .map((name) => readFile(new URL(name, migrationDir), "utf8")),
+    )
+  ).join("\n");
+
+  for (const table of [
+    "textbook_purchase_order_lines",
+    "textbook_sale_lines",
+    "textbook_stock_moves",
+    "textbook_stock_counts",
+  ]) {
+    assert.match(combinedSource, new RegExp(`alter table public\\.${table}[\\s\\S]*add column if not exists copy_scope text`));
+  }
+
+  assert.match(combinedSource, /copy_scope in \('student', 'teacher'\)/);
+  assert.match(combinedSource, /add column if not exists teacher_id uuid references public\.teacher_catalogs\(id\) on delete set null/);
+  assert.match(combinedSource, /add column if not exists teacher_name text not null default ''/);
+});
+
 test("textbook migrations keep master writes compatible with updated_at payloads", async () => {
   const migrationDir = new URL("supabase/migrations/", root);
   const migrationNames = await readdir(migrationDir);

@@ -4,10 +4,13 @@ import assert from "node:assert/strict";
 import {
   buildPurchaseLifecycleDraft,
   buildSaleLineStatusTransition,
+  buildTeacherTextbookIssueDraft,
   buildTextbookInventorySnapshot,
   buildTextbookMonthlyClosing,
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
+  getTextbookByReference,
+  getTextbookCopyScope,
   normalizeBarcodeValue,
   groupPurchaseLinesByStatus,
   groupSaleLinesByStatus,
@@ -160,6 +163,22 @@ test("barcode values normalize to digits for ISBN and scanner matching", () => {
   assert.equal(normalizeBarcodeValue(" 880 1234 567890 "), "8801234567890");
 });
 
+test("textbook reference lookup tolerates compact math textbook titles", () => {
+  const textbooks = [
+    { id: "concept-type", title: "개념 + 유형 기초탄탄 라이트 중학수학 3-1 (2027년)" },
+    { id: "rpm", title: "개념원리 RPM 중학수학 3-1 (2027년)" },
+  ];
+
+  assert.equal(
+    getTextbookByReference(textbooks, "개념+유형 기초탄탄라이트 중학수학 3-1(2027년)")?.id,
+    "concept-type",
+  );
+  assert.equal(
+    getTextbookByReference(textbooks, "개념원리RPM 중학수학3-1(2027년)")?.id,
+    "rpm",
+  );
+});
+
 test("purchase lifecycle separates teacher request, supplier order, and receipt", () => {
   const requested = buildPurchaseLifecycleDraft({
     stage: "request",
@@ -193,6 +212,47 @@ test("purchase lifecycle separates teacher request, supplier order, and receipt"
     })),
     /statement/i,
   );
+});
+
+test("teacher copy lifecycle keeps request, receipt, issue, and stock scoped", () => {
+  const teacherPurchase = buildPurchaseLifecycleDraft({
+    stage: "receive",
+    copyScope: "교사용",
+    requestedQuantity: 2,
+    orderedQuantity: 2,
+    receivedQuantity: 2,
+    statementNumber: "T-2027",
+  });
+  const teacherIssue = buildTeacherTextbookIssueDraft({
+    textbook: { id: "book-1", sale_price: 13000 },
+    teacherName: "김선생",
+    quantity: 1,
+    locationId: "main",
+    chargeMonth: "2026-06",
+    availableQuantity: 2,
+  });
+  const snapshot = buildTextbookInventorySnapshot({
+    textbooks: [{ id: "book-1", title: "개념원리RPM 중학수학3-1(2027년)" }],
+    locations: [{ id: "main", name: "본관" }],
+    stockMoves: [
+      { textbook_id: "book-1", location_id: "main", copy_scope: "student", quantity: 5, amount: 65000 },
+      { textbook_id: "book-1", location_id: "main", copy_scope: "teacher", quantity: 2, amount: 26000 },
+    ],
+  });
+  const issued = buildSaleLineStatusTransition({
+    line: teacherIssue.lines[0],
+    targetStatus: "issued",
+  });
+
+  assert.equal(teacherPurchase.copyScope, "teacher");
+  assert.equal(teacherIssue.lines[0].copy_scope, "teacher");
+  assert.equal(teacherIssue.lines[0].teacher_name, "김선생");
+  assert.equal(snapshot[0].totalQuantity, 7);
+  assert.equal(snapshot[0].studentQuantity, 5);
+  assert.equal(snapshot[0].teacherQuantity, 2);
+  assert.equal(getTextbookCopyScope(issued.stockMove), "teacher");
+  assert.equal(issued.stockMove.copy_scope, "teacher");
+  assert.equal(issued.stockMove.quantity, -1);
 });
 
 test("sale line transition issues stock directly from the pending issue state", () => {

@@ -1,5 +1,12 @@
 export type TextbookLedgerRow = Record<string, unknown>;
 
+export const TEXTBOOK_COPY_SCOPE_STUDENT: "student";
+export const TEXTBOOK_COPY_SCOPE_TEACHER: "teacher";
+
+export function normalizeTextbookLookupValue(value: unknown, options?: { compact?: boolean }): string;
+export function getTextbookByReference(textbooks?: TextbookLedgerRow[], reference?: unknown): TextbookLedgerRow | undefined;
+export function normalizeTextbookCopyScope(value: unknown): "student" | "teacher";
+export function getTextbookCopyScope(row?: TextbookLedgerRow): "student" | "teacher";
 export function normalizeBarcodeValue(value: unknown): string;
 export function normalizeOptionalUuid(value: unknown): string | null;
 export function getTextbookActionErrorMessage(error: unknown): string;
@@ -34,6 +41,24 @@ export function buildTextbookSaleDraft(args?: {
   stockShortage: number;
   hasStockShortage: boolean;
 };
+export function buildTeacherTextbookIssueDraft(args?: {
+  textbook?: TextbookLedgerRow;
+  teacherId?: string;
+  teacherName?: string;
+  chargeMonth?: string;
+  excludedStudentIds?: string[];
+  locationId?: string;
+  quantity?: number;
+  availableQuantity?: number;
+}): {
+  sale: TextbookLedgerRow;
+  lines: TextbookLedgerRow[];
+  totalQuantity: number;
+  totalAmount: number;
+  availableQuantity: number;
+  stockShortage: number;
+  hasStockShortage: boolean;
+};
 export function filterStockMovesForClosing(args?: {
   closingMonth?: string;
   subject?: string;
@@ -53,8 +78,10 @@ export function buildPurchaseLifecycleDraft(args?: {
   orderedQuantity?: number;
   receivedQuantity?: number;
   statementNumber?: string;
+  copyScope?: string;
 }): TextbookLedgerRow & {
   stage: string;
+  copyScope: "student" | "teacher";
   requestedQuantity: number;
   orderedQuantity: number;
   receivedQuantity: number;
