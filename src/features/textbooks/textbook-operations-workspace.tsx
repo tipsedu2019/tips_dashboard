@@ -378,10 +378,10 @@ function buildPurchaseProcessColumns(mode: "request" | "order", showSelection: b
     mode === "order" ? { id: "unitCost", label: "단가" } : null,
     { id: "eventAt", label: "처리일시" },
     { id: "requester", label: "요청자" },
-    { id: "copyScope", label: "대상" },
     { id: "textbook", label: "교재명", required: true },
     { id: "location", label: "위치" },
     { id: "class", label: "수업" },
+    { id: "copyScope", label: "용도" },
     { id: "requested", label: "요청", required: true },
     mode === "order" ? { id: "ordered", label: "주문" } : null,
     mode === "order" ? { id: "received", label: "입고" } : null,
@@ -1626,6 +1626,13 @@ function buildPurchaseCardDraft(line: Row, order: Row | undefined): PurchaseKanb
     statementNumber: text(order?.statement_number || order?.statementNumber),
     memo: text(line.memo || order?.memo),
   };
+}
+
+function getPurchaseScopeLines(line: Row) {
+  const scopeLines = Array.isArray(line.purchaseScopeLines)
+    ? (line.purchaseScopeLines as Row[]).filter(Boolean)
+    : [];
+  return scopeLines.length > 0 ? scopeLines : [line];
 }
 
 function getPurchaseDisplayCaseKey(line: Row, order: Row | undefined, textbooks: Row[]) {
@@ -3887,9 +3894,7 @@ export function TextbookOperationsWorkspace() {
   }
 
   function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string) {
-    const scopeLines = Array.isArray(line.purchaseScopeLines) && line.purchaseScopeLines.length > 0
-      ? (line.purchaseScopeLines as Row[])
-      : [line];
+    const scopeLines = getPurchaseScopeLines(line);
     const primaryLine = scopeLines.find((scopeLine) => getRecordId(scopeLine) === getRecordId(line)) || scopeLines[0];
     const primaryOrder = order || getPurchaseLineOrder(primaryLine, purchaseOrdersById);
     const studentLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "student");
@@ -4361,33 +4366,48 @@ export function TextbookOperationsWorkspace() {
       return;
     }
 
+    const scopeLines = getPurchaseScopeLines(line);
     void runAction(
       `purchase-move-${getRecordId(line)}`,
-      () => textbookService.updatePurchaseLifecycle(
-        applyConfiguredPurchasePricingToPayload(
-          draft
-            ? buildPurchasePayloadFromDraft(line, order, draft, status)
-            : buildPurchaseStatusPayload(line, order, status),
-        ),
-      ),
+      async () => {
+        await Promise.all(scopeLines.map((scopeLine) => {
+          const scopeOrder = getPurchaseLineOrder(scopeLine, purchaseOrdersById) || order;
+          return textbookService.updatePurchaseLifecycle(
+            applyConfiguredPurchasePricingToPayload(
+              draft && scopeLines.length === 1
+                ? buildPurchasePayloadFromDraft(scopeLine, scopeOrder, draft, status)
+                : buildPurchaseStatusPayload(scopeLine, scopeOrder, status),
+            ),
+          );
+        }));
+      },
       "상태가 변경되었습니다.",
     );
   }
 
   function deletePurchaseLine(line: Row, order: Row | undefined) {
+    const scopeLines = getPurchaseScopeLines(line);
     requestTextbookConfirmation({
-      title: "요청 삭제",
-      description: "이 요청 건을 삭제합니다.",
+      title: scopeLines.length > 1 ? "요청 묶음 삭제" : "요청 삭제",
+      description: scopeLines.length > 1
+        ? "학생용과 교사용 요청을 함께 삭제합니다."
+        : "이 요청 건을 삭제합니다.",
       confirmLabel: "삭제",
-      items: getPurchaseConfirmationItems(line, order),
+      items: scopeLines.flatMap((scopeLine) =>
+        getPurchaseConfirmationItems(scopeLine, getPurchaseLineOrder(scopeLine, purchaseOrdersById) || order)),
       onConfirm: () => {
         void runAction(
           `purchase-delete-${getRecordId(line)}`,
-          () => textbookService.deletePurchaseLifecycle({
-            purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
-            purchaseOrderLineId: getRecordId(line),
-          }),
-          "요청 건을 삭제했습니다.",
+          async () => {
+            await Promise.all(scopeLines.map((scopeLine) => {
+              const scopeOrder = getPurchaseLineOrder(scopeLine, purchaseOrdersById) || order;
+              return textbookService.deletePurchaseLifecycle({
+                purchaseOrderId: getRecordId(scopeOrder || {}) || text(scopeLine.purchase_order_id || scopeLine.purchaseOrderId),
+                purchaseOrderLineId: getRecordId(scopeLine),
+              });
+            }));
+          },
+          scopeLines.length > 1 ? "요청 묶음을 삭제했습니다." : "요청 건을 삭제했습니다.",
         );
       },
     });
@@ -9122,10 +9142,10 @@ function PurchaseProcessTable({
                         ) : null}
                         {isPurchaseColumnVisible("eventAt") ? <TableHead className="w-[118px]">처리일시</TableHead> : null}
                         {isPurchaseColumnVisible("requester") ? <TableHead className="w-[104px]">요청자</TableHead> : null}
-                        {isPurchaseColumnVisible("copyScope") ? <TableHead className="w-[92px]">용도</TableHead> : null}
                         {isPurchaseColumnVisible("textbook") ? <TableHead>교재명</TableHead> : null}
                         {isPurchaseColumnVisible("location") ? <TableHead className="w-[88px]">위치</TableHead> : null}
                         {isPurchaseColumnVisible("class") ? <TableHead className="w-[140px]">수업</TableHead> : null}
+                        {isPurchaseColumnVisible("copyScope") ? <TableHead className="w-[92px]">용도</TableHead> : null}
                         {isPurchaseColumnVisible("requested") ? <TableHead className="w-[104px] text-right">요청</TableHead> : null}
                         {mode === "order" ? (
                           <>
@@ -9209,19 +9229,6 @@ function PurchaseProcessTable({
                               <TableCell className="text-muted-foreground">{formatCompactDateTime(getPurchaseEventAt(line, order, status))}</TableCell>
                             ) : null}
                             {isPurchaseColumnVisible("requester") ? <TableCell className="max-w-[104px] truncate">{draft.requestBy || "-"}</TableCell> : null}
-                            {isPurchaseColumnVisible("copyScope") ? (
-                              <TableCell>
-                                <div className="flex flex-col gap-1">
-                                  {(["student", "teacher"] as TextbookCopyScope[])
-                                    .filter((scope) => displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === scope))
-                                    .map((scope) => (
-                                      <Badge key={scope} variant="outline" className="w-fit rounded-md">
-                                        {getTextbookCopyScopeLabel(scope)}
-                                      </Badge>
-                                    ))}
-                                </div>
-                              </TableCell>
-                            ) : null}
                             {isPurchaseColumnVisible("textbook") ? (
                             <TableCell>
                               <button
@@ -9242,6 +9249,19 @@ function PurchaseProcessTable({
                             {isPurchaseColumnVisible("class") ? (
                               <TableCell className="max-w-[140px] truncate" title={classRecord ? getClassName(classRecord) : "수업 미지정"}>
                                 {classRecord ? getClassName(classRecord) : "수업 미지정"}
+                              </TableCell>
+                            ) : null}
+                            {isPurchaseColumnVisible("copyScope") ? (
+                              <TableCell>
+                                <div className="flex flex-col gap-1">
+                                  {(["student", "teacher"] as TextbookCopyScope[])
+                                    .filter((scope) => displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === scope))
+                                    .map((scope) => (
+                                      <Badge key={scope} variant="outline" className="w-fit rounded-md">
+                                        {getTextbookCopyScopeLabel(scope)}
+                                      </Badge>
+                                    ))}
+                                </div>
                               </TableCell>
                             ) : null}
                             {isPurchaseColumnVisible("requested") ? (
@@ -9349,7 +9369,7 @@ function PurchaseProcessTable({
                                     size="icon"
                                     aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 건 삭제`}
                                     disabled={saving === `purchase-delete-${lineId}`}
-                                    onClick={() => onDeleteLine(line, order)}
+                                    onClick={() => onDeleteLine({ ...line, purchaseScopeLines: displayLines }, order)}
                                   >
                                     <Trash2 className="size-4" />
                                   </Button>
@@ -9367,10 +9387,10 @@ function PurchaseProcessTable({
                         {mode === "order" && isPurchaseColumnVisible("unitCost") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("eventAt") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("requester") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("copyScope") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("textbook") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("location") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("class") ? <TableCell /> : null}
+                        {isPurchaseColumnVisible("copyScope") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("requested") ? <TableCell className="text-right tabular-nums">{formatQuantity(requestedTotal)}</TableCell> : null}
                         {mode === "order" ? (
                           <>

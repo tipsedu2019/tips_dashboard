@@ -967,6 +967,41 @@ test("purchase requests support bulk ordering with requested quantity defaults",
   assert.match(serviceSource, /created_by: createdBy/);
 });
 
+test("purchase process grouped rows move and delete every copy-scope line together", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
+
+  assert.match(workspaceSource, /function getPurchaseScopeLines\(line: Row\)/);
+  assert.match(workspaceSource, /function movePurchaseLine[\s\S]*const scopeLines = getPurchaseScopeLines\(line\)/);
+  assert.match(workspaceSource, /Promise\.all\(scopeLines\.map\(\(scopeLine\) =>/);
+  assert.match(workspaceSource, /buildPurchaseStatusPayload\(scopeLine, scopeOrder, status\)/);
+  assert.match(workspaceSource, /function deletePurchaseLine[\s\S]*const scopeLines = getPurchaseScopeLines\(line\)/);
+  assert.match(workspaceSource, /getPurchaseConfirmationItems\(scopeLine, getPurchaseLineOrder\(scopeLine, purchaseOrdersById\) \|\| order\)/);
+  assert.match(workspaceSource, /textbookService\.deletePurchaseLifecycle\(\{[\s\S]*purchaseOrderLineId: getRecordId\(scopeLine\)/);
+  assert.match(tableSource, /onClick=\{\(\) => onDeleteLine\(\{ \.\.\.line, purchaseScopeLines: displayLines \}, order\)\}/);
+});
+
+test("purchase process table places copy scope after class", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
+  const tableHeaderSource = tableSource.slice(tableSource.indexOf("<TableHeader"), tableSource.indexOf("</TableHeader>"));
+  const classColumnIndex = tableHeaderSource.indexOf('TableHead className="w-[140px]">수업');
+  const copyScopeColumnIndex = tableHeaderSource.indexOf('TableHead className="w-[92px]">용도');
+  const requestedColumnIndex = tableHeaderSource.indexOf('TableHead className="w-[104px] text-right">요청');
+
+  assert.ok(classColumnIndex >= 0, "class column is present");
+  assert.ok(copyScopeColumnIndex >= 0, "copy scope column is present");
+  assert.ok(requestedColumnIndex >= 0, "requested column is present");
+  assert.ok(classColumnIndex < copyScopeColumnIndex, "copy scope appears after class");
+  assert.ok(copyScopeColumnIndex < requestedColumnIndex, "copy scope appears before requested quantity");
+});
+
 test("textbook workspace fixes second-round browser audit issues", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
