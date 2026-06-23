@@ -80,23 +80,23 @@ test("legacy auth variant routes redirect without keeping template components", 
   }
 });
 
-test("sign-in form accepts a login id instead of requiring an email address", async () => {
+test("sign-in form asks for a Google email like the reset and signup flows", async () => {
   const source = await readSource(
     "src/app/(auth)/sign-in/components/login-form-1.tsx",
   );
 
   assert.match(
     source,
-    /loginId:\s*z\.string\(\)\.trim\(\)\.min\(1, "아이디를 입력해 주세요\."\)/,
+    /loginId:\s*z\.string\(\)\.trim\(\)\.min\(1, "Google 이메일을 입력해 주세요\."\)/,
   );
   assert.match(source, /name="loginId"/);
   assert.match(source, /data-testid="sign-in-login-id"/);
   assert.match(source, /data-testid="sign-in-password"/);
-  assert.match(source, /<FormLabel>아이디<\/FormLabel>/);
-  assert.match(source, /type="text"/);
-  assert.match(source, /inputMode="text"/);
-  assert.match(source, /placeholder="01087547830"/);
-  assert.match(source, /autoComplete="username"/);
+  assert.match(source, /<FormLabel>Google 이메일<\/FormLabel>/);
+  assert.match(source, /type="email"/);
+  assert.match(source, /inputMode="email"/);
+  assert.match(source, /placeholder="name@gmail.com"/);
+  assert.match(source, /autoComplete="email"/);
   assert.match(source, /await login\(values\.loginId, values\.password\)/);
   assert.match(source, /const redirectTarget = searchParams\.get\("next"\) \|\| "\/admin\/dashboard"/);
   assert.match(source, /if \(!loading && user\) \{/);
@@ -106,8 +106,8 @@ test("sign-in form accepts a login id instead of requiring an email address", as
   assert.match(source, /<CardTitle className="text-xl">TIPS 로그인<\/CardTitle>/);
   assert.match(source, /href="\/sign-up"/);
   assert.match(source, /<Link href="\/sign-up">회원가입<\/Link>/);
-  assert.doesNotMatch(source, /z\.string\(\)\.email/);
-  assert.doesNotMatch(source, /type="email"/);
+  assert.doesNotMatch(source, /<FormLabel>아이디<\/FormLabel>/);
+  assert.doesNotMatch(source, /placeholder="01087547830"/);
   assert.doesNotMatch(source, /your-id@tipsedu\.co\.kr/);
   assert.doesNotMatch(source, /계정 만들기/);
 });

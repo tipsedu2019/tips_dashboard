@@ -3030,7 +3030,6 @@ export function TextbookOperationsWorkspace() {
   const purchaseSubmitDisabled = schemaDisabled ||
     saving === "purchase" ||
     (purchaseForm.requestStage === "request" && !purchaseRequestTitle) ||
-    (purchaseForm.requestStage === "request" && hasManualPurchaseCatalogMatch) ||
     (purchaseForm.requestStage !== "request" && !selectedPurchaseTextbookId) ||
     !purchaseRequestedTotalQuantity ||
     (purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity) ||
@@ -3670,6 +3669,12 @@ export function TextbookOperationsWorkspace() {
     };
   }
 
+  function getPurchaseLineTextbookId(line: Row) {
+    const draft = buildPurchaseCardDraft(line, getPurchaseLineOrder(line, purchaseOrdersById));
+    const textbook = getTextbookByExactIdOrTitle(data.textbooks, text(line.textbook_id || line.textbookId) || draft.requestedTextbookTitle);
+    return getRecordId(textbook || {}) || text(line.textbook_id || line.textbookId);
+  }
+
   function submitBulkOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (selectedBulkOrderLines.length === 0) {
@@ -4004,13 +4009,9 @@ export function TextbookOperationsWorkspace() {
 
   function submitPurchase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (purchaseForm.requestStage === "request" && hasManualPurchaseCatalogMatch) {
-      setActionErrorMessage("이미 등록된 교재입니다. 등록 교재로 선택해 요청하세요.");
-      return;
-    }
     const completedPurchaseStage = purchaseForm.requestStage;
     const completedPurchaseTitle = purchaseRequestTitle;
-    const completedPurchaseHasCatalogTextbook = Boolean(selectedPurchaseTextbookId || purchaseForm.textbookId);
+    const completedPurchaseHasCatalogTextbook = Boolean(selectedPurchaseTextbookId || getRecordId(requestedCatalogTextbook || {}) || purchaseForm.textbookId);
     const purchasePayloads = (["student", "teacher"] as TextbookCopyScope[]).flatMap((scope) => {
       const scopeLineId = selectedPurchaseScopeLineIds[scope] || "";
       const scopeLine = scopeLineId ? purchaseLinesById.get(scopeLineId) : undefined;
@@ -4034,7 +4035,7 @@ export function TextbookOperationsWorkspace() {
 
       return [{
         ...purchaseForm,
-        textbookId: selectedPurchaseTextbookId || purchaseForm.textbookId,
+        textbookId: selectedPurchaseTextbookId || getRecordId(requestedCatalogTextbook || {}) || purchaseForm.textbookId,
         requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
         requestedQuantity: requestedQuantity || orderedQuantity || receivedQuantity || "1",
         orderedQuantity,
@@ -4372,11 +4373,16 @@ export function TextbookOperationsWorkspace() {
       async () => {
         await Promise.all(scopeLines.map((scopeLine) => {
           const scopeOrder = getPurchaseLineOrder(scopeLine, purchaseOrdersById) || order;
+          const movePayload = draft && scopeLines.length === 1
+            ? buildPurchasePayloadFromDraft(scopeLine, scopeOrder, draft, status)
+            : buildPurchaseStatusPayload(scopeLine, scopeOrder, status);
           return textbookService.updatePurchaseLifecycle(
             applyConfiguredPurchasePricingToPayload(
-              draft && scopeLines.length === 1
-                ? buildPurchasePayloadFromDraft(scopeLine, scopeOrder, draft, status)
-                : buildPurchaseStatusPayload(scopeLine, scopeOrder, status),
+              {
+                ...movePayload,
+                textbookId: getPurchaseLineTextbookId(scopeLine) || text(movePayload.textbookId),
+                requestedTextbookTitle: normalizeStoredTextInput(text(movePayload.requestedTextbookTitle || getRequestedTextbookTitle(scopeLine))),
+              },
             ),
           );
         }));
@@ -5020,7 +5026,7 @@ export function TextbookOperationsWorkspace() {
                     <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="alert">
                       <div className="flex min-w-0 items-center justify-between gap-2">
                         <span className="font-medium">등록 교재가 있습니다</span>
-                        <Badge variant="outline" className="rounded-md border-amber-300 bg-white text-amber-700">미등록 요청 방지</Badge>
+                        <Badge variant="outline" className="rounded-md border-amber-300 bg-white text-amber-700">등록 교재 연결</Badge>
                       </div>
                       <div className="grid gap-1">
                         {manualPurchaseCatalogMatches.map((row) => {

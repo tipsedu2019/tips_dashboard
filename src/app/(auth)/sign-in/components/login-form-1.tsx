@@ -23,7 +23,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { getAuthErrorMessage } from "@/lib/auth-error-messages";
 
 const loginFormSchema = z.object({
-  loginId: z.string().trim().min(1, "아이디를 입력해 주세요."),
+  loginId: z.string().trim().min(1, "Google 이메일을 입력해 주세요."),
   password: z.string().min(6, "비밀번호는 6자 이상 입력해 주세요."),
 });
 
@@ -97,15 +97,15 @@ export function LoginForm1({
                     name="loginId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>아이디</FormLabel>
+                        <FormLabel>Google 이메일</FormLabel>
                         <FormControl>
                           <Input
                             data-testid="sign-in-login-id"
-                            type="text"
-                            inputMode="text"
+                            type="email"
+                            inputMode="email"
                             autoCapitalize="none"
-                            autoComplete="username"
-                            placeholder="01087547830"
+                            autoComplete="email"
+                            placeholder="name@gmail.com"
                             {...field}
                             onChange={(event) => {
                               field.onChange(event);
