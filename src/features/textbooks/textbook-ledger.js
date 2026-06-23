@@ -42,8 +42,7 @@ export function getTextbookByReference(textbooks = [], reference = "") {
 
   const normalizedTarget = normalizeTextbookLookupValue(target);
   const compactTarget = normalizeTextbookLookupValue(target, { compact: true });
-
-  return arrayValue(textbooks).find((textbook) => {
+  const candidates = arrayValue(textbooks).map((textbook) => {
     const aliases = [
       getTextbookTitle(textbook),
       textbook.name,
@@ -54,12 +53,17 @@ export function getTextbookByReference(textbooks = [], reference = "") {
       textbook.barcode,
     ];
 
-    return aliases.some((alias) => {
-      const normalizedAlias = normalizeTextbookLookupValue(alias);
-      return normalizedAlias === normalizedTarget ||
-        (compactTarget && normalizeTextbookLookupValue(alias, { compact: true }) === compactTarget);
-    });
+    return { textbook, aliases };
   });
+  const normalizedMatch = candidates.find(({ aliases }) =>
+    aliases.some((alias) => normalizeTextbookLookupValue(alias) === normalizedTarget));
+  if (normalizedMatch) {
+    return normalizedMatch.textbook;
+  }
+
+  const compactMatch = candidates.find(({ aliases }) =>
+    compactTarget && aliases.some((alias) => normalizeTextbookLookupValue(alias, { compact: true }) === compactTarget));
+  return compactMatch?.textbook;
 }
 
 export function normalizeTextbookCopyScope(value) {
@@ -187,6 +191,10 @@ export function isTipsTextbookSource(row = {}) {
 }
 
 export function getTextbookPurchaseUnitCost(row = {}) {
+  if (getTextbookCopyScope(row) === TEXTBOOK_COPY_SCOPE_TEACHER) {
+    return 0;
+  }
+
   const salePrice = getTextbookSalePrice(row);
   if (salePrice <= 0) {
     return 0;
@@ -417,7 +425,7 @@ export function buildTeacherTextbookIssueDraft({
 } = {}) {
   const textbookId = getRecordId(textbook);
   const safeQuantity = Math.max(1, numberValue(quantity) || 1);
-  const unitPrice = getTextbookSalePrice(textbook);
+  const unitPrice = 0;
   const resolvedTeacherName = text(teacherName);
   const line = {
     student_id: null,

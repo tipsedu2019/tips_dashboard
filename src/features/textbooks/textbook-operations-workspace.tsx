@@ -915,22 +915,33 @@ function getConfiguredSupplierIdForTextbook(textbook: Row | undefined, publisher
   return text(links[0]?.supplier_id || links[0]?.supplierId);
 }
 
-function getTextbookPurchasePricingContext(textbook: Row | undefined, supplierId: string, suppliers: Row[]) {
+function getTextbookPurchasePricingContext(textbook: Row | undefined, supplierId: string, suppliers: Row[], copyScope: unknown = "student") {
   const supplierName = supplierId ? getSupplierName(suppliers, supplierId) : "";
   const publisherName = getKnownPublisherLabel(textbook || {});
   return {
     ...(textbook || {}),
     ...(publisherName ? { publisher: publisherName, publisher_name: publisherName } : {}),
     ...(supplierName ? { supplier: supplierName, supplier_name: supplierName } : {}),
+    copy_scope: getTextbookCopyScope({ copyScope }),
   };
 }
 
-function getConfiguredTextbookPurchaseUnitCost(textbook: Row | undefined, supplierId: string, suppliers: Row[], fallback: unknown = 0) {
+function getConfiguredTextbookPurchaseUnitCost(
+  textbook: Row | undefined,
+  supplierId: string,
+  suppliers: Row[],
+  fallback: unknown = 0,
+  copyScope: unknown = "student",
+) {
+  if (getTextbookCopyScope({ copyScope }) === "teacher") {
+    return 0;
+  }
+
   if (getTextbookSalePrice(textbook || {}) <= 0) {
     return Math.max(0, numberValue(fallback));
   }
 
-  return getTextbookPurchaseUnitCost(getTextbookPurchasePricingContext(textbook, supplierId, suppliers));
+  return getTextbookPurchaseUnitCost(getTextbookPurchasePricingContext(textbook, supplierId, suppliers, copyScope));
 }
 
 function getTextbookCopyScopeLabel(value: unknown) {
@@ -1715,7 +1726,7 @@ function buildPurchaseSupplierHandoffGroups({
     const requestedQuantity = numberValue(draft.requestedQuantity);
     const receivedQuantity = numberValue(draft.receivedQuantity);
     const quantity = Math.max(orderedQuantity || requestedQuantity || receivedQuantity || 1, 1);
-    const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, suppliers, draft.unitCost);
+    const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, suppliers, draft.unitCost, draft.copyScope);
     const lineAmount = unitCost * quantity;
     const group = groups.get(supplierId) || {
       id: supplierId,
@@ -2642,30 +2653,30 @@ export function TextbookOperationsWorkspace() {
     : undefined;
   const purchaseFieldVisibility = getPurchaseFieldVisibility(purchaseForm.requestStage);
   const explicitlySelectedPurchaseTextbook = getTextbookById(data.textbooks, purchaseForm.textbookId);
-  const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook || getTextbookById(data.textbooks, purchaseForm.requestedTextbookTitle);
   const explicitPurchaseTextbookId = getRecordId(explicitlySelectedPurchaseTextbook || {});
+  const purchaseRequestTitle = text(purchaseForm.requestedTextbookTitle || getTextbookTitle(explicitlySelectedPurchaseTextbook || {}) || purchaseForm.textbookId);
+  const requestedCatalogTextbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
+  const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook || requestedCatalogTextbook;
   const selectedPurchaseTextbookId = getRecordId(selectedPurchaseTextbook || {});
   const purchaseRequestUsesCatalog = purchaseRequestInputMode === "catalog";
-  const purchaseRequestTitle = text(purchaseForm.requestedTextbookTitle || getTextbookTitle(selectedPurchaseTextbook || {}) || purchaseForm.textbookId);
   const manualPurchaseCatalogMatches = useMemo(
     () => {
       if (purchaseRequestInputMode !== "manual") return [];
-      const requestedTitleKey = purchaseRequestTitle.toLowerCase();
-      if (!requestedTitleKey) return [];
-      return activeTextbooks
-        .filter((row) => getTextbookTitle(row).trim().toLowerCase() === requestedTitleKey)
-        .slice(0, 3);
+      const textbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
+      return textbook ? [textbook] : [];
     },
     [activeTextbooks, purchaseRequestInputMode, purchaseRequestTitle],
   );
   const hasManualPurchaseCatalogMatch = manualPurchaseCatalogMatches.length > 0;
   const configuredPurchaseSupplierId =
     getConfiguredSupplierIdForTextbook(selectedPurchaseTextbook, data.publisherSupplierLinks, data.publishers) || purchaseForm.supplierId;
+  const purchaseCopyScope = getTextbookCopyScope(purchaseForm);
   const configuredPurchaseUnitCost = getConfiguredTextbookPurchaseUnitCost(
     selectedPurchaseTextbook,
     configuredPurchaseSupplierId,
     data.suppliers,
     purchaseForm.unitCost,
+    purchaseCopyScope,
   );
   const configuredPurchaseSupplierLabel = configuredPurchaseSupplierId
     ? getSupplierName(data.suppliers, configuredPurchaseSupplierId)
@@ -2684,7 +2695,6 @@ export function TextbookOperationsWorkspace() {
     ? purchaseCurrentLocationQuantity + numberValue(purchaseForm.receivedQuantity)
     : purchaseCurrentLocationQuantity;
   const configuredPurchaseTotalCost = configuredPurchaseUnitCost * purchaseStageQuantity;
-  const purchaseCopyScope = getTextbookCopyScope(purchaseForm);
   const selectedClassId = saleForm.classId;
   const saleCopyScope = getTextbookCopyScope(saleForm);
   const isTeacherSale = saleCopyScope === "teacher";
@@ -3495,8 +3505,9 @@ export function TextbookOperationsWorkspace() {
 
     return {
       ...payload,
+      textbookId: getRecordId(textbook || {}) || text(payload.textbookId),
       supplierId,
-      unitCost: String(getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, data.suppliers, payload.unitCost)),
+      unitCost: String(getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, data.suppliers, payload.unitCost, getTextbookCopyScope(payload))),
     };
   }
 
@@ -8957,7 +8968,7 @@ function PurchaseProcessTable({
                         const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
                         const textbookTitle = getPurchaseTextbookTitle(line, textbook);
                         const configuredSupplierId = getConfiguredSupplierIdForTextbook(textbook, publisherSupplierLinks, publishers) || draft.supplierId;
-                        const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, configuredSupplierId, suppliers, draft.unitCost);
+                        const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, configuredSupplierId, suppliers, draft.unitCost, draft.copyScope);
                         const locationName = getLocationName(locations, draft.locationId) || "-";
                         const classRecord = getClassById(classes, draft.classId);
                         const classStudentCount = getClassStudentCount(classRecord, students);

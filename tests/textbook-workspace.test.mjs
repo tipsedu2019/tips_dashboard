@@ -499,6 +499,21 @@ test("textbook workspace manages teacher copies across purchase, issue, and stoc
   assert.match(ledgerSource, /teacherQuantity/);
 });
 
+test("textbook purchase workflow links registered title requests before ordering", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
+
+  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
+  assert.match(workspaceSource, /const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook \|\| requestedCatalogTextbook/);
+  assert.match(workspaceSource, /textbookId: getRecordId\(textbook \|\| \{\}\) \|\| text\(payload\.textbookId\)/);
+  assert.match(workspaceSource, /getConfiguredTextbookPurchaseUnitCost\([\s\S]*purchaseCopyScope[\s\S]*\)/);
+  assert.match(serviceSource, /resolvePurchaseLifecycleTextbook/);
+  assert.match(serviceSource, /requestedTextbookTitle[\s\S]*textbooks[\s\S]*getTextbookByReference/);
+});
+
 test("textbook workspace exports supplier orders and MakeEdu billing handoffs", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
@@ -784,7 +799,7 @@ test("purchase process derives supplier and unit cost from settings and separate
   assert.match(tableSource, /publisherSupplierLinks: Row\[\]/);
   assert.match(tableSource, /publishers: Row\[\]/);
   assert.match(tableSource, /const configuredSupplierId = getConfiguredSupplierIdForTextbook\(textbook, publisherSupplierLinks, publishers\) \|\| draft\.supplierId/);
-  assert.match(tableSource, /const unitCost = getConfiguredTextbookPurchaseUnitCost\(textbook, configuredSupplierId, suppliers, draft\.unitCost\)/);
+  assert.match(tableSource, /const unitCost = getConfiguredTextbookPurchaseUnitCost\(textbook, configuredSupplierId, suppliers, draft\.unitCost, draft\.copyScope\)/);
   assert.match(tableSource, /TableHead className="w-\[96px\] text-right">단가/);
   assert.match(tableSource, /TableHead className="w-\[88px\]">위치/);
   assert.match(tableSource, /<TableCell className="max-w-\[88px\] truncate" title=\{locationName\}>\{locationName\}<\/TableCell>/);
@@ -1882,8 +1897,8 @@ test("textbook workspace locks 50 request ordering safeguards", async () => {
     /return String\(Math\.max\(options\.allowZero \? 0 : 1, quantity\)\)/,
     /const manualPurchaseCatalogMatches = useMemo/,
     /purchaseRequestInputMode !== "manual"/,
-    /getTextbookTitle\(row\)\.trim\(\)\.toLowerCase\(\) === requestedTitleKey/,
-    /\.slice\(0, 3\)/,
+    /const textbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,
+    /return textbook \? \[textbook\] : \[\]/,
     /const hasManualPurchaseCatalogMatch = manualPurchaseCatalogMatches\.length > 0/,
     /purchaseForm\.requestStage === "request" && hasManualPurchaseCatalogMatch/,
     /function setPurchaseField\(name: string, value: string\)/,

@@ -217,6 +217,26 @@ function getInventoryQuantity(inventoryRow: Row | undefined, locationId: string)
   return numberValue(locationQuantities[locationId]);
 }
 
+async function resolvePurchaseLifecycleTextbook(
+  client: SupabaseClientLike,
+  textbookId: unknown,
+  requestedTextbookTitle: unknown,
+) {
+  const normalizedTextbookId = normalizeOptionalUuid(textbookId);
+  if (normalizedTextbookId) {
+    return normalizedTextbookId;
+  }
+
+  const reference = text(requestedTextbookTitle || textbookId);
+  if (!reference) {
+    return null;
+  }
+
+  const textbooks = await readTable(client, "textbooks");
+  const textbook = getTextbookByReference(textbooks, reference);
+  return normalizeOptionalUuid(getRecordId(textbook || {}));
+}
+
 export async function listTextbookOperationsData(clientInput?: SupabaseClientLike | TextbookOperationsDataOptions | null) {
   const { client, scope } = resolveTextbookOperationsDataOptions(clientInput);
   const canLoadManagementTables = scope === "management";
@@ -350,12 +370,12 @@ export async function deleteTextbookMasters(idList: string[] | string, clientInp
 export async function createPurchaseReceipt(record: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
   const textbookId = text(record.textbookId || record.textbook_id);
-  const normalizedTextbookId = normalizeOptionalUuid(textbookId);
   const requestedTextbookTitle = text(record.requestedTextbookTitle || record.requested_textbook_title || record.textbookTitle || record.textbook_title);
   const locationId = normalizeOptionalUuid(record.locationId || record.location_id);
   const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
-  const unitCost = Math.max(0, numberValue(record.unitCost || record.unit_cost));
   const copyScope = getTextbookCopyScope(record);
+  const normalizedTextbookId = await resolvePurchaseLifecycleTextbook(client, textbookId, requestedTextbookTitle);
+  const unitCost = copyScope === "teacher" ? 0 : Math.max(0, numberValue(record.unitCost || record.unit_cost));
   const lifecycle = validatePurchaseLifecycleDraft(buildPurchaseLifecycleDraft({
     stage: text(record.stage || record.requestStage || record.request_stage) || "receive",
     requestedQuantity: numberValue(record.requestedQuantity || record.requested_quantity),
@@ -434,12 +454,12 @@ export async function updatePurchaseLifecycle(record: Row, clientInput?: Supabas
   const purchaseOrderId = text(record.purchaseOrderId || record.purchase_order_id);
   const purchaseOrderLineId = text(record.purchaseOrderLineId || record.purchase_order_line_id || record.id);
   const textbookId = text(record.textbookId || record.textbook_id);
-  const normalizedTextbookId = normalizeOptionalUuid(textbookId);
   const requestedTextbookTitle = text(record.requestedTextbookTitle || record.requested_textbook_title || record.textbookTitle || record.textbook_title);
   const locationId = normalizeOptionalUuid(record.locationId || record.location_id);
   const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
-  const unitCost = Math.max(0, numberValue(record.unitCost || record.unit_cost));
   const copyScope = getTextbookCopyScope(record);
+  const normalizedTextbookId = await resolvePurchaseLifecycleTextbook(client, textbookId, requestedTextbookTitle);
+  const unitCost = copyScope === "teacher" ? 0 : Math.max(0, numberValue(record.unitCost || record.unit_cost));
   const lifecycle = validatePurchaseLifecycleDraft(buildPurchaseLifecycleDraft({
     stage: text(record.stage || record.requestStage || record.request_stage) || "receive",
     requestedQuantity: numberValue(record.requestedQuantity || record.requested_quantity),

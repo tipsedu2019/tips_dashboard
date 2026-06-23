@@ -11,6 +11,7 @@ import {
   filterStockMovesForClosing,
   getTextbookByReference,
   getTextbookCopyScope,
+  getTextbookPurchaseUnitCost,
   normalizeBarcodeValue,
   groupPurchaseLinesByStatus,
   groupSaleLinesByStatus,
@@ -166,6 +167,7 @@ test("barcode values normalize to digits for ISBN and scanner matching", () => {
 test("textbook reference lookup tolerates compact math textbook titles", () => {
   const textbooks = [
     { id: "concept-type", title: "개념 + 유형 기초탄탄 라이트 중학수학 3-1 (2027년)" },
+    { id: "concept-type-live", title: "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)" },
     { id: "rpm", title: "개념원리 RPM 중학수학 3-1 (2027년)" },
   ];
 
@@ -177,6 +179,25 @@ test("textbook reference lookup tolerates compact math textbook titles", () => {
     getTextbookByReference(textbooks, "개념원리RPM 중학수학3-1(2027년)")?.id,
     "rpm",
   );
+  assert.equal(
+    getTextbookByReference(textbooks, "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)")?.id,
+    "concept-type-live",
+  );
+});
+
+test("teacher copy purchase unit cost is always zero", () => {
+  assert.equal(getTextbookPurchaseUnitCost({
+    title: "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)",
+    publisher: "비상교육",
+    sale_price: 19500,
+    copy_scope: "teacher",
+  }), 0);
+  assert.equal(getTextbookPurchaseUnitCost({
+    title: "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)",
+    publisher: "비상교육",
+    sale_price: 19500,
+    copy_scope: "student",
+  }), 17550);
 });
 
 test("purchase lifecycle separates teacher request, supplier order, and receipt", () => {
@@ -247,6 +268,8 @@ test("teacher copy lifecycle keeps request, receipt, issue, and stock scoped", (
   assert.equal(teacherPurchase.copyScope, "teacher");
   assert.equal(teacherIssue.lines[0].copy_scope, "teacher");
   assert.equal(teacherIssue.lines[0].teacher_name, "김선생");
+  assert.equal(teacherIssue.lines[0].unit_price, 0);
+  assert.equal(teacherIssue.totalAmount, 0);
   assert.equal(snapshot[0].totalQuantity, 7);
   assert.equal(snapshot[0].studentQuantity, 5);
   assert.equal(snapshot[0].teacherQuantity, 2);
