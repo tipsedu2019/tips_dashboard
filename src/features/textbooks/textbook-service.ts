@@ -9,6 +9,7 @@ import {
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
   getRecordId,
+  getTextbookByExactReference,
   getTextbookByReference,
   getTextbookCopyScope,
   getTextbookSalePrice,
@@ -233,7 +234,7 @@ async function resolvePurchaseLifecycleTextbook(
   }
 
   const textbooks = await readTable(client, "textbooks");
-  const textbook = getTextbookByReference(textbooks, reference);
+  const textbook = getTextbookByExactReference(textbooks, reference);
   return normalizeOptionalUuid(getRecordId(textbook || {}));
 }
 

@@ -4,6 +4,7 @@ export const TEXTBOOK_COPY_SCOPE_STUDENT: "student";
 export const TEXTBOOK_COPY_SCOPE_TEACHER: "teacher";
 
 export function normalizeTextbookLookupValue(value: unknown, options?: { compact?: boolean }): string;
+export function getTextbookByExactReference(textbooks?: TextbookLedgerRow[], reference?: unknown): TextbookLedgerRow | undefined;
 export function getTextbookByReference(textbooks?: TextbookLedgerRow[], reference?: unknown): TextbookLedgerRow | undefined;
 export function normalizeTextbookCopyScope(value: unknown): "student" | "teacher";
 export function getTextbookCopyScope(row?: TextbookLedgerRow): "student" | "teacher";

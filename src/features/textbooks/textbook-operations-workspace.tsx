@@ -76,6 +76,7 @@ import {
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
   getRecordId,
+  getTextbookByExactReference,
   getTextbookByReference,
   getTextbookCopyScope,
   getTextbookPurchaseUnitCost,
@@ -125,10 +126,11 @@ type PurchaseOrderFilter = "all" | "waiting" | "partial";
 type SalesProcessFilter = "all" | "waiting" | "issued" | "returned" | "cancelled";
 type TextbookOpsQueueKey = "unregistered" | "order" | "partial" | "issue" | "stockRisk";
 type PurchaseKanbanStatus = "requested" | "ordered" | "partially_received" | "received" | "cancelled" | "returned";
+type TextbookCopyScope = "student" | "teacher";
 type PurchaseKanbanDraft = {
   textbookId: string;
   requestedTextbookTitle: string;
-  copyScope: "student" | "teacher";
+  copyScope: TextbookCopyScope;
   classId: string;
   supplierId: string;
   locationId: string;
@@ -136,6 +138,12 @@ type PurchaseKanbanDraft = {
   requestedQuantity: string;
   orderedQuantity: string;
   receivedQuantity: string;
+  studentRequestedQuantity: string;
+  teacherRequestedQuantity: string;
+  studentOrderedQuantity: string;
+  teacherOrderedQuantity: string;
+  studentReceivedQuantity: string;
+  teacherReceivedQuantity: string;
   unitCost: string;
   statementNumber: string;
   memo: string;
@@ -273,6 +281,12 @@ const emptyPurchaseForm = {
   requestedQuantity: "1",
   orderedQuantity: "",
   receivedQuantity: "",
+  studentRequestedQuantity: "1",
+  teacherRequestedQuantity: "",
+  studentOrderedQuantity: "",
+  teacherOrderedQuantity: "",
+  studentReceivedQuantity: "",
+  teacherReceivedQuantity: "",
   unitCost: "",
   statementNumber: "",
   memo: "",
@@ -653,6 +667,29 @@ function normalizeQuantityInput(value: unknown, options: { allowZero?: boolean }
   return String(Math.max(options.allowZero ? 0 : 1, quantity));
 }
 
+const purchaseQuantityFieldNames = new Set([
+  "studentRequestedQuantity",
+  "teacherRequestedQuantity",
+  "studentOrderedQuantity",
+  "teacherOrderedQuantity",
+  "studentReceivedQuantity",
+  "teacherReceivedQuantity",
+]);
+
+function isPurchaseQuantityField(name: string) {
+  return purchaseQuantityFieldNames.has(name);
+}
+
+function normalizePurchaseQuantityField(name: string, value: unknown) {
+  return normalizeQuantityInput(value, { allowZero: isPurchaseQuantityField(name) });
+}
+
+function getPurchaseScopeQuantity(draft: PurchaseKanbanDraft | typeof emptyPurchaseForm, scope: TextbookCopyScope, kind: "requested" | "ordered" | "received") {
+  const prefix = scope === "teacher" ? "teacher" : "student";
+  const fieldName = `${prefix}${kind[0].toUpperCase()}${kind.slice(1)}Quantity` as keyof typeof emptyPurchaseForm;
+  return text((draft as Record<string, unknown>)[fieldName]);
+}
+
 function normalizeInlineTextInput(value: unknown) {
   return String(value || "").replace(/\s+/g, " ").trimStart();
 }
@@ -954,6 +991,10 @@ function normalizeTextbookLookup(value: unknown) {
 
 function getTextbookById(textbooks: Row[], id: string) {
   return getTextbookByReference(textbooks, id);
+}
+
+function getTextbookByExactIdOrTitle(textbooks: Row[], reference: string) {
+  return getTextbookByExactReference(textbooks, reference);
 }
 
 function buildTextbookLookupMap(textbooks: Row[]) {
@@ -1561,11 +1602,13 @@ function buildPurchaseCardDraft(line: Row, order: Row | undefined): PurchaseKanb
   const requested = text(line.requested_quantity || line.requestedQuantity);
   const ordered = text(line.ordered_quantity || line.orderedQuantity);
   const received = text(line.received_quantity || line.receivedQuantity);
+  const copyScope = getTextbookCopyScope(line);
+  const isTeacherCopy = copyScope === "teacher";
 
   return {
     textbookId: text(line.textbook_id || line.textbookId),
     requestedTextbookTitle: text(line.requested_textbook_title || line.requestedTextbookTitle || line.textbook_title || line.textbookTitle),
-    copyScope: getTextbookCopyScope(line),
+    copyScope,
     classId: text(line.class_id || line.classId),
     supplierId: text(order?.supplier_id || order?.supplierId),
     locationId: text(line.location_id || line.locationId),
@@ -1573,15 +1616,82 @@ function buildPurchaseCardDraft(line: Row, order: Row | undefined): PurchaseKanb
     requestedQuantity: requested || ordered || received || "1",
     orderedQuantity: ordered,
     receivedQuantity: received,
+    studentRequestedQuantity: isTeacherCopy ? "" : requested || ordered || received || "1",
+    teacherRequestedQuantity: isTeacherCopy ? requested || ordered || received || "1" : "",
+    studentOrderedQuantity: isTeacherCopy ? "" : ordered,
+    teacherOrderedQuantity: isTeacherCopy ? ordered : "",
+    studentReceivedQuantity: isTeacherCopy ? "" : received,
+    teacherReceivedQuantity: isTeacherCopy ? received : "",
     unitCost: text(line.unit_cost || line.unitCost),
     statementNumber: text(order?.statement_number || order?.statementNumber),
     memo: text(line.memo || order?.memo),
   };
 }
 
+function getPurchaseDisplayCaseKey(line: Row, order: Row | undefined, textbooks: Row[]) {
+  const draft = buildPurchaseCardDraft(line, order);
+  const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
+  const textbookKey = getRecordId(textbook || {}) || normalizeTextbookLookup(draft.requestedTextbookTitle || getPurchaseTextbookTitle(line, textbook));
+  return [
+    text(line.status || order?.status),
+    textbookKey,
+    draft.classId,
+    draft.locationId,
+    draft.requestBy,
+    draft.supplierId,
+    text(order?.order_date || order?.orderDate),
+    text(order?.statement_number || order?.statementNumber),
+  ].join("||");
+}
+
+function buildPurchaseDisplayRows(rows: Row[], ordersById: Map<string, Row>, textbooks: Row[]) {
+  const displayRows = new Map<string, { id: string; line: Row; lines: Row[] }>();
+  for (const row of rows) {
+    const order = ((row.order || getPurchaseLineOrder(row, ordersById)) || {}) as Row;
+    const baseKey = getPurchaseDisplayCaseKey(row, order, textbooks);
+    const copyScope = getTextbookCopyScope(row);
+    const existing = displayRows.get(baseKey);
+    const key = existing && existing.lines.some((line) => getTextbookCopyScope(line) === copyScope)
+      ? `${baseKey}||${getRecordId(row)}`
+      : baseKey;
+    const current = displayRows.get(key);
+    const nextLines = current ? [...current.lines, row] : [row];
+    const primaryLine = nextLines.find((line) => getTextbookCopyScope(line) === "student") || nextLines[0];
+    displayRows.set(key, {
+      id: key,
+      line: { ...primaryLine, purchaseScopeLines: nextLines },
+      lines: nextLines,
+    });
+  }
+  return [...displayRows.values()];
+}
+
+function getPurchaseDisplayScopeQuantity(lines: Row[], scope: TextbookCopyScope, kind: "requested" | "ordered" | "received") {
+  const snakeField = kind === "requested" ? "requested_quantity" : kind === "ordered" ? "ordered_quantity" : "received_quantity";
+  const camelField = kind === "requested" ? "requestedQuantity" : kind === "ordered" ? "orderedQuantity" : "receivedQuantity";
+  return lines
+    .filter((line) => getTextbookCopyScope(line) === scope)
+    .reduce((sum, line) => sum + numberValue(line[snakeField] || line[camelField]), 0);
+}
+
+function getPurchaseDisplayQuantity(lines: Row[], kind: "requested" | "ordered" | "received") {
+  return getPurchaseDisplayScopeQuantity(lines, "student", kind) + getPurchaseDisplayScopeQuantity(lines, "teacher", kind);
+}
+
+function PurchaseScopeQuantityCell({ lines, kind }: { lines: Row[]; kind: "requested" | "ordered" | "received" }) {
+  const studentQuantity = getPurchaseDisplayScopeQuantity(lines, "student", kind);
+  const teacherQuantity = getPurchaseDisplayScopeQuantity(lines, "teacher", kind);
+  return (
+    <div className="grid gap-1 text-right text-xs tabular-nums">
+      <span>학생 {formatQuantity(studentQuantity)}</span>
+      <span>교사 {formatQuantity(teacherQuantity)}</span>
+    </div>
+  );
+}
+
 function getOrderablePurchaseRequestTextbook(line: Row, order: Row | undefined, textbooks: Row[]) {
   const draft = buildPurchaseCardDraft(line, order);
-  return getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
+  return getTextbookByExactIdOrTitle(textbooks, draft.textbookId || draft.requestedTextbookTitle);
 }
 
 function isOrderablePurchaseRequestLine(line: Row, order: Row | undefined, textbooks: Row[]) {
@@ -2207,6 +2317,7 @@ export function TextbookOperationsWorkspace() {
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
   const [purchaseRequestInputMode, setPurchaseRequestInputMode] = useState<"catalog" | "manual">("catalog");
   const [selectedPurchaseLineId, setSelectedPurchaseLineId] = useState("");
+  const [selectedPurchaseScopeLineIds, setSelectedPurchaseScopeLineIds] = useState<Record<TextbookCopyScope, string>>({ student: "", teacher: "" });
   const [selectedPurchaseLineIds, setSelectedPurchaseLineIds] = useState<string[]>([]);
   const [bulkOrderDialogOpen, setBulkOrderDialogOpen] = useState(false);
   const [bulkOrderQuantities, setBulkOrderQuantities] = useState<Record<string, string>>({});
@@ -2578,7 +2689,6 @@ export function TextbookOperationsWorkspace() {
     () => new Map(data.saleLines.map((line) => [getRecordId(line), line])),
     [data.saleLines],
   );
-  const selectedPurchaseLine = selectedPurchaseLineId ? purchaseLinesById.get(selectedPurchaseLineId) : undefined;
   const selectedBulkOrderLines = useMemo(
     () => selectedPurchaseLineIds
       .map((id) => purchaseLinesById.get(id))
@@ -2648,21 +2758,18 @@ export function TextbookOperationsWorkspace() {
       .filter((line): line is Row => Boolean(line)),
     [saleLinesById, selectedSaleLineIds],
   );
-  const selectedPurchaseOrder = selectedPurchaseLine
-    ? getPurchaseLineOrder(selectedPurchaseLine, purchaseOrdersById)
-    : undefined;
   const purchaseFieldVisibility = getPurchaseFieldVisibility(purchaseForm.requestStage);
   const explicitlySelectedPurchaseTextbook = getTextbookById(data.textbooks, purchaseForm.textbookId);
   const explicitPurchaseTextbookId = getRecordId(explicitlySelectedPurchaseTextbook || {});
   const purchaseRequestTitle = text(purchaseForm.requestedTextbookTitle || getTextbookTitle(explicitlySelectedPurchaseTextbook || {}) || purchaseForm.textbookId);
-  const requestedCatalogTextbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
+  const requestedCatalogTextbook = getTextbookByExactIdOrTitle(activeTextbooks, purchaseRequestTitle);
   const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook || requestedCatalogTextbook;
   const selectedPurchaseTextbookId = getRecordId(selectedPurchaseTextbook || {});
   const purchaseRequestUsesCatalog = purchaseRequestInputMode === "catalog";
   const manualPurchaseCatalogMatches = useMemo(
     () => {
       if (purchaseRequestInputMode !== "manual") return [];
-      const textbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
+      const textbook = getTextbookByExactIdOrTitle(activeTextbooks, purchaseRequestTitle);
       return textbook ? [textbook] : [];
     },
     [activeTextbooks, purchaseRequestInputMode, purchaseRequestTitle],
@@ -2683,18 +2790,35 @@ export function TextbookOperationsWorkspace() {
     : "-";
   const selectedPurchaseClass = getClassById(data.classes, purchaseForm.classId);
   const purchaseClassStudentCount = getClassStudentCount(selectedPurchaseClass, data.students);
-  const purchaseQuantityFit = getPurchaseQuantityClassFit(purchaseForm.requestedQuantity, purchaseClassStudentCount);
+  const purchaseStudentRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "requested"));
+  const purchaseTeacherRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "requested"));
+  const purchaseRequestedTotalQuantity = purchaseStudentRequestedQuantity + purchaseTeacherRequestedQuantity;
+  const purchaseStudentOrderedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "ordered"));
+  const purchaseTeacherOrderedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "ordered"));
+  const purchaseOrderedTotalQuantity = purchaseStudentOrderedQuantity + purchaseTeacherOrderedQuantity;
+  const purchaseStudentReceivedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "received"));
+  const purchaseTeacherReceivedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "received"));
+  const purchaseReceivedTotalQuantity = purchaseStudentReceivedQuantity + purchaseTeacherReceivedQuantity;
+  const purchaseQuantityFit = getPurchaseQuantityClassFit(String(purchaseStudentRequestedQuantity), purchaseClassStudentCount);
   const selectedPurchaseInventory = inventoryById.get(selectedPurchaseTextbookId || purchaseForm.textbookId);
   const purchaseCurrentLocationQuantity = getInventoryQuantity(selectedPurchaseInventory, selectedLocationId);
-  const purchaseStageQuantity = purchaseForm.requestStage === "receive"
-    ? numberValue(purchaseForm.receivedQuantity)
-    : purchaseForm.requestStage === "order"
-      ? numberValue(purchaseForm.orderedQuantity)
-      : numberValue(purchaseForm.requestedQuantity);
   const purchaseProjectedLocationQuantity = purchaseForm.requestStage === "receive"
-    ? purchaseCurrentLocationQuantity + numberValue(purchaseForm.receivedQuantity)
+    ? purchaseCurrentLocationQuantity + purchaseReceivedTotalQuantity
     : purchaseCurrentLocationQuantity;
-  const configuredPurchaseTotalCost = configuredPurchaseUnitCost * purchaseStageQuantity;
+  const configuredPurchaseStudentUnitCost = getConfiguredTextbookPurchaseUnitCost(
+    selectedPurchaseTextbook,
+    configuredPurchaseSupplierId,
+    data.suppliers,
+    purchaseForm.unitCost,
+    "student",
+  );
+  const configuredPurchaseTotalCost = configuredPurchaseStudentUnitCost * (
+    purchaseForm.requestStage === "receive"
+      ? purchaseStudentReceivedQuantity
+      : purchaseForm.requestStage === "order"
+        ? purchaseStudentOrderedQuantity
+        : purchaseStudentRequestedQuantity
+  );
   const selectedClassId = saleForm.classId;
   const saleCopyScope = getTextbookCopyScope(saleForm);
   const isTeacherSale = saleCopyScope === "teacher";
@@ -2901,9 +3025,9 @@ export function TextbookOperationsWorkspace() {
     (purchaseForm.requestStage === "request" && !purchaseRequestTitle) ||
     (purchaseForm.requestStage === "request" && hasManualPurchaseCatalogMatch) ||
     (purchaseForm.requestStage !== "request" && !selectedPurchaseTextbookId) ||
-    !numberValue(purchaseForm.requestedQuantity) ||
-    (purchaseForm.requestStage !== "request" && !numberValue(purchaseForm.orderedQuantity)) ||
-    (purchaseForm.requestStage === "receive" && !numberValue(purchaseForm.receivedQuantity));
+    !purchaseRequestedTotalQuantity ||
+    (purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity) ||
+    (purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity);
   const filteredClosingMoves = filterStockMovesForClosing({
     closingMonth: closingForm.closingMonth,
     subject: closingForm.subject,
@@ -2965,10 +3089,21 @@ export function TextbookOperationsWorkspace() {
         return { ...current, requestedTextbookTitle: normalizeInlineTextInput(value) };
       }
 
-      if (name === "requestedQuantity" || name === "orderedQuantity" || name === "receivedQuantity") {
+      if (isPurchaseQuantityField(name)) {
         return {
           ...current,
-          [name]: normalizeQuantityInput(value, { allowZero: name === "receivedQuantity" }),
+          [name]: normalizePurchaseQuantityField(name, value),
+        };
+      }
+
+      if (name === "requestedQuantity" || name === "orderedQuantity" || name === "receivedQuantity") {
+        const normalized = normalizeQuantityInput(value, { allowZero: name === "receivedQuantity" });
+        const prefix = getTextbookCopyScope(current) === "teacher" ? "teacher" : "student";
+        const dualFieldName = `${prefix}${name[0].toUpperCase()}${name.slice(1)}` as keyof typeof emptyPurchaseForm;
+        return {
+          ...current,
+          [name]: normalized,
+          [dualFieldName]: normalized,
         };
       }
 
@@ -2984,8 +3119,12 @@ export function TextbookOperationsWorkspace() {
         return { ...current, [name]: value };
       }
 
-      const requestedQuantity = normalizeQuantityInput(current.requestedQuantity) || "1";
-      const orderedQuantity = normalizeQuantityInput(current.orderedQuantity) || requestedQuantity;
+      const studentRequestedQuantity = normalizePurchaseQuantityField("studentRequestedQuantity", current.studentRequestedQuantity) || "1";
+      const teacherRequestedQuantity = normalizePurchaseQuantityField("teacherRequestedQuantity", current.teacherRequestedQuantity);
+      const studentOrderedQuantity = normalizePurchaseQuantityField("studentOrderedQuantity", current.studentOrderedQuantity) || studentRequestedQuantity;
+      const teacherOrderedQuantity = normalizePurchaseQuantityField("teacherOrderedQuantity", current.teacherOrderedQuantity) || teacherRequestedQuantity;
+      const requestedQuantity = getTextbookCopyScope(current) === "teacher" ? teacherRequestedQuantity || "1" : studentRequestedQuantity || "1";
+      const orderedQuantity = getTextbookCopyScope(current) === "teacher" ? teacherOrderedQuantity || requestedQuantity : studentOrderedQuantity || requestedQuantity;
       return {
         ...current,
         requestStage: value,
@@ -2993,6 +3132,16 @@ export function TextbookOperationsWorkspace() {
         orderedQuantity: value === "request" ? "" : orderedQuantity,
         receivedQuantity: value === "receive"
           ? normalizeQuantityInput(current.receivedQuantity) || orderedQuantity
+          : "",
+        studentRequestedQuantity,
+        teacherRequestedQuantity,
+        studentOrderedQuantity: value === "request" ? "" : studentOrderedQuantity,
+        teacherOrderedQuantity: value === "request" ? "" : teacherOrderedQuantity,
+        studentReceivedQuantity: value === "receive"
+          ? normalizePurchaseQuantityField("studentReceivedQuantity", current.studentReceivedQuantity) || studentOrderedQuantity
+          : "",
+        teacherReceivedQuantity: value === "receive"
+          ? normalizePurchaseQuantityField("teacherReceivedQuantity", current.teacherReceivedQuantity) || teacherOrderedQuantity
           : "",
       };
     });
@@ -3117,6 +3266,7 @@ export function TextbookOperationsWorkspace() {
 
   function resetPurchaseForm() {
     setSelectedPurchaseLineId("");
+    setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
     setPurchaseForm(emptyPurchaseForm);
     setPurchaseRequestInputMode("catalog");
     setMessage("");
@@ -3130,6 +3280,7 @@ export function TextbookOperationsWorkspace() {
 
   function openNewPurchaseDialog() {
     setSelectedPurchaseLineId("");
+    setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
     setPurchaseForm({ ...emptyPurchaseForm, requestStage: "order" });
     setPurchaseRequestInputMode("catalog");
     setMessage("");
@@ -3138,6 +3289,7 @@ export function TextbookOperationsWorkspace() {
 
   function openNewRequestDialog() {
     setSelectedPurchaseLineId("");
+    setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
     setPurchaseForm({ ...emptyPurchaseForm, requestStage: "request" });
     setPurchaseRequestInputMode("catalog");
     setMessage("");
@@ -3498,7 +3650,7 @@ export function TextbookOperationsWorkspace() {
   }
 
   function applyConfiguredPurchasePricingToPayload(payload: Row) {
-    const textbook = getTextbookById(data.textbooks, text(payload.textbookId || payload.requestedTextbookTitle));
+    const textbook = getTextbookByExactIdOrTitle(data.textbooks, text(payload.textbookId || payload.requestedTextbookTitle));
     const supplierId =
       getConfiguredSupplierIdForTextbook(textbook, data.publisherSupplierLinks, data.publishers) ||
       text(payload.supplierId);
@@ -3735,32 +3887,62 @@ export function TextbookOperationsWorkspace() {
   }
 
   function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string) {
-    const status = text(order?.status || line.status);
-    const orderedQuantity = text(line.ordered_quantity || line.orderedQuantity);
-    const requestedQuantity = text(line.requested_quantity || line.requestedQuantity);
+    const scopeLines = Array.isArray(line.purchaseScopeLines) && line.purchaseScopeLines.length > 0
+      ? (line.purchaseScopeLines as Row[])
+      : [line];
+    const primaryLine = scopeLines.find((scopeLine) => getRecordId(scopeLine) === getRecordId(line)) || scopeLines[0];
+    const primaryOrder = order || getPurchaseLineOrder(primaryLine, purchaseOrdersById);
+    const studentLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "student");
+    const teacherLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "teacher");
+    const status = text(primaryOrder?.status || primaryLine.status);
+    const orderedQuantity = text(primaryLine.ordered_quantity || primaryLine.orderedQuantity);
+    const requestedQuantity = text(primaryLine.requested_quantity || primaryLine.requestedQuantity);
     const nextStage = stageOverride || purchaseStageFromStatus(status);
     const nextOrderedQuantity = nextStage === "request" ? orderedQuantity : orderedQuantity || requestedQuantity || "1";
-    const requestedTitle = getRequestedTextbookTitle(line);
-    const textbook = getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId) || requestedTitle);
-    setSelectedPurchaseLineId(getRecordId(line));
+    const requestedTitle = getRequestedTextbookTitle(primaryLine);
+    const textbook = getTextbookByExactIdOrTitle(data.textbooks, text(primaryLine.textbook_id || primaryLine.textbookId) || requestedTitle);
+    const copyScope = getTextbookCopyScope(primaryLine);
+    const isTeacherCopy = copyScope === "teacher";
+    const nextReceivedQuantity = nextStage === "receive"
+      ? text(primaryLine.received_quantity || primaryLine.receivedQuantity) || nextOrderedQuantity || requestedQuantity || "1"
+      : text(primaryLine.received_quantity || primaryLine.receivedQuantity);
+    const studentRequestedQuantity = text(studentLine?.requested_quantity || studentLine?.requestedQuantity || studentLine?.ordered_quantity || studentLine?.orderedQuantity || studentLine?.received_quantity || studentLine?.receivedQuantity);
+    const teacherRequestedQuantity = text(teacherLine?.requested_quantity || teacherLine?.requestedQuantity || teacherLine?.ordered_quantity || teacherLine?.orderedQuantity || teacherLine?.received_quantity || teacherLine?.receivedQuantity);
+    const studentOrderedQuantity = text(studentLine?.ordered_quantity || studentLine?.orderedQuantity);
+    const teacherOrderedQuantity = text(teacherLine?.ordered_quantity || teacherLine?.orderedQuantity);
+    const studentReceivedQuantity = nextStage === "receive"
+      ? text(studentLine?.received_quantity || studentLine?.receivedQuantity) || studentOrderedQuantity || studentRequestedQuantity
+      : text(studentLine?.received_quantity || studentLine?.receivedQuantity);
+    const teacherReceivedQuantity = nextStage === "receive"
+      ? text(teacherLine?.received_quantity || teacherLine?.receivedQuantity) || teacherOrderedQuantity || teacherRequestedQuantity
+      : text(teacherLine?.received_quantity || teacherLine?.receivedQuantity);
+    setSelectedPurchaseLineId(getRecordId(primaryLine));
+    setSelectedPurchaseScopeLineIds({
+      student: getRecordId(studentLine || {}),
+      teacher: getRecordId(teacherLine || {}),
+    });
     setPurchaseRequestInputMode(textbook ? "catalog" : "manual");
     setPurchaseForm({
       requestStage: nextStage,
-      copyScope: getTextbookCopyScope(line),
-      textbookId: getRecordId(textbook || {}) || text(line.textbook_id || line.textbookId),
-      requestedTextbookTitle: requestedTitle || getTextbookTitle(textbook || {}) || text(line.textbook_id || line.textbookId),
-      classId: text(line.class_id || line.classId),
-      supplierId: text(order?.supplier_id || order?.supplierId),
-      locationId: text(line.location_id || line.locationId),
-      requestBy: text(order?.requested_by || order?.requestedBy),
+      copyScope,
+      textbookId: getRecordId(textbook || {}) || text(primaryLine.textbook_id || primaryLine.textbookId),
+      requestedTextbookTitle: requestedTitle || getTextbookTitle(textbook || {}) || text(primaryLine.textbook_id || primaryLine.textbookId),
+      classId: text(primaryLine.class_id || primaryLine.classId),
+      supplierId: text(primaryOrder?.supplier_id || primaryOrder?.supplierId),
+      locationId: text(primaryLine.location_id || primaryLine.locationId),
+      requestBy: text(primaryOrder?.requested_by || primaryOrder?.requestedBy),
       requestedQuantity: requestedQuantity || orderedQuantity || "1",
       orderedQuantity: nextOrderedQuantity,
-      receivedQuantity: nextStage === "receive"
-        ? text(line.received_quantity || line.receivedQuantity) || nextOrderedQuantity || requestedQuantity || "1"
-        : text(line.received_quantity || line.receivedQuantity),
-      unitCost: text(line.unit_cost || line.unitCost),
-      statementNumber: text(order?.statement_number || order?.statementNumber),
-      memo: text(line.memo || order?.memo),
+      receivedQuantity: nextReceivedQuantity,
+      studentRequestedQuantity: studentRequestedQuantity || (isTeacherCopy ? "" : requestedQuantity || orderedQuantity || "1"),
+      teacherRequestedQuantity: teacherRequestedQuantity || (isTeacherCopy ? requestedQuantity || orderedQuantity || "1" : ""),
+      studentOrderedQuantity: studentOrderedQuantity || (isTeacherCopy ? "" : nextOrderedQuantity),
+      teacherOrderedQuantity: teacherOrderedQuantity || (isTeacherCopy ? nextOrderedQuantity : ""),
+      studentReceivedQuantity: studentReceivedQuantity || (isTeacherCopy ? "" : nextReceivedQuantity),
+      teacherReceivedQuantity: teacherReceivedQuantity || (isTeacherCopy ? nextReceivedQuantity : ""),
+      unitCost: text(primaryLine.unit_cost || primaryLine.unitCost),
+      statementNumber: text(primaryOrder?.statement_number || primaryOrder?.statementNumber),
+      memo: text(primaryLine.memo || primaryOrder?.memo),
     });
     setPurchaseDialogOpen(true);
     setMessage("");
@@ -3824,35 +4006,62 @@ export function TextbookOperationsWorkspace() {
     const completedPurchaseStage = purchaseForm.requestStage;
     const completedPurchaseTitle = purchaseRequestTitle;
     const completedPurchaseHasCatalogTextbook = Boolean(selectedPurchaseTextbookId || purchaseForm.textbookId);
-    const requestedQuantity = normalizeQuantityInput(purchaseForm.requestedQuantity) || "1";
-    const orderedQuantity = purchaseForm.requestStage === "request"
-      ? ""
-      : normalizeQuantityInput(purchaseForm.orderedQuantity) || requestedQuantity;
-    const receivedQuantity = purchaseForm.requestStage === "receive"
-      ? normalizeQuantityInput(purchaseForm.receivedQuantity) || orderedQuantity
-      : "";
-    const purchasePayload = {
-      ...purchaseForm,
-      textbookId: selectedPurchaseTextbookId || purchaseForm.textbookId,
-      requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
-      requestedQuantity,
-      orderedQuantity,
-      receivedQuantity,
-      copyScope: purchaseCopyScope,
-      copy_scope: purchaseCopyScope,
-      supplierId: configuredPurchaseSupplierId,
-      unitCost: String(configuredPurchaseUnitCost),
-      locationId: selectedLocationId,
-      purchaseOrderId: getRecordId(selectedPurchaseOrder),
-      purchaseOrderLineId: selectedPurchaseLineId,
-      statementNumber: normalizeStoredTextInput(purchaseForm.statementNumber),
-      createdBy: currentUserId,
-    };
+    const purchasePayloads = (["student", "teacher"] as TextbookCopyScope[]).flatMap((scope) => {
+      const scopeLineId = selectedPurchaseScopeLineIds[scope] || "";
+      const scopeLine = scopeLineId ? purchaseLinesById.get(scopeLineId) : undefined;
+      const scopeOrder = scopeLine ? getPurchaseLineOrder(scopeLine, purchaseOrdersById) : undefined;
+      const requestedQuantity = normalizePurchaseQuantityField(`${scope}RequestedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "requested"));
+      const orderedQuantity = purchaseForm.requestStage === "request"
+        ? ""
+        : normalizePurchaseQuantityField(`${scope}OrderedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "ordered")) || requestedQuantity;
+      const receivedQuantity = purchaseForm.requestStage === "receive"
+        ? normalizePurchaseQuantityField(`${scope}ReceivedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "received")) || orderedQuantity
+        : "";
+      const stageQuantity = purchaseForm.requestStage === "receive"
+        ? numberValue(receivedQuantity)
+        : purchaseForm.requestStage === "order"
+          ? numberValue(orderedQuantity)
+          : numberValue(requestedQuantity);
+
+      if (stageQuantity <= 0) {
+        return [];
+      }
+
+      return [{
+        ...purchaseForm,
+        textbookId: selectedPurchaseTextbookId || purchaseForm.textbookId,
+        requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
+        requestedQuantity: requestedQuantity || orderedQuantity || receivedQuantity || "1",
+        orderedQuantity,
+        receivedQuantity,
+        copyScope: scope,
+        copy_scope: scope,
+        supplierId: configuredPurchaseSupplierId,
+        unitCost: String(getConfiguredTextbookPurchaseUnitCost(
+          selectedPurchaseTextbook,
+          configuredPurchaseSupplierId,
+          data.suppliers,
+          purchaseForm.unitCost,
+          scope,
+        )),
+        locationId: selectedLocationId,
+        purchaseOrderId: getRecordId(scopeOrder || {}),
+        purchaseOrderLineId: scopeLineId,
+        statementNumber: normalizeStoredTextInput(purchaseForm.statementNumber),
+        createdBy: currentUserId,
+      }];
+    });
     void runAction(
       "purchase",
-      () => selectedPurchaseLineId
-        ? textbookService.updatePurchaseLifecycle(purchasePayload)
-        : textbookService.createPurchaseReceipt(purchasePayload),
+      async () => {
+        for (const purchasePayload of purchasePayloads) {
+          if (purchasePayload.purchaseOrderLineId) {
+            await textbookService.updatePurchaseLifecycle(purchasePayload);
+          } else {
+            await textbookService.createPurchaseReceipt(purchasePayload);
+          }
+        }
+      },
       selectedPurchaseLineId
         ? `${purchaseActionLabel(purchaseForm.requestStage)}로 업데이트했습니다.`
         : `${purchaseActionLabel(purchaseForm.requestStage)}되었습니다.`,
@@ -3861,6 +4070,7 @@ export function TextbookOperationsWorkspace() {
         showSavedPurchaseFlow(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook);
         setPurchaseDialogOpen(false);
         setSelectedPurchaseLineId("");
+        setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
         setPurchaseForm(emptyPurchaseForm);
       }
     });
@@ -4813,29 +5023,15 @@ export function TextbookOperationsWorkspace() {
                     </div>
                   ) : null}
                 </section>
-                <Field label="대상">
-                  <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="요청 대상">
-                    {textbookCopyScopeOptions.map((option) => (
-                      <Button
-                        key={option.value}
-                        type="button"
-                        variant={purchaseCopyScope === option.value ? "default" : "ghost"}
-                        size="sm"
-                        className="h-8 rounded"
-                        aria-pressed={purchaseCopyScope === option.value}
-                        onClick={() => setPurchaseField("copyScope", option.value)}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </div>
-                </Field>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px_140px]">
                   <Field label="수업">
                     <ClassSelect classes={data.classes} value={purchaseForm.classId} onValueChange={(value) => setPurchaseField("classId", value)} />
                   </Field>
-                  <Field label="요청" required>
-                    <Input value={purchaseForm.requestedQuantity} onChange={(event) => setPurchaseField("requestedQuantity", event.target.value)} inputMode="numeric" min="1" aria-label="요청 수량" />
+                  <Field label="학생용 요청">
+                    <Input value={purchaseForm.studentRequestedQuantity} onChange={(event) => setPurchaseField("studentRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 요청 수량" />
+                  </Field>
+                  <Field label="교사용 요청">
+                    <Input value={purchaseForm.teacherRequestedQuantity} onChange={(event) => setPurchaseField("teacherRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 요청 수량" />
                   </Field>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -4878,23 +5074,6 @@ export function TextbookOperationsWorkspace() {
                 <Field label="수업">
                   <ClassSelect classes={data.classes} value={purchaseForm.classId} onValueChange={(value) => setPurchaseField("classId", value)} />
                 </Field>
-                <Field label="대상">
-                  <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="주문 대상">
-                    {textbookCopyScopeOptions.map((option) => (
-                      <Button
-                        key={option.value}
-                        type="button"
-                        variant={purchaseCopyScope === option.value ? "default" : "ghost"}
-                        size="sm"
-                        className="h-8 rounded"
-                        aria-pressed={purchaseCopyScope === option.value}
-                        onClick={() => setPurchaseField("copyScope", option.value)}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </div>
-                </Field>
               </div>
             )}
             {purchaseForm.requestStage !== "request" && purchaseForm.requestedTextbookTitle ? (
@@ -4905,7 +5084,7 @@ export function TextbookOperationsWorkspace() {
             {purchaseForm.requestStage !== "request" ? (
               <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-6">
                 <Metric label="총판" value={configuredPurchaseSupplierLabel} />
-                <Metric label="요청" value={`${formatQuantity(purchaseForm.requestedQuantity)}권`} />
+                <Metric label="요청" value={`${formatQuantity(purchaseRequestedTotalQuantity)}권`} />
                 <Metric label="단가" value={formatPurchaseUnitCost(configuredPurchaseUnitCost, selectedPurchaseTextbook)} />
                 <Metric label="합계" value={configuredPurchaseTotalCost > 0 ? formatCurrency(configuredPurchaseTotalCost) : "-"} />
                 <Metric
@@ -4944,35 +5123,40 @@ export function TextbookOperationsWorkspace() {
                 ) : null}
                 {purchaseFieldVisibility.requestedQuantity ? (
                   <Field label="요청" required>
-                    <Input value={purchaseForm.requestedQuantity} onChange={(event) => setPurchaseField("requestedQuantity", event.target.value)} inputMode="numeric" min="1" aria-label="요청 수량" />
+                    <Input value={purchaseForm.studentRequestedQuantity} onChange={(event) => setPurchaseField("studentRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 요청 수량" />
                   </Field>
                 ) : null}
               </div>
             ) : null}
-            {purchaseFieldVisibility.classFit && purchaseCopyScope === "student" ? (
-              <div className="grid grid-cols-3 gap-2 text-sm">
+            {purchaseFieldVisibility.classFit ? (
+              <div className="grid grid-cols-4 gap-2 text-sm">
                 <Metric label="학생" value={`학생 ${formatQuantity(purchaseClassStudentCount)}명`} />
-                <Metric label="요청" value={`${formatQuantity(purchaseForm.requestedQuantity)}권`} />
+                <Metric label="학생용" value={`${formatQuantity(purchaseStudentRequestedQuantity)}권`} />
+                <Metric label="교사용" value={`${formatQuantity(purchaseTeacherRequestedQuantity)}권`} />
                 <Metric label="판단" value={purchaseQuantityFit.label} tone={purchaseQuantityFit.tone} />
-              </div>
-            ) : null}
-            {purchaseFieldVisibility.classFit && purchaseCopyScope === "teacher" ? (
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <Metric label="대상" value="교사용" />
-                <Metric label="요청" value={`${formatQuantity(purchaseForm.requestedQuantity)}권`} />
               </div>
             ) : null}
             {purchaseFieldVisibility.orderedQuantity || purchaseFieldVisibility.receivedQuantity ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {purchaseFieldVisibility.orderedQuantity ? (
-                  <Field label="주문" required>
-                    <Input value={purchaseForm.orderedQuantity} onChange={(event) => setPurchaseField("orderedQuantity", event.target.value)} inputMode="numeric" min="1" aria-label="주문 수량" />
-                  </Field>
+                  <>
+                    <Field label="학생용 주문">
+                      <Input value={purchaseForm.studentOrderedQuantity} onChange={(event) => setPurchaseField("studentOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 주문 수량" />
+                    </Field>
+                    <Field label="교사용 주문">
+                      <Input value={purchaseForm.teacherOrderedQuantity} onChange={(event) => setPurchaseField("teacherOrderedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 주문 수량" />
+                    </Field>
+                  </>
                 ) : null}
                 {purchaseFieldVisibility.receivedQuantity ? (
-                  <Field label="입고" required>
-                    <Input value={purchaseForm.receivedQuantity} onChange={(event) => setPurchaseField("receivedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="입고 수량" />
-                  </Field>
+                  <>
+                    <Field label="학생용 입고">
+                      <Input value={purchaseForm.studentReceivedQuantity} onChange={(event) => setPurchaseField("studentReceivedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 입고 수량" />
+                    </Field>
+                    <Field label="교사용 입고">
+                      <Input value={purchaseForm.teacherReceivedQuantity} onChange={(event) => setPurchaseField("teacherReceivedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 입고 수량" />
+                    </Field>
+                  </>
                 ) : null}
               </div>
             ) : null}
@@ -4988,7 +5172,7 @@ export function TextbookOperationsWorkspace() {
                 </Field>
                 <div className="flex items-end">
                   <Badge variant="outline" className="h-10 w-full justify-center rounded-md text-sm">
-                    {purchaseStageLabels[purchaseForm.requestStage]} · 차이 {formatQuantity(numberValue(purchaseForm.orderedQuantity) - numberValue(purchaseForm.receivedQuantity))}
+                    {purchaseStageLabels[purchaseForm.requestStage]} · 차이 {formatQuantity(purchaseOrderedTotalQuantity - purchaseReceivedTotalQuantity)}
                   </Badge>
                 </div>
               </div>
@@ -8868,6 +9052,7 @@ function PurchaseProcessTable({
         <div className="grid gap-0">
           {renderedGroups.map((group) => {
           const rows = getCurrentVisiblePurchaseRows(group.id);
+          const displayRows = buildPurchaseDisplayRows(rows, ordersById, textbooks);
           const collapsed = Boolean(collapsedGroups[group.id]);
           const requestedTotal = rows.reduce((sum, line) => sum + numberValue(line.requested_quantity || line.requestedQuantity), 0);
           const orderedTotal = rows.reduce((sum, line) => sum + numberValue(line.ordered_quantity || line.orderedQuantity), 0);
@@ -8885,7 +9070,7 @@ function PurchaseProcessTable({
           const groupSomeActionableSelected =
             groupSelectedActionableCount > 0 && !groupAllActionableSelected;
           const groupSummaryText = [
-            `${formatQuantity(rows.length)}건`,
+            `${formatQuantity(displayRows.length)}건`,
             requestedTotal > 0 ? `요청 ${formatQuantity(requestedTotal)}` : "",
             mode === "order" && orderedTotal > 0 ? `주문 ${formatQuantity(orderedTotal)}` : "",
             mode === "order" && receivedTotal > 0 ? `입고 ${formatQuantity(receivedTotal)}` : "",
@@ -8937,15 +9122,15 @@ function PurchaseProcessTable({
                         ) : null}
                         {isPurchaseColumnVisible("eventAt") ? <TableHead className="w-[118px]">처리일시</TableHead> : null}
                         {isPurchaseColumnVisible("requester") ? <TableHead className="w-[104px]">요청자</TableHead> : null}
-                        {isPurchaseColumnVisible("copyScope") ? <TableHead className="w-[82px]">대상</TableHead> : null}
+                        {isPurchaseColumnVisible("copyScope") ? <TableHead className="w-[92px]">용도</TableHead> : null}
                         {isPurchaseColumnVisible("textbook") ? <TableHead>교재명</TableHead> : null}
                         {isPurchaseColumnVisible("location") ? <TableHead className="w-[88px]">위치</TableHead> : null}
                         {isPurchaseColumnVisible("class") ? <TableHead className="w-[140px]">수업</TableHead> : null}
-                        {isPurchaseColumnVisible("requested") ? <TableHead className="w-[72px] text-right">요청</TableHead> : null}
+                        {isPurchaseColumnVisible("requested") ? <TableHead className="w-[104px] text-right">요청</TableHead> : null}
                         {mode === "order" ? (
                           <>
-                            {isPurchaseColumnVisible("ordered") ? <TableHead className="w-[72px] text-right">주문</TableHead> : null}
-                            {isPurchaseColumnVisible("received") ? <TableHead className="w-[72px] text-right">입고</TableHead> : null}
+                            {isPurchaseColumnVisible("ordered") ? <TableHead className="w-[104px] text-right">주문</TableHead> : null}
+                            {isPurchaseColumnVisible("received") ? <TableHead className="w-[104px] text-right">입고</TableHead> : null}
                           </>
                         ) : null}
                         {isPurchaseColumnVisible("decision") ? <TableHead className="w-[96px]">판단</TableHead> : null}
@@ -8960,9 +9145,17 @@ function PurchaseProcessTable({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rows.map((line) => {
+                      {displayRows.map((displayRow) => {
+                        const line = displayRow.line;
+                        const displayLines = displayRow.lines;
                         const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
                         const lineId = getRecordId(line);
+                        const displayLineIds = displayLines.map((scopeLine) => getRecordId(scopeLine)).filter(Boolean);
+                        const displayActionableLineIds = displayLineIds.filter((id) => visibleActionablePurchaseLineIdSet.has(id));
+                        const displayAllActionableSelected =
+                          displayActionableLineIds.length > 0 && displayActionableLineIds.every((id) => selectedLineIdSet.has(id));
+                        const displaySomeActionableSelected =
+                          displayActionableLineIds.some((id) => selectedLineIdSet.has(id)) && !displayAllActionableSelected;
                         const draft = buildPurchaseCardDraft(line, order);
                         const status = ((text(line.status || order.status) || group.id) as PurchaseKanbanStatus);
                         const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
@@ -8972,27 +9165,22 @@ function PurchaseProcessTable({
                         const locationName = getLocationName(locations, draft.locationId) || "-";
                         const classRecord = getClassById(classes, draft.classId);
                         const classStudentCount = getClassStudentCount(classRecord, students);
-                        const quantityFit = getPurchaseQuantityClassFit(draft.requestedQuantity, classStudentCount);
-                        const requested = numberValue(draft.requestedQuantity);
-                        const ordered = numberValue(draft.orderedQuantity);
-                        const received = numberValue(draft.receivedQuantity);
+                        const quantityFit = getPurchaseQuantityClassFit(String(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested")), classStudentCount);
+                        const ordered = getPurchaseDisplayQuantity(displayLines, "ordered");
+                        const received = getPurchaseDisplayQuantity(displayLines, "received");
                         const nextStatus = purchaseNextStatus(status);
                         const processAction = purchaseProcessAction(status);
-                        const isOrderableRequest = status === "requested" && Boolean(textbook);
                         const isMissingTextbookRequest = status === "requested" && !textbook;
-                        const isReceivableOrder = status === "ordered" || status === "partially_received";
                         const isReturnablePurchaseLine = mode === "order" && received > 0 && status !== "returned" && status !== "cancelled";
                         const isCancelablePurchaseLine = mode === "request" || (status !== "returned" && status !== "cancelled" && !isReturnablePurchaseLine);
-                        const isSelectablePurchaseLine = mode === "order" && (isOrderableRequest || isReceivableOrder || isReturnablePurchaseLine);
-
                         return (
-                          <TableRow key={lineId} className={cn(selectedLineId === lineId && "bg-primary/5")}>
+                          <TableRow key={displayRow.id} className={cn((selectedLineId === lineId || displayLineIds.includes(selectedLineId)) && "bg-primary/5")}>
                             {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? (
                               <TableCell>
                                 <Checkbox
-                                  checked={selectedLineIdSet.has(lineId)}
-                                  disabled={!isSelectablePurchaseLine}
-                                  onCheckedChange={(value) => onToggleLine?.(lineId, value === true)}
+                                  checked={displayAllActionableSelected || (displaySomeActionableSelected && "indeterminate")}
+                                  disabled={displayActionableLineIds.length === 0}
+                                  onCheckedChange={(value) => onToggleVisibleLines?.(displayActionableLineIds, value === true)}
                                   title={`${textbookTitle} 일괄 처리 선택`}
                                   aria-label={`${textbookTitle} 일괄 처리 선택`}
                                 />
@@ -9023,9 +9211,15 @@ function PurchaseProcessTable({
                             {isPurchaseColumnVisible("requester") ? <TableCell className="max-w-[104px] truncate">{draft.requestBy || "-"}</TableCell> : null}
                             {isPurchaseColumnVisible("copyScope") ? (
                               <TableCell>
-                                <Badge variant="outline" className="rounded-md">
-                                  {getTextbookCopyScopeLabel(draft.copyScope)}
-                                </Badge>
+                                <div className="flex flex-col gap-1">
+                                  {(["student", "teacher"] as TextbookCopyScope[])
+                                    .filter((scope) => displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === scope))
+                                    .map((scope) => (
+                                      <Badge key={scope} variant="outline" className="w-fit rounded-md">
+                                        {getTextbookCopyScopeLabel(scope)}
+                                      </Badge>
+                                    ))}
+                                </div>
                               </TableCell>
                             ) : null}
                             {isPurchaseColumnVisible("textbook") ? (
@@ -9050,11 +9244,23 @@ function PurchaseProcessTable({
                                 {classRecord ? getClassName(classRecord) : "수업 미지정"}
                               </TableCell>
                             ) : null}
-                            {isPurchaseColumnVisible("requested") ? <TableCell className="text-right tabular-nums">{formatQuantity(requested)}</TableCell> : null}
+                            {isPurchaseColumnVisible("requested") ? (
+                              <TableCell>
+                                <PurchaseScopeQuantityCell lines={displayLines} kind="requested" />
+                              </TableCell>
+                            ) : null}
                             {mode === "order" ? (
                               <>
-                                {isPurchaseColumnVisible("ordered") ? <TableCell className="text-right tabular-nums">{formatQuantity(ordered)}</TableCell> : null}
-                                {isPurchaseColumnVisible("received") ? <TableCell className="text-right tabular-nums">{formatQuantity(received)}</TableCell> : null}
+                                {isPurchaseColumnVisible("ordered") ? (
+                                  <TableCell>
+                                    <PurchaseScopeQuantityCell lines={displayLines} kind="ordered" />
+                                  </TableCell>
+                                ) : null}
+                                {isPurchaseColumnVisible("received") ? (
+                                  <TableCell>
+                                    <PurchaseScopeQuantityCell lines={displayLines} kind="received" />
+                                  </TableCell>
+                                ) : null}
                               </>
                             ) : null}
                             {isPurchaseColumnVisible("decision") ? (

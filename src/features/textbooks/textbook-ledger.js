@@ -29,7 +29,19 @@ export function normalizeTextbookLookupValue(value, { compact = false } = {}) {
   return normalized.replace(/\s+/g, " ");
 }
 
-export function getTextbookByReference(textbooks = [], reference = "") {
+function getTextbookReferenceAliases(textbook = {}) {
+  return [
+    getTextbookTitle(textbook),
+    textbook.name,
+    textbook.textbook_title,
+    textbook.textbookTitle,
+    textbook.isbn13,
+    textbook.isbn,
+    textbook.barcode,
+  ];
+}
+
+export function getTextbookByExactReference(textbooks = [], reference = "") {
   const target = text(reference);
   if (!target) {
     return undefined;
@@ -41,26 +53,23 @@ export function getTextbookByReference(textbooks = [], reference = "") {
   }
 
   const normalizedTarget = normalizeTextbookLookupValue(target);
-  const compactTarget = normalizeTextbookLookupValue(target, { compact: true });
-  const candidates = arrayValue(textbooks).map((textbook) => {
-    const aliases = [
-      getTextbookTitle(textbook),
-      textbook.name,
-      textbook.textbook_title,
-      textbook.textbookTitle,
-      textbook.isbn13,
-      textbook.isbn,
-      textbook.barcode,
-    ];
+  const normalizedMatch = arrayValue(textbooks).find((textbook) =>
+    getTextbookReferenceAliases(textbook).some((alias) => normalizeTextbookLookupValue(alias) === normalizedTarget));
 
-    return { textbook, aliases };
-  });
-  const normalizedMatch = candidates.find(({ aliases }) =>
-    aliases.some((alias) => normalizeTextbookLookupValue(alias) === normalizedTarget));
-  if (normalizedMatch) {
-    return normalizedMatch.textbook;
+  return normalizedMatch;
+}
+
+export function getTextbookByReference(textbooks = [], reference = "") {
+  const exactMatch = getTextbookByExactReference(textbooks, reference);
+  if (exactMatch) {
+    return exactMatch;
   }
 
+  const compactTarget = normalizeTextbookLookupValue(reference, { compact: true });
+  const candidates = arrayValue(textbooks).map((textbook) => ({
+    textbook,
+    aliases: getTextbookReferenceAliases(textbook),
+  }));
   const compactMatch = candidates.find(({ aliases }) =>
     compactTarget && aliases.some((alias) => normalizeTextbookLookupValue(alias, { compact: true }) === compactTarget));
   return compactMatch?.textbook;

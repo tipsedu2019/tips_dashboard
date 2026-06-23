@@ -506,12 +506,12 @@ test("textbook purchase workflow links registered title requests before ordering
   );
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
 
-  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
+  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookByExactIdOrTitle\(activeTextbooks, purchaseRequestTitle\)/);
   assert.match(workspaceSource, /const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook \|\| requestedCatalogTextbook/);
   assert.match(workspaceSource, /textbookId: getRecordId\(textbook \|\| \{\}\) \|\| text\(payload\.textbookId\)/);
   assert.match(workspaceSource, /getConfiguredTextbookPurchaseUnitCost\([\s\S]*purchaseCopyScope[\s\S]*\)/);
   assert.match(serviceSource, /resolvePurchaseLifecycleTextbook/);
-  assert.match(serviceSource, /requestedTextbookTitle[\s\S]*textbooks[\s\S]*getTextbookByReference/);
+  assert.match(serviceSource, /requestedTextbookTitle[\s\S]*textbooks[\s\S]*getTextbookByExactReference/);
 });
 
 test("textbook workspace exports supplier orders and MakeEdu billing handoffs", async () => {
@@ -699,7 +699,7 @@ test("purchase request tab accepts unregistered textbook titles before managemen
   assert.match(workspaceSource, /purchaseRequestUsesCatalog \? \(/);
   assert.match(workspaceSource, /setPurchaseRequestInputMode\("manual"\)/);
   assert.doesNotMatch(workspaceSource, /등록교재 우선 · 없으면 직접 입력/);
-  assert.match(workspaceSource, /sm:grid-cols-\[minmax\(0,1fr\)_160px\]/);
+  assert.match(workspaceSource, /sm:grid-cols-\[minmax\(0,1fr\)_140px_140px\]/);
   assert.match(workspaceSource, /<Field label="선생님">/);
   assert.match(workspaceSource, /ariaLabel="선생님 선택"/);
   assert.match(workspaceSource, /textbookId: selectedPurchaseTextbookId \|\| purchaseForm\.textbookId/);
@@ -715,7 +715,7 @@ test("purchase request tab accepts unregistered textbook titles before managemen
   assert.match(workspaceSource, /마스터 등록/);
   assert.match(workspaceSource, /buildKyoboSearchUrl/);
   assert.match(workspaceSource, /교보 검색/);
-  assert.match(workspaceSource, /const isSelectablePurchaseLine = mode === "order" &&/);
+  assert.match(workspaceSource, /const displayActionableLineIds = displayLineIds\.filter/);
   assert.match(serviceSource, /requested_textbook_title: requestedTextbookTitle/);
   assert.match(serviceSource, /요청 교재명을 입력하세요/);
   assert.match(serviceSource, /주문할 등록 교재를 선택하세요/);
@@ -844,7 +844,7 @@ test("textbook workspace keeps each textbook workflow visually continuous", asyn
 
   assert.match(workspaceSource, /const includedSaleStudentCount = selectedClassStudents\s*\.filter/);
   assert.match(workspaceSource, /const purchaseProjectedLocationQuantity = purchaseForm\.requestStage === "receive"/);
-  assert.match(workspaceSource, /const configuredPurchaseTotalCost = configuredPurchaseUnitCost \* purchaseStageQuantity/);
+  assert.match(workspaceSource, /const configuredPurchaseTotalCost = configuredPurchaseStudentUnitCost \* \(/);
   assert.match(workspaceSource, /const saleProjectedAmount = saleDraft\.totalAmount/);
   assert.match(workspaceSource, /const saleProjectedEndingQuantity = saleDraft\.availableQuantity - saleDraft\.totalQuantity/);
   assert.match(workspaceSource, /<Metric label="합계" value=\{configuredPurchaseTotalCost > 0 \? formatCurrency\(configuredPurchaseTotalCost\) : "-"\}/);
@@ -923,9 +923,11 @@ test("purchase process rows stay database-style and open the modal for editing",
   assert.match(tableSource, /mode === "request" \? "w-full min-w-\[1040px\]" : "w-full min-w-\[1200px\]"/);
   assert.match(tableSource, /TableHead className="w-\[96px\] text-right">단가/);
   assert.match(tableSource, /TableHead className="w-\[88px\]">위치/);
-  assert.match(tableSource, /TableHead className="w-\[72px\] text-right">요청/);
-  assert.match(tableSource, /TableHead className="w-\[72px\] text-right">주문/);
-  assert.match(tableSource, /TableHead className="w-\[72px\] text-right">입고/);
+  assert.match(tableSource, /TableHead className="w-\[104px\] text-right">요청/);
+  assert.match(tableSource, /TableHead className="w-\[104px\] text-right">주문/);
+  assert.match(tableSource, /TableHead className="w-\[104px\] text-right">입고/);
+  assert.match(tableSource, /buildPurchaseDisplayRows\(rows, ordersById, textbooks\)/);
+  assert.match(tableSource, /PurchaseScopeQuantityCell lines=\{displayLines\} kind="requested"/);
   assert.match(tableSource, /수정/);
   assert.match(tableSource, /purchaseProcessAction\(status\)/);
   assert.match(tableSource, /onSelectLine\(line, order, processAction\.stage\)/);
@@ -957,7 +959,7 @@ test("purchase requests support bulk ordering with requested quantity defaults",
   assert.match(workspaceSource, /선택한 요청을 공급처 주문 단계로 한꺼번에 전환합니다/);
   assert.match(workspaceSource, /draft\.orderedQuantity \|\| draft\.requestedQuantity \|\| "1"/);
   assert.match(workspaceSource, /const nextOrderedQuantity = nextStage === "request" \? orderedQuantity : orderedQuantity \|\| requestedQuantity \|\| "1"/);
-  assert.match(workspaceSource, /<Metric label="요청" value=\{`\$\{formatQuantity\(purchaseForm\.requestedQuantity\)\}권`\}/);
+  assert.match(workspaceSource, /<Metric label="요청" value=\{`\$\{formatQuantity\(purchaseRequestedTotalQuantity\)\}권`\}/);
   assert.match(tableSource, /일괄 처리 가능한 행 전체 선택/);
   assert.match(tableSource, /선택 주문/);
   assert.match(tableSource, /onToggleVisibleLines\?\.\(groupActionableLineIds, value === true\)/);
@@ -1883,7 +1885,7 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
   }
 });
 
-test("textbook workspace locks 50 request ordering safeguards", async () => {
+test("textbook workspace locks 54 request ordering safeguards", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
@@ -1897,23 +1899,23 @@ test("textbook workspace locks 50 request ordering safeguards", async () => {
     /return String\(Math\.max\(options\.allowZero \? 0 : 1, quantity\)\)/,
     /const manualPurchaseCatalogMatches = useMemo/,
     /purchaseRequestInputMode !== "manual"/,
-    /const textbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,
+    /const textbook = getTextbookByExactIdOrTitle\(activeTextbooks, purchaseRequestTitle\)/,
     /return textbook \? \[textbook\] : \[\]/,
     /const hasManualPurchaseCatalogMatch = manualPurchaseCatalogMatches\.length > 0/,
     /purchaseForm\.requestStage === "request" && hasManualPurchaseCatalogMatch/,
     /function setPurchaseField\(name: string, value: string\)/,
     /if \(name === "requestedTextbookTitle"\)/,
     /requestedTextbookTitle: normalizeInlineTextInput\(value\)/,
-    /name === "requestedQuantity" \|\| name === "orderedQuantity" \|\| name === "receivedQuantity"/,
-    /normalizeQuantityInput\(value, \{ allowZero: name === "receivedQuantity" \}\)/,
+    /isPurchaseQuantityField\(name\)/,
+    /normalizePurchaseQuantityField\(name, value\)/,
     /if \(name === "unitCost"\)/,
     /unitCost: normalizeMoneyInput\(value\)/,
     /if \(name === "statementNumber"\)/,
     /statementNumber: normalizeInlineTextInput\(value\)/,
-    /const requestedQuantity = normalizeQuantityInput\(current\.requestedQuantity\) \|\| "1"/,
-    /const orderedQuantity = normalizeQuantityInput\(current\.orderedQuantity\) \|\| requestedQuantity/,
+    /const studentRequestedQuantity = normalizePurchaseQuantityField\("studentRequestedQuantity", current\.studentRequestedQuantity\) \|\| "1"/,
+    /const studentOrderedQuantity = normalizePurchaseQuantityField\("studentOrderedQuantity", current\.studentOrderedQuantity\) \|\| studentRequestedQuantity/,
     /receivedQuantity: value === "receive"/,
-    /normalizeQuantityInput\(current\.receivedQuantity\) \|\| orderedQuantity/,
+    /normalizePurchaseQuantityField\("studentReceivedQuantity", current\.studentReceivedQuantity\) \|\| studentOrderedQuantity/,
     /function settlePurchaseTextField\(name: "requestedTextbookTitle" \| "statementNumber"\)/,
     /normalizeStoredTextInput\(current\[name\]\)/,
     /function selectCatalogTextbookForPurchaseRequest\(row: Row\)/,
@@ -1921,11 +1923,12 @@ test("textbook workspace locks 50 request ordering safeguards", async () => {
     /setPurchaseField\("textbookId", getRecordId\(row\)\)/,
     /if \(purchaseForm\.requestStage === "request" && hasManualPurchaseCatalogMatch\)/,
     /setActionErrorMessage\("이미 등록된 교재입니다\. 등록 교재로 선택해 요청하세요\."\)/,
-    /const requestedQuantity = normalizeQuantityInput\(purchaseForm\.requestedQuantity\) \|\| "1"/,
+    /const purchasePayloads = \(\["student", "teacher"\] as TextbookCopyScope\[\]\)\.flatMap/,
+    /const requestedQuantity = normalizePurchaseQuantityField\(`\$\{scope\}RequestedQuantity`, getPurchaseScopeQuantity\(purchaseForm, scope, "requested"\)\)/,
     /const orderedQuantity = purchaseForm\.requestStage === "request"/,
-    /normalizeQuantityInput\(purchaseForm\.orderedQuantity\) \|\| requestedQuantity/,
+    /normalizePurchaseQuantityField\(`\$\{scope\}OrderedQuantity`, getPurchaseScopeQuantity\(purchaseForm, scope, "ordered"\)\) \|\| requestedQuantity/,
     /const receivedQuantity = purchaseForm\.requestStage === "receive"/,
-    /normalizeQuantityInput\(purchaseForm\.receivedQuantity\) \|\| orderedQuantity/,
+    /normalizePurchaseQuantityField\(`\$\{scope\}ReceivedQuantity`, getPurchaseScopeQuantity\(purchaseForm, scope, "received"\)\) \|\| orderedQuantity/,
     /requestedTextbookTitle: normalizeStoredTextInput\(purchaseRequestTitle\)/,
     /statementNumber: normalizeStoredTextInput\(purchaseForm\.statementNumber\)/,
     /onBlur=\{\(\) => settlePurchaseTextField\("requestedTextbookTitle"\)\}/,
@@ -1936,13 +1939,16 @@ test("textbook workspace locks 50 request ordering safeguards", async () => {
     /selectCatalogTextbookForPurchaseRequest\(row\)/,
     /aria-label=\{`\$\{getTextbookTitle\(row\)\} 등록 교재로 선택`\}/,
     /onBlur=\{\(\) => settlePurchaseTextField\("statementNumber"\)\}/,
-    /<Input value=\{purchaseForm\.requestedQuantity\} onChange=\{\(event\) => setPurchaseField\("requestedQuantity", event\.target\.value\)\} inputMode="numeric" min="1"/,
-    /<Input value=\{purchaseForm\.orderedQuantity\} onChange=\{\(event\) => setPurchaseField\("orderedQuantity", event\.target\.value\)\} inputMode="numeric" min="1"/,
-    /<Input value=\{purchaseForm\.receivedQuantity\} onChange=\{\(event\) => setPurchaseField\("receivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
+    /<Input value=\{purchaseForm\.studentRequestedQuantity\} onChange=\{\(event\) => setPurchaseField\("studentRequestedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
+    /<Input value=\{purchaseForm\.teacherRequestedQuantity\} onChange=\{\(event\) => setPurchaseField\("teacherRequestedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
+    /<Input value=\{purchaseForm\.studentOrderedQuantity\} onChange=\{\(event\) => setPurchaseField\("studentOrderedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
+    /<Input value=\{purchaseForm\.teacherOrderedQuantity\} onChange=\{\(event\) => setPurchaseField\("teacherOrderedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
+    /<Input value=\{purchaseForm\.studentReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("studentReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
+    /<Input value=\{purchaseForm\.teacherReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("teacherReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
     /title=\{purchaseSubmitDisabled \? "필수 항목을 확인하세요" : `\$\{purchaseActionLabel\(purchaseForm\.requestStage\)\} 저장`\}/,
   ];
 
-  assert.equal(safeguards.length, 50);
+  assert.equal(safeguards.length, 54);
   for (const safeguard of safeguards) {
     assert.match(workspaceSource, safeguard);
   }
@@ -2261,7 +2267,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /purchaseForm\.requestStage === "request" && hasManualPurchaseCatalogMatch/,
     /이미 등록된 교재입니다\. 등록 교재로 선택해 요청하세요/,
     /requestedTextbookTitle: normalizeStoredTextInput\(purchaseRequestTitle\)/,
-    /selectedPurchaseLineId\s*\?\s*textbookService\.updatePurchaseLifecycle/,
+    /if \(purchasePayload\.purchaseOrderLineId\) \{\s*await textbookService\.updatePurchaseLifecycle\(purchasePayload\)/,
     /textbookService\.createPurchaseReceipt\(purchasePayload\)/,
     /purchaseActionLabel\(purchaseForm\.requestStage\)/,
     /activeTab === "purchase" && purchaseRequestFilter === "unregistered"/,

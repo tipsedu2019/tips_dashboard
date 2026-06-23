@@ -9,6 +9,7 @@ import {
   buildTextbookMonthlyClosing,
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
+  getTextbookByExactReference,
   getTextbookByReference,
   getTextbookCopyScope,
   getTextbookPurchaseUnitCost,
@@ -182,6 +183,26 @@ test("textbook reference lookup tolerates compact math textbook titles", () => {
   assert.equal(
     getTextbookByReference(textbooks, "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)")?.id,
     "concept-type-live",
+  );
+});
+
+test("textbook exact reference lookup keeps revised editions separated", () => {
+  const textbooks = [
+    { id: "concept-type-2026", title: "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2026년)" },
+    { id: "concept-type-2027", title: "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)" },
+  ];
+
+  assert.equal(
+    getTextbookByExactReference(textbooks, "개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)")?.id,
+    "concept-type-2027",
+  );
+  assert.equal(
+    getTextbookByExactReference(textbooks, "개념+유형 기초탄탄라이트 중학수학 3-1(2027년)"),
+    undefined,
+  );
+  assert.equal(
+    getTextbookByExactReference(textbooks, "개념+유형 기초탄탄 라이트 중학 수학 3-1"),
+    undefined,
   );
 });
 
