@@ -1139,7 +1139,27 @@ function matchesSubjectCatalog(subjects = [], currentSubject = "") {
   ));
 }
 
-const TIMETABLE_EXCLUDED_TEACHER_TEAMS = new Set(["관리팀", "관리", "운영", "admin", "staff", "management"]);
+const TIMETABLE_ACADEMIC_TEACHER_TEAMS = new Set(["영어팀", "수학팀"]);
+const TIMETABLE_KNOWN_TEACHER_TEAMS = new Set(["영어팀", "수학팀", "관리팀", "조교팀"]);
+const TIMETABLE_TEACHER_TEAM_ALIASES = new Map([
+  ["english", "영어팀"],
+  ["eng", "영어팀"],
+  ["영어", "영어팀"],
+  ["영어팀", "영어팀"],
+  ["math", "수학팀"],
+  ["수학", "수학팀"],
+  ["수학팀", "수학팀"],
+  ["admin", "관리팀"],
+  ["staff", "관리팀"],
+  ["management", "관리팀"],
+  ["관리", "관리팀"],
+  ["운영", "관리팀"],
+  ["관리팀", "관리팀"],
+  ["assistant", "조교팀"],
+  ["assist", "조교팀"],
+  ["조교", "조교팀"],
+  ["조교팀", "조교팀"],
+]);
 
 function normalizeCatalogSubjects(subjects = []) {
   if (Array.isArray(subjects)) {
@@ -1155,9 +1175,70 @@ function normalizeCatalogSubjectToken(value) {
     .replace(/(과목|팀)$/g, "");
 }
 
-function isTimetableTeacherCatalogVisible(item = {}) {
-  const teams = normalizeCatalogSubjects(item?.subjects).map((subject) => subject.toLowerCase());
-  return !teams.some((team) => TIMETABLE_EXCLUDED_TEACHER_TEAMS.has(team));
+function normalizeTimetableTeacherTeam(value) {
+  const normalized = text(value).replace(/\s+/g, "");
+  if (!normalized) {
+    return "";
+  }
+
+  return TIMETABLE_TEACHER_TEAM_ALIASES.get(normalized.toLowerCase()) || normalized;
+}
+
+function getTimetableTeacherTeams(item = {}) {
+  return normalizeCatalogSubjects(item?.subjects)
+    .map(normalizeTimetableTeacherTeam)
+    .filter(Boolean);
+}
+
+function getTimetableTeacherTeamForSubject(subject = "") {
+  const team = normalizeTimetableTeacherTeam(subject);
+  return TIMETABLE_ACADEMIC_TEACHER_TEAMS.has(team) ? team : "";
+}
+
+function isTimetableTeacherCatalogVisible(item = {}, currentSubject = "") {
+  const teams = getTimetableTeacherTeams(item);
+  const knownTeams = teams.filter((team) => TIMETABLE_KNOWN_TEACHER_TEAMS.has(team));
+  if (knownTeams.length === 0) {
+    return true;
+  }
+
+  const academicTeams = knownTeams.filter((team) => TIMETABLE_ACADEMIC_TEACHER_TEAMS.has(team));
+  if (academicTeams.length === 0) {
+    return false;
+  }
+
+  const targetTeam = getTimetableTeacherTeamForSubject(currentSubject);
+  return !targetTeam || academicTeams.includes(targetTeam);
+}
+
+function isTimetableTeacherFallbackVisible(name, teacherCatalogs = [], currentSubject = "") {
+  const teacherName = text(name);
+  if (!teacherName) {
+    return false;
+  }
+
+  const matchedCatalogs = toArray(teacherCatalogs).filter((item) => text(item?.name) === teacherName);
+  if (matchedCatalogs.length === 0) {
+    return true;
+  }
+
+  return matchedCatalogs.some(
+    (item) => item?.is_visible !== false && isTimetableTeacherCatalogVisible(item, currentSubject),
+  );
+}
+
+function buildTimetableTeacherOptions(teacherCatalogs = [], currentSubject = "", fallbackOptions = []) {
+  const visibleCatalogOptions = toArray(teacherCatalogs)
+    .filter((item) => item?.is_visible !== false && isTimetableTeacherCatalogVisible(item, currentSubject))
+    .sort((left, right) => Number(left?.sort_order || left?.sortOrder || 0) - Number(right?.sort_order || right?.sortOrder || 0) || text(left?.name).localeCompare(text(right?.name), "ko"))
+    .map((item) => text(item?.name))
+    .filter(Boolean);
+
+  const fallback = toArray(fallbackOptions)
+    .map((value) => text(value))
+    .filter((value) => isTimetableTeacherFallbackVisible(value, teacherCatalogs, currentSubject));
+
+  return unique([...visibleCatalogOptions, ...fallback]);
 }
 
 function buildCatalogBackedOptions(catalogs = [], currentSubject = "", fallbackOptions = [], normalizer = text, catalogFilter = () => true) {
@@ -1195,12 +1276,10 @@ function buildTimetableOptions(classes, classTerms, rows, teacherCatalogs = [], 
     gradeOptions: unique(classes.map((classItem) => text(classItem?.grade))).sort(
       (left, right) => left.localeCompare(right, "ko"),
     ),
-    teacherOptions: buildCatalogBackedOptions(
+    teacherOptions: buildTimetableTeacherOptions(
       teacherCatalogs,
       currentSubject,
       rows.map((row) => row.teacher).filter((value) => value && !isClassroomToken(value)),
-      text,
-      isTimetableTeacherCatalogVisible,
     ),
     classroomOptions: buildCatalogBackedOptions(
       classroomCatalogs,

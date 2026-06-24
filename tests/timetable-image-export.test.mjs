@@ -60,14 +60,39 @@ test("timetable panel headers show lesson count and weekly hours", async () => {
 
 test("compact timetable blocks keep class names readable", async () => {
   const css = await readSource("src/features/academic/timetable-grid-skin.module.css");
+  const component = await readSource("src/features/academic/components/legacy-timetable-grid.jsx");
   const globals = await readSource("src/app/globals.css");
 
   assert.match(css, /-webkit-line-clamp:\s*2/);
-  assert.match(css, /\.scope :global\(\.timetable-cell\) \{[\s\S]*overflow:\s*hidden/);
+  assert.match(css, /\.scope :global\(\.timetable-cell\) \{[\s\S]*overflow:\s*visible/);
   assert.match(css, /word-break:\s*keep-all/);
   assert.match(css, /\.scope :global\(\.block-value\)/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\)/);
+  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact\) \{[\s\S]*justify-content:\s*flex-start/);
+  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-subject\) \{[\s\S]*align-self:\s*flex-start/);
+  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\) \{[\s\S]*word-break:\s*break-all/);
+  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\) \{[\s\S]*text-align:\s*left/);
+  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-info\) \{[\s\S]*margin-top:\s*auto/);
+  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.info-label\) \{[\s\S]*display:\s*none/);
+  assert.match(css, /--timetable-fit-min-width:\s*560px/);
+  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.scope :global\(\.timetable-grid-shell\.is-fit-columns\) \{[\s\S]*overflow-x:\s*auto !important/);
+  assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.scope :global\(\.timetable-grid-shell\.is-fit-columns \.timetable-grid\) \{[\s\S]*min-width:\s*560px/);
+  assert.match(component, /minWidth:\s*fitColumns \? 'var\(--timetable-fit-min-width, 0\)' : undefined/);
   assert.match(globals, /\.timetable-floating-tooltip/);
   assert.match(globals, /\.timetable-tooltip-title/);
   assert.match(globals, /\.timetable-tooltip-badge/);
+});
+
+test("timetable toolbar separates dense controls from scrollable target filters", async () => {
+  const source = await readSource("src/features/academic/timetable-workspace.tsx");
+
+  assert.match(source, /lg:grid-cols-\[12rem_minmax\(0,1fr\)_minmax\(0,1fr\)_9rem\]/);
+  assert.match(source, /xl:grid-cols-\[minmax\(18rem,0\.7fr\)_minmax\(0,1fr\)_auto\]/);
+  assert.match(source, /grid grid-cols-2 gap-1\.5 sm:grid-cols-4/);
+  assert.match(source, /className="h-8 min-w-0 justify-center rounded-md px-2 text-\[11px\] font-medium"/);
+  assert.match(source, /overflow-x-auto px-1 pb-1 \[scrollbar-width:thin\]/);
+  assert.match(source, /whitespace-nowrap/);
+  assert.match(source, /"--timetable-panel-columns": `repeat\(\$\{Math\.min\(/);
+  assert.match(source, /grid grid-cols-1 gap-6 lg:\[grid-template-columns:var\(--timetable-panel-columns\)\]/);
+  assert.match(source, /필터 초기화/);
 });

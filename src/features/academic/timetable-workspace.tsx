@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   CalendarDays,
   GraduationCap,
@@ -306,6 +315,12 @@ export function AcademicTimetableWorkspace() {
   );
 
   const panelLayout = getTimetablePanelLayout({ view, gridCount });
+  const panelGridStyle = {
+    "--timetable-panel-columns": `repeat(${Math.min(
+      gridCount,
+      Math.max(grid.panels.length, 1),
+    )}, minmax(0, 1fr))`,
+  } as CSSProperties;
 
   const toggleFilterValue = (
     value: string,
@@ -362,9 +377,9 @@ export function AcademicTimetableWorkspace() {
         </Alert>
       ) : null}
 
-      <div className="flex flex-col gap-4 border border-border/70 bg-background p-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(180px,0.95fr)_minmax(190px,0.9fr)_minmax(180px,0.8fr)_minmax(320px,1.35fr)_auto]">
-          <div className="space-y-2">
+      <div className="flex flex-col gap-4 border border-border/70 bg-background p-3 sm:p-4">
+        <div className="grid gap-3 lg:grid-cols-[12rem_minmax(0,1fr)_minmax(0,1fr)_9rem]">
+          <div className="min-w-0 space-y-2">
             <Label htmlFor="period-filter" className="text-[11px] text-muted-foreground">기간</Label>
             <Select
               value={classGroupId || defaultPeriodId || "none"}
@@ -375,7 +390,7 @@ export function AcademicTimetableWorkspace() {
                 }
               }}
             >
-              <SelectTrigger id="period-filter" className="h-9 rounded-sm">
+              <SelectTrigger id="period-filter" className="h-9 w-full rounded-md">
                 <SelectValue placeholder="기간" />
               </SelectTrigger>
               <SelectContent>
@@ -394,7 +409,7 @@ export function AcademicTimetableWorkspace() {
             </Select>
           </div>
 
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <Label className="text-[11px] text-muted-foreground">수업 상태</Label>
             <div className="flex flex-wrap gap-2">
               {workspace.statusOptions.map((option) => (
@@ -404,7 +419,7 @@ export function AcademicTimetableWorkspace() {
                   variant={status === option ? "default" : "outline"}
                   size="sm"
                   onClick={() => setStatus(option)}
-                  className="h-9 rounded-sm px-3 text-[12px] font-medium"
+                  className="h-9 shrink-0 rounded-md px-3 text-[12px] font-medium"
                 >
                   {option}
                 </Button>
@@ -412,7 +427,7 @@ export function AcademicTimetableWorkspace() {
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <Label className="text-[11px] text-muted-foreground">과목</Label>
             <div className="flex flex-wrap gap-2">
               {subjectFilterOptions.map((option) => (
@@ -422,7 +437,7 @@ export function AcademicTimetableWorkspace() {
                   variant={subject === option ? "default" : "outline"}
                   size="sm"
                   onClick={() => setSubject(option)}
-                  className="h-9 min-w-12 rounded-sm px-3 text-[12px] font-medium"
+                  className="h-9 min-w-12 shrink-0 rounded-md px-3 text-[12px] font-medium"
                 >
                   {option || "전체"}
                 </Button>
@@ -430,9 +445,32 @@ export function AcademicTimetableWorkspace() {
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
+            <Label className="text-[11px] text-muted-foreground">레이아웃</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {GRID_OPTIONS.map((count) => {
+                const active = count === gridCount;
+                return (
+                  <Button
+                    key={count}
+                    type="button"
+                    variant={active ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setGridCount(count)}
+                    className="h-9 min-w-0 rounded-md px-2 text-[12px] font-medium"
+                  >
+                    {count}단
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 border-t border-border/70 pt-3 xl:grid-cols-[minmax(18rem,0.7fr)_minmax(0,1fr)_auto] xl:items-end">
+          <div className="min-w-0 space-y-2">
             <Label className="text-[11px] text-muted-foreground">보기 전환</Label>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
               {VIEW_OPTIONS.map((option) => {
                 const Icon = option.icon;
                 const active = option.id === view;
@@ -443,79 +481,48 @@ export function AcademicTimetableWorkspace() {
                     variant={active ? "default" : "outline"}
                     size="sm"
                     onClick={() => setView(option.id)}
-                    className="h-9 rounded-sm px-3 text-[12px] font-medium"
+                    className="h-8 min-w-0 justify-center rounded-md px-2 text-[11px] font-medium"
                   >
-                    <Icon className="mr-1.5 size-3.5" />
-                    {option.label}
+                    <Icon className="mr-1 size-3.5 shrink-0" />
+                    <span className="min-w-0 truncate">{option.label}</span>
                   </Button>
                 );
               })}
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-[11px] text-muted-foreground">레이아웃</Label>
-            <div className="flex gap-2">
-              {GRID_OPTIONS.map((count) => {
-                const active = count === gridCount;
-                return (
-                  <Button
-                    key={count}
-                    type="button"
-                    variant={active ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setGridCount(count)}
-                    className="h-9 min-w-14 rounded-sm px-3 text-[12px] font-medium"
-                  >
-                    {count}단
-                  </Button>
-                );
-              })}
+          <div className="min-w-0 space-y-2">
+            <Label className="text-[11px] text-muted-foreground">{activeSubFilterLabel}</Label>
+            <div className="-mx-1 flex min-w-0 gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+              {(view === "teacher-weekly"
+                ? workspace.teacherOptions.map((option) => ({
+                    label: option,
+                    active: selectedTeachers.includes(option),
+                    onClick: () => toggleFilterValue(option, selectedTeachers, setSelectedTeachers),
+                  }))
+                : view === "classroom-weekly"
+                  ? workspace.classroomOptions.map((option) => ({
+                      label: option,
+                      active: selectedClassrooms.includes(option),
+                      onClick: () => toggleFilterValue(option, selectedClassrooms, setSelectedClassrooms),
+                    }))
+                  : workspace.dayOptions.map((option) => ({
+                      label: option,
+                      active: selectedDays.includes(option),
+                      onClick: () => toggleFilterValue(option, selectedDays, setSelectedDays),
+                    }))).map((option) => (
+                      <Button
+                        key={option.label}
+                        type="button"
+                        variant={option.active ? "default" : "outline"}
+                        size="sm"
+                        onClick={option.onClick}
+                        className="h-8 shrink-0 rounded-md px-2.5 text-[12px] font-medium whitespace-nowrap"
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
             </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border/70 pt-3">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            <div className="text-[11px] text-muted-foreground">{activeSubFilterLabel}</div>
-            {view === "teacher-weekly"
-              ? workspace.teacherOptions.map((option) => (
-                  <Button
-                    key={option}
-                    type="button"
-                    variant={selectedTeachers.includes(option) ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => toggleFilterValue(option, selectedTeachers, setSelectedTeachers)}
-                    className="h-8 rounded-sm px-2.5 text-[12px] font-medium"
-                  >
-                    {option}
-                  </Button>
-                ))
-              : view === "classroom-weekly"
-                ? workspace.classroomOptions.map((option) => (
-                    <Button
-                      key={option}
-                      type="button"
-                      variant={selectedClassrooms.includes(option) ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => toggleFilterValue(option, selectedClassrooms, setSelectedClassrooms)}
-                      className="h-8 rounded-sm px-2.5 text-[12px] font-medium"
-                    >
-                      {option}
-                    </Button>
-                  ))
-                : workspace.dayOptions.map((option) => (
-                    <Button
-                      key={option}
-                      type="button"
-                      variant={selectedDays.includes(option) ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => toggleFilterValue(option, selectedDays, setSelectedDays)}
-                      className="h-8 rounded-sm px-2.5 text-[12px] font-medium"
-                    >
-                      {option}
-                    </Button>
-                  ))}
           </div>
 
           <Button
@@ -523,7 +530,7 @@ export function AcademicTimetableWorkspace() {
             variant="ghost"
             size="sm"
             onClick={resetFilters}
-            className="h-8 shrink-0 rounded-sm px-2.5 text-[12px] font-medium text-muted-foreground"
+            className="h-8 shrink-0 rounded-md px-2.5 text-[12px] font-medium text-muted-foreground xl:self-end"
           >
             필터 초기화
           </Button>
@@ -536,13 +543,8 @@ export function AcademicTimetableWorkspace() {
         </div>
       ) : (
         <div
-          className="grid gap-6"
-          style={{
-            gridTemplateColumns: `repeat(${Math.min(
-              gridCount,
-              Math.max(grid.panels.length, 1),
-            )}, minmax(0, 1fr))`,
-          }}
+          className="grid grid-cols-1 gap-6 lg:[grid-template-columns:var(--timetable-panel-columns)]"
+          style={panelGridStyle}
         >
           {grid.panels.map((panel) => {
             const PanelIcon = iconForView(view);

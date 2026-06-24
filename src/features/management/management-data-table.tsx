@@ -1,7 +1,7 @@
 "use client";
 "use no memo";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   type ColumnDef,
@@ -106,6 +106,7 @@ const CLASS_FILTERS = [
   { id: "teacher", label: "선생님" },
   { id: "classroom", label: "강의실" },
 ] as const;
+const CLASS_QUICK_FILTER_IDS = CLASS_FILTERS.map((filter) => `class-${filter.id}`);
 
 type ClassFilterColumnId = (typeof CLASS_FILTERS)[number]["id"];
 
@@ -2759,12 +2760,7 @@ export function ManagementDataTable({
           })),
         ].filter(Boolean) as ClassFilterPanelChip[]
       : [];
-  const activeStudentFilterCount = [
-    statusFilter,
-    studentSchoolCategoryFilter,
-    studentSchoolFilter,
-    studentGradeFilter,
-  ].filter(Boolean).length;
+  const activeStudentMenuFilterCount = [statusFilter].filter(Boolean).length;
 
   const renderStudentStatusSelect = () => (
     <div className="min-w-0">
@@ -2886,6 +2882,13 @@ export function ManagementDataTable({
           ))}
         </SelectContent>
       </Select>
+    </div>
+  );
+
+  const renderStudentQuickFilter = (label: string, select: ReactNode) => (
+    <div className="grid min-w-0 gap-1.5">
+      <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
+      {select}
     </div>
   );
 
@@ -3154,6 +3157,7 @@ export function ManagementDataTable({
           createLabel={createLabel}
           onCreate={actions.onCreate}
           createDisabled={!hasCreateAction}
+          quickSelectIds={CLASS_QUICK_FILTER_IDS}
           footerAction={null}
         />
       ) : (
@@ -3174,34 +3178,22 @@ export function ManagementDataTable({
                     <Button type="button" variant="outline" size="sm" className="h-9 shrink-0 rounded-md">
                       <SlidersHorizontal className="mr-2 size-4" />
                       필터
-                      {activeStudentFilterCount > 0 ? (
+                      {activeStudentMenuFilterCount > 0 ? (
                         <span className="ml-2 rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
-                          {activeStudentFilterCount}
+                          {activeStudentMenuFilterCount}
                         </span>
                       ) : null}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent align="end" className="w-[min(42rem,calc(100vw-2rem))] p-3">
+                  <PopoverContent align="end" className="w-[min(18rem,calc(100vw-2rem))] p-3">
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <div className="text-sm font-semibold">필터</div>
-                      {resetControl}
+                      {statusFilter ? resetControl : null}
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-4">
+                    <div className="grid gap-3">
                       <div className="grid min-w-0 gap-1.5">
                         <Label className="text-xs font-medium text-muted-foreground">재원 상태</Label>
                         {renderStudentStatusSelect()}
-                      </div>
-                      <div className="grid min-w-0 gap-1.5">
-                        <Label className="text-xs font-medium text-muted-foreground">학교 구분</Label>
-                        {renderStudentSchoolCategorySelect()}
-                      </div>
-                      <div className="grid min-w-0 gap-1.5">
-                        <Label className="text-xs font-medium text-muted-foreground">학교</Label>
-                        {renderStudentSchoolSelect()}
-                      </div>
-                      <div className="grid min-w-0 gap-1.5">
-                        <Label className="text-xs font-medium text-muted-foreground">학년</Label>
-                        {renderStudentGradeSelect()}
                       </div>
                     </div>
                   </PopoverContent>
@@ -3267,6 +3259,14 @@ export function ManagementDataTable({
               </>
             )}
           </div>
+
+          {kind === "students" ? (
+            <div data-testid="student-quick-filters" className="grid gap-2 sm:grid-cols-3">
+              {renderStudentQuickFilter("학교 구분", renderStudentSchoolCategorySelect())}
+              {renderStudentQuickFilter("학교", renderStudentSchoolSelect())}
+              {renderStudentQuickFilter("학년", renderStudentGradeSelect())}
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
             {showSummaryBadge ? <Badge variant="secondary">{summaryLabel}</Badge> : null}

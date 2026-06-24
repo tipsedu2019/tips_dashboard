@@ -811,7 +811,7 @@ function TimetableGrid({
         style={{
           gridTemplateColumns: `${timeColumnWidth}px repeat(${columns.length}, minmax(${minColumnWidth}px, 1fr))`,
           width: fitColumns ? '100%' : undefined,
-          minWidth: fitColumns ? 0 : undefined,
+          minWidth: fitColumns ? 'var(--timetable-fit-min-width, 0)' : undefined,
         }}
       >
         <div className={['timetable-header-cell', crosshairEnabled && hoveredSlot ? 'hover-highlight' : ''].filter(Boolean).join(' ')}>

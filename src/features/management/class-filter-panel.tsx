@@ -55,6 +55,7 @@ type ClassFilterPanelProps = {
   onCreate?: () => void;
   createDisabled?: boolean;
   footerAction?: ReactNode;
+  quickSelectIds?: string[];
   className?: string;
 };
 
@@ -77,11 +78,54 @@ export function ClassFilterPanel({
   onCreate,
   createDisabled = false,
   footerAction,
+  quickSelectIds = [],
   className,
 }: ClassFilterPanelProps) {
   const hasCreate = Boolean(createLabel);
   const activeFilterCount = filterCount ?? chips.length;
   const hasSearchValue = searchValue.trim().length > 0;
+  const quickSelectIdSet = new Set(quickSelectIds);
+  const quickSelects = selects.filter((select) => quickSelectIdSet.has(select.id));
+  const menuSelects = selects.filter((select) => !quickSelectIdSet.has(select.id));
+  const menuSelectIdSet = new Set(menuSelects.map((select) => select.id));
+  const activeMenuFilterCount = quickSelects.length > 0
+    ? chips.filter((chip) => menuSelectIdSet.has(chip.id)).length
+    : activeFilterCount;
+
+  const renderSelectField = (select: ClassFilterPanelSelect) => {
+    const options = normalizeOptions(select.options);
+    const emptyValue = select.emptyValue || "all";
+    const value = select.value || (select.allowEmpty ? emptyValue : options[0]?.value || emptyValue);
+    const disabled = select.disabled || (!select.allowEmpty && options.length === 0);
+
+    return (
+      <div key={select.id} className="grid min-w-0 gap-1.5">
+        <Label htmlFor={`${select.id}-filter`} className="text-xs font-medium text-muted-foreground">
+          {select.label}
+        </Label>
+        <Select value={value} disabled={disabled} onValueChange={select.onChange}>
+          <SelectTrigger className="h-9 w-full min-w-0" id={`${select.id}-filter`} aria-label={select.label}>
+            <SelectValue placeholder={select.label} />
+          </SelectTrigger>
+          <SelectContent>
+            {select.allowEmpty ? (
+              <SelectItem value={emptyValue}>{select.emptyLabel || `전체 ${select.label}`}</SelectItem>
+            ) : null}
+            {!select.allowEmpty && options.length === 0 ? (
+              <SelectItem value={emptyValue} disabled>
+                {select.emptyLabel || `${select.label} 없음`}
+              </SelectItem>
+            ) : null}
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  };
 
   return (
     <div className={cn("flex flex-col gap-2 border border-border/70 bg-background px-3 py-3", className)}>
@@ -112,7 +156,7 @@ export function ClassFilterPanel({
           ) : null}
         </div>
 
-        {selects.length > 0 ? (
+        {menuSelects.length > 0 ? (
           <Popover>
             <PopoverTrigger asChild>
               <Button
@@ -127,9 +171,9 @@ export function ClassFilterPanel({
                 {primaryLabel ? (
                   <span className="ml-2 max-w-[8rem] truncate text-muted-foreground">{primaryLabel}</span>
                 ) : null}
-                {activeFilterCount > 0 ? (
+                {activeMenuFilterCount > 0 ? (
                   <span className="ml-2 rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
-                    {activeFilterCount}
+                    {activeMenuFilterCount}
                   </span>
                 ) : null}
               </Button>
@@ -144,9 +188,9 @@ export function ClassFilterPanel({
                       {primaryLabel}
                     </Badge>
                   ) : null}
-                  {activeFilterCount > 0 ? (
+                  {activeMenuFilterCount > 0 ? (
                     <Badge variant="secondary" className="rounded-md px-1.5 text-[11px] tabular-nums">
-                      {activeFilterCount}
+                      {activeMenuFilterCount}
                     </Badge>
                   ) : null}
                 </div>
@@ -157,40 +201,7 @@ export function ClassFilterPanel({
                 ) : null}
               </div>
               <div className="grid gap-3 p-3 sm:grid-cols-2">
-                {selects.map((select) => {
-                  const options = normalizeOptions(select.options);
-                  const emptyValue = select.emptyValue || "all";
-                  const value = select.value || (select.allowEmpty ? emptyValue : options[0]?.value || emptyValue);
-                  const disabled = select.disabled || (!select.allowEmpty && options.length === 0);
-
-                  return (
-                    <div key={select.id} className="grid min-w-0 gap-1.5">
-                      <Label htmlFor={`${select.id}-filter`} className="text-xs font-medium text-muted-foreground">
-                        {select.label}
-                      </Label>
-                      <Select value={value} disabled={disabled} onValueChange={select.onChange}>
-                        <SelectTrigger className="h-9 w-full" id={`${select.id}-filter`} aria-label={select.label}>
-                          <SelectValue placeholder={select.label} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {select.allowEmpty ? (
-                            <SelectItem value={emptyValue}>{select.emptyLabel || `전체 ${select.label}`}</SelectItem>
-                          ) : null}
-                          {!select.allowEmpty && options.length === 0 ? (
-                            <SelectItem value={emptyValue} disabled>
-                              {select.emptyLabel || `${select.label} 없음`}
-                            </SelectItem>
-                          ) : null}
-                          {options.map((option) => (
-                            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  );
-                })}
+                {menuSelects.map(renderSelectField)}
               </div>
             </PopoverContent>
           </Popover>
@@ -209,6 +220,12 @@ export function ClassFilterPanel({
           </Button>
         ) : null}
       </div>
+
+      {quickSelects.length > 0 ? (
+        <div data-testid="class-filter-quick-selects" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {quickSelects.map(renderSelectField)}
+        </div>
+      ) : null}
 
       {summaryLabel || chips.length > 0 || showReset || footerAction ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">

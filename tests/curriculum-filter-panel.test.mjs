@@ -9,6 +9,8 @@ test("curriculum workspace reuses the class management filter panel", async () =
 
   assert.match(source, /@\/features\/management\/class-filter-panel/);
   assert.match(source, /<ClassFilterPanel\s+selects=\{filterSelects\}/);
+  assert.match(source, /quickSelectIds=\{CURRICULUM_QUICK_FILTER_IDS\}/);
+  assert.match(source, /const CURRICULUM_QUICK_FILTER_IDS = \["subject", "grade", "teacher", "classroom"\]/);
   assert.doesNotMatch(source, /AcademicFilterToolbar/);
   assert.match(source, /id: "period"/);
   assert.match(source, /label: "수업 상태"/);
@@ -203,7 +205,14 @@ test("shared class filter panel separates search and view state from filter coun
   const source = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
 
   assert.match(source, /filterCount\?: number/);
+  assert.match(source, /quickSelectIds\?: string\[\]/);
+  assert.match(source, /const quickSelects = selects\.filter/);
+  assert.match(source, /const menuSelects = selects\.filter/);
+  assert.match(source, /data-testid="class-filter-quick-selects"/);
+  assert.match(source, /quickSelects\.map\(renderSelectField\)/);
+  assert.match(source, /menuSelects\.map\(renderSelectField\)/);
   assert.match(source, /const activeFilterCount = filterCount \?\? chips\.length/);
+  assert.match(source, /const activeMenuFilterCount = quickSelects\.length > 0/);
   assert.match(source, /aria-label=\{searchPlaceholder\}/);
   assert.match(source, /data-testid="class-filter-popover-header"/);
   assert.match(source, /<PopoverContent align="end" className="w-\[min\(34rem,calc\(100vw-2rem\)\)\] p-0">/);

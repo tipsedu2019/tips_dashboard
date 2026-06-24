@@ -38,6 +38,7 @@ const CURRICULUM_VIEW_MODES = [
   { value: "update", label: "진도 미배정" },
   { value: "done", label: "계획 완료" },
 ] as const;
+const CURRICULUM_QUICK_FILTER_IDS = ["subject", "grade", "teacher", "classroom"];
 const CURRICULUM_SCROLL_STORAGE_PREFIX = "tips:curriculum-work-queue-scroll:";
 
 function rowMatchesViewMode(row: Record<string, unknown>, viewMode: string) {
@@ -626,6 +627,7 @@ export function AcademicCurriculumWorkspace() {
           showReset={hasActiveFilters}
           onReset={resetFilters}
           filterCount={filterChips.length}
+          quickSelectIds={CURRICULUM_QUICK_FILTER_IDS}
           footerAction={
             <Popover>
               <PopoverTrigger asChild>

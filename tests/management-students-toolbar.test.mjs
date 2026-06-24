@@ -10,6 +10,8 @@ test("class toolbar uses the shared class filter panel", async () => {
   const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
 
   assert.match(source, /<ClassFilterPanel\s+selects=\{classFilterSelects\}/);
+  assert.match(source, /quickSelectIds=\{CLASS_QUICK_FILTER_IDS\}/);
+  assert.match(source, /const CLASS_QUICK_FILTER_IDS = CLASS_FILTERS\.map/);
   assert.match(source, /classFilterChips/);
   assert.match(panelSource, /searchPlaceholder/);
   assert.match(panelSource, /role="search" aria-label=\{searchPlaceholder\}/);
@@ -29,9 +31,15 @@ test("student management filters lifecycle status separately from school filters
   assert.match(source, /renderStudentSchoolCategorySelect/);
   assert.match(source, /renderStudentSchoolSelect/);
   assert.match(source, /renderStudentGradeSelect/);
+  assert.match(source, /data-testid="student-quick-filters"/);
+  assert.match(source, /renderStudentQuickFilter\("학교 구분", renderStudentSchoolCategorySelect\(\)\)/);
+  assert.match(source, /renderStudentQuickFilter\("학교", renderStudentSchoolSelect\(\)\)/);
+  assert.match(source, /renderStudentQuickFilter\("학년", renderStudentGradeSelect\(\)\)/);
   assert.match(source, /studentSchoolCategoryFilter/);
   assert.match(source, /<div className="text-sm font-semibold">필터<\/div>/);
   assert.match(source, /\{resetControl\}/);
+  assert.match(source, /const activeStudentMenuFilterCount = \[statusFilter\]/);
+  assert.doesNotMatch(source, /sm:grid-cols-4/);
   assert.doesNotMatch(source, /kind !== "students" && statusFilter/);
 });
 
