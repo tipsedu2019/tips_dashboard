@@ -66,7 +66,7 @@ import {
 import { useDataTableColumns, type DataTableColumn } from "@/components/data-table/data-table-columns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { captureElementAsPngBlob, downloadBlob } from "@/lib/export-as-image";
+import { captureElementAsPdfBlob, captureElementAsPngBlob, downloadBlob } from "@/lib/export-as-image";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -188,6 +188,23 @@ type TextbookHandoffLine = {
   note: string;
   quantityLabel: string;
   amountLabel: string;
+  locationLabel?: string;
+  locationQuantities?: TextbookHandoffLocationQuantity[];
+  publisherLabel?: string;
+  studentQuantityLabel?: string;
+  teacherQuantityLabel?: string;
+  unitCostLabel?: string;
+};
+type TextbookHandoffLocationQuantity = {
+  locationLabel: string;
+  studentQuantityLabel: string;
+  teacherQuantityLabel: string;
+};
+type PreparedHandoffDownload = {
+  id: string;
+  label: string;
+  filename: string;
+  url: string;
 };
 type PurchaseSupplierHandoffLineAccumulator = {
   id: string;
@@ -195,10 +212,11 @@ type PurchaseSupplierHandoffLineAccumulator = {
   publisherLabel: string;
   classLabels: string[];
   locationLabels: string[];
+  locationScopeQuantities: Map<string, Record<TextbookCopyScope, number>>;
   requesterLabels: string[];
   statusLabels: string[];
   scopeQuantities: Record<TextbookCopyScope, number>;
-  amountLabels: string[];
+  unitCostLabels: string[];
   remainingQuantity: number;
   totalQuantity: number;
   totalAmount: number;
@@ -1536,14 +1554,6 @@ function getSafeExportFileName(value: string) {
     .slice(0, 80) || "textbook-export";
 }
 
-function escapeHtml(value: string) {
-  return text(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function getElementById(id: string) {
   const element = document.getElementById(id);
   if (!element) {
@@ -1561,76 +1571,67 @@ function getHandoffCaptureElement(elementId: string) {
 
 async function writeClipboardText(value: string) {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // Fall through to the selection-based copy path when the browser blocks clipboard writes.
+    }
   }
 
   const textarea = document.createElement("textarea");
   textarea.value = value;
   textarea.setAttribute("readonly", "true");
   textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.width = "1px";
+  textarea.style.height = "1px";
+  textarea.style.opacity = "0";
   document.body.appendChild(textarea);
+  textarea.focus({ preventScroll: true });
   textarea.select();
-  document.execCommand("copy");
+  textarea.setSelectionRange(0, value.length);
+  const copied = document.execCommand("copy");
   document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("클립보드 권한이 없어 복사하지 못했습니다.");
+  }
 }
 
-async function copyOrDownloadHandoffImage(element: HTMLElement, filename: string) {
+function createPreparedHandoffDownload(blob: Blob, filename: string, extension: "png" | "pdf", label: string) {
+  const safeFilename = `${getSafeExportFileName(filename)}.${extension}`;
+  downloadBlob(blob, safeFilename);
+
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    label,
+    filename: safeFilename,
+    url: URL.createObjectURL(blob),
+  };
+}
+
+async function downloadHandoffImage(element: HTMLElement, filename: string) {
   const blob = await captureElementAsPngBlob(element, {
     width: Math.max(720, Math.ceil(element.scrollWidth)),
     padding: 0,
     scale: 2,
     backgroundColor: "#ffffff",
   });
-  const ClipboardItemCtor = (window as unknown as {
-    ClipboardItem?: new (items: Record<string, Blob>) => ClipboardItem;
-  }).ClipboardItem;
 
-  if (navigator.clipboard?.write && ClipboardItemCtor) {
-    try {
-      await navigator.clipboard.write([new ClipboardItemCtor({ "image/png": blob })]);
-      return "copied" as const;
-    } catch {
-      // Some browsers block image clipboard writes. Saving the PNG keeps the action useful.
-    }
-  }
-
-  downloadBlob(blob, `${getSafeExportFileName(filename)}.png`);
-  return "downloaded" as const;
+  return createPreparedHandoffDownload(blob, filename, "png", "이미지");
 }
 
-function printHandoffElement(element: HTMLElement, title: string) {
-  const printWindow = window.open("", "_blank", "noopener,noreferrer,width=960,height=720");
-  if (!printWindow) {
-    throw new Error("인쇄 창을 열 수 없습니다.");
-  }
+async function downloadHandoffPdf(element: HTMLElement, filename: string) {
+  const blob = await captureElementAsPdfBlob(element, {
+    width: Math.max(720, Math.ceil(element.scrollWidth)),
+    padding: 0,
+    scale: 2,
+    backgroundColor: "#ffffff",
+  });
 
-  printWindow.document.write(`<!doctype html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(title)}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #ffffff; color: #111827; font-family: "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; }
-    main { padding: 24px; }
-    [data-handoff-toolbar] { display: none !important; }
-    [data-handoff-scroll] { max-height: none !important; overflow: visible !important; }
-    [data-handoff-print-root] { max-height: none !important; overflow: visible !important; }
-    [data-handoff-card] { break-inside: avoid; page-break-inside: avoid; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; }
-    th { background: #f8fafc; font-size: 12px; }
-    .text-right { text-align: right; }
-  </style>
-</head>
-<body>
-  <main>${element.outerHTML}</main>
-  <script>window.onload = () => { window.focus(); window.print(); };</script>
-</body>
-</html>`);
-  printWindow.document.close();
+  return createPreparedHandoffDownload(blob, filename, "pdf", "PDF");
 }
 
 function matchesSearchQuery(query: string, values: unknown[]) {
@@ -1868,15 +1869,25 @@ function matchesSaleLineQuery({
 
 function buildPurchaseSupplierMessage(group: TextbookHandoffGroup) {
   return [
-    `${group.title} 담당자님, 교재 주문 요청드립니다.`,
+    `[공급처 주문 전달] ${group.title}`,
     group.subtitle ? `담당: ${group.subtitle}` : "",
-    group.summary.join(" / "),
+    `총 주문금액: ${formatCurrency(group.totalAmount)}`,
+    `요약: ${group.summary.join(" / ")}`,
     "",
     ...group.lines.map((line, index) =>
-      `${index + 1}. ${line.title} / ${line.quantityLabel} / ${line.amountLabel}${line.detail ? ` / ${line.detail}` : ""}${line.note ? ` / ${line.note}` : ""}`,
+      [
+        `${index + 1}. 위치: ${line.locationLabel || "-"}`,
+        `교재: ${line.title}`,
+        `출판사: ${line.publisherLabel || "-"}`,
+        `학생용: ${line.studentQuantityLabel || "0권"}`,
+        `교사용: ${line.teacherQuantityLabel || "0권"}`,
+        `매입단가: ${line.unitCostLabel || "-"}`,
+        `주문금액: ${line.amountLabel}`,
+        line.note ? `비고: ${line.note}` : "",
+      ].filter(Boolean).join(" | "),
     ),
     "",
-    "확인 부탁드립니다.",
+    "위치별 수량 확인 후 전달 부탁드립니다.",
   ].filter((line) => line !== "").join("\n");
 }
 
@@ -1910,8 +1921,22 @@ function getPurchaseSupplierHandoffQuantityLabel(quantities: Record<TextbookCopy
   ].filter(Boolean).join(" · ") || "0권";
 }
 
-function getPurchaseSupplierHandoffAmountLabel(line: PurchaseSupplierHandoffLineAccumulator) {
-  return line.amountLabels.length > 0 ? line.amountLabels.join(" · ") : "0원";
+function getPurchaseSupplierHandoffLocationLabel(locationScopeQuantities: Map<string, Record<TextbookCopyScope, number>>) {
+  return [...locationScopeQuantities.entries()].map(([location, quantities]) => {
+    return `${location}: 학생용 ${formatQuantity(quantities.student)}권, 교사용 ${formatQuantity(quantities.teacher)}권`;
+  }).join(" · ");
+}
+
+function getPurchaseSupplierHandoffUnitCostLabel(line: PurchaseSupplierHandoffLineAccumulator) {
+  return line.unitCostLabels.length > 0 ? line.unitCostLabels.join(" · ") : "0원";
+}
+
+function getPurchaseSupplierHandoffLocationQuantities(locationScopeQuantities: Map<string, Record<TextbookCopyScope, number>>) {
+  return [...locationScopeQuantities.entries()].map(([locationLabel, quantities]) => ({
+    locationLabel,
+    studentQuantityLabel: `${formatQuantity(quantities.student)}권`,
+    teacherQuantityLabel: `${formatQuantity(quantities.teacher)}권`,
+  }));
 }
 
 function buildMakeEduBillingMessage(group: TextbookHandoffGroup) {
@@ -1965,7 +1990,7 @@ function buildPurchaseSupplierHandoffGroups({
     const supplierContact = getSupplierContact(supplier);
     const classRecord = getClassById(classes, draft.classId);
     const classLabel = classRecord ? getClassName(classRecord) : "";
-    const locationLabel = getLocationName(locations, draft.locationId);
+    const locationLabel = getLocationName(locations, draft.locationId) || "위치 미지정";
     const publisherLabel = getPublisherLabel(textbook || {});
     const orderedQuantity = numberValue(draft.orderedQuantity);
     const receivedQuantity = numberValue(draft.receivedQuantity);
@@ -1997,10 +2022,11 @@ function buildPurchaseSupplierHandoffGroups({
       publisherLabel,
       classLabels: [],
       locationLabels: [],
+      locationScopeQuantities: new Map(),
       requesterLabels: [],
       statusLabels: [],
       scopeQuantities: { student: 0, teacher: 0 },
-      amountLabels: [],
+      unitCostLabels: [],
       remainingQuantity: 0,
       totalQuantity: 0,
       totalAmount: 0,
@@ -2010,9 +2036,12 @@ function buildPurchaseSupplierHandoffGroups({
     pushUniqueText(lineAccumulator.locationLabels, locationLabel);
     pushUniqueText(lineAccumulator.requesterLabels, draft.requestBy);
     pushUniqueText(lineAccumulator.statusLabels, purchaseStatusLabel(status, draft.orderedQuantity, draft.receivedQuantity));
-    if (unitCost > 0 || draft.copyScope === "student") {
-      pushUniqueText(lineAccumulator.amountLabels, formatPurchaseUnitCost(unitCost, textbook));
+    if (draft.copyScope === "student" || unitCost > 0) {
+      pushUniqueText(lineAccumulator.unitCostLabels, formatPurchaseUnitCost(unitCost, textbook));
     }
+    const locationQuantities = lineAccumulator.locationScopeQuantities.get(locationLabel) || { student: 0, teacher: 0 };
+    locationQuantities[draft.copyScope] += quantity;
+    lineAccumulator.locationScopeQuantities.set(locationLabel, locationQuantities);
     lineAccumulator.scopeQuantities[draft.copyScope] += quantity;
     lineAccumulator.remainingQuantity += receivedQuantity > 0 && receivedQuantity < quantity ? quantity - receivedQuantity : 0;
     lineAccumulator.totalQuantity += quantity;
@@ -2025,7 +2054,8 @@ function buildPurchaseSupplierHandoffGroups({
   }
 
   return [...groups.values()].map(({ lineAccumulators, ...group }) => {
-    const lines = [...lineAccumulators.values()].map((line) => ({
+    const accumulatorLines = [...lineAccumulators.values()];
+    const lines = accumulatorLines.map((line) => ({
       id: line.id,
       title: line.title,
       detail: [
@@ -2040,10 +2070,20 @@ function buildPurchaseSupplierHandoffGroups({
         line.remainingQuantity > 0 ? `잔여 ${formatQuantity(line.remainingQuantity)}권` : "",
       ].filter(Boolean).join(" · "),
       quantityLabel: getPurchaseSupplierHandoffQuantityLabel(line.scopeQuantities),
-      amountLabel: getPurchaseSupplierHandoffAmountLabel(line),
+      amountLabel: formatCurrency(line.totalAmount),
+      locationLabel: getPurchaseSupplierHandoffLocationLabel(line.locationScopeQuantities),
+      locationQuantities: getPurchaseSupplierHandoffLocationQuantities(line.locationScopeQuantities),
+      publisherLabel: line.publisherLabel || "-",
+      studentQuantityLabel: `${formatQuantity(line.scopeQuantities.student)}권`,
+      teacherQuantityLabel: `${formatQuantity(line.scopeQuantities.teacher)}권`,
+      unitCostLabel: getPurchaseSupplierHandoffUnitCostLabel(line),
     }));
+    const studentQuantity = accumulatorLines.reduce((sum, line) => sum + line.scopeQuantities.student, 0);
+    const teacherQuantity = accumulatorLines.reduce((sum, line) => sum + line.scopeQuantities.teacher, 0);
     const summary = [
       `${formatQuantity(lines.length)}종`,
+      studentQuantity > 0 ? `학생용 ${formatQuantity(studentQuantity)}권` : "",
+      teacherQuantity > 0 ? `교사용 ${formatQuantity(teacherQuantity)}권` : "",
       `${formatQuantity(group.totalQuantity)}권`,
       group.totalAmount > 0 ? formatCurrency(group.totalAmount) : "",
     ].filter(Boolean);
@@ -6411,6 +6451,37 @@ function TextbookLoadingState() {
   );
 }
 
+const PURCHASE_ORDER_STANDARD_LOCATIONS = ["본관", "별관"];
+
+function getPurchaseOrderLocations(group: TextbookHandoffGroup) {
+  const locationLabels = new Set<string>();
+
+  group.lines.forEach((line) => {
+    line.locationQuantities?.forEach((quantity) => {
+      if (quantity.locationLabel) {
+        locationLabels.add(quantity.locationLabel);
+      }
+    });
+  });
+
+  const standardLocations = PURCHASE_ORDER_STANDARD_LOCATIONS.filter((locationLabel) =>
+    locationLabels.has(locationLabel) || locationLabels.size > 0,
+  );
+  const extraLocations = [...locationLabels].filter((locationLabel) =>
+    !PURCHASE_ORDER_STANDARD_LOCATIONS.includes(locationLabel),
+  );
+
+  return [...standardLocations, ...extraLocations];
+}
+
+function getLocationQuantityForLine(line: TextbookHandoffLine, locationLabel: string) {
+  return line.locationQuantities?.find((quantity) => quantity.locationLabel === locationLabel) || {
+    locationLabel,
+    studentQuantityLabel: "0권",
+    teacherQuantityLabel: "0권",
+  };
+}
+
 function TextbookHandoffDialog({
   open,
   onOpenChange,
@@ -6419,6 +6490,7 @@ function TextbookHandoffDialog({
   groups,
   emptyLabel,
   idPrefix,
+  format = "default",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -6427,16 +6499,57 @@ function TextbookHandoffDialog({
   groups: TextbookHandoffGroup[];
   emptyLabel: string;
   idPrefix: string;
+  format?: "default" | "purchase-order";
 }) {
   const [status, setStatus] = useState("");
+  const [manualCopyText, setManualCopyText] = useState("");
+  const [preparedDownload, setPreparedDownload] = useState<PreparedHandoffDownload | null>(null);
+  const manualCopyTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const preparedDownloadRef = useRef<PreparedHandoffDownload | null>(null);
   const totalQuantity = groups.reduce((sum, group) => sum + group.totalQuantity, 0);
   const allText = groups.map((group) => group.message).join("\n\n");
   const allDomId = getHandoffDomId(idPrefix, "all");
 
-  async function runAction(action: () => Promise<string> | string) {
+  useEffect(() => {
+    if (!manualCopyText) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      manualCopyTextareaRef.current?.focus();
+      manualCopyTextareaRef.current?.select();
+    });
+  }, [manualCopyText]);
+
+  useEffect(() => () => {
+    if (preparedDownloadRef.current) {
+      URL.revokeObjectURL(preparedDownloadRef.current.url);
+    }
+  }, []);
+
+  async function runCopyAction(value: string, successStatus: string) {
     try {
-      const nextStatus = await action();
-      setStatus(nextStatus);
+      await writeClipboardText(value);
+      setManualCopyText("");
+      setStatus(successStatus);
+    } catch {
+      setManualCopyText(value);
+      setStatus("복사 권한 없음 · 주문 메시지 선택됨");
+    }
+  }
+
+  function setNextPreparedDownload(download: PreparedHandoffDownload) {
+    if (preparedDownloadRef.current) {
+      URL.revokeObjectURL(preparedDownloadRef.current.url);
+    }
+    preparedDownloadRef.current = download;
+    setPreparedDownload(download);
+  }
+
+  async function runDownloadAction(action: () => Promise<PreparedHandoffDownload>, successStatus: string) {
+    try {
+      const download = await action();
+      setNextPreparedDownload(download);
+      setStatus(successStatus);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "처리 중 오류가 발생했습니다.");
     }
@@ -6445,9 +6558,17 @@ function TextbookHandoffDialog({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => {
       onOpenChange(nextOpen);
-      if (!nextOpen) setStatus("");
+      if (!nextOpen) {
+        setStatus("");
+        setManualCopyText("");
+        if (preparedDownloadRef.current) {
+          URL.revokeObjectURL(preparedDownloadRef.current.url);
+          preparedDownloadRef.current = null;
+        }
+        setPreparedDownload(null);
+      }
     }}>
-      <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-hidden sm:max-w-4xl">
+      <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-hidden sm:max-w-5xl xl:max-w-6xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="sr-only">{description}</DialogDescription>
@@ -6474,10 +6595,7 @@ function TextbookHandoffDialog({
                 size="sm"
                 variant="outline"
                 disabled={groups.length === 0}
-                onClick={() => runAction(async () => {
-                  await writeClipboardText(allText);
-                  return "전체 복사됨";
-                })}
+                onClick={() => runCopyAction(allText, "전체 복사됨")}
               >
                 <Copy className="mr-2 size-3.5" />
                 전체 복사
@@ -6487,16 +6605,58 @@ function TextbookHandoffDialog({
                 size="sm"
                 variant="outline"
                 disabled={groups.length === 0}
-                onClick={() => runAction(() => {
-                  printHandoffElement(getHandoffCaptureElement(allDomId), title);
-                  return "PDF 준비됨";
-                })}
+                onClick={() => runDownloadAction(
+                  () => downloadHandoffPdf(getHandoffCaptureElement(allDomId), title),
+                  "PDF 저장됨",
+                )}
               >
                 <Printer className="mr-2 size-3.5" />
-                PDF
+                PDF 저장
               </Button>
             </div>
           </div>
+
+          {manualCopyText ? (
+            <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-amber-800">
+                <span>자동 복사 제한 · 주문 메시지</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 bg-white"
+                  onClick={() => {
+                    manualCopyTextareaRef.current?.focus();
+                    manualCopyTextareaRef.current?.select();
+                  }}
+                >
+                  전체 선택
+                </Button>
+              </div>
+              <Textarea
+                ref={manualCopyTextareaRef}
+                readOnly
+                aria-label="복사할 주문 메시지"
+                className="max-h-40 min-h-24 resize-y bg-white font-mono text-xs"
+                value={manualCopyText}
+              />
+            </div>
+          ) : null}
+
+          {preparedDownload ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm">
+              <div className="min-w-0">
+                <div className="font-medium text-sky-900">{preparedDownload.label} 파일 준비됨</div>
+                <div className="truncate text-xs text-sky-700">{preparedDownload.filename}</div>
+              </div>
+              <Button type="button" size="sm" variant="outline" className="bg-white" asChild>
+                <a href={preparedDownload.url} download={preparedDownload.filename}>
+                  <Save className="mr-1 size-3.5" />
+                  저장
+                </a>
+              </Button>
+            </div>
+          ) : null}
 
           {groups.length === 0 ? (
             <div className="rounded-md border py-12 text-center text-sm font-medium text-muted-foreground">
@@ -6508,6 +6668,7 @@ function TextbookHandoffDialog({
                 {groups.map((group) => {
                   const groupDomId = getHandoffDomId(idPrefix, group.id);
                   const filename = `${title}-${group.title}`;
+                  const purchaseOrderLocations = format === "purchase-order" ? getPurchaseOrderLocations(group) : [];
                   return (
                     <section key={group.id} className="grid gap-2 rounded-md border bg-background p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2" data-handoff-toolbar>
@@ -6521,10 +6682,7 @@ function TextbookHandoffDialog({
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            onClick={() => runAction(async () => {
-                              await writeClipboardText(group.message);
-                              return "복사됨";
-                            })}
+                            onClick={() => runCopyAction(group.message, "복사됨")}
                           >
                             <Copy className="mr-1 size-3.5" />
                             복사
@@ -6534,26 +6692,26 @@ function TextbookHandoffDialog({
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            onClick={() => runAction(async () => {
-                              const result = await copyOrDownloadHandoffImage(getHandoffCaptureElement(groupDomId), filename);
-                              return result === "copied" ? "이미지 복사됨" : "이미지 저장됨";
-                            })}
+                            onClick={() => runDownloadAction(
+                              () => downloadHandoffImage(getHandoffCaptureElement(groupDomId), filename),
+                              "이미지 저장됨",
+                            )}
                           >
                             <FileImage className="mr-1 size-3.5" />
-                            이미지
+                            이미지 저장
                           </Button>
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            onClick={() => runAction(() => {
-                              printHandoffElement(getHandoffCaptureElement(groupDomId), group.title);
-                              return "PDF 준비됨";
-                            })}
+                            onClick={() => runDownloadAction(
+                              () => downloadHandoffPdf(getHandoffCaptureElement(groupDomId), filename),
+                              "PDF 저장됨",
+                            )}
                           >
                             <Printer className="mr-1 size-3.5" />
-                            PDF
+                            PDF 저장
                           </Button>
                         </div>
                       </div>
@@ -6574,27 +6732,98 @@ function TextbookHandoffDialog({
                         </div>
                         <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
                           <Table>
-                            <TableHeader>
-                              <TableRow className="bg-slate-50">
-                                <TableHead className="text-slate-600">항목</TableHead>
-                                <TableHead className="text-slate-600">대상</TableHead>
-                                <TableHead className="w-20 text-right text-slate-600">수량</TableHead>
-                                <TableHead className="w-24 text-right text-slate-600">금액</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {group.lines.map((line) => (
-                                <TableRow key={line.id}>
-                                  <TableCell>
-                                    <div className="font-medium text-slate-950">{line.title}</div>
-                                    {line.note ? <div className="text-xs text-slate-500">{line.note}</div> : null}
-                                  </TableCell>
-                                  <TableCell className="text-slate-700">{line.detail || "-"}</TableCell>
-                                  <TableCell className="text-right tabular-nums text-slate-700">{line.quantityLabel}</TableCell>
-                                  <TableCell className="text-right tabular-nums text-slate-950">{line.amountLabel}</TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
+                            {format === "purchase-order" ? (
+                              <>
+                                <TableHeader>
+                                  <TableRow className="bg-slate-50">
+                                    <TableHead rowSpan={2} className="min-w-[240px] text-slate-600">교재명</TableHead>
+                                    {purchaseOrderLocations.map((locationLabel) => (
+                                      <TableHead
+                                        key={locationLabel}
+                                        colSpan={2}
+                                        className="border-l border-slate-200 text-center text-slate-700"
+                                      >
+                                        {locationLabel}
+                                      </TableHead>
+                                    ))}
+                                    <TableHead rowSpan={2} className="w-[112px] text-right text-slate-600">매입 단가</TableHead>
+                                    <TableHead rowSpan={2} className="w-[112px] text-right text-slate-600">주문 금액</TableHead>
+                                  </TableRow>
+                                  <TableRow className="bg-slate-50">
+                                    {purchaseOrderLocations.map((locationLabel) => (
+                                      <Fragment key={`${locationLabel}-scopes`}>
+                                        <TableHead className="w-[76px] border-l border-slate-200 text-right text-sky-700">학생용</TableHead>
+                                        <TableHead className="w-[76px] text-right text-amber-700">교사용</TableHead>
+                                      </Fragment>
+                                    ))}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {group.lines.map((line) => (
+                                    <TableRow key={line.id} className="align-top">
+                                      <TableCell>
+                                        <div className="font-semibold text-slate-950">{line.title}</div>
+                                        <div className="mt-1 flex flex-wrap gap-1 text-xs text-slate-500">
+                                          {line.publisherLabel ? (
+                                            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+                                              {line.publisherLabel}
+                                            </span>
+                                          ) : null}
+                                          {line.note ? (
+                                            <span className="rounded-full bg-slate-50 px-2 py-0.5">
+                                              {line.note}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      </TableCell>
+                                      {purchaseOrderLocations.map((locationLabel) => {
+                                        const quantity = getLocationQuantityForLine(line, locationLabel);
+                                        return (
+                                          <Fragment key={`${line.id}-${locationLabel}`}>
+                                            <TableCell className="border-l border-slate-200 bg-sky-50/70 text-right font-semibold tabular-nums text-sky-900">
+                                              <span className="inline-flex rounded-full bg-white px-2 py-0.5 ring-1 ring-sky-200">
+                                                {quantity.studentQuantityLabel}
+                                              </span>
+                                            </TableCell>
+                                            <TableCell className="bg-amber-50/70 text-right font-semibold tabular-nums text-amber-900">
+                                              <span className="inline-flex rounded-full bg-white px-2 py-0.5 ring-1 ring-amber-200">
+                                                {quantity.teacherQuantityLabel}
+                                              </span>
+                                            </TableCell>
+                                          </Fragment>
+                                        );
+                                      })}
+                                      <TableCell className="text-right tabular-nums text-slate-700">{line.unitCostLabel || "-"}</TableCell>
+                                      <TableCell className="text-right font-semibold tabular-nums text-slate-950">{line.amountLabel}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </>
+                            ) : (
+                              <>
+                                <TableHeader>
+                                  <TableRow className="bg-slate-50">
+                                    <TableHead className="text-slate-600">항목</TableHead>
+                                    <TableHead className="text-slate-600">대상</TableHead>
+                                    <TableHead className="w-20 text-right text-slate-600">수량</TableHead>
+                                    <TableHead className="w-24 text-right text-slate-600">금액</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {group.lines.map((line) => (
+                                    <TableRow key={line.id}>
+                                      <TableCell>
+                                        <div className="font-medium text-slate-950">{line.title}</div>
+                                        {line.note ? <div className="text-xs text-slate-500">{line.note}</div> : null}
+                                      </TableCell>
+                                      <TableCell className="text-slate-700">{line.detail || "-"}</TableCell>
+                                      <TableCell className="text-right tabular-nums text-slate-700">{line.quantityLabel}</TableCell>
+                                      <TableCell className="text-right tabular-nums text-slate-950">{line.amountLabel}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </>
+                            )}
                           </Table>
                         </div>
                       </div>
@@ -9081,6 +9310,7 @@ function PurchaseProcessTable({
           groups={purchaseHandoffGroups}
           emptyLabel="전달할 주문 건이 없습니다"
           idPrefix="purchase-handoff"
+          format="purchase-order"
         />
       ) : null}
       <div

@@ -542,8 +542,8 @@ test("textbook workspace exports supplier orders and MakeEdu billing handoffs", 
   assert.match(workspaceSource, /수납명:/);
   assert.match(workspaceSource, /수납시작:/);
   assert.match(workspaceSource, /반복: 1회/);
-  assert.match(workspaceSource, /ClipboardItem/);
-  assert.match(workspaceSource, /window\.print/);
+  assert.match(workspaceSource, /downloadHandoffImage/);
+  assert.match(workspaceSource, /downloadHandoffPdf/);
   assert.match(workspaceSource, /getSupplierContact/);
   assert.match(workspaceSource, /getStudentGradeLabel/);
   assert.doesNotMatch(workspaceSource, /syncMakeEduTextbookPayments/);
@@ -559,9 +559,83 @@ test("textbook handoff exports use a printable capture target instead of the scr
   assert.match(workspaceSource, /getHandoffCaptureElement/);
   assert.match(workspaceSource, /data-handoff-capture-target/);
   assert.match(workspaceSource, /data-handoff-print-root/);
-  assert.match(workspaceSource, /\[data-handoff-scroll\]/);
-  assert.match(workspaceSource, /printHandoffElement\(getHandoffCaptureElement\(allDomId\)/);
-  assert.match(workspaceSource, /copyOrDownloadHandoffImage\(getHandoffCaptureElement\(groupDomId\)/);
+  assert.match(workspaceSource, /data-handoff-scroll/);
+  assert.match(workspaceSource, /downloadHandoffPdf\(getHandoffCaptureElement\(allDomId\)/);
+  assert.match(workspaceSource, /downloadHandoffImage\(getHandoffCaptureElement\(groupDomId\)/);
+});
+
+test("textbook handoff copy falls back when browser clipboard permission is denied", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const copySource = workspaceSource.slice(
+    workspaceSource.indexOf("async function writeClipboardText"),
+    workspaceSource.indexOf("async function downloadHandoffImage"),
+  );
+
+  assert.match(copySource, /try \{\s*await navigator\.clipboard\.writeText\(value\);\s*return;\s*\} catch/);
+  assert.match(copySource, /const copied = document\.execCommand\("copy"\)/);
+  assert.match(copySource, /if \(!copied\) \{/);
+  assert.match(copySource, /throw new Error\("클립보드 권한이 없어 복사하지 못했습니다\."\)/);
+  assert.match(workspaceSource, /const \[manualCopyText, setManualCopyText\] = useState\(""\)/);
+  assert.match(workspaceSource, /manualCopyTextareaRef/);
+  assert.match(workspaceSource, /복사 권한 없음 · 주문 메시지 선택됨/);
+  assert.match(workspaceSource, /aria-label="복사할 주문 메시지"/);
+});
+
+test("purchase supplier handoff is a location-first supplier order sheet with direct file exports", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const imageExportSource = await readFile(new URL("src/lib/export-as-image.ts", root), "utf8");
+  const messageSource = workspaceSource.slice(
+    workspaceSource.indexOf("function buildPurchaseSupplierMessage"),
+    workspaceSource.indexOf("function buildMakeEduBillingMessage"),
+  );
+  const handoffSource = workspaceSource.slice(
+    workspaceSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
+    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  );
+  const dialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("function TextbookHandoffDialog"),
+    workspaceSource.indexOf("type SearchSelectOption"),
+  );
+
+  assert.match(workspaceSource, /captureElementAsPdfBlob/);
+  assert.match(imageExportSource, /export async function captureElementAsPdfBlob/);
+  assert.match(imageExportSource, /new Blob\(\[pdfBytes\], \{ type: "application\/pdf" \}\)/);
+  assert.match(dialogSource, /format = "default"/);
+  assert.match(dialogSource, /format === "purchase-order"/);
+  assert.match(dialogSource, />교재명</);
+  assert.match(dialogSource, /rowSpan=\{2\}/);
+  assert.match(dialogSource, /colSpan=\{2\}/);
+  assert.match(dialogSource, /getPurchaseOrderLocations\(group\)/);
+  assert.match(dialogSource, /getLocationQuantityForLine\(line, locationLabel\)/);
+  assert.match(dialogSource, />학생용</);
+  assert.match(dialogSource, />교사용</);
+  assert.match(dialogSource, />매입 단가</);
+  assert.match(dialogSource, />주문 금액</);
+  assert.doesNotMatch(dialogSource, /<TableHead[^>]*>출판사<\/TableHead>/);
+  assert.match(dialogSource, /downloadHandoffImage\(getHandoffCaptureElement\(groupDomId\), filename\)/);
+  assert.match(dialogSource, /downloadHandoffPdf\(getHandoffCaptureElement\(groupDomId\), filename\)/);
+  assert.match(dialogSource, /"이미지 저장됨"/);
+  assert.match(dialogSource, /"PDF 저장됨"/);
+  assert.match(dialogSource, /preparedDownload/);
+  assert.match(dialogSource, /download=\{preparedDownload\.filename\}/);
+  assert.match(dialogSource, /파일 준비됨/);
+  assert.doesNotMatch(dialogSource, /printHandoffElement/);
+  assert.match(messageSource, /위치:/);
+  assert.match(messageSource, /교재:/);
+  assert.match(messageSource, /출판사:/);
+  assert.match(messageSource, /학생용/);
+  assert.match(messageSource, /교사용/);
+  assert.match(messageSource, /매입단가:/);
+  assert.match(messageSource, /주문금액:/);
+  assert.match(messageSource, /총 주문금액/);
+  assert.match(handoffSource, /getPurchaseSupplierHandoffLocationLabel\(line\.locationScopeQuantities\)/);
+  assert.match(handoffSource, /getPurchaseSupplierHandoffLocationQuantities\(line\.locationScopeQuantities\)/);
 });
 
 test("textbook workspace keeps purchase and sale cases in grouped process tables", async () => {

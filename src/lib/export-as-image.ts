@@ -647,13 +647,159 @@ export async function captureElementAsPngBlob(element: HTMLElement, options: Exp
   }
 }
 
+function loadImageFromBlob(blob: Blob) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("PDF image preparation failed"));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function dataUrlToBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] || "";
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function concatBytes(chunks: Uint8Array[]) {
+  const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const result = new Uint8Array(length);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return result;
+}
+
+function textBytes(value: string) {
+  return new TextEncoder().encode(value);
+}
+
+function fixedPdfNumber(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : "0.00";
+}
+
+function createSinglePagePdfFromJpeg(jpegBytes: Uint8Array, imageWidth: number, imageHeight: number) {
+  const pageWidth = 595.28;
+  const margin = 24;
+  const drawWidth = pageWidth - margin * 2;
+  const drawHeight = Math.max(1, drawWidth * (imageHeight / Math.max(1, imageWidth)));
+  const pageHeight = Math.max(200, drawHeight + margin * 2);
+  const content = [
+    "q",
+    `${fixedPdfNumber(drawWidth)} 0 0 ${fixedPdfNumber(drawHeight)} ${fixedPdfNumber(margin)} ${fixedPdfNumber(margin)} cm`,
+    "/Im0 Do",
+    "Q",
+  ].join("\n");
+  const chunks: Uint8Array[] = [];
+  const offsets: number[] = [];
+  let byteOffset = 0;
+
+  function push(chunk: Uint8Array) {
+    chunks.push(chunk);
+    byteOffset += chunk.length;
+  }
+
+  function pushText(value: string) {
+    push(textBytes(value));
+  }
+
+  function pushObject(id: number, parts: Array<string | Uint8Array>) {
+    offsets[id] = byteOffset;
+    pushText(`${id} 0 obj\n`);
+    for (const part of parts) {
+      if (typeof part === "string") {
+        pushText(part);
+      } else {
+        push(part);
+      }
+    }
+    pushText("\nendobj\n");
+  }
+
+  pushText("%PDF-1.4\n% TIPS Dashboard export\n");
+  pushObject(1, ["<< /Type /Catalog /Pages 2 0 R >>"]);
+  pushObject(2, ["<< /Type /Pages /Kids [3 0 R] /Count 1 >>"]);
+  pushObject(3, [
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${fixedPdfNumber(pageWidth)} ${fixedPdfNumber(pageHeight)}] `,
+    "/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>",
+  ]);
+  pushObject(4, [
+    `<< /Type /XObject /Subtype /Image /Width ${Math.max(1, Math.round(imageWidth))} /Height ${Math.max(1, Math.round(imageHeight))} `,
+    `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`,
+    jpegBytes,
+    "\nendstream",
+  ]);
+  pushObject(5, [`<< /Length ${textBytes(content).length} >>\nstream\n${content}\nendstream`]);
+
+  const xrefOffset = byteOffset;
+  pushText("xref\n0 6\n0000000000 65535 f \n");
+  for (let id = 1; id <= 5; id += 1) {
+    pushText(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
+  }
+  pushText(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
+
+  return concatBytes(chunks);
+}
+
+export async function captureElementAsPdfBlob(element: HTMLElement, options: ExportOptions = {}) {
+  const pngBlob = await captureElementAsPngBlob(element, options);
+  const image = await loadImageFromBlob(pngBlob);
+  const canvas = document.createElement("canvas");
+  const width = Math.max(1, image.naturalWidth || image.width);
+  const height = Math.max(1, image.naturalHeight || image.height);
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("PDF canvas preparation failed");
+  }
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+
+  const jpegBytes = dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92));
+  const pdfBytes = createSinglePagePdfFromJpeg(jpegBytes, width, height);
+
+  return new Blob([pdfBytes], { type: "application/pdf" });
+}
+
 export function downloadBlob(blob: Blob, filename: string) {
   const blobUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.download = filename;
   link.href = blobUrl;
+  link.rel = "noopener";
+  link.style.position = "fixed";
+  link.style.left = "-9999px";
+  link.style.top = "0";
+  link.style.width = "1px";
+  link.style.height = "1px";
+  link.style.opacity = "0";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(blobUrl);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }
 
 export async function exportElementAsImage(
