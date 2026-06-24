@@ -653,7 +653,7 @@ test("purchase process table supports grouped movement, modal edits, deletion, a
   assert.match(workspaceSource, /shouldShowPurchaseLineOnBoard/);
   assert.match(workspaceSource, /min-w-0 overflow-hidden rounded-lg border bg-background/);
   assert.match(workspaceSource, /aria-label="교재 요청 추가"[\s\S]*onClick=\{onAddLine\}/);
-  assert.match(workspaceSource, /mode === "request" \? "w-full min-w-\[1040px\]" : "w-full min-w-\[1200px\]"/);
+  assert.match(workspaceSource, /mode === "request" \? "w-full min-w-\[1120px\]" : "w-full min-w-\[1440px\]"/);
   assert.match(workspaceSource, /aria-label=\{\`\$\{group\.title\} 그룹 \$\{collapsed \? "펼치기" : "접기"\}\`\}/);
   assert.match(workspaceSource, /!collapsed && rows\.length > 0/);
   assert.match(serviceSource, /deletePurchaseLifecycle/);
@@ -933,14 +933,18 @@ test("purchase process rows stay database-style and open the modal for editing",
   );
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
-  assert.match(tableSource, /mode === "request" \? "w-full min-w-\[1040px\]" : "w-full min-w-\[1200px\]"/);
+  assert.match(tableSource, /mode === "request" \? "w-full min-w-\[1120px\]" : "w-full min-w-\[1440px\]"/);
   assert.match(tableSource, /TableHead className="w-\[96px\] text-right">단가/);
   assert.match(tableSource, /TableHead className="w-\[88px\]">위치/);
-  assert.match(tableSource, /TableHead className="w-\[104px\] text-right">요청/);
-  assert.match(tableSource, /TableHead className="w-\[104px\] text-right">주문/);
-  assert.match(tableSource, /TableHead className="w-\[104px\] text-right">입고/);
+  assert.match(tableSource, /TableHead className="w-\[96px\] whitespace-nowrap text-right">학생용 요청/);
+  assert.match(tableSource, /TableHead className="w-\[96px\] whitespace-nowrap text-right">학생용 주문/);
+  assert.match(tableSource, /TableHead className="w-\[96px\] whitespace-nowrap text-right">학생용 입고/);
+  assert.match(tableSource, /TableHead className="w-\[96px\] whitespace-nowrap text-right">교사용 요청/);
+  assert.match(tableSource, /TableHead className="w-\[96px\] whitespace-nowrap text-right">교사용 주문/);
+  assert.match(tableSource, /TableHead className="w-\[96px\] whitespace-nowrap text-right">교사용 입고/);
   assert.match(tableSource, /buildPurchaseDisplayRows\(rows, ordersById, textbooks\)/);
-  assert.match(tableSource, /PurchaseScopeQuantityCell lines=\{displayLines\} kind="requested"/);
+  assert.match(tableSource, /getPurchaseDisplayScopeQuantity\(displayLines, "student", "requested"\)/);
+  assert.match(tableSource, /getPurchaseDisplayScopeQuantity\(displayLines, "teacher", "requested"\)/);
   assert.match(tableSource, /수정/);
   assert.match(tableSource, /purchaseProcessAction\(status\)/);
   assert.match(tableSource, /onSelectLine\(line, order, processAction\.stage\)/);
@@ -1070,13 +1074,42 @@ test("purchase process table places copy scope after class", async () => {
   const tableHeaderSource = tableSource.slice(tableSource.indexOf("<TableHeader"), tableSource.indexOf("</TableHeader>"));
   const classColumnIndex = tableHeaderSource.indexOf('TableHead className="w-[140px]">수업');
   const copyScopeColumnIndex = tableHeaderSource.indexOf('TableHead className="w-[92px]">용도');
-  const requestedColumnIndex = tableHeaderSource.indexOf('TableHead className="w-[104px] text-right">요청');
+  const requestedColumnIndex = tableHeaderSource.indexOf('TableHead className="w-[96px] whitespace-nowrap text-right">학생용 요청');
 
   assert.ok(classColumnIndex >= 0, "class column is present");
   assert.ok(copyScopeColumnIndex >= 0, "copy scope column is present");
-  assert.ok(requestedColumnIndex >= 0, "requested column is present");
+  assert.ok(requestedColumnIndex >= 0, "student requested column is present");
   assert.ok(classColumnIndex < copyScopeColumnIndex, "copy scope appears after class");
   assert.ok(copyScopeColumnIndex < requestedColumnIndex, "copy scope appears before requested quantity");
+});
+
+test("purchase process table splits student and teacher quantities into six columns", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
+
+  for (const [id, label] of [
+    ["studentRequested", "학생용 요청"],
+    ["studentOrdered", "학생용 주문"],
+    ["studentReceived", "학생용 입고"],
+    ["teacherRequested", "교사용 요청"],
+    ["teacherOrdered", "교사용 주문"],
+    ["teacherReceived", "교사용 입고"],
+  ]) {
+    assert.match(workspaceSource, new RegExp(`id: "${id}", label: "${label}"`));
+    assert.match(tableSource, new RegExp(`isPurchaseColumnVisible\\("${id}"\\) \\? <TableHead className="w-\\[96px\\] whitespace-nowrap text-right">${label}`));
+  }
+
+  assert.match(tableSource, /const studentRequestedTotal = getPurchaseDisplayScopeQuantity\(rows, "student", "requested"\)/);
+  assert.match(tableSource, /const teacherReceivedTotal = getPurchaseDisplayScopeQuantity\(rows, "teacher", "received"\)/);
+  assert.match(tableSource, /getPurchaseDisplayScopeQuantity\(displayLines, "student", "ordered"\)/);
+  assert.match(tableSource, /getPurchaseDisplayScopeQuantity\(displayLines, "teacher", "ordered"\)/);
+  assert.match(tableSource, /isPurchaseColumnVisible\("studentRequested"\) \? <TableCell className="text-right tabular-nums">\{formatQuantity\(studentRequestedTotal\)\}<\/TableCell>/);
+  assert.match(tableSource, /isPurchaseColumnVisible\("teacherReceived"\) \? <TableCell className="text-right tabular-nums">\{formatQuantity\(teacherReceivedTotal\)\}<\/TableCell>/);
+  assert.doesNotMatch(tableSource, /PurchaseScopeQuantityCell lines=\{displayLines\} kind="requested"/);
+  assert.doesNotMatch(tableSource, /TableHead className="w-\[104px\] text-right">요청/);
 });
 
 test("textbook workspace fixes second-round browser audit issues", async () => {
