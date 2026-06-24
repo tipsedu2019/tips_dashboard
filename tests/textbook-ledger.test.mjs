@@ -264,6 +264,24 @@ test("purchase lifecycle separates teacher request, supplier order, and receipt"
   );
 });
 
+test("purchase lifecycle allows zero requested quantities before management ordering", () => {
+  const zeroRequest = buildPurchaseLifecycleDraft({
+    stage: "request",
+    requestedQuantity: 0,
+  });
+  const directOrder = buildPurchaseLifecycleDraft({
+    stage: "order",
+    requestedQuantity: 0,
+    orderedQuantity: 2,
+  });
+
+  assert.doesNotThrow(() => validatePurchaseLifecycleDraft(zeroRequest));
+  assert.doesNotThrow(() => validatePurchaseLifecycleDraft(directOrder));
+  assert.equal(zeroRequest.requestedQuantity, 0);
+  assert.equal(directOrder.requestedQuantity, 0);
+  assert.equal(directOrder.orderedQuantity, 2);
+});
+
 test("teacher copy lifecycle keeps request, receipt, issue, and stock scoped", () => {
   const teacherPurchase = buildPurchaseLifecycleDraft({
     stage: "receive",

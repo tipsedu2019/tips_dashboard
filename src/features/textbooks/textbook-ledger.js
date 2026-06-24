@@ -609,10 +609,6 @@ export function buildPurchaseLifecycleDraft({
 }
 
 export function validatePurchaseLifecycleDraft(draft = {}) {
-  if (draft.requestedQuantity <= 0 && draft.orderedQuantity <= 0 && draft.receivedQuantity <= 0) {
-    throw new Error("requested quantity required: 요청 수량을 입력하세요.");
-  }
-
   if (draft.stage === "order" && draft.orderedQuantity <= 0) {
     throw new Error("ordered quantity required: 주문 수량을 입력하세요.");
   }
@@ -624,6 +620,10 @@ export function validatePurchaseLifecycleDraft(draft = {}) {
     if (!text(draft.statementNumber)) {
       throw new Error("statement number required: 거래명세표 번호를 입력하세요.");
     }
+  }
+
+  if (draft.stage !== "request" && draft.requestedQuantity <= 0 && draft.orderedQuantity <= 0 && draft.receivedQuantity <= 0) {
+    throw new Error("requested quantity required: 요청 수량을 입력하세요.");
   }
 
   return draft;
