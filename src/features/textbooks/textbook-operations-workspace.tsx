@@ -388,6 +388,24 @@ const stickyActionHeadClassName =
 const stickyActionCellClassName =
   "sticky right-0 bg-background shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.35)]";
 
+function purchaseQuantityHeaderPillClassName(scope: TextbookCopyScope) {
+  return cn(
+    "inline-flex h-6 items-center justify-center rounded-full px-2 text-[11px] font-semibold leading-none ring-1",
+    scope === "student"
+      ? "bg-sky-100 text-sky-800 ring-sky-200"
+      : "bg-amber-100 text-amber-800 ring-amber-200",
+  );
+}
+
+function purchaseQuantityCellClassName(scope: TextbookCopyScope) {
+  return cn(
+    "text-right font-medium tabular-nums",
+    scope === "student"
+      ? "bg-sky-50/70 text-sky-950"
+      : "bg-amber-50/70 text-amber-950",
+  );
+}
+
 function withTextbookDataLoadTimeout<T>(promise: Promise<T>) {
   let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -414,7 +432,6 @@ function buildPurchaseProcessColumns(mode: "request" | "order", showSelection: b
     { id: "textbook", label: "교재명", required: true },
     { id: "location", label: "위치" },
     { id: "class", label: "수업" },
-    { id: "copyScope", label: "용도" },
     ...purchaseProcessQuantityColumns
       .filter((column) => mode === "order" || !column.orderOnly)
       .map((column) => ({ id: column.id, label: column.label, required: column.required })),
@@ -9195,6 +9212,11 @@ function PurchaseProcessTable({
           ) : null}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
+          {visibleRowCount > 0 ? (
+            <div role="group" aria-label="교재 처리표 컬럼 구성" className="shrink-0">
+              {columnSettingsControl}
+            </div>
+          ) : null}
           {mode === "order" && selectedProcessLineCount > 0 ? (
             <>
               <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
@@ -9408,37 +9430,37 @@ function PurchaseProcessTable({
                         </div>
                         <div className={cn("mt-3 grid gap-2 text-center text-xs", mode === "order" ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2")}>
                           {isPurchaseColumnVisible("studentRequested") ? (
-                            <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="rounded-md bg-sky-50/70 px-2 py-2 ring-1 ring-sky-100">
                               <div className="text-muted-foreground">학생용 요청</div>
                               <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested"))}</div>
                             </div>
                           ) : null}
                           {mode === "order" && isPurchaseColumnVisible("studentOrdered") ? (
-                            <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="rounded-md bg-sky-50/70 px-2 py-2 ring-1 ring-sky-100">
                               <div className="text-muted-foreground">학생용 주문</div>
                               <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "ordered"))}</div>
                             </div>
                           ) : null}
                           {mode === "order" && isPurchaseColumnVisible("studentReceived") ? (
-                            <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="rounded-md bg-sky-50/70 px-2 py-2 ring-1 ring-sky-100">
                               <div className="text-muted-foreground">학생용 입고</div>
                               <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "received"))}</div>
                             </div>
                           ) : null}
                           {isPurchaseColumnVisible("teacherRequested") ? (
-                            <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="rounded-md bg-amber-50/70 px-2 py-2 ring-1 ring-amber-100">
                               <div className="text-muted-foreground">교사용 요청</div>
                               <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "requested"))}</div>
                             </div>
                           ) : null}
                           {mode === "order" && isPurchaseColumnVisible("teacherOrdered") ? (
-                            <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="rounded-md bg-amber-50/70 px-2 py-2 ring-1 ring-amber-100">
                               <div className="text-muted-foreground">교사용 주문</div>
                               <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "ordered"))}</div>
                             </div>
                           ) : null}
                           {mode === "order" && isPurchaseColumnVisible("teacherReceived") ? (
-                            <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="rounded-md bg-amber-50/70 px-2 py-2 ring-1 ring-amber-100">
                               <div className="text-muted-foreground">교사용 입고</div>
                               <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "received"))}</div>
                             </div>
@@ -9571,30 +9593,22 @@ function PurchaseProcessTable({
                         {isPurchaseColumnVisible("textbook") ? <TableHead>교재명</TableHead> : null}
                         {isPurchaseColumnVisible("location") ? <TableHead className="w-[88px]">위치</TableHead> : null}
                         {isPurchaseColumnVisible("class") ? <TableHead className="w-[140px]">수업</TableHead> : null}
-                        {isPurchaseColumnVisible("copyScope") ? <TableHead className="w-[92px]">용도</TableHead> : null}
-                        {isPurchaseColumnVisible("studentRequested") ? <TableHead className="w-[96px] whitespace-nowrap text-right">학생용 요청</TableHead> : null}
+                        {isPurchaseColumnVisible("studentRequested") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("student")}>학생용 요청</span></TableHead> : null}
                         {mode === "order" ? (
                           <>
-                            {isPurchaseColumnVisible("studentOrdered") ? <TableHead className="w-[96px] whitespace-nowrap text-right">학생용 주문</TableHead> : null}
-                            {isPurchaseColumnVisible("studentReceived") ? <TableHead className="w-[96px] whitespace-nowrap text-right">학생용 입고</TableHead> : null}
+                            {isPurchaseColumnVisible("studentOrdered") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("student")}>학생용 주문</span></TableHead> : null}
+                            {isPurchaseColumnVisible("studentReceived") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("student")}>학생용 입고</span></TableHead> : null}
                           </>
                         ) : null}
-                        {isPurchaseColumnVisible("teacherRequested") ? <TableHead className="w-[96px] whitespace-nowrap text-right">교사용 요청</TableHead> : null}
+                        {isPurchaseColumnVisible("teacherRequested") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("teacher")}>교사용 요청</span></TableHead> : null}
                         {mode === "order" ? (
                           <>
-                            {isPurchaseColumnVisible("teacherOrdered") ? <TableHead className="w-[96px] whitespace-nowrap text-right">교사용 주문</TableHead> : null}
-                            {isPurchaseColumnVisible("teacherReceived") ? <TableHead className="w-[96px] whitespace-nowrap text-right">교사용 입고</TableHead> : null}
+                            {isPurchaseColumnVisible("teacherOrdered") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("teacher")}>교사용 주문</span></TableHead> : null}
+                            {isPurchaseColumnVisible("teacherReceived") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("teacher")}>교사용 입고</span></TableHead> : null}
                           </>
                         ) : null}
                         {isPurchaseColumnVisible("decision") ? <TableHead className="w-[96px]">판단</TableHead> : null}
-                        {isPurchaseColumnVisible("action") ? (
-                          <TableHead className={cn(mode === "request" ? "w-[160px]" : "w-[260px]", "text-right", stickyActionHeadClassName)}>
-                            <div className="flex items-center justify-end gap-1">
-                              <span>작업</span>
-                              {columnSettingsControl}
-                            </div>
-                          </TableHead>
-                        ) : null}
+                        {isPurchaseColumnVisible("action") ? <TableHead className={cn(mode === "request" ? "w-[160px]" : "w-[260px]", "text-right", stickyActionHeadClassName)}>작업</TableHead> : null}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -9684,52 +9698,39 @@ function PurchaseProcessTable({
                                 {classRecord ? getClassName(classRecord) : "수업 미지정"}
                               </TableCell>
                             ) : null}
-                            {isPurchaseColumnVisible("copyScope") ? (
-                              <TableCell>
-                                <div className="flex flex-col gap-1">
-                                  {(["student", "teacher"] as TextbookCopyScope[])
-                                    .filter((scope) => displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === scope))
-                                    .map((scope) => (
-                                      <Badge key={scope} variant="outline" className="w-fit rounded-md">
-                                        {getTextbookCopyScopeLabel(scope)}
-                                      </Badge>
-                                    ))}
-                                </div>
-                              </TableCell>
-                            ) : null}
                             {isPurchaseColumnVisible("studentRequested") ? (
-                              <TableCell className="text-right tabular-nums">
+                              <TableCell className={purchaseQuantityCellClassName("student")}>
                                 {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested"))}
                               </TableCell>
                             ) : null}
                             {mode === "order" ? (
                               <>
                                 {isPurchaseColumnVisible("studentOrdered") ? (
-                                  <TableCell className="text-right tabular-nums">
+                                  <TableCell className={purchaseQuantityCellClassName("student")}>
                                     {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "ordered"))}
                                   </TableCell>
                                 ) : null}
                                 {isPurchaseColumnVisible("studentReceived") ? (
-                                  <TableCell className="text-right tabular-nums">
+                                  <TableCell className={purchaseQuantityCellClassName("student")}>
                                     {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "received"))}
                                   </TableCell>
                                 ) : null}
                               </>
                             ) : null}
                             {isPurchaseColumnVisible("teacherRequested") ? (
-                              <TableCell className="text-right tabular-nums">
+                              <TableCell className={purchaseQuantityCellClassName("teacher")}>
                                 {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "requested"))}
                               </TableCell>
                             ) : null}
                             {mode === "order" ? (
                               <>
                                 {isPurchaseColumnVisible("teacherOrdered") ? (
-                                  <TableCell className="text-right tabular-nums">
+                                  <TableCell className={purchaseQuantityCellClassName("teacher")}>
                                     {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "ordered"))}
                                   </TableCell>
                                 ) : null}
                                 {isPurchaseColumnVisible("teacherReceived") ? (
-                                  <TableCell className="text-right tabular-nums">
+                                  <TableCell className={purchaseQuantityCellClassName("teacher")}>
                                     {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "received"))}
                                   </TableCell>
                                 ) : null}
@@ -9842,19 +9843,18 @@ function PurchaseProcessTable({
                         {isPurchaseColumnVisible("textbook") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("location") ? <TableCell /> : null}
                         {isPurchaseColumnVisible("class") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("copyScope") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("studentRequested") ? <TableCell className="text-right tabular-nums">{formatQuantity(studentRequestedTotal)}</TableCell> : null}
+                        {isPurchaseColumnVisible("studentRequested") ? <TableCell className={purchaseQuantityCellClassName("student")}>{formatQuantity(studentRequestedTotal)}</TableCell> : null}
                         {mode === "order" ? (
                           <>
-                            {isPurchaseColumnVisible("studentOrdered") ? <TableCell className="text-right tabular-nums">{formatQuantity(studentOrderedTotal)}</TableCell> : null}
-                            {isPurchaseColumnVisible("studentReceived") ? <TableCell className="text-right tabular-nums">{formatQuantity(studentReceivedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("studentOrdered") ? <TableCell className={purchaseQuantityCellClassName("student")}>{formatQuantity(studentOrderedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("studentReceived") ? <TableCell className={purchaseQuantityCellClassName("student")}>{formatQuantity(studentReceivedTotal)}</TableCell> : null}
                           </>
                         ) : null}
-                        {isPurchaseColumnVisible("teacherRequested") ? <TableCell className="text-right tabular-nums">{formatQuantity(teacherRequestedTotal)}</TableCell> : null}
+                        {isPurchaseColumnVisible("teacherRequested") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{formatQuantity(teacherRequestedTotal)}</TableCell> : null}
                         {mode === "order" ? (
                           <>
-                            {isPurchaseColumnVisible("teacherOrdered") ? <TableCell className="text-right tabular-nums">{formatQuantity(teacherOrderedTotal)}</TableCell> : null}
-                            {isPurchaseColumnVisible("teacherReceived") ? <TableCell className="text-right tabular-nums">{formatQuantity(teacherReceivedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("teacherOrdered") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{formatQuantity(teacherOrderedTotal)}</TableCell> : null}
+                            {isPurchaseColumnVisible("teacherReceived") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{formatQuantity(teacherReceivedTotal)}</TableCell> : null}
                           </>
                         ) : null}
                         {isPurchaseColumnVisible("decision") ? <TableCell /> : null}
