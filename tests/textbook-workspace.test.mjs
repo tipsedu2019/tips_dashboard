@@ -932,6 +932,50 @@ test("purchase form shows only the fields needed for the selected process stage"
   assert.doesNotMatch(workspaceSource, /setPurchaseField\("unitCost"/);
 });
 
+test("purchase order stage keeps request details editable before supplier ordering", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const visibilitySource = workspaceSource.slice(
+    workspaceSource.indexOf("function getPurchaseFieldVisibility"),
+    workspaceSource.indexOf("function buildPurchaseCardDraft"),
+  );
+  const dialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("function TextbookOperationsWorkspace"),
+    workspaceSource.indexOf("function PurchaseBulkOrderDialog"),
+  );
+
+  assert.match(visibilitySource, /requester: normalizedStage === "request" \|\| normalizedStage === "order"/);
+  assert.match(visibilitySource, /location: normalizedStage === "request" \|\| normalizedStage === "order" \|\| normalizedStage === "receive"/);
+  assert.match(visibilitySource, /requestedQuantity: normalizedStage === "request" \|\| normalizedStage === "order"/);
+  assert.match(visibilitySource, /classFit: normalizedStage === "request" \|\| normalizedStage === "order"/);
+  assert.match(dialogSource, /purchaseForm\.requestStage !== "request" && purchaseFieldVisibility\.requester/);
+  assert.match(dialogSource, /ariaLabel=\{purchaseForm\.requestStage === "order" \? "주문 요청자 선택" : "요청자 선택"\}/);
+  assert.match(dialogSource, /ariaLabel=\{purchaseForm\.requestStage === "order" \? "주문 위치 선택" : "입고 위치 선택"\}/);
+  assert.match(dialogSource, /<Field label="학생용 요청">[\s\S]*studentRequestedQuantity/);
+  assert.match(dialogSource, /<Field label="교사용 요청">[\s\S]*teacherRequestedQuantity/);
+});
+
+test("class combobox can clear a selected class by selecting it again", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const comboboxSource = workspaceSource.slice(
+    workspaceSource.indexOf("function SearchCombobox"),
+    workspaceSource.indexOf("function TextbookSelect"),
+  );
+  const classSelectSource = workspaceSource.slice(
+    workspaceSource.indexOf("function ClassSelect"),
+    workspaceSource.indexOf("function TeacherSelect"),
+  );
+
+  assert.match(comboboxSource, /allowDeselect = false/);
+  assert.match(comboboxSource, /onValueChange\(allowDeselect && option\.value === value \? "" : option\.value\)/);
+  assert.match(classSelectSource, /allowDeselect=\{true\}/);
+});
+
 test("purchase process derives supplier and unit cost from settings and separates location", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
@@ -1058,7 +1102,7 @@ test("selecting a class defaults requester to its teacher without locking the fi
   assert.match(workspaceSource, /requestBy: shouldDefaultTeacher \? nextTeacher : current\.requestBy/);
   assert.match(workspaceSource, /inferClassLocationId\(nextClass, locations\)/);
   assert.match(workspaceSource, /locationId: nextLocationId \|\| current\.locationId/);
-  assert.match(workspaceSource, /ariaLabel=\{purchaseForm\.requestStage === "request" \? "요청 위치 선택" : "입고 위치 선택"\}/);
+  assert.match(workspaceSource, /ariaLabel=\{purchaseForm\.requestStage === "order" \? "주문 위치 선택" : "입고 위치 선택"\}/);
   assert.match(workspaceSource, /<TeacherSelect[\s\S]*onValueChange=\{\(value\) => setPurchaseField\("requestBy", value\)\}/);
 });
 
@@ -1600,8 +1644,8 @@ test("textbook workspace names modal selects and removes duplicate hidden purcha
   assert.doesNotMatch(workspaceSource, /aria-label=\{saving === "sale" \? "출고 대기 저장 중"/);
   assert.doesNotMatch(workspaceSource, /aria-label=\{saving === "closing" \? "월마감 저장 중"/);
   assert.match(workspaceSource, /onOpenChange=\{\(open\) => \(open \? setPurchaseDialogOpen\(true\) : closePurchaseDialog\(\)\)\}/);
-  assert.match(workspaceSource, /ariaLabel="요청자 선택"/);
-  assert.match(workspaceSource, /"요청 위치 선택" : "입고 위치 선택"/);
+  assert.match(workspaceSource, /"주문 요청자 선택" : "요청자 선택"/);
+  assert.match(workspaceSource, /"주문 위치 선택" : "입고 위치 선택"/);
   assert.match(workspaceSource, /ariaLabel="출고 위치 선택"/);
   assert.match(workspaceSource, /ariaLabel="실사 위치 선택"/);
   assert.match(workspaceSource, /aria-label="마감 과목 선택"/);

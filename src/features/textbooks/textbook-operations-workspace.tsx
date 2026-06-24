@@ -1730,13 +1730,13 @@ function purchaseStatusToStage(status: PurchaseKanbanStatus) {
 function getPurchaseFieldVisibility(stage: unknown) {
   const normalizedStage = text(stage) || "request";
   return {
-    requester: normalizedStage === "request",
-    location: normalizedStage === "request" || normalizedStage === "receive",
-    requestedQuantity: normalizedStage === "request",
+    requester: normalizedStage === "request" || normalizedStage === "order",
+    location: normalizedStage === "request" || normalizedStage === "order" || normalizedStage === "receive",
+    requestedQuantity: normalizedStage === "request" || normalizedStage === "order",
     orderedQuantity: normalizedStage === "order" || normalizedStage === "receive",
     receivedQuantity: normalizedStage === "receive",
     statementNumber: normalizedStage === "receive",
-    classFit: normalizedStage === "request",
+    classFit: normalizedStage === "request" || normalizedStage === "order",
   };
 }
 
@@ -5571,33 +5571,38 @@ export function TextbookOperationsWorkspace() {
             {purchaseForm.requestStage !== "request" && purchaseFieldVisibility.requester ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {purchaseFieldVisibility.requester ? (
-                  <Field label="요청자">
+                  <Field label="선생님">
                     <TeacherSelect
                       teachers={data.teacherCatalogs}
                       value={purchaseForm.requestBy}
                       onValueChange={(value) => setPurchaseField("requestBy", value)}
-                      ariaLabel="요청자 선택"
+                      ariaLabel={purchaseForm.requestStage === "order" ? "주문 요청자 선택" : "요청자 선택"}
                     />
                   </Field>
                 ) : null}
               </div>
             ) : null}
             {purchaseForm.requestStage !== "request" && (purchaseFieldVisibility.location || purchaseFieldVisibility.requestedQuantity) ? (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-3">
                 {purchaseFieldVisibility.location ? (
                   <Field label="위치">
                     <LocationSelect
                       locations={locations}
                       value={selectedLocationId}
                       onValueChange={(value) => setPurchaseField("locationId", value)}
-                      ariaLabel={purchaseForm.requestStage === "request" ? "요청 위치 선택" : "입고 위치 선택"}
+                      ariaLabel={purchaseForm.requestStage === "order" ? "주문 위치 선택" : "입고 위치 선택"}
                     />
                   </Field>
                 ) : null}
                 {purchaseFieldVisibility.requestedQuantity ? (
-                  <Field label="요청" required>
+                  <>
+                  <Field label="학생용 요청">
                     <Input value={purchaseForm.studentRequestedQuantity} onChange={(event) => setPurchaseField("studentRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 요청 수량" />
                   </Field>
+                  <Field label="교사용 요청">
+                    <Input value={purchaseForm.teacherRequestedQuantity} onChange={(event) => setPurchaseField("teacherRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 요청 수량" />
+                  </Field>
+                  </>
                 ) : null}
               </div>
             ) : null}
@@ -7119,6 +7124,7 @@ function SearchCombobox({
   searchPlaceholder,
   emptyLabel,
   ariaLabel,
+  allowDeselect = false,
 }: {
   options: SearchSelectOption[];
   value: string;
@@ -7127,6 +7133,7 @@ function SearchCombobox({
   searchPlaceholder: string;
   emptyLabel: string;
   ariaLabel: string;
+  allowDeselect?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selected = options.find((option) => option.value === value);
@@ -7159,7 +7166,7 @@ function SearchCombobox({
                   key={option.value}
                   value={`${option.label} ${option.description || ""} ${option.searchText || ""} ${option.value}`}
                   onSelect={() => {
-                    onValueChange(option.value);
+                    onValueChange(allowDeselect && option.value === value ? "" : option.value);
                     setOpen(false);
                   }}
                 >
@@ -7225,6 +7232,7 @@ function ClassSelect({ classes, value, onValueChange }: { classes: Row[]; value:
       searchPlaceholder="수업명, 담당"
       emptyLabel="수업이 없습니다"
       ariaLabel="수업 선택"
+      allowDeselect={true}
     />
   );
 }
