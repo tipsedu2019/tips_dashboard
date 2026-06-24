@@ -970,14 +970,44 @@ test("purchase requests support bulk ordering with requested quantity defaults",
   assert.match(workspaceSource, /selectedBulkOrderLines/);
   assert.match(workspaceSource, /DialogTitle>선택 요청 일괄 주문<\/DialogTitle>/);
   assert.match(workspaceSource, /선택한 요청을 공급처 주문 단계로 한꺼번에 전환합니다/);
-  assert.match(workspaceSource, /draft\.orderedQuantity \|\| draft\.requestedQuantity \|\| "1"/);
-  assert.match(workspaceSource, /const nextOrderedQuantity = nextStage === "request" \? orderedQuantity : orderedQuantity \|\| primaryRequestedQuantity/);
-  assert.match(workspaceSource, /<Metric label="요청" value=\{`\$\{formatQuantity\(purchaseRequestedTotalQuantity\)\}권`\}/);
+  assert.match(workspaceSource, /function getPositivePurchaseQuantityText\(value: unknown\)/);
+  assert.match(workspaceSource, /getPositivePurchaseQuantityText\(draft\.orderedQuantity\) \|\| draft\.requestedQuantity \|\| "1"/);
+  assert.match(workspaceSource, /const orderedQuantity = normalizeQuantityInput\(bulkOrderQuantities\[lineId\]\) \|\| getPositivePurchaseQuantityText\(draft\.orderedQuantity\) \|\| draft\.requestedQuantity \|\| "1"/);
+  assert.match(workspaceSource, /const nextOrderedQuantity = nextStage === "request" \? orderedQuantity : getPositivePurchaseQuantityText\(orderedQuantity\) \|\| primaryRequestedQuantity/);
+  assert.match(workspaceSource, /<Metric label="요청" value=\{purchaseRequestedScopeSummary\}/);
   assert.match(tableSource, /일괄 처리 가능한 행 전체 선택/);
   assert.match(tableSource, /선택 주문/);
   assert.match(tableSource, /onToggleVisibleLines\?\.\(groupActionableLineIds, value === true\)/);
   assert.match(tableSource, /onToggleLine\?\.\(lineId, value === true\)/);
   assert.match(serviceSource, /created_by: createdBy/);
+});
+
+test("purchase order modal separates requested copy scope totals before ordering", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /function formatPurchaseScopeQuantityMetric\(studentQuantity: number, teacherQuantity: number\)/);
+  assert.match(workspaceSource, /const purchaseRequestedScopeSummary = formatPurchaseScopeQuantityMetric\(purchaseStudentRequestedQuantity, purchaseTeacherRequestedQuantity\)/);
+  assert.match(workspaceSource, /<Metric label="요청" value=\{purchaseRequestedScopeSummary\}/);
+  assert.doesNotMatch(workspaceSource, /<Metric label="요청" value=\{`\$\{formatQuantity\(purchaseRequestedTotalQuantity\)\}권`\}/);
+});
+
+test("purchase supplier handoff excludes request-only rows and never falls back to requested quantity", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const handoffSource = workspaceSource.slice(
+    workspaceSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
+    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  );
+
+  assert.match(handoffSource, /if \(status !== "ordered" && status !== "partially_received"\) \{/);
+  assert.match(handoffSource, /if \(orderedQuantity <= 0\) \{\s*continue;\s*\}/);
+  assert.match(handoffSource, /const quantity = orderedQuantity;/);
+  assert.doesNotMatch(handoffSource, /orderedQuantity \|\| requestedQuantity/);
 });
 
 test("purchase copy-scope actions identify student and teacher copies through order dialogs", async () => {
@@ -2063,8 +2093,8 @@ test("purchase order modal defaults student and teacher order quantities from gr
 
   assert.match(workspaceSource, /const studentBaseQuantity = studentRequestedQuantity \|\| \(!teacherLine \? primaryRequestedQuantity : ""\)/);
   assert.match(workspaceSource, /const teacherBaseQuantity = teacherRequestedQuantity \|\| \(!studentLine \? primaryRequestedQuantity : ""\)/);
-  assert.match(workspaceSource, /const nextStudentOrderedQuantity = nextStage === "request" \? studentOrderedQuantity : studentOrderedQuantity \|\| studentBaseQuantity/);
-  assert.match(workspaceSource, /const nextTeacherOrderedQuantity = nextStage === "request" \? teacherOrderedQuantity : teacherOrderedQuantity \|\| teacherBaseQuantity/);
+  assert.match(workspaceSource, /const nextStudentOrderedQuantity = nextStage === "request" \? studentOrderedQuantity : getPositivePurchaseQuantityText\(studentOrderedQuantity\) \|\| studentBaseQuantity/);
+  assert.match(workspaceSource, /const nextTeacherOrderedQuantity = nextStage === "request" \? teacherOrderedQuantity : getPositivePurchaseQuantityText\(teacherOrderedQuantity\) \|\| teacherBaseQuantity/);
   assert.match(workspaceSource, /studentOrderedQuantity: nextStudentOrderedQuantity/);
   assert.match(workspaceSource, /teacherOrderedQuantity: nextTeacherOrderedQuantity/);
 });

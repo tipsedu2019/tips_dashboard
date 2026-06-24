@@ -709,6 +709,11 @@ function numberValue(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function getPositivePurchaseQuantityText(value: unknown) {
+  const normalized = textPreservingZero(value);
+  return numberValue(normalized) > 0 ? normalized : "";
+}
+
 function normalizeMoneyInput(value: unknown) {
   return text(value).replace(/[^\d]/g, "");
 }
@@ -791,6 +796,13 @@ function formatCurrency(value: unknown) {
 
 function formatQuantity(value: unknown) {
   return new Intl.NumberFormat("ko-KR").format(numberValue(value));
+}
+
+function formatPurchaseScopeQuantityMetric(studentQuantity: number, teacherQuantity: number) {
+  return [
+    studentQuantity > 0 ? `학생용 ${formatQuantity(studentQuantity)}권` : "",
+    teacherQuantity > 0 ? `교사용 ${formatQuantity(teacherQuantity)}권` : "",
+  ].filter(Boolean).join(" · ") || "0권";
 }
 
 function formatPurchaseUnitCost(value: unknown, textbook: Row | undefined) {
@@ -1933,9 +1945,14 @@ function buildPurchaseSupplierHandoffGroups({
     const locationLabel = getLocationName(locations, draft.locationId);
     const publisherLabel = getPublisherLabel(textbook || {});
     const orderedQuantity = numberValue(draft.orderedQuantity);
-    const requestedQuantity = numberValue(draft.requestedQuantity);
     const receivedQuantity = numberValue(draft.receivedQuantity);
-    const quantity = Math.max(orderedQuantity || requestedQuantity || receivedQuantity || 1, 1);
+    if (status !== "ordered" && status !== "partially_received") {
+      continue;
+    }
+    if (orderedQuantity <= 0) {
+      continue;
+    }
+    const quantity = orderedQuantity;
     const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, suppliers, draft.unitCost, draft.copyScope);
     const lineAmount = unitCost * quantity;
     const group = groups.get(supplierId) || {
@@ -2939,6 +2956,7 @@ export function TextbookOperationsWorkspace() {
   const purchaseStudentRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "requested"));
   const purchaseTeacherRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "requested"));
   const purchaseRequestedTotalQuantity = purchaseStudentRequestedQuantity + purchaseTeacherRequestedQuantity;
+  const purchaseRequestedScopeSummary = formatPurchaseScopeQuantityMetric(purchaseStudentRequestedQuantity, purchaseTeacherRequestedQuantity);
   const purchaseStudentOrderedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "ordered"));
   const purchaseTeacherOrderedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "ordered"));
   const purchaseOrderedTotalQuantity = purchaseStudentOrderedQuantity + purchaseTeacherOrderedQuantity;
@@ -3777,7 +3795,7 @@ export function TextbookOperationsWorkspace() {
     setBulkOrderQuantities(Object.fromEntries(selectedBulkOrderLines.map((line) => {
       const order = getPurchaseLineOrder(line, purchaseOrdersById);
       const draft = buildPurchaseCardDraft(line, order);
-      return [getRecordId(line), draft.orderedQuantity || draft.requestedQuantity || "1"];
+      return [getRecordId(line), getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1"];
     })));
     setBulkOrderDialogOpen(true);
     setMessage("");
@@ -3827,13 +3845,14 @@ export function TextbookOperationsWorkspace() {
           const order = getPurchaseLineOrder(line, purchaseOrdersById);
           const draft = buildPurchaseCardDraft(line, order);
           const lineId = getRecordId(line);
+          const orderedQuantity = normalizeQuantityInput(bulkOrderQuantities[lineId]) || getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1";
           return textbookService.updatePurchaseLifecycle({
             ...applyConfiguredPurchasePricingToPayload(buildPurchasePayloadFromDraft(
               line,
               order,
               {
                 ...draft,
-                orderedQuantity: text(bulkOrderQuantities[lineId]) || draft.requestedQuantity || "1",
+                orderedQuantity,
               },
               "ordered",
             )),
@@ -4048,7 +4067,7 @@ export function TextbookOperationsWorkspace() {
     const requestedQuantity = getRowFieldText(primaryLine, "requested_quantity", "requestedQuantity");
     const primaryRequestedQuantity = requestedQuantity || orderedQuantity || "1";
     const nextStage = stageOverride || purchaseStageFromStatus(status);
-    const nextOrderedQuantity = nextStage === "request" ? orderedQuantity : orderedQuantity || primaryRequestedQuantity;
+    const nextOrderedQuantity = nextStage === "request" ? orderedQuantity : getPositivePurchaseQuantityText(orderedQuantity) || primaryRequestedQuantity;
     const requestedTitle = getRequestedTextbookTitle(primaryLine);
     const textbook = getTextbookById(data.textbooks, text(primaryLine.textbook_id || primaryLine.textbookId) || requestedTitle);
     const copyScope = getTextbookCopyScope(primaryLine);
@@ -4069,13 +4088,13 @@ export function TextbookOperationsWorkspace() {
     const teacherOrderedQuantity = getRowFieldText(teacherLine, "ordered_quantity", "orderedQuantity");
     const studentBaseQuantity = studentRequestedQuantity || (!teacherLine ? primaryRequestedQuantity : "");
     const teacherBaseQuantity = teacherRequestedQuantity || (!studentLine ? primaryRequestedQuantity : "");
-    const nextStudentOrderedQuantity = nextStage === "request" ? studentOrderedQuantity : studentOrderedQuantity || studentBaseQuantity;
-    const nextTeacherOrderedQuantity = nextStage === "request" ? teacherOrderedQuantity : teacherOrderedQuantity || teacherBaseQuantity;
+    const nextStudentOrderedQuantity = nextStage === "request" ? studentOrderedQuantity : getPositivePurchaseQuantityText(studentOrderedQuantity) || studentBaseQuantity;
+    const nextTeacherOrderedQuantity = nextStage === "request" ? teacherOrderedQuantity : getPositivePurchaseQuantityText(teacherOrderedQuantity) || teacherBaseQuantity;
     const nextStudentReceivedQuantity = nextStage === "receive"
-      ? getRowFieldText(studentLine, "received_quantity", "receivedQuantity") || nextStudentOrderedQuantity || studentBaseQuantity
+      ? getPositivePurchaseQuantityText(getRowFieldText(studentLine, "received_quantity", "receivedQuantity")) || nextStudentOrderedQuantity || studentBaseQuantity
       : getRowFieldText(studentLine, "received_quantity", "receivedQuantity");
     const nextTeacherReceivedQuantity = nextStage === "receive"
-      ? getRowFieldText(teacherLine, "received_quantity", "receivedQuantity") || nextTeacherOrderedQuantity || teacherBaseQuantity
+      ? getPositivePurchaseQuantityText(getRowFieldText(teacherLine, "received_quantity", "receivedQuantity")) || nextTeacherOrderedQuantity || teacherBaseQuantity
       : getRowFieldText(teacherLine, "received_quantity", "receivedQuantity");
     setSelectedPurchaseLineId(getRecordId(primaryLine));
     setSelectedPurchaseScopeLineIds({
@@ -5266,7 +5285,7 @@ export function TextbookOperationsWorkspace() {
             {purchaseForm.requestStage !== "request" ? (
               <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-6">
                 <Metric label="총판" value={configuredPurchaseSupplierLabel} />
-                <Metric label="요청" value={`${formatQuantity(purchaseRequestedTotalQuantity)}권`} />
+                <Metric label="요청" value={purchaseRequestedScopeSummary} />
                 <Metric label="단가" value={formatPurchaseUnitCost(configuredPurchaseUnitCost, selectedPurchaseTextbook)} />
                 <Metric label="합계" value={configuredPurchaseTotalCost > 0 ? formatCurrency(configuredPurchaseTotalCost) : "-"} />
                 <Metric
@@ -5424,6 +5443,7 @@ export function TextbookOperationsWorkspace() {
                     const order = getPurchaseLineOrder(line, purchaseOrdersById);
                     const draft = buildPurchaseCardDraft(line, order);
                     const textbook = getOrderablePurchaseRequestTextbook(line, order, data.textbooks);
+                    const defaultOrderQuantity = getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1";
                     return (
                       <TableRow key={lineId}>
                         <TableCell className="min-w-0">
@@ -5438,7 +5458,7 @@ export function TextbookOperationsWorkspace() {
                         <TableCell className="text-right">{formatQuantity(draft.requestedQuantity)}</TableCell>
                         <TableCell>
                           <Input
-                            value={bulkOrderQuantities[lineId] ?? draft.requestedQuantity}
+                            value={bulkOrderQuantities[lineId] ?? defaultOrderQuantity}
                             onChange={(event) => setBulkOrderQuantity(lineId, event.target.value)}
                             inputMode="numeric"
                             min="1"
@@ -6294,7 +6314,7 @@ function Metric({ label, value, tone = "default" }: { label: string; value: stri
       )}
     >
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+      <div className="mt-1 break-keep text-sm font-semibold leading-tight">{value}</div>
     </div>
   );
 }
