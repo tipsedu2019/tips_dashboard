@@ -121,7 +121,7 @@ type TextbookQualityFilter =
 type TextbookAmountMode = "salePrice" | "stockValue";
 type PurchaseBoardScope = "active" | "recent" | "all";
 type PurchaseRequestFilter = "all" | "unregistered" | "orderable";
-type PurchaseOrderFilter = "all" | "waiting" | "partial";
+type PurchaseOrderFilter = "all" | "waiting" | "partial" | "returnable" | "returned";
 type SalesProcessFilter = "all" | "waiting" | "issued" | "returned" | "cancelled";
 type TextbookOpsQueueKey = "unregistered" | "order" | "partial" | "issue" | "stockRisk";
 type PurchaseKanbanStatus = "requested" | "ordered" | "partially_received" | "received" | "cancelled" | "returned";
@@ -474,10 +474,12 @@ const purchaseOrderFilterLabels: Record<PurchaseOrderFilter, string> = {
   all: "전체",
   waiting: "진행중",
   partial: "부분입고",
+  returnable: "반품 가능",
+  returned: "반품 완료",
 };
 const purchaseRequestFilterValues: PurchaseRequestFilter[] = ["all", "unregistered", "orderable"];
 const purchaseBoardScopeValues: PurchaseBoardScope[] = ["active", "recent", "all"];
-const purchaseOrderFilterValues: PurchaseOrderFilter[] = ["all", "waiting", "partial"];
+const purchaseOrderFilterValues: PurchaseOrderFilter[] = ["all", "waiting", "partial", "returnable", "returned"];
 const salesProcessFilterValues: SalesProcessFilter[] = ["all", "waiting", "issued", "returned", "cancelled"];
 
 const saleStatusLabels: Record<string, string> = {
@@ -848,6 +850,43 @@ function formatCurrency(value: unknown) {
 
 function formatQuantity(value: unknown) {
   return new Intl.NumberFormat("ko-KR").format(numberValue(value));
+}
+
+const TEXTBOOK_HANDOFF_BUSINESS_NAME = "TIPS 영어수학학원";
+
+function formatKoreanDocumentDate(value: Date | string | number = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return formatKoreanDocumentDate();
+  }
+  return `${date.getFullYear()}년 ${formatQuantity(date.getMonth() + 1)}월 ${formatQuantity(date.getDate())}일`;
+}
+
+function getTextbookHandoffDocumentMeta(format: "default" | "purchase-order" | "purchase-return") {
+  if (format === "purchase-return") {
+    return {
+      documentTitle: "반품 요청서",
+      contentLabel: "교재 반품 요청",
+      documentDate: formatKoreanDocumentDate(),
+      businessName: TEXTBOOK_HANDOFF_BUSINESS_NAME,
+    };
+  }
+
+  if (format === "purchase-order") {
+    return {
+      documentTitle: "주문서",
+      contentLabel: "교재 주문 요청",
+      documentDate: formatKoreanDocumentDate(),
+      businessName: TEXTBOOK_HANDOFF_BUSINESS_NAME,
+    };
+  }
+
+  return {
+    documentTitle: "전달서",
+    contentLabel: "교재 업무 전달",
+    documentDate: formatKoreanDocumentDate(),
+    businessName: TEXTBOOK_HANDOFF_BUSINESS_NAME,
+  };
 }
 
 function formatPurchaseScopeQuantityMetric(studentQuantity: number, teacherQuantity: number) {
@@ -1868,8 +1907,12 @@ function matchesSaleLineQuery({
 }
 
 function buildPurchaseSupplierMessage(group: TextbookHandoffGroup) {
+  const documentMeta = getTextbookHandoffDocumentMeta("purchase-order");
   return [
-    `[공급처 주문 전달] ${group.title}`,
+    `[공급처 주문 전달] ${group.title} ${documentMeta.documentTitle}`,
+    `문서일자: ${documentMeta.documentDate}`,
+    "내용: 교재 주문 요청",
+    `발신: ${TEXTBOOK_HANDOFF_BUSINESS_NAME}`,
     group.subtitle ? `담당: ${group.subtitle}` : "",
     `총 주문금액: ${formatCurrency(group.totalAmount)}`,
     `요약: ${group.summary.join(" / ")}`,
@@ -1888,6 +1931,34 @@ function buildPurchaseSupplierMessage(group: TextbookHandoffGroup) {
     ),
     "",
     "위치별 수량 확인 후 전달 부탁드립니다.",
+  ].filter((line) => line !== "").join("\n");
+}
+
+function buildPurchaseSupplierReturnMessage(group: TextbookHandoffGroup) {
+  const documentMeta = getTextbookHandoffDocumentMeta("purchase-return");
+  return [
+    `[공급처 반품 요청서] ${group.title} ${documentMeta.documentTitle}`,
+    `문서일자: ${documentMeta.documentDate}`,
+    "내용: 교재 반품 요청",
+    `발신: ${TEXTBOOK_HANDOFF_BUSINESS_NAME}`,
+    group.subtitle ? `담당: ${group.subtitle}` : "",
+    `총 반품금액: ${formatCurrency(group.totalAmount)}`,
+    `요약: ${group.summary.join(" / ")}`,
+    "",
+    ...group.lines.map((line, index) =>
+      [
+        `${index + 1}. 위치: ${line.locationLabel || "-"}`,
+        `교재: ${line.title}`,
+        `출판사: ${line.publisherLabel || "-"}`,
+        `학생용: ${line.studentQuantityLabel || "0권"}`,
+        `교사용: ${line.teacherQuantityLabel || "0권"}`,
+        `매입단가: ${line.unitCostLabel || "-"}`,
+        `반품금액: ${line.amountLabel}`,
+        line.note ? `비고: ${line.note}` : "",
+      ].filter(Boolean).join(" | "),
+    ),
+    "",
+    "위치별 입고 수량 기준으로 반품 처리 부탁드립니다.",
   ].filter((line) => line !== "").join("\n");
 }
 
@@ -2091,6 +2162,144 @@ function buildPurchaseSupplierHandoffGroups({
     return {
       ...nextGroup,
       message: buildPurchaseSupplierMessage(nextGroup),
+    };
+  });
+}
+
+function buildPurchaseSupplierReturnHandoffGroups({
+  rows,
+  ordersById,
+  textbooks,
+  publishers,
+  suppliers,
+  publisherSupplierLinks,
+  locations,
+  classes,
+}: {
+  rows: Row[];
+  ordersById: Map<string, Row>;
+  textbooks: Row[];
+  publishers: Row[];
+  suppliers: Row[];
+  publisherSupplierLinks: Row[];
+  locations: Row[];
+  classes: Row[];
+}) {
+  const groups = new Map<string, PurchaseSupplierHandoffGroupDraft>();
+
+  for (const line of rows) {
+    const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
+    const draft = buildPurchaseCardDraft(line, order);
+    const status = text(line.status || order.status) || "requested";
+    if (status !== "received" && status !== "partially_received") {
+      continue;
+    }
+
+    const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
+    const textbookTitle = getPurchaseTextbookTitle(line, textbook);
+    const supplierId = getConfiguredSupplierIdForTextbook(textbook, publisherSupplierLinks, publishers) || draft.supplierId || "unspecified";
+    const supplier = getSupplierById(suppliers, supplierId);
+    const supplierName = getSupplierName(suppliers, supplierId) || "공급처 미지정";
+    const supplierContact = getSupplierContact(supplier);
+    const classRecord = getClassById(classes, draft.classId);
+    const classLabel = classRecord ? getClassName(classRecord) : "";
+    const locationLabel = getLocationName(locations, draft.locationId) || "위치 미지정";
+    const publisherLabel = getPublisherLabel(textbook || {});
+    const receivedQuantity = numberValue(draft.receivedQuantity);
+    const quantity = Math.max(0, receivedQuantity);
+    if (quantity <= 0) {
+      continue;
+    }
+    const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, suppliers, draft.unitCost, draft.copyScope);
+    const lineAmount = unitCost * quantity;
+    const group = groups.get(supplierId) || {
+      id: supplierId,
+      title: supplierName,
+      subtitle: supplierContact,
+      summary: [],
+      message: "",
+      lines: [],
+      totalQuantity: 0,
+      totalAmount: 0,
+      lineAccumulators: new Map(),
+    };
+    const textbookKey = getRecordId(textbook || {}) || normalizeTextbookLookup(textbookTitle) || textbookTitle;
+    const lineKey = `${supplierId}||${textbookKey}`;
+    const lineAccumulator = group.lineAccumulators.get(lineKey) || {
+      id: lineKey,
+      title: textbookTitle,
+      publisherLabel,
+      classLabels: [],
+      locationLabels: [],
+      locationScopeQuantities: new Map(),
+      requesterLabels: [],
+      statusLabels: [],
+      scopeQuantities: { student: 0, teacher: 0 },
+      unitCostLabels: [],
+      remainingQuantity: 0,
+      totalQuantity: 0,
+      totalAmount: 0,
+    };
+
+    pushUniqueText(lineAccumulator.classLabels, classLabel);
+    pushUniqueText(lineAccumulator.locationLabels, locationLabel);
+    pushUniqueText(lineAccumulator.requesterLabels, draft.requestBy);
+    pushUniqueText(lineAccumulator.statusLabels, purchaseStatusLabel(status, draft.orderedQuantity, draft.receivedQuantity));
+    if (draft.copyScope === "student" || unitCost > 0) {
+      pushUniqueText(lineAccumulator.unitCostLabels, formatPurchaseUnitCost(unitCost, textbook));
+    }
+    const locationQuantities = lineAccumulator.locationScopeQuantities.get(locationLabel) || { student: 0, teacher: 0 };
+    locationQuantities[draft.copyScope] += quantity;
+    lineAccumulator.locationScopeQuantities.set(locationLabel, locationQuantities);
+    lineAccumulator.scopeQuantities[draft.copyScope] += quantity;
+    lineAccumulator.totalQuantity += quantity;
+    lineAccumulator.totalAmount += lineAmount;
+
+    group.lineAccumulators.set(lineKey, lineAccumulator);
+    group.totalQuantity += quantity;
+    group.totalAmount += lineAmount;
+    groups.set(supplierId, group);
+  }
+
+  return [...groups.values()].map(({ lineAccumulators, ...group }) => {
+    const accumulatorLines = [...lineAccumulators.values()];
+    const lines = accumulatorLines.map((line) => ({
+      id: line.id,
+      title: line.title,
+      detail: [
+        getPurchaseSupplierHandoffScopeLabel(line.scopeQuantities),
+        line.publisherLabel,
+        formatCompactHandoffLabels(line.classLabels),
+        formatCompactHandoffLabels(line.locationLabels),
+      ].filter(Boolean).join(" · "),
+      note: [
+        formatCompactHandoffLabels(line.statusLabels),
+        line.requesterLabels.length > 0 ? `요청 ${formatCompactHandoffLabels(line.requesterLabels)}` : "",
+      ].filter(Boolean).join(" · "),
+      quantityLabel: getPurchaseSupplierHandoffQuantityLabel(line.scopeQuantities),
+      amountLabel: formatCurrency(line.totalAmount),
+      locationLabel: getPurchaseSupplierHandoffLocationLabel(line.locationScopeQuantities),
+      locationQuantities: getPurchaseSupplierHandoffLocationQuantities(line.locationScopeQuantities),
+      publisherLabel: line.publisherLabel || "-",
+      studentQuantityLabel: `${formatQuantity(line.scopeQuantities.student)}권`,
+      teacherQuantityLabel: `${formatQuantity(line.scopeQuantities.teacher)}권`,
+      unitCostLabel: getPurchaseSupplierHandoffUnitCostLabel(line),
+    }));
+    const studentQuantity = accumulatorLines.reduce((sum, line) => sum + line.scopeQuantities.student, 0);
+    const teacherQuantity = accumulatorLines.reduce((sum, line) => sum + line.scopeQuantities.teacher, 0);
+    const returnDocumentLabel = "반품 요청서";
+    const summary = [
+      returnDocumentLabel,
+      `${formatQuantity(lines.length)}종`,
+      studentQuantity > 0 ? `학생용 ${formatQuantity(studentQuantity)}권` : "",
+      teacherQuantity > 0 ? `교사용 ${formatQuantity(teacherQuantity)}권` : "",
+      `${formatQuantity(group.totalQuantity)}권`,
+      group.totalAmount > 0 ? formatCurrency(group.totalAmount) : "",
+    ].filter(Boolean);
+    const nextGroup = { ...group, lines, summary };
+    return {
+      ...nextGroup,
+      message: buildPurchaseSupplierReturnMessage(nextGroup),
     };
   });
 }
@@ -6499,15 +6708,18 @@ function TextbookHandoffDialog({
   groups: TextbookHandoffGroup[];
   emptyLabel: string;
   idPrefix: string;
-  format?: "default" | "purchase-order";
+  format?: "default" | "purchase-order" | "purchase-return";
 }) {
   const [status, setStatus] = useState("");
   const [manualCopyText, setManualCopyText] = useState("");
   const [preparedDownload, setPreparedDownload] = useState<PreparedHandoffDownload | null>(null);
   const manualCopyTextareaRef = useRef<HTMLTextAreaElement>(null);
   const preparedDownloadRef = useRef<PreparedHandoffDownload | null>(null);
+  const documentMeta = getTextbookHandoffDocumentMeta(format);
+  const isPurchaseDocument = format === "purchase-order" || format === "purchase-return";
+  const allowsTextCopy = !isPurchaseDocument;
   const totalQuantity = groups.reduce((sum, group) => sum + group.totalQuantity, 0);
-  const allText = groups.map((group) => group.message).join("\n\n");
+  const allText = allowsTextCopy ? groups.map((group) => group.message).join("\n\n") : "";
   const allDomId = getHandoffDomId(idPrefix, "all");
 
   useEffect(() => {
@@ -6590,15 +6802,30 @@ function TextbookHandoffDialog({
               ) : null}
             </div>
             <div className="flex flex-wrap justify-end gap-2" data-handoff-toolbar>
+              {allowsTextCopy ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={groups.length === 0}
+                  onClick={() => runCopyAction(allText, "전체 복사됨")}
+                >
+                  <Copy className="mr-2 size-3.5" />
+                  전체 복사
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 disabled={groups.length === 0}
-                onClick={() => runCopyAction(allText, "전체 복사됨")}
+                onClick={() => runDownloadAction(
+                  () => downloadHandoffImage(getHandoffCaptureElement(allDomId), title),
+                  "전체 이미지 저장됨",
+                )}
               >
-                <Copy className="mr-2 size-3.5" />
-                전체 복사
+                <FileImage className="mr-2 size-3.5" />
+                전체 이미지
               </Button>
               <Button
                 type="button"
@@ -6611,12 +6838,12 @@ function TextbookHandoffDialog({
                 )}
               >
                 <Printer className="mr-2 size-3.5" />
-                PDF 저장
+                전체 PDF
               </Button>
             </div>
           </div>
 
-          {manualCopyText ? (
+          {allowsTextCopy && manualCopyText ? (
             <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-amber-800">
                 <span>자동 복사 제한 · 주문 메시지</span>
@@ -6668,7 +6895,7 @@ function TextbookHandoffDialog({
                 {groups.map((group) => {
                   const groupDomId = getHandoffDomId(idPrefix, group.id);
                   const filename = `${title}-${group.title}`;
-                  const purchaseOrderLocations = format === "purchase-order" ? getPurchaseOrderLocations(group) : [];
+                  const purchaseOrderLocations = isPurchaseDocument ? getPurchaseOrderLocations(group) : [];
                   return (
                     <section key={group.id} className="grid gap-2 rounded-md border bg-background p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2" data-handoff-toolbar>
@@ -6677,16 +6904,18 @@ function TextbookHandoffDialog({
                           <div className="truncate text-xs text-muted-foreground">{group.summary.join(" · ")}</div>
                         </div>
                         <div className="flex shrink-0 flex-wrap gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8"
-                            onClick={() => runCopyAction(group.message, "복사됨")}
-                          >
-                            <Copy className="mr-1 size-3.5" />
-                            복사
-                          </Button>
+                          {allowsTextCopy ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8"
+                              onClick={() => runCopyAction(group.message, "복사됨")}
+                            >
+                              <Copy className="mr-1 size-3.5" />
+                              복사
+                            </Button>
+                          ) : null}
                           <Button
                             type="button"
                             size="sm"
@@ -6719,6 +6948,11 @@ function TextbookHandoffDialog({
                       <div id={groupDomId} data-handoff-card data-handoff-capture-target data-handoff-print-root className="rounded-md bg-white p-4 text-slate-950">
                         <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
                           <div className="min-w-0">
+                            {isPurchaseDocument ? (
+                              <div className="mb-1 text-xs font-semibold uppercase tracking-normal text-slate-500">
+                                {documentMeta.documentTitle}
+                              </div>
+                            ) : null}
                             <div className="text-base font-semibold">{group.title}</div>
                             {group.subtitle ? <div className="mt-1 text-xs text-slate-500">{group.subtitle}</div> : null}
                           </div>
@@ -6730,9 +6964,27 @@ function TextbookHandoffDialog({
                             ))}
                           </div>
                         </div>
+                        {isPurchaseDocument ? (
+                          <div className="grid gap-2 border-b py-3 text-sm sm:grid-cols-3">
+                            <div className="rounded-md bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] font-medium text-slate-500">문서일자</div>
+                              <div className="mt-1 font-semibold text-slate-950">{documentMeta.documentDate}</div>
+                            </div>
+                            <div className="rounded-md bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] font-medium text-slate-500">내용</div>
+                              <div className="mt-1 font-semibold text-slate-950">{documentMeta.contentLabel}</div>
+                            </div>
+                            <div className="rounded-md bg-slate-50 px-3 py-2">
+                              <div className="text-[11px] font-medium text-slate-500">발신</div>
+                              <div className="mt-1 font-semibold text-slate-950">
+                                {TEXTBOOK_HANDOFF_BUSINESS_NAME}
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
                         <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
                           <Table>
-                            {format === "purchase-order" ? (
+                            {isPurchaseDocument ? (
                               <>
                                 <TableHeader>
                                   <TableRow className="bg-slate-50">
@@ -6747,7 +6999,9 @@ function TextbookHandoffDialog({
                                       </TableHead>
                                     ))}
                                     <TableHead rowSpan={2} className="w-[112px] text-right text-slate-600">매입 단가</TableHead>
-                                    <TableHead rowSpan={2} className="w-[112px] text-right text-slate-600">주문 금액</TableHead>
+                                    <TableHead rowSpan={2} className="w-[112px] text-right text-slate-600">
+                                      {format === "purchase-return" ? "반품 금액" : "주문 금액"}
+                                    </TableHead>
                                   </TableRow>
                                   <TableRow className="bg-slate-50">
                                     {purchaseOrderLocations.map((locationLabel) => (
@@ -6826,6 +7080,17 @@ function TextbookHandoffDialog({
                             )}
                           </Table>
                         </div>
+                        {isPurchaseDocument ? (
+                          <div className="mt-4 flex items-end justify-between gap-3 border-t pt-3 text-sm">
+                            <div className="text-xs text-slate-500">
+                              {documentMeta.contentLabel} 내용 확인 후 회신 부탁드립니다.
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[11px] font-medium text-slate-500">발신</div>
+                              <div className="text-base font-semibold text-slate-950">{documentMeta.businessName}</div>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </section>
                   );
@@ -8845,6 +9110,12 @@ function getPurchaseProcessEmptyLabel(
   if (orderFilter === "partial") {
     return "부분입고 건이 없습니다";
   }
+  if (orderFilter === "returnable") {
+    return "반품 요청 가능한 입고 건이 없습니다";
+  }
+  if (orderFilter === "returned") {
+    return "반품 완료 건이 없습니다";
+  }
   if (groupId === "ordered") {
     return "입고 대기 주문이 없습니다";
   }
@@ -8878,6 +9149,12 @@ function getPurchaseProcessEmptyHint(
   }
   if (orderFilter === "partial" || groupId === "partially_received") {
     return "거래명세표 수량과 실제 입고 수량이 다를 때만 남습니다.";
+  }
+  if (orderFilter === "returnable") {
+    return "입고 수량이 있는 건만 공급처 반품 요청서로 정리할 수 있습니다.";
+  }
+  if (orderFilter === "returned" || groupId === "returned") {
+    return "반품 처리된 건은 재고와 주문 이력을 함께 확인합니다.";
   }
   if (orderFilter === "waiting" || groupId === "ordered") {
     return "주문 완료 건은 입고 수량을 입력하면 다음 단계로 이동합니다.";
@@ -9028,6 +9305,7 @@ function PurchaseProcessTable({
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [handoffDialogOpen, setHandoffDialogOpen] = useState(false);
+  const [returnHandoffDialogOpen, setReturnHandoffDialogOpen] = useState(false);
   const grouped = useMemo(() => groupPurchaseLinesByStatus({ orders, lines }) as Record<string, Row[]>, [lines, orders]);
   const ordersById = useMemo(() => new Map(orders.map((order) => [getRecordId(order), order])), [orders]);
   const requestFilterOptions = useMemo(
@@ -9057,6 +9335,12 @@ function PurchaseProcessTable({
     }
     if (orderFilter === "partial") {
       return groups.filter((group) => group.id === "partially_received");
+    }
+    if (orderFilter === "returnable") {
+      return groups.filter((group) => group.id === "partially_received" || group.id === "received");
+    }
+    if (orderFilter === "returned") {
+      return groups.filter((group) => group.id === "returned");
     }
     return groups;
   }, [groups, mode, orderFilter]);
@@ -9097,8 +9381,24 @@ function PurchaseProcessTable({
     if (mode === "request") return true;
     if (filter === "waiting") return groupId === "requested" || groupId === "ordered" || groupId === "partially_received";
     if (filter === "partial") return groupId === "partially_received";
+    if (filter === "returnable") return groupId === "partially_received" || groupId === "received";
+    if (filter === "returned") return groupId === "returned";
     return true;
   }, [mode]);
+
+  const shouldShowOrderLineForFilter = useCallback((line: Row, groupId: string, filter: PurchaseOrderFilter) => {
+    if (mode === "request") return true;
+    if (filter === "returnable") {
+      const order = getPurchaseLineOrder(line, ordersById);
+      const status = text(line.status || order?.status || groupId);
+      return numberValue(line.received_quantity || line.receivedQuantity) > 0 && status !== "returned" && status !== "cancelled";
+    }
+    if (filter === "returned") {
+      const order = getPurchaseLineOrder(line, ordersById);
+      return text(line.status || order?.status || groupId) === "returned";
+    }
+    return true;
+  }, [mode, ordersById]);
 
   const searchMatchedPurchaseRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
@@ -9124,11 +9424,12 @@ function PurchaseProcessTable({
     return rowsByGroup;
   }, [classes, grouped, groups, locations, ordersById, publisherSupplierLinks, publishers, searchQuery, suppliers, textbooks]);
 
-  const getVisiblePurchaseRows = useCallback((groupId: string, nextRequestFilter = requestFilter, nextBoardScope = boardScope) => {
+  const getVisiblePurchaseRows = useCallback((groupId: string, nextRequestFilter = requestFilter, nextBoardScope = boardScope, nextOrderFilter = orderFilter) => {
     return (searchMatchedPurchaseRowsByGroup.get(groupId) || [])
       .filter((line) => shouldShowPurchaseLineOnBoard(line, nextBoardScope))
-      .filter((line) => shouldShowRequestLineForFilter(line, nextRequestFilter));
-  }, [boardScope, requestFilter, searchMatchedPurchaseRowsByGroup, shouldShowRequestLineForFilter]);
+      .filter((line) => shouldShowRequestLineForFilter(line, nextRequestFilter))
+      .filter((line) => shouldShowOrderLineForFilter(line, groupId, nextOrderFilter));
+  }, [boardScope, orderFilter, requestFilter, searchMatchedPurchaseRowsByGroup, shouldShowOrderLineForFilter, shouldShowRequestLineForFilter]);
 
   const visiblePurchaseRowsByGroup = useMemo(() => {
     const rowsByGroup = new Map<string, Row[]>();
@@ -9174,7 +9475,7 @@ function PurchaseProcessTable({
         if (!shouldShowOrderGroupForFilter(group.id, filter)) {
           return sum;
         }
-        return sum + getVisiblePurchaseRows(group.id).length;
+        return sum + getVisiblePurchaseRows(group.id, requestFilter, boardScope, filter).length;
       }, 0);
     }
     for (const scope of purchaseBoardScopeValues) {
@@ -9182,7 +9483,7 @@ function PurchaseProcessTable({
     }
 
     return { request: requestCounts, order: orderCounts, boardScope: boardScopeCounts };
-  }, [getVisiblePurchaseRows, groups, requestFilter, shouldShowOrderGroupForFilter]);
+  }, [boardScope, getVisiblePurchaseRows, groups, requestFilter, shouldShowOrderGroupForFilter]);
   const purchaseProcessActionIds = useMemo(() => {
     const orderable: string[] = [];
     const receivable: string[] = [];
@@ -9280,6 +9581,18 @@ function PurchaseProcessTable({
         classes,
       })
     : [], [classes, locations, mode, ordersById, publisherSupplierLinks, publishers, suppliers, textbooks, visiblePurchaseRows]);
+  const returnHandoffGroups = useMemo(() => mode === "order"
+    ? buildPurchaseSupplierReturnHandoffGroups({
+        rows: visiblePurchaseRows,
+        ordersById,
+        textbooks,
+        publishers,
+        suppliers,
+        publisherSupplierLinks,
+        locations,
+        classes,
+      })
+    : [], [classes, locations, mode, ordersById, publisherSupplierLinks, publishers, suppliers, textbooks, visiblePurchaseRows]);
   const emptyActionLabel = hasProcessSearchQuery
     ? "검색 초기화"
     : hasHiddenProcessRows
@@ -9302,16 +9615,28 @@ function PurchaseProcessTable({
   return (
     <>
       {mode === "order" ? (
-        <TextbookHandoffDialog
-          open={handoffDialogOpen}
-          onOpenChange={setHandoffDialogOpen}
-          title="공급처 주문 전달"
-          description="보이는 주문 건을 공급처별 메시지, PDF, 이미지로 정리합니다."
-          groups={purchaseHandoffGroups}
-          emptyLabel="전달할 주문 건이 없습니다"
-          idPrefix="purchase-handoff"
-          format="purchase-order"
-        />
+        <>
+          <TextbookHandoffDialog
+            open={handoffDialogOpen}
+            onOpenChange={setHandoffDialogOpen}
+            title="공급처 주문 전달"
+            description="보이는 주문 건을 공급처별 이미지, PDF로 정리합니다."
+            groups={purchaseHandoffGroups}
+            emptyLabel="전달할 주문 건이 없습니다"
+            idPrefix="purchase-handoff"
+            format="purchase-order"
+          />
+          <TextbookHandoffDialog
+            open={returnHandoffDialogOpen}
+            onOpenChange={setReturnHandoffDialogOpen}
+            title="공급처 반품 요청서"
+            description="보이는 반품 가능 건을 공급처별 이미지, PDF로 정리합니다."
+            groups={returnHandoffGroups}
+            emptyLabel="반품 요청할 입고 건이 없습니다"
+            idPrefix="purchase-return-handoff"
+            format="purchase-return"
+          />
+        </>
       ) : null}
       <div
         className="min-w-0 overflow-hidden rounded-lg border bg-background max-w-[calc(100vw-2rem)] md:max-w-none"
@@ -9516,6 +9841,20 @@ function PurchaseProcessTable({
                   >
                     <Copy className="mr-2 size-3.5" />
                     전달
+                  </Button>
+                ) : null}
+                {returnHandoffGroups.length > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    aria-label="공급처 반품 요청서 열기"
+                    title="공급처 반품 요청서"
+                    onClick={() => setReturnHandoffDialogOpen(true)}
+                  >
+                    <Truck className="mr-2 size-3.5" />
+                    반품 요청서
                   </Button>
                 ) : null}
                 <Button type="button" size="sm" className="shrink-0" aria-label="교재 주문 추가" title="교재 주문 추가" onClick={onAddLine}>

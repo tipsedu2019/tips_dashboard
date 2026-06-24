@@ -561,10 +561,11 @@ test("textbook handoff exports use a printable capture target instead of the scr
   assert.match(workspaceSource, /data-handoff-print-root/);
   assert.match(workspaceSource, /data-handoff-scroll/);
   assert.match(workspaceSource, /downloadHandoffPdf\(getHandoffCaptureElement\(allDomId\)/);
+  assert.match(workspaceSource, /downloadHandoffImage\(getHandoffCaptureElement\(allDomId\)/);
   assert.match(workspaceSource, /downloadHandoffImage\(getHandoffCaptureElement\(groupDomId\)/);
 });
 
-test("textbook handoff copy falls back when browser clipboard permission is denied", async () => {
+test("textbook handoff keeps text copy only for non-document handoffs", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
@@ -582,6 +583,10 @@ test("textbook handoff copy falls back when browser clipboard permission is deni
   assert.match(workspaceSource, /manualCopyTextareaRef/);
   assert.match(workspaceSource, /복사 권한 없음 · 주문 메시지 선택됨/);
   assert.match(workspaceSource, /aria-label="복사할 주문 메시지"/);
+  assert.match(workspaceSource, /const allowsTextCopy = !isPurchaseDocument/);
+  assert.match(workspaceSource, /allowsTextCopy \? \(/);
+  assert.match(workspaceSource, /전체 이미지/);
+  assert.match(workspaceSource, /전체 PDF/);
 });
 
 test("purchase supplier handoff is a location-first supplier order sheet with direct file exports", async () => {
@@ -608,6 +613,7 @@ test("purchase supplier handoff is a location-first supplier order sheet with di
   assert.match(imageExportSource, /new Blob\(\[pdfBytes\], \{ type: "application\/pdf" \}\)/);
   assert.match(dialogSource, /format = "default"/);
   assert.match(dialogSource, /format === "purchase-order"/);
+  assert.match(dialogSource, /const allowsTextCopy = !isPurchaseDocument/);
   assert.match(dialogSource, />교재명</);
   assert.match(dialogSource, /rowSpan=\{2\}/);
   assert.match(dialogSource, /colSpan=\{2\}/);
@@ -616,7 +622,7 @@ test("purchase supplier handoff is a location-first supplier order sheet with di
   assert.match(dialogSource, />학생용</);
   assert.match(dialogSource, />교사용</);
   assert.match(dialogSource, />매입 단가</);
-  assert.match(dialogSource, />주문 금액</);
+  assert.match(dialogSource, /format === "purchase-return" \? "반품 금액" : "주문 금액"/);
   assert.doesNotMatch(dialogSource, /<TableHead[^>]*>출판사<\/TableHead>/);
   assert.match(dialogSource, /downloadHandoffImage\(getHandoffCaptureElement\(groupDomId\), filename\)/);
   assert.match(dialogSource, /downloadHandoffPdf\(getHandoffCaptureElement\(groupDomId\), filename\)/);
@@ -636,6 +642,62 @@ test("purchase supplier handoff is a location-first supplier order sheet with di
   assert.match(messageSource, /총 주문금액/);
   assert.match(handoffSource, /getPurchaseSupplierHandoffLocationLabel\(line\.locationScopeQuantities\)/);
   assert.match(handoffSource, /getPurchaseSupplierHandoffLocationQuantities\(line\.locationScopeQuantities\)/);
+});
+
+test("purchase supplier handoff renders as a dated order document with academy footer", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const dialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("function TextbookHandoffDialog"),
+    workspaceSource.indexOf("type SearchSelectOption"),
+  );
+  const messageSource = workspaceSource.slice(
+    workspaceSource.indexOf("function buildPurchaseSupplierMessage"),
+    workspaceSource.indexOf("function buildMakeEduBillingMessage"),
+  );
+
+  assert.match(workspaceSource, /const TEXTBOOK_HANDOFF_BUSINESS_NAME = "TIPS 영어수학학원"/);
+  assert.match(workspaceSource, /function formatKoreanDocumentDate/);
+  assert.match(workspaceSource, /function getTextbookHandoffDocumentMeta/);
+  assert.match(dialogSource, /문서일자/);
+  assert.match(dialogSource, /내용/);
+  assert.match(dialogSource, /발신/);
+  assert.match(dialogSource, /TEXTBOOK_HANDOFF_BUSINESS_NAME/);
+  assert.match(workspaceSource, /documentTitle: "주문서"/);
+  assert.match(messageSource, /documentMeta\.documentTitle/);
+  assert.match(messageSource, /문서일자:/);
+  assert.match(messageSource, /내용: 교재 주문 요청/);
+  assert.match(messageSource, /발신: \$\{TEXTBOOK_HANDOFF_BUSINESS_NAME\}/);
+});
+
+test("purchase process exposes supplier return requests opposite the order handoff", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const returnHandoffSource = workspaceSource.slice(
+    workspaceSource.indexOf("function buildPurchaseSupplierReturnHandoffGroups"),
+    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  );
+  const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
+
+  assert.match(workspaceSource, /type PurchaseOrderFilter = "all" \| "waiting" \| "partial" \| "returnable" \| "returned"/);
+  assert.match(workspaceSource, /returnable: "반품 가능"/);
+  assert.match(workspaceSource, /returned: "반품 완료"/);
+  assert.match(workspaceSource, /const \[returnHandoffDialogOpen, setReturnHandoffDialogOpen\] = useState\(false\)/);
+  assert.match(workspaceSource, /function buildPurchaseSupplierReturnMessage/);
+  assert.match(workspaceSource, /function buildPurchaseSupplierReturnHandoffGroups/);
+  assert.match(returnHandoffSource, /status !== "received" && status !== "partially_received"/);
+  assert.match(returnHandoffSource, /const quantity = Math\.max\(0, receivedQuantity\)/);
+  assert.match(returnHandoffSource, /반품 요청서/);
+  assert.match(tableSource, /returnHandoffGroups/);
+  assert.match(tableSource, /공급처 반품 요청서 열기/);
+  assert.match(tableSource, /반품 요청서/);
+  assert.match(tableSource, /format="purchase-return"/);
+  assert.match(tableSource, /orderFilter === "returnable"/);
+  assert.match(tableSource, /orderFilter === "returned"/);
 });
 
 test("textbook workspace keeps purchase and sale cases in grouped process tables", async () => {
@@ -1495,7 +1557,7 @@ test("textbook workspace tightens the operations queue and grouped list controls
     "utf8",
   );
 
-  assert.match(workspaceSource, /type PurchaseOrderFilter = "all" \| "waiting" \| "partial"/);
+  assert.match(workspaceSource, /type PurchaseOrderFilter = "all" \| "waiting" \| "partial" \| "returnable" \| "returned"/);
   assert.match(workspaceSource, /const purchaseOrderFilterLabels/);
   assert.match(workspaceSource, /const queueBadgeValue = activeQueueItem \? activeQueueItem\.value : activeQueueTotal/);
   assert.match(workspaceSource, /activeQueueItem \? activeQueueItem\.label : "할 일"/);
@@ -1511,6 +1573,8 @@ test("textbook workspace tightens the operations queue and grouped list controls
   assert.match(workspaceSource, /purchaseOrderFilterLabels/);
   assert.match(workspaceSource, /orderFilter === "waiting"/);
   assert.match(workspaceSource, /orderFilter === "partial"/);
+  assert.match(workspaceSource, /orderFilter === "returnable"/);
+  assert.match(workspaceSource, /orderFilter === "returned"/);
   assert.match(workspaceSource, /compareTextbookGroupLabels/);
   assert.doesNotMatch(workspaceSource, /visibleTextbookGroupLabels/);
   assert.doesNotMatch(workspaceSource, /collapseVisibleTextbookGroups/);
