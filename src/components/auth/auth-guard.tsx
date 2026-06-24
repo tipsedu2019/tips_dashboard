@@ -6,6 +6,26 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/providers/auth-provider"
 
+const ASSISTANT_ALLOWED_ADMIN_PATHS = [
+  "/admin/tasks",
+  "/admin/word-retests",
+  "/admin/academic-calendar",
+  "/admin/calendar",
+  "/admin/timetable",
+]
+
+function normalizeAdminPath(pathname: string) {
+  return pathname.replace(/\/+$/, "") || "/"
+}
+
+function canAssistantAccessPath(pathname: string) {
+  const normalizedPath = normalizeAdminPath(pathname)
+
+  return ASSISTANT_ALLOWED_ADMIN_PATHS.some((path) => (
+    normalizedPath === path || normalizedPath.startsWith(`${path}/`)
+  ))
+}
+
 function AdminShellLoadingState() {
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
@@ -100,7 +120,14 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const queryString = searchParams.toString()
-  const { user, loading, canAccessDashboard } = useAuth()
+  const {
+    user,
+    loading,
+    canAccessDashboard,
+    canUseAssistantOperations,
+    defaultAdminPath,
+  } = useAuth()
+  const canAccessCurrentRoute = !canUseAssistantOperations || canAssistantAccessPath(pathname)
 
   useEffect(() => {
     if (loading) {
@@ -116,10 +143,15 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     if (!canAccessDashboard) {
       router.replace("/errors/forbidden")
+      return
     }
-  }, [canAccessDashboard, loading, pathname, queryString, router, user])
 
-  if (loading || !user || !canAccessDashboard) {
+    if (!canAccessCurrentRoute) {
+      router.replace(defaultAdminPath)
+    }
+  }, [canAccessCurrentRoute, canAccessDashboard, defaultAdminPath, loading, pathname, queryString, router, user])
+
+  if (loading || !user || !canAccessDashboard || !canAccessCurrentRoute) {
     return <AdminShellLoadingState />
   }
 

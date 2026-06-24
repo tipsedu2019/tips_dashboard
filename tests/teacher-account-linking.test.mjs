@@ -62,14 +62,16 @@ test("teacher settings uses fixed team groups instead of subject labels", async 
 
   assert.match(
     workspaceSource,
-    /TEAM_OPTIONS = \["영어팀", "수학팀", "관리팀"\]/,
+    /TEAM_OPTIONS = \["영어팀", "수학팀", "관리팀", "조교팀"\]/,
   );
   assert.match(
     workspaceSource,
     /TEAM_FILTERS = \["전체", \.\.\.TEAM_OPTIONS\]/,
   );
   assert.match(workspaceSource, /normalizeTeamValue/);
+  assert.match(workspaceSource, /resolveRoleForTeam/);
   assert.match(workspaceSource, /handleTeamChange/);
+  assert.match(workspaceSource, /value === "조교팀" \? "assistant"/);
   assert.match(workspaceSource, /label: "팀"/);
   assert.match(workspaceSource, />\s*팀\s*<\/TableHead>/);
   assert.match(workspaceSource, /placeholder="팀"/);
@@ -131,6 +133,8 @@ test("teacher account migration stores profile links, permissions, and audit his
     migrationSource,
     /create or replace function public\.log_dashboard_audit_event/,
   );
+  assert.match(migrationSource, /role in \('admin', 'staff', 'teacher', 'assistant', 'viewer'\)/);
+  assert.match(migrationSource, /dashboard_role in \('admin', 'staff', 'teacher', 'assistant', 'viewer'\)/);
 
   for (const table of [
     "teacher_catalogs",
@@ -145,4 +149,26 @@ test("teacher account migration stores profile links, permissions, and audit his
       `${table} must keep insert/update/delete actor history`,
     );
   }
+});
+
+test("assistant team maps to a restricted dashboard role", async () => {
+  const [workspaceSource, serviceSource, authUtilsSource, providerSource, migrationSource] =
+    await Promise.all([
+      readFile(new URL("src/features/management/teacher-master-workspace.tsx", root), "utf8"),
+      readFile(new URL("src/features/management/management-service.js", root), "utf8"),
+      readFile(new URL("src/lib/auth-utils.ts", root), "utf8"),
+      readFile(new URL("src/providers/auth-provider.tsx", root), "utf8"),
+      readAllMigrationSource(),
+    ]);
+
+  assert.match(workspaceSource, /{ value: "assistant", label: "조교" }/);
+  assert.match(workspaceSource, /조교팀/);
+  assert.match(serviceSource, /DASHBOARD_ROLES = \["admin", "staff", "teacher", "assistant", "viewer"\]/);
+  assert.match(authUtilsSource, /export type DashboardRole = "admin" \| "staff" \| "teacher" \| "assistant" \| "viewer"/);
+  assert.match(authUtilsSource, /if \(normalized === "assistant"\) return "assistant"/);
+  assert.match(authUtilsSource, /const canUseAssistantOperations = normalizedRole === "assistant"/);
+  assert.match(providerSource, /isAssistant: boolean/);
+  assert.match(providerSource, /const isAssistant = role === "assistant"/);
+  assert.match(migrationSource, /update public\.teacher_catalogs[\s\S]*dashboard_role = 'assistant'[\s\S]*'조교팀' = any\(subjects\)/);
+  assert.match(migrationSource, /academic_events_staff_write[\s\S]*'assistant'/);
 });

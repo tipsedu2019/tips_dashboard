@@ -35,11 +35,30 @@ test("student management filters lifecycle status separately from school filters
   assert.doesNotMatch(source, /kind !== "students" && statusFilter/);
 });
 
+test("student management keeps search and school filters in the URL for cross-view returns", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(source, /const STUDENT_LIST_QUERY_PARAM_KEYS =/);
+  assert.match(source, /function getStudentListQueryState/);
+  assert.match(source, /q: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.q\)\)/);
+  assert.match(source, /status: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.status\)\)/);
+  assert.match(source, /schoolCategory: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.schoolCategory\)\)/);
+  assert.match(source, /school: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.school\)\)/);
+  assert.match(source, /grade: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.grade\)\)/);
+  assert.match(source, /function buildStudentListHref/);
+  assert.match(source, /const requestedStudentListQueryState = useMemo/);
+  assert.match(source, /syncStudentListQueryState\(\{ q: value \}\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ status: nextStatusValue \}\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ schoolCategory: nextSchoolCategoryFilter, school: "", grade: "" \}\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ school: nextSchoolFilter, grade: "" \}\)/);
+  assert.match(source, /syncStudentListQueryState\(\{ grade: nextGradeFilter \}\)/);
+});
+
 test("student management opens with active students before withdrawn records", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const studentDefaultConfig = source.match(/students:\s*\{[\s\S]*?\n\s*\},\n\s*classes:/)?.[0] || "";
 
-  assert.match(source, /const STORAGE_VERSION = 13/);
+  assert.match(source, /const STORAGE_VERSION = 14/);
   assert.match(source, /const STUDENT_STATUS_SORT_ORDER = \["재원", "퇴원"\]/);
   assert.match(source, /function compareStudentStatusForTable/);
   assert.match(studentDefaultConfig, /\{ id: "status", desc: false \},\s*\{ id: "title", desc: false \}/);
@@ -221,15 +240,15 @@ test("student and class tables expose bulk edit and delete actions for selected 
   assert.match(tableSource, /actions\.onBulkUpdateRows/);
   assert.match(tableSource, /actions\.onBulkDeleteRows/);
   assert.match(tableSource, /bulkEditField/);
-  assert.match(tableSource, /deleteLabel=\{kind === "students" \? "일괄 퇴원" : "일괄 삭제"\}/);
+  assert.match(tableSource, /deleteLabel=\{kind === "students" \? "일괄 퇴원" : kind === "classes" \? "일괄 종강" : "일괄 삭제"\}/);
   assert.match(tableSource, /일괄 수정/);
   assert.match(tableSource, /일괄 퇴원/);
   assert.match(pageSource, /handleBulkUpdateRows/);
   assert.match(pageSource, /handleBulkDeleteRows/);
   assert.match(pageSource, /Promise\.all\(rows\.map/);
   assert.match(pageSource, /WITHDRAWN_STUDENT_STATUS/);
-  assert.match(pageSource, /onBulkUpdateRows: handleBulkUpdateRows/);
-  assert.match(pageSource, /onBulkDeleteRows: handleBulkDeleteRows/);
+  assert.match(pageSource, /onBulkUpdateRows: canMutateRows \? handleBulkUpdateRows : undefined/);
+  assert.match(pageSource, /onBulkDeleteRows: canMutateRows \? handleBulkDeleteRows : undefined/);
 });
 
 test("management deletes use an in-app confirmation dialog", async () => {
@@ -256,4 +275,26 @@ test("management table keeps filter and search actions visible and reversible", 
   assert.match(tableSource, /setRowSelection\(\{\}\);[\s\S]*table\.resetPagination\(\);/);
   assert.match(tableSource, /aria-busy=\{loading\}/);
   assert.match(tableSource, /데이터를 불러오는 중입니다/);
+});
+
+test("management databases restore list scroll after opening a record", async () => {
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(tableSource, /MANAGEMENT_SCROLL_STORAGE_PREFIX/);
+  assert.match(tableSource, /function getManagementListScrollStorageKey/);
+  assert.match(tableSource, /params\.delete\("classId"\)/);
+  assert.match(tableSource, /params\.delete\("studentId"\)/);
+  assert.match(tableSource, /function parseStoredManagementScroll/);
+  assert.match(tableSource, /const tableViewportRef = useRef<HTMLDivElement \| null>\(null\)/);
+  assert.match(tableSource, /const rememberManagementScrollPosition = useCallback/);
+  assert.match(tableSource, /window\.sessionStorage\.setItem/);
+  assert.match(tableSource, /pageY: window\.scrollY/);
+  assert.match(tableSource, /tableX: tableViewportRef\.current\?\.scrollLeft \|\| 0/);
+  assert.match(tableSource, /const openManagementRow = useCallback/);
+  assert.match(tableSource, /rememberManagementScrollPosition\(\)/);
+  assert.match(tableSource, /actions\.onOpenRow\?\.\(row\)/);
+  assert.match(tableSource, /window\.requestAnimationFrame/);
+  assert.match(tableSource, /window\.scrollTo\(\{ top: savedScroll\.pageY \}\)/);
+  assert.match(tableSource, /tableViewportRef\.current\.scrollLeft = savedScroll\.tableX/);
+  assert.match(tableSource, /ref=\{tableViewportRef\}/);
 });

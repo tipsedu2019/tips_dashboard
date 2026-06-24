@@ -17,7 +17,6 @@ test("curriculum workspace reuses the class management filter panel", async () =
   assert.match(source, /filterCount=\{filterChips\.length\}/);
   assert.doesNotMatch(source, /label: <>보기/);
   assert.doesNotMatch(source, /label: <>검색어/);
-  assert.doesNotMatch(source, /useEffect/);
   assert.doesNotMatch(source, /mt-3 flex flex-wrap items-center gap-2/);
 });
 
@@ -57,6 +56,7 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /const curriculumViewModeCounts = useMemo/);
   assert.match(source, /data-testid="curriculum-mobile-list"/);
   assert.match(source, /data-testid=\{`curriculum-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(source, /data-testid="curriculum-desktop-scroll-anchor"/);
   assert.match(source, /<ScrollArea className="hidden h-\[38rem\] \[contain-intrinsic-size:640px\] \[content-visibility:auto\] md:block">/);
   assert.match(source, /for \(const row of model\.rows\)/);
   assert.match(source, /counts\.unlinked \+= 1/);
@@ -69,14 +69,17 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /\[classListScopeKey\]: \(current\[classListScopeKey\] \|\| CURRICULUM_CLASS_PAGE_SIZE\) \+ CURRICULUM_CLASS_PAGE_SIZE/);
   assert.match(source, /\{viewRowSessionCount\}회차 · \{viewRowTextbookCount\}권/);
   assert.doesNotMatch(source, /\{model\.summary\.totalSessions\}회차 · \{model\.summary\.linkedTextbooks\}권/);
-  assert.match(source, /viewRows\.find\(\(row\) => row\.id === selectedClassId\) \|\|\s*viewRows\[0\] \|\|\s*null/);
-  assert.doesNotMatch(source, /model\.rows\.find\(\(row\) => row\.id === selectedClassId\)/);
+  assert.doesNotMatch(source, /selectedClassId/);
+  assert.doesNotMatch(source, /selectedRow/);
+  assert.doesNotMatch(source, /aria-selected/);
+  assert.doesNotMatch(source, /data-selected/);
   assert.match(source, /setViewMode\(item\.value\)/);
   assert.match(source, /viewMode === item\.value/);
   assert.match(source, /교재 미연결/);
   assert.match(source, /진도 미배정/);
   assert.match(source, /sticky top-0 z-10 bg-background/);
-  assert.match(source, /min-w-\[1040px\]/);
+  assert.match(source, /min-w-\[980px\]/);
+  assert.match(source, /<TableHead className="w-\[12%\] text-right">작업<\/TableHead>/);
   assert.match(source, /const hasLinkedTextbooks = row\.textbookCount > 0/);
   assert.match(source, /inline-flex h-8 items-center rounded-md border border-dashed/);
   assert.match(modelSource, /const progressTargetSessions = textbookCount > 0/);
@@ -90,35 +93,110 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.doesNotMatch(source, /교재를 연결한 뒤 회차별 진도를 배정합니다\./);
 });
 
-test("curriculum detail panel separates schedule and progress entry points", async () => {
+test("curriculum workspace removes duplicated right detail panel", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
-  assert.match(source, /data-testid="curriculum-detail-actions"/);
-  assert.match(source, /const selectedRowProgressAction = selectedRow \? getCurriculumDesignAction\(selectedRow\) : null/);
-  assert.match(source, /buildLessonDesignHref\(selectedRow\.id, "", "lesson-design-periods"\)/);
-  assert.match(
-    source,
-    /buildLessonDesignHref\(\s*selectedRow\.id,\s*selectedRowProgressAction\.sessionId,\s*selectedRowProgressAction\.sectionId,\s*\)/,
-  );
-  assert.match(source, /일정 생성/);
-  assert.match(source, /\{selectedRowProgressAction\.label === "교재" \? "교재 연결" : "진도 생성"\}/);
+  assert.doesNotMatch(source, /data-testid="curriculum-detail-actions"/);
+  assert.doesNotMatch(source, /const selectedRowProgressAction/);
+  assert.doesNotMatch(source, /selectedProgressTargetSessionCount/);
+  assert.doesNotMatch(source, /selectedClassId/);
+  assert.doesNotMatch(source, /selectedRow/);
+  assert.doesNotMatch(source, /xl:sticky xl:top-24 xl:self-start/);
+  assert.doesNotMatch(source, /회차 배치/);
+  assert.doesNotMatch(source, /buildLessonDesignHref\(selectedRow\.id, "", "lesson-design-periods"\)/);
+  assert.match(source, /buildClassDetailHref\(\s*row\.id,\s*rowDesignAction\.tab,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
   assert.match(source, /className="h-7 rounded-md px-2 text-xs lg:hidden"/);
 });
 
-test("curriculum row action opens the right lesson-design workspace", async () => {
+test("curriculum row action opens the official class detail target tab", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
   assert.match(source, /function getCurriculumDesignAction/);
+  assert.match(source, /function buildClassDetailHref/);
+  assert.match(source, /returnTo = ""/);
+  assert.match(source, /params\.set\("returnTo", normalizedReturnTo\)/);
+  assert.match(source, /return `\/admin\/classes\?\$\{params\.toString\(\)\}`/);
+  assert.match(source, /params\.set\("tab", tab \|\| "basic"\)/);
   assert.match(source, /Number\(row\.textbookCount \|\| 0\) <= 0/);
   assert.match(source, /label: "교재"/);
+  assert.match(source, /tab: "curriculum"/);
   assert.match(source, /sectionId: "lesson-design-textbooks"/);
   assert.match(source, /Number\(row\.totalSessions \|\| 0\) <= 0/);
+  assert.match(source, /tab: "schedule"/);
   assert.match(source, /Number\(row\.delayedProgressSessions \|\| 0\) > 0/);
   assert.doesNotMatch(source, /Number\(row\.delayedSessions \|\| 0\) > 0/);
   assert.match(source, /sectionId: "lesson-design-periods"/);
   assert.match(source, /sectionId: "lesson-design-board"/);
   assert.match(source, /rowDesignAction\.label/);
-  assert.match(source, /buildLessonDesignHref\(row\.id, rowDesignAction\.sessionId, rowDesignAction\.sectionId\)/);
+  assert.match(source, /buildClassDetailHref\(\s*row\.id,\s*rowDesignAction\.tab,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
+});
+
+test("curriculum row actions show the next work reason before navigation", async () => {
+  const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
+
+  assert.match(source, /reason: "교재 연결 필요"/);
+  assert.match(source, /reason: "회차 생성 필요"/);
+  assert.match(source, /reason: `미배정 \$\{Number\(row\.delayedProgressSessions \|\| 0\)\}회`/);
+  assert.match(source, /reason: "기본 정보 확인"/);
+  assert.match(source, /data-testid="curriculum-row-next-action"/);
+  assert.match(source, /rowDesignAction\.reason/);
+  assert.match(source, /aria-label=\{`\$\{row\.title\} \$\{rowDesignAction\.label\} \$\{rowDesignAction\.reason\}`\}/);
+});
+
+test("completed curriculum rows open basic class detail without stale section targets", async () => {
+  const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
+
+  assert.match(source, /return \{ label: "보기", tab: "basic", sectionId: "", sessionId: "", reason: "기본 정보 확인" \}/);
+  assert.doesNotMatch(source, /return \{ label: "보기", tab: "basic", sectionId: "lesson-design-board", sessionId, reason: "기본 정보 확인" \}/);
+});
+
+test("curriculum rows open the official class detail without a duplicated preview", async () => {
+  const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
+
+  assert.match(source, /const openCurriculumRow = useCallback/);
+  assert.match(source, /router\.push\(buildClassDetailHref\(/);
+  assert.match(source, /const handleCurriculumRowKeyDown = useCallback/);
+  assert.match(source, /event\.key !== "Enter" && event\.key !== " "/);
+  assert.match(source, /data-testid=\{`curriculum-mobile-card-\$\{row\.id\}`\}/);
+  assert.match(source, /onClick=\{\(\) => openCurriculumRow\(row, rowDesignAction\)\}/);
+  assert.match(source, /onKeyDown=\{\(event\) => handleCurriculumRowKeyDown\(event, row, rowDesignAction\)\}/);
+  assert.match(source, /data-testid=\{`curriculum-desktop-row-\$\{row\.id\}`\}/);
+  assert.match(source, /role="link"/);
+  assert.match(source, /tabIndex=\{0\}/);
+  assert.doesNotMatch(source, /setSelectedClassId/);
+  assert.doesNotMatch(source, /data-testid="curriculum-detail-actions"/);
+});
+
+test("curriculum work queue persists filter context in the URL and return path", async () => {
+  const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
+
+  assert.match(source, /usePathname, useRouter, useSearchParams/);
+  assert.match(source, /function applyCurriculumQueryState/);
+  assert.match(source, /\["q", state\.search\.trim\(\), ""\]/);
+  assert.match(source, /\["view", normalizeCurriculumViewMode\(state\.viewMode\), "all"\]/);
+  assert.match(source, /params\.delete\("classId"\)/);
+  assert.match(source, /const curriculumReturnPath = useMemo/);
+  assert.match(source, /buildCurriculumListHref\(pathname, searchParamString, curriculumQueryState\)/);
+  assert.match(source, /router\.replace\(nextHref, \{ scroll: false \}\)/);
+  assert.match(source, /setPeriod\(value === "none" \? "" : value\)/);
+});
+
+test("curriculum work queue restores scroll position after opening class detail", async () => {
+  const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
+
+  assert.match(source, /CURRICULUM_SCROLL_STORAGE_PREFIX/);
+  assert.match(source, /function getCurriculumScrollStorageKey/);
+  assert.match(source, /function parseStoredCurriculumScroll/);
+  assert.match(source, /const desktopListRef = useRef<HTMLDivElement \| null>\(null\)/);
+  assert.match(source, /const rememberCurriculumScrollPosition = useCallback/);
+  assert.match(source, /window\.sessionStorage\.setItem/);
+  assert.match(source, /pageY: window\.scrollY/);
+  assert.match(source, /listY: viewport\?\.scrollTop \|\| 0/);
+  assert.match(source, /querySelector<HTMLElement>\('\[data-slot="scroll-area-viewport"\]'\)/);
+  assert.match(source, /window\.requestAnimationFrame/);
+  assert.match(source, /window\.scrollTo\(\{ top: savedScroll\.pageY \}\)/);
+  assert.match(source, /viewport\.scrollTop = savedScroll\.listY/);
+  assert.match(source, /rememberCurriculumScrollPosition\(\)/);
 });
 
 test("shared class filter panel separates search and view state from filter count", async () => {

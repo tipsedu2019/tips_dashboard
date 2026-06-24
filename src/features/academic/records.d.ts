@@ -148,9 +148,22 @@ export type CurriculumRow = {
     dateValue: string;
     dateLabel: string;
     periodLabel: string;
+    scheduleState: string;
+    scheduleMemo: string;
+    makeupMemo: string;
+    makeupDate: string;
     hasPlanContent: boolean;
     planSummary: string;
     textbookEntryCount: number;
+    textbookEntries: Array<{
+      textbookId: string;
+      textbookTitle: string;
+      startRange: string;
+      endRange: string;
+      rangeLabel: string;
+      memo: string;
+      status: string;
+    }>;
   } | null;
   sessionSummaries: Array<{
     sessionId: string;
@@ -163,9 +176,22 @@ export type CurriculumRow = {
     dateValue: string;
     dateLabel: string;
     periodLabel: string;
+    scheduleState: string;
+    scheduleMemo: string;
+    makeupMemo: string;
+    makeupDate: string;
     hasPlanContent: boolean;
     planSummary: string;
     textbookEntryCount: number;
+    textbookEntries: Array<{
+      textbookId: string;
+      textbookTitle: string;
+      startRange: string;
+      endRange: string;
+      rangeLabel: string;
+      memo: string;
+      status: string;
+    }>;
   }>;
   searchText: string;
 };

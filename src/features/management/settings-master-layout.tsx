@@ -17,7 +17,7 @@ type SettingsMasterHeaderProps = {
 
 export function SettingsWorkspaceShell({ children, className }: SettingsWorkspaceShellProps) {
   return (
-    <div className={cn("mx-auto flex w-full max-w-[1480px] flex-col gap-3 px-4 py-4 sm:px-6", className)}>
+    <div className={cn("mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-4 py-3 sm:px-5 lg:px-6", className)}>
       {children}
     </div>
   );
@@ -27,7 +27,7 @@ export function SettingsMasterHeader({ filters, actions, className }: SettingsMa
   return (
     <div
       className={cn(
-        "sticky top-0 z-20 -mx-1 flex flex-col gap-2 rounded-lg border border-border/70 bg-background/95 p-2.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85 md:flex-row md:items-center md:justify-between",
+        "sticky top-0 z-30 -mx-1 flex flex-col gap-2 rounded-md border border-border/70 bg-background/95 p-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85 md:flex-row md:items-center md:justify-between",
         className,
       )}
     >
@@ -39,13 +39,16 @@ export function SettingsMasterHeader({ filters, actions, className }: SettingsMa
 
 export function SettingsTableFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-x-auto overflow-y-hidden rounded-lg border border-border/70 bg-background shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+    <div
+      data-testid="settings-database-frame"
+      className="max-h-[calc(100dvh-12rem)] overflow-x-auto overflow-y-auto rounded-md border border-border/70 bg-background shadow-none"
+    >
       {children}
     </div>
   );
 }
 
-export const settingsTableHeadClass = "h-9 bg-muted/25 px-3 py-2 text-xs font-medium text-muted-foreground";
-export const settingsTableCellClass = "px-3 py-2 align-middle";
+export const settingsTableHeadClass = "sticky top-0 z-20 h-9 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground";
+export const settingsTableCellClass = "border-b border-border/60 px-3 py-2 align-middle";
 export const settingsTableActionHeadClass = `sticky right-0 z-10 text-right ${settingsTableHeadClass}`;
-export const settingsTableActionCellClass = `${settingsTableCellClass} sticky right-0 z-10 bg-background`;
+export const settingsTableActionCellClass = `${settingsTableCellClass} sticky right-0 z-10 bg-background shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]`;

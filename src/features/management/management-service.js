@@ -2,7 +2,9 @@ import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supab
 import { normalizeStudentStatus } from "../../lib/student-status.js";
 
 const DEFAULT_CLASS_STATUS = "수강";
-const DASHBOARD_ROLES = ["admin", "staff", "teacher", "viewer"];
+const DEFAULT_CLASS_TYPE = "정규";
+const ARCHIVED_CLASS_STATUS = "종강";
+const DASHBOARD_ROLES = ["admin", "staff", "teacher", "assistant", "viewer"];
 const CLASSROOM_ALIAS_MAP = new Map([
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],
@@ -38,6 +40,20 @@ export function normalizeClassroomName(value) {
   return CLASSROOM_ALIAS_MAP.get(normalized) || trimText(value);
 }
 
+function getClassTypeValue(record = {}) {
+  return (
+    trimText(
+      record.classType ||
+        record.class_type ||
+        record.type ||
+        record.lessonType ||
+        record.lesson_type ||
+        record.courseType ||
+        record.course_type,
+    ) || DEFAULT_CLASS_TYPE
+  );
+}
+
 function normalizeSubjectList(subjects) {
   return [...new Set((Array.isArray(subjects) ? subjects : []).map((subject) => trimText(subject)).filter(Boolean))];
 }
@@ -51,6 +67,16 @@ function isMissingColumnError(error) {
   const message = trimText(error?.message).toLowerCase();
   return message.includes("column") &&
     (message.includes("does not exist") || message.includes("schema cache") || message.includes("could not find"));
+}
+
+function getMissingColumnName(error) {
+  const message = trimText(error?.message);
+  const quotedColumn = message.match(/'([^']+)'\s+column/i)?.[1];
+  if (quotedColumn) {
+    return quotedColumn;
+  }
+
+  return message.match(/column\s+(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s+does not exist/i)?.[1] || "";
 }
 
 function isMissingRelationError(error) {
@@ -336,27 +362,69 @@ async function selectRows(client, table) {
   return data || [];
 }
 
-function stripStudentLifecycleFields(row) {
+function stripFields(row, fields) {
   const nextRow = { ...row };
-  delete nextRow.status;
+  for (const field of fields) {
+    delete nextRow[field];
+  }
   return nextRow;
+}
+
+function stripPayloadFields(payload, fields) {
+  return Array.isArray(payload)
+    ? payload.map((row) => stripFields(row, fields))
+    : stripFields(payload, fields);
+}
+
+function getStaleSchemaFallbackFields(error, optionalFields) {
+  if (!isMissingColumnError(error)) {
+    return [];
+  }
+
+  const missingColumn = getMissingColumnName(error);
+  if (missingColumn && optionalFields.includes(missingColumn)) {
+    return [missingColumn];
+  }
+
+  return missingColumn ? [] : optionalFields;
 }
 
 async function upsertStudentRows(client, payload) {
   try {
     return await upsertRows(client, "students", payload);
   } catch (error) {
-    if (!isMissingColumnError(error)) {
+    const fallbackFields = getStaleSchemaFallbackFields(error, ["status", "recent_issue", "counseling_note"]);
+    if (fallbackFields.length === 0) {
       throw error;
     }
-    return upsertRows(
-      client,
-      "students",
-      Array.isArray(payload)
-        ? payload.map(stripStudentLifecycleFields)
-        : stripStudentLifecycleFields(payload),
-    );
+    return upsertRows(client, "students", stripPayloadFields(payload, fallbackFields));
   }
+}
+
+async function upsertClassRows(client, payload) {
+  try {
+    return await upsertRows(client, "classes", payload);
+  } catch (error) {
+    const fallbackFields = getStaleSchemaFallbackFields(error, ["class_type"]);
+    if (fallbackFields.length === 0) {
+      throw error;
+    }
+    return upsertRows(client, "classes", stripPayloadFields(payload, fallbackFields));
+  }
+}
+
+async function restoreRelationRowsAfterFailure(
+  client,
+  { student, classItem, studentSaved = false, classSaved = false, generateId = createId } = {},
+) {
+  const restores = [];
+  if (studentSaved && student) {
+    restores.push(upsertStudentRows(client, buildStudentPayload(student, { generateId })));
+  }
+  if (classSaved && classItem) {
+    restores.push(upsertClassRows(client, buildClassPayload(classItem, { generateId })));
+  }
+  await Promise.allSettled(restores);
 }
 
 function getStudentClassMode(student, classId) {
@@ -454,6 +522,7 @@ export function buildStudentPayload(record = {}, options = {}) {
     grade: trimText(record.grade),
     contact: trimText(record.contact),
     parent_contact: trimText(record.parentContact || record.parent_contact),
+    recent_issue: trimText(record.recentIssue || record.recent_issue || record.latestIssue || record.latest_issue || record.specialNote || record.special_note),
     enroll_date: formatDateOnly(record.enrollDate || record.enroll_date || new Date()),
     status: normalizeStudentStatus(record.status),
     class_ids: getArrayField(record, "class_ids", "classIds"),
@@ -469,6 +538,7 @@ export function buildClassPayload(record = {}, options = {}) {
   return {
     id,
     name,
+    class_type: getClassTypeValue(record),
     subject: trimText(record.subject),
     grade: trimText(record.grade),
     teacher: trimText(record.teacher || record.teacherName || record.teacher_name),
@@ -653,6 +723,23 @@ export function createManagementService(options = {}) {
       return Array.isArray(updated) ? updated[0] || null : updated || null;
     },
 
+    async updateStudentCounselingNote({ studentId, note } = {}) {
+      const client = ensureClient(supabase);
+      const safeStudentId = trimText(studentId);
+      if (!safeStudentId) {
+        throw new Error("학생 ID를 찾을 수 없습니다.");
+      }
+      const { data, error } = await client
+        .from("students")
+        .update({ counseling_note: trimText(note) })
+        .eq("id", safeStudentId)
+        .select();
+      if (error) {
+        throw error;
+      }
+      return Array.isArray(data) ? data[0] || null : data || null;
+    },
+
     async deleteStudent(id) {
       const client = ensureClient(supabase);
       return deleteRows(client, "students", id ? [id] : []);
@@ -660,13 +747,13 @@ export function createManagementService(options = {}) {
 
     async createClass(record = {}) {
       const client = ensureClient(supabase);
-      const created = await upsertRows(client, "classes", buildClassPayload(record, { generateId }));
+      const created = await upsertClassRows(client, buildClassPayload(record, { generateId }));
       return Array.isArray(created) ? created[0] || null : created || null;
     },
 
     async updateClass(record = {}) {
       const client = ensureClient(supabase);
-      const updated = await upsertRows(client, "classes", buildClassPayload(record, { generateId }));
+      const updated = await upsertClassRows(client, buildClassPayload(record, { generateId }));
       return Array.isArray(updated) ? updated[0] || null : updated || null;
     },
 
@@ -697,7 +784,19 @@ export function createManagementService(options = {}) {
 
     async deleteClass(id) {
       const client = ensureClient(supabase);
-      return deleteRows(client, "classes", id ? [id] : []);
+      const safeId = trimText(id);
+      if (!safeId) {
+        return [];
+      }
+      const { data, error } = await client
+        .from("classes")
+        .update({ status: ARCHIVED_CLASS_STATUS })
+        .eq("id", safeId)
+        .select();
+      if (error) {
+        throw error;
+      }
+      return data || [];
     },
 
     async createTextbook(record = {}) {
@@ -744,18 +843,49 @@ export function createManagementService(options = {}) {
       const enrolled = mode === "enrolled";
       const previousMode = getStudentClassMode(student, safeClassId);
       const nextMode = enrolled ? "enrolled" : "waitlist";
+      const nextStudentClassIds = enrolled ? addUnique(student.class_ids || student.classIds, safeClassId) : removeId(student.class_ids || student.classIds, safeClassId);
+      const nextStudentWaitlistIds = enrolled
+        ? removeId(student.waitlist_class_ids || student.waitlistClassIds, safeClassId)
+        : addUnique(student.waitlist_class_ids || student.waitlistClassIds, safeClassId);
+      const nextClassStudentIds = enrolled
+        ? addUnique(classItem.student_ids || classItem.studentIds, safeStudentId)
+        : removeId(classItem.student_ids || classItem.studentIds, safeStudentId);
+      const nextClassWaitlistIds = enrolled
+        ? removeId(getClassWaitlistIds(classItem), safeStudentId)
+        : addUnique(getClassWaitlistIds(classItem), safeStudentId);
       const nextStudent = {
         ...student,
-        class_ids: enrolled ? addUnique(student.class_ids, safeClassId) : removeId(student.class_ids, safeClassId),
-        waitlist_class_ids: enrolled ? removeId(student.waitlist_class_ids, safeClassId) : addUnique(student.waitlist_class_ids, safeClassId),
+        class_ids: nextStudentClassIds,
+        classIds: nextStudentClassIds,
+        waitlist_class_ids: nextStudentWaitlistIds,
+        waitlistClassIds: nextStudentWaitlistIds,
       };
       const nextClass = {
         ...classItem,
-        student_ids: enrolled ? addUnique(classItem.student_ids, safeStudentId) : removeId(classItem.student_ids, safeStudentId),
-        waitlist_ids: enrolled ? removeId(classItem.waitlist_ids, safeStudentId) : addUnique(classItem.waitlist_ids, safeStudentId),
+        student_ids: nextClassStudentIds,
+        studentIds: nextClassStudentIds,
+        waitlist_ids: nextClassWaitlistIds,
+        waitlistIds: nextClassWaitlistIds,
+        waitlist_student_ids: nextClassWaitlistIds,
+        waitlistStudentIds: nextClassWaitlistIds,
       };
-      await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
-      await upsertRows(client, "classes", buildClassPayload(nextClass, { generateId }));
+      let studentSaved = false;
+      let classSaved = false;
+      try {
+        await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
+        studentSaved = true;
+        await upsertClassRows(client, buildClassPayload(nextClass, { generateId }));
+        classSaved = true;
+      } catch (writeError) {
+        await restoreRelationRowsAfterFailure(client, {
+          student,
+          classItem,
+          studentSaved,
+          classSaved,
+          generateId,
+        });
+        throw writeError;
+      }
       if (previousMode !== nextMode) {
         await insertStudentClassHistory(client, [{
           student_id: safeStudentId,
@@ -803,11 +933,26 @@ export function createManagementService(options = {}) {
             waitlistStudentIds: nextWaitlistIds,
           }
         : null;
-      if (nextStudent) {
-        await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
-      }
-      if (nextClass) {
-        await upsertRows(client, "classes", buildClassPayload(nextClass, { generateId }));
+      let studentSaved = false;
+      let classSaved = false;
+      try {
+        if (nextStudent) {
+          await upsertStudentRows(client, buildStudentPayload(nextStudent, { generateId }));
+          studentSaved = true;
+        }
+        if (nextClass) {
+          await upsertClassRows(client, buildClassPayload(nextClass, { generateId }));
+          classSaved = true;
+        }
+      } catch (writeError) {
+        await restoreRelationRowsAfterFailure(client, {
+          student,
+          classItem,
+          studentSaved,
+          classSaved,
+          generateId,
+        });
+        throw writeError;
       }
       if (previousMode && student && classItem) {
         await insertStudentClassHistory(client, [{

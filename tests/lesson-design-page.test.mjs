@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { buildClassScheduleRouteModel } from "../src/features/operations/records.js";
+
 const root = new URL("../", import.meta.url);
 
 async function readSource(pathname) {
@@ -201,19 +203,47 @@ test("lesson design ranks class-fit textbooks and keeps session range entry manu
   assert.doesNotMatch(source, /\$\{textbookEntrySummaries\.length\}개 교재 범위/);
 });
 
-test("curriculum overview links each session to its range editor", async () => {
+test("curriculum overview uses row actions instead of a duplicated detail panel", async () => {
   const source = await readSource("src/features/academic/curriculum-workspace.tsx");
   const workspaceSource = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
-  assert.match(source, /function getSessionSummaryLinkKey/);
-  assert.match(source, /selectedRow\.sessionSummaries\.slice\(0, 8\)\.map\(\(session, sessionIndex\) =>/);
-  assert.match(source, /key=\{getSessionSummaryLinkKey\(session, sessionIndex\)\}/);
-  assert.doesNotMatch(source, /key=\{session\.sessionId \|\| `\$\{session\.sessionOrder\}/);
-  assert.match(source, /buildLessonDesignHref\(\s*selectedRow\.id,\s*session\.sessionId \|\| "",\s*"lesson-design-periods"/);
+  assert.doesNotMatch(source, /function getSessionSummaryLinkKey/);
+  assert.doesNotMatch(source, /selectedRow\.sessionSummaries\.slice\(0, 8\)/);
+  assert.doesNotMatch(source, /data-testid="curriculum-detail-actions"/);
+  assert.doesNotMatch(source, /className="grid gap-6/);
+  assert.doesNotMatch(source, /selectedRow/);
+  assert.equal(source.match(/<section className=/g)?.length || 0, 1);
+  assert.match(source, /const rowDesignAction = getCurriculumDesignAction\(row\)/);
+  assert.match(source, /buildClassDetailHref\(\s*row\.id,\s*rowDesignAction\.tab,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
   assert.match(workspaceSource, /sessionId: isLessonDesignPage \? selectedLessonSessionId : ""/);
-  assert.match(source, /session\.planSummary \|\| "범위 미지정"/);
-  assert.match(source, /session\.hasPlanContent \? "배정" : "대기"/);
   assert.doesNotMatch(source, /업데이트 필요/);
+});
+
+test("lesson design can return to the originating class detail tab", async () => {
+  const workspaceSource = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const managementSource = await readSource("src/features/management/management-page.tsx");
+
+  assert.match(managementSource, /const buildClassDetailReturnPath = \(/);
+  assert.match(managementSource, /params\.set\("returnTo", requestedClassReturnPath\)/);
+  assert.match(managementSource, /const resolvedReturnTab = options\.returnTab \|\| activeClassDetailTab/);
+  assert.match(managementSource, /buildClassDetailReturnPath\(resolvedReturnTab/);
+  assert.match(workspaceSource, /function normalizeAdminReturnPath/);
+  assert.match(workspaceSource, /const requestedLessonReturnPath = normalizeAdminReturnPath\(searchParams\.get\("returnTo"\)\)/);
+  assert.match(workspaceSource, /params\.delete\("returnTo"\)/);
+  assert.match(workspaceSource, /if \(requestedLessonReturnPath\) \{[\s\S]*router\.replace\(requestedLessonReturnPath, \{ scroll: false \}\)/);
+  assert.match(workspaceSource, /const lessonDesignReturnLabel = requestedLessonReturnPath\.includes\("\/admin\/classes"\)/);
+  assert.match(workspaceSource, /\{lessonDesignReturnLabel\}/);
+});
+
+test("lesson design keeps return action reachable in the bottom save bar", async () => {
+  const workspaceSource = await readSource("src/features/operations/class-schedule-workspace.tsx");
+
+  assert.match(workspaceSource, /data-testid="lesson-design-bottom-action-bar"/);
+  assert.match(workspaceSource, /requestedLessonReturnPath \? \(/);
+  assert.match(workspaceSource, /data-testid="lesson-design-bottom-return"/);
+  assert.match(workspaceSource, /aria-label=\{lessonDesignReturnLabel\}/);
+  assert.match(workspaceSource, /onClick=\{closeLessonDesignWorkspace\}/);
+  assert.match(workspaceSource, /requestedLessonReturnPath\.includes\("\/admin\/classes"\) \? "수업 상세" : "수업계획"/);
 });
 
 test("lesson design session query sync does not override local session clicks", async () => {
@@ -301,6 +331,9 @@ test("lesson design separates textbook finder and connected textbook ranges", as
   assert.match(source, /수업교재 검색 지우기/);
   assert.match(source, /lesson-textbook-finder/);
   assert.match(source, /aria-expanded=\{isLessonTextbookFinderVisible\}/);
+  assert.match(source, /data-testid=\{`lesson-textbook-remove-\$\{book\.textbookId\}`\}/);
+  assert.match(source, />\s*연결 해제\s*<\/Button>/);
+  assert.match(source, /handleRemoveLessonTextbook\(book\.textbookId\)/);
   assert.match(source, /isLessonDesignProgressMode && !hasLessonTextbooks \? "교재 연결 필요" : "저장"/);
   assert.doesNotMatch(source, /xl:sticky xl:top-20/);
   assert.match(source, /isLessonDesignProgressMode && hasLessonTextbooks \? \(/);
@@ -350,6 +383,7 @@ test("lesson design splits schedule generation from progress generation", async 
 
   assert.match(source, /lessonDesignActiveMode/);
   assert.match(source, /isLessonDesignProgressMode/);
+  assert.match(source, /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.board \|\|\s*requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.textbooks/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.periods\)/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.board\)/);
   assert.match(source, /isLessonDesignProgressMode \? \(/);
@@ -387,34 +421,86 @@ test("lesson design keeps navigation, recovery, and save actions stable", async 
 
 test("class schedule overview keeps dense list columns from colliding", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
-  const listSection = source.slice(
-    source.indexOf('<p className="text-sm font-semibold text-foreground">수업 목록</p>'),
-    source.indexOf('<p className="text-sm font-semibold text-foreground">동기 그룹</p>'),
-  );
+  const databaseStart = source.indexOf('data-testid="class-schedule-database-view"');
+  const listSection = source.slice(databaseStart, source.indexOf("\n  );\n\n  return (", databaseStart));
 
-  assert.match(listSection, /<Table className="min-w-\[980px\] table-fixed">/);
+  assert.match(listSection, /<Table className="min-w-\[1180px\] table-fixed">/);
   assert.match(listSection, /<colgroup>/);
-  assert.match(listSection, /<col className="w-\[24%\]" \/>/);
-  assert.match(listSection, /<col className="w-\[28%\]" \/>/);
+  assert.match(listSection, /<col className="w-\[22%\]" \/>/);
+  assert.match(listSection, /<col className="w-\[20%\]" \/>/);
   assert.match(listSection, /<col className="w-\[18%\]" \/>/);
+  assert.match(listSection, /<TableHead>다음 작업<\/TableHead>/);
+  assert.match(listSection, /<TableHead className="text-right">작업<\/TableHead>/);
   assert.match(listSection, /<TableCell className="align-top whitespace-normal">/);
   assert.match(listSection, /className="min-w-0 space-y-2/);
   assert.match(listSection, /className="font-medium leading-5 break-keep"/);
+  assert.match(listSection, /data-testid=\{`class-schedule-database-row-\$\{row\.id\}`\}/);
+  assert.doesNotMatch(source, /선택한 반 진행 상세/);
 });
 
 test("class schedule overview uses mobile cards instead of a clipped wide table", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
-  const listSection = source.slice(
-    source.indexOf('<p className="text-sm font-semibold text-foreground">수업 목록</p>'),
-    source.indexOf('<p className="text-sm font-semibold text-foreground">동기 그룹</p>'),
-  );
+  const databaseStart = source.indexOf('data-testid="class-schedule-database-view"');
+  const listSection = source.slice(databaseStart, source.indexOf("\n  );\n\n  return (", databaseStart));
 
+  assert.match(listSection, /data-testid="class-schedule-sync-group-bar"/);
   assert.match(listSection, /data-testid="class-schedule-mobile-list"/);
   assert.match(listSection, /className="grid gap-2 md:hidden"/);
   assert.match(listSection, /data-testid=\{`class-schedule-mobile-card-\$\{row\.id\}`\}/);
   assert.match(listSection, /row\.scheduleLabel \|\| "시간표 미정"/);
   assert.match(listSection, /계획 \{row\.latestPlannedSessionIndex\}회차 · 실제 \{row\.latestActualSessionIndex\}회차/);
-  assert.match(listSection, /<ScrollArea className="hidden h-\[34rem\] pr-4 md:block">/);
+  assert.match(listSection, /snapshot\?\.pendingSessionSummary/);
+  assert.match(listSection, /<ScrollArea className="hidden h-\[44rem\] md:block">/);
+});
+
+test("class schedule work queue summarizes pending sessions without exposing raw ids", () => {
+  const model = buildClassScheduleRouteModel({
+    classes: [
+      {
+        id: "class-1",
+        name: "고1 공통수학",
+        subject: "수학",
+        schedule_plan: {
+          sessions: [
+            { id: "550e8400-e29b-41d4-a716-446655440000", progressStatus: "pending" },
+            { id: "session:2026-07-15:period-177458:active", progressStatus: "pending" },
+            { id: "session-1", sessionNumber: 1, progressStatus: "pending" },
+            { id: "session-2", sessionNumber: 2, progressStatus: "pending" },
+            { id: "duplicate-session-2", sessionNumber: 2, progressStatus: "pending" },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(model.rows[0].pendingSessionSummary, "1회차, 2회차 · 회차 정보 확인 2건");
+  assert.doesNotMatch(model.rows[0].pendingSessionSummary, /550e8400|session:2026|duplicate-session/);
+});
+
+test("class schedule overview opens the official class schedule detail with preserved context", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const databaseStart = source.indexOf('data-testid="class-schedule-database-view"');
+  const listSection = source.slice(databaseStart, source.indexOf("\n  );\n\n  return (", databaseStart));
+
+  assert.match(source, /const CLASS_SCHEDULE_SCROLL_STORAGE_PREFIX = "tips:class-schedule-database-scroll:"/);
+  assert.match(source, /function buildClassScheduleListHref/);
+  assert.match(source, /function buildOfficialClassScheduleDetailHref/);
+  assert.match(source, /params\.set\("tab", "schedule"\)/);
+  assert.match(source, /params\.set\("section", resolvedSectionId\)/);
+  assert.match(source, /params\.set\("sessionId", resolvedSessionId\)/);
+  assert.match(source, /params\.set\("returnTo", normalizedReturnTo\)/);
+  assert.match(source, /const \[search, setSearch\] = useState\(\(\) => text\(searchParams\.get\("q"\)\)\)/);
+  assert.match(source, /const classScheduleReturnPath = useMemo/);
+  assert.match(source, /router\.replace\(nextHref, \{ scroll: false \}\)/);
+  assert.match(source, /const rememberClassScheduleListPosition = useCallback/);
+  assert.match(source, /data-testid="class-schedule-desktop-scroll-anchor"/);
+  assert.match(source, /const openClassScheduleOfficialDetail = useCallback/);
+  assert.match(source, /router\.push\(buildOfficialClassScheduleDetailHref/);
+  assert.match(listSection, /role="link"/);
+  assert.match(listSection, /onClick=\{\(\) => openClassScheduleOfficialDetail\(row, nextSessionId, LESSON_DESIGN_SECTION_IDS\.periods\)\}/);
+  assert.match(listSection, /onKeyDown=\{\(event\) => handleClassScheduleRowKeyDown\(event, row, nextSessionId, LESSON_DESIGN_SECTION_IDS\.periods\)\}/);
+  assert.match(listSection, /href=\{buildOfficialClassScheduleDetailHref\(row, nextSessionId, LESSON_DESIGN_SECTION_IDS\.periods, classScheduleReturnPath\)\}/);
+  assert.doesNotMatch(listSection, /onClick=\{\(\) => setSelectedClassId\(row\.id\)\}/);
 });
 
 test("lesson design exposes a compact PC work queue only when it adds progress value", async () => {

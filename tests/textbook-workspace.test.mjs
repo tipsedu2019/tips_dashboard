@@ -76,7 +76,8 @@ test("textbook workspace exposes class-linked sales and scanner-ready fields", a
   assert.match(workspaceSource, /excludedStudentIds/);
   assert.match(workspaceSource, /type="search"[\s\S]*value=\{saleStudentQuery\}/);
   assert.match(workspaceSource, /name="title"[\s\S]*value=\{masterForm\.title\}/);
-  assert.match(workspaceSource, /name="publisher"[\s\S]*value=\{masterForm\.publisher\}/);
+  assert.match(workspaceSource, /masterPublisherOptions/);
+  assert.match(workspaceSource, /ariaLabel="출판사 선택"/);
   assert.match(workspaceSource, /name="price"[\s\S]*value=\{masterForm\.price\}/);
   assert.match(workspaceSource, /name="isbn13"[\s\S]*value=\{masterForm\.isbn13\}/);
   assert.match(workspaceSource, /name="barcode"[\s\S]*value=\{masterForm\.barcode\}/);
@@ -290,16 +291,20 @@ test("textbook workspace resolves reviewed master and inventory UX issues", asyn
   assert.match(workspaceSource, /masterDialogOpen/);
   assert.match(workspaceSource, /openNewMasterDialog/);
   assert.match(workspaceSource, /DialogTitle>\{masterForm\.id \? "교재 수정" : "교재 신규 등록"\}/);
-  assert.match(workspaceSource, /overflow-x-hidden overflow-y-auto sm:max-w-3xl/);
+  assert.match(workspaceSource, /overflow-x-hidden overflow-y-auto p-4 sm:max-w-3xl sm:p-6/);
   assert.match(workspaceSource, /sm:grid-cols-\[minmax\(0,1fr\)_140px_140px\]/);
   assert.match(workspaceSource, /sm:grid-cols-2 lg:grid-cols-5/);
   assert.match(workspaceSource, /학교 구분/);
   assert.match(workspaceSource, /세부과목/);
   assert.match(workspaceSource, /전체 학년/);
   assert.match(workspaceSource, /buildTextbookCategoryValue/);
-  assert.match(workspaceSource, /list="textbook-publisher-options"/);
+  assert.match(workspaceSource, /configuredPublisherOptions/);
+  assert.match(workspaceSource, /masterPublisherOptions/);
+  assert.match(workspaceSource, /getPublisherSettingLabel/);
   assert.match(workspaceSource, /placeholder="예: 쎈 고등 수학 2"/);
-  assert.match(workspaceSource, /placeholder="예: 신사고"/);
+  assert.match(workspaceSource, /placeholder="출판사 선택"/);
+  assert.match(workspaceSource, /searchPlaceholder="출판사 검색"/);
+  assert.match(workspaceSource, /emptyLabel="설정된 출판사가 없습니다"/);
   assert.match(workspaceSource, /placeholder="13자리 ISBN"/);
   assert.match(workspaceSource, /placeholder="스캔 또는 입력"/);
   assert.match(workspaceSource, /autoFocus/);
@@ -312,7 +317,7 @@ test("textbook workspace resolves reviewed master and inventory UX issues", asyn
   assert.match(workspaceSource, /pattern="\[0-9\]\*"/);
   assert.match(workspaceSource, /onChange=\{\(event\) => setMasterTextField\("title", event\.target\.value\)\}/);
   assert.match(workspaceSource, /onBlur=\{\(\) => settleMasterTextField\("title"\)\}/);
-  assert.match(workspaceSource, /onChange=\{\(event\) => setMasterTextField\("publisher", event\.target\.value\)\}/);
+  assert.match(workspaceSource, /publisher: normalizeStoredTextInput\(value === "none" \? "" : value\)/);
   assert.match(workspaceSource, /onChange=\{\(event\) => setMasterIsbn13\(event\.target\.value\)\}/);
   assert.match(workspaceSource, /const shouldMirrorBarcode = !previousBarcode \|\| previousBarcode === previousIsbn/);
   assert.match(workspaceSource, /isNewMasterDuplicate/);
@@ -506,7 +511,7 @@ test("textbook purchase workflow links registered title requests before ordering
   );
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
 
-  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookByExactIdOrTitle\(activeTextbooks, purchaseRequestTitle\)/);
+  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
   assert.match(workspaceSource, /const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook \|\| requestedCatalogTextbook/);
   assert.match(workspaceSource, /textbookId: getRecordId\(textbook \|\| \{\}\) \|\| text\(payload\.textbookId\)/);
   assert.match(workspaceSource, /function getPurchaseLineTextbookId\(line: Row\)/);
@@ -515,7 +520,7 @@ test("textbook purchase workflow links registered title requests before ordering
   assert.doesNotMatch(workspaceSource, /purchaseForm\.requestStage === "request" && hasManualPurchaseCatalogMatch/);
   assert.match(workspaceSource, /getConfiguredTextbookPurchaseUnitCost\([\s\S]*purchaseCopyScope[\s\S]*\)/);
   assert.match(serviceSource, /resolvePurchaseLifecycleTextbook/);
-  assert.match(serviceSource, /requestedTextbookTitle[\s\S]*textbooks[\s\S]*getTextbookByExactReference/);
+  assert.match(serviceSource, /requestedTextbookTitle[\s\S]*textbooks[\s\S]*getTextbookByReference/);
 });
 
 test("textbook workspace exports supplier orders and MakeEdu billing handoffs", async () => {
@@ -569,6 +574,10 @@ test("textbook workspace keeps purchase and sale cases in grouped process tables
 
   assert.match(workspaceSource, /PurchaseProcessTable/);
   assert.match(workspaceSource, /SalesProcessTable/);
+  assert.match(workspaceSource, /data-testid="textbook-purchase-process-mobile-list"/);
+  assert.match(workspaceSource, /data-testid="textbook-sales-process-mobile-list"/);
+  assert.match(workspaceSource, /hidden max-w-full overflow-x-auto md:block/);
+  assert.match(workspaceSource, /max-w-\[calc\(100vw-2rem\)\] md:max-w-none/);
   assert.match(workspaceSource, /Table className="w-full min-w-\[980px\]"/);
   assert.doesNotMatch(workspaceSource, /ProcessEmptyState/);
   assert.doesNotMatch(workspaceSource, /표시할 교재가 없습니다/);
@@ -962,13 +971,45 @@ test("purchase requests support bulk ordering with requested quantity defaults",
   assert.match(workspaceSource, /DialogTitle>선택 요청 일괄 주문<\/DialogTitle>/);
   assert.match(workspaceSource, /선택한 요청을 공급처 주문 단계로 한꺼번에 전환합니다/);
   assert.match(workspaceSource, /draft\.orderedQuantity \|\| draft\.requestedQuantity \|\| "1"/);
-  assert.match(workspaceSource, /const nextOrderedQuantity = nextStage === "request" \? orderedQuantity : orderedQuantity \|\| requestedQuantity \|\| "1"/);
+  assert.match(workspaceSource, /const nextOrderedQuantity = nextStage === "request" \? orderedQuantity : orderedQuantity \|\| primaryRequestedQuantity/);
   assert.match(workspaceSource, /<Metric label="요청" value=\{`\$\{formatQuantity\(purchaseRequestedTotalQuantity\)\}권`\}/);
   assert.match(tableSource, /일괄 처리 가능한 행 전체 선택/);
   assert.match(tableSource, /선택 주문/);
   assert.match(tableSource, /onToggleVisibleLines\?\.\(groupActionableLineIds, value === true\)/);
   assert.match(tableSource, /onToggleLine\?\.\(lineId, value === true\)/);
   assert.match(serviceSource, /created_by: createdBy/);
+});
+
+test("purchase copy-scope actions identify student and teacher copies through order dialogs", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /<SelectItem value="request">요청 접수<\/SelectItem>/);
+  assert.match(workspaceSource, /<Badge variant="outline" className="w-fit rounded-md">[\s\S]*\{getTextbookCopyScopeLabel\(draft\.copyScope\)\}[\s\S]*<\/Badge>/);
+  assert.match(workspaceSource, /detail: \[[\s\S]*getTextbookCopyScopeLabel\(draft\.copyScope\),[\s\S]*statusLabel/);
+  assert.match(workspaceSource, /type PurchaseSupplierHandoffLineAccumulator/);
+  assert.match(workspaceSource, /lineAccumulators: new Map/);
+  assert.match(workspaceSource, /getPurchaseSupplierHandoffQuantityLabel\(line\.scopeQuantities\)/);
+  assert.match(workspaceSource, /학생용\/교사용/);
+});
+
+test("purchase order edits allow zero requested quantities for direct management orders", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /function textPreservingZero/);
+  assert.match(workspaceSource, /function getRowFieldText/);
+  assert.match(workspaceSource, /const requested = getRowFieldText\(line, "requested_quantity", "requestedQuantity"\)/);
+  assert.match(workspaceSource, /const requestedQuantity = getRowFieldText\(primaryLine, "requested_quantity", "requestedQuantity"\)/);
+  assert.match(workspaceSource, /\(purchaseForm\.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId\)/);
+  assert.doesNotMatch(workspaceSource, /\|\|\s*!purchaseRequestedTotalQuantity\s*\|\|/);
+  assert.match(workspaceSource, /const canKeepZeroQuantityRequestLine = purchaseForm\.requestStage === "request" && Boolean\(scopeLineId\)/);
+  assert.match(workspaceSource, /if \(stageQuantity <= 0 && !canKeepZeroQuantityRequestLine\)/);
+  assert.match(workspaceSource, /requestedQuantity: requestedQuantity \|\| \(purchaseForm\.requestStage === "request" \? orderedQuantity \|\| receivedQuantity \|\| "1" : "0"\)/);
 });
 
 test("purchase process grouped rows move and delete every copy-scope line together", async () => {
@@ -1024,7 +1065,17 @@ test("textbook workspace fixes second-round browser audit issues", async () => {
   assert.doesNotMatch(workspaceSource, /onPointerDown=\{\(event\) =>/);
   assert.doesNotMatch(workspaceSource, /event\.preventDefault\(\);[\s\S]*closePurchaseDialog\(\);/);
   assert.match(workspaceSource, /dialogFooterClassName/);
-  assert.match(workspaceSource, /sticky bottom-0 -mx-6 -mb-6/);
+  assert.match(workspaceSource, /sticky bottom-0 mt-1 flex w-full min-w-0 max-w-full justify-self-stretch overflow-hidden flex-col/);
+  assert.doesNotMatch(workspaceSource, /sm:-mx-6/);
+  assert.doesNotMatch(workspaceSource, /sm:-mb-6/);
+  assert.match(workspaceSource, /flex flex-col/);
+  assert.match(workspaceSource, /px-0 py-4/);
+  assert.match(workspaceSource, /sm:flex-row/);
+  assert.match(workspaceSource, /\[\&>button\]:w-full/);
+  assert.match(workspaceSource, /sm:\[\&>button\]:w-auto/);
+  assert.match(workspaceSource, /<form onSubmit=\{submitPurchase\} className="grid min-w-0 max-w-full gap-3 overflow-hidden \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
+  assert.match(workspaceSource, /<form onSubmit=\{submitSale\} className="grid min-w-0 max-w-full gap-3 overflow-hidden \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
+  assert.match(workspaceSource, /<form onSubmit=\{submitClosing\} className="grid min-w-0 max-w-full gap-3 overflow-hidden \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
   assert.doesNotMatch(workspaceSource, /showCloseButton=\{false\}/);
   assert.match(workspaceSource, /closeMasterDialog/);
   assert.match(workspaceSource, /<div className=\{dialogFooterClassName\}>[\s\S]*aria-label="교재 등록 취소"/);
@@ -1126,26 +1177,22 @@ test("inventory stock count is inline and mobile-first with recommended targets"
   assert.match(workspaceSource, /const visibleAuditFilterOptions = \(Object\.keys\(inventoryAuditFilterLabels\)/);
   assert.match(workspaceSource, /visibleAuditFilterOptions\.map/);
   assert.match(workspaceSource, /const \[displayLimitsByScope, setDisplayLimitsByScope\] = useState<Record<string, number>>\(\{\}\)/);
-  assert.match(workspaceSource, /const \[usesDesktopInventoryTable, setUsesDesktopInventoryTable\] = useState\(true\)/);
   assert.match(workspaceSource, /const displayScopeKey = `\$\{auditFilter\}:\$\{locationId\}:\$\{rows\.length\}`/);
   assert.match(workspaceSource, /const displayLimit = displayLimitsByScope\[displayScopeKey\] \|\| INVENTORY_COUNT_PAGE_SIZE/);
   assert.match(workspaceSource, /const selectedIdSet = useMemo\(\(\) => new Set\(selectedIds\), \[selectedIds\]\)/);
   assert.match(workspaceSource, /const visibleRows = useMemo/);
   assert.match(workspaceSource, /const displayRows = useMemo\(\(\) => visibleRows\.slice\(0, displayLimit\), \[displayLimit, visibleRows\]\)/);
   assert.match(workspaceSource, /const groupsByLabel = new Map/);
-  assert.match(workspaceSource, /window\.matchMedia\("\(min-width: 640px\)"\)/);
-  assert.match(workspaceSource, /query\.addEventListener\("change", syncLayout\)/);
-  assert.match(workspaceSource, /!usesDesktopInventoryTable \? \(/);
-  assert.match(workspaceSource, /usesDesktopInventoryTable \? \(/);
+  assert.doesNotMatch(workspaceSource, /usesDesktopInventoryTable/);
+  assert.doesNotMatch(workspaceSource, /window\.matchMedia\("\(min-width: 640px\)"\)/);
   assert.match(workspaceSource, /setDisplayLimitsByScope\(\(current\) => \(\{/);
   assert.match(workspaceSource, /\[displayScopeKey\]: \(current\[displayScopeKey\] \|\| INVENTORY_COUNT_PAGE_SIZE\) \+ INVENTORY_COUNT_PAGE_SIZE/);
   assert.match(workspaceSource, /submitInlineStockCount/);
   assert.match(workspaceSource, /onSubmitCount=\{submitInlineStockCount\}/);
   assert.match(workspaceSource, /aria-label=\{`\$\{row\.title\} \$\{row\.locationName\} 실사 수량`\}/);
   assert.match(workspaceSource, /aria-label=\{`\$\{row\.title\} \$\{row\.locationName\} 실사 메모`\}/);
-  assert.match(workspaceSource, /!usesDesktopInventoryTable \? \(/);
-  assert.match(workspaceSource, /usesDesktopInventoryTable \? \(/);
-  assert.match(workspaceSource, /className="overflow-x-auto rounded-lg border \[contain-intrinsic-size:720px\] \[content-visibility:auto\]"/);
+  assert.match(workspaceSource, /className="grid gap-3 md:hidden"/);
+  assert.match(workspaceSource, /className="hidden overflow-x-auto rounded-lg border \[contain-intrinsic-size:720px\] \[content-visibility:auto\] md:block"/);
   assert.doesNotMatch(workspaceSource, /className="hidden overflow-x-auto rounded-lg border sm:block"/);
   assert.match(workspaceSource, /title=\{getInventoryCountReasonLabel\(row\)\}/);
   assert.match(inventorySource, /\{currentLocation\} \{visibleRowSummary\}/);
@@ -1870,8 +1917,6 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
   const safeguards = [
     /function normalizeInlineTextInput/,
     /function normalizeStoredTextInput/,
-    /function setMasterTextField/,
-    /function settleMasterTextField/,
     /function setMasterIsbn13/,
     /const previousIsbn = normalizeBarcodeValue\(current\.isbn13\)/,
     /const previousBarcode = normalizeBarcodeValue\(current\.barcode\)/,
@@ -1891,8 +1936,10 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
     /barcode: normalizeBarcodeValue\(masterForm\.barcode \|\| masterForm\.isbn13\)/,
     /onChange=\{\(event\) => setMasterTextField\("title", event\.target\.value\)\}/,
     /onBlur=\{\(\) => settleMasterTextField\("title"\)\}/,
-    /onChange=\{\(event\) => setMasterTextField\("publisher", event\.target\.value\)\}/,
-    /onBlur=\{\(\) => settleMasterTextField\("publisher"\)\}/,
+    /options=\{masterPublisherOptions\}/,
+    /value=\{masterForm\.publisher \|\| "none"\}/,
+    /publisher: normalizeStoredTextInput\(value === "none" \? "" : value\)/,
+    /ariaLabel="출판사 선택"/,
     /onChange=\{\(event\) => setMasterIsbn13\(event\.target\.value\)\}/,
     /role="alert"/,
     /masterDuplicatePreviewRows\.map/,
@@ -1907,8 +1954,8 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
     /pattern="\[0-9\]\*"/,
     /autoFocus/,
     /required/,
-    /list="textbook-publisher-options"/,
-    /<datalist id="textbook-publisher-options">/,
+    /configuredPublisherOptions/,
+    /getPublisherSettingLabel/,
     /<datalist id="textbook-category-options">/,
     /inputMode="numeric"/,
     /barcode: normalizeBarcodeValue\(masterForm\.barcode \|\| masterForm\.isbn13\)/,
@@ -1940,7 +1987,7 @@ test("textbook workspace locks 54 request ordering safeguards", async () => {
     /return String\(Math\.max\(options\.allowZero \? 0 : 1, quantity\)\)/,
     /const manualPurchaseCatalogMatches = useMemo/,
     /purchaseRequestInputMode !== "manual"/,
-    /const textbook = getTextbookByExactIdOrTitle\(activeTextbooks, purchaseRequestTitle\)/,
+    /const textbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,
     /return textbook \? \[textbook\] : \[\]/,
     /const hasManualPurchaseCatalogMatch = manualPurchaseCatalogMatches\.length > 0/,
     /const completedPurchaseHasCatalogTextbook = Boolean\(selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId\)/,
@@ -1986,13 +2033,40 @@ test("textbook workspace locks 54 request ordering safeguards", async () => {
     /<Input value=\{purchaseForm\.studentReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("studentReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
     /<Input value=\{purchaseForm\.teacherReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("teacherReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
     /function getPurchaseLineTextbookId\(line: Row\)/,
-    /title=\{purchaseSubmitDisabled \? "필수 항목을 확인하세요" : `\$\{purchaseActionLabel\(purchaseForm\.requestStage\)\} 저장`\}/,
+    /title=\{purchaseSubmitDisabled \? "필수 항목을 확인하세요" : purchaseActionLabel\(purchaseForm\.requestStage\)\}/,
   ];
 
   assert.equal(safeguards.length, 54);
   for (const safeguard of safeguards) {
     assert.match(workspaceSource, safeguard);
   }
+});
+
+test("purchase request ordering uses the same compact title match in list, modal, and save", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /function getOrderablePurchaseRequestTextbook[\s\S]*return getTextbookById\(textbooks, draft\.textbookId \|\| draft\.requestedTextbookTitle\)/);
+  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
+  assert.match(workspaceSource, /const textbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
+  assert.match(workspaceSource, /const textbook = getTextbookById\(data\.textbooks, text\(payload\.textbookId \|\| payload\.requestedTextbookTitle\)\)/);
+  assert.match(workspaceSource, /const textbook = getTextbookById\(data\.textbooks, text\(primaryLine\.textbook_id \|\| primaryLine\.textbookId\) \|\| requestedTitle\)/);
+});
+
+test("purchase order modal defaults student and teacher order quantities from grouped requests", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /const studentBaseQuantity = studentRequestedQuantity \|\| \(!teacherLine \? primaryRequestedQuantity : ""\)/);
+  assert.match(workspaceSource, /const teacherBaseQuantity = teacherRequestedQuantity \|\| \(!studentLine \? primaryRequestedQuantity : ""\)/);
+  assert.match(workspaceSource, /const nextStudentOrderedQuantity = nextStage === "request" \? studentOrderedQuantity : studentOrderedQuantity \|\| studentBaseQuantity/);
+  assert.match(workspaceSource, /const nextTeacherOrderedQuantity = nextStage === "request" \? teacherOrderedQuantity : teacherOrderedQuantity \|\| teacherBaseQuantity/);
+  assert.match(workspaceSource, /studentOrderedQuantity: nextStudentOrderedQuantity/);
+  assert.match(workspaceSource, /teacherOrderedQuantity: nextTeacherOrderedQuantity/);
 });
 
 test("textbook workspace locks 50 inventory count safeguards", async () => {
@@ -2051,7 +2125,7 @@ test("textbook workspace locks 50 inventory count safeguards", async () => {
     /PackageCheck/,
     /aria-busy=\{isSaving\}/,
     /className=\{cn\(hasDraft && "bg-blue-50\/40"\)\}/,
-    /className=\{cn\("rounded-lg border bg-background p-3 shadow-sm active:scale-\[0\.99\]", text\(value\) && "border-blue-200 bg-blue-50\/30"\)\}/,
+    /className=\{cn\("min-w-0 max-w-full overflow-hidden rounded-lg border bg-background p-3 shadow-sm active:scale-\[0\.99\]", text\(value\) && "border-blue-200 bg-blue-50\/30"\)\}/,
   ];
 
   assert.equal(safeguards.length, 50);
@@ -2298,7 +2372,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /setPurchaseRequestFilter\(getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\)\)/,
     /setPurchaseOrderFilter\(getSavedPurchaseOrderFilter\(stage, hasCatalogTextbook\)\)/,
     /operationSearchRef\.current\?\.select\(\)/,
-    /const requestedCatalogTextbook = getTextbookByExactIdOrTitle\(activeTextbooks, purchaseRequestTitle\)/,
+    /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,
     /const completedPurchaseStage = purchaseForm\.requestStage/,
     /const completedPurchaseTitle = purchaseRequestTitle/,
     /const completedPurchaseHasCatalogTextbook = Boolean\(selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId\)/,

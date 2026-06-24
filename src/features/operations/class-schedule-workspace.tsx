@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { CSSProperties } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { ArrowLeft, ArrowUpRight, BookOpen, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
@@ -37,11 +37,20 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
-import { buildClassScheduleRouteModel } from "./records.js";
+import {
+  buildClassSchedulePendingSessionSummary,
+  buildClassScheduleRouteModel,
+} from "./records.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 
 function text(value: unknown) {
   return String(value || "").trim();
+}
+
+function normalizeAdminReturnPath(value: unknown) {
+  const path = text(value);
+  if (!path || path.startsWith("//") || path.includes("://")) return "";
+  return path.startsWith("/admin/") ? path : "";
 }
 
 function getTextbookTitle(book: Record<string, unknown> | null | undefined) {
@@ -339,6 +348,7 @@ function buildLessonDesignPageHref(
   selectedRow: Record<string, unknown> | null,
   sessionId: string = "",
   sectionId: string = "",
+  returnTo = "",
 ) {
   const classId = text(selectedRow?.id);
   if (!classId) {
@@ -346,6 +356,10 @@ function buildLessonDesignPageHref(
   }
 
   const params = buildLessonDesignSearchParams({ classId, sessionId, sectionId });
+  const normalizedReturnTo = normalizeAdminReturnPath(returnTo);
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
   return `/admin/curriculum/lesson-design?${params.toString()}`;
 }
 
@@ -435,6 +449,7 @@ function clearLessonDesignSearchParams(currentParams: URLSearchParams) {
   params.delete("classId");
   params.delete("sessionId");
   params.delete("section");
+  params.delete("returnTo");
   params.delete("lessonMonths");
   params.delete("lessonPeriod");
   params.delete("lessonScheduleState");
@@ -647,6 +662,7 @@ const LESSON_DESIGN_SECTION_IDS = {
 } as const;
 const LESSON_DESIGN_SELECTED_SESSION_EDITOR_ID = "lesson-design-selected-session-editor";
 const LESSON_DESIGN_PERIOD_DETAIL_ID_PREFIX = "lesson-design-period-detail-";
+const CLASS_SCHEDULE_SCROLL_STORAGE_PREFIX = "tips:class-schedule-database-scroll:";
 
 const LESSON_DESIGN_SECTION_VALUES = new Set<string>(Object.values(LESSON_DESIGN_SECTION_IDS));
 const LESSON_DESIGN_SCHEDULE_STATE_VALUES = new Set([
@@ -666,6 +682,105 @@ function resolveLessonDesignSectionId(sectionId: string) {
 function resolveLessonDesignScheduleState(value: string) {
   const resolvedValue = text(value) || "all";
   return LESSON_DESIGN_SCHEDULE_STATE_VALUES.has(resolvedValue) ? resolvedValue : "all";
+}
+
+function getClassScheduleScrollStorageKey(returnPath: string) {
+  return `${CLASS_SCHEDULE_SCROLL_STORAGE_PREFIX}${returnPath || "/admin/class-schedule"}`;
+}
+
+function parseStoredClassScheduleScroll(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { pageY?: unknown; listY?: unknown };
+    return {
+      pageY: Number(parsed.pageY || 0),
+      listY: Number(parsed.listY || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function applyClassScheduleQueryState(
+  params: URLSearchParams,
+  state: {
+    search: string;
+    termId: string;
+    subject: string;
+    grade: string;
+    teacher: string;
+    selectedSyncGroupId: string;
+  },
+) {
+  const values = [
+    ["q", state.search.trim(), ""],
+    ["term", state.termId, ""],
+    ["subject", state.subject, ""],
+    ["grade", state.grade, ""],
+    ["teacher", state.teacher, ""],
+    ["syncGroup", state.selectedSyncGroupId, ""],
+  ] as const;
+
+  for (const [key, value, defaultValue] of values) {
+    if (value && value !== defaultValue) {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+  }
+
+  params.delete("lessonDesign");
+  params.delete("classId");
+  params.delete("tab");
+  params.delete("section");
+  params.delete("sessionId");
+  params.delete("returnTo");
+  params.delete("lessonMonths");
+  params.delete("lessonPeriod");
+  params.delete("lessonScheduleState");
+  params.delete("lessonStatus");
+}
+
+function buildClassScheduleListHref(
+  pathname: string,
+  currentQuery: string,
+  state: Parameters<typeof applyClassScheduleQueryState>[1],
+) {
+  const params = new URLSearchParams(currentQuery);
+  applyClassScheduleQueryState(params, state);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+function buildOfficialClassScheduleDetailHref(
+  row: Record<string, unknown> | null,
+  sessionId = "",
+  sectionId: string = LESSON_DESIGN_SECTION_IDS.periods,
+  returnTo = "",
+) {
+  const classId = text(row?.id);
+  if (!classId) {
+    return "/admin/classes";
+  }
+
+  const params = new URLSearchParams();
+  params.set("classId", classId);
+  params.set("tab", "schedule");
+
+  const resolvedSectionId = resolveLessonDesignSectionId(sectionId) || LESSON_DESIGN_SECTION_IDS.periods;
+  params.set("section", resolvedSectionId);
+
+  const resolvedSessionId = text(sessionId);
+  if (resolvedSessionId) {
+    params.set("sessionId", resolvedSessionId);
+  }
+
+  const normalizedReturnTo = normalizeAdminReturnPath(returnTo);
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+
+  return `/admin/classes?${params.toString()}`;
 }
 
 function buildLessonMonthKey(value: string) {
@@ -2294,12 +2409,9 @@ function buildSelectedRowSnapshot(
     (session) => text(session.progressStatus) !== "done",
   );
   const nextActionSession = actionableSessions[0] || null;
-  const pendingSessionLabels = actionableSessions
-    .map((session) => {
-      const sessionNumber = Number(session.sessionNumber || 0);
-      return sessionNumber > 0 ? `${sessionNumber}회차` : text(session.id) || "확인 필요";
-    })
-    .filter(Boolean);
+  const pendingSessionSummary =
+    text(selectedRow.pendingSessionSummary) ||
+    buildClassSchedulePendingSessionSummary(actionableSessions);
   const latestNoteSession = [...sessions]
     .reverse()
     .find((session) => text(session.noteSummary));
@@ -2336,10 +2448,7 @@ function buildSelectedRowSnapshot(
       : "동기 그룹 연결 정보가 아직 없습니다.",
     warningLabel: warningText || "현재 감지된 운영 경고가 없습니다.",
     warningHint: text(planDrift?.message || syncGap?.message) || "계획 대비 차이나 그룹 간 간격 집계 결과입니다.",
-    pendingSessionSummary:
-      pendingSessionLabels.length > 0
-        ? pendingSessionLabels.join(", ")
-        : "업데이트 대기 회차가 없습니다.",
+    pendingSessionSummary,
     pendingSessions: actionableSessions.slice(0, 4).map((session) => ({
       id: text(session.id) || `${Number(session.sessionNumber || 0)}`,
       label:
@@ -2381,30 +2490,16 @@ function ClassScheduleSkeleton() {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.55fr_0.85fr]">
+      <div className="px-4 lg:px-6">
         <div className="border border-border/70 bg-background px-4 py-4">
-          <div className="space-y-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <Skeleton key={`row-${index}`} className="h-18 w-full" />
+          <div className="mb-3 flex items-center justify-between gap-3 border-b pb-3">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="h-6 w-24" />
+          </div>
+          <div className="space-y-2">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={`row-${index}`} className="h-14 w-full" />
             ))}
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="border border-border/70 bg-background px-4 py-4">
-            <div className="space-y-3">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <Skeleton key={`group-${index}`} className="h-24 w-full" />
-              ))}
-            </div>
-          </div>
-
-          <div className="border border-border/70 bg-background px-4 py-4">
-            <div className="space-y-3">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <Skeleton key={`status-${index}`} className="h-18 w-full" />
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -2417,12 +2512,15 @@ export function ClassScheduleWorkspace() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [search, setSearch] = useState("");
-  const [termId, setTermId] = useState("");
-  const [subject, setSubject] = useState("");
-  const [grade, setGrade] = useState("");
-  const [teacher, setTeacher] = useState("");
-  const [selectedSyncGroupId, setSelectedSyncGroupId] = useState("");
+  const searchParamString = searchParams.toString();
+  const isLessonDesignPage = pathname.endsWith("/lesson-design");
+  const classScheduleListRef = useRef<HTMLDivElement | null>(null);
+  const [search, setSearch] = useState(() => text(searchParams.get("q")));
+  const [termId, setTermId] = useState(() => text(searchParams.get("term")));
+  const [subject, setSubject] = useState(() => text(searchParams.get("subject")));
+  const [grade, setGrade] = useState(() => text(searchParams.get("grade")));
+  const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
+  const [selectedSyncGroupId, setSelectedSyncGroupId] = useState(() => text(searchParams.get("syncGroup")));
   const [selectedClassId, setSelectedClassId] = useState("");
   const [lessonDesignOpen, setLessonDesignOpen] = useState(false);
   const [selectedLessonMonthKeys, setSelectedLessonMonthKeys] = useState<string[]>([]);
@@ -2501,6 +2599,97 @@ export function ClassScheduleWorkspace() {
       data.textbooks,
     ],
   );
+  const classScheduleQueryState = useMemo(
+    () => ({
+      search,
+      termId,
+      subject,
+      grade,
+      teacher,
+      selectedSyncGroupId,
+    }),
+    [grade, search, selectedSyncGroupId, subject, teacher, termId],
+  );
+  const classScheduleReturnPath = useMemo(
+    () => buildClassScheduleListHref("/admin/class-schedule", searchParamString, classScheduleQueryState),
+    [classScheduleQueryState, searchParamString],
+  );
+
+  useEffect(() => {
+    if (isLessonDesignPage) return;
+
+    const nextHref = buildClassScheduleListHref(pathname, searchParamString, classScheduleQueryState);
+    const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+    if (nextHref !== currentHref) {
+      router.replace(nextHref, { scroll: false });
+    }
+  }, [classScheduleQueryState, isLessonDesignPage, pathname, router, searchParamString]);
+
+  const rememberClassScheduleListPosition = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const viewport = classScheduleListRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    window.sessionStorage.setItem(
+      getClassScheduleScrollStorageKey(classScheduleReturnPath),
+      JSON.stringify({
+        pageY: window.scrollY,
+        listY: viewport?.scrollTop || 0,
+      }),
+    );
+  }, [classScheduleReturnPath]);
+
+  const openClassScheduleOfficialDetail = useCallback(
+    (
+      row: Record<string, unknown>,
+      sessionId = "",
+      sectionId: string = LESSON_DESIGN_SECTION_IDS.periods,
+    ) => {
+      rememberClassScheduleListPosition();
+      setSelectedClassId(text(row.id));
+      router.push(buildOfficialClassScheduleDetailHref(row, sessionId, sectionId, classScheduleReturnPath));
+    },
+    [classScheduleReturnPath, rememberClassScheduleListPosition, router],
+  );
+
+  const handleClassScheduleRowKeyDown = useCallback(
+    (
+      event: KeyboardEvent<HTMLElement>,
+      row: Record<string, unknown>,
+      sessionId = "",
+      sectionId: string = LESSON_DESIGN_SECTION_IDS.periods,
+    ) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      openClassScheduleOfficialDetail(row, sessionId, sectionId);
+    },
+    [openClassScheduleOfficialDetail],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined" || loading || isLessonDesignPage) return undefined;
+    const savedScroll = parseStoredClassScheduleScroll(
+      window.sessionStorage.getItem(getClassScheduleScrollStorageKey(classScheduleReturnPath)),
+    );
+    if (!savedScroll) return undefined;
+
+    const restoreScroll = () => {
+      const viewport = classScheduleListRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+      if (savedScroll.pageY > 0) {
+        window.scrollTo({ top: savedScroll.pageY });
+      }
+      if (viewport && savedScroll.listY > 0) {
+        viewport.scrollTop = savedScroll.listY;
+      }
+    };
+
+    const firstFrame = window.requestAnimationFrame(() => {
+      restoreScroll();
+      window.requestAnimationFrame(restoreScroll);
+    });
+    return () => window.cancelAnimationFrame(firstFrame);
+  }, [classScheduleReturnPath, isLessonDesignPage, loading, model.rows.length]);
 
   useEffect(() => {
     if (model.rows.length === 0) {
@@ -2533,6 +2722,16 @@ export function ClassScheduleWorkspace() {
       })),
     [model.syncGroupCards],
   );
+  const rowSnapshotById = useMemo(
+    () =>
+      new Map(
+        model.rows.map((row) => [
+          row.id,
+          buildSelectedRowSnapshot(row, data.textbooks),
+        ]),
+      ),
+    [data.textbooks, model.rows],
+  );
 
   const selectedRow = useMemo(
     () =>
@@ -2542,10 +2741,6 @@ export function ClassScheduleWorkspace() {
     [allRowsModel.rows, model.rows, selectedClassId],
   );
 
-  const selectedSnapshot = useMemo(
-    () => buildSelectedRowSnapshot(selectedRow, data.textbooks),
-    [data.textbooks, selectedRow],
-  );
   const selectedRowClassItem = useMemo(
     () => ((selectedRow?.raw || null) as Record<string, unknown> | null)?.classItem as Record<string, unknown> | null,
     [selectedRow],
@@ -3701,32 +3896,10 @@ export function ClassScheduleWorkspace() {
     [data.textbooks],
   );
 
-  const openLessonDesignPageForRow = useCallback(
-    (
-      row: Record<string, unknown> | null,
-      sessionId: string = "",
-      sectionId: string = "",
-    ) => {
-      if (!row) {
-        return;
-      }
-
-      const resolvedSessionId = text(sessionId);
-      const targetSectionId =
-        resolveLessonDesignSectionId(sectionId) ||
-        (resolvedSessionId ? LESSON_DESIGN_SECTION_IDS.board : LESSON_DESIGN_SECTION_IDS.periods);
-
-      router.push(buildLessonDesignPageHref(row, resolvedSessionId, targetSectionId), {
-        scroll: false,
-      });
-    },
-    [router],
-  );
-
-  const isLessonDesignPage = pathname.endsWith("/lesson-design");
   const requestedClassId = text(searchParams.get("classId"));
   const requestedSessionId = text(searchParams.get("sessionId"));
   const requestedLessonDesignSectionId = resolveLessonDesignSectionId(text(searchParams.get("section")));
+  const requestedLessonReturnPath = normalizeAdminReturnPath(searchParams.get("returnTo"));
   const requestedLessonMonthKeys = useMemo(
     () =>
       text(searchParams.get("lessonMonths"))
@@ -3744,11 +3917,15 @@ export function ClassScheduleWorkspace() {
 
   const closeLessonDesignWorkspace = useCallback(() => {
     setLessonDesignOpen(false);
+    if (requestedLessonReturnPath) {
+      router.replace(requestedLessonReturnPath, { scroll: false });
+      return;
+    }
     router.replace(
       buildCurriculumWorkspaceHref(new URLSearchParams(searchParams.toString())),
       { scroll: false },
     );
-  }, [router, searchParams]);
+  }, [requestedLessonReturnPath, router, searchParams]);
 
   useEffect(() => {
     if (!isLessonDesignPage || !searchParams.has("lessonMonths")) {
@@ -4167,13 +4344,19 @@ export function ClassScheduleWorkspace() {
   const lessonDesignDescription = selectedRow
     ? `${selectedRow.termName || "학기 미정"} · ${selectedRow.teacher || "선생님 미정"}`
     : "수업 설계";
+  const lessonDesignReturnLabel = requestedLessonReturnPath.includes("/admin/classes")
+    ? "수업 상세로 돌아가기"
+    : "수업계획으로 돌아가기";
 
   if (loading) {
     return <ClassScheduleSkeleton />;
   }
 
   const lessonDesignActiveMode =
-    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.board ? "progress" : "schedule";
+    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.board ||
+    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.textbooks
+      ? "progress"
+      : "schedule";
   const isLessonDesignProgressMode = lessonDesignActiveMode === "progress";
   const lessonTextbookSubjectFilterLabel =
     lessonTextbookSubjectFilter === "current"
@@ -4973,13 +5156,15 @@ export function ClassScheduleWorkspace() {
                       </div>
                       <Button
                         type="button"
-                        size="icon"
+                        size="sm"
                         variant="ghost"
-                        className="size-8 shrink-0"
+                        className="h-8 shrink-0 rounded-md px-2 text-xs"
+                        data-testid={`lesson-textbook-remove-${book.textbookId}`}
                         aria-label={`${book.title} 연결 해제`}
                         onClick={() => handleRemoveLessonTextbook(book.textbookId)}
                       >
-                        <X className="size-4" />
+                        <X className="mr-1 size-3.5" />
+                        연결 해제
                       </Button>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -5812,6 +5997,19 @@ export function ClassScheduleWorkspace() {
                 </Badge>
               ) : null}
             </div>
+            {requestedLessonReturnPath ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-md px-3 shadow-none"
+                data-testid="lesson-design-bottom-return"
+                aria-label={lessonDesignReturnLabel}
+                onClick={closeLessonDesignWorkspace}
+              >
+                <ArrowLeft className="mr-1.5 size-4" />
+                {requestedLessonReturnPath.includes("/admin/classes") ? "수업 상세" : "수업계획"}
+              </Button>
+            ) : null}
             <Button
               type="button"
               className="h-9 rounded-md px-5 shadow-none"
@@ -5886,15 +6084,79 @@ export function ClassScheduleWorkspace() {
         />
       </div>
 
-      <div className="grid gap-6 px-4 xl:grid-cols-[1.55fr_0.85fr] lg:px-6">
-        <section className="overflow-hidden border border-border/70 bg-background">
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <div>
+      <div className="px-4 lg:px-6">
+        <section
+          data-testid="class-schedule-database-view"
+          className="overflow-hidden rounded-lg border border-border/70 bg-background shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <p className="text-sm font-semibold text-foreground">수업 목록</p>
+              <Badge variant="outline">{model.rows.length}개</Badge>
+              <Badge variant="outline">경고 {model.rows.filter((row) => row.warningText).length}</Badge>
             </div>
-            <Badge variant="outline">{model.rows.length}개</Badge>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>{model.syncGroupCards.length}개 동기 그룹</span>
+              <span aria-hidden="true">/</span>
+              <span>{model.rows.reduce((sum, row) => sum + Number(row.sessionCount || 0), 0)}회차</span>
+            </div>
           </div>
-          <div className="px-4 py-4">
+
+          {model.syncGroupCards.length > 0 ? (
+            <div
+              data-testid="class-schedule-sync-group-bar"
+              className="flex gap-2 overflow-x-auto border-b px-4 py-2"
+            >
+              <button
+                type="button"
+                aria-pressed={!selectedSyncGroupId}
+                className={cn(
+                  "inline-flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors",
+                  !selectedSyncGroupId
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border/70 bg-background hover:bg-muted/50",
+                )}
+                onClick={() => setSelectedSyncGroupId("")}
+              >
+                전체
+                <span className="rounded bg-background/20 px-1.5">{allRowsModel.rows.length}</span>
+              </button>
+              {model.syncGroupCards.map((group) => {
+                const isSelected = selectedSyncGroupId === group.id;
+
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    aria-pressed={isSelected}
+                    className={cn(
+                      "inline-flex h-8 max-w-72 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors",
+                      isSelected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border/70 bg-background hover:bg-muted/50",
+                    )}
+                    onClick={() => {
+                      const nextGroupId = isSelected ? "" : group.id;
+                      setSelectedSyncGroupId(nextGroupId);
+                      setSelectedClassId(group.members[0]?.classId || "");
+                    }}
+                  >
+                    <span className="truncate">{group.name || group.id}</span>
+                    <span className={cn("rounded px-1.5", isSelected ? "bg-primary-foreground/20" : "bg-muted")}>
+                      {group.memberCount}
+                    </span>
+                    {group.warningText ? (
+                      <Badge variant={isSelected ? "secondary" : "outline"} className="h-5 rounded px-1.5 text-[11px]">
+                        점검
+                      </Badge>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="p-3 md:p-4">
             {model.rows.length === 0 ? (
               <div className="text-muted-foreground flex min-h-72 items-center justify-center border border-dashed text-sm">
                 선택한 조건에 맞는 수업일정이 없습니다.
@@ -5905,26 +6167,26 @@ export function ClassScheduleWorkspace() {
                   {model.rows.map((row) => {
                     const progressPercent = formatProgress(row.completedSessions, row.sessionCount);
                     const isSelected = selectedClassId === row.id;
+                    const snapshot = rowSnapshotById.get(row.id);
+                    const nextSessionId = snapshot?.nextSessionId || row.nextActionSessionId || "";
+                    const designSectionId = nextSessionId
+                      ? LESSON_DESIGN_SECTION_IDS.board
+                      : LESSON_DESIGN_SECTION_IDS.periods;
 
                     return (
-                      <article
-                        key={`class-schedule-mobile-card-${row.id}`}
-                        data-testid={`class-schedule-mobile-card-${row.id}`}
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={isSelected}
-                        className={cn(
-                          "min-w-0 rounded-lg border bg-background px-3 py-3 text-sm transition-colors",
-                          isSelected ? "border-primary bg-muted/60" : "border-border/70",
-                        )}
-                        onClick={() => setSelectedClassId(row.id)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setSelectedClassId(row.id);
-                          }
-                        }}
-                      >
+	                      <article
+	                        key={`class-schedule-mobile-card-${row.id}`}
+	                        data-testid={`class-schedule-mobile-card-${row.id}`}
+	                        role="link"
+	                        tabIndex={0}
+	                        aria-label={`${row.title} 일정 상세 열기`}
+	                        className={cn(
+	                          "min-w-0 cursor-pointer rounded-lg border bg-background px-3 py-3 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+	                          isSelected ? "border-primary bg-muted/60" : "border-border/70",
+	                        )}
+	                        onClick={() => openClassScheduleOfficialDetail(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
+	                        onKeyDown={(event) => handleClassScheduleRowKeyDown(event, row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
+	                      >
                         <div className="flex min-w-0 items-start justify-between gap-3">
                           <div className="min-w-0 space-y-1">
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -5932,19 +6194,14 @@ export function ClassScheduleWorkspace() {
                               {row.grade ? <Badge variant="secondary">{row.grade}</Badge> : null}
                               {row.syncGroupName ? <Badge variant="outline">{row.syncGroupName}</Badge> : null}
                             </div>
-                            <Link
-                              href={buildLessonDesignPageHref(
-                                row,
-                                row.nextActionSessionId || "",
-                                row.nextActionSessionId
-                                  ? LESSON_DESIGN_SECTION_IDS.board
-                                  : LESSON_DESIGN_SECTION_IDS.periods,
-                              )}
-                              className="block text-base font-semibold leading-5 break-keep underline-offset-4 hover:underline"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                              }}
-                            >
+	                            <Link
+	                              href={buildOfficialClassScheduleDetailHref(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods, classScheduleReturnPath)}
+	                              className="block text-base font-semibold leading-5 break-keep underline-offset-4 hover:underline"
+	                              onClick={(event) => {
+	                                event.stopPropagation();
+	                                rememberClassScheduleListPosition();
+	                              }}
+	                            >
                               {row.title}
                             </Link>
                             <p className="text-muted-foreground leading-5 break-keep">
@@ -5962,11 +6219,23 @@ export function ClassScheduleWorkspace() {
                             </p>
                           </div>
 
+                          <div className="min-w-0 rounded-md border bg-background px-3 py-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="font-medium leading-5">다음 작업</p>
+                              <Badge variant={nextSessionId ? snapshot?.nextSessionTone || "outline" : "outline"}>
+                                {snapshot?.nextSessionMeta || "기록 없음"}
+                              </Badge>
+                            </div>
+                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                              {snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다."}
+                            </p>
+                          </div>
+
                           <div className="flex items-center gap-2">
                             <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
                               <div
                                 className="h-full rounded-full bg-primary"
-                                style={{ width: `${progressPercent}%` }}
+                                style={{ width: `${Math.min(progressPercent, 100)}%` }}
                               />
                             </div>
                             <span className="shrink-0 text-xs text-muted-foreground">
@@ -5979,27 +6248,56 @@ export function ClassScheduleWorkspace() {
                               {row.warningText}
                             </div>
                           ) : null}
+
+                          <div className="flex flex-wrap justify-end gap-2 pt-1">
+                            <Button asChild type="button" size="sm" variant="outline" className="h-8 rounded-md px-2.5 text-xs">
+                              <Link
+                                href={buildPublicClassHref(row)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                }}
+                              >
+                                홈페이지
+                              </Link>
+                            </Button>
+	                            <Button asChild type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs">
+	                              <Link
+	                                href={buildLessonDesignPageHref(row, nextSessionId, designSectionId, classScheduleReturnPath)}
+	                                onClick={(event) => {
+	                                  event.stopPropagation();
+	                                  rememberClassScheduleListPosition();
+	                                }}
+	                              >
+                                수업 설계
+                              </Link>
+                            </Button>
+                          </div>
                         </div>
                       </article>
                     );
                   })}
                 </div>
-                <ScrollArea className="hidden h-[34rem] pr-4 md:block">
-                <Table className="min-w-[980px] table-fixed">
+	                <div ref={classScheduleListRef} data-testid="class-schedule-desktop-scroll-anchor">
+	                <ScrollArea className="hidden h-[44rem] md:block">
+                <Table className="min-w-[1180px] table-fixed">
                   <colgroup>
-                    <col className="w-[24%]" />
-                    <col className="w-[28%]" />
+                    <col className="w-[22%]" />
                     <col className="w-[18%]" />
-                    <col className="w-[12%]" />
-                    <col className="w-[18%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[8%]" />
                   </colgroup>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_var(--border)]">
                     <TableRow>
-                      <TableHead className="sticky top-0 z-10 bg-background">반</TableHead>
-                      <TableHead className="sticky top-0 z-10 bg-background">운영 정보</TableHead>
-                      <TableHead className="sticky top-0 z-10 bg-background">진행도</TableHead>
-                      <TableHead className="sticky top-0 z-10 bg-background">동기 그룹</TableHead>
-                      <TableHead className="sticky top-0 z-10 bg-background">경고</TableHead>
+                      <TableHead>반</TableHead>
+                      <TableHead>일정</TableHead>
+                      <TableHead>다음 작업</TableHead>
+                      <TableHead>진도</TableHead>
+                      <TableHead>동기</TableHead>
+                      <TableHead>상태</TableHead>
+                      <TableHead className="text-right">작업</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -6008,17 +6306,27 @@ export function ClassScheduleWorkspace() {
                         row.completedSessions,
                         row.sessionCount,
                       );
+                      const snapshot = rowSnapshotById.get(row.id);
+                      const isSelected = selectedClassId === row.id;
+                      const nextSessionId = snapshot?.nextSessionId || row.nextActionSessionId || "";
+                      const designSectionId = nextSessionId
+                        ? LESSON_DESIGN_SECTION_IDS.board
+                        : LESSON_DESIGN_SECTION_IDS.periods;
 
                       return (
-                        <TableRow
-                          key={row.id}
-                          className={cn(
-                            "cursor-pointer transition-colors hover:bg-muted/50",
-                            selectedClassId === row.id && "bg-muted/60",
-                          )}
-                          aria-selected={selectedClassId === row.id}
-                          onClick={() => setSelectedClassId(row.id)}
-                        >
+	                        <TableRow
+	                          key={row.id}
+	                          data-testid={`class-schedule-database-row-${row.id}`}
+	                          role="link"
+	                          className={cn(
+	                            "cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+	                            isSelected && "border-l-2 border-l-primary bg-primary/5",
+	                          )}
+	                          aria-label={`${row.title} 일정 상세 열기`}
+	                          tabIndex={0}
+	                          onClick={() => openClassScheduleOfficialDetail(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
+	                          onKeyDown={(event) => handleClassScheduleRowKeyDown(event, row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
+	                        >
                           <TableCell className="align-top whitespace-normal">
                             <div className="min-w-0 space-y-2">
                               <div className="flex flex-wrap items-center gap-2">
@@ -6028,19 +6336,14 @@ export function ClassScheduleWorkspace() {
                                 ) : null}
                               </div>
                               <div>
-                                <Link
-                                  href={buildLessonDesignPageHref(
-                                    row,
-                                    row.nextActionSessionId || "",
-                                    row.nextActionSessionId
-                                      ? LESSON_DESIGN_SECTION_IDS.board
-                                      : LESSON_DESIGN_SECTION_IDS.periods,
-                                  )}
-                                  className="inline-flex max-w-full text-left font-medium leading-5 break-keep underline-offset-4 hover:underline"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                  }}
-                                >
+	                                <Link
+	                                  href={buildOfficialClassScheduleDetailHref(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods, classScheduleReturnPath)}
+	                                  className="inline-flex max-w-full text-left font-medium leading-5 break-keep underline-offset-4 hover:underline"
+	                                  onClick={(event) => {
+	                                    event.stopPropagation();
+	                                    rememberClassScheduleListPosition();
+	                                  }}
+	                                >
                                   {row.title}
                                 </Link>
                                 <p className="text-muted-foreground text-sm leading-5 break-keep">
@@ -6058,11 +6361,37 @@ export function ClassScheduleWorkspace() {
                             </div>
                           </TableCell>
                           <TableCell className="align-top whitespace-normal">
+                            <div className="min-w-0 space-y-2 text-sm leading-5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant={nextSessionId ? snapshot?.nextSessionTone || "outline" : "outline"}>
+                                  {snapshot?.nextSessionMeta || "기록 없음"}
+                                </Badge>
+                                {snapshot?.pendingSessions.length ? (
+                                  <Badge variant="outline">{snapshot.pendingSessions.length}건</Badge>
+                                ) : null}
+                              </div>
+                              <p className="line-clamp-2 text-xs text-muted-foreground">
+                                {snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다."}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="align-top whitespace-normal">
                             <div className="min-w-0 space-y-1.5 text-sm">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <span>{row.completedSessions}/{row.sessionCount}회 완료</span>
+                                <span>{row.completedSessions}/{row.sessionCount}회</span>
                                 <span className="font-medium text-foreground">{progressPercent}%</span>
                               </div>
+                              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-primary"
+                                  style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                                />
+                              </div>
+                              {snapshot?.textbookTitles.length ? (
+                                <p className="truncate text-xs text-muted-foreground">
+                                  교재 {snapshot.textbookTitles.length}권
+                                </p>
+                              ) : null}
                             </div>
                           </TableCell>
                           <TableCell className="align-top whitespace-normal">
@@ -6074,293 +6403,48 @@ export function ClassScheduleWorkspace() {
                           </TableCell>
                           <TableCell className="align-top whitespace-normal">
                             {row.warningText ? (
-                              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
-                                {row.warningText}
-                              </div>
+                              <Badge variant="destructive" className="max-w-full truncate">점검</Badge>
                             ) : (
-                              <span className="text-muted-foreground text-sm">정상</span>
+                              <Badge variant="outline">정상</Badge>
                             )}
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <div className="flex justify-end gap-1.5">
+                              <Button asChild type="button" size="icon" variant="ghost" className="size-8" aria-label={`${row.title} 홈페이지 확인`}>
+                                <Link
+                                  href={buildPublicClassHref(row)}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                  }}
+                                >
+                                  <ArrowUpRight className="size-4" />
+                                </Link>
+                              </Button>
+	                              <Button asChild type="button" size="sm" className="h-8 rounded-md px-2 text-xs">
+	                                <Link
+	                                  href={buildLessonDesignPageHref(row, nextSessionId, designSectionId, classScheduleReturnPath)}
+	                                  onClick={(event) => {
+	                                    event.stopPropagation();
+	                                    rememberClassScheduleListPosition();
+	                                  }}
+	                                >
+                                  설계
+                                </Link>
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
                     })}
                   </TableBody>
                 </Table>
-              </ScrollArea>
+	              </ScrollArea>
+	              </div>
               </>
             )}
           </div>
         </section>
 
-        <div className="space-y-6">
-          <section className="border border-border/70 bg-background">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <p className="text-sm font-semibold text-foreground">동기 그룹</p>
-              <span className="text-xs text-muted-foreground">{model.syncGroupCards.length}개</span>
-            </div>
-            <div className="space-y-3 px-4 py-4 text-sm">
-              {model.syncGroupCards.length > 0 ? (
-                model.syncGroupCards.map((group) => {
-                  const isSelected = selectedSyncGroupId === group.id;
-
-                  return (
-                    <button
-                      key={group.id}
-                      type="button"
-                      className={cn(
-                        "w-full rounded-xl border px-4 py-3 text-left transition-colors hover:bg-muted/50",
-                        isSelected && "border-primary bg-muted/60",
-                      )}
-                      onClick={() => {
-                        const nextGroupId = isSelected ? "" : group.id;
-                        setSelectedSyncGroupId(nextGroupId);
-                        setSelectedClassId(group.members[0]?.classId || "");
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="font-medium">{group.name || group.id}</p>
-                          <p className="text-muted-foreground text-xs">
-                            {group.memberCount}개 반 · {group.members
-                              .map((member) => member.className)
-                              .filter(Boolean)
-                              .join(", ")}
-                          </p>
-                        </div>
-                        <Badge variant={isSelected ? "default" : "outline"}>
-                          {isSelected ? "선택 중" : "그룹 확인"}
-                        </Badge>
-                      </div>
-                      {group.warningText ? (
-                        <p className="text-muted-foreground mt-3 text-xs">{group.warningText}</p>
-                      ) : null}
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="text-muted-foreground border border-dashed px-3 py-6 text-center">
-                  현재 연결된 동기 그룹이 없습니다.
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="border border-border/70 bg-background">
-            <div className="border-b px-4 py-3">
-              <p className="text-sm font-semibold text-foreground">선택한 반 진행 상세</p>
-            </div>
-            <div className="space-y-4 px-4 py-4 text-sm">
-              {selectedRow && selectedSnapshot ? (
-                <>
-                  <div className="rounded-xl border px-4 py-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge>{selectedRow.subject || "과목 미정"}</Badge>
-                          {selectedRow.grade ? (
-                            <Badge variant="secondary">{selectedRow.grade}</Badge>
-                          ) : null}
-                          {selectedRow.syncGroupName ? (
-                            <Badge variant="outline">{selectedRow.syncGroupName}</Badge>
-                          ) : null}
-                        </div>
-                        <div>
-                          <p className="text-base font-semibold">{selectedRow.title}</p>
-                          <p className="text-muted-foreground mt-1">
-                            {selectedRow.termName || "학기 미정"} · {selectedRow.teacher || "선생님 미정"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-muted-foreground text-right text-xs">
-                        <p>마지막 업데이트</p>
-                        <p className="mt-1 font-medium text-foreground">
-                          {selectedSnapshot.recentSessions[0]?.updatedAt || selectedSnapshot.nextSessionMeta}
-                        </p>
-	                        {lessonDesignSnapshot ? (
-	                          <div className="mt-3 flex flex-wrap justify-end gap-2">
-	                            <Button asChild type="button" size="sm" variant="outline">
-	                              <Link href={buildPublicClassHref(selectedRow)}>
-	                                홈페이지 확인
-	                                <ArrowUpRight className="size-3.5" />
-	                              </Link>
-	                            </Button>
-	                            <Button asChild type="button" size="sm">
-	                              <Link
-	                                href={buildLessonDesignPageHref(
-                                  selectedRow,
-                                  selectedSnapshot.nextSessionId || "",
-                                  selectedSnapshot.nextSessionId
-                                    ? LESSON_DESIGN_SECTION_IDS.board
-                                    : LESSON_DESIGN_SECTION_IDS.periods,
-                                )}
-                              >
-                                수업 설계
-                                <ArrowUpRight className="size-3.5" />
-                              </Link>
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      disabled={!selectedSnapshot.nextSessionId}
-                      aria-disabled={!selectedSnapshot.nextSessionId}
-                      className={cn(
-                        "rounded-xl border px-3 py-3 text-left transition-colors",
-                        selectedSnapshot.nextSessionId
-                          ? "hover:bg-muted/40"
-                          : "cursor-default",
-                      )}
-                      onClick={
-                        selectedSnapshot.nextSessionId
-                          ? () => openLessonDesignPageForRow(selectedRow, selectedSnapshot.nextSessionId || "")
-                          : undefined
-                      }
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium">바로 확인할 회차</p>
-                        <Badge variant={selectedSnapshot.nextSessionId ? selectedSnapshot.nextSessionTone : "outline"}>
-                          {selectedSnapshot.nextSessionMeta}
-                        </Badge>
-                      </div>
-                      <div className="mt-3 space-y-2 text-muted-foreground">
-                        <p>{selectedSnapshot.nextSessionLabel}</p>
-                      </div>
-                    </button>
-                    <div className="rounded-xl border px-3 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium">동기 그룹 상태</p>
-                        {selectedRow.syncGroupName ? (
-                          <Badge variant="outline">{selectedRow.syncGroupName}</Badge>
-                        ) : null}
-                      </div>
-                      <div className="mt-3 space-y-2 text-muted-foreground">
-                        <p>{selectedSnapshot.syncGroupLabel}</p>
-                        <p>{selectedSnapshot.syncGroupHint}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border px-3 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium">계획 대비 경고</p>
-                        <Badge variant={selectedRow.warningText ? "destructive" : "outline"}>
-                          {selectedRow.warningText ? "점검 필요" : "안정"}
-                        </Badge>
-                      </div>
-                      <div className="mt-3 space-y-2 text-muted-foreground">
-                        <p>{selectedSnapshot.warningLabel}</p>
-                        <p>{selectedSnapshot.warningHint}</p>
-                      </div>
-                    </div>
-                    <div className="rounded-xl border px-3 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium">업데이트 대기 회차</p>
-                        <Badge variant="outline">
-                          {selectedSnapshot.pendingSessions.length > 0 ? `${selectedSnapshot.pendingSessions.length}건` : "없음"}
-                        </Badge>
-                      </div>
-                      <div className="mt-3 space-y-2 text-muted-foreground">
-                        <p>{selectedSnapshot.pendingSessionSummary}</p>
-                      </div>
-                      {selectedSnapshot.pendingSessions.length > 0 ? (
-                        <div className="mt-3 space-y-2">
-                          {selectedSnapshot.pendingSessions.map((session) => (
-                            <button
-                              key={session.id}
-                              type="button"
-                              className="w-full rounded-lg border bg-muted/20 px-3 py-2 text-left transition-colors hover:bg-muted/40"
-                              onClick={() => openLessonDesignPageForRow(selectedRow, session.id)}
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="font-medium text-foreground">{session.label}</p>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge variant={session.progressTone}>{session.statusLabel}</Badge>
-                                  <span className="text-xs text-muted-foreground">{session.updatedAt}</span>
-                                </div>
-                              </div>
-                              {session.noteSummary !== "기록 메모 없음" ? (
-                                <p className="mt-2 text-xs text-muted-foreground">{session.noteSummary}</p>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium">연결 교재</p>
-                      <Badge variant="outline">{selectedSnapshot.textbookTitles.length}권</Badge>
-                    </div>
-                    {selectedSnapshot.textbookTitles.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {selectedSnapshot.textbookTitles.map((title) => (
-                          <Badge key={title} variant="secondary">
-                            {title}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-xl border px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium">최근 기록 메모</p>
-                      <Badge variant="outline">{selectedSnapshot.latestNoteSessionLabel}</Badge>
-                    </div>
-                    <div className="mt-3 space-y-2 text-muted-foreground">
-                      <p>{selectedSnapshot.latestNoteLabel}</p>
-                      <p>{selectedSnapshot.latestNoteSessionLabel}</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium">최근 회차 흐름</p>
-                      <Badge variant="outline">{selectedSnapshot.recentSessions.length}건</Badge>
-                    </div>
-                    {selectedSnapshot.recentSessions.length > 0 ? (
-                      <div className="mt-3 space-y-3">
-                        {selectedSnapshot.recentSessions.map((session) => (
-                          <button
-                            type="button"
-                            key={session.id}
-                            className="w-full rounded-xl border bg-muted/20 px-3 py-3 text-left"
-                            onClick={() => openLessonDesignPageForRow(selectedRow, session.id)}
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-medium">{session.label}</p>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant={session.progressTone}>{session.statusLabel}</Badge>
-                                <span className="text-muted-foreground text-xs">{session.updatedAt}</span>
-                              </div>
-                            </div>
-                            {session.noteSummary ? (
-                              <p className="text-muted-foreground mt-2 text-xs">
-                                {session.noteSummary}
-                              </p>
-                            ) : null}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </>
-              ) : (
-                <div className="text-muted-foreground border border-dashed px-3 py-6 text-center">
-                  선택 중인 반이 없습니다.
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
       </div>
       </div>
     </>
@@ -6384,7 +6468,7 @@ export function ClassScheduleWorkspace() {
             </div>
             <Button type="button" variant="outline" onClick={closeLessonDesignWorkspace}>
               <ArrowLeft className="mr-2 size-4" />
-              수업계획으로 돌아가기
+              {lessonDesignReturnLabel}
             </Button>
           </div>
           {lessonDesignSnapshot ? (
@@ -6398,7 +6482,7 @@ export function ClassScheduleWorkspace() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <Button type="button" variant="outline" onClick={closeLessonDesignWorkspace}>
                     <ArrowLeft className="mr-2 size-4" />
-                    수업계획으로 돌아가기
+                    {lessonDesignReturnLabel}
                   </Button>
                   <Link
                     href="/admin/classes"

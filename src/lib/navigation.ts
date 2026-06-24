@@ -280,43 +280,64 @@ export function resolveAdminWorkspaceMeta(pathname: string): AdminWorkspaceMeta 
 export function buildAdminNavGroups({
   canManageAll,
   canEditCurriculumPlanning,
+  canUseAssistantOperations = false,
 }: {
   canManageAll: boolean
   canEditCurriculumPlanning: boolean
+  canUseAssistantOperations?: boolean
 }): NavGroup[] {
+  const assistantOverviewItems: NavItem[] = [
+    {
+      title: "할 일",
+      url: "/admin/tasks",
+      icon: ClipboardCheck,
+    },
+    { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+    {
+      title: "학사일정",
+      url: "/admin/academic-calendar",
+      icon: CalendarDays,
+      items: [
+        { title: "캘린더", url: "/admin/academic-calendar" },
+        { title: "학교 연간 일정표", url: "/admin/academic-calendar/annual-board" },
+      ],
+    },
+    { title: "시간표", url: "/admin/timetable", icon: LayoutGrid },
+  ]
+  const fullOverviewItems: NavItem[] = [
+    {
+      title: "할 일",
+      url: "/admin/tasks",
+      icon: ClipboardCheck,
+      items: [
+        { title: "오늘", url: "/admin/tasks?list=today" },
+        { title: "지연", url: "/admin/tasks?list=filters&filter=overdue" },
+        { title: "내 담당", url: "/admin/tasks?list=mine" },
+        { title: "전체 일정", url: "/admin/tasks?list=calendar" },
+        { title: "보드", url: "/admin/tasks?list=board" },
+        { title: "미정리", url: "/admin/tasks?list=filters&filter=unassigned" },
+      ],
+    },
+    { title: "등록", url: "/admin/registration", icon: UserPlus },
+    { title: "전반", url: "/admin/transfer", icon: Repeat2 },
+    { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
+    { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+    { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
+    { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
+    {
+      title: "학사일정",
+      url: "/admin/academic-calendar",
+      icon: CalendarDays,
+      items: [
+        { title: "캘린더", url: "/admin/academic-calendar" },
+        { title: "학교 연간 일정표", url: "/admin/academic-calendar/annual-board" },
+      ],
+    },
+    { title: "시간표", url: "/admin/timetable", icon: LayoutGrid },
+  ]
   const overview: NavGroup = {
     label: "운영",
-    items: [
-      {
-        title: "할 일",
-        url: "/admin/tasks",
-        icon: ClipboardCheck,
-        items: [
-          { title: "오늘", url: "/admin/tasks?list=today" },
-          { title: "지연", url: "/admin/tasks?list=filters&filter=overdue" },
-          { title: "내 담당", url: "/admin/tasks?list=mine" },
-          { title: "전체 일정", url: "/admin/tasks?list=calendar" },
-          { title: "보드", url: "/admin/tasks?list=board" },
-          { title: "미정리", url: "/admin/tasks?list=filters&filter=unassigned" },
-        ],
-      },
-      { title: "등록", url: "/admin/registration", icon: UserPlus },
-      { title: "전반", url: "/admin/transfer", icon: Repeat2 },
-      { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
-      { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
-      { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
-      { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
-      {
-        title: "학사일정",
-        url: "/admin/academic-calendar",
-        icon: CalendarDays,
-        items: [
-          { title: "캘린더", url: "/admin/academic-calendar" },
-          { title: "학교 연간 일정표", url: "/admin/academic-calendar/annual-board" },
-        ],
-      },
-      { title: "시간표", url: "/admin/timetable", icon: LayoutGrid },
-    ],
+    items: canUseAssistantOperations ? assistantOverviewItems : fullOverviewItems,
   }
 
   const managementItems: NavItem[] = []

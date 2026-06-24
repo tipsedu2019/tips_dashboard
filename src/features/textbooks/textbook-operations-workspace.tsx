@@ -76,7 +76,6 @@ import {
   buildTextbookSaleDraft,
   filterStockMovesForClosing,
   getRecordId,
-  getTextbookByExactReference,
   getTextbookByReference,
   getTextbookCopyScope,
   getTextbookPurchaseUnitCost,
@@ -189,6 +188,20 @@ type TextbookHandoffLine = {
   quantityLabel: string;
   amountLabel: string;
 };
+type PurchaseSupplierHandoffLineAccumulator = {
+  id: string;
+  title: string;
+  publisherLabel: string;
+  classLabels: string[];
+  locationLabels: string[];
+  requesterLabels: string[];
+  statusLabels: string[];
+  scopeQuantities: Record<TextbookCopyScope, number>;
+  amountLabels: string[];
+  remainingQuantity: number;
+  totalQuantity: number;
+  totalAmount: number;
+};
 type TextbookHandoffGroup = {
   id: string;
   title: string;
@@ -198,6 +211,9 @@ type TextbookHandoffGroup = {
   lines: TextbookHandoffLine[];
   totalQuantity: number;
   totalAmount: number;
+};
+type PurchaseSupplierHandoffGroupDraft = TextbookHandoffGroup & {
+  lineAccumulators: Map<string, PurchaseSupplierHandoffLineAccumulator>;
 };
 type TextbookConfirmationPreviewItem = {
   id: string;
@@ -349,7 +365,7 @@ const textbookQualityIssueFilterKeys: Exclude<TextbookQualityFilter, "all" | "at
 const textbookTabTriggerClassName =
   "gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm";
 const dialogFooterClassName =
-  "sticky bottom-0 -mx-6 -mb-6 mt-1 flex justify-end gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80";
+  "sticky bottom-0 mt-1 flex w-full min-w-0 max-w-full justify-self-stretch overflow-hidden flex-col gap-2 border-t bg-background/95 px-0 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:justify-end [&>button]:w-full sm:[&>button]:w-auto";
 const stickyActionHeadClassName =
   "sticky right-0 bg-muted/30 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
 const stickyActionCellClassName =
@@ -471,6 +487,28 @@ function text(value: unknown) {
   return String(value || "").trim();
 }
 
+function textPreservingZero(value: unknown) {
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function getRowFieldText(row: Row | undefined, ...fieldNames: string[]) {
+  if (!row) return "";
+  for (const fieldName of fieldNames) {
+    if (!Object.prototype.hasOwnProperty.call(row, fieldName)) continue;
+    const value = textPreservingZero(row[fieldName]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function firstNonBlankText(...values: unknown[]) {
+  for (const value of values) {
+    const normalized = textPreservingZero(value);
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
 function isEditableShortcutTarget(target: EventTarget | null) {
   const element = target instanceof HTMLElement ? target : null;
   if (!element) return false;
@@ -504,6 +542,23 @@ function getPublisherLabel(row: Row) {
 function getKnownPublisherLabel(row: Row) {
   const publisherLabel = getPublisherLabel(row);
   return publisherLabel === "미분류" ? "" : publisherLabel;
+}
+
+function getPublisherSettingLabel(row: Row) {
+  return text(row.name || row.publisher || row.publisher_name || row.publisherName);
+}
+
+function uniqueSortedLabels(values: unknown[]) {
+  const labelsByKey = new Map<string, string>();
+  for (const value of values) {
+    const label = text(value);
+    if (!label || label === "미분류") continue;
+    const key = label.toLowerCase();
+    if (!labelsByKey.has(key)) {
+      labelsByKey.set(key, label);
+    }
+  }
+  return [...labelsByKey.values()].sort((left, right) => left.localeCompare(right, "ko", { numeric: true }));
 }
 
 function compactUniqueLabels(parts: Array<unknown>) {
@@ -991,10 +1046,6 @@ function normalizeTextbookLookup(value: unknown) {
 
 function getTextbookById(textbooks: Row[], id: string) {
   return getTextbookByReference(textbooks, id);
-}
-
-function getTextbookByExactIdOrTitle(textbooks: Row[], reference: string) {
-  return getTextbookByExactReference(textbooks, reference);
 }
 
 function buildTextbookLookupMap(textbooks: Row[]) {
@@ -1566,6 +1617,11 @@ function purchaseActionLabel(stage: string) {
   return "입고 반영";
 }
 
+function purchaseSuccessMessage(stage: string, isEdit: boolean) {
+  const stageLabel = purchaseStageLabels[stage] || purchaseActionLabel(stage);
+  return isEdit ? `${stageLabel}로 업데이트했습니다.` : `${stageLabel}를 저장했습니다.`;
+}
+
 function getPurchaseDialogTitle(stage: unknown, isEdit: boolean) {
   const normalizedStage = text(stage) || "request";
   const title = normalizedStage === "receive" ? "교재 입고" : normalizedStage === "order" ? "교재 주문" : "교재 요청";
@@ -1599,9 +1655,9 @@ function getPurchaseFieldVisibility(stage: unknown) {
 }
 
 function buildPurchaseCardDraft(line: Row, order: Row | undefined): PurchaseKanbanDraft {
-  const requested = text(line.requested_quantity || line.requestedQuantity);
-  const ordered = text(line.ordered_quantity || line.orderedQuantity);
-  const received = text(line.received_quantity || line.receivedQuantity);
+  const requested = getRowFieldText(line, "requested_quantity", "requestedQuantity");
+  const ordered = getRowFieldText(line, "ordered_quantity", "orderedQuantity");
+  const received = getRowFieldText(line, "received_quantity", "receivedQuantity");
   const copyScope = getTextbookCopyScope(line);
   const isTeacherCopy = copyScope === "teacher";
 
@@ -1698,7 +1754,7 @@ function PurchaseScopeQuantityCell({ lines, kind }: { lines: Row[]; kind: "reque
 
 function getOrderablePurchaseRequestTextbook(line: Row, order: Row | undefined, textbooks: Row[]) {
   const draft = buildPurchaseCardDraft(line, order);
-  return getTextbookByExactIdOrTitle(textbooks, draft.textbookId || draft.requestedTextbookTitle);
+  return getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
 }
 
 function isOrderablePurchaseRequestLine(line: Row, order: Row | undefined, textbooks: Row[]) {
@@ -1789,6 +1845,40 @@ function buildPurchaseSupplierMessage(group: TextbookHandoffGroup) {
   ].filter((line) => line !== "").join("\n");
 }
 
+function pushUniqueText(values: string[], value: unknown) {
+  const normalized = text(value);
+  if (normalized && !values.includes(normalized)) {
+    values.push(normalized);
+  }
+}
+
+function formatCompactHandoffLabels(values: string[]) {
+  const uniqueValues = values.filter(Boolean);
+  if (uniqueValues.length <= 2) {
+    return uniqueValues.join(", ");
+  }
+  return `${uniqueValues.slice(0, 2).join(", ")} 외 ${formatQuantity(uniqueValues.length - 2)}`;
+}
+
+function getPurchaseSupplierHandoffScopeLabel(quantities: Record<TextbookCopyScope, number>) {
+  const hasStudentCopies = quantities.student > 0;
+  const hasTeacherCopies = quantities.teacher > 0;
+  if (hasStudentCopies && hasTeacherCopies) return "학생용/교사용";
+  if (hasTeacherCopies) return "교사용";
+  return "학생용";
+}
+
+function getPurchaseSupplierHandoffQuantityLabel(quantities: Record<TextbookCopyScope, number>) {
+  return [
+    quantities.student > 0 ? `학생용 ${formatQuantity(quantities.student)}권` : "",
+    quantities.teacher > 0 ? `교사용 ${formatQuantity(quantities.teacher)}권` : "",
+  ].filter(Boolean).join(" · ") || "0권";
+}
+
+function getPurchaseSupplierHandoffAmountLabel(line: PurchaseSupplierHandoffLineAccumulator) {
+  return line.amountLabels.length > 0 ? line.amountLabels.join(" · ") : "0원";
+}
+
 function buildMakeEduBillingMessage(group: TextbookHandoffGroup) {
   return [
     "[메이크에듀 기타수납 생성]",
@@ -1822,7 +1912,7 @@ function buildPurchaseSupplierHandoffGroups({
   locations: Row[];
   classes: Row[];
 }) {
-  const groups = new Map<string, TextbookHandoffGroup>();
+  const groups = new Map<string, PurchaseSupplierHandoffGroupDraft>();
 
   for (const line of rows) {
     const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
@@ -1839,6 +1929,9 @@ function buildPurchaseSupplierHandoffGroups({
     const supplierName = getSupplierName(suppliers, supplierId) || "공급처 미지정";
     const supplierContact = getSupplierContact(supplier);
     const classRecord = getClassById(classes, draft.classId);
+    const classLabel = classRecord ? getClassName(classRecord) : "";
+    const locationLabel = getLocationName(locations, draft.locationId);
+    const publisherLabel = getPublisherLabel(textbook || {});
     const orderedQuantity = numberValue(draft.orderedQuantity);
     const requestedQuantity = numberValue(draft.requestedQuantity);
     const receivedQuantity = numberValue(draft.receivedQuantity);
@@ -1854,47 +1947,72 @@ function buildPurchaseSupplierHandoffGroups({
       lines: [],
       totalQuantity: 0,
       totalAmount: 0,
+      lineAccumulators: new Map(),
+    };
+    const textbookKey = getRecordId(textbook || {}) || normalizeTextbookLookup(textbookTitle) || textbookTitle;
+    const lineKey = `${supplierId}||${textbookKey}`;
+    const lineAccumulator = group.lineAccumulators.get(lineKey) || {
+      id: lineKey,
+      title: textbookTitle,
+      publisherLabel,
+      classLabels: [],
+      locationLabels: [],
+      requesterLabels: [],
+      statusLabels: [],
+      scopeQuantities: { student: 0, teacher: 0 },
+      amountLabels: [],
+      remainingQuantity: 0,
+      totalQuantity: 0,
+      totalAmount: 0,
     };
 
-    group.lines.push({
-      id: getRecordId(line) || `${supplierId}-${group.lines.length}`,
-      title: textbookTitle,
-      detail: [
-        getTextbookCopyScopeLabel(draft.copyScope),
-        getPublisherLabel(textbook || {}),
-        classRecord ? getClassName(classRecord) : "",
-        getLocationName(locations, draft.locationId),
-      ].filter(Boolean).join(" · "),
-      note: [
-        purchaseStatusLabel(status, draft.orderedQuantity, draft.receivedQuantity),
-        getTextbookCopyScopeLabel(draft.copyScope),
-        draft.requestBy ? `요청 ${draft.requestBy}` : "",
-        receivedQuantity > 0 && receivedQuantity < quantity ? `잔여 ${formatQuantity(quantity - receivedQuantity)}권` : "",
-      ].filter(Boolean).join(" · "),
-      quantityLabel: `${formatQuantity(quantity)}권`,
-      amountLabel: formatPurchaseUnitCost(unitCost, textbook),
-    });
+    pushUniqueText(lineAccumulator.classLabels, classLabel);
+    pushUniqueText(lineAccumulator.locationLabels, locationLabel);
+    pushUniqueText(lineAccumulator.requesterLabels, draft.requestBy);
+    pushUniqueText(lineAccumulator.statusLabels, purchaseStatusLabel(status, draft.orderedQuantity, draft.receivedQuantity));
+    if (unitCost > 0 || draft.copyScope === "student") {
+      pushUniqueText(lineAccumulator.amountLabels, formatPurchaseUnitCost(unitCost, textbook));
+    }
+    lineAccumulator.scopeQuantities[draft.copyScope] += quantity;
+    lineAccumulator.remainingQuantity += receivedQuantity > 0 && receivedQuantity < quantity ? quantity - receivedQuantity : 0;
+    lineAccumulator.totalQuantity += quantity;
+    lineAccumulator.totalAmount += lineAmount;
+
+    group.lineAccumulators.set(lineKey, lineAccumulator);
     group.totalQuantity += quantity;
     group.totalAmount += lineAmount;
     groups.set(supplierId, group);
   }
 
-  return [...groups.values()].map((group) => ({
-    ...group,
-    summary: [
-      `${formatQuantity(group.lines.length)}종`,
+  return [...groups.values()].map(({ lineAccumulators, ...group }) => {
+    const lines = [...lineAccumulators.values()].map((line) => ({
+      id: line.id,
+      title: line.title,
+      detail: [
+        getPurchaseSupplierHandoffScopeLabel(line.scopeQuantities),
+        line.publisherLabel,
+        formatCompactHandoffLabels(line.classLabels),
+        formatCompactHandoffLabels(line.locationLabels),
+      ].filter(Boolean).join(" · "),
+      note: [
+        formatCompactHandoffLabels(line.statusLabels),
+        line.requesterLabels.length > 0 ? `요청 ${formatCompactHandoffLabels(line.requesterLabels)}` : "",
+        line.remainingQuantity > 0 ? `잔여 ${formatQuantity(line.remainingQuantity)}권` : "",
+      ].filter(Boolean).join(" · "),
+      quantityLabel: getPurchaseSupplierHandoffQuantityLabel(line.scopeQuantities),
+      amountLabel: getPurchaseSupplierHandoffAmountLabel(line),
+    }));
+    const summary = [
+      `${formatQuantity(lines.length)}종`,
       `${formatQuantity(group.totalQuantity)}권`,
       group.totalAmount > 0 ? formatCurrency(group.totalAmount) : "",
-    ].filter(Boolean),
-    message: buildPurchaseSupplierMessage({
-      ...group,
-      summary: [
-        `${formatQuantity(group.lines.length)}종`,
-        `${formatQuantity(group.totalQuantity)}권`,
-        group.totalAmount > 0 ? formatCurrency(group.totalAmount) : "",
-      ].filter(Boolean),
-    }),
-  }));
+    ].filter(Boolean);
+    const nextGroup = { ...group, lines, summary };
+    return {
+      ...nextGroup,
+      message: buildPurchaseSupplierMessage(nextGroup),
+    };
+  });
 }
 
 function buildMakeEduBillingHandoffGroups({
@@ -2379,12 +2497,33 @@ export function TextbookOperationsWorkspace() {
     textbookHistoryDeleteAdminEmails.has(currentUserEmail);
   const activeTextbooks = useMemo(() => data.textbooks.filter(isActiveTextbook), [data.textbooks]);
   const activeInventory = useMemo(() => data.inventory.filter(isActiveTextbook), [data.inventory]);
-  const publisherGroupOptions = useMemo(
-    () => [...new Set(activeInventory.map(getPublisherLabel))]
-      .filter(Boolean)
-      .sort((left, right) => left.localeCompare(right, "ko")),
-    [activeInventory],
+  const configuredPublisherOptions = useMemo(
+    () => uniqueSortedLabels(data.publishers.map(getPublisherSettingLabel)),
+    [data.publishers],
   );
+  const publisherGroupOptions = useMemo(
+    () => uniqueSortedLabels([
+      ...configuredPublisherOptions,
+      ...activeInventory.map(getKnownPublisherLabel),
+    ]),
+    [activeInventory, configuredPublisherOptions],
+  );
+  const masterPublisherOptions = useMemo(() => {
+    const configuredPublisherKeys = new Set(configuredPublisherOptions.map((option) => option.toLowerCase()));
+    const optionLabels = uniqueSortedLabels([
+      ...publisherGroupOptions,
+      masterForm.publisher,
+    ]);
+
+    return [
+      { value: "none", label: "선택" },
+      ...optionLabels.map((label) => ({
+        value: label,
+        label,
+        description: configuredPublisherKeys.has(label.toLowerCase()) ? "설정" : "기존",
+      })),
+    ];
+  }, [configuredPublisherOptions, masterForm.publisher, publisherGroupOptions]);
   const textbookSubSubjectSettings = useMemo<TextbookSubSubjectSettingRecord[]>(
     () => mergeTextbookSubSubjectSettings(data.textbookSubSubjectSettings),
     [data.textbookSubSubjectSettings],
@@ -2769,14 +2908,14 @@ export function TextbookOperationsWorkspace() {
   const explicitlySelectedPurchaseTextbook = getTextbookById(data.textbooks, purchaseForm.textbookId);
   const explicitPurchaseTextbookId = getRecordId(explicitlySelectedPurchaseTextbook || {});
   const purchaseRequestTitle = text(purchaseForm.requestedTextbookTitle || getTextbookTitle(explicitlySelectedPurchaseTextbook || {}) || purchaseForm.textbookId);
-  const requestedCatalogTextbook = getTextbookByExactIdOrTitle(activeTextbooks, purchaseRequestTitle);
+  const requestedCatalogTextbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
   const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook || requestedCatalogTextbook;
   const selectedPurchaseTextbookId = getRecordId(selectedPurchaseTextbook || {});
   const purchaseRequestUsesCatalog = purchaseRequestInputMode === "catalog";
   const manualPurchaseCatalogMatches = useMemo(
     () => {
       if (purchaseRequestInputMode !== "manual") return [];
-      const textbook = getTextbookByExactIdOrTitle(activeTextbooks, purchaseRequestTitle);
+      const textbook = getTextbookById(activeTextbooks, purchaseRequestTitle);
       return textbook ? [textbook] : [];
     },
     [activeTextbooks, purchaseRequestInputMode, purchaseRequestTitle],
@@ -3031,7 +3170,7 @@ export function TextbookOperationsWorkspace() {
     saving === "purchase" ||
     (purchaseForm.requestStage === "request" && !purchaseRequestTitle) ||
     (purchaseForm.requestStage !== "request" && !selectedPurchaseTextbookId) ||
-    !purchaseRequestedTotalQuantity ||
+    (purchaseForm.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId) ||
     (purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity) ||
     (purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity);
   const filteredClosingMoves = filterStockMovesForClosing({
@@ -3656,7 +3795,7 @@ export function TextbookOperationsWorkspace() {
   }
 
   function applyConfiguredPurchasePricingToPayload(payload: Row) {
-    const textbook = getTextbookByExactIdOrTitle(data.textbooks, text(payload.textbookId || payload.requestedTextbookTitle));
+    const textbook = getTextbookById(data.textbooks, text(payload.textbookId || payload.requestedTextbookTitle));
     const supplierId =
       getConfiguredSupplierIdForTextbook(textbook, data.publisherSupplierLinks, data.publishers) ||
       text(payload.supplierId);
@@ -3671,7 +3810,7 @@ export function TextbookOperationsWorkspace() {
 
   function getPurchaseLineTextbookId(line: Row) {
     const draft = buildPurchaseCardDraft(line, getPurchaseLineOrder(line, purchaseOrdersById));
-    const textbook = getTextbookByExactIdOrTitle(data.textbooks, text(line.textbook_id || line.textbookId) || draft.requestedTextbookTitle);
+    const textbook = getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId) || draft.requestedTextbookTitle);
     return getRecordId(textbook || {}) || text(line.textbook_id || line.textbookId);
   }
 
@@ -3905,27 +4044,39 @@ export function TextbookOperationsWorkspace() {
     const studentLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "student");
     const teacherLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "teacher");
     const status = text(primaryOrder?.status || primaryLine.status);
-    const orderedQuantity = text(primaryLine.ordered_quantity || primaryLine.orderedQuantity);
-    const requestedQuantity = text(primaryLine.requested_quantity || primaryLine.requestedQuantity);
+    const orderedQuantity = getRowFieldText(primaryLine, "ordered_quantity", "orderedQuantity");
+    const requestedQuantity = getRowFieldText(primaryLine, "requested_quantity", "requestedQuantity");
+    const primaryRequestedQuantity = requestedQuantity || orderedQuantity || "1";
     const nextStage = stageOverride || purchaseStageFromStatus(status);
-    const nextOrderedQuantity = nextStage === "request" ? orderedQuantity : orderedQuantity || requestedQuantity || "1";
+    const nextOrderedQuantity = nextStage === "request" ? orderedQuantity : orderedQuantity || primaryRequestedQuantity;
     const requestedTitle = getRequestedTextbookTitle(primaryLine);
-    const textbook = getTextbookByExactIdOrTitle(data.textbooks, text(primaryLine.textbook_id || primaryLine.textbookId) || requestedTitle);
+    const textbook = getTextbookById(data.textbooks, text(primaryLine.textbook_id || primaryLine.textbookId) || requestedTitle);
     const copyScope = getTextbookCopyScope(primaryLine);
-    const isTeacherCopy = copyScope === "teacher";
     const nextReceivedQuantity = nextStage === "receive"
-      ? text(primaryLine.received_quantity || primaryLine.receivedQuantity) || nextOrderedQuantity || requestedQuantity || "1"
-      : text(primaryLine.received_quantity || primaryLine.receivedQuantity);
-    const studentRequestedQuantity = text(studentLine?.requested_quantity || studentLine?.requestedQuantity || studentLine?.ordered_quantity || studentLine?.orderedQuantity || studentLine?.received_quantity || studentLine?.receivedQuantity);
-    const teacherRequestedQuantity = text(teacherLine?.requested_quantity || teacherLine?.requestedQuantity || teacherLine?.ordered_quantity || teacherLine?.orderedQuantity || teacherLine?.received_quantity || teacherLine?.receivedQuantity);
-    const studentOrderedQuantity = text(studentLine?.ordered_quantity || studentLine?.orderedQuantity);
-    const teacherOrderedQuantity = text(teacherLine?.ordered_quantity || teacherLine?.orderedQuantity);
-    const studentReceivedQuantity = nextStage === "receive"
-      ? text(studentLine?.received_quantity || studentLine?.receivedQuantity) || studentOrderedQuantity || studentRequestedQuantity
-      : text(studentLine?.received_quantity || studentLine?.receivedQuantity);
-    const teacherReceivedQuantity = nextStage === "receive"
-      ? text(teacherLine?.received_quantity || teacherLine?.receivedQuantity) || teacherOrderedQuantity || teacherRequestedQuantity
-      : text(teacherLine?.received_quantity || teacherLine?.receivedQuantity);
+      ? getRowFieldText(primaryLine, "received_quantity", "receivedQuantity") || nextOrderedQuantity || primaryRequestedQuantity
+      : getRowFieldText(primaryLine, "received_quantity", "receivedQuantity");
+    const studentRequestedQuantity = firstNonBlankText(
+      getRowFieldText(studentLine, "requested_quantity", "requestedQuantity"),
+      getRowFieldText(studentLine, "ordered_quantity", "orderedQuantity"),
+      getRowFieldText(studentLine, "received_quantity", "receivedQuantity"),
+    );
+    const teacherRequestedQuantity = firstNonBlankText(
+      getRowFieldText(teacherLine, "requested_quantity", "requestedQuantity"),
+      getRowFieldText(teacherLine, "ordered_quantity", "orderedQuantity"),
+      getRowFieldText(teacherLine, "received_quantity", "receivedQuantity"),
+    );
+    const studentOrderedQuantity = getRowFieldText(studentLine, "ordered_quantity", "orderedQuantity");
+    const teacherOrderedQuantity = getRowFieldText(teacherLine, "ordered_quantity", "orderedQuantity");
+    const studentBaseQuantity = studentRequestedQuantity || (!teacherLine ? primaryRequestedQuantity : "");
+    const teacherBaseQuantity = teacherRequestedQuantity || (!studentLine ? primaryRequestedQuantity : "");
+    const nextStudentOrderedQuantity = nextStage === "request" ? studentOrderedQuantity : studentOrderedQuantity || studentBaseQuantity;
+    const nextTeacherOrderedQuantity = nextStage === "request" ? teacherOrderedQuantity : teacherOrderedQuantity || teacherBaseQuantity;
+    const nextStudentReceivedQuantity = nextStage === "receive"
+      ? getRowFieldText(studentLine, "received_quantity", "receivedQuantity") || nextStudentOrderedQuantity || studentBaseQuantity
+      : getRowFieldText(studentLine, "received_quantity", "receivedQuantity");
+    const nextTeacherReceivedQuantity = nextStage === "receive"
+      ? getRowFieldText(teacherLine, "received_quantity", "receivedQuantity") || nextTeacherOrderedQuantity || teacherBaseQuantity
+      : getRowFieldText(teacherLine, "received_quantity", "receivedQuantity");
     setSelectedPurchaseLineId(getRecordId(primaryLine));
     setSelectedPurchaseScopeLineIds({
       student: getRecordId(studentLine || {}),
@@ -3941,15 +4092,15 @@ export function TextbookOperationsWorkspace() {
       supplierId: text(primaryOrder?.supplier_id || primaryOrder?.supplierId),
       locationId: text(primaryLine.location_id || primaryLine.locationId),
       requestBy: text(primaryOrder?.requested_by || primaryOrder?.requestedBy),
-      requestedQuantity: requestedQuantity || orderedQuantity || "1",
+      requestedQuantity: primaryRequestedQuantity,
       orderedQuantity: nextOrderedQuantity,
       receivedQuantity: nextReceivedQuantity,
-      studentRequestedQuantity: studentRequestedQuantity || (isTeacherCopy ? "" : requestedQuantity || orderedQuantity || "1"),
-      teacherRequestedQuantity: teacherRequestedQuantity || (isTeacherCopy ? requestedQuantity || orderedQuantity || "1" : ""),
-      studentOrderedQuantity: studentOrderedQuantity || (isTeacherCopy ? "" : nextOrderedQuantity),
-      teacherOrderedQuantity: teacherOrderedQuantity || (isTeacherCopy ? nextOrderedQuantity : ""),
-      studentReceivedQuantity: studentReceivedQuantity || (isTeacherCopy ? "" : nextReceivedQuantity),
-      teacherReceivedQuantity: teacherReceivedQuantity || (isTeacherCopy ? nextReceivedQuantity : ""),
+      studentRequestedQuantity: studentBaseQuantity,
+      teacherRequestedQuantity: teacherBaseQuantity,
+      studentOrderedQuantity: nextStudentOrderedQuantity,
+      teacherOrderedQuantity: nextTeacherOrderedQuantity,
+      studentReceivedQuantity: nextStudentReceivedQuantity,
+      teacherReceivedQuantity: nextTeacherReceivedQuantity,
       unitCost: text(primaryLine.unit_cost || primaryLine.unitCost),
       statementNumber: text(primaryOrder?.statement_number || primaryOrder?.statementNumber),
       memo: text(primaryLine.memo || primaryOrder?.memo),
@@ -4028,8 +4179,9 @@ export function TextbookOperationsWorkspace() {
         : purchaseForm.requestStage === "order"
           ? numberValue(orderedQuantity)
           : numberValue(requestedQuantity);
+      const canKeepZeroQuantityRequestLine = purchaseForm.requestStage === "request" && Boolean(scopeLineId);
 
-      if (stageQuantity <= 0) {
+      if (stageQuantity <= 0 && !canKeepZeroQuantityRequestLine) {
         return [];
       }
 
@@ -4037,7 +4189,7 @@ export function TextbookOperationsWorkspace() {
         ...purchaseForm,
         textbookId: selectedPurchaseTextbookId || getRecordId(requestedCatalogTextbook || {}) || purchaseForm.textbookId,
         requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
-        requestedQuantity: requestedQuantity || orderedQuantity || receivedQuantity || "1",
+        requestedQuantity: requestedQuantity || (purchaseForm.requestStage === "request" ? orderedQuantity || receivedQuantity || "1" : "0"),
         orderedQuantity,
         receivedQuantity,
         copyScope: scope,
@@ -4068,9 +4220,7 @@ export function TextbookOperationsWorkspace() {
           }
         }
       },
-      selectedPurchaseLineId
-        ? `${purchaseActionLabel(purchaseForm.requestStage)}로 업데이트했습니다.`
-        : `${purchaseActionLabel(purchaseForm.requestStage)}되었습니다.`,
+      purchaseSuccessMessage(purchaseForm.requestStage, Boolean(selectedPurchaseLineId)),
     ).then((ok) => {
       if (ok) {
         showSavedPurchaseFlow(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook);
@@ -4172,6 +4322,7 @@ export function TextbookOperationsWorkspace() {
       id: getRecordId(line) || text(line.purchase_order_line_id || line.purchaseOrderLineId) || getPurchaseTextbookTitle(line, textbook),
       title: getPurchaseTextbookTitle(line, textbook),
       detail: [
+        getTextbookCopyScopeLabel(draft.copyScope),
         statusLabel,
         `${formatQuantity(quantity)}권`,
         locationLabel,
@@ -4745,7 +4896,7 @@ export function TextbookOperationsWorkspace() {
 
       {masterDialogOpen ? (
       <Dialog open={masterDialogOpen} onOpenChange={(open) => (open ? setMasterDialogOpen(true) : closeMasterDialog())}>
-        <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto p-4 sm:max-w-3xl sm:p-6">
           <DialogHeader>
             <DialogTitle>{masterForm.id ? "교재 수정" : "교재 신규 등록"}</DialogTitle>
             <DialogDescription className="sr-only">교재명, 학년, 세부과목, 출판사, 판매가, ISBN, 바코드를 등록하거나 수정합니다.</DialogDescription>
@@ -4878,15 +5029,19 @@ export function TextbookOperationsWorkspace() {
                 />
               </Field>
               <Field label="출판사">
-                <Input
-                  name="publisher"
-                  value={masterForm.publisher}
-                  onChange={(event) => setMasterTextField("publisher", event.target.value)}
-                  onBlur={() => settleMasterTextField("publisher")}
-                  list="textbook-publisher-options"
-                  placeholder="예: 신사고"
-                  aria-label="출판사"
-                  autoComplete="off"
+                <SearchCombobox
+                  options={masterPublisherOptions}
+                  value={masterForm.publisher || "none"}
+                  onValueChange={(value) => {
+                    setMasterForm((current) => ({
+                      ...current,
+                      publisher: normalizeStoredTextInput(value === "none" ? "" : value),
+                    }));
+                  }}
+                  placeholder="출판사 선택"
+                  searchPlaceholder="출판사 검색"
+                  emptyLabel="설정된 출판사가 없습니다"
+                  ariaLabel="출판사 선택"
                 />
               </Field>
               <Field label="판매가">
@@ -4956,7 +5111,7 @@ export function TextbookOperationsWorkspace() {
             <DialogTitle>{getPurchaseDialogTitle(purchaseForm.requestStage, Boolean(selectedPurchaseLineId))}</DialogTitle>
             <DialogDescription className="sr-only">교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitPurchase} className="grid gap-3" aria-busy={saving === "purchase"}>
+          <form onSubmit={submitPurchase} className="grid min-w-0 max-w-full gap-3 overflow-hidden [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "purchase"}>
             {purchaseForm.requestStage === "request" ? (
               <div className="grid gap-3">
                 <section className="grid gap-2 rounded-lg border bg-muted/20 p-3">
@@ -5085,6 +5240,7 @@ export function TextbookOperationsWorkspace() {
                   <Select value={purchaseForm.requestStage} onValueChange={(value) => setPurchaseField("requestStage", value)}>
                     <SelectTrigger className="w-full" aria-label="처리 단계 선택"><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="request">요청 접수</SelectItem>
                       <SelectItem value="order">공급처 주문</SelectItem>
                       <SelectItem value="receive">입고 처리</SelectItem>
                     </SelectContent>
@@ -5234,7 +5390,7 @@ export function TextbookOperationsWorkspace() {
               <Button
                 type="submit"
                 disabled={purchaseSubmitDisabled}
-                title={purchaseSubmitDisabled ? "필수 항목을 확인하세요" : `${purchaseActionLabel(purchaseForm.requestStage)} 저장`}
+                title={purchaseSubmitDisabled ? "필수 항목을 확인하세요" : purchaseActionLabel(purchaseForm.requestStage)}
               >
                 <Truck className="mr-2 size-4" />
                 {saving === "purchase" ? "저장 중" : selectedPurchaseLineId ? "선택 건 저장" : purchaseActionLabel(purchaseForm.requestStage)}
@@ -5271,7 +5427,12 @@ export function TextbookOperationsWorkspace() {
                     return (
                       <TableRow key={lineId}>
                         <TableCell className="min-w-0">
-                          <div className="truncate font-medium">{getPurchaseTextbookTitle(line, textbook)}</div>
+                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <div className="min-w-0 truncate font-medium">{getPurchaseTextbookTitle(line, textbook)}</div>
+                            <Badge variant="outline" className="w-fit rounded-md">
+                              {getTextbookCopyScopeLabel(draft.copyScope)}
+                            </Badge>
+                          </div>
                           <div className="text-xs text-muted-foreground">{getPublisherLabel(textbook || {})}</div>
                         </TableCell>
                         <TableCell className="text-right">{formatQuantity(draft.requestedQuantity)}</TableCell>
@@ -5281,7 +5442,7 @@ export function TextbookOperationsWorkspace() {
                             onChange={(event) => setBulkOrderQuantity(lineId, event.target.value)}
                             inputMode="numeric"
                             min="1"
-                            aria-label={`${getPurchaseTextbookTitle(line, textbook)} 주문 수량`}
+                            aria-label={`${getPurchaseTextbookTitle(line, textbook)} ${getTextbookCopyScopeLabel(draft.copyScope)} 주문 수량`}
                           />
                         </TableCell>
                       </TableRow>
@@ -5317,7 +5478,7 @@ export function TextbookOperationsWorkspace() {
             <DialogTitle>출고 추가</DialogTitle>
             <DialogDescription className="sr-only">수업 또는 선생님과 교재를 선택해 출고 대기 내역을 생성합니다.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitSale} className="grid gap-3" aria-busy={saving === "sale"}>
+          <form onSubmit={submitSale} className="grid min-w-0 max-w-full gap-3 overflow-hidden [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "sale"}>
             <Field label="대상">
               <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="출고 대상">
                 {textbookCopyScopeOptions.map((option) => (
@@ -5538,7 +5699,7 @@ export function TextbookOperationsWorkspace() {
             <DialogTitle>월마감</DialogTitle>
             <DialogDescription className="sr-only">월별 입고, 출고, 기말 수량과 금액 차이를 정산합니다.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitClosing} className="grid gap-3" aria-busy={saving === "closing"}>
+          <form onSubmit={submitClosing} className="grid min-w-0 max-w-full gap-3 overflow-hidden [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "closing"}>
             <div className="grid grid-cols-2 gap-3">
               <Field label="월" required>
                 <Input type="month" value={closingForm.closingMonth} onChange={(event) => setClosingForm((current) => ({ ...current, closingMonth: event.target.value }))} aria-label="마감 월" />
@@ -6112,7 +6273,7 @@ export function TextbookOperationsWorkspace() {
 
 function Field({ label, children, required = false }: { label: string; children: React.ReactNode; required?: boolean }) {
   return (
-    <div className="grid gap-1.5">
+    <div className="grid min-w-0 max-w-full gap-1.5 [&>*]:min-w-0 [&>*]:max-w-full">
       <Label className="text-xs font-medium text-muted-foreground">
         {label}
         {required ? <span className="ml-1 text-destructive">*</span> : null}
@@ -6984,7 +7145,6 @@ function InventoryCountWorkspace({
   emptyLabel?: string;
 }) {
   const [displayLimitsByScope, setDisplayLimitsByScope] = useState<Record<string, number>>({});
-  const [usesDesktopInventoryTable, setUsesDesktopInventoryTable] = useState(true);
   const countRows = useMemo(
     () => buildInventoryCountRows({ rows, stockCounts, locations, locationId }),
     [locationId, locations, rows, stockCounts],
@@ -7044,16 +7204,8 @@ function InventoryCountWorkspace({
   }, [displayRows]);
   const currentLocation = getLocationName(locations, locationId) || "위치";
 
-  useEffect(() => {
-    const query = window.matchMedia("(min-width: 640px)");
-    const syncLayout = () => setUsesDesktopInventoryTable(query.matches);
-    syncLayout();
-    query.addEventListener("change", syncLayout);
-    return () => query.removeEventListener("change", syncLayout);
-  }, []);
-
   return (
-    <section className="grid min-w-0 gap-3">
+    <section className="grid w-full min-w-0 max-w-[calc(100vw-2rem)] gap-3 overflow-hidden md:max-w-none">
       <div className="flex flex-col gap-2 rounded-lg border bg-background p-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="grid gap-2 sm:flex sm:items-center">
           <LocationSelect
@@ -7110,34 +7262,31 @@ function InventoryCountWorkspace({
         </div>
       </div>
 
-      {!usesDesktopInventoryTable ? (
-        <div className="grid gap-3">
-          {displayRows.map((row) => {
-            const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
-            return (
-              <InventoryCountMobileCard
-                key={draftKey}
-                row={row}
-                value={countDrafts[draftKey] || ""}
-                memoValue={memoDrafts[draftKey] || ""}
-                saving={saving === `count-inline-${draftKey}`}
-                disabled={schemaDisabled}
-                onChange={(value) => onDraftChange(row, value)}
-                onMemoChange={(value) => onMemoChange(row, value)}
-                onClear={() => onClearDraft(row)}
-                onSubmit={(value, memo) => onSubmitCount(row, value, memo)}
-              />
-            );
-          })}
-          {visibleRows.length === 0 ? (
-            <div className="rounded-lg border py-8 text-center text-sm text-muted-foreground">{emptyLabel}</div>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="grid gap-3 md:hidden">
+        {displayRows.map((row) => {
+          const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
+          return (
+            <InventoryCountMobileCard
+              key={draftKey}
+              row={row}
+              value={countDrafts[draftKey] || ""}
+              memoValue={memoDrafts[draftKey] || ""}
+              saving={saving === `count-inline-${draftKey}`}
+              disabled={schemaDisabled}
+              onChange={(value) => onDraftChange(row, value)}
+              onMemoChange={(value) => onMemoChange(row, value)}
+              onClear={() => onClearDraft(row)}
+              onSubmit={(value, memo) => onSubmitCount(row, value, memo)}
+            />
+          );
+        })}
+        {visibleRows.length === 0 ? (
+          <div className="rounded-lg border py-8 text-center text-sm text-muted-foreground">{emptyLabel}</div>
+        ) : null}
+      </div>
 
-      {usesDesktopInventoryTable ? (
       <div
-        className="overflow-x-auto rounded-lg border [contain-intrinsic-size:720px] [content-visibility:auto]"
+        className="hidden overflow-x-auto rounded-lg border [contain-intrinsic-size:720px] [content-visibility:auto] md:block"
         aria-label="재고 실사 목록"
       >
         <Table className="min-w-[1260px] table-fixed">
@@ -7314,7 +7463,6 @@ function InventoryCountWorkspace({
           </TableBody>
         </Table>
       </div>
-      ) : null}
       {hasMoreVisibleRows ? (
         <div className="flex justify-center">
           <Button
@@ -7366,7 +7514,7 @@ function InventoryCountMobileCard({
 
   return (
     <form
-      className={cn("rounded-lg border bg-background p-3 shadow-sm active:scale-[0.99]", text(value) && "border-blue-200 bg-blue-50/30")}
+      className={cn("min-w-0 max-w-full overflow-hidden rounded-lg border bg-background p-3 shadow-sm active:scale-[0.99]", text(value) && "border-blue-200 bg-blue-50/30")}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit(value, memoValue);
@@ -7984,7 +8132,43 @@ function InventoryHistoryPanel({
         <h3 className="text-sm font-semibold">재고 이력</h3>
         <Badge variant="secondary" className="rounded-md">최근 {formatQuantity(rows.length)}건</Badge>
       </div>
-      <div className="overflow-x-auto">
+      <div className="grid gap-2 p-2 md:hidden">
+        {rows.map((row) => (
+          <div key={row.id} className="grid min-w-0 gap-2 rounded-md border bg-background p-3">
+            <div className="flex min-w-0 items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{row.textbookTitle}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">{formatCompactDateTime(row.at)} · {row.locationName}</div>
+              </div>
+              <Badge variant="outline" className="shrink-0 rounded-md font-mono">{row.change}</Badge>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+              <div className="min-w-0 truncate">{row.action}</div>
+              <div className="min-w-0 truncate text-right">{row.actor}</div>
+            </div>
+            {row.memo ? <div className="truncate text-xs text-muted-foreground">{row.memo}</div> : null}
+            {canDeleteHistory ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-full text-muted-foreground hover:text-destructive"
+                disabled={saving === `inventory-history-delete-${row.id}`}
+                aria-label={`${row.textbookTitle} 재고 이력 삭제`}
+                title="재고 이력 삭제"
+                onClick={() => onDeleteHistory(row)}
+              >
+                <Trash2 className="mr-2 size-3.5" />
+                이력 삭제
+              </Button>
+            ) : null}
+          </div>
+        ))}
+        {rows.length === 0 ? (
+          <div className="rounded-md border py-6 text-center text-sm text-muted-foreground">재고 이력이 없습니다</div>
+        ) : null}
+      </div>
+      <div className="hidden overflow-x-auto md:block">
         <Table className="min-w-[920px]">
           <TableHeader>
             <TableRow className="bg-muted/30">
@@ -8857,7 +9041,7 @@ function PurchaseProcessTable({
         />
       ) : null}
       <div
-        className="min-w-0 overflow-hidden rounded-lg border bg-background"
+        className="min-w-0 overflow-hidden rounded-lg border bg-background max-w-[calc(100vw-2rem)] md:max-w-none"
         aria-label={mode === "request" ? "교재 요청 목록" : "교재 주문·입고 목록"}
       >
       {showProcessControls ? (
@@ -9103,7 +9287,7 @@ function PurchaseProcessTable({
           ].filter(Boolean).join(" · ");
 
           return (
-            <section key={group.id} className="border-b last:border-b-0">
+            <section key={group.id} className="min-w-0 overflow-hidden border-b last:border-b-0">
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium hover:bg-muted/60"
@@ -9120,7 +9304,187 @@ function PurchaseProcessTable({
                 </span>
               </button>
               {!collapsed && rows.length > 0 ? (
-                <div className="max-w-full overflow-x-auto">
+                <>
+                <div data-testid="textbook-purchase-process-mobile-list" className="grid min-w-0 max-w-full gap-2 overflow-hidden p-2 md:hidden">
+                  {displayRows.map((displayRow) => {
+                    const line = displayRow.line;
+                    const displayLines = displayRow.lines;
+                    const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
+                    const lineId = getRecordId(line);
+                    const displayLineIds = displayLines.map((scopeLine) => getRecordId(scopeLine)).filter(Boolean);
+                    const displayActionableLineIds = displayLineIds.filter((id) => visibleActionablePurchaseLineIdSet.has(id));
+                    const displayAllActionableSelected =
+                      displayActionableLineIds.length > 0 && displayActionableLineIds.every((id) => selectedLineIdSet.has(id));
+                    const displaySomeActionableSelected =
+                      displayActionableLineIds.some((id) => selectedLineIdSet.has(id)) && !displayAllActionableSelected;
+                    const draft = buildPurchaseCardDraft(line, order);
+                    const status = ((text(line.status || order.status) || group.id) as PurchaseKanbanStatus);
+                    const textbook = getTextbookById(textbooks, draft.textbookId || draft.requestedTextbookTitle);
+                    const textbookTitle = getPurchaseTextbookTitle(line, textbook);
+                    const configuredSupplierId = getConfiguredSupplierIdForTextbook(textbook, publisherSupplierLinks, publishers) || draft.supplierId;
+                    const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, configuredSupplierId, suppliers, draft.unitCost, draft.copyScope);
+                    const locationName = getLocationName(locations, draft.locationId) || "-";
+                    const classRecord = getClassById(classes, draft.classId);
+                    const classStudentCount = getClassStudentCount(classRecord, students);
+                    const quantityFit = getPurchaseQuantityClassFit(String(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested")), classStudentCount);
+                    const ordered = getPurchaseDisplayQuantity(displayLines, "ordered");
+                    const received = getPurchaseDisplayQuantity(displayLines, "received");
+                    const nextStatus = purchaseNextStatus(status);
+                    const processAction = purchaseProcessAction(status);
+                    const isMissingTextbookRequest = status === "requested" && !textbook;
+                    const isReturnablePurchaseLine = mode === "order" && received > 0 && status !== "returned" && status !== "cancelled";
+                    const isCancelablePurchaseLine = mode === "request" || (status !== "returned" && status !== "cancelled" && !isReturnablePurchaseLine);
+
+                    return (
+                      <article key={`mobile-${displayRow.id}`} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
+                        <div className="flex min-w-0 items-start gap-3">
+                          {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? (
+                            <Checkbox
+                              checked={displayAllActionableSelected || (displaySomeActionableSelected && "indeterminate")}
+                              disabled={displayActionableLineIds.length === 0}
+                              onCheckedChange={(value) => onToggleVisibleLines?.(displayActionableLineIds, value === true)}
+                              title={`${textbookTitle} 일괄 처리 선택`}
+                              aria-label={`${textbookTitle} 일괄 처리 선택`}
+                              className="mt-1 shrink-0"
+                            />
+                          ) : null}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-start justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => onSelectLine(line, order)}
+                                aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`}
+                                title={textbookTitle}
+                                className="min-w-0 flex-1 truncate text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                              >
+                                {textbookTitle}
+                              </button>
+                              <Badge variant="outline" className={cn("shrink-0 rounded-md", processStatusPillClass(status))}>
+                                {purchaseStatusLabel(status, ordered, received)}
+                              </Badge>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                              <span>{getSupplierName(suppliers, configuredSupplierId) || "총판 미지정"}</span>
+                              <span>·</span>
+                              <span>{formatPurchaseUnitCost(unitCost, textbook)}</span>
+                              <span>·</span>
+                              <span>{locationName}</span>
+                              <span>·</span>
+                              <span>{classRecord ? getClassName(classRecord) : "수업 미지정"}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                          <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="text-muted-foreground">요청</div>
+                            <PurchaseScopeQuantityCell lines={displayLines} kind="requested" />
+                          </div>
+                          <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="text-muted-foreground">주문</div>
+                            <PurchaseScopeQuantityCell lines={displayLines} kind="ordered" />
+                          </div>
+                          <div className="rounded-md bg-muted/50 px-2 py-2">
+                            <div className="text-muted-foreground">입고</div>
+                            <PurchaseScopeQuantityCell lines={displayLines} kind="received" />
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === "student") ? (
+                            <Badge variant="outline" className="rounded-md">학생용</Badge>
+                          ) : null}
+                          {displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === "teacher") ? (
+                            <Badge variant="outline" className="rounded-md">교사용</Badge>
+                          ) : null}
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "ml-auto rounded-md tabular-nums",
+                              quantityFit.tone === "danger" && "border-red-300 bg-red-50 text-red-700",
+                              quantityFit.tone === "warning" && "border-amber-300 bg-amber-50 text-amber-700",
+                              quantityFit.tone === "good" && "border-emerald-300 bg-emerald-50 text-emerald-700",
+                            )}
+                            title={quantityFit.label}
+                          >
+                            {quantityFit.label}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 [&>button]:w-full">
+                          {mode === "request" ? (
+                            <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 요청 수정`} onClick={() => onSelectLine(line, order)}>
+                              <Pencil className="mr-1 size-3.5" />
+                              수정
+                            </Button>
+                          ) : (
+                            <>
+                              <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 주문·입고 수정`} onClick={() => onSelectLine(line, order)}>
+                                <Pencil className="mr-1 size-3.5" />
+                                수정
+                              </Button>
+                              {mode === "order" && isMissingTextbookRequest ? (
+                                <>
+                                  <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 마스터 등록`} onClick={() => onRegisterTextbook(line, order)}>
+                                    마스터 등록
+                                  </Button>
+                                  {textbookTitle !== "-" ? (
+                                    <Button type="button" variant="outline" size="sm" asChild>
+                                      <a href={buildKyoboSearchUrl(textbookTitle)} target="_blank" rel="noreferrer" aria-label={`${textbookTitle} 교보문고 검색`} title={`${textbookTitle} 교보문고 검색`}>
+                                        <Search className="mr-1 size-3.5" />
+                                        교보 검색
+                                      </a>
+                                    </Button>
+                                  ) : null}
+                                </>
+                              ) : null}
+                              {nextStatus && !isMissingTextbookRequest ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  aria-label={`${textbookTitle} ${processAction?.label || "이동"}`}
+                                  disabled={saving === `purchase-move-${lineId}`}
+                                  onClick={() => {
+                                    if (processAction) {
+                                      onSelectLine(line, order, processAction.stage);
+                                      return;
+                                    }
+                                    onMoveLine(line, order, nextStatus as PurchaseKanbanStatus);
+                                  }}
+                                >
+                                  {processAction?.label || "이동"}
+                                </Button>
+                              ) : null}
+                              {isReturnablePurchaseLine && onReturnLine ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  aria-label={`${textbookTitle} 공급처 반품`}
+                                  disabled={saving === `purchase-return-${lineId}`}
+                                  onClick={() => onReturnLine(line, order)}
+                                >
+                                  반품
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
+                          {isCancelablePurchaseLine ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 건 삭제`}
+                              disabled={saving === `purchase-delete-${lineId}`}
+                              onClick={() => onDeleteLine({ ...line, purchaseScopeLines: displayLines }, order)}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="hidden max-w-full overflow-x-auto md:block">
                   <Table
                     className={mode === "request" ? "w-full min-w-[1040px]" : "w-full min-w-[1200px]"}
                     aria-colcount={visiblePurchaseColumnCount}
@@ -9410,6 +9774,7 @@ function PurchaseProcessTable({
                     </TableBody>
                   </Table>
                 </div>
+                </>
               ) : null}
               {!collapsed && rows.length === 0 ? (
                 <ProcessGroupEmptyState
@@ -9828,7 +10193,7 @@ function SalesProcessTable({
         emptyLabel="청구할 출고 건이 없습니다"
         idPrefix="makeedu-billing"
       />
-      <div className="min-w-0 overflow-hidden rounded-lg border bg-background" aria-label="교재 출고 목록">
+      <div className="min-w-0 overflow-hidden rounded-lg border bg-background max-w-[calc(100vw-2rem)] md:max-w-none" aria-label="교재 출고 목록">
       {showSalesControls ? (
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b p-3">
         <div className="flex flex-wrap gap-1">
@@ -10007,7 +10372,7 @@ function SalesProcessTable({
             groupSelectedSelectableCount > 0 && !groupAllSelectableSelected;
 
           return (
-            <section key={group.id} className="border-b last:border-b-0">
+            <section key={group.id} className="min-w-0 overflow-hidden border-b last:border-b-0">
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium hover:bg-muted/60"
@@ -10024,7 +10389,133 @@ function SalesProcessTable({
                 </Badge>
               </button>
               {!collapsed && totalCount > 0 ? (
-                <div className="max-w-full overflow-x-auto">
+                <>
+                <div data-testid="textbook-sales-process-mobile-list" className="grid min-w-0 max-w-full gap-2 overflow-hidden p-2 md:hidden">
+                  {rows.map((line) => {
+                    const lineId = getRecordId(line);
+                    const sale = salesById.get(text(line.sale_id || line.saleId));
+                    const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
+                    const classItem = getClassById(classes, text(line.class_id || sale?.class_id));
+                    const rawStatus = text(line.status || sale?.status) || group.id;
+                    const status = rawStatus === "paid" ? "charged" : rawStatus;
+                    const quantity = numberValue(line.quantity) || 1;
+                    const textbookTitle = textbook ? getTextbookTitle(textbook) : text(line.textbook_id);
+                    const copyScope = getTextbookCopyScope(line);
+                    const studentName = getSaleLineRecipientName(line, studentsById);
+                    const locationName = getLocationName(locations, text(line.location_id || line.locationId || sale?.location_id || sale?.locationId)) || "-";
+                    const isTerminalSaleStatus = status === "issued" || status === "cancelled" || status === "returned";
+                    const canDeleteThisLine = canDeleteHistory && Boolean(onDeleteLine);
+                    const canSelectThisLine = canDeleteHistory || !isTerminalSaleStatus;
+
+                    return (
+                      <article key={`mobile-${lineId}`} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <Checkbox
+                            checked={selectedLineIdSet.has(lineId)}
+                            disabled={!canSelectThisLine}
+                            onCheckedChange={(value) => onToggleLine?.(lineId, value === true)}
+                            title={`${studentName} ${textbookTitle} 출고 선택`}
+                            aria-label={`${studentName} ${textbookTitle} 출고 선택`}
+                            className="mt-1 shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-semibold" title={textbookTitle}>{textbookTitle}</div>
+                                <div className="mt-0.5 truncate text-xs text-muted-foreground">{studentName} · {getTextbookCopyScopeLabel(copyScope)}</div>
+                              </div>
+                              <Badge variant="outline" className={cn("shrink-0 rounded-md", processStatusPillClass(status))}>
+                                {saleStatusLabels[status] || status}
+                              </Badge>
+                            </div>
+                            <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
+                              <div className="rounded-md bg-muted/50 px-2 py-2">
+                                <div className="text-muted-foreground">출고월</div>
+                                <div className="mt-1 font-medium tabular-nums">{text(line.charge_month || sale?.charge_month) || "-"}</div>
+                              </div>
+                              <div className="rounded-md bg-muted/50 px-2 py-2">
+                                <div className="text-muted-foreground">위치</div>
+                                <div className="mt-1 truncate font-medium">{locationName}</div>
+                              </div>
+                              <div className="rounded-md bg-muted/50 px-2 py-2">
+                                <div className="text-muted-foreground">수량</div>
+                                <div className="mt-1 font-mono font-semibold">{formatQuantity(quantity)}</div>
+                              </div>
+                            </div>
+                            <div className="mt-2 truncate text-xs text-muted-foreground" title={classItem ? getClassName(classItem) : "-"}>
+                              {classItem ? getClassName(classItem) : "-"} · {formatCompactDateTime(getSaleEventAt(line, sale, status))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 [&>button]:w-full">
+                          {status !== "issued" && status !== "cancelled" && status !== "returned" ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                aria-label={`${studentName} ${textbookTitle} 출고 완료 처리`}
+                                disabled={saving === `sale-line-${lineId}`}
+                                onClick={() => onUpdateStatus(line, "issued")}
+                              >
+                                출고
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                aria-label={`${studentName} ${textbookTitle} 출고 전 취소`}
+                                disabled={saving === `sale-delete-${lineId}`}
+                                onClick={() => onCancelLine(line)}
+                              >
+                                취소
+                              </Button>
+                            </>
+                          ) : status === "issued" ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                aria-label={`${studentName} ${textbookTitle} 고객 반품`}
+                                disabled={saving === `sale-line-${lineId}`}
+                                onClick={() => onReturnLine(line)}
+                              >
+                                반품
+                              </Button>
+                              {canDeleteThisLine ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                  aria-label={`${studentName} ${textbookTitle} 출고 이력 삭제`}
+                                  disabled={saving === `sale-delete-${lineId}`}
+                                  onClick={() => onDeleteLine?.(line)}
+                                >
+                                  삭제
+                                </Button>
+                              ) : null}
+                            </>
+                          ) : canDeleteThisLine ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              aria-label={`${studentName} ${textbookTitle} 출고 이력 삭제`}
+                              disabled={saving === `sale-delete-${lineId}`}
+                              onClick={() => onDeleteLine?.(line)}
+                            >
+                              삭제
+                            </Button>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="hidden max-w-full overflow-x-auto md:block">
                   <Table className="w-full min-w-[980px]">
                     <caption className="sr-only">교재 출고 처리 목록</caption>
                     <TableHeader className="sticky top-0 z-10 bg-background">
@@ -10170,6 +10661,7 @@ function SalesProcessTable({
                     </TableBody>
                   </Table>
                 </div>
+                </>
               ) : null}
               {!collapsed && totalCount === 0 ? (
                 <ProcessGroupEmptyState

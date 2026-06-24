@@ -29,10 +29,10 @@ function pickFirstString(...values: unknown[]) {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const { user, canManageAll, canEditCurriculumPlanning } = useAuth()
+  const { user, canManageAll, canEditCurriculumPlanning, canUseAssistantOperations } = useAuth()
   const navGroups = React.useMemo(
-    () => buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning }),
-    [canEditCurriculumPlanning, canManageAll],
+    () => buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations }),
+    [canEditCurriculumPlanning, canManageAll, canUseAssistantOperations],
   )
 
   const userMetadata = (user?.user_metadata ?? {}) as Record<string, unknown>

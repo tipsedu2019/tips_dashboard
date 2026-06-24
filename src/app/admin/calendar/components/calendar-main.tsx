@@ -86,6 +86,10 @@ type MonthEventSegment = {
   continuesAfter: boolean
 }
 
+const MONTH_GRID_DAY_HEADER_HEIGHT = 44
+const MONTH_GRID_EVENT_LANE_HEIGHT = 26
+const MONTH_GRID_CELL_BODY_HEIGHT = 70
+
 function formatEventRange(event: CalendarEvent) {
   const { start, end } = getEventRange(event)
   if (isSameDay(start, end)) {
@@ -543,7 +547,7 @@ export function CalendarMain({
           {calendarWeeks.map((week, weekIndex) => {
             const weekSegments = monthSegments.filter((segment) => segment.weekIndex === weekIndex)
             const laneCount = Math.max(weekSegments.reduce((max, segment) => Math.max(max, segment.lane + 1), 0), 0)
-            const segmentOffset = laneCount > 0 ? 30 + laneCount * 26 : 30
+            const segmentOffset = MONTH_GRID_DAY_HEADER_HEIGHT + laneCount * MONTH_GRID_EVENT_LANE_HEIGHT
 
             return (
               <div key={`week-${weekIndex}`} className="relative grid grid-cols-7 border-b last:border-b-0">
@@ -577,7 +581,10 @@ export function CalendarMain({
                         isWithinSelection && "bg-primary/8",
                         isWithinDragPreview && "bg-blue-500/10 ring-1 ring-blue-400/60 ring-inset",
                       )}
-                      style={{ minHeight: `${Math.max(136, segmentOffset + 70)}px`, paddingTop: `${segmentOffset}px` }}
+                      style={{
+                        minHeight: `${Math.max(136, segmentOffset + MONTH_GRID_CELL_BODY_HEIGHT)}px`,
+                        paddingTop: `${segmentOffset}px`,
+                      }}
                       onPointerDown={() => {
                         if (draggedEvent) {
                           return
@@ -604,7 +611,7 @@ export function CalendarMain({
                       }}
                       onClick={() => handleDayCellClick(day, dayEvents.length > 0)}
                     >
-                      <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
+                      <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between">
                         <button
                           type="button"
                           className={cn(
@@ -722,12 +729,15 @@ export function CalendarMain({
                   )
                 })}
 
-                <div className="pointer-events-none absolute inset-x-0 top-8">
+                <div
+                  className="pointer-events-none absolute inset-x-0"
+                  style={{ top: `${MONTH_GRID_DAY_HEADER_HEIGHT}px` }}
+                >
                   {weekSegments.map((segment) => {
                     const { event } = segment
                     const left = `calc((100% / 7) * ${segment.startIndex} + 4px)`
                     const width = `calc((100% / 7) * ${segment.span} - 8px)`
-                    const top = `${segment.lane * 26}px`
+                    const top = `${segment.lane * MONTH_GRID_EVENT_LANE_HEIGHT}px`
 
                     const annualBoardHref = buildAcademicAnnualBoardEventHref(event)
 

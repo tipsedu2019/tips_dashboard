@@ -516,6 +516,24 @@ test("global shell controls use Korean action labels", async () => {
   assert.match(appSidebarSource, /aria-label="대시보드 홈으로 이동"/);
 });
 
+test("assistant navigation only exposes allowed operation surfaces", async () => {
+  const [navigationSource, sidebarSource, commandSearchSource] = await Promise.all([
+    readSource("src/lib/navigation.ts"),
+    readSource("src/components/app-sidebar.tsx"),
+    readSource("src/components/command-search.tsx"),
+  ]);
+
+  assert.match(navigationSource, /canUseAssistantOperations/);
+  assert.match(navigationSource, /const assistantOverviewItems: NavItem\[\]/);
+  assert.match(navigationSource, /title: "할 일"[\s\S]*url: "\/admin\/tasks"/);
+  assert.match(navigationSource, /title: "단어 재시험"[\s\S]*url: "\/admin\/word-retests"/);
+  assert.match(navigationSource, /title: "학사일정"[\s\S]*url: "\/admin\/academic-calendar"/);
+  assert.match(navigationSource, /title: "시간표"[\s\S]*url: "\/admin\/timetable"/);
+  assert.match(navigationSource, /canUseAssistantOperations \? assistantOverviewItems : fullOverviewItems/);
+  assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations \}\)/);
+  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations \}\)/);
+});
+
 test("global shell exposes stable browser-use targets", async () => {
   const [navMainSource, commandSearchSource, headerSource, modeToggleSource, navUserSource, appSidebarSource, sidebarSource, dialogSource, globalsSource] = await Promise.all([
     readSource("src/components/nav-main.tsx"),

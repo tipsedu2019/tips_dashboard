@@ -226,6 +226,39 @@ function isSessionCounted(session = {}) {
   return !["exception", "tbd"].includes(state);
 }
 
+export function buildClassSchedulePendingSessionSummary(sessions = []) {
+  const actionableSessions = (sessions || []).filter(
+    (session) => text(session?.progressStatus) !== "done",
+  );
+  const numberedSessions = [
+    ...new Set(
+      actionableSessions
+        .map((session) => Number(session?.sessionNumber || 0))
+        .filter((sessionNumber) => Number.isFinite(sessionNumber) && sessionNumber > 0),
+    ),
+  ].sort((left, right) => left - right);
+  const unknownCount = actionableSessions.filter((session) => {
+    const sessionNumber = Number(session?.sessionNumber || 0);
+    return !Number.isFinite(sessionNumber) || sessionNumber <= 0;
+  }).length;
+  const parts = [];
+
+  if (numberedSessions.length > 0) {
+    const visibleNumbers = numberedSessions.slice(0, 4).map((sessionNumber) => `${sessionNumber}회차`);
+    const hiddenCount = numberedSessions.length - visibleNumbers.length;
+    parts.push(
+      hiddenCount > 0
+        ? `${visibleNumbers.join(", ")} 외 ${hiddenCount}건`
+        : visibleNumbers.join(", "),
+    );
+  }
+  if (unknownCount > 0) {
+    parts.push(`회차 정보 확인 ${unknownCount}건`);
+  }
+
+  return parts.join(" · ") || "업데이트 대기 회차가 없습니다.";
+}
+
 function normalizeEntryProgressStatus(entry = {}) {
   const status = text(entry?.actual?.status || entry?.status);
   if (status === "done" || status === "partial") {
@@ -836,6 +869,7 @@ function buildRouteRows(rows = []) {
         row.latestActualSessionIndex || fallback.latestActualSessionIndex || 0,
       ),
       nextActionSessionId: text(nextActionSession?.id),
+      pendingSessionSummary: buildClassSchedulePendingSessionSummary(sessions),
       syncGroupName: text(row?.syncGroup?.name),
       warningText: buildScheduleWarningText(row) || fallback.warningText,
       raw: row,

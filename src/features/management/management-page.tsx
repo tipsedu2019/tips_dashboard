@@ -1,8 +1,8 @@
 "use client";
 
-import { type FormEvent, type ReactNode, useCallback, useMemo, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { BookOpen, CalendarDays, Check, ChevronDown, ClipboardList, Save, Settings2, Users } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import type { ManagementKind, ManagementRow } from "@/features/management/use-management-records";
 import { useManagementRecords } from "@/features/management/use-management-records";
@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   STUDENT_STATUS_OPTIONS,
@@ -34,6 +35,7 @@ import {
   normalizeStudentStatus,
 } from "@/lib/student-status";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
 import { managementService } from "./management-service.js";
@@ -84,6 +86,25 @@ type ClassGroupOption = { id: string; name: string; subject?: string };
 type DeleteRequest = { rows: ManagementRow[] };
 
 const CLASS_STATUS_OPTIONS = ["수강", "개강 준비", "종강"] as const;
+const ARCHIVED_CLASS_STATUS = "종강";
+const CLASS_DETAIL_TABS = [
+  { value: "basic", label: "기본" },
+  { value: "students", label: "학생" },
+  { value: "schedule", label: "일정" },
+  { value: "curriculum", label: "교재·진도" },
+] as const;
+type ClassDetailTab = (typeof CLASS_DETAIL_TABS)[number]["value"];
+const CLASS_MOBILE_ACTION_ICONS: Record<ClassDetailTab, ReactNode> = {
+  basic: <ClipboardList className="size-3.5" aria-hidden="true" />,
+  students: <Users className="size-3.5" aria-hidden="true" />,
+  schedule: <CalendarDays className="size-3.5" aria-hidden="true" />,
+  curriculum: <BookOpen className="size-3.5" aria-hidden="true" />,
+};
+const CLASS_MOBILE_ACTION_TABS = CLASS_DETAIL_TABS.map((tab) => ({
+  ...tab,
+  shortLabel: tab.value === "curriculum" ? "진도" : tab.label,
+  icon: CLASS_MOBILE_ACTION_ICONS[tab.value],
+}));
 const CLASS_SELECT_FIELD_NAMES = new Set([
   "status",
   "subject",
@@ -135,6 +156,12 @@ function text(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeReturnToPath(value: unknown) {
+  const path = text(value);
+  if (!path || path.startsWith("//") || path.includes("://")) return "";
+  return path.startsWith("/admin/") ? path : "";
+}
+
 function normalizeClassStatusForForm(value: unknown) {
   const status = text(value);
   const lowerStatus = status.toLowerCase();
@@ -152,6 +179,23 @@ function splitOptionValues(value: unknown) {
     .split(/[,，/]+/)
     .map((part) => part.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
+}
+
+function getClassSubjectValue(raw: Record<string, unknown> = {}) {
+  return text(raw.subject);
+}
+
+function getClassTeacherValues(raw: Record<string, unknown> = {}) {
+  return splitOptionValues(raw.teacher || raw.teacher_name || raw.teacherName);
+}
+
+function getClassTeacherOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
+  const selectedSubject = text(subject);
+  const subjectRows = selectedSubject
+    ? rawRows.filter((raw) => getClassSubjectValue(raw) === selectedSubject)
+    : rawRows;
+  const sourceRows = subjectRows.length > 0 ? subjectRows : rawRows;
+  return uniqueSortedOptions(sourceRows.flatMap((raw) => getClassTeacherValues(raw)));
 }
 
 function uniqueSortedOptions(values: string[], preferredOrder: string[] = []) {
@@ -368,10 +412,76 @@ function getClassTermOption(record: Record<string, unknown>) {
   );
 }
 
+function getClassPeriodLabel(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const rawGroupNames = Array.isArray(raw.class_group_names || raw.classGroupNames)
+    ? (raw.class_group_names || raw.classGroupNames) as unknown[]
+    : [];
+  const groupNames = rawGroupNames.map(text).filter(Boolean);
+  const classGroups = normalizeClassGroupOptions(raw.classGroups || raw.class_groups);
+  const periodNames = groupNames.length > 0 ? groupNames : classGroups.map((group) => group.name).filter(Boolean);
+
+  if (periodNames.length === 1) {
+    return periodNames[0];
+  }
+  if (periodNames.length > 1) {
+    return `${periodNames[0]} 외 ${periodNames.length - 1}개`;
+  }
+
+  return [getClassAcademicYearOption(raw), getClassTermOption(raw)].filter(Boolean).join(" ").trim();
+}
+
 function getLabel(kind: ManagementKind) {
   if (kind === "students") return "학생 등록";
   if (kind === "classes") return "수업 등록";
   return "교재 등록";
+}
+
+function normalizeClassDetailTab(value: unknown): ClassDetailTab {
+  const tab = text(value);
+  return CLASS_DETAIL_TABS.some((item) => item.value === tab) ? (tab as ClassDetailTab) : "basic";
+}
+
+function getClassDetailTabForSection(section: string) {
+  if (section === "lesson-design-board" || section === "lesson-design-textbooks") {
+    return "curriculum";
+  }
+  if (section === "lesson-design-periods") {
+    return "schedule";
+  }
+  return "";
+}
+
+function isClassDetailSessionTargetSection(section: string) {
+  return section === "lesson-design-board" || section === "lesson-design-periods";
+}
+
+function getDefaultLessonDesignSectionForClassTab(tab: ClassDetailTab) {
+  return tab === "schedule" ? "lesson-design-periods" : "lesson-design-board";
+}
+
+function getClassDetailSectionTargetId(section: string, sessionId = "") {
+  if (section === "lesson-design-board") {
+    return sessionId ? `class-curriculum-session-${sessionId}` : "class-curriculum-unassigned-work-panel";
+  }
+  if (section === "lesson-design-textbooks") {
+    return "class-curriculum-textbooks-panel";
+  }
+  if (section === "lesson-design-periods") {
+    return sessionId ? `class-schedule-session-${sessionId}` : "class-schedule-session-create-work-panel";
+  }
+  return "";
+}
+
+function scrollClassDetailTargetIntoView(target: HTMLElement) {
+  target.scrollIntoView({ block: "center", behavior: "smooth" });
+  const dialog = target.closest('[role="dialog"]') as HTMLElement | null;
+  if (!dialog) return;
+
+  const dialogRect = dialog.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const targetOffset = targetRect.top - dialogRect.top - Math.max((dialogRect.height - targetRect.height) / 2, 0);
+  dialog.scrollTop += targetOffset;
 }
 
 function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormState {
@@ -457,6 +567,10 @@ function normalizeRelatedRecordList(value: unknown): RelatedRecord[] {
 
 function getEmbeddedRelatedRecords(kind: ManagementKind, row?: ManagementRow | null) {
   if (!row || kind !== "classes") return [];
+  return getClassStudentSummaries(row);
+}
+
+function getClassStudentSummaries(row: ManagementRow) {
   const raw = (row.raw || {}) as Record<string, unknown>;
   return [
     ...normalizeRelatedRecordList(raw.registered_students || raw.registeredStudents),
@@ -542,6 +656,333 @@ function getClassWaitlistStudentIds(row: ManagementRow) {
   return idList(raw.waitlist_student_ids || raw.waitlistStudentIds || raw.waitlist_ids || raw.waitlistIds);
 }
 
+function getClassTextbookCount(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const explicitCount = Number(raw.textbook_count || raw.textbookCount || row.metrics.textbookCount || 0);
+  if (Number.isFinite(explicitCount) && explicitCount > 0) {
+    return explicitCount;
+  }
+  return idList(raw.textbook_ids || raw.textbookIds).length;
+}
+
+function getClassSessionCount(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const value = Number(raw.total_sessions || raw.totalSessions || 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function getClassDelayedProgressCount(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const value = Number(raw.delayed_progress_sessions || raw.delayedProgressSessions || 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function numericValue(value: unknown) {
+  const normalized = Number(value || 0);
+  return Number.isFinite(normalized) ? normalized : 0;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function recordList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
+}
+
+function getClassCurriculumSummary(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  return recordValue(raw.curriculum_summary || raw.curriculumSummary) || {};
+}
+
+function getClassTextbookCatalog(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return recordList(raw.textbook_catalog || raw.textbookCatalog || summary.textbookCatalog);
+}
+
+function getClassSessionSummaries(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return recordList(raw.session_summaries || raw.sessionSummaries || summary.sessionSummaries);
+}
+
+function getClassNextCurriculumSession(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return recordValue(raw.next_session || raw.nextSession || summary.nextSession);
+}
+
+function getClassPendingSessionLabels(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return stringList(raw.pending_session_labels || raw.pendingSessionLabels || summary.pendingSessionLabels);
+}
+
+function getClassCurriculumStateLabel(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return text(raw.state_label || raw.stateLabel || summary.stateLabel) || "상태 확인 필요";
+}
+
+function getClassProgressTargetPercent(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return numericValue(raw.progress_target_percent || raw.progressTargetPercent || summary.progressTargetPercent);
+}
+
+function getClassPlannedProgressCount(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return numericValue(raw.planned_progress_sessions || raw.plannedProgressSessions || summary.plannedProgressSessions);
+}
+
+function getClassProgressTargetCount(row: ManagementRow) {
+  const raw = (row.raw || {}) as Record<string, unknown>;
+  const summary = getClassCurriculumSummary(row);
+  return numericValue(raw.progress_target_sessions || raw.progressTargetSessions || summary.progressTargetSessions || getClassSessionCount(row));
+}
+
+function getClassLatestProgressNote(row: ManagementRow) {
+  const summary = getClassCurriculumSummary(row);
+  const note = text(summary.latestNoteSummary);
+  const label = text(summary.latestNoteSessionLabel);
+  return [label, note].filter(Boolean).join(" · ");
+}
+
+function getClassTextbookTitle(book: Record<string, unknown>, index: number) {
+  return text(
+    book.title ||
+      book.sourceTitle ||
+      book.source_title ||
+      book.textbookTitle ||
+      book.textbook_title ||
+      book.name ||
+      book.textbookId ||
+      book.textbook_id,
+  ) || `교재 ${index + 1}`;
+}
+
+function getClassSummaryCurriculumLabel(row: ManagementRow) {
+  const textbooks = getClassTextbookCatalog(row);
+  const textbookCount = textbooks.length || getClassTextbookCount(row);
+  const latestProgressNote = getClassLatestProgressNote(row);
+  const delayedProgressCount = getClassDelayedProgressCount(row);
+  const progressLabel = delayedProgressCount > 0
+    ? `미배정 ${delayedProgressCount}회`
+    : latestProgressNote || getClassCurriculumStateLabel(row);
+
+  if (textbooks.length > 0) {
+    const textbookLabel = textbookCount > 1
+      ? `${getClassTextbookTitle(textbooks[0], 0)} 외 ${textbookCount - 1}권`
+      : getClassTextbookTitle(textbooks[0], 0);
+    return [textbookLabel, progressLabel].filter(Boolean).join(" · ");
+  }
+
+  if (textbookCount > 0) {
+    return [`교재 ${textbookCount}권`, progressLabel].filter(Boolean).join(" · ");
+  }
+
+  return "교재 미연결";
+}
+
+function getTextbookRoleLabel(roleValue: unknown, index: number) {
+  const role = text(roleValue).toLowerCase();
+  if (role.includes("main") || role.includes("주")) return "주교재";
+  if (role.includes("supplement") || role.includes("부")) return "부교재";
+  return index === 0 ? "주교재" : "부교재";
+}
+
+function getTextbookMeta(book: Record<string, unknown>) {
+  return [
+    text(book.publisher),
+    text(book.subject),
+    text(book.category),
+  ].filter(Boolean).join(" · ");
+}
+
+function getTextbookScopeLabel(book: Record<string, unknown>) {
+  return text(book.scopeLabel || book.scope_label) || [text(book.area), text(book.subSubject || book.sub_subject)].filter(Boolean).join(" · ");
+}
+
+function getTextbookEntryRangeLabel(entry: Record<string, unknown>) {
+  return text(entry.rangeLabel || entry.range_label) || [
+    text(entry.startRange || entry.start_range || entry.start || entry.from),
+    text(entry.endRange || entry.end_range || entry.end || entry.to),
+  ].filter(Boolean).join("~");
+}
+
+function getSessionTextbookEntries(session: Record<string, unknown>) {
+  return recordList(session.textbookEntries || session.textbook_entries);
+}
+
+function textbookEntryMatchesBook(entry: Record<string, unknown>, book: Record<string, unknown>, index: number) {
+  const entryId = text(entry.textbookId || entry.textbook_id || entry.id);
+  const bookId = text(book.textbookId || book.textbook_id || book.id);
+  if (entryId && bookId) {
+    return entryId === bookId;
+  }
+
+  const entryTitle = text(entry.textbookTitle || entry.textbook_title || entry.title || entry.name);
+  const bookTitle = getClassTextbookTitle(book, index);
+  return Boolean(entryTitle && bookTitle && entryTitle === bookTitle);
+}
+
+function getClassTextbookProgressSnapshot(row: ManagementRow) {
+  const sessions = getClassSessionSummaries(row);
+  const nextSession = getClassNextCurriculumSession(row);
+  const nextSessionId = nextSession ? getCurriculumSessionStableId(nextSession) : "";
+
+  return getClassTextbookCatalog(row).map((book, index) => {
+    const matchingRanges = sessions.flatMap((session) =>
+      getSessionTextbookEntries(session)
+        .filter((entry) => textbookEntryMatchesBook(entry, book, index))
+        .map((entry) => ({
+          entry,
+          session,
+          rangeLabel: getTextbookEntryRangeLabel(entry),
+        })),
+    ).filter((item) => Boolean(item.rangeLabel));
+    const latestRange =
+      [...matchingRanges].reverse().find((item) => Boolean(item.session.hasActualContent || item.session.hasPlanContent)) ||
+      matchingRanges[matchingRanges.length - 1] ||
+      null;
+    const nextRange =
+      (nextSessionId ? matchingRanges.find((item) => getCurriculumSessionStableId(item.session) === nextSessionId) : null) ||
+      matchingRanges.find((item) => Number(item.session.sessionOrder || 0) > Number(latestRange?.session.sessionOrder || 0)) ||
+      latestRange;
+
+    return {
+      textbookId: text(book.textbookId || book.textbook_id),
+      title: getClassTextbookTitle(book, index),
+      recentRangeLabel: latestRange?.rangeLabel || "",
+      nextRangeLabel: nextRange?.rangeLabel || "",
+      plannedRangeCount: matchingRanges.length,
+    };
+  });
+}
+
+function hasCurriculumPlanContent(session: Record<string, unknown>) {
+  return Boolean(session.hasPlanContent) || Boolean(text(session.planSummary));
+}
+
+function getCurriculumSessionStableId(session: Record<string, unknown>) {
+  return text(session.sessionId || session.session_id || session.id);
+}
+
+function getCurriculumSessionTitle(session: Record<string, unknown>, fallback = "회차") {
+  return text(session.label) || [
+    text(session.dateLabel || session.date_label),
+    text(session.sessionNumber || session.session_number || session.sessionOrder || session.session_order)
+      ? `${text(session.sessionNumber || session.session_number || session.sessionOrder || session.session_order)}회차`
+      : "",
+  ].filter(Boolean).join(" · ") || fallback;
+}
+
+function getCurriculumSessionStatusLabel(session: Record<string, unknown>) {
+  const status = text(session.progressStatus || session.progress_status);
+  if (!hasCurriculumPlanContent(session)) return "미배정";
+  if (status === "done") return "완료";
+  if (status === "partial") return "진행";
+  return "배정";
+}
+
+function getCurriculumSessionDescription(session: Record<string, unknown>) {
+  return [
+    text(session.planSummary || session.plan_summary),
+    text(session.noteSummary || session.note_summary),
+    text(session.periodLabel || session.period_label),
+  ].filter(Boolean).join(" · ");
+}
+
+function getCurriculumSessionDate(session: Record<string, unknown>) {
+  const rawValue = text(session.dateValue || session.date_value);
+  if (!rawValue) return null;
+  const date = new Date(rawValue);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getCurriculumSessionOrder(session: Record<string, unknown>) {
+  return numericValue(session.sessionNumber || session.session_number || session.sessionOrder || session.session_order);
+}
+
+function getClassScheduleNextSession(row: ManagementRow) {
+  const sessions = getClassSessionSummaries(row);
+  if (sessions.length === 0) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const futureSession = sessions.find((session) => {
+    const date = getCurriculumSessionDate(session);
+    return date ? date >= today : false;
+  });
+  return futureSession || getClassNextCurriculumSession(row) || sessions[0] || null;
+}
+
+function getClassScheduleCurrentSession(row: ManagementRow) {
+  const sessions = getClassSessionSummaries(row);
+  if (sessions.length === 0) return null;
+  const completedOrPlanned = [...sessions]
+    .filter((session) => Boolean(session.hasActualContent) || hasCurriculumPlanContent(session))
+    .sort((left, right) => getCurriculumSessionOrder(left) - getCurriculumSessionOrder(right));
+  return completedOrPlanned.slice(-1)[0] || sessions[0] || null;
+}
+
+function getClassSummaryScheduleLabel(row: ManagementRow, fallbackSchedule: string) {
+  const nextSession = getClassScheduleNextSession(row);
+  const currentSession = getClassScheduleCurrentSession(row);
+  const totalSessions = getClassSessionCount(row) || getClassSessionSummaries(row).length;
+  const currentOrder = currentSession ? getCurriculumSessionOrder(currentSession) : 0;
+  const nextLabel = nextSession ? `다음 ${getCurriculumSessionTitle(nextSession, "수업")}` : "";
+  const currentLabel = currentOrder > 0 && totalSessions > 0
+    ? `현재 ${currentOrder}/${totalSessions}회`
+    : totalSessions > 0
+      ? `전체 ${totalSessions}회`
+      : "";
+
+  return [fallbackSchedule, nextLabel, currentLabel].filter(Boolean).join(" · ") || "일정 미정";
+}
+
+function getScheduleStateLabel(session: Record<string, unknown>) {
+  const state = text(session.scheduleState || session.schedule_state || session.state).toLowerCase();
+  if (state === "makeup") return "보강";
+  if (state === "exception") return text(session.makeupDate || session.makeup_date) ? "휴강·보강" : "휴강";
+  if (state === "force_active") return "정규";
+  if (state === "recorded") return "기록";
+  return "정규";
+}
+
+function getScheduleSessionMemo(session: Record<string, unknown>) {
+  return [
+    text(session.scheduleMemo || session.schedule_memo || session.memo),
+    text(session.makeupMemo || session.makeup_memo),
+    text(session.makeupDate || session.makeup_date) ? `보강일 ${text(session.makeupDate || session.makeup_date)}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function getClassScheduleExceptionSessions(row: ManagementRow) {
+  return getClassSessionSummaries(row).filter((session) => {
+    const state = text(session.scheduleState || session.schedule_state || session.state).toLowerCase();
+    const searchable = [
+      state,
+      getScheduleSessionMemo(session),
+      getCurriculumSessionDescription(session),
+    ].join(" ");
+    return /makeup|exception|cancel|holiday|보강|휴강|예외/.test(searchable);
+  });
+}
+
+function getClassUnassignedProgressSessions(row: ManagementRow) {
+  return getClassSessionSummaries(row).filter((session) => !hasCurriculumPlanContent(session));
+}
+
 function normalizeHistoryRows(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
@@ -564,6 +1005,58 @@ function formatHistoryDate(value: unknown) {
     return "-";
   }
   return normalized.replace("T", " ").slice(0, 16);
+}
+
+function formatClassAuditAction(value: unknown) {
+  const action = text(value).toUpperCase();
+  if (action === "INSERT") return "등록";
+  if (action === "UPDATE") return "수정";
+  if (action === "DELETE") return "삭제";
+  return "수정";
+}
+
+function getClassAuditInfo(row: ManagementRow) {
+  const raw = row.raw || {};
+  const changedAt = text(raw.updated_at || raw.updatedAt);
+  const actor = text(
+    raw.updated_by_name ||
+      raw.updatedByName ||
+      raw.updated_by ||
+      raw.updatedBy,
+  );
+  const action = formatClassAuditAction(raw.latest_audit_action || raw.latestAuditAction);
+
+  if (!changedAt) {
+    return {
+      label: "최근 수정 기록 없음",
+      changedAt: "",
+      actor: "",
+      action,
+    };
+  }
+
+  return {
+    label: [
+      `최근 ${action}`,
+      formatHistoryDate(changedAt),
+      actor || "수정자 기록 없음",
+    ].filter(Boolean).join(" · "),
+    changedAt,
+    actor,
+    action,
+  };
+}
+
+function getClassAuditLogs(row: ManagementRow) {
+  const raw = row.raw || {};
+  return normalizeHistoryRows(raw.auditLogs || raw.audit_logs);
+}
+
+function getStudentContactValue(record: RelatedRecord | undefined, kind: "student" | "parent") {
+  if (!record) return "";
+  return kind === "parent"
+    ? text(record.parent_contact || record.parentContact || record.guardian_contact || record.guardianContact)
+    : text(record.contact || record.phone || record.student_contact || record.studentContact);
 }
 
 function renderStudentTimelineList(
@@ -639,12 +1132,16 @@ function getDetailMetrics(kind: ManagementKind, row: ManagementRow) {
     const enrolledCount = getClassEnrolledStudentIds(row).length;
     const waitlistCount = getClassWaitlistStudentIds(row).length;
     const capacity = Number(raw.capacity || row.metrics.capacity || 0);
-    const textbookCount = idList(raw.textbook_ids || raw.textbookIds).length;
+    const textbookCount = getClassTextbookCount(row);
+    const sessionCount = getClassSessionCount(row);
+    const delayedProgressCount = getClassDelayedProgressCount(row);
     return [
       detailMetric("수강생", enrolledCount),
       detailMetric("대기자", waitlistCount),
       detailMetric("정원", capacity > 0 ? `${enrolledCount}/${capacity}` : "-"),
       detailMetric("교재 연결", `${textbookCount}권`),
+      detailMetric("회차", sessionCount > 0 ? `${sessionCount}회` : "-"),
+      detailMetric("미배정", delayedProgressCount > 0 ? `${delayedProgressCount}회` : "0회"),
     ];
   }
 
@@ -677,14 +1174,23 @@ function getSaveErrorMessage(error: unknown) {
   return text(error) || "등록 저장 중 오류가 발생했습니다.";
 }
 
+function getSaveErrorStatusLabel(message: string) {
+  return `저장 실패 · 기존 데이터 유지 · ${message}`;
+}
+
 export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { canManageAll } = useAuth();
   const config = PAGE_CONFIG[kind];
   const { rows, stats, loading, error, refresh } = useManagementRecords(kind);
+  const canMutateRows = canManageAll;
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [relatedRows, setRelatedRows] = useState<RelatedRecord[]>([]);
@@ -692,6 +1198,15 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [relationMode, setRelationMode] = useState<"enrolled" | "waitlist">("enrolled");
   const [detailRowQuery, setDetailRowQuery] = useState("");
   const [relationQuery, setRelationQuery] = useState("");
+  const [activeClassDetailTab, setActiveClassDetailTab] = useState<ClassDetailTab>("basic");
+  const requestedClassId = kind === "classes" ? text(searchParams.get("classId")) : "";
+  const requestedStudentId = kind === "students" ? text(searchParams.get("studentId")) : "";
+  const requestedStudentReturnPath = kind === "students" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
+  const requestedClassDetailTab = normalizeClassDetailTab(searchParams.get("tab"));
+  const requestedClassDetailSection = kind === "classes" ? text(searchParams.get("section")) : "";
+  const requestedClassDetailSessionId = kind === "classes" ? text(searchParams.get("sessionId")) : "";
+  const requestedClassDetailStudentId = kind === "classes" ? text(searchParams.get("studentId")) : "";
+  const requestedClassReturnPath = kind === "classes" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
 
   const createLabel = getLabel(kind);
   const isCreate = dialogMode === "create";
@@ -700,13 +1215,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const relatedRecordsById = useMemo(
     () => {
       const records = new Map<string, RelatedRecord>();
-      for (const record of relatedRows) {
-        const id = text(record.id);
-        if (id) records.set(id, record);
-      }
       for (const record of getEmbeddedRelatedRecords(kind, selectedRow)) {
         const id = text(record.id);
         if (id) records.set(id, record);
+      }
+      for (const record of relatedRows) {
+        const id = text(record.id);
+        if (id) records.set(id, { ...(records.get(id) || {}), ...record });
       }
       return records;
     },
@@ -744,25 +1259,24 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       .filter((row) => `${row.title} ${row.subtitle} ${row.metaSummary} ${row.searchText}`.toLowerCase().includes(query))
       .slice(0, 8);
   }, [detailRowQuery, rows, selectedRow?.id]);
+  const selectedClassSubject = kind === "classes" ? text(form.subject) : "";
   const classSelectOptions = useMemo(() => {
     if (kind !== "classes") {
       return {} as Record<string, string[]>;
     }
 
-    const rawRows = rows.map((row) => row.raw || {});
+    const rawRows = rows.map((row) => (row.raw || {}) as Record<string, unknown>);
 
     return {
       status: [...CLASS_STATUS_OPTIONS],
       subject: uniqueSortedOptions(rawRows.map((raw) => text(raw.subject)), ["영어", "수학"]),
       grade: uniqueSortedOptions(rawRows.map((raw) => text(raw.grade))),
-      teacher: uniqueSortedOptions(
-        rawRows.flatMap((raw) => splitOptionValues(raw.teacher || raw.teacher_name || raw.teacherName)),
-      ),
+      teacher: getClassTeacherOptionsForSubject(rawRows, selectedClassSubject),
       classroom: uniqueSortedOptions(
         rawRows.flatMap((raw) => splitOptionValues(raw.classroom || raw.room)),
       ),
     } satisfies Record<string, string[]>;
-  }, [kind, rows]);
+  }, [kind, rows, selectedClassSubject]);
   const studentSchoolCategory = getStudentSchoolCategoryFromForm(form);
   const studentSelectOptions = useMemo(() => {
     if (kind !== "students") {
@@ -786,6 +1300,63 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     () => (kind === "classes" ? getDefaultClassGroupIdsForCreate(classGroupOptions) : ""),
     [classGroupOptions, kind],
   );
+  const writeClassDetailRoute = useCallback(
+    (
+      classId: string,
+      tab: ClassDetailTab,
+      options: { section?: string; sessionId?: string; studentId?: string } = {},
+    ) => {
+      if (kind !== "classes") return;
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("classId", classId);
+      params.set("tab", tab);
+      if (options.section) {
+        params.set("section", options.section);
+      } else {
+        params.delete("section");
+      }
+      if (options.sessionId) {
+        params.set("sessionId", options.sessionId);
+      } else {
+        params.delete("sessionId");
+      }
+      if (options.studentId) {
+        params.set("studentId", options.studentId);
+      } else {
+        params.delete("studentId");
+      }
+      const nextQuery = params.toString();
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    },
+    [kind, pathname, router, searchParams],
+  );
+  const clearClassDetailRoute = useCallback(() => {
+    if (kind !== "classes") return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("classId");
+    params.delete("tab");
+    params.delete("section");
+    params.delete("sessionId");
+    params.delete("studentId");
+    params.delete("returnTo");
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [kind, pathname, router, searchParams]);
+  const writeStudentDetailRoute = useCallback((studentId: string) => {
+    if (kind !== "students") return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("studentId", studentId);
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [kind, pathname, router, searchParams]);
+  const clearStudentDetailRoute = useCallback(() => {
+    if (kind !== "students") return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("studentId");
+    params.delete("returnTo");
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [kind, pathname, router, searchParams]);
   const resolveRelatedRecord = (id: string) => relatedRecordsById.get(id);
   const resolveRelatedTitle = (id: string) => {
     const fallbackTitle = getMissingRelatedTitle(kind);
@@ -793,8 +1364,38 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     if (record) return relatedTitle(record, fallbackTitle);
     return isUuidLike(id) ? fallbackTitle : id;
   };
+  const handleClassStudentDetailOpen = (studentId: string) => {
+    if (!selectedRow || kind !== "classes") return;
+    const targetStudentId = text(studentId);
+    if (!targetStudentId) return;
+    const params = new URLSearchParams();
+    params.set("studentId", targetStudentId);
+    params.set("returnTo", buildClassDetailReturnPath("students", { studentId: targetStudentId }));
+    router.push(`/admin/students?${params.toString()}`);
+  };
+  const buildStudentDetailReturnPath = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedRow?.id) {
+      params.set("studentId", selectedRow.id);
+    }
+    return `/admin/students?${params.toString()}`;
+  };
+  const handleStudentClassDetailOpen = (classId: string, tab: ClassDetailTab = "students") => {
+    if (!selectedRow || kind !== "students") return;
+    const targetClassId = text(classId);
+    if (!targetClassId) return;
+    const params = new URLSearchParams();
+    params.set("classId", targetClassId);
+    params.set("tab", tab);
+    params.set("studentId", selectedRow.id);
+    params.set("returnTo", buildStudentDetailReturnPath());
+    router.push(`/admin/classes?${params.toString()}`);
+  };
   const renderRelationList = (label: string, ids: string[], modeLabel: "수강" | "대기") => (
-    <section className="overflow-hidden rounded-md border bg-background">
+    <section
+      data-testid={kind === "classes" ? (modeLabel === "수강" ? "class-enrolled-student-roster" : "class-waitlist-student-roster") : undefined}
+      className="overflow-hidden rounded-md border bg-background"
+    >
       <div className="flex h-10 items-center justify-between border-b px-3">
         <div className="text-sm font-semibold">{label}</div>
         <Badge variant="secondary" className="h-6 rounded-full px-2">
@@ -803,20 +1404,110 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       </div>
       {ids.length > 0 ? (
         <div className="divide-y">
-          {ids.map((id) => (
-            <div key={`${modeLabel}-${id}`} className="flex items-center justify-between gap-3 px-3 py-3">
+          {kind === "classes" ? (
+            <>
+              <div className="hidden grid-cols-[minmax(10rem,1.1fr)_minmax(8rem,.8fr)_minmax(8rem,.8fr)_auto] gap-3 bg-muted/25 px-3 py-2 text-xs font-medium text-muted-foreground lg:grid">
+                <div>학생</div>
+                <div>학생 연락처</div>
+                <div>학부모 연락처</div>
+                <div className="text-right">관리</div>
+              </div>
+              {ids.map((id) => {
+                const record = resolveRelatedRecord(id);
+                const studentContact = getStudentContactValue(record, "student");
+                const parentContact = getStudentContactValue(record, "parent");
+                const nextMode = modeLabel === "수강" ? "waitlist" : "enrolled";
+                const isFocusedRosterStudent = requestedClassDetailStudentId === id;
+
+                return (
+                  <div
+                    key={`${modeLabel}-${id}`}
+                    id={`class-roster-student-${id}`}
+                    data-testid="class-roster-student-row"
+                    data-class-roster-student-id={id}
+                    data-class-roster-focused={isFocusedRosterStudent ? "true" : undefined}
+                    className={cn(
+                      "grid gap-3 px-3 py-3 lg:grid-cols-[minmax(10rem,1.1fr)_minmax(8rem,.8fr)_minmax(8rem,.8fr)_auto] lg:items-center",
+                      isFocusedRosterStudent && "bg-primary/5 ring-1 ring-inset ring-primary/30",
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant={modeLabel === "수강" ? "default" : "secondary"}>{modeLabel}</Badge>
+                        {text(record?.status) ? <Badge variant="outline">{text(record?.status)}</Badge> : null}
+                      </div>
+                      <div className="mt-1 truncate text-sm font-semibold">{resolveRelatedTitle(id)}</div>
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{relatedMeta(record) || "학생 정보 확인 필요"}</div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs text-muted-foreground lg:hidden">학생 연락처</div>
+                      <div className="truncate text-sm font-medium">{studentContact || "-"}</div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs text-muted-foreground lg:hidden">학부모 연락처</div>
+                      <div className="truncate text-sm font-medium">{parentContact || "-"}</div>
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2"
+                        data-testid="class-student-official-link"
+                        onClick={() => handleClassStudentDetailOpen(id)}
+                      >
+                        학생 상세
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => handleRelationModeChange(id, nextMode)}
+                        disabled={saving || !canMutateRows}
+                      >
+                        {modeLabel === "수강" ? "대기로 이동" : "등록 전환"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-destructive hover:text-destructive"
+                        onClick={() => handleRelationRemove(selectedRow?.id || "", id)}
+                        disabled={saving || !canMutateRows}
+                        aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}
+                      >
+                        해제
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          ) : ids.map((id) => (
+            <div key={`${modeLabel}-${id}`} className="grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">{resolveRelatedTitle(id)}</div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">{relatedMeta(resolveRelatedRecord(id)) || modeLabel}</div>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex flex-wrap justify-end gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2"
+                  data-testid="student-class-official-link"
+                  onClick={() => handleStudentClassDetailOpen(id, "students")}
+                >
+                  학생 현황
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="h-7 px-2"
                   onClick={() => handleRelationModeChange(id, modeLabel === "수강" ? "waitlist" : "enrolled")}
-                  disabled={saving}
+                  disabled={saving || !canMutateRows}
                 >
                   {modeLabel === "수강" ? "대기로" : "등록"}
                 </Button>
@@ -825,8 +1516,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                   variant="outline"
                   size="sm"
                   className="h-7 px-2 text-destructive hover:text-destructive"
-                  onClick={() => kind === "students" ? handleRelationRemove(id, selectedRow?.id || "") : handleRelationRemove(selectedRow?.id || "", id)}
-                  disabled={saving}
+                  onClick={() => handleRelationRemove(id, selectedRow?.id || "")}
+                  disabled={saving || !canMutateRows}
                   aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}
                 >
                   해제
@@ -884,11 +1575,19 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         }
       }
 
+      if (kind === "classes" && fieldName === "subject") {
+        const rawRows = rows.map((row) => (row.raw || {}) as Record<string, unknown>);
+        const teacherOptions = getClassTeacherOptionsForSubject(rawRows, normalizedValue);
+        if (next.teacher && teacherOptions.length > 0 && !teacherOptions.includes(next.teacher)) {
+          next.teacher = "";
+        }
+      }
+
       return next;
     });
   };
 
-  const renderEditableFields = (scope: "detail" | "form") => {
+  const renderEditableFields = (scope: "detail" | "form" | "quick", fieldNames?: string[]) => {
     const selectedClassGroupIds = new Set(parseClassGroupIds(form.classGroupIds));
     const selectedClassGroups = classGroupOptions.filter((group) => selectedClassGroupIds.has(group.id));
     const selectedClassGroupLabel =
@@ -909,7 +1608,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
     return (
       <div className="grid gap-3 sm:grid-cols-2">
-        {FORM_FIELDS[kind].map((field) => {
+        {FORM_FIELDS[kind].filter((field) => !fieldNames || fieldNames.includes(field.name)).map((field) => {
           const id = `${kind}-${scope}-${field.name}`;
           const value = form[field.name] || "";
           const selectOptions = getEditableFieldOptions(field.name, value);
@@ -922,12 +1621,14 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                   name={field.name}
                   value={value}
                   placeholder={field.placeholder}
+                  disabled={!canMutateRows}
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               ) : selectOptions.length > 0 ? (
                 <Select
                   value={value || "__none__"}
                   onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
+                  disabled={!canMutateRows}
                 >
                   <SelectTrigger id={id} className="w-full">
                     <SelectValue placeholder={field.placeholder || `${field.label} 선택`} />
@@ -952,6 +1653,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                   value={value}
                   placeholder={field.placeholder}
                   required={field.required}
+                  disabled={!canMutateRows}
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               )}
@@ -959,7 +1661,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           );
         })}
 
-        {kind === "classes" ? (
+        {kind === "classes" && (!fieldNames || fieldNames.includes("classGroupIds")) ? (
           <div className="space-y-2 sm:col-span-2">
             <Label>기간</Label>
             <Popover>
@@ -968,7 +1670,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                   type="button"
                   variant="outline"
                   className="h-10 w-full justify-between px-3 font-normal"
-                  disabled={classGroupOptions.length === 0}
+                  disabled={!canMutateRows || classGroupOptions.length === 0}
                 >
                   <span className={cn("truncate", selectedClassGroups.length === 0 && "text-muted-foreground")}>
                     {classGroupOptions.length === 0 ? "기간 없음" : selectedClassGroupLabel}
@@ -989,6 +1691,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                           checked && "bg-primary/10 text-primary hover:bg-primary/10",
                         )}
                         onClick={() => toggleClassGroup(group.id)}
+                        disabled={!canMutateRows}
                       >
                         <span
                           aria-hidden="true"
@@ -1013,7 +1716,16 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     );
   };
 
-  const openRow = useCallback(async (row: ManagementRow) => {
+  const openRow = useCallback(async (
+    row: ManagementRow,
+    options: {
+      tab?: ClassDetailTab;
+      section?: string;
+      sessionId?: string;
+      syncRoute?: boolean;
+    } = {},
+  ) => {
+    const nextTab = kind === "classes" ? normalizeClassDetailTab(options.tab) : "basic";
     setSelectedRow(row);
     setForm(initialForm(kind, row));
     setTargetId("");
@@ -1021,14 +1733,146 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setDetailRowQuery("");
     setRelationQuery("");
     setOperationError(null);
+    setSaveNotice("");
+    setActiveClassDetailTab(nextTab);
     setDialogMode("detail");
+    if (kind === "classes" && options.syncRoute !== false) {
+      writeClassDetailRoute(row.id, nextTab, {
+        section: options.section,
+        sessionId: options.sessionId,
+      });
+    }
+    if (kind === "students" && options.syncRoute !== false) {
+      writeStudentDetailRoute(row.id);
+    }
     if (kind === "students") setRelatedRows(await service.listClasses());
     if (kind === "classes") setRelatedRows(await service.listStudents());
-  }, [kind]);
+  }, [kind, writeClassDetailRoute, writeStudentDetailRoute]);
+
+  useEffect(() => {
+    if (kind !== "classes" || loading || !requestedClassId) {
+      return;
+    }
+
+    if (selectedRow?.id === requestedClassId && dialogMode === "detail") {
+      setActiveClassDetailTab(requestedClassDetailTab);
+      return;
+    }
+
+    const targetRow = rows.find((row) => row.id === requestedClassId);
+    if (targetRow) {
+      void openRow(targetRow, {
+        tab: requestedClassDetailTab,
+        section: requestedClassDetailSection,
+        sessionId: requestedClassDetailSessionId,
+        syncRoute: false,
+      });
+    }
+  }, [
+    dialogMode,
+    kind,
+    loading,
+    openRow,
+    requestedClassDetailSection,
+    requestedClassDetailSessionId,
+    requestedClassDetailTab,
+    requestedClassId,
+    rows,
+    selectedRow?.id,
+  ]);
+
+  useEffect(() => {
+    if (kind !== "students" || loading || !requestedStudentId) {
+      return;
+    }
+
+    if (selectedRow?.id === requestedStudentId && dialogMode === "detail") {
+      return;
+    }
+
+    const targetRow = rows.find((row) => row.id === requestedStudentId);
+    if (targetRow) {
+      void openRow(targetRow, { syncRoute: false });
+    }
+  }, [
+    dialogMode,
+    kind,
+    loading,
+    openRow,
+    requestedStudentId,
+    rows,
+    selectedRow?.id,
+  ]);
+
+  useEffect(() => {
+    if (
+      kind !== "classes" ||
+      dialogMode !== "detail" ||
+      activeClassDetailTab !== "students" ||
+      !requestedClassDetailStudentId
+    ) {
+      return;
+    }
+
+    const scrollFocusedRosterStudent = () => {
+      const row = document.getElementById(`class-roster-student-${requestedClassDetailStudentId}`);
+      if (row) {
+        scrollClassDetailTargetIntoView(row);
+      }
+    };
+    const timer = window.setTimeout(scrollFocusedRosterStudent, 80);
+    const retryTimer = window.setTimeout(scrollFocusedRosterStudent, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(retryTimer);
+    };
+  }, [activeClassDetailTab, dialogMode, kind, relatedRows.length, requestedClassDetailStudentId, selectedRow?.id]);
+
+  useEffect(() => {
+    if (
+      kind !== "classes" ||
+      dialogMode !== "detail" ||
+      (activeClassDetailTab !== "schedule" && activeClassDetailTab !== "curriculum") ||
+      !requestedClassDetailSection
+    ) {
+      return;
+    }
+
+    const scrollRequestedClassDetailSection = () => {
+      const target = document.getElementById(getClassDetailSectionTargetId(
+        requestedClassDetailSection,
+        requestedClassDetailSessionId,
+      ));
+      if (target) {
+        scrollClassDetailTargetIntoView(target);
+      }
+    };
+    const timer = window.setTimeout(scrollRequestedClassDetailSection, 120);
+    const retryTimer = window.setTimeout(scrollRequestedClassDetailSection, 520);
+    const finalRetryTimer = window.setTimeout(scrollRequestedClassDetailSection, 1500);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(retryTimer);
+      window.clearTimeout(finalRetryTimer);
+    };
+  }, [
+    activeClassDetailTab,
+    dialogMode,
+    kind,
+    requestedClassDetailSection,
+    requestedClassDetailSessionId,
+    selectedRow?.id,
+  ]);
 
   const handleBulkUpdateRows = useCallback(async (rows: ManagementRow[], change: { field: string; value: string }) => {
     const value = text(change.value);
     if (rows.length === 0 || !value) {
+      return;
+    }
+    if (!canMutateRows) {
+      setOperationError("수정 권한이 없습니다.");
       return;
     }
 
@@ -1047,10 +1891,14 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     } finally {
       setSaving(false);
     }
-  }, [kind, refresh]);
+  }, [canMutateRows, kind, refresh]);
 
   const deleteRows = useCallback(async (rows: ManagementRow[]) => {
     if (rows.length === 0) {
+      return;
+    }
+    if (!canMutateRows) {
+      setOperationError("처리 권한이 없습니다.");
       return;
     }
 
@@ -1059,16 +1907,16 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     try {
       await Promise.all(rows.map((row) => {
         if (kind === "students") return service.updateStudent({ ...(row.raw || {}), id: row.id, status: WITHDRAWN_STUDENT_STATUS });
-        if (kind === "classes") return service.deleteClass(row.id);
+        if (kind === "classes") return service.updateClass(compact({ status: ARCHIVED_CLASS_STATUS }, kind, row));
         return service.deleteTextbook(row.id);
       }));
       await refresh();
     } catch (bulkError) {
-      setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 삭제 중 오류가 발생했습니다.");
+      setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
-  }, [kind, refresh]);
+  }, [canMutateRows, kind, refresh]);
 
   const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -1086,7 +1934,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const actions = useMemo(() => {
     const base = {
-      onCreate: () => {
+      onCreate: canMutateRows ? () => {
         setSelectedRow(null);
         const nextForm = initialForm(kind);
         if (kind === "classes" && defaultClassGroupIdsForCreate) {
@@ -1096,14 +1944,15 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         setDetailRowQuery("");
         setRelationQuery("");
         setOperationError(null);
+        setSaveNotice("");
         setDialogMode("create" as const);
-      },
+      } : undefined,
       onOpenRow: openRow,
-      onBulkUpdateRows: handleBulkUpdateRows,
-      onBulkDeleteRows: handleBulkDeleteRows,
-      onDeleteRow: (row: ManagementRow) => {
+      onBulkUpdateRows: canMutateRows ? handleBulkUpdateRows : undefined,
+      onBulkDeleteRows: canMutateRows ? handleBulkDeleteRows : undefined,
+      onDeleteRow: canMutateRows ? (row: ManagementRow) => {
         setDeleteRequest({ rows: [row] });
-      },
+      } : undefined,
     };
     if (kind === "students") return { ...base, onOpenSchoolMaster: () => router.push("/admin/settings/schools") };
     if (kind === "classes") {
@@ -1115,9 +1964,9 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       };
     }
     return base;
-  }, [defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router]);
+  }, [canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router]);
 
-  const deleteActionLabel = kind === "students" ? "퇴원 처리" : "삭제";
+  const deleteActionLabel = kind === "students" ? "퇴원 처리" : kind === "classes" ? "종강 처리" : "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
   const deleteTargetLabel =
     deleteRequestCount === 1
@@ -1126,7 +1975,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canMutateRows) {
+      setOperationError("등록 권한이 없습니다.");
+      return;
+    }
     setOperationError(null);
+    setSaveNotice("");
     setSaving(true);
     try {
       const payload = compact(form, kind, selectedRow);
@@ -1154,7 +2008,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const handleDetailSave = async () => {
     if (!selectedRow) return;
+    if (!canMutateRows) {
+      setOperationError("수정 권한이 없습니다.");
+      return;
+    }
     setOperationError(null);
+    setSaveNotice("");
     setSaving(true);
     try {
       const payload = compact(form, kind, selectedRow);
@@ -1207,6 +2066,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           : current,
       );
       await refresh();
+      setSaveNotice("저장 완료");
     } catch (saveError) {
       setOperationError(getSaveErrorMessage(saveError));
     } finally {
@@ -1216,9 +2076,14 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const handleRelationSave = async () => {
     if (!selectedRow || !targetId) return;
+    if (!canMutateRows) {
+      setOperationError("관계 변경 권한이 없습니다.");
+      return;
+    }
     const relatedId = targetId;
     setSaving(true);
     setOperationError(null);
+    setSaveNotice("");
     try {
       if (kind === "students") {
         await service.assignStudentToClass({ studentId: selectedRow.id, classId: relatedId, mode: relationMode });
@@ -1229,6 +2094,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       setRelationQuery("");
       setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, relationMode) : current);
       await refresh();
+      setSaveNotice(relationMode === "enrolled" ? "등록 학생 추가 완료" : "대기 학생 추가 완료");
     } catch (relationError) {
       setOperationError(relationError instanceof Error ? relationError.message : "수강/대기 등록 중 오류가 발생했습니다.");
     } finally {
@@ -1238,8 +2104,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const handleRelationModeChange = async (id: string, mode: "enrolled" | "waitlist") => {
     if (!selectedRow) return;
+    if (!canMutateRows) {
+      setOperationError("관계 변경 권한이 없습니다.");
+      return;
+    }
     setSaving(true);
     setOperationError(null);
+    setSaveNotice("");
     try {
       if (kind === "students") {
         await service.assignStudentToClass({ studentId: selectedRow.id, classId: id, mode });
@@ -1248,6 +2119,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       }
       setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, id, mode) : current);
       await refresh();
+      setSaveNotice(mode === "enrolled" ? "등록 전환 완료" : "대기 전환 완료");
     } catch (relationError) {
       setOperationError(relationError instanceof Error ? relationError.message : "등록 상태 변경 중 오류가 발생했습니다.");
     } finally {
@@ -1256,18 +2128,962 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   };
 
   const handleRelationRemove = async (classId: string, studentId: string) => {
+    if (!canMutateRows) {
+      setOperationError("관계 변경 권한이 없습니다.");
+      return;
+    }
     const relatedId = kind === "students" ? classId : studentId;
     setSaving(true);
     setOperationError(null);
+    setSaveNotice("");
     try {
       await service.removeStudentFromClass({ studentId, classId });
       setSelectedRow((current) => current && selectedRow && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, "removed") : current);
       await refresh();
+      setSaveNotice("연결 해제 완료");
     } catch (relationError) {
       setOperationError(relationError instanceof Error ? relationError.message : "수강 연결 해제 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDialogOpenChange = (open: boolean) => {
+    if (open) return;
+    setDialogMode(null);
+    if (kind === "classes") {
+      clearClassDetailRoute();
+    }
+    if (kind === "students") {
+      clearStudentDetailRoute();
+    }
+  };
+
+  const handleClassDetailTabChange = (value: string) => {
+    const nextTab = normalizeClassDetailTab(value);
+    const shouldKeepSection = getClassDetailTabForSection(requestedClassDetailSection) === nextTab;
+    const shouldKeepStudentTarget = nextTab === "students" && requestedClassDetailStudentId;
+    setActiveClassDetailTab(nextTab);
+    if (selectedRow && kind === "classes") {
+      writeClassDetailRoute(selectedRow.id, nextTab, {
+        section: shouldKeepSection ? requestedClassDetailSection : "",
+        sessionId: shouldKeepSection && isClassDetailSessionTargetSection(requestedClassDetailSection) ? requestedClassDetailSessionId : "",
+        studentId: shouldKeepStudentTarget ? requestedClassDetailStudentId : "",
+      });
+    }
+  };
+
+  const buildClassDetailReturnPath = (
+    tab: ClassDetailTab,
+    options: { section?: string; sessionId?: string; studentId?: string } = {},
+  ) => {
+    if (!selectedRow) return "/admin/classes";
+    const params = new URLSearchParams();
+    params.set("classId", selectedRow.id);
+    params.set("tab", tab);
+    if (options.section) {
+      params.set("section", options.section);
+    }
+    if (options.sessionId) {
+      params.set("sessionId", options.sessionId);
+    }
+    if (options.studentId) {
+      params.set("studentId", options.studentId);
+    }
+    if (requestedClassReturnPath) {
+      params.set("returnTo", requestedClassReturnPath);
+    }
+    return `/admin/classes?${params.toString()}`;
+  };
+
+  const buildLessonDesignFromClassDetailHref = (
+    options: { section?: string; sessionId?: string; returnTab?: ClassDetailTab } = {},
+  ) => {
+    if (!selectedRow) return "/admin/curriculum/lesson-design";
+    const params = new URLSearchParams();
+    params.set("classId", selectedRow.id);
+    params.set("lessonDesign", "1");
+    const resolvedReturnTab = options.returnTab || activeClassDetailTab;
+    const shouldUseRequestedSection =
+      !options.section &&
+      getClassDetailTabForSection(requestedClassDetailSection) === resolvedReturnTab;
+    const resolvedSection =
+      options.section ||
+      (shouldUseRequestedSection ? requestedClassDetailSection : "") ||
+      getDefaultLessonDesignSectionForClassTab(resolvedReturnTab);
+    if (resolvedSection) {
+      params.set("section", resolvedSection);
+    }
+    const shouldUseRequestedSession =
+      !options.sessionId &&
+      shouldUseRequestedSection &&
+      isClassDetailSessionTargetSection(resolvedSection);
+    const resolvedSessionId = options.sessionId || (shouldUseRequestedSession ? requestedClassDetailSessionId : "");
+    if (resolvedSessionId) {
+      params.set("sessionId", resolvedSessionId);
+    }
+    params.set(
+      "returnTo",
+      buildClassDetailReturnPath(resolvedReturnTab, {
+        section: resolvedSection,
+        sessionId: resolvedSessionId,
+      }),
+    );
+    return `/admin/curriculum/lesson-design?${params.toString()}`;
+  };
+
+  const renderSaveStatus = () => {
+    if (!canMutateRows && (isCreate || isDetail)) {
+      return (
+        <div data-testid="management-save-status" className="text-xs font-medium text-muted-foreground">
+          읽기 전용
+        </div>
+      );
+    }
+    if (saving) {
+      return (
+        <div data-testid="management-save-status" className="text-xs font-medium text-muted-foreground">
+          저장 중
+        </div>
+      );
+    }
+    if (operationError) {
+      const saveErrorStatusLabel = getSaveErrorStatusLabel(operationError);
+      return (
+        <div data-testid="management-save-status" className="text-xs font-medium text-destructive">
+          {saveErrorStatusLabel}
+        </div>
+      );
+    }
+    if (saveNotice) {
+      return (
+        <div data-testid="management-save-status" className="text-xs font-medium text-primary">
+          {saveNotice}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderClassAuditTimeline = () => {
+    if (kind !== "classes" || !selectedRow) return null;
+
+    const auditLogs = getClassAuditLogs(selectedRow);
+
+    return (
+      <section data-testid="class-audit-timeline" className="overflow-hidden rounded-md border bg-background">
+        <div className="flex h-10 items-center justify-between border-b px-3">
+          <div className="text-sm font-semibold">최근 변경 이력</div>
+          <Badge variant="secondary" className="h-6 rounded-full px-2">
+            {auditLogs.length}건
+          </Badge>
+        </div>
+        {auditLogs.length > 0 ? (
+          <div className="divide-y">
+            {auditLogs.slice(0, 5).map((item, index) => {
+              const actor = text(
+                item.actorEmail ||
+                  item.actor_email ||
+                  item.actorRole ||
+                  item.actor_role ||
+                  item.actorProfileId ||
+                  item.actor_profile_id,
+              );
+
+              return (
+                <div key={text(item.id) || `class-audit-${index}`} className="grid gap-1 px-3 py-2.5 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
+                  <Badge variant="outline" className="w-fit">
+                    {formatClassAuditAction(item.action)}
+                  </Badge>
+                  <div className="min-w-0 truncate text-sm text-muted-foreground">
+                    {actor || "수정자 기록 없음"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatHistoryDate(item.changedAt || item.changed_at)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="px-3 py-5 text-sm text-muted-foreground">기록된 변경 이력이 없습니다</div>
+        )}
+      </section>
+    );
+  };
+
+	  const renderClassMobileActionBar = () => {
+	    if (kind !== "classes" || !selectedRow) return null;
+	    const mobileSaveStatus = renderSaveStatus();
+
+	    return (
+	      <div
+	        data-testid="class-detail-mobile-action-bar"
+	        className="sticky bottom-0 z-30 -mx-4 grid grid-cols-[repeat(5,minmax(0,1fr))] gap-1 border-t bg-background/95 p-2 shadow-[0_-8px_20px_-18px_rgba(15,23,42,0.65)] backdrop-blur md:hidden sm:-mx-6"
+	      >
+	        {mobileSaveStatus ? (
+	          <div
+	            data-testid="class-detail-mobile-save-status"
+	            className="col-span-5 flex min-h-6 items-center justify-center rounded-sm bg-muted/40 px-2 py-1"
+	          >
+	            {mobileSaveStatus}
+	          </div>
+	        ) : null}
+	        {CLASS_MOBILE_ACTION_TABS.map((tab) => (
+	          <Button
+	            key={tab.value}
+	            type="button"
+	            size="sm"
+	            variant={activeClassDetailTab === tab.value ? "default" : "ghost"}
+	            className="h-12 min-w-0 flex-col gap-0.5 rounded-sm px-1 text-[10px] leading-none"
+	            data-testid={`class-detail-mobile-tab-${tab.value}`}
+	            aria-label={`${tab.label} 보기`}
+	            title={`${tab.label} 보기`}
+	            onClick={() => handleClassDetailTabChange(tab.value)}
+	          >
+	            {tab.icon}
+	            <span className="max-w-full truncate">{tab.shortLabel}</span>
+	          </Button>
+	        ))}
+	        <Button
+	          type="button"
+	          size="sm"
+	          variant="outline"
+	          data-testid="class-detail-mobile-save"
+	          className="h-12 min-w-0 flex-col gap-0.5 rounded-sm px-1 text-[10px] leading-none"
+	          aria-label={saving ? "저장 중" : "저장"}
+	          title={saving ? "저장 중" : "저장"}
+	          onClick={handleDetailSave}
+	          disabled={saving || !canMutateRows}
+	        >
+	          <Save className="size-3.5" aria-hidden="true" />
+	          <span className="max-w-full truncate">{saving ? "저장 중" : "저장"}</span>
+	        </Button>
+	      </div>
+	    );
+	  };
+
+  const renderClassSummaryBar = () => {
+    if (kind !== "classes" || !selectedRow) return null;
+    const raw = selectedRow.raw || {};
+    const registeredCount = getClassEnrolledStudentIds(selectedRow).length;
+    const waitlistCount = getClassWaitlistStudentIds(selectedRow).length;
+    const capacity = Number(raw.capacity || selectedRow.metrics.capacity || 0);
+    const schedule = text(raw.schedule) || "시간표 미정";
+    const scheduleSummaryLabel = getClassSummaryScheduleLabel(selectedRow, schedule);
+    const teacher = text(raw.teacher || raw.teacher_name || raw.teacherName) || "담당 미정";
+    const classroom = text(raw.classroom || raw.room) || "강의실 미정";
+    const periodLabel = getClassPeriodLabel(selectedRow) || "기간 미정";
+    const curriculumSummaryLabel = getClassSummaryCurriculumLabel(selectedRow);
+    const auditInfo = getClassAuditInfo(selectedRow);
+
+    return (
+      <div data-testid="class-official-summary-bar" className="sticky top-0 z-20 border-y bg-background/95 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,2fr)] lg:items-center">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <Badge>{selectedRow.badge}</Badge>
+                <Badge variant="secondary">{selectedRow.status}</Badge>
+                <Badge variant="outline">{periodLabel}</Badge>
+              </div>
+              {requestedClassReturnPath?.startsWith("/admin/students") ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="class-detail-return-to-student"
+                  className="h-8 shrink-0 rounded-md px-2.5 text-xs"
+                  onClick={() => router.push(requestedClassReturnPath)}
+                >
+                  학생 상세
+                </Button>
+              ) : requestedClassReturnPath ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="class-detail-return-to-work-queue"
+                  className="h-8 shrink-0 rounded-md px-2.5 text-xs"
+                  onClick={() => router.push(requestedClassReturnPath)}
+                >
+                  수업계획
+                </Button>
+              ) : null}
+            </div>
+            <div className="mt-1 truncate text-base font-semibold text-foreground">{selectedRow.title}</div>
+            <div className="mt-0.5 truncate text-sm text-muted-foreground">
+              {[teacher, periodLabel, classroom].filter(Boolean).join(" · ")}
+            </div>
+            <div data-testid="class-audit-summary" className="mt-0.5 truncate text-xs text-muted-foreground">
+              {auditInfo.label}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+            <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+              <div className="text-xs text-muted-foreground">일정</div>
+              <div className="mt-1 truncate font-medium">{scheduleSummaryLabel}</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+              <div className="text-xs text-muted-foreground">정원</div>
+              <div className="mt-1 font-medium">{capacity > 0 ? `${registeredCount}/${capacity}` : `${registeredCount}명`}</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+              <div className="text-xs text-muted-foreground">등록/대기</div>
+              <div className="mt-1 font-medium">{registeredCount}명 / {waitlistCount}명</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+              <div className="text-xs text-muted-foreground">교재·진도</div>
+              <div className="mt-1 truncate font-medium">{curriculumSummaryLabel}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderClassSchedulePanel = () => {
+    if (kind !== "classes" || !selectedRow) return null;
+
+    const raw = selectedRow.raw || {};
+    const schedule = text(raw.schedule) || "시간표 미정";
+    const teacher = text(raw.teacher || raw.teacher_name || raw.teacherName) || "담당 미정";
+    const classroom = text(raw.classroom || raw.room) || "강의실 미정";
+    const sessions = getClassSessionSummaries(selectedRow);
+    const nextSession = getClassScheduleNextSession(selectedRow);
+    const currentSession = getClassScheduleCurrentSession(selectedRow);
+    const exceptionSessions = getClassScheduleExceptionSessions(selectedRow);
+    const plannedSessionCount = sessions.filter((session) => hasCurriculumPlanContent(session)).length;
+    const sessionRows = sessions.slice(0, 8);
+    const scheduleExceptionCreateSessionId = getCurriculumSessionStableId(nextSession || currentSession || sessions[0] || {});
+    const isScheduleSectionRequested = requestedClassDetailSection === "lesson-design-periods";
+    const scheduleCreationStateLabel = sessions.length <= 0 ? "회차 미생성" : "회차 생성됨";
+    const shouldHighlightScheduleCreation = isScheduleSectionRequested && sessions.length <= 0;
+
+    return (
+      <section id="class-schedule-official-panel" data-testid="class-schedule-official-panel" className="space-y-4">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">요일·시간</div>
+            <div className="mt-1 truncate text-sm font-semibold">{schedule}</div>
+          </div>
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">다음 수업일</div>
+            <div className="mt-1 truncate text-sm font-semibold">
+              {nextSession ? getCurriculumSessionTitle(nextSession, "다음 회차") : "회차 없음"}
+            </div>
+          </div>
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">현재 회차</div>
+            <div className="mt-1 truncate text-sm font-semibold">
+              {currentSession ? getCurriculumSessionTitle(currentSession, "현재 회차") : "회차 없음"}
+            </div>
+          </div>
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">전체 회차</div>
+            <div className="mt-1 text-sm font-semibold">{sessions.length > 0 ? `${sessions.length}회` : "-"}</div>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold">일정 정보</div>
+            <Badge variant="secondary" className="h-6 rounded-full px-2">
+              {teacher} · {classroom}
+            </Badge>
+          </div>
+          {renderEditableFields("detail", ["teacher", "schedule", "classroom", "classGroupIds"])}
+        </section>
+
+        <section
+          id="class-schedule-session-create-work-panel"
+          data-testid="class-schedule-session-create-work-panel"
+          data-class-detail-focused={shouldHighlightScheduleCreation ? "true" : undefined}
+          className={cn(
+            "rounded-md border bg-background p-3",
+            shouldHighlightScheduleCreation && "border-primary/40 bg-primary/5 ring-1 ring-primary/30",
+          )}
+        >
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant={sessions.length <= 0 ? "destructive" : "secondary"}>
+                  {scheduleCreationStateLabel}
+                </Badge>
+                <Badge variant="outline">{schedule}</Badge>
+              </div>
+              <div className="mt-2 text-sm font-semibold">회차 생성</div>
+              <div className="mt-1 truncate text-xs text-muted-foreground">
+                {sessions.length <= 0
+                  ? "반별 수업계획에서 넘어온 회차 미생성 수업입니다"
+                  : `${sessions.length}회가 생성되어 있습니다. 새 학기나 시간표 변경 시 여기서 조정합니다`}
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 w-full px-2.5 lg:w-auto"
+              onClick={() => router.push(buildLessonDesignFromClassDetailHref({
+                section: "lesson-design-periods",
+                returnTab: "schedule",
+              }))}
+            >
+              회차 생성
+            </Button>
+          </div>
+        </section>
+
+        <section data-testid="class-schedule-exception-work-panel" className="rounded-md border bg-background p-3">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant={exceptionSessions.length > 0 ? "destructive" : "secondary"}>
+                  예외 {exceptionSessions.length}건
+                </Badge>
+                {nextSession ? <Badge variant="outline">{getCurriculumSessionTitle(nextSession, "다음 회차")}</Badge> : null}
+              </div>
+              <div className="mt-2 text-sm font-semibold">예외 일정 관리</div>
+              <div className="mt-1 truncate text-xs text-muted-foreground">
+                {exceptionSessions[0]
+                  ? `${getCurriculumSessionTitle(exceptionSessions[0], "예외 회차")} · ${getScheduleSessionMemo(exceptionSessions[0]) || getScheduleStateLabel(exceptionSessions[0])}`
+                  : "휴강·보강이 생기면 다음 회차에서 바로 처리합니다"}
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 w-full px-2.5 lg:w-auto"
+              data-testid="class-schedule-exception-create"
+              onClick={() => router.push(buildLessonDesignFromClassDetailHref({
+                section: "lesson-design-periods",
+                sessionId: scheduleExceptionCreateSessionId,
+                returnTab: "schedule",
+              }))}
+              disabled={!scheduleExceptionCreateSessionId}
+            >
+              예외 등록
+            </Button>
+          </div>
+        </section>
+
+        <section className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)]">
+          <div className="rounded-md border bg-background">
+            <div className="flex h-10 items-center justify-between border-b px-3">
+              <div className="text-sm font-semibold">회차 흐름</div>
+              <Badge variant="secondary" className="h-6 rounded-full px-2">
+                배정 {plannedSessionCount}/{sessions.length || 0}회
+              </Badge>
+            </div>
+            {sessionRows.length > 0 ? (
+              <div className="divide-y">
+                {sessionRows.map((session, index) => {
+                  const isFocusedScheduleSession = isScheduleSectionRequested &&
+                    requestedClassDetailSessionId === getCurriculumSessionStableId(session);
+
+                  return (
+                    <div
+                      key={`${text(session.sessionId || session.session_id) || getCurriculumSessionTitle(session)}-${index}`}
+                      id={`class-schedule-session-${getCurriculumSessionStableId(session)}`}
+                      data-class-detail-focused={isFocusedScheduleSession ? "true" : undefined}
+                      className={cn(
+                        "grid gap-2 px-3 py-2.5 lg:grid-cols-[minmax(9rem,.9fr)_auto_minmax(12rem,1.1fr)] lg:items-center",
+                        isFocusedScheduleSession && "bg-primary/5 ring-1 ring-primary/30",
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{getCurriculumSessionTitle(session)}</div>
+                        <div className="truncate text-xs text-muted-foreground">{text(session.periodLabel || session.period_label) || schedule}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge variant={getScheduleStateLabel(session) === "정규" ? "secondary" : "destructive"}>{getScheduleStateLabel(session)}</Badge>
+                        <Badge variant={hasCurriculumPlanContent(session) ? "outline" : "destructive"}>
+                          {getCurriculumSessionStatusLabel(session)}
+                        </Badge>
+                      </div>
+                      <div className="min-w-0 truncate text-sm text-muted-foreground">
+                        {getCurriculumSessionDescription(session) || getScheduleSessionMemo(session) || "회차 메모 없음"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">생성된 회차가 없습니다</div>
+            )}
+          </div>
+
+          <div className="rounded-md border bg-background">
+            <div className="flex h-10 items-center justify-between border-b px-3">
+              <div className="text-sm font-semibold">보강·휴강·예외</div>
+              <Badge variant={exceptionSessions.length > 0 ? "destructive" : "secondary"} className="h-6 rounded-full px-2">
+                {exceptionSessions.length}건
+              </Badge>
+            </div>
+            {exceptionSessions.length > 0 ? (
+              <div className="divide-y">
+                {exceptionSessions.slice(0, 5).map((session, index) => (
+                  <div key={`schedule-exception-${text(session.sessionId || session.session_id) || index}`} className="grid gap-1 px-3 py-2.5">
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">{getCurriculumSessionTitle(session)}</span>
+                      <Badge variant="outline" className="shrink-0">{getScheduleStateLabel(session)}</Badge>
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {getScheduleSessionMemo(session) || getCurriculumSessionDescription(session) || "예외 메모 없음"}
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs"
+                        data-testid="class-schedule-exception-edit"
+                        onClick={() => router.push(buildLessonDesignFromClassDetailHref({
+                          section: "lesson-design-periods",
+                          sessionId: getCurriculumSessionStableId(session),
+                          returnTab: "schedule",
+                        }))}
+                      >
+                        예외 수정
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">등록된 예외 일정이 없습니다</div>
+            )}
+          </div>
+        </section>
+
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => router.push(buildLessonDesignFromClassDetailHref())}
+          >
+            회차 생성·수정
+          </Button>
+        </div>
+      </section>
+    );
+  };
+
+  const renderClassCurriculumPanel = () => {
+    if (kind !== "classes" || !selectedRow) return null;
+
+    const textbooks = getClassTextbookCatalog(selectedRow);
+    const sessions = getClassSessionSummaries(selectedRow);
+    const textbookProgressSnapshots = getClassTextbookProgressSnapshot(selectedRow);
+    const nextSession = getClassNextCurriculumSession(selectedRow);
+    const pendingSessionLabels = getClassPendingSessionLabels(selectedRow);
+    const unassignedProgressSessions = getClassUnassignedProgressSessions(selectedRow);
+    const firstUnassignedSession = unassignedProgressSessions[0] || null;
+    const firstUnassignedSessionId = firstUnassignedSession ? getCurriculumSessionStableId(firstUnassignedSession) : "";
+    const firstUnassignedTitle = firstUnassignedSession
+      ? getCurriculumSessionTitle(firstUnassignedSession, "첫 미배정 회차")
+      : pendingSessionLabels[0] || "";
+    const firstUnassignedDescription = firstUnassignedSession
+      ? getCurriculumSessionDescription(firstUnassignedSession) || "교재별 진도 범위를 입력해야 합니다"
+      : "교재·진도 편집에서 미배정 회차를 확인하세요";
+    const plannedProgressCount = getClassPlannedProgressCount(selectedRow);
+    const progressTargetCount = getClassProgressTargetCount(selectedRow);
+    const progressPercent = getClassProgressTargetPercent(selectedRow);
+    const delayedProgressCount = getClassDelayedProgressCount(selectedRow);
+    const latestProgressNote = getClassLatestProgressNote(selectedRow);
+    const isCurriculumBoardRequested = requestedClassDetailSection === "lesson-design-board";
+    const isTextbooksSectionRequested = requestedClassDetailSection === "lesson-design-textbooks";
+    const isCurriculumWorkPanelFocused = isCurriculumBoardRequested &&
+      (!requestedClassDetailSessionId || requestedClassDetailSessionId === firstUnassignedSessionId);
+    const recentSessions = [...sessions]
+      .filter((session) =>
+        hasCurriculumPlanContent(session) ||
+        Boolean(text(session.noteSummary || session.note_summary || session.updatedAt || session.updated_at)),
+      )
+      .slice(-4)
+      .reverse();
+
+    return (
+      <section data-testid="class-curriculum-official-panel" className="space-y-4">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">상태</div>
+            <div className="mt-1 truncate text-sm font-semibold">{getClassCurriculumStateLabel(selectedRow)}</div>
+          </div>
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">교재</div>
+            <div className="mt-1 text-sm font-semibold">{textbooks.length || getClassTextbookCount(selectedRow)}권</div>
+          </div>
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">진도 배정</div>
+            <div className="mt-1 text-sm font-semibold">
+              {progressTargetCount > 0 ? `${plannedProgressCount}/${progressTargetCount}회` : "-"}
+            </div>
+          </div>
+          <div className="rounded-md border bg-background px-3 py-2">
+            <div className="text-xs text-muted-foreground">미배정 회차</div>
+            <div className={cn("mt-1 text-sm font-semibold", delayedProgressCount > 0 && "text-amber-700 dark:text-amber-300")}>
+              {delayedProgressCount}회
+            </div>
+          </div>
+        </section>
+
+        <section
+          id="class-curriculum-unassigned-work-panel"
+          data-testid="class-curriculum-unassigned-work-panel"
+          data-class-detail-focused={isCurriculumWorkPanelFocused ? "true" : undefined}
+          className={cn(
+            "rounded-md border bg-background p-3",
+            isCurriculumWorkPanelFocused && "border-primary/40 bg-primary/5 ring-1 ring-primary/30",
+          )}
+        >
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_auto] lg:items-center">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant={delayedProgressCount > 0 ? "destructive" : "secondary"}>
+                  {delayedProgressCount > 0 ? `미배정 ${delayedProgressCount}회` : "미배정 없음"}
+                </Badge>
+                {firstUnassignedTitle ? (
+                  <Badge id={`class-curriculum-session-${firstUnassignedSessionId}`} variant="outline">
+                    {firstUnassignedTitle}
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="mt-2 text-sm font-semibold">진도 작업 큐</div>
+              <div className="mt-1 truncate text-xs text-muted-foreground">
+                {delayedProgressCount > 0
+                  ? firstUnassignedDescription
+                  : "모든 회차에 교재별 진도 범위가 배정되어 있습니다"}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 px-2.5"
+                onClick={() => router.push(buildLessonDesignFromClassDetailHref({ section: "lesson-design-board" }))}
+              >
+                전체 확인
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 px-2.5"
+                onClick={() => router.push(buildLessonDesignFromClassDetailHref({
+                  section: "lesson-design-board",
+                  sessionId: firstUnassignedSessionId,
+                }))}
+                disabled={delayedProgressCount <= 0}
+              >
+                첫 미배정 처리
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section
+          id="class-curriculum-textbooks-panel"
+          data-testid="class-curriculum-textbooks-panel"
+          data-class-detail-focused={isTextbooksSectionRequested ? "true" : undefined}
+          className={cn(
+            "space-y-2",
+            isTextbooksSectionRequested && "rounded-md border border-primary/40 p-3 ring-1 ring-primary/30",
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold">교재별 영역</div>
+            <Badge variant="secondary" className="h-6 rounded-full px-2">{textbooks.length}권</Badge>
+          </div>
+          {textbooks.length > 0 ? (
+            <div className="grid gap-2 lg:grid-cols-2">
+              {textbooks.map((book, index) => {
+                const title = text(book.title || book.sourceTitle || book.source_title || book.textbookId || book.textbook_id) || "교재명 없음";
+                const scopeLabel = getTextbookScopeLabel(book);
+                const meta = getTextbookMeta(book);
+                const progressSnapshot = textbookProgressSnapshots[index] || {};
+
+                return (
+                  <article
+                    key={`${text(book.textbookId || book.textbook_id) || title}-${index}`}
+                    data-testid="class-curriculum-textbook-progress-card"
+                    className="rounded-md border bg-background p-3"
+                  >
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant={index === 0 ? "default" : "secondary"}>{getTextbookRoleLabel(book.role, index)}</Badge>
+                          {scopeLabel ? <Badge variant="outline">{scopeLabel}</Badge> : null}
+                        </div>
+                        <div className="mt-1 truncate text-sm font-semibold">{title}</div>
+                        <div className="mt-0.5 truncate text-xs text-muted-foreground">{meta || "교재 메타 없음"}</div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 shrink-0 gap-1.5 px-2.5"
+                        data-testid="class-curriculum-manage-textbook"
+                        onClick={() => router.push(buildLessonDesignFromClassDetailHref({
+                          section: "lesson-design-textbooks",
+                          returnTab: "curriculum",
+                        }))}
+                      >
+                        <Settings2 className="size-3.5" aria-hidden="true" />
+                        연결·제거
+                      </Button>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                      <div className="rounded-md bg-muted/35 px-2.5 py-2">
+                        <div className="text-muted-foreground">최근 범위</div>
+                        <div className="mt-1 truncate font-medium">{text(progressSnapshot.recentRangeLabel) || "범위 없음"}</div>
+                      </div>
+                      <div className="rounded-md bg-muted/35 px-2.5 py-2">
+                        <div className="text-muted-foreground">다음 범위</div>
+                        <div className="mt-1 truncate font-medium">{text(progressSnapshot.nextRangeLabel) || "범위 없음"}</div>
+                      </div>
+                      <div className="rounded-md bg-muted/35 px-2.5 py-2">
+                        <div className="text-muted-foreground">계획 회차</div>
+                        <div className="mt-1 font-medium">{Number(progressSnapshot.plannedRangeCount || 0)}회</div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid gap-3 rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+              <div>연결된 교재가 없습니다</div>
+              <div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 px-2.5"
+                  data-testid="class-curriculum-connect-textbook"
+                  onClick={() => router.push(buildLessonDesignFromClassDetailHref({
+                    section: "lesson-design-textbooks",
+                    returnTab: "curriculum",
+                  }))}
+                >
+                  교재 연결
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="grid gap-3 lg:grid-cols-2">
+          <div className="rounded-md border bg-background p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold">다음 예정</div>
+              <Badge variant={delayedProgressCount > 0 ? "destructive" : "secondary"} className="h-6 rounded-full px-2">
+                {progressPercent}%
+              </Badge>
+            </div>
+            {nextSession ? (
+              <div className="mt-3 grid gap-1.5">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium">{getCurriculumSessionTitle(nextSession, "다음 회차")}</span>
+                  <Badge variant={hasCurriculumPlanContent(nextSession) ? "outline" : "destructive"} className="shrink-0">
+                    {getCurriculumSessionStatusLabel(nextSession)}
+                  </Badge>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {getCurriculumSessionDescription(nextSession) || "아직 배정된 진도 범위가 없습니다"}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-md border border-dashed px-3 py-5 text-center text-sm text-muted-foreground">
+                생성된 회차가 없습니다
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-md border bg-background p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold">미배정 회차</div>
+              <Badge variant={pendingSessionLabels.length > 0 ? "destructive" : "secondary"} className="h-6 rounded-full px-2">
+                {pendingSessionLabels.length}건
+              </Badge>
+            </div>
+            {pendingSessionLabels.length > 0 ? (
+              <div className="mt-3 grid gap-1.5">
+                {pendingSessionLabels.slice(0, 5).map((label) => (
+                  <div key={label} className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-muted/35 px-2.5 py-2 text-sm">
+                    <span className="truncate">{label}</span>
+                    <Badge variant="outline" className="shrink-0">대기</Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 rounded-md border border-dashed px-3 py-5 text-center text-sm text-muted-foreground">
+                비어 있는 진도 회차가 없습니다
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold">최근 진행 범위</div>
+            {latestProgressNote ? <div className="max-w-full truncate text-xs text-muted-foreground sm:max-w-[28rem]">{latestProgressNote}</div> : null}
+          </div>
+          {recentSessions.length > 0 ? (
+            <div className="divide-y rounded-md border bg-background">
+              {recentSessions.map((session, index) => {
+                const isFocusedCurriculumSession = isCurriculumBoardRequested &&
+                  requestedClassDetailSessionId === getCurriculumSessionStableId(session);
+
+                return (
+                  <div
+                    key={`${text(session.sessionId || session.session_id) || getCurriculumSessionTitle(session)}-${index}`}
+                    id={`class-curriculum-session-${getCurriculumSessionStableId(session)}`}
+                    data-class-detail-focused={isFocusedCurriculumSession ? "true" : undefined}
+                    className={cn(
+                      "grid gap-1 px-3 py-2.5",
+                      isFocusedCurriculumSession && "bg-primary/5 ring-1 ring-primary/30",
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium">{getCurriculumSessionTitle(session)}</span>
+                      <Badge variant={hasCurriculumPlanContent(session) ? "secondary" : "outline"} className="shrink-0">
+                        {getCurriculumSessionStatusLabel(session)}
+                      </Badge>
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {getCurriculumSessionDescription(session) || "진도 범위 기록 없음"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+              기록된 진행 범위가 없습니다
+            </div>
+          )}
+        </section>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => handleClassDetailTabChange("schedule")}>
+            일정 보기
+          </Button>
+          <Button type="button" onClick={() => router.push(buildLessonDesignFromClassDetailHref())}>
+            교재·진도 편집
+          </Button>
+        </div>
+      </section>
+    );
+  };
+
+  const renderRelationManagementSection = () => {
+    if (!selectedRow || kind === "textbooks") return null;
+    const classEnrolledStudentIds = kind === "classes" ? getClassEnrolledStudentIds(selectedRow) : [];
+    const classWaitlistStudentIds = kind === "classes" ? getClassWaitlistStudentIds(selectedRow) : [];
+    const classCapacity = kind === "classes" ? Number(selectedRow.raw?.capacity || selectedRow.metrics.capacity || 0) : 0;
+    const classRemainingSeats = classCapacity > 0 ? Math.max(classCapacity - classEnrolledStudentIds.length, 0) : null;
+
+    return (
+      <section data-testid={kind === "classes" ? "class-student-roster-panel" : undefined} className="space-y-3 border-t pt-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-semibold">{relationLabel} 관리</div>
+        </div>
+        {kind === "classes" ? (
+          <div data-testid="class-student-roster-summary" className="grid gap-2 text-sm sm:grid-cols-4">
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">정원</div>
+              <div className="mt-1 font-semibold">{classCapacity > 0 ? `${classCapacity}명` : "미정"}</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">등록 학생</div>
+              <div className="mt-1 font-semibold">{classEnrolledStudentIds.length}명</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">대기 학생</div>
+              <div className="mt-1 font-semibold">{classWaitlistStudentIds.length}명</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">잔여 자리</div>
+              <div className={cn("mt-1 font-semibold", classCapacity > 0 && classRemainingSeats === 0 && "text-amber-700 dark:text-amber-300")}>
+                {classRemainingSeats === null ? "정원 미정" : `${classRemainingSeats}명`}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(14rem,1fr)_minmax(14rem,1fr)_auto_auto]">
+          <div className="grid gap-1.5">
+            <Label>{relationLabel} 검색</Label>
+            <Input
+              value={relationQuery}
+              placeholder={`${relationLabel} 이름 검색`}
+              disabled={!canMutateRows}
+              onChange={(event) => setRelationQuery(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>{relationLabel} 선택</Label>
+            <Select value={targetId || "none"} onValueChange={(value) => setTargetId(value === "none" ? "" : value)} disabled={!canMutateRows}>
+              <SelectTrigger className="w-full"><SelectValue placeholder={`${relationLabel} 선택`} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">선택 없음</SelectItem>
+                {filteredAvailableRelatedRows.length === 0 ? (
+                  <SelectItem value="empty" disabled>추가 가능한 {relationLabel} 없음</SelectItem>
+                ) : null}
+                {filteredAvailableRelatedRows.map((record) => (
+                  <SelectItem key={text(record.id)} value={text(record.id)}>
+                    {[relatedTitle(record), relatedMeta(record)].filter(Boolean).join(" · ")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>상태</Label>
+            <div className="grid grid-cols-2 rounded-md border bg-background p-1">
+              <Button
+                type="button"
+                variant={relationMode === "enrolled" ? "default" : "ghost"}
+                size="sm"
+                className="h-8"
+                onClick={() => setRelationMode("enrolled")}
+                disabled={!canMutateRows}
+                aria-pressed={relationMode === "enrolled"}
+              >
+                등록
+              </Button>
+              <Button
+                type="button"
+                variant={relationMode === "waitlist" ? "default" : "ghost"}
+                size="sm"
+                className="h-8"
+                onClick={() => setRelationMode("waitlist")}
+                disabled={!canMutateRows}
+                aria-pressed={relationMode === "waitlist"}
+              >
+                대기
+              </Button>
+            </div>
+          </div>
+          <div className="grid content-end">
+            <Button type="button" className="h-10 px-5" onClick={handleRelationSave} disabled={!canMutateRows || !targetId || saving}>
+              {relationMode === "enrolled" ? "등록 추가" : "대기 추가"}
+            </Button>
+          </div>
+        </div>
+        <div className={cn("grid gap-3 text-sm", kind === "students" && "sm:grid-cols-2")}>
+          {kind === "students" ? (
+            <>
+              {renderRelationList("등록 수업", getStudentEnrolledClassIds(selectedRow), "수강")}
+              {renderRelationList("대기 수업", getStudentWaitlistClassIds(selectedRow), "대기")}
+            </>
+          ) : (
+            <>
+              {renderRelationList("등록 학생", classEnrolledStudentIds, "수강")}
+              {renderRelationList("대기 학생", classWaitlistStudentIds, "대기")}
+            </>
+          )}
+        </div>
+      </section>
+    );
   };
 
   return (
@@ -1294,8 +3110,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         />
       </div>
 
-      <Dialog open={dialogMode !== null} onOpenChange={(open) => !open && setDialogMode(null)}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
+      <Dialog open={dialogMode !== null} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="z-[80] max-h-[92vh] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto p-4 sm:w-full sm:max-w-5xl sm:p-6">
           <DialogHeader>
             <DialogTitle>{dialogTitle}</DialogTitle>
             <DialogDescription className="sr-only">
@@ -1309,22 +3125,106 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             </Alert>
           ) : null}
 
-          {isDetail && selectedRow ? (
+          {isDetail && selectedRow && kind === "classes" ? (
+            <div data-testid="class-official-detail" className="space-y-4 pb-32 md:pb-0">
+              {renderClassSummaryBar()}
+
+              <section className="space-y-2">
+                <Label htmlFor={`${kind}-detail-row-search`}>수업 빠른 이동</Label>
+                <Input
+                  id={`${kind}-detail-row-search`}
+                  value={detailRowQuery}
+                  placeholder="수업명 검색"
+                  onChange={(event) => setDetailRowQuery(event.target.value)}
+                />
+                {detailSearchMatches.length > 0 ? (
+                  <div className="overflow-hidden rounded-lg border bg-background">
+                    {detailSearchMatches.map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        className="grid w-full gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/60"
+                        onClick={() => void openRow(row, { tab: activeClassDetailTab })}
+                      >
+                        <span className="truncate text-sm font-medium">{row.title}</span>
+                        <span className="truncate text-xs text-muted-foreground">{row.subtitle || row.metaSummary || "-"}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              <Tabs
+                value={activeClassDetailTab}
+                onValueChange={handleClassDetailTabChange}
+                data-testid="class-official-detail-tabs"
+                className="min-w-0"
+              >
+                <TabsList className="grid h-auto w-full grid-cols-4 rounded-lg border bg-muted/35 p-1">
+                  {CLASS_DETAIL_TABS.map((tab) => (
+                    <TabsTrigger key={tab.value} value={tab.value} className="min-h-8 min-w-0 whitespace-normal break-keep px-1 text-[11px] leading-tight sm:text-sm">
+                      <span>{tab.label}</span>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+
+                <TabsContent value="basic" className="mt-4 space-y-4">
+                  <section className="space-y-3">
+                    <div className="text-sm font-semibold">기본 정보</div>
+                    {renderEditableFields("detail", [
+                      "name",
+                      "status",
+                      "subject",
+                      "grade",
+                      "teacher",
+                      "classroom",
+                      "capacity",
+                      "fee",
+                      "classGroupIds",
+	                    ])}
+	                  </section>
+	                  {renderClassAuditTimeline()}
+	                </TabsContent>
+
+                <TabsContent value="students" className="mt-4 space-y-4" data-testid="class-detail-students-tab">
+                  {renderRelationManagementSection()}
+                </TabsContent>
+
+                <TabsContent value="schedule" className="mt-4 space-y-4" data-testid="class-detail-schedule-tab">
+                  {renderClassSchedulePanel()}
+                </TabsContent>
+
+                <TabsContent value="curriculum" className="mt-4 space-y-4" data-testid="class-detail-curriculum-tab">
+                  {renderClassCurriculumPanel()}
+                </TabsContent>
+              </Tabs>
+              {renderClassMobileActionBar()}
+
+              <DialogFooter className="items-center gap-3">
+                {renderSaveStatus()}
+                <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button>
+                <Button type="button" variant="destructive" onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving || !canMutateRows}>
+                  종강 처리
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : isDetail && selectedRow ? (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge>{selectedRow.badge}</Badge>
                   <Badge variant="secondary">{selectedRow.status}</Badge>
                 </div>
-                {kind === "classes" ? (
+                {kind === "students" && requestedStudentReturnPath ? (
                   <Button
                     type="button"
-                    variant="outline"
                     size="sm"
-                    onClick={() => router.push(`/admin/curriculum/lesson-design?classId=${encodeURIComponent(selectedRow.id)}`)}
-                    aria-label="수업 상세에서 수업설계로 이동"
+                    variant="outline"
+                    data-testid="student-detail-return-to-class"
+                    className="h-8 rounded-md px-2.5 text-xs"
+                    onClick={() => router.push(requestedStudentReturnPath)}
                   >
-                    수업 설계 열기
+                    수업 상세
                   </Button>
                 ) : null}
               </div>
@@ -1370,99 +3270,25 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                 {renderEditableFields("detail")}
               </section>
 
-              {kind !== "textbooks" ? (
-                <section className="space-y-3 border-t pt-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold">{relationLabel} 관리</div>
-                  </div>
-                  <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(14rem,1fr)_minmax(14rem,1fr)_auto_auto]">
-                    <div className="grid gap-1.5">
-                      <Label>{relationLabel} 검색</Label>
-                      <Input
-                        value={relationQuery}
-                        placeholder={`${relationLabel} 이름 검색`}
-                        onChange={(event) => setRelationQuery(event.target.value)}
-                      />
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label>{relationLabel} 선택</Label>
-                      <Select value={targetId || "none"} onValueChange={(value) => setTargetId(value === "none" ? "" : value)}>
-                        <SelectTrigger className="w-full"><SelectValue placeholder={`${relationLabel} 선택`} /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">선택 없음</SelectItem>
-                          {filteredAvailableRelatedRows.length === 0 ? (
-                            <SelectItem value="empty" disabled>추가 가능한 {relationLabel} 없음</SelectItem>
-                          ) : null}
-                          {filteredAvailableRelatedRows.map((record) => (
-                            <SelectItem key={text(record.id)} value={text(record.id)}>
-                              {[relatedTitle(record), relatedMeta(record)].filter(Boolean).join(" · ")}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label>상태</Label>
-                      <div className="grid grid-cols-2 rounded-md border bg-background p-1">
-                        <Button
-                          type="button"
-                          variant={relationMode === "enrolled" ? "default" : "ghost"}
-                          size="sm"
-                          className="h-8"
-                          onClick={() => setRelationMode("enrolled")}
-                          aria-pressed={relationMode === "enrolled"}
-                        >
-                          등록
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={relationMode === "waitlist" ? "default" : "ghost"}
-                          size="sm"
-                          className="h-8"
-                          onClick={() => setRelationMode("waitlist")}
-                          aria-pressed={relationMode === "waitlist"}
-                        >
-                          대기
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="grid content-end">
-                      <Button type="button" className="h-10 px-5" onClick={handleRelationSave} disabled={!targetId || saving}>
-                        {relationMode === "enrolled" ? "등록 추가" : "대기 추가"}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="grid gap-3 text-sm sm:grid-cols-2">
-                    {kind === "students" ? (
-                      <>
-                        {renderRelationList("등록 수업", getStudentEnrolledClassIds(selectedRow), "수강")}
-                        {renderRelationList("대기 수업", getStudentWaitlistClassIds(selectedRow), "대기")}
-                      </>
-                    ) : (
-                      <>
-                        {renderRelationList("등록 학생", getClassEnrolledStudentIds(selectedRow), "수강")}
-                        {renderRelationList("대기 학생", getClassWaitlistStudentIds(selectedRow), "대기")}
-                      </>
-                    )}
-                  </div>
-                </section>
-              ) : null}
+              {renderRelationManagementSection()}
 
               {kind === "students" ? renderStudentHistoryPanel(selectedRow) : null}
 
-              <DialogFooter>
-                <Button type="button" onClick={handleDetailSave} disabled={saving}>{saving ? "저장 중" : "저장"}</Button>
-                <Button type="button" variant="destructive" onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving}>
-                  {kind === "students" ? "퇴원 처리" : "삭제"}
+              <DialogFooter className="items-center gap-3">
+                {renderSaveStatus()}
+                <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button>
+                <Button type="button" variant="destructive" onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving || !canMutateRows}>
+                  {deleteActionLabel}
                 </Button>
               </DialogFooter>
             </div>
           ) : (
             <form className="space-y-4" onSubmit={handleSubmit}>
               {renderEditableFields("form")}
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setDialogMode(null)} disabled={saving}>취소</Button>
-                <Button type="submit" disabled={saving}>{saving ? "저장 중" : "등록 저장"}</Button>
+              <DialogFooter className="items-center gap-3">
+                {renderSaveStatus()}
+                <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>취소</Button>
+                <Button type="submit" disabled={saving || !canMutateRows}>{saving ? "저장 중" : "등록 저장"}</Button>
               </DialogFooter>
             </form>
           )}

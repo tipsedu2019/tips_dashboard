@@ -49,6 +49,7 @@ export type ClassScheduleRouteRow = {
   latestPlannedSessionIndex: number;
   latestActualSessionIndex: number;
   nextActionSessionId: string;
+  pendingSessionSummary: string;
   syncGroupName: string;
   warningText: string;
   raw: Record<string, unknown>;
@@ -102,3 +103,7 @@ export function buildClassScheduleRouteModel(input?: {
   syncGroupMembers?: OperationsSourceRow[];
   filters?: Record<string, string>;
 }): ClassScheduleRouteModel;
+
+export function buildClassSchedulePendingSessionSummary(
+  sessions?: OperationsSourceRow[],
+): string;

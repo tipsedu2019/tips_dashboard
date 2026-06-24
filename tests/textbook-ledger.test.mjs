@@ -165,6 +165,14 @@ test("barcode values normalize to digits for ISBN and scanner matching", () => {
   assert.equal(normalizeBarcodeValue(" 880 1234 567890 "), "8801234567890");
 });
 
+test("optional UUID normalization accepts canonical Notion-style textbook IDs", () => {
+  assert.equal(
+    normalizeOptionalUuid("290bd6d4-d474-8054-8e79-f391ecb45294"),
+    "290bd6d4-d474-8054-8e79-f391ecb45294",
+  );
+  assert.equal(normalizeOptionalUuid("개념+유형 기초탄탄 라이트 중학 수학 3-1 (2027년)"), null);
+});
+
 test("textbook reference lookup tolerates compact math textbook titles", () => {
   const textbooks = [
     { id: "concept-type", title: "개념 + 유형 기초탄탄 라이트 중학수학 3-1 (2027년)" },

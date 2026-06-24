@@ -11,6 +11,7 @@ import {
   normalizeStudentManagementRecord,
   normalizeTextbookManagementRecord,
 } from "./records.js";
+import { buildCurriculumWorkspaceModel } from "../academic/records.js";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -91,6 +92,12 @@ function isMissingRelationError(error: unknown) {
   );
 }
 
+function isMissingColumnError(error: unknown) {
+  const message = String((error as { message?: string })?.message || "").toLowerCase();
+  return message.includes("column") &&
+    (message.includes("does not exist") || message.includes("schema cache") || message.includes("could not find"));
+}
+
 function withTableTimeout<T>(request: PromiseLike<T>, table: string, optional: boolean): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<T>((resolve, reject) => {
@@ -115,7 +122,7 @@ async function readOptionalTable(table: string, columns = "*") {
   const { data, error } = await withTableTimeout(supabase!.from(table).select(columns), table, true);
 
   if (error) {
-    if (isMissingRelationError(error)) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) {
       return [] as Record<string, unknown>[];
     }
     throw error;
@@ -150,12 +157,27 @@ function listValue(value: unknown): string[] {
 
 function toClassStudentSummary(student: Record<string, unknown> | undefined, id: string) {
   const studentName = textValue(student?.name);
+  const recentIssue = textValue(
+    student?.recent_issue ||
+      student?.recentIssue ||
+      student?.latest_issue ||
+      student?.latestIssue ||
+      student?.special_note ||
+      student?.specialNote ||
+      student?.important_note ||
+      student?.importantNote,
+  );
 
   return {
     id,
     name: studentName || "학생 정보 확인 필요",
     school: textValue(student?.school),
     grade: textValue(student?.grade),
+    status: textValue(student?.status),
+    contact: textValue(student?.contact || student?.phone || student?.student_contact || student?.studentContact),
+    parentContact: textValue(student?.parent_contact || student?.parentContact || student?.guardian_contact || student?.guardianContact),
+    counselingNote: textValue(student?.counseling_note || student?.counselingNote || student?.memo || student?.note),
+    recentIssue,
   };
 }
 
@@ -341,6 +363,111 @@ function attachClassGroupSummaries(
   };
 }
 
+function attachClassCurriculumSummary(
+  classRow: Record<string, unknown>,
+  curriculumByClassId: Map<string, Record<string, unknown>>,
+) {
+  const classId = textValue(classRow.id);
+  const curriculum = curriculumByClassId.get(classId);
+  if (!curriculum) {
+    return classRow;
+  }
+
+  return {
+    ...classRow,
+    curriculum_summary: curriculum,
+    curriculumSummary: curriculum,
+    state_label: curriculum.stateLabel,
+    stateLabel: curriculum.stateLabel,
+    textbook_count: curriculum.textbookCount,
+    textbookCount: curriculum.textbookCount,
+    textbook_catalog: curriculum.textbookCatalog,
+    textbookCatalog: curriculum.textbookCatalog,
+    total_sessions: curriculum.totalSessions,
+    totalSessions: curriculum.totalSessions,
+    progress_target_sessions: curriculum.progressTargetSessions,
+    progressTargetSessions: curriculum.progressTargetSessions,
+    planned_progress_sessions: curriculum.plannedProgressSessions,
+    plannedProgressSessions: curriculum.plannedProgressSessions,
+    delayed_progress_sessions: curriculum.delayedProgressSessions,
+    delayedProgressSessions: curriculum.delayedProgressSessions,
+    progress_target_percent: curriculum.progressTargetPercent,
+    progressTargetPercent: curriculum.progressTargetPercent,
+    next_session: curriculum.nextSession,
+    nextSession: curriculum.nextSession,
+  };
+}
+
+async function readOptionalClassAuditLogs() {
+  if (!supabase) {
+    return [] as Record<string, unknown>[];
+  }
+
+  const { data, error } = await withTableTimeout(
+    supabase
+      .from("dashboard_audit_logs")
+      .select("id, actor_profile_id, actor_email, actor_role, action, entity_table, entity_id, entity_label, changed_at")
+      .eq("entity_table", "classes")
+      .order("changed_at", { ascending: false })
+      .limit(300),
+    "dashboard_audit_logs",
+    true,
+  );
+
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) {
+      return [] as Record<string, unknown>[];
+    }
+    throw error;
+  }
+
+  return (data || []) as unknown as Record<string, unknown>[];
+}
+
+function toClassAuditSummary(log: Record<string, unknown>) {
+  return {
+    id: textValue(log.id),
+    action: textValue(log.action),
+    actorProfileId: textValue(log.actor_profile_id || log.actorProfileId),
+    actorEmail: textValue(log.actor_email || log.actorEmail),
+    actorRole: textValue(log.actor_role || log.actorRole),
+    changedAt: textValue(log.changed_at || log.changedAt),
+  };
+}
+
+function attachClassAuditSummary(
+  classRow: Record<string, unknown>,
+  auditLogsByClassId: Map<string, Record<string, unknown>[]>,
+) {
+  const classId = textValue(classRow.id);
+  const auditLogs = (auditLogsByClassId.get(classId) || []).map(toClassAuditSummary);
+  const latestAudit = auditLogs[0];
+  const latestChangedAt = textValue(classRow.updated_at || classRow.updatedAt || latestAudit?.changedAt);
+  const latestActor = textValue(
+    classRow.updated_by_name ||
+      classRow.updatedByName ||
+      classRow.updated_by ||
+      classRow.updatedBy ||
+      latestAudit?.actorEmail ||
+      latestAudit?.actorRole ||
+      latestAudit?.actorProfileId,
+  );
+
+  return {
+    ...classRow,
+    audit_logs: auditLogs,
+    auditLogs,
+    latest_audit_action: latestAudit?.action || "",
+    latestAuditAction: latestAudit?.action || "",
+    updated_at: latestChangedAt,
+    updatedAt: latestChangedAt,
+    updated_by: latestActor,
+    updatedBy: latestActor,
+    updated_by_name: latestActor,
+    updatedByName: latestActor,
+  };
+}
+
 export function useManagementRecords(kind: ManagementKind) {
   const [rows, setRows] = useState<ManagementRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -400,10 +527,14 @@ export function useManagementRecords(kind: ManagementKind) {
       }
 
       if (kind === "classes") {
-        const [students, classGroups, classGroupMembers] = await Promise.all([
-          readOptionalTable("students", "id,name,school,grade"),
+        const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs] = await Promise.all([
+          readOptionalTable("students"),
           readOptionalTable("class_schedule_sync_groups", "id,name,subject"),
           readOptionalTable("class_schedule_sync_group_members", "group_id,class_id,sort_order"),
+          readOptionalTable("class_terms"),
+          readOptionalTable("textbooks"),
+          readOptionalTable("progress_logs"),
+          readOptionalClassAuditLogs(),
         ]);
         const studentsById = new Map(
           students.map((student) => [textValue(student.id), student]),
@@ -422,13 +553,32 @@ export function useManagementRecords(kind: ManagementKind) {
           result.set(classId, list);
           return result;
         }, new Map());
+        const curriculumModel = buildCurriculumWorkspaceModel({
+          classes: sourceRows,
+          classTerms,
+          classGroups,
+          classGroupMembers,
+          textbooks,
+          progressLogs,
+          filters: {},
+        }) as { rows?: Record<string, unknown>[] };
+        const curriculumByClassId = new Map(
+          (curriculumModel.rows || []).map((row) => [textValue(row.id), row]),
+        );
+        const auditLogsByClassId = groupRowsByKey(classAuditLogs, "entity_id");
 
         sourceRows = sourceRows.map((row) =>
           ({
-            ...attachClassGroupSummaries(
-            attachClassStudentSummaries(row, studentsById),
-            groupsById,
-            membersByClassId,
+            ...attachClassAuditSummary(
+              attachClassCurriculumSummary(
+                attachClassGroupSummaries(
+                  attachClassStudentSummaries(row, studentsById),
+                  groupsById,
+                  membersByClassId,
+                ),
+                curriculumByClassId,
+              ),
+              auditLogsByClassId,
             ),
             available_class_groups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
             availableClassGroups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),

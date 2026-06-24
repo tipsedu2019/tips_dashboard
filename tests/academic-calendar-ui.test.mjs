@@ -50,6 +50,22 @@ test("academic calendar month view switches to readable mobile agenda cards", as
   assert.match(source, /className="hidden flex-1 bg-background md:block"/);
 });
 
+test("academic calendar month bars stay below the day number row", async () => {
+  const source = await readFile(
+    new URL("src/app/admin/calendar/components/calendar-main.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /const MONTH_GRID_DAY_HEADER_HEIGHT = 44/);
+  assert.match(source, /const MONTH_GRID_EVENT_LANE_HEIGHT = 26/);
+  assert.match(source, /const MONTH_GRID_CELL_BODY_HEIGHT = 70/);
+  assert.match(source, /segmentOffset = MONTH_GRID_DAY_HEADER_HEIGHT \+ laneCount \* MONTH_GRID_EVENT_LANE_HEIGHT/);
+  assert.match(source, /style=\{\{ top: `\$\{MONTH_GRID_DAY_HEADER_HEIGHT\}px` \}\}/);
+  assert.match(source, /const top = `\$\{segment\.lane \* MONTH_GRID_EVENT_LANE_HEIGHT\}px`/);
+  assert.match(source, /absolute top-2 left-2 right-2 z-10 flex items-center justify-between/);
+  assert.doesNotMatch(source, /absolute inset-x-0 top-8/);
+});
+
 test("shared date picker defaults to Korean calendar labels", async () => {
   const source = await readFile(
     new URL("src/components/ui/calendar.tsx", root),

@@ -629,6 +629,36 @@ function getPlanRangeLabel(entry = {}) {
   return [start, end].filter(Boolean).join("~");
 }
 
+function normalizeCurriculumTextbookEntry(entry = {}) {
+  const plan = entry?.plan && typeof entry.plan === "object" ? entry.plan : entry;
+  const textbookId = text(entry?.textbookId || entry?.textbook_id || entry?.id);
+  const textbookTitle = text(
+    entry?.textbookTitle ||
+      entry?.textbook_title ||
+      entry?.title ||
+      entry?.name ||
+      plan?.textbookTitle ||
+      plan?.textbook_title,
+  );
+  const startRange = text(plan?.start || plan?.from || plan?.startRange || plan?.start_range);
+  const endRange = text(plan?.end || plan?.to || plan?.endRange || plan?.end_range);
+  const rangeLabel = getPlanRangeLabel(entry);
+
+  if (!textbookId && !textbookTitle && !rangeLabel) {
+    return null;
+  }
+
+  return {
+    textbookId,
+    textbookTitle,
+    startRange,
+    endRange,
+    rangeLabel,
+    memo: text(plan?.memo || plan?.note || plan?.teacherNote || plan?.teacher_note),
+    status: text(entry?.status || entry?.progressStatus || entry?.progress_status || plan?.status),
+  };
+}
+
 function summarizeSessionPlanEntries(entries = []) {
   const labels = toArray(entries)
     .map((entry) => getPlanRangeLabel(entry))
@@ -776,6 +806,7 @@ function createCurriculumSessionSummaries(classItem, progressSummary) {
         matchedLog?.textbookEntries,
         matchedLog?.textbook_entries,
       ].find((entries) => Array.isArray(entries) && entries.length > 0) || [];
+    const normalizedTextbookEntries = toArray(textbookEntries).map(normalizeCurriculumTextbookEntry).filter(Boolean);
     const planSummary = summarizeSessionPlanEntries(textbookEntries);
     const dateValue = text(session?.date || session?.session_date || session?.dateValue || session?.date_value);
     const periodLabel = text(
@@ -784,6 +815,10 @@ function createCurriculumSessionSummaries(classItem, progressSummary) {
         session?.billingLabel ||
         session?.billing_label,
     );
+    const scheduleState = text(session?.state || session?.scheduleState || session?.schedule_state) || "active";
+    const scheduleMemo = text(session?.memo || session?.scheduleMemo || session?.schedule_memo);
+    const makeupMemo = text(session?.makeupMemo || session?.makeup_memo);
+    const makeupDate = text(session?.makeupDate || session?.makeup_date);
     const displayLabel = [
       dateValue ? formatCurriculumSessionDate(dateValue) : "",
       sessionNumber > 0 ? `${sessionNumber}회차` : sessionId || "기록 회차",
@@ -802,9 +837,14 @@ function createCurriculumSessionSummaries(classItem, progressSummary) {
       dateValue,
       dateLabel: dateValue ? formatCurriculumSessionDate(dateValue) : "",
       periodLabel,
+      scheduleState,
+      scheduleMemo,
+      makeupMemo,
+      makeupDate,
       hasPlanContent: planSummary.hasPlanContent,
       planSummary: planSummary.label,
-      textbookEntryCount: toArray(textbookEntries).length,
+      textbookEntryCount: normalizedTextbookEntries.length,
+      textbookEntries: normalizedTextbookEntries,
     };
   });
 
@@ -854,9 +894,14 @@ function createCurriculumSessionSummaries(classItem, progressSummary) {
         dateValue,
         dateLabel: dateValue ? formatCurriculumSessionDate(dateValue) : "",
         periodLabel: "",
+        scheduleState: text(session?.scheduleState || session?.schedule_state || session?.state) || "recorded",
+        scheduleMemo: "",
+        makeupMemo: "",
+        makeupDate: "",
         hasPlanContent: false,
         planSummary: "",
         textbookEntryCount: 0,
+        textbookEntries: [],
       };
     });
 

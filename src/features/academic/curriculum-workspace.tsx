@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
-import { BookOpen, CalendarDays, CheckCircle2, ClipboardList, SlidersHorizontal } from "lucide-react";
+import { type KeyboardEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,7 @@ const CURRICULUM_VIEW_MODES = [
   { value: "update", label: "진도 미배정" },
   { value: "done", label: "계획 완료" },
 ] as const;
+const CURRICULUM_SCROLL_STORAGE_PREFIX = "tips:curriculum-work-queue-scroll:";
 
 function rowMatchesViewMode(row: Record<string, unknown>, viewMode: string) {
   if (viewMode === "unlinked") {
@@ -71,32 +73,100 @@ function text(value: unknown) {
   return String(value || "").trim();
 }
 
-function buildLessonDesignHref(classId: string, sessionId = "", sectionId = "") {
+function getCurriculumScrollStorageKey(returnPath: string) {
+  return `${CURRICULUM_SCROLL_STORAGE_PREFIX}${returnPath || "/admin/curriculum"}`;
+}
+
+function parseStoredCurriculumScroll(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { pageY?: unknown; listY?: unknown };
+    return {
+      pageY: Number(parsed.pageY || 0),
+      listY: Number(parsed.listY || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCurriculumViewMode(value: unknown) {
+  const normalized = text(value);
+  return CURRICULUM_VIEW_MODES.some((mode) => mode.value === normalized) ? normalized : "all";
+}
+
+function applyCurriculumQueryState(
+  params: URLSearchParams,
+  state: {
+    search: string;
+    period: string;
+    status: string;
+    subject: string;
+    grade: string;
+    teacher: string;
+    classroom: string;
+    viewMode: string;
+  },
+) {
+  const values = [
+    ["q", state.search.trim(), ""],
+    ["period", state.period, ""],
+    ["status", state.status, DEFAULT_CURRICULUM_STATUS_FILTER],
+    ["subject", state.subject, ""],
+    ["grade", state.grade, ""],
+    ["teacher", state.teacher, ""],
+    ["classroom", state.classroom, ""],
+    ["view", normalizeCurriculumViewMode(state.viewMode), "all"],
+  ] as const;
+
+  for (const [key, value, defaultValue] of values) {
+    if (value && value !== defaultValue) {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+  }
+
+  params.delete("classId");
+  params.delete("tab");
+  params.delete("section");
+  params.delete("sessionId");
+  params.delete("returnTo");
+}
+
+function buildCurriculumListHref(
+  pathname: string,
+  currentQuery: string,
+  state: Parameters<typeof applyCurriculumQueryState>[1],
+) {
+  const params = new URLSearchParams(currentQuery);
+  applyCurriculumQueryState(params, state);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+function buildClassDetailHref(classId: string, tab = "basic", sectionId = "", sessionId = "", returnTo = "") {
   const normalizedClassId = text(classId);
   if (!normalizedClassId) {
-    return "/admin/curriculum";
+    return "/admin/classes";
   }
 
   const params = new URLSearchParams();
   params.set("classId", normalizedClassId);
-  params.set("lessonDesign", "1");
-  const normalizedSessionId = text(sessionId);
-  if (normalizedSessionId) {
-    params.set("sessionId", normalizedSessionId);
-  }
+  params.set("tab", tab || "basic");
   const normalizedSectionId = text(sectionId);
   if (normalizedSectionId) {
     params.set("section", normalizedSectionId);
   }
-  return `/admin/curriculum/lesson-design?${params.toString()}`;
-}
-
-function getSessionSummaryLinkKey(session: Record<string, unknown>, index: number) {
-  const stableId = text(session.sessionId || session.id);
-  const sessionOrder = text(session.sessionOrder ?? session.sessionNumber);
-  const dateValue = text(session.dateValue || session.dateLabel);
-  const label = text(session.label);
-  return [stableId || `session-${index}`, sessionOrder, dateValue, label, String(index)].filter(Boolean).join(":");
+  const normalizedSessionId = text(sessionId);
+  if (normalizedSessionId) {
+    params.set("sessionId", normalizedSessionId);
+  }
+  const normalizedReturnTo = text(returnTo);
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  return `/admin/classes?${params.toString()}`;
 }
 
 function getCurriculumDesignAction(row: Record<string, unknown>) {
@@ -104,18 +174,18 @@ function getCurriculumDesignAction(row: Record<string, unknown>) {
   const sessionId = text(nextSession.id || nextSession.sessionId);
 
   if (Number(row.textbookCount || 0) <= 0) {
-    return { label: "교재", sectionId: "lesson-design-textbooks", sessionId: "" };
+    return { label: "교재", tab: "curriculum", sectionId: "lesson-design-textbooks", sessionId: "", reason: "교재 연결 필요" };
   }
 
   if (Number(row.totalSessions || 0) <= 0) {
-    return { label: "일정", sectionId: "lesson-design-periods", sessionId: "" };
+    return { label: "일정", tab: "schedule", sectionId: "lesson-design-periods", sessionId: "", reason: "회차 생성 필요" };
   }
 
   if (Number(row.delayedProgressSessions || 0) > 0) {
-    return { label: "진도", sectionId: "lesson-design-board", sessionId };
+    return { label: "진도", tab: "curriculum", sectionId: "lesson-design-board", sessionId, reason: `미배정 ${Number(row.delayedProgressSessions || 0)}회` };
   }
 
-  return { label: "보기", sectionId: "lesson-design-board", sessionId };
+  return { label: "보기", tab: "basic", sectionId: "", sessionId: "", reason: "기본 정보 확인" };
 }
 
 function formatTextbookCount(count: number) {
@@ -158,17 +228,10 @@ function CurriculumWorkspaceSkeleton() {
       </div>
 
       <div className="px-4 lg:px-6">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(24rem,0.65fr)]">
-          <div className="border border-border/70 bg-background px-4 py-4">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <Skeleton key={`row-${index}`} className="mb-3 h-16 w-full" />
-            ))}
-          </div>
-          <div className="border border-border/70 bg-background px-4 py-4">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="mt-4 h-28 w-full" />
-            <Skeleton className="mt-3 h-28 w-full" />
-          </div>
+        <div className="border border-border/70 bg-background px-4 py-4">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Skeleton key={`row-${index}`} className="mb-3 h-16 w-full" />
+          ))}
         </div>
       </div>
     </div>
@@ -176,16 +239,20 @@ function CurriculumWorkspaceSkeleton() {
 }
 
 export function AcademicCurriculumWorkspace() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const searchParamString = searchParams.toString();
+  const desktopListRef = useRef<HTMLDivElement | null>(null);
   const { data, loading, error } = useAcademicWorkspaceData();
-  const [search, setSearch] = useState("");
-  const [period, setPeriod] = useState("");
-  const [status, setStatus] = useState(DEFAULT_CURRICULUM_STATUS_FILTER);
-  const [subject, setSubject] = useState("");
-  const [grade, setGrade] = useState("");
-  const [teacher, setTeacher] = useState("");
-  const [classroom, setClassroom] = useState("");
-  const [viewMode, setViewMode] = useState("all");
-  const [selectedClassId, setSelectedClassId] = useState("");
+  const [search, setSearch] = useState(() => text(searchParams.get("q")));
+  const [period, setPeriod] = useState(() => text(searchParams.get("period")));
+  const [status, setStatus] = useState(() => text(searchParams.get("status")) || DEFAULT_CURRICULUM_STATUS_FILTER);
+  const [subject, setSubject] = useState(() => text(searchParams.get("subject")));
+  const [grade, setGrade] = useState(() => text(searchParams.get("grade")));
+  const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
+  const [classroom, setClassroom] = useState(() => text(searchParams.get("classroom")));
+  const [viewMode, setViewMode] = useState(() => normalizeCurriculumViewMode(searchParams.get("view")));
   const [classListLimitsByScope, setClassListLimitsByScope] = useState<Record<string, number>>({});
   const deferredSearch = useDeferredValue(search);
 
@@ -333,17 +400,97 @@ export function AcademicCurriculumWorkspace() {
       })),
     [curriculumViewModeCounts],
   );
-  const selectedRow = useMemo(
-    () =>
-      viewRows.find((row) => row.id === selectedClassId) ||
-      viewRows[0] ||
-      null,
-    [selectedClassId, viewRows],
+  const curriculumQueryState = useMemo(
+    () => ({
+      search,
+      period,
+      status,
+      subject,
+      grade,
+      teacher,
+      classroom,
+      viewMode,
+    }),
+    [classroom, grade, period, search, status, subject, teacher, viewMode],
   );
-  const selectedRowProgressAction = selectedRow ? getCurriculumDesignAction(selectedRow) : null;
-  const selectedProgressTargetSessionCount = selectedRow
-    ? selectedRow.progressTargetSessions ?? selectedRow.totalSessions
-    : 0;
+  const curriculumReturnPath = useMemo(
+    () => buildCurriculumListHref(pathname, searchParamString, curriculumQueryState),
+    [curriculumQueryState, pathname, searchParamString],
+  );
+
+  useEffect(() => {
+    const nextHref = buildCurriculumListHref(pathname, searchParamString, curriculumQueryState);
+    const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+    if (nextHref !== currentHref) {
+      router.replace(nextHref, { scroll: false });
+    }
+  }, [curriculumQueryState, pathname, router, searchParamString]);
+
+  const rememberCurriculumScrollPosition = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const viewport = desktopListRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    window.sessionStorage.setItem(
+      getCurriculumScrollStorageKey(curriculumReturnPath),
+      JSON.stringify({
+        pageY: window.scrollY,
+        listY: viewport?.scrollTop || 0,
+      }),
+    );
+  }, [curriculumReturnPath]);
+
+  const openCurriculumRow = useCallback(
+    (row: Record<string, unknown>, rowDesignAction: ReturnType<typeof getCurriculumDesignAction>) => {
+      rememberCurriculumScrollPosition();
+      router.push(buildClassDetailHref(
+        text(row.id),
+        rowDesignAction.tab,
+        rowDesignAction.sectionId,
+        rowDesignAction.sessionId,
+        curriculumReturnPath,
+      ));
+    },
+    [curriculumReturnPath, rememberCurriculumScrollPosition, router],
+  );
+
+  const handleCurriculumRowKeyDown = useCallback(
+    (
+      event: KeyboardEvent<HTMLElement>,
+      row: Record<string, unknown>,
+      rowDesignAction: ReturnType<typeof getCurriculumDesignAction>,
+    ) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      openCurriculumRow(row, rowDesignAction);
+    },
+    [openCurriculumRow],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined" || loading) return undefined;
+    const savedScroll = parseStoredCurriculumScroll(
+      window.sessionStorage.getItem(getCurriculumScrollStorageKey(curriculumReturnPath)),
+    );
+    if (!savedScroll) return undefined;
+
+    const restoreScroll = () => {
+      const viewport = desktopListRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+      if (savedScroll.pageY > 0) {
+        window.scrollTo({ top: savedScroll.pageY });
+      }
+      if (viewport && savedScroll.listY > 0) {
+        viewport.scrollTop = savedScroll.listY;
+      }
+    };
+
+    const firstFrame = window.requestAnimationFrame(() => {
+      restoreScroll();
+      window.requestAnimationFrame(restoreScroll);
+    });
+    return () => window.cancelAnimationFrame(firstFrame);
+  }, [curriculumReturnPath, loading, visibleViewRows.length]);
 
   const resetFilters = () => {
     setSearch("");
@@ -369,9 +516,7 @@ export function AcademicCurriculumWorkspace() {
       emptyLabel: "기간 없음",
       disabled: model.classGroupOptions.length === 0,
       onChange: (value) => {
-        if (value !== "none") {
-          setPeriod(value);
-        }
+        setPeriod(value === "none" ? "" : value);
       },
     },
     {
@@ -543,8 +688,7 @@ export function AcademicCurriculumWorkspace() {
       </div>
 
       <div className="px-4 lg:px-6">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(24rem,0.65fr)]">
-          <section className="overflow-hidden rounded-lg border border-border/70 bg-background">
+        <section className="overflow-hidden rounded-lg border border-border/70 bg-background">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
               <div className="flex items-center gap-2">
                 <ClipboardList className="size-4 text-muted-foreground" />
@@ -564,7 +708,6 @@ export function AcademicCurriculumWorkspace() {
               <>
                 <div data-testid="curriculum-mobile-list" className="grid gap-2 p-3 md:hidden">
                   {visibleViewRows.map((row) => {
-                    const isSelected = selectedRow?.id === row.id;
                     const rowDesignAction = getCurriculumDesignAction(row);
                     const hasLinkedTextbooks = row.textbookCount > 0;
                     const progressTargetSessionCount = row.progressTargetSessions ?? row.totalSessions;
@@ -573,21 +716,12 @@ export function AcademicCurriculumWorkspace() {
                       <article
                         key={`mobile-${row.id}`}
                         data-testid={`curriculum-mobile-card-${row.id}`}
-                        role="button"
+                        role="link"
                         tabIndex={0}
-                        data-selected={isSelected ? "true" : "false"}
-                        aria-label={`${row.title} 선택`}
-                        className={[
-                          "rounded-md border bg-background p-3 shadow-xs transition-colors",
-                          isSelected ? "border-primary bg-primary/5" : "hover:border-primary/40 hover:bg-muted/30",
-                        ].join(" ")}
-                        onClick={() => setSelectedClassId(row.id)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setSelectedClassId(row.id);
-                          }
-                        }}
+                        aria-label={`${row.title} ${rowDesignAction.label} ${rowDesignAction.reason}`}
+                        className="cursor-pointer rounded-md border bg-background p-3 shadow-xs transition-colors hover:border-primary/40 hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => openCurriculumRow(row, rowDesignAction)}
+                        onKeyDown={(event) => handleCurriculumRowKeyDown(event, row, rowDesignAction)}
                       >
                         <div className="space-y-3">
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -638,12 +772,25 @@ export function AcademicCurriculumWorkspace() {
                             </div>
                           )}
 
-                          <div className="flex justify-end">
+                          <div className="flex items-center justify-between gap-2" data-testid="curriculum-row-next-action">
+                            <div className="min-w-0 text-xs">
+                              <div className="text-muted-foreground">다음 작업</div>
+                              <div className="truncate font-medium text-foreground">{rowDesignAction.reason}</div>
+                            </div>
                             <Button asChild variant="outline" size="sm" className="h-8 rounded-sm px-2 text-xs">
                               <Link
-                                href={buildLessonDesignHref(row.id, rowDesignAction.sessionId, rowDesignAction.sectionId)}
-                                aria-label={`${row.title} ${rowDesignAction.label}`}
-                                onClick={(event) => event.stopPropagation()}
+                                href={buildClassDetailHref(
+                                  row.id,
+                                  rowDesignAction.tab,
+                                  rowDesignAction.sectionId,
+                                  rowDesignAction.sessionId,
+                                  curriculumReturnPath,
+                                )}
+                                aria-label={`${row.title} ${rowDesignAction.label} ${rowDesignAction.reason}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  rememberCurriculumScrollPosition();
+                                }}
                               >
                                 {rowDesignAction.label}
                               </Link>
@@ -655,20 +802,20 @@ export function AcademicCurriculumWorkspace() {
                   })}
                 </div>
 
+                <div ref={desktopListRef} data-testid="curriculum-desktop-scroll-anchor">
                 <ScrollArea className="hidden h-[38rem] [contain-intrinsic-size:640px] [content-visibility:auto] md:block">
-                  <Table className="min-w-[1040px] table-fixed">
+                  <Table className="min-w-[980px] table-fixed">
                     <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_var(--border)]">
                       <TableRow>
-                        <TableHead className="w-[30%]">수업</TableHead>
+                        <TableHead className="w-[28%]">수업</TableHead>
                         <TableHead className="w-[18%]">일정</TableHead>
                         <TableHead className="w-[22%]">수업교재</TableHead>
                         <TableHead className="w-[20%]">진도</TableHead>
-                        <TableHead className="w-[10%] text-right">작업</TableHead>
+                        <TableHead className="w-[12%] text-right">작업</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {visibleViewRows.map((row) => {
-                      const isSelected = selectedRow?.id === row.id;
                       const rowDesignAction = getCurriculumDesignAction(row);
                       const hasLinkedTextbooks = row.textbookCount > 0;
                       const progressTargetSessionCount = row.progressTargetSessions ?? row.totalSessions;
@@ -676,21 +823,13 @@ export function AcademicCurriculumWorkspace() {
                       return (
                         <TableRow
                           key={row.id}
-                          aria-selected={isSelected}
+                          data-testid={`curriculum-desktop-row-${row.id}`}
+                          role="link"
                           tabIndex={0}
-                          aria-label={`${row.title} 선택`}
-                          className={
-                            isSelected
-                              ? "cursor-pointer border-l-2 border-l-primary bg-primary/5 transition-colors hover:bg-primary/10"
-                              : "cursor-pointer transition-colors hover:bg-muted/30"
-                          }
-                          onClick={() => setSelectedClassId(row.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              setSelectedClassId(row.id);
-                            }
-                          }}
+                          aria-label={`${row.title} ${rowDesignAction.label} ${rowDesignAction.reason}`}
+                          className="cursor-pointer transition-colors hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                          onClick={() => openCurriculumRow(row, rowDesignAction)}
+                          onKeyDown={(event) => handleCurriculumRowKeyDown(event, row, rowDesignAction)}
                         >
                           <TableCell className="align-top">
                             <div className="min-w-0 space-y-2">
@@ -751,15 +890,27 @@ export function AcademicCurriculumWorkspace() {
                             )}
                           </TableCell>
                           <TableCell className="align-top text-right">
-                            <Button asChild variant="outline" size="sm" className="h-8 rounded-sm px-2 text-xs">
-                              <Link
-                                href={buildLessonDesignHref(row.id, rowDesignAction.sessionId, rowDesignAction.sectionId)}
-                                aria-label={`${row.title} ${rowDesignAction.label}`}
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                {rowDesignAction.label}
-                              </Link>
-                            </Button>
+                            <div className="grid justify-items-end gap-1.5" data-testid="curriculum-row-next-action">
+                              <div className="max-w-28 truncate text-xs font-medium text-muted-foreground">{rowDesignAction.reason}</div>
+                              <Button asChild variant="outline" size="sm" className="h-8 rounded-sm px-2 text-xs">
+                                <Link
+                                  href={buildClassDetailHref(
+                                    row.id,
+                                    rowDesignAction.tab,
+                                    rowDesignAction.sectionId,
+                                    rowDesignAction.sessionId,
+                                    curriculumReturnPath,
+                                  )}
+                                  aria-label={`${row.title} ${rowDesignAction.label} ${rowDesignAction.reason}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    rememberCurriculumScrollPosition();
+                                  }}
+                                >
+                                  {rowDesignAction.label}
+                                </Link>
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -767,6 +918,7 @@ export function AcademicCurriculumWorkspace() {
                     </TableBody>
                   </Table>
                 </ScrollArea>
+                </div>
                 {hasMoreViewRows ? (
                   <div className="flex justify-center border-t bg-background px-4 py-3">
                     <Button
@@ -785,169 +937,7 @@ export function AcademicCurriculumWorkspace() {
                 ) : null}
               </>
             )}
-          </section>
-
-          <section className="border border-border/70 bg-background xl:sticky xl:top-24 xl:self-start">
-            {selectedRow ? (
-              <div className="flex h-full flex-col">
-                <div className="border-b px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge>{selectedRow.subject || "과목 미정"}</Badge>
-                        {selectedRow.grade ? <Badge variant="secondary">{selectedRow.grade}</Badge> : null}
-                        <Badge variant={getStateVariant(selectedRow.stateLabel)}>{selectedRow.stateLabel}</Badge>
-                      </div>
-                      <div>
-                        <p className="truncate text-lg font-semibold text-foreground">{selectedRow.title}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {selectedRow.teacherSummary || "선생님 미정"} · {selectedRow.schedule || "시간표 미정"}
-                        </p>
-                      </div>
-                    </div>
-                    <div data-testid="curriculum-detail-actions" className="flex shrink-0 flex-wrap gap-2">
-                      <Button asChild size="sm" variant="outline" className="h-8 rounded-md px-2.5 text-xs">
-                        <Link href={buildLessonDesignHref(selectedRow.id, "", "lesson-design-periods")}>
-                          일정 생성
-                        </Link>
-                      </Button>
-                      {selectedRowProgressAction ? (
-                        <Button asChild size="sm" className="h-8 rounded-md px-2.5 text-xs">
-                          <Link
-                            href={buildLessonDesignHref(
-                              selectedRow.id,
-                              selectedRowProgressAction.sessionId,
-                              selectedRowProgressAction.sectionId,
-                            )}
-                          >
-                            {selectedRowProgressAction.label === "교재" ? "교재 연결" : "진도 생성"}
-                          </Link>
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-
-                <ScrollArea className="h-[35rem]">
-                  <div className="space-y-5 px-4 py-4">
-                    <div className="grid grid-cols-3 divide-x rounded-lg border text-sm">
-                      <div className="px-3 py-2">
-                        <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <CalendarDays className="size-3.5" />
-                          <span>회차</span>
-                        </div>
-                        <p className="mt-1 font-semibold">{selectedProgressTargetSessionCount}회</p>
-                      </div>
-                      <div className="px-3 py-2">
-                        <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <BookOpen className="size-3.5" />
-                          <span>교재</span>
-                        </div>
-                        <p className="mt-1 font-semibold">{selectedRow.textbookCount}권</p>
-                      </div>
-                      <div className="px-3 py-2">
-                        <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <CheckCircle2 className="size-3.5" />
-                          <span>진도</span>
-                        </div>
-                        <p className="mt-1 font-semibold">{selectedRow.plannedProgressSessions}회</p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-foreground">수업교재</p>
-                        <Badge variant="outline">{selectedRow.textbookCount}권</Badge>
-                      </div>
-                      {selectedRow.textbookCatalog.length > 0 ? (
-                        <div className="space-y-2">
-                          {selectedRow.textbookCatalog.map((book) => (
-                            <div key={book.textbookId} className="rounded-lg border px-3 py-2 text-sm">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium text-foreground">{book.title}</p>
-                                  <p className="mt-0.5 text-xs text-muted-foreground">
-                                    {[book.publisher, book.scopeLabel || book.category].filter(Boolean).join(" · ") || "교재 정보"}
-                                  </p>
-                                </div>
-                                <Badge variant={book.role === "main" ? "default" : "secondary"}>
-                                  {book.role === "main" ? "주교재" : "부교재"}
-                                </Badge>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border border-dashed px-3 py-5 text-sm text-muted-foreground">
-                          수업 설계에서 교재를 연결하세요.
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-foreground">회차 배치</p>
-                        <Badge variant="outline">
-                          {selectedRow.plannedProgressSessions}/{selectedProgressTargetSessionCount}
-                        </Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {selectedRow.sessionSummaries.slice(0, 8).map((session, sessionIndex) => {
-                          const sessionStatusLabel = session.hasPlanContent ? "계획 완료" : "진도 미배정";
-                          const sessionHref = buildLessonDesignHref(
-                            selectedRow.id,
-                            session.sessionId || "",
-                            "lesson-design-periods",
-                          );
-                          const sessionMeta = [
-                            session.periodLabel,
-                            session.planSummary || "범위 미지정",
-                            session.textbookEntryCount > 0 ? `${session.textbookEntryCount}권` : "",
-                          ].filter(Boolean).join(" · ");
-
-                          return (
-                            <Link
-                              key={getSessionSummaryLinkKey(session, sessionIndex)}
-                              href={sessionHref}
-                              className="block rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-muted/40"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="font-medium text-foreground">{session.label}</p>
-                                <Badge variant={getStateVariant(sessionStatusLabel)}>
-                                  {session.hasPlanContent ? "배정" : "대기"}
-                                </Badge>
-                              </div>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {sessionMeta || "범위 미지정"}
-                              </p>
-                            </Link>
-                          );
-                        })}
-                        {selectedRow.sessionSummaries.length === 0 ? (
-                          <div className="rounded-lg border border-dashed px-3 py-5 text-sm text-muted-foreground">
-                            수업일정 생성기로 회차를 먼저 만들 수 있습니다.
-                          </div>
-                        ) : null}
-                        {selectedRow.sessionSummaries.length > 8 ? (
-                          <Link
-                            href={buildLessonDesignHref(selectedRow.id, "", "lesson-design-periods")}
-                            className="block rounded-lg border border-dashed px-3 py-2 text-center text-sm font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                          >
-                            나머지 {selectedRow.sessionSummaries.length - 8}회 보기
-                          </Link>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                </ScrollArea>
-              </div>
-            ) : (
-              <div className="text-muted-foreground flex min-h-72 items-center justify-center border border-dashed text-sm">
-                선택 중인 수업이 없습니다.
-              </div>
-            )}
-          </section>
-        </div>
+        </section>
       </div>
     </div>
   );

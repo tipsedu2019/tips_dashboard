@@ -1,7 +1,8 @@
 "use client";
 "use no memo";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   type ColumnDef,
   type ColumnFiltersState,
@@ -66,7 +67,7 @@ import {
 } from "./class-filter-panel";
 import { pickDefaultPeriodValue } from "./period-preferences";
 
-const STORAGE_VERSION = 13;
+const STORAGE_VERSION = 14;
 
 const STUDENT_TABLE_COLUMN_IDS = [
   "select",
@@ -111,11 +112,66 @@ type ClassFilterColumnId = (typeof CLASS_FILTERS)[number]["id"];
 const DEFAULT_CLASS_STATUS_FILTER = "수강";
 const CLASS_STATUS_FILTER_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 
+const CLASS_LIST_QUERY_PARAM_KEYS = {
+  q: "q",
+  period: "period",
+  status: "status",
+  subject: "subject",
+  grade: "grade",
+  teacher: "teacher",
+  classroom: "classroom",
+} as const;
+
+type ClassListQueryState = {
+  q: string;
+  period: string;
+  status: string;
+  subject: string;
+  grade: string;
+  teacher: string;
+  classroom: string;
+};
+
+const EMPTY_CLASS_LIST_QUERY_STATE: ClassListQueryState = {
+  q: "",
+  period: "",
+  status: "",
+  subject: "",
+  grade: "",
+  teacher: "",
+  classroom: "",
+};
+
 const STUDENT_SCHOOL_CATEGORY_OPTIONS = ["고등", "중등", "초등"] as const;
 const STUDENT_STATUS_SORT_ORDER = ["재원", "퇴원"] as const;
 
+const STUDENT_LIST_QUERY_PARAM_KEYS = {
+  q: "q",
+  status: "status",
+  schoolCategory: "schoolCategory",
+  school: "school",
+  grade: "grade",
+} as const;
+
+type StudentListQueryState = {
+  q: string;
+  status: string;
+  schoolCategory: string;
+  school: string;
+  grade: string;
+};
+
+const EMPTY_STUDENT_LIST_QUERY_STATE: StudentListQueryState = {
+  q: "",
+  status: "",
+  schoolCategory: "",
+  school: "",
+  grade: "",
+};
+
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50, 100, 200, 300, 400, 500] as const;
 const DEFAULT_PAGE_SIZE = 20;
+const MANAGEMENT_SCROLL_STORAGE_PREFIX = "tips:management-table-scroll:";
 
 const TEXTBOOK_TABLE_COLUMN_IDS = [
   "select",
@@ -231,6 +287,11 @@ type ManagementTableActions = {
   onOpenTeacherMaster?: () => void;
   onOpenClassroomMaster?: () => void;
   onOpenTermManager?: () => void;
+};
+
+type StoredManagementScroll = {
+  pageY: number;
+  tableX: number;
 };
 
 type BulkEditField = {
@@ -357,6 +418,103 @@ function normalizeScalar(value: unknown): string {
     }
   }
   return String(value);
+}
+
+function getClassListQueryState(params: URLSearchParams): ClassListQueryState {
+  return {
+    q: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.q)),
+    period: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.period)),
+    status: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.status)),
+    subject: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.subject)),
+    grade: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.grade)),
+    teacher: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.teacher)),
+    classroom: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.classroom)),
+  };
+}
+
+function setClassListQueryParam(params: URLSearchParams, key: string, value: string, defaultValue = "") {
+  const normalized = normalizeScalar(value);
+  if (!normalized || normalized === defaultValue) {
+    params.delete(key);
+    return;
+  }
+
+  params.set(key, normalized);
+}
+
+function buildClassListHref(pathname: string, searchParamString: string, state: ClassListQueryState, defaultPeriodFilter = "") {
+  const params = new URLSearchParams(searchParamString);
+
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.q, state.q);
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.period, state.period, defaultPeriodFilter);
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.status, state.status, DEFAULT_CLASS_STATUS_FILTER);
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.subject, state.subject);
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.grade, state.grade);
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.teacher, state.teacher);
+  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.classroom, state.classroom);
+
+  const nextQuery = params.toString();
+  return nextQuery ? `${pathname}?${nextQuery}` : pathname;
+}
+
+function getStudentListQueryState(params: URLSearchParams): StudentListQueryState {
+  return {
+    q: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.q)),
+    status: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.status)),
+    schoolCategory: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.schoolCategory)),
+    school: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.school)),
+    grade: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.grade)),
+  };
+}
+
+function buildStudentListHref(pathname: string, searchParamString: string, state: StudentListQueryState) {
+  const params = new URLSearchParams(searchParamString);
+
+  setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.q, state.q);
+  setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.status, state.status);
+  setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.schoolCategory, state.schoolCategory);
+  setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.school, state.school);
+  setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.grade, state.grade);
+
+  const nextQuery = params.toString();
+  return nextQuery ? `${pathname}?${nextQuery}` : pathname;
+}
+
+function getManagementListScrollStorageKey(kind: ManagementKind, pathname: string, searchParamString: string) {
+  const params = new URLSearchParams(searchParamString);
+  params.delete("classId");
+  params.delete("studentId");
+  params.delete("tab");
+  params.delete("section");
+  params.delete("sessionId");
+  params.delete("returnTo");
+  params.sort();
+
+  const nextQuery = params.toString();
+  return `${MANAGEMENT_SCROLL_STORAGE_PREFIX}${kind}:${pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+}
+
+function parseStoredManagementScroll(rawValue: string | null): StoredManagementScroll | null {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as Partial<StoredManagementScroll>;
+    const pageY = Number(parsed.pageY || 0);
+    const tableX = Number(parsed.tableX || 0);
+
+    if (!Number.isFinite(pageY) && !Number.isFinite(tableX)) {
+      return null;
+    }
+
+    return {
+      pageY: Number.isFinite(pageY) ? Math.max(0, pageY) : 0,
+      tableX: Number.isFinite(tableX) ? Math.max(0, tableX) : 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function compareStudentStatusForTable(left: unknown, right: unknown) {
@@ -1278,6 +1436,23 @@ export function ManagementDataTable({
   emptyLabel: string;
   actions?: ManagementTableActions;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const searchParamString = searchParams.toString();
+  const tableViewportRef = useRef<HTMLDivElement | null>(null);
+  const managementScrollStorageKey = useMemo(
+    () => getManagementListScrollStorageKey(kind, pathname, searchParamString),
+    [kind, pathname, searchParamString],
+  );
+  const requestedClassListQueryState = useMemo(
+    () => (kind === "classes" ? getClassListQueryState(new URLSearchParams(searchParamString)) : EMPTY_CLASS_LIST_QUERY_STATE),
+    [kind, searchParamString],
+  );
+  const requestedStudentListQueryState = useMemo(
+    () => (kind === "students" ? getStudentListQueryState(new URLSearchParams(searchParamString)) : EMPTY_STUDENT_LIST_QUERY_STATE),
+    [kind, searchParamString],
+  );
   const storageKey = `tips-management-table:${kind}:v${STORAGE_VERSION}`;
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -1285,12 +1460,14 @@ export function ManagementDataTable({
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>([]);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [rowSelection, setRowSelection] = useState({});
-  const [globalFilter, setGlobalFilter] = useState("");
+  const [globalFilter, setGlobalFilter] = useState(() => (
+    kind === "classes" ? requestedClassListQueryState.q : kind === "students" ? requestedStudentListQueryState.q : ""
+  ));
   const deferredGlobalFilter = useDeferredValue(globalFilter);
-  const [classGroupFilter, setClassGroupFilter] = useState("");
-  const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState("");
-  const [studentSchoolFilter, setStudentSchoolFilter] = useState("");
-  const [studentGradeFilter, setStudentGradeFilter] = useState("");
+  const [classGroupFilter, setClassGroupFilter] = useState(() => requestedClassListQueryState.period);
+  const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState(() => requestedStudentListQueryState.schoolCategory);
+  const [studentSchoolFilter, setStudentSchoolFilter] = useState(() => requestedStudentListQueryState.school);
+  const [studentGradeFilter, setStudentGradeFilter] = useState(() => requestedStudentListQueryState.grade);
   const [grouping, setGrouping] = useState<GroupingState>([]);
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1299,6 +1476,26 @@ export function ManagementDataTable({
   const [bulkEditField, setBulkEditField] = useState(BULK_EDIT_FIELDS[kind][0]?.id || "");
   const [bulkEditValue, setBulkEditValue] = useState("");
   const [bulkActionPending, setBulkActionPending] = useState(false);
+  const rememberManagementScrollPosition = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.sessionStorage.setItem(
+      managementScrollStorageKey,
+      JSON.stringify({
+        pageY: window.scrollY,
+        tableX: tableViewportRef.current?.scrollLeft || 0,
+      }),
+    );
+  }, [managementScrollStorageKey]);
+  const openManagementRow = useCallback(
+    (row: ManagementRow) => {
+      rememberManagementScrollPosition();
+      actions.onOpenRow?.(row);
+    },
+    [actions, rememberManagementScrollPosition],
+  );
 
   const columns = useMemo<ColumnDef<ManagementRow>[]>(() => {
     const fixedColumns: ColumnDef<ManagementRow>[] = [
@@ -1345,7 +1542,7 @@ export function ManagementDataTable({
                 "-mx-1.5 inline-flex max-w-full cursor-pointer rounded-md px-1.5 py-1 text-left text-sm font-medium leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px",
                 kind === "classes" ? "text-blue-600 dark:text-blue-400" : "text-foreground",
               )}
-              onClick={() => actions.onOpenRow?.(row.original)}
+              onClick={() => openManagementRow(row.original)}
             >
               <span className="truncate">{row.original.title}</span>
             </button>
@@ -1477,8 +1674,8 @@ export function ManagementDataTable({
               variant="ghost"
               size="icon"
               className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              aria-label={`${row.original.title} ${kind === "students" ? "퇴원 처리" : "삭제"}`}
-              title={kind === "students" ? "퇴원 처리" : "삭제"}
+              aria-label={`${row.original.title} ${kind === "students" ? "퇴원 처리" : kind === "classes" ? "종강 처리" : "삭제"}`}
+              title={kind === "students" ? "퇴원 처리" : kind === "classes" ? "종강 처리" : "삭제"}
               onClick={() => actions.onDeleteRow?.(row.original)}
             >
               <Trash2 className="size-4" />
@@ -1522,7 +1719,7 @@ export function ManagementDataTable({
       const columnId = String(column.id ?? "");
       return getKindColumnIds(kind).has(columnId) && USER_FACING_COLUMN_IDS.has(columnId);
     });
-  }, [actions, badgeLabel, emptyLabel, kind, statusLabel]);
+  }, [actions, badgeLabel, emptyLabel, kind, openManagementRow, statusLabel]);
 
   const allColumnIds = useMemo(() => columns.map((column) => String(column.id ?? "")).filter(Boolean), [columns]);
 
@@ -1775,6 +1972,9 @@ export function ManagementDataTable({
   const subjectColumn =
     kind === "classes" && allColumnIds.includes("subject") ? table.getColumn("subject") : undefined;
   const selectedSubjectFilter = (subjectColumn?.getFilterValue() as string) || "";
+  const selectedGradeFilter = kind === "classes" ? ((table.getColumn("grade")?.getFilterValue() as string) || "") : "";
+  const selectedTeacherFilter = kind === "classes" ? ((table.getColumn("teacher")?.getFilterValue() as string) || "") : "";
+  const selectedClassroomFilter = kind === "classes" ? ((table.getColumn("classroom")?.getFilterValue() as string) || "") : "";
 
   const classFilterOptions = useMemo(() => {
     const emptyOptions: Record<ClassFilterColumnId, string[]> = {
@@ -1898,6 +2098,92 @@ export function ManagementDataTable({
   const createLabel = kind === "students" ? "학생 등록" : kind === "classes" ? "수업 등록" : "교재 등록";
   const hasCreateAction = typeof actions.onCreate === "function";
   const showSummaryBadge = loading || hasActiveFilters || rows.length !== filteredRowCount;
+  useEffect(() => {
+    if (typeof window === "undefined" || loading) {
+      return undefined;
+    }
+
+    const savedScroll = parseStoredManagementScroll(window.sessionStorage.getItem(managementScrollStorageKey));
+    if (!savedScroll) {
+      return undefined;
+    }
+
+    const restoreScroll = () => {
+      if (savedScroll.pageY > 0) {
+        window.scrollTo({ top: savedScroll.pageY });
+      }
+
+      if (tableViewportRef.current && savedScroll.tableX > 0) {
+        tableViewportRef.current.scrollLeft = savedScroll.tableX;
+      }
+    };
+    const firstFrame = window.requestAnimationFrame(() => {
+      restoreScroll();
+      window.requestAnimationFrame(restoreScroll);
+    });
+
+    return () => window.cancelAnimationFrame(firstFrame);
+  }, [filteredRowCount, loading, managementScrollStorageKey, searchParamString]);
+  const currentClassListQueryState = useMemo<ClassListQueryState>(
+    () => ({
+      q: normalizedGlobalFilter,
+      period: normalizedClassGroupFilter,
+      status: normalizedClassStatusFilter,
+      subject: selectedSubjectFilter,
+      grade: selectedGradeFilter,
+      teacher: selectedTeacherFilter,
+      classroom: selectedClassroomFilter,
+    }),
+    [
+      normalizedClassGroupFilter,
+      normalizedClassStatusFilter,
+      normalizedGlobalFilter,
+      selectedClassroomFilter,
+      selectedGradeFilter,
+      selectedSubjectFilter,
+      selectedTeacherFilter,
+    ],
+  );
+  const syncClassListQueryState = useCallback(
+    (nextState: Partial<ClassListQueryState>) => {
+      if (kind !== "classes") {
+        return;
+      }
+
+      const mergedState = { ...currentClassListQueryState, ...nextState };
+      const nextHref = buildClassListHref(pathname, searchParamString, mergedState, defaultPeriodFilter);
+      const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+      if (nextHref !== currentHref) {
+        router.replace(nextHref, { scroll: false });
+      }
+    },
+    [currentClassListQueryState, defaultPeriodFilter, kind, pathname, router, searchParamString],
+  );
+  const currentStudentListQueryState = useMemo<StudentListQueryState>(
+    () => ({
+      q: normalizedGlobalFilter,
+      status: kind === "students" ? statusFilter : "",
+      schoolCategory: studentSchoolCategoryFilter,
+      school: studentSchoolFilter,
+      grade: studentGradeFilter,
+    }),
+    [kind, normalizedGlobalFilter, statusFilter, studentGradeFilter, studentSchoolCategoryFilter, studentSchoolFilter],
+  );
+  const syncStudentListQueryState = useCallback(
+    (nextState: Partial<StudentListQueryState>) => {
+      if (kind !== "students") {
+        return;
+      }
+
+      const mergedState = { ...currentStudentListQueryState, ...nextState };
+      const nextHref = buildStudentListHref(pathname, searchParamString, mergedState);
+      const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+      if (nextHref !== currentHref) {
+        router.replace(nextHref, { scroll: false });
+      }
+    },
+    [currentStudentListQueryState, kind, pathname, router, searchParamString],
+  );
 
   useEffect(() => {
     if (kind !== "classes" || !statusColumn) {
@@ -1913,6 +2199,79 @@ export function ManagementDataTable({
       statusColumn.setFilterValue(normalizedClassStatusFilter);
     }
   }, [kind, normalizedClassStatusFilter, statusColumn, statusFilter]);
+
+  useEffect(() => {
+    if (kind !== "classes") {
+      return;
+    }
+
+    if (globalFilter !== requestedClassListQueryState.q) {
+      setGlobalFilter(requestedClassListQueryState.q);
+    }
+
+    const requestedPeriodFilter = requestedClassListQueryState.period || defaultPeriodFilter;
+    if (requestedPeriodFilter && classGroupFilter !== requestedPeriodFilter) {
+      setClassGroupFilter(requestedPeriodFilter);
+    }
+
+    const requestedStatusFilter = requestedClassListQueryState.status || DEFAULT_CLASS_STATUS_FILTER;
+    if (statusColumn && statusFilter !== requestedStatusFilter) {
+      statusColumn.setFilterValue(requestedStatusFilter);
+    }
+
+    for (const filter of CLASS_FILTERS) {
+      const column = table.getColumn(filter.id);
+      const requestedFilterValue = requestedClassListQueryState[filter.id] || "";
+      if (column && ((column.getFilterValue() as string) || "") !== requestedFilterValue) {
+        column.setFilterValue(requestedFilterValue);
+      }
+    }
+  }, [
+    classGroupFilter,
+    defaultPeriodFilter,
+    globalFilter,
+    kind,
+    requestedClassListQueryState,
+    statusColumn,
+    statusFilter,
+    table,
+  ]);
+
+  useEffect(() => {
+    if (kind !== "students") {
+      return;
+    }
+
+    if (globalFilter !== requestedStudentListQueryState.q) {
+      setGlobalFilter(requestedStudentListQueryState.q);
+    }
+
+    const requestedStatusFilter = requestedStudentListQueryState.status || "";
+    if (statusColumn && statusFilter !== requestedStatusFilter) {
+      statusColumn.setFilterValue(requestedStatusFilter);
+    }
+
+    if (studentSchoolCategoryFilter !== requestedStudentListQueryState.schoolCategory) {
+      setStudentSchoolCategoryFilter(requestedStudentListQueryState.schoolCategory);
+    }
+
+    if (studentSchoolFilter !== requestedStudentListQueryState.school) {
+      setStudentSchoolFilter(requestedStudentListQueryState.school);
+    }
+
+    if (studentGradeFilter !== requestedStudentListQueryState.grade) {
+      setStudentGradeFilter(requestedStudentListQueryState.grade);
+    }
+  }, [
+    globalFilter,
+    kind,
+    requestedStudentListQueryState,
+    statusColumn,
+    statusFilter,
+    studentGradeFilter,
+    studentSchoolCategoryFilter,
+    studentSchoolFilter,
+  ]);
 
   const resetPreferences = () => {
     setColumnVisibility(defaultVisibility);
@@ -1946,6 +2305,24 @@ export function ManagementDataTable({
       for (const filter of CLASS_FILTERS) {
         table.getColumn(filter.id)?.setFilterValue("");
       }
+      syncClassListQueryState({
+        q: "",
+        period: defaultPeriodFilter,
+        status: DEFAULT_CLASS_STATUS_FILTER,
+        subject: "",
+        grade: "",
+        teacher: "",
+        classroom: "",
+      });
+    }
+    if (kind === "students") {
+      syncStudentListQueryState({
+        q: "",
+        status: "",
+        schoolCategory: "",
+        school: "",
+        grade: "",
+      });
     }
     table.resetPagination();
   };
@@ -1955,6 +2332,8 @@ export function ManagementDataTable({
     setRowSelection({});
     setBulkEditValue("");
     table.resetPagination();
+    syncClassListQueryState({ q: value });
+    syncStudentListQueryState({ q: value });
   };
 
   const updateGrouping = (nextGrouping: GroupingState) => {
@@ -2297,6 +2676,7 @@ export function ManagementDataTable({
                 return;
               }
               setClassGroupFilter(value);
+              syncClassListQueryState({ period: value });
               setRowSelection({});
               table.resetPagination();
             },
@@ -2311,6 +2691,7 @@ export function ManagementDataTable({
             })),
             onChange: (value) => {
               statusColumn?.setFilterValue(value);
+              syncClassListQueryState({ status: value });
               setRowSelection({});
               table.resetPagination();
             },
@@ -2330,10 +2711,14 @@ export function ManagementDataTable({
                 label: option,
               })),
               onChange: (value: string) => {
-                column?.setFilterValue(value === "all" ? "" : value);
+                const nextFilterValue = value === "all" ? "" : value;
+                column?.setFilterValue(nextFilterValue);
                 if (filter.id === "subject") {
                   table.getColumn("teacher")?.setFilterValue("");
                   table.getColumn("classroom")?.setFilterValue("");
+                  syncClassListQueryState({ [filter.id]: nextFilterValue, teacher: "", classroom: "" });
+                } else {
+                  syncClassListQueryState({ [filter.id]: nextFilterValue });
                 }
                 setRowSelection({});
                 table.resetPagination();
@@ -2389,7 +2774,9 @@ export function ManagementDataTable({
       <Select
         value={statusFilter || "all"}
         onValueChange={(value) => {
-          statusColumn?.setFilterValue(value === "all" ? "" : value);
+          const nextStatusValue = value === "all" ? "" : value;
+          statusColumn?.setFilterValue(nextStatusValue);
+          syncStudentListQueryState({ status: nextStatusValue });
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2417,9 +2804,11 @@ export function ManagementDataTable({
       <Select
         value={studentSchoolCategoryFilter || "all"}
         onValueChange={(value) => {
-          setStudentSchoolCategoryFilter(value === "all" ? "" : value);
+          const nextSchoolCategoryFilter = value === "all" ? "" : value;
+          setStudentSchoolCategoryFilter(nextSchoolCategoryFilter);
           setStudentSchoolFilter("");
           setStudentGradeFilter("");
+          syncStudentListQueryState({ schoolCategory: nextSchoolCategoryFilter, school: "", grade: "" });
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2447,8 +2836,10 @@ export function ManagementDataTable({
       <Select
         value={studentSchoolFilter || "all"}
         onValueChange={(value) => {
-          setStudentSchoolFilter(value === "all" ? "" : value);
+          const nextSchoolFilter = value === "all" ? "" : value;
+          setStudentSchoolFilter(nextSchoolFilter);
           setStudentGradeFilter("");
+          syncStudentListQueryState({ school: nextSchoolFilter, grade: "" });
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2476,7 +2867,9 @@ export function ManagementDataTable({
       <Select
         value={studentGradeFilter || "all"}
         onValueChange={(value) => {
-          setStudentGradeFilter(value === "all" ? "" : value);
+          const nextGradeFilter = value === "all" ? "" : value;
+          setStudentGradeFilter(nextGradeFilter);
+          syncStudentListQueryState({ grade: nextGradeFilter });
           setRowSelection({});
           table.resetPagination();
         }}
@@ -2535,7 +2928,7 @@ export function ManagementDataTable({
       field={bulkEditField}
       value={bulkEditValue}
       pending={bulkActionPending}
-      deleteLabel={kind === "students" ? "일괄 퇴원" : "일괄 삭제"}
+      deleteLabel={kind === "students" ? "일괄 퇴원" : kind === "classes" ? "일괄 종강" : "일괄 삭제"}
       onFieldChange={(nextField) => {
         setBulkEditField(nextField);
         setBulkEditValue("");
@@ -2589,7 +2982,7 @@ export function ManagementDataTable({
                   <button
                     type="button"
                     className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    onClick={() => actions.onOpenRow?.(record)}
+                    onClick={() => openManagementRow(record)}
                   >
                     {record.title}
                   </button>
@@ -2602,8 +2995,8 @@ export function ManagementDataTable({
                   variant="ghost"
                   size="icon"
                   className="size-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={`${record.title} 삭제`}
-                  title="삭제"
+                  aria-label={`${record.title} 종강 처리`}
+                  title="종강 처리"
                   onClick={() => actions.onDeleteRow?.(record)}
                 >
                   <Trash2 className="size-4" />
@@ -2693,7 +3086,7 @@ export function ManagementDataTable({
                   <button
                     type="button"
                     className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    onClick={() => actions.onOpenRow?.(record)}
+                    onClick={() => openManagementRow(record)}
                   >
                     {record.title}
                   </button>
@@ -2896,7 +3289,7 @@ export function ManagementDataTable({
       {studentMobileList}
       {classMobileList}
 
-      <div className={cn("overflow-x-auto rounded-lg border border-border/70 bg-background", (kind === "classes" || kind === "students") && "hidden md:block")} aria-busy={loading}>
+      <div ref={tableViewportRef} className={cn("overflow-x-auto rounded-lg border border-border/70 bg-background", (kind === "classes" || kind === "students") && "hidden md:block")} aria-busy={loading}>
         <Table className="min-w-[980px] table-fixed">
           <caption className="sr-only">{emptyLabel} 운영 목록{captionSuffix ? ` · ${captionSuffix}` : ""}</caption>
           <TableHeader>

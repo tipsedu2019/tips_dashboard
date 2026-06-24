@@ -31,7 +31,7 @@ test("class relation removal can clear orphaned student references", async () =>
   assert.match(removeSource, /if \(!student && !classItem\)/);
   assert.match(removeSource, /getStudentClassMode\(student, safeClassId\) \|\| getClassStudentMode\(classItem, safeStudentId\)/);
   assert.match(removeSource, /if \(nextStudent\) \{\s*await upsertStudentRows/);
-  assert.match(removeSource, /if \(nextClass\) \{\s*await upsertRows/);
+  assert.match(removeSource, /if \(nextClass\) \{\s*await upsertClassRows/);
   assert.match(removeSource, /if \(previousMode && student && classItem\)/);
 });
 
@@ -40,9 +40,9 @@ test("student delete actions become withdrawal actions instead of physical delet
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(pageSource, /status: WITHDRAWN_STUDENT_STATUS/);
-  assert.match(pageSource, /kind === "students" \? "퇴원 처리" : "삭제"/);
-  assert.match(tableSource, /kind === "students" \? "퇴원 처리" : "삭제"/);
-  assert.match(tableSource, /kind === "students" \? "일괄 퇴원" : "일괄 삭제"/);
+  assert.match(pageSource, /kind === "students" \? "퇴원 처리" : kind === "classes" \? "종강 처리" : "삭제"/);
+  assert.match(tableSource, /kind === "students" \? "퇴원 처리" : kind === "classes" \? "종강 처리" : "삭제"/);
+  assert.match(tableSource, /kind === "students" \? "일괄 퇴원" : kind === "classes" \? "일괄 종강" : "일괄 삭제"/);
 });
 
 test("student detail loads class and textbook history", async () => {
@@ -60,4 +60,42 @@ test("student detail loads class and textbook history", async () => {
   assert.match(pageSource, /수업·교재 이력/);
   assert.match(migrationSource, /create table if not exists public\.student_class_enrollment_history/);
   assert.match(migrationSource, /student_class_enrollment_history_staff_write/);
+});
+
+test("student detail class cards open the official class detail with return context", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(pageSource, /const requestedStudentId = kind === "students" \? text\(searchParams\.get\("studentId"\)\) : ""/);
+  assert.match(pageSource, /const writeStudentDetailRoute = useCallback/);
+  assert.match(pageSource, /params\.set\("studentId", studentId\)/);
+  assert.match(pageSource, /const buildStudentDetailReturnPath = \(\) =>/);
+  assert.match(pageSource, /return `\/admin\/students\?\$\{params\.toString\(\)\}`/);
+  assert.match(pageSource, /const handleStudentClassDetailOpen = \(classId: string, tab: ClassDetailTab = "students"\) =>/);
+  assert.match(pageSource, /params\.set\("classId", targetClassId\)/);
+  assert.match(pageSource, /params\.set\("tab", tab\)/);
+  assert.match(pageSource, /params\.set\("studentId", selectedRow\.id\)/);
+  assert.match(pageSource, /params\.set\("returnTo", buildStudentDetailReturnPath\(\)\)/);
+  assert.match(pageSource, /router\.push\(`\/admin\/classes\?\$\{params\.toString\(\)\}`\)/);
+  assert.match(pageSource, /data-testid="student-class-official-link"/);
+  assert.match(pageSource, /onClick=\{\(\) => handleStudentClassDetailOpen\(id, "students"\)\}/);
+  assert.match(pageSource, /학생 현황/);
+  assert.doesNotMatch(pageSource, /data-testid="student-class-counseling-link"/);
+  assert.doesNotMatch(pageSource, /onClick=\{\(\) => handleStudentClassDetailOpen\(id, "counseling"\)\}/);
+  assert.doesNotMatch(pageSource, /상담 보기/);
+  assert.match(pageSource, /data-testid="class-detail-return-to-student"/);
+  assert.match(pageSource, /openRow\(targetRow, \{ syncRoute: false \}\)/);
+});
+
+test("class detail student rows open the official student detail with return context", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(pageSource, /const requestedStudentReturnPath = kind === "students" \? normalizeReturnToPath\(searchParams\.get\("returnTo"\)\) : ""/);
+  assert.match(pageSource, /const handleClassStudentDetailOpen = \(studentId: string\) =>/);
+  assert.match(pageSource, /params\.set\("studentId", targetStudentId\)/);
+  assert.match(pageSource, /params\.set\("returnTo", buildClassDetailReturnPath\("students", \{ studentId: targetStudentId \}\)\)/);
+  assert.match(pageSource, /router\.push\(`\/admin\/students\?\$\{params\.toString\(\)\}`\)/);
+  assert.match(pageSource, /data-testid="class-student-official-link"/);
+  assert.match(pageSource, /onClick=\{\(\) => handleClassStudentDetailOpen\(id\)\}/);
+  assert.match(pageSource, /data-testid="student-detail-return-to-class"/);
+  assert.match(pageSource, /router\.push\(requestedStudentReturnPath\)/);
 });

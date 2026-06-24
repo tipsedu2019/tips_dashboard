@@ -215,6 +215,28 @@ test("registered sign-in explains the next step and viewer accounts can open the
   );
 });
 
+test("assistant role can enter the shell but not management or curriculum planning", async () => {
+  const [authUtilsSource, authGuardSource, sidebarSource, commandSearchSource] =
+    await Promise.all([
+      readSource("src/lib/auth-utils.ts"),
+      readSource("src/components/auth/auth-guard.tsx"),
+      readSource("src/components/app-sidebar.tsx"),
+      readSource("src/components/command-search.tsx"),
+    ]);
+
+  assert.match(authUtilsSource, /normalizedRole === "assistant"/);
+  assert.match(authUtilsSource, /canUseAssistantOperations/);
+  assert.match(authUtilsSource, /defaultAdminPath: canUseAssistantOperations \? "\/admin\/tasks" : "\/admin\/dashboard"/);
+  assert.match(authGuardSource, /ASSISTANT_ALLOWED_ADMIN_PATHS/);
+  assert.match(authGuardSource, /"\/admin\/tasks"/);
+  assert.match(authGuardSource, /"\/admin\/word-retests"/);
+  assert.match(authGuardSource, /"\/admin\/academic-calendar"/);
+  assert.match(authGuardSource, /"\/admin\/timetable"/);
+  assert.match(authGuardSource, /router\.replace\(defaultAdminPath\)/);
+  assert.match(sidebarSource, /canUseAssistantOperations/);
+  assert.match(commandSearchSource, /canUseAssistantOperations/);
+});
+
 test("forgot-password uses the receivable email reset flow", async () => {
   const source = await readSource(
     "src/app/(auth)/forgot-password/components/forgot-password-form-1.tsx",

@@ -10,6 +10,8 @@ import {
   normalizeStudentStatus,
 } from "../../lib/student-status.js";
 
+const DEFAULT_CLASS_TYPE = "정규";
+
 function text(value) {
   return String(value || "").trim();
 }
@@ -29,6 +31,33 @@ function formatCurrency(value) {
 
 function buildMetaSummary(parts) {
   return parts.map(text).filter(Boolean).join(" · ");
+}
+
+function getStudentRecentIssue(row = {}) {
+  return text(
+    row.recent_issue ||
+      row.recentIssue ||
+      row.latest_issue ||
+      row.latestIssue ||
+      row.special_note ||
+      row.specialNote ||
+      row.important_note ||
+      row.importantNote,
+  );
+}
+
+function getClassTypeValue(row = {}) {
+  return (
+    text(
+      row.class_type ||
+        row.classType ||
+        row.type ||
+        row.lesson_type ||
+        row.lessonType ||
+        row.course_type ||
+        row.courseType,
+    ) || DEFAULT_CLASS_TYPE
+  );
 }
 
 function formatDurationLabel(totalMinutes) {
@@ -104,6 +133,7 @@ export function normalizeStudentManagementRecord(row = {}) {
   const grade = text(row.grade) || "학년 미정";
   const title = text(row.name) || "이름 미정";
   const status = normalizeStudentStatus(row.status);
+  const recentIssue = getStudentRecentIssue(row);
   const classStatus = classIds.length
     ? `수강 ${classIds.length}개`
     : waitlistClassIds.length
@@ -129,6 +159,7 @@ export function normalizeStudentManagementRecord(row = {}) {
       row.enroll_date || row.enrollDate
         ? `등록 ${row.enroll_date || row.enrollDate}`
         : "",
+      recentIssue ? `특이사항 ${recentIssue}` : "",
     ]),
     searchText: [
       title,
@@ -139,12 +170,15 @@ export function normalizeStudentManagementRecord(row = {}) {
       text(row.uid),
       text(row.contact),
       text(row.parent_contact || row.parentContact),
+      recentIssue,
     ]
       .filter(Boolean)
       .join(" "),
     raw: {
       ...row,
       status,
+      recent_issue: recentIssue,
+      recentIssue,
       class_status: classStatus,
       classStatus,
     },
@@ -154,6 +188,7 @@ export function normalizeStudentManagementRecord(row = {}) {
       classCount: classIds.length,
       waitlistCount: waitlistClassIds.length,
       school,
+      recentIssue,
     },
   };
 }
@@ -164,11 +199,13 @@ export function normalizeClassManagementRecord(row = {}) {
     row.waitlist_student_ids || row.waitlistStudentIds || row.waitlist_ids || row.waitlistIds,
   );
   const textbookIds = toArray(row.textbook_ids || row.textbookIds);
+  const textbookCount = textbookIds.length || Number(row.textbook_count || row.textbookCount || 0);
   const capacity = Number(row.capacity || 0);
   const normalizedStatus =
     normalizeClassStatus(row.status) || computeClassStatus(row);
   const title = text(row.name || row.className) || "이름 없는 수업";
   const subject = text(row.subject) || "과목 미정";
+  const classType = getClassTypeValue(row);
   const schedule = text(row.schedule);
   const scheduleLines = normalizeScheduleLines(schedule);
   const teacher = text(row.teacher || row.teacher_name || row.teacherName) || "담당 미정";
@@ -194,18 +231,20 @@ export function normalizeClassManagementRecord(row = {}) {
     status: normalizedStatus,
     statusValue: normalizedStatus,
     metaSummary: buildMetaSummary([
+      classType,
       classGroupNames.join(", "),
       text(row.grade),
       classroom,
       capacity > 0
         ? `정원 ${registeredCount}/${capacity}`
         : `수강 ${registeredCount}명`,
-      `교재 ${textbookIds.length}권`,
+      `교재 ${textbookCount}권`,
       tuitionLabel,
     ]),
     searchText: [
       title,
       subject,
+      classType,
       teacher,
       schedule,
       text(row.grade),
@@ -218,6 +257,8 @@ export function normalizeClassManagementRecord(row = {}) {
       ...row,
       teacher,
       classroom,
+      class_type: classType,
+      classType,
       class_name: title,
       className: title,
       schedule_lines: scheduleLines,
@@ -242,11 +283,12 @@ export function normalizeClassManagementRecord(row = {}) {
     metrics: {
       studentCount: registeredCount,
       waitlistCount,
-      textbookCount: textbookIds.length,
+      textbookCount,
       capacity,
       weeklyMinutes,
       weeklyHoursLabel,
       tuitionLabel,
+      classType,
       teacher,
       classroom,
       scheduleLines,
