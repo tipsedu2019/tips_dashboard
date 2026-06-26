@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, CalendarDays, Check, ChevronDown, ClipboardList, Save, Settings2, Users } from "lucide-react";
+import { BookOpen, CalendarDays, Check, ChevronDown, ClipboardList, Pencil, Plus, Save, Settings2, Users } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import type { ManagementKind, ManagementRow } from "@/features/management/use-management-records";
@@ -468,7 +468,7 @@ function getClassDetailSectionTargetId(section: string, sessionId = "") {
     return "class-curriculum-textbooks-panel";
   }
   if (section === "lesson-design-periods") {
-    return sessionId ? `class-schedule-session-${sessionId}` : "class-schedule-session-create-work-panel";
+    return sessionId ? `class-schedule-session-${sessionId}` : "class-schedule-session-view-panel";
   }
   return "";
 }
@@ -908,6 +908,41 @@ function getCurriculumSessionDate(session: Record<string, unknown>) {
   if (!rawValue) return null;
   const date = new Date(rawValue);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getClassScheduleDateKey(session: Record<string, unknown>) {
+  const date = getCurriculumSessionDate(session);
+  if (!date) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getClassScheduleMonthLabel(monthKey: string) {
+  if (monthKey === "undated") return "날짜 미정";
+  const [year, month] = monthKey.split("-");
+  return year && month ? `${year}.${month}` : "날짜 미정";
+}
+
+function getClassScheduleSessionGroups(sessions: Record<string, unknown>[] = []) {
+  const groups = new Map<string, { key: string; label: string; sessions: Record<string, unknown>[] }>();
+  const orderedSessions = [...sessions].sort((left, right) => {
+    const leftDate = getCurriculumSessionDate(left)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const rightDate = getCurriculumSessionDate(right)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    return leftDate - rightDate || getCurriculumSessionOrder(left) - getCurriculumSessionOrder(right);
+  });
+
+  orderedSessions.forEach((session) => {
+    const dateKey = getClassScheduleDateKey(session);
+    const monthKey = dateKey ? dateKey.slice(0, 7) : "undated";
+    const group = groups.get(monthKey) || {
+      key: monthKey,
+      label: getClassScheduleMonthLabel(monthKey),
+      sessions: [],
+    };
+    group.sessions.push(session);
+    groups.set(monthKey, group);
+  });
+
+  return [...groups.values()];
 }
 
 function getCurriculumSessionOrder(session: Record<string, unknown>) {
@@ -2447,223 +2482,178 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
     const raw = selectedRow.raw || {};
     const schedule = text(raw.schedule) || "시간표 미정";
-    const teacher = text(raw.teacher || raw.teacher_name || raw.teacherName) || "담당 미정";
-    const classroom = text(raw.classroom || raw.room) || "강의실 미정";
     const sessions = getClassSessionSummaries(selectedRow);
     const nextSession = getClassScheduleNextSession(selectedRow);
     const currentSession = getClassScheduleCurrentSession(selectedRow);
     const exceptionSessions = getClassScheduleExceptionSessions(selectedRow);
     const plannedSessionCount = sessions.filter((session) => hasCurriculumPlanContent(session)).length;
-    const sessionRows = sessions.slice(0, 8);
-    const scheduleExceptionCreateSessionId = getCurriculumSessionStableId(nextSession || currentSession || sessions[0] || {});
+    const sessionGroups = getClassScheduleSessionGroups(sessions);
     const isScheduleSectionRequested = requestedClassDetailSection === "lesson-design-periods";
-    const scheduleCreationStateLabel = sessions.length <= 0 ? "회차 미생성" : "회차 생성됨";
-    const shouldHighlightScheduleCreation = isScheduleSectionRequested && sessions.length <= 0;
+    const scheduleCreationStateLabel = sessions.length <= 0 ? "회차 미생성" : `회차 ${sessions.length}회`;
+    const shouldHighlightScheduleView = isScheduleSectionRequested && sessions.length <= 0;
+    const openScheduleEditor = (sessionId = "") => {
+      router.push(buildLessonDesignFromClassDetailHref({
+        section: "lesson-design-periods",
+        sessionId,
+        returnTab: "schedule",
+      }));
+    };
 
     return (
       <section id="class-schedule-official-panel" data-testid="class-schedule-official-panel" className="space-y-4">
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-md border bg-background px-3 py-2">
-            <div className="text-xs text-muted-foreground">요일·시간</div>
-            <div className="mt-1 truncate text-sm font-semibold">{schedule}</div>
-          </div>
-          <div className="rounded-md border bg-background px-3 py-2">
-            <div className="text-xs text-muted-foreground">다음 수업일</div>
-            <div className="mt-1 truncate text-sm font-semibold">
-              {nextSession ? getCurriculumSessionTitle(nextSession, "다음 회차") : "회차 없음"}
-            </div>
-          </div>
-          <div className="rounded-md border bg-background px-3 py-2">
-            <div className="text-xs text-muted-foreground">현재 회차</div>
-            <div className="mt-1 truncate text-sm font-semibold">
-              {currentSession ? getCurriculumSessionTitle(currentSession, "현재 회차") : "회차 없음"}
-            </div>
-          </div>
-          <div className="rounded-md border bg-background px-3 py-2">
-            <div className="text-xs text-muted-foreground">전체 회차</div>
-            <div className="mt-1 text-sm font-semibold">{sessions.length > 0 ? `${sessions.length}회` : "-"}</div>
-          </div>
-        </section>
-
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-semibold">일정 정보</div>
-            <Badge variant="secondary" className="h-6 rounded-full px-2">
-              {teacher} · {classroom}
-            </Badge>
-          </div>
-          {renderEditableFields("detail", ["teacher", "schedule", "classroom", "classGroupIds"])}
-        </section>
-
         <section
-          id="class-schedule-session-create-work-panel"
-          data-testid="class-schedule-session-create-work-panel"
-          data-class-detail-focused={shouldHighlightScheduleCreation ? "true" : undefined}
+          id="class-schedule-session-view-panel"
+          data-testid="class-schedule-session-view-panel"
+          data-class-detail-focused={shouldHighlightScheduleView ? "true" : undefined}
           className={cn(
-            "rounded-md border bg-background p-3",
-            shouldHighlightScheduleCreation && "border-primary/40 bg-primary/5 ring-1 ring-primary/30",
+            "overflow-hidden rounded-md border bg-background",
+            shouldHighlightScheduleView && "border-primary/40 bg-primary/5 ring-1 ring-primary/30",
           )}
         >
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="grid gap-3 border-b px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1.5">
+                <div className="text-sm font-semibold">회차 보기</div>
                 <Badge variant={sessions.length <= 0 ? "destructive" : "secondary"}>
                   {scheduleCreationStateLabel}
                 </Badge>
-                <Badge variant="outline">{schedule}</Badge>
-              </div>
-              <div className="mt-2 text-sm font-semibold">회차 생성</div>
-              <div className="mt-1 truncate text-xs text-muted-foreground">
-                {sessions.length <= 0
-                  ? "반별 수업계획에서 넘어온 회차 미생성 수업입니다"
-                  : `${sessions.length}회가 생성되어 있습니다. 새 학기나 시간표 변경 시 여기서 조정합니다`}
-              </div>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 w-full px-2.5 lg:w-auto"
-              onClick={() => router.push(buildLessonDesignFromClassDetailHref({
-                section: "lesson-design-periods",
-                returnTab: "schedule",
-              }))}
-            >
-              회차 생성
-            </Button>
-          </div>
-        </section>
-
-        <section data-testid="class-schedule-exception-work-panel" className="rounded-md border bg-background p-3">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge variant={exceptionSessions.length > 0 ? "destructive" : "secondary"}>
-                  예외 {exceptionSessions.length}건
+                <Badge variant={exceptionSessions.length > 0 ? "destructive" : "outline"}>
+                  보강·휴강·예외 {exceptionSessions.length}건
                 </Badge>
-                {nextSession ? <Badge variant="outline">{getCurriculumSessionTitle(nextSession, "다음 회차")}</Badge> : null}
               </div>
-              <div className="mt-2 text-sm font-semibold">예외 일정 관리</div>
-              <div className="mt-1 truncate text-xs text-muted-foreground">
-                {exceptionSessions[0]
-                  ? `${getCurriculumSessionTitle(exceptionSessions[0], "예외 회차")} · ${getScheduleSessionMemo(exceptionSessions[0]) || getScheduleStateLabel(exceptionSessions[0])}`
-                  : "휴강·보강이 생기면 다음 회차에서 바로 처리합니다"}
-              </div>
+              <div className="mt-1 truncate text-xs text-muted-foreground">{schedule}</div>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 w-full px-2.5 lg:w-auto"
-              data-testid="class-schedule-exception-create"
-              onClick={() => router.push(buildLessonDesignFromClassDetailHref({
-                section: "lesson-design-periods",
-                sessionId: scheduleExceptionCreateSessionId,
-                returnTab: "schedule",
-              }))}
-              disabled={!scheduleExceptionCreateSessionId}
-            >
-              예외 등록
-            </Button>
-          </div>
-        </section>
-
-        <section className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)]">
-          <div className="rounded-md border bg-background">
-            <div className="flex h-10 items-center justify-between border-b px-3">
-              <div className="text-sm font-semibold">회차 흐름</div>
-              <Badge variant="secondary" className="h-6 rounded-full px-2">
-                배정 {plannedSessionCount}/{sessions.length || 0}회
-              </Badge>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 min-w-0 gap-1.5 rounded-md px-2.5"
+                data-testid="class-schedule-session-view-edit"
+                onClick={() => openScheduleEditor()}
+              >
+                <Pencil className="size-3.5" aria-hidden="true" />
+                <span className="truncate">회차 편집</span>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 min-w-0 gap-1.5 rounded-md px-2.5"
+                data-testid="class-schedule-session-view-create"
+                onClick={() => openScheduleEditor()}
+              >
+                <Plus className="size-3.5" aria-hidden="true" />
+                <span className="truncate">회차 생성</span>
+              </Button>
             </div>
-            {sessionRows.length > 0 ? (
-              <div className="divide-y">
-                {sessionRows.map((session, index) => {
-                  const isFocusedScheduleSession = isScheduleSectionRequested &&
-                    requestedClassDetailSessionId === getCurriculumSessionStableId(session);
-
-                  return (
-                    <div
-                      key={`${text(session.sessionId || session.session_id) || getCurriculumSessionTitle(session)}-${index}`}
-                      id={`class-schedule-session-${getCurriculumSessionStableId(session)}`}
-                      data-class-detail-focused={isFocusedScheduleSession ? "true" : undefined}
-                      className={cn(
-                        "grid gap-2 px-3 py-2.5 lg:grid-cols-[minmax(9rem,.9fr)_auto_minmax(12rem,1.1fr)] lg:items-center",
-                        isFocusedScheduleSession && "bg-primary/5 ring-1 ring-primary/30",
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{getCurriculumSessionTitle(session)}</div>
-                        <div className="truncate text-xs text-muted-foreground">{text(session.periodLabel || session.period_label) || schedule}</div>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge variant={getScheduleStateLabel(session) === "정규" ? "secondary" : "destructive"}>{getScheduleStateLabel(session)}</Badge>
-                        <Badge variant={hasCurriculumPlanContent(session) ? "outline" : "destructive"}>
-                          {getCurriculumSessionStatusLabel(session)}
-                        </Badge>
-                      </div>
-                      <div className="min-w-0 truncate text-sm text-muted-foreground">
-                        {getCurriculumSessionDescription(session) || getScheduleSessionMemo(session) || "회차 메모 없음"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground">생성된 회차가 없습니다</div>
-            )}
           </div>
 
-          <div className="rounded-md border bg-background">
-            <div className="flex h-10 items-center justify-between border-b px-3">
-              <div className="text-sm font-semibold">보강·휴강·예외</div>
-              <Badge variant={exceptionSessions.length > 0 ? "destructive" : "secondary"} className="h-6 rounded-full px-2">
-                {exceptionSessions.length}건
-              </Badge>
+          <div className="grid gap-2 border-b p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">다음 수업일</div>
+              <div className="mt-1 truncate font-semibold">
+                {nextSession ? getCurriculumSessionTitle(nextSession, "다음 회차") : "회차 없음"}
+              </div>
             </div>
-            {exceptionSessions.length > 0 ? (
-              <div className="divide-y">
-                {exceptionSessions.slice(0, 5).map((session, index) => (
-                  <div key={`schedule-exception-${text(session.sessionId || session.session_id) || index}`} className="grid gap-1 px-3 py-2.5">
-                    <div className="flex min-w-0 items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium">{getCurriculumSessionTitle(session)}</span>
-                      <Badge variant="outline" className="shrink-0">{getScheduleStateLabel(session)}</Badge>
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {getScheduleSessionMemo(session) || getCurriculumSessionDescription(session) || "예외 메모 없음"}
-                    </div>
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2 text-xs"
-                        data-testid="class-schedule-exception-edit"
-                        onClick={() => router.push(buildLessonDesignFromClassDetailHref({
-                          section: "lesson-design-periods",
-                          sessionId: getCurriculumSessionStableId(session),
-                          returnTab: "schedule",
-                        }))}
-                      >
-                        예외 수정
-                      </Button>
-                    </div>
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">현재 회차</div>
+              <div className="mt-1 truncate font-semibold">
+                {currentSession ? getCurriculumSessionTitle(currentSession, "현재 회차") : "회차 없음"}
+              </div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">전체 회차</div>
+              <div className="mt-1 font-semibold">{sessions.length > 0 ? `${sessions.length}회` : "-"}</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">배정 진도</div>
+              <div className="mt-1 font-semibold">
+                {plannedSessionCount}/{sessions.length || 0}회
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 p-3">
+            {sessionGroups.length > 0 ? (
+              sessionGroups.map((group) => (
+                <section key={group.key} className="overflow-hidden rounded-md border bg-background">
+                  <div className="flex h-10 items-center justify-between gap-2 border-b px-3">
+                    <div className="truncate text-sm font-semibold">{group.label}</div>
+                    <Badge variant="secondary" className="h-6 rounded-full px-2">
+                      {group.sessions.length}회
+                    </Badge>
                   </div>
-                ))}
-              </div>
+                  <div className="divide-y">
+                    {group.sessions.map((session, index) => {
+                      const sessionId = getCurriculumSessionStableId(session);
+                      const isFocusedScheduleSession = isScheduleSectionRequested && requestedClassDetailSessionId === sessionId;
+                      const scheduleStateLabel = getScheduleStateLabel(session);
+                      const scheduleMemo = getScheduleSessionMemo(session);
+                      const sessionDescription = getCurriculumSessionDescription(session);
+                      const dateKey = getClassScheduleDateKey(session);
+
+                      return (
+                        <div
+                          key={`${sessionId || getCurriculumSessionTitle(session)}-${index}`}
+                          id={`class-schedule-session-${sessionId}`}
+                          data-testid="class-schedule-session-row"
+                          data-class-detail-focused={isFocusedScheduleSession ? "true" : undefined}
+                          className={cn(
+                            "grid gap-2 px-3 py-2.5 lg:grid-cols-[minmax(10rem,.9fr)_minmax(0,1fr)_auto] lg:items-center",
+                            isFocusedScheduleSession && "bg-primary/5 ring-1 ring-primary/30",
+                          )}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="truncate text-sm font-medium">{getCurriculumSessionTitle(session)}</span>
+                              <Badge variant={scheduleStateLabel === "정규" ? "secondary" : "destructive"}>
+                                {scheduleStateLabel}
+                              </Badge>
+                            </div>
+                            <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {dateKey || text(session.periodLabel || session.period_label) || schedule}
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap gap-1">
+                              <Badge variant={hasCurriculumPlanContent(session) ? "outline" : "destructive"}>
+                                {getCurriculumSessionStatusLabel(session)}
+                              </Badge>
+                              {scheduleMemo ? <Badge variant="outline">예외 메모</Badge> : null}
+                            </div>
+                            <div className="mt-1 truncate text-sm text-muted-foreground">
+                              {sessionDescription || scheduleMemo || "회차 메모 없음"}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 min-w-0 gap-1.5 rounded-md px-2.5"
+                            data-testid="class-schedule-session-row-edit"
+                            onClick={() => router.push(buildLessonDesignFromClassDetailHref({
+                              section: "lesson-design-periods",
+                              sessionId: getCurriculumSessionStableId(session),
+                              returnTab: "schedule",
+                            }))}
+                          >
+                            <Pencil className="size-3.5" aria-hidden="true" />
+                            <span className="truncate">회차 수정</span>
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))
             ) : (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground">등록된 예외 일정이 없습니다</div>
+              <div className="rounded-md border border-dashed px-3 py-8 text-center">
+                <div className="text-sm font-semibold text-foreground">생성된 회차가 없습니다</div>
+                <div className="mt-1 text-xs text-muted-foreground">회차 생성으로 이동해 수업계획을 만들 수 있습니다</div>
+              </div>
             )}
           </div>
         </section>
-
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.push(buildLessonDesignFromClassDetailHref())}
-          >
-            회차 생성·수정
-          </Button>
-        </div>
       </section>
     );
   };
