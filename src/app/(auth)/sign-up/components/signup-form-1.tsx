@@ -19,12 +19,20 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getAuthErrorMessage } from "@/lib/auth-error-messages";
 import { getAuthRedirectUrl } from "@/lib/auth-redirect-url";
 import { supabase, supabaseConfigError } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 const BLOCKED_EMAIL_DOMAIN = "tipsedu.co.kr";
+const TEACHER_TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀", "조교팀"] as const;
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
@@ -37,6 +45,9 @@ function isBlockedEmail(value: string) {
 const signupFormSchema = z
   .object({
     name: z.string().trim().min(1, "이름을 입력해 주세요."),
+    teacherTeam: z.enum(TEACHER_TEAM_OPTIONS, {
+      message: "팀을 선택해 주세요.",
+    }),
     email: z
       .string()
       .trim()
@@ -67,6 +78,7 @@ export function SignupForm1({
     resolver: zodResolver(signupFormSchema),
     defaultValues: {
       name: "",
+      teacherTeam: "영어팀",
       email: "",
       password: "",
       confirmPassword: "",
@@ -95,6 +107,8 @@ export function SignupForm1({
           data: {
             name,
             full_name: name,
+            teacher_team: values.teacherTeam,
+            team: values.teacherTeam,
           },
         },
       });
@@ -106,6 +120,7 @@ export function SignupForm1({
       setMessage("가입 확인 메일을 보냈습니다. 메일 확인 후 로그인하세요.");
       form.reset({
         name: "",
+        teacherTeam: "영어팀",
         email: "",
         password: "",
         confirmPassword: "",
@@ -148,6 +163,37 @@ export function SignupForm1({
                             {...field}
                           />
                         </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="teacherTeam"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>팀</FormLabel>
+                        <Select
+                          name="teacherTeam"
+                          value={field.value}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger
+                              data-testid="sign-up-teacher-team"
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="팀 선택" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {TEACHER_TEAM_OPTIONS.map((team) => (
+                              <SelectItem key={team} value={team}>
+                                {team}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}

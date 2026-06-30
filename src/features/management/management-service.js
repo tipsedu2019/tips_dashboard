@@ -63,6 +63,60 @@ function normalizeDashboardRole(value) {
   return DASHBOARD_ROLES.includes(role) ? role : "teacher";
 }
 
+function normalizeNullableText(value) {
+  const trimmed = trimText(value);
+  return trimmed || null;
+}
+
+function normalizeNullableLowerText(value) {
+  const trimmed = trimText(value).toLowerCase();
+  return trimmed || null;
+}
+
+function normalizeComparableSubjects(value) {
+  return normalizeSubjectList(value).join("\n");
+}
+
+function normalizeComparableTeacherCatalog(row = {}) {
+  return {
+    id: trimText(row.id),
+    name: trimText(row.name),
+    subjects: normalizeComparableSubjects(row.subjects),
+    profile_id: normalizeNullableText(row.profile_id || row.profileId),
+    account_email: normalizeNullableLowerText(row.account_email || row.accountEmail),
+    dashboard_role: normalizeDashboardRole(row.dashboard_role || row.dashboardRole),
+    is_visible: row.is_visible !== false && row.isVisible !== false,
+    sort_order: Number(row.sort_order ?? row.sortOrder ?? 0) || 0,
+  };
+}
+
+function isSameTeacherCatalogPayload(nextRow = {}, currentRow = {}) {
+  const next = normalizeComparableTeacherCatalog(nextRow);
+  const current = normalizeComparableTeacherCatalog(currentRow);
+
+  return (
+    next.name === current.name &&
+    next.subjects === current.subjects &&
+    next.profile_id === current.profile_id &&
+    next.account_email === current.account_email &&
+    next.dashboard_role === current.dashboard_role &&
+    next.is_visible === current.is_visible &&
+    next.sort_order === current.sort_order
+  );
+}
+
+export function filterChangedTeacherCatalogPayload(payload = [], currentRows = []) {
+  const currentById = new Map(
+    (currentRows || []).map((row) => [trimText(row?.id), row]),
+  );
+
+  return (payload || []).filter((row) => {
+    const id = trimText(row?.id);
+    const current = id ? currentById.get(id) : null;
+    return !current || !isSameTeacherCatalogPayload(row, current);
+  });
+}
+
 function isMissingColumnError(error) {
   const message = trimText(error?.message).toLowerCase();
   return message.includes("column") &&
@@ -209,29 +263,101 @@ async function upsertTeacherCatalogRows(client, rows = []) {
   }
 }
 
+async function selectTeacherCatalogRowsByIds(client, rows = []) {
+  const ids = [...new Set((rows || []).map((row) => trimText(row.id)).filter(Boolean))];
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const extendedSelect = "id, name, subjects, is_visible, sort_order, profile_id, account_email, dashboard_role";
+  const baseSelect = "id, name, subjects, is_visible, sort_order";
+  let result = await client.from("teacher_catalogs").select(extendedSelect).in("id", ids);
+
+  if (!result.error) {
+    return result.data || [];
+  }
+  if (!isMissingColumnError(result.error)) {
+    throw result.error;
+  }
+
+  result = await client.from("teacher_catalogs").select(baseSelect).in("id", ids);
+  if (result.error) {
+    throw result.error;
+  }
+  return result.data || [];
+}
+
+async function selectProfilesByIdsForTeacherSync(client, ids = []) {
+  const targets = [...new Set((ids || []).map(trimText).filter(Boolean))];
+  if (targets.length === 0) {
+    return [];
+  }
+
+  let result = await client
+    .from("profiles")
+    .select("id, role, teacher_catalog_id")
+    .in("id", targets);
+  if (!result.error) {
+    return result.data || [];
+  }
+  if (!isMissingColumnError(result.error)) {
+    throw result.error;
+  }
+
+  result = await client.from("profiles").select("id, role").in("id", targets);
+  if (result.error) {
+    throw result.error;
+  }
+  return result.data || [];
+}
+
+function buildLinkedTeacherProfilePatch(row = {}) {
+  return {
+    role: normalizeDashboardRole(row.dashboard_role),
+    teacher_catalog_id: normalizeNullableText(row.id),
+  };
+}
+
+function hasProfilePatchChanges(profile = {}, patch = {}) {
+  if (!profile || !trimText(profile.id)) {
+    return true;
+  }
+  if (normalizeDashboardRole(profile.role) !== patch.role) {
+    return true;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(profile, "teacher_catalog_id") &&
+    normalizeNullableText(profile.teacher_catalog_id) !== patch.teacher_catalog_id
+  ) {
+    return true;
+  }
+  return false;
+}
+
 async function syncLinkedTeacherProfiles(client, rows = []) {
   const linkedRows = rows.filter((row) => trimText(row.profile_id));
   if (linkedRows.length === 0) {
     return [];
   }
 
+  const profileRows = await selectProfilesByIdsForTeacherSync(
+    client,
+    linkedRows.map((row) => row.profile_id),
+  );
+  const profilesById = new Map(
+    profileRows.map((profile) => [trimText(profile.id), profile]),
+  );
   const updates = [];
   for (const row of linkedRows) {
     const profileId = trimText(row.profile_id);
-    const role = normalizeDashboardRole(row.dashboard_role);
-    const accountEmail = trimText(row.account_email).toLowerCase();
-    const loginId = accountEmail.includes("@") ? accountEmail.split("@")[0] : accountEmail;
-    const extendedPatch = {
-      role,
-      name: trimText(row.name),
-      email: accountEmail || null,
-      login_id: loginId || null,
-      teacher_catalog_id: trimText(row.id) || null,
-    };
+    const extendedPatch = buildLinkedTeacherProfilePatch(row);
+    if (!hasProfilePatchChanges(profilesById.get(profileId), extendedPatch)) {
+      continue;
+    }
 
     let result = await client.from("profiles").update(extendedPatch).eq("id", profileId).select();
     if (result.error && isMissingColumnError(result.error)) {
-      result = await client.from("profiles").update({ role }).eq("id", profileId).select();
+      result = await client.from("profiles").update({ role: extendedPatch.role }).eq("id", profileId).select();
     }
     if (result.error) {
       throw result.error;
@@ -593,8 +719,13 @@ export function createManagementService(options = {}) {
     async upsertTeacherCatalogs(resources = []) {
       const client = ensureClient(supabase);
       const payload = buildResourceCatalogPayload(resources, { kind: "teacher", generateId });
-      const rows = await upsertTeacherCatalogRows(client, payload);
-      await syncLinkedTeacherProfiles(client, payload);
+      const currentRows = await selectTeacherCatalogRowsByIds(client, payload);
+      const changedPayload = filterChangedTeacherCatalogPayload(payload, currentRows);
+      if (changedPayload.length === 0) {
+        return [];
+      }
+      const rows = await upsertTeacherCatalogRows(client, changedPayload);
+      await syncLinkedTeacherProfiles(client, changedPayload);
       return rows;
     },
 

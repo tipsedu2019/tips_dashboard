@@ -80,23 +80,23 @@ test("legacy auth variant routes redirect without keeping template components", 
   }
 });
 
-test("sign-in form asks for a Google email like the reset and signup flows", async () => {
+test("sign-in form accepts a Google email or the Gmail id only", async () => {
   const source = await readSource(
     "src/app/(auth)/sign-in/components/login-form-1.tsx",
   );
 
   assert.match(
     source,
-    /loginId:\s*z\.string\(\)\.trim\(\)\.min\(1, "Google 이메일을 입력해 주세요\."\)/,
+    /loginId:\s*z\.string\(\)\.trim\(\)\.min\(1, "Google 이메일 또는 아이디를 입력해 주세요\."\)/,
   );
   assert.match(source, /name="loginId"/);
   assert.match(source, /data-testid="sign-in-login-id"/);
   assert.match(source, /data-testid="sign-in-password"/);
-  assert.match(source, /<FormLabel>Google 이메일<\/FormLabel>/);
-  assert.match(source, /type="email"/);
+  assert.match(source, /<FormLabel>Google 이메일 또는 아이디<\/FormLabel>/);
+  assert.match(source, /type="text"/);
   assert.match(source, /inputMode="email"/);
-  assert.match(source, /placeholder="name@gmail.com"/);
-  assert.match(source, /autoComplete="email"/);
+  assert.match(source, /placeholder="name 또는 name@gmail.com"/);
+  assert.match(source, /autoComplete="username"/);
   assert.match(source, /await login\(values\.loginId, values\.password\)/);
   assert.match(source, /const redirectTarget = searchParams\.get\("next"\) \|\| "\/admin\/dashboard"/);
   assert.match(source, /if \(!loading && user\) \{/);
@@ -107,12 +107,13 @@ test("sign-in form asks for a Google email like the reset and signup flows", asy
   assert.match(source, /href="\/sign-up"/);
   assert.match(source, /<Link href="\/sign-up">회원가입<\/Link>/);
   assert.doesNotMatch(source, /<FormLabel>아이디<\/FormLabel>/);
+  assert.doesNotMatch(source, /type="email"/);
   assert.doesNotMatch(source, /placeholder="01087547830"/);
   assert.doesNotMatch(source, /your-id@tipsedu\.co\.kr/);
   assert.doesNotMatch(source, /계정 만들기/);
 });
 
-test("bare phone ids are normalized to full tipsedu email addresses", async () => {
+test("bare Gmail ids are normalized to full Gmail email addresses", async () => {
   const [authUtilsSource, authProviderSource] = await Promise.all([
     readSource("src/lib/auth-utils.ts"),
     readSource("src/providers/auth-provider.tsx"),
@@ -120,7 +121,7 @@ test("bare phone ids are normalized to full tipsedu email addresses", async () =
 
   assert.match(
     authUtilsSource,
-    /DEFAULT_LOGIN_EMAIL_DOMAIN = "tipsedu\.co\.kr"/,
+    /DEFAULT_LOGIN_EMAIL_DOMAIN = "gmail\.com"/,
   );
   assert.match(authUtilsSource, /return digits/);
   assert.match(
@@ -169,8 +170,13 @@ test("self sign-up uses a receivable email and Supabase signUp", async () => {
   assert.match(source, /BLOCKED_EMAIL_DOMAIN = "tipsedu\.co\.kr"/);
   assert.match(
     source,
+    /TEACHER_TEAM_OPTIONS = \["영어팀", "수학팀", "관리팀", "조교팀"\] as const/,
+  );
+  assert.match(
+    source,
     /name:\s*z\.string\(\)\.trim\(\)\.min\(1, "이름을 입력해 주세요\."\)/,
   );
+  assert.match(source, /teacherTeam:\s*z\.enum\(TEACHER_TEAM_OPTIONS/);
   assert.match(
     source,
     /email:\s*z[\s\S]*email\("수신 가능한 이메일 주소를 입력해 주세요\."\)/,
@@ -190,6 +196,11 @@ test("self sign-up uses a receivable email and Supabase signUp", async () => {
   assert.doesNotMatch(source, /router\.replace\("\/admin\/dashboard"\)/);
   assert.doesNotMatch(source, /window\.location\.origin/);
   assert.match(source, /full_name:\s*name/);
+  assert.match(source, /teacher_team:\s*values\.teacherTeam/);
+  assert.match(source, /team:\s*values\.teacherTeam/);
+  assert.match(source, /name="teacherTeam"/);
+  assert.match(source, /data-testid="sign-up-teacher-team"/);
+  assert.match(source, /<FormLabel>팀<\/FormLabel>/);
   assert.match(source, /placeholder="name@gmail\.com"/);
   assert.match(source, /<CardTitle className="text-xl">회원가입<\/CardTitle>/);
   assert.doesNotMatch(source, /console\.log\("Signup attempt:/);
@@ -198,9 +209,10 @@ test("self sign-up uses a receivable email and Supabase signUp", async () => {
 });
 
 test("registered sign-in explains the next step and viewer accounts can open the dashboard", async () => {
-  const [loginSource, authUtilsSource] = await Promise.all([
+  const [loginSource, authUtilsSource, adminLayoutSource] = await Promise.all([
     readSource("src/app/(auth)/sign-in/components/login-form-1.tsx"),
     readSource("src/lib/auth-utils.ts"),
+    readSource("src/app/admin/layout.tsx"),
   ]);
 
   assert.match(loginSource, /searchParams\.get\("registered"\) === "1"/);
@@ -213,6 +225,9 @@ test("registered sign-in explains the next step and viewer accounts can open the
     authUtilsSource,
     /canManageAll = normalizedRole === "admin" \|\| normalizedRole === "staff"/,
   );
+  assert.match(adminLayoutSource, /role === "viewer"/);
+  assert.match(adminLayoutSource, /data-testid="viewer-permission-notice"/);
+  assert.match(adminLayoutSource, /관리팀에게 권한 조정을 요청하세요\./);
 });
 
 test("assistant role can enter the shell but not management or curriculum planning", async () => {

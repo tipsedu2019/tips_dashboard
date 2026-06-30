@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createManagementService } from "../src/features/management/management-service.js";
+import {
+  createManagementService,
+  filterChangedTeacherCatalogPayload,
+} from "../src/features/management/management-service.js";
 
 function makeStudentUpsertClient(errorColumn) {
   const calls = [];
@@ -189,6 +192,165 @@ function makeRelationPartialFailureClient() {
     },
   };
 }
+
+function makeTeacherCatalogAuditClient() {
+  const calls = {
+    teacherSelectIds: [],
+    teacherUpserts: [],
+    profileSelectIds: [],
+    profileUpdates: [],
+  };
+  const fixtures = {
+    teacher_catalogs: [
+      {
+        id: "teacher-1",
+        name: "김선생",
+        subjects: ["영어팀"],
+        profile_id: "profile-1",
+        account_email: "teacher@example.com",
+        dashboard_role: "teacher",
+        is_visible: false,
+        sort_order: 1,
+      },
+    ],
+    profiles: [
+      {
+        id: "profile-1",
+        role: "teacher",
+        teacher_catalog_id: "teacher-1",
+      },
+    ],
+  };
+
+  return {
+    calls,
+    from(table) {
+      if (table === "teacher_catalogs") {
+        return {
+          select() {
+            return {
+              in(column, ids) {
+                assert.equal(column, "id");
+                calls.teacherSelectIds.push(ids);
+                return Promise.resolve({
+                  data: fixtures.teacher_catalogs.filter((row) => ids.includes(row.id)),
+                  error: null,
+                });
+              },
+            };
+          },
+          upsert(payload) {
+            calls.teacherUpserts.push(payload);
+            return {
+              async select() {
+                return { data: Array.isArray(payload) ? payload : [payload], error: null };
+              },
+            };
+          },
+        };
+      }
+
+      if (table === "profiles") {
+        return {
+          select() {
+            return {
+              in(column, ids) {
+                assert.equal(column, "id");
+                calls.profileSelectIds.push(ids);
+                return Promise.resolve({
+                  data: fixtures.profiles.filter((row) => ids.includes(row.id)),
+                  error: null,
+                });
+              },
+            };
+          },
+          update(patch) {
+            return {
+              eq(column, id) {
+                assert.equal(column, "id");
+                calls.profileUpdates.push({ id, patch });
+                return {
+                  async select() {
+                    return { data: [{ id, ...patch }], error: null };
+                  },
+                };
+              },
+            };
+          },
+        };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    },
+  };
+}
+
+test("teacher catalog saves ignore unchanged rows before audit-triggering upserts", () => {
+  const payload = [
+    {
+      id: "teacher-1",
+      name: "김선생",
+      subjects: ["영어팀"],
+      profile_id: "profile-1",
+      account_email: "teacher@example.com",
+      dashboard_role: "teacher",
+      is_visible: true,
+      sort_order: 1,
+    },
+    {
+      id: "teacher-2",
+      name: "박선생",
+      subjects: ["수학팀"],
+      profile_id: null,
+      account_email: null,
+      dashboard_role: "teacher",
+      is_visible: true,
+      sort_order: 2,
+    },
+  ];
+
+  const changed = filterChangedTeacherCatalogPayload(payload, [
+    {
+      id: "teacher-1",
+      name: "김선생",
+      subjects: ["영어팀"],
+      profile_id: "profile-1",
+      account_email: "teacher@example.com",
+      dashboard_role: "teacher",
+      is_visible: true,
+      sort_order: 1,
+    },
+  ]);
+
+  assert.deepEqual(changed.map((row) => row.id), ["teacher-2"]);
+});
+
+test("teacher catalog saves do not update linked profiles when profile fields are unchanged", async () => {
+  const client = makeTeacherCatalogAuditClient();
+  const service = createManagementService({
+    supabase: client,
+    generateId: () => "teacher-1",
+  });
+
+  await service.upsertTeacherCatalogs([
+    {
+      id: "teacher-1",
+      name: "김선생",
+      subjects: ["영어팀"],
+      profileId: "profile-1",
+      accountEmail: "teacher@example.com",
+      dashboardRole: "teacher",
+      isVisible: true,
+      sortOrder: 1,
+    },
+  ]);
+
+  assert.equal(client.calls.teacherUpserts.length, 1);
+  assert.equal(client.calls.teacherUpserts[0].length, 1);
+  assert.equal(client.calls.teacherUpserts[0][0].id, "teacher-1");
+  assert.deepEqual(client.calls.profileSelectIds, [["profile-1"]]);
+  assert.deepEqual(client.calls.profileUpdates, []);
+});
 
 test("student upserts retry without optional counseling fields when the live schema is stale", async () => {
   const client = makeStudentUpsertClient("recent_issue");

@@ -5,7 +5,6 @@ import {
   ArrowDown,
   ArrowUp,
   History,
-  Link2,
   Plus,
   RefreshCw,
   Trash2,
@@ -37,15 +36,9 @@ import {
   SettingsMasterHeader,
   SettingsTableFrame,
   SettingsWorkspaceShell,
-  settingsTableActionCellClass,
-  settingsTableActionHeadClass,
   settingsTableCellClass,
   settingsTableHeadClass,
 } from "./settings-master-layout";
-import {
-  useSettingsTableColumns,
-  type SettingsTableColumn,
-} from "./settings-table-columns";
 
 type TeacherRecord = {
   id: string;
@@ -107,15 +100,6 @@ const ROLE_OPTIONS = [
   { value: "assistant", label: "조교" },
   { value: "viewer", label: "보기만" },
 ] satisfies Array<{ value: DashboardRole; label: string }>;
-const TEACHER_TABLE_COLUMNS = [
-  { id: "subjects", label: "팀" },
-  { id: "name", label: "이름" },
-  { id: "account", label: "계정" },
-  { id: "role", label: "권한" },
-  { id: "visible", label: "표시" },
-  { id: "action", label: "작업", required: true },
-] satisfies SettingsTableColumn[];
-
 function normalizeTeamValue(subjects: string) {
   const parsedTeams = subjects
     .split(",")
@@ -163,11 +147,71 @@ function formatAccountIdentifier(value: string) {
   return trimmed;
 }
 
-function getAccountLabel(profile: AccountProfile) {
+function getAccountIdentifier(profile: AccountProfile) {
   if (profile.email) return formatAccountIdentifier(profile.email);
   if (profile.loginId) return formatAccountIdentifier(profile.loginId);
+  return "";
+}
+
+function getAccountPrimaryLabel(profile: AccountProfile) {
   if (profile.name) return profile.name;
+  const identifier = getAccountIdentifier(profile);
+  if (identifier) return identifier;
   return `계정 ${profile.id.slice(0, 8)}`;
+}
+
+function getAccountSecondaryLabel(profile: AccountProfile) {
+  const identifier = getAccountIdentifier(profile);
+  if (profile.name && identifier) return identifier;
+  return getRoleLabel(profile.role);
+}
+
+function normalizeAccountName(value: string) {
+  return value.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function isAccountNameMatched(row: TeacherRecord, profile: AccountProfile) {
+  const teacherName = normalizeAccountName(row.name);
+  const profileName = normalizeAccountName(profile.name);
+  return Boolean(teacherName && profileName && teacherName === profileName);
+}
+
+function getLinkedTeacherName(
+  profile: AccountProfile,
+  rows: TeacherRecord[],
+) {
+  if (!profile.teacherCatalogId) return "";
+  return rows.find((row) => row.id === profile.teacherCatalogId)?.name || "";
+}
+
+function isAccountLinkedToAnotherTeacher(
+  profile: AccountProfile,
+  currentTeacherId: string,
+) {
+  return Boolean(
+    profile.teacherCatalogId && profile.teacherCatalogId !== currentTeacherId,
+  );
+}
+
+function getAccountConnectionStatus(
+  profile: AccountProfile,
+  row: TeacherRecord,
+  rows: TeacherRecord[],
+) {
+  if (isAccountLinkedToAnotherTeacher(profile, row.id)) {
+    const linkedTeacherName = getLinkedTeacherName(profile, rows);
+    return linkedTeacherName
+      ? `이미 연결: ${linkedTeacherName}`
+      : "이미 다른 선생님에 연결";
+  }
+
+  if (!isAccountNameMatched(row, profile)) {
+    return "가입명 확인";
+  }
+
+  return profile.teacherCatalogId === row.id
+    ? "현재 계정 · 선생님 이름 일치"
+    : "연결 가능 · 선생님 이름 일치";
 }
 
 function toAccountProfile(row: Record<string, unknown>): AccountProfile {
@@ -213,7 +257,7 @@ function toTeacherRecord(
     typeof row.account_email === "string" && row.account_email
       ? row.account_email
       : profile
-        ? getAccountLabel(profile)
+        ? getAccountIdentifier(profile)
         : "";
 
   const team = normalizeTeamValue(subjects);
@@ -244,6 +288,15 @@ function createEmptyTeacher(nextSortOrder: number): TeacherRecord {
   };
 }
 
+function getNextSortOrder(rows: TeacherRecord[]) {
+  const numericSortOrders = rows
+    .map((row) => Number.parseInt(row.sortOrder, 10))
+    .filter((value) => Number.isFinite(value));
+  return (
+    (numericSortOrders.length > 0 ? Math.max(...numericSortOrders) : 0) + 1
+  );
+}
+
 function reorderWithSequentialSort(
   rows: TeacherRecord[],
   fromIndex: number,
@@ -256,6 +309,123 @@ function reorderWithSequentialSort(
     ...row,
     sortOrder: String(index + 1),
   }));
+}
+
+function withSequentialSort(rows: TeacherRecord[]) {
+  return rows.map((row, index) => ({
+    ...row,
+    sortOrder: String(index + 1),
+  }));
+}
+
+function TeacherAccountSelect({
+  row,
+  rows,
+  profiles,
+  isAccountSchemaReady,
+  onAccountChange,
+  onManualAccountChange,
+}: {
+  row: TeacherRecord;
+  rows: TeacherRecord[];
+  profiles: AccountProfile[];
+  isAccountSchemaReady: boolean;
+  onAccountChange: (id: string, value: string) => void;
+  onManualAccountChange: (id: string, value: string) => void;
+}) {
+  const selectedProfile = profiles.find((profile) => profile.id === row.profileId);
+  const selectedStatus = selectedProfile
+    ? getAccountConnectionStatus(selectedProfile, row, rows)
+    : "";
+
+  return (
+    <div className="grid gap-1.5">
+      <Select
+        value={row.profileId || "unlinked"}
+        onValueChange={(value) => onAccountChange(row.id, value)}
+      >
+        <SelectTrigger
+          aria-label="연결된 계정"
+          className="h-auto min-h-9 w-full py-1.5 text-left"
+          disabled={!isAccountSchemaReady}
+        >
+          {selectedProfile ? (
+            <span className="grid min-w-0 gap-0.5">
+              <span className="truncate text-sm font-medium">
+                {getAccountPrimaryLabel(selectedProfile)}
+              </span>
+              <span className="truncate text-[11px] text-muted-foreground">
+                {getAccountSecondaryLabel(selectedProfile)} · {selectedStatus}
+              </span>
+            </span>
+          ) : (
+            <span className="truncate text-sm text-muted-foreground">
+              {row.accountEmail
+                ? formatAccountIdentifier(row.accountEmail)
+                : "계정 미연결"}
+            </span>
+          )}
+        </SelectTrigger>
+        <SelectContent className="min-w-80">
+          <SelectItem value="unlinked">
+            <span className="grid gap-0.5">
+              <span className="text-sm font-medium">계정 미연결</span>
+              <span className="text-[11px] text-muted-foreground">
+                이메일 또는 아이디 직접 입력
+              </span>
+            </span>
+          </SelectItem>
+          {profiles.map((profile) => {
+            const status = getAccountConnectionStatus(profile, row, rows);
+            const disabled = isAccountLinkedToAnotherTeacher(profile, row.id);
+
+            return (
+              <SelectItem
+                key={profile.id}
+                value={profile.id}
+                disabled={disabled}
+                className="py-2"
+              >
+                <span className="grid min-w-0 gap-1">
+                  <span className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="truncate font-medium">
+                      {getAccountPrimaryLabel(profile)}
+                    </span>
+                    <Badge variant="outline" className="shrink-0 rounded-md text-[10px]">
+                      {getRoleLabel(profile.role)}
+                    </Badge>
+                  </span>
+                  <span className="flex min-w-0 items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                    <span className="truncate">
+                      {getAccountSecondaryLabel(profile)}
+                    </span>
+                    <span className="shrink-0">{status}</span>
+                  </span>
+                </span>
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+
+      {selectedProfile && !isAccountNameMatched(row, selectedProfile) ? (
+        <p className="text-[11px] text-amber-700">
+          가입명 {selectedProfile.name || "-"} · 설정명 {row.name || "-"}
+        </p>
+      ) : null}
+
+      {!row.profileId ? (
+        <Input
+          className="h-8 text-xs"
+          value={row.accountEmail}
+          onChange={(event) => onManualAccountChange(row.id, event.target.value)}
+          placeholder="이메일 또는 아이디"
+          aria-label="로그인 계정 이메일 또는 아이디"
+          disabled={!isAccountSchemaReady}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function getAuditActionLabel(action: string) {
@@ -291,11 +461,6 @@ export function TeacherMasterWorkspace() {
   const [isDirty, setIsDirty] = useState(false);
   const [teamFilter, setTeamFilter] =
     useState<(typeof TEAM_FILTERS)[number]>("전체");
-  const { isColumnVisible, visibleColumnCount, columnSettingsControl } =
-    useSettingsTableColumns(
-      "tips-settings-table:teachers:v2",
-      TEACHER_TABLE_COLUMNS,
-    );
 
   const loadTeachers = useCallback(async () => {
     setLoading(true);
@@ -364,23 +529,23 @@ export function TeacherMasterWorkspace() {
     };
   }, [isDirty, loadTeachers]);
 
-  const nextSortOrder = useMemo(() => {
-    const numericSortOrders = rows
-      .map((row) => Number.parseInt(row.sortOrder, 10))
-      .filter((value) => Number.isFinite(value));
-    return (
-      (numericSortOrders.length > 0 ? Math.max(...numericSortOrders) : 0) + 1
-    );
-  }, [rows]);
+  const visibleTeams = useMemo(
+    () =>
+      teamFilter === "전체"
+        ? [...TEAM_OPTIONS]
+        : [teamFilter as TeamOption],
+    [teamFilter],
+  );
+
+  const getRowsForTeam = useCallback(
+    (team: TeamOption) =>
+      rows.filter((row) => normalizeTeamValue(row.subjects) === team),
+    [rows],
+  );
 
   const filteredRows = useMemo(
-    () =>
-      rows.filter(
-        (row) =>
-          teamFilter === "전체" ||
-          normalizeTeamValue(row.subjects) === teamFilter,
-      ),
-    [rows, teamFilter],
+    () => visibleTeams.flatMap((team) => getRowsForTeam(team)),
+    [getRowsForTeam, visibleTeams],
   );
 
   const handleFieldChange = (
@@ -418,7 +583,7 @@ export function TeacherMasterWorkspace() {
               ...row,
               profileId: profile ? profile.id : "",
               accountEmail: profile
-                ? getAccountLabel(profile)
+                ? getAccountIdentifier(profile)
                 : row.accountEmail,
               dashboardRole: profile ? profile.role : row.dashboardRole,
             }
@@ -432,9 +597,31 @@ export function TeacherMasterWorkspace() {
     handleFieldChange(id, "dashboardRole", normalizeRole(value));
   };
 
-  const handleAdd = () => {
-    setRows((current) => [createEmptyTeacher(nextSortOrder), ...current]);
+  const handleAddToTeam = (team: TeamOption) => {
+    setRows((current) => {
+      const defaultRole: DashboardRole =
+        team === "조교팀" ? "assistant" : "teacher";
+      const newTeacher: TeacherRecord = {
+        ...createEmptyTeacher(getNextSortOrder(current)),
+        subjects: team,
+        dashboardRole: defaultRole,
+      };
+      let insertIndex = current.length;
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        if (normalizeTeamValue(current[index].subjects) === team) {
+          insertIndex = index + 1;
+          break;
+        }
+      }
+      const nextRows = [...current];
+      nextRows.splice(insertIndex, 0, newTeacher);
+      return withSequentialSort(nextRows);
+    });
     setIsDirty(true);
+  };
+
+  const handleAdd = () => {
+    handleAddToTeam(teamFilter === "전체" ? TEAM_OPTIONS[0] : teamFilter);
   };
 
   const handleSaveAll = async () => {
@@ -497,24 +684,29 @@ export function TeacherMasterWorkspace() {
     setIsDirty(true);
   };
 
-  const handleMoveRow = (id: string, direction: "up" | "down") => {
-    const currentIndex = rows.findIndex((row) => row.id === id);
-    if (currentIndex < 0) {
+  const handleMoveRowWithinTeam = (id: string, direction: "up" | "down") => {
+    const row = rows.find((item) => item.id === id);
+    if (!row) {
       return;
     }
 
-    const targetIndex =
-      direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= rows.length) {
+    const teamRows = getRowsForTeam(normalizeTeamValue(row.subjects));
+    const teamIndex = teamRows.findIndex((item) => item.id === id);
+    const targetTeamIndex =
+      direction === "up" ? teamIndex - 1 : teamIndex + 1;
+    if (targetTeamIndex < 0 || targetTeamIndex >= teamRows.length) {
       return;
     }
 
-    const reorderedRows = reorderWithSequentialSort(
-      rows,
-      currentIndex,
-      targetIndex,
+    const currentIndex = rows.findIndex((item) => item.id === id);
+    const targetIndex = rows.findIndex(
+      (item) => item.id === teamRows[targetTeamIndex].id,
     );
-    setRows(reorderedRows);
+    if (currentIndex < 0 || targetIndex < 0) {
+      return;
+    }
+
+    setRows(reorderWithSequentialSort(rows, currentIndex, targetIndex));
     setIsDirty(true);
   };
 
@@ -559,7 +751,6 @@ export function TeacherMasterWorkspace() {
             >
               {saving ? "저장 중" : "변경 저장"}
             </Button>
-            {columnSettingsControl}
           </>
         }
       />
@@ -592,7 +783,8 @@ export function TeacherMasterWorkspace() {
           </div>
         ) : (
           filteredRows.map((row) => {
-            const currentIndex = rows.findIndex((item) => item.id === row.id);
+            const teamRows = getRowsForTeam(normalizeTeamValue(row.subjects));
+            const currentIndex = teamRows.findIndex((item) => item.id === row.id);
 
             return (
               <section
@@ -655,39 +847,16 @@ export function TeacherMasterWorkspace() {
 
                   <div className="grid gap-1.5">
                     <span className="text-xs font-medium text-muted-foreground">계정</span>
-                    <Select
-                      value={row.profileId || "unlinked"}
-                      onValueChange={(value) => handleAccountChange(row.id, value)}
-                    >
-                      <SelectTrigger className="h-9" disabled={!isAccountSchemaReady}>
-                        <SelectValue placeholder="연결된 계정" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unlinked">계정 미연결</SelectItem>
-                        {profiles.map((profile) => (
-                          <SelectItem key={profile.id} value={profile.id}>
-                            {getAccountLabel(profile)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {row.profileId ? (
-                      <Badge variant="outline" className="h-8 w-fit rounded-md px-2 text-[11px]">
-                        <Link2 className="mr-1 size-3" />
-                        연결됨
-                      </Badge>
-                    ) : (
-                      <Input
-                        className="h-8 text-xs"
-                        value={row.accountEmail}
-                        onChange={(event) =>
-                          handleFieldChange(row.id, "accountEmail", event.target.value)
-                        }
-                        placeholder="이메일 또는 아이디"
-                        aria-label="로그인 계정 이메일 또는 아이디"
-                        disabled={!isAccountSchemaReady}
-                      />
-                    )}
+                    <TeacherAccountSelect
+                      row={row}
+                      rows={rows}
+                      profiles={profiles}
+                      isAccountSchemaReady={isAccountSchemaReady}
+                      onAccountChange={handleAccountChange}
+                      onManualAccountChange={(id, value) =>
+                        handleFieldChange(id, "accountEmail", value)
+                      }
+                    />
                   </div>
 
                   <div className="grid gap-1.5">
@@ -716,7 +885,7 @@ export function TeacherMasterWorkspace() {
                       variant="outline"
                       size="icon"
                       className="size-8"
-                      onClick={() => handleMoveRow(row.id, "up")}
+                      onClick={() => handleMoveRowWithinTeam(row.id, "up")}
                       disabled={saving || currentIndex <= 0}
                       aria-label="선생님 순서 위로 이동"
                     >
@@ -727,8 +896,8 @@ export function TeacherMasterWorkspace() {
                       variant="outline"
                       size="icon"
                       className="size-8"
-                      onClick={() => handleMoveRow(row.id, "down")}
-                      disabled={saving || currentIndex === rows.length - 1}
+                      onClick={() => handleMoveRowWithinTeam(row.id, "down")}
+                      disabled={saving || currentIndex === teamRows.length - 1}
                       aria-label="선생님 순서 아래로 이동"
                     >
                       <ArrowDown className="size-4" />
@@ -752,258 +921,203 @@ export function TeacherMasterWorkspace() {
         )}
       </div>
 
-      <div className="hidden md:block">
-      <SettingsTableFrame>
-        <Table className="table-fixed">
-          <caption className="sr-only">선생님 목록</caption>
-          <TableHeader>
-            <TableRow>
-              {isColumnVisible("subjects") ? (
-                <TableHead className={`w-[14%] ${settingsTableHeadClass}`}>
-                  팀
-                </TableHead>
-              ) : null}
-              {isColumnVisible("name") ? (
-                <TableHead className={`w-[17%] ${settingsTableHeadClass}`}>
-                  이름
-                </TableHead>
-              ) : null}
-              {isColumnVisible("account") ? (
-                <TableHead className={`w-[29%] ${settingsTableHeadClass}`}>
-                  계정
-                </TableHead>
-              ) : null}
-              {isColumnVisible("role") ? (
-                <TableHead className={`w-[14%] ${settingsTableHeadClass}`}>
-                  권한
-                </TableHead>
-              ) : null}
-              {isColumnVisible("visible") ? (
-                <TableHead
-                  className={`w-[8%] text-center ${settingsTableHeadClass}`}
+      <div
+        data-testid="teacher-organization-tree"
+        className="hidden gap-3 md:grid"
+      >
+        {visibleTeams.map((team) => {
+          const teamRows = getRowsForTeam(team);
+
+          return (
+            <section
+              key={team}
+              data-testid={`teacher-team-group-${team}`}
+              className="overflow-hidden rounded-md border bg-background"
+            >
+              <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
+                  <h2 className="truncate text-sm font-semibold text-foreground">
+                    {team}
+                  </h2>
+                  <Badge variant="outline" className="rounded-md text-[11px]">
+                    {teamRows.length}명
+                  </Badge>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => handleAddToTeam(team)}
+                  disabled={saving}
                 >
-                  표시
-                </TableHead>
-              ) : null}
-              {isColumnVisible("action") ? (
-                <TableHead
-                  className={`w-[18%] ${settingsTableActionHeadClass}`}
-                >
-                  작업
-                </TableHead>
-              ) : null}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              Array.from({ length: 4 }).map((_, index) => (
-                <TableRow key={`teacher-loading-${index}`}>
-                  <TableCell colSpan={visibleColumnCount} className="px-3 py-2">
-                    <Skeleton className="h-10 w-full" />
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : filteredRows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={visibleColumnCount}
-                  className="px-3 py-10 text-center text-sm text-muted-foreground"
-                >
-                  {teamFilter === "전체"
-                    ? "등록된 선생님이 없습니다."
-                    : `${teamFilter} 선생님이 없습니다.`}
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredRows.map((row) => {
-                const currentIndex = rows.findIndex(
-                  (item) => item.id === row.id,
-                );
-                return (
-                  <TableRow key={row.id}>
-                    {isColumnVisible("subjects") ? (
-                      <TableCell className={settingsTableCellClass}>
-                        <Select
-                          value={normalizeTeamValue(row.subjects)}
-                          onValueChange={(value) =>
-                            handleTeamChange(row.id, value as TeamOption)
-                          }
+                  <Plus className="mr-1.5 size-3.5" />
+                  추가
+                </Button>
+              </div>
+
+              <div className="px-3 py-3">
+                {loading ? (
+                  <div className="grid gap-2">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <Skeleton
+                        key={`teacher-tree-loading-${team}-${index}`}
+                        className="h-16 w-full"
+                      />
+                    ))}
+                  </div>
+                ) : teamRows.length === 0 ? (
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-5 text-sm text-muted-foreground">
+                    <span>{team} 선생님이 없습니다.</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => handleAddToTeam(team)}
+                      disabled={saving}
+                    >
+                      <Plus className="mr-1.5 size-3.5" />
+                      추가
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="relative grid gap-2 pl-6 before:absolute before:bottom-8 before:left-3 before:top-8 before:w-px before:bg-border">
+                    {teamRows.map((row) => {
+                      const currentIndex = teamRows.findIndex(
+                        (item) => item.id === row.id,
+                      );
+
+                      return (
+                        <div
+                          key={row.id}
+                          className="relative grid grid-cols-[minmax(120px,0.8fr)_minmax(150px,0.9fr)_minmax(230px,1.4fr)_minmax(112px,0.7fr)_72px_112px] items-start gap-2 rounded-md border bg-background px-3 py-2 shadow-xs before:absolute before:left-[-1.55rem] before:top-1/2 before:h-px before:w-5 before:bg-border after:absolute after:left-[-1.9rem] after:top-1/2 after:size-2 after:-translate-y-1/2 after:rounded-full after:border after:border-primary after:bg-background"
                         >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="팀" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TEAM_OPTIONS.map((team) => (
-                              <SelectItem key={team} value={team}>
-                                {team}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    ) : null}
-                    {isColumnVisible("name") ? (
-                      <TableCell className={settingsTableCellClass}>
-                        <Input
-                          name="teacher-name"
-                          className="h-9"
-                          value={row.name}
-                          onChange={(event) =>
-                            handleFieldChange(
-                              row.id,
-                              "name",
-                              event.target.value,
-                            )
-                          }
-                          placeholder="선생님 이름"
-                          aria-label={`${row.name || "새 선생님"} 이름`}
-                        />
-                      </TableCell>
-                    ) : null}
-                    {isColumnVisible("account") ? (
-                      <TableCell className={settingsTableCellClass}>
-                        <div className="grid gap-1.5">
                           <Select
-                            value={row.profileId || "unlinked"}
+                            value={normalizeTeamValue(row.subjects)}
                             onValueChange={(value) =>
-                              handleAccountChange(row.id, value)
+                              handleTeamChange(row.id, value as TeamOption)
                             }
                           >
-                            <SelectTrigger
-                              className="h-9"
-                              disabled={!isAccountSchemaReady}
-                            >
-                              <SelectValue placeholder="연결된 계정" />
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue placeholder="팀" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="unlinked">
-                                계정 미연결
-                              </SelectItem>
-                              {profiles.map((profile) => (
-                                <SelectItem key={profile.id} value={profile.id}>
-                                  {getAccountLabel(profile)}
+                              {TEAM_OPTIONS.map((option) => (
+                                <SelectItem key={option} value={option}>
+                                  {option}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
-                          {row.profileId ? (
-                            <div className="flex justify-end">
-                              <Badge
-                                variant="outline"
-                                className="h-8 rounded-md px-2 text-[11px]"
-                              >
-                                <Link2 className="mr-1 size-3" />
-                                연결됨
-                              </Badge>
-                            </div>
-                          ) : (
-                            <Input
-                              className="h-8 text-xs"
-                              value={row.accountEmail}
-                              onChange={(event) =>
-                                handleFieldChange(
-                                  row.id,
-                                  "accountEmail",
-                                  event.target.value,
-                                )
-                              }
-                              placeholder="이메일 또는 아이디"
-                              aria-label="로그인 계정 이메일 또는 아이디"
-                              disabled={!isAccountSchemaReady}
-                            />
-                          )}
-                        </div>
-                      </TableCell>
-                    ) : null}
-                    {isColumnVisible("role") ? (
-                      <TableCell className={settingsTableCellClass}>
-                        <Select
-                          value={row.dashboardRole}
-                          onValueChange={(value) =>
-                            handleRoleChange(row.id, value)
-                          }
-                          disabled={!isAccountSchemaReady}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="권한" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLE_OPTIONS.map((role) => (
-                              <SelectItem key={role.value} value={role.value}>
-                                {role.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    ) : null}
-                    {isColumnVisible("visible") ? (
-                      <TableCell
-                        className={`${settingsTableCellClass} text-center`}
-                      >
-                        <div className="flex justify-center">
-                          <Checkbox
-                            aria-label="선생님 표시 여부"
-                            checked={row.isVisible}
-                            onCheckedChange={(checked) =>
+
+                          <Input
+                            name="teacher-name"
+                            className="h-9"
+                            value={row.name}
+                            onChange={(event) =>
                               handleFieldChange(
                                 row.id,
-                                "isVisible",
-                                checked === true,
+                                "name",
+                                event.target.value,
                               )
                             }
+                            placeholder="선생님 이름"
+                            aria-label={`${row.name || "새 선생님"} 이름`}
                           />
-                        </div>
-                      </TableCell>
-                    ) : null}
-                    {isColumnVisible("action") ? (
-                      <TableCell className={settingsTableActionCellClass}>
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => handleMoveRow(row.id, "up")}
-                            disabled={saving || currentIndex <= 0}
-                            aria-label="선생님 순서 위로 이동"
-                          >
-                            <ArrowUp className="size-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => handleMoveRow(row.id, "down")}
-                            disabled={
-                              saving || currentIndex === rows.length - 1
+
+                          <TeacherAccountSelect
+                            row={row}
+                            rows={rows}
+                            profiles={profiles}
+                            isAccountSchemaReady={isAccountSchemaReady}
+                            onAccountChange={handleAccountChange}
+                            onManualAccountChange={(id, value) =>
+                              handleFieldChange(id, "accountEmail", value)
                             }
-                            aria-label="선생님 순서 아래로 이동"
+                          />
+
+                          <Select
+                            value={row.dashboardRole}
+                            onValueChange={(value) =>
+                              handleRoleChange(row.id, value)
+                            }
+                            disabled={!isAccountSchemaReady}
                           >
-                            <ArrowDown className="size-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="size-8 text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(row)}
-                            disabled={saving}
-                            aria-label="선생님 삭제"
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue placeholder="권한" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ROLE_OPTIONS.map((role) => (
+                                <SelectItem key={role.value} value={role.value}>
+                                  {role.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          <div className="flex h-9 items-center justify-center gap-2">
+                            <Checkbox
+                              aria-label="선생님 표시 여부"
+                              checked={row.isVisible}
+                              onCheckedChange={(checked) =>
+                                handleFieldChange(
+                                  row.id,
+                                  "isVisible",
+                                  checked === true,
+                                )
+                              }
+                            />
+                            <span className="text-xs text-muted-foreground">표시</span>
+                          </div>
+
+                          <div className="flex h-9 justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="size-8"
+                              onClick={() => handleMoveRowWithinTeam(row.id, "up")}
+                              disabled={saving || currentIndex <= 0}
+                              aria-label="선생님 순서 위로 이동"
+                            >
+                              <ArrowUp className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="size-8"
+                              onClick={() => handleMoveRowWithinTeam(row.id, "down")}
+                              disabled={
+                                saving || currentIndex === teamRows.length - 1
+                              }
+                              aria-label="선생님 순서 아래로 이동"
+                            >
+                              <ArrowDown className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-destructive hover:text-destructive"
+                              onClick={() => handleDelete(row)}
+                              disabled={saving}
+                              aria-label="선생님 삭제"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
                         </div>
-                      </TableCell>
-                    ) : null}
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </SettingsTableFrame>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </section>
+          );
+        })}
       </div>
 
       <div data-testid="teacher-audit-mobile-list" className="grid gap-2 md:hidden">

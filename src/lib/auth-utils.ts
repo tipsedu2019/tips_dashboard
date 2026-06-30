@@ -1,4 +1,4 @@
-export const DEFAULT_LOGIN_EMAIL_DOMAIN = "tipsedu.co.kr";
+export const DEFAULT_LOGIN_EMAIL_DOMAIN = "gmail.com";
 
 export type DashboardRole = "admin" | "staff" | "teacher" | "assistant" | "viewer";
 
