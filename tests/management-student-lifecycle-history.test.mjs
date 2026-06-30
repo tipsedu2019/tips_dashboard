@@ -35,14 +35,18 @@ test("class relation removal can clear orphaned student references", async () =>
   assert.match(removeSource, /if \(previousMode && student && classItem\)/);
 });
 
-test("student delete actions become withdrawal actions instead of physical deletion", async () => {
+test("student delete actions become withdrawal actions while classes end through status edits only", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(pageSource, /status: WITHDRAWN_STUDENT_STATUS/);
-  assert.match(pageSource, /kind === "students" \? "퇴원 처리" : kind === "classes" \? "종강 처리" : "삭제"/);
-  assert.match(tableSource, /kind === "students" \? "퇴원 처리" : kind === "classes" \? "종강 처리" : "삭제"/);
-  assert.match(tableSource, /kind === "students" \? "일괄 퇴원" : kind === "classes" \? "일괄 종강" : "일괄 삭제"/);
+  assert.match(pageSource, /kind === "classes" \? undefined : canMutateRows \? \(row: ManagementRow\) =>/);
+  assert.match(tableSource, /kind === "classes" \? null : \(/);
+  assert.match(tableSource, /kind === "students" \? "퇴원 처리" : "삭제"/);
+  assert.match(tableSource, /kind === "students" \? "일괄 퇴원" : "일괄 삭제"/);
+  assert.doesNotMatch(pageSource, /종강 처리/);
+  assert.doesNotMatch(tableSource, /종강 처리/);
+  assert.doesNotMatch(tableSource, /일괄 종강/);
 });
 
 test("student detail loads class and textbook history", async () => {

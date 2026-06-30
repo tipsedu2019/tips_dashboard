@@ -31,6 +31,17 @@ test("curriculum model exposes class-style period and status filtering", async (
   assert.match(source, /classroomOptions: buildCatalogBackedOptions/);
 });
 
+test("curriculum default period follows the configured period option", async () => {
+  const source = await readFile(new URL("src/features/academic/records.js", root), "utf8");
+  const typeSource = await readFile(new URL("src/features/academic/records.d.ts", root), "utf8");
+  const workspaceSource = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
+
+  assert.match(source, /isDefault: group\.isDefault === true/);
+  assert.match(source, /\.map\(\(\{ value, label, aliases, isDefault \}\) => \(\{ value, label, aliases, isDefault \}\)\)/);
+  assert.match(typeSource, /classGroupOptions: Array<\{ value: string; label: string; aliases\?: string\[\]; isDefault\?: boolean \}>/);
+  assert.match(workspaceSource, /const defaultPeriod = useMemo\(\(\) => pickDefaultPeriodValue\(baseModel\.classGroupOptions\), \[baseModel\.classGroupOptions\]\)/);
+});
+
 test("curriculum summary shows actionable planning workload", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
@@ -106,19 +117,23 @@ test("curriculum workspace removes duplicated right detail panel", async () => {
   assert.doesNotMatch(source, /xl:sticky xl:top-24 xl:self-start/);
   assert.doesNotMatch(source, /회차 배치/);
   assert.doesNotMatch(source, /buildLessonDesignHref\(selectedRow\.id, "", "lesson-design-periods"\)/);
-  assert.match(source, /buildClassDetailHref\(\s*row\.id,\s*rowDesignAction\.tab,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
+  assert.match(source, /buildLessonDesignHref\(\s*row\.id,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
   assert.match(source, /className="h-7 rounded-md px-2 text-xs lg:hidden"/);
 });
 
-test("curriculum row action opens the official class detail target tab", async () => {
+test("curriculum row action opens the lesson design modal route", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
   assert.match(source, /function getCurriculumDesignAction/);
-  assert.match(source, /function buildClassDetailHref/);
+  assert.match(source, /function buildLessonDesignHref/);
   assert.match(source, /returnTo = ""/);
+  assert.match(source, /params\.set\("lessonDesign", "1"\)/);
+  assert.match(source, /params\.set\("classId", normalizedClassId\)/);
   assert.match(source, /params\.set\("returnTo", normalizedReturnTo\)/);
-  assert.match(source, /return `\/admin\/classes\?\$\{params\.toString\(\)\}`/);
-  assert.match(source, /params\.set\("tab", tab \|\| "basic"\)/);
+  assert.match(source, /return `\/admin\/curriculum\?\$\{params\.toString\(\)\}`/);
+  assert.doesNotMatch(source, /function buildClassDetailHref/);
+  assert.doesNotMatch(source, /return `\/admin\/classes\?\$\{params\.toString\(\)\}`/);
+  assert.doesNotMatch(source, /params\.set\("tab", tab \|\| "basic"\)/);
   assert.match(source, /Number\(row\.textbookCount \|\| 0\) <= 0/);
   assert.match(source, /label: "교재"/);
   assert.match(source, /tab: "curriculum"/);
@@ -130,7 +145,7 @@ test("curriculum row action opens the official class detail target tab", async (
   assert.match(source, /sectionId: "lesson-design-periods"/);
   assert.match(source, /sectionId: "lesson-design-board"/);
   assert.match(source, /rowDesignAction\.label/);
-  assert.match(source, /buildClassDetailHref\(\s*row\.id,\s*rowDesignAction\.tab,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
+  assert.match(source, /buildLessonDesignHref\(\s*row\.id,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
 });
 
 test("curriculum row actions show the next work reason before navigation", async () => {
@@ -152,11 +167,11 @@ test("completed curriculum rows open basic class detail without stale section ta
   assert.doesNotMatch(source, /return \{ label: "보기", tab: "basic", sectionId: "lesson-design-board", sessionId, reason: "기본 정보 확인" \}/);
 });
 
-test("curriculum rows open the official class detail without a duplicated preview", async () => {
+test("curriculum rows open lesson design without a duplicated preview", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
   assert.match(source, /const openCurriculumRow = useCallback/);
-  assert.match(source, /router\.push\(buildClassDetailHref\(/);
+  assert.match(source, /router\.push\(buildLessonDesignHref\(/);
   assert.match(source, /const handleCurriculumRowKeyDown = useCallback/);
   assert.match(source, /event\.key !== "Enter" && event\.key !== " "/);
   assert.match(source, /data-testid=\{`curriculum-mobile-card-\$\{row\.id\}`\}/);

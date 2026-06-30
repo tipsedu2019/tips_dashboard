@@ -40,7 +40,7 @@ export type TimetableWorkspaceModel = {
   yearOptions: string[];
   termOptions: string[];
   subjectOptions: string[];
-  classGroupOptions: Array<{ value: string; label: string }>;
+  classGroupOptions: Array<{ value: string; label: string; aliases?: string[]; isDefault?: boolean }>;
   statusOptions: string[];
   gradeOptions: string[];
   teacherOptions: string[];
@@ -199,7 +199,7 @@ export type CurriculumRow = {
 export type CurriculumWorkspaceModel = {
   rows: CurriculumRow[];
   termOptions: string[];
-  classGroupOptions: Array<{ value: string; label: string }>;
+  classGroupOptions: Array<{ value: string; label: string; aliases?: string[]; isDefault?: boolean }>;
   statusOptions: string[];
   subjectOptions: string[];
   gradeOptions: string[];

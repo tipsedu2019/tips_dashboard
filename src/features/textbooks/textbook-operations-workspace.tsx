@@ -2,7 +2,6 @@
 
 import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Archive,
   Barcode,
   BookOpen,
   Check,
@@ -2786,6 +2785,11 @@ export function TextbookOperationsWorkspace() {
     textbookHistoryDeleteAdminEmails.has(currentUserEmail);
   const activeTextbooks = useMemo(() => data.textbooks.filter(isActiveTextbook), [data.textbooks]);
   const activeInventory = useMemo(() => data.inventory.filter(isActiveTextbook), [data.inventory]);
+  const inactiveTextbookRows = useMemo(() => data.inventory.filter((row) => !isActiveTextbook(row)), [data.inventory]);
+  const inactiveTextbookTrashItems = useMemo(
+    () => buildTextbookCleanupPreviewRows(inactiveTextbookRows),
+    [inactiveTextbookRows],
+  );
   const configuredPublisherOptions = useMemo(
     () => uniqueSortedLabels(data.publishers.map(getPublisherSettingLabel)),
     [data.publishers],
@@ -4328,6 +4332,34 @@ export function TextbookOperationsWorkspace() {
     );
   }
 
+  function emptyInactiveTextbookTrash() {
+    const targetIds = inactiveTextbookRows.map(getRecordId).filter(Boolean);
+    if (targetIds.length === 0) {
+      setMessage("비울 미사용 교재가 없습니다.");
+      return;
+    }
+
+    let deleteResult: Awaited<ReturnType<typeof textbookService.purgeInactiveTextbooks>> | undefined;
+    requestTextbookConfirmation({
+      title: "미사용 보관함 비우기",
+      description: `${formatQuantity(targetIds.length)}개 미사용 교재를 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다.`,
+      confirmLabel: "영구 삭제",
+      items: inactiveTextbookTrashItems,
+      onConfirm: () => {
+        void runAction(
+          "textbook-trash-empty",
+          async () => {
+            deleteResult = await textbookService.purgeInactiveTextbooks(targetIds);
+            clearMasterSelection();
+            setBulkTextbookPatch(emptyBulkTextbookPatch);
+            setTextbookQualityFilter("all");
+          },
+          () => `${formatQuantity(deleteResult?.deletedIds.length || targetIds.length)}개 미사용 교재를 영구 삭제했습니다.`,
+        );
+      },
+    });
+  }
+
   function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string) {
     const scopeLines = getPurchaseScopeLines(line);
     const primaryLine = scopeLines.find((scopeLine) => getRecordId(scopeLine) === getRecordId(line)) || scopeLines[0];
@@ -5495,7 +5527,7 @@ export function TextbookOperationsWorkspace() {
                     </div>
                   ) : null}
                 </section>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px_140px]">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <Field label="수업">
                     <ClassSelect classes={data.classes} value={purchaseForm.classId} onValueChange={(value) => setPurchaseField("classId", value)} />
                   </Field>
@@ -5505,8 +5537,6 @@ export function TextbookOperationsWorkspace() {
                   <Field label="교사용 요청">
                     <Input value={purchaseForm.teacherRequestedQuantity} onChange={(event) => setPurchaseField("teacherRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 요청 수량" />
                   </Field>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="선생님">
                     <TeacherSelect
                       teachers={data.teacherCatalogs}
@@ -5515,14 +5545,16 @@ export function TextbookOperationsWorkspace() {
                       ariaLabel="선생님 선택"
                     />
                   </Field>
-                  <Field label="위치">
-                    <LocationSelect
-                      locations={locations}
-                      value={selectedLocationId}
-                      onValueChange={(value) => setPurchaseField("locationId", value)}
-                      ariaLabel="요청 위치 선택"
-                    />
-                  </Field>
+                  <div className="sm:col-span-2">
+                    <Field label="위치">
+                      <LocationSelect
+                        locations={locations}
+                        value={selectedLocationId}
+                        onValueChange={(value) => setPurchaseField("locationId", value)}
+                        ariaLabel="요청 위치 선택"
+                      />
+                    </Field>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -6290,23 +6322,37 @@ export function TextbookOperationsWorkspace() {
                   </div>
                 </PopoverContent>
               </Popover>
+              {activeTab === "master" && textbookQualityFilter === "inactive" && textbookQualityFilterCounts.inactive > 0 ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="h-9 rounded-md"
+                  onClick={emptyInactiveTextbookTrash}
+                  disabled={saving === "textbook-trash-empty"}
+                >
+                  <Trash2 className="mr-2 size-3.5" />
+                  비우기
+                </Button>
+              ) : null}
               {activeTab === "master" && textbookQualityFilterCounts.inactive > 0 ? (
                 <Button
                   type="button"
                   variant={textbookQualityFilter === "inactive" ? "default" : "outline"}
-                  size="sm"
-                  className="h-9 rounded-md"
+                  size="icon"
+                  className="relative size-9 rounded-md"
                   aria-pressed={textbookQualityFilter === "inactive"}
-                  aria-label="미사용 교재 보관함"
+                  aria-label="미사용 교재 보관함 열기"
+                  title="미사용 교재 보관함"
                   onClick={() => {
                     changeInventoryFilter("all");
                     changeTextbookQualityFilter(textbookQualityFilter === "inactive" ? "all" : "inactive");
                   }}
                 >
-                  <Archive className="mr-2 size-3.5" />
-                  미사용
+                  <Trash2 className="size-4" />
+                  <span className="sr-only">미사용 교재 보관함 {formatQuantity(textbookQualityFilterCounts.inactive)}개</span>
                   <span className={cn(
-                    "ml-2 rounded px-1.5 text-[11px] font-semibold tabular-nums",
+                    "absolute -right-1 -top-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums",
                     textbookQualityFilter === "inactive" ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                   )}>
                     {formatQuantity(textbookQualityFilterCounts.inactive)}
@@ -7114,6 +7160,37 @@ type SearchSelectOption = {
   label: string;
   description?: string;
   searchText?: string;
+  metaRows?: SearchSelectMetaRow[];
+  filterValues?: Record<string, SearchSelectFilterValue[]>;
+};
+
+type SearchSelectMetaRow = {
+  label: string;
+  value: string;
+};
+
+type SearchSelectFilterValue = {
+  value: string;
+  label: string;
+};
+
+type SearchSelectFilterOption = SearchSelectFilterValue & {
+  count: number;
+};
+
+type SearchSelectFilterLayout = "default" | "subject-grade-teacher" | "subject-grade-detail";
+
+type SearchSelectFilterGroupConfig = {
+  key: string;
+  label: string;
+  optionOrder?: string[];
+};
+
+type SearchSelectFilterGroup = {
+  key: string;
+  label: string;
+  optionOrder?: string[];
+  options: SearchSelectFilterOption[];
 };
 
 function SearchCombobox({
@@ -7124,7 +7201,12 @@ function SearchCombobox({
   searchPlaceholder,
   emptyLabel,
   ariaLabel,
+  triggerLabel,
+  triggerClassName,
+  contentClassName,
   allowDeselect = false,
+  filterGroups = [],
+  filterLayout = "default",
 }: {
   options: SearchSelectOption[];
   value: string;
@@ -7133,10 +7215,26 @@ function SearchCombobox({
   searchPlaceholder: string;
   emptyLabel: string;
   ariaLabel: string;
+  triggerLabel?: string;
+  triggerClassName?: string;
+  contentClassName?: string;
   allowDeselect?: boolean;
+  filterGroups?: SearchSelectFilterGroup[];
+  filterLayout?: SearchSelectFilterLayout;
 }) {
   const [open, setOpen] = useState(false);
+  const [selectedFilterValues, setSelectedFilterValues] = useState<Record<string, string[]>>({});
   const selected = options.find((option) => option.value === value);
+  const activeFilterCount = filterGroups.reduce((sum, group) => {
+    const validValues = new Set(group.options.map((option) => option.value));
+    return sum + (selectedFilterValues[group.key] || []).filter((value) => validValues.has(value)).length;
+  }, 0);
+  const visibleFilterGroups = buildVisibleSearchSelectFilterGroups(options, filterGroups, selectedFilterValues);
+  const filteredOptions = filterGroups.length === 0
+    ? options
+    : options.filter((option) => doesSearchOptionMatchFilters(option, filterGroups, selectedFilterValues));
+  const usesTwoColumnFilterLayout = filterLayout === "subject-grade-teacher" || filterLayout === "subject-grade-detail";
+  const shouldInlineFilterReset = usesTwoColumnFilterLayout && activeFilterCount > 0;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -7147,34 +7245,142 @@ function SearchCombobox({
           role="combobox"
           aria-expanded={open}
           aria-label={ariaLabel}
-          className="w-full justify-between gap-2 px-3 font-normal"
+          className={cn("w-full justify-between gap-2 px-3 font-normal", triggerClassName)}
         >
-          <span className={cn("min-w-0 flex-1 truncate text-left", !selected && "text-muted-foreground")}>
-            {selected?.label || placeholder}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+            {triggerLabel ? <span className="shrink-0 text-xs font-medium text-muted-foreground">{triggerLabel}</span> : null}
+            <span className={cn("min-w-0 truncate", !selected && "text-muted-foreground")}>
+              {selected?.label || placeholder}
+            </span>
           </span>
           <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(520px,calc(100vw-2rem))] p-0" align="start">
+      <PopoverContent
+        className={cn("w-[min(640px,calc(100vw-2rem))] p-0", contentClassName)}
+        align="start"
+        onWheelCapture={(event) => event.stopPropagation()}
+        onTouchMoveCapture={(event) => event.stopPropagation()}
+      >
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
-          <CommandList className="max-h-72">
+          {visibleFilterGroups.length > 0 ? (
+            <div className="grid gap-2 border-b px-2 py-2">
+              {!usesTwoColumnFilterLayout && activeFilterCount > 0 ? (
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 rounded-md px-2 text-xs"
+                    onClick={() => setSelectedFilterValues({})}
+                    aria-label={`${ariaLabel} 필터 초기화`}
+                  >
+                    필터 초기화
+                  </Button>
+                </div>
+              ) : null}
+              <div
+                className={cn(
+                  "grid max-h-36 gap-2 overflow-y-auto pr-1",
+                  usesTwoColumnFilterLayout && "grid-cols-2 items-start",
+                  shouldInlineFilterReset && "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]",
+                )}
+              >
+                {visibleFilterGroups.map((group) => (
+                  <Fragment key={group.key}>
+                    <div
+                      className={cn(
+                        "grid gap-1",
+                        usesTwoColumnFilterLayout && !["subject", "grade"].includes(group.key) && (shouldInlineFilterReset ? "col-span-3" : "col-span-2"),
+                      )}
+                    >
+                      <div className="text-[11px] font-medium text-muted-foreground">{group.label}</div>
+                      <div className="flex flex-wrap gap-1">
+                        {group.options.map((option) => {
+                          const isFilterSelected = (selectedFilterValues[group.key] || []).includes(option.value);
+                          return (
+                            <button
+                              key={`${group.key}-${option.value}`}
+                              type="button"
+                              className={cn(
+                                "inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-1 text-[11px] leading-none transition",
+                                isFilterSelected
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                              )}
+                              aria-pressed={isFilterSelected}
+                              aria-label={`${ariaLabel} ${group.label} ${option.label} 필터`}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setSelectedFilterValues((current) => toggleSearchSelectFilter(current, group.key, option.value));
+                              }}
+                            >
+                              <span className="min-w-0 truncate">{option.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {group.key === "grade" && shouldInlineFilterReset ? (
+                      <div className="flex items-end justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 rounded-md px-2 text-xs"
+                          onClick={() => setSelectedFilterValues({})}
+                          aria-label={`${ariaLabel} 필터 초기화`}
+                        >
+                          필터 초기화
+                        </Button>
+                      </div>
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <CommandList
+            className="max-h-80 overscroll-contain overflow-y-auto"
+            onWheelCapture={(event) => event.stopPropagation()}
+            onTouchMoveCapture={(event) => event.stopPropagation()}
+          >
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             <CommandGroup>
-              {options.map((option) => (
+              {filteredOptions.map((option) => (
                 <CommandItem
                   key={option.value}
-                  value={`${option.label} ${option.description || ""} ${option.searchText || ""} ${option.value}`}
+                  value={buildSearchSelectCommandValue(option)}
+                  className="items-start gap-2 py-2"
                   onSelect={() => {
                     onValueChange(allowDeselect && option.value === value ? "" : option.value);
                     setOpen(false);
                   }}
                 >
-                  <Check className={cn("size-4", option.value === value ? "opacity-100" : "opacity-0")} />
-                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                  {option.description ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">{option.description}</span>
-                  ) : null}
+                  <Check className={cn("mt-0.5 size-4 shrink-0", option.value === value ? "opacity-100" : "opacity-0")} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <span className="min-w-0 truncate font-medium">{option.label}</span>
+                      {option.description ? (
+                        <span className="shrink-0 text-xs text-muted-foreground">{option.description}</span>
+                      ) : null}
+                    </div>
+                    {option.metaRows?.length ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {option.metaRows.map((row) => (
+                          <span
+                            key={`${row.label}-${row.value}`}
+                            className="inline-flex max-w-full items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 text-[11px] leading-none"
+                          >
+                            <span className="shrink-0 font-medium text-muted-foreground">{row.label}</span>
+                            <span className="min-w-0 truncate text-foreground">{row.value}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -7185,11 +7391,169 @@ function SearchCombobox({
   );
 }
 
+function toggleSearchSelectFilter(current: Record<string, string[]>, groupKey: string, optionValue: string) {
+  const currentValues = current[groupKey] || [];
+  const nextValues = currentValues.includes(optionValue)
+    ? currentValues.filter((value) => value !== optionValue)
+    : [...currentValues, optionValue];
+  const next = { ...current };
+  if (nextValues.length > 0) {
+    next[groupKey] = nextValues;
+  } else {
+    delete next[groupKey];
+  }
+  return next;
+}
+
+function doesSearchOptionMatchFilters(
+  option: SearchSelectOption,
+  filterGroups: SearchSelectFilterGroup[],
+  selectedFilterValues: Record<string, string[]>,
+) {
+  for (const group of filterGroups) {
+    const selectedValues = selectedFilterValues[group.key] || [];
+    if (selectedValues.length === 0) continue;
+    const optionValues = new Set((option.filterValues?.[group.key] || []).map((item) => item.value));
+    if (!selectedValues.some((value) => optionValues.has(value))) return false;
+  }
+  return true;
+}
+
+function buildSearchSelectCommandValue(option: SearchSelectOption) {
+  return [
+    option.label,
+    option.description,
+    option.searchText,
+    option.value,
+    ...(option.metaRows || []).flatMap((row) => [row.label, row.value]),
+    ...Object.values(option.filterValues || {}).flatMap((values) => values.flatMap((row) => [row.label, row.value])),
+  ].map(text).join(" ");
+}
+
+function buildSearchSelectMetaRows(rows: Array<SearchSelectMetaRow | null | undefined>) {
+  return rows.filter((row): row is SearchSelectMetaRow => Boolean(row && text(row.value)));
+}
+
+function buildSearchSelectFilterValue(value: unknown, label = value): SearchSelectFilterValue | null {
+  const normalizedValue = text(value);
+  const normalizedLabel = text(label) || normalizedValue;
+  return normalizedValue ? { value: normalizedValue, label: normalizedLabel } : null;
+}
+
+function isSearchSelectFilterValue(value: unknown): value is SearchSelectFilterValue {
+  return Boolean(value && typeof value === "object" && "value" in value && "label" in value);
+}
+
+function buildSearchSelectFilterValues(values: Array<unknown | SearchSelectFilterValue | null | undefined>) {
+  const valuesByKey = new Map<string, SearchSelectFilterValue>();
+  for (const value of values) {
+    const filterValue = isSearchSelectFilterValue(value)
+      ? buildSearchSelectFilterValue(value.value, value.label)
+      : buildSearchSelectFilterValue(value);
+    if (!filterValue || valuesByKey.has(filterValue.value)) continue;
+    valuesByKey.set(filterValue.value, filterValue);
+  }
+  return [...valuesByKey.values()];
+}
+
+function collectSearchSelectFilterOptions(options: SearchSelectOption[], groupKey: string) {
+  const optionCounts = new Map<string, SearchSelectFilterOption>();
+  for (const option of options) {
+    const countedOptionValues = new Set<string>();
+    for (const filterValue of option.filterValues?.[groupKey] || []) {
+      if (countedOptionValues.has(filterValue.value)) continue;
+      countedOptionValues.add(filterValue.value);
+      const existing = optionCounts.get(filterValue.value);
+      optionCounts.set(filterValue.value, {
+        value: filterValue.value,
+        label: existing?.label || filterValue.label,
+        count: (existing?.count || 0) + 1,
+      });
+    }
+  }
+  return [...optionCounts.values()];
+}
+
+function sortSearchSelectFilterOptions(options: SearchSelectFilterOption[], optionOrder: string[] = []) {
+  return [...options].sort((left, right) => {
+    const leftOrder = optionOrder.indexOf(left.label);
+    const rightOrder = optionOrder.indexOf(right.label);
+    if (leftOrder !== -1 || rightOrder !== -1) {
+      if (leftOrder === -1) return 1;
+      if (rightOrder === -1) return -1;
+      return leftOrder - rightOrder;
+    }
+    return left.label.localeCompare(right.label, "ko", { numeric: true });
+  });
+}
+
+function buildSearchSelectFilterGroups(
+  options: SearchSelectOption[],
+  groups: SearchSelectFilterGroupConfig[],
+): SearchSelectFilterGroup[] {
+  return groups.map((group) => {
+    return {
+      key: group.key,
+      label: group.label,
+      optionOrder: group.optionOrder,
+      options: sortSearchSelectFilterOptions(collectSearchSelectFilterOptions(options, group.key), group.optionOrder),
+    };
+  }).filter((group) => group.options.length > 0);
+}
+
+function buildVisibleSearchSelectFilterGroups(
+  options: SearchSelectOption[],
+  filterGroups: SearchSelectFilterGroup[],
+  selectedFilterValues: Record<string, string[]>,
+) {
+  return filterGroups.map((group) => {
+    const selectedPeerFilterValues = { ...selectedFilterValues };
+    delete selectedPeerFilterValues[group.key];
+    const scopedOptions = options.filter((option) => (
+      doesSearchOptionMatchFilters(option, filterGroups, selectedPeerFilterValues)
+    ));
+    return {
+      ...group,
+      options: sortSearchSelectFilterOptions(collectSearchSelectFilterOptions(scopedOptions, group.key), group.optionOrder),
+    };
+  }).filter((group) => group.options.length > 0);
+}
+
+const textbookNonSubSubjectFilterLabels = new Set([
+  ...TEXTBOOK_GRADE_OPTIONS.map((option) => option.label),
+  ...TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => option.label),
+]);
+
+function getTextbookSelectSubSubject(textbook: Row) {
+  const subSubject = getTextbookSubSubject(textbook);
+  return textbookNonSubSubjectFilterLabels.has(subSubject) ? "" : subSubject;
+}
+
+function buildTextbookSelectMetaRows(textbook: Row) {
+  const schoolLevel = getTextbookSchoolLevelLabel(getTextbookSchoolLevel(textbook));
+  const grade = getTextbookGradeLabel(getTextbookGradeLevel(textbook));
+  const subSubject = getTextbookSelectSubSubject(textbook);
+  const categoryDetail = compactUniqueLabels([schoolLevel, grade, subSubject]).join(" · ");
+
+  return buildSearchSelectMetaRows([
+    { label: "출판사", value: getPublisherLabel(textbook) },
+    { label: "구분", value: categoryDetail || getTaxonomyCategoryLabel(textbook) },
+    { label: "ISBN", value: text(textbook.isbn13) },
+    { label: "바코드", value: text(textbook.barcode) },
+  ]);
+}
+
 function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[]; value: string; onValueChange: (value: string) => void }) {
   const options = textbooks.map((textbook) => ({
     value: getRecordId(textbook),
     label: getTextbookTitle(textbook),
     description: getSubjectLabel(textbook.subject),
+    metaRows: buildTextbookSelectMetaRows(textbook),
+    filterValues: {
+      subject: buildSearchSelectFilterValues([getSubjectLabel(textbook.subject)]),
+      grade: buildSearchSelectFilterValues([getTextbookGradeLabel(getTextbookGradeLevel(textbook))]),
+      subSubject: buildSearchSelectFilterValues([getTextbookSelectSubSubject(textbook)]),
+    },
     searchText: [
       normalizeTextbookLookupValue(getTextbookTitle(textbook), { compact: true }),
       textbook.publisher,
@@ -7197,11 +7561,16 @@ function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[];
       getTaxonomyCategoryLabel(textbook),
       getTextbookSchoolLevelLabel(getTextbookSchoolLevel(textbook)),
       getTextbookGradeLabel(getTextbookGradeLevel(textbook)),
-      getTextbookSubSubject(textbook),
+      getTextbookSelectSubSubject(textbook),
       textbook.isbn13,
       textbook.barcode,
     ].map(text).join(" "),
   }));
+  const textbookSelectFilterGroups = buildSearchSelectFilterGroups(options, [
+    { key: "subject", label: "과목", optionOrder: ["영어", "수학", "기타"] },
+    { key: "grade", label: "학년" },
+    { key: "subSubject", label: "세부과목" },
+  ]);
 
   return (
     <SearchCombobox
@@ -7212,16 +7581,103 @@ function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[];
       searchPlaceholder="교재명, 출판사, ISBN"
       emptyLabel="교재가 없습니다"
       ariaLabel="교재 선택"
+      filterGroups={textbookSelectFilterGroups}
+      filterLayout="subject-grade-detail"
     />
   );
+}
+
+function getClassTeacherLabel(classItem: Row) {
+  return splitTeacherNames(
+    classItem.teacher ||
+      classItem.teacher_name ||
+      classItem.teacherName ||
+      classItem.teacher_names ||
+      classItem.teacherNames,
+  ).join(", ");
+}
+
+function getClassClassroomSelectLabel(classItem: Row) {
+  return text(
+    classItem.classroom ||
+      classItem.classroom_name ||
+      classItem.classroomName ||
+      classItem.room ||
+      classItem.location ||
+      classItem.location_name ||
+      classItem.locationName,
+  );
+}
+
+function getClassSubjectLabel(classItem: Row) {
+  const subject = text(classItem.subject || classItem.subject_name || classItem.subjectName || classItem.course || classItem.courseName);
+  const normalized = subjectAliases[subject] || subjectAliases[subject.toLowerCase()];
+  return normalized ? subjectOptions.find((option) => option.value === normalized)?.label || subject : subject;
+}
+
+function getClassGradeSelectLabel(classItem: Row) {
+  return text(classItem.grade || classItem.grade_label || classItem.gradeLabel || classItem.school_grade || classItem.schoolGrade);
+}
+
+function getClassStudentCountSelectValue(classItem: Row) {
+  const studentIds = listIds(classItem.student_ids || classItem.studentIds);
+  return studentIds.length || numberValue(classItem.student_count || classItem.studentCount || classItem.enrollment_count || classItem.enrollmentCount);
+}
+
+function getClassStatusLabel(classItem: Row) {
+  const status = text(classItem.status || classItem.class_status || classItem.classStatus);
+  if (!status) return "";
+  const normalized = statusAliases[status] || statusAliases[status.toLowerCase()];
+  return statusOptions.find((option) => option.value === normalized)?.label || status;
+}
+
+function getClassScheduleLabel(classItem: Row) {
+  return text(
+    classItem.schedule ||
+      classItem.schedule_summary ||
+      classItem.scheduleSummary ||
+      classItem.class_time ||
+      classItem.classTime ||
+      classItem.time,
+  );
+}
+
+function buildClassSelectMetaRows(classItem: Row) {
+  const studentCount = getClassStudentCountSelectValue(classItem);
+  return buildSearchSelectMetaRows([
+    { label: "선생님", value: getClassTeacherLabel(classItem) },
+    { label: "강의실", value: getClassClassroomSelectLabel(classItem) },
+    { label: "학생", value: studentCount > 0 ? `${formatQuantity(studentCount)}명` : "" },
+    { label: "시간", value: getClassScheduleLabel(classItem) },
+  ]);
 }
 
 function ClassSelect({ classes, value, onValueChange }: { classes: Row[]; value: string; onValueChange: (value: string) => void }) {
   const options = classes.map((classItem) => ({
     value: getRecordId(classItem),
     label: getClassName(classItem),
-    searchText: [classItem.teacher, classItem.teacher_name, classItem.teacherName].map(text).join(" "),
+    description: compactUniqueLabels([getClassSubjectLabel(classItem), getClassGradeSelectLabel(classItem)]).join(" · "),
+    metaRows: buildClassSelectMetaRows(classItem),
+    filterValues: {
+      subject: buildSearchSelectFilterValues([getClassSubjectLabel(classItem)]),
+      grade: buildSearchSelectFilterValues([getClassGradeSelectLabel(classItem)]),
+      teacher: buildSearchSelectFilterValues(splitTeacherNames(getClassTeacherLabel(classItem))),
+    },
+    searchText: [
+      classItem.teacher,
+      classItem.teacher_name,
+      classItem.teacherName,
+      getClassSubjectLabel(classItem),
+      getClassGradeSelectLabel(classItem),
+      getClassStatusLabel(classItem),
+      getClassScheduleLabel(classItem),
+    ].map(text).join(" "),
   }));
+  const classSelectFilterGroups = buildSearchSelectFilterGroups(options, [
+    { key: "subject", label: "과목", optionOrder: ["영어", "수학", "기타"] },
+    { key: "grade", label: "학년" },
+    { key: "teacher", label: "선생님" },
+  ]);
 
   return (
     <SearchCombobox
@@ -7233,6 +7689,8 @@ function ClassSelect({ classes, value, onValueChange }: { classes: Row[]; value:
       emptyLabel="수업이 없습니다"
       ariaLabel="수업 선택"
       allowDeselect={true}
+      filterGroups={classSelectFilterGroups}
+      filterLayout="subject-grade-teacher"
     />
   );
 }
@@ -7316,6 +7774,10 @@ function TextbookListControls({
   onCategoryFilterChange: (value: string) => void;
   categoryOptions: string[];
 }) {
+  const subjectSelectOptions = [
+    { value: "all", label: "전체 과목" },
+    ...subjectOptions,
+  ];
   const categorySelectOptions = [
     { value: "all", label: "전체 세부과목" },
     ...categoryOptions.map((category) => ({ value: category, label: category })),
@@ -7328,99 +7790,65 @@ function TextbookListControls({
     { value: "all", label: "전체 학년" },
     ...gradeLevelOptions,
   ];
-  const activeFilterLabel = [
-    subjectFilter === "all" ? "" : subjectOptions.find((option) => option.value === subjectFilter)?.label,
-    categoryFilter === "all" ? "" : categoryFilter,
-    schoolLevelFilter === "all" ? "" : schoolLevelSelectOptions.find((option) => option.value === schoolLevelFilter)?.label,
-    gradeLevelFilter === "all" ? "" : gradeLevelSelectOptions.find((option) => option.value === gradeLevelFilter)?.label,
-  ]
-    .filter(Boolean)
-    .join(" · ") || "전체";
 
   return (
-    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2" aria-label="교재 분류 필터">
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md" aria-label="교재 분류 필터 열기">
-            <SlidersHorizontal className="mr-2 size-3.5" />
-            분류
-            <span
-              className="ml-2 max-w-[12rem] truncate rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground"
-              title={activeFilterLabel}
-            >
-              {activeFilterLabel}
-            </span>
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-[min(28rem,calc(100vw-2rem))] p-3">
-          <div className="grid gap-4">
-            <div className="grid gap-2">
-              <p className="text-xs font-medium text-muted-foreground">과목</p>
-              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={subjectFilter === "all" ? "default" : "outline"}
-                  className="h-8 justify-start rounded-md"
-                  aria-pressed={subjectFilter === "all"}
-                  onClick={() => onSubjectFilterChange("all")}
-                >
-                  전체 과목
-                </Button>
-                {subjectOptions.map((option) => (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    size="sm"
-                    variant={subjectFilter === option.value ? "default" : "outline"}
-                    className="h-8 justify-start rounded-md"
-                    aria-pressed={subjectFilter === option.value}
-                    onClick={() => onSubjectFilterChange(option.value)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
-              <SearchCombobox
-                options={categorySelectOptions}
-                value={categoryFilter}
-                onValueChange={onCategoryFilterChange}
-                placeholder="세부과목 선택"
-                searchPlaceholder="세부과목 검색"
-                emptyLabel="세부과목이 없습니다"
-                ariaLabel="세부과목 필터"
-              />
-            </div>
-            <div className="grid gap-2">
-              <p className="text-xs font-medium text-muted-foreground">학교 구분</p>
-              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                {schoolLevelSelectOptions.map((option) => (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    size="sm"
-                    variant={schoolLevelFilter === option.value ? "default" : "outline"}
-                    className="h-8 justify-start rounded-md"
-                    aria-pressed={schoolLevelFilter === option.value}
-                    onClick={() => onSchoolLevelFilterChange(option.value)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
-              <SearchCombobox
-                options={gradeLevelSelectOptions}
-                value={gradeLevelFilter}
-                onValueChange={onGradeLevelFilterChange}
-                placeholder="학년 선택"
-                searchPlaceholder="학년 검색"
-                emptyLabel="학년이 없습니다"
-                ariaLabel="학년 필터"
-              />
-            </div>
-          </div>
-        </PopoverContent>
-      </Popover>
+    <div className="mt-2 grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-4" aria-label="교재 마스터 필터">
+      <div className="min-w-0">
+        <SearchCombobox
+          options={subjectSelectOptions}
+          value={subjectFilter}
+          onValueChange={onSubjectFilterChange}
+          placeholder="전체 과목"
+          searchPlaceholder="과목 검색"
+          emptyLabel="과목이 없습니다"
+          ariaLabel="교재 과목 필터"
+          triggerLabel="과목"
+          triggerClassName="h-8 rounded-md"
+          contentClassName="w-[min(18rem,calc(100vw-2rem))]"
+        />
+      </div>
+      <div className="min-w-0">
+        <SearchCombobox
+          options={categorySelectOptions}
+          value={categoryFilter}
+          onValueChange={onCategoryFilterChange}
+          placeholder="전체 세부과목"
+          searchPlaceholder="세부과목 검색"
+          emptyLabel="세부과목이 없습니다"
+          ariaLabel="교재 세부과목 필터"
+          triggerLabel="세부과목"
+          triggerClassName="h-8 rounded-md"
+          contentClassName="w-[min(22rem,calc(100vw-2rem))]"
+        />
+      </div>
+      <div className="min-w-0">
+        <SearchCombobox
+          options={schoolLevelSelectOptions}
+          value={schoolLevelFilter}
+          onValueChange={onSchoolLevelFilterChange}
+          placeholder="전체 학교 구분"
+          searchPlaceholder="학교 구분 검색"
+          emptyLabel="학교 구분이 없습니다"
+          ariaLabel="교재 학교 구분 필터"
+          triggerLabel="학교"
+          triggerClassName="h-8 rounded-md"
+          contentClassName="w-[min(18rem,calc(100vw-2rem))]"
+        />
+      </div>
+      <div className="min-w-0">
+        <SearchCombobox
+          options={gradeLevelSelectOptions}
+          value={gradeLevelFilter}
+          onValueChange={onGradeLevelFilterChange}
+          placeholder="전체 학년"
+          searchPlaceholder="학년 검색"
+          emptyLabel="학년이 없습니다"
+          ariaLabel="교재 학년 필터"
+          triggerLabel="학년"
+          triggerClassName="h-8 rounded-md"
+          contentClassName="w-[min(18rem,calc(100vw-2rem))]"
+        />
+      </div>
     </div>
   );
 }
@@ -8192,7 +8620,7 @@ function TextbookTable({
     })),
     [locations],
   );
-  const columnSpan = locationColumns.length + 4 + (onSelectTextbook ? 1 : 0) + (hasSelection ? 1 : 0);
+  const columnSpan = locationColumns.length + 7 + (onSelectTextbook ? 1 : 0) + (hasSelection ? 1 : 0);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const sortedGroupedRows = useMemo(() => {
     const groupsByLabel = new Map<string, Row[]>();
@@ -8391,7 +8819,7 @@ function TextbookTable({
       </div>
 
       <div className="hidden overflow-x-auto rounded-lg border [contain-intrinsic-size:720px] [content-visibility:auto] md:block">
-      <Table className="min-w-[920px] table-fixed">
+      <Table className="min-w-[1080px] table-fixed">
         <caption className="sr-only">교재 마스터 목록</caption>
         <TableHeader className="sticky top-0 z-10 bg-background">
           <TableRow>
@@ -8405,8 +8833,11 @@ function TextbookTable({
                 />
               </TableHead>
             ) : null}
-            <TableHead className="w-[38%] min-w-72">교재</TableHead>
-            <TableHead className="w-44">분류</TableHead>
+            <TableHead className="w-[30%] min-w-64">교재</TableHead>
+            <TableHead className="w-24">과목</TableHead>
+            <TableHead className="w-32">세부과목</TableHead>
+            <TableHead className="w-28">학교 구분</TableHead>
+            <TableHead className="w-24">학년</TableHead>
             {locationColumns.map((location) => (
               <TableHead key={location.id} className="w-20 text-right">{location.label}</TableHead>
             ))}
@@ -8465,9 +8896,10 @@ function TextbookTable({
                 const publisherLabel = getKnownPublisherLabel(row);
                 const locationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
                 const amountValue = amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue;
-                const gradeLabel = getTextbookGradeLabel(getTextbookGradeLevel(row)) || getTextbookSchoolLevelLabel(getTextbookSchoolLevel(row)) || "-";
+                const subjectLabel = getSubjectLabel(row.subject) || "-";
+                const gradeLabel = getTextbookGradeLabel(getTextbookGradeLevel(row)) || "-";
+                const schoolLevelLabel = getTextbookSchoolLevelLabel(getTextbookSchoolLevel(row)) || "-";
                 const subSubjectLabel = getTextbookSubSubject(row) || "-";
-                const categorySummary = compactUniqueLabels([getSubjectLabel(row.subject), gradeLabel, subSubjectLabel]).join(" · ") || "-";
                 const qualityIssues = getTextbookQualityIssues(row, duplicateTitleKeys);
                 const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
                 const qualityIssueSummary = getQualityIssueSummary(qualityIssueLabels);
@@ -8511,7 +8943,10 @@ function TextbookTable({
                         </Badge>
                       ) : null}
                     </TableCell>
-                    <TableCell className="max-w-[176px] truncate" title={categorySummary}>{categorySummary}</TableCell>
+                    <TableCell className="max-w-[96px] truncate" title={subjectLabel}>{subjectLabel}</TableCell>
+                    <TableCell className="max-w-[128px] truncate" title={subSubjectLabel}>{subSubjectLabel}</TableCell>
+                    <TableCell className="max-w-[112px] truncate" title={schoolLevelLabel}>{schoolLevelLabel}</TableCell>
+                    <TableCell className="max-w-[96px] truncate" title={gradeLabel}>{gradeLabel}</TableCell>
                     {locationColumns.map((location) => (
                       <TableCell key={location.id} className="text-right tabular-nums">
                         {formatQuantity(locationQuantities[location.id])}
@@ -8539,12 +8974,15 @@ function TextbookTable({
               })()}
             </Fragment>
           ))}
-          {rows.length > 0 ? (
-            <TableRow className="bg-muted/30 text-xs font-semibold text-muted-foreground">
-              {hasSelection ? <TableCell /> : null}
-              <TableCell>합계</TableCell>
-              <TableCell />
-              {locationColumns.map((location) => (
+	          {rows.length > 0 ? (
+	            <TableRow className="bg-muted/30 text-xs font-semibold text-muted-foreground">
+	              {hasSelection ? <TableCell /> : null}
+	              <TableCell>합계</TableCell>
+	              <TableCell />
+	              <TableCell />
+	              <TableCell />
+	              <TableCell />
+	              {locationColumns.map((location) => (
                 <TableCell key={location.id} className="text-right tabular-nums">
                   {formatQuantity(tableTotals.locationQuantities[location.id])}
                 </TableCell>

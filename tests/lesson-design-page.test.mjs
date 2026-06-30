@@ -22,6 +22,17 @@ test("shared lesson design workspace content does not depend on dialog title pri
   assert.doesNotMatch(workspaceContentMatch[1], /DialogDescription/);
 });
 
+test("lesson design modal opens fullscreen with its own scroll viewport", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+
+  assert.match(source, /data-testid="lesson-design-fullscreen-dialog"/);
+  assert.match(source, /<DialogTitle className="sr-only">\{lessonDesignTitle\}<\/DialogTitle>/);
+  assert.match(source, /className="[^"]*fixed[^"]*!inset-0[^"]*!flex[^"]*h-dvh[^"]*w-screen[^"]*!max-w-none[^"]*!translate-x-0[^"]*!translate-y-0[^"]*!rounded-none[^"]*overflow-hidden[^"]*"/);
+  assert.match(source, /data-testid="lesson-design-dialog-scroll"/);
+  assert.match(source, /className="[^"]*min-h-0[^"]*flex-1[^"]*overflow-y-auto[^"]*overscroll-contain[^"]*scroll-pb-28[^"]*"/);
+  assert.doesNotMatch(source, /h-\[92vh\] w-\[98vw\] max-w-\[1600px\]/);
+});
+
 test("lesson design page keeps schedule controls direct and non-duplicative", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
   const plannerSource = await readSource("src/lib/class-schedule-planner.js");
@@ -32,7 +43,16 @@ test("lesson design page keeps schedule controls direct and non-duplicative", as
   assert.match(source, /selectedDays\.length > 0 \? selectedDays\.length \* 4 : 0/);
   assert.match(source, /lessonCalendarMonths\.map\(\(month\) =>/);
   assert.match(source, /월 선택/);
-  assert.match(source, /2xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
+  assert.match(source, /xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
+  assert.doesNotMatch(source, /2xl:grid-cols-\[minmax\(18rem,0\.85fr\)_minmax\(34rem,1\.45fr\)\]/);
+  assert.match(
+    source,
+    /data-lesson-period-sidebar="true"[\s\S]*className="[^"]*xl:col-start-1[^"]*xl:pr-5[^"]*"/,
+  );
+  assert.match(
+    source,
+    /id=\{LESSON_DESIGN_SECTION_IDS\.calendar\}[\s\S]*className="[^"]*xl:col-start-2[^"]*xl:row-span-2[^"]*xl:border-l[^"]*xl:border-t-0[^"]*xl:px-5[^"]*"/,
+  );
   assert.doesNotMatch(source, /aria-label="수업 일정 현황"/);
   assert.doesNotMatch(source, /생성 \{month\.activeCount\}회 · 대기 \{month\.pendingCount\}회/);
   assert.doesNotMatch(source, /<Badge variant="outline">\{month\.label\}<\/Badge>/);
@@ -214,19 +234,21 @@ test("curriculum overview uses row actions instead of a duplicated detail panel"
   assert.doesNotMatch(source, /selectedRow/);
   assert.equal(source.match(/<section className=/g)?.length || 0, 1);
   assert.match(source, /const rowDesignAction = getCurriculumDesignAction\(row\)/);
-  assert.match(source, /buildClassDetailHref\(\s*row\.id,\s*rowDesignAction\.tab,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
-  assert.match(workspaceSource, /sessionId: isLessonDesignPage \? selectedLessonSessionId : ""/);
+  assert.match(source, /buildLessonDesignHref\(\s*row\.id,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
+  assert.match(
+    workspaceSource,
+    /sessionId:\s*isLessonDesignPage \|\| requestedLessonDesignSectionId \|\| requestedSessionId\s*\?\s*selectedLessonSessionId\s*: ""/,
+  );
   assert.doesNotMatch(source, /업데이트 필요/);
 });
 
-test("lesson design can return to the originating class detail tab", async () => {
+test("lesson design can return to the originating class management context", async () => {
   const workspaceSource = await readSource("src/features/operations/class-schedule-workspace.tsx");
   const managementSource = await readSource("src/features/management/management-page.tsx");
 
   assert.match(managementSource, /const buildClassDetailReturnPath = \(/);
   assert.match(managementSource, /params\.set\("returnTo", requestedClassReturnPath\)/);
-  assert.match(managementSource, /const resolvedReturnTab = options\.returnTab \|\| activeClassDetailTab/);
-  assert.match(managementSource, /buildClassDetailReturnPath\(resolvedReturnTab/);
+  assert.match(managementSource, /params\.set\("returnTo", buildClassDetailReturnPath\(normalizeClassDetailTab\(options\.returnTab\)\)\)/);
   assert.match(workspaceSource, /function normalizeAdminReturnPath/);
   assert.match(workspaceSource, /const requestedLessonReturnPath = normalizeAdminReturnPath\(searchParams\.get\("returnTo"\)\)/);
   assert.match(workspaceSource, /params\.delete\("returnTo"\)/);
@@ -383,9 +405,13 @@ test("lesson design splits schedule generation from progress generation", async 
 
   assert.match(source, /lessonDesignActiveMode/);
   assert.match(source, /isLessonDesignProgressMode/);
+  assert.match(source, /const isLessonDesignRouteActive = isLessonDesignPage \|\| searchParams\.get\("lessonDesign"\) === "1"/);
   assert.match(source, /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.board \|\|\s*requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.textbooks/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.periods\)/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.board\)/);
+  assert.match(source, /currentParams: new URLSearchParams\(searchParams\.toString\(\)\)/);
+  assert.match(source, /router\.replace\(`\$\{pathname\}\?\$\{nextParams\.toString\(\)\}`, \{ scroll: false \}\);/);
+  assert.doesNotMatch(source, /if \(isLessonDesignPage && row\) \{/);
   assert.match(source, /isLessonDesignProgressMode \? \(/);
   assert.match(source, /renderLessonMonthSessionDetails\(periodSessions, \{ showTextbookPlans: false \}\)/);
   assert.match(
@@ -393,6 +419,14 @@ test("lesson design splits schedule generation from progress generation", async 
     /renderLessonMonthSessionDetails\(\[selectedLessonSession\], \{\s*showScheduleControls: false,\s*showTextbookPlans: true,\s*\}\)/,
   );
   assert.match(source, /sectionId: LESSON_DESIGN_SECTION_IDS\.board/);
+  assert.match(
+    source,
+    /sectionId:\s*isLessonDesignRouteActive\s*\?\s*requestedLessonDesignSectionId \|\|\s*\(isLessonDesignPage && selectedLessonSessionId \? LESSON_DESIGN_SECTION_IDS\.board : ""\)\s*: ""/,
+  );
+  assert.doesNotMatch(
+    source,
+    /sectionId:\s*isLessonDesignPage\s*\?\s*requestedLessonDesignSectionId \|\|\s*\(selectedLessonSessionId \? LESSON_DESIGN_SECTION_IDS\.board : ""\)\s*: ""/,
+  );
 });
 
 test("lesson design keeps navigation, recovery, and save actions stable", async () => {

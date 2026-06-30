@@ -92,7 +92,6 @@ const CLASS_TABLE_COLUMN_IDS = [
   "capacity",
   "weeklyHours",
   "tuition",
-  "action",
 ] as const;
 
 const CLASS_MANAGEMENT_COLUMN_IDS = [
@@ -276,6 +275,7 @@ type PeriodOption = {
   value: string;
   label: string;
   aliases: string[];
+  isDefault?: boolean;
 };
 
 type ManagementTableActions = {
@@ -751,7 +751,7 @@ function getClassGroupValues(row: ManagementRow) {
 
 function getAvailableClassGroupOptions(rows: ManagementRow[]): PeriodOption[] {
   const byLabel = new Map<string, PeriodOption>();
-  const upsertOption = (labelValue: string, optionValue: string, aliases: string[]) => {
+  const upsertOption = (labelValue: string, optionValue: string, aliases: string[], isDefault = false) => {
     const rawLabel = normalizeScalar(labelValue);
     const label = normalizePeriodLabel(rawLabel);
     const value = normalizeScalar(optionValue) || label;
@@ -763,6 +763,7 @@ function getAvailableClassGroupOptions(rows: ManagementRow[]): PeriodOption[] {
     const existing = byLabel.get(key);
     if (existing) {
       existing.aliases = [...new Set([...existing.aliases, ...aliases.map(normalizeScalar), rawLabel, value, label].filter(Boolean))];
+      existing.isDefault = existing.isDefault || isDefault;
       return;
     }
 
@@ -770,6 +771,7 @@ function getAvailableClassGroupOptions(rows: ManagementRow[]): PeriodOption[] {
       value,
       label,
       aliases: [...new Set([...aliases.map(normalizeScalar), rawLabel, value, label].filter(Boolean))],
+      isDefault,
     });
   };
 
@@ -792,7 +794,13 @@ function getAvailableClassGroupOptions(rows: ManagementRow[]): PeriodOption[] {
       const id = normalizeScalar(record.id);
       const label = normalizeScalar(record.name) || id;
       const value = id || label;
-      upsertOption(label, value, [value, label]);
+      const option = {
+        value,
+        label,
+        aliases: [value, label],
+        isDefault: record.is_default === true || record.isDefault === true,
+      };
+      upsertOption(option.label, option.value, option.aliases, option.isDefault);
     }
   }
 
@@ -1342,7 +1350,7 @@ function ManagementBulkActionBar({
   onFieldChange: (value: string) => void;
   onValueChange: (value: string) => void;
   onApply: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   onClear: () => void;
 }) {
   if (selectedCount === 0 || fields.length === 0) {
@@ -1405,10 +1413,12 @@ function ManagementBulkActionBar({
           <Pencil className="mr-2 size-4" />
           일괄 수정
         </Button>
-        <Button type="button" size="sm" variant="destructive" className="h-9" disabled={pending} onClick={onDelete}>
-          <Trash2 className="mr-2 size-4" />
-          {deleteLabel}
-        </Button>
+        {onDelete ? (
+          <Button type="button" size="sm" variant="destructive" className="h-9" disabled={pending} onClick={onDelete}>
+            <Trash2 className="mr-2 size-4" />
+            {deleteLabel}
+          </Button>
+        ) : null}
         <Button type="button" size="sm" variant="ghost" className="h-9" disabled={pending} onClick={onClear}>
           선택 해제
         </Button>
@@ -1669,14 +1679,14 @@ export function ManagementDataTable({
         enableHiding: false,
         enableResizing: false,
         enableGrouping: false,
-        cell: ({ row }) => (
+        cell: ({ row }) => kind === "classes" ? null : (
           <div className="flex items-center justify-center">
             <Button
               variant="ghost"
               size="icon"
               className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              aria-label={`${row.original.title} ${kind === "students" ? "퇴원 처리" : kind === "classes" ? "종강 처리" : "삭제"}`}
-              title={kind === "students" ? "퇴원 처리" : kind === "classes" ? "종강 처리" : "삭제"}
+              aria-label={`${row.original.title} ${kind === "students" ? "퇴원 처리" : "삭제"}`}
+              title={kind === "students" ? "퇴원 처리" : "삭제"}
               onClick={() => actions.onDeleteRow?.(row.original)}
             >
               <Trash2 className="size-4" />
@@ -2931,14 +2941,14 @@ export function ManagementDataTable({
       field={bulkEditField}
       value={bulkEditValue}
       pending={bulkActionPending}
-      deleteLabel={kind === "students" ? "일괄 퇴원" : kind === "classes" ? "일괄 종강" : "일괄 삭제"}
+      deleteLabel={kind === "students" ? "일괄 퇴원" : "일괄 삭제"}
       onFieldChange={(nextField) => {
         setBulkEditField(nextField);
         setBulkEditValue("");
       }}
       onValueChange={setBulkEditValue}
       onApply={() => void submitBulkUpdate()}
-      onDelete={() => void submitBulkDelete()}
+      onDelete={actions.onBulkDeleteRows ? () => void submitBulkDelete() : undefined}
       onClear={() => setRowSelection({})}
     />
   );
@@ -2994,16 +3004,6 @@ export function ManagementDataTable({
                     {classroom ? <span className="min-w-0 break-keep">{classroom}</span> : null}
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={`${record.title} 종강 처리`}
-                  title="종강 처리"
-                  onClick={() => actions.onDeleteRow?.(record)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
               </div>
               <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">

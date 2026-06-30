@@ -737,7 +737,7 @@ export function TextbookSupplierSettingsWorkspace() {
       if (shouldPersistSubSubjects && nextSubSubjects.length > 0) {
         const { error: subSubjectError } = await supabase.from("textbook_sub_subject_settings").upsert(
           nextSubSubjects.map((row, index) => ({
-            id: row.isNew ? undefined : row.id,
+            id: row.id,
             subject: row.subject,
             name: row.name,
             sort_order: row.sortOrder || (index + 1) * 10,

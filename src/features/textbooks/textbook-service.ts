@@ -367,6 +367,37 @@ export async function deleteTextbookMasters(idList: string[] | string, clientInp
   return { ids, deletedIds, archivedIds };
 }
 
+export async function purgeInactiveTextbooks(idList: string[] | string, clientInput?: SupabaseClientLike | null) {
+  const client = ensureClient(clientInput);
+  const ids = [...new Set((Array.isArray(idList) ? idList : [idList]).map(text).filter(Boolean))];
+  if (ids.length === 0) {
+    return { ids: [], deletedIds: [] };
+  }
+
+  for (const table of [
+    "textbook_stock_counts",
+    "textbook_stock_moves",
+    "textbook_purchase_order_lines",
+    "textbook_sale_lines",
+  ]) {
+    const { error } = await client.from(table).delete().in("textbook_id", ids);
+    if (error) throw error;
+  }
+
+  const { data, error } = await client
+    .from("textbooks")
+    .delete()
+    .eq("status", "inactive")
+    .in("id", ids)
+    .select("id");
+  if (error) throw error;
+
+  return {
+    ids,
+    deletedIds: ((data || []) as Row[]).map((row) => text(row.id)).filter(Boolean),
+  };
+}
+
 export async function createPurchaseReceipt(record: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
   const textbookId = text(record.textbookId || record.textbook_id);
@@ -1091,6 +1122,7 @@ export const textbookService = {
   listTextbookOperationsData,
   upsertTextbookMaster,
   deleteTextbookMasters,
+  purgeInactiveTextbooks,
   createPurchaseReceipt,
   updatePurchaseLifecycle,
   deletePurchaseLifecycle,

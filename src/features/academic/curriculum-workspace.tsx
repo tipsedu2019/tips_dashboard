@@ -129,6 +129,7 @@ function applyCurriculumQueryState(
   }
 
   params.delete("classId");
+  params.delete("lessonDesign");
   params.delete("tab");
   params.delete("section");
   params.delete("sessionId");
@@ -146,15 +147,15 @@ function buildCurriculumListHref(
   return query ? `${pathname}?${query}` : pathname;
 }
 
-function buildClassDetailHref(classId: string, tab = "basic", sectionId = "", sessionId = "", returnTo = "") {
+function buildLessonDesignHref(classId: string, sectionId = "", sessionId = "", returnTo = "") {
   const normalizedClassId = text(classId);
   if (!normalizedClassId) {
-    return "/admin/classes";
+    return "/admin/curriculum";
   }
 
   const params = new URLSearchParams();
+  params.set("lessonDesign", "1");
   params.set("classId", normalizedClassId);
-  params.set("tab", tab || "basic");
   const normalizedSectionId = text(sectionId);
   if (normalizedSectionId) {
     params.set("section", normalizedSectionId);
@@ -167,7 +168,7 @@ function buildClassDetailHref(classId: string, tab = "basic", sectionId = "", se
   if (normalizedReturnTo) {
     params.set("returnTo", normalizedReturnTo);
   }
-  return `/admin/classes?${params.toString()}`;
+  return `/admin/curriculum?${params.toString()}`;
 }
 
 function getCurriculumDesignAction(row: Record<string, unknown>) {
@@ -442,9 +443,8 @@ export function AcademicCurriculumWorkspace() {
   const openCurriculumRow = useCallback(
     (row: Record<string, unknown>, rowDesignAction: ReturnType<typeof getCurriculumDesignAction>) => {
       rememberCurriculumScrollPosition();
-      router.push(buildClassDetailHref(
+      router.push(buildLessonDesignHref(
         text(row.id),
-        rowDesignAction.tab,
         rowDesignAction.sectionId,
         rowDesignAction.sessionId,
         curriculumReturnPath,
@@ -781,9 +781,8 @@ export function AcademicCurriculumWorkspace() {
                             </div>
                             <Button asChild variant="outline" size="sm" className="h-8 rounded-sm px-2 text-xs">
                               <Link
-                                href={buildClassDetailHref(
+                                href={buildLessonDesignHref(
                                   row.id,
-                                  rowDesignAction.tab,
                                   rowDesignAction.sectionId,
                                   rowDesignAction.sessionId,
                                   curriculumReturnPath,
@@ -896,9 +895,8 @@ export function AcademicCurriculumWorkspace() {
                               <div className="max-w-28 truncate text-xs font-medium text-muted-foreground">{rowDesignAction.reason}</div>
                               <Button asChild variant="outline" size="sm" className="h-8 rounded-sm px-2 text-xs">
                                 <Link
-                                  href={buildClassDetailHref(
+                                  href={buildLessonDesignHref(
                                     row.id,
-                                    rowDesignAction.tab,
                                     rowDesignAction.sectionId,
                                     rowDesignAction.sessionId,
                                     curriculumReturnPath,

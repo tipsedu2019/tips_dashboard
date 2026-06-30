@@ -208,7 +208,7 @@ const workspaceMetaEntries: Array<{
     meta: {
       section: "관리",
       title: "수업관리",
-      summary: "반 편성, 교재 연결, 진행 상태를 한 흐름으로 점검합니다.",
+      summary: "수업 기본정보와 학생 배정 상태를 관리합니다.",
     },
   },
   {

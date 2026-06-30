@@ -51,3 +51,15 @@ test("class creation preselects the default period so new classes stay visible",
   assert.match(source, /const defaultClassGroupIdsForCreate = useMemo/);
   assert.match(source, /if \(kind === "classes" && defaultClassGroupIdsForCreate\) \{\s*nextForm\.classGroupIds = defaultClassGroupIdsForCreate;\s*\}/);
 });
+
+test("default period preference uses the server-configured period before stored fallback", async () => {
+  const preferenceSource = await readFile(new URL("src/features/management/period-preferences.ts", root), "utf8");
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const recordsSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
+
+  assert.match(preferenceSource, /isDefault\?: boolean/);
+  assert.match(preferenceSource, /const configuredDefault = options\.find\(\(option\) => option\.isDefault === true\)/);
+  assert.match(preferenceSource, /if \(configuredDefault\) \{\s*return configuredDefault\.value;\s*\}/);
+  assert.match(tableSource, /isDefault: record\.is_default === true \|\| record\.isDefault === true/);
+  assert.match(recordsSource, /readOptionalTable\("class_schedule_sync_groups"\)/);
+});

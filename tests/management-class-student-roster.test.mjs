@@ -30,7 +30,7 @@ test("class student rosters never use raw UUIDs as display names", async () => {
   assert.doesNotMatch(tableSource, /const name = student\.name \|\| student\.id \|\| "학생"/);
 });
 
-test("class management exposes the official class detail tabs through URL state", async () => {
+test("class management exposes only basic and student detail tabs through URL state", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
   assert.match(pageSource, /useSearchParams/);
@@ -40,8 +40,8 @@ test("class management exposes the official class detail tabs through URL state"
   assert.match(pageSource, /const CLASS_DETAIL_TABS = \[/);
   assert.match(pageSource, /\{ value: "basic", label: "기본" \}/);
   assert.match(pageSource, /\{ value: "students", label: "학생" \}/);
-  assert.match(pageSource, /\{ value: "schedule", label: "일정" \}/);
-  assert.match(pageSource, /\{ value: "curriculum", label: "교재·진도" \}/);
+  assert.doesNotMatch(pageSource, /\{ value: "schedule", label: "일정" \}/);
+  assert.doesNotMatch(pageSource, /\{ value: "curriculum", label: "교재·진도" \}/);
   assert.doesNotMatch(pageSource, /\{ value: "counseling", label: "상담" \}/);
   assert.match(pageSource, /params\.set\("classId", classId\)/);
   assert.match(pageSource, /params\.set\("tab", tab\)/);
@@ -54,53 +54,29 @@ test("class management exposes the official class detail tabs through URL state"
   assert.match(pageSource, /params\.delete\("returnTo"\)/);
   assert.match(pageSource, /data-testid="class-official-detail-tabs"/);
   assert.match(pageSource, /data-testid="class-detail-students-tab"/);
-  assert.match(pageSource, /data-testid="class-detail-schedule-tab"/);
-  assert.match(pageSource, /data-testid="class-detail-curriculum-tab"/);
+  assert.doesNotMatch(pageSource, /<TabsContent value="schedule"/);
+  assert.doesNotMatch(pageSource, /<TabsContent value="curriculum"/);
+  assert.doesNotMatch(pageSource, /\{renderClassSchedulePanel\(\)\}/);
+  assert.doesNotMatch(pageSource, /\{renderClassCurriculumPanel\(\)\}/);
   assert.doesNotMatch(pageSource, /data-testid="class-detail-counseling-tab"/);
-  assert.match(pageSource, /buildLessonDesignFromClassDetailHref/);
   assert.match(pageSource, /const buildClassDetailReturnPath = \(/);
   assert.match(pageSource, /params\.set\("studentId", options\.studentId\)/);
   assert.match(pageSource, /params\.set\("returnTo", requestedClassReturnPath\)/);
-  assert.match(pageSource, /const resolvedReturnTab = options\.returnTab \|\| activeClassDetailTab/);
-  assert.match(pageSource, /buildClassDetailReturnPath\(resolvedReturnTab/);
-  assert.match(pageSource, /params\.set\("section", resolvedSection\)/);
 });
 
-test("class curriculum detail tab shows official textbook and progress context", async () => {
+test("class management keeps schedule and textbook progress out of the detail dialog", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const tabsStart = pageSource.indexOf('data-testid="class-official-detail-tabs"');
+  const tabsEnd = pageSource.indexOf("<DialogFooter", tabsStart);
+  const tabsSource = pageSource.slice(tabsStart, tabsEnd);
 
-  assert.match(pageSource, /function getClassCurriculumSummary/);
-  assert.match(pageSource, /function getClassTextbookCatalog/);
-  assert.match(pageSource, /function getClassSessionSummaries/);
-  assert.match(pageSource, /function getClassNextCurriculumSession/);
-  assert.match(pageSource, /function getCurriculumSessionStableId/);
-  assert.match(pageSource, /function getClassUnassignedProgressSessions/);
-  assert.match(pageSource, /function getClassTextbookProgressSnapshot/);
-  assert.match(pageSource, /function getTextbookEntryRangeLabel/);
-  assert.match(pageSource, /const textbookProgressSnapshots = getClassTextbookProgressSnapshot\(selectedRow\)/);
-  assert.match(pageSource, /const renderClassCurriculumPanel = \(\) =>/);
-  assert.match(pageSource, /data-testid="class-curriculum-official-panel"/);
-  assert.match(pageSource, /data-testid="class-curriculum-unassigned-work-panel"/);
-  assert.match(pageSource, /진도 작업 큐/);
-  assert.match(pageSource, /첫 미배정 처리/);
-  assert.match(pageSource, /const firstUnassignedSessionId = firstUnassignedSession \? getCurriculumSessionStableId\(firstUnassignedSession\) : ""/);
-  assert.match(pageSource, /buildLessonDesignFromClassDetailHref\(\{\s*section: "lesson-design-board",\s*sessionId: firstUnassignedSessionId,\s*\}\)/);
-  assert.match(pageSource, /disabled=\{delayedProgressCount <= 0\}/);
-  assert.match(pageSource, /교재별 영역/);
-  assert.match(pageSource, /data-testid="class-curriculum-textbook-progress-card"/);
-  assert.match(pageSource, /data-testid="class-curriculum-manage-textbook"/);
-  assert.match(pageSource, /Settings2 className="size-3\.5"/);
-  assert.match(pageSource, /연결·제거/);
-  assert.match(pageSource, /data-testid="class-curriculum-connect-textbook"/);
-  assert.match(pageSource, /buildLessonDesignFromClassDetailHref\(\{\s*section: "lesson-design-textbooks",\s*returnTab: "curriculum",\s*\}\)/);
-  assert.match(pageSource, />\s*교재 연결\s*<\/Button>/);
-  assert.match(pageSource, />최근 범위</);
-  assert.match(pageSource, />다음 범위</);
-  assert.match(pageSource, /다음 예정/);
-  assert.match(pageSource, /미배정 회차/);
-  assert.match(pageSource, /최근 진행 범위/);
-  assert.match(pageSource, /교재·진도 편집/);
-  assert.match(pageSource, /\{renderClassCurriculumPanel\(\)\}/);
+  assert.ok(tabsStart >= 0 && tabsEnd > tabsStart);
+  assert.match(tabsSource, /<TabsContent value="basic"/);
+  assert.match(tabsSource, /<TabsContent value="students"/);
+  assert.doesNotMatch(tabsSource, /<TabsContent value="schedule"/);
+  assert.doesNotMatch(tabsSource, /<TabsContent value="curriculum"/);
+  assert.doesNotMatch(tabsSource, /\{renderClassSchedulePanel\(\)\}/);
+  assert.doesNotMatch(tabsSource, /\{renderClassCurriculumPanel\(\)\}/);
 });
 
 test("curriculum session summaries preserve per-textbook ranges for official class details", async () => {
@@ -118,63 +94,43 @@ test("curriculum session summaries preserve per-textbook ranges for official cla
   assert.match(typeSource, /endRange: string/);
 });
 
-test("class detail focuses requested curriculum and schedule targets from URL", async () => {
+test("class detail ignores lesson-design section targets owned by curriculum planning", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const tabsStart = pageSource.indexOf('data-testid="class-official-detail-tabs"');
+  const tabsEnd = pageSource.indexOf("<DialogFooter", tabsStart);
+  const tabsSource = pageSource.slice(tabsStart, tabsEnd);
 
-  assert.match(pageSource, /function getClassDetailSectionTargetId/);
-  assert.match(pageSource, /requestedClassDetailSection === "lesson-design-board"/);
-  assert.match(pageSource, /requestedClassDetailSection === "lesson-design-periods"/);
-  assert.match(pageSource, /document\.getElementById\(getClassDetailSectionTargetId\(/);
-  assert.match(pageSource, /function scrollClassDetailTargetIntoView\(target: HTMLElement\)/);
-  assert.match(pageSource, /target\.closest\('\[role="dialog"\]'\) as HTMLElement \| null/);
-  assert.match(pageSource, /dialog\.scrollTop \+=/);
-  assert.match(pageSource, /scrollClassDetailTargetIntoView\(target\)/);
-  assert.match(pageSource, /requestedClassDetailSection === "lesson-design-textbooks"/);
-  assert.match(pageSource, /const retryTimer = window\.setTimeout\(scrollRequestedClassDetailSection, 520\)/);
-  assert.match(pageSource, /const finalRetryTimer = window\.setTimeout\(scrollRequestedClassDetailSection, 1500\)/);
-  assert.match(pageSource, /id="class-curriculum-unassigned-work-panel"/);
-  assert.match(pageSource, /id="class-curriculum-textbooks-panel"/);
-  assert.match(pageSource, /data-testid="class-curriculum-textbooks-panel"/);
-  assert.match(pageSource, /return sessionId \? `class-schedule-session-\$\{sessionId\}` : "class-schedule-session-view-panel"/);
-  assert.match(pageSource, /id="class-schedule-session-view-panel"/);
-  assert.match(pageSource, /id=\{`class-curriculum-session-\$\{firstUnassignedSessionId\}`\}/);
-  assert.match(pageSource, /id=\{`class-schedule-session-\$\{sessionId\}`\}/);
-  assert.match(pageSource, /data-class-detail-focused=\{isCurriculumWorkPanelFocused \? "true" : undefined\}/);
-  assert.match(pageSource, /data-class-detail-focused=\{isTextbooksSectionRequested \? "true" : undefined\}/);
-  assert.match(pageSource, /data-class-detail-focused=\{shouldHighlightScheduleView \? "true" : undefined\}/);
-  assert.match(pageSource, /data-class-detail-focused=\{isFocusedScheduleSession \? "true" : undefined\}/);
-  assert.match(pageSource, /ring-1 ring-primary\/30/);
+  assert.match(pageSource, /const requestedClassDetailSection = kind === "classes" \? text\(searchParams\.get\("section"\)\) : ""/);
+  assert.match(pageSource, /const requestedClassDetailSessionId = kind === "classes" \? text\(searchParams\.get\("sessionId"\)\) : ""/);
+  assert.ok(tabsStart >= 0 && tabsEnd > tabsStart);
+  assert.doesNotMatch(pageSource, /document\.getElementById\(getClassDetailSectionTargetId\(/);
+  assert.doesNotMatch(pageSource, /scrollRequestedClassDetailSection/);
+  assert.doesNotMatch(pageSource, /activeClassDetailTab !== "schedule"/);
+  assert.doesNotMatch(pageSource, /activeClassDetailTab !== "curriculum"/);
+  assert.doesNotMatch(tabsSource, /data-class-detail-focused=\{isCurriculumWorkPanelFocused \? "true" : undefined\}/);
+  assert.doesNotMatch(tabsSource, /data-class-detail-focused=\{shouldHighlightScheduleView \? "true" : undefined\}/);
 });
 
-test("class detail tab changes keep URL targets only when they belong to the active tab", async () => {
+test("class detail tab changes preserve only student row targets", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(pageSource, /function getClassDetailTabForSection\(section: string\)/);
-  assert.match(pageSource, /section === "lesson-design-board" \|\| section === "lesson-design-textbooks"/);
-  assert.match(pageSource, /return "curriculum"/);
-  assert.match(pageSource, /section === "lesson-design-periods"/);
-  assert.match(pageSource, /return "schedule"/);
-  assert.match(pageSource, /function isClassDetailSessionTargetSection\(section: string\)/);
-  assert.match(pageSource, /const shouldKeepSection = getClassDetailTabForSection\(requestedClassDetailSection\) === nextTab/);
   assert.match(pageSource, /const shouldKeepStudentTarget = nextTab === "students" && requestedClassDetailStudentId/);
-  assert.match(pageSource, /section: shouldKeepSection \? requestedClassDetailSection : ""/);
-  assert.match(pageSource, /sessionId: shouldKeepSection && isClassDetailSessionTargetSection\(requestedClassDetailSection\) \? requestedClassDetailSessionId : ""/);
   assert.match(pageSource, /studentId: shouldKeepStudentTarget \? requestedClassDetailStudentId : ""/);
+  assert.doesNotMatch(pageSource, /const shouldKeepSection = getClassDetailTabForSection\(requestedClassDetailSection\) === nextTab/);
+  assert.doesNotMatch(pageSource, /section: shouldKeepSection \? requestedClassDetailSection : ""/);
+  assert.doesNotMatch(pageSource, /sessionId: shouldKeepSection/);
   assert.doesNotMatch(pageSource, /section: nextTab === "schedule" \|\| nextTab === "curriculum" \? requestedClassDetailSection : ""/);
 });
 
-test("class lesson-design links ignore stale section targets from other detail tabs", async () => {
+test("class management detail no longer owns lesson-design navigation", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const tabsStart = pageSource.indexOf('data-testid="class-official-detail-tabs"');
+  const tabsEnd = pageSource.indexOf("<DialogFooter", tabsStart);
+  const tabsSource = pageSource.slice(tabsStart, tabsEnd);
 
-  assert.match(pageSource, /function getDefaultLessonDesignSectionForClassTab\(tab: ClassDetailTab\)/);
-  assert.match(pageSource, /return tab === "schedule" \? "lesson-design-periods" : "lesson-design-board"/);
-  assert.match(pageSource, /const resolvedReturnTab = options\.returnTab \|\| activeClassDetailTab/);
-  assert.match(pageSource, /const shouldUseRequestedSection =[\s\S]*!options\.section[\s\S]*getClassDetailTabForSection\(requestedClassDetailSection\) === resolvedReturnTab/);
-  assert.match(pageSource, /shouldUseRequestedSection \? requestedClassDetailSection : ""/);
-  assert.match(pageSource, /getDefaultLessonDesignSectionForClassTab\(resolvedReturnTab\)/);
-  assert.match(pageSource, /const shouldUseRequestedSession =[\s\S]*!options\.sessionId[\s\S]*shouldUseRequestedSection[\s\S]*isClassDetailSessionTargetSection\(resolvedSection\)/);
-  assert.match(pageSource, /options\.sessionId \|\| \(shouldUseRequestedSession \? requestedClassDetailSessionId : ""\)/);
-  assert.match(pageSource, /buildClassDetailReturnPath\(resolvedReturnTab/);
+  assert.ok(tabsStart >= 0 && tabsEnd > tabsStart);
+  assert.doesNotMatch(tabsSource, /buildLessonDesignFromClassDetailHref/);
+  assert.doesNotMatch(tabsSource, /\/admin\/curriculum\/lesson-design\?/);
   assert.doesNotMatch(pageSource, /options\.section \|\|[\s\n]*requestedClassDetailSection \|\|/);
   assert.doesNotMatch(pageSource, /options\.sessionId \|\| requestedClassDetailSessionId/);
 });
@@ -217,36 +173,25 @@ test("class detail first screen omits counseling surfaces delegated to MakeEdu",
   assert.doesNotMatch(pageSource, /\{renderClassOfficialQuickEditPanel\(\)\}/);
 });
 
-test("class schedule detail tab shows official session and exception context", async () => {
+test("class management no longer renders schedule detail content", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const recordsSource = await readFile(new URL("src/features/academic/records.js", root), "utf8");
   const typeSource = await readFile(new URL("src/features/academic/records.d.ts", root), "utf8");
+  const tabsStart = pageSource.indexOf('data-testid="class-official-detail-tabs"');
+  const tabsEnd = pageSource.indexOf("<DialogFooter", tabsStart);
+  const tabsSource = pageSource.slice(tabsStart, tabsEnd);
 
-  assert.match(pageSource, /function getClassScheduleNextSession/);
-  assert.match(pageSource, /function getClassScheduleCurrentSession/);
-  assert.match(pageSource, /function getClassScheduleExceptionSessions/);
-  assert.match(pageSource, /const renderClassSchedulePanel = \(\) =>/);
-  assert.match(pageSource, /data-testid="class-schedule-official-panel"/);
-  assert.match(pageSource, /다음 수업일/);
-  assert.match(pageSource, /현재 회차/);
-  assert.match(pageSource, /전체 회차/);
-  assert.match(pageSource, /회차 보기/);
-  assert.match(pageSource, /보강·휴강·예외/);
-  assert.match(pageSource, /data-testid="class-schedule-session-view-panel"/);
-  assert.match(pageSource, /data-testid="class-schedule-session-view-create"/);
-  assert.match(pageSource, /data-testid="class-schedule-session-view-edit"/);
-  assert.match(pageSource, /data-testid="class-schedule-session-row-edit"/);
-  assert.match(pageSource, /sessions\.length <= 0 \? "회차 미생성" : `회차 \$\{sessions\.length\}회`/);
-  assert.match(pageSource, /회차 생성/);
-  assert.match(pageSource, /\{renderClassSchedulePanel\(\)\}/);
+  assert.ok(tabsStart >= 0 && tabsEnd > tabsStart);
+  assert.doesNotMatch(tabsSource, /data-testid="class-schedule-official-panel"/);
+  assert.doesNotMatch(tabsSource, /\{renderClassSchedulePanel\(\)\}/);
   assert.doesNotMatch(pageSource, /renderEditableFields\("detail", \["teacher", "schedule", "classroom", "classGroupIds"\]\)/);
-  assert.doesNotMatch(pageSource, /data-testid="class-schedule-session-create-work-panel"/);
-  assert.doesNotMatch(pageSource, /data-testid="class-schedule-exception-work-panel"/);
-  assert.doesNotMatch(pageSource, /data-testid="class-schedule-exception-create"/);
-  assert.doesNotMatch(pageSource, /data-testid="class-schedule-exception-edit"/);
-  assert.match(pageSource, /section: "lesson-design-periods"/);
-  assert.match(pageSource, /sessionId: getCurriculumSessionStableId\(session\)/);
-  assert.match(pageSource, /회차 수정/);
+  assert.doesNotMatch(tabsSource, /data-testid="class-schedule-session-create-work-panel"/);
+  assert.doesNotMatch(tabsSource, /data-testid="class-schedule-exception-work-panel"/);
+  assert.doesNotMatch(tabsSource, /data-testid="class-schedule-exception-create"/);
+  assert.doesNotMatch(tabsSource, /data-testid="class-schedule-exception-edit"/);
+  assert.doesNotMatch(tabsSource, /section: "lesson-design-periods"/);
+  assert.doesNotMatch(tabsSource, /sessionId: getCurriculumSessionStableId\(session\)/);
+  assert.doesNotMatch(tabsSource, /회차 수정/);
 
   assert.match(recordsSource, /scheduleState = text\(session\?\.state \|\| session\?\.scheduleState \|\| session\?\.schedule_state\)/);
   assert.match(recordsSource, /makeupDate = text\(session\?\.makeupDate \|\| session\?\.makeup_date\)/);
@@ -266,8 +211,7 @@ test("class management shares curriculum summary data without dashboard warning 
   assert.match(hookSource, /curriculumModel = buildCurriculumWorkspaceModel/);
   assert.match(hookSource, /delayed_progress_sessions: curriculum\.delayedProgressSessions/);
 
-  assert.match(pageSource, /function getClassSummaryCurriculumLabel/);
-  assert.match(pageSource, /const curriculumSummaryLabel = getClassSummaryCurriculumLabel\(selectedRow\)/);
+  assert.doesNotMatch(pageSource, /const curriculumSummaryLabel = getClassSummaryCurriculumLabel\(selectedRow\)/);
   assert.match(pageSource, /data-testid="class-official-summary-bar"/);
   assert.doesNotMatch(pageSource, /function getClassOperationalWarnings/);
   assert.doesNotMatch(pageSource, /ClassOperationalWarning/);
@@ -345,14 +289,14 @@ test("class detail keeps mobile primary actions reachable at the bottom", async 
   assert.match(pageSource, /onClick=\{\(\) => handleClassDetailTabChange\(tab\.value\)\}/);
   assert.match(pageSource, /\{tab\.icon\}/);
   assert.match(pageSource, /\{tab\.shortLabel\}/);
-  assert.match(pageSource, /grid-cols-\[repeat\(5,minmax\(0,1fr\)\)\]/);
+  assert.match(pageSource, /grid-cols-\[repeat\(3,minmax\(0,1fr\)\)\]/);
   assert.match(pageSource, /const mobileSaveStatus = renderSaveStatus\(\)/);
   assert.match(pageSource, /data-testid="class-detail-mobile-save-status"/);
   assert.match(pageSource, /\{mobileSaveStatus\}/);
   assert.match(pageSource, /data-testid="class-detail-mobile-save"/);
   assert.match(pageSource, /onClick=\{handleDetailSave\}/);
   assert.match(pageSource, /<span className="max-w-full truncate">\{saving \? "저장 중" : "저장"\}<\/span>/);
-  assert.match(pageSource, /pb-32 md:pb-0/);
+  assert.match(pageSource, /pb-28 md:pb-0/);
   assert.doesNotMatch(pageSource, /pb-24 md:pb-0/);
   assert.match(pageSource, /\{renderClassMobileActionBar\(\)\}/);
 });
@@ -394,46 +338,50 @@ test("class official summary keeps the period visible as core class identity", a
   assert.match(pageSource, /renderEditableFields\("detail", \[[\s\S]*"classGroupIds"[\s\S]*\]\)/);
 });
 
-test("class official summary shows the active textbook with progress status", async () => {
+test("class official summary hides active textbook progress status", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const summaryStart = pageSource.indexOf("const renderClassSummaryBar = () =>");
+  const summaryEnd = pageSource.indexOf("  const renderRelationManagementSection", summaryStart);
+  const summarySource = pageSource.slice(summaryStart, summaryEnd);
 
-  assert.match(pageSource, /function getClassTextbookTitle\(book: Record<string, unknown>, index: number\)/);
-  assert.match(pageSource, /function getClassSummaryCurriculumLabel\(row: ManagementRow\)/);
-  assert.match(pageSource, /const textbooks = getClassTextbookCatalog\(row\)/);
-  assert.match(pageSource, /const latestProgressNote = getClassLatestProgressNote\(row\)/);
-  assert.match(pageSource, /const curriculumSummaryLabel = getClassSummaryCurriculumLabel\(selectedRow\)/);
-  assert.match(pageSource, />교재·진도<\/div>/);
-  assert.match(pageSource, /\{curriculumSummaryLabel\}/);
+  assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
+  assert.doesNotMatch(summarySource, /const curriculumSummaryLabel = getClassSummaryCurriculumLabel\(selectedRow\)/);
+  assert.doesNotMatch(summarySource, />교재·진도<\/div>/);
+  assert.doesNotMatch(summarySource, /\{curriculumSummaryLabel\}/);
   assert.doesNotMatch(pageSource, />진도 상태<\/div>/);
 });
 
-test("class official summary shows next lesson and current session context", async () => {
+test("class official summary hides next lesson and current session context", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const summaryStart = pageSource.indexOf("const renderClassSummaryBar = () =>");
+  const summaryEnd = pageSource.indexOf("  const renderRelationManagementSection", summaryStart);
+  const summarySource = pageSource.slice(summaryStart, summaryEnd);
 
-  assert.match(pageSource, /function getClassSummaryScheduleLabel\(row: ManagementRow, fallbackSchedule: string\)/);
-  assert.match(pageSource, /const nextSession = getClassScheduleNextSession\(row\)/);
-  assert.match(pageSource, /const currentSession = getClassScheduleCurrentSession\(row\)/);
-  assert.match(pageSource, /const totalSessions = getClassSessionCount\(row\) \|\| getClassSessionSummaries\(row\)\.length/);
-  assert.match(pageSource, /`현재 \$\{currentOrder\}\/\$\{totalSessions\}회`/);
-  assert.match(pageSource, /const scheduleSummaryLabel = getClassSummaryScheduleLabel\(selectedRow, schedule\)/);
-  assert.match(pageSource, /\{scheduleSummaryLabel\}/);
+  assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
+  assert.doesNotMatch(summarySource, /const scheduleSummaryLabel = getClassSummaryScheduleLabel\(selectedRow, schedule\)/);
+  assert.doesNotMatch(summarySource, />일정<\/div>/);
+  assert.doesNotMatch(summarySource, /\{scheduleSummaryLabel\}/);
 });
 
 test("class official summary omits the counseling decision strip", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const summaryStart = pageSource.indexOf("const renderClassSummaryBar = () =>");
+  const summaryEnd = pageSource.indexOf("  const renderRelationManagementSection", summaryStart);
+  const summarySource = pageSource.slice(summaryStart, summaryEnd);
 
   assert.doesNotMatch(pageSource, /const remainingSeats = capacity > 0 \? Math\.max\(capacity - registeredCount, 0\) : null/);
   assert.doesNotMatch(pageSource, /const nextLessonLabel = nextSession \? getCurriculumSessionTitle\(nextSession, "다음 회차"\) : "회차 없음"/);
   assert.doesNotMatch(pageSource, /const decisionProgressLabel = delayedProgressCount > 0 \? `미배정 \$\{delayedProgressCount\}회` : latestProgressNote \|\| getClassCurriculumStateLabel\(selectedRow\)/);
   assert.doesNotMatch(pageSource, /data-testid="class-summary-decision-strip"/);
   assert.doesNotMatch(pageSource, />다음 작업</);
-  assert.match(pageSource, />일정<\/div>/);
-  assert.match(pageSource, />정원<\/div>/);
-  assert.match(pageSource, />등록\/대기<\/div>/);
-  assert.match(pageSource, />교재·진도<\/div>/);
+  assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
+  assert.match(summarySource, />정원<\/div>/);
+  assert.match(summarySource, />등록\/대기<\/div>/);
+  assert.doesNotMatch(summarySource, />일정<\/div>/);
+  assert.doesNotMatch(summarySource, />교재·진도<\/div>/);
 });
 
-test("class management archives classes and shows audit-aware official details", async () => {
+test("class management ends classes through the status field and shows audit-aware official details", async () => {
   const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
@@ -458,12 +406,14 @@ test("class management archives classes and shows audit-aware official details",
   assert.match(pageSource, /formatClassAuditAction\(item\.action\)/);
   assert.match(pageSource, /formatHistoryDate\(item\.changedAt \|\| item\.changed_at\)/);
   assert.match(pageSource, /\{renderClassAuditTimeline\(\)\}/);
-  assert.match(pageSource, /service\.updateClass\(compact\(\{ status: ARCHIVED_CLASS_STATUS \}, kind, row\)\)/);
   assert.doesNotMatch(pageSource, /if \(kind === "classes"\) return service\.deleteClass\(row\.id\)/);
-  assert.match(pageSource, /kind === "classes" \? "종강 처리"/);
+  assert.match(pageSource, /kind === "classes" \? undefined : canMutateRows \? \(row: ManagementRow\) =>/);
+  assert.doesNotMatch(pageSource, /종강 처리/);
   assert.match(pageSource, /disabled=\{saving \|\| !canMutateRows\}/);
 
-  assert.match(tableSource, /kind === "classes" \? "일괄 종강"/);
+  assert.match(tableSource, /kind === "classes" \? null : \(/);
+  assert.doesNotMatch(tableSource, /종강 처리/);
+  assert.doesNotMatch(tableSource, /일괄 종강/);
   assert.match(serviceSource, /const ARCHIVED_CLASS_STATUS = "종강"/);
   assert.match(serviceSource, /\.update\(\{ status: ARCHIVED_CLASS_STATUS \}\)/);
   assert.match(auditMigration, /create trigger dashboard_audit_classes/);

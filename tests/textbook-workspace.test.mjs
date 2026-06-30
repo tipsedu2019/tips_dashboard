@@ -269,15 +269,161 @@ test("textbook workspace uses searchable selectors and tab-scoped inventory cont
   assert.match(workspaceSource, /submitInlineStockCount/);
 });
 
-test("textbook workspace resolves reviewed master and inventory UX issues", async () => {
+test("textbook operation selectors keep long option menus scrollable without selector sorting", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const searchComboboxBlock = workspaceSource.slice(
+    workspaceSource.indexOf("function SearchCombobox"),
+    workspaceSource.indexOf("function toggleSearchSelectFilter"),
+  );
+  const textbookSelectBlock = workspaceSource.slice(
+    workspaceSource.indexOf("function TextbookSelect"),
+    workspaceSource.indexOf("function getClassTeacherLabel"),
+  );
+  const classSelectBlock = workspaceSource.slice(
+    workspaceSource.indexOf("function ClassSelect"),
+    workspaceSource.indexOf("function TeacherSelect"),
+  );
+
+  assert.match(workspaceSource, /onWheelCapture=\{\(event\) => event\.stopPropagation\(\)\}/);
+  assert.match(workspaceSource, /CommandList[\s\S]*className="max-h-80 overscroll-contain overflow-y-auto"/);
+  assert.match(workspaceSource, /option\.metaRows/);
+  assert.doesNotMatch(workspaceSource, /type SearchSelectSortOption =/);
+  assert.doesNotMatch(searchComboboxBlock, /sortOptions/);
+  assert.doesNotMatch(searchComboboxBlock, /정렬/);
+  assert.doesNotMatch(workspaceSource, /const textbookSelectSortOptions/);
+  assert.doesNotMatch(textbookSelectBlock, /sortOptions=/);
+  assert.doesNotMatch(textbookSelectBlock, /defaultSortKey=/);
+  assert.doesNotMatch(workspaceSource, /const classSelectSortOptions/);
+  assert.doesNotMatch(classSelectBlock, /sortOptions=/);
+  assert.doesNotMatch(classSelectBlock, /defaultSortKey=/);
+});
+
+test("textbook operation selectors expose class and textbook attributes in menu options", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
   );
 
+  assert.match(workspaceSource, /function buildTextbookSelectMetaRows/);
+  assert.match(workspaceSource, /metaRows: buildTextbookSelectMetaRows\(textbook\)/);
+  assert.match(workspaceSource, /const categoryDetail = compactUniqueLabels\(\[schoolLevel, grade, subSubject\]\)\.join\(" · "\)/);
+  assert.match(workspaceSource, /\{ label: "구분", value: categoryDetail \|\| getTaxonomyCategoryLabel\(textbook\) \}/);
+  assert.match(workspaceSource, /label: "출판사"/);
+  assert.match(workspaceSource, /label: "ISBN"/);
+  assert.match(workspaceSource, /label: "바코드"/);
+  assert.match(workspaceSource, /function buildClassSelectMetaRows/);
+  assert.match(workspaceSource, /metaRows: buildClassSelectMetaRows\(classItem\)/);
+  const classSelectMetaRowsBlock = workspaceSource.slice(
+    workspaceSource.indexOf("function buildClassSelectMetaRows"),
+    workspaceSource.indexOf("function ClassSelect"),
+  );
+  assert.match(classSelectMetaRowsBlock, /\{ label: "선생님", value: getClassTeacherLabel\(classItem\) \}/);
+  assert.match(classSelectMetaRowsBlock, /\{ label: "강의실", value: getClassClassroomSelectLabel\(classItem\) \}/);
+  assert.match(classSelectMetaRowsBlock, /\{ label: "학생", value: studentCount > 0 \? `\$\{formatQuantity\(studentCount\)\}명` : "" \}/);
+  assert.match(classSelectMetaRowsBlock, /\{ label: "시간", value: getClassScheduleLabel\(classItem\) \}/);
+  assert.doesNotMatch(classSelectMetaRowsBlock, /label: "담당"/);
+  assert.doesNotMatch(classSelectMetaRowsBlock, /label: "과목"/);
+  assert.doesNotMatch(classSelectMetaRowsBlock, /label: "학년"/);
+  assert.doesNotMatch(classSelectMetaRowsBlock, /label: "상태"/);
+});
+
+test("textbook operation selectors support multi-select filters in option menus", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const searchComboboxBlock = workspaceSource.slice(
+    workspaceSource.indexOf("function SearchCombobox"),
+    workspaceSource.indexOf("function toggleSearchSelectFilter"),
+  );
+  const textbookSelectBlock = workspaceSource.slice(
+    workspaceSource.indexOf("function TextbookSelect"),
+    workspaceSource.indexOf("function getClassTeacherLabel"),
+  );
+  const classSelectBlock = workspaceSource.slice(
+    workspaceSource.indexOf("function ClassSelect"),
+    workspaceSource.indexOf("function TeacherSelect"),
+  );
+
+  assert.match(workspaceSource, /type SearchSelectFilterGroup =/);
+  assert.match(workspaceSource, /type SearchSelectFilterLayout = "default" \| "subject-grade-teacher" \| "subject-grade-detail"/);
+  assert.match(workspaceSource, /filterGroups\?: SearchSelectFilterGroup\[\]/);
+  assert.match(workspaceSource, /filterLayout\?: SearchSelectFilterLayout/);
+  assert.match(workspaceSource, /const \[selectedFilterValues, setSelectedFilterValues\] = useState<Record<string, string\[\]>>/);
+  assert.match(workspaceSource, /const filteredOptions = filterGroups\.length === 0/);
+  assert.match(searchComboboxBlock, /const visibleFilterGroups = buildVisibleSearchSelectFilterGroups/);
+  assert.match(searchComboboxBlock, /const shouldInlineFilterReset = usesTwoColumnFilterLayout && activeFilterCount > 0/);
+  assert.match(searchComboboxBlock, /shouldInlineFilterReset && "grid-cols-\[minmax\(0,1fr\)_minmax\(0,1fr\)_auto\]"/);
+  assert.match(searchComboboxBlock, /!usesTwoColumnFilterLayout && activeFilterCount > 0/);
+  assert.match(searchComboboxBlock, /usesTwoColumnFilterLayout && "grid-cols-2/);
+  assert.match(searchComboboxBlock, /usesTwoColumnFilterLayout && !\["subject", "grade"\]\.includes\(group\.key\) && \(shouldInlineFilterReset \? "col-span-3" : "col-span-2"\)/);
+  assert.match(searchComboboxBlock, /group\.key === "grade" && shouldInlineFilterReset/);
+  assert.match(workspaceSource, /function toggleSearchSelectFilter/);
+  assert.match(workspaceSource, /activeFilterCount/);
+  assert.match(workspaceSource, /필터 초기화/);
+  assert.doesNotMatch(searchComboboxBlock, />\s*필터\s*<\/span>/);
+  assert.match(workspaceSource, /aria-pressed=\{isFilterSelected\}/);
+  assert.doesNotMatch(workspaceSource, /필터\{activeFilterCount > 0/);
+  assert.doesNotMatch(workspaceSource, /\{formatQuantity\(option\.count\)\}/);
+  assert.match(workspaceSource, /buildSearchSelectFilterGroups/);
+  assert.match(workspaceSource, /function buildVisibleSearchSelectFilterGroups/);
+  assert.match(workspaceSource, /filterValues: \{/);
+  assert.match(workspaceSource, /const textbookSelectFilterGroups = buildSearchSelectFilterGroups/);
+  assert.match(workspaceSource, /const classSelectFilterGroups = buildSearchSelectFilterGroups/);
+  assert.match(textbookSelectBlock, /subject: buildSearchSelectFilterValues/);
+  assert.match(textbookSelectBlock, /grade: buildSearchSelectFilterValues/);
+  assert.match(textbookSelectBlock, /subSubject: buildSearchSelectFilterValues\(\[getTextbookSelectSubSubject\(textbook\)\]\)/);
+  assert.doesNotMatch(textbookSelectBlock, /schoolLevel: buildSearchSelectFilterValues/);
+  assert.match(textbookSelectBlock, /\{ key: "subject", label: "과목", optionOrder: \["영어", "수학", "기타"\] \}/);
+  assert.match(textbookSelectBlock, /\{ key: "grade", label: "학년" \}[\s\S]*\{ key: "subSubject", label: "세부과목" \}/);
+  assert.match(textbookSelectBlock, /\{ key: "subSubject", label: "세부과목" \}/);
+  assert.doesNotMatch(textbookSelectBlock, /\{ key: "schoolLevel"/);
+  assert.match(textbookSelectBlock, /filterLayout="subject-grade-detail"/);
+  assert.match(workspaceSource, /function getTextbookSelectSubSubject/);
+  assert.match(workspaceSource, /const textbookNonSubSubjectFilterLabels = new Set/);
+  assert.match(workspaceSource, /TEXTBOOK_GRADE_OPTIONS\.map\(\(option\) => option\.label\)/);
+  assert.match(workspaceSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS\.map\(\(option\) => option\.label\)/);
+  assert.doesNotMatch(textbookSelectBlock, /publisher: buildSearchSelectFilterValues/);
+  assert.doesNotMatch(textbookSelectBlock, /category: buildSearchSelectFilterValues/);
+  assert.doesNotMatch(textbookSelectBlock, /\{ key: "publisher"/);
+  assert.doesNotMatch(textbookSelectBlock, /\{ key: "category"/);
+  assert.match(classSelectBlock, /subject: buildSearchSelectFilterValues/);
+  assert.match(classSelectBlock, /grade: buildSearchSelectFilterValues/);
+  assert.match(classSelectBlock, /teacher: buildSearchSelectFilterValues/);
+  assert.match(classSelectBlock, /\{ key: "subject", label: "과목", optionOrder: \["영어", "수학", "기타"\] \}/);
+  assert.match(classSelectBlock, /\{ key: "grade", label: "학년" \}/);
+  assert.match(classSelectBlock, /\{ key: "teacher", label: "선생님" \}/);
+  assert.match(classSelectBlock, /filterLayout="subject-grade-teacher"/);
+  assert.doesNotMatch(classSelectBlock, /status: buildSearchSelectFilterValues/);
+  assert.doesNotMatch(classSelectBlock, /\{ key: "status"/);
+});
+
+test("textbook workspace resolves reviewed master and inventory UX issues", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const listControlsSource = workspaceSource.slice(
+    workspaceSource.indexOf("function TextbookListControls"),
+    workspaceSource.indexOf("function TextbookBulkActionBar"),
+  );
+
   assert.match(workspaceSource, /TabsList[\s\S]*aria-label="교재관리 업무 탭"/);
   assert.match(workspaceSource, /TextbookListControls/);
-  assert.match(workspaceSource, /분류 필터/);
+  assert.match(listControlsSource, /aria-label="교재 마스터 필터"/);
+  assert.match(listControlsSource, /grid-cols-2 gap-2 lg:grid-cols-4/);
+  assert.doesNotMatch(listControlsSource, /lg:flex/);
+  assert.doesNotMatch(listControlsSource, /lg:w-3[024]|lg:w-4[04]/);
+  assert.match(listControlsSource, /ariaLabel="교재 과목 필터"/);
+  assert.match(listControlsSource, /ariaLabel="교재 세부과목 필터"/);
+  assert.match(listControlsSource, /ariaLabel="교재 학교 구분 필터"/);
+  assert.match(listControlsSource, /ariaLabel="교재 학년 필터"/);
+  assert.doesNotMatch(listControlsSource, /교재 분류 필터 열기/);
+  assert.doesNotMatch(listControlsSource, /<Popover>/);
+  assert.doesNotMatch(listControlsSource, /분류\s*<span/);
   assert.match(workspaceSource, /subjectGroupFilter/);
   assert.match(workspaceSource, /schoolLevelGroupFilter/);
   assert.match(workspaceSource, /gradeLevelGroupFilter/);
@@ -323,6 +469,39 @@ test("textbook workspace resolves reviewed master and inventory UX issues", asyn
   assert.match(workspaceSource, /isNewMasterDuplicate/);
   assert.match(workspaceSource, /이미 등록된 교재/);
   assert.match(workspaceSource, /저장 잠김/);
+});
+
+test("textbook workspace keeps inactive textbooks in a compact trash flow", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
+  const inactiveTrashSource = workspaceSource.slice(
+    workspaceSource.indexOf("textbookQualityFilterCounts.inactive > 0"),
+    workspaceSource.indexOf("{hasTextbookListFilter ? ("),
+  );
+
+  assert.match(workspaceSource, /const inactiveTextbookRows = useMemo/);
+  assert.match(workspaceSource, /const inactiveTextbookTrashItems = useMemo/);
+  assert.match(workspaceSource, /function emptyInactiveTextbookTrash/);
+  assert.match(workspaceSource, /requestTextbookConfirmation\(\{[\s\S]*title: "미사용 보관함 비우기"/);
+  assert.match(workspaceSource, /confirmLabel: "영구 삭제"/);
+  assert.match(workspaceSource, /textbookService\.purgeInactiveTextbooks\(targetIds\)/);
+  assert.match(workspaceSource, /aria-label="미사용 교재 보관함 열기"/);
+  assert.match(workspaceSource, /title="미사용 교재 보관함"/);
+  assert.match(workspaceSource, /<Trash2 className="size-4" \/>/);
+  assert.match(workspaceSource, /className="sr-only">미사용 교재 보관함/);
+  assert.match(workspaceSource, />\s*비우기\s*<\/Button>/);
+  assert.doesNotMatch(inactiveTrashSource, /<Archive /);
+  assert.match(serviceSource, /export async function purgeInactiveTextbooks/);
+  assert.match(serviceSource, /"textbook_stock_counts"/);
+  assert.match(serviceSource, /"textbook_stock_moves"/);
+  assert.match(serviceSource, /"textbook_purchase_order_lines"/);
+  assert.match(serviceSource, /"textbook_sale_lines"/);
+  assert.match(serviceSource, /await client\.from\(table\)\.delete\(\)\.in\("textbook_id", ids\)/);
+  assert.match(serviceSource, /\.from\("textbooks"\)[\s\S]*\.delete\(\)[\s\S]*\.eq\("status", "inactive"\)[\s\S]*\.in\("id", ids\)/);
+  assert.match(serviceSource, /purgeInactiveTextbooks,/);
 });
 
 test("textbook workspace separates category filters and lets grouped rows collapse", async () => {
@@ -848,7 +1027,14 @@ test("purchase request tab accepts unregistered textbook titles before managemen
   assert.match(workspaceSource, /purchaseRequestUsesCatalog \? \(/);
   assert.match(workspaceSource, /setPurchaseRequestInputMode\("manual"\)/);
   assert.doesNotMatch(workspaceSource, /등록교재 우선 · 없으면 직접 입력/);
-  assert.match(workspaceSource, /sm:grid-cols-\[minmax\(0,1fr\)_140px_140px\]/);
+  const requestDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("{purchaseForm.requestStage === \"request\" ? ("),
+    workspaceSource.indexOf("purchaseForm.requestStage !== \"request\" && purchaseForm.requestedTextbookTitle"),
+  );
+  assert.match(requestDialogSource, /<div className="grid gap-3 sm:grid-cols-3">/);
+  assert.match(requestDialogSource, /<Field label="수업">[\s\S]*<Field label="학생용 요청">[\s\S]*<Field label="교사용 요청">[\s\S]*<Field label="선생님">/);
+  assert.match(requestDialogSource, /<div className="sm:col-span-2">\s*<Field label="위치">/);
+  assert.doesNotMatch(requestDialogSource, /sm:grid-cols-\[minmax\(0,1fr\)_140px_140px\]/);
   assert.match(workspaceSource, /<Field label="선생님">/);
   assert.match(workspaceSource, /ariaLabel="선생님 선택"/);
   assert.match(workspaceSource, /textbookId: selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId/);
@@ -1575,7 +1761,7 @@ test("textbook workspace keeps list and process controls responsive and focused"
   assert.match(workspaceSource, /data-testid="textbook-master-mobile-list"/);
   assert.match(workspaceSource, /data-testid=\{`textbook-master-mobile-card-\$\{rowId\}`\}/);
   assert.match(workspaceSource, /hidden overflow-x-auto rounded-lg border \[contain-intrinsic-size:720px\] \[content-visibility:auto\] md:block/);
-  assert.match(workspaceSource, /<Table className="min-w-\[920px\] table-fixed">/);
+  assert.match(workspaceSource, /<Table className="min-w-\[1080px\] table-fixed">/);
   assert.match(workspaceSource, /교재 상태 필터 열기/);
   assert.match(workspaceSource, /type PurchaseRequestFilter = "all" \| "unregistered" \| "orderable"/);
   assert.match(workspaceSource, /검토 전체/);
@@ -1872,8 +2058,8 @@ test("textbook workspace adds quality triage, tab totals, and compact empty proc
   assert.match(workspaceSource, /textbookQualityFilterCounts\[filter\]/);
   assert.match(workspaceSource, /aria-pressed=\{inventoryFilter === filter\}/);
   assert.match(workspaceSource, /aria-pressed=\{textbookQualityFilter === filter\}/);
-  assert.match(workspaceSource, /aria-pressed=\{subjectFilter === option\.value\}/);
-  assert.match(workspaceSource, /aria-pressed=\{schoolLevelFilter === option\.value\}/);
+  assert.match(workspaceSource, /ariaLabel="교재 과목 필터"/);
+  assert.match(workspaceSource, /ariaLabel="교재 학교 구분 필터"/);
   assert.doesNotMatch(workspaceSource, /showZero/);
   assert.match(workspaceSource, /aria-label="마스터"/);
   assert.match(workspaceSource, /aria-label="주문·입고"/);
@@ -1891,17 +2077,27 @@ test("textbook workspace adds quality triage, tab totals, and compact empty proc
   assert.match(workspaceSource, /const activePurchaseOrderLines = useMemo/);
   assert.match(workspaceSource, /const activeSaleLines = useMemo/);
   assert.match(workspaceSource, /const activeStockMoves = useMemo/);
-  assert.match(workspaceSource, /aria-label="미사용 교재 보관함"/);
-  assert.match(workspaceSource, /<Archive className="mr-2 size-3\.5" \/>/);
+  assert.match(workspaceSource, /aria-label="미사용 교재 보관함 열기"/);
+  assert.match(workspaceSource, /<Trash2 className="size-4" \/>/);
   assert.match(workspaceSource, /const tableTotals = useMemo/);
   assert.match(workspaceSource, /const groupsByLabel = new Map<string, Row\[\]>\(\)/);
   assert.match(workspaceSource, /const selectedIdSet = useMemo\(\(\) => new Set\(selectedIds\), \[selectedIds\]\)/);
   assert.match(workspaceSource, /checked=\{selectedIdSet\.has\(rowId\)\}/);
   assert.match(workspaceSource, /tableTotals\.locationQuantities/);
-  assert.match(workspaceSource, /<TableHead className="w-44">분류<\/TableHead>/);
+  assert.doesNotMatch(workspaceSource, /<TableHead className="w-44">분류<\/TableHead>/);
+  assert.match(workspaceSource, /<TableHead className="w-24">과목<\/TableHead>/);
+  assert.match(workspaceSource, /<TableHead className="w-32">세부과목<\/TableHead>/);
+  assert.match(workspaceSource, /<TableHead className="w-28">학교 구분<\/TableHead>/);
+  assert.match(workspaceSource, /<TableHead className="w-24">학년<\/TableHead>/);
+  assert.match(workspaceSource, /const columnSpan = locationColumns\.length \+ 7/);
+  assert.match(workspaceSource, /const subjectLabel = getSubjectLabel\(row\.subject\) \|\| "-"/);
   assert.match(workspaceSource, /const gradeLabel = getTextbookGradeLabel/);
+  assert.match(workspaceSource, /const schoolLevelLabel = getTextbookSchoolLevelLabel/);
   assert.match(workspaceSource, /const subSubjectLabel = getTextbookSubSubject\(row\) \|\| "-"/);
-  assert.match(workspaceSource, /const categorySummary = compactUniqueLabels/);
+  assert.match(workspaceSource, /title=\{subjectLabel\}>\{subjectLabel\}/);
+  assert.match(workspaceSource, /title=\{subSubjectLabel\}>\{subSubjectLabel\}/);
+  assert.match(workspaceSource, /title=\{schoolLevelLabel\}>\{schoolLevelLabel\}/);
+  assert.match(workspaceSource, /title=\{gradeLabel\}>\{gradeLabel\}/);
   assert.match(workspaceSource, /<TableCell>합계<\/TableCell>/);
   assert.match(workspaceSource, /const renderedGroups = visibleGroups\.filter/);
   assert.match(workspaceSource, /const emptyGroupId = visibleGroups\[0\]\?\.id/);

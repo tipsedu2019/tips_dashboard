@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, CalendarDays, Check, ChevronDown, ClipboardList, Pencil, Plus, Save, Settings2, Users } from "lucide-react";
+import { Check, ChevronDown, ClipboardList, Pencil, Plus, Save, Settings2, Users } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import type { ManagementKind, ManagementRow } from "@/features/management/use-management-records";
@@ -82,27 +82,22 @@ type Field = {
   inputMode?: "text" | "search" | "tel" | "url" | "email" | "numeric" | "decimal";
   autoComplete?: string;
 };
-type ClassGroupOption = { id: string; name: string; subject?: string };
+type ClassGroupOption = { id: string; name: string; subject?: string; isDefault?: boolean };
 type DeleteRequest = { rows: ManagementRow[] };
 
 const CLASS_STATUS_OPTIONS = ["수강", "개강 준비", "종강"] as const;
-const ARCHIVED_CLASS_STATUS = "종강";
 const CLASS_DETAIL_TABS = [
   { value: "basic", label: "기본" },
   { value: "students", label: "학생" },
-  { value: "schedule", label: "일정" },
-  { value: "curriculum", label: "교재·진도" },
 ] as const;
 type ClassDetailTab = (typeof CLASS_DETAIL_TABS)[number]["value"];
 const CLASS_MOBILE_ACTION_ICONS: Record<ClassDetailTab, ReactNode> = {
   basic: <ClipboardList className="size-3.5" aria-hidden="true" />,
   students: <Users className="size-3.5" aria-hidden="true" />,
-  schedule: <CalendarDays className="size-3.5" aria-hidden="true" />,
-  curriculum: <BookOpen className="size-3.5" aria-hidden="true" />,
 };
 const CLASS_MOBILE_ACTION_TABS = CLASS_DETAIL_TABS.map((tab) => ({
   ...tab,
-  shortLabel: tab.value === "curriculum" ? "진도" : tab.label,
+  shortLabel: tab.label,
   icon: CLASS_MOBILE_ACTION_ICONS[tab.value],
 }));
 const CLASS_SELECT_FIELD_NAMES = new Set([
@@ -300,12 +295,19 @@ function normalizeClassGroupOptions(value: unknown): ClassGroupOption[] {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((item) => {
+    .map((item): ClassGroupOption | null => {
       if (item && typeof item === "object") {
         const group = item as Record<string, unknown>;
         const id = text(group.id);
         const name = text(group.name) || id;
-        return id || name ? { id: id || name, name, subject: text(group.subject) } : null;
+        return id || name
+          ? {
+              id: id || name,
+              name,
+              subject: text(group.subject),
+              isDefault: group.is_default === true || group.isDefault === true,
+            }
+          : null;
       }
 
       const name = text(item);
@@ -371,6 +373,7 @@ function getDefaultClassGroupIdsForCreate(classGroupOptions: ClassGroupOption[])
       value: group.id,
       label: group.name,
       aliases: [group.id, group.name],
+      isDefault: group.isDefault,
     })),
   );
 
@@ -440,37 +443,6 @@ function getLabel(kind: ManagementKind) {
 function normalizeClassDetailTab(value: unknown): ClassDetailTab {
   const tab = text(value);
   return CLASS_DETAIL_TABS.some((item) => item.value === tab) ? (tab as ClassDetailTab) : "basic";
-}
-
-function getClassDetailTabForSection(section: string) {
-  if (section === "lesson-design-board" || section === "lesson-design-textbooks") {
-    return "curriculum";
-  }
-  if (section === "lesson-design-periods") {
-    return "schedule";
-  }
-  return "";
-}
-
-function isClassDetailSessionTargetSection(section: string) {
-  return section === "lesson-design-board" || section === "lesson-design-periods";
-}
-
-function getDefaultLessonDesignSectionForClassTab(tab: ClassDetailTab) {
-  return tab === "schedule" ? "lesson-design-periods" : "lesson-design-board";
-}
-
-function getClassDetailSectionTargetId(section: string, sessionId = "") {
-  if (section === "lesson-design-board") {
-    return sessionId ? `class-curriculum-session-${sessionId}` : "class-curriculum-unassigned-work-panel";
-  }
-  if (section === "lesson-design-textbooks") {
-    return "class-curriculum-textbooks-panel";
-  }
-  if (section === "lesson-design-periods") {
-    return sessionId ? `class-schedule-session-${sessionId}` : "class-schedule-session-view-panel";
-  }
-  return "";
 }
 
 function scrollClassDetailTargetIntoView(target: HTMLElement) {
@@ -771,29 +743,6 @@ function getClassTextbookTitle(book: Record<string, unknown>, index: number) {
   ) || `교재 ${index + 1}`;
 }
 
-function getClassSummaryCurriculumLabel(row: ManagementRow) {
-  const textbooks = getClassTextbookCatalog(row);
-  const textbookCount = textbooks.length || getClassTextbookCount(row);
-  const latestProgressNote = getClassLatestProgressNote(row);
-  const delayedProgressCount = getClassDelayedProgressCount(row);
-  const progressLabel = delayedProgressCount > 0
-    ? `미배정 ${delayedProgressCount}회`
-    : latestProgressNote || getClassCurriculumStateLabel(row);
-
-  if (textbooks.length > 0) {
-    const textbookLabel = textbookCount > 1
-      ? `${getClassTextbookTitle(textbooks[0], 0)} 외 ${textbookCount - 1}권`
-      : getClassTextbookTitle(textbooks[0], 0);
-    return [textbookLabel, progressLabel].filter(Boolean).join(" · ");
-  }
-
-  if (textbookCount > 0) {
-    return [`교재 ${textbookCount}권`, progressLabel].filter(Boolean).join(" · ");
-  }
-
-  return "교재 미연결";
-}
-
 function getTextbookRoleLabel(roleValue: unknown, index: number) {
   const role = text(roleValue).toLowerCase();
   if (role.includes("main") || role.includes("주")) return "주교재";
@@ -968,21 +917,6 @@ function getClassScheduleCurrentSession(row: ManagementRow) {
     .filter((session) => Boolean(session.hasActualContent) || hasCurriculumPlanContent(session))
     .sort((left, right) => getCurriculumSessionOrder(left) - getCurriculumSessionOrder(right));
   return completedOrPlanned.slice(-1)[0] || sessions[0] || null;
-}
-
-function getClassSummaryScheduleLabel(row: ManagementRow, fallbackSchedule: string) {
-  const nextSession = getClassScheduleNextSession(row);
-  const currentSession = getClassScheduleCurrentSession(row);
-  const totalSessions = getClassSessionCount(row) || getClassSessionSummaries(row).length;
-  const currentOrder = currentSession ? getCurriculumSessionOrder(currentSession) : 0;
-  const nextLabel = nextSession ? `다음 ${getCurriculumSessionTitle(nextSession, "수업")}` : "";
-  const currentLabel = currentOrder > 0 && totalSessions > 0
-    ? `현재 ${currentOrder}/${totalSessions}회`
-    : totalSessions > 0
-      ? `전체 ${totalSessions}회`
-      : "";
-
-  return [fallbackSchedule, nextLabel, currentLabel].filter(Boolean).join(" · ") || "일정 미정";
 }
 
 function getScheduleStateLabel(session: Record<string, unknown>) {
@@ -1237,7 +1171,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const requestedClassId = kind === "classes" ? text(searchParams.get("classId")) : "";
   const requestedStudentId = kind === "students" ? text(searchParams.get("studentId")) : "";
   const requestedStudentReturnPath = kind === "students" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
-  const requestedClassDetailTab = normalizeClassDetailTab(searchParams.get("tab"));
+  const requestedClassDetailTabParam = kind === "classes" ? text(searchParams.get("tab")) : "";
+  const requestedClassDetailTab = normalizeClassDetailTab(requestedClassDetailTabParam);
   const requestedClassDetailSection = kind === "classes" ? text(searchParams.get("section")) : "";
   const requestedClassDetailSessionId = kind === "classes" ? text(searchParams.get("sessionId")) : "";
   const requestedClassDetailStudentId = kind === "classes" ? text(searchParams.get("studentId")) : "";
@@ -1339,22 +1274,14 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     (
       classId: string,
       tab: ClassDetailTab,
-      options: { section?: string; sessionId?: string; studentId?: string } = {},
+      options: { studentId?: string } = {},
     ) => {
       if (kind !== "classes") return;
       const params = new URLSearchParams(searchParams.toString());
       params.set("classId", classId);
       params.set("tab", tab);
-      if (options.section) {
-        params.set("section", options.section);
-      } else {
-        params.delete("section");
-      }
-      if (options.sessionId) {
-        params.set("sessionId", options.sessionId);
-      } else {
-        params.delete("sessionId");
-      }
+      params.delete("section");
+      params.delete("sessionId");
       if (options.studentId) {
         params.set("studentId", options.studentId);
       } else {
@@ -1377,6 +1304,33 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     const nextQuery = params.toString();
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }, [kind, pathname, router, searchParams]);
+  useEffect(() => {
+    const shouldNormalizeTab =
+      requestedClassDetailTabParam && requestedClassDetailTabParam !== requestedClassDetailTab;
+    if (
+      kind !== "classes" ||
+      (!shouldNormalizeTab && !requestedClassDetailSection && !requestedClassDetailSessionId)
+    ) {
+      return;
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    if (shouldNormalizeTab) {
+      params.set("tab", requestedClassDetailTab);
+    }
+    params.delete("section");
+    params.delete("sessionId");
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+  }, [
+    kind,
+    pathname,
+    requestedClassDetailSection,
+    requestedClassDetailSessionId,
+    requestedClassDetailTab,
+    requestedClassDetailTabParam,
+    router,
+    searchParams,
+  ]);
   const writeStudentDetailRoute = useCallback((studentId: string) => {
     if (kind !== "students") return;
     const params = new URLSearchParams(searchParams.toString());
@@ -1755,8 +1709,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     row: ManagementRow,
     options: {
       tab?: ClassDetailTab;
-      section?: string;
-      sessionId?: string;
       syncRoute?: boolean;
     } = {},
   ) => {
@@ -1772,10 +1724,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setActiveClassDetailTab(nextTab);
     setDialogMode("detail");
     if (kind === "classes" && options.syncRoute !== false) {
-      writeClassDetailRoute(row.id, nextTab, {
-        section: options.section,
-        sessionId: options.sessionId,
-      });
+      writeClassDetailRoute(row.id, nextTab);
     }
     if (kind === "students" && options.syncRoute !== false) {
       writeStudentDetailRoute(row.id);
@@ -1798,8 +1747,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     if (targetRow) {
       void openRow(targetRow, {
         tab: requestedClassDetailTab,
-        section: requestedClassDetailSection,
-        sessionId: requestedClassDetailSessionId,
         syncRoute: false,
       });
     }
@@ -1808,8 +1755,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     kind,
     loading,
     openRow,
-    requestedClassDetailSection,
-    requestedClassDetailSessionId,
     requestedClassDetailTab,
     requestedClassId,
     rows,
@@ -1864,43 +1809,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     };
   }, [activeClassDetailTab, dialogMode, kind, relatedRows.length, requestedClassDetailStudentId, selectedRow?.id]);
 
-  useEffect(() => {
-    if (
-      kind !== "classes" ||
-      dialogMode !== "detail" ||
-      (activeClassDetailTab !== "schedule" && activeClassDetailTab !== "curriculum") ||
-      !requestedClassDetailSection
-    ) {
-      return;
-    }
-
-    const scrollRequestedClassDetailSection = () => {
-      const target = document.getElementById(getClassDetailSectionTargetId(
-        requestedClassDetailSection,
-        requestedClassDetailSessionId,
-      ));
-      if (target) {
-        scrollClassDetailTargetIntoView(target);
-      }
-    };
-    const timer = window.setTimeout(scrollRequestedClassDetailSection, 120);
-    const retryTimer = window.setTimeout(scrollRequestedClassDetailSection, 520);
-    const finalRetryTimer = window.setTimeout(scrollRequestedClassDetailSection, 1500);
-
-    return () => {
-      window.clearTimeout(timer);
-      window.clearTimeout(retryTimer);
-      window.clearTimeout(finalRetryTimer);
-    };
-  }, [
-    activeClassDetailTab,
-    dialogMode,
-    kind,
-    requestedClassDetailSection,
-    requestedClassDetailSessionId,
-    selectedRow?.id,
-  ]);
-
   const handleBulkUpdateRows = useCallback(async (rows: ManagementRow[], change: { field: string; value: string }) => {
     const value = text(change.value);
     if (rows.length === 0 || !value) {
@@ -1932,6 +1840,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     if (rows.length === 0) {
       return;
     }
+    if (kind === "classes") {
+      setOperationError("수업 상태를 종강으로 변경해 주세요.");
+      return;
+    }
     if (!canMutateRows) {
       setOperationError("처리 권한이 없습니다.");
       return;
@@ -1942,7 +1854,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     try {
       await Promise.all(rows.map((row) => {
         if (kind === "students") return service.updateStudent({ ...(row.raw || {}), id: row.id, status: WITHDRAWN_STUDENT_STATUS });
-        if (kind === "classes") return service.updateClass(compact({ status: ARCHIVED_CLASS_STATUS }, kind, row));
         return service.deleteTextbook(row.id);
       }));
       await refresh();
@@ -1984,8 +1895,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       } : undefined,
       onOpenRow: openRow,
       onBulkUpdateRows: canMutateRows ? handleBulkUpdateRows : undefined,
-      onBulkDeleteRows: canMutateRows ? handleBulkDeleteRows : undefined,
-      onDeleteRow: canMutateRows ? (row: ManagementRow) => {
+      onBulkDeleteRows: canMutateRows && kind !== "classes" ? handleBulkDeleteRows : undefined,
+      onDeleteRow: kind === "classes" ? undefined : canMutateRows ? (row: ManagementRow) => {
         setDeleteRequest({ rows: [row] });
       } : undefined,
     };
@@ -2001,7 +1912,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     return base;
   }, [canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router]);
 
-  const deleteActionLabel = kind === "students" ? "퇴원 처리" : kind === "classes" ? "종강 처리" : "삭제";
+  const deleteActionLabel = kind === "students" ? "퇴원 처리" : "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
   const deleteTargetLabel =
     deleteRequestCount === 1
@@ -2196,13 +2107,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const handleClassDetailTabChange = (value: string) => {
     const nextTab = normalizeClassDetailTab(value);
-    const shouldKeepSection = getClassDetailTabForSection(requestedClassDetailSection) === nextTab;
     const shouldKeepStudentTarget = nextTab === "students" && requestedClassDetailStudentId;
     setActiveClassDetailTab(nextTab);
     if (selectedRow && kind === "classes") {
       writeClassDetailRoute(selectedRow.id, nextTab, {
-        section: shouldKeepSection ? requestedClassDetailSection : "",
-        sessionId: shouldKeepSection && isClassDetailSessionTargetSection(requestedClassDetailSection) ? requestedClassDetailSessionId : "",
         studentId: shouldKeepStudentTarget ? requestedClassDetailStudentId : "",
       });
     }
@@ -2210,18 +2118,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const buildClassDetailReturnPath = (
     tab: ClassDetailTab,
-    options: { section?: string; sessionId?: string; studentId?: string } = {},
+    options: { studentId?: string } = {},
   ) => {
     if (!selectedRow) return "/admin/classes";
     const params = new URLSearchParams();
     params.set("classId", selectedRow.id);
     params.set("tab", tab);
-    if (options.section) {
-      params.set("section", options.section);
-    }
-    if (options.sessionId) {
-      params.set("sessionId", options.sessionId);
-    }
     if (options.studentId) {
       params.set("studentId", options.studentId);
     }
@@ -2232,39 +2134,21 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   };
 
   const buildLessonDesignFromClassDetailHref = (
-    options: { section?: string; sessionId?: string; returnTab?: ClassDetailTab } = {},
+    options: { section?: string; sessionId?: string; returnTab?: string } = {},
   ) => {
-    if (!selectedRow) return "/admin/curriculum/lesson-design";
+    if (!selectedRow) return "/admin/curriculum";
     const params = new URLSearchParams();
-    params.set("classId", selectedRow.id);
     params.set("lessonDesign", "1");
-    const resolvedReturnTab = options.returnTab || activeClassDetailTab;
-    const shouldUseRequestedSection =
-      !options.section &&
-      getClassDetailTabForSection(requestedClassDetailSection) === resolvedReturnTab;
-    const resolvedSection =
-      options.section ||
-      (shouldUseRequestedSection ? requestedClassDetailSection : "") ||
-      getDefaultLessonDesignSectionForClassTab(resolvedReturnTab);
+    params.set("classId", selectedRow.id);
+    const resolvedSection = options.section || "lesson-design-board";
     if (resolvedSection) {
       params.set("section", resolvedSection);
     }
-    const shouldUseRequestedSession =
-      !options.sessionId &&
-      shouldUseRequestedSection &&
-      isClassDetailSessionTargetSection(resolvedSection);
-    const resolvedSessionId = options.sessionId || (shouldUseRequestedSession ? requestedClassDetailSessionId : "");
-    if (resolvedSessionId) {
-      params.set("sessionId", resolvedSessionId);
+    if (options.sessionId) {
+      params.set("sessionId", options.sessionId);
     }
-    params.set(
-      "returnTo",
-      buildClassDetailReturnPath(resolvedReturnTab, {
-        section: resolvedSection,
-        sessionId: resolvedSessionId,
-      }),
-    );
-    return `/admin/curriculum/lesson-design?${params.toString()}`;
+    params.set("returnTo", buildClassDetailReturnPath(normalizeClassDetailTab(options.returnTab)));
+    return `/admin/curriculum?${params.toString()}`;
   };
 
   const renderSaveStatus = () => {
@@ -2353,13 +2237,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
 	    return (
 	      <div
-	        data-testid="class-detail-mobile-action-bar"
-	        className="sticky bottom-0 z-30 -mx-4 grid grid-cols-[repeat(5,minmax(0,1fr))] gap-1 border-t bg-background/95 p-2 shadow-[0_-8px_20px_-18px_rgba(15,23,42,0.65)] backdrop-blur md:hidden sm:-mx-6"
+        data-testid="class-detail-mobile-action-bar"
+        className="sticky bottom-0 z-30 -mx-4 grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 border-t bg-background/95 p-2 shadow-[0_-8px_20px_-18px_rgba(15,23,42,0.65)] backdrop-blur md:hidden sm:-mx-6"
 	      >
 	        {mobileSaveStatus ? (
 	          <div
 	            data-testid="class-detail-mobile-save-status"
-	            className="col-span-5 flex min-h-6 items-center justify-center rounded-sm bg-muted/40 px-2 py-1"
+            className="col-span-3 flex min-h-6 items-center justify-center rounded-sm bg-muted/40 px-2 py-1"
 	          >
 	            {mobileSaveStatus}
 	          </div>
@@ -2404,12 +2288,9 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     const registeredCount = getClassEnrolledStudentIds(selectedRow).length;
     const waitlistCount = getClassWaitlistStudentIds(selectedRow).length;
     const capacity = Number(raw.capacity || selectedRow.metrics.capacity || 0);
-    const schedule = text(raw.schedule) || "시간표 미정";
-    const scheduleSummaryLabel = getClassSummaryScheduleLabel(selectedRow, schedule);
     const teacher = text(raw.teacher || raw.teacher_name || raw.teacherName) || "담당 미정";
     const classroom = text(raw.classroom || raw.room) || "강의실 미정";
     const periodLabel = getClassPeriodLabel(selectedRow) || "기간 미정";
-    const curriculumSummaryLabel = getClassSummaryCurriculumLabel(selectedRow);
     const auditInfo = getClassAuditInfo(selectedRow);
 
     return (
@@ -2454,11 +2335,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
               {auditInfo.label}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <div className="rounded-md border bg-muted/20 px-2.5 py-2">
-              <div className="text-xs text-muted-foreground">일정</div>
-              <div className="mt-1 truncate font-medium">{scheduleSummaryLabel}</div>
-            </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
             <div className="rounded-md border bg-muted/20 px-2.5 py-2">
               <div className="text-xs text-muted-foreground">정원</div>
               <div className="mt-1 font-medium">{capacity > 0 ? `${registeredCount}/${capacity}` : `${registeredCount}명`}</div>
@@ -2466,10 +2343,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             <div className="rounded-md border bg-muted/20 px-2.5 py-2">
               <div className="text-xs text-muted-foreground">등록/대기</div>
               <div className="mt-1 font-medium">{registeredCount}명 / {waitlistCount}명</div>
-            </div>
-            <div className="rounded-md border bg-muted/20 px-2.5 py-2">
-              <div className="text-xs text-muted-foreground">교재·진도</div>
-              <div className="mt-1 truncate font-medium">{curriculumSummaryLabel}</div>
             </div>
           </div>
         </div>
@@ -3116,7 +2989,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           ) : null}
 
           {isDetail && selectedRow && kind === "classes" ? (
-            <div data-testid="class-official-detail" className="space-y-4 pb-32 md:pb-0">
+            <div data-testid="class-official-detail" className="space-y-4 pb-28 md:pb-0">
               {renderClassSummaryBar()}
 
               <section className="space-y-2">
@@ -3150,7 +3023,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                 data-testid="class-official-detail-tabs"
                 className="min-w-0"
               >
-                <TabsList className="grid h-auto w-full grid-cols-4 rounded-lg border bg-muted/35 p-1">
+                <TabsList className="grid h-auto w-full grid-cols-2 rounded-lg border bg-muted/35 p-1">
                   {CLASS_DETAIL_TABS.map((tab) => (
                     <TabsTrigger key={tab.value} value={tab.value} className="min-h-8 min-w-0 whitespace-normal break-keep px-1 text-[11px] leading-tight sm:text-sm">
                       <span>{tab.label}</span>
@@ -3179,23 +3052,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                 <TabsContent value="students" className="mt-4 space-y-4" data-testid="class-detail-students-tab">
                   {renderRelationManagementSection()}
                 </TabsContent>
-
-                <TabsContent value="schedule" className="mt-4 space-y-4" data-testid="class-detail-schedule-tab">
-                  {renderClassSchedulePanel()}
-                </TabsContent>
-
-                <TabsContent value="curriculum" className="mt-4 space-y-4" data-testid="class-detail-curriculum-tab">
-                  {renderClassCurriculumPanel()}
-                </TabsContent>
               </Tabs>
               {renderClassMobileActionBar()}
 
               <DialogFooter className="items-center gap-3">
                 {renderSaveStatus()}
                 <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button>
-                <Button type="button" variant="destructive" onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving || !canMutateRows}>
-                  종강 처리
-                </Button>
               </DialogFooter>
             </div>
           ) : isDetail && selectedRow ? (

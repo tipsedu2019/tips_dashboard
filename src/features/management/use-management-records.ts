@@ -529,7 +529,7 @@ export function useManagementRecords(kind: ManagementKind) {
       if (kind === "classes") {
         const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs] = await Promise.all([
           readOptionalTable("students"),
-          readOptionalTable("class_schedule_sync_groups", "id,name,subject"),
+          readOptionalTable("class_schedule_sync_groups"),
           readOptionalTable("class_schedule_sync_group_members", "group_id,class_id,sort_order"),
           readOptionalTable("class_terms"),
           readOptionalTable("textbooks"),

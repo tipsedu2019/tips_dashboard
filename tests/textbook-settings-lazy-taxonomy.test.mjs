@@ -9,6 +9,10 @@ test("textbook settings loads editable taxonomy only when that tab is opened", a
     new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
     "utf8",
   );
+  const migrationSource = await readFile(
+    new URL("supabase/migrations/20260630093000_textbook_sub_subject_id_default.sql", root),
+    "utf8",
+  );
 
   assert.match(source, /useState<TextbookSubSubjectSettingRecord\[\]>\(\(\) =>\s*mergeTextbookSubSubjectSettings\(\[\]\)/);
   assert.match(source, /const loadSubSubjectRows = useCallback/);
@@ -16,6 +20,11 @@ test("textbook settings loads editable taxonomy only when that tab is opened", a
   assert.match(source, /void loadSubSubjectRows\(\)/);
   assert.match(source, /const shouldPersistSubSubjects = subSubjectsTouched \|\| deletedSubSubjectIds\.length > 0/);
   assert.match(source, /shouldPersistSubSubjects && nextSubSubjects\.length > 0/);
+  assert.match(source, /id: row\.id,/);
+  assert.doesNotMatch(source, /id: row\.isNew \? undefined : row\.id/);
+  assert.match(migrationSource, /alter table public\.textbook_sub_subject_settings/);
+  assert.match(migrationSource, /alter column id set default gen_random_uuid\(\)/);
+  assert.match(migrationSource, /update public\.textbook_sub_subject_settings[\s\S]*where id is null/);
 
   const loadRowsBody = source.slice(source.indexOf("const loadRows = useCallback"), source.indexOf("const loadSubSubjectRows"));
   assert.doesNotMatch(loadRowsBody, /textbook_sub_subject_settings/);

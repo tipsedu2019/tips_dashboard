@@ -49,11 +49,16 @@ export function writeDefaultPeriodPreference(preference: DefaultPeriodPreference
   }
 }
 
-export function pickDefaultPeriodValue<T extends { value: string; label: string; aliases?: string[] }>(
+export function pickDefaultPeriodValue<T extends { value: string; label: string; aliases?: string[]; isDefault?: boolean }>(
   options: T[],
 ) {
   if (options.length === 0) {
     return "";
+  }
+
+  const configuredDefault = options.find((option) => option.isDefault === true);
+  if (configuredDefault) {
+    return configuredDefault.value;
   }
 
   const preference = readDefaultPeriodPreference();

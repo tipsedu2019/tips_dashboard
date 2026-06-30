@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -2514,6 +2514,7 @@ export function ClassScheduleWorkspace() {
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
   const isLessonDesignPage = pathname.endsWith("/lesson-design");
+  const isLessonDesignRouteActive = isLessonDesignPage || searchParams.get("lessonDesign") === "1";
   const classScheduleListRef = useRef<HTMLDivElement | null>(null);
   const [search, setSearch] = useState(() => text(searchParams.get("q")));
   const [termId, setTermId] = useState(() => text(searchParams.get("term")));
@@ -2616,14 +2617,14 @@ export function ClassScheduleWorkspace() {
   );
 
   useEffect(() => {
-    if (isLessonDesignPage) return;
+    if (isLessonDesignPage || searchParams.get("lessonDesign") === "1") return;
 
     const nextHref = buildClassScheduleListHref(pathname, searchParamString, classScheduleQueryState);
     const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
     if (nextHref !== currentHref) {
       router.replace(nextHref, { scroll: false });
     }
-  }, [classScheduleQueryState, isLessonDesignPage, pathname, router, searchParamString]);
+  }, [classScheduleQueryState, isLessonDesignPage, pathname, router, searchParamString, searchParams]);
 
   const rememberClassScheduleListPosition = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -3950,17 +3951,21 @@ export function ClassScheduleWorkspace() {
       }
 
       const resolvedSessionId = text(sessionId);
-      if (isLessonDesignPage && row) {
-        router.replace(buildLessonDesignPageHref(row, resolvedSessionId, resolvedSectionId), {
-          scroll: false,
+      if (row) {
+        const nextParams = buildLessonDesignSearchParams({
+          currentParams: new URLSearchParams(searchParams.toString()),
+          classId: text(row.id),
+          sessionId: resolvedSessionId,
+          sectionId: resolvedSectionId,
         });
+        router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
       }
 
       if (options.scroll !== false) {
         scrollLessonDesignSectionAfterRender(resolvedSectionId);
       }
     },
-    [isLessonDesignPage, router, selectedLessonSession, selectedRow],
+    [pathname, router, searchParams, selectedLessonSession, selectedRow],
   );
 
   const focusLessonDesignSession = useCallback(
@@ -4169,13 +4174,6 @@ export function ClassScheduleWorkspace() {
       requestedLessonDesignSectionId ||
       (requestedSessionId ? LESSON_DESIGN_SECTION_IDS.board : LESSON_DESIGN_SECTION_IDS.periods);
 
-    if (!isLessonDesignPage) {
-      router.replace(buildLessonDesignPageHref(targetRow, requestedSessionId || "", targetSectionId), {
-        scroll: false,
-      });
-      return;
-    }
-
     if (lessonDesignOpen && selectedClassId === requestedClassId) {
       return;
     }
@@ -4288,20 +4286,23 @@ export function ClassScheduleWorkspace() {
       const nextParams = buildLessonDesignSearchParams({
         currentParams,
         classId: text(selectedRow.id),
-        sessionId: isLessonDesignPage ? selectedLessonSessionId : "",
+        sessionId:
+          isLessonDesignPage || requestedLessonDesignSectionId || requestedSessionId
+            ? selectedLessonSessionId
+            : "",
         sectionId:
-          isLessonDesignPage
+          isLessonDesignRouteActive
             ? requestedLessonDesignSectionId ||
-              (selectedLessonSessionId ? LESSON_DESIGN_SECTION_IDS.board : "")
+              (isLessonDesignPage && selectedLessonSessionId ? LESSON_DESIGN_SECTION_IDS.board : "")
             : "",
         monthKeys:
-          isLessonDesignPage &&
+          isLessonDesignRouteActive &&
           lessonDesignSnapshot &&
           !areSameLessonMonthSelection(selectedLessonMonthKeys, defaultLessonMonthKeys)
             ? selectedLessonMonthKeys
             : [],
-        periodId: isLessonDesignPage ? selectedLessonPeriodId : "all",
-        scheduleState: isLessonDesignPage ? selectedLessonScheduleState : "all",
+        periodId: isLessonDesignRouteActive ? selectedLessonPeriodId : "all",
+        scheduleState: isLessonDesignRouteActive ? selectedLessonScheduleState : "all",
         status: "all",
       });
       const nextQuery = nextParams.toString();
@@ -4326,6 +4327,7 @@ export function ClassScheduleWorkspace() {
     }
   }, [
     isLessonDesignPage,
+    isLessonDesignRouteActive,
     lessonDesignOpen,
     loading,
     pathname,
@@ -4336,6 +4338,7 @@ export function ClassScheduleWorkspace() {
     selectedLessonScheduleState,
     lessonDesignSnapshot,
     requestedLessonDesignSectionId,
+    requestedSessionId,
     selectedLessonSessionId,
     selectedRow,
   ]);
@@ -4743,7 +4746,7 @@ export function ClassScheduleWorkspace() {
             "grid min-w-0 gap-0 p-4 pb-24 lg:p-6 lg:pb-24",
             isLessonDesignProgressMode
               ? "2xl:grid-cols-[minmax(24rem,0.9fr)_minmax(32rem,1.1fr)]"
-              : "2xl:grid-cols-[minmax(18rem,0.85fr)_minmax(34rem,1.45fr)]",
+              : "xl:grid-cols-[minmax(18rem,0.85fr)_minmax(34rem,1.45fr)]",
           )}
         >
           {lessonDesignSaveError ? (
@@ -4781,7 +4784,7 @@ export function ClassScheduleWorkspace() {
             </div>
           ) : null}
 
-          <div className="border-b bg-background pb-4 pt-1 2xl:col-span-full">
+          <div className="border-b bg-background pb-4 pt-1 xl:col-span-full">
             <div className="flex flex-wrap items-center gap-2">
               <div
                 data-testid="lesson-design-mode-tabs"
@@ -5302,7 +5305,7 @@ export function ClassScheduleWorkspace() {
           <section
             id={LESSON_DESIGN_SECTION_IDS.periods}
             data-lesson-period-sidebar="true"
-            className="bg-background py-4 2xl:col-start-1 2xl:pr-5"
+            className="bg-background py-4 xl:col-start-1 xl:pr-5"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-lg font-semibold text-foreground">일정 생성</p>
@@ -5432,7 +5435,7 @@ export function ClassScheduleWorkspace() {
 
           <section
             id={LESSON_DESIGN_SECTION_IDS.calendar}
-            className="border-t bg-background py-6 2xl:col-start-2 2xl:row-span-2 2xl:border-l 2xl:border-t-0 2xl:px-5"
+            className="border-t bg-background py-6 xl:col-start-2 xl:row-span-2 xl:border-l xl:border-t-0 xl:px-5"
           >
                   <div className="flex flex-wrap items-start justify-between gap-3">
 	                    <div className="space-y-1">
@@ -6503,11 +6506,20 @@ export function ClassScheduleWorkspace() {
         </div>
       ) : (
         <Dialog open={lessonDesignOpen} onOpenChange={handleLessonDesignOpenChange}>
-          <DialogContent className="flex h-[92vh] w-[98vw] max-w-[1600px] flex-col overflow-hidden gap-0 p-0 xl:h-[94vh]">
+          <DialogContent
+            data-testid="lesson-design-fullscreen-dialog"
+            className="fixed !inset-0 !left-0 !top-0 z-[80] !flex h-dvh w-screen !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 !rounded-none overflow-hidden !border-0 !p-0 !shadow-none sm:!max-w-none"
+          >
+            <DialogTitle className="sr-only">{lessonDesignTitle}</DialogTitle>
             <DialogDescription className="sr-only">
               수업 일정과 수업교재를 연결하고 회차별 진도를 설계합니다.
             </DialogDescription>
-            {lessonDesignWorkspaceContent}
+            <div
+              data-testid="lesson-design-dialog-scroll"
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-28"
+            >
+              {lessonDesignWorkspaceContent}
+            </div>
           </DialogContent>
         </Dialog>
       )}

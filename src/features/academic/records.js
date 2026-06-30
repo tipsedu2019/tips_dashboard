@@ -249,6 +249,7 @@ function normalizeClassGroup(group = {}) {
     rawName,
     subject: text(group?.subject),
     sortOrder: Number(group?.sort_order ?? group?.sortOrder ?? 0) || 0,
+    isDefault: group.isDefault === true || group.is_default === true,
     synthetic: Boolean(group?.synthetic),
   };
 }
@@ -322,6 +323,7 @@ function buildClassGroupOptions(groups = []) {
     const existing = byKey.get(key);
     if (existing) {
       existing.aliases = unique([...existing.aliases, id, rawName, name]);
+      existing.isDefault = existing.isDefault || group.isDefault === true;
       continue;
     }
 
@@ -330,12 +332,13 @@ function buildClassGroupOptions(groups = []) {
       label: name || id,
       sortOrder: Number(group.sortOrder || 0),
       aliases: unique([id, rawName, name]),
+      isDefault: group.isDefault === true,
     });
   }
 
   return [...byKey.values()]
     .sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label, "ko", { numeric: true }))
-    .map(({ value, label, aliases }) => ({ value, label, aliases }));
+    .map(({ value, label, aliases, isDefault }) => ({ value, label, aliases, isDefault }));
 }
 
 function getClassGroupFilterValues(classGroupOptions = [], selectedGroup = "") {
