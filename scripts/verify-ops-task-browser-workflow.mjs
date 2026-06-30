@@ -339,10 +339,9 @@ const AUTHENTICATED_CORE_SMOKE_ROUTES = [
 ]
 
 const ROUTES = [
-  { path: "/admin/tasks?list=today", name: "todo-today", expectedTexts: ["할 일", "오늘", "추가"], interaction: "quick-add" },
-  { path: "/admin/tasks?list=mine", name: "todo-mine", expectedTexts: ["할 일", "내 담당"] },
-  { path: "/admin/tasks?list=board", name: "todo-board", expectedTexts: ["할 일", "보드"] },
-  { path: "/admin/tasks?list=calendar", name: "todo-calendar", expectedTexts: ["할 일", "일정"] },
+  { path: "/admin/tasks?list=inbox", name: "todo-inbox", expectedTexts: ["할 일", "받은함", "추가"], interaction: "quick-add" },
+  { path: "/admin/tasks?list=sent", name: "todo-sent", expectedTexts: ["할 일", "보낸함"] },
+  { path: "/admin/tasks?list=completed", name: "todo-completed", expectedTexts: ["할 일", "완료"] },
   { path: "/admin/registration", name: "registration", expectedTexts: ["등록", "등록 추가"], interaction: "open-create" },
   { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 추가"], interaction: "open-create" },
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 추가"], interaction: "open-create" },
@@ -1103,7 +1102,9 @@ async function createTemporaryBrowserUserStorage(baseUrl) {
 
   const cleanup = async () => {
     if (!userId) return
-    await adminClient.from("profiles").delete().eq("id", userId).throwOnError().catch(() => {})
+    try {
+      await adminClient.from("profiles").delete().eq("id", userId).throwOnError()
+    } catch {}
     await adminClient.auth.admin.deleteUser(userId).catch(() => {})
   }
 

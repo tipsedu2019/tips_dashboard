@@ -6,10 +6,9 @@ import { useEffect, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "@/providers/auth-provider"
 
-import { getOpsTaskCalendarItems, hasOpsTaskCalendarDate, hasOpsTaskOverdueCalendarDate, isClosedOpsTask, isOpsTaskAssignedToUser, toDateKey } from "./ops-task-model"
+import { isClosedOpsTask, isOpsTaskInUserInbox, isOpsTaskInUserSent } from "./ops-task-model"
 import {
   loadOpsTodoDashboardSummaryData,
-  type OpsTask,
   type OpsTodoDashboardSummaryData,
 } from "./ops-task-service"
 
@@ -33,10 +32,6 @@ function MetricLink({ href, label, value }: { href: string; label: string; value
   )
 }
 
-function hasDashboardTaskSchedule(task: OpsTask) {
-  return getOpsTaskCalendarItems([task]).length > 0
-}
-
 export function OpsTaskDashboardSummary() {
   const { user } = useAuth()
   const [data, setData] = useState(EMPTY_TODO_SUMMARY_DATA)
@@ -52,30 +47,38 @@ export function OpsTaskDashboardSummary() {
   }, [])
 
   const summary = useMemo(() => {
-    const todayKey = toDateKey(new Date())
     const openTasks = data.tasks.filter((task) => !isClosedOpsTask(task))
     const openGeneralTasks = openTasks.filter((task) => task.type === "general")
+    const completedGeneralTasks = data.tasks.filter((task) => task.type === "general" && isClosedOpsTask(task))
     const currentUserLabel = [user?.name, user?.email, user?.loginId]
       .map((value) => String(value || "").trim())
       .find(Boolean) || ""
+    const currentUserTeam = [
+      (user as { teacherTeam?: string; teacher_team?: string; team?: string } | null)?.teacherTeam,
+      (user as { teacherTeam?: string; teacher_team?: string; team?: string } | null)?.teacher_team,
+      (user as { teacherTeam?: string; teacher_team?: string; team?: string } | null)?.team,
+    ].map((value) => String(value || "").trim()).find(Boolean) || ""
+    const currentUserContext = {
+      currentUserId: user?.id || "",
+      currentUserLabel,
+      currentUserTeam,
+    }
 
     return {
-      today: openGeneralTasks.filter((task) => hasOpsTaskCalendarDate(task, todayKey)).length,
-      overdue: openGeneralTasks.filter((task) => hasOpsTaskOverdueCalendarDate(task, todayKey)).length,
-      mine: openGeneralTasks.filter((task) => isOpsTaskAssignedToUser(task, user?.id || "", currentUserLabel)).length,
-      unassigned: openGeneralTasks.filter((task) => !task.assigneeId || !hasDashboardTaskSchedule(task)).length,
+      inbox: openGeneralTasks.filter((task) => isOpsTaskInUserInbox(task, currentUserContext)).length,
+      sent: openGeneralTasks.filter((task) => isOpsTaskInUserSent(task, currentUserContext)).length,
+      completed: completedGeneralTasks.length,
     }
-  }, [data, user?.email, user?.id, user?.loginId, user?.name])
+  }, [data, user])
 
-  const hasSignal = summary.today > 0 || summary.overdue > 0 || summary.mine > 0 || summary.unassigned > 0
+  const hasSignal = summary.inbox > 0 || summary.sent > 0 || summary.completed > 0
   if (!hasSignal) return null
 
   return (
-    <section className="mb-4 grid gap-2 md:grid-cols-4" aria-label="할 일 요약">
-      <MetricLink href="/admin/tasks?list=today" label="오늘" value={summary.today} />
-      <MetricLink href="/admin/tasks?list=filters&filter=overdue" label="지연" value={summary.overdue} />
-      <MetricLink href="/admin/tasks?list=filters&filter=mine" label="내 담당" value={summary.mine} />
-      <MetricLink href="/admin/tasks?list=filters&filter=unassigned" label="미정리" value={summary.unassigned} />
+    <section className="mb-4 grid gap-2 md:grid-cols-3" aria-label="할 일 요약">
+      <MetricLink href="/admin/tasks?list=inbox" label="받은함" value={summary.inbox} />
+      <MetricLink href="/admin/tasks?list=sent" label="보낸함" value={summary.sent} />
+      <MetricLink href="/admin/tasks?list=completed" label="완료" value={summary.completed} />
     </section>
   )
 }

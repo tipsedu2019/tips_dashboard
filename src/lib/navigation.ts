@@ -264,7 +264,7 @@ const workspaceMetaEntries: Array<{
     meta: {
       section: "운영",
       title: "할 일",
-      summary: "받은함, 오늘, 예정, 보드로 할 일을 정리합니다.",
+      summary: "받은함, 보낸함, 완료 큐로 팀 할 일의 다음 액션을 정리합니다.",
     },
   },
   {
@@ -291,6 +291,11 @@ export function buildAdminNavGroups({
       title: "할 일",
       url: "/admin/tasks",
       icon: ClipboardCheck,
+      items: [
+        { title: "받은함", url: "/admin/tasks?list=inbox" },
+        { title: "보낸함", url: "/admin/tasks?list=sent" },
+        { title: "완료", url: "/admin/tasks?list=completed" },
+      ],
     },
     { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
     {
@@ -310,12 +315,9 @@ export function buildAdminNavGroups({
       url: "/admin/tasks",
       icon: ClipboardCheck,
       items: [
-        { title: "오늘", url: "/admin/tasks?list=today" },
-        { title: "지연", url: "/admin/tasks?list=filters&filter=overdue" },
-        { title: "내 담당", url: "/admin/tasks?list=mine" },
-        { title: "전체 일정", url: "/admin/tasks?list=calendar" },
-        { title: "보드", url: "/admin/tasks?list=board" },
-        { title: "미정리", url: "/admin/tasks?list=filters&filter=unassigned" },
+        { title: "받은함", url: "/admin/tasks?list=inbox" },
+        { title: "보낸함", url: "/admin/tasks?list=sent" },
+        { title: "완료", url: "/admin/tasks?list=completed" },
       ],
     },
     { title: "등록", url: "/admin/registration", icon: UserPlus },

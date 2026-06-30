@@ -16,8 +16,11 @@ const ko = {
   inbox: "\ubc1b\uc740\ud568",
   mine: "\ub0b4 \ub2f4\ub2f9",
   overdue: "\uc9c0\uc5f0",
+  requestedTeam: "\uc694\uccad\ud300",
+  reviewRequested: "\uac80\ud1a0 \uc694\uccad",
   registration: "\ub4f1\ub85d",
   scheduleAll: "\uc804\uccb4 \uc77c\uc815",
+  sent: "\ubcf4\ub0b8\ud568",
   student: "\ud559\uc0dd",
   teacher: "\uc120\uc0dd\ub2d8",
   today: "\uc624\ub298",
@@ -49,7 +52,7 @@ function assertIncludesAll(source, values) {
   }
 }
 
-test("/admin/tasks is a focused Todoist-style todo workspace", async () => {
+test("/admin/tasks is a focused team task inbox workspace", async () => {
   const [pageSource, workspaceSource] = await Promise.all([
     readSource("src/app/admin/tasks/page.tsx"),
     readSource("src/features/tasks/ops-task-workspace.tsx"),
@@ -59,16 +62,19 @@ test("/admin/tasks is a focused Todoist-style todo workspace", async () => {
   assert.doesNotMatch(pageSource, /redirect\(/);
 
   assertIncludesAll(workspaceSource, [
-    'type TodoViewKey = "inbox" | "today" | "upcoming" | "mine" | "board" | "calendar" | "filters" | "completed"',
+    'type TodoViewKey = "inbox" | "sent" | "completed"',
+    'type TodoSortKey = "status" | "priority" | "due"',
     "TODO_VIEW_TABS",
     ko.inbox,
-    ko.today,
-    ko.upcoming,
-    ko.mine,
-    ko.board,
-    ko.calendar,
-    ko.filters,
+    ko.sent,
     ko.completed,
+    "TODO_TABLE_SORT_COLUMNS",
+    "TODO_TEAM_FILTER_UNASSIGNED",
+    "isOpsTaskInUserInbox",
+    "isOpsTaskInUserSent",
+    "sortOpsTasksByPriority",
+    "sortOpsTasksByWorkDate",
+    "sortOpsTasksByWorkflowStatus",
     "parseTodoistQuickAdd",
     "quickDateTimeForNextWeekday",
     "normalizeQuickAddTimeToken",
@@ -77,26 +83,32 @@ test("/admin/tasks is a focused Todoist-style todo workspace", async () => {
     "resolveQuickAddAssigneeId",
     "withTime",
     "data-testid=\"todo-quick-add-input\"",
-    'token.startsWith("@")',
-    'token.startsWith("#")',
-    "TodoFilterBar",
+    'cleanToken.startsWith("@")',
+    'cleanToken.startsWith("#")',
+    "TodoTeamFilterBar",
     "TodoPriorityBadge",
+    "ReadonlyInfoField",
     "canDeleteTask",
     'task.type === "general" || !isClosedOpsTask(task)',
-    "getTodoViewForDueAt",
     "sortCompletedTodoTasks",
     "normalizeQuickAddLookup",
     "applyTaskPatch",
-    "data && !data.schemaReady",
-    "sm:max-w-2xl",
-    "max-h-[calc(100dvh-1rem)]",
-    "overscroll-contain",
-    "scroll-pb-24",
-    "md:hidden",
-  ]);
+	    "data && !data.schemaReady",
+	    "sm:max-w-2xl",
+	    "sm:min-h-[min(760px,92vh)]",
+	    "max-h-[calc(100dvh-1rem)]",
+	    "overscroll-contain",
+	    "scroll-pb-24",
+	    "xl:hidden",
+	    'label="우선순위"',
+	    'label="요청일시"',
+	    'label="요청자"',
+	    'label="시작일"',
+	    'label="마감일"',
+	  ]);
 
   assert.ok(workspaceSource.includes(`${ko.todo} ${ko.add}`));
-  assert.ok(workspaceSource.includes(`? "${ko.doneOpen}" : "${ko.completed}"`));
+  assert.ok(workspaceSource.includes(`label: "${ko.reviewRequested}"`));
   assert.doesNotMatch(workspaceSource, /TaskCreateLauncher/);
   assert.doesNotMatch(workspaceSource, /TEMPLATE_TASK_TYPES/);
   assert.doesNotMatch(workspaceSource, /DropdownMenu/);
@@ -131,70 +143,192 @@ test("/admin/tasks removes the legacy sample table implementation", async () => 
   }
 });
 
-test("todo workspace supports board calendar filters and legacy query links", async () => {
+test("todo workspace supports team tabs sorting filters and legacy query links", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
   assertIncludesAll(source, [
-    '{ key: "calendar", label: "',
-    '{ key: "board", label: "',
+    '{ key: "sent", label: "',
+    '{ key: "completed", label: "',
+    'type TodoSortKey = "status" | "priority" | "due"',
+    "TODO_TABLE_SORT_COLUMNS",
+    '{ key: "status", label: "상태" }',
+    '{ key: "priority", label: "우선순위" }',
+    '{ key: "due", label: "시작/마감" }',
     "const LEGACY_TODO_VIEW_ROUTES",
-    'board: { list: "board" }',
-    'mine: { list: "mine" }',
-    'if (nextFilter === "mine") return { list: "mine" }',
-    'overdue: { list: "filters", filter: "overdue" }',
-    'confirmation: { list: "filters", filter: "all" }',
-    "function buildTodoBoardColumns",
-    'key: "overdue"',
-    'key: "today"',
-    'key: "mine"',
-    'key: "upcoming"',
-    'key: "unsorted"',
-    'aria-label="',
-    "scroll-px-3 snap-x snap-mandatory",
-    'grid-flow-col auto-cols-[minmax(78vw,1fr)]',
-    'md:grid-cols-[repeat(5,minmax(0,1fr))]',
-    "snap-start",
-    'columns.map((column)',
-    "비어 있음",
-    "function getCalendarDateState",
-    "function sortCalendarDatesForWork",
-    "getOpsTaskCalendarItems(openGeneralTasks).length",
+    'today: { list: "inbox", sort: "due" }',
+    'upcoming: { list: "inbox", sort: "due" }',
+    'board: { list: "inbox", sort: "status" }',
+    'calendar: { list: "inbox", sort: "due" }',
+    'mine: { list: "inbox" }',
+    'overdue: { list: "inbox", due: "overdue" }',
+    'confirmation: { list: "inbox", status: "review_requested" }',
+    "function buildTodoFilterOptions",
+    "function matchesTodoTeamFilters",
+    "function getTodoActionLabel",
+    "function TodoTeamFilterBar",
+    'requestedByFilter',
+    'requestedTeamFilter',
+    'assigneeFilter',
+    'assigneeTeamFilter',
     "tasks={visibleTasks}",
-    'if (todoView === "mine") return isOpenTask(task) && isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)',
-    'mine: openGeneralTasks.filter((task) => isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)).length',
+    "sortKey={todoSort}",
+    "onSortChange={syncTodoSort}",
+    'if (todoView === "inbox") return isOpsTaskInUserInbox(task, currentUserContext)',
+    'if (todoView === "sent") return isOpsTaskInUserSent(task, currentUserContext)',
     'const deepLinkedTaskId = searchParams.get("taskId") || ""',
     'const deepLinkedTask = taskById.get(deepLinkedTaskId)',
     'syncTaskDeepLink(null)',
     "setSelectedTask(deepLinkedTask)",
     "setDetailOpen(true)",
-    "syncTaskDeepLink(task.id)",
-    "syncTaskDeepLink(null)",
-  ]);
+	    "syncTaskDeepLink(task.id)",
+	    "syncTaskDeepLink(null)",
+	    "data-testid=\"todo-mobile-task-list\"",
+	    "data-testid=\"todo-table-task-list\"",
+	    "function TodoTaskCard",
+	    "xl:grid",
+	    "xl:grid-cols-4",
+	  ]);
 
-  assert.ok(source.includes(`label: "${ko.board}"`));
-  assert.ok(source.includes(`label: "${ko.mine}"`));
-  assert.ok(source.includes(`label: "${ko.unassigned}"`));
-  assert.ok(source.includes(`aria-label="${ko.todo} ${ko.board}"`));
+  assert.ok(source.includes(`label: "${ko.sent}"`));
+  assert.ok(source.includes(`label="${ko.requestedTeam}"`));
+  assert.ok(source.includes(`aria-label="${ko.todo} 필터"`));
   assert.ok(source.includes("const todoTaskSource = scopedTasks"));
   assert.match(source, /const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto/);
-  assert.doesNotMatch(source, /todoFilter === "confirmation"/);
-  assert.doesNotMatch(source, /confirmationByTaskId=\\{confirmationByTaskId\\}/);
-  assertIncludesAll(source, [
-    'dateState === "today"',
-    `? "${ko.today}" : dateState === "overdue"`,
-    `? "${ko.overdue}" : "${ko.upcoming}"`,
+  assert.doesNotMatch(source, /TODO_SORT_TABS/);
+  assert.doesNotMatch(source, /TODO_DUE_FILTER_OPTIONS/);
+  assert.doesNotMatch(source, /aria-label="할 일 정렬"/);
+  assert.doesNotMatch(source, /priorityFilter/);
+  assert.doesNotMatch(source, /dueFilter/);
+  assert.doesNotMatch(source, /statusFilter/);
+  assert.doesNotMatch(source, /label: "기한 전체"/);
+	  assert.doesNotMatch(source, /todoView === "board"/);
+	  assert.doesNotMatch(source, /function TodoBoard/);
+	  assert.doesNotMatch(source, /confirmationByTaskId=\\{confirmationByTaskId\\}/);
+	  assert.doesNotMatch(source, /md:overflow-x-auto/);
+	  assert.doesNotMatch(source, /lg:grid-cols-6/);
+	});
+
+test("todo form keeps requester metadata readonly and assignee selectors team-aware", async () => {
+  const [workspaceSource, serviceSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-service.ts"),
   ]);
-  assert.doesNotMatch(source, /md:overflow-x-auto/);
+
+  assertIncludesAll(serviceSource, [
+    "includeTeacherOptions",
+    'readTableWithFallback("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email"',
+    "requestedBy?: string",
+    "requested_by: nullable(input.requestedBy)",
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    "const TODO_TEAM_OPTIONS = [\"영어팀\", \"수학팀\", \"관리팀\", \"조교팀\"]",
+    "function normalizeTaskTeamValue",
+    "function buildTaskProfileTeamLookup",
+    "function getProfilesForTeam",
+    "const assigneeProfileOptions = useMemo",
+    "function handleAssigneeChange",
+    "function handleAssigneeTeamChange",
+    "const formRequestedByLabel =",
+    "const formRequestedTeamLabel =",
+    "ReadonlyInfoField label=\"요청자\"",
+    "ReadonlyInfoField label=\"요청팀\"",
+    "ReadonlyInfoField label=\"요청일시\"",
+    "className=\"grid gap-3 pt-1 md:grid-cols-[160px_minmax(0,1fr)]\"",
+    "className=\"grid gap-3 md:grid-cols-2\"",
+    'isTemplateForm ? "sm:sticky sm:bottom-0" : ""',
+    "profiles={assigneeProfileOptions}",
+    "onChange={handleAssigneeChange}",
+    "onClick={() => handleAssigneeChange(currentUserId)}",
+  ]);
+
+  assert.doesNotMatch(workspaceSource, /profiles=\{requestedProfileOptions\}/);
+  assert.doesNotMatch(workspaceSource, /onChange=\{handleRequestedByChange\}/);
+  const generalTodoFormSource = workspaceSource.slice(
+    workspaceSource.indexOf("{!isTemplateForm && ("),
+    workspaceSource.indexOf("{isTemplateForm && formDetailTabs.length > 0"),
+  );
+  assert.ok(generalTodoFormSource.indexOf('<span>메모</span>') < generalTodoFormSource.indexOf('ReadonlyInfoField label="요청자"'));
 });
 
-test("quick add keeps Todoist-like shortcuts without extra UI", async () => {
+test("todo form uses compact polished controls for dates priority and team selection", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assertIncludesAll(workspaceSource, [
+    'const TODO_FORM_PRIORITY_ORDER: OpsTaskPriority[] = ["urgent", "high", "normal", "low"]',
+    "const TODO_FORM_PRIORITY_OPTIONS = TODO_FORM_PRIORITY_ORDER",
+    "function TaskListboxField({",
+    "type TaskListboxOption = {",
+    "function PrioritySelectField({",
+    "function DateField({",
+    "import { Popover, PopoverContent, PopoverTrigger } from",
+    "calendarDateOpen",
+    "function getCalendarMonthDate",
+    "function buildCalendarDateCells",
+    "<Popover open={calendarDateOpen} onOpenChange={setCalendarDateOpen}>",
+    "<PopoverTrigger asChild>",
+    "<PopoverContent",
+    "collisionPadding={12}",
+    'className="w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden p-0"',
+    "role=\"grid\"",
+    "role=\"gridcell\"",
+    "직접 날짜 입력",
+    "aria-label={clearLabel}",
+    '<X className="size-4" />',
+    "function TeamSelectField({",
+    'aria-haspopup="listbox"',
+    'role="listbox"',
+    "setListboxOpen(false)",
+    "const [isLinkedSearchOpen, setIsLinkedSearchOpen] = useState(false)",
+    "setIsLinkedSearchOpen(false)",
+    'DialogHeader className="-mx-6 -mt-6 border-b px-6 py-4"',
+    "<PrioritySelectField",
+    "<TeamSelectField",
+    "<DateField",
+  ]);
+
+  const priorityOrder = workspaceSource.slice(
+    workspaceSource.indexOf("const TODO_FORM_PRIORITY_ORDER"),
+    workspaceSource.indexOf("const TODO_FORM_PRIORITY_OPTIONS"),
+  );
+  assert.ok(priorityOrder.indexOf('"urgent"') < priorityOrder.indexOf('"low"'));
+
+  const linkedSelectSource = workspaceSource.slice(
+    workspaceSource.indexOf("function LinkedSelect"),
+    workspaceSource.indexOf("function ProfileSelect"),
+  );
+  assert.doesNotMatch(linkedSelectSource, /<Input[\s\S]*<select/);
+
+  const generalTodoFormSource = workspaceSource.slice(
+    workspaceSource.indexOf("{!isTemplateForm && ("),
+    workspaceSource.indexOf("{isTemplateForm && formDetailTabs.length > 0"),
+  );
+  assert.ok(generalTodoFormSource.indexOf("<PrioritySelectField") < generalTodoFormSource.indexOf('<TextField\n                    label="제목"'));
+  assert.ok(generalTodoFormSource.includes('md:grid-cols-[160px_minmax(0,1fr)]'));
+  assert.doesNotMatch(generalTodoFormSource, /<SelectField label="우선순위"/);
+  assert.doesNotMatch(generalTodoFormSource, /type="date"/);
+  assert.doesNotMatch(generalTodoFormSource, /<select/);
+
+  assert.doesNotMatch(workspaceSource, />\s*시작일 지우기\s*</);
+  assert.doesNotMatch(workspaceSource, />\s*마감일 지우기\s*</);
+  assert.doesNotMatch(workspaceSource, /DialogHeader className="sticky/);
+  const dateFieldSource = workspaceSource.slice(
+    workspaceSource.indexOf("function DateField({"),
+    workspaceSource.indexOf("function ReadonlyInfoField"),
+  );
+  assert.doesNotMatch(dateFieldSource, /handleDateOutsidePointerDown/);
+  assert.doesNotMatch(dateFieldSource, /document\.addEventListener\("pointerdown"/);
+  assert.doesNotMatch(dateFieldSource, /relative z-30 mt-1 overflow-hidden/);
+  assert.doesNotMatch(dateFieldSource, /absolute left-0 right-0 top-full/);
+});
+
+test("quick add keeps Todoist-like shortcuts and opens the structured form", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
   assertIncludesAll(source, [
     "function parseTodoistQuickAdd",
-    "const quickDueAt = parsed.dueAt || (todoView === \"today\" ? dueTodayValue : \"\")",
+    "const quickDueAt = parsed.dueAt || \"\"",
     "dueAt: quickDueAt",
-    "getTodoViewForDueAt(quickDueAt, todayKey)",
     "let explicitTime = \"\"",
     "const setDueAt = (nextDueAt: string) => {",
     "dueAt = explicitTime ? withTime(nextDueAt, explicitTime) : nextDueAt",
@@ -219,15 +353,22 @@ test("quick add keeps Todoist-like shortcuts without extra UI", async () => {
     "const applyDateToken = (dateToken: string) =>",
     'normalizedDateToken.endsWith("까지")',
     'applyDateToken(normalizedDateToken.replace(/까지$/, ""))',
-    "const assigneeDirective = getQuickAddAssigneeDirective(token)",
+    "const assigneeDirective = getQuickAddAssigneeDirective(cleanToken)",
     '["담당", "담당자", "assignee", "assign"].includes(normalized)',
-    "const dueDirective = getQuickAddDueDirective(token)",
+    "const dueDirective = getQuickAddDueDirective(cleanToken)",
     "applyDateToken(dueDirective.value)",
     "pendingDueLookup = true",
     '["마감", "마감일", "예정", "예정일", "기한", "일정", "due"].includes(normalized)',
+    "TODO_QUICK_ADD_PRIORITY_ALIASES",
+    "normalizeQuickAddToken",
+    'priorityAlias = TODO_QUICK_ADD_PRIORITY_ALIASES[normalized]',
     "parsed.assigneeId",
     "parsed.priority",
     "parsed.memo",
+    'placeholder="예: 긴급. 담당 홍길동. 내일까지 할 일 하기"',
+    'aria-label="자연어로 할 일 빠른 추가"',
+    'aria-label="입력창으로 할 일 요청"',
+    "                추가\n              </Button>",
   ]);
 });
 
@@ -243,10 +384,26 @@ test("simple todo details stay completion focused", async () => {
   );
 
   assertIncludesAll(source, [
-    'if (task.type === "general") return []',
+    'if (task.status === "review_requested") return [{ value: "in_progress", label: "수정 요청" }]',
     "function shouldShowDetailStatusBadge",
-    'task.type !== "general" || isClosedOpsTask(task)',
+    'task.type !== "general" || task.status === "review_requested" || isClosedOpsTask(task)',
     "shouldShowDetailStatusBadge(selectedTaskFresh)",
+    "function GeneralTaskDetailPanel({",
+    "function DetailInfoTile({",
+    'selectedTaskFresh.type === "general" ? (',
+    "<GeneralTaskDetailPanel",
+    "TodoPriorityBadge priority={task.priority}",
+    "TaskStatusBadge status={task.status}",
+    "label=\"우선순위\"",
+    "label=\"제목\"",
+    "label=\"담당팀\"",
+    "label=\"담당자\"",
+    "label=\"시작일\"",
+    "label=\"마감일\"",
+    "label=\"요청팀\"",
+    "label=\"요청자\"",
+    "label=\"요청일시\"",
+    "label=\"메모\"",
     'deleteTarget?.title ? `${deleteTarget.title} 삭제할까요?` : "삭제할까요?"',
     "deleteTargetRemovesCompletedOperation",
     '`${deleteTarget?.title || "완료된 운영 업무"} 이력 삭제할까요?`',
@@ -265,6 +422,54 @@ test("simple todo details stay completion focused", async () => {
   assert.doesNotMatch(detailDialogSource, /<DialogDescription(?! className="sr-only")/);
 });
 
+test("todo list places priority before title in table rows", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const taskListSource = source.slice(
+    source.indexOf("function TaskList({"),
+    source.indexOf("function GroupedTaskList({"),
+  );
+
+  assertIncludesAll(taskListSource, [
+    'md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]',
+    "function TodoSortableHeaderButton({",
+    'onSortChange("status")',
+    'onSortChange("priority")',
+    'onSortChange("due")',
+    "aria-sort={ariaSort}",
+    "TODO_TABLE_SORT_COLUMNS",
+    "{isTodoRow && (",
+    "<TodoPriorityBadge priority={task.priority} showNormal />",
+  ]);
+
+  assert.ok(taskListSource.indexOf('column.label === "우선순위"') < taskListSource.indexOf('<span>{isTodoList ? "제목" : "업무"}</span>'));
+  assert.ok(taskListSource.indexOf("<TodoPriorityBadge priority={task.priority} showNormal />") < taskListSource.indexOf('aria-label={`${task.title} 상세 보기`}'));
+});
+
+test("todo filters use custom listboxes and only keep people and team filters", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const filterSource = source.slice(
+    source.indexOf("function TodoTeamFilterBar({"),
+    source.indexOf("function EmptyTaskState({"),
+  );
+
+  assertIncludesAll(filterSource, [
+    "function TodoFilterListbox({",
+    '<TodoFilterListbox label="요청자"',
+    '<TodoFilterListbox label="요청팀"',
+    '<TodoFilterListbox label="담당자"',
+    '<TodoFilterListbox label="담당팀"',
+    'aria-haspopup="listbox"',
+    'role="listbox"',
+    "<Check className=\"size-4 shrink-0\" />",
+  ]);
+
+  assert.doesNotMatch(filterSource, /<CompactSelect/);
+  assert.doesNotMatch(filterSource, /<select/);
+  assert.doesNotMatch(filterSource, /label="우선순위"/);
+  assert.doesNotMatch(filterSource, /label="기한"/);
+  assert.doesNotMatch(filterSource, /label="상태"/);
+});
+
 test("assignee search and quick add match profile login ids", async () => {
   const [workspaceSource, serviceSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
@@ -275,6 +480,48 @@ test("assignee search and quick add match profile login ids", async () => {
   assert.match(serviceSource, /profiles: profileRows[\s\S]*loginId: text\(row\.login_id\),[\s\S]*role: text\(row\.role\)/);
   assert.match(workspaceSource, /searchText: \[profile\.email, profile\.loginId, profile\.role\]\.filter\(Boolean\)\.join\(" "\)/);
   assert.match(workspaceSource, /normalizeQuickAddLookup\(profile\.email\)\.includes\(assigneeQuery\) \|\|[\s\S]*normalizeQuickAddLookup\(profile\.loginId\)\.includes\(assigneeQuery\)/);
+});
+
+test("team workflow migration adds review request and explicit team fields", async () => {
+  const [migrationSource, serviceSource] = await Promise.all([
+    readSource("supabase/migrations/20260630143000_ops_task_team_workflow.sql"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+  ]);
+
+  assertIncludesAll(migrationSource, [
+    "requested_team text",
+    "assignee_team text",
+    "start_at timestamptz",
+    "review_requested",
+    "ops_tasks_requested_team_idx",
+    "ops_tasks_assignee_team_idx",
+    "ops_tasks_start_at_idx",
+  ]);
+  assertIncludesAll(serviceSource, [
+    "requestedTeam: string",
+    "assigneeTeam: string",
+    "startAt: string",
+    "requested_team",
+    "assignee_team",
+    "start_at",
+    'const OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS = ["requested_team", "assignee_team", "start_at"]',
+    "writeOpsTaskWithOptionalTeamWorkflowColumns",
+    "stripMissingMigrationColumns(row, OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS)",
+    '"review_requested"',
+  ]);
+});
+
+test("todo form close confirmation stays quiet and uses explicit discard copy", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assertIncludesAll(workspaceSource, [
+    'confirmingFormClose ? "저장하지 않고 닫기" : "닫기"',
+    "discardFormAndClose",
+  ]);
+
+  assert.doesNotMatch(workspaceSource, />\s*버리고 닫기\s*</);
+  assert.doesNotMatch(workspaceSource, />\s*입력 중\s*</);
+  assert.doesNotMatch(workspaceSource, />\s*계속 작성\s*</);
 });
 
 test("linked selectors support one-result keyboard selection", async () => {
@@ -315,12 +562,9 @@ test("navigation keeps todo queues and separates operation menus", async () => {
     `title: "${ko.todo}"`,
     'url: "/admin/tasks"',
     'items: [',
-    `{ title: "${ko.today}", url: "/admin/tasks?list=today" }`,
-    `{ title: "${ko.overdue}", url: "/admin/tasks?list=filters&filter=overdue" }`,
-    `{ title: "${ko.mine}", url: "/admin/tasks?list=mine" }`,
-    `{ title: "${ko.scheduleAll}", url: "/admin/tasks?list=calendar" }`,
-    `{ title: "${ko.board}", url: "/admin/tasks?list=board" }`,
-    `{ title: "${ko.unassigned}", url: "/admin/tasks?list=filters&filter=unassigned" }`,
+    `{ title: "${ko.inbox}", url: "/admin/tasks?list=inbox" }`,
+    `{ title: "${ko.sent}", url: "/admin/tasks?list=sent" }`,
+    `{ title: "${ko.completed}", url: "/admin/tasks?list=completed" }`,
     `{ title: "${ko.registration}", url: "/admin/registration", icon: UserPlus }`,
     `{ title: "${ko.transfer}", url: "/admin/transfer", icon: Repeat2 }`,
     `{ title: "${ko.withdrawal}", url: "/admin/withdrawal", icon: UserMinus }`,
@@ -757,11 +1001,10 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
   assertIncludesAll(dashboardSummary, [
     "loadOpsTodoDashboardSummaryData",
     "const openGeneralTasks = openTasks.filter((task) => task.type === \"general\")",
-    "md:grid-cols-4",
-    `label="${ko.today}"`,
-    `label="${ko.overdue}"`,
-    `label="${ko.mine}"`,
-    `label="${ko.unassigned}"`,
+    "md:grid-cols-3",
+    `label="${ko.inbox}"`,
+    `label="${ko.sent}"`,
+    `label="${ko.completed}"`,
   ]);
   assert.doesNotMatch(dashboardSummary, /filter=confirmation/);
   assert.doesNotMatch(dashboardSummary, /openOperationTasks/);
@@ -774,22 +1017,21 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     "if (options.taskType) taskQuery = taskQuery.eq(\"type\", options.taskType)",
     "shouldReadRegistration ? readTaskScopedTable",
     "export async function loadOpsTodoDashboardSummaryData",
-    '.select("id,title,type,status,priority,requested_by,assignee_id,secondary_assignee_id,student_id,class_id,textbook_id,student_name,class_name,textbook_title,campus,subject,due_at,completed_at,memo,created_at,updated_at")',
+    '.select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,class_id,textbook_id,student_name,class_name,textbook_title,campus,subject,start_at,due_at,completed_at,memo,created_at,updated_at")',
     '.eq("type", "general")',
-    '.not("status", "in", "(\\"done\\",\\"canceled\\")")',
     'readTable("profiles", "id,name,email,role,login_id", true)',
   ]);
 
-  assertIncludesAll(workspaceSource, [
-    "getCachedOpsTaskWorkspaceData(workspaceLoadOptions)",
-    "const loadOptions = { taskType: scopedTaskType, includeManagementOptions: !isTodoWorkspace }",
-    "loadOpsTaskWorkspaceData({ ...loadOptions, force })",
-  ]);
+	  assertIncludesAll(workspaceSource, [
+	    "getCachedOpsTaskWorkspaceData(workspaceLoadOptions)",
+	    "const loadOptions = { taskType: scopedTaskType, includeManagementOptions: !isTodoWorkspace, includeTeacherOptions: true }",
+	    "loadOpsTaskWorkspaceData({ ...loadOptions, force })",
+	  ]);
 
   assertIncludesAll(scriptSource, [
-    "/admin/tasks?list=today",
-    "/admin/tasks?list=board",
-    "/admin/tasks?list=calendar",
+    "/admin/tasks?list=inbox",
+    "/admin/tasks?list=sent",
+    "/admin/tasks?list=completed",
     "/admin/dashboard",
     "/admin/registration",
     "/admin/transfer",
@@ -954,7 +1196,7 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     'Todo detail leaked workflow status',
     'teacherButton.innerText()).includes("선생님")',
     'assistantButton.innerText()).includes("조교")',
-    `expectedTexts: ["${ko.todo}", "${ko.today}", "${ko.add}"]`,
+    `expectedTexts: ["${ko.todo}", "${ko.inbox}", "${ko.add}"]`,
     `expectedTexts: ["${ko.registration}", "${ko.registration} ${ko.add}"]`,
     `expectedTexts: ["${ko.approvals}",`,
   ]);

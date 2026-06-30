@@ -13,6 +13,7 @@ export const OPS_TASK_STATUSES = [
   { value: "requested", label: "요청" },
   { value: "confirmed", label: "확인" },
   { value: "in_progress", label: "진행" },
+  { value: "review_requested", label: "검토 요청" },
   { value: "done", label: "완료" },
   { value: "on_hold", label: "보류" },
   { value: "canceled", label: "취소" },
@@ -67,6 +68,84 @@ function text(value) {
   return String(value || "").trim();
 }
 
+const ACTION_ASSIGNEE_STATUSES = new Set(["requested", "confirmed", "in_progress", "on_hold"]);
+const ACTION_REQUESTER_STATUSES = new Set(["review_requested"]);
+
+export const OPS_TASK_WORKFLOW_STATUS_ORDER = [
+  "requested",
+  "confirmed",
+  "in_progress",
+  "review_requested",
+  "done",
+  "on_hold",
+  "canceled",
+];
+
+function normalizedUserContext(context = {}) {
+  return {
+    currentUserId: text(context.currentUserId),
+    currentUserLabel: text(context.currentUserLabel),
+    currentUserTeam: text(context.currentUserTeam),
+  };
+}
+
+function matchesIdentity(ids, labels, context = {}) {
+  const { currentUserId, currentUserLabel } = normalizedUserContext(context);
+  const safeIds = ids.map(text).filter(Boolean);
+  if (currentUserId && safeIds.includes(currentUserId)) return true;
+
+  const safeLabels = labels.map(text).filter(Boolean);
+  return Boolean(currentUserLabel && safeLabels.includes(currentUserLabel));
+}
+
+function matchesTeam(teams, context = {}) {
+  const { currentUserTeam } = normalizedUserContext(context);
+  if (!currentUserTeam) return false;
+  return teams.map(text).filter(Boolean).includes(currentUserTeam);
+}
+
+function matchesRequester(task = {}, context = {}) {
+  return matchesIdentity(
+    [task.requestedBy, task.requested_by],
+    [task.requestedByLabel, task.requested_by_label],
+    context,
+  ) || matchesTeam([task.requestedTeam, task.requested_team], context);
+}
+
+function matchesAssignee(task = {}, context = {}) {
+  return matchesIdentity(
+    [
+      task.assigneeId,
+      task.assignee_id,
+      task.secondaryAssigneeId,
+      task.secondary_assignee_id,
+    ],
+    [
+      task.assigneeLabel,
+      task.assignee_label,
+      task.secondaryAssigneeLabel,
+      task.secondary_assignee_label,
+    ],
+    context,
+  ) || matchesTeam([task.assigneeTeam, task.assignee_team], context);
+}
+
+export function isOpsTaskInUserInbox(task = {}, context = {}) {
+  if (isClosedOpsTask(task)) return false;
+  const status = text(task.status || "requested");
+  if (ACTION_REQUESTER_STATUSES.has(status)) return matchesRequester(task, context);
+  if (ACTION_ASSIGNEE_STATUSES.has(status)) return matchesAssignee(task, context);
+  return false;
+}
+
+export function isOpsTaskInUserSent(task = {}, context = {}) {
+  if (isClosedOpsTask(task)) return false;
+  const status = text(task.status || "requested");
+  if (ACTION_REQUESTER_STATUSES.has(status)) return matchesAssignee(task, context);
+  if (ACTION_ASSIGNEE_STATUSES.has(status)) return matchesRequester(task, context);
+  return false;
+}
+
 export function toDateKey(value) {
   if (!value) return "";
   const raw = String(value).trim();
@@ -80,6 +159,75 @@ export function toDateKey(value) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function taskPrimaryDate(task = {}) {
+  return getOpsTaskCalendarItems([task])[0]?.date || "";
+}
+
+const TODO_PRIORITY_ORDER = {
+  urgent: 0,
+  high: 1,
+  normal: 2,
+  low: 3,
+};
+
+function taskPriorityOrder(task = {}) {
+  const priority = text(task.priority || "normal");
+  return Object.prototype.hasOwnProperty.call(TODO_PRIORITY_ORDER, priority) ? TODO_PRIORITY_ORDER[priority] : TODO_PRIORITY_ORDER.normal;
+}
+
+function taskDateBucket(task = {}, todayKey = "") {
+  const date = taskPrimaryDate(task);
+  if (!date) return 3;
+  if (date < todayKey) return 0;
+  if (date === todayKey) return 1;
+  return 2;
+}
+
+function compareFallback(left = {}, right = {}) {
+  const priorityDiff = taskPriorityOrder(left) - taskPriorityOrder(right);
+  if (priorityDiff !== 0) return priorityDiff;
+
+  return String(right.createdAt || right.created_at || right.updatedAt || right.updated_at || "")
+    .localeCompare(String(left.createdAt || left.created_at || left.updatedAt || left.updated_at || ""));
+}
+
+export function sortOpsTasksByWorkDate(tasks = [], todayKey = toDateKey(new Date())) {
+  const safeTodayKey = toDateKey(todayKey);
+  return [...(tasks || [])].sort((left, right) => {
+    const leftBucket = taskDateBucket(left, safeTodayKey);
+    const rightBucket = taskDateBucket(right, safeTodayKey);
+    if (leftBucket !== rightBucket) return leftBucket - rightBucket;
+
+    const leftDate = taskPrimaryDate(left);
+    const rightDate = taskPrimaryDate(right);
+    if (leftDate && rightDate && leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+
+    return compareFallback(left, right);
+  });
+}
+
+function workflowStatusOrder(task = {}) {
+  const status = text(task.status || "requested");
+  const index = OPS_TASK_WORKFLOW_STATUS_ORDER.indexOf(status);
+  return index === -1 ? OPS_TASK_WORKFLOW_STATUS_ORDER.length : index;
+}
+
+export function sortOpsTasksByWorkflowStatus(tasks = [], todayKey = toDateKey(new Date())) {
+  return [...(tasks || [])].sort((left, right) => {
+    const statusDiff = workflowStatusOrder(left) - workflowStatusOrder(right);
+    if (statusDiff !== 0) return statusDiff;
+    return sortOpsTasksByWorkDate([left, right], todayKey)[0] === left ? -1 : 1;
+  });
+}
+
+export function sortOpsTasksByPriority(tasks = [], todayKey = toDateKey(new Date())) {
+  return [...(tasks || [])].sort((left, right) => {
+    const priorityDiff = taskPriorityOrder(left) - taskPriorityOrder(right);
+    if (priorityDiff !== 0) return priorityDiff;
+    return sortOpsTasksByWorkDate([left, right], todayKey)[0] === left ? -1 : 1;
+  });
 }
 
 function addCalendarItem(items, task, kind, value) {
@@ -103,7 +251,12 @@ export function getOpsTaskCalendarItems(tasks = [], { includeClosed = false } = 
       if (!includeClosed && isClosedOpsTask(task)) return [];
 
       const items = [];
-      addCalendarItem(items, task, "예정", task.dueAt || task.due_at);
+      if (!task.type || task.type === "general") {
+        addCalendarItem(items, task, "시작", task.startAt || task.start_at);
+        addCalendarItem(items, task, "마감", task.dueAt || task.due_at);
+      } else {
+        addCalendarItem(items, task, "예정", task.dueAt || task.due_at);
+      }
 
       if (task.type === "registration") {
         const detail = task.registration || {};

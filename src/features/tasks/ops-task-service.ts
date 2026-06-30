@@ -20,6 +20,7 @@ export type OpsTaskStatus =
   | "requested"
   | "confirmed"
   | "in_progress"
+  | "review_requested"
   | "done"
   | "on_hold"
   | "canceled"
@@ -195,8 +196,10 @@ export type OpsTask = {
   priority: OpsTaskPriority
   requestedBy: string
   requestedByLabel: string
+  requestedTeam: string
   assigneeId: string
   assigneeLabel: string
+  assigneeTeam: string
   secondaryAssigneeId: string
   secondaryAssigneeLabel: string
   studentId: string
@@ -207,6 +210,7 @@ export type OpsTask = {
   textbookTitle: string
   campus: string
   subject: string
+  startAt: string
   dueAt: string
   completedAt: string
   memo: string
@@ -237,7 +241,10 @@ export type OpsTaskInput = {
   type: OpsTaskType
   status?: OpsTaskStatus
   priority?: OpsTaskPriority
+  requestedBy?: string
+  requestedTeam?: string
   assigneeId?: string
+  assigneeTeam?: string
   secondaryAssigneeId?: string
   studentId?: string
   classId?: string
@@ -247,6 +254,7 @@ export type OpsTaskInput = {
   textbookTitle?: string
   campus?: string
   subject?: string
+  startAt?: string
   dueAt?: string
   completedAt?: string
   memo?: string
@@ -272,13 +280,19 @@ type OpsTaskWorkspaceLoadOptions = {
   force?: boolean
   taskType?: OpsTaskType
   includeManagementOptions?: boolean
+  includeTeacherOptions?: boolean
 }
 const opsTaskWorkspaceDataCache = new Map<string, { data: OpsTaskWorkspaceData; expiresAt: number }>()
+
+function shouldIncludeOpsTeacherOptions(options: OpsTaskWorkspaceLoadOptions = {}) {
+  return options.includeManagementOptions !== false || options.includeTeacherOptions === true
+}
 
 function getOpsTaskWorkspaceCacheKey(options: OpsTaskWorkspaceLoadOptions = {}) {
   return [
     options.taskType || "all",
     options.includeManagementOptions === false ? "light" : "full",
+    shouldIncludeOpsTeacherOptions(options) ? "teachers" : "no-teachers",
   ].join(":")
 }
 
@@ -376,7 +390,7 @@ function createOpsId() {
 
 function normalizeStatus(value: unknown): OpsTaskStatus {
   const status = text(value) as OpsTaskStatus
-  if (["requested", "confirmed", "in_progress", "done", "on_hold", "canceled"].includes(status)) {
+  if (["requested", "confirmed", "in_progress", "review_requested", "done", "on_hold", "canceled"].includes(status)) {
     return status
   }
   return "requested"
@@ -745,8 +759,10 @@ function mapTask(
     priority: normalizePriority(row.priority),
     requestedBy,
     requestedByLabel: profileLabel(profiles.get(requestedBy)),
+    requestedTeam: text(row.requested_team),
     assigneeId,
     assigneeLabel: profileLabel(profiles.get(assigneeId)),
+    assigneeTeam: text(row.assignee_team),
     secondaryAssigneeId,
     secondaryAssigneeLabel: profileLabel(profiles.get(secondaryAssigneeId)),
     studentId: text(row.student_id),
@@ -757,6 +773,7 @@ function mapTask(
     textbookTitle: text(row.textbook_title),
     campus: text(row.campus),
     subject: text(row.subject),
+    startAt: text(row.start_at),
     dueAt: text(row.due_at),
     completedAt: text(row.completed_at),
     memo: text(row.memo),
@@ -791,9 +808,8 @@ export async function loadOpsTodoDashboardSummaryData(): Promise<OpsTodoDashboar
     const [taskResult, profileRows] = await Promise.all([
       supabase
         .from("ops_tasks")
-        .select("id,title,type,status,priority,requested_by,assignee_id,secondary_assignee_id,student_id,class_id,textbook_id,student_name,class_name,textbook_title,campus,subject,due_at,completed_at,memo,created_at,updated_at")
-        .eq("type", "general")
-        .not("status", "in", "(\"done\",\"canceled\")"),
+        .select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,class_id,textbook_id,student_name,class_name,textbook_title,campus,subject,start_at,due_at,completed_at,memo,created_at,updated_at")
+        .eq("type", "general"),
       readTable("profiles", "id,name,email,role,login_id", true),
     ])
 
@@ -868,6 +884,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
       return (data || []) as unknown as Row[]
     })
     const includeManagementOptions = options.includeManagementOptions !== false
+    const includeTeacherOptions = shouldIncludeOpsTeacherOptions(options)
     const [
       taskRows,
       profileRows,
@@ -887,7 +904,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
       includeManagementOptions
         ? readTable("textbooks", "id,title,name,publisher,subject", true)
         : Promise.resolve([]),
-      includeManagementOptions
+      includeTeacherOptions
         ? readTableWithFallback("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email", "id,name,subjects,is_visible,sort_order", true)
         : Promise.resolve([]),
     ])
@@ -1110,6 +1127,8 @@ function didMutateOpsTask(data: unknown) {
   return ((data || []) as unknown as Row[]).length > 0
 }
 
+const OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS = ["requested_team", "assignee_team", "start_at"]
+
 function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: boolean; completedAtFallback?: string } = {}) {
   const completedAt = nullableDate(input.completedAt) || (input.status === "done" ? nullableDate(options.completedAtFallback) : null)
   const row = {
@@ -1117,7 +1136,10 @@ function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: 
     type: input.type,
     status: input.status || "requested",
     priority: input.priority || "normal",
+    ...(text(input.requestedBy) ? { requested_by: nullable(input.requestedBy) } : {}),
+    requested_team: nullable(input.requestedTeam),
     assignee_id: nullable(input.assigneeId),
+    assignee_team: nullable(input.assigneeTeam),
     secondary_assignee_id: nullable(input.secondaryAssigneeId),
     student_id: nullable(input.studentId),
     class_id: nullable(input.classId),
@@ -1127,6 +1149,7 @@ function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: 
     textbook_title: nullable(input.textbookTitle),
     campus: nullable(input.campus),
     subject: nullable(input.subject),
+    start_at: nullableDate(input.startAt),
     due_at: nullableDate(input.dueAt),
     completed_at: completedAt,
     memo: nullable(input.memo),
@@ -1134,7 +1157,9 @@ function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: 
   if (!options.preserveManagementLinks) return row
 
   const managementLinkColumns = new Set([
+    "requested_team",
     "assignee_id",
+    "assignee_team",
     "student_id",
     "class_id",
     "textbook_id",
@@ -1247,6 +1272,17 @@ function stripMissingMigrationColumns(row: Row, columns: string[]) {
   return next
 }
 
+async function writeOpsTaskWithOptionalTeamWorkflowColumns(
+  row: Row,
+  write: (row: Row) => PromiseLike<{ data: unknown; error: unknown }>,
+) {
+  let result = await write(row)
+  if (result.error && isMissingColumnError(result.error)) {
+    result = await write(stripMissingMigrationColumns(row, OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS))
+  }
+  return result
+}
+
 async function upsertDetail(taskId: string, input: OpsTaskInput) {
   if (!supabase) return
 
@@ -1286,7 +1322,10 @@ function inputFromTask(task: OpsTask, status: OpsTaskStatus = task.status): OpsT
     type: task.type,
     status,
     priority: task.priority,
+    requestedBy: task.requestedBy,
+    requestedTeam: task.requestedTeam,
     assigneeId: task.assigneeId,
+    assigneeTeam: task.assigneeTeam,
     secondaryAssigneeId: task.secondaryAssigneeId,
     studentId: task.studentId,
     classId: task.classId,
@@ -1296,6 +1335,7 @@ function inputFromTask(task: OpsTask, status: OpsTaskStatus = task.status): OpsT
     textbookTitle: task.textbookTitle,
     campus: task.campus,
     subject: task.subject,
+    startAt: task.startAt,
     dueAt: task.dueAt,
     completedAt: task.completedAt,
     memo: task.memo,
@@ -1354,6 +1394,7 @@ function getRegistrationPipelineStatusForTaskStatus(status: OpsTaskStatus, curre
   if (status === "requested") return current.startsWith("0.") ? current : findRegistrationPipelineStatus("0.", current)
   if (status === "confirmed" && isClosedRegistrationPipelineStatus(current)) return findRegistrationPipelineStatus("1.", current)
   if (status === "in_progress" && isClosedRegistrationPipelineStatus(current)) return findRegistrationPipelineStatus("6.", current)
+  if (status === "review_requested" && isClosedRegistrationPipelineStatus(current)) return findRegistrationPipelineStatus("6.", current)
   if (status === "on_hold" && isClosedRegistrationPipelineStatus(current)) return findRegistrationPipelineStatus("4-3.", current)
 
   return current
@@ -1373,7 +1414,7 @@ function getWordRetestDetailStatusForTaskStatus(status: OpsTaskStatus, currentRe
 
   if (status === "done") return current === "absent" ? "absent" : "done"
   if (status === "canceled") return "absent"
-  if (status === "in_progress") return "in_progress"
+  if (status === "in_progress" || status === "review_requested") return "in_progress"
   if (status === "requested" || status === "confirmed") return "not_started"
   if (status === "on_hold") return current === "in_progress" ? "in_progress" : current || "not_started"
 
@@ -2142,7 +2183,12 @@ async function updateOpsTaskLinkFields(taskId: string, patch: Record<string, Ops
       .filter(([, value]) => value === null || Boolean(value)),
   )
   if (Object.keys(nextPatch).length === 0) return
-  const { error } = await supabase.from("ops_tasks").update(nextPatch).eq("id", taskId)
+  let { error } = await supabase.from("ops_tasks").update(nextPatch).eq("id", taskId)
+  if (error && isMissingColumnError(error)) {
+    const fallbackPatch = stripMissingMigrationColumns(nextPatch, OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS)
+    if (Object.keys(fallbackPatch).length === 0) return
+    ;({ error } = await supabase.from("ops_tasks").update(fallbackPatch).eq("id", taskId))
+  }
   if (error) throw error
 }
 
@@ -2395,14 +2441,18 @@ function attachOpsTaskCleanupError(originalError: unknown, cleanupError: unknown
 
 export async function createOpsTask(input: OpsTaskInput) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const client = supabase
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
 
-  const { data, error } = await supabase
-    .from("ops_tasks")
-    .insert(buildTaskRow(input, { completedAtFallback: new Date().toISOString() }))
-    .select("id")
-    .single()
+  const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
+    buildTaskRow(input, { completedAtFallback: new Date().toISOString() }),
+    (row) => client
+      .from("ops_tasks")
+      .insert(row)
+      .select("id")
+      .single(),
+  )
 
   if (error) throw error
   const taskId = text((data as Row).id)
@@ -2427,6 +2477,7 @@ export async function createOpsTask(input: OpsTaskInput) {
 
 export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const client = supabase
   const nextStatus = input.status || "requested"
   const existingTask = await loadOpsTaskById(taskId)
   if (!existingTask) throw new Error("업무 데이터를 다시 불러오세요.")
@@ -2450,11 +2501,14 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
       throw error
     }
 
-    const { data, error } = await supabase
-      .from("ops_tasks")
-      .update(buildTaskRow(input, { preserveManagementLinks: true, completedAtFallback: new Date().toISOString() }))
-      .eq("id", taskId)
-      .select("id")
+    const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
+      buildTaskRow(input, { preserveManagementLinks: true, completedAtFallback: new Date().toISOString() }),
+      (row) => client
+        .from("ops_tasks")
+        .update(row)
+        .eq("id", taskId)
+        .select("id"),
+    )
 
     if (error || !didMutateOpsTask(data)) {
       await rollbackAppliedCompletionSync(rollbackCompletionSync, completionSyncApplied, error)
@@ -2466,11 +2520,14 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
     return
   }
 
-  const { data, error } = await supabase
-    .from("ops_tasks")
-    .update(buildTaskRow(input))
-    .eq("id", taskId)
-    .select("id")
+  const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
+    buildTaskRow(input),
+    (row) => client
+      .from("ops_tasks")
+      .update(row)
+      .eq("id", taskId)
+      .select("id"),
+  )
 
   if (error) throw error
   if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
@@ -2522,6 +2579,9 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
   }
   if (currentTask.type === "registration") await syncRegistrationPipelineStatusForTaskStatus(currentTask, status)
   await writeEvent(currentTask.id, "status_changed", "status", currentTask.status, status)
+  if (currentTask.status === "review_requested" && status === "in_progress") {
+    await writeEvent(currentTask.id, "revision_requested", "검토", "검토 요청", "수정 요청")
+  }
   clearOpsTaskWorkspaceDataCache()
 }
 

@@ -87,12 +87,9 @@ test("todo navigation exposes direct queues and keeps query links distinct", asy
   ]);
 
   for (const url of [
-    "/admin/tasks?list=today",
-    "/admin/tasks?list=filters&filter=overdue",
-    "/admin/tasks?list=mine",
-    "/admin/tasks?list=calendar",
-    "/admin/tasks?list=board",
-    "/admin/tasks?list=filters&filter=unassigned",
+    "/admin/tasks?list=inbox",
+    "/admin/tasks?list=sent",
+    "/admin/tasks?list=completed",
   ]) {
     assert.ok(navigationSource.includes(`url: "${url}"`), url);
   }
@@ -102,10 +99,12 @@ test("todo navigation exposes direct queues and keeps query links distinct", asy
 
   assert.match(navMainSource, /useSearchParams/);
   assert.match(navMainSource, /function normalizeHref/);
-  assert.match(navMainSource, /const LEGACY_TODO_VIEW_SEARCH: Record<string, \{ list: string; filter\?: string \}>/);
+  assert.match(navMainSource, /const LEGACY_TODO_VIEW_SEARCH: Record<string, \{ list: string; sort\?: string; due\?: string; status\?: string \}>/);
   assert.match(navMainSource, /const legacyRoute = LEGACY_TODO_VIEW_SEARCH\[legacyView\]/);
   assert.match(navMainSource, /params\.set\("list", legacyRoute\.list\)/);
-  assert.match(navMainSource, /params\.set\("filter", legacyRoute\.filter\)/);
+  assert.match(navMainSource, /params\.set\("sort", legacyRoute\.sort\)/);
+  assert.match(navMainSource, /params\.set\("due", legacyRoute\.due\)/);
+  assert.match(navMainSource, /params\.set\("status", legacyRoute\.status\)/);
   assert.match(navMainSource, /const currentHref = React\.useMemo/);
   assert.match(navMainSource, /navigationTargetId\(url: string\)[\s\S]*normalizeHref\(url\)/);
   assert.match(navMainSource, /target\.search && target\.path === current\.path/);

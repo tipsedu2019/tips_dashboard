@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation"
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
-import { CalendarDays, Check, ChevronLeft, ChevronRight, FileText, Inbox, Kanban, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
+import { CalendarDays, Check, ChevronLeft, ChevronRight, FileText, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,11 +21,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/providers/auth-provider"
 
 import {
   OPS_TASK_STATUSES,
+  OPS_TASK_PRIORITIES,
   REGISTRATION_PIPELINE_STATUSES,
   WORD_RETEST_STATUSES,
   groupOpsTasksByAssignee,
@@ -37,7 +39,12 @@ import {
   hasOpsTaskCalendarDate,
   hasOpsTaskOverdueCalendarDate,
   isClosedOpsTask,
+  isOpsTaskInUserInbox,
+  isOpsTaskInUserSent,
   isOpsTaskAssignedToUser,
+  sortOpsTasksByPriority,
+  sortOpsTasksByWorkflowStatus,
+  sortOpsTasksByWorkDate,
   toDateKey,
 } from "./ops-task-model"
 import {
@@ -71,8 +78,10 @@ import {
 
 type WorkspaceKey = "todo" | "registration" | "transfer" | "withdrawal" | "word_retest"
 type ViewKey = "all" | "status" | "assignee" | "calendar"
-type TodoViewKey = "inbox" | "today" | "upcoming" | "mine" | "board" | "calendar" | "filters" | "completed"
-type TodoFilterKey = "all" | "overdue" | "priority" | "unassigned"
+type TodoViewKey = "inbox" | "sent" | "completed"
+type TodoSortKey = "status" | "priority" | "due"
+type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
+type TodoSelectFilterKey = "all" | string
 
 type WordRetestMode = "teacher" | "assistant"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
@@ -90,11 +99,6 @@ type TaskScheduleItem = {
   label: string
   value: string
   date: string
-}
-type TodoBoardColumn = {
-  key: "overdue" | "today" | "mine" | "upcoming" | "unsorted"
-  label: string
-  tasks: OpsTask[]
 }
 type QuickAddPreviewItem = { key: string; label: string }
 type OpsTaskOptionIndexes = {
@@ -121,6 +125,7 @@ type FormDetailStepKey =
   | "word_retest_scores"
 
 const EMPTY_TASKS: OpsTask[] = []
+const EMPTY_PROFILE_OPTIONS: OpsProfileOption[] = []
 const EMPTY_STUDENT_OPTIONS: OpsStudentOption[] = []
 const EMPTY_CLASS_OPTIONS: OpsClassOption[] = []
 const EMPTY_TEACHER_OPTIONS: OpsTeacherOption[] = []
@@ -139,38 +144,77 @@ const LINKED_SELECT_MANUAL_VALUE = "__manual__"
 const HORIZONTAL_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 const HORIZONTAL_MUTED_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md bg-muted/45 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+const TODO_TEAM_FILTER_UNASSIGNED = "__unassigned__"
+const TODO_TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀", "조교팀"] as const
+const TODO_FORM_PRIORITY_ORDER: OpsTaskPriority[] = ["urgent", "high", "normal", "low"]
+const TODO_FORM_PRIORITY_OPTIONS = TODO_FORM_PRIORITY_ORDER
+  .map((value) => OPS_TASK_PRIORITIES.find((priority) => priority.value === value))
+  .filter((priority): priority is (typeof OPS_TASK_PRIORITIES)[number] => Boolean(priority))
+const TODO_QUICK_ADD_PRIORITY_ALIASES: Partial<Record<string, OpsTaskPriority>> = {
+  p1: "urgent",
+  "!!": "urgent",
+  "!1": "urgent",
+  긴급: "urgent",
+  급함: "urgent",
+  최우선: "urgent",
+  p2: "high",
+  "!2": "high",
+  높음: "high",
+  중요: "high",
+  p3: "normal",
+  "!3": "normal",
+  보통: "normal",
+  p4: "low",
+  "!4": "low",
+  낮음: "low",
+}
+const TODO_TEAM_ALIASES: Record<string, (typeof TODO_TEAM_OPTIONS)[number]> = {
+  english: "영어팀",
+  영어: "영어팀",
+  영어팀: "영어팀",
+  math: "수학팀",
+  mathematics: "수학팀",
+  수학: "수학팀",
+  수학팀: "수학팀",
+  admin: "관리팀",
+  operation: "관리팀",
+  operations: "관리팀",
+  관리: "관리팀",
+  관리팀: "관리팀",
+  assistant: "조교팀",
+  assistants: "조교팀",
+  조교: "조교팀",
+  조교팀: "조교팀",
+}
 
 const TODO_VIEW_TABS: Array<{ key: TodoViewKey; label: string }> = [
   { key: "inbox", label: "받은함" },
-  { key: "today", label: "오늘" },
-  { key: "upcoming", label: "예정" },
-  { key: "mine", label: "내 담당" },
-  { key: "board", label: "보드" },
-  { key: "calendar", label: "일정" },
-  { key: "filters", label: "필터" },
+  { key: "sent", label: "보낸함" },
   { key: "completed", label: "완료" },
 ]
 
-const TODO_FILTER_TABS: Array<{ key: TodoFilterKey; label: string }> = [
-  { key: "all", label: "전체" },
-  { key: "overdue", label: "지연" },
-  { key: "priority", label: "중요" },
-  { key: "unassigned", label: "미정리" },
+const TODO_TABLE_SORT_COLUMNS: Array<{ key: TodoSortKey; label: string }> = [
+  { key: "status", label: "상태" },
+  { key: "priority", label: "우선순위" },
+  { key: "due", label: "시작/마감" },
 ]
 
-const LEGACY_TODO_VIEW_ROUTES: Record<string, { list: TodoViewKey; filter?: TodoFilterKey }> = {
-  all: { list: "filters", filter: "all" },
+const TODO_DUE_FILTER_KEYS = new Set<TodoDueFilterKey>(["all", "overdue", "today", "upcoming", "unscheduled"])
+
+const LEGACY_TODO_VIEW_ROUTES: Record<string, { list: TodoViewKey; sort?: TodoSortKey; due?: TodoDueFilterKey; status?: OpsTaskStatus }> = {
+  all: { list: "inbox" },
   inbox: { list: "inbox" },
-  today: { list: "today" },
-  upcoming: { list: "upcoming" },
-  board: { list: "board" },
-  calendar: { list: "calendar" },
+  today: { list: "inbox", sort: "due" },
+  upcoming: { list: "inbox", sort: "due" },
+  mine: { list: "inbox" },
+  board: { list: "inbox", sort: "status" },
+  calendar: { list: "inbox", sort: "due" },
   completed: { list: "completed" },
-  overdue: { list: "filters", filter: "overdue" },
-  mine: { list: "mine" },
-  priority: { list: "filters", filter: "priority" },
-  unassigned: { list: "filters", filter: "unassigned" },
-  confirmation: { list: "filters", filter: "all" },
+  sent: { list: "sent" },
+  overdue: { list: "inbox", due: "overdue" },
+  priority: { list: "inbox" },
+  unassigned: { list: "inbox" },
+  confirmation: { list: "inbox", status: "review_requested" },
 }
 
 const OPERATION_VIEW_TABS: Array<{ key: ViewKey; label: string }> = [
@@ -276,22 +320,35 @@ function isTodoViewKey(value: string): value is TodoViewKey {
   return TODO_VIEW_TABS.some((tab) => tab.key === value)
 }
 
-function isTodoFilterKey(value: string): value is TodoFilterKey {
-  return TODO_FILTER_TABS.some((tab) => tab.key === value)
+function isTodoSortKey(value: string): value is TodoSortKey {
+  return TODO_TABLE_SORT_COLUMNS.some((column) => column.key === value)
 }
 
-function getTodoRouteState(searchParams: URLSearchParams): { list: TodoViewKey; filter?: TodoFilterKey } | null {
+function isTodoDueFilterKey(value: string): value is TodoDueFilterKey {
+  return TODO_DUE_FILTER_KEYS.has(value as TodoDueFilterKey)
+}
+
+function getTodoRouteState(searchParams: URLSearchParams): { list: TodoViewKey; sort?: TodoSortKey; due?: TodoDueFilterKey; status?: OpsTaskStatus } | null {
   const nextList = searchParams.get("list") || ""
   const nextFilter = searchParams.get("filter") || ""
-  if (nextFilter === "mine") return { list: "mine" }
+  const nextSort = searchParams.get("sort") || ""
+  const nextDue = searchParams.get("due") || ""
+  const nextStatus = searchParams.get("status") || ""
+  const routeStatus = OPS_TASK_STATUSES.some((status) => status.value === nextStatus) ? nextStatus as OpsTaskStatus : undefined
   if (isTodoViewKey(nextList)) {
-    const routeFilter = nextFilter && isTodoFilterKey(nextFilter) ? nextFilter : nextList === "filters" ? "all" : undefined
     return {
       list: nextList,
-      filter: routeFilter,
+      sort: isTodoSortKey(nextSort) ? nextSort : undefined,
+      due: isTodoDueFilterKey(nextDue) ? nextDue : undefined,
+      status: routeStatus,
     }
   }
-  if (nextFilter && isTodoFilterKey(nextFilter)) return { list: "filters", filter: nextFilter }
+  if (nextFilter === "overdue") return { list: "inbox", due: "overdue" }
+  if (nextFilter === "priority") return { list: "inbox" }
+  if (nextFilter === "unassigned") return { list: "inbox", due: "unscheduled" }
+  if (nextFilter === "mine") return { list: "inbox" }
+  if (nextFilter === "confirmation") return { list: "inbox", status: "review_requested" }
+  if (LEGACY_TODO_VIEW_ROUTES[nextList]) return LEGACY_TODO_VIEW_ROUTES[nextList]
 
   const legacyView = searchParams.get("view") || ""
   return LEGACY_TODO_VIEW_ROUTES[legacyView] || null
@@ -300,13 +357,9 @@ function getTodoRouteState(searchParams: URLSearchParams): { list: TodoViewKey; 
 function getTodoEmptyLabel(view: TodoViewKey, isFilteredEmpty: boolean) {
   if (isFilteredEmpty) return "조건에 맞는 할 일 없음"
   if (view === "inbox") return "받은함 비어 있음"
-  if (view === "today") return "오늘 할 일 없음"
-  if (view === "upcoming") return "예정된 할 일 없음"
-  if (view === "mine") return "내 담당 할 일 없음"
-  if (view === "board") return "보드에 표시할 할 일 없음"
-  if (view === "calendar") return "일정 없음"
+  if (view === "sent") return "보낸함 비어 있음"
   if (view === "completed") return "완료한 할 일 없음"
-  return "필터에 맞는 할 일 없음"
+  return "할 일 없음"
 }
 
 function isTaskFocus(value: string): value is TaskFocus {
@@ -316,6 +369,64 @@ function isTaskFocus(value: string): value is TaskFocus {
 function isEnglishOperationOption(value: string) {
   const normalized = value.replace(/\s+/g, "").toLowerCase()
   return normalized.includes("영어") || normalized.includes("english")
+}
+
+function normalizeTaskTeamValue(value?: string | string[]) {
+  const values = Array.isArray(value)
+    ? value
+    : String(value || "").split(/[,\s/|]+/)
+
+  for (const rawValue of values) {
+    const normalized = String(rawValue || "").replace(/\s+/g, "").toLowerCase()
+    if (!normalized) continue
+    const aliasedTeam = TODO_TEAM_ALIASES[normalized]
+    if (aliasedTeam) return aliasedTeam
+    const matchingTeam = TODO_TEAM_OPTIONS.find((team) => team.replace(/\s+/g, "").toLowerCase() === normalized)
+    if (matchingTeam) return matchingTeam
+  }
+
+  return ""
+}
+
+function buildTaskProfileTeamLookup(profiles: OpsProfileOption[], teachers: OpsTeacherOption[]) {
+  const profilesByContact = new Map<string, OpsProfileOption>()
+  profiles.forEach((profile) => {
+    [profile.email, profile.loginId].forEach((value) => {
+      const key = String(value || "").trim().toLowerCase()
+      if (key) profilesByContact.set(key, profile)
+    })
+  })
+
+  const profileTeamById = new Map<string, string>()
+  teachers.forEach((teacher) => {
+    const team = normalizeTaskTeamValue(teacher.subjects)
+    if (!team) return
+    const contactKey = String(teacher.accountEmail || "").trim().toLowerCase()
+    const profileId = teacher.profileId || profilesByContact.get(contactKey)?.id || ""
+    if (profileId) profileTeamById.set(profileId, team)
+  })
+
+  return profileTeamById
+}
+
+function getProfilesForTeam(
+  profiles: OpsProfileOption[],
+  team: string,
+  profileTeamById: Map<string, string>,
+  selectedProfileId = "",
+) {
+  const normalizedTeam = normalizeTaskTeamValue(team)
+  if (!normalizedTeam) return profiles
+
+  return profiles.filter((profile) => (
+    profileTeamById.get(profile.id) === normalizedTeam || profile.id === selectedProfileId
+  ))
+}
+
+function shouldClearProfileForTeam(profileId: string | undefined, team: string, profileTeamById: Map<string, string>) {
+  const normalizedTeam = normalizeTaskTeamValue(team)
+  if (!profileId || !normalizedTeam) return false
+  return profileTeamById.get(profileId) !== normalizedTeam
 }
 
 function isWordRetestClassOption(classItem?: OpsClassOption) {
@@ -391,7 +502,10 @@ const EMPTY_FORM: OpsTaskInput = {
   type: "general",
   status: "requested",
   priority: "normal",
+  requestedBy: "",
+  requestedTeam: "",
   assigneeId: "",
+  assigneeTeam: "",
   secondaryAssigneeId: "",
   studentId: "",
   classId: "",
@@ -401,6 +515,7 @@ const EMPTY_FORM: OpsTaskInput = {
   textbookTitle: "",
   campus: "",
   subject: "",
+  startAt: "",
   dueAt: "",
   memo: "",
   registration: {},
@@ -430,7 +545,10 @@ function formFromTask(task: OpsTask): OpsTaskInput {
     type: task.type,
     status: task.status,
     priority: task.priority,
+    requestedBy: task.requestedBy,
+    requestedTeam: task.requestedTeam,
     assigneeId: task.assigneeId,
+    assigneeTeam: task.assigneeTeam,
     secondaryAssigneeId: task.secondaryAssigneeId,
     studentId: task.studentId,
     classId: task.classId,
@@ -440,6 +558,7 @@ function formFromTask(task: OpsTask): OpsTaskInput {
     textbookTitle: task.textbookTitle,
     campus: task.campus,
     subject: task.subject,
+    startAt: task.startAt,
     dueAt: task.dueAt,
     completedAt: task.completedAt,
     memo: task.memo,
@@ -872,7 +991,7 @@ function dateLabel(value: string) {
 }
 
 function getDueAtDisplayLabel(type: OpsTaskType) {
-  return type === "general" ? "예정일" : "다음 처리일"
+  return type === "general" ? "마감일" : "다음 처리일"
 }
 
 function getQuickAddDuePreviewLabel(value: string, todayKey: string, tomorrowKey: string) {
@@ -893,7 +1012,12 @@ function addTaskScheduleItem(items: TaskScheduleItem[], label: string, value?: s
 function getTaskScheduleItems(task: OpsTask) {
   const items: TaskScheduleItem[] = []
 
-  addTaskScheduleItem(items, getDueAtDisplayLabel(task.type), task.dueAt)
+  if (task.type === "general") {
+    addTaskScheduleItem(items, "시작", task.startAt)
+    addTaskScheduleItem(items, "마감", task.dueAt)
+  } else {
+    addTaskScheduleItem(items, getDueAtDisplayLabel(task.type), task.dueAt)
+  }
 
   if (task.type === "registration") {
     addTaskScheduleItem(items, "문의", task.registration?.inquiryAt)
@@ -938,10 +1062,6 @@ function getPrimaryTaskScheduleItem(task: OpsTask, todayKey: string) {
   return [...items].reverse()[0] || null
 }
 
-function getPrimaryTaskScheduleDate(task: OpsTask, todayKey: string) {
-  return getPrimaryTaskScheduleItem(task, todayKey)?.date || ""
-}
-
 function getOpsTaskEventTypeLabel(eventType: string) {
   switch (eventType) {
     case "auto_synced":
@@ -958,6 +1078,8 @@ function getOpsTaskEventTypeLabel(eventType: string) {
       return "생성"
     case "updated":
       return "수정"
+    case "revision_requested":
+      return "수정 요청"
     default:
       return eventType || "이력"
   }
@@ -1233,7 +1355,7 @@ function TaskScheduleLabel({ task, todayKey }: { task: OpsTask; todayKey: string
     return <span className="text-muted-foreground">미정</span>
   }
 
-  if (task.type === "general" && schedule.label === "예정") {
+  if (task.type === "general" && schedule.label === "마감") {
     return <DueDateLabel value={schedule.value} status={task.status} />
   }
 
@@ -1243,6 +1365,23 @@ function TaskScheduleLabel({ task, todayKey }: { task: OpsTask; todayKey: string
         {schedule.label}
       </span>
       <DueDateLabel value={schedule.value} status={task.status} />
+    </span>
+  )
+}
+
+function TodoDateSummary({ task }: { task: OpsTask }) {
+  const startLabel = dateLabel(task.startAt)
+
+  return (
+    <span className="inline-grid min-w-0 gap-1 text-xs leading-5 md:text-sm">
+      <span className="min-w-0 truncate">
+        <span className="mr-1 text-muted-foreground">시작</span>
+        <span>{startLabel === "-" ? "미정" : startLabel}</span>
+      </span>
+      <span className="min-w-0">
+        <span className="mr-1 text-muted-foreground">마감</span>
+        <DueDateLabel value={task.dueAt} status={task.status} />
+      </span>
     </span>
   )
 }
@@ -1262,8 +1401,10 @@ function matchesSearch(task: OpsTask, query: string) {
     task.subject,
     task.campus,
     task.assigneeLabel,
+    task.assigneeTeam,
     task.secondaryAssigneeLabel,
     task.requestedByLabel,
+    task.requestedTeam,
     task.memo,
     task.registration?.pipelineStatus,
     task.registration?.parentPhone,
@@ -1276,81 +1417,6 @@ function matchesSearch(task: OpsTask, query: string) {
     task.wordRetest?.unit,
     task.wordRetest?.requestNote,
   ].some((value) => String(value || "").toLowerCase().includes(normalized))
-}
-
-const TODO_PRIORITY_ORDER: Record<OpsTaskPriority, number> = {
-  urgent: 0,
-  high: 1,
-  normal: 2,
-  low: 3,
-}
-
-function getTodoDueOrder(task: OpsTask, todayKey: string) {
-  const dueDate = getPrimaryTaskScheduleDate(task, todayKey)
-  if (!dueDate) return 3
-  if (dueDate < todayKey) return 0
-  if (dueDate === todayKey) return 1
-  return 2
-}
-
-function todoDueSortKey(task: OpsTask, todayKey: string) {
-  const schedule = getPrimaryTaskScheduleItem(task, todayKey)
-  if (!schedule) return ""
-  return dateTimeInputValue(schedule.value) || schedule.date
-}
-
-function sortTodoTasks(tasks: OpsTask[], todayKey: string) {
-  return [...tasks].sort((left, right) => {
-    const leftDueOrder = getTodoDueOrder(left, todayKey)
-    const rightDueOrder = getTodoDueOrder(right, todayKey)
-    if (leftDueOrder !== rightDueOrder) return leftDueOrder - rightDueOrder
-
-    const leftDue = todoDueSortKey(left, todayKey)
-    const rightDue = todoDueSortKey(right, todayKey)
-    if (leftDue && rightDue && leftDue !== rightDue) return leftDue.localeCompare(rightDue)
-
-    const priorityDiff = TODO_PRIORITY_ORDER[left.priority] - TODO_PRIORITY_ORDER[right.priority]
-    if (priorityDiff !== 0) return priorityDiff
-
-    return String(right.createdAt || right.updatedAt).localeCompare(String(left.createdAt || left.updatedAt))
-  })
-}
-
-function getTodoBoardColumnKey(
-  task: OpsTask,
-  todayKey: string,
-  currentUserId: string,
-  currentUserLabel: string,
-): TodoBoardColumn["key"] {
-  const dueDate = getPrimaryTaskScheduleDate(task, todayKey)
-  if ((dueDate && dueDate < todayKey) || hasOpsTaskOverdueCalendarDate(task, todayKey)) return "overdue"
-  if (hasOpsTaskCalendarDate(task, todayKey)) return "today"
-  if (hasOpsTaskFutureCalendarDate(task, todayKey)) return "upcoming"
-  if (isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)) return "mine"
-  return "unsorted"
-}
-
-function buildTodoBoardColumns(
-  tasks: OpsTask[],
-  todayKey: string,
-  currentUserId: string,
-  currentUserLabel: string,
-): TodoBoardColumn[] {
-  const columns: TodoBoardColumn[] = [
-    { key: "overdue", label: "지연", tasks: [] },
-    { key: "today", label: "오늘", tasks: [] },
-    { key: "mine", label: "내 담당", tasks: [] },
-    { key: "upcoming", label: "예정", tasks: [] },
-    { key: "unsorted", label: "미정리", tasks: [] },
-  ]
-  const columnByKey = new Map(columns.map((column) => [column.key, column]))
-
-  for (const task of sortTodoTasks(tasks.filter(isOpenTask), todayKey)) {
-    const column = columnByKey.get(getTodoBoardColumnKey(task, todayKey, currentUserId, currentUserLabel))
-    column?.tasks.push(task)
-  }
-
-  return columns
 }
 
 function sortCompletedTodoTasks(tasks: OpsTask[]) {
@@ -1367,16 +1433,95 @@ function sortWorkspaceTasks(tasks: OpsTask[]) {
   ))
 }
 
-function getTodoViewForDueAt(dueAt: string | undefined, todayKey: string): TodoViewKey {
-  const dueDate = toDateKey(dueAt)
-  if (!dueDate) return "inbox"
-  return dueDate <= todayKey ? "today" : "upcoming"
+type TodoFilterOption = {
+  value: string
+  label: string
+  count: number
 }
 
-function hasOpsTaskFutureCalendarDate(task: OpsTask, todayKey: string) {
-  const targetDate = toDateKey(todayKey)
-  if (!targetDate || isClosedOpsTask(task)) return false
-  return getOpsTaskCalendarItems([task]).some((item) => item.date > targetDate)
+type TodoFilterOptions = {
+  requestedBy: TodoFilterOption[]
+  requestedTeam: TodoFilterOption[]
+  assignee: TodoFilterOption[]
+  assigneeTeam: TodoFilterOption[]
+}
+
+function selectFilterValue(value: unknown) {
+  const textValue = String(value || "").trim()
+  return textValue || TODO_TEAM_FILTER_UNASSIGNED
+}
+
+function selectFilterLabel(value: string) {
+  return value === TODO_TEAM_FILTER_UNASSIGNED ? "미지정" : value
+}
+
+function addTodoFilterOptionCount(options: Map<string, TodoFilterOption>, value: unknown, label?: string) {
+  const optionValue = selectFilterValue(value)
+  const optionLabel = String(label || "").trim() || selectFilterLabel(optionValue)
+  const current = options.get(optionValue)
+  options.set(optionValue, {
+    value: optionValue,
+    label: current?.label || optionLabel,
+    count: (current?.count || 0) + 1,
+  })
+}
+
+function sortedTodoFilterOptions(options: Map<string, TodoFilterOption>) {
+  return Array.from(options.values()).sort((left, right) => (
+    left.value === TODO_TEAM_FILTER_UNASSIGNED ? 1 :
+      right.value === TODO_TEAM_FILTER_UNASSIGNED ? -1 :
+        left.label.localeCompare(right.label, "ko")
+  ))
+}
+
+function buildTodoFilterOptions(tasks: OpsTask[]): TodoFilterOptions {
+  const requestedBy = new Map<string, TodoFilterOption>()
+  const requestedTeam = new Map<string, TodoFilterOption>()
+  const assignee = new Map<string, TodoFilterOption>()
+  const assigneeTeam = new Map<string, TodoFilterOption>()
+
+  tasks.forEach((task) => {
+    addTodoFilterOptionCount(requestedBy, task.requestedBy || task.requestedByLabel, task.requestedByLabel || task.requestedBy)
+    addTodoFilterOptionCount(requestedTeam, task.requestedTeam)
+    addTodoFilterOptionCount(assignee, task.assigneeId || task.assigneeLabel, task.assigneeLabel || task.assigneeId)
+    addTodoFilterOptionCount(assigneeTeam, task.assigneeTeam)
+  })
+
+  return {
+    requestedBy: sortedTodoFilterOptions(requestedBy),
+    requestedTeam: sortedTodoFilterOptions(requestedTeam),
+    assignee: sortedTodoFilterOptions(assignee),
+    assigneeTeam: sortedTodoFilterOptions(assigneeTeam),
+  }
+}
+
+function matchesSelectFilter(values: unknown[], filter: TodoSelectFilterKey) {
+  if (filter === "all") return true
+  const normalizedValues = values.map((value) => String(value || "").trim()).filter(Boolean)
+  if (filter === TODO_TEAM_FILTER_UNASSIGNED) return normalizedValues.length === 0
+  return normalizedValues.some((value) => selectFilterValue(value) === filter)
+}
+
+function matchesTodoTeamFilters(
+  task: OpsTask,
+  filters: {
+    requestedByFilter: TodoSelectFilterKey
+    requestedTeamFilter: TodoSelectFilterKey
+    assigneeFilter: TodoSelectFilterKey
+    assigneeTeamFilter: TodoSelectFilterKey
+  },
+) {
+  if (!matchesSelectFilter([task.requestedBy, task.requestedByLabel], filters.requestedByFilter)) return false
+  if (!matchesSelectFilter([task.requestedTeam], filters.requestedTeamFilter)) return false
+  if (!matchesSelectFilter([task.assigneeId, task.assigneeLabel, task.secondaryAssigneeId, task.secondaryAssigneeLabel], filters.assigneeFilter)) return false
+  if (!matchesSelectFilter([task.assigneeTeam], filters.assigneeTeamFilter)) return false
+  return true
+}
+
+function getTodoActionLabel(task: OpsTask) {
+  if (task.status === "done") return "완료됨"
+  if (task.status === "canceled") return "취소됨"
+  return getNextTaskStatusAction(task)?.label || "확인"
 }
 
 function normalizeQuickAddLookup(value: string) {
@@ -1386,6 +1531,14 @@ function normalizeQuickAddLookup(value: string) {
 function normalizeQuickAddMemoToken(value: string) {
   if ((value.startsWith("@") || value.startsWith("#")) && value.length > 1) return value.slice(1)
   return value
+}
+
+function normalizeQuickAddToken(value: string) {
+  return value.trim().toLowerCase().replace(/^[.,。]+/, "").replace(/[.,。]+$/, "")
+}
+
+function cleanQuickAddToken(value: string) {
+  return value.trim().replace(/^[.,。]+/, "").replace(/[.,。]+$/, "")
 }
 
 function getQuickAddMemoDirective(token: string) {
@@ -1507,6 +1660,131 @@ function SelectField({
   )
 }
 
+type TaskListboxOption = {
+  value: string
+  label: string
+}
+
+function TaskListboxField({
+  label,
+  value,
+  options,
+  onChange,
+  emptyClassName = "text-muted-foreground",
+}: {
+  label: string
+  value: string
+  options: readonly TaskListboxOption[]
+  onChange: (value: string) => void
+  emptyClassName?: string
+}) {
+  const fieldId = useId()
+  const listId = useId()
+  const [listboxOpen, setListboxOpen] = useState(false)
+  const selectedOption = options.find((option) => option.value === value)
+  const selectedLabel = selectedOption?.label || options[0]?.label || "선택"
+
+  function handleListboxSelect(nextValue: string) {
+    onChange(nextValue)
+    setListboxOpen(false)
+  }
+
+  return (
+    <div
+      className="relative grid min-w-0 gap-1.5 text-sm font-medium"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+        setListboxOpen(false)
+      }}
+    >
+      <label id={fieldId}>{label}</label>
+      <button
+        type="button"
+        aria-labelledby={fieldId}
+        aria-haspopup="listbox"
+        aria-expanded={listboxOpen}
+        aria-controls={listId}
+        onClick={() => setListboxOpen((open) => !open)}
+        className={[
+          "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition",
+          listboxOpen ? "border-ring ring-2 ring-ring/40" : "hover:border-foreground/30",
+        ].join(" ")}
+      >
+        <span className={value ? "truncate text-foreground" : `truncate ${emptyClassName}`}>{selectedLabel}</span>
+        <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", listboxOpen ? "rotate-90" : ""].join(" ")} />
+      </button>
+      {listboxOpen && (
+        <div
+          id={listId}
+          role="listbox"
+          aria-labelledby={fieldId}
+          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg"
+        >
+          {options.map((option) => {
+            const selected = option.value === value
+            return (
+              <button
+                key={option.value || "__empty_listbox_value__"}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => handleListboxSelect(option.value)}
+                className={[
+                  "flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-sm outline-none transition-colors",
+                  selected ? "bg-primary/10 text-primary" : "hover:bg-muted",
+                ].join(" ")}
+              >
+                <span className="truncate">{option.label}</span>
+                {selected && <Check className="size-4 shrink-0" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PrioritySelectField({
+  value,
+  onChange,
+}: {
+  value: OpsTaskPriority
+  onChange: (value: OpsTaskPriority) => void
+}) {
+  return (
+    <TaskListboxField
+      label="우선순위"
+      value={value}
+      options={TODO_FORM_PRIORITY_OPTIONS.map((priority) => ({ value: priority.value, label: priority.label }))}
+      onChange={(nextValue) => onChange(nextValue as OpsTaskPriority)}
+      emptyClassName="text-foreground"
+    />
+  )
+}
+
+function TeamSelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: readonly string[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <TaskListboxField
+      label={label}
+      value={value}
+      options={[{ value: "", label: "미지정" }, ...options.map((team) => ({ value: team, label: team }))]}
+      onChange={onChange}
+    />
+  )
+}
+
 type LinkedSelectOption = {
   id: string
   label: string
@@ -1541,7 +1819,9 @@ function LinkedSelect({
 }) {
   const fieldId = useId()
   const queryId = useId()
+  const listId = useId()
   const [linkedQuery, setLinkedQuery] = useState("")
+  const [isLinkedSearchOpen, setIsLinkedSearchOpen] = useState(false)
   const shouldShowLinkedSearch = options.length > LINKED_SELECT_SEARCH_THRESHOLD
   const normalizedLinkedQuery = linkedQuery.trim().toLowerCase()
   const selectedOption = options.find((option) => option.id === value)
@@ -1549,76 +1829,136 @@ function LinkedSelect({
     if (!shouldShowLinkedSearch || !normalizedLinkedQuery) return []
     return options.filter((option) => optionSearchText(option).includes(normalizedLinkedQuery))
   }, [normalizedLinkedQuery, options, shouldShowLinkedSearch])
-  const filteredOptions = useMemo(() => {
-    const shouldDeferLinkedOptions = shouldShowLinkedSearch && !normalizedLinkedQuery
-    if (shouldDeferLinkedOptions) return selectedOption ? [selectedOption] : []
-
-    const nextOptions = shouldShowLinkedSearch && normalizedLinkedQuery ? matchedOptions : options
-
-    const limitedOptions = normalizedLinkedQuery ? nextOptions.slice(0, LINKED_SELECT_QUERY_OPTION_LIMIT) : nextOptions
-    if (!selectedOption || limitedOptions.some((option) => option.id === selectedOption.id)) return limitedOptions
-    return [selectedOption, ...limitedOptions]
-  }, [matchedOptions, normalizedLinkedQuery, options, selectedOption, shouldShowLinkedSearch])
   const quickSelectOption = useMemo(() => {
     if (!shouldShowLinkedSearch || !normalizedLinkedQuery) return undefined
     const exactOption = matchedOptions.find((option) => optionExactSearchParts(option).includes(normalizedLinkedQuery))
     return exactOption || (matchedOptions.length === 1 ? matchedOptions[0] : undefined)
   }, [matchedOptions, normalizedLinkedQuery, shouldShowLinkedSearch])
-  const emptyOptionLabel = shouldShowLinkedSearch && !normalizedLinkedQuery
-    ? `${label} 검색 후 선택`
-    : shouldShowLinkedSearch && normalizedLinkedQuery && matchedOptions.length === 0
-      ? "검색 결과 없음"
-      : "선택"
+  const searchOptions = useMemo(() => {
+    const nextOptions = normalizedLinkedQuery ? matchedOptions : options
+    const limitedOptions = nextOptions.slice(0, LINKED_SELECT_QUERY_OPTION_LIMIT)
+    if (!selectedOption || limitedOptions.some((option) => option.id === selectedOption.id)) return limitedOptions
+    return [selectedOption, ...limitedOptions]
+  }, [matchedOptions, normalizedLinkedQuery, options, selectedOption])
+  const selectedLabel = selectedOption
+    ? selectedOption.meta ? `${selectedOption.label} · ${selectedOption.meta}` : selectedOption.label
+    : `${label} 검색 후 선택`
+  const emptySearchResultLabel = "검색 결과 없음"
 
   function handleLinkedChange(nextValue: string) {
     if (nextValue === LINKED_SELECT_MANUAL_VALUE) {
       onManualSelect?.()
       onChange("")
       setLinkedQuery("")
+      setIsLinkedSearchOpen(false)
       return
     }
     onChange(nextValue)
     setLinkedQuery("")
+    setIsLinkedSearchOpen(false)
   }
 
   function handleLinkedQueryKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      setLinkedQuery("")
+      setIsLinkedSearchOpen(false)
+      return
+    }
     if (event.key !== "Enter" || !quickSelectOption) return
     event.preventDefault()
     handleLinkedChange(quickSelectOption.id)
   }
 
   return (
-    <div className="grid min-w-0 gap-1.5 text-sm font-medium">
-      <label htmlFor={fieldId}>{label}</label>
-      {shouldShowLinkedSearch ? (
+    <div
+      className="relative grid min-w-0 gap-1.5 text-sm font-medium"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+        setIsLinkedSearchOpen(false)
+      }}
+    >
+      <label id={fieldId}>{label}</label>
+      {isLinkedSearchOpen && shouldShowLinkedSearch ? (
         <Input
           id={queryId}
           type="search"
           value={linkedQuery}
           placeholder={`${label} 검색`}
           aria-label={`${label} 검색`}
+          aria-controls={listId}
           autoComplete="off"
+          autoFocus
           className="h-9 min-w-0"
           onChange={(event) => setLinkedQuery(event.target.value)}
           onKeyDown={handleLinkedQueryKeyDown}
         />
-      ) : null}
-      <select
-        id={fieldId}
-        aria-label={label}
-        aria-describedby={shouldShowLinkedSearch ? queryId : undefined}
-        value={value}
-        onChange={(event) => handleLinkedChange(event.target.value)}
-        className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm shadow-xs outline-none focus:border-ring focus:ring-ring/40 focus:ring-2"
-      >
-        <option value="">{emptyOptionLabel}</option>
-        {onManualSelect && <option value={LINKED_SELECT_MANUAL_VALUE}>{manualLabel || "직접 입력"}</option>}
-        {filteredOptions.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.meta ? `${option.label} · ${option.meta}` : option.label}
-          </option>
-        ))}
-      </select>
+      ) : (
+        <button
+          type="button"
+          aria-labelledby={fieldId}
+          aria-haspopup="listbox"
+          aria-expanded={isLinkedSearchOpen}
+          aria-controls={listId}
+          onClick={() => setIsLinkedSearchOpen((open) => !open)}
+          className={[
+            "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
+            isLinkedSearchOpen ? "border-ring ring-2 ring-ring/40" : "",
+          ].join(" ")}
+        >
+          <span className={selectedOption ? "truncate text-foreground" : "truncate text-muted-foreground"}>{selectedOption ? selectedLabel : "선택"}</span>
+          {shouldShowLinkedSearch ? (
+            <Search className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", isLinkedSearchOpen ? "rotate-90" : ""].join(" ")} />
+          )}
+        </button>
+      )}
+      {isLinkedSearchOpen && (
+        <div
+          id={listId}
+          role="listbox"
+          aria-labelledby={fieldId}
+          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg"
+        >
+          {onManualSelect && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={false}
+              onClick={() => handleLinkedChange(LINKED_SELECT_MANUAL_VALUE)}
+              className="flex w-full items-center rounded px-2.5 py-2 text-left text-sm hover:bg-muted"
+            >
+              {manualLabel || "직접 입력"}
+            </button>
+          )}
+          {searchOptions.map((option) => {
+            const selected = option.id === value
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => handleLinkedChange(option.id)}
+                className={[
+                  "flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-sm outline-none transition-colors",
+                  selected ? "bg-primary/10 text-primary" : "hover:bg-muted",
+                ].join(" ")}
+              >
+                <span className="min-w-0 truncate">{option.meta ? `${option.label} · ${option.meta}` : option.label}</span>
+                {selected && <Check className="size-4 shrink-0" />}
+              </button>
+            )
+          })}
+          {searchOptions.length === 0 && (
+            <div className="px-2.5 py-3 text-sm text-muted-foreground" role="status">
+              {emptySearchResultLabel}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -1687,6 +2027,229 @@ function TextField({
         onInput={(event) => handleInputChange(event.currentTarget.value)}
       />
     </label>
+  )
+}
+
+const CALENDAR_WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"]
+
+function getCalendarMonthDate(value: string) {
+  const dateKey = toDateKey(value) || toDateKey(new Date())
+  const [year, month] = dateKey.split("-").map(Number)
+  return new Date(year, month - 1, 1)
+}
+
+function addCalendarMonths(value: Date, amount: number) {
+  return new Date(value.getFullYear(), value.getMonth() + amount, 1)
+}
+
+function getCalendarMonthLabel(value: Date) {
+  return `${value.getFullYear()}년 ${value.getMonth() + 1}월`
+}
+
+function buildCalendarDateCells(calendarMonth: Date) {
+  const todayKey = toDateKey(new Date())
+  const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1)
+  const gridStart = new Date(monthStart)
+  gridStart.setDate(monthStart.getDate() - monthStart.getDay())
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart)
+    date.setDate(gridStart.getDate() + index)
+    const dateKey = toDateKey(date)
+    return {
+      dateKey,
+      dayLabel: String(date.getDate()),
+      isCurrentMonth: date.getMonth() === calendarMonth.getMonth(),
+      isToday: dateKey === todayKey,
+    }
+  })
+}
+
+function DateField({
+  label,
+  value,
+  onChange,
+  onClear,
+  clearLabel,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  onClear: () => void
+  clearLabel: string
+}) {
+  const fieldId = useId()
+  const calendarId = useId()
+  const manualInputId = useId()
+  const [calendarDateOpen, setCalendarDateOpen] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(value))
+  const [manualDate, setManualDate] = useState(value)
+  const selectedDateLabel = value ? dateLabel(value) : "연도. 월. 일."
+  const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
+
+  function handleDateSelect(nextValue: string) {
+    onChange(nextValue)
+    setManualDate(nextValue)
+    setCalendarMonth(getCalendarMonthDate(nextValue))
+    setCalendarDateOpen(false)
+  }
+
+  function applyManualDate() {
+    const nextValue = manualDate.trim()
+    if (!nextValue) {
+      onClear()
+      setCalendarDateOpen(false)
+      return
+    }
+    onChange(nextValue)
+    setCalendarMonth(getCalendarMonthDate(nextValue))
+    setCalendarDateOpen(false)
+  }
+
+  function handleManualDateKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      setCalendarDateOpen(false)
+      setManualDate(value)
+      return
+    }
+    if (event.key !== "Enter") return
+    event.preventDefault()
+    applyManualDate()
+  }
+
+  return (
+    <Popover open={calendarDateOpen} onOpenChange={setCalendarDateOpen}>
+      <div className="relative grid min-w-0 gap-1.5 text-sm font-medium">
+        <label id={fieldId}>{label}</label>
+        <span className="relative block min-w-0">
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-labelledby={fieldId}
+              aria-haspopup="dialog"
+              aria-expanded={calendarDateOpen}
+              aria-controls={calendarId}
+              onClick={() => {
+                setCalendarMonth(getCalendarMonthDate(value))
+                setManualDate(value)
+              }}
+              className={[
+                "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
+                value ? "pr-10" : "",
+                calendarDateOpen ? "border-ring ring-2 ring-ring/40" : "",
+              ].filter(Boolean).join(" ")}
+            >
+              <span className={value ? "truncate text-foreground" : "truncate text-muted-foreground"}>{selectedDateLabel}</span>
+              <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+            </button>
+          </PopoverTrigger>
+          {value && (
+            <button
+              type="button"
+              aria-label={clearLabel}
+              onClick={(event) => {
+                event.stopPropagation()
+                onClear()
+                setManualDate("")
+              }}
+              className="absolute right-2 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </span>
+      </div>
+      {calendarDateOpen && (
+        <PopoverContent
+          id={calendarId}
+          role="dialog"
+          aria-labelledby={fieldId}
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden p-0"
+        >
+          <div className="flex items-center justify-between border-b px-2 py-1.5">
+            <button
+              type="button"
+              aria-label="이전 달"
+              onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="text-sm font-semibold">{getCalendarMonthLabel(calendarMonth)}</span>
+            <button
+              type="button"
+              aria-label="다음 달"
+              onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+          <div role="grid" aria-label={`${label} 달력`} className="grid grid-cols-7 gap-1 p-2">
+            {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
+              <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
+                {weekday}
+              </div>
+            ))}
+            {calendarCells.map((cell) => {
+              const selected = cell.dateKey === value
+              return (
+                <button
+                  key={cell.dateKey}
+                  type="button"
+                  role="gridcell"
+                  aria-selected={selected}
+                  aria-label={`${cell.dateKey} 선택`}
+                  onClick={() => handleDateSelect(cell.dateKey)}
+                  className={[
+                    "grid h-8 min-w-0 place-items-center rounded-md text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                    selected ? "bg-primary text-primary-foreground shadow-xs" : "",
+                    !selected && cell.isToday ? "border border-primary/50 text-primary" : "",
+                    !selected && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
+                    !selected && !cell.isToday && !cell.isCurrentMonth ? "text-muted-foreground/45 hover:bg-muted/60" : "",
+                  ].join(" ")}
+                >
+                  {cell.dayLabel}
+                </button>
+              )
+            })}
+          </div>
+          <div className="grid gap-2 border-t bg-muted/30 px-2.5 py-2">
+            <label htmlFor={manualInputId} className="text-xs font-medium text-muted-foreground">직접 날짜 입력</label>
+            <div className="flex gap-2">
+              <Input
+                id={manualInputId}
+                type="text"
+                inputMode="numeric"
+                value={manualDate}
+                placeholder="YYYY-MM-DD"
+                className="h-8 min-w-0"
+                onChange={(event) => setManualDate(event.target.value)}
+                onKeyDown={handleManualDateKeyDown}
+              />
+              <Button type="button" variant="outline" size="sm" onClick={applyManualDate} className="h-8 shrink-0 px-2.5">
+                적용
+              </Button>
+            </div>
+          </div>
+        </PopoverContent>
+      )}
+    </Popover>
+  )
+}
+
+function ReadonlyInfoField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid min-w-0 gap-1.5 text-sm font-medium">
+      <span>{label}</span>
+      <div className="flex h-9 min-w-0 items-center rounded-md border bg-muted/35 px-3 text-sm text-muted-foreground">
+        <span className="truncate">{value || "-"}</span>
+      </div>
+    </div>
   )
 }
 
@@ -1829,15 +2392,17 @@ function AutoSyncInlineBadge({ task }: { task: OpsTask }) {
   )
 }
 
-function TodoPriorityBadge({ priority }: { priority: OpsTaskPriority }) {
-  if (priority === "normal") return null
+function TodoPriorityBadge({ priority, showNormal = false }: { priority: OpsTaskPriority; showNormal?: boolean }) {
+  if (priority === "normal" && !showNormal) return null
 
   const className =
     priority === "urgent"
       ? "border-red-200 bg-red-50 text-red-700"
       : priority === "high"
         ? "border-orange-200 bg-orange-50 text-orange-700"
-        : "border-slate-200 bg-slate-50 text-slate-600"
+        : priority === "low"
+          ? "border-slate-200 bg-slate-50 text-slate-600"
+          : "border-primary/25 bg-primary/5 text-primary"
 
   return (
     <Badge variant="outline" className={className}>
@@ -1848,17 +2413,12 @@ function TodoPriorityBadge({ priority }: { priority: OpsTaskPriority }) {
 
 function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { status: OpsTaskStatus; label: string } | null {
   if (task.status === "canceled") return { status: "requested", label: "다시 열기" }
-
-  if (task.type === "general") {
-    if (task.status === "done") return { status: "requested", label: "다시 열기" }
-    if (task.status === "on_hold") return { status: "in_progress", label: "재개" }
-    return { status: "done", label: "완료" }
-  }
-
+  if (task.status === "done") return { status: "requested", label: "다시 열기" }
+  if (task.status === "on_hold") return { status: "in_progress", label: "재개" }
   if (task.status === "requested") return { status: "confirmed", label: "확인" }
   if (task.status === "confirmed") return { status: "in_progress", label: "진행" }
-  if (task.status === "in_progress") return { status: "done", label: "완료" }
-  if (task.status === "on_hold") return { status: "in_progress", label: "재개" }
+  if (task.status === "in_progress") return { status: "review_requested", label: "검토 요청" }
+  if (task.status === "review_requested") return { status: "done", label: "완료" }
   return null
 }
 
@@ -1901,17 +2461,19 @@ function getNextRegistrationPipelineAction(task: Pick<OpsTask, "type" | "status"
 
 function getSecondaryTaskStatusOptions(task: Pick<OpsTask, "status" | "type">) {
   if (task.status === "done" || task.status === "canceled") return []
-  if (task.type === "general") return []
-
-  return OPS_TASK_STATUSES.filter((status) => (
-    ["on_hold", "canceled"].includes(status.value) &&
-    status.value !== task.status &&
-    status.value !== getNextTaskStatusAction(task)?.status
-  ))
+  if (task.type !== "general") {
+    return OPS_TASK_STATUSES.filter((status) => (
+      ["on_hold", "canceled"].includes(status.value) &&
+      status.value !== task.status &&
+      status.value !== getNextTaskStatusAction(task)?.status
+    ))
+  }
+  if (task.status === "review_requested") return [{ value: "in_progress", label: "수정 요청" }]
+  return []
 }
 
 function shouldShowDetailStatusBadge(task: Pick<OpsTask, "type" | "status">) {
-  return task.type !== "general" || isClosedOpsTask(task)
+  return task.type !== "general" || task.status === "review_requested" || isClosedOpsTask(task)
 }
 
 function getTaskPrimaryName(input: OpsTaskInput) {
@@ -2055,7 +2617,9 @@ function parseTodoistQuickAdd(
   ])
 
   tokens.forEach((token) => {
-    const normalized = token.toLowerCase()
+    const cleanToken = cleanQuickAddToken(token)
+    const normalized = normalizeQuickAddToken(token)
+    if (!cleanToken) return
     const setDueAt = (nextDueAt: string) => {
       dueAt = explicitTime ? withTime(nextDueAt, explicitTime) : nextDueAt
     }
@@ -2132,31 +2696,31 @@ function parseTodoistQuickAdd(
     }
 
     if (collectingQuickAddMemo) {
-      labels.push(normalizeQuickAddMemoToken(token))
+      labels.push(normalizeQuickAddMemoToken(cleanToken))
       return
     }
     if (pendingDueLookup) {
       pendingDueLookup = false
-      if (applyDateToken(token)) return
+      if (applyDateToken(cleanToken)) return
     }
     if (pendingAssigneeLookup) {
       pendingAssigneeLookup = false
-      applyAssignee(token)
+      applyAssignee(cleanToken)
       return
     }
-    const memoDirective = getQuickAddMemoDirective(token)
+    const memoDirective = getQuickAddMemoDirective(cleanToken)
     if (memoDirective) {
       collectingQuickAddMemo = true
       if (memoDirective.value) labels.push(normalizeQuickAddMemoToken(memoDirective.value))
       return
     }
-    const dueDirective = getQuickAddDueDirective(token)
+    const dueDirective = getQuickAddDueDirective(cleanToken)
     if (dueDirective) {
       if (dueDirective.value) applyDateToken(dueDirective.value)
       else pendingDueLookup = true
       return
     }
-    const assigneeDirective = getQuickAddAssigneeDirective(token)
+    const assigneeDirective = getQuickAddAssigneeDirective(cleanToken)
     if (assigneeDirective) {
       if (assigneeDirective.value) applyAssignee(assigneeDirective.value)
       else pendingAssigneeLookup = true
@@ -2198,34 +2762,23 @@ function parseTodoistQuickAdd(
       assigneeId = currentUserId
       return
     }
-    if (["p1", "!!", "!1", "긴급", "급함", "최우선"].includes(normalized)) {
-      priority = "urgent"
+    const priorityAlias = TODO_QUICK_ADD_PRIORITY_ALIASES[normalized]
+    if (priorityAlias) {
+      priority = priorityAlias
       return
     }
-    if (["p2", "!2", "중요"].includes(normalized)) {
-      priority = "high"
+    if ((cleanToken.startsWith("@") || cleanToken.startsWith("#")) && cleanToken.length > 1) {
+      labels.push(normalizeQuickAddMemoToken(cleanToken))
       return
     }
-    if (["p3", "!3", "보통"].includes(normalized)) {
-      priority = "normal"
-      return
-    }
-    if (["p4", "!4", "낮음"].includes(normalized)) {
-      priority = "low"
-      return
-    }
-    if ((token.startsWith("@") || token.startsWith("#")) && token.length > 1) {
-      labels.push(normalizeQuickAddMemoToken(token))
-      return
-    }
-    if (token.startsWith("+") && token.length > 1) {
-      const assigneeName = token.slice(1)
+    if (cleanToken.startsWith("+") && cleanToken.length > 1) {
+      const assigneeName = cleanToken.slice(1)
       applyAssignee(assigneeName)
       return
     }
     pendingMeridiem = ""
     pendingWeekdayModifier = ""
-    titleTokens.push(token)
+    titleTokens.push(cleanToken)
   })
 
   return {
@@ -2253,7 +2806,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [loading, setLoading] = useState(() => !initialWorkspaceData)
   const [view, setView] = useState<ViewKey>("all")
   const [todoView, setTodoView] = useState<TodoViewKey>("inbox")
-  const [todoFilter, setTodoFilter] = useState<TodoFilterKey>("all")
+  const [todoSort, setTodoSort] = useState<TodoSortKey>("due")
+  const [requestedByFilter, setRequestedByFilter] = useState<TodoSelectFilterKey>("all")
+  const [requestedTeamFilter, setRequestedTeamFilter] = useState<TodoSelectFilterKey>("all")
+  const [assigneeFilter, setAssigneeFilter] = useState<TodoSelectFilterKey>("all")
+  const [assigneeTeamFilter, setAssigneeTeamFilter] = useState<TodoSelectFilterKey>("all")
   const [taskFocus, setTaskFocus] = useState<TaskFocus>("none")
   const [registrationPipeline, setRegistrationPipeline] = useState(REGISTRATION_PIPELINE_ALL)
   const [query, setQuery] = useState("")
@@ -2290,6 +2847,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     () => [user?.name, user?.email, user?.loginId].map((value) => String(value || "").trim()).find(Boolean) || "",
     [user?.email, user?.loginId, user?.name],
   )
+  const currentUserTeam = useMemo(
+    () => [
+      (user as { teacherTeam?: string; teacher_team?: string; team?: string } | null)?.teacherTeam,
+      (user as { teacherTeam?: string; teacher_team?: string; team?: string } | null)?.teacher_team,
+      (user as { teacherTeam?: string; teacher_team?: string; team?: string } | null)?.team,
+    ].map((value) => String(value || "").trim()).find(Boolean) || "",
+    [user],
+  )
+  const currentUserContext = useMemo(() => ({
+    currentUserId,
+    currentUserLabel,
+    currentUserTeam,
+  }), [currentUserId, currentUserLabel, currentUserTeam])
   const canDelete = canManageAll || isStaff
   const canDeleteTask = useCallback(
     (task: OpsTask) => {
@@ -2307,7 +2877,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const workspaceLabel = WORKSPACE_LABELS[workspace]
 
   const reload = useCallback(async (force = false, showPending = true) => {
-    const loadOptions = { taskType: scopedTaskType, includeManagementOptions: !isTodoWorkspace }
+    const loadOptions = { taskType: scopedTaskType, includeManagementOptions: !isTodoWorkspace, includeTeacherOptions: true }
     if (showPending && (force || !getCachedOpsTaskWorkspaceData(loadOptions))) setLoading(true)
     const nextData = await loadOpsTaskWorkspaceData({ ...loadOptions, force })
     setData(nextData)
@@ -2324,7 +2894,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     const nextTodoRouteState = isTodoWorkspace ? getTodoRouteState(searchParams) : null
     if (nextTodoRouteState) {
       setTodoView(nextTodoRouteState.list)
-      setTodoFilter(nextTodoRouteState.filter || "all")
+      setTodoSort(nextTodoRouteState.sort || (nextTodoRouteState.status ? "status" : "due"))
     } else if (!isTodoWorkspace && nextView && isViewKey(nextView)) {
       setView(nextView)
     }
@@ -2358,28 +2928,22 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const syncTodoView = (nextView: TodoViewKey) => {
     setTodoView(nextView)
     setTaskFocus("none")
-    if (nextView !== "filters") setTodoFilter("all")
     const searchParams = new URLSearchParams(window.location.search)
     searchParams.set("list", nextView)
     searchParams.delete("view")
     searchParams.delete("focus")
-    if (nextView !== "filters") searchParams.delete("filter")
+    searchParams.delete("filter")
     const queryString = searchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
-  const syncTodoFilter = (nextFilter: TodoFilterKey) => {
-    setTodoView("filters")
-    setTodoFilter(nextFilter)
+  const syncTodoSort = (nextSort: TodoSortKey) => {
+    setTodoSort(nextSort)
     const searchParams = new URLSearchParams(window.location.search)
-    searchParams.set("list", "filters")
+    searchParams.set("list", todoView)
+    searchParams.set("sort", nextSort)
     searchParams.delete("view")
     searchParams.delete("focus")
-    if (nextFilter === "all") {
-      searchParams.delete("filter")
-    } else {
-      searchParams.set("filter", nextFilter)
-    }
     const queryString = searchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
@@ -2396,6 +2960,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   }, [])
 
   const tasks = data?.tasks || EMPTY_TASKS
+  const profiles = data?.profiles || EMPTY_PROFILE_OPTIONS
   const students = data?.students || EMPTY_STUDENT_OPTIONS
   const classes = data?.classes || EMPTY_CLASS_OPTIONS
   const textbooks = data?.textbooks || EMPTY_TEXTBOOK_OPTIONS
@@ -2425,8 +2990,20 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setDetailOpen(true)
   }, [data, searchParams, syncTaskDeepLink, taskById])
   const profileLabelById = useMemo(
-    () => new Map((data?.profiles || []).map((profile) => [profile.id, profile.label])),
-    [data?.profiles],
+    () => new Map(profiles.map((profile) => [profile.id, profile.label])),
+    [profiles],
+  )
+  const profileTeamById = useMemo(
+    () => buildTaskProfileTeamLookup(profiles, teachers),
+    [profiles, teachers],
+  )
+  const currentUserTaskTeam = useMemo(
+    () => profileTeamById.get(currentUserId) || normalizeTaskTeamValue(currentUserTeam),
+    [currentUserId, currentUserTeam, profileTeamById],
+  )
+  const assigneeProfileOptions = useMemo(
+    () => getProfilesForTeam(profiles, form.assigneeTeam || "", profileTeamById, form.assigneeId || ""),
+    [form.assigneeId, form.assigneeTeam, profileTeamById, profiles],
   )
   const scopedTasks = useMemo(
     () => tasks.filter((task) => task.type === scopedTaskType),
@@ -2454,30 +3031,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     [operationMetrics, taskFocus],
   )
   const todayKey = useMemo(() => toDateKey(new Date()), [])
+  const todoFilterOptions = useMemo(() => buildTodoFilterOptions(scopedTasks), [scopedTasks])
   const todoCounts = useMemo(() => {
     const openGeneralTasks = scopedTasks.filter((task) => !isClosedOpsTask(task))
     return {
-      inbox: openGeneralTasks.filter((task) => !toDateKey(task.dueAt)).length,
-      today: openGeneralTasks.filter((task) => hasOpsTaskCalendarDate(task, todayKey)).length,
-      upcoming: openGeneralTasks.filter((task) => hasOpsTaskFutureCalendarDate(task, todayKey)).length,
-      mine: openGeneralTasks.filter((task) => isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)).length,
-      board: openGeneralTasks.length,
-      calendar: getOpsTaskCalendarItems(openGeneralTasks).length,
-      filters: openGeneralTasks.filter((task) => {
-        const dueDate = toDateKey(task.dueAt)
-        return (
-          (Boolean(dueDate) && dueDate < todayKey) ||
-          hasOpsTaskOverdueCalendarDate(task, todayKey) ||
-          isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel) ||
-          task.priority === "urgent" ||
-          task.priority === "high" ||
-          !task.assigneeId ||
-          !hasTaskSchedule(task)
-        )
-      }).length,
+      inbox: openGeneralTasks.filter((task) => isOpsTaskInUserInbox(task, currentUserContext)).length,
+      sent: openGeneralTasks.filter((task) => isOpsTaskInUserSent(task, currentUserContext)).length,
       completed: scopedTasks.filter((task) => isClosedOpsTask(task)).length,
     }
-  }, [currentUserId, currentUserLabel, scopedTasks, todayKey])
+  }, [currentUserContext, scopedTasks])
   const registrationPipelineCountTasks = useMemo(() => {
     if (!isRegistrationWorkspace) return EMPTY_TASKS
 
@@ -2492,21 +3054,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     const nextTasks = todoTaskSource
       .filter((task) => {
         if (isTodoWorkspace) {
-          const dueDate = toDateKey(task.dueAt)
-          if (hasQuery) return todoView === "completed" ? isClosedOpsTask(task) : isOpenTask(task)
-          if (todoView === "inbox") return isOpenTask(task) && !dueDate
-          if (todoView === "today") return hasOpsTaskCalendarDate(task, todayKey)
-          if (todoView === "upcoming") return hasOpsTaskFutureCalendarDate(task, todayKey)
-          if (todoView === "mine") return isOpenTask(task) && isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)
-          if (todoView === "board") return isOpenTask(task)
-          if (todoView === "calendar") return isOpenTask(task)
-          if (todoView === "filters") {
-            if (!isOpenTask(task)) return false
-            if (todoFilter === "overdue") return (Boolean(dueDate) && dueDate < todayKey) || hasOpsTaskOverdueCalendarDate(task, todayKey)
-            if (todoFilter === "priority") return task.priority === "urgent" || task.priority === "high"
-            if (todoFilter === "unassigned") return !task.assigneeId || !hasTaskSchedule(task)
-            return true
-          }
+          if (todoView === "inbox") return isOpsTaskInUserInbox(task, currentUserContext) && isOpenTask(task)
+          if (todoView === "sent") return isOpsTaskInUserSent(task, currentUserContext) && isOpenTask(task)
           return isClosedOpsTask(task)
         }
 
@@ -2528,10 +3077,18 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         return true
       })
       .filter((task) => matchesSearch(task, deferredQuery))
+      .filter((task) => !isTodoWorkspace || matchesTodoTeamFilters(task, {
+        requestedByFilter,
+        requestedTeamFilter,
+        assigneeFilter,
+        assigneeTeamFilter,
+      }))
     if (!isTodoWorkspace) return nextTasks
-    if (todoView === "calendar") return nextTasks
-    return todoView === "completed" ? sortCompletedTodoTasks(nextTasks) : sortTodoTasks(nextTasks, todayKey)
-  }, [confirmationByTaskId, currentUserId, currentUserLabel, deferredQuery, hasQuery, isRegistrationWorkspace, isTodoWorkspace, isWordRetestWorkspace, registrationPipeline, scopedTasks, showClosed, taskFocus, todayKey, todoFilter, todoView, view, wordRetestMode])
+    if (todoView === "completed") return sortCompletedTodoTasks(nextTasks)
+    if (todoSort === "status") return sortOpsTasksByWorkflowStatus(nextTasks, todayKey)
+    if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
+    return sortOpsTasksByWorkDate(nextTasks, todayKey)
+  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, wordRetestMode])
 
   const calendarItems = useMemo(
     () => {
@@ -2547,16 +3104,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     teachers,
     optionIndexes,
   ), [classes, optionIndexes, students, teachers, textbooks, visibleTasks])
-  const todoBoardColumns = useMemo(
-    () => buildTodoBoardColumns(visibleTasks, todayKey, currentUserId, currentUserLabel),
-    [currentUserId, currentUserLabel, todayKey, visibleTasks],
-  )
   const dueTodayValue = useMemo(() => quickDateTimeInputValue(0), [])
   const dueTomorrowValue = useMemo(() => quickDateTimeInputValue(1), [])
   const quickAddPreviewItems = useMemo<QuickAddPreviewItem[]>(() => {
     if (!isTodoWorkspace || !quickAddText.trim()) return []
 
-    const parsed = parseTodoistQuickAdd(quickAddText, data?.profiles || [], {
+    const parsed = parseTodoistQuickAdd(quickAddText, profiles, {
       currentUserId,
       currentUserLabel,
       dueTodayValue,
@@ -2568,8 +3121,13 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (parsed.priority && parsed.priority !== "normal") items.push({ key: "priority", label: getTaskPriorityLabel(parsed.priority) })
     if (parsed.memo) items.push({ key: "memo", label: parsed.memo })
     return items
-  }, [currentUserId, currentUserLabel, data?.profiles, dueTodayValue, dueTomorrowValue, isTodoWorkspace, profileLabelById, quickAddText, todayKey])
-  const isTodoFilteredEmpty = isTodoWorkspace && todoView === "filters" && todoFilter !== "all"
+  }, [currentUserId, currentUserLabel, dueTodayValue, dueTomorrowValue, isTodoWorkspace, profileLabelById, profiles, quickAddText, todayKey])
+  const isTodoFilteredEmpty = isTodoWorkspace && (
+    requestedByFilter !== "all" ||
+    requestedTeamFilter !== "all" ||
+    assigneeFilter !== "all" ||
+    assigneeTeamFilter !== "all"
+  )
   const isFilteredEmpty = hasQuery || isTodoFilteredEmpty || (!isTodoWorkspace && taskFocus !== "none") || (isRegistrationWorkspace && registrationPipeline !== REGISTRATION_PIPELINE_ALL)
   const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleTasks.length === 0
   const showToolbarCreate = !isTodoWorkspace && !showEmptyCreate
@@ -2577,7 +3135,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const createActionDisabled = saving || !canOpenCreate
   const showClosedToggle = !isTodoWorkspace && (todoCounts.completed > 0 || showClosed)
   const hasSearchableScopedTasks = isTodoWorkspace
-    ? todoCounts.board > 0
+    ? scopedTasks.length > 0
     : scopedTasks.some((task) => showClosed || isOpenTask(task))
   const showSearch = hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks
   const emptyActionLabel = `${workspaceLabel} 추가`
@@ -2601,6 +3159,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const previousFormStepLabel = previousFormDetailStep ? `이전: ${previousFormDetailStep.label}` : ""
   const nextFormStepLabel = nextFormDetailStep ? `다음: ${nextFormDetailStep.label}` : ""
   const showTemplateDueAt = isTemplateForm && form.type !== "word_retest"
+  const formRequestedAtLabel = dateLabel(editingTask?.createdAt || new Date().toISOString())
+  const formRequestedByLabel = profileLabelById.get(form.requestedBy || "") || editingTask?.requestedByLabel || (form.requestedBy === currentUserId ? currentUserLabel : "") || "미지정"
+  const formRequestedTeamLabel = form.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam || "미지정"
   const isFormDirty = formOpen && serializeOpsTaskInput(form) !== formBaselineRef.current
   const formDialogTitle = editingTask
     ? form.type === "general"
@@ -2615,8 +3176,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   function openCreate(type: OpsTaskType = scopedTaskType) {
     if (!canOpenCreate) return
     const defaultAssigneeId = currentUserId || ""
+    const defaultAssigneeTeam = profileTeamById.get(defaultAssigneeId) || ""
     const defaultDueAt = taskFocus === "today" ? dueTodayValue : ""
-    const nextForm = cloneForm({ ...EMPTY_FORM, type, assigneeId: defaultAssigneeId, dueAt: defaultDueAt })
+    const nextForm = cloneForm({
+      ...EMPTY_FORM,
+      type,
+      requestedBy: currentUserId,
+      requestedTeam: currentUserTaskTeam,
+      assigneeId: defaultAssigneeId,
+      assigneeTeam: defaultAssigneeTeam,
+      dueAt: defaultDueAt,
+    })
     blurActiveElementBeforeDialog()
     setEditingTask(null)
     setForm(nextForm)
@@ -2699,6 +3269,32 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setFormCompletionBlockers([])
     setConfirmingFormClose(false)
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function resetFormFeedback() {
+    setMessage("")
+    setFormCompletionBlockers([])
+    setConfirmingFormClose(false)
+  }
+
+  function handleAssigneeChange(value: string) {
+    resetFormFeedback()
+    const nextTeam = profileTeamById.get(value) || ""
+    setForm((current) => ({
+      ...current,
+      assigneeId: value,
+      assigneeTeam: nextTeam || current.assigneeTeam || "",
+    }))
+  }
+
+  function handleAssigneeTeamChange(value: string) {
+    resetFormFeedback()
+    const nextTeam = normalizeTaskTeamValue(value)
+    setForm((current) => ({
+      ...current,
+      assigneeTeam: nextTeam,
+      assigneeId: shouldClearProfileForTeam(current.assigneeId, nextTeam, profileTeamById) ? "" : current.assigneeId,
+    }))
   }
 
   const updateRegistration = (key: keyof NonNullable<OpsTaskInput["registration"]>, value: string | boolean) => {
@@ -2809,6 +3405,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const buildLocalTaskFromInput = (taskId: string, input: OpsTaskInput, existing?: OpsTask): OpsTask => {
     const timestamp = new Date().toISOString()
+    const requestedBy = input.requestedBy || existing?.requestedBy || currentUserId
     const assigneeId = input.assigneeId || ""
     const secondaryAssigneeId = input.secondaryAssigneeId || ""
     const status = input.status || existing?.status || "requested"
@@ -2819,10 +3416,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       type: input.type,
       status,
       priority: input.priority || existing?.priority || "normal",
-      requestedBy: existing?.requestedBy || currentUserId,
-      requestedByLabel: existing?.requestedByLabel || currentUserLabel,
+      requestedBy,
+      requestedByLabel: profileLabelById.get(requestedBy) || existing?.requestedByLabel || (requestedBy === currentUserId ? currentUserLabel : ""),
+      requestedTeam: input.requestedTeam || existing?.requestedTeam || "",
       assigneeId,
       assigneeLabel: profileLabelById.get(assigneeId) || "",
+      assigneeTeam: input.assigneeTeam || existing?.assigneeTeam || "",
       secondaryAssigneeId,
       secondaryAssigneeLabel: profileLabelById.get(secondaryAssigneeId) || "",
       studentId: input.studentId || "",
@@ -2833,6 +3432,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       textbookTitle: input.textbookTitle || "",
       campus: input.campus || "",
       subject: input.subject || "",
+      startAt: input.startAt || "",
       dueAt: input.dueAt || "",
       completedAt: pickInputCompletedAt(input, existing),
       memo: input.memo || "",
@@ -2850,7 +3450,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const submitQuickAdd = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const parsed = parseTodoistQuickAdd(quickAddText, data?.profiles || [], {
+    const parsed = parseTodoistQuickAdd(quickAddText, profiles, {
       currentUserId,
       currentUserLabel,
       dueTodayValue,
@@ -2862,9 +3462,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       setStatusUndo(null)
       return
     }
-    const quickDueAt = parsed.dueAt || (todoView === "today" ? dueTodayValue : "")
+    const quickDueAt = parsed.dueAt || ""
     const quickPriority = parsed.priority || "normal"
     const quickAssigneeId = parsed.assigneeId || ""
+    const quickAssigneeTeam = profileTeamById.get(quickAssigneeId) || ""
     const quickMemo = parsed.memo || ""
 
     setSaving(true)
@@ -2877,7 +3478,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         ...EMPTY_FORM,
         type: "general",
         title: parsed.title,
+        requestedBy: currentUserId,
+        requestedTeam: currentUserTaskTeam,
         assigneeId: quickAssigneeId,
+        assigneeTeam: quickAssigneeTeam,
         dueAt: quickDueAt,
         priority: quickPriority,
         memo: quickMemo,
@@ -2891,8 +3495,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         priority: quickPriority,
         requestedBy: currentUserId,
         requestedByLabel: currentUserLabel,
+        requestedTeam: currentUserTaskTeam,
         assigneeId: quickAssigneeId,
         assigneeLabel: profileLabelById.get(quickAssigneeId) || "",
+        assigneeTeam: quickAssigneeTeam,
         secondaryAssigneeId: "",
         secondaryAssigneeLabel: "",
         studentId: "",
@@ -2903,6 +3509,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         textbookTitle: "",
         campus: "",
         subject: "",
+        startAt: "",
         dueAt: quickDueAt,
         completedAt: "",
         memo: quickMemo,
@@ -2912,7 +3519,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         attachments: [],
         events: [],
       })
-      const nextTodoView = getTodoViewForDueAt(quickDueAt, todayKey)
+      const createdTask = buildLocalTaskFromInput(taskId, {
+        ...EMPTY_FORM,
+        type: "general",
+        title: parsed.title,
+        requestedBy: currentUserId,
+        requestedTeam: currentUserTaskTeam,
+        assigneeId: quickAssigneeId,
+        assigneeTeam: quickAssigneeTeam,
+        dueAt: quickDueAt,
+        priority: quickPriority,
+        memo: quickMemo,
+      })
+      const nextTodoView: TodoViewKey = isOpsTaskInUserInbox(createdTask, currentUserContext) ? "inbox" : "sent"
       if (todoView !== nextTodoView) {
         syncTodoView(nextTodoView)
       }
@@ -2943,7 +3562,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setStatusUndo(null)
     try {
       const wasEditing = Boolean(editingTask)
-      const inputWithCompletionIntent = applyFormCompletionIntent({ ...form, title: nextTitle }, formCompletionIntent)
+      const formWithRequesterDefaults: OpsTaskInput = form.type === "general"
+        ? {
+          ...form,
+          title: nextTitle,
+          requestedBy: form.requestedBy || editingTask?.requestedBy || currentUserId,
+          requestedTeam: form.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam,
+        }
+        : { ...form, title: nextTitle }
+      const inputWithCompletionIntent = applyFormCompletionIntent(formWithRequesterDefaults, formCompletionIntent)
       const payload = normalizeFormForSubmit(inputWithCompletionIntent)
       const completionBlockers = getOperationCompletionBlockers(
         payload,
@@ -3328,7 +3955,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
         {isTodoWorkspace && (
           <div className="grid gap-2">
-            <form onSubmit={submitQuickAdd} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border bg-background p-2">
+            <form onSubmit={submitQuickAdd} className="grid gap-2 rounded-md border bg-background p-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
               <Input
                 ref={quickAddInputRef}
                 value={quickAddText}
@@ -3339,20 +3966,31 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 onKeyDown={(event) => {
                   if (event.key === "Escape") setQuickAddText("")
                 }}
-                placeholder="할 일 추가"
+                placeholder="예: 긴급. 담당 홍길동. 내일까지 할 일 하기"
                 data-testid="todo-quick-add-input"
                 className="h-10 border-0 shadow-none focus-visible:ring-0"
               />
               <Button
                 type="submit"
                 size="sm"
-                aria-label="할 일 추가"
+                aria-label="자연어로 할 일 빠른 추가"
                 disabled={saving || !quickAddText.trim()}
-                className="size-10 shrink-0 px-0 sm:w-auto sm:px-3"
+                className="h-10 shrink-0 px-3"
                 data-testid="todo-quick-add-submit"
               >
                 <Plus className="size-4" />
-                <span className="sr-only sm:not-sr-only">추가</span>
+                <span>빠른 추가</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label="입력창으로 할 일 요청"
+                onClick={() => openCreate("general")}
+                disabled={createActionDisabled}
+                className="h-10 shrink-0 px-3"
+              >
+                추가
               </Button>
             </form>
             {quickAddPreviewItems.length > 0 && (
@@ -3435,13 +4073,20 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           </div>
         )}
 
-        {isTodoWorkspace && todoView === "filters" && (
-          <TodoFilterBar
-            value={todoFilter}
-            tasks={scopedTasks}
-            todayKey={todayKey}
-            onChange={syncTodoFilter}
-          />
+        {isTodoWorkspace && (
+          <div className="grid gap-2">
+            <TodoTeamFilterBar
+              options={todoFilterOptions}
+              requestedByFilter={requestedByFilter}
+              requestedTeamFilter={requestedTeamFilter}
+              assigneeFilter={assigneeFilter}
+              assigneeTeamFilter={assigneeTeamFilter}
+              onRequestedByChange={setRequestedByFilter}
+              onRequestedTeamChange={setRequestedTeamFilter}
+              onAssigneeChange={setAssigneeFilter}
+              onAssigneeTeamChange={setAssigneeTeamFilter}
+            />
+          </div>
         )}
 
         {isRegistrationWorkspace && (
@@ -3479,19 +4124,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
         {loading ? (
           <TaskListSkeleton showType={!isTodoWorkspace} />
-        ) : shouldHideEmptySurface ? null : isTodoWorkspace && todoView === "board" ? (
-          <TodoBoard
-            columns={todoBoardColumns}
-            todayKey={todayKey}
-            onOpen={openDetail}
-            onEdit={openEdit}
-            onStatusChange={(task, status) => void changeStatus(task, status)}
-            statusActionDisabled={saving}
-            onCreate={focusQuickAdd}
-            emptyLabel={emptyTaskLabel}
-            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
-          />
-        ) : (isTodoWorkspace && todoView === "calendar") || (!isTodoWorkspace && view === "calendar") ? (
+        ) : shouldHideEmptySurface ? null : !isTodoWorkspace && view === "calendar" ? (
           <CalendarList
             items={calendarItems}
             tasks={visibleTasks}
@@ -3553,6 +4186,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             emptyActionLabel={emptyActionLabel}
             showEmptyAction={showEmptyCreate}
             showType={false}
+            sortKey={todoSort}
+            onSortChange={syncTodoSort}
             completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
           />
         )}
@@ -3560,16 +4195,16 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
       <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className={[
-          "max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
-          isTemplateForm ? "sm:max-w-3xl" : "sm:max-w-xl",
+          "z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
+          isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
         ].join(" ")}>
-          <DialogHeader className="sticky top-0 z-20 -mx-6 -mt-6 border-b bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+          <DialogHeader className="-mx-6 -mt-6 border-b px-6 py-4">
             <DialogTitle>{formDialogTitle}</DialogTitle>
             <DialogDescription className="sr-only">
               운영 업무를 입력하고 저장합니다.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-4">
+          <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
             {message && !isTemplateForm && (
               <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">
                 {message}
@@ -3590,7 +4225,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
             {!isTemplateForm && (
               <>
-                <div className="grid gap-3">
+                <div className="grid gap-3 pt-1 md:grid-cols-[160px_minmax(0,1fr)]">
+                  <PrioritySelectField value={form.priority || "normal"} onChange={(value) => updateForm("priority", value)} />
                   <TextField
                     label="제목"
                     value={form.title}
@@ -3601,12 +4237,29 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
+                  <TeamSelectField label="담당팀" value={form.assigneeTeam || ""} options={TODO_TEAM_OPTIONS} onChange={handleAssigneeTeamChange} />
                   <ProfileSelect
                     value={form.assigneeId || ""}
-                    profiles={data?.profiles || []}
-                    onChange={(value) => updateForm("assigneeId", value)}
+                    profiles={assigneeProfileOptions}
+                    onChange={handleAssigneeChange}
                   />
-                  <TextField label="예정일" type="date" value={dateInputValue(form.dueAt)} onChange={(value) => updateForm("dueAt", value)} />
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <DateField
+                    label="시작일"
+                    value={dateInputValue(form.startAt)}
+                    onChange={(value) => updateForm("startAt", value)}
+                    onClear={() => updateForm("startAt", "")}
+                    clearLabel="시작일 지우기"
+                  />
+                  <DateField
+                    label="마감일"
+                    value={dateInputValue(form.dueAt)}
+                    onChange={(value) => updateForm("dueAt", value)}
+                    onClear={() => updateForm("dueAt", "")}
+                    clearLabel="마감일 지우기"
+                  />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/45 px-3 py-2">
@@ -3615,7 +4268,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                       type="button"
                       variant={form.assigneeId === currentUserId ? "default" : "outline"}
                       size="sm"
-                      onClick={() => updateForm("assigneeId", currentUserId)}
+                      onClick={() => handleAssigneeChange(currentUserId)}
                     >
                       <UserRound className="size-4" />
                       나에게
@@ -3623,12 +4276,21 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   )}
                   <Button
                     type="button"
+                    variant={dateInputValue(form.startAt) === dateInputValue(dueTodayValue) ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => updateForm("startAt", toDateKey(dueTodayValue))}
+                  >
+                    <CalendarDays className="size-4" />
+                    오늘 시작
+                  </Button>
+                  <Button
+                    type="button"
                     variant={dateInputValue(form.dueAt) === dateInputValue(dueTodayValue) ? "default" : "outline"}
                     size="sm"
                     onClick={() => updateForm("dueAt", toDateKey(dueTodayValue))}
                   >
                     <CalendarDays className="size-4" />
-                    오늘
+                    오늘 마감
                   </Button>
                   <Button
                     type="button"
@@ -3637,13 +4299,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                     onClick={() => updateForm("dueAt", toDateKey(dueTomorrowValue))}
                   >
                     <CalendarDays className="size-4" />
-                    내일
+                    내일 마감
                   </Button>
-                  {form.dueAt && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => updateForm("dueAt", "")}>
-                      예정일 지우기
-                    </Button>
-                  )}
                 </div>
 
                 <label htmlFor={formMemoId} className="grid gap-1.5 text-sm font-medium">
@@ -3653,9 +4310,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                     value={form.memo || ""}
                     onChange={(event) => updateForm("memo", event.target.value)}
                     placeholder="메모"
-                    className="min-h-24"
+                    className="min-h-20 resize-y"
                   />
                 </label>
+
+                <div className="grid gap-3 border-t pt-3 md:grid-cols-3">
+                  <ReadonlyInfoField label="요청팀" value={formRequestedTeamLabel} />
+                  <ReadonlyInfoField label="요청자" value={formRequestedByLabel} />
+                  <ReadonlyInfoField label="요청일시" value={formRequestedAtLabel} />
+                </div>
               </>
             )}
 
@@ -3728,11 +4391,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             {isTemplateForm && (
               <section className="grid gap-3 rounded-lg border bg-muted/20 p-3">
                 <div className={showTemplateDueAt ? "grid gap-3 md:grid-cols-2" : "grid gap-3"}>
-                  <ProfileSelect
-                    value={form.assigneeId || ""}
-                    profiles={data?.profiles || []}
-                    onChange={(value) => updateForm("assigneeId", value)}
-                  />
+	                  <ProfileSelect
+	                    value={form.assigneeId || ""}
+	                    profiles={profiles}
+	                    onChange={(value) => updateForm("assigneeId", value)}
+	                  />
                   {showTemplateDueAt && (
                     <TextField label={getDueAtDisplayLabel(form.type)} type="datetime-local" value={dateTimeInputValue(form.dueAt)} onChange={(value) => updateForm("dueAt", value)} />
                   )}
@@ -3747,15 +4410,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 )}
               </section>
             )}
-            <div className="sticky bottom-0 z-20 -mx-6 -mb-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:justify-end">
-              {confirmingFormClose && (
-                <div role="alert" className="flex w-full items-center justify-between gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive sm:mr-auto sm:w-auto">
-                  <span>입력 중</span>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmingFormClose(false)}>
-                    계속 작성
-                  </Button>
-                </div>
-              )}
+            <div className={[
+              "z-50 -mx-6 -mb-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:justify-end",
+              isTemplateForm ? "sm:sticky sm:bottom-0" : "",
+            ].filter(Boolean).join(" ")}>
               {formCompletionBlockers.length > 0 && (
                 (() => {
                   const firstBlocker = formCompletionBlockers[0]
@@ -3801,7 +4459,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 </div>
               )}
               <Button type="button" variant={confirmingFormClose ? "destructive" : "outline"} onClick={confirmingFormClose ? discardFormAndClose : closeForm} className="w-full sm:w-auto">
-                {confirmingFormClose ? "버리고 닫기" : "닫기"}
+                {confirmingFormClose ? "저장하지 않고 닫기" : "닫기"}
               </Button>
               <Button type="submit" disabled={saving} className="w-full sm:w-auto">{saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent)}</Button>
             </div>
@@ -3846,27 +4504,27 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           {selectedTaskFresh && (
             <div className={selectedTaskFresh.type === "general" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}>
               <div className="flex flex-col gap-3 rounded-lg border p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  {selectedTaskFresh.type !== "general" && <TaskTypeBadge type={selectedTaskFresh.type} />}
-                  {shouldShowDetailStatusBadge(selectedTaskFresh) && <TaskStatusBadge status={selectedTaskFresh.status} />}
-                  {selectedTaskFresh.type === "general" ? (
-                    <TodoPriorityBadge priority={selectedTaskFresh.priority} />
-                  ) : (
-                    <Badge variant="outline">{getTaskPriorityLabel(selectedTaskFresh.priority)}</Badge>
-                  )}
-                  {selectedTaskFresh.campus && <Badge variant="secondary">{selectedTaskFresh.campus}</Badge>}
-                  {selectedTaskFresh.subject && <Badge variant="secondary">{selectedTaskFresh.subject}</Badge>}
-                </div>
-                <dl className="grid gap-3 text-sm md:grid-cols-2">
-                  {selectedTaskFresh.type !== "general" && selectedTaskFresh.studentName && <Info label="학생" value={selectedTaskFresh.studentName} />}
-                  {selectedTaskFresh.type !== "general" && selectedTaskFresh.className && <Info label="수업" value={selectedTaskFresh.className} />}
-                  {selectedTaskFresh.type !== "general" && selectedTaskFresh.textbookTitle && <Info label="교재" value={selectedTaskFresh.textbookTitle} />}
-                  {(selectedTaskFresh.type !== "general" || selectedTaskFresh.assigneeLabel) && (
-                    <Info label="담당" value={selectedTaskFresh.assigneeLabel || "미지정"} />
-                  )}
-                  {selectedTaskFresh.dueAt && <Info label={getDueAtDisplayLabel(selectedTaskFresh.type)} value={dateLabel(selectedTaskFresh.dueAt)} />}
-                  {selectedTaskFresh.completedAt && <Info label="완료" value={dateLabel(selectedTaskFresh.completedAt)} />}
-                </dl>
+                {selectedTaskFresh.type === "general" ? (
+                  <GeneralTaskDetailPanel task={selectedTaskFresh} />
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <TaskTypeBadge type={selectedTaskFresh.type} />
+                      {shouldShowDetailStatusBadge(selectedTaskFresh) && <TaskStatusBadge status={selectedTaskFresh.status} />}
+                      <Badge variant="outline">{getTaskPriorityLabel(selectedTaskFresh.priority)}</Badge>
+                      {selectedTaskFresh.campus && <Badge variant="secondary">{selectedTaskFresh.campus}</Badge>}
+                      {selectedTaskFresh.subject && <Badge variant="secondary">{selectedTaskFresh.subject}</Badge>}
+                    </div>
+                    <dl className="grid gap-3 text-sm md:grid-cols-2">
+                      {selectedTaskFresh.studentName && <Info label="학생" value={selectedTaskFresh.studentName} />}
+                      {selectedTaskFresh.className && <Info label="수업" value={selectedTaskFresh.className} />}
+                      {selectedTaskFresh.textbookTitle && <Info label="교재" value={selectedTaskFresh.textbookTitle} />}
+                      {selectedTaskFresh.assigneeLabel && <Info label="담당" value={selectedTaskFresh.assigneeLabel || "미지정"} />}
+                      {selectedTaskFresh.dueAt && <Info label={getDueAtDisplayLabel(selectedTaskFresh.type)} value={dateLabel(selectedTaskFresh.dueAt)} />}
+                      {selectedTaskFresh.completedAt && <Info label="완료" value={dateLabel(selectedTaskFresh.completedAt)} />}
+                    </dl>
+                  </>
+                )}
                 <CompletionBlockerActionPanel
                   task={selectedTaskFresh}
                   blockers={completionBlockers}
@@ -3874,7 +4532,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 />
                 {selectedTaskFresh.type !== "general" && <TypeDetail task={selectedTaskFresh} />}
                 {selectedTaskFresh.type !== "general" && <AutoSyncResultSummary task={selectedTaskFresh} />}
-                {selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
+                {selectedTaskFresh.type !== "general" && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   {detailPrimaryAction && (
                     <Button
@@ -4516,51 +5174,116 @@ function RegistrationPipelineFilter({
   )
 }
 
-function TodoFilterBar({
+function TodoTeamFilterBar({
+  options,
+  requestedByFilter,
+  requestedTeamFilter,
+  assigneeFilter,
+  assigneeTeamFilter,
+  onRequestedByChange,
+  onRequestedTeamChange,
+  onAssigneeChange,
+  onAssigneeTeamChange,
+}: {
+  options: TodoFilterOptions
+  requestedByFilter: TodoSelectFilterKey
+  requestedTeamFilter: TodoSelectFilterKey
+  assigneeFilter: TodoSelectFilterKey
+  assigneeTeamFilter: TodoSelectFilterKey
+  onRequestedByChange: (value: TodoSelectFilterKey) => void
+  onRequestedTeamChange: (value: TodoSelectFilterKey) => void
+  onAssigneeChange: (value: TodoSelectFilterKey) => void
+  onAssigneeTeamChange: (value: TodoSelectFilterKey) => void
+}) {
+  return (
+    <div aria-label="할 일 필터" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <TodoFilterListbox label="요청자" allLabel="요청자 전체" value={requestedByFilter} options={options.requestedBy} onChange={onRequestedByChange} />
+      <TodoFilterListbox label="요청팀" allLabel="요청팀 전체" value={requestedTeamFilter} options={options.requestedTeam} onChange={onRequestedTeamChange} />
+      <TodoFilterListbox label="담당자" allLabel="담당자 전체" value={assigneeFilter} options={options.assignee} onChange={onAssigneeChange} />
+      <TodoFilterListbox label="담당팀" allLabel="담당팀 전체" value={assigneeTeamFilter} options={options.assigneeTeam} onChange={onAssigneeTeamChange} />
+    </div>
+  )
+}
+
+function TodoFilterListbox({
+  label,
+  allLabel,
   value,
-  tasks,
-  todayKey,
+  options,
   onChange,
 }: {
-  value: TodoFilterKey
-  tasks: OpsTask[]
-  todayKey: string
-  onChange: (value: TodoFilterKey) => void
+  label: string
+  allLabel: string
+  value: string
+  options: TodoFilterOption[]
+  onChange: (value: string) => void
 }) {
-  const activeFilterRef = useRef<HTMLButtonElement | null>(null)
-  useEffect(() => {
-    activeFilterRef.current?.scrollIntoView({ block: "nearest", inline: "center" })
-  }, [value])
+  const fieldId = useId()
+  const listId = useId()
+  const [open, setOpen] = useState(false)
+  const allOption = { value: "all", label: allLabel, count: 0 }
+  const listboxOptions = [allOption, ...options]
+  const selectedOption = listboxOptions.find((option) => option.value === value) || allOption
 
-  const openTasks = tasks.filter((task) => !isClosedOpsTask(task))
-  const counts: Record<TodoFilterKey, number> = {
-    all: openTasks.length,
-    overdue: openTasks.filter((task) => {
-      const dueDate = toDateKey(task.dueAt)
-      return (Boolean(dueDate) && dueDate < todayKey) || hasOpsTaskOverdueCalendarDate(task, todayKey)
-    }).length,
-    priority: openTasks.filter((task) => task.priority === "urgent" || task.priority === "high").length,
-    unassigned: openTasks.filter((task) => !task.assigneeId || !hasTaskSchedule(task)).length,
+  function selectOption(nextValue: string) {
+    onChange(nextValue)
+    setOpen(false)
   }
 
   return (
-    <div className={HORIZONTAL_CHIP_BAR_CLASS} aria-label="할 일 필터">
-      {TODO_FILTER_TABS.map((filter) => (
-          <button
-            key={filter.key}
-            ref={value === filter.key ? activeFilterRef : undefined}
-            type="button"
-            onClick={() => onChange(filter.key)}
-            aria-pressed={value === filter.key}
-            className={[
-            "shrink-0 rounded px-3 py-1.5 text-sm font-medium",
-            value === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-          ].join(" ")}
+    <div
+      className="relative grid min-w-0 gap-1 text-xs font-medium text-muted-foreground"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+        setOpen(false)
+      }}
+    >
+      <span id={fieldId}>{label}</span>
+      <button
+        type="button"
+        aria-labelledby={fieldId}
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((current) => !current)}
+        className={[
+          "flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-2.5 text-left text-sm text-foreground shadow-xs outline-none transition",
+          open ? "border-ring ring-2 ring-ring/40" : "hover:border-foreground/30",
+        ].join(" ")}
+      >
+        <span className="min-w-0 truncate">{selectedOption.label}{selectedOption.count ? ` ${selectedOption.count}` : ""}</span>
+        <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", open ? "rotate-90" : ""].join(" ")} />
+      </button>
+      {open && (
+        <div
+          id={listId}
+          role="listbox"
+          aria-labelledby={fieldId}
+          className="absolute left-0 right-0 top-full z-40 mt-1 max-h-64 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg"
         >
-          {filter.label}
-          {counts[filter.key] > 0 && <span className="ml-1 text-xs opacity-80">{counts[filter.key]}</span>}
-        </button>
-      ))}
+          {listboxOptions.map((option) => {
+            const selected = option.value === value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => selectOption(option.value)}
+                className={[
+                  "flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-sm outline-none transition-colors",
+                  selected ? "bg-primary/10 text-primary" : "hover:bg-muted",
+                ].join(" ")}
+              >
+                <span className="min-w-0 truncate">{option.label}{option.count ? ` ${option.count}` : ""}</span>
+                {selected && <Check className="size-4 shrink-0" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -4598,15 +5321,87 @@ function EmptyTaskState({
   )
 }
 
+function TodoTaskCard({
+  task,
+  onOpen,
+  onStatusChange,
+  statusActionDisabled,
+}: {
+  task: OpsTask
+  onOpen: (task: OpsTask) => void
+  onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
+  statusActionDisabled: boolean
+}) {
+  const nextAction = getNextTaskStatusAction(task)
+  const requesterLabel = [task.requestedByLabel || "미지정", task.requestedTeam || "미지정"].join(" / ")
+  const assigneeLabel = [task.assigneeLabel || "미지정", task.assigneeTeam || "미지정"].join(" / ")
+
+  return (
+    <article className="grid gap-3 rounded-md border bg-background p-3 text-sm shadow-xs">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <TaskStatusBadge status={task.status} />
+          <TodoPriorityBadge priority={task.priority} showNormal />
+          <AutoSyncInlineBadge task={task} />
+        </span>
+        <span className="shrink-0 text-xs font-medium text-muted-foreground">{getTodoActionLabel(task)}</span>
+      </div>
+
+      <button
+        type="button"
+        aria-label={`${task.title} 상세 보기`}
+        onClick={() => onOpen(task)}
+        className="min-w-0 text-left hover:text-primary"
+      >
+        <span className={[
+          "block truncate text-base font-semibold",
+          isClosedOpsTask(task) ? "text-muted-foreground line-through" : "",
+        ].filter(Boolean).join(" ")}
+        >
+          {task.title}
+        </span>
+      </button>
+
+      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+        <span className="min-w-0">
+          <span className="mb-0.5 block font-medium text-foreground">요청</span>
+          <span className="block truncate">{requesterLabel}</span>
+        </span>
+        <span className="min-w-0">
+          <span className="mb-0.5 block font-medium text-foreground">담당</span>
+          <span className="block truncate">{assigneeLabel}</span>
+        </span>
+        <span className="min-w-0 sm:col-span-2">
+          <span className="mb-0.5 block font-medium text-foreground">시작/마감</span>
+          <TodoDateSummary task={task} />
+        </span>
+      </div>
+
+      {nextAction && (
+        <Button
+          type="button"
+          variant={nextAction.status === "done" ? "default" : "outline"}
+          size="sm"
+          className="w-full"
+          onClick={() => onStatusChange(task, nextAction.status)}
+          disabled={statusActionDisabled}
+        >
+          {nextAction.label}
+        </Button>
+      )}
+    </article>
+  )
+}
+
 function TaskListSkeleton({ showType }: { showType: boolean }) {
   const gridClass = showType
     ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-    : "md:grid-cols-[48px_minmax(260px,1fr)_140px_140px]"
+    : "md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]"
 
   return (
     <div className="overflow-hidden rounded-md border" aria-label="불러오는 중">
       <div className={`hidden border-b bg-muted/40 px-3 py-2 md:grid ${gridClass}`}>
-        {Array.from({ length: showType ? 7 : 4 }).map((_, index) => (
+        {Array.from({ length: 7 }).map((_, index) => (
           <span key={index} className="h-3 w-16 rounded bg-muted" />
         ))}
       </div>
@@ -4614,6 +5409,7 @@ function TaskListSkeleton({ showType }: { showType: boolean }) {
         <div key={index} className={`grid gap-2 border-b px-3 py-3 last:border-b-0 md:items-center md:gap-0 ${gridClass}`}>
           <span className="size-6 rounded-full bg-muted" />
           {showType && <span className="h-5 w-14 rounded bg-muted" />}
+          {!showType && <span className="h-5 w-12 rounded bg-muted" />}
           <span className="grid gap-1.5">
             <span className="h-4 w-3/4 rounded bg-muted" />
             <span className="h-3 w-1/2 rounded bg-muted md:hidden" />
@@ -4621,154 +5417,12 @@ function TaskListSkeleton({ showType }: { showType: boolean }) {
           <span className="h-4 w-20 rounded bg-muted" />
           {showType && <span className="h-4 w-20 rounded bg-muted" />}
           <span className="h-4 w-24 rounded bg-muted" />
+          {!showType && <span className="h-4 w-24 rounded bg-muted" />}
+          {!showType && <span className="h-8 w-20 rounded bg-muted md:justify-self-end" />}
           {showType && <span className="h-8 w-24 rounded bg-muted md:justify-self-end" />}
         </div>
       ))}
     </div>
-  )
-}
-
-function TodoBoard({
-  columns,
-  todayKey,
-  onOpen,
-  onEdit,
-  onStatusChange,
-  statusActionDisabled,
-  onCreate,
-  emptyLabel,
-  completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
-}: {
-  columns: TodoBoardColumn[]
-  todayKey: string
-  onOpen: (task: OpsTask) => void
-  onEdit: (task: OpsTask, blockers?: string[]) => void
-  onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
-  statusActionDisabled: boolean
-  onCreate: () => void
-  emptyLabel: string
-  completionBlockersByTaskId?: OperationCompletionBlockerMap
-}) {
-  const total = columns.reduce((sum, column) => sum + column.tasks.length, 0)
-
-  if (total === 0) {
-    return (
-      <EmptyTaskState
-        icon={<Kanban className="size-5" />}
-        label={emptyLabel}
-        actionLabel="빠른 추가"
-        onCreate={onCreate}
-      />
-    )
-  }
-
-  return (
-    <div className="scroll-px-3 snap-x snap-mandatory overflow-x-auto pb-2" aria-label="할 일 보드">
-      <div
-        className="grid grid-flow-col auto-cols-[minmax(78vw,1fr)] gap-3 md:grid-flow-row md:auto-cols-auto md:grid-cols-[repeat(5,minmax(0,1fr))]"
-      >
-        {columns.map((column) => (
-          <section key={column.key} className="min-w-0 snap-start rounded-lg border bg-muted/25">
-            <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-              <h3 className="truncate text-sm font-semibold">{column.label}</h3>
-              <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                {column.tasks.length}
-              </span>
-            </div>
-            <div className="flex min-h-28 flex-col gap-2 p-2">
-              {column.tasks.length > 0 ? (
-                column.tasks.map((task) => (
-                  <TodoBoardCard
-                    key={task.id}
-                    task={task}
-                    todayKey={todayKey}
-                    onOpen={onOpen}
-                    onEdit={onEdit}
-                    onStatusChange={onStatusChange}
-                    statusActionDisabled={statusActionDisabled}
-                    completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
-                  />
-                ))
-              ) : (
-                <div className="flex min-h-20 items-center justify-center rounded-md border border-dashed bg-background/60 px-2 text-xs text-muted-foreground">
-                  비어 있음
-                </div>
-              )}
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function TodoBoardCard({
-  task,
-  todayKey,
-  onOpen,
-  onEdit,
-  onStatusChange,
-  statusActionDisabled,
-  completionBlockers,
-}: {
-  task: OpsTask
-  todayKey: string
-  onOpen: (task: OpsTask) => void
-  onEdit: (task: OpsTask, blockers?: string[]) => void
-  onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
-  statusActionDisabled: boolean
-  completionBlockers: string[]
-}) {
-  const nextAction = getNextTaskStatusAction(task)
-  const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
-  const taskMeta = [task.studentName, task.className, task.assigneeLabel].filter(Boolean).join(" · ")
-
-  return (
-    <article className="rounded-md border bg-background p-3 text-sm shadow-xs">
-      <div className="flex items-start gap-2">
-        {task.type === "general" ? (
-          <button
-            type="button"
-            aria-label={`${task.title} 완료`}
-            onClick={() => onStatusChange(task, "done")}
-            disabled={statusActionDisabled}
-            className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-muted-foreground/40 hover:border-primary hover:text-primary"
-          />
-        ) : (
-          <TaskStatusBadge status={task.status} />
-        )}
-        <button type="button" onClick={() => onOpen(task)} className="min-w-0 flex-1 text-left hover:text-primary">
-          <span className="block truncate font-semibold">{task.title}</span>
-          {taskMeta && <span className="mt-1 block truncate text-xs text-muted-foreground">{taskMeta}</span>}
-        </button>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {task.type !== "general" && <TaskTypeBadge type={task.type} />}
-        <TodoPriorityBadge priority={task.priority} />
-        <TaskScheduleLabel task={task} todayKey={todayKey} />
-        <AutoSyncInlineBadge task={task} />
-      </div>
-      {completionBlockers.length > 0 && (
-        <CompletionBlockerInlineChips
-          task={task}
-          blockers={completionBlockers}
-          onSelect={(blocker) => onEdit(task, [blocker])}
-          className="mt-2"
-        />
-      )}
-      {nextAction && task.type !== "general" && (
-        <Button
-          type="button"
-          variant={nextActionBlocked ? "outline" : "secondary"}
-          size="sm"
-          className="mt-2 h-8 w-full"
-          onClick={() => nextActionBlocked ? onEdit(task, completionBlockers) : onStatusChange(task, nextAction.status)}
-          disabled={statusActionDisabled}
-        >
-          {nextActionBlocked ? getCompletionBlockerActionLabel(completionBlockers) : nextAction.label}
-        </Button>
-      )}
-    </article>
   )
 }
 
@@ -4785,6 +5439,8 @@ function TaskList({
   emptyActionLabel,
   showEmptyAction = true,
   showType = true,
+  sortKey = "due",
+  onSortChange = noopTodoSortChange,
   completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
 }: {
   tasks: OpsTask[]
@@ -4799,6 +5455,8 @@ function TaskList({
   emptyActionLabel?: string
   showEmptyAction?: boolean
   showType?: boolean
+  sortKey?: TodoSortKey
+  onSortChange?: (key: TodoSortKey) => void
   completionBlockersByTaskId?: OperationCompletionBlockerMap
 }) {
   if (tasks.length === 0) {
@@ -4816,40 +5474,110 @@ function TaskList({
   const hasOperationRows = tasks.some((task) => task.type !== "general")
   const showTypeColumn = showType
   const isTodoList = !hasOperationRows
-  const gridClass = hasOperationRows
-    ? showTypeColumn
-      ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-      : "md:grid-cols-[88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-    : "md:grid-cols-[48px_minmax(260px,1fr)_140px_140px]"
+  const [statusColumn, priorityColumn, dueColumn] = TODO_TABLE_SORT_COLUMNS
+	  const gridClass = hasOperationRows
+	    ? showTypeColumn
+	      ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
+	      : "md:grid-cols-[88px_minmax(220px,1fr)_120px_120px_120px_150px]"
+	    : "md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]"
+	  const header = (
+	    <div className={`hidden border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid xl:grid ${gridClass}`}>
+	      {isTodoList ? (
+	        <TodoSortableHeaderButton column={statusColumn} sortKey={sortKey} onSortChange={() => onSortChange("status")} />
+	      ) : (
+	        <span>상태</span>
+	      )}
+	      {showTypeColumn && <span>유형</span>}
+	      {isTodoList && <TodoSortableHeaderButton column={priorityColumn} sortKey={sortKey} onSortChange={() => onSortChange("priority")} />}
+	      <span>{isTodoList ? "제목" : "업무"}</span>
+	      <span>{isTodoList ? "요청자/요청팀" : "담당"}</span>
+	      {isTodoList && <span>담당자/담당팀</span>}
+	      {hasOperationRows && <span>학생</span>}
+	      {isTodoList ? (
+	        <TodoSortableHeaderButton column={dueColumn} sortKey={sortKey} onSortChange={() => onSortChange("due")} />
+	      ) : (
+	        <span>기한</span>
+	      )}
+	      {(hasOperationRows || isTodoList) && <span className="text-right">다음 액션</span>}
+	    </div>
+	  )
+	  const rows = tasks.map((task) => (
+	    <TaskListRow
+	      key={task.id}
+	      task={task}
+	      todayKey={todayKey}
+	      onOpen={onOpen}
+	      onEdit={onEdit}
+	      onStatusChange={onStatusChange}
+	      onRegistrationPipelineAdvance={onRegistrationPipelineAdvance}
+	      statusActionDisabled={statusActionDisabled}
+	      showType={showTypeColumn}
+	      todoControls={!showType}
+	      showOperationColumns={hasOperationRows}
+	      completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
+	    />
+	  ))
+
+	  if (isTodoList) {
+	    return (
+	      <div className="grid gap-2">
+	        <div data-testid="todo-mobile-task-list" className="grid gap-2 xl:hidden">
+	          {tasks.map((task) => (
+	            <TodoTaskCard
+	              key={task.id}
+	              task={task}
+	              onOpen={onOpen}
+	              onStatusChange={onStatusChange}
+	              statusActionDisabled={statusActionDisabled}
+	            />
+	          ))}
+	        </div>
+	        <div data-testid="todo-table-task-list" className="hidden overflow-hidden rounded-md border xl:block">
+	          {header}
+	          {rows}
+	        </div>
+	      </div>
+	    )
+	  }
+
+	  return (
+	    <div className="overflow-hidden rounded-md border">
+	      {hasOperationRows && header}
+	      {rows}
+	    </div>
+	  )
+	}
+
+function noopTodoSortChange() {}
+
+function TodoSortableHeaderButton({
+  column,
+  sortKey,
+  onSortChange,
+}: {
+  column: { key: TodoSortKey; label: string }
+  sortKey: TodoSortKey
+  onSortChange: () => void
+}) {
+  const selected = sortKey === column.key
+  const ariaSort = selected ? "ascending" : "none"
 
   return (
-    <div className="overflow-hidden rounded-md border">
-      {hasOperationRows && <div className={`hidden border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid ${gridClass}`}>
-        <span>상태</span>
-        {showTypeColumn && <span>유형</span>}
-        <span>{isTodoList ? "할 일" : "업무"}</span>
-        <span>담당</span>
-        {hasOperationRows && <span>학생</span>}
-        <span>예정</span>
-        {hasOperationRows && <span className="text-right">작업</span>}
-      </div>}
-      {tasks.map((task) => (
-        <TaskListRow
-          key={task.id}
-          task={task}
-          todayKey={todayKey}
-          onOpen={onOpen}
-          onEdit={onEdit}
-          onStatusChange={onStatusChange}
-          onRegistrationPipelineAdvance={onRegistrationPipelineAdvance}
-          statusActionDisabled={statusActionDisabled}
-          showType={showTypeColumn}
-          todoControls={!showType}
-          showOperationColumns={hasOperationRows}
-          completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
-        />
-      ))}
-    </div>
+    <span role="columnheader" aria-sort={ariaSort} className="min-w-0">
+      <button
+        type="button"
+        aria-pressed={selected}
+        aria-label={`${column.label} 정렬`}
+        onClick={onSortChange}
+        className={[
+          "inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left font-medium transition",
+          selected ? "text-foreground" : "text-muted-foreground hover:bg-background hover:text-foreground",
+        ].join(" ")}
+      >
+        <span className="truncate">{column.label}</span>
+        <ChevronRight className={["size-3.5 shrink-0 transition-transform", selected ? "rotate-90" : ""].join(" ")} />
+      </button>
+    </span>
   )
 }
 
@@ -4887,7 +5615,6 @@ function TaskListRow({
     : nextActionBlocked
   const isTodoRow = todoControls && task.type === "general"
   const isOperationRow = task.type !== "general"
-  const nextTodoStatus: OpsTaskStatus = isClosedOpsTask(task) ? "requested" : "done"
   const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
   const organizationFixes = getTaskOrganizationFixes(task)
   const needsAssigneeFix = organizationFixes.includes("담당 지정")
@@ -4896,35 +5623,24 @@ function TaskListRow({
     ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
     : isOperationRow
       ? "md:grid-cols-[88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-      : "md:grid-cols-[48px_minmax(260px,1fr)_140px_140px]"
+      : "md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]"
   const taskMeta = [task.subject, task.campus, task.className, task.textbookTitle].filter(Boolean).join(" · ")
+  const todoRequesterLabel = [task.requestedByLabel || "미지정", task.requestedTeam || "미지정"].join(" / ")
+  const todoAssigneeLabel = [task.assigneeLabel || "미지정", task.assigneeTeam || "미지정"].join(" / ")
 
   return (
     <div
       className={`grid grid-cols-[auto_minmax(0,1fr)] gap-2 border-b px-3 py-3 text-sm transition-colors [contain-intrinsic-size:72px] [content-visibility:auto] last:border-b-0 hover:bg-muted/40 md:items-center md:gap-0 ${gridClass}`}
     >
       <span className="row-start-1">
-        {isTodoRow ? (
-          <button
-            type="button"
-            aria-label={`${task.title} ${isClosedOpsTask(task) ? "다시 열기" : "완료"}`}
-            onClick={() => onStatusChange(task, nextTodoStatus)}
-            disabled={statusActionDisabled}
-            className={[
-              "inline-flex size-8 items-center justify-center rounded-full border transition-colors active:scale-95 md:size-7",
-              task.status === "done"
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-muted-foreground/40 bg-background hover:border-primary hover:text-primary",
-            ].join(" ")}
-          >
-            {task.status === "done" && <Check className="size-4 md:size-3.5" />}
-            {task.status === "canceled" && <X className="size-4 md:size-3.5" />}
-          </button>
-        ) : (
-          <TaskStatusBadge status={task.status} />
-        )}
+        <TaskStatusBadge status={task.status} />
       </span>
       {showType && <span><TaskTypeBadge type={task.type} /></span>}
+      {isTodoRow && (
+        <span className="hidden md:block">
+          <TodoPriorityBadge priority={task.priority} showNormal />
+        </span>
+      )}
       <button
         type="button"
         aria-label={`${task.title} 상세 보기`}
@@ -4940,18 +5656,26 @@ function TaskListRow({
           >
             {task.title}
           </span>
-          {isTodoRow && <TodoPriorityBadge priority={task.priority} />}
           <AutoSyncInlineBadge task={task} />
         </span>
         {taskMeta && <span className="block truncate text-xs text-muted-foreground">{taskMeta}</span>}
         {isTodoRow && (
           <span className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground md:hidden">
-            {task.assigneeLabel && <span>담당 {task.assigneeLabel}</span>}
-            {task.assigneeLabel && hasTaskSchedule(task) && <span>·</span>}
-            {hasTaskSchedule(task) && <span>예정 <TaskScheduleLabel task={task} todayKey={todayKey} /></span>}
+            <span>요청 {todoRequesterLabel}</span>
+            <span>담당 {todoAssigneeLabel}</span>
+            <span className="inline-flex min-w-0 items-start gap-1">
+              <span>시작/마감</span>
+              <TodoDateSummary task={task} />
+            </span>
+            <span>다음 액션 {getTodoActionLabel(task)}</span>
           </span>
         )}
       </button>
+      {isTodoRow && (
+        <span className="hidden min-w-0 text-muted-foreground md:block">
+          <span className="truncate">{todoRequesterLabel}</span>
+        </span>
+      )}
       <span className={[isTodoRow ? "hidden md:block" : "", isOperationRow ? "col-span-full md:col-auto" : "", "min-w-0 text-muted-foreground md:text-foreground"].filter(Boolean).join(" ")}>
         {isOperationRow && <span className="mr-2 text-xs text-muted-foreground md:hidden">담당:</span>}
         {isOperationRow && needsAssigneeFix ? (
@@ -4964,7 +5688,7 @@ function TaskListRow({
             담당 지정
           </button>
         ) : (
-          <span className="truncate">{isTodoRow && !task.assigneeLabel ? null : task.assigneeLabel || "미지정"}</span>
+          <span className="truncate">{isTodoRow ? todoAssigneeLabel : task.assigneeLabel || "미지정"}</span>
         )}
       </span>
       {showOperationColumns && !isOperationRow && <span className="hidden md:block" />}
@@ -4986,9 +5710,25 @@ function TaskListRow({
             예정 지정
           </button>
         ) : (
-          isTodoRow && !hasTaskSchedule(task) ? null : <TaskScheduleLabel task={task} todayKey={todayKey} />
+          isTodoRow ? <TodoDateSummary task={task} /> : <TaskScheduleLabel task={task} todayKey={todayKey} />
         )}
       </span>
+      {isTodoRow && (
+        <span className="col-span-full flex justify-start md:col-auto md:justify-end">
+          {nextAction && (
+            <Button
+              type="button"
+              variant={nextAction.status === "done" ? "default" : "outline"}
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => onStatusChange(task, nextAction.status)}
+              disabled={statusActionDisabled}
+            >
+              {nextAction.label}
+            </Button>
+          )}
+        </span>
+      )}
       {isOperationRow && (
         <span className="col-span-full flex flex-wrap justify-start gap-1.5 md:col-auto md:justify-end">
           {primaryOperationAction && (
@@ -5404,6 +6144,49 @@ function AutoSyncResultSummary({ task }: { task: OpsTask }) {
         ))}
       </div>
     </section>
+  )
+}
+
+function DetailInfoTile({ label, value, children }: { label: string; value?: string; children?: ReactNode }) {
+  return (
+    <div className="grid min-w-0 gap-1.5 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 font-medium text-foreground">
+        {children || <span className="block truncate">{value || "미지정"}</span>}
+      </dd>
+    </div>
+  )
+}
+
+function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {
+  return (
+    <dl className="grid gap-3">
+      <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+        <DetailInfoTile label="우선순위">
+          <TodoPriorityBadge priority={task.priority} showNormal />
+        </DetailInfoTile>
+        <DetailInfoTile label="제목" value={task.title} />
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <DetailInfoTile label="담당팀" value={task.assigneeTeam || "미지정"} />
+        <DetailInfoTile label="담당자" value={task.assigneeLabel || "미지정"} />
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <DetailInfoTile label="시작일" value={dateLabel(task.startAt) === "-" ? "미지정" : dateLabel(task.startAt)} />
+        <DetailInfoTile label="마감일" value={dateLabel(task.dueAt) === "-" ? "미지정" : dateLabel(task.dueAt)} />
+      </div>
+      <DetailInfoTile label="메모" value={task.memo || "미입력"} />
+      <div className="grid gap-3 border-t pt-3 md:grid-cols-3">
+        <DetailInfoTile label="요청팀" value={task.requestedTeam || "미지정"} />
+        <DetailInfoTile label="요청자" value={task.requestedByLabel || "미지정"} />
+        <DetailInfoTile label="요청일시" value={dateLabel(task.createdAt)} />
+      </div>
+      {shouldShowDetailStatusBadge(task) && (
+        <div className="flex flex-wrap gap-2">
+          <TaskStatusBadge status={task.status} />
+        </div>
+      )}
+    </dl>
   )
 }
 

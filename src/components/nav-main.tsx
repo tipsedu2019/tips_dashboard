@@ -27,19 +27,20 @@ function normalizePath(path: string) {
   return normalized === "" ? "/" : normalized
 }
 
-const LEGACY_TODO_VIEW_SEARCH: Record<string, { list: string; filter?: string }> = {
-  all: { list: "filters", filter: "all" },
+const LEGACY_TODO_VIEW_SEARCH: Record<string, { list: string; sort?: string; due?: string; status?: string }> = {
+  all: { list: "inbox" },
   inbox: { list: "inbox" },
-  today: { list: "today" },
-  upcoming: { list: "upcoming" },
-  board: { list: "board" },
-  calendar: { list: "calendar" },
+  today: { list: "inbox", sort: "due" },
+  upcoming: { list: "inbox", sort: "due" },
+  board: { list: "inbox", sort: "status" },
+  calendar: { list: "inbox", sort: "due" },
   completed: { list: "completed" },
-  overdue: { list: "filters", filter: "overdue" },
-  mine: { list: "filters", filter: "mine" },
-  priority: { list: "filters", filter: "priority" },
-  unassigned: { list: "filters", filter: "unassigned" },
-  confirmation: { list: "filters", filter: "all" },
+  sent: { list: "sent" },
+  overdue: { list: "inbox", due: "overdue" },
+  mine: { list: "inbox" },
+  priority: { list: "inbox" },
+  unassigned: { list: "inbox", due: "unscheduled" },
+  confirmation: { list: "inbox", status: "review_requested" },
 }
 
 function normalizeSearch(path: string, search: string) {
@@ -49,11 +50,10 @@ function normalizeSearch(path: string, search: string) {
     const legacyRoute = LEGACY_TODO_VIEW_SEARCH[legacyView]
     if (!params.get("list") && legacyRoute) {
       params.set("list", legacyRoute.list)
-      if (legacyRoute.filter && legacyRoute.filter !== "all") {
-        params.set("filter", legacyRoute.filter)
-      } else {
-        params.delete("filter")
-      }
+      if (legacyRoute.sort) params.set("sort", legacyRoute.sort)
+      if (legacyRoute.due) params.set("due", legacyRoute.due)
+      if (legacyRoute.status) params.set("status", legacyRoute.status)
+      params.delete("filter")
       params.delete("view")
       params.delete("focus")
     }

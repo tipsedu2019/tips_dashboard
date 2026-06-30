@@ -11,6 +11,11 @@ import {
   hasOpsTaskOverdueCalendarDate,
   isClosedOpsTask,
   isOpsTaskAssignedToUser,
+  isOpsTaskInUserInbox,
+  isOpsTaskInUserSent,
+  sortOpsTasksByPriority,
+  sortOpsTasksByWorkDate,
+  sortOpsTasksByWorkflowStatus,
   summarizeOpsTasks,
 } from "../src/features/tasks/ops-task-model.js";
 
@@ -25,7 +30,80 @@ test("ops task types keep the Notion migration scope narrow", () => {
 test("ops task statuses follow the shared workflow", () => {
   assert.deepEqual(
     OPS_TASK_STATUSES.map((item) => item.label),
-    ["요청", "확인", "진행", "완료", "보류", "취소"],
+    ["요청", "확인", "진행", "검토 요청", "완료", "보류", "취소"],
+  );
+});
+
+test("team workflow inbox and sent boxes follow the current action owner", () => {
+  const tasks = [
+    {
+      id: "requested-work",
+      status: "requested",
+      requestedBy: "requester-1",
+      requestedByLabel: "요청자",
+      requestedTeam: "수학팀",
+      assigneeId: "assistant-1",
+      assigneeLabel: "담당자",
+      assigneeTeam: "조교팀",
+    },
+    {
+      id: "review-work",
+      status: "review_requested",
+      requestedBy: "requester-1",
+      requestedByLabel: "요청자",
+      requestedTeam: "수학팀",
+      assigneeId: "assistant-1",
+      assigneeLabel: "담당자",
+      assigneeTeam: "조교팀",
+    },
+    {
+      id: "done-work",
+      status: "done",
+      requestedBy: "requester-1",
+      requestedTeam: "수학팀",
+      assigneeId: "assistant-1",
+      assigneeTeam: "조교팀",
+    },
+  ];
+
+  assert.equal(isOpsTaskInUserInbox(tasks[0], { currentUserId: "assistant-1", currentUserTeam: "조교팀" }), true);
+  assert.equal(isOpsTaskInUserSent(tasks[0], { currentUserId: "requester-1", currentUserTeam: "수학팀" }), true);
+  assert.equal(isOpsTaskInUserInbox(tasks[1], { currentUserId: "requester-1", currentUserTeam: "수학팀" }), true);
+  assert.equal(isOpsTaskInUserSent(tasks[1], { currentUserId: "assistant-1", currentUserTeam: "조교팀" }), true);
+  assert.equal(isOpsTaskInUserInbox(tasks[2], { currentUserId: "requester-1", currentUserTeam: "수학팀" }), false);
+  assert.equal(isOpsTaskInUserSent(tasks[2], { currentUserId: "assistant-1", currentUserTeam: "조교팀" }), false);
+});
+
+test("team workflow sorting supports due-date and status ordering", () => {
+  const tasks = [
+    { id: "none", title: "미정", status: "confirmed", priority: "normal" },
+    { id: "future", title: "예정", status: "review_requested", priority: "normal", dueAt: "2026-05-23" },
+    { id: "overdue", title: "지연", status: "in_progress", priority: "normal", dueAt: "2026-05-20" },
+    { id: "today", title: "오늘", status: "requested", priority: "normal", dueAt: "2026-05-21" },
+    { id: "start-only", title: "시작", status: "requested", priority: "normal", startAt: "2026-05-22" },
+  ];
+
+  assert.deepEqual(
+    sortOpsTasksByWorkDate(tasks, "2026-05-21").map((task) => task.id),
+    ["overdue", "today", "start-only", "future", "none"],
+  );
+  assert.deepEqual(
+    sortOpsTasksByWorkflowStatus(tasks, "2026-05-21").map((task) => task.id),
+    ["today", "start-only", "none", "overdue", "future"],
+  );
+});
+
+test("team workflow sorting supports priority ordering", () => {
+  const tasks = [
+    { id: "normal", title: "보통", status: "requested", priority: "normal", dueAt: "2026-05-21" },
+    { id: "low", title: "낮음", status: "requested", priority: "low", dueAt: "2026-05-20" },
+    { id: "urgent", title: "긴급", status: "requested", priority: "urgent", dueAt: "2026-05-23" },
+    { id: "high", title: "높음", status: "requested", priority: "high", dueAt: "2026-05-22" },
+  ];
+
+  assert.deepEqual(
+    sortOpsTasksByPriority(tasks, "2026-05-21").map((task) => task.id),
+    ["urgent", "high", "normal", "low"],
   );
 });
 
@@ -42,6 +120,14 @@ test("ops task calendar merges registration withdrawal transfer and word retest 
         levelTestAt: "2026-05-23T14:00:00+09:00",
         classStartDate: "2026-05-29",
       },
+    },
+    {
+      id: "general-1",
+      title: "일반 할 일",
+      type: "general",
+      status: "requested",
+      startAt: "2026-05-21",
+      dueAt: "2026-05-28",
     },
     {
       id: "withdrawal-1",
@@ -77,12 +163,14 @@ test("ops task calendar merges registration withdrawal transfer and word retest 
     items.map((item) => `${item.taskId}:${item.kind}:${item.date}`),
     [
       "registration-1:문의:2026-05-20",
+      "general-1:시작:2026-05-21",
       "registration-1:예정:2026-05-22",
       "registration-1:레벨테스트:2026-05-23",
       "withdrawal-1:퇴원일:2026-05-24",
       "transfer-1:전 수업 종료:2026-05-25",
       "word-1:응시:2026-05-26",
       "transfer-1:후 수업 시작:2026-05-27",
+      "general-1:마감:2026-05-28",
       "registration-1:수업 시작:2026-05-29",
     ],
   );
