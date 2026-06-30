@@ -117,6 +117,26 @@ test("teacher settings renders a team organization tree with account identity st
   assert.match(workspaceSource, /getAccountSecondaryLabel\(profile\)/);
 });
 
+test("teacher organization tree keeps the list clean after automatic account linking", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/management/teacher-master-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /const selectedAccountLabel = selectedProfile/);
+  assert.match(workspaceSource, /getAccountIdentifier\(selectedProfile\)/);
+  assert.match(workspaceSource, /{selectedAccountLabel}/);
+  assert.match(workspaceSource, /data-testid="teacher-organization-tree"/);
+  assert.match(workspaceSource, /divide-y divide-border\/60/);
+  assert.match(workspaceSource, /items-center gap-2 px-2 py-2/);
+  assert.doesNotMatch(workspaceSource, /const selectedStatus = selectedProfile/);
+  assert.doesNotMatch(workspaceSource, /{getAccountSecondaryLabel\(selectedProfile\)} · {selectedStatus}/);
+  assert.doesNotMatch(workspaceSource, /가입명 \{selectedProfile\.name \|\| "-"\}/);
+  assert.doesNotMatch(workspaceSource, /before:absolute before:bottom-8/);
+  assert.doesNotMatch(workspaceSource, /after:absolute after:left-\[-1\.9rem\]/);
+  assert.doesNotMatch(workspaceSource, /rounded-md border bg-background px-3 py-2 shadow-xs/);
+});
+
 test("teacher account migration stores profile links, permissions, and audit history", async () => {
   const migrationSource = await readAllMigrationSource();
 

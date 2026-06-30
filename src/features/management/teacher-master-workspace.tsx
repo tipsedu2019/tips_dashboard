@@ -334,8 +334,8 @@ function TeacherAccountSelect({
   onManualAccountChange: (id: string, value: string) => void;
 }) {
   const selectedProfile = profiles.find((profile) => profile.id === row.profileId);
-  const selectedStatus = selectedProfile
-    ? getAccountConnectionStatus(selectedProfile, row, rows)
+  const selectedAccountLabel = selectedProfile
+    ? getAccountIdentifier(selectedProfile) || getAccountPrimaryLabel(selectedProfile)
     : "";
 
   return (
@@ -350,12 +350,9 @@ function TeacherAccountSelect({
           disabled={!isAccountSchemaReady}
         >
           {selectedProfile ? (
-            <span className="grid min-w-0 gap-0.5">
-              <span className="truncate text-sm font-medium">
-                {getAccountPrimaryLabel(selectedProfile)}
-              </span>
-              <span className="truncate text-[11px] text-muted-foreground">
-                {getAccountSecondaryLabel(selectedProfile)} · {selectedStatus}
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">
+                {selectedAccountLabel}
               </span>
             </span>
           ) : (
@@ -407,12 +404,6 @@ function TeacherAccountSelect({
           })}
         </SelectContent>
       </Select>
-
-      {selectedProfile && !isAccountNameMatched(row, selectedProfile) ? (
-        <p className="text-[11px] text-amber-700">
-          가입명 {selectedProfile.name || "-"} · 설정명 {row.name || "-"}
-        </p>
-      ) : null}
 
       {!row.profileId ? (
         <Input
@@ -932,21 +923,21 @@ export function TeacherMasterWorkspace() {
             <section
               key={team}
               data-testid={`teacher-team-group-${team}`}
-              className="overflow-hidden rounded-md border bg-background"
+              className="rounded-md bg-background"
             >
-              <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2">
+              <div className="flex items-center justify-between gap-3 px-2 py-2">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
                   <h2 className="truncate text-sm font-semibold text-foreground">
                     {team}
                   </h2>
-                  <Badge variant="outline" className="rounded-md text-[11px]">
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                     {teamRows.length}명
-                  </Badge>
+                  </span>
                 </div>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   className="h-8"
                   onClick={() => handleAddToTeam(team)}
@@ -968,11 +959,11 @@ export function TeacherMasterWorkspace() {
                     ))}
                   </div>
                 ) : teamRows.length === 0 ? (
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-5 text-sm text-muted-foreground">
+                  <div className="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-5 text-sm text-muted-foreground">
                     <span>{team} 선생님이 없습니다.</span>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
                       className="h-8"
                       onClick={() => handleAddToTeam(team)}
@@ -983,7 +974,7 @@ export function TeacherMasterWorkspace() {
                     </Button>
                   </div>
                 ) : (
-                  <div className="relative grid gap-2 pl-6 before:absolute before:bottom-8 before:left-3 before:top-8 before:w-px before:bg-border">
+                  <div className="divide-y divide-border/60">
                     {teamRows.map((row) => {
                       const currentIndex = teamRows.findIndex(
                         (item) => item.id === row.id,
@@ -992,7 +983,7 @@ export function TeacherMasterWorkspace() {
                       return (
                         <div
                           key={row.id}
-                          className="relative grid grid-cols-[minmax(120px,0.8fr)_minmax(150px,0.9fr)_minmax(230px,1.4fr)_minmax(112px,0.7fr)_72px_112px] items-start gap-2 rounded-md border bg-background px-3 py-2 shadow-xs before:absolute before:left-[-1.55rem] before:top-1/2 before:h-px before:w-5 before:bg-border after:absolute after:left-[-1.9rem] after:top-1/2 after:size-2 after:-translate-y-1/2 after:rounded-full after:border after:border-primary after:bg-background"
+                          className="grid grid-cols-[minmax(120px,0.8fr)_minmax(150px,0.9fr)_minmax(230px,1.4fr)_minmax(112px,0.7fr)_72px_112px] items-center gap-2 px-2 py-2"
                         >
                           <Select
                             value={normalizeTeamValue(row.subjects)}
