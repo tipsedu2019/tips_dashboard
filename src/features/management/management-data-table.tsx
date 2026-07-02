@@ -1,7 +1,17 @@
 "use client";
 "use no memo";
 
-import { type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type CompositionEvent,
+  type ReactNode,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   type ColumnDef,
@@ -1474,6 +1484,7 @@ export function ManagementDataTable({
   const [globalFilter, setGlobalFilter] = useState(() => (
     kind === "classes" ? requestedClassListQueryState.q : kind === "students" ? requestedStudentListQueryState.q : ""
   ));
+  const globalFilterCompositionRef = useRef(false);
   const deferredGlobalFilter = useDeferredValue(globalFilter);
   const [classGroupFilter, setClassGroupFilter] = useState(() => requestedClassListQueryState.period);
   const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState(() => requestedStudentListQueryState.schoolCategory);
@@ -2216,7 +2227,7 @@ export function ManagementDataTable({
       return;
     }
 
-    if (globalFilter !== requestedClassListQueryState.q) {
+    if (!globalFilterCompositionRef.current && globalFilter !== requestedClassListQueryState.q) {
       setGlobalFilter(requestedClassListQueryState.q);
     }
 
@@ -2253,7 +2264,7 @@ export function ManagementDataTable({
       return;
     }
 
-    if (globalFilter !== requestedStudentListQueryState.q) {
+    if (!globalFilterCompositionRef.current && globalFilter !== requestedStudentListQueryState.q) {
       setGlobalFilter(requestedStudentListQueryState.q);
     }
 
@@ -2338,13 +2349,33 @@ export function ManagementDataTable({
     table.resetPagination();
   };
 
-  const updateGlobalFilter = (value: string) => {
+  const updateGlobalFilter = (value: string, options: { syncUrl?: boolean } = {}) => {
     setGlobalFilter(value);
     setRowSelection({});
     setBulkEditValue("");
     table.resetPagination();
-    syncClassListQueryState({ q: value });
-    syncStudentListQueryState({ q: value });
+    if (options.syncUrl !== false && !globalFilterCompositionRef.current) {
+      syncClassListQueryState({ q: value });
+      syncStudentListQueryState({ q: value });
+    }
+  };
+
+  const isComposingSearchInput = (event: ChangeEvent<HTMLInputElement>) => (
+    globalFilterCompositionRef.current ||
+    ("isComposing" in event.nativeEvent && Boolean(event.nativeEvent.isComposing))
+  );
+
+  const handleGlobalFilterChange = (event: ChangeEvent<HTMLInputElement>) => {
+    updateGlobalFilter(String(event.target.value), { syncUrl: !isComposingSearchInput(event) });
+  };
+
+  const handleGlobalFilterCompositionStart = () => {
+    globalFilterCompositionRef.current = true;
+  };
+
+  const handleGlobalFilterCompositionEnd = (event: CompositionEvent<HTMLInputElement>) => {
+    globalFilterCompositionRef.current = false;
+    updateGlobalFilter(String(event.currentTarget.value), { syncUrl: true });
   };
 
   const updateGrouping = (nextGrouping: GroupingState) => {
@@ -2630,7 +2661,9 @@ export function ManagementDataTable({
         enterKeyHint="search"
         placeholder={`${emptyLabel} 검색`}
         value={globalFilter ?? ""}
-        onChange={(event) => updateGlobalFilter(String(event.target.value))}
+        onChange={handleGlobalFilterChange}
+        onCompositionStart={handleGlobalFilterCompositionStart}
+        onCompositionEnd={handleGlobalFilterCompositionEnd}
         className="h-9 pl-9 pr-9"
       />
       {normalizedGlobalFilter ? (
@@ -3149,6 +3182,11 @@ export function ManagementDataTable({
           searchValue={String(globalFilter || "")}
           searchPlaceholder={`${emptyLabel} 검색`}
           onSearchChange={updateGlobalFilter}
+          onSearchCompositionStart={handleGlobalFilterCompositionStart}
+          onSearchCompositionEnd={(value) => {
+            globalFilterCompositionRef.current = false;
+            updateGlobalFilter(value, { syncUrl: true });
+          }}
           summaryLabel={showSummaryBadge ? summaryLabel : ""}
           chips={classFilterChips}
           primaryLabel={activePeriodLabel}

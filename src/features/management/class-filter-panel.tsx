@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +44,9 @@ type ClassFilterPanelProps = {
   selects: ClassFilterPanelSelect[];
   searchValue: string;
   searchPlaceholder: string;
-  onSearchChange: (value: string) => void;
+  onSearchChange: (value: string, options?: { syncUrl?: boolean }) => void;
+  onSearchCompositionStart?: () => void;
+  onSearchCompositionEnd?: (value: string) => void;
   summaryLabel?: ReactNode;
   chips?: ClassFilterPanelChip[];
   showReset?: boolean;
@@ -63,11 +65,17 @@ function normalizeOptions(options: ClassFilterPanelOption[] = []) {
   return options.filter((option) => option.value);
 }
 
+function isComposingSearchInput(event: ChangeEvent<HTMLInputElement>) {
+  return "isComposing" in event.nativeEvent && Boolean(event.nativeEvent.isComposing);
+}
+
 export function ClassFilterPanel({
   selects,
   searchValue,
   searchPlaceholder,
   onSearchChange,
+  onSearchCompositionStart,
+  onSearchCompositionEnd,
   summaryLabel,
   chips = [],
   showReset = false,
@@ -139,7 +147,9 @@ export function ClassFilterPanel({
             enterKeyHint="search"
             placeholder={searchPlaceholder}
             value={searchValue}
-            onChange={(event) => onSearchChange(event.target.value)}
+            onChange={(event) => onSearchChange(event.target.value, { syncUrl: !isComposingSearchInput(event) })}
+            onCompositionStart={onSearchCompositionStart}
+            onCompositionEnd={(event) => onSearchCompositionEnd?.(event.currentTarget.value)}
             className="h-9 pl-9 pr-9"
           />
           {hasSearchValue ? (

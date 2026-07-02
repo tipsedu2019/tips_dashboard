@@ -159,6 +159,22 @@ test("management table defers heavy global filtering while typing", async () => 
   assert.match(source, /value=\{globalFilter \?\? ""\}/);
 });
 
+test("management search preserves Korean IME composition before syncing URL filters", async () => {
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
+
+  assert.match(tableSource, /const globalFilterCompositionRef = useRef\(false\)/);
+  assert.match(tableSource, /options\.syncUrl !== false && !globalFilterCompositionRef\.current/);
+  assert.match(tableSource, /onChange=\{handleGlobalFilterChange\}/);
+  assert.match(tableSource, /onCompositionStart=\{handleGlobalFilterCompositionStart\}/);
+  assert.match(tableSource, /onCompositionEnd=\{handleGlobalFilterCompositionEnd\}/);
+  assert.match(tableSource, /!globalFilterCompositionRef\.current && globalFilter !== requestedClassListQueryState\.q/);
+  assert.match(tableSource, /!globalFilterCompositionRef\.current && globalFilter !== requestedStudentListQueryState\.q/);
+  assert.match(panelSource, /onSearchChange: \(value: string, options\?: \{ syncUrl\?: boolean \}\) => void/);
+  assert.match(panelSource, /isComposingSearchInput\(event\)/);
+  assert.match(panelSource, /onCompositionEnd=\{\(event\) => onSearchCompositionEnd\?\.\(event\.currentTarget\.value\)\}/);
+});
+
 test("management table exposes resize handles with a clear reset action", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const resizeHandle = source.match(/header\.column\.getCanResize\(\)[\s\S]*?onKeyDown=\{\(event\) => \{[\s\S]*?\}\}/)?.[0] || "";
