@@ -236,7 +236,7 @@ test("todo form keeps requester metadata readonly and assignee selectors team-aw
     "ReadonlyInfoField label=\"요청일시\"",
     "className=\"grid gap-3 pt-1 md:grid-cols-[160px_minmax(0,1fr)]\"",
     "className=\"grid gap-3 md:grid-cols-2\"",
-    'isTemplateForm ? "sm:sticky sm:bottom-0" : ""',
+    '"-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"',
     "profiles={assigneeProfileOptions}",
     "onChange={handleAssigneeChange}",
     "onClick={() => handleAssigneeChange(currentUserId)}",
@@ -246,7 +246,7 @@ test("todo form keeps requester metadata readonly and assignee selectors team-aw
   assert.doesNotMatch(workspaceSource, /onChange=\{handleRequestedByChange\}/);
   const generalTodoFormSource = workspaceSource.slice(
     workspaceSource.indexOf("{!isTemplateForm && ("),
-    workspaceSource.indexOf("{isTemplateForm && formDetailTabs.length > 0"),
+    workspaceSource.indexOf("{isWordRetestForm && ("),
   );
   assert.ok(generalTodoFormSource.indexOf('<span>메모</span>') < generalTodoFormSource.indexOf('ReadonlyInfoField label="요청자"'));
 });
@@ -261,7 +261,7 @@ test("todo form uses compact polished controls for dates priority and team selec
     "type TaskListboxOption = {",
     "function PrioritySelectField({",
     "function DateField({",
-    "import { Popover, PopoverContent, PopoverTrigger } from",
+    "import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from",
     "calendarDateOpen",
     "function getCalendarMonthDate",
     "function buildCalendarDateCells",
@@ -280,6 +280,12 @@ test("todo form uses compact polished controls for dates priority and team selec
     'role="listbox"',
     "setListboxOpen(false)",
     "const [isLinkedSearchOpen, setIsLinkedSearchOpen] = useState(false)",
+    "const linkedSelectControl = shouldShowLinkedSearch && isLinkedSearchOpen",
+    "<PopoverAnchor asChild>{linkedSelectControl}</PopoverAnchor>",
+    "className=\"z-[120] w-[var(--radix-popper-anchor-width)] min-w-72 max-w-[calc(100vw-1rem)] overflow-hidden p-0\"",
+    "function handleLinkedListWheel(event: WheelEvent<HTMLDivElement>)",
+    "onWheel={handleLinkedListWheel}",
+    "onOpenAutoFocus={(event) => event.preventDefault()}",
     "setIsLinkedSearchOpen(false)",
     'DialogHeader className="-mx-6 -mt-6 border-b px-6 py-4"',
     "<PrioritySelectField",
@@ -301,7 +307,7 @@ test("todo form uses compact polished controls for dates priority and team selec
 
   const generalTodoFormSource = workspaceSource.slice(
     workspaceSource.indexOf("{!isTemplateForm && ("),
-    workspaceSource.indexOf("{isTemplateForm && formDetailTabs.length > 0"),
+    workspaceSource.indexOf("{isWordRetestForm && ("),
   );
   assert.ok(generalTodoFormSource.indexOf("<PrioritySelectField") < generalTodoFormSource.indexOf('<TextField\n                    label="제목"'));
   assert.ok(generalTodoFormSource.includes('md:grid-cols-[160px_minmax(0,1fr)]'));
@@ -422,7 +428,7 @@ test("simple todo details stay completion focused", async () => {
   assert.doesNotMatch(detailDialogSource, /<DialogDescription(?! className="sr-only")/);
 });
 
-test("todo list places priority before title in table rows", async () => {
+test("todo list places columns in the requested operations order", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const taskListSource = source.slice(
     source.indexOf("function TaskList({"),
@@ -430,19 +436,38 @@ test("todo list places priority before title in table rows", async () => {
   );
 
   assertIncludesAll(taskListSource, [
-    'md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]',
+    'md:grid-cols-[88px_140px_minmax(220px,1fr)_150px_150px_96px_120px]',
     "function TodoSortableHeaderButton({",
     'onSortChange("status")',
     'onSortChange("priority")',
     'onSortChange("due")',
     "aria-sort={ariaSort}",
     "TODO_TABLE_SORT_COLUMNS",
-    "{isTodoRow && (",
+    "if (isTodoRow) {",
     "<TodoPriorityBadge priority={task.priority} showNormal />",
+    "<TodoDateSummary task={task} />",
+    "<TaskStatusBadge status={task.status} />",
   ]);
 
-  assert.ok(taskListSource.indexOf('column.label === "우선순위"') < taskListSource.indexOf('<span>{isTodoList ? "제목" : "업무"}</span>'));
-  assert.ok(taskListSource.indexOf("<TodoPriorityBadge priority={task.priority} showNormal />") < taskListSource.indexOf('aria-label={`${task.title} 상세 보기`}'));
+  const headerSource = taskListSource.slice(
+    taskListSource.indexOf("const header = ("),
+    taskListSource.indexOf("const rows ="),
+  );
+  assert.ok(headerSource.indexOf('onSortChange("priority")') < headerSource.indexOf('onSortChange("due")'));
+  assert.ok(headerSource.indexOf('onSortChange("due")') < headerSource.indexOf("<span>제목</span>"));
+  assert.ok(headerSource.indexOf("<span>제목</span>") < headerSource.indexOf("<span>요청자/요청팀</span>"));
+  assert.ok(headerSource.indexOf("<span>요청자/요청팀</span>") < headerSource.indexOf("<span>담당자/담당팀</span>"));
+  assert.ok(headerSource.indexOf("<span>담당자/담당팀</span>") < headerSource.indexOf('onSortChange("status")'));
+  assert.ok(headerSource.indexOf('onSortChange("status")') < headerSource.indexOf("<span className=\"text-right\">다음 액션</span>"));
+
+  const todoRowSource = taskListSource.slice(
+    taskListSource.indexOf("if (isTodoRow) {"),
+    taskListSource.indexOf("\n  return (", taskListSource.indexOf("if (isTodoRow) {")),
+  );
+  assert.ok(todoRowSource.indexOf("<TodoPriorityBadge priority={task.priority} showNormal />") < todoRowSource.indexOf("<TodoDateSummary task={task} />"));
+  assert.ok(todoRowSource.indexOf("<TodoDateSummary task={task} />") < todoRowSource.indexOf('aria-label={`${task.title} 상세 보기`}'));
+  assert.ok(todoRowSource.indexOf("{todoRequesterLabel}") < todoRowSource.indexOf("{todoAssigneeLabel}"));
+  assert.ok(todoRowSource.indexOf("{todoAssigneeLabel}") < todoRowSource.indexOf("<TaskStatusBadge status={task.status} />"));
 });
 
 test("todo filters use custom listboxes and only keep people and team filters", async () => {
@@ -641,7 +666,9 @@ test("operation forms use staged fields and linked management selectors", async 
     "<LinkedSelect",
     `label="${ko.student}"`,
     `label="${ko.class}"`,
-    `label="${ko.teacher}"`,
+    'label="담당선생님"',
+    'label="장소"',
+    'label="메모"',
     "fillRegistration: true",
     "fillWithdrawal: true",
     "fillTransferFrom: true",
@@ -650,23 +677,149 @@ test("operation forms use staged fields and linked management selectors", async 
     "getStudentRosterClassIds",
     "selectedWordRetestStudent",
     "selectedWordRetestClassId",
+    "selectedWordRetestClass",
     "selectedWordRetestTeacherId",
-    "getWordRetestClassOptions(classes, selectedWordRetestStudent, selectedWordRetestClassId)",
+    "selectedWordRetestTeacher",
+    "getWordRetestStudentOptions(students, selectedWordRetestClass, form.studentId || \"\")",
+    "getWordRetestClassOptions(classes, selectedWordRetestStudent, selectedWordRetestClassId, selectedWordRetestTeacher)",
     "getWordRetestTeacherOptions(teachers, selectedWordRetestTeacherId)",
     "classItem.id === selectedClassId",
     "teacher.id === selectedTeacherId",
+    "findCurrentUserTeacherOption",
     "openManualField",
     "shouldShowManualField",
+    "DateTimeField",
+    "LinkedSelectedValue",
+    "renderOption",
+    "renderSelected",
+    "listHeader",
+    "getWordRetestTextbookOptions",
+    "getWordRetestTextbookGradeFilters",
+    "normalizeWordRetestTextbookSubjectLabel",
+    "isWordRetestTextbookOption",
+    "inferWordRetestTextbookSubject",
+    "inferWordRetestTextbookGrade",
+    "inferWordRetestTextbookGradePill",
+    "wordRetestTextbookGradeFilter",
     'const defaultAssigneeId = currentUserId || ""',
     "const { user, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()",
     'setWordRetestMode(isTeacher && !isStaff ? "teacher" : "assistant")',
+    "shouldShowFormDetailTabs",
     "{formStepProgressLabel}",
     "{getTaskTypeLabel(form.type)}",
   ]);
 
   assert.doesNotMatch(formDialogSource, /<DialogDescription(?! className="sr-only")/);
-  assert.match(source, />\s*\uc120\uc0dd\ub2d8\s*<\/button>/);
-  assert.match(source, />\s*\uc870\uad50\s*<\/button>/);
+  assert.ok(source.includes('{ key: "teacher", label: "담당선생님" }'));
+  assert.ok(source.includes('{ key: "assistant", label: "조교선생님" }'));
+});
+
+test("word retest workspace uses role queues branch filters and dedicated row actions", async () => {
+  const [workspaceSource, modelSource, serviceSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-model.js"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+  ]);
+
+  assertIncludesAll(modelSource, [
+    "function getWordRetestWorkspaceRole",
+    "function isWordRetestInAssistantQueue",
+    "function isWordRetestInTeacherQueue",
+    "WORD_RETEST_ASSISTANT_ACTION_STATUSES",
+    "WORD_RETEST_TEACHER_ACTION_STATUSES",
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    'type WordRetestMode = "assistant" | "teacher"',
+    'type WordRetestBranchFilter = "all" | "본관" | "별관"',
+    "WORD_RETEST_ROLE_TABS",
+    '{ key: "assistant", label: "조교선생님" }',
+    '{ key: "teacher", label: "담당선생님" }',
+    "WORD_RETEST_BRANCH_FILTERS",
+    '{ key: "all", label: "전체" }',
+    '{ key: "본관", label: "본관" }',
+    '{ key: "별관", label: "별관" }',
+    "syncWordRetestMode",
+    "setWordRetestBranchFilter",
+    "isWordRetestInAssistantQueue",
+    "isWordRetestInTeacherQueue",
+    "WordRetestTaskList",
+    "WordRetestTaskRow",
+    "WordRetestRoleActionButton",
+    "getWordRetestPrimaryAction",
+    "getWordRetestScoreSummary",
+    "getWordRetestBranch",
+    "getWordRetestTeacherLabel",
+    "getWordRetestRequestDefaults",
+    "assigneeTeam: \"조교팀\"",
+    'if (input.type === "word_retest")',
+    'assigneeId: ""',
+    'isTemplateForm && !isWordRetestForm',
+    "WORD_RETEST_TIME_OPTIONS",
+    "Clock className",
+    "<SelectedValuePill",
+    "PopoverContent",
+    "placeholder={`${label} 검색`}",
+    "className=\"h-9 min-w-0 pr-9\"",
+    "className=\"max-h-72 overflow-y-auto overscroll-contain p-1\"",
+    "right-2 top-1/2 inline-flex size-6",
+    "value ? \"pr-20\" : \"\"",
+    "value ? \"mr-7\" : \"\"",
+    "z-[120]",
+    "handleTimeListWheel",
+    "target.scrollTop += event.deltaY",
+    "sortWordRetestTasksByTestAt",
+    "WordRetestFilterBar",
+    "WordRetestInlineScoreEditor",
+    "WordRetestStatusBadge",
+    "WordRetestProgressStepper",
+    "onScoreSave={(task) => void saveWordRetestInlineScores(task)}",
+    'label="담당선생님" allLabel="담당선생님 전체"',
+    'label="수업" allLabel="수업 전체"',
+    "WORD_RETEST_BRANCH_OPTIONS",
+    "TaskListboxField label=\"장소\"",
+    "md:grid-cols-2",
+    "renderSelected={(option) => <LinkedSelectedValue label={option.label} />}",
+    "renderOption={(option) => <LinkedSelectedValue label={option.label} />}",
+    "renderOption={(option) =>",
+    "listHeader={renderWordRetestTextbookFilters()}",
+    "학년구분 전체",
+    "pills={[classItem?.teacher, classItem?.room]}",
+    "pills={[student?.grade, student?.school]}",
+    "inferWordRetestTextbookSubject(textbook) === \"어휘\"",
+    "inferWordRetestTextbookSubject(textbook)",
+    "inferWordRetestTextbookGradePill(textbook)",
+    "teacherId: teacher?.id || \"\"",
+    "teacherName: teacher?.label || \"\"",
+    "label=\"담당선생님\"",
+    "label=\"장소\"",
+    "label=\"메모\"",
+    "DateTimeField label=\"응시일시\"",
+    "label=\"시험범위\"",
+    "label=\"진행상태\"",
+    "교재/시험범위",
+    "시험범위 입력",
+    "시험 시작",
+    "점수 입력",
+    "검토 요청",
+    "미응시",
+    "완료 확인",
+    "응시일시 변경",
+    "미응시 재요청",
+  ]);
+  assert.doesNotMatch(workspaceSource, /세부과목 전체/);
+
+  const wordRetestToolbarSource = workspaceSource.slice(
+    workspaceSource.indexOf("{isWordRetestWorkspace && ("),
+    workspaceSource.indexOf("{isTodoWorkspace && ("),
+  );
+  assert.doesNotMatch(wordRetestToolbarSource, /OPERATION_VIEW_TABS/);
+  assert.doesNotMatch(wordRetestToolbarSource, />\s*전체\s*<\/button>[\s\S]*>\s*상태별\s*<\/button>/);
+
+  assertIncludesAll(serviceSource, [
+    'if (status === "review_requested") return current === "absent" ? "absent" : "in_progress"',
+    'if (status === "requested" || status === "confirmed") return "not_started"',
+  ]);
 });
 
 test("management sync connects registration transfer withdrawal and word retest data", async () => {
@@ -694,10 +847,11 @@ test("management sync connects registration transfer withdrawal and word retest 
     "wordRetest.branch",
     "wordRetest.testAt",
     "wordRetest.unit",
+    "blockers.push(\"시험범위\")",
     "hasWordRetestScore",
     "function shouldRequireWordRetestScore",
     "!isWordRetestAbsent(wordRetest) && !hasWordRetestScore(wordRetest)",
-    'if (value === "absent")',
+    '...(value === "absent" ? { firstScore: "", secondScore: "", thirdScore: "" } : {})',
     "점수 없음",
     "function CompletionBlockerActionPanel",
     "function CompletionBlockerInlineChips",
@@ -754,6 +908,7 @@ test("management sync connects registration transfer withdrawal and word retest 
     "const firstDelete = await supabase.from(\"ops_tasks\").delete().eq(\"id\", taskId)",
     "export async function deleteOpsTask",
     "MANAGEMENT_INPUT_FIELDS",
+    "missingFields.push(\"시험범위\")",
     "MANAGEMENT_CHOICE_FIELDS",
     "managementMissingFieldLabel",
     "입력 필요",

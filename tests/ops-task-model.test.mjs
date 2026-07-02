@@ -13,6 +13,9 @@ import {
   isOpsTaskAssignedToUser,
   isOpsTaskInUserInbox,
   isOpsTaskInUserSent,
+  getWordRetestWorkspaceRole,
+  isWordRetestInAssistantQueue,
+  isWordRetestInTeacherQueue,
   sortOpsTasksByPriority,
   sortOpsTasksByWorkDate,
   sortOpsTasksByWorkflowStatus,
@@ -72,6 +75,37 @@ test("team workflow inbox and sent boxes follow the current action owner", () =>
   assert.equal(isOpsTaskInUserSent(tasks[1], { currentUserId: "assistant-1", currentUserTeam: "조교팀" }), true);
   assert.equal(isOpsTaskInUserInbox(tasks[2], { currentUserId: "requester-1", currentUserTeam: "수학팀" }), false);
   assert.equal(isOpsTaskInUserSent(tasks[2], { currentUserId: "assistant-1", currentUserTeam: "조교팀" }), false);
+});
+
+test("word retest workspace roles follow assistant teacher action ownership", () => {
+  const assistantStatuses = ["requested", "confirmed", "in_progress", "on_hold"];
+
+  for (const status of assistantStatuses) {
+    const task = { id: status, type: "word_retest", status };
+    assert.equal(getWordRetestWorkspaceRole(task), "assistant", status);
+    assert.equal(isWordRetestInAssistantQueue(task), true, status);
+    assert.equal(isWordRetestInTeacherQueue(task), false, status);
+  }
+
+  const reviewTask = {
+    id: "review",
+    type: "word_retest",
+    status: "review_requested",
+    requestedBy: "teacher-1",
+    requestedTeam: "영어팀",
+    wordRetest: { teacherId: "teacher-1", teacherName: "한지현" },
+  };
+
+  assert.equal(getWordRetestWorkspaceRole(reviewTask), "teacher");
+  assert.equal(isWordRetestInAssistantQueue(reviewTask), false);
+  assert.equal(isWordRetestInTeacherQueue(reviewTask), true);
+  assert.equal(isWordRetestInTeacherQueue(reviewTask, { currentUserId: "teacher-1" }), true);
+  assert.equal(isWordRetestInTeacherQueue(reviewTask, { currentUserLabel: "한지현" }), true);
+  assert.equal(isWordRetestInTeacherQueue(reviewTask, { currentUserId: "other", currentUserLabel: "다른선생님" }), false);
+
+  assert.equal(getWordRetestWorkspaceRole({ type: "word_retest", status: "done" }), "completed");
+  assert.equal(getWordRetestWorkspaceRole({ type: "word_retest", status: "canceled" }), "completed");
+  assert.equal(getWordRetestWorkspaceRole({ type: "general", status: "requested" }), "none");
 });
 
 test("team workflow sorting supports due-date and status ordering", () => {

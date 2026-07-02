@@ -1414,7 +1414,8 @@ function getWordRetestDetailStatusForTaskStatus(status: OpsTaskStatus, currentRe
 
   if (status === "done") return current === "absent" ? "absent" : "done"
   if (status === "canceled") return "absent"
-  if (status === "in_progress" || status === "review_requested") return "in_progress"
+  if (status === "review_requested") return current === "absent" ? "absent" : "in_progress"
+  if (status === "in_progress") return "in_progress"
   if (status === "requested" || status === "confirmed") return "not_started"
   if (status === "on_hold") return current === "in_progress" ? "in_progress" : current || "not_started"
 
@@ -1451,7 +1452,7 @@ function isSameManagementReference(first: unknown, second: unknown) {
 }
 
 const MANAGEMENT_LINK_FIELDS = new Set(["학생", "수업", "교재", "전 수업", "후 수업", "선생님"])
-const MANAGEMENT_INPUT_FIELDS = new Set(["수업시작일", "퇴원일", "전 수업 종료일", "후 수업 시작일", "응시일시", "단원", "점수"])
+const MANAGEMENT_INPUT_FIELDS = new Set(["수업시작일", "퇴원일", "전 수업 종료일", "후 수업 시작일", "응시일시", "시험범위", "점수"])
 const MANAGEMENT_CHOICE_FIELDS = new Set(["다른 수업"])
 
 function managementMissingFieldLabel(field: string) {
@@ -1500,7 +1501,7 @@ function assertManagementSyncReady(input: OpsTaskInput) {
     if (!hasManagementReference(input.textbookId)) missingFields.push("교재")
     if (!text(wordRetest.branch)) missingFields.push("지점")
     if (!text(wordRetest.testAt)) missingFields.push("응시일시")
-    if (!text(wordRetest.unit)) missingFields.push("단원")
+    if (!text(wordRetest.unit)) missingFields.push("시험범위")
     if (shouldRequireWordRetestScore(wordRetest)) missingFields.push("점수")
   }
 

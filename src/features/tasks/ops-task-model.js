@@ -70,6 +70,8 @@ function text(value) {
 
 const ACTION_ASSIGNEE_STATUSES = new Set(["requested", "confirmed", "in_progress", "on_hold"]);
 const ACTION_REQUESTER_STATUSES = new Set(["review_requested"]);
+const WORD_RETEST_ASSISTANT_ACTION_STATUSES = new Set(["requested", "confirmed", "in_progress", "on_hold"]);
+const WORD_RETEST_TEACHER_ACTION_STATUSES = new Set(["review_requested"]);
 
 export const OPS_TASK_WORKFLOW_STATUS_ORDER = [
   "requested",
@@ -144,6 +146,43 @@ export function isOpsTaskInUserSent(task = {}, context = {}) {
   if (ACTION_REQUESTER_STATUSES.has(status)) return matchesAssignee(task, context);
   if (ACTION_ASSIGNEE_STATUSES.has(status)) return matchesRequester(task, context);
   return false;
+}
+
+function getWordRetestDetail(task = {}) {
+  return task.wordRetest || task.word_retest || {};
+}
+
+function matchesWordRetestTeacher(task = {}, context = {}) {
+  const detail = getWordRetestDetail(task);
+  return matchesIdentity(
+    [detail.teacherId, detail.teacher_id, task.requestedBy, task.requested_by],
+    [detail.teacherName, detail.teacher_name, task.requestedByLabel, task.requested_by_label],
+    context,
+  ) || matchesTeam([task.requestedTeam, task.requested_team], context);
+}
+
+export function getWordRetestWorkspaceRole(task = {}) {
+  if (text(task.type) !== "word_retest") return "none";
+  if (isClosedOpsTask(task)) return "completed";
+
+  const status = text(task.status || "requested");
+  if (WORD_RETEST_TEACHER_ACTION_STATUSES.has(status)) return "teacher";
+  if (WORD_RETEST_ASSISTANT_ACTION_STATUSES.has(status)) return "assistant";
+  return "none";
+}
+
+export function isWordRetestInAssistantQueue(task = {}, context = {}) {
+  if (getWordRetestWorkspaceRole(task) !== "assistant") return false;
+  const normalized = normalizedUserContext(context);
+  if (!normalized.currentUserId && !normalized.currentUserLabel && !normalized.currentUserTeam) return true;
+  return matchesAssignee(task, context);
+}
+
+export function isWordRetestInTeacherQueue(task = {}, context = {}) {
+  if (getWordRetestWorkspaceRole(task) !== "teacher") return false;
+  const normalized = normalizedUserContext(context);
+  if (!normalized.currentUserId && !normalized.currentUserLabel && !normalized.currentUserTeam) return true;
+  return matchesWordRetestTeacher(task, context);
 }
 
 export function toDateKey(value) {

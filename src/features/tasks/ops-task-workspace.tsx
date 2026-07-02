@@ -1,8 +1,8 @@
 "use client"
 
 import { useSearchParams } from "next/navigation"
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
-import { CalendarDays, Check, ChevronLeft, ChevronRight, FileText, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type WheelEvent } from "react"
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock, FileText, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,7 +21,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/providers/auth-provider"
 
@@ -36,12 +36,15 @@ import {
   getTaskPriorityLabel,
   getTaskStatusLabel,
   getTaskTypeLabel,
+  getWordRetestWorkspaceRole,
   hasOpsTaskCalendarDate,
   hasOpsTaskOverdueCalendarDate,
   isClosedOpsTask,
   isOpsTaskInUserInbox,
   isOpsTaskInUserSent,
   isOpsTaskAssignedToUser,
+  isWordRetestInAssistantQueue,
+  isWordRetestInTeacherQueue,
   sortOpsTasksByPriority,
   sortOpsTasksByWorkflowStatus,
   sortOpsTasksByWorkDate,
@@ -83,7 +86,14 @@ type TodoSortKey = "status" | "priority" | "due"
 type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
 type TodoSelectFilterKey = "all" | string
 
-type WordRetestMode = "teacher" | "assistant"
+type WordRetestMode = "assistant" | "teacher"
+type WordRetestBranchFilter = "all" | "본관" | "별관"
+type WordRetestSelectFilterKey = "all" | string
+type WordRetestScoreDraft = {
+  firstScore: string
+  secondScore: string
+  thirdScore: string
+}
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
   status?: OpsTaskStatus
@@ -101,6 +111,9 @@ type TaskScheduleItem = {
   date: string
 }
 type QuickAddPreviewItem = { key: string; label: string }
+type WordRetestPrimaryAction =
+  | { kind: "status"; status: OpsTaskStatus; label: string }
+  | { kind: "edit"; label: string; blockers?: string[] }
 type OpsTaskOptionIndexes = {
   studentsById: Map<string, OpsStudentOption>
   classesById: Map<string, OpsClassOption>
@@ -191,6 +204,17 @@ const TODO_VIEW_TABS: Array<{ key: TodoViewKey; label: string }> = [
   { key: "inbox", label: "받은함" },
   { key: "sent", label: "보낸함" },
   { key: "completed", label: "완료" },
+]
+
+const WORD_RETEST_ROLE_TABS: Array<{ key: WordRetestMode; label: string }> = [
+  { key: "assistant", label: "조교선생님" },
+  { key: "teacher", label: "담당선생님" },
+]
+
+const WORD_RETEST_BRANCH_FILTERS: Array<{ key: WordRetestBranchFilter; label: string }> = [
+  { key: "all", label: "전체" },
+  { key: "본관", label: "본관" },
+  { key: "별관", label: "별관" },
 ]
 
 const TODO_TABLE_SORT_COLUMNS: Array<{ key: TodoSortKey; label: string }> = [
@@ -328,6 +352,14 @@ function isTodoDueFilterKey(value: string): value is TodoDueFilterKey {
   return TODO_DUE_FILTER_KEYS.has(value as TodoDueFilterKey)
 }
 
+function isWordRetestModeKey(value: string): value is WordRetestMode {
+  return WORD_RETEST_ROLE_TABS.some((tab) => tab.key === value)
+}
+
+function isWordRetestBranchFilterKey(value: string): value is WordRetestBranchFilter {
+  return WORD_RETEST_BRANCH_FILTERS.some((filter) => filter.key === value)
+}
+
 function getTodoRouteState(searchParams: URLSearchParams): { list: TodoViewKey; sort?: TodoSortKey; due?: TodoDueFilterKey; status?: OpsTaskStatus } | null {
   const nextList = searchParams.get("list") || ""
   const nextFilter = searchParams.get("filter") || ""
@@ -452,13 +484,39 @@ function uniqueClassOptions(classes: OpsClassOption[]) {
   })
 }
 
-function getWordRetestClassOptions(classes: OpsClassOption[], student?: OpsStudentOption, selectedClassId = "") {
+function uniqueStudentOptions(students: OpsStudentOption[]) {
+  const seenIds = new Set<string>()
+  return students.filter((student) => {
+    if (seenIds.has(student.id)) return false
+    seenIds.add(student.id)
+    return true
+  })
+}
+
+function getWordRetestStudentOptions(students: OpsStudentOption[], classItem?: OpsClassOption, selectedStudentId = "") {
+  const selectedStudent = students.find((student) => student.id === selectedStudentId)
+  if (!classItem) return uniqueStudentOptions([selectedStudent, ...students].filter(Boolean) as OpsStudentOption[])
+
+  const classStudentIds = new Set([...classItem.studentIds, ...classItem.waitlistIds])
+  const rosterStudents = students.filter((student) => (
+    classStudentIds.has(student.id) ||
+    student.classIds.includes(classItem.id) ||
+    student.waitlistClassIds.includes(classItem.id)
+  ))
+
+  return uniqueStudentOptions([selectedStudent, ...(rosterStudents.length > 0 ? rosterStudents : students)].filter(Boolean) as OpsStudentOption[])
+}
+
+function getWordRetestClassOptions(classes: OpsClassOption[], student?: OpsStudentOption, selectedClassId = "", teacher?: OpsTeacherOption) {
   const englishClasses = classes.filter(isWordRetestClassOption)
   const baseClasses = englishClasses.length > 0 ? englishClasses : classes
+  const teacherName = normalizeLookupValue(teacher?.label)
+  const teacherClasses = teacherName ? baseClasses.filter((classItem) => normalizeLookupValue(classItem.teacher) === teacherName) : []
+  const teacherScopedClasses = teacherClasses.length > 0 ? teacherClasses : baseClasses
   const studentClassIds = getStudentRosterClassIds(student, classes)
-  const studentClasses = baseClasses.filter((classItem) => studentClassIds.includes(classItem.id))
+  const studentClasses = teacherScopedClasses.filter((classItem) => studentClassIds.includes(classItem.id))
   const selectedClass = classes.find((classItem) => classItem.id === selectedClassId)
-  return uniqueClassOptions([selectedClass, ...(studentClasses.length > 0 ? studentClasses : baseClasses)].filter(Boolean) as OpsClassOption[])
+  return uniqueClassOptions([selectedClass, ...(studentClasses.length > 0 ? studentClasses : teacherScopedClasses)].filter(Boolean) as OpsClassOption[])
 }
 
 function isWordRetestTeacherOption(teacher?: OpsTeacherOption) {
@@ -481,6 +539,88 @@ function getWordRetestTeacherOptions(teachers: OpsTeacherOption[], selectedTeach
   const baseTeachers = englishTeachers.length > 0 ? englishTeachers : teachers
   const selectedTeacher = teachers.find((teacher) => teacher.id === selectedTeacherId)
   return uniqueTeacherOptions([selectedTeacher, ...baseTeachers].filter(Boolean) as OpsTeacherOption[])
+}
+
+function findCurrentUserTeacherOption(
+  teachers: OpsTeacherOption[],
+  userId: string,
+  ...references: unknown[]
+) {
+  const safeUserId = String(userId || "").trim()
+  const normalizedReferences = new Set(references.map(normalizeLookupValue).filter(Boolean))
+  return teachers.find((teacher) => {
+    if (safeUserId && teacher.profileId === safeUserId) return true
+    return [
+      teacher.accountEmail,
+      teacher.label,
+    ].some((value) => normalizedReferences.has(normalizeLookupValue(value)))
+  })
+}
+
+function normalizeWordRetestTextbookSubjectLabel(subject: string) {
+  const value = subject.trim()
+  const normalized = value.toLowerCase()
+  if (!value || normalized === "other") return "기타"
+  if (normalized === "english") return "영어"
+  if (normalized === "math") return "수학"
+  return value
+}
+
+function isWordRetestTextbookOption(textbook: OpsTextbookOption) {
+  return inferWordRetestTextbookSubject(textbook) === "어휘"
+}
+
+function inferWordRetestTextbookSubject(textbook: OpsTextbookOption) {
+  const text = normalizeLookupValue([textbook.subject, textbook.label, textbook.publisher, textbook.meta].filter(Boolean).join(" "))
+  if (/(단어|어휘|보카|voca|vocab|vocabulary)/i.test(text)) return "어휘"
+  if (/(문법|grammar)/i.test(text)) return "문법"
+  if (/(독해|reading|read)/i.test(text)) return "독해"
+  if (/(듣기|리스닝|listening)/i.test(text)) return "듣기"
+  if (/(내신|학교별|school)/i.test(text)) return "내신"
+  if (/(수능|모의|mock|exam)/i.test(text)) return "수능"
+  if (/(영어|english)/i.test(text)) return "영어"
+  return normalizeWordRetestTextbookSubjectLabel(textbook.subject || "")
+}
+
+function inferWordRetestTextbookGrade(textbook: OpsTextbookOption) {
+  const text = normalizeLookupValue([textbook.label, textbook.subject, textbook.meta].filter(Boolean).join(" "))
+  if (/(초[1-6]|초등|elementary)/i.test(text)) return "초등"
+  if (/(중[1-3]|중등|middle)/i.test(text)) return "중등"
+  if (/(고[1-3]|고등|high)/i.test(text)) return "고등"
+  return ""
+}
+
+function inferWordRetestTextbookGradePill(textbook: OpsTextbookOption) {
+  const text = normalizeLookupValue([textbook.label, textbook.subject, textbook.meta].filter(Boolean).join(" "))
+  const exactGrade = text.match(/(초[1-6]|중[1-3]|고[1-3])/)
+  if (exactGrade) return exactGrade[1]
+  if (/(초등|elementary)/i.test(text)) return "초등"
+  if (/(중등|middle)/i.test(text)) return "중등"
+  if (/(고등|high)/i.test(text)) return "고등"
+  return ""
+}
+
+function uniqueTextFilters(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function getWordRetestTextbookGradeFilters(textbooks: OpsTextbookOption[]) {
+  const availableFilters = new Set(uniqueTextFilters(textbooks.filter(isWordRetestTextbookOption).map(inferWordRetestTextbookGrade)))
+  return ["초등", "중등", "고등"].filter((filterValue) => availableFilters.has(filterValue))
+}
+
+function getWordRetestTextbookOptions(
+  textbooks: OpsTextbookOption[],
+  selectedTextbookId = "",
+  gradeFilter = "all",
+) {
+  const eligibleTextbooks = textbooks.filter(isWordRetestTextbookOption)
+  const filteredTextbooks = eligibleTextbooks.filter((textbook) => (
+    gradeFilter === "all" || inferWordRetestTextbookGrade(textbook) === gradeFilter
+  ))
+  const selectedTextbook = eligibleTextbooks.find((textbook) => textbook.id === selectedTextbookId)
+  const candidates = [selectedTextbook, ...filteredTextbooks].filter((textbook): textbook is OpsTextbookOption => Boolean(textbook))
+  return candidates.filter((textbook, index, list) => list.findIndex((item) => item.id === textbook.id) === index)
 }
 
 function getUnknownErrorMessage(error: unknown) {
@@ -656,6 +796,94 @@ function isWordRetestAbsent(wordRetest?: OpsTaskInput["wordRetest"]) {
 
 function shouldRequireWordRetestScore(wordRetest?: OpsTaskInput["wordRetest"]) {
   return !isWordRetestAbsent(wordRetest) && !hasWordRetestScore(wordRetest)
+}
+
+function getWordRetestBranch(task: OpsTask) {
+  return String(task.wordRetest?.branch || task.campus || "본관").trim() || "본관"
+}
+
+function getWordRetestTeacherLabel(task: OpsTask) {
+  return task.wordRetest?.teacherName || task.assigneeLabel || task.requestedByLabel || "미지정"
+}
+
+function getWordRetestStudentLabel(task: OpsTask) {
+  return task.studentName || task.wordRetest?.studentName || "미지정"
+}
+
+function getWordRetestClassLabel(task: OpsTask) {
+  return task.className || task.wordRetest?.className || "미지정"
+}
+
+function getWordRetestTextbookLabel(task: OpsTask) {
+  return task.textbookTitle || task.wordRetest?.textbookName || "미지정"
+}
+
+function getWordRetestUnitLabel(task: OpsTask) {
+  return task.wordRetest?.unit || "미지정"
+}
+
+function getWordRetestStatusLabel(value?: string) {
+  const statusValue = String(value || "not_started").trim() || "not_started"
+  return WORD_RETEST_STATUSES.find((status) => status.value === statusValue)?.label || "시작 전"
+}
+
+function getWordRetestScoreSummary(task: OpsTask) {
+  const wordRetest = task.wordRetest || {}
+  if (isWordRetestAbsent(wordRetest)) return "미응시"
+  const scores = [wordRetest.firstScore, wordRetest.secondScore, wordRetest.thirdScore]
+    .map((score) => String(score || "").trim())
+    .filter(Boolean)
+  return scores.length > 0 ? scores.join(" / ") : "점수 미입력"
+}
+
+function getWordRetestScoreDraft(task: OpsTask): WordRetestScoreDraft {
+  const wordRetest = task.wordRetest || {}
+  return {
+    firstScore: String(wordRetest.firstScore || ""),
+    secondScore: String(wordRetest.secondScore || ""),
+    thirdScore: String(wordRetest.thirdScore || ""),
+  }
+}
+
+function hasWordRetestScoreDraft(draft: WordRetestScoreDraft) {
+  return [draft.firstScore, draft.secondScore, draft.thirdScore].some((score) => Boolean(score.trim()))
+}
+
+function isWordRetestScoreDraftDirty(task: OpsTask, draft: WordRetestScoreDraft) {
+  const current = getWordRetestScoreDraft(task)
+  return current.firstScore !== draft.firstScore ||
+    current.secondScore !== draft.secondScore ||
+    current.thirdScore !== draft.thirdScore
+}
+
+function getWordRetestDateSortValue(task: OpsTask) {
+  const rawValue = task.wordRetest?.testAt || task.dueAt || task.startAt || ""
+  const timestamp = Date.parse(rawValue)
+  return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER
+}
+
+function sortWordRetestTasksByTestAt(tasks: OpsTask[]) {
+  return [...tasks].sort((left, right) => {
+    const dateDiff = getWordRetestDateSortValue(left) - getWordRetestDateSortValue(right)
+    if (dateDiff !== 0) return dateDiff
+    return String(left.createdAt || left.updatedAt).localeCompare(String(right.createdAt || right.updatedAt))
+  })
+}
+
+function getWordRetestRequestDefaults(type: OpsTaskType, currentUserId: string, currentUserTaskTeam: string, teacher?: OpsTeacherOption): Partial<OpsTaskInput> {
+  if (type !== "word_retest") return {}
+  return {
+    requestedBy: currentUserId,
+    requestedTeam: currentUserTaskTeam,
+    assigneeId: "",
+    assigneeTeam: "조교팀",
+    wordRetest: {
+      branch: "본관",
+      retestStatus: "not_started",
+      teacherId: teacher?.id || "",
+      teacherName: teacher?.label || "",
+    },
+  }
 }
 
 function isSameLinkedRecord(first: unknown, second: unknown) {
@@ -839,7 +1067,7 @@ function getOperationCompletionBlockers(
     if (!hasLinkedRecord(input.textbookId)) blockers.push("교재")
     if (hasLinkedRecord(input.textbookId) && !findTextbookOption(textbooks, input.textbookId, indexes)) blockers.push("교재")
     if (!String(wordRetest.testAt || "").trim()) blockers.push("응시일시")
-    if (!String(wordRetest.unit || "").trim()) blockers.push("단원")
+    if (!String(wordRetest.unit || "").trim()) blockers.push("시험범위")
     if (shouldRequireWordRetestScore(wordRetest)) blockers.push("점수")
   }
 
@@ -892,7 +1120,7 @@ const BLOCKER_ACTION_LABELS: Record<string, string> = {
   "수업료 처리": "수업료 처리",
   "교재비 처리": "교재비 처리",
   "응시일시": "응시일시 지정",
-  "단원": "단원 입력",
+  "시험범위": "시험범위 입력",
   "점수": "점수 입력",
 }
 
@@ -930,7 +1158,7 @@ const INPUT_COMPLETION_BLOCKERS = new Set([
   "전 수업 종료일",
   "후 수업 시작일",
   "응시일시",
-  "단원",
+  "시험범위",
   "점수",
 ])
 
@@ -969,7 +1197,7 @@ function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): Fo
 
   if (type === "word_retest") {
     if (blockers.some((blocker) => ["학생", "수업", "선생님", "응시일시", "수업 명단"].includes(blocker))) return "word_retest_basic"
-    if (blockers.some((blocker) => ["교재", "단원"].includes(blocker))) return "word_retest_scope"
+    if (blockers.some((blocker) => ["교재", "시험범위"].includes(blocker))) return "word_retest_scope"
     if (blockers.some((blocker) => ["점수"].includes(blocker))) return "word_retest_scores"
   }
 
@@ -1155,6 +1383,72 @@ function quickDateTimeFromDate(date: Date) {
 
   return `${year}-${month}-${day}T09:00`
 }
+
+function dateTimeDateInputValue(value?: string) {
+  const normalized = dateTimeInputValue(value)
+  if (normalized) return normalized.slice(0, 10)
+  return toDateKey(value || "")
+}
+
+function dateTimeTimeInputValue(value?: string) {
+  const normalized = dateTimeInputValue(value)
+  return normalized.includes("T") ? normalized.slice(11, 16) : ""
+}
+
+function buildLocalDateTimeValue(date: string, time: string) {
+  const dateValue = toDateKey(date)
+  if (!dateValue) return ""
+  return `${dateValue}T${time || "09:00"}`
+}
+
+function normalizeTimeInput(value: string) {
+  const raw = value.trim()
+  const match = raw.match(/^(\d{1,2}):?(\d{2})$/)
+  if (!match) return ""
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return ""
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+}
+
+function formatTimeLabel(value: string) {
+  const normalized = normalizeTimeInput(value)
+  if (!normalized) return "--:--"
+  const [hourRaw, minute] = normalized.split(":")
+  const hour = Number(hourRaw)
+  const period = hour < 12 ? "오전" : "오후"
+  const hour12 = hour % 12 || 12
+  return `${period} ${hour12}:${minute}`
+}
+
+const WORD_RETEST_TIME_OPTIONS = [
+  "09:00",
+  "09:30",
+  "10:00",
+  "10:30",
+  "11:00",
+  "11:30",
+  "12:00",
+  "12:30",
+  "13:00",
+  "13:30",
+  "14:00",
+  "14:30",
+  "15:00",
+  "15:30",
+  "16:00",
+  "16:30",
+  "17:00",
+  "17:30",
+  "18:00",
+  "18:30",
+  "19:00",
+  "19:30",
+  "20:00",
+  "20:30",
+  "21:00",
+  "21:30",
+]
 
 function quickDateTimeForNextWeekday(targetDay: number, forceNextWeek = false) {
   const date = new Date()
@@ -1446,6 +1740,11 @@ type TodoFilterOptions = {
   assigneeTeam: TodoFilterOption[]
 }
 
+type WordRetestFilterOptions = {
+  teacher: TodoFilterOption[]
+  class: TodoFilterOption[]
+}
+
 function selectFilterValue(value: unknown) {
   const textValue = String(value || "").trim()
   return textValue || TODO_TEAM_FILTER_UNASSIGNED
@@ -1493,6 +1792,44 @@ function buildTodoFilterOptions(tasks: OpsTask[]): TodoFilterOptions {
     assignee: sortedTodoFilterOptions(assignee),
     assigneeTeam: sortedTodoFilterOptions(assigneeTeam),
   }
+}
+
+function addWordRetestFilterOptionCount(options: Map<string, TodoFilterOption>, value: unknown, label?: string) {
+  const optionValue = selectFilterValue(value)
+  const optionLabel = String(label || "").trim() || selectFilterLabel(optionValue)
+  const current = options.get(optionValue)
+  options.set(optionValue, {
+    value: optionValue,
+    label: current?.label || optionLabel,
+    count: (current?.count || 0) + 1,
+  })
+}
+
+function getWordRetestTeacherFilterValue(task: OpsTask) {
+  return task.wordRetest?.teacherId || task.wordRetest?.teacherName || getWordRetestTeacherLabel(task)
+}
+
+function getWordRetestClassFilterValue(task: OpsTask) {
+  return task.classId || task.wordRetest?.className || task.className
+}
+
+function buildWordRetestFilterOptions(tasks: OpsTask[]): WordRetestFilterOptions {
+  const teacher = new Map<string, TodoFilterOption>()
+  const classOptions = new Map<string, TodoFilterOption>()
+
+  tasks.forEach((task) => {
+    addWordRetestFilterOptionCount(teacher, getWordRetestTeacherFilterValue(task), getWordRetestTeacherLabel(task))
+    addWordRetestFilterOptionCount(classOptions, getWordRetestClassFilterValue(task), getWordRetestClassLabel(task))
+  })
+
+  return {
+    teacher: sortedTodoFilterOptions(teacher),
+    class: sortedTodoFilterOptions(classOptions),
+  }
+}
+
+function matchesWordRetestFilter(value: unknown, filter: WordRetestSelectFilterKey) {
+  return matchesSelectFilter([value], filter)
 }
 
 function matchesSelectFilter(values: unknown[], filter: TodoSelectFilterKey) {
@@ -1581,10 +1918,6 @@ function resolveQuickAddAssigneeId(
   ))?.id || ""
 }
 
-function isTeacherWordRetest(task: OpsTask, currentUserId: string, currentUserLabel: string) {
-  return isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)
-}
-
 function isOperationConfirmationTask(
   task: OpsTask,
   indexes: OpsTaskOptionIndexes = EMPTY_OPS_TASK_OPTION_INDEXES,
@@ -1664,6 +1997,11 @@ type TaskListboxOption = {
   value: string
   label: string
 }
+
+const WORD_RETEST_BRANCH_OPTIONS: readonly TaskListboxOption[] = [
+  { value: "본관", label: "본관" },
+  { value: "별관", label: "별관" },
+]
 
 function TaskListboxField({
   label,
@@ -1802,6 +2140,26 @@ function optionExactSearchParts(option: LinkedSelectOption) {
     .filter(Boolean)
 }
 
+function SelectedValuePill({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex max-w-[9rem] shrink-0 items-center rounded-full border bg-muted/45 px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground">
+      <span className="truncate">{children}</span>
+    </span>
+  )
+}
+
+function LinkedSelectedValue({ label, pills = [] }: { label: string; pills?: Array<string | undefined> }) {
+  const visiblePills = pills.map((pill) => String(pill || "").trim()).filter(Boolean)
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+      <span className="min-w-0 truncate">{label}</span>
+      {visiblePills.map((pill) => (
+        <SelectedValuePill key={pill}>{pill}</SelectedValuePill>
+      ))}
+    </span>
+  )
+}
+
 function LinkedSelect({
   label,
   value,
@@ -1809,6 +2167,9 @@ function LinkedSelect({
   onChange,
   manualLabel,
   onManualSelect,
+  renderSelected,
+  renderOption,
+  listHeader,
 }: {
   label: string
   value: string
@@ -1816,6 +2177,9 @@ function LinkedSelect({
   onChange: (value: string) => void
   manualLabel?: string
   onManualSelect?: () => void
+  renderSelected?: (option: LinkedSelectOption) => ReactNode
+  renderOption?: (option: LinkedSelectOption) => ReactNode
+  listHeader?: ReactNode
 }) {
   const fieldId = useId()
   const queryId = useId()
@@ -1845,6 +2209,14 @@ function LinkedSelect({
     : `${label} 검색 후 선택`
   const emptySearchResultLabel = "검색 결과 없음"
 
+  function openLinkedSearch() {
+    setIsLinkedSearchOpen(true)
+  }
+
+  function toggleLinkedSearch() {
+    setIsLinkedSearchOpen((open) => !open)
+  }
+
   function handleLinkedChange(nextValue: string) {
     if (nextValue === LINKED_SELECT_MANUAL_VALUE) {
       onManualSelect?.()
@@ -1870,96 +2242,131 @@ function LinkedSelect({
     handleLinkedChange(quickSelectOption.id)
   }
 
-  return (
-    <div
-      className="relative grid min-w-0 gap-1.5 text-sm font-medium"
-      onBlur={(event) => {
-        const nextTarget = event.relatedTarget
-        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
-        setIsLinkedSearchOpen(false)
-      }}
+  function handleLinkedListWheel(event: WheelEvent<HTMLDivElement>) {
+    const target = event.currentTarget
+    if (target.scrollHeight <= target.clientHeight) return
+    const previousScrollTop = target.scrollTop
+    target.scrollTop += event.deltaY
+    if (target.scrollTop === previousScrollTop) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  const linkedSelectControl = shouldShowLinkedSearch && isLinkedSearchOpen ? (
+    <span className="relative block min-w-0">
+      <Input
+        id={queryId}
+        type="search"
+        value={linkedQuery}
+        placeholder={`${label} 검색`}
+        aria-labelledby={fieldId}
+        aria-controls={listId}
+        autoComplete="off"
+        autoFocus
+        className="h-9 min-w-0 pr-9"
+        onFocus={openLinkedSearch}
+        onClick={openLinkedSearch}
+        onChange={(event) => setLinkedQuery(event.target.value)}
+        onKeyDown={handleLinkedQueryKeyDown}
+      />
+      <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+    </span>
+  ) : (
+    <button
+      type="button"
+      aria-labelledby={fieldId}
+      aria-haspopup="listbox"
+      aria-expanded={isLinkedSearchOpen}
+      aria-controls={listId}
+      onClick={shouldShowLinkedSearch ? openLinkedSearch : toggleLinkedSearch}
+      className={[
+        "flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 py-1.5 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
+        isLinkedSearchOpen ? "border-ring ring-2 ring-ring/40" : "",
+      ].join(" ")}
     >
-      <label id={fieldId}>{label}</label>
-      {isLinkedSearchOpen && shouldShowLinkedSearch ? (
-        <Input
-          id={queryId}
-          type="search"
-          value={linkedQuery}
-          placeholder={`${label} 검색`}
-          aria-label={`${label} 검색`}
-          aria-controls={listId}
-          autoComplete="off"
-          autoFocus
-          className="h-9 min-w-0"
-          onChange={(event) => setLinkedQuery(event.target.value)}
-          onKeyDown={handleLinkedQueryKeyDown}
-        />
+      {selectedOption ? (
+        <span className="min-w-0 flex-1 overflow-hidden text-foreground">
+          {renderSelected ? renderSelected(selectedOption) : <span className="block truncate">{selectedLabel}</span>}
+        </span>
       ) : (
-        <button
-          type="button"
-          aria-labelledby={fieldId}
-          aria-haspopup="listbox"
-          aria-expanded={isLinkedSearchOpen}
-          aria-controls={listId}
-          onClick={() => setIsLinkedSearchOpen((open) => !open)}
-          className={[
-            "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
-            isLinkedSearchOpen ? "border-ring ring-2 ring-ring/40" : "",
-          ].join(" ")}
-        >
-          <span className={selectedOption ? "truncate text-foreground" : "truncate text-muted-foreground"}>{selectedOption ? selectedLabel : "선택"}</span>
-          {shouldShowLinkedSearch ? (
-            <Search className="size-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", isLinkedSearchOpen ? "rotate-90" : ""].join(" ")} />
-          )}
-        </button>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">선택</span>
       )}
+      {shouldShowLinkedSearch ? (
+        <Search className="size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", isLinkedSearchOpen ? "rotate-90" : ""].join(" ")} />
+      )}
+    </button>
+  )
+
+  return (
+    <Popover open={isLinkedSearchOpen} onOpenChange={setIsLinkedSearchOpen}>
+      <div className="relative grid min-w-0 gap-1.5 text-sm font-medium">
+        <label id={fieldId}>{label}</label>
+        <PopoverAnchor asChild>{linkedSelectControl}</PopoverAnchor>
+      </div>
       {isLinkedSearchOpen && (
-        <div
+        <PopoverContent
           id={listId}
           role="listbox"
           aria-labelledby={fieldId}
-          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg"
+          align="start"
+          side="bottom"
+          sideOffset={4}
+          collisionPadding={12}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          className="z-[120] w-[var(--radix-popper-anchor-width)] min-w-72 max-w-[calc(100vw-1rem)] overflow-hidden p-0"
         >
-          {onManualSelect && (
-            <button
-              type="button"
-              role="option"
-              aria-selected={false}
-              onClick={() => handleLinkedChange(LINKED_SELECT_MANUAL_VALUE)}
-              className="flex w-full items-center rounded px-2.5 py-2 text-left text-sm hover:bg-muted"
-            >
-              {manualLabel || "직접 입력"}
-            </button>
-          )}
-          {searchOptions.map((option) => {
-            const selected = option.id === value
-            return (
-              <button
-                key={option.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={() => handleLinkedChange(option.id)}
-                className={[
-                  "flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-sm outline-none transition-colors",
-                  selected ? "bg-primary/10 text-primary" : "hover:bg-muted",
-                ].join(" ")}
-              >
-                <span className="min-w-0 truncate">{option.meta ? `${option.label} · ${option.meta}` : option.label}</span>
-                {selected && <Check className="size-4 shrink-0" />}
-              </button>
-            )
-          })}
-          {searchOptions.length === 0 && (
-            <div className="px-2.5 py-3 text-sm text-muted-foreground" role="status">
-              {emptySearchResultLabel}
+          {listHeader && (
+            <div className="grid gap-2 border-b bg-background p-2">
+              {listHeader}
             </div>
           )}
-        </div>
+          <div
+            className="max-h-72 overflow-y-auto overscroll-contain p-1"
+            onWheel={handleLinkedListWheel}
+          >
+            {onManualSelect && (
+              <button
+                type="button"
+                role="option"
+                aria-selected={false}
+                onClick={() => handleLinkedChange(LINKED_SELECT_MANUAL_VALUE)}
+                className="flex w-full items-center rounded px-2.5 py-2 text-left text-sm hover:bg-muted"
+              >
+                {manualLabel || "직접 입력"}
+              </button>
+            )}
+            {searchOptions.map((option) => {
+              const selected = option.id === value
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => handleLinkedChange(option.id)}
+                  className={[
+                    "flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-sm outline-none transition-colors",
+                    selected ? "bg-primary/10 text-primary" : "hover:bg-muted",
+                  ].join(" ")}
+                >
+                  <span className="min-w-0 overflow-hidden">
+                    {renderOption ? renderOption(option) : <span className="block truncate">{option.meta ? `${option.label} · ${option.meta}` : option.label}</span>}
+                  </span>
+                  {selected && <Check className="size-4 shrink-0" />}
+                </button>
+              )
+            })}
+            {searchOptions.length === 0 && (
+              <div className="px-2.5 py-3 text-sm text-muted-foreground" role="status">
+                {emptySearchResultLabel}
+              </div>
+            )}
+          </div>
+        </PopoverContent>
       )}
-    </div>
+    </Popover>
   )
 }
 
@@ -2242,6 +2649,248 @@ function DateField({
   )
 }
 
+function DateTimeField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const fieldId = useId()
+  const popoverId = useId()
+  const manualDateInputId = useId()
+  const manualTimeInputId = useId()
+  const dateValue = dateTimeDateInputValue(value)
+  const timeValue = dateTimeTimeInputValue(value)
+  const [dateTimeOpen, setDateTimeOpen] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(dateValue))
+  const [manualDate, setManualDate] = useState(dateValue)
+  const [manualTime, setManualTime] = useState(timeValue || "09:00")
+  const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
+  const buttonText = dateValue ? `${dateValue} ${timeValue ? formatTimeLabel(timeValue) : "--:--"}` : "연도. 월. 일.  --:--"
+
+  function syncDraftValues() {
+    setCalendarMonth(getCalendarMonthDate(dateValue))
+    setManualDate(dateValue)
+    setManualTime(timeValue || "09:00")
+  }
+
+  function handleDateTimeDateSelect(nextDate: string) {
+    const nextTime = timeValue || manualTime || "09:00"
+    onChange(buildLocalDateTimeValue(nextDate, nextTime))
+    setManualDate(nextDate)
+    setCalendarMonth(getCalendarMonthDate(nextDate))
+  }
+
+  function handleDateTimeTimeSelect(nextTime: string) {
+    const normalized = normalizeTimeInput(nextTime)
+    if (!normalized) return
+    const nextDate = dateValue || manualDate || toDateKey(new Date())
+    onChange(buildLocalDateTimeValue(nextDate, normalized))
+    setManualDate(nextDate)
+    setManualTime(normalized)
+  }
+
+  function applyManualDateTime() {
+    const nextDate = toDateKey(manualDate)
+    const nextTime = normalizeTimeInput(manualTime)
+    if (!nextDate) {
+      onChange("")
+      setDateTimeOpen(false)
+      return
+    }
+    onChange(buildLocalDateTimeValue(nextDate, nextTime || "09:00"))
+    setCalendarMonth(getCalendarMonthDate(nextDate))
+    setDateTimeOpen(false)
+  }
+
+  function handleManualDateTimeKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      setDateTimeOpen(false)
+      syncDraftValues()
+      return
+    }
+    if (event.key !== "Enter") return
+    event.preventDefault()
+    applyManualDateTime()
+  }
+
+  function handleTimeListWheel(event: WheelEvent<HTMLDivElement>) {
+    const target = event.currentTarget
+    if (target.scrollHeight <= target.clientHeight) return
+    const previousScrollTop = target.scrollTop
+    target.scrollTop += event.deltaY
+    if (target.scrollTop === previousScrollTop) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  return (
+    <Popover open={dateTimeOpen} onOpenChange={(open) => {
+      setDateTimeOpen(open)
+      if (open) syncDraftValues()
+    }}>
+      <div className="grid min-w-0 gap-1.5 text-sm font-medium">
+        <label id={fieldId}>{label}</label>
+        <span className="relative block min-w-0">
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-labelledby={fieldId}
+              aria-haspopup="dialog"
+              aria-expanded={dateTimeOpen}
+              aria-controls={popoverId}
+              className={[
+                "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
+                value ? "pr-20" : "",
+                dateTimeOpen ? "border-ring ring-2 ring-ring/40" : "",
+              ].filter(Boolean).join(" ")}
+            >
+              <span className={value ? "truncate text-foreground" : "truncate text-muted-foreground"}>{buttonText}</span>
+              <span className={["flex shrink-0 items-center gap-1 text-muted-foreground", value ? "mr-7" : ""].join(" ")}>
+                <CalendarDays className="size-4" />
+                <Clock className="size-4" />
+              </span>
+            </button>
+          </PopoverTrigger>
+          {value && (
+            <button
+              type="button"
+              aria-label={`${label} 지우기`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onChange("")
+                setManualDate("")
+                setManualTime("09:00")
+              }}
+              className="absolute right-2 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </span>
+      </div>
+      {dateTimeOpen && (
+        <PopoverContent
+          id={popoverId}
+          role="dialog"
+          aria-labelledby={fieldId}
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="z-[120] w-[min(42rem,calc(100vw-1rem))] overflow-hidden p-0"
+        >
+          <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="border-b md:border-b-0 md:border-r">
+              <div className="flex items-center justify-between border-b px-2 py-1.5">
+                <button
+                  type="button"
+                  aria-label="이전 달"
+                  onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
+                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+                <span className="text-sm font-semibold">{getCalendarMonthLabel(calendarMonth)}</span>
+                <button
+                  type="button"
+                  aria-label="다음 달"
+                  onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
+                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                >
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
+              <div role="grid" aria-label={`${label} 달력`} className="grid grid-cols-7 gap-1 p-2">
+                {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
+                  <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
+                    {weekday}
+                  </div>
+                ))}
+                {calendarCells.map((cell) => {
+                  const selected = cell.dateKey === dateValue
+                  return (
+                    <button
+                      key={cell.dateKey}
+                      type="button"
+                      role="gridcell"
+                      aria-selected={selected}
+                      aria-label={`${cell.dateKey} 선택`}
+                      onClick={() => handleDateTimeDateSelect(cell.dateKey)}
+                      className={[
+                        "grid h-8 min-w-0 place-items-center rounded-md text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                        selected ? "bg-primary text-primary-foreground shadow-xs" : "",
+                        !selected && cell.isToday ? "border border-primary/50 text-primary" : "",
+                        !selected && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
+                        !selected && !cell.isToday && !cell.isCurrentMonth ? "text-muted-foreground/45 hover:bg-muted/60" : "",
+                      ].join(" ")}
+                    >
+                      {cell.dayLabel}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="grid max-h-72 gap-1 overflow-y-auto overscroll-contain p-2" onWheel={handleTimeListWheel}>
+              {WORD_RETEST_TIME_OPTIONS.map((time) => {
+                const selected = time === timeValue
+                return (
+                  <button
+                    key={time}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => handleDateTimeTimeSelect(time)}
+                    className={[
+                      "rounded-md px-2 py-1.5 text-left text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                      selected ? "bg-primary text-primary-foreground shadow-xs" : "text-foreground hover:bg-muted",
+                    ].join(" ")}
+                  >
+                    {formatTimeLabel(time)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <div className="grid border-t bg-muted/30 md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="border-b p-2 md:border-b-0 md:border-r">
+              <label htmlFor={manualDateInputId} className="sr-only">직접 날짜 입력</label>
+              <Input
+                id={manualDateInputId}
+                type="text"
+                inputMode="numeric"
+                value={manualDate}
+                placeholder="YYYY-MM-DD"
+                className="h-8 min-w-0"
+                onChange={(event) => setManualDate(event.target.value)}
+                onKeyDown={handleManualDateTimeKeyDown}
+              />
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2">
+              <label htmlFor={manualTimeInputId} className="sr-only">직접 시간 입력</label>
+              <Input
+                id={manualTimeInputId}
+                type="text"
+                inputMode="numeric"
+                value={manualTime}
+                placeholder="HH:MM"
+                className="h-8 min-w-0"
+                onChange={(event) => setManualTime(event.target.value)}
+                onKeyDown={handleManualDateTimeKeyDown}
+              />
+              <Button type="button" variant="outline" size="sm" onClick={applyManualDateTime} className="h-8 shrink-0 px-2.5">
+                적용
+              </Button>
+            </div>
+          </div>
+        </PopoverContent>
+      )}
+    </Popover>
+  )
+}
+
 function ReadonlyInfoField({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid min-w-0 gap-1.5 text-sm font-medium">
@@ -2472,6 +3121,33 @@ function getSecondaryTaskStatusOptions(task: Pick<OpsTask, "status" | "type">) {
   return []
 }
 
+function getWordRetestPrimaryAction(task: OpsTask, mode: WordRetestMode, completionBlockers: string[] = EMPTY_COMPLETION_BLOCKERS): WordRetestPrimaryAction | null {
+  if (getWordRetestWorkspaceRole(task) === "completed") return null
+
+  const wordRetest = task.wordRetest || {}
+  const absent = isWordRetestAbsent(wordRetest)
+
+  if (mode === "assistant") {
+    if (task.status === "requested" || task.status === "confirmed" || task.status === "on_hold") {
+      return { kind: "status", status: "in_progress", label: "시험 시작" }
+    }
+    if (task.status === "in_progress") {
+      if (absent || hasWordRetestScore(wordRetest)) return { kind: "status", status: "review_requested", label: "검토 요청" }
+      return { kind: "edit", label: "점수 입력", blockers: ["점수"] }
+    }
+  }
+
+  if (mode === "teacher" && task.status === "review_requested") {
+    if (absent) return { kind: "edit", label: "응시일시 변경", blockers: ["응시일시"] }
+    if (completionBlockers.length > 0) {
+      return { kind: "edit", label: getCompletionBlockerActionLabel(completionBlockers), blockers: completionBlockers }
+    }
+    return { kind: "status", status: "done", label: "완료 확인" }
+  }
+
+  return null
+}
+
 function shouldShowDetailStatusBadge(task: Pick<OpsTask, "type" | "status">) {
   return task.type !== "general" || task.status === "review_requested" || isClosedOpsTask(task)
 }
@@ -2520,6 +3196,14 @@ function buildFallbackTaskTitle(input: OpsTaskInput) {
 }
 
 function normalizeFormForSubmit(input: OpsTaskInput): OpsTaskInput {
+  if (input.type === "word_retest") {
+    return {
+      ...input,
+      assigneeId: "",
+      assigneeTeam: "조교팀",
+    }
+  }
+
   if (input.type !== "registration") return input
 
   const pipelineStatus = input.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"
@@ -2817,6 +3501,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [quickAddText, setQuickAddText] = useState("")
   const [showClosed, setShowClosed] = useState(false)
   const [wordRetestMode, setWordRetestMode] = useState<WordRetestMode>("assistant")
+  const [wordRetestBranchFilter, setWordRetestBranchFilter] = useState<WordRetestBranchFilter>("all")
+  const [wordRetestTeacherFilter, setWordRetestTeacherFilter] = useState<WordRetestSelectFilterKey>("all")
+  const [wordRetestClassFilter, setWordRetestClassFilter] = useState<WordRetestSelectFilterKey>("all")
+  const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [detailOpen, setDetailOpen] = useState(false)
@@ -2891,22 +3579,28 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   useEffect(() => {
     const nextView = searchParams.get("view")
     const nextFocus = searchParams.get("focus")
+    const nextWordRetestRole = searchParams.get("role") || ""
+    const nextWordRetestBranch = searchParams.get("branch") || ""
     const nextTodoRouteState = isTodoWorkspace ? getTodoRouteState(searchParams) : null
     if (nextTodoRouteState) {
       setTodoView(nextTodoRouteState.list)
       setTodoSort(nextTodoRouteState.sort || (nextTodoRouteState.status ? "status" : "due"))
+    } else if (isWordRetestWorkspace) {
+      if (isWordRetestModeKey(nextWordRetestRole)) setWordRetestMode(nextWordRetestRole)
+      if (isWordRetestBranchFilterKey(nextWordRetestBranch)) setWordRetestBranchFilter(nextWordRetestBranch)
     } else if (!isTodoWorkspace && nextView && isViewKey(nextView)) {
       setView(nextView)
     }
     if (nextFocus && isTaskFocus(nextFocus)) {
       setTaskFocus(nextFocus)
     }
-  }, [isTodoWorkspace, searchParams])
+  }, [isTodoWorkspace, isWordRetestWorkspace, searchParams])
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
+    if (isWordRetestModeKey(searchParams.get("role") || "")) return
     setWordRetestMode(isTeacher && !isStaff ? "teacher" : "assistant")
-  }, [isStaff, isTeacher, isWordRetestWorkspace])
+  }, [isStaff, isTeacher, isWordRetestWorkspace, searchParams])
 
   const syncView = (nextView: ViewKey, nextFocus: TaskFocus = "none") => {
     setView(nextView)
@@ -2933,6 +3627,29 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     searchParams.delete("view")
     searchParams.delete("focus")
     searchParams.delete("filter")
+    const queryString = searchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }
+
+  const syncWordRetestMode = (nextMode: WordRetestMode) => {
+    setWordRetestMode(nextMode)
+    setTaskFocus("none")
+    const searchParams = new URLSearchParams(window.location.search)
+    searchParams.set("role", nextMode)
+    searchParams.delete("view")
+    searchParams.delete("list")
+    searchParams.delete("focus")
+    const queryString = searchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }
+
+  const syncWordRetestBranchFilter = (nextBranch: WordRetestBranchFilter) => {
+    setWordRetestBranchFilter(nextBranch)
+    const searchParams = new URLSearchParams(window.location.search)
+    if (nextBranch === "all") searchParams.delete("branch")
+    else searchParams.set("branch", nextBranch)
+    searchParams.delete("view")
+    searchParams.delete("list")
     const queryString = searchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
@@ -3040,6 +3757,41 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       completed: scopedTasks.filter((task) => isClosedOpsTask(task)).length,
     }
   }, [currentUserContext, scopedTasks])
+  const wordRetestRoleContext = useMemo(
+    () => (canManageAll || isStaff ? {} : currentUserContext),
+    [canManageAll, currentUserContext, isStaff],
+  )
+  const branchScopedWordRetestTasks = useMemo(() => (
+    scopedTasks.filter((task) => wordRetestBranchFilter === "all" || getWordRetestBranch(task) === wordRetestBranchFilter)
+  ), [scopedTasks, wordRetestBranchFilter])
+  const wordRetestRoleCounts = useMemo(() => {
+    const openWordRetests = branchScopedWordRetestTasks.filter((task) => !isClosedOpsTask(task))
+    return {
+      assistant: openWordRetests.filter((task) => isWordRetestInAssistantQueue(task, wordRetestRoleContext)).length,
+      teacher: openWordRetests.filter((task) => isWordRetestInTeacherQueue(task, wordRetestRoleContext)).length,
+    }
+  }, [branchScopedWordRetestTasks, wordRetestRoleContext])
+  const wordRetestFilterSourceTasks = useMemo(() => (
+    branchScopedWordRetestTasks.filter((task) => {
+      if (!showClosed && !isOpenTask(task)) return false
+      if (showClosed && isClosedOpsTask(task)) return true
+      if (wordRetestMode === "assistant") return isWordRetestInAssistantQueue(task, wordRetestRoleContext)
+      return isWordRetestInTeacherQueue(task, wordRetestRoleContext)
+    })
+  ), [branchScopedWordRetestTasks, showClosed, wordRetestMode, wordRetestRoleContext])
+  const wordRetestFilterOptions = useMemo(
+    () => buildWordRetestFilterOptions(wordRetestFilterSourceTasks),
+    [wordRetestFilterSourceTasks],
+  )
+  useEffect(() => {
+    if (!isWordRetestWorkspace) return
+    if (wordRetestTeacherFilter !== "all" && !wordRetestFilterOptions.teacher.some((option) => option.value === wordRetestTeacherFilter)) {
+      setWordRetestTeacherFilter("all")
+    }
+    if (wordRetestClassFilter !== "all" && !wordRetestFilterOptions.class.some((option) => option.value === wordRetestClassFilter)) {
+      setWordRetestClassFilter("all")
+    }
+  }, [isWordRetestWorkspace, wordRetestClassFilter, wordRetestFilterOptions, wordRetestTeacherFilter])
   const registrationPipelineCountTasks = useMemo(() => {
     if (!isRegistrationWorkspace) return EMPTY_TASKS
 
@@ -3067,14 +3819,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         if (taskFocus === "overdue") {
           if (!hasOpsTaskOverdueCalendarDate(task, todayKey)) return false
         }
-        if (taskFocus === "confirmation" && confirmationByTaskId.get(task.id) !== true) return false
-        if (taskFocus === "mine" && !isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)) return false
-        if (taskFocus === "unassigned" && task.assigneeId && hasTaskSchedule(task)) return false
-        if (isWordRetestWorkspace) {
-          if (wordRetestMode === "teacher" && !isTeacherWordRetest(task, currentUserId, currentUserLabel)) return false
-        }
-        if (view === "calendar" || view === "all" || view === "status" || view === "assignee") return true
-        return true
+	        if (taskFocus === "confirmation" && confirmationByTaskId.get(task.id) !== true) return false
+	        if (taskFocus === "mine" && !isOpsTaskAssignedToUser(task, currentUserId, currentUserLabel)) return false
+	        if (taskFocus === "unassigned" && task.assigneeId && hasTaskSchedule(task)) return false
+	        if (isWordRetestWorkspace) {
+	          if (wordRetestBranchFilter !== "all" && getWordRetestBranch(task) !== wordRetestBranchFilter) return false
+	          if (!matchesWordRetestFilter(getWordRetestTeacherFilterValue(task), wordRetestTeacherFilter)) return false
+	          if (!matchesWordRetestFilter(getWordRetestClassFilterValue(task), wordRetestClassFilter)) return false
+	          if (showClosed && isClosedOpsTask(task)) return true
+	          if (wordRetestMode === "assistant") return isWordRetestInAssistantQueue(task, wordRetestRoleContext)
+	          return isWordRetestInTeacherQueue(task, wordRetestRoleContext)
+	        }
+	        if (view === "calendar" || view === "all" || view === "status" || view === "assignee") return true
+	        return true
       })
       .filter((task) => matchesSearch(task, deferredQuery))
       .filter((task) => !isTodoWorkspace || matchesTodoTeamFilters(task, {
@@ -3083,12 +3840,13 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         assigneeFilter,
         assigneeTeamFilter,
       }))
+    if (isWordRetestWorkspace) return sortWordRetestTasksByTestAt(nextTasks)
     if (!isTodoWorkspace) return nextTasks
     if (todoView === "completed") return sortCompletedTodoTasks(nextTasks)
     if (todoSort === "status") return sortOpsTasksByWorkflowStatus(nextTasks, todayKey)
     if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
     return sortOpsTasksByWorkDate(nextTasks, todayKey)
-  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, wordRetestMode])
+  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, wordRetestBranchFilter, wordRetestClassFilter, wordRetestMode, wordRetestRoleContext, wordRetestTeacherFilter])
 
   const calendarItems = useMemo(
     () => {
@@ -3128,7 +3886,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     assigneeFilter !== "all" ||
     assigneeTeamFilter !== "all"
   )
-  const isFilteredEmpty = hasQuery || isTodoFilteredEmpty || (!isTodoWorkspace && taskFocus !== "none") || (isRegistrationWorkspace && registrationPipeline !== REGISTRATION_PIPELINE_ALL)
+  const isWordRetestFilteredEmpty = isWordRetestWorkspace && (
+    wordRetestBranchFilter !== "all" ||
+    wordRetestTeacherFilter !== "all" ||
+    wordRetestClassFilter !== "all"
+  )
+  const isFilteredEmpty = hasQuery || isTodoFilteredEmpty || isWordRetestFilteredEmpty || (!isTodoWorkspace && taskFocus !== "none") || (isRegistrationWorkspace && registrationPipeline !== REGISTRATION_PIPELINE_ALL)
   const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleTasks.length === 0
   const showToolbarCreate = !isTodoWorkspace && !showEmptyCreate
   const canOpenCreate = isTodoWorkspace || !loading
@@ -3147,15 +3910,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const emptyCalendarLabel = isFilteredEmpty ? "조건에 맞는 일정 없음" : "일정 없음"
   const hasLoadBlocker = Boolean(data && !data.schemaReady)
   const shouldHideEmptySurface = !loading && visibleTasks.length === 0 && (hasLoadBlocker || Boolean(message && !formOpen && !detailOpen))
-  const formDetailTabs = useMemo(() => getFormDetailTabs(form.type), [form.type])
-  const isTemplateForm = form.type !== "general"
-  const activeFormDetailStep = formDetailTabs.some((tab) => tab.key === formDetailStep)
-    ? formDetailStep
-    : getDefaultFormDetailStep(form.type)
-  const activeFormStepIndex = Math.max(0, formDetailTabs.findIndex((tab) => tab.key === activeFormDetailStep))
-  const previousFormDetailStep = formDetailTabs[activeFormStepIndex - 1]
-  const nextFormDetailStep = formDetailTabs[activeFormStepIndex + 1]
-  const formStepProgressLabel = isTemplateForm && formDetailTabs.length > 1 ? `${activeFormStepIndex + 1}/${formDetailTabs.length}` : ""
+	  const formDetailTabs = useMemo(() => getFormDetailTabs(form.type), [form.type])
+	  const isTemplateForm = form.type !== "general"
+	  const isWordRetestForm = form.type === "word_retest"
+	  const activeFormDetailStep = formDetailTabs.some((tab) => tab.key === formDetailStep)
+	    ? formDetailStep
+	    : getDefaultFormDetailStep(form.type)
+	  const activeFormStepIndex = Math.max(0, formDetailTabs.findIndex((tab) => tab.key === activeFormDetailStep))
+	  const previousFormDetailStep = formDetailTabs[activeFormStepIndex - 1]
+	  const nextFormDetailStep = formDetailTabs[activeFormStepIndex + 1]
+	  const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && formDetailTabs.length > 1
+	  const formStepProgressLabel = shouldShowFormDetailTabs ? `${activeFormStepIndex + 1}/${formDetailTabs.length}` : ""
   const previousFormStepLabel = previousFormDetailStep ? `이전: ${previousFormDetailStep.label}` : ""
   const nextFormStepLabel = nextFormDetailStep ? `다음: ${nextFormDetailStep.label}` : ""
   const showTemplateDueAt = isTemplateForm && form.type !== "word_retest"
@@ -3178,6 +3943,14 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     const defaultAssigneeId = currentUserId || ""
     const defaultAssigneeTeam = profileTeamById.get(defaultAssigneeId) || ""
     const defaultDueAt = taskFocus === "today" ? dueTodayValue : ""
+    const defaultWordRetestTeacher = findCurrentUserTeacherOption(
+      teachers,
+      currentUserId,
+      user?.email,
+      user?.loginId,
+      currentUserLabel,
+    )
+    const wordRetestDefaults = getWordRetestRequestDefaults(type, currentUserId, currentUserTaskTeam, defaultWordRetestTeacher)
     const nextForm = cloneForm({
       ...EMPTY_FORM,
       type,
@@ -3186,6 +3959,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       assigneeId: defaultAssigneeId,
       assigneeTeam: defaultAssigneeTeam,
       dueAt: defaultDueAt,
+      ...wordRetestDefaults,
     })
     blurActiveElementBeforeDialog()
     setEditingTask(null)
@@ -3334,6 +4108,20 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setForm((current) => ({
       ...current,
       wordRetest: { ...(current.wordRetest || {}), [key]: value },
+    }))
+  }
+
+  const updateWordRetestProgressStatus = (value: string) => {
+    setMessage("")
+    setFormCompletionBlockers([])
+    setConfirmingFormClose(false)
+    setForm((current) => ({
+      ...current,
+      wordRetest: {
+        ...(current.wordRetest || {}),
+        retestStatus: value,
+        ...(value === "absent" ? { firstScore: "", secondScore: "", thirdScore: "" } : {}),
+      },
     }))
   }
 
@@ -3621,9 +4409,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }
   }
 
-  const changeStatus = async (task: OpsTask, status: OpsTaskStatus) => {
-    setSaving(true)
-    setMessage("")
+	  const changeStatus = async (task: OpsTask, status: OpsTaskStatus) => {
+	    setSaving(true)
+	    setMessage("")
     setNotice("")
     setStatusUndo(null)
     try {
@@ -3652,10 +4440,95 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       setMessage(getOpsTaskActionErrorMessage(error, "상태를 바꾸지 못했습니다."))
     } finally {
       setSaving(false)
-    }
-  }
+	    }
+	  }
 
-  const changeRegistrationPipeline = async (task: OpsTask, pipelineStatus: string) => {
+	  const updateWordRetestFlow = async (task: OpsTask, input: OpsTaskInput, successMessage: string) => {
+	    setSaving(true)
+	    setMessage("")
+	    setNotice("")
+	    setStatusUndo(null)
+	    try {
+	      const payload = normalizeFormForSubmit(input)
+	      await updateOpsTask(task.id, payload)
+	      const syncedTask = await loadOpsTaskById(task.id)
+	      replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+	      setNotice(successMessage)
+	    } catch (error) {
+	      setMessage(getOpsTaskActionErrorMessage(error, "단어 재시험 상태를 바꾸지 못했습니다."))
+	    } finally {
+	      setSaving(false)
+	    }
+	  }
+
+	  const markWordRetestAbsent = async (task: OpsTask) => {
+	    const wordRetest = task.wordRetest || {}
+	    await updateWordRetestFlow(task, {
+	      ...formFromTask(task),
+	      status: "review_requested",
+	      wordRetest: {
+	        ...wordRetest,
+	        retestStatus: "absent",
+	        firstScore: "",
+	        secondScore: "",
+	        thirdScore: "",
+	      },
+	    }, "미응시로 담당선생님에게 보냈습니다.")
+	  }
+
+	  const requestWordRetestAgain = async (task: OpsTask) => {
+	    const wordRetest = task.wordRetest || {}
+	    await updateWordRetestFlow(task, {
+	      ...formFromTask(task),
+	      status: "requested",
+	      completedAt: "",
+	      wordRetest: {
+	        ...wordRetest,
+	        retestStatus: "not_started",
+	        firstScore: "",
+	        secondScore: "",
+	        thirdScore: "",
+	      },
+	    }, "미응시 학생 재시험을 다시 요청했습니다.")
+	  }
+
+	  const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
+	    setWordRetestScoreDrafts((current) => ({
+	      ...current,
+	      [task.id]: {
+	        ...(current[task.id] || getWordRetestScoreDraft(task)),
+	        [key]: value,
+	      },
+	    }))
+	  }
+
+	  const saveWordRetestInlineScores = async (task: OpsTask) => {
+	    const wordRetest = task.wordRetest || {}
+	    if (isWordRetestAbsent(wordRetest)) return
+	    const draft = wordRetestScoreDrafts[task.id] || getWordRetestScoreDraft(task)
+	    const hasDraftScore = hasWordRetestScoreDraft(draft)
+	    const shouldRequestReview = task.status === "in_progress" && hasDraftScore
+	    const nextRetestStatus = hasDraftScore
+	      ? "done"
+	      : wordRetest.retestStatus === "done" ? "in_progress" : wordRetest.retestStatus || "not_started"
+
+	    await updateWordRetestFlow(task, {
+	      ...formFromTask(task),
+	      status: shouldRequestReview ? "review_requested" : task.status,
+	      wordRetest: {
+	        ...wordRetest,
+	        ...draft,
+	        retestStatus: nextRetestStatus,
+	      },
+	    }, shouldRequestReview ? "점수를 저장하고 담당선생님에게 검토 요청했습니다." : "점수를 저장했습니다.")
+	    setWordRetestScoreDrafts((current) => {
+	      const nextDrafts = { ...current }
+	      delete nextDrafts[task.id]
+	      return nextDrafts
+	    })
+	  }
+
+	  const changeRegistrationPipeline = async (task: OpsTask, pipelineStatus: string) => {
     const payload = normalizeFormForSubmit({
       ...formFromTask(task),
       registration: {
@@ -3804,8 +4677,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const deleteTargetRemovesCompletedOperation = deleteTarget ? deleteTarget.type !== "general" && isClosedOpsTask(deleteTarget) : false
   const nextAction = selectedTaskFresh ? getNextTaskStatusAction(selectedTaskFresh) : null
   const selectedRegistrationAction = selectedTaskFresh ? getNextRegistrationPipelineAction(selectedTaskFresh) : null
-  const completionBlockers = selectedTaskFresh
-    ? getOperationCompletionBlockers(
+	  const completionBlockers = selectedTaskFresh
+	    ? getOperationCompletionBlockers(
         inputFromTaskForCompletionCheck(selectedTaskFresh),
         data?.students || EMPTY_STUDENT_OPTIONS,
         data?.classes || EMPTY_CLASS_OPTIONS,
@@ -3813,9 +4686,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         data?.teachers || EMPTY_TEACHER_OPTIONS,
         optionIndexes,
       )
-    : []
-  const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
-  const detailPrimaryAction = selectedRegistrationAction || nextAction
+	    : []
+	  const detailWordRetestPrimaryAction = selectedTaskFresh?.type === "word_retest"
+	    ? getWordRetestPrimaryAction(selectedTaskFresh, wordRetestMode, completionBlockers)
+	    : null
+	  const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
+	  const detailPrimaryAction = selectedTaskFresh?.type === "word_retest" ? null : selectedRegistrationAction || nextAction
   const detailPrimaryActionBlocked = selectedRegistrationAction
     ? selectedRegistrationAction.pipelineStatus.startsWith("7.") && completionBlockers.length > 0
     : nextActionBlocked
@@ -3880,10 +4756,38 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
       <div className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs">
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
-          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : `${workspaceLabel} 보기`}>
-            {isTodoWorkspace
-              ? TODO_VIEW_TABS.map((tab) => {
-                const todoCount = todoCounts[tab.key]
+	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : `${workspaceLabel} 보기`}>
+	            {isWordRetestWorkspace
+	              ? WORD_RETEST_ROLE_TABS.map((tab) => {
+	                const roleCount = wordRetestRoleCounts[tab.key]
+
+	                return (
+	                  <button
+	                    key={tab.key}
+	                    type="button"
+	                    role="tab"
+	                    onClick={() => syncWordRetestMode(tab.key)}
+	                    aria-selected={wordRetestMode === tab.key}
+	                    aria-label={roleCount > 0 ? `${tab.label} ${roleCount}건` : tab.label}
+	                    className={[
+	                      "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+	                      wordRetestMode === tab.key
+	                        ? "bg-primary text-primary-foreground"
+	                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+	                    ].join(" ")}
+	                  >
+	                    <span>{tab.label}</span>
+	                    {roleCount > 0 && (
+	                      <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
+	                        {roleCount}
+	                      </span>
+	                    )}
+	                  </button>
+	                )
+	              })
+	              : isTodoWorkspace
+	              ? TODO_VIEW_TABS.map((tab) => {
+	                const todoCount = todoCounts[tab.key]
 
                 return (
                   <button
@@ -4044,34 +4948,34 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         </div>
         )}
 
-        {isWordRetestWorkspace && (
-          <div className="inline-flex w-fit rounded-md border bg-background p-1">
-            <button
-              type="button"
-              aria-pressed={wordRetestMode === "teacher"}
-              aria-label="담당 선생님 보기"
-              onClick={() => setWordRetestMode("teacher")}
-              className={[
-                "rounded px-3 py-1.5 text-sm font-medium",
-                wordRetestMode === "teacher" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
-              ].join(" ")}
-            >
-              선생님
-            </button>
-            <button
-              type="button"
-              aria-pressed={wordRetestMode === "assistant"}
-              aria-label="조교 선생님 보기"
-              onClick={() => setWordRetestMode("assistant")}
-              className={[
-                "rounded px-3 py-1.5 text-sm font-medium",
-                wordRetestMode === "assistant" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
-              ].join(" ")}
-            >
-              조교
-            </button>
-          </div>
-        )}
+	        {isWordRetestWorkspace && (
+	          <div className="grid gap-2">
+	            <div className="inline-flex w-fit rounded-md border bg-background p-1" aria-label="단어 재시험 지점">
+	              {WORD_RETEST_BRANCH_FILTERS.map((filter) => (
+	                <button
+	                  key={filter.key}
+	                  type="button"
+	                  aria-pressed={wordRetestBranchFilter === filter.key}
+	                  aria-label={`${filter.label} 단어 재시험 보기`}
+	                  onClick={() => syncWordRetestBranchFilter(filter.key)}
+	                  className={[
+	                    "rounded px-3 py-1.5 text-sm font-medium",
+	                    wordRetestBranchFilter === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+	                  ].join(" ")}
+	                >
+	                  {filter.label}
+	                </button>
+	              ))}
+	            </div>
+	            <WordRetestFilterBar
+	              options={wordRetestFilterOptions}
+	              teacherFilter={wordRetestTeacherFilter}
+	              classFilter={wordRetestClassFilter}
+	              onTeacherChange={setWordRetestTeacherFilter}
+	              onClassChange={setWordRetestClassFilter}
+	            />
+	          </div>
+	        )}
 
         {isTodoWorkspace && (
           <div className="grid gap-2">
@@ -4124,8 +5028,27 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
         {loading ? (
           <TaskListSkeleton showType={!isTodoWorkspace} />
-        ) : shouldHideEmptySurface ? null : !isTodoWorkspace && view === "calendar" ? (
-          <CalendarList
+	        ) : shouldHideEmptySurface ? null : isWordRetestWorkspace ? (
+	          <WordRetestTaskList
+	            tasks={visibleTasks}
+	            mode={wordRetestMode}
+	            onOpen={openDetail}
+	            onEdit={openEdit}
+	            onStatusChange={(task, status) => void changeStatus(task, status)}
+	            onMarkAbsent={(task) => void markWordRetestAbsent(task)}
+	            onRetry={(task) => void requestWordRetestAgain(task)}
+	            scoreDrafts={wordRetestScoreDrafts}
+	            onScoreDraftChange={updateWordRetestScoreDraft}
+	            onScoreSave={(task) => void saveWordRetestInlineScores(task)}
+	            statusActionDisabled={saving}
+	            onCreate={() => openCreate(scopedTaskType)}
+	            emptyLabel={emptyTaskLabel}
+	            emptyActionLabel={emptyActionLabel}
+	            showEmptyAction={showEmptyCreate}
+	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
+	          />
+	        ) : !isTodoWorkspace && view === "calendar" ? (
+	          <CalendarList
             items={calendarItems}
             tasks={visibleTasks}
             todayKey={todayKey}
@@ -4322,10 +5245,80 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               </>
             )}
 
-            {isTemplateForm && formDetailTabs.length > 0 && (
-              <section className="grid gap-3 rounded-lg border p-3">
-                {formStepProgressLabel && (
-                  <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium text-muted-foreground">
+	            {isWordRetestForm && (
+	              <section className="grid gap-4 rounded-lg border p-3">
+	                {message && (
+	                  <div role="alert" className="rounded-md border border-destructive/30 whitespace-pre-line bg-background px-3 py-2 text-sm text-destructive">
+	                    <span>{message}</span>
+	                    {formCompletionBlockers.length > 0 && (
+	                      <span className="mt-2 flex flex-wrap gap-1">
+	                        {formCompletionBlockers.map((blocker) => (
+	                          <button
+	                            key={blocker}
+	                            type="button"
+	                            onClick={() => setFormDetailStep(getCompletionBlockerFormStep(form.type, [blocker]) || activeFormDetailStep)}
+	                            aria-label={`${blocker} ${getCompletionBlockerNeedLabel(blocker)} 입력 위치로 이동`}
+	                            className="inline-flex min-h-7 items-center rounded-full border border-destructive/25 bg-background px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/10"
+	                          >
+	                            {blocker} {getCompletionBlockerNeedLabel(blocker)}
+	                          </button>
+	                        ))}
+	                      </span>
+	                    )}
+	                  </div>
+	                )}
+	                <WordRetestProgressStepper
+	                  value={form.wordRetest?.retestStatus || "not_started"}
+	                  onChange={updateWordRetestProgressStatus}
+	                />
+	                <TypeSpecificFields
+	                  step="word_retest_basic"
+	                  form={form}
+	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
+	                  classes={data?.classes || EMPTY_CLASS_OPTIONS}
+	                  teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
+	                  textbooks={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
+	                  updateForm={updateForm}
+	                  updateRegistration={updateRegistration}
+	                  updateWithdrawal={updateWithdrawal}
+	                  updateTransfer={updateTransfer}
+	                  updateWordRetest={updateWordRetest}
+	                />
+	                <TypeSpecificFields
+	                  step="word_retest_scope"
+	                  form={form}
+	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
+	                  classes={data?.classes || EMPTY_CLASS_OPTIONS}
+	                  teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
+	                  textbooks={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
+	                  updateForm={updateForm}
+	                  updateRegistration={updateRegistration}
+	                  updateWithdrawal={updateWithdrawal}
+	                  updateTransfer={updateTransfer}
+	                  updateWordRetest={updateWordRetest}
+	                />
+	                {editingTask && (
+	                  <TypeSpecificFields
+	                    step="word_retest_scores"
+	                    form={form}
+	                    students={data?.students || EMPTY_STUDENT_OPTIONS}
+	                    classes={data?.classes || EMPTY_CLASS_OPTIONS}
+	                    teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
+	                    textbooks={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
+	                    updateForm={updateForm}
+	                    updateRegistration={updateRegistration}
+	                    updateWithdrawal={updateWithdrawal}
+	                    updateTransfer={updateTransfer}
+	                    updateWordRetest={updateWordRetest}
+	                  />
+	                )}
+	              </section>
+	            )}
+
+	            {isTemplateForm && !isWordRetestForm && formDetailTabs.length > 0 && (
+	              <section className="grid gap-3 rounded-lg border p-3">
+	                {formStepProgressLabel && (
+	                  <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium text-muted-foreground">
                     <span>{getTaskTypeLabel(form.type)}</span>
                     <span>{formStepProgressLabel}</span>
                   </div>
@@ -4335,8 +5328,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   role="group"
                   aria-label={`${getTaskTypeLabel(form.type)} 입력 단계 ${formStepProgressLabel}`}
                 >
-                  {formDetailTabs.map((tab) => (
-                    <button
+	                  {formDetailTabs.map((tab) => (
+	                    <button
                       key={tab.key}
                       type="button"
                       aria-pressed={activeFormDetailStep === tab.key}
@@ -4372,7 +5365,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                     )}
                   </div>
                 )}
-                <TypeSpecificFields
+	                <TypeSpecificFields
                   step={activeFormDetailStep}
                   form={form}
                   students={data?.students || EMPTY_STUDENT_OPTIONS}
@@ -4388,14 +5381,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               </section>
             )}
 
-            {isTemplateForm && (
+            {isTemplateForm && !isWordRetestForm && (
               <section className="grid gap-3 rounded-lg border bg-muted/20 p-3">
                 <div className={showTemplateDueAt ? "grid gap-3 md:grid-cols-2" : "grid gap-3"}>
-	                  <ProfileSelect
-	                    value={form.assigneeId || ""}
-	                    profiles={profiles}
-	                    onChange={(value) => updateForm("assigneeId", value)}
-	                  />
+                  <ProfileSelect
+                    label="담당자"
+                    value={form.assigneeId || ""}
+                    profiles={profiles}
+                    onChange={(value) => updateForm("assigneeId", value)}
+                  />
                   {showTemplateDueAt && (
                     <TextField label={getDueAtDisplayLabel(form.type)} type="datetime-local" value={dateTimeInputValue(form.dueAt)} onChange={(value) => updateForm("dueAt", value)} />
                   )}
@@ -4411,8 +5405,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               </section>
             )}
             <div className={[
-              "z-50 -mx-6 -mb-6 flex flex-col gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:justify-end",
-              isTemplateForm ? "sm:sticky sm:bottom-0" : "",
+              "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end",
             ].filter(Boolean).join(" ")}>
               {formCompletionBlockers.length > 0 && (
                 (() => {
@@ -4430,7 +5423,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   )
                 })()
               )}
-              {isTemplateForm && formDetailTabs.length > 1 && (
+	              {shouldShowFormDetailTabs && (
                 <div className="flex w-full items-center gap-2 sm:mr-auto sm:w-auto">
                   {previousFormDetailStep && (
                     <Button
@@ -4506,6 +5499,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               <div className="flex flex-col gap-3 rounded-lg border p-4">
                 {selectedTaskFresh.type === "general" ? (
                   <GeneralTaskDetailPanel task={selectedTaskFresh} />
+                ) : selectedTaskFresh.type === "word_retest" ? (
+                  <WordRetestDetailPanel task={selectedTaskFresh} />
                 ) : (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
@@ -4530,12 +5525,33 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   blockers={completionBlockers}
                   onSelect={(blocker) => openEdit(selectedTaskFresh, [blocker])}
                 />
-                {selectedTaskFresh.type !== "general" && <TypeDetail task={selectedTaskFresh} />}
+                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && <TypeDetail task={selectedTaskFresh} />}
                 {selectedTaskFresh.type !== "general" && <AutoSyncResultSummary task={selectedTaskFresh} />}
-                {selectedTaskFresh.type !== "general" && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
-                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  {detailPrimaryAction && (
-                    <Button
+	                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
+	                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+	                  {selectedTaskFresh.type === "word_retest" && (
+	                    <>
+	                      <WordRetestRoleActionButton
+	                        task={selectedTaskFresh}
+	                        action={detailWordRetestPrimaryAction}
+	                        onEdit={openEdit}
+	                        onStatusChange={(task, status) => void changeStatus(task, status)}
+	                        disabled={saving}
+	                      />
+	                      {wordRetestMode === "assistant" && selectedTaskFresh.status === "in_progress" && !isWordRetestAbsent(selectedTaskFresh.wordRetest) && (
+	                        <Button type="button" variant="outline" size="sm" onClick={() => void markWordRetestAbsent(selectedTaskFresh)} disabled={saving} className="w-full sm:w-auto">
+	                          미응시
+	                        </Button>
+	                      )}
+	                      {wordRetestMode === "teacher" && selectedTaskFresh.status === "review_requested" && isWordRetestAbsent(selectedTaskFresh.wordRetest) && (
+	                        <Button type="button" variant="default" size="sm" onClick={() => void requestWordRetestAgain(selectedTaskFresh)} disabled={saving} className="w-full sm:w-auto">
+	                          미응시 재요청
+	                        </Button>
+	                      )}
+	                    </>
+	                  )}
+	                  {detailPrimaryAction && (
+	                    <Button
                       type="button"
                       size="sm"
                       variant={detailPrimaryActionBlocked ? "outline" : "default"}
@@ -4720,10 +5736,20 @@ function TypeSpecificFields({
   const findTextbook = (id: string) => textbooks.find((textbook) => textbook.id === id)
   const selectedWordRetestStudent = form.type === "word_retest" ? findStudent(form.studentId || "") : undefined
   const selectedWordRetestClassId = form.type === "word_retest" ? form.classId || "" : ""
+  const selectedWordRetestClass = form.type === "word_retest" ? findClass(selectedWordRetestClassId) : undefined
   const selectedWordRetestTeacherId = form.type === "word_retest" ? wordRetest.teacherId || "" : ""
-  const wordRetestClassOptions = getWordRetestClassOptions(classes, selectedWordRetestStudent, selectedWordRetestClassId)
+  const selectedWordRetestTeacher = form.type === "word_retest" ? findTeacher(selectedWordRetestTeacherId) : undefined
+  const wordRetestStudentOptions = getWordRetestStudentOptions(students, selectedWordRetestClass, form.studentId || "")
+  const wordRetestClassOptions = getWordRetestClassOptions(classes, selectedWordRetestStudent, selectedWordRetestClassId, selectedWordRetestTeacher)
   const wordRetestTeacherOptions = getWordRetestTeacherOptions(teachers, selectedWordRetestTeacherId)
   const [manualLinkedFields, setManualLinkedFields] = useState<Record<string, boolean>>({})
+  const [wordRetestTextbookGradeFilter, setWordRetestTextbookGradeFilter] = useState("all")
+  const wordRetestTextbookGradeFilters = useMemo(() => getWordRetestTextbookGradeFilters(textbooks), [textbooks])
+  const wordRetestTextbookOptions = useMemo(() => getWordRetestTextbookOptions(
+    textbooks,
+    form.textbookId || "",
+    wordRetestTextbookGradeFilter,
+  ), [form.textbookId, textbooks, wordRetestTextbookGradeFilter])
 
   function openManualField(field: string) {
     setManualLinkedFields((current) => ({ ...current, [field]: true }))
@@ -4753,6 +5779,30 @@ function TypeSpecificFields({
     if (roomText.includes("별관")) return "별관"
     if (roomText.includes("본관")) return "본관"
     return ""
+  }
+
+  function renderWordRetestTextbookFilters() {
+    if (textbooks.length === 0) return null
+    return (
+      <div className="grid gap-2">
+        <div className="flex flex-wrap gap-1">
+          {["all", ...wordRetestTextbookGradeFilters].map((filterValue) => (
+            <button
+              key={`grade-${filterValue}`}
+              type="button"
+              aria-pressed={wordRetestTextbookGradeFilter === filterValue}
+              onClick={() => setWordRetestTextbookGradeFilter(filterValue)}
+              className={[
+                "rounded-full border px-2 py-0.5 text-[11px] font-medium transition",
+                wordRetestTextbookGradeFilter === filterValue ? "border-primary/45 bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:bg-muted",
+              ].join(" ")}
+            >
+              {filterValue === "all" ? "학년구분 전체" : filterValue}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   function findStudentPrimaryClass(student: OpsStudentOption, options: { wordRetestOnly?: boolean } = {}) {
@@ -4820,7 +5870,9 @@ function TypeSpecificFields({
     updateForm("className", classItem.label)
     updateForm("subject", classItem.subject)
     const textbookId = findClassPrimaryTextbook(classItem)
-    if (textbookId && !form.textbookId) selectTextbook(textbookId)
+    const primaryTextbook = textbookId ? findTextbook(textbookId) : undefined
+    const shouldUsePrimaryTextbook = Boolean(primaryTextbook && (form.type !== "word_retest" || isWordRetestTextbookOption(primaryTextbook)))
+    if (textbookId && shouldUsePrimaryTextbook && !form.textbookId) selectTextbook(textbookId)
     if (options.fillRegistration) {
       updateRegistration("schoolGrade", registration.schoolGrade || classItem.grade)
     }
@@ -4843,7 +5895,7 @@ function TypeSpecificFields({
         if (teacher && !wordRetest.teacherId) selectTeacher(teacher.id)
         else updateWordRetest("teacherName", wordRetest.teacherName || classItem.teacher)
       }
-      if (textbookId && !wordRetest.textbookName) selectTextbook(textbookId, { fillWordRetest: true })
+      if (textbookId && shouldUsePrimaryTextbook && !wordRetest.textbookName) selectTextbook(textbookId, { fillWordRetest: true })
     }
     if (options.fillWithdrawal && classItem.teacher) {
       updateWithdrawal("schoolGrade", withdrawal.schoolGrade || classItem.grade)
@@ -4860,7 +5912,6 @@ function TypeSpecificFields({
     }
     if (!teacher) return
     updateWordRetest("teacherName", teacher.label)
-    if (teacher.profileId) updateForm("assigneeId", teacher.profileId)
   }
 
   const selectTextbook = (textbookId: string, options: { fillWordRetest?: boolean } = {}) => {
@@ -5051,35 +6102,93 @@ function TypeSpecificFields({
   if (form.type === "word_retest") {
     if (step === "word_retest_basic") {
       return (
-        <div className="grid gap-3 md:grid-cols-3">
-          <LinkedSelect label="학생" value={form.studentId || ""} options={students} onChange={(value) => selectStudent(value, { fillWordRetest: true, fillWordRetestClass: true })} onManualSelect={() => openManualField("wordRetestStudent")} />
-          <LinkedSelect label="수업" value={form.classId || ""} options={wordRetestClassOptions} onChange={(value) => selectClass(value, { fillWordRetest: true })} onManualSelect={() => openManualField("wordRetestClass")} />
-          <LinkedSelect label="선생님" value={wordRetest.teacherId || ""} options={wordRetestTeacherOptions} onChange={(value) => selectTeacher(value)} onManualSelect={() => openManualField("wordRetestTeacher")} />
-          <TextField label="응시일시" type="datetime-local" value={dateTimeInputValue(wordRetest.testAt)} onChange={(value) => updateWordRetest("testAt", value)} />
-          <SelectField label="지점" value={wordRetest.branch || "본관"} onChange={(value) => updateWordRetest("branch", value)}>
-            <option value="본관">본관</option>
-            <option value="별관">별관</option>
-          </SelectField>
-          {shouldShowManualField("wordRetestTeacher", wordRetest.teacherId, wordRetest.teacherName) && <TextField label="선생님명" value={wordRetest.teacherName || ""} onChange={(value) => updateWordRetest("teacherName", value)} />}
-          {shouldShowManualField("wordRetestClass", form.classId, wordRetest.className) && <TextField label="수업명" value={wordRetest.className || ""} onChange={(value) => {
-            updateWordRetest("className", value)
-            updateForm("className", value)
-          }} />}
-          {shouldShowManualField("wordRetestStudent", form.studentId, wordRetest.studentName) && <TextField label="학생명" value={wordRetest.studentName || ""} onChange={(value) => {
-            updateWordRetest("studentName", value)
-            updateForm("studentName", value)
-          }} />}
+        <div className="grid gap-3">
+          <LinkedSelect
+            label="담당선생님"
+            value={wordRetest.teacherId || ""}
+            options={wordRetestTeacherOptions}
+            onChange={(value) => selectTeacher(value)}
+            onManualSelect={() => openManualField("wordRetestTeacher")}
+            renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+            renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+          />
+          {shouldShowManualField("wordRetestTeacher", wordRetest.teacherId, wordRetest.teacherName) && <TextField label="담당선생님명" value={wordRetest.teacherName || ""} onChange={(value) => updateWordRetest("teacherName", value)} />}
+          <div className="grid gap-3 md:grid-cols-2">
+            <LinkedSelect
+              label="수업"
+              value={form.classId || ""}
+              options={wordRetestClassOptions}
+              onChange={(value) => selectClass(value, { fillWordRetest: true })}
+              onManualSelect={() => openManualField("wordRetestClass")}
+              renderOption={(option) => {
+                const classItem = findClass(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[classItem?.teacher, classItem?.room]} />
+              }}
+              renderSelected={(option) => {
+                const classItem = findClass(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[classItem?.teacher, classItem?.room]} />
+              }}
+            />
+            <LinkedSelect
+              label="학생"
+              value={form.studentId || ""}
+              options={wordRetestStudentOptions}
+              onChange={(value) => selectStudent(value, { fillWordRetest: true, fillWordRetestClass: true })}
+              onManualSelect={() => openManualField("wordRetestStudent")}
+              renderOption={(option) => {
+                const student = findStudent(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
+              }}
+              renderSelected={(option) => {
+                const student = findStudent(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
+              }}
+            />
+          </div>
+          {(shouldShowManualField("wordRetestClass", form.classId, wordRetest.className) || shouldShowManualField("wordRetestStudent", form.studentId, wordRetest.studentName)) && (
+            <div className="grid gap-3 md:grid-cols-2">
+              {shouldShowManualField("wordRetestClass", form.classId, wordRetest.className) && <TextField label="수업명" value={wordRetest.className || ""} onChange={(value) => {
+                updateWordRetest("className", value)
+                updateForm("className", value)
+              }} />}
+              {shouldShowManualField("wordRetestStudent", form.studentId, wordRetest.studentName) && <TextField label="학생명" value={wordRetest.studentName || ""} onChange={(value) => {
+                updateWordRetest("studentName", value)
+                updateForm("studentName", value)
+              }} />}
+            </div>
+          )}
+          <div className="grid gap-3 md:grid-cols-2">
+            <DateTimeField label="응시일시" value={wordRetest.testAt || ""} onChange={(value) => updateWordRetest("testAt", value)} />
+            <TaskListboxField label="장소" value={wordRetest.branch || "본관"} options={WORD_RETEST_BRANCH_OPTIONS} onChange={(value) => updateWordRetest("branch", value)} emptyClassName="text-foreground" />
+          </div>
         </div>
       )
     }
 
     if (step === "word_retest_scope") {
       return (
-        <div className="grid gap-3 md:grid-cols-3">
-          <LinkedSelect label="교재" value={form.textbookId || ""} options={textbooks} onChange={(value) => selectTextbook(value, { fillWordRetest: true })} onManualSelect={() => openManualField("wordRetestTextbook")} />
+        <div className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <LinkedSelect
+              label="교재"
+              value={form.textbookId || ""}
+              options={wordRetestTextbookOptions}
+              onChange={(value) => selectTextbook(value, { fillWordRetest: true })}
+              onManualSelect={() => openManualField("wordRetestTextbook")}
+              listHeader={renderWordRetestTextbookFilters()}
+              renderOption={(option) => {
+                const textbook = findTextbook(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[textbook ? inferWordRetestTextbookSubject(textbook) : "", textbook ? inferWordRetestTextbookGradePill(textbook) : ""]} />
+              }}
+              renderSelected={(option) => {
+                const textbook = findTextbook(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[textbook ? inferWordRetestTextbookSubject(textbook) : "", textbook ? inferWordRetestTextbookGradePill(textbook) : ""]} />
+              }}
+            />
+            <TextField label="시험범위" value={wordRetest.unit || ""} onChange={(value) => updateWordRetest("unit", value)} />
+          </div>
           {shouldShowManualField("wordRetestTextbook", form.textbookId, wordRetest.textbookName) && <TextField label="교재명" value={wordRetest.textbookName || ""} onChange={(value) => updateWordRetest("textbookName", value)} />}
-          <TextField label="단원" value={wordRetest.unit || ""} onChange={(value) => updateWordRetest("unit", value)} />
-          <TextField label="요청사항" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
+          <TextField label="메모" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
         </div>
       )
     }
@@ -5087,22 +6196,8 @@ function TypeSpecificFields({
     if (step === "word_retest_scores") {
       return (
         <div className="grid gap-3 md:grid-cols-3">
-          <SelectField
-            label="상태"
-            value={wordRetest.retestStatus || "not_started"}
-            onChange={(value) => {
-              updateWordRetest("retestStatus", value)
-              if (value === "absent") {
-                updateWordRetest("firstScore", "")
-                updateWordRetest("secondScore", "")
-                updateWordRetest("thirdScore", "")
-              }
-            }}
-          >
-            {WORD_RETEST_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
-          </SelectField>
           {wordRetestAbsent ? (
-            <div className="flex min-h-10 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground md:col-span-2">
+            <div className="flex min-h-10 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium text-muted-foreground md:col-span-3">
               점수 없음
             </div>
           ) : (
@@ -5201,6 +6296,29 @@ function TodoTeamFilterBar({
       <TodoFilterListbox label="요청팀" allLabel="요청팀 전체" value={requestedTeamFilter} options={options.requestedTeam} onChange={onRequestedTeamChange} />
       <TodoFilterListbox label="담당자" allLabel="담당자 전체" value={assigneeFilter} options={options.assignee} onChange={onAssigneeChange} />
       <TodoFilterListbox label="담당팀" allLabel="담당팀 전체" value={assigneeTeamFilter} options={options.assigneeTeam} onChange={onAssigneeTeamChange} />
+    </div>
+  )
+}
+
+function WordRetestFilterBar({
+  options,
+  teacherFilter,
+  classFilter,
+  onTeacherChange,
+  onClassChange,
+}: {
+  options: WordRetestFilterOptions
+  teacherFilter: WordRetestSelectFilterKey
+  classFilter: WordRetestSelectFilterKey
+  onTeacherChange: (value: WordRetestSelectFilterKey) => void
+  onClassChange: (value: WordRetestSelectFilterKey) => void
+}) {
+  if (options.teacher.length === 0 && options.class.length === 0 && teacherFilter === "all" && classFilter === "all") return null
+
+  return (
+    <div aria-label="단어 재시험 필터" className="grid gap-2 sm:grid-cols-2">
+      <TodoFilterListbox label="담당선생님" allLabel="담당선생님 전체" value={teacherFilter} options={options.teacher} onChange={onTeacherChange} />
+      <TodoFilterListbox label="수업" allLabel="수업 전체" value={classFilter} options={options.class} onChange={onClassChange} />
     </div>
   )
 }
@@ -5321,6 +6439,124 @@ function EmptyTaskState({
   )
 }
 
+function WordRetestStatusBadge({ value }: { value?: string }) {
+  const statusValue = String(value || "not_started").trim() || "not_started"
+  const toneClass = statusValue === "done"
+    ? "border-primary/25 bg-primary/10 text-primary"
+    : statusValue === "absent"
+      ? "border-destructive/25 bg-destructive/10 text-destructive"
+      : statusValue === "in_progress"
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-muted-foreground/20 bg-muted/50 text-muted-foreground"
+
+  return (
+    <span className={["inline-flex h-7 items-center rounded-full border px-2.5 text-xs font-semibold", toneClass].join(" ")}>
+      {getWordRetestStatusLabel(statusValue)}
+    </span>
+  )
+}
+
+function WordRetestProgressStepper({
+  value,
+  onChange,
+  readOnly = false,
+}: {
+  value?: string
+  onChange?: (value: string) => void
+  readOnly?: boolean
+}) {
+  const currentValue = String(value || "not_started").trim() || "not_started"
+
+  return (
+    <div className="grid gap-2" aria-label="진행상태">
+      <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium text-muted-foreground">
+        <span>진행상태</span>
+        <span>{getWordRetestStatusLabel(currentValue)}</span>
+      </div>
+      <div className="grid gap-1.5 sm:grid-cols-4" role="group" aria-label="단어 재시험 진행상태">
+        {WORD_RETEST_STATUSES.map((status, index) => {
+          const active = status.value === currentValue
+          return (
+            <button
+              key={status.value}
+              type="button"
+              aria-pressed={active}
+              aria-disabled={readOnly}
+              disabled={readOnly}
+              onClick={() => onChange?.(status.value)}
+              className={[
+                "flex min-h-10 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition",
+                active ? "border-primary/45 bg-primary/10 text-primary shadow-xs" : "bg-background text-muted-foreground hover:border-primary/35 hover:text-foreground",
+                readOnly ? "cursor-default hover:border-border hover:text-muted-foreground" : "",
+              ].join(" ")}
+            >
+              <span className={[
+                "grid size-5 shrink-0 place-items-center rounded-full border text-[11px]",
+                active ? "border-primary bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+              ].join(" ")}>
+                {index + 1}
+              </span>
+              <span className="truncate">{status.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function WordRetestInlineScoreEditor({
+  task,
+  draft,
+  disabled,
+  onDraftChange,
+  onSave,
+}: {
+  task: OpsTask
+  draft: WordRetestScoreDraft
+  disabled: boolean
+  onDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
+  onSave: (task: OpsTask) => void
+}) {
+  const dirty = isWordRetestScoreDraftDirty(task, draft)
+  const absent = isWordRetestAbsent(task.wordRetest)
+
+  if (absent) {
+    return <span className="text-sm font-medium text-muted-foreground">미응시</span>
+  }
+
+  return (
+    <span className="grid min-w-[13.5rem] grid-cols-[repeat(3,minmax(2.5rem,1fr))_auto] items-center gap-1">
+      {([
+        ["firstScore", "1차"],
+        ["secondScore", "2차"],
+        ["thirdScore", "3차"],
+      ] as const).map(([key, label]) => (
+        <Input
+          key={key}
+          value={draft[key]}
+          inputMode="numeric"
+          aria-label={`${getWordRetestStudentLabel(task)} ${label} 점수`}
+          placeholder={label}
+          disabled={disabled}
+          onChange={(event) => onDraftChange(task, key, event.target.value)}
+          className="h-8 min-w-0 px-2 text-xs"
+        />
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={disabled || !dirty}
+        onClick={() => onSave(task)}
+        className="h-8 px-2 text-xs"
+      >
+        저장
+      </Button>
+    </span>
+  )
+}
+
 function TodoTaskCard({
   task,
   onOpen,
@@ -5396,7 +6632,7 @@ function TodoTaskCard({
 function TaskListSkeleton({ showType }: { showType: boolean }) {
   const gridClass = showType
     ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-    : "md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]"
+    : "md:grid-cols-[88px_140px_minmax(220px,1fr)_150px_150px_96px_120px]"
 
   return (
     <div className="overflow-hidden rounded-md border" aria-label="불러오는 중">
@@ -5407,9 +6643,10 @@ function TaskListSkeleton({ showType }: { showType: boolean }) {
       </div>
       {Array.from({ length: 4 }).map((_, index) => (
         <div key={index} className={`grid gap-2 border-b px-3 py-3 last:border-b-0 md:items-center md:gap-0 ${gridClass}`}>
-          <span className="size-6 rounded-full bg-muted" />
-          {showType && <span className="h-5 w-14 rounded bg-muted" />}
+          {showType && <span className="size-6 rounded-full bg-muted" />}
           {!showType && <span className="h-5 w-12 rounded bg-muted" />}
+          {showType && <span className="h-5 w-14 rounded bg-muted" />}
+          {!showType && <span className="h-4 w-24 rounded bg-muted" />}
           <span className="grid gap-1.5">
             <span className="h-4 w-3/4 rounded bg-muted" />
             <span className="h-3 w-1/2 rounded bg-muted md:hidden" />
@@ -5475,78 +6712,296 @@ function TaskList({
   const showTypeColumn = showType
   const isTodoList = !hasOperationRows
   const [statusColumn, priorityColumn, dueColumn] = TODO_TABLE_SORT_COLUMNS
-	  const gridClass = hasOperationRows
-	    ? showTypeColumn
-	      ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-	      : "md:grid-cols-[88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-	    : "md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]"
-	  const header = (
-	    <div className={`hidden border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid xl:grid ${gridClass}`}>
-	      {isTodoList ? (
-	        <TodoSortableHeaderButton column={statusColumn} sortKey={sortKey} onSortChange={() => onSortChange("status")} />
-	      ) : (
-	        <span>상태</span>
-	      )}
-	      {showTypeColumn && <span>유형</span>}
-	      {isTodoList && <TodoSortableHeaderButton column={priorityColumn} sortKey={sortKey} onSortChange={() => onSortChange("priority")} />}
-	      <span>{isTodoList ? "제목" : "업무"}</span>
-	      <span>{isTodoList ? "요청자/요청팀" : "담당"}</span>
-	      {isTodoList && <span>담당자/담당팀</span>}
-	      {hasOperationRows && <span>학생</span>}
-	      {isTodoList ? (
-	        <TodoSortableHeaderButton column={dueColumn} sortKey={sortKey} onSortChange={() => onSortChange("due")} />
-	      ) : (
-	        <span>기한</span>
-	      )}
-	      {(hasOperationRows || isTodoList) && <span className="text-right">다음 액션</span>}
-	    </div>
-	  )
-	  const rows = tasks.map((task) => (
-	    <TaskListRow
-	      key={task.id}
-	      task={task}
-	      todayKey={todayKey}
-	      onOpen={onOpen}
-	      onEdit={onEdit}
-	      onStatusChange={onStatusChange}
-	      onRegistrationPipelineAdvance={onRegistrationPipelineAdvance}
-	      statusActionDisabled={statusActionDisabled}
-	      showType={showTypeColumn}
-	      todoControls={!showType}
-	      showOperationColumns={hasOperationRows}
-	      completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
-	    />
-	  ))
+  const gridClass = hasOperationRows
+    ? showTypeColumn
+      ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
+      : "md:grid-cols-[88px_minmax(220px,1fr)_120px_120px_120px_150px]"
+    : "md:grid-cols-[88px_140px_minmax(220px,1fr)_150px_150px_96px_120px]"
+  const header = (
+    <div className={`hidden border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid xl:grid ${gridClass}`}>
+      {isTodoList ? (
+        <>
+          <TodoSortableHeaderButton column={priorityColumn} sortKey={sortKey} onSortChange={() => onSortChange("priority")} />
+          <TodoSortableHeaderButton column={dueColumn} sortKey={sortKey} onSortChange={() => onSortChange("due")} />
+          <span>제목</span>
+          <span>요청자/요청팀</span>
+          <span>담당자/담당팀</span>
+          <TodoSortableHeaderButton column={statusColumn} sortKey={sortKey} onSortChange={() => onSortChange("status")} />
+          <span className="text-right">다음 액션</span>
+        </>
+      ) : (
+        <>
+          <span>상태</span>
+          {showTypeColumn && <span>유형</span>}
+          <span>업무</span>
+          <span>담당</span>
+          {hasOperationRows && <span>학생</span>}
+          <span>기한</span>
+          {hasOperationRows && <span className="text-right">다음 액션</span>}
+        </>
+      )}
+    </div>
+  )
+  const rows = tasks.map((task) => (
+    <TaskListRow
+      key={task.id}
+      task={task}
+      todayKey={todayKey}
+      onOpen={onOpen}
+      onEdit={onEdit}
+      onStatusChange={onStatusChange}
+      onRegistrationPipelineAdvance={onRegistrationPipelineAdvance}
+      statusActionDisabled={statusActionDisabled}
+      showType={showTypeColumn}
+      todoControls={!showType}
+      showOperationColumns={hasOperationRows}
+      completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
+    />
+  ))
 
-	  if (isTodoList) {
-	    return (
-	      <div className="grid gap-2">
-	        <div data-testid="todo-mobile-task-list" className="grid gap-2 xl:hidden">
-	          {tasks.map((task) => (
-	            <TodoTaskCard
-	              key={task.id}
-	              task={task}
-	              onOpen={onOpen}
-	              onStatusChange={onStatusChange}
-	              statusActionDisabled={statusActionDisabled}
-	            />
-	          ))}
-	        </div>
-	        <div data-testid="todo-table-task-list" className="hidden overflow-hidden rounded-md border xl:block">
-	          {header}
-	          {rows}
-	        </div>
-	      </div>
-	    )
-	  }
+  if (isTodoList) {
+    return (
+      <div className="grid gap-2">
+        <div data-testid="todo-mobile-task-list" className="grid gap-2 xl:hidden">
+          {tasks.map((task) => (
+            <TodoTaskCard
+              key={task.id}
+              task={task}
+              onOpen={onOpen}
+              onStatusChange={onStatusChange}
+              statusActionDisabled={statusActionDisabled}
+            />
+          ))}
+        </div>
+        <div data-testid="todo-table-task-list" className="hidden overflow-hidden rounded-md border xl:block">
+          {header}
+          {rows}
+        </div>
+      </div>
+    )
+  }
 
-	  return (
-	    <div className="overflow-hidden rounded-md border">
-	      {hasOperationRows && header}
-	      {rows}
-	    </div>
-	  )
-	}
+  return (
+    <div className="overflow-hidden rounded-md border">
+      {hasOperationRows && header}
+      {rows}
+    </div>
+  )
+}
+
+function WordRetestTaskList({
+  tasks,
+  mode,
+  onOpen,
+  onEdit,
+  onStatusChange,
+  onMarkAbsent,
+  onRetry,
+  scoreDrafts,
+  onScoreDraftChange,
+  onScoreSave,
+  statusActionDisabled = false,
+  onCreate,
+  emptyLabel = "단어 재시험 없음",
+  emptyActionLabel = "단어 재시험 추가",
+  showEmptyAction = true,
+  completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
+}: {
+  tasks: OpsTask[]
+  mode: WordRetestMode
+  onOpen: (task: OpsTask) => void
+  onEdit: (task: OpsTask, blockers?: string[]) => void
+  onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
+  onMarkAbsent: (task: OpsTask) => void
+  onRetry: (task: OpsTask) => void
+  scoreDrafts: Record<string, WordRetestScoreDraft>
+  onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
+  onScoreSave: (task: OpsTask) => void
+  statusActionDisabled?: boolean
+  onCreate: () => void
+  emptyLabel?: string
+  emptyActionLabel?: string
+  showEmptyAction?: boolean
+  completionBlockersByTaskId?: OperationCompletionBlockerMap
+}) {
+  if (tasks.length === 0) {
+    return (
+      <EmptyTaskState
+        icon={<FileText className="size-5" />}
+        label={emptyLabel}
+        actionLabel={emptyActionLabel}
+        showAction={showEmptyAction}
+        onCreate={onCreate}
+      />
+    )
+  }
+
+  return (
+    <div className="overflow-hidden rounded-md border">
+      <div className="hidden border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[132px_minmax(96px,0.8fr)_minmax(150px,1.1fr)_minmax(96px,0.75fr)_minmax(220px,1.35fr)_92px_150px] md:items-center md:gap-3">
+        <span>응시일시</span>
+        <span>학생</span>
+        <span>교재</span>
+        <span>시험범위</span>
+        <span>점수</span>
+        <span>상태</span>
+        <span className="text-right">다음 액션</span>
+      </div>
+      {tasks.map((task) => (
+        <WordRetestTaskRow
+          key={task.id}
+          task={task}
+          mode={mode}
+          completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
+          onOpen={onOpen}
+          onEdit={onEdit}
+          onStatusChange={onStatusChange}
+          onMarkAbsent={onMarkAbsent}
+          onRetry={onRetry}
+          scoreDraft={scoreDrafts[task.id] || getWordRetestScoreDraft(task)}
+          onScoreDraftChange={onScoreDraftChange}
+          onScoreSave={onScoreSave}
+          statusActionDisabled={statusActionDisabled}
+        />
+      ))}
+    </div>
+  )
+}
+
+function WordRetestTaskRow({
+  task,
+  mode,
+  completionBlockers,
+  onOpen,
+  onEdit,
+  onStatusChange,
+  onMarkAbsent,
+  onRetry,
+  scoreDraft,
+  onScoreDraftChange,
+  onScoreSave,
+  statusActionDisabled,
+}: {
+  task: OpsTask
+  mode: WordRetestMode
+  completionBlockers: string[]
+  onOpen: (task: OpsTask) => void
+  onEdit: (task: OpsTask, blockers?: string[]) => void
+  onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
+  onMarkAbsent: (task: OpsTask) => void
+  onRetry: (task: OpsTask) => void
+  scoreDraft: WordRetestScoreDraft
+  onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
+  onScoreSave: (task: OpsTask) => void
+  statusActionDisabled: boolean
+}) {
+  const wordRetest = task.wordRetest || {}
+  const primaryAction = getWordRetestPrimaryAction(task, mode, completionBlockers)
+  const branch = getWordRetestBranch(task)
+  const studentLabel = getWordRetestStudentLabel(task)
+  const textbookLabel = getWordRetestTextbookLabel(task)
+  const unitLabel = getWordRetestUnitLabel(task)
+  const absent = isWordRetestAbsent(wordRetest)
+  const canMarkAbsent = mode === "assistant" && task.status === "in_progress" && !absent
+  const canRetryAbsent = mode === "teacher" && task.status === "review_requested" && absent
+
+  return (
+    <div className="grid gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 md:grid-cols-[132px_minmax(96px,0.8fr)_minmax(150px,1.1fr)_minmax(96px,0.75fr)_minmax(220px,1.35fr)_92px_150px] md:items-center md:gap-3">
+      <span className="min-w-0">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">응시일시</span>
+        <span className="font-medium">{dateLabel(wordRetest.testAt || task.dueAt || "")}</span>
+        <span className="mt-1 flex flex-wrap gap-1 md:hidden">
+          <WordRetestStatusBadge value={wordRetest.retestStatus} />
+          <Badge variant="secondary">{branch}</Badge>
+        </span>
+      </span>
+      <button
+        type="button"
+        aria-label={`${studentLabel} 단어 재시험 상세 보기`}
+        onClick={() => onOpen(task)}
+        className="min-w-0 truncate text-left font-semibold hover:text-primary"
+      >
+        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">학생</span>
+        {studentLabel}
+      </button>
+      <span className="min-w-0 truncate">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">교재</span>
+        {textbookLabel}
+      </span>
+      <span className="min-w-0 truncate text-muted-foreground md:text-foreground">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">시험범위</span>
+        {unitLabel}
+      </span>
+      <span className="min-w-0">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">점수</span>
+        <WordRetestInlineScoreEditor
+          task={task}
+          draft={scoreDraft}
+          disabled={statusActionDisabled || absent || isClosedOpsTask(task)}
+          onDraftChange={onScoreDraftChange}
+          onSave={onScoreSave}
+        />
+      </span>
+      <span className="min-w-0">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">상태</span>
+        <WordRetestStatusBadge value={wordRetest.retestStatus} />
+      </span>
+      <span className="flex flex-wrap justify-start gap-1.5 md:justify-end">
+        <WordRetestRoleActionButton
+          task={task}
+          action={primaryAction}
+          onEdit={onEdit}
+          onStatusChange={onStatusChange}
+          disabled={statusActionDisabled}
+        />
+        {canMarkAbsent && (
+          <Button type="button" variant="outline" size="sm" onClick={() => onMarkAbsent(task)} disabled={statusActionDisabled}>
+            미응시
+          </Button>
+        )}
+        {canRetryAbsent && (
+          <Button type="button" variant="default" size="sm" onClick={() => onRetry(task)} disabled={statusActionDisabled}>
+            미응시 재요청
+          </Button>
+        )}
+      </span>
+    </div>
+  )
+}
+
+function WordRetestRoleActionButton({
+  task,
+  action,
+  onEdit,
+  onStatusChange,
+  disabled,
+}: {
+  task: OpsTask
+  action: WordRetestPrimaryAction | null
+  onEdit: (task: OpsTask, blockers?: string[]) => void
+  onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
+  disabled: boolean
+}) {
+  if (!action) return null
+
+  return (
+    <Button
+      type="button"
+      variant={action.kind === "status" && action.status === "done" ? "default" : "outline"}
+      size="sm"
+      onClick={() => {
+        if (action.kind === "edit") {
+          onEdit(task, action.blockers || [])
+          return
+        }
+        onStatusChange(task, action.status)
+      }}
+      disabled={disabled}
+    >
+      {action.label}
+    </Button>
+  )
+}
 
 function noopTodoSortChange() {}
 
@@ -5623,10 +7078,77 @@ function TaskListRow({
     ? "md:grid-cols-[88px_88px_minmax(220px,1fr)_120px_120px_120px_150px]"
     : isOperationRow
       ? "md:grid-cols-[88px_minmax(220px,1fr)_120px_120px_120px_150px]"
-      : "md:grid-cols-[96px_88px_minmax(220px,1fr)_150px_150px_140px_120px]"
+      : "md:grid-cols-[88px_140px_minmax(220px,1fr)_150px_150px_96px_120px]"
   const taskMeta = [task.subject, task.campus, task.className, task.textbookTitle].filter(Boolean).join(" · ")
   const todoRequesterLabel = [task.requestedByLabel || "미지정", task.requestedTeam || "미지정"].join(" / ")
   const todoAssigneeLabel = [task.assigneeLabel || "미지정", task.assigneeTeam || "미지정"].join(" / ")
+
+  if (isTodoRow) {
+    return (
+      <div
+        className={`grid grid-cols-[auto_minmax(0,1fr)] gap-2 border-b px-3 py-3 text-sm transition-colors [contain-intrinsic-size:72px] [content-visibility:auto] last:border-b-0 hover:bg-muted/40 md:items-center md:gap-0 ${gridClass}`}
+      >
+        <span className="hidden md:block">
+          <TodoPriorityBadge priority={task.priority} showNormal />
+        </span>
+        <span className="hidden text-muted-foreground md:block">
+          <TodoDateSummary task={task} />
+        </span>
+        <button
+          type="button"
+          aria-label={`${task.title} 상세 보기`}
+          onClick={() => onOpen(task)}
+          className="min-w-0 text-left hover:text-primary md:col-auto"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span
+              className={[
+                "truncate font-semibold",
+                isClosedOpsTask(task) ? "text-muted-foreground line-through" : "",
+              ].filter(Boolean).join(" ")}
+            >
+              {task.title}
+            </span>
+            <AutoSyncInlineBadge task={task} />
+          </span>
+          {taskMeta && <span className="block truncate text-xs text-muted-foreground">{taskMeta}</span>}
+          <span className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground md:hidden">
+            <span>요청 {todoRequesterLabel}</span>
+            <span>담당 {todoAssigneeLabel}</span>
+            <span className="inline-flex min-w-0 items-start gap-1">
+              <span>시작/마감</span>
+              <TodoDateSummary task={task} />
+            </span>
+            <span>상태 {getTaskStatusLabel(task.status)}</span>
+            <span>다음 액션 {getTodoActionLabel(task)}</span>
+          </span>
+        </button>
+        <span className="hidden min-w-0 text-muted-foreground md:block">
+          <span className="truncate">{todoRequesterLabel}</span>
+        </span>
+        <span className="hidden min-w-0 text-muted-foreground md:block">
+          <span className="truncate">{todoAssigneeLabel}</span>
+        </span>
+        <span className="hidden md:block">
+          <TaskStatusBadge status={task.status} />
+        </span>
+        <span className="col-span-full flex justify-start md:col-auto md:justify-end">
+          {nextAction && (
+            <Button
+              type="button"
+              variant={nextAction.status === "done" ? "default" : "outline"}
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => onStatusChange(task, nextAction.status)}
+              disabled={statusActionDisabled}
+            >
+              {nextAction.label}
+            </Button>
+          )}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -6190,6 +7712,37 @@ function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {
   )
 }
 
+function WordRetestDetailPanel({ task }: { task: OpsTask }) {
+  const wordRetest = task.wordRetest || {}
+  const requestNote = wordRetest.requestNote || task.memo || ""
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <TaskTypeBadge type={task.type} />
+        <WordRetestStatusBadge value={wordRetest.retestStatus} />
+        <Badge variant="outline">{getWordRetestBranch(task)}</Badge>
+        <Badge variant="secondary">{getWordRetestTeacherLabel(task)}</Badge>
+        <Badge variant="secondary">{getWordRetestClassLabel(task)}</Badge>
+      </div>
+      <WordRetestProgressStepper value={wordRetest.retestStatus || "not_started"} readOnly />
+      <dl className="grid gap-3 md:grid-cols-2">
+        <DetailInfoTile label="응시일시" value={dateLabel(wordRetest.testAt || task.dueAt || "") === "-" ? "미지정" : dateLabel(wordRetest.testAt || task.dueAt || "")} />
+        <DetailInfoTile label="학생" value={getWordRetestStudentLabel(task)} />
+        <DetailInfoTile label="교재" value={getWordRetestTextbookLabel(task)} />
+        <DetailInfoTile label="시험범위" value={getWordRetestUnitLabel(task)} />
+        <DetailInfoTile label="점수" value={getWordRetestScoreSummary(task)} />
+        <DetailInfoTile label="운영상태">
+          <TaskStatusBadge status={task.status} />
+        </DetailInfoTile>
+      </dl>
+      {requestNote && (
+        <DetailInfoTile label="메모" value={requestNote} />
+      )}
+    </div>
+  )
+}
+
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -6315,17 +7868,21 @@ function TypeDetail({ task }: { task: OpsTask }) {
       </div>
     )
   }
-  if (task.type === "word_retest" && task.wordRetest) {
-    const wordRetest = task.wordRetest
-    return (
-      <dl className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm md:grid-cols-2">
-        <OptionalInfo label="응시일시" value={dateLabel(wordRetest.testAt || "")} />
-        <OptionalInfo label="교재/단원" value={[wordRetest.textbookName, wordRetest.unit].filter(Boolean).join(" · ")} />
-        <OptionalInfo label="1차 점수" value={wordRetest.firstScore} />
-        <OptionalInfo label="2차 점수" value={wordRetest.secondScore} />
-        <OptionalInfo label="3차 점수" value={wordRetest.thirdScore} />
-      </dl>
-    )
-  }
+	  if (task.type === "word_retest" && task.wordRetest) {
+	    const wordRetest = task.wordRetest
+	    return (
+	      <dl className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm md:grid-cols-2">
+	        <OptionalInfo label="지점" value={wordRetest.branch} />
+	        <OptionalInfo label="담당선생님" value={getWordRetestTeacherLabel(task)} />
+	        <OptionalInfo label="응시일시" value={dateLabel(wordRetest.testAt || "")} />
+	        <OptionalInfo label="교재/시험범위" value={[wordRetest.textbookName, wordRetest.unit].filter(Boolean).join(" · ")} />
+	        <OptionalInfo label="결과" value={getWordRetestScoreSummary(task)} />
+	        <OptionalInfo label="1차 점수" value={wordRetest.firstScore} />
+	        <OptionalInfo label="2차 점수" value={wordRetest.secondScore} />
+	        <OptionalInfo label="3차 점수" value={wordRetest.thirdScore} />
+	        <OptionalInfo label="요청사항" value={wordRetest.requestNote} />
+	      </dl>
+	    )
+	  }
   return null
 }
