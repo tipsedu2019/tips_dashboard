@@ -715,10 +715,11 @@ test("operation forms use staged fields and linked management selectors", async 
 });
 
 test("word retest workspace uses role queues branch filters and dedicated row actions", async () => {
-  const [workspaceSource, modelSource, serviceSource] = await Promise.all([
+  const [workspaceSource, modelSource, serviceSource, scoreMetadataMigrationSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-model.js"),
     readSource("src/features/tasks/ops-task-service.ts"),
+    readSource("supabase/migrations/20260702173249_ops_word_retest_score_metadata.sql"),
   ]);
 
   assertIncludesAll(modelSource, [
@@ -746,7 +747,15 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestTaskList",
     "WordRetestTaskRow",
     "WordRetestRoleActionButton",
-    "getWordRetestPrimaryAction",
+    "getWordRetestPrimaryActions",
+    '"word_retest_complete"',
+    "submitWordRetestCompletion",
+    'retestStatus: "done"',
+    "parseWordRetestScoreValue",
+    "getWordRetestScoreResult",
+    "getWordRetestStatusLabel(value?: string, taskStatus?: OpsTaskStatus",
+    'if (scoreResult === "passed") return "완료: 합격"',
+    'if (scoreResult === "failed") return "완료: 불합격"',
     "getWordRetestScoreSummary",
     "getWordRetestBranch",
     "getWordRetestTeacherLabel",
@@ -772,8 +781,35 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestFilterBar",
     "WordRetestInlineScoreEditor",
     "WordRetestStatusBadge",
+    "WordRetestScoreResultCell",
+    "getWordRetestScorePercent",
     "WordRetestProgressStepper",
+    "WORD_RETEST_TABLE_COLUMN_WIDTHS",
+    "WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS",
+    "WordRetestResizableHeaderCell",
+    'label="상태" columnKey="status"',
+    'label="맞은 개수" columnKey="score"',
+    'label="커트라인" columnKey="cutoff"',
+    'label="출제 개수" columnKey="total"',
+    'label="결과" columnKey="result"',
+    "cursor-col-resize",
+    "onPointerDown",
+    "md:[grid-template-columns:var(--word-retest-grid-template)]",
+    "title={textbookLabel}",
+    "group-hover:block",
     "onScoreSave={(task) => void saveWordRetestInlineScores(task)}",
+    "status: task.status",
+    'retestStatus: wordRetest.retestStatus || "not_started"',
+    'if (deepLinkedTask.type === "word_retest")',
+    "openEdit(deepLinkedTask)",
+    "onOpen={openEdit}",
+    "단어 재시험 수정",
+    'if (task.type === "word_retest") return []',
+    "!isTodoWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
+    "!isTodoWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
+    'selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl"',
+    'selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4"',
+    'selectedTaskFresh.type !== "word_retest" && (',
     'label="담당선생님" allLabel="담당선생님 전체"',
     'label="수업" allLabel="수업 전체"',
     "WORD_RETEST_BRANCH_OPTIONS",
@@ -782,6 +818,16 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "renderSelected={(option) => <LinkedSelectedValue label={option.label} />}",
     "renderOption={(option) => <LinkedSelectedValue label={option.label} />}",
     "renderOption={(option) =>",
+    "LinkedMultiSelect",
+    "wordRetestStudentIds",
+    "setWordRetestStudentIds",
+    "selectedWordRetestStudentIds",
+    "selectWordRetestStudents",
+    "getWordRetestStudentPayload",
+    "createPayloads",
+    "savedTasks.length > 1",
+    "values={selectedWordRetestStudentIds}",
+    'selectedOptions.map((option) => option.label).join(", ")',
     "listHeader={renderWordRetestTextbookFilters()}",
     "학년구분 전체",
     "pills={[classItem?.teacher, classItem?.room]}",
@@ -797,17 +843,37 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "DateTimeField label=\"응시일시\"",
     "label=\"시험범위\"",
     "label=\"진행상태\"",
+    "출제 개수",
+    "커트라인(맞은 개수)",
+    "커트라인",
+    "1차 맞은 개수",
+    "2차 맞은 개수",
+    "3차 맞은 개수",
+    "getWordRetestAttemptScoreFeedback",
+    "${percent}점",
+    "min-w-[8.5rem]",
+    "items-center justify-start gap-1",
+    "totalQuestionCount",
+    "scoreOutOf100",
+    "cutoffQuestionCount",
     "교재/시험범위",
     "시험범위 입력",
     "시험 시작",
-    "점수 입력",
-    "검토 요청",
+    "완료",
     "미응시",
     "완료 확인",
     "응시일시 변경",
     "미응시 재요청",
   ]);
   assert.doesNotMatch(workspaceSource, /세부과목 전체/);
+  assert.doesNotMatch(workspaceSource, /shouldRequestReview/);
+  assert.doesNotMatch(workspaceSource, /kind: "edit", label: "점수 입력"/);
+  assert.doesNotMatch(workspaceSource, /kind: "status", status: "review_requested", label: "검토 요청"/);
+  assert.doesNotMatch(workspaceSource, /label: "통과"/);
+  assert.doesNotMatch(workspaceSource, /label: "재시험"/);
+  assert.doesNotMatch(workspaceSource, /100점 환산/);
+  assert.doesNotMatch(workspaceSource, /1차 · 2차 · 3차/);
+  assert.doesNotMatch(workspaceSource, /WordRetestResizableHeaderCell label="점수"/);
 
   const wordRetestToolbarSource = workspaceSource.slice(
     workspaceSource.indexOf("{isWordRetestWorkspace && ("),
@@ -815,10 +881,30 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   );
   assert.doesNotMatch(wordRetestToolbarSource, /OPERATION_VIEW_TABS/);
   assert.doesNotMatch(wordRetestToolbarSource, />\s*전체\s*<\/button>[\s\S]*>\s*상태별\s*<\/button>/);
+  assert.doesNotMatch(wordRetestToolbarSource, /visibleOperationMetrics/);
+  assert.doesNotMatch(wordRetestToolbarSource, /TASK_FOCUS_LABELS\[taskFocus\]/);
 
   assertIncludesAll(serviceSource, [
-    'if (status === "review_requested") return current === "absent" ? "absent" : "in_progress"',
+    "totalQuestionCount?: string",
+    "scoreOutOf100?: string",
+    "cutoffQuestionCount?: string",
+    "totalQuestionCount: numberText(row.total_question_count)",
+    "scoreOutOf100: numberText(row.score_out_of_100)",
+    "cutoffQuestionCount: numberText(row.cutoff_question_count)",
+    "total_question_count: nullableNumber(detail.totalQuestionCount)",
+    "score_out_of_100: nullableNumber(detail.scoreOutOf100)",
+    "cutoff_question_count: nullableNumber(detail.cutoffQuestionCount)",
+    "OPS_WORD_RETEST_OPTIONAL_DETAIL_COLUMNS",
+    "wordRetest?.firstScore, wordRetest?.secondScore, wordRetest?.thirdScore",
+    'if (status === "review_requested") return current === "absent" ? "absent" : current === "done" ? "done" : "in_progress"',
     'if (status === "requested" || status === "confirmed") return "not_started"',
+  ]);
+
+  assertIncludesAll(scoreMetadataMigrationSource, [
+    "alter table public.ops_word_retests",
+    "total_question_count numeric(8,2)",
+    "score_out_of_100 numeric(8,2)",
+    "cutoff_question_count numeric(8,2)",
   ]);
 });
 
@@ -851,7 +937,7 @@ test("management sync connects registration transfer withdrawal and word retest 
     "hasWordRetestScore",
     "function shouldRequireWordRetestScore",
     "!isWordRetestAbsent(wordRetest) && !hasWordRetestScore(wordRetest)",
-    '...(value === "absent" ? { firstScore: "", secondScore: "", thirdScore: "" } : {})',
+    '...(value === "absent" ? { firstScore: "", secondScore: "", thirdScore: "", scoreOutOf100: "" } : {})',
     "점수 없음",
     "function CompletionBlockerActionPanel",
     "function CompletionBlockerInlineChips",

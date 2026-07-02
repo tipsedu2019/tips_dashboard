@@ -149,6 +149,9 @@ export type OpsWordRetestDetail = {
   textbookName?: string
   unit?: string
   requestNote?: string
+  totalQuestionCount?: string
+  scoreOutOf100?: string
+  cutoffQuestionCount?: string
   firstScore?: string
   secondScore?: string
   thirdScore?: string
@@ -686,6 +689,9 @@ function mapWordRetest(row: Row | undefined): OpsWordRetestDetail | undefined {
     textbookName: text(row.textbook_name),
     unit: text(row.unit),
     requestNote: text(row.request_note),
+    totalQuestionCount: numberText(row.total_question_count),
+    scoreOutOf100: numberText(row.score_out_of_100),
+    cutoffQuestionCount: numberText(row.cutoff_question_count),
     firstScore: numberText(row.first_score),
     secondScore: numberText(row.second_score),
     thirdScore: numberText(row.third_score),
@@ -1128,6 +1134,7 @@ function didMutateOpsTask(data: unknown) {
 }
 
 const OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS = ["requested_team", "assignee_team", "start_at"]
+const OPS_WORD_RETEST_OPTIONAL_DETAIL_COLUMNS = ["teacher_catalog_id", "total_question_count", "score_out_of_100", "cutoff_question_count"]
 
 function buildTaskRow(input: OpsTaskInput, options: { preserveManagementLinks?: boolean; completedAtFallback?: string } = {}) {
   const completedAt = nullableDate(input.completedAt) || (input.status === "done" ? nullableDate(options.completedAtFallback) : null)
@@ -1257,6 +1264,9 @@ function buildWordRetestRow(taskId: string, detail: OpsWordRetestDetail = {}) {
     textbook_name: nullable(detail.textbookName),
     unit: nullable(detail.unit),
     request_note: nullable(detail.requestNote),
+    total_question_count: nullableNumber(detail.totalQuestionCount),
+    score_out_of_100: nullableNumber(detail.scoreOutOf100),
+    cutoff_question_count: nullableNumber(detail.cutoffQuestionCount),
     first_score: nullableNumber(detail.firstScore),
     second_score: nullableNumber(detail.secondScore),
     third_score: nullableNumber(detail.thirdScore),
@@ -1310,7 +1320,7 @@ async function upsertDetail(taskId: string, input: OpsTaskInput) {
     if (error && isMissingColumnError(error)) {
       ;({ error } = await supabase
         .from("ops_word_retests")
-        .upsert(stripMissingMigrationColumns(row, ["teacher_catalog_id"])))
+        .upsert(stripMissingMigrationColumns(row, OPS_WORD_RETEST_OPTIONAL_DETAIL_COLUMNS)))
     }
     if (error) throw error
   }
@@ -1414,7 +1424,7 @@ function getWordRetestDetailStatusForTaskStatus(status: OpsTaskStatus, currentRe
 
   if (status === "done") return current === "absent" ? "absent" : "done"
   if (status === "canceled") return "absent"
-  if (status === "review_requested") return current === "absent" ? "absent" : "in_progress"
+  if (status === "review_requested") return current === "absent" ? "absent" : current === "done" ? "done" : "in_progress"
   if (status === "in_progress") return "in_progress"
   if (status === "requested" || status === "confirmed") return "not_started"
   if (status === "on_hold") return current === "in_progress" ? "in_progress" : current || "not_started"
