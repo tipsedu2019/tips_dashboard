@@ -98,8 +98,10 @@ type WordRetestScoreDraft = {
 type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "score" | "cutoff" | "total" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
+  kind?: "word_retest_retry"
   status?: OpsTaskStatus
   registrationPipelineStatus?: string
+  wordRetestStatus?: string
 }
 type StatusUndoState = {
   taskId: string
@@ -116,6 +118,7 @@ type QuickAddPreviewItem = { key: string; label: string }
 type WordRetestPrimaryAction =
   | { kind: "status"; status: OpsTaskStatus; label: string }
   | { kind: "word_retest_complete"; label: string }
+  | { kind: "word_retest_retry"; label: string }
   | { kind: "edit"; label: string; blockers?: string[] }
 type OpsTaskOptionIndexes = {
   studentsById: Map<string, OpsStudentOption>
@@ -346,6 +349,10 @@ const TASK_FOCUS_LABELS: Record<Exclude<TaskFocus, "none">, string> = {
 }
 
 const VALID_TASK_FOCUSES = new Set<TaskFocus>(["none", "today", "overdue", "mine", "unassigned", "confirmation"])
+const WORD_RETEST_PROGRESS_STATUS_ORDER = ["not_started", "absent", "in_progress", "done"] as const
+const WORD_RETEST_PROGRESS_STATUSES = WORD_RETEST_PROGRESS_STATUS_ORDER
+  .map((value) => WORD_RETEST_STATUSES.find((status) => status.value === value))
+  .filter((status): status is (typeof WORD_RETEST_STATUSES)[number] => Boolean(status))
 
 function getFormDetailTabs(type: OpsTaskType): Array<{ key: FormDetailStepKey; label: string }> {
   if (type === "registration") {
@@ -775,6 +782,13 @@ function inputFromTaskForCompletionCheck(task: OpsTask): OpsTaskInput {
 
 function getCompletionIntentForBlockedEdit(task: OpsTask, blockers: string[]): FormCompletionIntent | null {
   if (blockers.length === 0 || task.type === "general") return null
+  if (task.type === "word_retest" && isWordRetestAbsent(task.wordRetest) && blockers.includes("응시일시")) {
+    return {
+      kind: "word_retest_retry",
+      status: "requested",
+      wordRetestStatus: "not_started",
+    }
+  }
   if (task.type === "registration") {
     return { registrationPipelineStatus: findRegistrationPipelineStatus("7.") || "7. 등록 완료" }
   }
@@ -794,6 +808,18 @@ function applyFormCompletionIntent(input: OpsTaskInput, intent: FormCompletionIn
     }
   }
 
+  if (input.type === "word_retest" && intent.wordRetestStatus) {
+    return {
+      ...input,
+      status: intent.status || input.status,
+      completedAt: intent.status === "requested" ? "" : input.completedAt,
+      wordRetest: {
+        ...(input.wordRetest || {}),
+        retestStatus: intent.wordRetestStatus,
+      },
+    }
+  }
+
   if (intent.status) return { ...input, status: intent.status }
 
   return input
@@ -801,6 +827,7 @@ function applyFormCompletionIntent(input: OpsTaskInput, intent: FormCompletionIn
 
 function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null) {
   if (!intent) return "저장"
+  if (intent.kind === "word_retest_retry") return "미응시 재요청"
   if (intent.registrationPipelineStatus) return `저장 후 ${getCompactRegistrationPipelineLabel(intent.registrationPipelineStatus)}`
   if (intent.status === "done") return "저장 후 완료"
   return "저장"
@@ -937,7 +964,7 @@ function getWordRetestStatusLabel(value?: string, taskStatus?: OpsTaskStatus, wo
     if (statusValue === "absent") return "미응시"
     const scoreResult = getWordRetestScoreResult(wordRetest)
     if (scoreResult === "passed") return "완료: 합격"
-    if (scoreResult === "failed") return "완료: 불합격"
+    if (scoreResult === "failed") return "미완료: 불합격"
     if (statusValue === "done" || statusValue === "in_progress") return "완료"
   }
   return WORD_RETEST_STATUSES.find((status) => status.value === statusValue)?.label || "시작 전"
@@ -3558,6 +3585,7 @@ function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, comple
 
   const wordRetest = task.wordRetest || {}
   const absent = isWordRetestAbsent(wordRetest)
+  const scoreResult = getWordRetestScoreResult(wordRetest)
 
   if (mode === "assistant") {
     if (task.status === "requested" || task.status === "confirmed" || task.status === "on_hold") {
@@ -3571,6 +3599,12 @@ function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, comple
 
   if (mode === "teacher" && task.status === "review_requested") {
     if (absent) return [{ kind: "edit", label: "응시일시 변경", blockers: ["응시일시"] }]
+    if (scoreResult === "failed") {
+      return [
+        { kind: "word_retest_retry", label: "미완료 재요청" },
+        { kind: "status", status: "done", label: "미완료 확인" },
+      ]
+    }
     if (completionBlockers.length > 0) {
       return [{ kind: "edit", label: getCompletionBlockerActionLabel(completionBlockers), blockers: completionBlockers }]
     }
@@ -4534,6 +4568,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
     const inferredCompletionIntent = completionIntent || getCompletionIntentForBlockedEdit(task, blockers)
+    const shouldDeferWordRetestRetryBlockers = inferredCompletionIntent?.kind === "word_retest_retry"
     const nextForm = applyFormCompletionIntent(formFromTask(task), inferredCompletionIntent)
     blurActiveElementBeforeDialog()
     setDetailOpen(false)
@@ -4543,8 +4578,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setWordRetestStudentIds(task.type === "word_retest" && task.studentId ? [task.studentId] : [])
     formBaselineRef.current = serializeOpsTaskInput(nextForm)
     setFormDetailStep(getCompletionBlockerFormStep(task.type, blockers) || getDefaultFormDetailStep(task.type))
-    setMessage(blockers.length > 0 ? getCompletionBlockerActionLabel(blockers) : "")
-    setFormCompletionBlockers(blockers)
+    setMessage(blockers.length > 0 && !shouldDeferWordRetestRetryBlockers ? getCompletionBlockerActionLabel(blockers) : "")
+    setFormCompletionBlockers(shouldDeferWordRetestRetryBlockers ? [] : blockers)
     setFormCompletionIntent(inferredCompletionIntent)
     setConfirmingFormClose(false)
     setNotice("")
@@ -4934,14 +4969,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         : { ...form, title: nextTitle }
       const inputWithCompletionIntent = applyFormCompletionIntent(formWithRequesterDefaults, formCompletionIntent)
       const payload = normalizeFormForSubmit(inputWithCompletionIntent)
-      const completionBlockers = getOperationCompletionBlockers(
+      const intentBlockers = formCompletionIntent?.kind === "word_retest_retry" && payload.type === "word_retest" && !String(payload.wordRetest?.testAt || "").trim()
+        ? ["응시일시"]
+        : []
+      const completionBlockers = prioritizeCompletionBlockers([...intentBlockers, ...getOperationCompletionBlockers(
         payload,
         data?.students || EMPTY_STUDENT_OPTIONS,
         data?.classes || EMPTY_CLASS_OPTIONS,
         data?.textbooks || EMPTY_TEXTBOOK_OPTIONS,
         data?.teachers || EMPTY_TEACHER_OPTIONS,
         optionIndexes,
-      )
+      )])
       if (completionBlockers.length > 0) {
         setFormDetailStep(getCompletionBlockerFormStep(payload.type, completionBlockers) || getDefaultFormDetailStep(payload.type))
         setMessage(getCompletionBlockerActionLabel(completionBlockers))
@@ -5131,6 +5169,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const requestWordRetestAgain = async (task: OpsTask) => {
     const wordRetest = task.wordRetest || {}
+    const retryNotice = isWordRetestAbsent(wordRetest)
+      ? "미응시 학생 재시험을 다시 요청했습니다."
+      : "미완료 학생 재시험을 다시 요청했습니다."
     await updateWordRetestFlow(task, {
       ...formFromTask(task),
       status: "requested",
@@ -5143,7 +5184,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         thirdScore: "",
         scoreOutOf100: "",
       },
-    }, "미응시 학생 재시험을 다시 요청했습니다.")
+    }, retryNotice)
   }
 
   const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
@@ -6169,7 +6210,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             <div className={[
               "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end",
             ].filter(Boolean).join(" ")}>
-              {formCompletionBlockers.length > 0 && (
+              {formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== "word_retest_retry" && (
                 (() => {
                   const firstBlocker = formCompletionBlockers[0]
                   return (
@@ -6301,14 +6342,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                          onEdit={openEdit}
 	                          onStatusChange={(task, status) => void changeStatus(task, status)}
 	                          onComplete={(task) => void submitWordRetestCompletion(task)}
+	                          onRetry={(task) => void requestWordRetestAgain(task)}
 	                          disabled={saving}
 	                        />
 	                      ))}
-	                      {wordRetestMode === "teacher" && selectedTaskFresh.status === "review_requested" && isWordRetestAbsent(selectedTaskFresh.wordRetest) && (
-	                        <Button type="button" variant="default" size="sm" onClick={() => void requestWordRetestAgain(selectedTaskFresh)} disabled={saving} className="w-full sm:w-auto">
-	                          미응시 재요청
-	                        </Button>
-	                      )}
 	                    </>
 	                  )}
 	                  {detailPrimaryAction && (
@@ -6990,6 +7027,12 @@ function TypeSpecificFields({
             />
             <TextField label="시험범위" value={wordRetest.unit || ""} onChange={(value) => updateWordRetest("unit", value)} />
           </div>
+          {!wordRetestAbsent && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <TextField label="커트라인(맞은 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
+              <TextField label="출제 개수" value={wordRetest.totalQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("totalQuestionCount", value)} />
+            </div>
+          )}
           {shouldShowManualField("wordRetestTextbook", form.textbookId, wordRetest.textbookName) && <TextField label="교재명" value={wordRetest.textbookName || ""} onChange={(value) => updateWordRetest("textbookName", value)} />}
           <TextField label="메모" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
         </div>
@@ -7004,35 +7047,29 @@ function TypeSpecificFields({
               점수 없음
             </div>
           ) : (
-            <>
-              <div className="grid gap-3 md:grid-cols-2">
-                <TextField label="커트라인(맞은 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
-                <TextField label="출제 개수" value={wordRetest.totalQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("totalQuestionCount", value)} />
-              </div>
-              <div className="grid gap-3 border-t pt-3 md:grid-cols-3">
-                <WordRetestAttemptScoreField
-                  label="1차 맞은 개수"
-                  value={wordRetest.firstScore || ""}
-                  totalQuestionCount={wordRetest.totalQuestionCount}
-                  cutoffQuestionCount={wordRetest.cutoffQuestionCount}
-                  onChange={(value) => updateWordRetest("firstScore", value)}
-                />
-                <WordRetestAttemptScoreField
-                  label="2차 맞은 개수"
-                  value={wordRetest.secondScore || ""}
-                  totalQuestionCount={wordRetest.totalQuestionCount}
-                  cutoffQuestionCount={wordRetest.cutoffQuestionCount}
-                  onChange={(value) => updateWordRetest("secondScore", value)}
-                />
-                <WordRetestAttemptScoreField
-                  label="3차 맞은 개수"
-                  value={wordRetest.thirdScore || ""}
-                  totalQuestionCount={wordRetest.totalQuestionCount}
-                  cutoffQuestionCount={wordRetest.cutoffQuestionCount}
-                  onChange={(value) => updateWordRetest("thirdScore", value)}
-                />
-              </div>
-            </>
+            <div className="grid gap-3 md:grid-cols-3">
+              <WordRetestAttemptScoreField
+                label="1차 맞은 개수"
+                value={wordRetest.firstScore || ""}
+                totalQuestionCount={wordRetest.totalQuestionCount}
+                cutoffQuestionCount={wordRetest.cutoffQuestionCount}
+                onChange={(value) => updateWordRetest("firstScore", value)}
+              />
+              <WordRetestAttemptScoreField
+                label="2차 맞은 개수"
+                value={wordRetest.secondScore || ""}
+                totalQuestionCount={wordRetest.totalQuestionCount}
+                cutoffQuestionCount={wordRetest.cutoffQuestionCount}
+                onChange={(value) => updateWordRetest("secondScore", value)}
+              />
+              <WordRetestAttemptScoreField
+                label="3차 맞은 개수"
+                value={wordRetest.thirdScore || ""}
+                totalQuestionCount={wordRetest.totalQuestionCount}
+                cutoffQuestionCount={wordRetest.cutoffQuestionCount}
+                onChange={(value) => updateWordRetest("thirdScore", value)}
+              />
+            </div>
           )}
         </div>
       )
@@ -7402,7 +7439,7 @@ function WordRetestProgressStepper({
         <span>{getWordRetestStatusLabel(currentValue)}</span>
       </div>
       <div className="grid gap-1.5 sm:grid-cols-4" role="group" aria-label="단어 재시험 진행상태">
-        {WORD_RETEST_STATUSES.map((status, index) => {
+        {WORD_RETEST_PROGRESS_STATUSES.map((status, index) => {
           const active = status.value === currentValue
           return (
             <button
@@ -7898,6 +7935,11 @@ function WordRetestResizableHeaderCell({
   )
 }
 
+function shouldIgnoreWordRetestRowOpen(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false
+  return Boolean(target.closest("button, input, textarea, select, a, [data-word-retest-interactive='true']"))
+}
+
 const WordRetestTaskRow = memo(function WordRetestTaskRow({
   task,
   mode,
@@ -7944,11 +7986,14 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   const absent = isWordRetestAbsent(wordRetest)
   const resolvedScoreDraft = scoreDraft || getWordRetestScoreDraft(task)
   const scorePreviewWordRetest = { ...wordRetest, ...resolvedScoreDraft }
-  const canRetryAbsent = mode === "teacher" && task.status === "review_requested" && absent
 
   return (
     <div
-      className="grid gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
+      onClick={(event) => {
+        if (shouldIgnoreWordRetestRowOpen(event.target)) return
+        onOpen(task)
+      }}
+      className="grid cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
       style={{ "--word-retest-grid-template": gridTemplateColumns } as CSSProperties}
     >
       <span className="flex min-w-0 items-center md:justify-center">
@@ -8036,14 +8081,10 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
             onEdit={onEdit}
             onStatusChange={onStatusChange}
             onComplete={onComplete}
+            onRetry={onRetry}
             disabled={statusActionDisabled}
           />
         ))}
-        {canRetryAbsent && (
-          <Button type="button" variant="default" size="sm" onClick={() => onRetry(task)} disabled={statusActionDisabled}>
-            미응시 재요청
-          </Button>
-        )}
       </span>
     </div>
   )
@@ -8055,6 +8096,7 @@ function WordRetestRoleActionButton({
   onEdit,
   onStatusChange,
   onComplete,
+  onRetry,
   disabled,
 }: {
   task: OpsTask
@@ -8062,6 +8104,7 @@ function WordRetestRoleActionButton({
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
+  onRetry: (task: OpsTask) => void
   disabled: boolean
 }) {
   if (!action) return null
@@ -8078,6 +8121,10 @@ function WordRetestRoleActionButton({
         }
         if (action.kind === "word_retest_complete") {
           onComplete(task)
+          return
+        }
+        if (action.kind === "word_retest_retry") {
+          onRetry(task)
           return
         }
         onStatusChange(task, action.status)

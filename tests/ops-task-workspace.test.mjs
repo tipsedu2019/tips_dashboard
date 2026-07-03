@@ -749,13 +749,15 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestRoleActionButton",
     "getWordRetestPrimaryActions",
     '"word_retest_complete"',
+    '"word_retest_retry"',
     "submitWordRetestCompletion",
     'retestStatus: "done"',
+    'wordRetestStatus: "not_started"',
     "parseWordRetestScoreValue",
     "getWordRetestScoreResult",
     "getWordRetestStatusLabel(value?: string, taskStatus?: OpsTaskStatus",
     'if (scoreResult === "passed") return "완료: 합격"',
-    'if (scoreResult === "failed") return "완료: 불합격"',
+    'if (scoreResult === "failed") return "미완료: 불합격"',
     "getWordRetestScoreSummary",
     "getWordRetestBranch",
     "getWordRetestTeacherLabel",
@@ -784,6 +786,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestScoreResultCell",
     "getWordRetestScorePercent",
     "WordRetestProgressStepper",
+    "WORD_RETEST_PROGRESS_STATUS_ORDER",
+    "WORD_RETEST_PROGRESS_STATUSES",
     "WordRetestPeriodFilterBar",
     "WORD_RETEST_PERIOD_FILTERS",
     '{ key: "today", label: "오늘" }',
@@ -830,6 +834,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "md:[grid-template-columns:var(--word-retest-grid-template)]",
     "title={textbookLabel}",
     "group-hover:block",
+    "function shouldIgnoreWordRetestRowOpen",
+    "onClick={(event) => {",
     "onScoreSave={handleWordRetestScoreSave}",
     "scoreDraft={scoreDrafts[task.id]}",
     "const resolvedScoreDraft = scoreDraft || getWordRetestScoreDraft(task)",
@@ -901,8 +907,11 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "완료",
     "미응시",
     "완료 확인",
+    "미완료 재요청",
+    "미완료 확인",
     "응시일시 변경",
     "미응시 재요청",
+    'formCompletionIntent?.kind !== "word_retest_retry"',
   ]);
   assert.doesNotMatch(workspaceSource, /세부과목 전체/);
   assert.doesNotMatch(workspaceSource, /shouldRequestReview/);
@@ -913,6 +922,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /100점 환산/);
   assert.doesNotMatch(workspaceSource, /1차 · 2차 · 3차/);
   assert.doesNotMatch(workspaceSource, /onMarkAbsent/);
+  assert.doesNotMatch(workspaceSource, /canRetryAbsent/);
   assert.doesNotMatch(workspaceSource, /WordRetestResizableHeaderCell label="점수"/);
 
   const wordRetestToolbarSource = workspaceSource.slice(
