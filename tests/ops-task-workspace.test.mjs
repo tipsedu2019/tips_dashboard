@@ -784,10 +784,21 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestScoreResultCell",
     "getWordRetestScorePercent",
     "WordRetestProgressStepper",
+    "WordRetestPeriodFilterBar",
+    "WORD_RETEST_PERIOD_FILTERS",
+    '{ key: "today", label: "오늘" }',
+    '{ key: "week", label: "이번주" }',
+    '{ key: "month", label: "이번달" }',
+    '{ key: "custom", label: "직접입력" }',
+    "matchesWordRetestPeriodFilter",
+    "shouldAutoMarkWordRetestAbsent",
+    "autoMarkPastWordRetestsAbsent",
     "WORD_RETEST_TABLE_COLUMN_WIDTHS",
     "WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS",
     "WordRetestResizableHeaderCell",
     'label="상태" columnKey="status"',
+    'label="담당선생님" columnKey="teacher"',
+    'label="수업" columnKey="class"',
     'label="맞은 개수" columnKey="score"',
     'label="커트라인" columnKey="cutoff"',
     'label="출제 개수" columnKey="total"',
@@ -800,6 +811,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "onScoreSave={(task) => void saveWordRetestInlineScores(task)}",
     "status: task.status",
     'retestStatus: wordRetest.retestStatus || "not_started"',
+    'retestStatus: "absent"',
     'if (deepLinkedTask.type === "word_retest")',
     "openEdit(deepLinkedTask)",
     "onOpen={openEdit}",
@@ -812,6 +824,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'selectedTaskFresh.type !== "word_retest" && (',
     'label="담당선생님" allLabel="담당선생님 전체"',
     'label="수업" allLabel="수업 전체"',
+    "const teacherLabel = getWordRetestTeacherLabel(task)",
+    "const classLabel = getWordRetestClassLabel(task)",
     "WORD_RETEST_BRANCH_OPTIONS",
     "TaskListboxField label=\"장소\"",
     "md:grid-cols-2",
@@ -873,6 +887,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /label: "재시험"/);
   assert.doesNotMatch(workspaceSource, /100점 환산/);
   assert.doesNotMatch(workspaceSource, /1차 · 2차 · 3차/);
+  assert.doesNotMatch(workspaceSource, /onMarkAbsent/);
   assert.doesNotMatch(workspaceSource, /WordRetestResizableHeaderCell label="점수"/);
 
   const wordRetestToolbarSource = workspaceSource.slice(

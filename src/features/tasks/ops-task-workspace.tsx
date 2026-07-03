@@ -88,13 +88,14 @@ type TodoSelectFilterKey = "all" | string
 
 type WordRetestMode = "assistant" | "teacher"
 type WordRetestBranchFilter = "all" | "본관" | "별관"
+type WordRetestPeriodFilter = "all" | "today" | "week" | "month" | "custom"
 type WordRetestSelectFilterKey = "all" | string
 type WordRetestScoreDraft = {
   firstScore: string
   secondScore: string
   thirdScore: string
 }
-type WordRetestTableColumnKey = "status" | "testAt" | "student" | "textbook" | "unit" | "score" | "cutoff" | "total" | "result" | "action"
+type WordRetestTableColumnKey = "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "score" | "cutoff" | "total" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
   status?: OpsTaskStatus
@@ -156,6 +157,8 @@ const EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID: OperationCompletionBlockerMap = new 
 const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> = {
   status: 102,
   testAt: 132,
+  teacher: 112,
+  class: 128,
   student: 108,
   textbook: 220,
   unit: 108,
@@ -168,6 +171,8 @@ const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> 
 const WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS: Record<WordRetestTableColumnKey, number> = {
   status: 88,
   testAt: 112,
+  teacher: 96,
+  class: 108,
   student: 88,
   textbook: 150,
   unit: 88,
@@ -241,6 +246,14 @@ const WORD_RETEST_BRANCH_FILTERS: Array<{ key: WordRetestBranchFilter; label: st
   { key: "all", label: "전체" },
   { key: "본관", label: "본관" },
   { key: "별관", label: "별관" },
+]
+
+const WORD_RETEST_PERIOD_FILTERS: Array<{ key: WordRetestPeriodFilter; label: string }> = [
+  { key: "all", label: "전체 기간" },
+  { key: "today", label: "오늘" },
+  { key: "week", label: "이번주" },
+  { key: "month", label: "이번달" },
+  { key: "custom", label: "직접입력" },
 ]
 
 const TODO_TABLE_SORT_COLUMNS: Array<{ key: TodoSortKey; label: string }> = [
@@ -384,6 +397,10 @@ function isWordRetestModeKey(value: string): value is WordRetestMode {
 
 function isWordRetestBranchFilterKey(value: string): value is WordRetestBranchFilter {
   return WORD_RETEST_BRANCH_FILTERS.some((filter) => filter.key === value)
+}
+
+function isWordRetestPeriodFilterKey(value: string): value is WordRetestPeriodFilter {
+  return WORD_RETEST_PERIOD_FILTERS.some((filter) => filter.key === value)
 }
 
 function getTodoRouteState(searchParams: URLSearchParams): { list: TodoViewKey; sort?: TodoSortKey; due?: TodoDueFilterKey; status?: OpsTaskStatus } | null {
@@ -944,6 +961,98 @@ function getWordRetestDateSortValue(task: OpsTask) {
   return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER
 }
 
+function getDateFromKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day)
+}
+
+function getWordRetestTestDateKey(task: OpsTask) {
+  return toDateKey(task.wordRetest?.testAt || task.dueAt || task.startAt || "")
+}
+
+function getWordRetestWeekRange(todayKey: string) {
+  const today = getDateFromKey(todayKey) || new Date()
+  const day = today.getDay()
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1))
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  return {
+    start: toDateKey(monday),
+    end: toDateKey(sunday),
+  }
+}
+
+function getWordRetestMonthRange(todayKey: string) {
+  const today = getDateFromKey(todayKey) || new Date()
+  const start = new Date(today.getFullYear(), today.getMonth(), 1)
+  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+  return {
+    start: toDateKey(start),
+    end: toDateKey(end),
+  }
+}
+
+function isDateKeyInRange(dateKey: string, startDateKey: string, endDateKey: string) {
+  if (!dateKey) return false
+  if (startDateKey && dateKey < startDateKey) return false
+  if (endDateKey && dateKey > endDateKey) return false
+  return true
+}
+
+function matchesWordRetestPeriodFilter(
+  task: OpsTask,
+  periodFilter: WordRetestPeriodFilter,
+  todayKey: string,
+  customStartDate: string,
+  customEndDate: string,
+) {
+  if (periodFilter === "all") return true
+  const dateKey = getWordRetestTestDateKey(task)
+  if (!dateKey) return false
+
+  if (periodFilter === "today") return dateKey === todayKey
+  if (periodFilter === "week") {
+    const range = getWordRetestWeekRange(todayKey)
+    return isDateKeyInRange(dateKey, range.start, range.end)
+  }
+  if (periodFilter === "month") {
+    const range = getWordRetestMonthRange(todayKey)
+    return isDateKeyInRange(dateKey, range.start, range.end)
+  }
+
+  const startDateKey = toDateKey(customStartDate)
+  const endDateKey = toDateKey(customEndDate)
+  if (!startDateKey && !endDateKey) return true
+  return isDateKeyInRange(dateKey, startDateKey, endDateKey)
+}
+
+function getWordRetestAutoAbsentDeadline(task: OpsTask) {
+  const rawValue = String(task.wordRetest?.testAt || task.dueAt || task.startAt || "").trim()
+  if (!rawValue) return null
+  const dateOnly = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly
+    return new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999).getTime()
+  }
+  const timestamp = Date.parse(rawValue)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function shouldAutoMarkWordRetestAbsent(task: OpsTask, now = new Date()) {
+  const wordRetest = task.wordRetest || {}
+  const retestStatus = String(wordRetest.retestStatus || "not_started").trim() || "not_started"
+  const deadline = getWordRetestAutoAbsentDeadline(task)
+
+  return task.type === "word_retest" &&
+    !isClosedOpsTask(task) &&
+    ["requested", "confirmed", "on_hold"].includes(task.status) &&
+    retestStatus === "not_started" &&
+    deadline !== null &&
+    deadline < now.getTime()
+}
+
 function sortWordRetestTasksByTestAt(tasks: OpsTask[]) {
   return [...tasks].sort((left, right) => {
     const dateDiff = getWordRetestDateSortValue(left) - getWordRetestDateSortValue(right)
@@ -956,6 +1065,8 @@ function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey,
   return [
     widths.status,
     widths.testAt,
+    widths.teacher,
+    widths.class,
     widths.student,
     widths.textbook,
     widths.unit,
@@ -3834,6 +3945,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [showClosed, setShowClosed] = useState(false)
   const [wordRetestMode, setWordRetestMode] = useState<WordRetestMode>("assistant")
   const [wordRetestBranchFilter, setWordRetestBranchFilter] = useState<WordRetestBranchFilter>("all")
+  const [wordRetestPeriodFilter, setWordRetestPeriodFilter] = useState<WordRetestPeriodFilter>("all")
+  const [wordRetestCustomStartDate, setWordRetestCustomStartDate] = useState("")
+  const [wordRetestCustomEndDate, setWordRetestCustomEndDate] = useState("")
   const [wordRetestTeacherFilter, setWordRetestTeacherFilter] = useState<WordRetestSelectFilterKey>("all")
   const [wordRetestClassFilter, setWordRetestClassFilter] = useState<WordRetestSelectFilterKey>("all")
   const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
@@ -3861,6 +3975,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const attachmentLinkId = useId()
   const quickAddInputRef = useRef<HTMLInputElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const autoAbsentWordRetestIdsRef = useRef<Set<string>>(new Set())
   const deferredQuery = useDeferredValue(query)
 
   const currentUserId = user?.id || ""
@@ -3914,6 +4029,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     const nextFocus = searchParams.get("focus")
     const nextWordRetestRole = searchParams.get("role") || ""
     const nextWordRetestBranch = searchParams.get("branch") || ""
+    const nextWordRetestPeriod = searchParams.get("period") || ""
+    const nextWordRetestFrom = searchParams.get("from") || ""
+    const nextWordRetestTo = searchParams.get("to") || ""
     const nextTodoRouteState = isTodoWorkspace ? getTodoRouteState(searchParams) : null
     if (nextTodoRouteState) {
       setTodoView(nextTodoRouteState.list)
@@ -3921,6 +4039,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     } else if (isWordRetestWorkspace) {
       if (isWordRetestModeKey(nextWordRetestRole)) setWordRetestMode(nextWordRetestRole)
       if (isWordRetestBranchFilterKey(nextWordRetestBranch)) setWordRetestBranchFilter(nextWordRetestBranch)
+      setWordRetestPeriodFilter(isWordRetestPeriodFilterKey(nextWordRetestPeriod) ? nextWordRetestPeriod : "all")
+      setWordRetestCustomStartDate(toDateKey(nextWordRetestFrom))
+      setWordRetestCustomEndDate(toDateKey(nextWordRetestTo))
     } else if (!isTodoWorkspace && nextView && isViewKey(nextView)) {
       setView(nextView)
     }
@@ -3981,6 +4102,42 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     const searchParams = new URLSearchParams(window.location.search)
     if (nextBranch === "all") searchParams.delete("branch")
     else searchParams.set("branch", nextBranch)
+    searchParams.delete("view")
+    searchParams.delete("list")
+    const queryString = searchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }
+
+  const syncWordRetestPeriodFilter = (nextPeriod: WordRetestPeriodFilter) => {
+    setWordRetestPeriodFilter(nextPeriod)
+    const searchParams = new URLSearchParams(window.location.search)
+    if (nextPeriod === "all") {
+      searchParams.delete("period")
+      searchParams.delete("from")
+      searchParams.delete("to")
+    } else {
+      searchParams.set("period", nextPeriod)
+      if (nextPeriod !== "custom") {
+        searchParams.delete("from")
+        searchParams.delete("to")
+      }
+    }
+    searchParams.delete("view")
+    searchParams.delete("list")
+    const queryString = searchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }
+
+  const syncWordRetestCustomDate = (key: "from" | "to", value: string) => {
+    const nextDate = toDateKey(value)
+    if (key === "from") setWordRetestCustomStartDate(nextDate)
+    else setWordRetestCustomEndDate(nextDate)
+    setWordRetestPeriodFilter("custom")
+
+    const searchParams = new URLSearchParams(window.location.search)
+    searchParams.set("period", "custom")
+    if (nextDate) searchParams.set(key, nextDate)
+    else searchParams.delete(key)
     searchParams.delete("view")
     searchParams.delete("list")
     const queryString = searchParams.toString()
@@ -4086,21 +4243,30 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const branchScopedWordRetestTasks = useMemo(() => (
     scopedTasks.filter((task) => wordRetestBranchFilter === "all" || getWordRetestBranch(task) === wordRetestBranchFilter)
   ), [scopedTasks, wordRetestBranchFilter])
+  const periodScopedWordRetestTasks = useMemo(() => (
+    branchScopedWordRetestTasks.filter((task) => matchesWordRetestPeriodFilter(
+      task,
+      wordRetestPeriodFilter,
+      todayKey,
+      wordRetestCustomStartDate,
+      wordRetestCustomEndDate,
+    ))
+  ), [branchScopedWordRetestTasks, todayKey, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestPeriodFilter])
   const wordRetestRoleCounts = useMemo(() => {
-    const openWordRetests = branchScopedWordRetestTasks.filter((task) => !isClosedOpsTask(task))
+    const openWordRetests = periodScopedWordRetestTasks.filter((task) => !isClosedOpsTask(task))
     return {
       assistant: openWordRetests.filter((task) => isWordRetestInAssistantQueue(task, wordRetestRoleContext)).length,
       teacher: openWordRetests.filter((task) => isWordRetestInTeacherQueue(task, wordRetestRoleContext)).length,
     }
-  }, [branchScopedWordRetestTasks, wordRetestRoleContext])
+  }, [periodScopedWordRetestTasks, wordRetestRoleContext])
   const wordRetestFilterSourceTasks = useMemo(() => (
-    branchScopedWordRetestTasks.filter((task) => {
+    periodScopedWordRetestTasks.filter((task) => {
       if (!showClosed && !isOpenTask(task)) return false
       if (showClosed && isClosedOpsTask(task)) return true
       if (wordRetestMode === "assistant") return isWordRetestInAssistantQueue(task, wordRetestRoleContext)
       return isWordRetestInTeacherQueue(task, wordRetestRoleContext)
     })
-  ), [branchScopedWordRetestTasks, showClosed, wordRetestMode, wordRetestRoleContext])
+  ), [periodScopedWordRetestTasks, showClosed, wordRetestMode, wordRetestRoleContext])
   const wordRetestFilterOptions = useMemo(
     () => buildWordRetestFilterOptions(wordRetestFilterSourceTasks),
     [wordRetestFilterSourceTasks],
@@ -4146,6 +4312,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	        if (taskFocus === "unassigned" && task.assigneeId && hasTaskSchedule(task)) return false
 	        if (isWordRetestWorkspace) {
 	          if (wordRetestBranchFilter !== "all" && getWordRetestBranch(task) !== wordRetestBranchFilter) return false
+	          if (!matchesWordRetestPeriodFilter(task, wordRetestPeriodFilter, todayKey, wordRetestCustomStartDate, wordRetestCustomEndDate)) return false
 	          if (!matchesWordRetestFilter(getWordRetestTeacherFilterValue(task), wordRetestTeacherFilter)) return false
 	          if (!matchesWordRetestFilter(getWordRetestClassFilterValue(task), wordRetestClassFilter)) return false
 	          if (showClosed && isClosedOpsTask(task)) return true
@@ -4168,7 +4335,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (todoSort === "status") return sortOpsTasksByWorkflowStatus(nextTasks, todayKey)
     if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
     return sortOpsTasksByWorkDate(nextTasks, todayKey)
-  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, wordRetestBranchFilter, wordRetestClassFilter, wordRetestMode, wordRetestRoleContext, wordRetestTeacherFilter])
+  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
 
   const calendarItems = useMemo(
     () => {
@@ -4210,6 +4377,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   )
   const isWordRetestFilteredEmpty = isWordRetestWorkspace && (
     wordRetestBranchFilter !== "all" ||
+    wordRetestPeriodFilter !== "all" ||
+    Boolean(wordRetestCustomStartDate) ||
+    Boolean(wordRetestCustomEndDate) ||
     wordRetestTeacherFilter !== "all" ||
     wordRetestClassFilter !== "all"
   )
@@ -4822,21 +4992,65 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	    }
 	  }
 
-	  const markWordRetestAbsent = async (task: OpsTask) => {
-	    const wordRetest = task.wordRetest || {}
-	    await updateWordRetestFlow(task, {
-	      ...formFromTask(task),
-	      status: "review_requested",
-	      wordRetest: {
-	        ...wordRetest,
-	        retestStatus: "absent",
-	        firstScore: "",
-	        secondScore: "",
-	        thirdScore: "",
-	        scoreOutOf100: "",
-	      },
-	    }, "미응시로 담당선생님에게 보냈습니다.")
-	  }
+	  useEffect(() => {
+	    if (!isWordRetestWorkspace || loading || !data) return
+
+	    const nextTasks = scopedTasks.filter((task) => (
+	      shouldAutoMarkWordRetestAbsent(task) && !autoAbsentWordRetestIdsRef.current.has(task.id)
+	    ))
+	    if (nextTasks.length === 0) return
+
+	    async function autoMarkPastWordRetestsAbsent() {
+	      nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.add(task.id))
+	      try {
+	        const syncedTasks = await Promise.all(nextTasks.map(async (task) => {
+	          const wordRetest = task.wordRetest || {}
+	          const payload = normalizeFormForSubmit({
+	            ...formFromTask(task),
+	            status: "review_requested",
+	            wordRetest: {
+	              ...wordRetest,
+	              retestStatus: "absent",
+	              firstScore: "",
+	              secondScore: "",
+	              thirdScore: "",
+	              scoreOutOf100: "",
+	            },
+	          })
+	          await updateOpsTask(task.id, payload)
+	          const syncedTask = await loadOpsTaskById(task.id)
+	          return syncedTask || {
+	            ...task,
+	            ...payload,
+	            updatedAt: new Date().toISOString(),
+	          }
+	        }))
+	        setData((current) => {
+	          const workspaceData = current || emptyOpsTaskWorkspaceData
+	          return {
+	            ...workspaceData,
+	            tasks: sortWorkspaceTasks(workspaceData.tasks.map((task) => (
+	              syncedTasks.find((syncedTask) => syncedTask.id === task.id) || task
+	            ))),
+	          }
+	        })
+	        setSelectedTask((current) => {
+	          if (!current) return current
+	          return syncedTasks.find((task) => task.id === current.id) || current
+	        })
+	        setMessage("")
+	        setNotice(nextTasks.length > 1
+	          ? `지난 응시일시 ${nextTasks.length}건을 미응시로 자동 변경했습니다.`
+	          : "지난 응시일시를 미응시로 자동 변경했습니다.")
+	      } catch (error) {
+	        setMessage(getOpsTaskActionErrorMessage(error, "지난 응시일시를 미응시로 자동 변경하지 못했습니다."))
+	      } finally {
+	        nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.delete(task.id))
+	      }
+	    }
+
+	    void autoMarkPastWordRetestsAbsent()
+	  }, [data, isWordRetestWorkspace, loading, scopedTasks])
 
 	  const submitWordRetestCompletion = async (task: OpsTask) => {
 	    const wordRetest = task.wordRetest || {}
@@ -5320,22 +5534,32 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
 	        {isWordRetestWorkspace && (
 	          <div className="grid gap-2">
-	            <div className="inline-flex w-fit rounded-md border bg-background p-1" aria-label="단어 재시험 지점">
-	              {WORD_RETEST_BRANCH_FILTERS.map((filter) => (
-	                <button
-	                  key={filter.key}
-	                  type="button"
-	                  aria-pressed={wordRetestBranchFilter === filter.key}
-	                  aria-label={`${filter.label} 단어 재시험 보기`}
-	                  onClick={() => syncWordRetestBranchFilter(filter.key)}
-	                  className={[
-	                    "rounded px-3 py-1.5 text-sm font-medium",
-	                    wordRetestBranchFilter === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
-	                  ].join(" ")}
-	                >
-	                  {filter.label}
-	                </button>
-	              ))}
+	            <div className="flex flex-wrap gap-2">
+	              <div className="inline-flex w-fit rounded-md border bg-background p-1" aria-label="단어 재시험 지점">
+	                {WORD_RETEST_BRANCH_FILTERS.map((filter) => (
+	                  <button
+	                    key={filter.key}
+	                    type="button"
+	                    aria-pressed={wordRetestBranchFilter === filter.key}
+	                    aria-label={`${filter.label} 단어 재시험 보기`}
+	                    onClick={() => syncWordRetestBranchFilter(filter.key)}
+	                    className={[
+	                      "rounded px-3 py-1.5 text-sm font-medium",
+	                      wordRetestBranchFilter === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+	                    ].join(" ")}
+	                  >
+	                    {filter.label}
+	                  </button>
+	                ))}
+	              </div>
+	              <WordRetestPeriodFilterBar
+	                value={wordRetestPeriodFilter}
+	                startDate={wordRetestCustomStartDate}
+	                endDate={wordRetestCustomEndDate}
+	                onChange={syncWordRetestPeriodFilter}
+	                onStartDateChange={(value) => syncWordRetestCustomDate("from", value)}
+	                onEndDateChange={(value) => syncWordRetestCustomDate("to", value)}
+	              />
 	            </div>
 	            <WordRetestFilterBar
 	              options={wordRetestFilterOptions}
@@ -5406,7 +5630,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	            onEdit={openEdit}
 	            onStatusChange={(task, status) => void changeStatus(task, status)}
 	            onComplete={(task) => void submitWordRetestCompletion(task)}
-	            onMarkAbsent={(task) => void markWordRetestAbsent(task)}
 	            onRetry={(task) => void requestWordRetestAgain(task)}
 	            scoreDrafts={wordRetestScoreDrafts}
 	            onScoreDraftChange={updateWordRetestScoreDraft}
@@ -5924,11 +6147,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                          disabled={saving}
 	                        />
 	                      ))}
-	                      {wordRetestMode === "assistant" && ["requested", "confirmed", "on_hold"].includes(selectedTaskFresh.status) && !isWordRetestAbsent(selectedTaskFresh.wordRetest) && (
-	                        <Button type="button" variant="outline" size="sm" onClick={() => void markWordRetestAbsent(selectedTaskFresh)} disabled={saving} className="w-full sm:w-auto">
-	                          미응시
-	                        </Button>
-	                      )}
 	                      {wordRetestMode === "teacher" && selectedTaskFresh.status === "review_requested" && isWordRetestAbsent(selectedTaskFresh.wordRetest) && (
 	                        <Button type="button" variant="default" size="sm" onClick={() => void requestWordRetestAgain(selectedTaskFresh)} disabled={saving} className="w-full sm:w-auto">
 	                          미응시 재요청
@@ -6729,6 +6947,71 @@ function TodoTeamFilterBar({
   )
 }
 
+function WordRetestPeriodFilterBar({
+  value,
+  startDate,
+  endDate,
+  onChange,
+  onStartDateChange,
+  onEndDateChange,
+}: {
+  value: WordRetestPeriodFilter
+  startDate: string
+  endDate: string
+  onChange: (value: WordRetestPeriodFilter) => void
+  onStartDateChange: (value: string) => void
+  onEndDateChange: (value: string) => void
+}) {
+  const startDateId = useId()
+  const endDateId = useId()
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="inline-flex max-w-full overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="단어 재시험 응시일시 기간">
+        {WORD_RETEST_PERIOD_FILTERS.map((filter) => (
+          <button
+            key={filter.key}
+            type="button"
+            aria-pressed={value === filter.key}
+            aria-label={`${filter.label} 단어 재시험 보기`}
+            onClick={() => onChange(filter.key)}
+            className={[
+              "shrink-0 rounded px-3 py-1.5 text-sm font-medium",
+              value === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+            ].join(" ")}
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
+      {value === "custom" && (
+        <div className="grid min-w-[18rem] flex-1 gap-2 sm:max-w-sm sm:grid-cols-2">
+          <label htmlFor={startDateId} className="grid gap-1 text-xs font-medium text-muted-foreground">
+            <span>시작일</span>
+            <Input
+              id={startDateId}
+              type="date"
+              value={startDate}
+              onChange={(event) => onStartDateChange(event.target.value)}
+              className="h-9 bg-background"
+            />
+          </label>
+          <label htmlFor={endDateId} className="grid gap-1 text-xs font-medium text-muted-foreground">
+            <span>종료일</span>
+            <Input
+              id={endDateId}
+              type="date"
+              value={endDate}
+              onChange={(event) => onEndDateChange(event.target.value)}
+              className="h-9 bg-background"
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function WordRetestFilterBar({
   options,
   teacherFilter,
@@ -7261,7 +7544,6 @@ function WordRetestTaskList({
   onEdit,
   onStatusChange,
   onComplete,
-  onMarkAbsent,
   onRetry,
   scoreDrafts,
   onScoreDraftChange,
@@ -7279,7 +7561,6 @@ function WordRetestTaskList({
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
-  onMarkAbsent: (task: OpsTask) => void
   onRetry: (task: OpsTask) => void
   scoreDrafts: Record<string, WordRetestScoreDraft>
   onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
@@ -7334,6 +7615,8 @@ function WordRetestTaskList({
       >
         <WordRetestResizableHeaderCell label="상태" columnKey="status" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="응시일시" columnKey="testAt" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="담당선생님" columnKey="teacher" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="수업" columnKey="class" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="학생" columnKey="student" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="교재" columnKey="textbook" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="시험범위" columnKey="unit" onResizeStart={startColumnResize} />
@@ -7353,7 +7636,6 @@ function WordRetestTaskList({
           onEdit={onEdit}
           onStatusChange={onStatusChange}
           onComplete={onComplete}
-          onMarkAbsent={onMarkAbsent}
           onRetry={onRetry}
           scoreDraft={scoreDrafts[task.id] || getWordRetestScoreDraft(task)}
           onScoreDraftChange={onScoreDraftChange}
@@ -7398,7 +7680,6 @@ function WordRetestTaskRow({
   onEdit,
   onStatusChange,
   onComplete,
-  onMarkAbsent,
   onRetry,
   scoreDraft,
   onScoreDraftChange,
@@ -7413,7 +7694,6 @@ function WordRetestTaskRow({
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
-  onMarkAbsent: (task: OpsTask) => void
   onRetry: (task: OpsTask) => void
   scoreDraft: WordRetestScoreDraft
   onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
@@ -7424,12 +7704,13 @@ function WordRetestTaskRow({
   const wordRetest = task.wordRetest || {}
   const primaryActions = getWordRetestPrimaryActions(task, mode, completionBlockers)
   const branch = getWordRetestBranch(task)
+  const teacherLabel = getWordRetestTeacherLabel(task)
+  const classLabel = getWordRetestClassLabel(task)
   const studentLabel = getWordRetestStudentLabel(task)
   const textbookLabel = getWordRetestTextbookLabel(task)
   const unitLabel = getWordRetestUnitLabel(task)
   const absent = isWordRetestAbsent(wordRetest)
   const scorePreviewWordRetest = { ...wordRetest, ...scoreDraft }
-  const canMarkAbsent = mode === "assistant" && ["requested", "confirmed", "on_hold"].includes(task.status) && !absent
   const canRetryAbsent = mode === "teacher" && task.status === "review_requested" && absent
 
   return (
@@ -7447,6 +7728,14 @@ function WordRetestTaskRow({
         <span className="mt-1 flex flex-wrap gap-1 md:hidden">
           <Badge variant="secondary">{branch}</Badge>
         </span>
+      </span>
+      <span className="min-w-0 truncate font-medium">
+        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">담당선생님</span>
+        {teacherLabel}
+      </span>
+      <span className="min-w-0 truncate">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">수업</span>
+        {classLabel}
       </span>
       <button
         type="button"
@@ -7506,11 +7795,6 @@ function WordRetestTaskRow({
             disabled={statusActionDisabled}
           />
         ))}
-        {canMarkAbsent && (
-          <Button type="button" variant="outline" size="sm" onClick={() => onMarkAbsent(task)} disabled={statusActionDisabled}>
-            미응시
-          </Button>
-        )}
         {canRetryAbsent && (
           <Button type="button" variant="default" size="sm" onClick={() => onRetry(task)} disabled={statusActionDisabled}>
             미응시 재요청
