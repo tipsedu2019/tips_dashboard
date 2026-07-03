@@ -1,7 +1,7 @@
 "use client"
 
 import { useSearchParams } from "next/navigation"
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from "react"
+import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from "react"
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock, FileText, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -95,7 +95,7 @@ type WordRetestScoreDraft = {
   secondScore: string
   thirdScore: string
 }
-type WordRetestTableColumnKey = "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "score" | "cutoff" | "total" | "result" | "action"
+type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "score" | "cutoff" | "total" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
   status?: OpsTaskStatus
@@ -155,6 +155,7 @@ const EMPTY_OPS_TASK_OPTION_INDEXES: OpsTaskOptionIndexes = {
 const EMPTY_COMPLETION_BLOCKERS: string[] = []
 const EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID: OperationCompletionBlockerMap = new Map()
 const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> = {
+  select: 40,
   status: 102,
   testAt: 132,
   teacher: 112,
@@ -166,9 +167,10 @@ const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> 
   cutoff: 86,
   total: 96,
   result: 132,
-  action: 150,
+  action: 108,
 }
 const WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS: Record<WordRetestTableColumnKey, number> = {
+  select: 40,
   status: 88,
   testAt: 112,
   teacher: 96,
@@ -180,7 +182,18 @@ const WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS: Record<WordRetestTableColumnKey, numb
   cutoff: 78,
   total: 88,
   result: 116,
-  action: 120,
+  action: 92,
+}
+function useStableEvent<T extends (...args: never[]) => unknown>(handler: T): T {
+  const handlerRef = useRef(handler)
+
+  useEffect(() => {
+    handlerRef.current = handler
+  }, [handler])
+
+  const stableHandler = useCallback((...args: Parameters<T>) => handlerRef.current(...args), [])
+
+  return stableHandler as T
 }
 const LINKED_SELECT_SEARCH_THRESHOLD = 12
 const LINKED_SELECT_QUERY_OPTION_LIMIT = 50
@@ -1063,6 +1076,7 @@ function sortWordRetestTasksByTestAt(tasks: OpsTask[]) {
 
 function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey, number>) {
   return [
+    widths.select,
     widths.status,
     widths.testAt,
     widths.teacher,
@@ -3952,6 +3966,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [wordRetestClassFilter, setWordRetestClassFilter] = useState<WordRetestSelectFilterKey>("all")
   const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
+  const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [detailOpen, setDetailOpen] = useState(false)
@@ -3969,6 +3984,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [attachmentName, setAttachmentName] = useState("")
   const [attachmentLink, setAttachmentLink] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<OpsTask | null>(null)
+  const [bulkDeleteTargets, setBulkDeleteTargets] = useState<OpsTask[]>([])
   const [statusUndo, setStatusUndo] = useState<StatusUndoState | null>(null)
   const formMemoId = useId()
   const attachmentNameId = useId()
@@ -3976,6 +3992,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const quickAddInputRef = useRef<HTMLInputElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const autoAbsentWordRetestIdsRef = useRef<Set<string>>(new Set())
+  const wordRetestTeacherFilterTouchedRef = useRef(false)
   const deferredQuery = useDeferredValue(query)
 
   const currentUserId = user?.id || ""
@@ -4197,6 +4214,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     () => profileTeamById.get(currentUserId) || normalizeTaskTeamValue(currentUserTeam),
     [currentUserId, currentUserTeam, profileTeamById],
   )
+  const currentUserTeacherOption = useMemo(
+    () => findCurrentUserTeacherOption(teachers, currentUserId, user?.email, user?.loginId, currentUserLabel),
+    [currentUserId, currentUserLabel, teachers, user?.email, user?.loginId],
+  )
+  const shouldDefaultWordRetestTeacherFilter = useMemo(() => {
+    if (!isWordRetestTeacherOption(currentUserTeacherOption)) return false
+    if (normalizeTaskTeamValue(currentUserTaskTeam) === "영어팀") return true
+    return normalizeTaskTeamValue(currentUserTeacherOption?.subjects || []) === "영어팀"
+  }, [currentUserTaskTeam, currentUserTeacherOption])
   const assigneeProfileOptions = useMemo(
     () => getProfilesForTeam(profiles, form.assigneeTeam || "", profileTeamById, form.assigneeId || ""),
     [form.assigneeId, form.assigneeTeam, profileTeamById, profiles],
@@ -4280,6 +4306,27 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       setWordRetestClassFilter("all")
     }
   }, [isWordRetestWorkspace, wordRetestClassFilter, wordRetestFilterOptions, wordRetestTeacherFilter])
+  useEffect(() => {
+    if (
+      !isWordRetestWorkspace ||
+      wordRetestTeacherFilterTouchedRef.current ||
+      wordRetestTeacherFilter !== "all" ||
+      !shouldDefaultWordRetestTeacherFilter ||
+      !currentUserTeacherOption
+    ) return
+
+    const normalizedTeacherLabel = normalizeLookupValue(currentUserTeacherOption.label)
+    const option = wordRetestFilterOptions.teacher.find((item) => item.value === currentUserTeacherOption.id) ||
+      wordRetestFilterOptions.teacher.find((item) => normalizeLookupValue(item.label) === normalizedTeacherLabel)
+
+    if (option) setWordRetestTeacherFilter(option.value)
+  }, [
+    currentUserTeacherOption,
+    isWordRetestWorkspace,
+    shouldDefaultWordRetestTeacherFilter,
+    wordRetestFilterOptions.teacher,
+    wordRetestTeacherFilter,
+  ])
   const registrationPipelineCountTasks = useMemo(() => {
     if (!isRegistrationWorkspace) return EMPTY_TASKS
 
@@ -4336,6 +4383,23 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
     return sortOpsTasksByWorkDate(nextTasks, todayKey)
   }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
+
+  useEffect(() => {
+    if (!isWordRetestWorkspace) return
+    const visibleTaskIds = new Set(visibleTasks.map((task) => task.id))
+    setWordRetestSelectedTaskIds((current) => {
+      let changed = false
+      const next = new Set<string>()
+      current.forEach((taskId) => {
+        if (visibleTaskIds.has(taskId)) {
+          next.add(taskId)
+        } else {
+          changed = true
+        }
+      })
+      return changed ? next : current
+    })
+  }, [isWordRetestWorkspace, visibleTasks])
 
   const calendarItems = useMemo(
     () => {
@@ -4940,9 +5004,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }
   }
 
-	  const changeStatus = async (task: OpsTask, status: OpsTaskStatus) => {
-	    setSaving(true)
-	    setMessage("")
+  const changeStatus = async (task: OpsTask, status: OpsTaskStatus) => {
+    setSaving(true)
+    setMessage("")
     setNotice("")
     setStatusUndo(null)
     try {
@@ -4971,146 +5035,147 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       setMessage(getOpsTaskActionErrorMessage(error, "상태를 바꾸지 못했습니다."))
     } finally {
       setSaving(false)
-	    }
-	  }
+    }
+  }
 
-	  const updateWordRetestFlow = async (task: OpsTask, input: OpsTaskInput, successMessage: string) => {
-	    setSaving(true)
-	    setMessage("")
-	    setNotice("")
-	    setStatusUndo(null)
-	    try {
-	      const payload = normalizeFormForSubmit(input)
-	      await updateOpsTask(task.id, payload)
-	      const syncedTask = await loadOpsTaskById(task.id)
-	      replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
-	      setNotice(successMessage)
-	    } catch (error) {
-	      setMessage(getOpsTaskActionErrorMessage(error, "단어 재시험 상태를 바꾸지 못했습니다."))
-	    } finally {
-	      setSaving(false)
-	    }
-	  }
+  const updateWordRetestFlow = async (task: OpsTask, input: OpsTaskInput, successMessage: string) => {
+    setSaving(true)
+    setMessage("")
+    setNotice("")
+    setStatusUndo(null)
+    try {
+      const payload = normalizeFormForSubmit(input)
+      await updateOpsTask(task.id, payload)
+      const syncedTask = await loadOpsTaskById(task.id)
+      replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      setNotice(successMessage)
+    } catch (error) {
+      setMessage(getOpsTaskActionErrorMessage(error, "단어 재시험 상태를 바꾸지 못했습니다."))
+    } finally {
+      setSaving(false)
+    }
+  }
 
-	  useEffect(() => {
-	    if (!isWordRetestWorkspace || loading || !data) return
+  useEffect(() => {
+    if (!isWordRetestWorkspace || loading || !data) return
 
-	    const nextTasks = scopedTasks.filter((task) => (
-	      shouldAutoMarkWordRetestAbsent(task) && !autoAbsentWordRetestIdsRef.current.has(task.id)
-	    ))
-	    if (nextTasks.length === 0) return
+    const nextTasks = wordRetestFilterSourceTasks.filter((task) => (
+      shouldAutoMarkWordRetestAbsent(task) && !autoAbsentWordRetestIdsRef.current.has(task.id)
+    ))
 
-	    async function autoMarkPastWordRetestsAbsent() {
-	      nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.add(task.id))
-	      try {
-	        const syncedTasks = await Promise.all(nextTasks.map(async (task) => {
-	          const wordRetest = task.wordRetest || {}
-	          const payload = normalizeFormForSubmit({
-	            ...formFromTask(task),
-	            status: "review_requested",
-	            wordRetest: {
-	              ...wordRetest,
-	              retestStatus: "absent",
-	              firstScore: "",
-	              secondScore: "",
-	              thirdScore: "",
-	              scoreOutOf100: "",
-	            },
-	          })
-	          await updateOpsTask(task.id, payload)
-	          const syncedTask = await loadOpsTaskById(task.id)
-	          return syncedTask || {
-	            ...task,
-	            ...payload,
-	            updatedAt: new Date().toISOString(),
-	          }
-	        }))
-	        setData((current) => {
-	          const workspaceData = current || emptyOpsTaskWorkspaceData
-	          return {
-	            ...workspaceData,
-	            tasks: sortWorkspaceTasks(workspaceData.tasks.map((task) => (
-	              syncedTasks.find((syncedTask) => syncedTask.id === task.id) || task
-	            ))),
-	          }
-	        })
-	        setSelectedTask((current) => {
-	          if (!current) return current
-	          return syncedTasks.find((task) => task.id === current.id) || current
-	        })
-	        setMessage("")
-	        setNotice(nextTasks.length > 1
-	          ? `지난 응시일시 ${nextTasks.length}건을 미응시로 자동 변경했습니다.`
-	          : "지난 응시일시를 미응시로 자동 변경했습니다.")
-	      } catch (error) {
-	        setMessage(getOpsTaskActionErrorMessage(error, "지난 응시일시를 미응시로 자동 변경하지 못했습니다."))
-	      } finally {
-	        nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.delete(task.id))
-	      }
-	    }
+    if (nextTasks.length === 0) return
 
-	    void autoMarkPastWordRetestsAbsent()
-	  }, [data, isWordRetestWorkspace, loading, scopedTasks])
+    async function autoMarkPastWordRetestsAbsent() {
+      nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.add(task.id))
+      try {
+        const syncedTasks = await Promise.all(nextTasks.map(async (task) => {
+          const wordRetest = task.wordRetest || {}
+          const payload = normalizeFormForSubmit({
+            ...formFromTask(task),
+            status: "review_requested",
+            wordRetest: {
+              ...wordRetest,
+              retestStatus: "absent",
+              firstScore: "",
+              secondScore: "",
+              thirdScore: "",
+              scoreOutOf100: "",
+            },
+          })
+          await updateOpsTask(task.id, payload)
+          const syncedTask = await loadOpsTaskById(task.id)
+          return syncedTask || {
+            ...task,
+            ...payload,
+            updatedAt: new Date().toISOString(),
+          }
+        }))
+        setData((current) => {
+          const workspaceData = current || emptyOpsTaskWorkspaceData
+          return {
+            ...workspaceData,
+            tasks: sortWorkspaceTasks(workspaceData.tasks.map((task) => (
+              syncedTasks.find((syncedTask) => syncedTask.id === task.id) || task
+            ))),
+          }
+        })
+        setSelectedTask((current) => {
+          if (!current) return current
+          return syncedTasks.find((task) => task.id === current.id) || current
+        })
+        setMessage("")
+        setNotice(nextTasks.length > 1
+          ? `지난 응시일시 ${nextTasks.length}건을 미응시로 자동 변경했습니다.`
+          : "지난 응시일시를 미응시로 자동 변경했습니다.")
+      } catch (error) {
+        setMessage(getOpsTaskActionErrorMessage(error, "지난 응시일시를 미응시로 자동 변경하지 못했습니다."))
+      } finally {
+        nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.delete(task.id))
+      }
+    }
 
-	  const submitWordRetestCompletion = async (task: OpsTask) => {
-	    const wordRetest = task.wordRetest || {}
-	    await updateWordRetestFlow(task, {
-	      ...formFromTask(task),
-	      status: "review_requested",
-	      wordRetest: {
-	        ...wordRetest,
-	        retestStatus: "done",
-	      },
-	    }, "완료 결과를 담당선생님에게 보냈습니다.")
-	  }
+    void autoMarkPastWordRetestsAbsent()
+  }, [data, isWordRetestWorkspace, loading, wordRetestFilterSourceTasks])
 
-	  const requestWordRetestAgain = async (task: OpsTask) => {
-	    const wordRetest = task.wordRetest || {}
-	    await updateWordRetestFlow(task, {
-	      ...formFromTask(task),
-	      status: "requested",
-	      completedAt: "",
-	      wordRetest: {
-	        ...wordRetest,
-	        retestStatus: "not_started",
-	        firstScore: "",
-	        secondScore: "",
-	        thirdScore: "",
-	        scoreOutOf100: "",
-	      },
-	    }, "미응시 학생 재시험을 다시 요청했습니다.")
-	  }
+  const submitWordRetestCompletion = async (task: OpsTask) => {
+    const wordRetest = task.wordRetest || {}
+    await updateWordRetestFlow(task, {
+      ...formFromTask(task),
+      status: "review_requested",
+      wordRetest: {
+        ...wordRetest,
+        retestStatus: "done",
+      },
+    }, "완료 결과를 담당선생님에게 보냈습니다.")
+  }
 
-	  const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
-	    setWordRetestScoreDrafts((current) => ({
-	      ...current,
-	      [task.id]: {
-	        ...(current[task.id] || getWordRetestScoreDraft(task)),
-	        [key]: value,
-	      },
-	    }))
-	  }
+  const requestWordRetestAgain = async (task: OpsTask) => {
+    const wordRetest = task.wordRetest || {}
+    await updateWordRetestFlow(task, {
+      ...formFromTask(task),
+      status: "requested",
+      completedAt: "",
+      wordRetest: {
+        ...wordRetest,
+        retestStatus: "not_started",
+        firstScore: "",
+        secondScore: "",
+        thirdScore: "",
+        scoreOutOf100: "",
+      },
+    }, "미응시 학생 재시험을 다시 요청했습니다.")
+  }
 
-	  const saveWordRetestInlineScores = async (task: OpsTask) => {
-	    const wordRetest = task.wordRetest || {}
-	    if (isWordRetestAbsent(wordRetest)) return
-	    const draft = wordRetestScoreDrafts[task.id] || getWordRetestScoreDraft(task)
+  const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
+    setWordRetestScoreDrafts((current) => ({
+      ...current,
+      [task.id]: {
+        ...(current[task.id] || getWordRetestScoreDraft(task)),
+        [key]: value,
+      },
+    }))
+  }
 
-	    await updateWordRetestFlow(task, {
-	      ...formFromTask(task),
-	      status: task.status,
-	      wordRetest: {
-	        ...wordRetest,
-	        ...draft,
-	        retestStatus: wordRetest.retestStatus || "not_started",
-	      },
-	    }, "점수를 저장했습니다.")
-	    setWordRetestScoreDrafts((current) => {
-	      const nextDrafts = { ...current }
-	      delete nextDrafts[task.id]
-	      return nextDrafts
-	    })
-	  }
+  const saveWordRetestInlineScores = async (task: OpsTask) => {
+    const wordRetest = task.wordRetest || {}
+    if (isWordRetestAbsent(wordRetest)) return
+    const draft = wordRetestScoreDrafts[task.id] || getWordRetestScoreDraft(task)
+
+    await updateWordRetestFlow(task, {
+      ...formFromTask(task),
+      status: task.status,
+      wordRetest: {
+        ...wordRetest,
+        ...draft,
+        retestStatus: wordRetest.retestStatus || "not_started",
+      },
+    }, "점수를 저장했습니다.")
+    setWordRetestScoreDrafts((current) => {
+      const nextDrafts = { ...current }
+      delete nextDrafts[task.id]
+      return nextDrafts
+    })
+  }
 
 	  const changeRegistrationPipeline = async (task: OpsTask, pipelineStatus: string) => {
     const payload = normalizeFormForSubmit({
@@ -5235,6 +5300,24 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setDeleteTarget(task)
   }
 
+  const requestRemoveWordRetests = (selectedTasks: OpsTask[]) => {
+    const deletableTasks = selectedTasks.filter((task) => task.type === "word_retest" && canDeleteTask(task))
+    if (deletableTasks.length === 0) {
+      setMessage("삭제할 수 있는 단어 재시험이 없습니다.")
+      return
+    }
+
+    blurActiveElementBeforeDialog()
+    setDetailOpen(false)
+    setFormOpen(false)
+    setMessage("")
+    setFormCompletionBlockers([])
+    setNotice("")
+    setStatusUndo(null)
+    setDeleteTarget(null)
+    setBulkDeleteTargets(deletableTasks)
+  }
+
   const confirmRemoveTask = async () => {
     if (!deleteTarget || !canDeleteTask(deleteTarget)) return
     setSaving(true)
@@ -5252,6 +5335,36 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       setNotice(`${itemLabel} 삭제 완료`)
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "삭제하지 못했습니다."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmRemoveWordRetests = async () => {
+    const deletableTasks = bulkDeleteTargets.filter((task) => task.type === "word_retest" && canDeleteTask(task))
+    if (deletableTasks.length === 0) return
+    setSaving(true)
+    setMessage("")
+    setNotice("")
+    setStatusUndo(null)
+    try {
+      const deletedTaskIds = new Set(deletableTasks.map((task) => task.id))
+      await Promise.all(deletableTasks.map((task) => deleteOpsTask(task.id)))
+      setBulkDeleteTargets([])
+      setWordRetestSelectedTaskIds((current) => {
+        const next = new Set(current)
+        deletedTaskIds.forEach((taskId) => next.delete(taskId))
+        return next
+      })
+      setData((current) => current
+        ? { ...current, tasks: current.tasks.filter((task) => !deletedTaskIds.has(task.id)) }
+        : current)
+      setSelectedTask((current) => current && deletedTaskIds.has(current.id) ? null : current)
+      setDetailOpen(false)
+      syncTaskDeepLink(null)
+      setNotice(`단어 재시험 ${deletableTasks.length}건 삭제 완료`)
+    } catch (error) {
+      setMessage(getOpsTaskActionErrorMessage(error, "선택한 단어 재시험을 삭제하지 못했습니다."))
     } finally {
       setSaving(false)
     }
@@ -5281,6 +5394,41 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     : nextActionBlocked
   const detailBlockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
   const selectedTaskCanEdit = selectedTaskFresh ? canEditTaskDetails(selectedTaskFresh) : false
+  const toggleWordRetestSelection = useCallback((task: OpsTask, selected: boolean) => {
+    if (task.type !== "word_retest" || !canDeleteTask(task)) return
+    setWordRetestSelectedTaskIds((current) => {
+      const next = new Set(current)
+      if (selected) next.add(task.id)
+      else next.delete(task.id)
+      return next
+    })
+  }, [canDeleteTask])
+  const toggleAllVisibleWordRetests = useCallback((selected: boolean, taskList: OpsTask[]) => {
+    const selectableTasks = taskList.filter((task) => task.type === "word_retest" && canDeleteTask(task))
+    setWordRetestSelectedTaskIds((current) => {
+      const next = new Set(current)
+      selectableTasks.forEach((task) => {
+        if (selected) next.add(task.id)
+        else next.delete(task.id)
+      })
+      return next
+    })
+  }, [canDeleteTask])
+  const clearWordRetestSelection = useCallback(() => {
+    setWordRetestSelectedTaskIds(new Set())
+  }, [])
+  const handleWordRetestStatusChange = useStableEvent((task: OpsTask, status: OpsTaskStatus) => {
+    void changeStatus(task, status)
+  })
+  const handleWordRetestCompletion = useStableEvent((task: OpsTask) => {
+    void submitWordRetestCompletion(task)
+  })
+  const handleWordRetestRetry = useStableEvent((task: OpsTask) => {
+    void requestWordRetestAgain(task)
+  })
+  const handleWordRetestScoreSave = useStableEvent((task: OpsTask) => {
+    void saveWordRetestInlineScores(task)
+  })
   const focusQuickAdd = useCallback(() => {
     quickAddInputRef.current?.focus()
   }, [])
@@ -5296,7 +5444,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (!isTodoWorkspace) return
 
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || formOpen || detailOpen || deleteTarget) return
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || formOpen || detailOpen || deleteTarget || bulkDeleteTargets.length > 0) return
 
       const target = event.target as HTMLElement | null
       const tagName = target?.tagName?.toLowerCase()
@@ -5320,7 +5468,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
     window.addEventListener("keydown", handleShortcut)
     return () => window.removeEventListener("keydown", handleShortcut)
-  }, [deleteTarget, detailOpen, focusQuickAdd, focusSearch, formOpen, isTodoWorkspace])
+  }, [bulkDeleteTargets.length, deleteTarget, detailOpen, focusQuickAdd, focusSearch, formOpen, isTodoWorkspace])
 
   return (
     <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
@@ -5565,7 +5713,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	              options={wordRetestFilterOptions}
 	              teacherFilter={wordRetestTeacherFilter}
 	              classFilter={wordRetestClassFilter}
-	              onTeacherChange={setWordRetestTeacherFilter}
+	              onTeacherChange={(value) => {
+	                wordRetestTeacherFilterTouchedRef.current = true
+	                setWordRetestTeacherFilter(value)
+	              }}
 	              onClassChange={setWordRetestClassFilter}
 	            />
 	          </div>
@@ -5628,13 +5779,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	            mode={wordRetestMode}
 	            onOpen={openEdit}
 	            onEdit={openEdit}
-	            onStatusChange={(task, status) => void changeStatus(task, status)}
-	            onComplete={(task) => void submitWordRetestCompletion(task)}
-	            onRetry={(task) => void requestWordRetestAgain(task)}
+	            onStatusChange={handleWordRetestStatusChange}
+	            onComplete={handleWordRetestCompletion}
+	            onRetry={handleWordRetestRetry}
 	            scoreDrafts={wordRetestScoreDrafts}
 	            onScoreDraftChange={updateWordRetestScoreDraft}
-	            onScoreSave={(task) => void saveWordRetestInlineScores(task)}
+	            onScoreSave={handleWordRetestScoreSave}
 	            statusActionDisabled={saving}
+	            selectedTaskIds={wordRetestSelectedTaskIds}
+	            canSelectTask={canDeleteTask}
+	            onSelectTask={toggleWordRetestSelection}
+	            onSelectAll={toggleAllVisibleWordRetests}
+	            onClearSelection={clearWordRetestSelection}
+	            onBulkDelete={requestRemoveWordRetests}
 	            onCreate={() => openCreate(scopedTaskType)}
 	            emptyLabel={emptyTaskLabel}
 	            emptyActionLabel={emptyActionLabel}
@@ -6276,6 +6433,29 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkDeleteTargets.length > 0} onOpenChange={(open) => !open && setBulkDeleteTargets([])}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>단어 재시험 {bulkDeleteTargets.length}건 삭제할까요?</DialogTitle>
+            <DialogDescription className="sr-only">
+              선택한 단어 재시험 여러 건의 삭제를 확인합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium">
+            {bulkDeleteTargets.slice(0, 3).map((task) => getWordRetestStudentLabel(task)).join(", ")}
+            {bulkDeleteTargets.length > 3 ? ` 외 ${bulkDeleteTargets.length - 3}건` : ""}
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => setBulkDeleteTargets([])} disabled={saving} className="w-full sm:w-auto">
+              취소
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => void confirmRemoveWordRetests()} disabled={saving} className="w-full sm:w-auto">
+              선택 삭제
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -7549,6 +7729,12 @@ function WordRetestTaskList({
   onScoreDraftChange,
   onScoreSave,
   statusActionDisabled = false,
+  selectedTaskIds,
+  canSelectTask,
+  onSelectTask,
+  onSelectAll,
+  onClearSelection,
+  onBulkDelete,
   onCreate,
   emptyLabel = "단어 재시험 없음",
   emptyActionLabel = "단어 재시험 추가",
@@ -7566,6 +7752,12 @@ function WordRetestTaskList({
   onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
   onScoreSave: (task: OpsTask) => void
   statusActionDisabled?: boolean
+  selectedTaskIds: Set<string>
+  canSelectTask: (task: OpsTask) => boolean
+  onSelectTask: (task: OpsTask, selected: boolean) => void
+  onSelectAll: (selected: boolean, tasks: OpsTask[]) => void
+  onClearSelection: () => void
+  onBulkDelete: (tasks: OpsTask[]) => void
   onCreate: () => void
   emptyLabel?: string
   emptyActionLabel?: string
@@ -7575,6 +7767,10 @@ function WordRetestTaskList({
   const [columnWidths, setColumnWidths] = useState<Record<WordRetestTableColumnKey, number>>(WORD_RETEST_TABLE_COLUMN_WIDTHS)
   const gridTemplateColumns = getWordRetestTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--word-retest-grid-template": gridTemplateColumns } as CSSProperties
+  const selectableTasks = useMemo(() => tasks.filter(canSelectTask), [canSelectTask, tasks])
+  const selectedTasks = useMemo(() => tasks.filter((task) => selectedTaskIds.has(task.id) && canSelectTask(task)), [canSelectTask, selectedTaskIds, tasks])
+  const allVisibleSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id))
+  const partiallySelected = selectedTasks.length > 0 && !allVisibleSelected
 
   function startColumnResize(key: WordRetestTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -7609,10 +7805,37 @@ function WordRetestTaskList({
 
   return (
     <div className="overflow-x-auto rounded-md border">
+      {selectedTasks.length > 0 && (
+        <div className="flex flex-col gap-2 border-b bg-muted/30 px-3 py-2 text-sm font-medium sm:flex-row sm:items-center sm:justify-between">
+          <span>{selectedTasks.length}건 선택</span>
+          <span className="flex flex-wrap gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onClearSelection} disabled={statusActionDisabled}>
+              선택 해제
+            </Button>
+            <Button type="button" variant="destructive" size="sm" onClick={() => onBulkDelete(selectedTasks)} disabled={statusActionDisabled}>
+              <Trash2 className="size-4" />
+              선택 삭제
+            </Button>
+          </span>
+        </div>
+      )}
       <div
         className="hidden min-w-max border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
         style={gridTemplateStyle}
       >
+        <span className="flex min-w-0 items-center justify-center">
+          <input
+            type="checkbox"
+            aria-label="보이는 단어 재시험 전체 선택"
+            checked={allVisibleSelected}
+            disabled={selectableTasks.length === 0 || statusActionDisabled}
+            ref={(node) => {
+              if (node) node.indeterminate = partiallySelected
+            }}
+            onChange={(event) => onSelectAll(event.target.checked, tasks)}
+            className="size-4 rounded border-border text-primary"
+          />
+        </span>
         <WordRetestResizableHeaderCell label="상태" columnKey="status" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="응시일시" columnKey="testAt" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="담당선생님" columnKey="teacher" onResizeStart={startColumnResize} />
@@ -7637,10 +7860,13 @@ function WordRetestTaskList({
           onStatusChange={onStatusChange}
           onComplete={onComplete}
           onRetry={onRetry}
-          scoreDraft={scoreDrafts[task.id] || getWordRetestScoreDraft(task)}
+          scoreDraft={scoreDrafts[task.id]}
           onScoreDraftChange={onScoreDraftChange}
           onScoreSave={onScoreSave}
           statusActionDisabled={statusActionDisabled}
+          selected={selectedTaskIds.has(task.id)}
+          selectable={canSelectTask(task)}
+          onSelectTask={onSelectTask}
           gridTemplateColumns={gridTemplateColumns}
         />
       ))}
@@ -7672,7 +7898,7 @@ function WordRetestResizableHeaderCell({
   )
 }
 
-function WordRetestTaskRow({
+const WordRetestTaskRow = memo(function WordRetestTaskRow({
   task,
   mode,
   completionBlockers,
@@ -7685,6 +7911,9 @@ function WordRetestTaskRow({
   onScoreDraftChange,
   onScoreSave,
   statusActionDisabled,
+  selected,
+  selectable,
+  onSelectTask,
   gridTemplateColumns,
 }: {
   task: OpsTask
@@ -7695,10 +7924,13 @@ function WordRetestTaskRow({
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
   onRetry: (task: OpsTask) => void
-  scoreDraft: WordRetestScoreDraft
+  scoreDraft?: WordRetestScoreDraft
   onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
   onScoreSave: (task: OpsTask) => void
   statusActionDisabled: boolean
+  selected: boolean
+  selectable: boolean
+  onSelectTask: (task: OpsTask, selected: boolean) => void
   gridTemplateColumns: string
 }) {
   const wordRetest = task.wordRetest || {}
@@ -7710,7 +7942,8 @@ function WordRetestTaskRow({
   const textbookLabel = getWordRetestTextbookLabel(task)
   const unitLabel = getWordRetestUnitLabel(task)
   const absent = isWordRetestAbsent(wordRetest)
-  const scorePreviewWordRetest = { ...wordRetest, ...scoreDraft }
+  const resolvedScoreDraft = scoreDraft || getWordRetestScoreDraft(task)
+  const scorePreviewWordRetest = { ...wordRetest, ...resolvedScoreDraft }
   const canRetryAbsent = mode === "teacher" && task.status === "review_requested" && absent
 
   return (
@@ -7718,6 +7951,17 @@ function WordRetestTaskRow({
       className="grid gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
       style={{ "--word-retest-grid-template": gridTemplateColumns } as CSSProperties}
     >
+      <span className="flex min-w-0 items-center md:justify-center">
+        <input
+          type="checkbox"
+          aria-label={`${studentLabel} 단어 재시험 선택`}
+          checked={selected}
+          disabled={!selectable || statusActionDisabled}
+          onChange={(event) => onSelectTask(task, event.target.checked)}
+          onClick={(event) => event.stopPropagation()}
+          className="size-4 rounded border-border text-primary"
+        />
+      </span>
       <span className="min-w-0">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">상태</span>
         <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
@@ -7765,7 +8009,7 @@ function WordRetestTaskRow({
         <span className="mr-2 text-xs text-muted-foreground md:hidden">맞은 개수</span>
         <WordRetestInlineScoreEditor
           task={task}
-          draft={scoreDraft}
+          draft={resolvedScoreDraft}
           disabled={statusActionDisabled || absent || isClosedOpsTask(task)}
           onDraftChange={onScoreDraftChange}
           onSave={onScoreSave}
@@ -7803,7 +8047,7 @@ function WordRetestTaskRow({
       </span>
     </div>
   )
-}
+})
 
 function WordRetestRoleActionButton({
   task,
