@@ -357,7 +357,7 @@ const WORD_RETEST_DIAGRAM_MAIN_NODES = [
   { key: "decision", label: "결과 판정", detail: "자동" },
 ] as const
 const WORD_RETEST_DIAGRAM_ABSENT_NODES = [
-  { key: "absent", label: "미응시", detail: "응시일시 경과시 자동으로 상태 변경" },
+  { key: "absent", label: "미응시", detail: "응시일시 경과" },
   { key: "reschedule", label: "응시일정 변경", detail: "담당선생님" },
 ] as const
 const WORD_RETEST_DIAGRAM_RESULT_BRANCHES = [
@@ -369,7 +369,7 @@ const WORD_RETEST_DIAGRAM_RESULT_BRANCHES = [
     nodes: [
       { key: "failed_report", label: "불합격 보고", detail: "조교선생님" },
       { key: "failed_confirm", label: "불합격 확인", detail: "담당선생님" },
-      { key: "retry_create", label: "재시험 추가", detail: "담당 요청", returnToStart: true },
+      { key: "retry_create", label: "재시험 추가", detail: "담당선생님", returnToStart: true },
     ],
   },
   {
@@ -7609,11 +7609,11 @@ function WordRetestCompactNode({
   )
 }
 
-function WordRetestFlowArrow({ tone = "muted", loop = false }: { tone?: WordRetestDiagramTone; loop?: boolean }) {
+function WordRetestFlowArrow({ tone = "muted" }: { tone?: WordRetestDiagramTone }) {
   return (
     <span className="flex w-5 shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
       <span className={["h-px flex-1", getWordRetestDiagramLineClass(tone)].join(" ")} />
-      {loop ? <RefreshCw className="mx-0.5 size-3.5" /> : <ChevronRight className="mx-0.5 size-3.5" />}
+      <ChevronRight className="mx-0.5 size-3.5" />
     </span>
   )
 }
@@ -7659,7 +7659,7 @@ function WordRetestFlowLane({
         ))}
         {nodes.map((node, index) => (
           <span key={node.key} className="contents">
-            {index > 0 && <WordRetestFlowArrow tone={tone} loop={node.returnToStart} />}
+            {index > 0 && <WordRetestFlowArrow tone={tone} />}
             <WordRetestCompactNode node={node} tone={tone} active={activeKeys.has(node.key)} />
           </span>
         ))}
@@ -7683,17 +7683,16 @@ function WordRetestFlowChart({
   const commonNodes: WordRetestCompactFlowNode[] = WORD_RETEST_DIAGRAM_MAIN_NODES.map((node, index) => ({
     ...node,
     label: index === 0 ? "재시험 추가" : node.label,
-    detail: index === 0 ? node.label : node.detail.replace("선생님", "").replace(" 및 저장", " 저장"),
+    detail: index === 0 ? node.label : node.detail,
   }))
   const absentNodes: WordRetestCompactFlowNode[] = [
     WORD_RETEST_DIAGRAM_ABSENT_NODES[0],
     WORD_RETEST_DIAGRAM_ABSENT_NODES[1],
-    { key: "absent_return", label: "시작 전 복귀", detail: "일정 대기", returnToStart: true },
+    { key: "absent_return", label: "시작 전", detail: "복귀", returnToStart: true },
   ]
   const failedNodes: WordRetestCompactFlowNode[] = [
     failedBranch.result,
-    ...failedBranch.nodes.map((node) => ({ ...node, returnToStart: false })),
-    { key: "failed_return", label: "시작 전 복귀", detail: "새 일정 대기", returnToStart: true },
+    ...failedBranch.nodes,
   ]
   const passedNodes: WordRetestCompactFlowNode[] = [
     passedBranch.result,

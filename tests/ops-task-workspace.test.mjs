@@ -806,11 +806,12 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "현재 진행상태",
     "재시험 추가",
     "공통",
-    "시작 전 복귀",
-    "담당 요청",
+    "복귀",
+    "담당선생님",
+    "조교선생님",
     "시험 진행",
     "결과 판정",
-    "응시일시 경과시 자동으로 상태 변경",
+    "응시일시 경과",
     "커트라인 미만",
     "커트라인 이상",
     "불합격",
@@ -964,6 +965,9 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /label: "응시일시 변경"/);
   assert.doesNotMatch(workspaceSource, /100점 환산/);
   assert.doesNotMatch(workspaceSource, /1차 · 2차 · 3차/);
+  assert.doesNotMatch(workspaceSource, /시작 전 복귀/);
+  assert.doesNotMatch(workspaceSource, /응시일시 경과시 자동으로 상태 변경/);
+  assert.doesNotMatch(workspaceSource, /담당 요청/);
   assert.doesNotMatch(workspaceSource, /onMarkAbsent/);
   assert.doesNotMatch(workspaceSource, /canRetryAbsent/);
   assert.doesNotMatch(workspaceSource, /WordRetestResizableHeaderCell label="점수"/);
