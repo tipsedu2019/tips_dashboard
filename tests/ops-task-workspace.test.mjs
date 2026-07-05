@@ -753,6 +753,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "submitWordRetestCompletion",
     'retestStatus: "done"',
     'wordRetestStatus: "not_started"',
+    "createWordRetestRetryTask",
     "parseWordRetestScoreValue",
     "getWordRetestScoreResult",
     "getWordRetestStatusLabel(value?: string, taskStatus?: OpsTaskStatus",
@@ -788,6 +789,11 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestProgressStepper",
     "WORD_RETEST_PROGRESS_STATUS_ORDER",
     "WORD_RETEST_PROGRESS_STATUSES",
+    "WORD_RETEST_PROGRESS_FLOW_STEPS",
+    "담당 요청",
+    "일정 변경",
+    "시험 진행",
+    "결과 확인",
     "WordRetestPeriodFilterBar",
     "WORD_RETEST_PERIOD_FILTERS",
     '{ key: "today", label: "오늘" }',
@@ -887,6 +893,10 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "label=\"메모\"",
     "DateTimeField label=\"응시일시\"",
     "label=\"시험범위\"",
+    'blockers.push("커트라인")',
+    'blockers.push("출제 개수")',
+    'blockers.push("교재")',
+    'blockers.push("시험범위")',
     "label=\"진행상태\"",
     "출제 개수",
     "커트라인(맞은 개수)",
@@ -904,12 +914,13 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "교재/시험범위",
     "시험범위 입력",
     "시험 시작",
-    "완료",
+    "완료 보고",
+    "미완료 보고",
     "미응시",
     "완료 확인",
-    "미완료 재요청",
+    "재시험 추가",
     "미완료 확인",
-    "응시일시 변경",
+    "응시일정 변경",
     "미응시 재요청",
     'formCompletionIntent?.kind !== "word_retest_retry"',
   ]);
@@ -919,6 +930,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /kind: "status", status: "review_requested", label: "검토 요청"/);
   assert.doesNotMatch(workspaceSource, /label: "통과"/);
   assert.doesNotMatch(workspaceSource, /label: "재시험"/);
+  assert.doesNotMatch(workspaceSource, /label: "미완료 재요청"/);
+  assert.doesNotMatch(workspaceSource, /label: "응시일시 변경"/);
   assert.doesNotMatch(workspaceSource, /100점 환산/);
   assert.doesNotMatch(workspaceSource, /1차 · 2차 · 3차/);
   assert.doesNotMatch(workspaceSource, /onMarkAbsent/);

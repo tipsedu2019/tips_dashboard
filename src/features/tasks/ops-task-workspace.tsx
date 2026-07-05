@@ -353,6 +353,12 @@ const WORD_RETEST_PROGRESS_STATUS_ORDER = ["not_started", "absent", "in_progress
 const WORD_RETEST_PROGRESS_STATUSES = WORD_RETEST_PROGRESS_STATUS_ORDER
   .map((value) => WORD_RETEST_STATUSES.find((status) => status.value === value))
   .filter((status): status is (typeof WORD_RETEST_STATUSES)[number] => Boolean(status))
+const WORD_RETEST_PROGRESS_FLOW_STEPS: Record<string, { eyebrow: string; description: string }> = {
+  not_started: { eyebrow: "담당 요청", description: "일정 대기" },
+  absent: { eyebrow: "일정 변경", description: "담당 재요청" },
+  in_progress: { eyebrow: "시험 진행", description: "조교 처리" },
+  done: { eyebrow: "결과 확인", description: "담당 마감" },
+}
 
 function getFormDetailTabs(type: OpsTaskType): Array<{ key: FormDetailStepKey; label: string }> {
   if (type === "registration") {
@@ -1306,6 +1312,10 @@ function getOperationCompletionBlockers(
 
   if (input.type === "word_retest" && input.status === "done") {
     const wordRetest = input.wordRetest || {}
+    const textbookName = String(wordRetest.textbookName || input.textbookTitle || "").trim()
+    const hasTextbook = hasLinkedRecord(input.textbookId)
+      ? Boolean(findTextbookOption(textbooks, input.textbookId, indexes))
+      : Boolean(textbookName)
     if (!hasLinkedRecord(input.studentId)) blockers.push("학생")
     if (hasLinkedRecord(input.studentId) && !findStudentOption(students, input.studentId, indexes)) blockers.push("학생")
     if (!hasLinkedRecord(input.classId)) blockers.push("수업")
@@ -1313,8 +1323,7 @@ function getOperationCompletionBlockers(
     if (!hasLinkedRecord(wordRetest.teacherId)) blockers.push("선생님")
     if (hasLinkedRecord(wordRetest.teacherId) && !findTeacherOption(teachers, wordRetest.teacherId, indexes)) blockers.push("선생님")
     if (!String(wordRetest.branch || "").trim()) blockers.push("지점")
-    if (!hasLinkedRecord(input.textbookId)) blockers.push("교재")
-    if (hasLinkedRecord(input.textbookId) && !findTextbookOption(textbooks, input.textbookId, indexes)) blockers.push("교재")
+    if (!hasTextbook) blockers.push("교재")
     if (!String(wordRetest.testAt || "").trim()) blockers.push("응시일시")
     if (!String(wordRetest.unit || "").trim()) blockers.push("시험범위")
     if (shouldRequireWordRetestScore(wordRetest)) blockers.push("점수")
@@ -1322,6 +1331,29 @@ function getOperationCompletionBlockers(
 
   const rosterBlockers = getRosterCompletionBlockers(input, students, classes, indexes)
   return prioritizeCompletionBlockers([...blockers, ...rosterBlockers])
+}
+
+function getWordRetestRequiredInputBlockers(
+  input: OpsTaskInput,
+  textbooks: OpsTextbookOption[] = EMPTY_TEXTBOOK_OPTIONS,
+  indexes: OpsTaskOptionIndexes = EMPTY_OPS_TASK_OPTION_INDEXES,
+) {
+  if (input.type !== "word_retest") return []
+
+  const blockers: string[] = []
+  const wordRetest = input.wordRetest || {}
+  const textbookName = String(wordRetest.textbookName || input.textbookTitle || "").trim()
+  const hasTextbook = hasLinkedRecord(input.textbookId)
+    ? Boolean(findTextbookOption(textbooks, input.textbookId, indexes))
+    : Boolean(textbookName)
+
+  if (!hasTextbook) blockers.push("교재")
+  if (!String(wordRetest.unit || "").trim()) blockers.push("시험범위")
+  if (!String(wordRetest.testAt || "").trim()) blockers.push("응시일시")
+  if (!String(wordRetest.cutoffQuestionCount || "").trim()) blockers.push("커트라인")
+  if (!String(wordRetest.totalQuestionCount || "").trim()) blockers.push("출제 개수")
+
+  return blockers
 }
 
 function buildOperationCompletionBlockerMap(
@@ -1370,6 +1402,8 @@ const BLOCKER_ACTION_LABELS: Record<string, string> = {
   "교재비 처리": "교재비 처리",
   "응시일시": "응시일시 지정",
   "시험범위": "시험범위 입력",
+  "커트라인": "커트라인 입력",
+  "출제 개수": "출제 개수 입력",
   "점수": "점수 입력",
 }
 
@@ -1408,6 +1442,8 @@ const INPUT_COMPLETION_BLOCKERS = new Set([
   "후 수업 시작일",
   "응시일시",
   "시험범위",
+  "커트라인",
+  "출제 개수",
   "점수",
 ])
 
@@ -1446,7 +1482,7 @@ function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): Fo
 
   if (type === "word_retest") {
     if (blockers.some((blocker) => ["학생", "수업", "선생님", "응시일시", "수업 명단"].includes(blocker))) return "word_retest_basic"
-    if (blockers.some((blocker) => ["교재", "시험범위"].includes(blocker))) return "word_retest_scope"
+    if (blockers.some((blocker) => ["교재", "시험범위", "커트라인", "출제 개수"].includes(blocker))) return "word_retest_scope"
     if (blockers.some((blocker) => ["점수"].includes(blocker))) return "word_retest_scores"
   }
 
@@ -3593,15 +3629,18 @@ function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, comple
     }
     if (task.status === "in_progress") {
       if (absent) return []
-      return [{ kind: "word_retest_complete", label: "완료" }]
+      if (completionBlockers.length > 0) {
+        return [{ kind: "edit", label: getCompletionBlockerActionLabel(completionBlockers), blockers: completionBlockers }]
+      }
+      return [{ kind: "word_retest_complete", label: scoreResult === "failed" ? "미완료 보고" : "완료 보고" }]
     }
   }
 
   if (mode === "teacher" && task.status === "review_requested") {
-    if (absent) return [{ kind: "edit", label: "응시일시 변경", blockers: ["응시일시"] }]
+    if (absent) return [{ kind: "edit", label: "응시일정 변경", blockers: ["응시일시"] }]
     if (scoreResult === "failed") {
       return [
-        { kind: "word_retest_retry", label: "미완료 재요청" },
+        { kind: "word_retest_retry", label: "재시험 추가" },
         { kind: "status", status: "done", label: "미완료 확인" },
       ]
     }
@@ -4972,7 +5011,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       const intentBlockers = formCompletionIntent?.kind === "word_retest_retry" && payload.type === "word_retest" && !String(payload.wordRetest?.testAt || "").trim()
         ? ["응시일시"]
         : []
-      const completionBlockers = prioritizeCompletionBlockers([...intentBlockers, ...getOperationCompletionBlockers(
+      const wordRetestRequiredBlockers = getWordRetestRequiredInputBlockers(
+        payload,
+        data?.textbooks || EMPTY_TEXTBOOK_OPTIONS,
+        optionIndexes,
+      )
+      const completionBlockers = prioritizeCompletionBlockers([...intentBlockers, ...wordRetestRequiredBlockers, ...getOperationCompletionBlockers(
         payload,
         data?.students || EMPTY_STUDENT_OPTIONS,
         data?.classes || EMPTY_CLASS_OPTIONS,
@@ -5167,24 +5211,62 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }, "완료 결과를 담당선생님에게 보냈습니다.")
   }
 
-  const requestWordRetestAgain = async (task: OpsTask) => {
+  const createWordRetestRetryTask = async (task: OpsTask) => {
     const wordRetest = task.wordRetest || {}
-    const retryNotice = isWordRetestAbsent(wordRetest)
-      ? "미응시 학생 재시험을 다시 요청했습니다."
-      : "미완료 학생 재시험을 다시 요청했습니다."
-    await updateWordRetestFlow(task, {
-      ...formFromTask(task),
+    const baseForm = formFromTask(task)
+    const timestamp = new Date().toISOString()
+    const completedPayload = normalizeFormForSubmit({
+      ...baseForm,
+      status: "done",
+      completedAt: timestamp,
+      wordRetest: {
+        ...wordRetest,
+        retestStatus: "done",
+      },
+    })
+    const retryPayload = normalizeFormForSubmit({
+      ...baseForm,
       status: "requested",
       completedAt: "",
+      requestedBy: currentUserId || baseForm.requestedBy,
+      requestedTeam: currentUserTaskTeam || baseForm.requestedTeam,
+      assigneeId: "",
+      assigneeTeam: "조교팀",
+      startAt: "",
+      dueAt: "",
       wordRetest: {
         ...wordRetest,
         retestStatus: "not_started",
+        testAt: "",
         firstScore: "",
         secondScore: "",
         thirdScore: "",
         scoreOutOf100: "",
       },
-    }, retryNotice)
+    })
+
+    setSaving(true)
+    setMessage("")
+    setNotice("")
+    setStatusUndo(null)
+    try {
+      await updateOpsTask(task.id, completedPayload)
+      const taskId = await createOpsTask(retryPayload)
+      const [syncedOriginal, syncedRetry] = await Promise.all([
+        loadOpsTaskById(task.id),
+        loadOpsTaskById(taskId),
+      ])
+      const nextOriginal = syncedOriginal || buildLocalTaskFromInput(task.id, completedPayload, task)
+      const nextRetry = syncedRetry || buildLocalTaskFromInput(taskId, retryPayload)
+      replaceTaskInState(nextOriginal)
+      prependTask(nextRetry)
+      openEdit(nextRetry, ["응시일시"])
+      setNotice("미완료 보고를 저장하고 새 재시험을 추가했습니다.")
+    } catch (error) {
+      setMessage(getOpsTaskActionErrorMessage(error, "재시험을 새로 추가하지 못했습니다."))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
@@ -5465,7 +5547,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     void submitWordRetestCompletion(task)
   })
   const handleWordRetestRetry = useStableEvent((task: OpsTask) => {
-    void requestWordRetestAgain(task)
+    void createWordRetestRetryTask(task)
   })
   const handleWordRetestScoreSave = useStableEvent((task: OpsTask) => {
     void saveWordRetestInlineScores(task)
@@ -6342,7 +6424,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                          onEdit={openEdit}
 	                          onStatusChange={(task, status) => void changeStatus(task, status)}
 	                          onComplete={(task) => void submitWordRetestCompletion(task)}
-	                          onRetry={(task) => void requestWordRetestAgain(task)}
+	                          onRetry={(task) => void createWordRetestRetryTask(task)}
 	                          disabled={saving}
 	                        />
 	                      ))}
@@ -7027,13 +7109,11 @@ function TypeSpecificFields({
             />
             <TextField label="시험범위" value={wordRetest.unit || ""} onChange={(value) => updateWordRetest("unit", value)} />
           </div>
-          {!wordRetestAbsent && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <TextField label="커트라인(맞은 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
-              <TextField label="출제 개수" value={wordRetest.totalQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("totalQuestionCount", value)} />
-            </div>
-          )}
           {shouldShowManualField("wordRetestTextbook", form.textbookId, wordRetest.textbookName) && <TextField label="교재명" value={wordRetest.textbookName || ""} onChange={(value) => updateWordRetest("textbookName", value)} />}
+          <div className="grid gap-3 md:grid-cols-2">
+            <TextField label="커트라인(맞은 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
+            <TextField label="출제 개수" value={wordRetest.totalQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("totalQuestionCount", value)} />
+          </div>
           <TextField label="메모" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
         </div>
       )
@@ -7441,6 +7521,7 @@ function WordRetestProgressStepper({
       <div className="grid gap-1.5 sm:grid-cols-4" role="group" aria-label="단어 재시험 진행상태">
         {WORD_RETEST_PROGRESS_STATUSES.map((status, index) => {
           const active = status.value === currentValue
+          const flowStep = WORD_RETEST_PROGRESS_FLOW_STEPS[status.value]
           return (
             <button
               key={status.value}
@@ -7450,7 +7531,7 @@ function WordRetestProgressStepper({
               disabled={readOnly}
               onClick={() => onChange?.(status.value)}
               className={[
-                "flex min-h-10 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition",
+                "flex min-h-14 items-start gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition",
                 active ? "border-primary/45 bg-primary/10 text-primary shadow-xs" : "bg-background text-muted-foreground hover:border-primary/35 hover:text-foreground",
                 readOnly ? "cursor-default hover:border-border hover:text-muted-foreground" : "",
               ].join(" ")}
@@ -7461,7 +7542,15 @@ function WordRetestProgressStepper({
               ].join(" ")}>
                 {index + 1}
               </span>
-              <span className="truncate">{status.label}</span>
+              <span className="min-w-0">
+                <span className="block truncate">{status.label}</span>
+                {flowStep && (
+                  <>
+                    <span className="mt-0.5 block truncate text-[11px] font-normal opacity-80">{flowStep.eyebrow}</span>
+                    <span className="block truncate text-[11px] font-normal opacity-70">{flowStep.description}</span>
+                  </>
+                )}
+              </span>
             </button>
           )
         })}
