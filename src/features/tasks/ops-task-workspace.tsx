@@ -350,44 +350,36 @@ const TASK_FOCUS_LABELS: Record<Exclude<TaskFocus, "none">, string> = {
 }
 
 const VALID_TASK_FOCUSES = new Set<TaskFocus>(["none", "today", "overdue", "mine", "unassigned", "confirmation"])
-const WORD_RETEST_FLOW_TRUNK_NODES = [
-  { label: "재시험 추가", detail: "담당 요청" },
-  { label: "시작 전", detail: "일정 대기" },
+const WORD_RETEST_DIAGRAM_MAIN_NODES = [
+  { key: "start", label: "시작 전", detail: "일정 대기" },
+  { key: "exam_start", label: "시험 시작", detail: "조교선생님" },
+  { key: "in_progress", label: "시험 진행", detail: "점수 입력 및 저장" },
+  { key: "decision", label: "결과 판정", detail: "자동" },
 ] as const
-const WORD_RETEST_FLOW_CHART_ROWS = [
-  {
-    key: "absent",
-    label: "미응시",
-    tone: "destructive",
-    nodes: [
-      { label: "미응시", detail: "응시일시 경과시 자동으로 상태 변경" },
-      { label: "응시일정 변경", detail: "담당선생님" },
-      { label: "시작 전", detail: "다시 일정 대기", returnToTrunk: true },
-    ],
-  },
+const WORD_RETEST_DIAGRAM_ABSENT_NODES = [
+  { key: "absent", label: "미응시", detail: "응시일시 경과시 자동으로 상태 변경" },
+  { key: "reschedule", label: "응시일정 변경", detail: "담당선생님" },
+] as const
+const WORD_RETEST_DIAGRAM_RESULT_BRANCHES = [
   {
     key: "failed",
-    label: "미완료",
+    label: "불합격",
     tone: "warning",
+    result: { key: "failed_result", label: "결과: 불합격", detail: "커트라인 미만" },
     nodes: [
-      { label: "시험 시작", detail: "조교선생님" },
-      { label: "진행 중", detail: "점수 입력 및 저장" },
-      { label: "미완료: 불합격", detail: "커트라인 미만시 자동으로 상태 변경" },
-      { label: "미완료 보고", detail: "조교선생님" },
-      { label: "미완료 확인", detail: "담당선생님" },
-      { label: "재시험 추가", detail: "새 요청 생성", returnToTrunk: true },
+      { key: "failed_report", label: "불합격 보고", detail: "조교선생님" },
+      { key: "failed_confirm", label: "불합격 확인", detail: "담당선생님" },
+      { key: "retry_create", label: "재시험 추가", detail: "담당 요청", returnToStart: true },
     ],
   },
   {
     key: "passed",
-    label: "완료",
+    label: "합격",
     tone: "primary",
+    result: { key: "passed_result", label: "결과: 합격", detail: "커트라인 이상" },
     nodes: [
-      { label: "시험 시작", detail: "조교선생님" },
-      { label: "진행 중", detail: "점수 입력 및 저장" },
-      { label: "완료: 합격", detail: "커트라인 이상시 자동으로 상태 변경" },
-      { label: "완료 보고", detail: "조교선생님" },
-      { label: "완료 확인", detail: "담당선생님" },
+      { key: "passed_report", label: "합격 보고", detail: "조교선생님" },
+      { key: "passed_confirm", label: "합격 확인", detail: "담당선생님" },
     ],
   },
 ] as const
@@ -6206,6 +6198,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 )}
                 <WordRetestProgressStepper
                   value={form.wordRetest?.retestStatus || "not_started"}
+                  taskStatus={form.status}
+                  wordRetest={form.wordRetest}
                 />
 	                <TypeSpecificFields
 	                  step="word_retest_basic"
@@ -7563,98 +7557,191 @@ function WordRetestScoreResultCell({ wordRetest }: { wordRetest?: OpsTaskInput["
   )
 }
 
-function WordRetestFlowNode({
-  label,
-  detail,
-  active,
-}: {
+type WordRetestDiagramTone = "muted" | "destructive" | "warning" | "primary" | "decision"
+
+function getWordRetestDiagramToneClass(tone: WordRetestDiagramTone) {
+  if (tone === "destructive") return "border-destructive/30 bg-destructive/[0.06] text-destructive"
+  if (tone === "warning") return "border-amber-300/80 bg-amber-50 text-amber-800"
+  if (tone === "primary") return "border-primary/30 bg-primary/[0.07] text-primary"
+  if (tone === "decision") return "border-muted-foreground/30 bg-background text-foreground"
+  return "border-border bg-muted/35 text-foreground"
+}
+
+function getWordRetestDiagramLineClass(tone: WordRetestDiagramTone) {
+  if (tone === "destructive") return "bg-destructive/25"
+  if (tone === "warning") return "bg-amber-300/60"
+  if (tone === "primary") return "bg-primary/25"
+  return "bg-border"
+}
+
+type WordRetestCompactFlowNode = {
+  key: string
   label: string
   detail?: string
+  returnToStart?: boolean
+}
+
+function WordRetestCompactNode({
+  node,
+  active,
+  tone = "muted",
+}: {
+  node: WordRetestCompactFlowNode
   active?: boolean
+  tone?: WordRetestDiagramTone
 }) {
+  const title = [node.label, node.detail].filter(Boolean).join(" · ")
+
   return (
     <span className={[
-      "inline-flex min-h-10 max-w-full flex-col justify-center rounded-md border px-2.5 py-1.5 text-left leading-tight",
-      active ? "border-primary/35 bg-primary/10 text-primary" : "border-border bg-muted/30 text-muted-foreground",
-    ].join(" ")}>
-      <span className="truncate text-xs font-semibold">{label}</span>
-      {detail && (
-        <span className="mt-0.5 line-clamp-2 text-[10px] font-normal leading-snug opacity-75">{detail}</span>
+      "relative inline-flex h-10 w-[108px] shrink-0 flex-col justify-center rounded-md border px-2.5 text-left leading-tight shadow-sm",
+      getWordRetestDiagramToneClass(tone),
+      active ? "ring-2 ring-primary/45 ring-offset-1 ring-offset-background" : "",
+    ].filter(Boolean).join(" ")}>
+      <span className="truncate text-xs font-bold">{node.label}</span>
+      {node.detail && (
+        <span className="mt-0.5 truncate text-[10px] font-semibold opacity-65" title={title}>{node.detail}</span>
+      )}
+      {node.returnToStart && (
+        <RefreshCw className="absolute right-1.5 top-1.5 size-3 text-current/70" aria-hidden />
       )}
     </span>
   )
 }
 
-function WordRetestFlowChart({ currentValue }: { currentValue: string }) {
-  const activeNodes = new Set(
-    currentValue === "absent"
-      ? ["미응시"]
-      : currentValue === "in_progress"
-        ? ["진행 중"]
-      : currentValue === "done"
-          ? ["완료: 합격", "미완료: 불합격"]
-          : ["시작 전"],
-  )
-
-  const renderFlowNodes = (
-    nodes: ReadonlyArray<{ label: string; detail?: string; returnToTrunk?: boolean }>,
-    keyPrefix: string,
-  ) => (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
-      {nodes.map((node, index) => {
-        const active = activeNodes.has(node.label)
-        return (
-          <span key={`${keyPrefix}-${node.label}-${index}`} className="contents">
-            {index > 0 && (
-              node.returnToTrunk
-                ? <RefreshCw className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-                : <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-            )}
-            <WordRetestFlowNode label={node.label} detail={node.detail} active={active} />
-          </span>
-        )
-      })}
+function WordRetestFlowArrow({ tone = "muted", loop = false }: { tone?: WordRetestDiagramTone; loop?: boolean }) {
+  return (
+    <span className="flex w-5 shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
+      <span className={["h-px flex-1", getWordRetestDiagramLineClass(tone)].join(" ")} />
+      {loop ? <RefreshCw className="mx-0.5 size-3.5" /> : <ChevronRight className="mx-0.5 size-3.5" />}
     </span>
   )
+}
+
+function WordRetestFlowColumnSpacer() {
+  return (
+    <span className="contents" aria-hidden>
+      <span className="h-10 w-[108px] shrink-0" />
+      <span className="w-5 shrink-0" />
+    </span>
+  )
+}
+
+function WordRetestFlowLane({
+  label,
+  nodes,
+  activeKeys,
+  tone = "muted",
+  leadingSlots = 0,
+}: {
+  label: string
+  nodes: WordRetestCompactFlowNode[]
+  activeKeys: Set<string>
+  tone?: WordRetestDiagramTone
+  leadingSlots?: number
+}) {
+  const labelClass = tone === "destructive"
+    ? "border-destructive/25 bg-destructive/[0.05] text-destructive"
+    : tone === "warning"
+      ? "border-amber-300/70 bg-amber-50 text-amber-800"
+      : tone === "primary"
+        ? "border-primary/25 bg-primary/[0.06] text-primary"
+        : "border-border bg-muted/40 text-foreground"
 
   return (
-    <div className="grid gap-2 rounded-md border bg-muted/20 p-2" aria-label="단어 재시험 업무 흐름">
-      <div className="grid gap-2 rounded-md bg-background px-2.5 py-2 sm:grid-cols-[4.5rem_1fr] sm:items-center">
-        <span className="inline-flex h-7 w-fit items-center rounded-full border border-border bg-muted/30 px-2.5 text-xs font-semibold text-muted-foreground">
-          공통
-        </span>
-        {renderFlowNodes(WORD_RETEST_FLOW_TRUNK_NODES, "trunk")}
-      </div>
-      {WORD_RETEST_FLOW_CHART_ROWS.map((row) => {
-        const toneClass = row.tone === "destructive"
-          ? "border-destructive/25 bg-destructive/10 text-destructive"
-          : row.tone === "warning"
-            ? "border-amber-200 bg-amber-50 text-amber-700"
-            : "border-primary/25 bg-primary/10 text-primary"
+    <span className="grid min-w-[700px] grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 rounded-md px-1.5 py-1">
+      <span className={["inline-flex h-8 items-center justify-center rounded-full border px-2 text-xs font-bold", labelClass].join(" ")}>
+        {label}
+      </span>
+      <span className="flex min-w-0 items-center">
+        {Array.from({ length: leadingSlots }).map((_, index) => (
+          <WordRetestFlowColumnSpacer key={`leading-slot-${index}`} />
+        ))}
+        {nodes.map((node, index) => (
+          <span key={node.key} className="contents">
+            {index > 0 && <WordRetestFlowArrow tone={tone} loop={node.returnToStart} />}
+            <WordRetestCompactNode node={node} tone={tone} active={activeKeys.has(node.key)} />
+          </span>
+        ))}
+      </span>
+    </span>
+  )
+}
 
-        return (
-          <div key={row.key} className="grid gap-2 rounded-md bg-background px-2.5 py-2 sm:grid-cols-[4.5rem_1fr] sm:items-center">
-            <span className={["inline-flex h-7 w-fit items-center rounded-full border px-2.5 text-xs font-semibold", toneClass].join(" ")}>
-              {row.label}
-            </span>
-            {renderFlowNodes(row.nodes, row.key)}
-          </div>
-        )
-      })}
+function WordRetestFlowChart({
+  currentValue,
+  taskStatus,
+  wordRetest,
+}: {
+  currentValue: string
+  taskStatus?: OpsTaskStatus
+  wordRetest?: OpsTaskInput["wordRetest"]
+}) {
+  const scoreResult = getWordRetestScoreResult(wordRetest)
+  const activeKeys = new Set<string>()
+  const [failedBranch, passedBranch] = WORD_RETEST_DIAGRAM_RESULT_BRANCHES
+  const commonNodes: WordRetestCompactFlowNode[] = WORD_RETEST_DIAGRAM_MAIN_NODES.map((node, index) => ({
+    ...node,
+    label: index === 0 ? "재시험 추가" : node.label,
+    detail: index === 0 ? node.label : node.detail.replace("선생님", "").replace(" 및 저장", " 저장"),
+  }))
+  const absentNodes: WordRetestCompactFlowNode[] = [
+    WORD_RETEST_DIAGRAM_ABSENT_NODES[0],
+    WORD_RETEST_DIAGRAM_ABSENT_NODES[1],
+    { key: "absent_return", label: "시작 전 복귀", detail: "일정 대기", returnToStart: true },
+  ]
+  const failedNodes: WordRetestCompactFlowNode[] = [
+    failedBranch.result,
+    ...failedBranch.nodes.map((node) => ({ ...node, returnToStart: false })),
+    { key: "failed_return", label: "시작 전 복귀", detail: "새 일정 대기", returnToStart: true },
+  ]
+  const passedNodes: WordRetestCompactFlowNode[] = [
+    passedBranch.result,
+    ...passedBranch.nodes,
+  ]
+
+  if (currentValue === "absent") {
+    activeKeys.add("absent")
+  } else if (currentValue === "in_progress") {
+    activeKeys.add("in_progress")
+  } else if (currentValue === "done" || taskStatus === "review_requested" || taskStatus === "done") {
+    activeKeys.add("decision")
+    if (scoreResult === "failed") activeKeys.add("failed_result")
+    if (scoreResult === "passed") activeKeys.add("passed_result")
+  } else {
+    activeKeys.add("start")
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-md border bg-background p-2" aria-label="단어 재시험 업무 흐름">
+      <div className="grid min-w-[720px] gap-1">
+        <WordRetestFlowLane label="공통" nodes={commonNodes} activeKeys={activeKeys} />
+        <WordRetestFlowLane label="미응시" nodes={absentNodes} activeKeys={activeKeys} tone="destructive" leadingSlots={1} />
+        <WordRetestFlowLane label={failedBranch.label} nodes={failedNodes} activeKeys={activeKeys} tone="warning" leadingSlots={3} />
+        <WordRetestFlowLane label={passedBranch.label} nodes={passedNodes} activeKeys={activeKeys} tone="primary" leadingSlots={3} />
+      </div>
     </div>
   )
 }
 
-function WordRetestProgressStepper({ value }: { value?: string }) {
+function WordRetestProgressStepper({
+  value,
+  taskStatus,
+  wordRetest,
+}: {
+  value?: string
+  taskStatus?: OpsTaskStatus
+  wordRetest?: OpsTaskInput["wordRetest"]
+}) {
   const currentValue = String(value || "not_started").trim() || "not_started"
 
   return (
     <div className="grid gap-2" aria-label="진행상태">
       <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium text-muted-foreground">
-        <span>진행상태</span>
-        <span>{getWordRetestStatusLabel(currentValue)}</span>
+        <span>현재 진행상태</span>
+        <span>{getWordRetestStatusLabel(currentValue, taskStatus, wordRetest)}</span>
       </div>
-      <WordRetestFlowChart currentValue={currentValue} />
+      <WordRetestFlowChart currentValue={currentValue} taskStatus={taskStatus} wordRetest={wordRetest} />
     </div>
   )
 }
@@ -9047,7 +9134,7 @@ function WordRetestDetailPanel({ task }: { task: OpsTask }) {
         <Badge variant="secondary">{getWordRetestTeacherLabel(task)}</Badge>
         <Badge variant="secondary">{getWordRetestClassLabel(task)}</Badge>
       </div>
-      <WordRetestProgressStepper value={wordRetest.retestStatus || "not_started"} />
+      <WordRetestProgressStepper value={wordRetest.retestStatus || "not_started"} taskStatus={task.status} wordRetest={wordRetest} />
       <dl className="grid gap-3 md:grid-cols-2">
         <DetailInfoTile label="응시일시" value={dateLabel(wordRetest.testAt || task.dueAt || "") === "-" ? "미지정" : dateLabel(wordRetest.testAt || task.dueAt || "")} />
         <DetailInfoTile label="학생" value={getWordRetestStudentLabel(task)} />
