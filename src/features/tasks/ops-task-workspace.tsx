@@ -99,6 +99,7 @@ type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "cl
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
   kind?: "word_retest_retry"
+  retryReason?: "absent" | "failed"
   status?: OpsTaskStatus
   registrationPipelineStatus?: string
   wordRetestStatus?: string
@@ -349,16 +350,47 @@ const TASK_FOCUS_LABELS: Record<Exclude<TaskFocus, "none">, string> = {
 }
 
 const VALID_TASK_FOCUSES = new Set<TaskFocus>(["none", "today", "overdue", "mine", "unassigned", "confirmation"])
-const WORD_RETEST_PROGRESS_STATUS_ORDER = ["not_started", "absent", "in_progress", "done"] as const
-const WORD_RETEST_PROGRESS_STATUSES = WORD_RETEST_PROGRESS_STATUS_ORDER
-  .map((value) => WORD_RETEST_STATUSES.find((status) => status.value === value))
-  .filter((status): status is (typeof WORD_RETEST_STATUSES)[number] => Boolean(status))
-const WORD_RETEST_PROGRESS_FLOW_STEPS: Record<string, { eyebrow: string; description: string }> = {
-  not_started: { eyebrow: "담당 요청", description: "일정 대기" },
-  absent: { eyebrow: "일정 변경", description: "담당 재요청" },
-  in_progress: { eyebrow: "시험 진행", description: "조교 처리" },
-  done: { eyebrow: "결과 확인", description: "담당 마감" },
-}
+const WORD_RETEST_FLOW_TRUNK_NODES = [
+  { label: "재시험 추가", detail: "담당 요청" },
+  { label: "시작 전", detail: "일정 대기" },
+] as const
+const WORD_RETEST_FLOW_CHART_ROWS = [
+  {
+    key: "absent",
+    label: "미응시",
+    tone: "destructive",
+    nodes: [
+      { label: "미응시", detail: "응시일시 경과시 자동으로 상태 변경" },
+      { label: "응시일정 변경", detail: "담당선생님" },
+      { label: "시작 전", detail: "다시 일정 대기", returnToTrunk: true },
+    ],
+  },
+  {
+    key: "failed",
+    label: "미완료",
+    tone: "warning",
+    nodes: [
+      { label: "시험 시작", detail: "조교선생님" },
+      { label: "진행 중", detail: "점수 입력 및 저장" },
+      { label: "미완료: 불합격", detail: "커트라인 미만시 자동으로 상태 변경" },
+      { label: "미완료 보고", detail: "조교선생님" },
+      { label: "미완료 확인", detail: "담당선생님" },
+      { label: "재시험 추가", detail: "새 요청 생성", returnToTrunk: true },
+    ],
+  },
+  {
+    key: "passed",
+    label: "완료",
+    tone: "primary",
+    nodes: [
+      { label: "시험 시작", detail: "조교선생님" },
+      { label: "진행 중", detail: "점수 입력 및 저장" },
+      { label: "완료: 합격", detail: "커트라인 이상시 자동으로 상태 변경" },
+      { label: "완료 보고", detail: "조교선생님" },
+      { label: "완료 확인", detail: "담당선생님" },
+    ],
+  },
+] as const
 
 function getFormDetailTabs(type: OpsTaskType): Array<{ key: FormDetailStepKey; label: string }> {
   if (type === "registration") {
@@ -791,6 +823,7 @@ function getCompletionIntentForBlockedEdit(task: OpsTask, blockers: string[]): F
   if (task.type === "word_retest" && isWordRetestAbsent(task.wordRetest) && blockers.includes("응시일시")) {
     return {
       kind: "word_retest_retry",
+      retryReason: "absent",
       status: "requested",
       wordRetestStatus: "not_started",
     }
@@ -833,7 +866,9 @@ function applyFormCompletionIntent(input: OpsTaskInput, intent: FormCompletionIn
 
 function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null) {
   if (!intent) return "저장"
-  if (intent.kind === "word_retest_retry") return "미응시 재요청"
+  if (intent.kind === "word_retest_retry") {
+    return intent.retryReason === "failed" ? "재시험 추가 및 미완료 확인" : "미응시 재요청"
+  }
   if (intent.registrationPipelineStatus) return `저장 후 ${getCompactRegistrationPipelineLabel(intent.registrationPipelineStatus)}`
   if (intent.status === "done") return "저장 후 완료"
   return "저장"
@@ -4626,6 +4661,52 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setFormOpen(true)
   }, [syncTaskDeepLink])
 
+  const openFailedWordRetestRetryForm = useCallback((task: OpsTask) => {
+    const baseForm = formFromTask(task)
+    const wordRetest = baseForm.wordRetest || {}
+    const nextForm = cloneForm({
+      ...baseForm,
+      status: "requested",
+      completedAt: "",
+      requestedBy: currentUserId || baseForm.requestedBy,
+      requestedTeam: currentUserTaskTeam || baseForm.requestedTeam,
+      assigneeId: "",
+      assigneeTeam: "조교팀",
+      startAt: "",
+      dueAt: "",
+      wordRetest: {
+        ...wordRetest,
+        retestStatus: "not_started",
+        testAt: "",
+        firstScore: "",
+        secondScore: "",
+        thirdScore: "",
+        scoreOutOf100: "",
+      },
+    })
+
+    blurActiveElementBeforeDialog()
+    setDetailOpen(false)
+    syncTaskDeepLink(null)
+    setEditingTask(task)
+    setForm(nextForm)
+    setWordRetestStudentIds(nextForm.studentId ? [nextForm.studentId] : [])
+    formBaselineRef.current = serializeOpsTaskInput(nextForm)
+    setFormDetailStep("word_retest_basic")
+    setMessage("")
+    setFormCompletionBlockers([])
+    setFormCompletionIntent({
+      kind: "word_retest_retry",
+      retryReason: "failed",
+      status: "requested",
+      wordRetestStatus: "not_started",
+    })
+    setConfirmingFormClose(false)
+    setNotice("")
+    setStatusUndo(null)
+    setFormOpen(true)
+  }, [currentUserId, currentUserTaskTeam, syncTaskDeepLink])
+
   const openDetail = useCallback((task: OpsTask) => {
     blurActiveElementBeforeDialog()
     setSelectedTask(task)
@@ -4756,20 +4837,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setForm((current) => ({
       ...current,
       wordRetest: { ...(current.wordRetest || {}), [key]: value },
-    }))
-  }
-
-  const updateWordRetestProgressStatus = (value: string) => {
-    setMessage("")
-    setFormCompletionBlockers([])
-    setConfirmingFormClose(false)
-    setForm((current) => ({
-      ...current,
-      wordRetest: {
-        ...(current.wordRetest || {}),
-        retestStatus: value,
-        ...(value === "absent" ? { firstScore: "", secondScore: "", thirdScore: "", scoreOutOf100: "" } : {}),
-      },
     }))
   }
 
@@ -5008,6 +5075,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         : { ...form, title: nextTitle }
       const inputWithCompletionIntent = applyFormCompletionIntent(formWithRequesterDefaults, formCompletionIntent)
       const payload = normalizeFormForSubmit(inputWithCompletionIntent)
+      const isFailedWordRetestRetry = formCompletionIntent?.kind === "word_retest_retry"
+        && formCompletionIntent.retryReason === "failed"
+        && Boolean(editingTask)
+        && payload.type === "word_retest"
       const intentBlockers = formCompletionIntent?.kind === "word_retest_retry" && payload.type === "word_retest" && !String(payload.wordRetest?.testAt || "").trim()
         ? ["응시일시"]
         : []
@@ -5016,19 +5087,69 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         data?.textbooks || EMPTY_TEXTBOOK_OPTIONS,
         optionIndexes,
       )
-      const completionBlockers = prioritizeCompletionBlockers([...intentBlockers, ...wordRetestRequiredBlockers, ...getOperationCompletionBlockers(
-        payload,
-        data?.students || EMPTY_STUDENT_OPTIONS,
-        data?.classes || EMPTY_CLASS_OPTIONS,
-        data?.textbooks || EMPTY_TEXTBOOK_OPTIONS,
-        data?.teachers || EMPTY_TEACHER_OPTIONS,
-        optionIndexes,
-      )])
+      const operationCompletionBlockers = isFailedWordRetestRetry
+        ? []
+        : getOperationCompletionBlockers(
+          payload,
+          data?.students || EMPTY_STUDENT_OPTIONS,
+          data?.classes || EMPTY_CLASS_OPTIONS,
+          data?.textbooks || EMPTY_TEXTBOOK_OPTIONS,
+          data?.teachers || EMPTY_TEACHER_OPTIONS,
+          optionIndexes,
+        )
+      const completionBlockers = prioritizeCompletionBlockers([...intentBlockers, ...wordRetestRequiredBlockers, ...operationCompletionBlockers])
       if (completionBlockers.length > 0) {
         setFormDetailStep(getCompletionBlockerFormStep(payload.type, completionBlockers) || getDefaultFormDetailStep(payload.type))
         setMessage(getCompletionBlockerActionLabel(completionBlockers))
         setFormCompletionBlockers(completionBlockers)
         setSaving(false)
+        return
+      }
+      if (isFailedWordRetestRetry && editingTask && payload.type === "word_retest") {
+        const timestamp = new Date().toISOString()
+        const originalWordRetest = editingTask.wordRetest || {}
+        const completedPayload = normalizeFormForSubmit({
+          ...formFromTask(editingTask),
+          status: "done",
+          completedAt: timestamp,
+          wordRetest: {
+            ...originalWordRetest,
+            retestStatus: "done",
+          },
+        })
+        const retryPayload = normalizeFormForSubmit({
+          ...payload,
+          status: "requested",
+          completedAt: "",
+          assigneeId: "",
+          assigneeTeam: "조교팀",
+          startAt: "",
+          dueAt: "",
+          wordRetest: {
+            ...(payload.wordRetest || {}),
+            retestStatus: "not_started",
+            firstScore: "",
+            secondScore: "",
+            thirdScore: "",
+            scoreOutOf100: "",
+          },
+        })
+
+        await updateOpsTask(editingTask.id, completedPayload)
+        const taskId = await createOpsTask(retryPayload)
+        const [syncedOriginal, syncedRetry] = await Promise.all([
+          loadOpsTaskById(editingTask.id),
+          loadOpsTaskById(taskId),
+        ])
+        replaceTaskInState(syncedOriginal || buildLocalTaskFromInput(editingTask.id, completedPayload, editingTask))
+        prependTask(syncedRetry || buildLocalTaskFromInput(taskId, retryPayload))
+        setFormOpen(false)
+        setFormCompletionBlockers([])
+        setFormCompletionIntent(null)
+        setConfirmingFormClose(false)
+        setWordRetestStudentIds([])
+        setQuery("")
+        setNotice("재시험을 추가하고 미완료를 확인했습니다.")
         return
       }
       const createWordRetestStudentIds = wasEditing || payload.type !== "word_retest"
@@ -5209,64 +5330,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         retestStatus: "done",
       },
     }, "완료 결과를 담당선생님에게 보냈습니다.")
-  }
-
-  const createWordRetestRetryTask = async (task: OpsTask) => {
-    const wordRetest = task.wordRetest || {}
-    const baseForm = formFromTask(task)
-    const timestamp = new Date().toISOString()
-    const completedPayload = normalizeFormForSubmit({
-      ...baseForm,
-      status: "done",
-      completedAt: timestamp,
-      wordRetest: {
-        ...wordRetest,
-        retestStatus: "done",
-      },
-    })
-    const retryPayload = normalizeFormForSubmit({
-      ...baseForm,
-      status: "requested",
-      completedAt: "",
-      requestedBy: currentUserId || baseForm.requestedBy,
-      requestedTeam: currentUserTaskTeam || baseForm.requestedTeam,
-      assigneeId: "",
-      assigneeTeam: "조교팀",
-      startAt: "",
-      dueAt: "",
-      wordRetest: {
-        ...wordRetest,
-        retestStatus: "not_started",
-        testAt: "",
-        firstScore: "",
-        secondScore: "",
-        thirdScore: "",
-        scoreOutOf100: "",
-      },
-    })
-
-    setSaving(true)
-    setMessage("")
-    setNotice("")
-    setStatusUndo(null)
-    try {
-      await updateOpsTask(task.id, completedPayload)
-      const taskId = await createOpsTask(retryPayload)
-      const [syncedOriginal, syncedRetry] = await Promise.all([
-        loadOpsTaskById(task.id),
-        loadOpsTaskById(taskId),
-      ])
-      const nextOriginal = syncedOriginal || buildLocalTaskFromInput(task.id, completedPayload, task)
-      const nextRetry = syncedRetry || buildLocalTaskFromInput(taskId, retryPayload)
-      replaceTaskInState(nextOriginal)
-      prependTask(nextRetry)
-      openEdit(nextRetry, ["응시일시"])
-      setNotice("미완료 보고를 저장하고 새 재시험을 추가했습니다.")
-    } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "재시험을 새로 추가하지 못했습니다."))
-    } finally {
-      setSaving(false)
-    }
   }
 
   const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
@@ -5547,7 +5610,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     void submitWordRetestCompletion(task)
   })
   const handleWordRetestRetry = useStableEvent((task: OpsTask) => {
-    void createWordRetestRetryTask(task)
+    openFailedWordRetestRetryForm(task)
   })
   const handleWordRetestScoreSave = useStableEvent((task: OpsTask) => {
     void saveWordRetestInlineScores(task)
@@ -6140,11 +6203,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                      </span>
 	                    )}
 	                  </div>
-	                )}
-	                <WordRetestProgressStepper
-	                  value={form.wordRetest?.retestStatus || "not_started"}
-	                  onChange={updateWordRetestProgressStatus}
-	                />
+                )}
+                <WordRetestProgressStepper
+                  value={form.wordRetest?.retestStatus || "not_started"}
+                />
 	                <TypeSpecificFields
 	                  step="word_retest_basic"
 	                  form={form}
@@ -6424,7 +6486,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                          onEdit={openEdit}
 	                          onStatusChange={(task, status) => void changeStatus(task, status)}
 	                          onComplete={(task) => void submitWordRetestCompletion(task)}
-	                          onRetry={(task) => void createWordRetestRetryTask(task)}
+	                          onRetry={openFailedWordRetestRetryForm}
 	                          disabled={saving}
 	                        />
 	                      ))}
@@ -7501,15 +7563,89 @@ function WordRetestScoreResultCell({ wordRetest }: { wordRetest?: OpsTaskInput["
   )
 }
 
-function WordRetestProgressStepper({
-  value,
-  onChange,
-  readOnly = false,
+function WordRetestFlowNode({
+  label,
+  detail,
+  active,
 }: {
-  value?: string
-  onChange?: (value: string) => void
-  readOnly?: boolean
+  label: string
+  detail?: string
+  active?: boolean
 }) {
+  return (
+    <span className={[
+      "inline-flex min-h-10 max-w-full flex-col justify-center rounded-md border px-2.5 py-1.5 text-left leading-tight",
+      active ? "border-primary/35 bg-primary/10 text-primary" : "border-border bg-muted/30 text-muted-foreground",
+    ].join(" ")}>
+      <span className="truncate text-xs font-semibold">{label}</span>
+      {detail && (
+        <span className="mt-0.5 line-clamp-2 text-[10px] font-normal leading-snug opacity-75">{detail}</span>
+      )}
+    </span>
+  )
+}
+
+function WordRetestFlowChart({ currentValue }: { currentValue: string }) {
+  const activeNodes = new Set(
+    currentValue === "absent"
+      ? ["미응시"]
+      : currentValue === "in_progress"
+        ? ["진행 중"]
+      : currentValue === "done"
+          ? ["완료: 합격", "미완료: 불합격"]
+          : ["시작 전"],
+  )
+
+  const renderFlowNodes = (
+    nodes: ReadonlyArray<{ label: string; detail?: string; returnToTrunk?: boolean }>,
+    keyPrefix: string,
+  ) => (
+    <span className="flex min-w-0 flex-wrap items-center gap-1">
+      {nodes.map((node, index) => {
+        const active = activeNodes.has(node.label)
+        return (
+          <span key={`${keyPrefix}-${node.label}-${index}`} className="contents">
+            {index > 0 && (
+              node.returnToTrunk
+                ? <RefreshCw className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+                : <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+            )}
+            <WordRetestFlowNode label={node.label} detail={node.detail} active={active} />
+          </span>
+        )
+      })}
+    </span>
+  )
+
+  return (
+    <div className="grid gap-2 rounded-md border bg-muted/20 p-2" aria-label="단어 재시험 업무 흐름">
+      <div className="grid gap-2 rounded-md bg-background px-2.5 py-2 sm:grid-cols-[4.5rem_1fr] sm:items-center">
+        <span className="inline-flex h-7 w-fit items-center rounded-full border border-border bg-muted/30 px-2.5 text-xs font-semibold text-muted-foreground">
+          공통
+        </span>
+        {renderFlowNodes(WORD_RETEST_FLOW_TRUNK_NODES, "trunk")}
+      </div>
+      {WORD_RETEST_FLOW_CHART_ROWS.map((row) => {
+        const toneClass = row.tone === "destructive"
+          ? "border-destructive/25 bg-destructive/10 text-destructive"
+          : row.tone === "warning"
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-primary/25 bg-primary/10 text-primary"
+
+        return (
+          <div key={row.key} className="grid gap-2 rounded-md bg-background px-2.5 py-2 sm:grid-cols-[4.5rem_1fr] sm:items-center">
+            <span className={["inline-flex h-7 w-fit items-center rounded-full border px-2.5 text-xs font-semibold", toneClass].join(" ")}>
+              {row.label}
+            </span>
+            {renderFlowNodes(row.nodes, row.key)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function WordRetestProgressStepper({ value }: { value?: string }) {
   const currentValue = String(value || "not_started").trim() || "not_started"
 
   return (
@@ -7518,43 +7654,7 @@ function WordRetestProgressStepper({
         <span>진행상태</span>
         <span>{getWordRetestStatusLabel(currentValue)}</span>
       </div>
-      <div className="grid gap-1.5 sm:grid-cols-4" role="group" aria-label="단어 재시험 진행상태">
-        {WORD_RETEST_PROGRESS_STATUSES.map((status, index) => {
-          const active = status.value === currentValue
-          const flowStep = WORD_RETEST_PROGRESS_FLOW_STEPS[status.value]
-          return (
-            <button
-              key={status.value}
-              type="button"
-              aria-pressed={active}
-              aria-disabled={readOnly}
-              disabled={readOnly}
-              onClick={() => onChange?.(status.value)}
-              className={[
-                "flex min-h-14 items-start gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition",
-                active ? "border-primary/45 bg-primary/10 text-primary shadow-xs" : "bg-background text-muted-foreground hover:border-primary/35 hover:text-foreground",
-                readOnly ? "cursor-default hover:border-border hover:text-muted-foreground" : "",
-              ].join(" ")}
-            >
-              <span className={[
-                "grid size-5 shrink-0 place-items-center rounded-full border text-[11px]",
-                active ? "border-primary bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
-              ].join(" ")}>
-                {index + 1}
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate">{status.label}</span>
-                {flowStep && (
-                  <>
-                    <span className="mt-0.5 block truncate text-[11px] font-normal opacity-80">{flowStep.eyebrow}</span>
-                    <span className="block truncate text-[11px] font-normal opacity-70">{flowStep.description}</span>
-                  </>
-                )}
-              </span>
-            </button>
-          )
-        })}
-      </div>
+      <WordRetestFlowChart currentValue={currentValue} />
     </div>
   )
 }
@@ -8947,7 +9047,7 @@ function WordRetestDetailPanel({ task }: { task: OpsTask }) {
         <Badge variant="secondary">{getWordRetestTeacherLabel(task)}</Badge>
         <Badge variant="secondary">{getWordRetestClassLabel(task)}</Badge>
       </div>
-      <WordRetestProgressStepper value={wordRetest.retestStatus || "not_started"} readOnly />
+      <WordRetestProgressStepper value={wordRetest.retestStatus || "not_started"} />
       <dl className="grid gap-3 md:grid-cols-2">
         <DetailInfoTile label="응시일시" value={dateLabel(wordRetest.testAt || task.dueAt || "") === "-" ? "미지정" : dateLabel(wordRetest.testAt || task.dueAt || "")} />
         <DetailInfoTile label="학생" value={getWordRetestStudentLabel(task)} />

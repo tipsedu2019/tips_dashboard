@@ -750,10 +750,15 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "getWordRetestPrimaryActions",
     '"word_retest_complete"',
     '"word_retest_retry"',
+    'retryReason?: "absent" | "failed"',
     "submitWordRetestCompletion",
     'retestStatus: "done"',
     'wordRetestStatus: "not_started"',
-    "createWordRetestRetryTask",
+    "openFailedWordRetestRetryForm",
+    "isFailedWordRetestRetry",
+    "operationCompletionBlockers",
+    "재시험 추가 및 미완료 확인",
+    "재시험을 추가하고 미완료를 확인했습니다.",
     "parseWordRetestScoreValue",
     "getWordRetestScoreResult",
     "getWordRetestStatusLabel(value?: string, taskStatus?: OpsTaskStatus",
@@ -787,13 +792,18 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestScoreResultCell",
     "getWordRetestScorePercent",
     "WordRetestProgressStepper",
-    "WORD_RETEST_PROGRESS_STATUS_ORDER",
-    "WORD_RETEST_PROGRESS_STATUSES",
-    "WORD_RETEST_PROGRESS_FLOW_STEPS",
+    "WORD_RETEST_FLOW_TRUNK_NODES",
+    "WORD_RETEST_FLOW_CHART_ROWS",
+    "WordRetestFlowNode",
+    "WordRetestFlowChart",
     "담당 요청",
-    "일정 변경",
-    "시험 진행",
-    "결과 확인",
+    "응시일시 경과시 자동으로 상태 변경",
+    "커트라인 미만시 자동으로 상태 변경",
+    "커트라인 이상시 자동으로 상태 변경",
+    "미완료 확인",
+    "returnToTrunk: true",
+    "미완료 보고",
+    "완료 보고",
     "WordRetestPeriodFilterBar",
     "WORD_RETEST_PERIOD_FILTERS",
     '{ key: "today", label: "오늘" }',
@@ -937,6 +947,9 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /onMarkAbsent/);
   assert.doesNotMatch(workspaceSource, /canRetryAbsent/);
   assert.doesNotMatch(workspaceSource, /WordRetestResizableHeaderCell label="점수"/);
+  assert.doesNotMatch(workspaceSource, /미완료 보고를 저장하고 새 재시험을 추가했습니다/);
+  assert.doesNotMatch(workspaceSource, /aria-label="단어 재시험 진행상태"/);
+  assert.doesNotMatch(workspaceSource, /미응시 자동/);
 
   const wordRetestToolbarSource = workspaceSource.slice(
     workspaceSource.indexOf("{isWordRetestWorkspace && ("),
@@ -1000,7 +1013,6 @@ test("management sync connects registration transfer withdrawal and word retest 
     "hasWordRetestScore",
     "function shouldRequireWordRetestScore",
     "!isWordRetestAbsent(wordRetest) && !hasWordRetestScore(wordRetest)",
-    '...(value === "absent" ? { firstScore: "", secondScore: "", thirdScore: "", scoreOutOf100: "" } : {})',
     "점수 없음",
     "function CompletionBlockerActionPanel",
     "function CompletionBlockerInlineChips",
