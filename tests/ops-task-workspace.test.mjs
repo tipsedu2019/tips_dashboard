@@ -328,6 +328,18 @@ test("todo form uses compact polished controls for dates priority and team selec
   assert.doesNotMatch(dateFieldSource, /absolute left-0 right-0 top-full/);
 });
 
+test("popover content can stay inside modal scroll containers", async () => {
+  const popoverSource = await readSource("src/components/ui/popover.tsx");
+
+  assertIncludesAll(popoverSource, [
+    "type PopoverContentProps = React.ComponentProps<typeof PopoverPrimitive.Content> & {",
+    "disablePortal?: boolean",
+    "portalContainer?: React.ComponentProps<typeof PopoverPrimitive.Portal>[\"container\"]",
+    "if (disablePortal) return content",
+    "<PopoverPrimitive.Portal container={portalContainer}>",
+  ]);
+});
+
 test("quick add keeps Todoist-like shortcuts and opens the structured form", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
@@ -787,6 +799,12 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "Clock className",
     "<SelectedValuePill",
     "PopoverContent",
+    "TOUCH_SCROLL_AREA_STYLE",
+    'WebkitOverflowScrolling: "touch"',
+    'touchAction: "pan-y"',
+    "function stopTouchScrollPropagation(event: TouchEvent<HTMLElement>)",
+    "disablePortal",
+    "onTouchMove={stopTouchScrollPropagation}",
     "placeholder={`${label} 검색`}",
     "className=\"h-9 min-w-0 pr-9\"",
     "className=\"max-h-72 overflow-y-auto overscroll-contain p-1\"",

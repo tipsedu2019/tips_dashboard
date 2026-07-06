@@ -1,7 +1,7 @@
 "use client"
 
 import { useSearchParams } from "next/navigation"
-import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent } from "react"
+import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock, FileText, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -205,12 +205,22 @@ const LINKED_SELECT_MANUAL_VALUE = "__manual__"
 const HORIZONTAL_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 const HORIZONTAL_MUTED_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md bg-muted/45 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+const TOUCH_SCROLL_AREA_STYLE = {
+  WebkitOverflowScrolling: "touch",
+  overscrollBehavior: "contain",
+  touchAction: "pan-y",
+} as CSSProperties
 const TODO_TEAM_FILTER_UNASSIGNED = "__unassigned__"
 const TODO_TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀", "조교팀"] as const
 const TODO_FORM_PRIORITY_ORDER: OpsTaskPriority[] = ["urgent", "high", "normal", "low"]
 const TODO_FORM_PRIORITY_OPTIONS = TODO_FORM_PRIORITY_ORDER
   .map((value) => OPS_TASK_PRIORITIES.find((priority) => priority.value === value))
   .filter((priority): priority is (typeof OPS_TASK_PRIORITIES)[number] => Boolean(priority))
+
+function stopTouchScrollPropagation(event: TouchEvent<HTMLElement>) {
+  event.stopPropagation()
+}
+
 const TODO_QUICK_ADD_PRIORITY_ALIASES: Partial<Record<string, OpsTaskPriority>> = {
   p1: "urgent",
   "!!": "urgent",
@@ -2370,6 +2380,8 @@ function TaskListboxField({
           role="listbox"
           aria-labelledby={fieldId}
           className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg"
+          style={TOUCH_SCROLL_AREA_STYLE}
+          onTouchMove={stopTouchScrollPropagation}
         >
           {options.map((option) => {
             const selected = option.value === value
@@ -2626,6 +2638,7 @@ function LinkedSelect({
           side="bottom"
           sideOffset={4}
           collisionPadding={12}
+          disablePortal
           onOpenAutoFocus={(event) => event.preventDefault()}
           className="z-[120] w-[var(--radix-popper-anchor-width)] min-w-72 max-w-[calc(100vw-1rem)] overflow-hidden p-0"
         >
@@ -2636,7 +2649,9 @@ function LinkedSelect({
           )}
           <div
             className="max-h-72 overflow-y-auto overscroll-contain p-1"
+            style={TOUCH_SCROLL_AREA_STYLE}
             onWheel={handleLinkedListWheel}
+            onTouchMove={stopTouchScrollPropagation}
           >
             {onManualSelect && (
               <button
@@ -2776,6 +2791,7 @@ function LinkedMultiSelect({
           side="bottom"
           sideOffset={4}
           collisionPadding={12}
+          disablePortal
           onOpenAutoFocus={(event) => event.preventDefault()}
           className="z-[120] w-[var(--radix-popper-anchor-width)] min-w-72 max-w-[calc(100vw-1rem)] overflow-hidden p-0"
         >
@@ -2796,7 +2812,12 @@ function LinkedMultiSelect({
               <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             </span>
           </div>
-          <div className="max-h-72 overflow-y-auto overscroll-contain p-1" onWheel={handleWheel}>
+          <div
+            className="max-h-72 overflow-y-auto overscroll-contain p-1"
+            style={TOUCH_SCROLL_AREA_STYLE}
+            onWheel={handleWheel}
+            onTouchMove={stopTouchScrollPropagation}
+          >
             {onManualSelect && (
               <button
                 type="button"
@@ -3302,6 +3323,9 @@ function DateTimeField({
           align="start"
           sideOffset={6}
           collisionPadding={12}
+          disablePortal
+          style={TOUCH_SCROLL_AREA_STYLE}
+          onTouchMove={stopTouchScrollPropagation}
           className="z-[120] w-[min(42rem,calc(100vw-1rem))] max-h-[min(34rem,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain p-0"
         >
           <div className="grid gap-0 min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
@@ -3355,7 +3379,12 @@ function DateTimeField({
                 })}
               </div>
             </div>
-            <div className="grid max-h-44 gap-1 overflow-y-auto overscroll-contain p-2 min-[380px]:max-h-[16.5rem] md:max-h-72" onWheel={handleTimeListWheel}>
+            <div
+              className="grid max-h-44 gap-1 overflow-y-auto overscroll-contain p-2 min-[380px]:max-h-[16.5rem] md:max-h-72"
+              style={TOUCH_SCROLL_AREA_STYLE}
+              onWheel={handleTimeListWheel}
+              onTouchMove={stopTouchScrollPropagation}
+            >
               {WORD_RETEST_TIME_OPTIONS.map((time) => {
                 const selected = time === timeValue
                 return (
