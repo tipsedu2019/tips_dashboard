@@ -869,7 +869,7 @@ function applyFormCompletionIntent(input: OpsTaskInput, intent: FormCompletionIn
 function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null) {
   if (!intent) return "저장"
   if (intent.kind === "word_retest_retry") {
-    return intent.retryReason === "failed" ? "재시험 추가 및 미완료 확인" : "미응시 재요청"
+    return intent.retryReason === "failed" ? "재시험 추가 및 불합격 확인" : "미응시 재요청"
   }
   if (intent.registrationPipelineStatus) return `저장 후 ${getCompactRegistrationPipelineLabel(intent.registrationPipelineStatus)}`
   if (intent.status === "done") return "저장 후 완료"
@@ -1623,7 +1623,7 @@ function getOpsTaskEventTypeLabel(eventType: string) {
     case "manual_unchecked":
       return "확인 해제"
     case "status_changed":
-      return "상태 변경"
+      return "진행상태 변경"
     case "created":
       return "생성"
     case "updated":
@@ -3688,7 +3688,7 @@ function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, comple
       if (completionBlockers.length > 0) {
         return [{ kind: "edit", label: getCompletionBlockerActionLabel(completionBlockers), blockers: completionBlockers }]
       }
-      return [{ kind: "word_retest_complete", label: scoreResult === "failed" ? "미완료 보고" : "완료 보고" }]
+      return [{ kind: "word_retest_complete", label: scoreResult === "failed" ? "불합격 보고" : "합격 보고" }]
     }
   }
 
@@ -3697,13 +3697,13 @@ function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, comple
     if (scoreResult === "failed") {
       return [
         { kind: "word_retest_retry", label: "재시험 추가" },
-        { kind: "status", status: "done", label: "미완료 확인" },
+        { kind: "status", status: "done", label: "불합격 확인" },
       ]
     }
     if (completionBlockers.length > 0) {
       return [{ kind: "edit", label: getCompletionBlockerActionLabel(completionBlockers), blockers: completionBlockers }]
     }
-    return [{ kind: "status", status: "done", label: "완료 확인" }]
+    return [{ kind: "status", status: "done", label: "합격 확인" }]
   }
 
   return []
@@ -5170,7 +5170,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         setConfirmingFormClose(false)
         setWordRetestStudentIds([])
         setQuery("")
-        setNotice("재시험을 추가하고 미완료를 확인했습니다.")
+        setNotice("재시험을 추가하고 불합격을 확인했습니다.")
         return
       }
       const createWordRetestStudentIds = wasEditing || payload.type !== "word_retest"
@@ -5254,9 +5254,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           nextStatus: status,
         })
       }
-      setNotice("상태를 변경했습니다.")
+      setNotice("진행상태를 변경했습니다.")
     } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "상태를 바꾸지 못했습니다."))
+      setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 바꾸지 못했습니다."))
     } finally {
       setSaving(false)
     }
@@ -5274,7 +5274,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
       setNotice(successMessage)
     } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "단어 재시험 상태를 바꾸지 못했습니다."))
+      setMessage(getOpsTaskActionErrorMessage(error, "단어 재시험 진행상태를 바꾸지 못했습니다."))
     } finally {
       setSaving(false)
     }
@@ -5343,6 +5343,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const submitWordRetestCompletion = async (task: OpsTask) => {
     const wordRetest = task.wordRetest || {}
+    const scoreResult = getWordRetestScoreResult(wordRetest)
     await updateWordRetestFlow(task, {
       ...formFromTask(task),
       status: "review_requested",
@@ -5350,7 +5351,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         ...wordRetest,
         retestStatus: "done",
       },
-    }, "완료 결과를 담당선생님에게 보냈습니다.")
+    }, scoreResult === "failed"
+      ? "불합격 결과를 담당선생님에게 보냈습니다."
+      : "합격 결과를 담당선생님에게 보냈습니다.")
   }
 
   const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
@@ -5444,9 +5447,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         })
       }
       setStatusUndo(null)
-      setNotice("상태 변경을 되돌렸습니다.")
+      setNotice("진행상태 변경을 되돌렸습니다.")
     } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "상태를 되돌리지 못했습니다."))
+      setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 되돌리지 못했습니다."))
     } finally {
       setSaving(false)
     }
@@ -5983,7 +5986,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 size="sm"
                 onClick={() => void undoStatusChange()}
                 disabled={saving}
-                aria-label={`${statusUndo.title} 상태 변경 되돌리기`}
+                aria-label={`${statusUndo.title} 진행상태 변경 되돌리기`}
                 className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
               >
                 되돌리기
@@ -6466,7 +6469,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   size="sm"
                   onClick={() => void undoStatusChange()}
                   disabled={saving}
-                  aria-label={`${statusUndo.title} 상태 변경 되돌리기`}
+                  aria-label={`${statusUndo.title} 진행상태 변경 되돌리기`}
                   className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
                 >
                   되돌리기
@@ -8341,7 +8344,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
       className="grid cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
       style={{ "--word-retest-grid-template": gridTemplateColumns } as CSSProperties}
     >
-      <span className="flex min-w-0 items-center md:justify-center">
+      <span className="order-first flex min-w-0 items-center md:order-none md:justify-center">
         <input
           type="checkbox"
           aria-label={`${studentLabel} 단어 재시험 선택`}
@@ -8352,22 +8355,23 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
           className="size-4 rounded border-border text-primary"
         />
       </span>
-      <span className="min-w-0">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">상태</span>
+      <span className="order-1 min-w-0 md:order-none">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">진행상태</span>
         <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
       </span>
-      <span className="min-w-0">
+      <span className="order-5 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">응시일시</span>
         <span className="font-medium">{dateLabel(wordRetest.testAt || task.dueAt || "")}</span>
-        <span className="mt-1 flex flex-wrap gap-1 md:hidden">
-          <Badge variant="secondary">{branch}</Badge>
-        </span>
       </span>
-      <span className="min-w-0 truncate font-medium">
+      <span className="order-6 min-w-0 md:hidden">
+        <span className="mr-2 text-xs text-muted-foreground">장소</span>
+        <Badge variant="secondary">{branch}</Badge>
+      </span>
+      <span className="order-2 min-w-0 truncate font-medium md:order-none">
         <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">담당선생님</span>
         {teacherLabel}
       </span>
-      <span className="min-w-0 truncate">
+      <span className="order-3 min-w-0 truncate md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">수업</span>
         {classLabel}
       </span>
@@ -8375,12 +8379,12 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
         type="button"
         aria-label={`${studentLabel} 단어 재시험 수정`}
         onClick={() => onOpen(task)}
-        className="min-w-0 truncate text-left font-semibold hover:text-primary"
+        className="order-4 min-w-0 truncate text-left font-semibold hover:text-primary md:order-none"
       >
         <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">학생</span>
         {studentLabel}
       </button>
-      <span className="group relative min-w-0 truncate">
+      <span className="group relative order-7 min-w-0 truncate md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">교재</span>
         <span tabIndex={0} title={textbookLabel} className="outline-none focus-visible:text-primary">
           {textbookLabel}
@@ -8391,11 +8395,11 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
           </span>
         )}
       </span>
-      <span className="min-w-0 truncate text-muted-foreground md:text-foreground">
+      <span className="order-8 min-w-0 truncate text-muted-foreground md:order-none md:text-foreground">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">시험범위</span>
         {unitLabel}
       </span>
-      <span className="min-w-0">
+      <span className="order-11 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">맞은 개수</span>
         <WordRetestInlineScoreEditor
           task={task}
@@ -8405,19 +8409,20 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
           onSave={onScoreSave}
         />
       </span>
-      <span className="min-w-0 font-medium">
+      <span className="order-10 min-w-0 font-medium md:order-none">
         <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
         {wordRetest.cutoffQuestionCount || "-"}
       </span>
-      <span className="min-w-0 font-medium">
+      <span className="order-9 min-w-0 font-medium md:order-none">
         <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">출제 개수</span>
         {wordRetest.totalQuestionCount || "-"}
       </span>
-      <span className="min-w-0">
+      <span className="order-12 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">결과</span>
         <WordRetestScoreResultCell wordRetest={scorePreviewWordRetest} />
       </span>
-      <span className="flex flex-wrap justify-start gap-1.5 md:justify-end">
+      <span className="order-last flex flex-wrap justify-start gap-1.5 md:order-none md:justify-end">
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">다음 액션</span>
         {primaryActions.map((action) => (
           <WordRetestRoleActionButton
             key={`${action.kind}-${action.label}`}

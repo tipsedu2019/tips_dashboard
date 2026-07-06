@@ -780,8 +780,16 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "openFailedWordRetestRetryForm",
     "isFailedWordRetestRetry",
     "operationCompletionBlockers",
-    "재시험 추가 및 미완료 확인",
-    "재시험을 추가하고 미완료를 확인했습니다.",
+    "재시험 추가 및 불합격 확인",
+    "재시험을 추가하고 불합격을 확인했습니다.",
+    "불합격 결과를 담당선생님에게 보냈습니다.",
+    "합격 결과를 담당선생님에게 보냈습니다.",
+    "진행상태를 변경했습니다.",
+    "진행상태를 바꾸지 못했습니다.",
+    "단어 재시험 진행상태를 바꾸지 못했습니다.",
+    "진행상태 변경을 되돌렸습니다.",
+    "진행상태를 되돌리지 못했습니다.",
+    "진행상태 변경",
     "parseWordRetestScoreValue",
     "getWordRetestScoreResult",
     "getWordRetestStatusLabel(value?: string, taskStatus?: OpsTaskStatus",
@@ -985,12 +993,12 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "교재/시험범위",
     "시험범위 입력",
     "시험 시작",
-    "완료 보고",
-    "미완료 보고",
+    "합격 보고",
+    "불합격 보고",
     "미응시",
-    "완료 확인",
+    "합격 확인",
     "재시험 추가",
-    "미완료 확인",
+    "불합격 확인",
     "응시일정 변경",
     "미응시 재요청",
     'formCompletionIntent?.kind !== "word_retest_retry"',
@@ -1012,8 +1020,56 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /canRetryAbsent/);
   assert.doesNotMatch(workspaceSource, /WordRetestResizableHeaderCell label="점수"/);
   assert.doesNotMatch(workspaceSource, /미완료 보고를 저장하고 새 재시험을 추가했습니다/);
+  assert.doesNotMatch(workspaceSource, /재시험 추가 및 미완료 확인/);
+  assert.doesNotMatch(workspaceSource, /재시험을 추가하고 미완료를 확인했습니다/);
+  assert.doesNotMatch(workspaceSource, /완료 결과를 담당선생님에게 보냈습니다/);
+  assert.doesNotMatch(workspaceSource, /setNotice\("상태를 변경했습니다\."\)/);
+  assert.doesNotMatch(workspaceSource, /"상태를 바꾸지 못했습니다\."/);
+  assert.doesNotMatch(workspaceSource, /"단어 재시험 상태를 바꾸지 못했습니다\."/);
+  assert.doesNotMatch(workspaceSource, /setNotice\("상태 변경을 되돌렸습니다\."\)/);
+  assert.doesNotMatch(workspaceSource, /"상태를 되돌리지 못했습니다\."/);
+  assert.doesNotMatch(workspaceSource, /\$\{statusUndo\.title\} 상태 변경 되돌리기/);
   assert.doesNotMatch(workspaceSource, /aria-label="단어 재시험 진행상태"/);
   assert.doesNotMatch(workspaceSource, /미응시 자동/);
+
+  const wordRetestActionSource = workspaceSource.slice(
+    workspaceSource.indexOf("function getWordRetestPrimaryActions"),
+    workspaceSource.indexOf("function shouldShowDetailStatusBadge"),
+  );
+  assert.match(wordRetestActionSource, /scoreResult === "failed" \? "불합격 보고" : "합격 보고"/);
+  assert.ok(wordRetestActionSource.includes('label: "불합격 확인"'));
+  assert.ok(wordRetestActionSource.includes('label: "합격 확인"'));
+  assert.doesNotMatch(wordRetestActionSource, /미완료 보고|미완료 확인|완료 보고|완료 확인/);
+
+  const wordRetestRowSource = workspaceSource.slice(
+    workspaceSource.indexOf("memo(function WordRetestTaskRow"),
+    workspaceSource.indexOf("function WordRetestRoleActionButton"),
+  );
+  const mobileRowOrder = [
+    ["진행상태", "order-1"],
+    ["담당선생님", "order-2"],
+    ["수업", "order-3"],
+    ["학생", "order-4"],
+    ["응시일시", "order-5"],
+    ["장소", "order-6"],
+    ["교재", "order-7"],
+    ["시험범위", "order-8"],
+    ["출제 개수", "order-9"],
+    ["커트라인", "order-10"],
+    ["맞은 개수", "order-11"],
+    ["결과", "order-12"],
+    ["다음 액션", "order-last"],
+  ];
+  for (const [label, orderClass] of mobileRowOrder) {
+    const labelIndex = wordRetestRowSource.indexOf(`>${label}</span>`);
+    assert.ok(labelIndex > -1, `${label} mobile label should be present`);
+    const cellSource = wordRetestRowSource.slice(Math.max(0, labelIndex - 220), labelIndex);
+    assert.ok(cellSource.includes(orderClass), `${label} should use ${orderClass} on mobile`);
+    assert.ok(
+      cellSource.includes("md:order-none") || cellSource.includes("md:hidden") || orderClass === "order-last",
+      `${label} should keep desktop order`,
+    );
+  }
 
   const progressStepperSource = workspaceSource.slice(
     workspaceSource.indexOf("function WordRetestProgressStepper"),
