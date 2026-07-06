@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import {
   BookOpen,
   CalendarDays,
+  CalendarClock,
   ClipboardCheck,
   FileCheck2,
   GraduationCap,
@@ -252,6 +253,14 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
+    match: "/admin/makeup-requests",
+    meta: {
+      section: "운영",
+      title: "휴보강 신청서",
+      summary: "휴강 신청부터 보강 강의실 확인, 결재, 관리팀 최종 반영까지 처리합니다.",
+    },
+  },
+  {
     match: "/admin/approvals",
     meta: {
       section: "운영",
@@ -298,6 +307,7 @@ export function buildAdminNavGroups({
       ],
     },
     { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+    { title: "휴보강 신청서", url: "/admin/makeup-requests", icon: CalendarClock },
     {
       title: "학사일정",
       url: "/admin/academic-calendar",
@@ -324,6 +334,7 @@ export function buildAdminNavGroups({
     { title: "전반", url: "/admin/transfer", icon: Repeat2 },
     { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
     { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+    { title: "휴보강 신청서", url: "/admin/makeup-requests", icon: CalendarClock },
     { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
     { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
     {

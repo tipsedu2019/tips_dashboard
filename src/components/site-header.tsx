@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { ExternalLink } from "lucide-react"
 
 import { CommandSearch, SearchTrigger } from "@/components/command-search"
+import { DashboardNotificationPopover } from "@/components/dashboard-notification-popover"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -65,6 +66,9 @@ export function SiteHeader() {
               </Link>
               <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
                 <SearchTrigger onClick={() => setSearchOpen(true)} />
+              </div>
+              <div aria-label="알림">
+                <DashboardNotificationPopover />
               </div>
               <ModeToggle />
             </div>
