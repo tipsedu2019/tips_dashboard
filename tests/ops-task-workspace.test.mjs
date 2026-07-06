@@ -697,6 +697,8 @@ test("operation forms use staged fields and linked management selectors", async 
     "getWordRetestTextbookGradeFilters",
     "normalizeWordRetestTextbookSubjectLabel",
     "isWordRetestTextbookOption",
+    "findClassWordRetestTextbook",
+    "shouldPreferWordRetestTextbook",
     "inferWordRetestTextbookSubject",
     "inferWordRetestTextbookGrade",
     "inferWordRetestTextbookGradePill",
@@ -712,6 +714,15 @@ test("operation forms use staged fields and linked management selectors", async 
   assert.doesNotMatch(formDialogSource, /<DialogDescription(?! className="sr-only")/);
   assert.ok(source.includes('{ key: "teacher", label: "담당선생님" }'));
   assert.ok(source.includes('{ key: "assistant", label: "조교선생님" }'));
+
+  const wordRetestScopeSource = source.slice(
+    source.indexOf('if (step === "word_retest_scope")'),
+    source.indexOf('if (step === "word_retest_scores")'),
+  );
+  assert.ok(
+    wordRetestScopeSource.indexOf('label="출제 개수"') < wordRetestScopeSource.indexOf('label="커트라인(맞은 개수)"'),
+    "word retest scope fields should place total question count before cutoff count",
+  );
 });
 
 test("word retest workspace uses role queues branch filters and dedicated row actions", async () => {
@@ -783,6 +794,9 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "value ? \"pr-20\" : \"\"",
     "value ? \"mr-7\" : \"\"",
     "z-[120]",
+    "max-h-[min(34rem,var(--radix-popover-content-available-height))]",
+    "min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem]",
+    "min-[380px]:max-h-[16.5rem]",
     "handleTimeListWheel",
     "target.scrollTop += event.deltaY",
     "sortWordRetestTasksByTestAt",
@@ -801,6 +815,14 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestFlowColumnSpacer",
     "WordRetestFlowLane",
     "WordRetestFlowChart",
+    "aria-expanded={open}",
+    "업무 흐름 보기",
+    "접기",
+    'isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2"',
+    'isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto"',
+    "showClosedToggle && !isWordRetestWorkspace",
+    "!isWordRetestWorkspace && (",
+    '<span className="sm:hidden">추가</span>',
     "min-w-[720px]",
     "h-10 w-[108px]",
     "현재 진행상태",
@@ -974,6 +996,16 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /미완료 보고를 저장하고 새 재시험을 추가했습니다/);
   assert.doesNotMatch(workspaceSource, /aria-label="단어 재시험 진행상태"/);
   assert.doesNotMatch(workspaceSource, /미응시 자동/);
+
+  const progressStepperSource = workspaceSource.slice(
+    workspaceSource.indexOf("function WordRetestProgressStepper"),
+    workspaceSource.indexOf("function WordRetestInlineScoreEditor"),
+  );
+  assert.ok(progressStepperSource.includes("aria-expanded={open}"));
+  assert.ok(
+    progressStepperSource.indexOf("업무 흐름 보기") < progressStepperSource.indexOf("<WordRetestFlowChart"),
+    "word retest workflow chart should stay behind the collapsible progress control",
+  );
 
   const wordRetestToolbarSource = workspaceSource.slice(
     workspaceSource.indexOf("{isWordRetestWorkspace && ("),

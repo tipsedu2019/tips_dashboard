@@ -3302,10 +3302,10 @@ function DateTimeField({
           align="start"
           sideOffset={6}
           collisionPadding={12}
-          className="z-[120] w-[min(42rem,calc(100vw-1rem))] overflow-hidden p-0"
+          className="z-[120] w-[min(42rem,calc(100vw-1rem))] max-h-[min(34rem,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain p-0"
         >
-          <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_14rem]">
-            <div className="border-b md:border-b-0 md:border-r">
+          <div className="grid gap-0 min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="border-b min-[380px]:border-b-0 min-[380px]:border-r">
               <div className="flex items-center justify-between border-b px-2 py-1.5">
                 <button
                   type="button"
@@ -3355,7 +3355,7 @@ function DateTimeField({
                 })}
               </div>
             </div>
-            <div className="grid max-h-72 gap-1 overflow-y-auto overscroll-contain p-2" onWheel={handleTimeListWheel}>
+            <div className="grid max-h-44 gap-1 overflow-y-auto overscroll-contain p-2 min-[380px]:max-h-[16.5rem] md:max-h-72" onWheel={handleTimeListWheel}>
               {WORD_RETEST_TIME_OPTIONS.map((time) => {
                 const selected = time === timeValue
                 return (
@@ -3375,8 +3375,8 @@ function DateTimeField({
               })}
             </div>
           </div>
-          <div className="grid border-t bg-muted/30 md:grid-cols-[minmax(0,1fr)_14rem]">
-            <div className="border-b p-2 md:border-b-0 md:border-r">
+          <div className="grid border-t bg-muted/30 min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="border-b p-2 min-[380px]:border-b-0 min-[380px]:border-r">
               <label htmlFor={manualDateInputId} className="sr-only">직접 날짜 입력</label>
               <Input
                 id={manualDateInputId}
@@ -5665,8 +5665,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       )}
 
       <div className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs">
-        <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
-	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : `${workspaceLabel} 보기`}>
+        <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
+	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
 	              ? WORD_RETEST_ROLE_TABS.map((tab) => {
 	                const roleCount = wordRetestRoleCounts[tab.key]
@@ -5741,31 +5741,46 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 </button>
               ))}
           </div>
-          <div className={isTodoWorkspace ? "flex shrink-0 flex-wrap items-center justify-end gap-2" : "flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"}>
+          <div className={isTodoWorkspace ? "flex shrink-0 flex-wrap items-center justify-end gap-2" : isWordRetestWorkspace ? "flex shrink-0 items-center justify-end gap-2" : "flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"}>
             {!isTodoWorkspace && !isWordRetestWorkspace && taskFocus !== "none" && (
               <Button type="button" variant="secondary" size="sm" onClick={() => syncView(view)}>
                 <X className="size-4" />
                 {TASK_FOCUS_LABELS[taskFocus]} 해제
               </Button>
             )}
-            {showClosedToggle && (
+            {showClosedToggle && !isWordRetestWorkspace && (
               <Button type="button" variant="outline" size="sm" aria-pressed={showClosed} onClick={() => setShowClosed((value) => !value)}>
                 <Check className="size-4" />
                 {showClosed ? "완료 숨김" : "완료 보기"}
               </Button>
             )}
-            <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading} aria-label="새로고침" className="size-8 px-0">
-              <RefreshCw className="size-4" />
-              <span className="sr-only">새로고침</span>
-            </Button>
+            {!isWordRetestWorkspace && (
+              <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading} aria-label="새로고침" className="size-8 px-0">
+                <RefreshCw className="size-4" />
+                <span className="sr-only">새로고침</span>
+              </Button>
+            )}
             {showToolbarCreate && (
               <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
                 <Plus className="size-4" />
-                {isTodoWorkspace ? "할 일 추가" : `${workspaceLabel} 추가`}
+                {isWordRetestWorkspace ? (
+                  <>
+                    <span className="sm:hidden">추가</span>
+                    <span className="hidden sm:inline">{workspaceLabel} 추가</span>
+                  </>
+                ) : isTodoWorkspace ? "할 일 추가" : `${workspaceLabel} 추가`}
               </Button>
             )}
           </div>
         </div>
+        {isWordRetestWorkspace && showClosedToggle && (
+          <div className="flex justify-end">
+            <Button type="button" variant="outline" size="sm" aria-pressed={showClosed} onClick={() => setShowClosed((value) => !value)}>
+              <Check className="size-4" />
+              {showClosed ? "완료 숨김" : "완료 보기"}
+            </Button>
+          </div>
+        )}
 
         {isTodoWorkspace && (
           <div className="grid gap-2">
@@ -6746,6 +6761,14 @@ function TypeSpecificFields({
     return textbookId || ""
   }
 
+  function findClassWordRetestTextbook(classItem: OpsClassOption) {
+    const textbookId = classItem.textbookIds.find((id) => {
+      const textbook = findTextbook(id)
+      return textbook ? isWordRetestTextbookOption(textbook) : false
+    })
+    return textbookId || ""
+  }
+
   function findClassBranch(classItem: OpsClassOption) {
     const roomText = `${classItem.room || ""} ${classItem.meta || ""}`
     if (roomText.includes("별관")) return "별관"
@@ -6847,9 +6870,10 @@ function TypeSpecificFields({
 
     updateForm("className", classItem.label)
     updateForm("subject", classItem.subject)
-    const textbookId = findClassPrimaryTextbook(classItem)
+    const shouldPreferWordRetestTextbook = form.type === "word_retest" || options.fillWordRetest
+    const textbookId = shouldPreferWordRetestTextbook ? findClassWordRetestTextbook(classItem) : findClassPrimaryTextbook(classItem)
     const primaryTextbook = textbookId ? findTextbook(textbookId) : undefined
-    const shouldUsePrimaryTextbook = Boolean(primaryTextbook && (form.type !== "word_retest" || isWordRetestTextbookOption(primaryTextbook)))
+    const shouldUsePrimaryTextbook = Boolean(primaryTextbook && (!shouldPreferWordRetestTextbook || isWordRetestTextbookOption(primaryTextbook)))
     if (textbookId && shouldUsePrimaryTextbook && !form.textbookId) selectTextbook(textbookId)
     if (options.fillRegistration) {
       updateRegistration("schoolGrade", registration.schoolGrade || classItem.grade)
@@ -7167,8 +7191,8 @@ function TypeSpecificFields({
           </div>
           {shouldShowManualField("wordRetestTextbook", form.textbookId, wordRetest.textbookName) && <TextField label="교재명" value={wordRetest.textbookName || ""} onChange={(value) => updateWordRetest("textbookName", value)} />}
           <div className="grid gap-3 md:grid-cols-2">
-            <TextField label="커트라인(맞은 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
             <TextField label="출제 개수" value={wordRetest.totalQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("totalQuestionCount", value)} />
+            <TextField label="커트라인(맞은 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
           </div>
           <TextField label="메모" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
         </div>
@@ -7733,14 +7757,31 @@ function WordRetestProgressStepper({
   wordRetest?: OpsTaskInput["wordRetest"]
 }) {
   const currentValue = String(value || "not_started").trim() || "not_started"
+  const [open, setOpen] = useState(false)
+  const statusLabel = getWordRetestStatusLabel(currentValue, taskStatus, wordRetest)
 
   return (
-    <div className="grid gap-2" aria-label="진행상태">
-      <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium text-muted-foreground">
-        <span>현재 진행상태</span>
-        <span>{getWordRetestStatusLabel(currentValue, taskStatus, wordRetest)}</span>
-      </div>
-      <WordRetestFlowChart currentValue={currentValue} taskStatus={taskStatus} wordRetest={wordRetest} />
+    <div className="overflow-hidden rounded-md border bg-background" aria-label="진행상태">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-muted/45"
+      >
+        <span className="min-w-0">
+          <span className="block text-xs font-medium text-muted-foreground">현재 진행상태</span>
+          <span className="block truncate text-sm font-semibold text-foreground">{statusLabel}</span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground">
+          {open ? "접기" : "업무 흐름 보기"}
+          <ChevronRight className={["size-4 transition-transform", open ? "rotate-90" : ""].filter(Boolean).join(" ")} aria-hidden />
+        </span>
+      </button>
+      {open && (
+        <div className="border-t p-2">
+          <WordRetestFlowChart currentValue={currentValue} taskStatus={taskStatus} wordRetest={wordRetest} />
+        </div>
+      )}
     </div>
   )
 }
