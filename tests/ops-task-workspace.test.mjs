@@ -821,8 +821,11 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'value ? "right-10" : "right-3"',
     "z-[120]",
     "max-h-[min(34rem,var(--radix-popover-content-available-height))]",
-    "min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem]",
-    "min-[380px]:max-h-[16.5rem]",
+    'side="bottom"',
+    "collisionPadding={12}",
+    "grid-cols-[minmax(0,1fr)_7.25rem]",
+    "max-h-[18.5rem]",
+    "md:max-h-[18.875rem]",
     "handleTimeListWheel",
     "target.scrollTop += event.deltaY",
     "sortWordRetestTasksByTestAt",
@@ -913,9 +916,9 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'label="상태" columnKey="status"',
     'label="담당선생님" columnKey="teacher"',
     'label="수업" columnKey="class"',
-    'label="맞은 개수" columnKey="score"',
     'label="출제 개수" columnKey="total"',
     'label="커트라인" columnKey="cutoff"',
+    'label="맞은 개수" columnKey="score"',
     'label="결과" columnKey="result"',
     "cursor-col-resize",
     "onPointerDown",
@@ -1040,6 +1043,26 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /aria-label="단어 재시험 진행상태"/);
   assert.doesNotMatch(workspaceSource, /미응시 자동/);
 
+  const wordRetestHeaderSource = workspaceSource.slice(
+    workspaceSource.indexOf('<WordRetestResizableHeaderCell label="상태"'),
+    workspaceSource.indexOf('<WordRetestResizableHeaderCell label="다음 액션"'),
+  );
+  assert.ok(
+    wordRetestHeaderSource.indexOf('label="출제 개수" columnKey="total"') <
+      wordRetestHeaderSource.indexOf('label="커트라인" columnKey="cutoff"'),
+    "desktop table should keep total questions before cutline",
+  );
+  assert.ok(
+    wordRetestHeaderSource.indexOf('label="커트라인" columnKey="cutoff"') <
+      wordRetestHeaderSource.indexOf('label="맞은 개수" columnKey="score"'),
+    "desktop table should place correct-count after cutline",
+  );
+  assert.ok(
+    wordRetestHeaderSource.indexOf('label="맞은 개수" columnKey="score"') <
+      wordRetestHeaderSource.indexOf('label="결과" columnKey="result"'),
+    "desktop table should place correct-count directly before result",
+  );
+
   const wordRetestActionSource = workspaceSource.slice(
     workspaceSource.indexOf("function getWordRetestPrimaryActions"),
     workspaceSource.indexOf("function shouldShowDetailStatusBadge"),
@@ -1053,6 +1076,16 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     workspaceSource.indexOf("memo(function WordRetestTaskRow"),
     workspaceSource.indexOf("function WordRetestRoleActionButton"),
   );
+  const desktopScoreOrder = ["출제 개수", "커트라인", "맞은 개수", "결과"];
+  const desktopScoreOrderIndexes = desktopScoreOrder.map((label) => wordRetestRowSource.indexOf(`>${label}</span>`));
+  assert.ok(desktopScoreOrderIndexes.every((index) => index > -1), "score result labels should be present in row source");
+  for (let index = 1; index < desktopScoreOrderIndexes.length; index += 1) {
+    assert.ok(
+      desktopScoreOrderIndexes[index - 1] < desktopScoreOrderIndexes[index],
+      `${desktopScoreOrder[index - 1]} should appear before ${desktopScoreOrder[index]} in desktop row order`,
+    );
+  }
+
   const mobileRowOrder = [
     ["진행상태", "order-1"],
     ["담당선생님", "order-2"],
@@ -1078,6 +1111,37 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
       `${label} should keep desktop order`,
     );
   }
+
+  const wordRetestDateTimeFieldSource = workspaceSource.slice(
+    workspaceSource.indexOf("function DateTimeField"),
+    workspaceSource.indexOf("function ReadonlyInfoField"),
+  );
+  const dateSelectSource = wordRetestDateTimeFieldSource.slice(
+    wordRetestDateTimeFieldSource.indexOf("function handleDateTimeDateSelect"),
+    wordRetestDateTimeFieldSource.indexOf("function handleDateTimeTimeSelect"),
+  );
+  const timeSelectSource = wordRetestDateTimeFieldSource.slice(
+    wordRetestDateTimeFieldSource.indexOf("function handleDateTimeTimeSelect"),
+    wordRetestDateTimeFieldSource.indexOf("function handleTimeListWheel"),
+  );
+  assert.doesNotMatch(wordRetestDateTimeFieldSource, /manualDateInputId|manualTimeInputId|applyManualDateTime/);
+  assert.doesNotMatch(wordRetestDateTimeFieldSource, /직접 날짜 입력|직접 시간 입력/);
+  assert.doesNotMatch(wordRetestDateTimeFieldSource, />\s*적용\s*</);
+  assert.doesNotMatch(wordRetestDateTimeFieldSource, /side="top"/);
+  assert.match(wordRetestDateTimeFieldSource, /side="bottom"/);
+  assert.match(wordRetestDateTimeFieldSource, /collisionPadding=\{12\}/);
+  assert.match(wordRetestDateTimeFieldSource, /grid-cols-\[minmax\(0,1fr\)_7\.25rem\]/);
+  assert.match(wordRetestDateTimeFieldSource, /max-h-\[18\.5rem\]/);
+  assert.match(wordRetestDateTimeFieldSource, /md:max-h-\[18\.875rem\]/);
+  assert.doesNotMatch(wordRetestDateTimeFieldSource, /self-start|md:max-h-56|max-h-\[15\.5rem\]/);
+  assert.match(wordRetestDateTimeFieldSource, /const timeListRef = useRef<HTMLDivElement>\(null\)/);
+  assert.match(wordRetestDateTimeFieldSource, /selectedButton\.offsetTop/);
+  assert.match(wordRetestDateTimeFieldSource, /const maxScrollTop = Math\.max\(0, list\.scrollHeight - list\.clientHeight\)/);
+  assert.match(wordRetestDateTimeFieldSource, /list\.scrollTop = Math\.min\(maxScrollTop, Math\.max\(0, nextScrollTop\)\)/);
+  assert.match(wordRetestDateTimeFieldSource, /data-selected=\{selected \? "true" : undefined\}/);
+  assert.doesNotMatch(wordRetestDateTimeFieldSource, /min-\[380px\]:grid-cols/);
+  assert.match(dateSelectSource, /setDateTimeOpen\(false\)/);
+  assert.match(timeSelectSource, /setDateTimeOpen\(false\)/);
 
   const progressStepperSource = workspaceSource.slice(
     workspaceSource.indexOf("function WordRetestProgressStepper"),

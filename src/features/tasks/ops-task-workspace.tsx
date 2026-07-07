@@ -95,7 +95,7 @@ type WordRetestScoreDraft = {
   secondScore: string
   thirdScore: string
 }
-type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "score" | "total" | "cutoff" | "result" | "action"
+type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "total" | "cutoff" | "score" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
   kind?: "word_retest_retry"
@@ -167,9 +167,9 @@ const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> 
   student: 108,
   textbook: 220,
   unit: 108,
-  score: 248,
-  cutoff: 86,
   total: 96,
+  cutoff: 86,
+  score: 248,
   result: 132,
   action: 108,
 }
@@ -182,9 +182,9 @@ const WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS: Record<WordRetestTableColumnKey, numb
   student: 88,
   textbook: 150,
   unit: 88,
-  score: 210,
-  cutoff: 78,
   total: 88,
+  cutoff: 78,
+  score: 210,
   result: 116,
   action: 92,
 }
@@ -1154,9 +1154,9 @@ function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey,
     widths.student,
     widths.textbook,
     widths.unit,
-    widths.score,
     widths.total,
     widths.cutoff,
+    widths.score,
     widths.result,
     widths.action,
   ].map((width) => `${width}px`).join(" ")
@@ -3202,62 +3202,52 @@ function DateTimeField({
 }) {
   const fieldId = useId()
   const popoverId = useId()
-  const manualDateInputId = useId()
-  const manualTimeInputId = useId()
   const dateValue = dateTimeDateInputValue(value)
   const timeValue = dateTimeTimeInputValue(value)
   const [dateTimeOpen, setDateTimeOpen] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(dateValue))
-  const [manualDate, setManualDate] = useState(dateValue)
-  const [manualTime, setManualTime] = useState(timeValue || "09:00")
+  const [draftDate, setDraftDate] = useState(dateValue)
+  const [draftTime, setDraftTime] = useState(timeValue)
+  const timeListRef = useRef<HTMLDivElement>(null)
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
+  const selectedDate = draftDate || dateValue
+  const selectedTime = draftTime || timeValue
   const buttonText = dateValue ? `${dateValue} ${timeValue ? formatTimeLabel(timeValue) : "--:--"}` : "연도. 월. 일.  --:--"
+
+  useEffect(() => {
+    if (!dateTimeOpen) return
+    const list = timeListRef.current
+    if (!list) return
+    const selectedButton = list.querySelector<HTMLButtonElement>("[data-selected='true']")
+    if (!selectedButton) return
+    const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight)
+    const nextScrollTop = selectedButton.offsetTop - (list.clientHeight - selectedButton.clientHeight) / 2
+    list.scrollTop = Math.min(maxScrollTop, Math.max(0, nextScrollTop))
+  }, [dateTimeOpen, selectedTime])
 
   function syncDraftValues() {
     setCalendarMonth(getCalendarMonthDate(dateValue))
-    setManualDate(dateValue)
-    setManualTime(timeValue || "09:00")
+    setDraftDate(dateValue)
+    setDraftTime(timeValue)
   }
 
   function handleDateTimeDateSelect(nextDate: string) {
-    const nextTime = timeValue || manualTime || "09:00"
-    onChange(buildLocalDateTimeValue(nextDate, nextTime))
-    setManualDate(nextDate)
+    const nextTime = draftTime || timeValue
+    setDraftDate(nextDate)
     setCalendarMonth(getCalendarMonthDate(nextDate))
+    if (!nextTime) return
+    onChange(buildLocalDateTimeValue(nextDate, nextTime))
+    setDateTimeOpen(false)
   }
 
   function handleDateTimeTimeSelect(nextTime: string) {
     const normalized = normalizeTimeInput(nextTime)
     if (!normalized) return
-    const nextDate = dateValue || manualDate || toDateKey(new Date())
+    const nextDate = draftDate || dateValue
+    setDraftTime(normalized)
+    if (!nextDate) return
     onChange(buildLocalDateTimeValue(nextDate, normalized))
-    setManualDate(nextDate)
-    setManualTime(normalized)
-  }
-
-  function applyManualDateTime() {
-    const nextDate = toDateKey(manualDate)
-    const nextTime = normalizeTimeInput(manualTime)
-    if (!nextDate) {
-      onChange("")
-      setDateTimeOpen(false)
-      return
-    }
-    onChange(buildLocalDateTimeValue(nextDate, nextTime || "09:00"))
-    setCalendarMonth(getCalendarMonthDate(nextDate))
     setDateTimeOpen(false)
-  }
-
-  function handleManualDateTimeKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault()
-      setDateTimeOpen(false)
-      syncDraftValues()
-      return
-    }
-    if (event.key !== "Enter") return
-    event.preventDefault()
-    applyManualDateTime()
   }
 
   function handleTimeListWheel(event: WheelEvent<HTMLDivElement>) {
@@ -3305,8 +3295,8 @@ function DateTimeField({
               onClick={(event) => {
                 event.stopPropagation()
                 onChange("")
-                setManualDate("")
-                setManualTime("09:00")
+                setDraftDate("")
+                setDraftTime("")
               }}
               className="absolute right-2 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
@@ -3321,45 +3311,43 @@ function DateTimeField({
           role="dialog"
           aria-labelledby={fieldId}
           align="start"
+          side="bottom"
           sideOffset={6}
           collisionPadding={12}
           disablePortal
-          style={{
-            ...TOUCH_SCROLL_AREA_STYLE,
-            maxHeight: "min(30rem, var(--radix-popover-content-available-height), calc(100vh - 4rem))",
-          }}
+          style={TOUCH_SCROLL_AREA_STYLE}
           onTouchMove={stopTouchScrollPropagation}
-          className="z-[120] w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto overscroll-contain p-0"
+          className="z-[120] max-h-[min(18.5rem,var(--radix-popover-content-available-height))] w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto overscroll-contain p-0 md:max-h-[min(34rem,var(--radix-popover-content-available-height))] md:w-[min(42rem,calc(100vw-2rem))]"
         >
-          <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
-            <div className="border-b sm:border-b-0 sm:border-r">
-              <div className="flex items-center justify-between border-b px-2 py-1.5">
+          <div className="grid grid-cols-[minmax(0,1fr)_7.25rem] gap-0 md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="border-r">
+              <div className="flex items-center justify-between border-b px-1.5 py-1 min-[390px]:px-2 min-[390px]:py-1.5">
                 <button
                   type="button"
                   aria-label="이전 달"
                   onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
-                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground min-[390px]:size-8"
                 >
                   <ChevronLeft className="size-4" />
                 </button>
-                <span className="text-sm font-semibold">{getCalendarMonthLabel(calendarMonth)}</span>
+                <span className="text-xs font-semibold min-[390px]:text-sm">{getCalendarMonthLabel(calendarMonth)}</span>
                 <button
                   type="button"
                   aria-label="다음 달"
                   onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
-                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground min-[390px]:size-8"
                 >
                   <ChevronRight className="size-4" />
                 </button>
               </div>
-              <div role="grid" aria-label={`${label} 달력`} className="grid grid-cols-7 gap-1 p-2">
+              <div role="grid" aria-label={`${label} 달력`} className="grid grid-cols-7 gap-0.5 p-1.5 min-[390px]:gap-1 min-[390px]:p-2">
                 {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
-                  <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
+                  <div key={weekday} role="columnheader" className="grid h-5 place-items-center text-[10px] font-medium text-muted-foreground min-[390px]:h-6 min-[390px]:text-[11px]">
                     {weekday}
                   </div>
                 ))}
                 {calendarCells.map((cell) => {
-                  const selected = cell.dateKey === dateValue
+                  const selected = cell.dateKey === selectedDate
                   return (
                     <button
                       key={cell.dateKey}
@@ -3369,7 +3357,7 @@ function DateTimeField({
                       aria-label={`${cell.dateKey} 선택`}
                       onClick={() => handleDateTimeDateSelect(cell.dateKey)}
                       className={[
-                        "grid h-8 min-w-0 place-items-center rounded-md text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                        "grid h-7 min-w-0 place-items-center rounded-md text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40 min-[390px]:h-8 min-[390px]:text-sm",
                         selected ? "bg-primary text-primary-foreground shadow-xs" : "",
                         !selected && cell.isToday ? "border border-primary/50 text-primary" : "",
                         !selected && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
@@ -3383,21 +3371,23 @@ function DateTimeField({
               </div>
             </div>
             <div
-              className="grid max-h-44 gap-1 overflow-y-auto overscroll-contain p-2 sm:max-h-[16.5rem] md:max-h-56"
+              ref={timeListRef}
+              className="grid max-h-[18.5rem] gap-0.5 overflow-y-auto overscroll-contain p-1.5 md:max-h-[18.875rem] md:gap-1 md:p-2"
               style={TOUCH_SCROLL_AREA_STYLE}
               onWheel={handleTimeListWheel}
               onTouchMove={stopTouchScrollPropagation}
             >
               {WORD_RETEST_TIME_OPTIONS.map((time) => {
-                const selected = time === timeValue
+                const selected = time === selectedTime
                 return (
                   <button
                     key={time}
                     type="button"
                     aria-pressed={selected}
+                    data-selected={selected ? "true" : undefined}
                     onClick={() => handleDateTimeTimeSelect(time)}
                     className={[
-                      "rounded-md px-2 py-1.5 text-left text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                      "rounded-md px-1.5 py-1 text-left text-xs font-medium transition focus-visible:ring-2 focus-visible:ring-ring/40 min-[390px]:px-2 min-[390px]:py-1.5 min-[390px]:text-sm",
                       selected ? "bg-primary text-primary-foreground shadow-xs" : "text-foreground hover:bg-muted",
                     ].join(" ")}
                   >
@@ -3405,37 +3395,6 @@ function DateTimeField({
                   </button>
                 )
               })}
-            </div>
-          </div>
-          <div className="grid border-t bg-muted/30 sm:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
-            <div className="border-b p-2 sm:border-b-0 sm:border-r">
-              <label htmlFor={manualDateInputId} className="sr-only">직접 날짜 입력</label>
-              <Input
-                id={manualDateInputId}
-                type="text"
-                inputMode="numeric"
-                value={manualDate}
-                placeholder="YYYY-MM-DD"
-                className="h-8 min-w-0"
-                onChange={(event) => setManualDate(event.target.value)}
-                onKeyDown={handleManualDateTimeKeyDown}
-              />
-            </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 p-2">
-              <label htmlFor={manualTimeInputId} className="sr-only">직접 시간 입력</label>
-              <Input
-                id={manualTimeInputId}
-                type="text"
-                inputMode="numeric"
-                value={manualTime}
-                placeholder="HH:MM"
-                className="h-8 min-w-0"
-                onChange={(event) => setManualTime(event.target.value)}
-                onKeyDown={handleManualDateTimeKeyDown}
-              />
-              <Button type="button" variant="outline" size="sm" onClick={applyManualDateTime} className="h-8 shrink-0 px-2.5">
-                적용
-              </Button>
             </div>
           </div>
         </PopoverContent>
@@ -8256,9 +8215,9 @@ function WordRetestTaskList({
         <WordRetestResizableHeaderCell label="학생" columnKey="student" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="교재" columnKey="textbook" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="시험범위" columnKey="unit" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="맞은 개수" columnKey="score" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="출제 개수" columnKey="total" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="커트라인" columnKey="cutoff" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="맞은 개수" columnKey="score" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="결과" columnKey="result" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="다음 액션" columnKey="action" align="right" onResizeStart={startColumnResize} />
       </div>
@@ -8427,6 +8386,14 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
         <span className="mr-2 text-xs text-muted-foreground md:hidden">시험범위</span>
         {unitLabel}
       </span>
+      <span className="order-9 min-w-0 font-medium md:order-none">
+        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">출제 개수</span>
+        {wordRetest.totalQuestionCount || "-"}
+      </span>
+      <span className="order-10 min-w-0 font-medium md:order-none">
+        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
+        {wordRetest.cutoffQuestionCount || "-"}
+      </span>
       <span className="order-11 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">맞은 개수</span>
         <WordRetestInlineScoreEditor
@@ -8436,14 +8403,6 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
           onDraftChange={onScoreDraftChange}
           onSave={onScoreSave}
         />
-      </span>
-      <span className="order-9 min-w-0 font-medium md:order-none">
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">출제 개수</span>
-        {wordRetest.totalQuestionCount || "-"}
-      </span>
-      <span className="order-10 min-w-0 font-medium md:order-none">
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
-        {wordRetest.cutoffQuestionCount || "-"}
       </span>
       <span className="order-12 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">결과</span>
