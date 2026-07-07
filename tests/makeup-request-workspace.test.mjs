@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 
 function readOptionalSource(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -25,6 +25,10 @@ const pushClientSource = readOptionalSource("src/lib/dashboard-push-client.ts");
 const pushSubscriptionsRouteSource = readOptionalSource("src/app/api/push-subscriptions/route.ts");
 const webPushRouteSource = readOptionalSource("src/app/api/web-push/route.ts");
 const notificationPopoverSource = readFileSync("src/components/dashboard-notification-popover.tsx", "utf8");
+const allMigrationSource = readdirSync("supabase/migrations")
+  .filter((name) => name.endsWith(".sql"))
+  .map((name) => readFileSync(`supabase/migrations/${name}`, "utf8"))
+  .join("\n");
 
 test("makeup request route is exposed in admin navigation and quick search", () => {
   assert.match(navigationSource, /title: "휴보강"/);
@@ -132,10 +136,10 @@ test("makeup workspace exposes notification controls cancellation and fixed subj
   assert.match(workspaceSource, /알림 설정/);
   assert.match(workspaceSource, /notificationDialogOpen/);
   assert.match(workspaceSource, /발송 현황/);
-  assert.match(serviceSource, /google_chat_math: "Google Chat · 수학팀"/);
-  assert.match(serviceSource, /google_chat_english: "Google Chat · 영어팀"/);
-  assert.doesNotMatch(serviceSource, /google_chat_math: "Google Chat · 수학"/);
-  assert.doesNotMatch(serviceSource, /google_chat_english: "Google Chat · 영어"/);
+  assert.match(serviceSource, /google_chat_math: "구글챗 · 수학팀"/);
+  assert.match(serviceSource, /google_chat_english: "구글챗 · 영어팀"/);
+  assert.doesNotMatch(serviceSource, /Google Chat/);
+  assert.doesNotMatch(workspaceSource, /Google Chat/);
   assert.match(workspaceSource, /function getNotificationDeliveryTargetLabel/);
   assert.match(workspaceSource, /delivery\.targetType === "google_chat"/);
   assert.match(workspaceSource, /getNotificationDeliveryTargetLabel\(delivery\)/);
@@ -225,6 +229,118 @@ test("makeup workspace exposes notification controls cancellation and fixed subj
   assert.doesNotMatch(serviceSource, /completed: "처리 완료"/);
 });
 
+test("makeup notification controls render a process by channel matrix", () => {
+  const notificationDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
+    workspaceSource.indexOf("<Dialog open={Boolean(finalCancelRequest)}"),
+  );
+  assert.match(workspaceSource, /const MAKEUP_NOTIFICATION_CHANNEL_ORDER[\s\S]*= \[/);
+  for (const channelKey of [
+    "dashboard_personal",
+    "dashboard_management",
+    "google_chat_executive",
+    "google_chat_admin",
+    "google_chat_english",
+    "google_chat_math",
+  ]) {
+    assert.match(workspaceSource, new RegExp(`"${channelKey}"`));
+  }
+  const notificationChannelOrderSource = workspaceSource.slice(
+    workspaceSource.indexOf("const MAKEUP_NOTIFICATION_CHANNEL_ORDER"),
+    workspaceSource.indexOf("const MAKEUP_NOTIFICATION_TABLE_GRID_STYLE"),
+  );
+  assert.ok(
+    notificationChannelOrderSource.indexOf('"google_chat_english"') < notificationChannelOrderSource.indexOf('"google_chat_math"'),
+    "english chat column should appear before math chat column",
+  );
+  assert.match(notificationDialogSource, /role="table"/);
+  assert.match(notificationDialogSource, /aria-label="휴보강 알림 설정 표"/);
+  assert.doesNotMatch(notificationDialogSource, /알림 제어/);
+  assert.doesNotMatch(notificationDialogSource, /읽기 전용/);
+  assert.match(notificationDialogSource, /role="columnheader"/);
+  assert.match(notificationDialogSource, /프로세스/);
+  assert.match(notificationDialogSource, /알림 위치/);
+  assert.match(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_ORDER\.map/);
+  assert.match(notificationDialogSource, /role="rowheader"/);
+  assert.match(notificationDialogSource, /role="cell"/);
+  assert.match(notificationDialogSource, /openNotificationTemplateEditor\(triggerKind, settings\)/);
+  assert.match(notificationDialogSource, /find\(\(item\) => item\.channel === channel\)/);
+  assert.match(notificationDialogSource, /setting\.enabled \? "켜짐" : "꺼짐"/);
+  assert.match(notificationDialogSource, /알림 \$\{setting\.enabled \? "끄기" : "켜기"\}/);
+  assert.doesNotMatch(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_LABELS\[channel\]\} 알림 내용 수정/);
+  assert.doesNotMatch(notificationDialogSource, /grid-cols-\[1fr_auto\]/);
+  assert.doesNotMatch(notificationDialogSource, /rounded-md border bg-muted\/15 p-3 md:grid-cols-\[120px_minmax\(0,1fr\)\]/);
+});
+
+test("makeup notification controls can preview and edit per-process content templates", () => {
+  const notificationDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
+    workspaceSource.indexOf("<Dialog open={Boolean(finalCancelRequest)}"),
+  );
+  assert.match(allMigrationSource, /title_template text not null default ''/);
+  assert.match(allMigrationSource, /body_template text not null default ''/);
+  assert.match(allMigrationSource, /notify pgrst, 'reload schema'/);
+  assert.match(serviceSource, /titleTemplate: text\(row\.title_template\)/);
+  assert.match(serviceSource, /bodyTemplate: text\(row\.body_template\)/);
+  assert.match(serviceSource, /function getDefaultMakeupNotificationTitleTemplate/);
+  assert.match(serviceSource, /function getDefaultMakeupNotificationBodyTemplate/);
+  assert.match(serviceSource, /function renderMakeupNotificationTemplate/);
+  assert.match(serviceSource, /function getNotificationTriggerTemplateSetting/);
+  assert.match(serviceSource, /export async function updateMakeupNotificationTriggerContent/);
+  assert.match(serviceSource, /MAKEUP_NOTIFICATION_CHANNELS\.map\(\(channel\) => \(\{/);
+  assert.match(serviceSource, /title_template: titleTemplate/);
+  assert.match(serviceSource, /body_template: bodyTemplate/);
+  assert.match(serviceSource, /renderMakeupNotificationTemplate\(templateSetting\?\.titleTemplate/);
+  assert.match(serviceSource, /renderMakeupNotificationTemplate\(templateSetting\?\.bodyTemplate/);
+  assert.match(workspaceSource, /updateMakeupNotificationTriggerContent/);
+  assert.match(workspaceSource, /selectedNotificationSetting/);
+  assert.match(workspaceSource, /notificationTemplateInput/);
+  assert.match(notificationDialogSource, /내용/);
+  assert.match(notificationDialogSource, /DialogTitle>알림 내용 수정/);
+  assert.match(notificationDialogSource, /Textarea/);
+  assert.match(notificationDialogSource, /미리보기/);
+  assert.match(notificationDialogSource, /저장/);
+  assert.match(notificationDialogSource, /사용 가능 변수/);
+  const notificationVariableSource = workspaceSource.slice(
+    workspaceSource.indexOf("const MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES"),
+    workspaceSource.indexOf("const hiddenOnCardColumnKeys"),
+  );
+  const tableColumnSource = workspaceSource.slice(
+    workspaceSource.indexOf("const MAKEUP_REQUEST_TABLE_COLUMNS"),
+    workspaceSource.indexOf("const hiddenOnCardColumnKeys"),
+  );
+  assert.match(notificationVariableSource, /"프로세스"/);
+  assert.match(notificationVariableSource, /MAKEUP_REQUEST_TABLE_COLUMNS/);
+  assert.match(notificationVariableSource, /\.map\(\(column\) => column\.label\)/);
+  assert.match(notificationVariableSource, /\.filter\(\(label\) => label !== "액션"\)/);
+  for (const variable of [
+    "상태",
+    "수업",
+    "과목",
+    "선생님",
+    "사유",
+    "휴강일",
+    "보강일시",
+    "보강 강의실",
+    "신청자",
+    "상신일시",
+    "보완요청일시",
+    "보완 사유",
+    "승인일시",
+    "승인 메모",
+    "반려일시",
+    "반려 사유",
+    "승인취소일시",
+    "승인취소 메모",
+    "결재자",
+  ]) {
+    assert.match(tableColumnSource, new RegExp(`label: "${variable}"`));
+  }
+  assert.match(serviceSource, /const roomSummary = buildMakeupNotificationRoomSummary\(request\)/);
+  assert.match(serviceSource, /"보강 강의실": roomSummary/);
+  assert.match(serviceSource, /"승인취소 메모": getMakeupNotificationEventNote\(request, \["approval_canceled", "completed_canceled"\]\)/);
+});
+
 test("makeup workspace keeps approval-canceled requests out of the active request tab", () => {
   assert.match(workspaceSource, /const MAKEUP_REQUEST_ACTIVE_STATUSES = \["approval_pending", "revision_requested"\]/);
   assert.match(workspaceSource, /const MAKEUP_REQUEST_CLOSED_STATUSES = \["completed", "rejected", "canceled"\]/);
@@ -234,6 +350,24 @@ test("makeup workspace keeps approval-canceled requests out of the active reques
   assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, view, currentUserId\)/);
   assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, "mine", currentUserId\)\.length/);
   assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, "closed", currentUserId\)\.length/);
+});
+
+test("makeup workspace lets only operators delete closed request rows", () => {
+  assert.match(workspaceSource, /const \{ user, role, isAdmin, loading: authLoading \} = useAuth\(\)/);
+  assert.match(workspaceSource, /const canForceDeleteClosedRequests = isAdmin/);
+  assert.match(workspaceSource, /deleteMakeupRequest\(request\.id, currentUserId\)/);
+  assert.match(workspaceSource, /onForceDelete=\{handleForceDeleteRequest\}/);
+  assert.match(workspaceSource, /canForceDelete=\{canForceDeleteClosedRequests\}/);
+  assert.match(workspaceSource, /MAKEUP_REQUEST_CLOSED_STATUSES\.includes\(request\.status\)/);
+  assert.match(workspaceSource, /Trash2/);
+  assert.match(serviceSource, /export async function deleteMakeupRequest\(requestId: string, actorId: string\)/);
+  assert.match(serviceSource, /actor\?\.role !== "admin"/);
+  assert.match(serviceSource, /\.from\("makeup_requests"\)\.delete\(\)\.eq\("id", id\)\.select\("id"\)/);
+  assert.match(allMigrationSource, /grant select, insert, update, delete on public\.makeup_requests to authenticated/);
+  assert.match(allMigrationSource, /create policy makeup_requests_delete_operator_closed/);
+  assert.match(allMigrationSource, /for delete\s+to authenticated[\s\S]*public\.current_dashboard_role\(\) = 'admin'/);
+  assert.match(allMigrationSource, /status in \('completed', 'rejected', 'canceled'\)/);
+  assert.doesNotMatch(allMigrationSource, /makeup_requests_delete_operator_closed[\s\S]{0,600}current_dashboard_role\(\) = 'staff'/);
 });
 
 test("makeup workspace filters table rows by subject teacher class and period", () => {

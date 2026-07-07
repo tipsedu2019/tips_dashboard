@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowDown, ArrowUp, Bell, Check, ChevronsUpDown, Filter, MessageSquare, Plus, RotateCcw, Send, Settings, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, Check, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Trash2, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -45,14 +45,17 @@ import {
   approveMakeupRequest,
   cancelCompletedMakeupRequest,
   createMakeupRequest,
+  deleteMakeupRequest,
   getMakeupNotificationTriggerLabel,
   loadMakeupRequestWorkspaceData,
   MAKEUP_NOTIFICATION_CHANNEL_LABELS,
   MAKEUP_NOTIFICATION_TRIGGER_LABELS,
   rejectMakeupRequest,
+  renderMakeupNotificationTemplate,
   requestMakeupRequestRevision,
   resubmitMakeupRequest,
   toggleMakeupNotificationSetting,
+  updateMakeupNotificationTriggerContent,
   type MakeupClassOption,
   type MakeupNotificationDelivery,
   type MakeupNotificationSetting,
@@ -101,6 +104,53 @@ const NOTIFICATION_DELIVERY_STATUS_LABELS: Record<string, string> = {
   failed: "실패",
   disabled: "꺼짐",
   deduped: "중복 차단",
+}
+
+const MAKEUP_NOTIFICATION_CHANNEL_ORDER: Array<MakeupNotificationSetting["channel"]> = [
+  "dashboard_personal",
+  "dashboard_management",
+  "google_chat_executive",
+  "google_chat_admin",
+  "google_chat_english",
+  "google_chat_math",
+]
+
+const MAKEUP_NOTIFICATION_TABLE_GRID_STYLE: CSSProperties = {
+  gridTemplateColumns: `minmax(160px, 0.95fr) repeat(${MAKEUP_NOTIFICATION_CHANNEL_ORDER.length}, minmax(118px, 1fr))`,
+}
+
+const EMPTY_NOTIFICATION_TEMPLATE_INPUT = {
+  titleTemplate: "",
+  bodyTemplate: "",
+}
+
+const MAKEUP_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> = {
+  프로세스: "신청 제출",
+  상태: "결재자 승인 대기",
+  수업: "대기고1A",
+  과목: "영어",
+  선생님: "강부희",
+  사유: "개인 일정",
+  휴강일: "2026-07-07",
+  보강일시: "2026-07-08 10:00 - 2026-07-08 12:00",
+  "보강 강의실": "별관 3강",
+  보강강의실: "별관 3강",
+  신청자: "임현준",
+  상신일시: "2026-07-06 12:03",
+  보완요청일시: "-",
+  "보완 사유": "-",
+  승인일시: "2026-07-06 12:06",
+  "승인 메모": "-",
+  반려일시: "-",
+  "반려 사유": "-",
+  승인취소일시: "2026-07-06 12:44",
+  "승인취소 메모": "-",
+  결재자: "강부희",
+}
+
+function getNotificationTemplateSetting(triggerKind: MakeupNotificationSetting["triggerKind"], settings: MakeupNotificationSetting[]) {
+  const triggerSettings = settings.filter((item) => item.triggerKind === triggerKind)
+  return triggerSettings.find((item) => item.channel === "dashboard_personal") || triggerSettings[0] || null
 }
 
 function getNotificationDeliveryTargetLabel(delivery: MakeupNotificationDelivery) {
@@ -339,6 +389,13 @@ const MAKEUP_REQUEST_TABLE_COLUMNS: Array<{
   { columnKey: "action", label: "액션", width: 230, minWidth: 180, align: "right" },
 ]
 
+const MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES = [
+  "프로세스",
+  ...MAKEUP_REQUEST_TABLE_COLUMNS
+    .map((column) => column.label)
+    .filter((label) => label !== "액션"),
+]
+
 const hiddenOnCardColumnKeys = new Set<MakeupRequestTableColumnKey>(["className", "subject", "teacher"])
 const MAKEUP_REQUEST_CARD_COLUMNS: Array<{ columnKey: MakeupRequestCardColumnKey; label: string }> = [
   { columnKey: "reason", label: "사유" },
@@ -484,6 +541,8 @@ type MakeupRequestActionControlsProps = {
   onRequestRevision: (request: MakeupRequest, note: string) => void
   onReject: (request: MakeupRequest, note: string) => void
   onFinalCancel: (request: MakeupRequest) => void
+  canForceDelete: boolean
+  onForceDelete: (request: MakeupRequest) => void
   align?: "start" | "end"
 }
 
@@ -497,14 +556,17 @@ function MakeupRequestActionControls({
   onRequestRevision,
   onReject,
   onFinalCancel,
+  canForceDelete,
+  onForceDelete,
   align = "end",
 }: MakeupRequestActionControlsProps) {
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
   const canRevise = request.status === "revision_requested" && request.requesterId === currentUserId
   const canApprove = request.status === "approval_pending" && request.approverProfileId === currentUserId
   const canCancelApproval = request.status === "completed" && request.approverProfileId === currentUserId
+  const canForceDeleteRequest = canForceDelete && MAKEUP_REQUEST_CLOSED_STATUSES.includes(request.status)
 
-  if (!canRevise && !canApprove && !canCancelApproval) return null
+  if (!canRevise && !canApprove && !canCancelApproval && !canForceDeleteRequest) return null
 
   return (
     <div className={["flex flex-wrap gap-1.5", align === "end" ? "justify-end" : "justify-start"].join(" ")}>
@@ -550,6 +612,12 @@ function MakeupRequestActionControls({
           승인 취소
         </Button>
       ) : null}
+      {canForceDeleteRequest ? (
+        <Button type="button" size="sm" variant="destructive" disabled={saving} onClick={() => onForceDelete(request)}>
+          <Trash2 className="size-4" aria-hidden="true" />
+          삭제
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -564,6 +632,8 @@ function MakeupRequestDetailCard({
   onRequestRevision,
   onReject,
   onFinalCancel,
+  canForceDelete,
+  onForceDelete,
   onOpenDetail,
   variant = "full",
 }: MakeupRequestActionControlsProps & {
@@ -629,6 +699,8 @@ function MakeupRequestDetailCard({
           onRequestRevision={onRequestRevision}
           onReject={onReject}
           onFinalCancel={onFinalCancel}
+          canForceDelete={canForceDelete}
+          onForceDelete={onForceDelete}
           align="start"
         />
       </div>
@@ -648,6 +720,8 @@ function MakeupRequestCardList({
   onRequestRevision,
   onReject,
   onFinalCancel,
+  canForceDelete,
+  onForceDelete,
 }: Omit<MakeupRequestActionControlsProps, "request" | "align"> & {
   requests: MakeupRequest[]
   loading: boolean
@@ -688,6 +762,8 @@ function MakeupRequestCardList({
             onRequestRevision={onRequestRevision}
             onReject={onReject}
             onFinalCancel={onFinalCancel}
+            canForceDelete={canForceDelete}
+            onForceDelete={onForceDelete}
             variant="compact"
           />
         </div>
@@ -891,6 +967,8 @@ function MakeupRequestDataTable({
   onRequestRevision,
   onReject,
   onFinalCancel,
+  canForceDelete,
+  onForceDelete,
   onOpenDetail,
 }: {
   requests: MakeupRequest[]
@@ -903,6 +981,8 @@ function MakeupRequestDataTable({
   onRequestRevision: (request: MakeupRequest, note: string) => void
   onReject: (request: MakeupRequest, note: string) => void
   onFinalCancel: (request: MakeupRequest) => void
+  canForceDelete: boolean
+  onForceDelete: (request: MakeupRequest) => void
   onOpenDetail: (request: MakeupRequest) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<MakeupRequestTableColumnKey, number>>(MAKEUP_REQUEST_TABLE_COLUMN_WIDTHS)
@@ -1124,6 +1204,8 @@ function MakeupRequestDataTable({
                             onRequestRevision={onRequestRevision}
                             onReject={onReject}
                             onFinalCancel={onFinalCancel}
+                            canForceDelete={canForceDelete}
+                            onForceDelete={onForceDelete}
                           />
                         </MakeupRequestDataCell>
                       )
@@ -1155,6 +1237,8 @@ function MakeupRequestDataTable({
         onRequestRevision={onRequestRevision}
         onReject={onReject}
         onFinalCancel={onFinalCancel}
+        canForceDelete={canForceDelete}
+        onForceDelete={onForceDelete}
       />
     </div>
   )
@@ -1255,7 +1339,7 @@ function hasSlotRoomCollision(
 }
 
 export function MakeupRequestWorkspace() {
-  const { user, role, loading: authLoading } = useAuth()
+  const { user, role, isAdmin, loading: authLoading } = useAuth()
   const [view, setView] = useState<MakeupRequestView>("mine")
   const [data, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
@@ -1279,12 +1363,15 @@ export function MakeupRequestWorkspace() {
   const [finalCancelRequest, setFinalCancelRequest] = useState<MakeupRequest | null>(null)
   const [finalCancelNote, setFinalCancelNote] = useState("")
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false)
+  const [selectedNotificationSetting, setSelectedNotificationSetting] = useState<MakeupNotificationSetting | null>(null)
+  const [notificationTemplateInput, setNotificationTemplateInput] = useState(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
 
   const currentUserId = user?.id || ""
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
   const isManager = canUserManage(role)
+  const canForceDeleteClosedRequests = isAdmin
   const detailRequest = useMemo(() => (
     selectedDetailRequest
       ? data.requests.find((request) => request.id === selectedDetailRequest.id) || selectedDetailRequest
@@ -1369,6 +1456,11 @@ export function MakeupRequestWorkspace() {
     }
     return grouped
   }, [data.notificationSettings])
+
+  const notificationTemplatePreview = useMemo(() => ({
+    title: renderMakeupNotificationTemplate(notificationTemplateInput.titleTemplate, MAKEUP_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT),
+    body: renderMakeupNotificationTemplate(notificationTemplateInput.bodyTemplate, MAKEUP_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT),
+  }), [notificationTemplateInput])
 
   const patchInput = useCallback((patch: Partial<MakeupRequestInput>) => {
     setInput((current) => ({ ...current, ...patch }))
@@ -1554,6 +1646,22 @@ export function MakeupRequestWorkspace() {
     }
   }, [currentUserId, finalCancelNote, finalCancelRequest, runAction])
 
+  const handleForceDeleteRequest = useCallback(async (request: MakeupRequest) => {
+    if (!canForceDeleteClosedRequests || !MAKEUP_REQUEST_CLOSED_STATUSES.includes(request.status)) {
+      setError("운영자만 완료된 휴보강 이력을 삭제할 수 있습니다.")
+      return
+    }
+    const confirmed = window.confirm(`${request.className || "휴보강 신청"} 이력 삭제할까요?`)
+    if (!confirmed) return
+    const deleted = await runAction(
+      () => deleteMakeupRequest(request.id, currentUserId),
+      "휴보강 이력을 삭제했습니다.",
+    )
+    if (deleted) {
+      setSelectedDetailRequest(null)
+    }
+  }, [canForceDeleteClosedRequests, currentUserId, runAction])
+
   const handleToggleNotificationSetting = useCallback(async (setting: MakeupNotificationSetting) => {
     if (!isManager) {
       setError("관리 권한이 있는 계정만 알림 설정을 변경할 수 있습니다.")
@@ -1564,6 +1672,43 @@ export function MakeupRequestWorkspace() {
       "알림 설정을 저장했습니다.",
     )
   }, [currentUserId, isManager, runAction])
+
+  const openNotificationTemplateEditor = useCallback((triggerKind: MakeupNotificationSetting["triggerKind"], settings: MakeupNotificationSetting[]) => {
+    const setting = getNotificationTemplateSetting(triggerKind, settings)
+    if (!setting) return
+    setSelectedNotificationSetting(setting)
+    setNotificationTemplateInput({
+      titleTemplate: setting.titleTemplate,
+      bodyTemplate: setting.bodyTemplate,
+    })
+  }, [])
+
+  const closeNotificationTemplateEditor = useCallback(() => {
+    if (saving) return
+    setSelectedNotificationSetting(null)
+    setNotificationTemplateInput(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
+  }, [saving])
+
+  const handleSaveNotificationTemplate = useCallback(async () => {
+    if (!selectedNotificationSetting) return
+    if (!isManager) {
+      setError("관리 권한이 있는 계정만 알림 내용을 변경할 수 있습니다.")
+      return
+    }
+    const saved = await runAction(
+      () => updateMakeupNotificationTriggerContent(
+        selectedNotificationSetting.triggerKind,
+        notificationTemplateInput.titleTemplate,
+        notificationTemplateInput.bodyTemplate,
+        currentUserId,
+      ),
+      "알림 내용을 저장했습니다.",
+    )
+    if (saved) {
+      setSelectedNotificationSetting(null)
+      setNotificationTemplateInput(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
+    }
+  }, [currentUserId, isManager, notificationTemplateInput, runAction, selectedNotificationSetting])
 
   const handleEditForRevision = useCallback((request: MakeupRequest) => {
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
@@ -1838,6 +1983,8 @@ export function MakeupRequestWorkspace() {
             setFinalCancelRequest(request)
             setFinalCancelNote("")
           }}
+          canForceDelete={canForceDeleteClosedRequests}
+          onForceDelete={handleForceDeleteRequest}
           onOpenDetail={setSelectedDetailRequest}
         />
       </div>
@@ -1873,6 +2020,8 @@ export function MakeupRequestWorkspace() {
                 setFinalCancelRequest(request)
                 setFinalCancelNote("")
               }}
+              canForceDelete={canForceDeleteClosedRequests}
+              onForceDelete={handleForceDeleteRequest}
             />
           ) : null}
         </DialogContent>
@@ -1883,44 +2032,99 @@ export function MakeupRequestWorkspace() {
           <DialogHeader>
             <DialogTitle>알림 설정</DialogTitle>
             <DialogDescription>
-              알림/웹훅 트리거와 Google Chat 발송 현황을 확인합니다.
+              알림/웹훅 트리거와 구글챗 발송 현황을 확인합니다.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.8fr)]">
             <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 <div className="inline-flex items-center gap-2 text-sm font-medium">
                   <Bell className="size-4" aria-hidden="true" />
                   알림/웹훅
                 </div>
-                <Badge variant={isManager ? "outline" : "secondary"}>{isManager ? "알림 제어" : "읽기 전용"}</Badge>
               </div>
-              {(Object.entries(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as Array<[keyof typeof MAKEUP_NOTIFICATION_TRIGGER_LABELS, string]>).map(([triggerKind, triggerLabel]) => {
-                const settings = notificationSettingsByTrigger.get(triggerKind) || []
-                return (
-                  <div key={triggerKind} className="grid gap-2 rounded-md border bg-muted/15 p-3 md:grid-cols-[120px_minmax(0,1fr)]">
-                    <div className="text-sm font-medium">{triggerLabel}</div>
-                    <div className="flex min-w-0 flex-wrap gap-1.5">
-                      {settings.map((setting) => (
-                        <Button
-                          key={`${setting.triggerKind}-${setting.channel}`}
-                          type="button"
-                          variant={setting.enabled ? "default" : "outline"}
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          disabled={saving || !isManager}
-                          onClick={() => void handleToggleNotificationSetting(setting)}
-                        >
-                          {MAKEUP_NOTIFICATION_CHANNEL_LABELS[setting.channel]}
-                          <Badge variant={setting.enabled ? "secondary" : "outline"} className="ml-1 h-5 px-1">
-                            {setting.enabled ? "켜짐" : "꺼짐"}
-                          </Badge>
-                        </Button>
-                      ))}
+              <div className="overflow-x-auto rounded-md border" role="table" aria-label="휴보강 알림 설정 표">
+                <div className="min-w-[880px]">
+                  <div
+                    role="row"
+                    className="grid border-b bg-muted/40 text-xs font-medium text-muted-foreground"
+                    style={MAKEUP_NOTIFICATION_TABLE_GRID_STYLE}
+                  >
+                    <div role="columnheader" className="border-r px-3 py-2">
+                      프로세스
+                    </div>
+                    <div role="columnheader" className="col-span-6 px-3 py-2 text-center">
+                      알림 위치
                     </div>
                   </div>
-                )
-              })}
+                  <div
+                    role="row"
+                    className="grid border-b bg-muted/20 text-xs font-medium text-muted-foreground"
+                    style={MAKEUP_NOTIFICATION_TABLE_GRID_STYLE}
+                  >
+                    <div role="columnheader" className="border-r px-3 py-2" aria-label="프로세스" />
+                    {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => (
+                      <div key={channel} role="columnheader" className="border-r px-3 py-2 last:border-r-0">
+                        {MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]}
+                      </div>
+                    ))}
+                  </div>
+                  {(Object.entries(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as Array<[keyof typeof MAKEUP_NOTIFICATION_TRIGGER_LABELS, string]>).map(([triggerKind, triggerLabel]) => {
+                    const settings = notificationSettingsByTrigger.get(triggerKind) || []
+                    return (
+                      <div
+                        key={triggerKind}
+                        role="row"
+                        className="grid border-b last:border-b-0"
+                        style={MAKEUP_NOTIFICATION_TABLE_GRID_STYLE}
+                      >
+                        <div role="rowheader" className="border-r bg-muted/10 px-3 py-2 text-sm font-medium">
+                          <div className="flex min-w-0 items-center justify-between gap-2">
+                            <span className="truncate">{triggerLabel}</span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 shrink-0 px-2 text-xs"
+                              disabled={saving || !isManager || settings.length === 0}
+                              aria-label={`${triggerLabel} 알림 내용 수정`}
+                              onClick={() => openNotificationTemplateEditor(triggerKind, settings)}
+                            >
+                              <Pencil className="size-3.5" aria-hidden="true" />
+                              내용
+                            </Button>
+                          </div>
+                        </div>
+                        {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => {
+                          const setting = settings.find((item) => item.channel === channel)
+                          if (!setting) {
+                            return (
+                              <div key={`${triggerKind}-${channel}`} role="cell" className="border-r px-2 py-2 last:border-r-0">
+                                <span className="block rounded-md border border-dashed px-2 py-1.5 text-center text-xs text-muted-foreground">-</span>
+                              </div>
+                            )
+                          }
+                          return (
+                            <div key={`${setting.triggerKind}-${setting.channel}`} role="cell" className="border-r px-2 py-2 last:border-r-0">
+                              <Button
+                                type="button"
+                                variant={setting.enabled ? "default" : "outline"}
+                                size="sm"
+                                className="h-8 w-full justify-center px-2 text-xs"
+                                disabled={saving || !isManager}
+                                aria-label={`${triggerLabel} ${MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]} 알림 ${setting.enabled ? "끄기" : "켜기"}`}
+                                onClick={() => void handleToggleNotificationSetting(setting)}
+                              >
+                                {setting.enabled ? "켜짐" : "꺼짐"}
+                              </Button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
 
             <div className="min-w-0 rounded-md border">
@@ -1953,6 +2157,75 @@ export function MakeupRequestWorkspace() {
               </div>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedNotificationSetting)} onOpenChange={(open) => {
+        if (!open) closeNotificationTemplateEditor()
+      }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>알림 내용 수정</DialogTitle>
+            <DialogDescription>
+              {selectedNotificationSetting
+                ? getMakeupNotificationTriggerLabel(selectedNotificationSetting.triggerKind)
+                : "알림 내용"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="makeup-notification-title-template">제목</Label>
+              <Input
+                id="makeup-notification-title-template"
+                value={notificationTemplateInput.titleTemplate}
+                onChange={(event) => setNotificationTemplateInput((current) => ({
+                  ...current,
+                  titleTemplate: event.target.value,
+                }))}
+                placeholder="알림 제목"
+                disabled={saving || !isManager}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="makeup-notification-body-template">본문</Label>
+              <Textarea
+                id="makeup-notification-body-template"
+                value={notificationTemplateInput.bodyTemplate}
+                onChange={(event) => setNotificationTemplateInput((current) => ({
+                  ...current,
+                  bodyTemplate: event.target.value,
+                }))}
+                placeholder="알림 본문"
+                className="min-h-24"
+                disabled={saving || !isManager}
+              />
+            </div>
+            <div className="grid gap-2 rounded-md border bg-muted/20 p-3">
+              <div className="text-sm font-medium">미리보기</div>
+              <div className="grid gap-1 text-sm">
+                <div className="font-medium">{notificationTemplatePreview.title || "-"}</div>
+                <div className="whitespace-pre-wrap text-muted-foreground">{notificationTemplatePreview.body || "-"}</div>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <div className="text-xs font-medium text-muted-foreground">사용 가능 변수</div>
+              <div className="flex flex-wrap gap-1">
+                {MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES.map((variable) => (
+                  <Badge key={variable} variant="outline" className="font-mono">
+                    {`{${variable}}`}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeNotificationTemplateEditor} disabled={saving}>
+              취소
+            </Button>
+            <Button type="button" onClick={() => void handleSaveNotificationTemplate()} disabled={saving || !isManager}>
+              저장
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

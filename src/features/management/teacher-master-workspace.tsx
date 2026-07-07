@@ -87,6 +87,8 @@ const TEAM_ALIASES: Record<string, TeamOption> = {
   staff: "관리팀",
   관리: "관리팀",
   운영: "관리팀",
+  관리자: "관리팀",
+  운영자: "관리팀",
   관리팀: "관리팀",
   assistant: "조교팀",
   assist: "조교팀",
@@ -94,8 +96,8 @@ const TEAM_ALIASES: Record<string, TeamOption> = {
   조교팀: "조교팀",
 };
 const ROLE_OPTIONS = [
-  { value: "admin", label: "관리자" },
-  { value: "staff", label: "운영" },
+  { value: "admin", label: "운영자" },
+  { value: "staff", label: "관리자" },
   { value: "teacher", label: "선생님" },
   { value: "assistant", label: "조교" },
   { value: "viewer", label: "보기만" },

@@ -1,9 +1,13 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import test from "node:test"
 
 const workspaceSource = readFileSync("src/features/approvals/approval-workspace.tsx", "utf8")
 const serviceSource = readFileSync("src/features/approvals/approval-service.ts", "utf8")
+const migrationSource = readdirSync("supabase/migrations")
+  .filter((name) => name.endsWith(".sql"))
+  .map((name) => readFileSync(`supabase/migrations/${name}`, "utf8"))
+  .join("\n")
 
 test("monthly approval checklist supports done, pending, and not-applicable states", () => {
   assert.match(serviceSource, /state\?: "pending" \| "done" \| "na"/)
@@ -147,6 +151,23 @@ test("approval views separate authored documents from documents waiting for my a
 test("approval workspace loads independent datasets in parallel", () => {
   assert.match(serviceSource, /const \[profilesResult, templatesResult, requestResult\] = await Promise\.all\(\[/)
   assert.match(serviceSource, /\.from\("profiles"\)[\s\S]*\.from\("approval_templates"\)[\s\S]*\.from\("approval_requests"\)/)
+})
+
+test("approval workspace lets only operators delete closed documents", () => {
+  assert.match(workspaceSource, /const \{ user, canManageAll, isStaff, isAdmin \} = useAuth\(\)/)
+  assert.match(workspaceSource, /const canDeleteClosedApprovals = isAdmin/)
+  assert.match(workspaceSource, /function canDeleteApprovalRequest\(request: ApprovalRequest\)/)
+  assert.match(workspaceSource, /return canDeleteClosedApprovals && isClosedApproval\(request\.status\)/)
+  assert.match(workspaceSource, /deleteApprovalRequest\(request\.id\)/)
+  assert.match(workspaceSource, /onDelete=\{deleteApproval\}/)
+  assert.match(workspaceSource, /Trash2/)
+  assert.match(serviceSource, /export async function deleteApprovalRequest\(id: string\)/)
+  assert.match(serviceSource, /\.from\("approval_requests"\)\.delete\(\)\.eq\("id", requestId\)\.select\("id"\)/)
+  assert.match(migrationSource, /grant select, insert, update, delete on public\.approval_requests to authenticated/)
+  assert.match(migrationSource, /create policy approval_requests_delete_operator_closed/)
+  assert.match(migrationSource, /for delete\s+to authenticated[\s\S]*p\.role = 'admin'/)
+  assert.match(migrationSource, /status in \('approved', 'returned', 'canceled'\)/)
+  assert.doesNotMatch(migrationSource, /approval_requests_delete_operator_closed[\s\S]{0,600}p\.role = 'staff'/)
 })
 
 test("monthly approval forms compress legacy report templates into operational groups", () => {

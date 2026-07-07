@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
-import { Check, ClipboardCheck, FileCheck2, Paperclip, Pencil, RefreshCw, RotateCcw, Save, Send, X } from "lucide-react"
+import { Check, ClipboardCheck, FileCheck2, Paperclip, Pencil, RefreshCw, RotateCcw, Save, Send, Trash2, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ import { useAuth } from "@/providers/auth-provider"
 import {
   addApprovalComment,
   createMonthlyReportApproval,
+  deleteApprovalRequest,
   loadApprovalWorkspaceData,
   saveApprovalTemplate,
   updateApprovalStatus,
@@ -451,7 +452,7 @@ function approvalLineOptions(
 }
 
 export function ApprovalWorkspace() {
-  const { user, canManageAll, isStaff } = useAuth()
+  const { user, canManageAll, isStaff, isAdmin } = useAuth()
   const [data, setData] = useState<ApprovalWorkspaceData>({ schemaReady: true, requests: [], profiles: [], templates: [] })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -469,6 +470,7 @@ export function ApprovalWorkspace() {
   const [editingRequestId, setEditingRequestId] = useState("")
   const [editingRequestStatus, setEditingRequestStatus] = useState<ApprovalStatus>("draft")
   const canApprove = canManageAll || isStaff
+  const canDeleteClosedApprovals = isAdmin
   const userId = user?.id || ""
   const progress = checklistProgress(input.checklistItems)
   const draftAttachments = useMemo(() => attachmentDisplayRows(input.attachmentLinks), [input.attachmentLinks])
@@ -742,6 +744,26 @@ export function ApprovalWorkspace() {
       setMessage(`${request.title} · 댓글 추가`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "댓글을 저장하지 못했습니다.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function canDeleteApprovalRequest(request: ApprovalRequest) {
+    return canDeleteClosedApprovals && isClosedApproval(request.status)
+  }
+
+  const deleteApproval = async (request: ApprovalRequest) => {
+    if (!canDeleteApprovalRequest(request) || saving) return
+    const confirmed = window.confirm(`${request.title || "전자결재 문서"} 삭제할까요?`)
+    if (!confirmed) return
+    setSaving(true)
+    try {
+      await deleteApprovalRequest(request.id)
+      await reload()
+      setMessage(`${request.title} 삭제 완료`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "문서를 삭제하지 못했습니다.")
     } finally {
       setSaving(false)
     }
@@ -1056,9 +1078,11 @@ export function ApprovalWorkspace() {
                 canApprove={canApprove}
                 userId={userId}
                 saving={saving}
+                canDelete={canDeleteApprovalRequest(request)}
                 onEdit={editApproval}
                 onStatusChange={changeStatus}
                 onAddComment={addComment}
+                onDelete={deleteApproval}
               />
             ))}
           </div>
@@ -1113,17 +1137,21 @@ function ApprovalRequestRow({
   canApprove,
   userId,
   saving,
+  canDelete,
   onEdit,
   onStatusChange,
   onAddComment,
+  onDelete,
 }: {
   request: ApprovalRequest
   canApprove: boolean
   userId: string
   saving: boolean
+  canDelete: boolean
   onEdit: (request: ApprovalRequest) => void
   onStatusChange: (request: ApprovalRequest, status: ApprovalStatus) => void
   onAddComment: (request: ApprovalRequest, body: string) => void
+  onDelete: (request: ApprovalRequest) => void
 }) {
   const nextAction = nextApprovalAction(request.status, canApprove, request.requesterId === userId)
   const [commentBody, setCommentBody] = useState("")
@@ -1190,6 +1218,12 @@ function ApprovalRequestRow({
             <Button type="button" size="sm" variant="outline" onClick={() => onStatusChange(request, "returned")} disabled={saving}>
               <RotateCcw />
               반려
+            </Button>
+          )}
+          {canDelete && (
+            <Button type="button" size="sm" variant="destructive" onClick={() => onDelete(request)} disabled={saving}>
+              <Trash2 />
+              삭제
             </Button>
           )}
         </div>

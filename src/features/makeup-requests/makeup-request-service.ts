@@ -7,6 +7,7 @@ import {
   buildRoomAvailability,
   canTransitionMakeupRequest,
   getAllowedApproverNames,
+  MAKEUP_REQUEST_STATUS_LABELS,
   normalizeMakeupSlots,
   resolveMakeupApprovalGroup,
 } from "./makeup-request-model.js"
@@ -175,6 +176,8 @@ export type MakeupNotificationSetting = {
   triggerKind: MakeupNotificationTrigger
   channel: MakeupNotificationChannel
   enabled: boolean
+  titleTemplate: string
+  bodyTemplate: string
   updatedAt: string
 }
 
@@ -223,10 +226,10 @@ export const MAKEUP_NOTIFICATION_TRIGGER_LABELS: Record<ActiveMakeupNotification
 export const MAKEUP_NOTIFICATION_CHANNEL_LABELS: Record<MakeupNotificationChannel, string> = {
   dashboard_personal: "웹 알림 · 개인",
   dashboard_management: "웹 알림 · 관리팀",
-  google_chat_executive: "Google Chat · 경영팀",
-  google_chat_admin: "Google Chat · 관리팀",
-  google_chat_math: "Google Chat · 수학팀",
-  google_chat_english: "Google Chat · 영어팀",
+  google_chat_executive: "구글챗 · 경영팀",
+  google_chat_admin: "구글챗 · 관리팀",
+  google_chat_math: "구글챗 · 수학팀",
+  google_chat_english: "구글챗 · 영어팀",
 }
 
 const MAKEUP_NOTIFICATION_TRIGGERS = Object.keys(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as ActiveMakeupNotificationTrigger[]
@@ -235,6 +238,32 @@ const MAKEUP_NOTIFICATION_CHANNELS = Object.keys(MAKEUP_NOTIFICATION_CHANNEL_LAB
 export function getMakeupNotificationTriggerLabel(triggerKind: string) {
   if (triggerKind === "completed") return MAKEUP_NOTIFICATION_TRIGGER_LABELS.approved
   return MAKEUP_NOTIFICATION_TRIGGER_LABELS[triggerKind as ActiveMakeupNotificationTrigger] || triggerKind
+}
+
+const MAKEUP_NOTIFICATION_TITLE_TEMPLATES: Record<MakeupNotificationTrigger, string> = {
+  submitted: "휴보강 신청서가 올라왔습니다",
+  approved: "휴보강 신청서가 결재 승인되어 자동 처리되었습니다",
+  returned: "휴보강 신청서 보완 요청이 도착했습니다",
+  rejected: "휴보강 신청서가 반려되었습니다",
+  completed: "휴보강 신청서가 결재 승인되어 자동 처리되었습니다",
+  canceled: "휴보강 승인이 취소되었습니다",
+}
+
+const MAKEUP_NOTIFICATION_BODY_TEMPLATE = "{수업} · {휴강일} 휴강 / {보강일시} · {보강강의실} 보강"
+
+export function getDefaultMakeupNotificationTitleTemplate(triggerKind: MakeupNotificationTrigger) {
+  return MAKEUP_NOTIFICATION_TITLE_TEMPLATES[triggerKind] || "{프로세스}"
+}
+
+export function getDefaultMakeupNotificationBodyTemplate() {
+  return MAKEUP_NOTIFICATION_BODY_TEMPLATE
+}
+
+export function renderMakeupNotificationTemplate(template: string, context: Record<string, string>) {
+  return text(template).replace(/\{([^{}]+)\}/g, (match, key) => {
+    const value = context[text(key)]
+    return value === undefined ? match : value
+  })
 }
 
 function text(value: unknown) {
@@ -420,10 +449,13 @@ function mapEvent(row: Row, profilesById: Map<string, MakeupProfileOption>): Mak
 }
 
 function mapNotificationSetting(row: Row): MakeupNotificationSetting {
+  const triggerKind = text(row.trigger_kind) as MakeupNotificationTrigger
   return {
-    triggerKind: text(row.trigger_kind) as MakeupNotificationTrigger,
+    triggerKind,
     channel: text(row.channel) as MakeupNotificationChannel,
     enabled: row.enabled !== false,
+    titleTemplate: text(row.title_template) || getDefaultMakeupNotificationTitleTemplate(triggerKind),
+    bodyTemplate: text(row.body_template) || getDefaultMakeupNotificationBodyTemplate(),
     updatedAt: text(row.updated_at),
   }
 }
@@ -451,6 +483,8 @@ function buildDefaultNotificationSettings() {
       triggerKind,
       channel,
       enabled: true,
+      titleTemplate: getDefaultMakeupNotificationTitleTemplate(triggerKind),
+      bodyTemplate: getDefaultMakeupNotificationBodyTemplate(),
       updatedAt: "",
     }))
   ))
@@ -459,7 +493,16 @@ function buildDefaultNotificationSettings() {
 function mergeNotificationSettings(settings: MakeupNotificationSetting[]) {
   const settingMap = new Map(settings.map((item) => [`${item.triggerKind}:${item.channel}`, item]))
   return buildDefaultNotificationSettings().map((fallback) => (
-    settingMap.get(`${fallback.triggerKind}:${fallback.channel}`) || fallback
+    (() => {
+      const setting = settingMap.get(`${fallback.triggerKind}:${fallback.channel}`)
+      if (!setting) return fallback
+      return {
+        ...fallback,
+        ...setting,
+        titleTemplate: setting.titleTemplate || fallback.titleTemplate,
+        bodyTemplate: setting.bodyTemplate || fallback.bodyTemplate,
+      }
+    })()
   ))
 }
 
@@ -516,9 +559,110 @@ function getNotificationSetting(settings: MakeupNotificationSetting[], triggerKi
   return settings.find((item) => item.triggerKind === triggerKind && item.channel === channel)
 }
 
+function getNotificationTriggerTemplateSetting(settings: MakeupNotificationSetting[], triggerKind: MakeupNotificationTrigger) {
+  const triggerSettings = settings.filter((item) => item.triggerKind === triggerKind)
+  return MAKEUP_NOTIFICATION_CHANNELS
+    .map((channel) => triggerSettings.find((item) => item.channel === channel))
+    .find(Boolean) || null
+}
+
 function isNotificationChannelEnabled(settings: MakeupNotificationSetting[], triggerKind: MakeupNotificationTrigger, channel: MakeupNotificationChannel) {
   const setting = getNotificationSetting(settings, triggerKind, channel)
   return setting ? setting.enabled : true
+}
+
+function formatNotificationDateTime(value: string) {
+  if (!value) return ""
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  return match ? `${match[1]} ${match[2]}` : value
+}
+
+function buildMakeupNotificationRoomSummary(request: MakeupRequest) {
+  return request.makeupSlots.length > 0
+    ? request.makeupSlots.map((slot) => text(slot.classroom || request.makeupClassroom)).filter(Boolean).join(", ")
+    : request.makeupClassroom
+}
+
+function buildMakeupNotificationTimeSummary(request: MakeupRequest) {
+  const slots = request.makeupSlots.length > 0
+    ? request.makeupSlots
+    : [{ startAt: request.makeupStartAt, endAt: request.makeupEndAt }]
+  return slots
+    .map((slot) => {
+      const startAt = formatNotificationDateTime(text(slot.startAt))
+      const endAt = formatNotificationDateTime(text(slot.endAt))
+      if (startAt && endAt) return `${startAt} - ${endAt}`
+      return startAt || endAt
+    })
+    .filter(Boolean)
+    .join(", ")
+}
+
+function getMakeupNotificationStatusLabel(status: MakeupRequestStatus) {
+  return MAKEUP_REQUEST_STATUS_LABELS[status] || status
+}
+
+function getMakeupNotificationEvent(request: MakeupRequest, eventTypes: string[]) {
+  return request.events.find((event) => eventTypes.includes(event.eventType))
+}
+
+function getMakeupNotificationEventDateTime(request: MakeupRequest, eventTypes: string[], fallback = "") {
+  return formatNotificationDateTime(fallback || getMakeupNotificationEvent(request, eventTypes)?.createdAt || "") || "-"
+}
+
+function getMakeupNotificationEventNote(request: MakeupRequest, eventTypes: string[]) {
+  return getMakeupNotificationEvent(request, eventTypes)?.note || "-"
+}
+
+function buildMakeupNotificationTemplateContext(
+  request: MakeupRequest,
+  triggerKind: MakeupNotificationTrigger,
+  fallbackTitle: string,
+  fallbackBody: string,
+) {
+  const roomSummary = buildMakeupNotificationRoomSummary(request)
+  return {
+    프로세스: getMakeupNotificationTriggerLabel(triggerKind),
+    상태: getMakeupNotificationStatusLabel(request.status),
+    수업: request.className,
+    과목: request.subject,
+    선생님: request.teacherLabel,
+    사유: request.reason,
+    휴강일: request.cancelDate,
+    보강일시: buildMakeupNotificationTimeSummary(request),
+    "보강 강의실": roomSummary,
+    보강강의실: roomSummary,
+    신청자: request.requesterLabel,
+    상신일시: getMakeupNotificationEventDateTime(request, ["submitted", "resubmitted"], request.createdAt),
+    보완요청일시: getMakeupNotificationEventDateTime(request, ["revision_requested"]),
+    "보완 사유": request.returnedReason || "-",
+    승인일시: getMakeupNotificationEventDateTime(request, ["approved"], request.approvedAt),
+    "승인 메모": request.finalNote || "-",
+    반려일시: getMakeupNotificationEventDateTime(request, ["rejected"]),
+    "반려 사유": request.rejectedReason || "-",
+    승인취소일시: getMakeupNotificationEventDateTime(request, ["approval_canceled", "completed_canceled"], request.canceledAt),
+    "승인취소 메모": getMakeupNotificationEventNote(request, ["approval_canceled", "completed_canceled"]),
+    결재자: request.approverLabel,
+    제목: fallbackTitle,
+    본문: fallbackBody,
+  }
+}
+
+function renderMakeupNotificationContent(
+  settings: MakeupNotificationSetting[],
+  triggerKind: MakeupNotificationTrigger,
+  channel: MakeupNotificationChannel,
+  request: MakeupRequest,
+  fallbackTitle: string,
+  fallbackBody: string,
+) {
+  void channel
+  const templateSetting = getNotificationTriggerTemplateSetting(settings, triggerKind)
+  const context = buildMakeupNotificationTemplateContext(request, triggerKind, fallbackTitle, fallbackBody)
+  return {
+    title: renderMakeupNotificationTemplate(templateSetting?.titleTemplate || fallbackTitle, context),
+    body: renderMakeupNotificationTemplate(templateSetting?.bodyTemplate || fallbackBody, context),
+  }
 }
 
 async function recordMakeupRequestEvent(requestId: string, eventType: string, options: Partial<MakeupRequestEvent> = {}) {
@@ -733,7 +877,7 @@ async function createMonitoredDashboardNotification(input: {
 
 export async function sendGoogleChatNotification(channel: GoogleChatChannel, textBody: string, metadata: Row = {}) {
   if (!GOOGLE_CHAT_CHANNEL_ENV[channel]) {
-    return { ok: false, skipped: true, error: "알 수 없는 Google Chat 채널입니다." }
+    return { ok: false, skipped: true, error: "알 수 없는 구글챗 채널입니다." }
   }
 
   if (!supabase) {
@@ -769,7 +913,7 @@ export async function sendGoogleChatNotification(channel: GoogleChatChannel, tex
     return {
       ok: false,
       skipped: false,
-      error: error instanceof Error ? error.message : "Google Chat 알림 발송에 실패했습니다.",
+      error: error instanceof Error ? error.message : "구글챗 알림 발송에 실패했습니다.",
     }
   }
 }
@@ -777,19 +921,11 @@ export async function sendGoogleChatNotification(channel: GoogleChatChannel, tex
 async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificationTrigger, profiles: MakeupProfileOption[], actorProfileId = "") {
   const href = buildRequestHref(request.id)
   const managementProfileIds = getManagementProfileIds(profiles)
-  const titleByKind = {
-    submitted: "휴보강 신청서가 올라왔습니다",
-    approved: "휴보강 신청서가 결재 승인되어 자동 처리되었습니다",
-    returned: "휴보강 신청서 보완 요청이 도착했습니다",
-    rejected: "휴보강 신청서가 반려되었습니다",
-    completed: "휴보강 신청서가 결재 승인되어 자동 처리되었습니다",
-    canceled: "휴보강 승인이 취소되었습니다",
-  }
-  const roomSummary = request.makeupSlots.length > 0
-    ? request.makeupSlots.map((slot) => text(slot.classroom || request.makeupClassroom)).filter(Boolean).join(", ")
-    : request.makeupClassroom
-  const body = `${request.className} · ${request.cancelDate} 휴강 / ${roomSummary} 보강`
+  const fallbackTitle = getDefaultMakeupNotificationTitleTemplate(kind)
+  const fallbackBody = renderMakeupNotificationTemplate(getDefaultMakeupNotificationBodyTemplate(), buildMakeupNotificationTemplateContext(request, kind, fallbackTitle, ""))
   const settings = await loadMakeupNotificationSettings()
+  const personalContent = renderMakeupNotificationContent(settings, kind, "dashboard_personal", request, fallbackTitle, fallbackBody)
+  const managementContent = renderMakeupNotificationContent(settings, kind, "dashboard_management", request, fallbackTitle, fallbackBody)
   const personalRecipients = new Set<string>()
   const addPersonalRecipient = (profileId: string) => {
     if (!profileId || managementProfileIds.includes(profileId)) return
@@ -816,8 +952,8 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
       channel: "dashboard_personal",
       recipientProfileId,
       actorProfileId,
-      title: titleByKind[kind],
-      body,
+      title: personalContent.title,
+      body: personalContent.body,
       href,
       targetLabel: profiles.find((profile) => profile.id === recipientProfileId)?.label || "개인",
       settings,
@@ -829,8 +965,8 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
           channel: "dashboard_management",
           recipientTeam: "관리팀",
           actorProfileId,
-          title: titleByKind[kind],
-          body,
+          title: managementContent.title,
+          body: managementContent.body,
           href,
           targetLabel: "관리팀",
           settings,
@@ -853,6 +989,7 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
   )
   for (const chatChannel of chatTargets) {
     const notificationChannel = `google_chat_${chatChannel}` as MakeupNotificationChannel
+    const chatContent = renderMakeupNotificationContent(settings, kind, notificationChannel, request, fallbackTitle, fallbackBody)
     const dedupeKey = buildNotificationDedupeKey(request.id, kind, notificationChannel, chatChannel)
     if (!isNotificationChannelEnabled(settings, kind, notificationChannel)) {
       await recordNotificationDelivery({
@@ -864,8 +1001,8 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
         googleChatChannel: chatChannel,
         status: "disabled",
         dedupeKey,
-        title: titleByKind[kind],
-        body,
+        title: chatContent.title,
+        body: chatContent.body,
         actorProfileId,
         metadata: { webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel] },
       })
@@ -889,8 +1026,8 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
           googleChatChannel: chatChannel,
           status: "deduped",
           dedupeKey,
-          title: titleByKind[kind],
-          body,
+          title: chatContent.title,
+          body: chatContent.body,
           actorProfileId,
           metadata: { webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel] },
         })
@@ -898,7 +1035,7 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
       }
     }
 
-    const result = await sendGoogleChatNotification(chatChannel, `${titleByKind[kind]}\n${body}`, {
+    const result = await sendGoogleChatNotification(chatChannel, `${chatContent.title}\n${chatContent.body}`, {
       requestId: request.id,
       status: request.status,
       triggerKind: kind,
@@ -913,8 +1050,8 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
       googleChatChannel: chatChannel,
       status: result.ok ? "sent" : result.skipped ? "skipped" : "failed",
       dedupeKey,
-      title: titleByKind[kind],
-      body,
+      title: chatContent.title,
+      body: chatContent.body,
       error: result.error,
       actorProfileId,
       metadata: { webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel] },
@@ -1348,6 +1485,28 @@ export async function cancelCompletedMakeupRequest(requestId: string, actorId: s
   await notifyMakeupRequest({ ...request, status: "canceled" }, "canceled", workspaceData.profiles, actorId)
 }
 
+export async function deleteMakeupRequest(requestId: string, actorId: string) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const id = text(requestId)
+  if (!id) throw new Error("삭제할 휴보강 신청서를 찾을 수 없습니다.")
+
+  const workspaceData = await loadMakeupRequestWorkspaceData()
+  const { request } = await loadSingleMakeupRequest(id, workspaceData)
+  const actor = workspaceData.profiles.find((profile) => profile.id === actorId)
+  if (actor?.role !== "admin") {
+    throw new Error("운영자만 휴보강 이력을 삭제할 수 있습니다.")
+  }
+  if (!["completed", "rejected", "canceled"].includes(request.status)) {
+    throw new Error("승인/반려된 휴보강 이력만 삭제할 수 있습니다.")
+  }
+
+  const { data, error } = await supabase.from("makeup_requests").delete().eq("id", id).select("id")
+  if (error) throw error
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("삭제할 휴보강 신청서를 찾을 수 없습니다.")
+  }
+}
+
 export async function toggleMakeupNotificationSetting(
   triggerKind: MakeupNotificationTrigger,
   channel: MakeupNotificationChannel,
@@ -1364,6 +1523,29 @@ export async function toggleMakeupNotificationSetting(
       updated_by: nullable(actorId),
       updated_at: new Date().toISOString(),
     }, { onConflict: "trigger_kind,channel" })
+  if (error) throw error
+}
+
+export async function updateMakeupNotificationTriggerContent(
+  triggerKind: MakeupNotificationTrigger,
+  inputTitleTemplate: string,
+  inputBodyTemplate: string,
+  actorId: string,
+) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const titleTemplate = text(inputTitleTemplate) || getDefaultMakeupNotificationTitleTemplate(triggerKind)
+  const bodyTemplate = text(inputBodyTemplate) || getDefaultMakeupNotificationBodyTemplate()
+  const rows = MAKEUP_NOTIFICATION_CHANNELS.map((channel) => ({
+    trigger_kind: triggerKind,
+    channel,
+    title_template: titleTemplate,
+    body_template: bodyTemplate,
+    updated_by: nullable(actorId),
+    updated_at: new Date().toISOString(),
+  }))
+  const { error } = await supabase
+    .from("makeup_notification_settings")
+    .upsert(rows, { onConflict: "trigger_kind,channel" })
   if (error) throw error
 }
 

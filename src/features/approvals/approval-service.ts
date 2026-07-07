@@ -404,6 +404,18 @@ export async function updateApprovalStatus(id: string, status: ApprovalStatus) {
   if (error) throw error
 }
 
+export async function deleteApprovalRequest(id: string) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const requestId = text(id)
+  if (!requestId) throw new Error("삭제할 문서를 찾을 수 없습니다.")
+
+  const { data, error } = await supabase.from("approval_requests").delete().eq("id", requestId).select("id")
+  if (error) throw error
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("삭제할 문서를 찾을 수 없습니다.")
+  }
+}
+
 export async function addApprovalComment(approvalId: string, authorId: string, body: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const nextBody = text(body)

@@ -57,6 +57,20 @@ test("teacher settings links teachers to login accounts and editable roles", asy
   assert.match(serviceSource, /profiles/);
 });
 
+test("teacher settings labels admin as operator and staff as administrator", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/management/teacher-master-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /{ value: "admin", label: "운영자" }/);
+  assert.match(workspaceSource, /{ value: "staff", label: "관리자" }/);
+  assert.doesNotMatch(workspaceSource, /{ value: "admin", label: "관리자" }/);
+  assert.doesNotMatch(workspaceSource, /{ value: "staff", label: "운영" }/);
+  assert.match(workspaceSource, /운영자: "관리팀"/);
+  assert.match(workspaceSource, /관리자: "관리팀"/);
+});
+
 test("teacher settings uses fixed team groups instead of subject labels", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/management/teacher-master-workspace.tsx", root),
