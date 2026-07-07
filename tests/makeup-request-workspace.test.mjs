@@ -53,6 +53,11 @@ test("makeup request migration creates request event and notification tables", (
   assert.match(notificationMigrationSource, /create table if not exists public\.makeup_notification_deliveries/);
   assert.match(notificationMigrationSource, /dedupe_key text/);
   assert.match(notificationMigrationSource, /dashboard_notifications_dedupe_key/);
+  assert.match(allMigrationSource, /create table if not exists public\.google_chat_webhook_settings/);
+  assert.match(allMigrationSource, /channel text primary key/);
+  assert.match(allMigrationSource, /webhook_url text not null default ''/);
+  assert.match(allMigrationSource, /grant select, insert, update on public\.google_chat_webhook_settings to service_role/);
+  assert.doesNotMatch(allMigrationSource, /grant select, insert, update on public\.google_chat_webhook_settings to authenticated/);
 });
 
 test("makeup workspace includes approver queues form fields and room availability states", () => {
@@ -132,7 +137,6 @@ test("makeup approval auto-completes without manager confirmation UI", () => {
 test("makeup workspace exposes notification controls cancellation and fixed subject ordering", () => {
   assert.match(workspaceSource, /const SUBJECT_SORT_ORDER = \["영어", "수학"\]/);
   assert.match(workspaceSource, /sortSubjectOptions/);
-  assert.match(workspaceSource, /알림\/웹훅/);
   assert.match(workspaceSource, /알림 설정/);
   assert.match(workspaceSource, /notificationDialogOpen/);
   assert.match(workspaceSource, /발송 현황/);
@@ -255,12 +259,24 @@ test("makeup notification controls render a process by channel matrix", () => {
   );
   assert.match(notificationDialogSource, /role="table"/);
   assert.match(notificationDialogSource, /aria-label="휴보강 알림 설정 표"/);
+  assert.doesNotMatch(notificationDialogSource, /알림\/웹훅/);
+  assert.doesNotMatch(notificationDialogSource, /알림\/웹훅 트리거와 구글챗 발송 현황을 확인합니다/);
+  assert.doesNotMatch(notificationDialogSource, /<Bell className/);
   assert.doesNotMatch(notificationDialogSource, /알림 제어/);
   assert.doesNotMatch(notificationDialogSource, /읽기 전용/);
   assert.match(notificationDialogSource, /role="columnheader"/);
   assert.match(notificationDialogSource, /프로세스/);
   assert.match(notificationDialogSource, /알림 위치/);
+  assert.match(workspaceSource, /const MAKEUP_GOOGLE_CHAT_CHANNEL_MAP/);
   assert.match(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_ORDER\.map/);
+  assert.match(notificationDialogSource, /웹훅 URL 보기/);
+  assert.match(notificationDialogSource, /handleOpenWebhookInfo\(channel\)/);
+  assert.match(notificationDialogSource, /selectedWebhookInfo/);
+  assert.match(notificationDialogSource, /웹훅 URL 수정/);
+  assert.match(notificationDialogSource, /webhookUrlInput/);
+  assert.match(notificationDialogSource, /handleSaveWebhookInfo/);
+  assert.match(notificationDialogSource, /maskedUrl/);
+  assert.match(notificationDialogSource, /envName/);
   assert.match(notificationDialogSource, /role="rowheader"/);
   assert.match(notificationDialogSource, /role="cell"/);
   assert.match(notificationDialogSource, /openNotificationTemplateEditor\(triggerKind, settings\)/);
@@ -353,7 +369,7 @@ test("makeup workspace keeps approval-canceled requests out of the active reques
 });
 
 test("makeup workspace lets only operators delete closed request rows", () => {
-  assert.match(workspaceSource, /const \{ user, role, isAdmin, loading: authLoading \} = useAuth\(\)/);
+  assert.match(workspaceSource, /const \{ user, role, isAdmin, loading: authLoading, session \} = useAuth\(\)/);
   assert.match(workspaceSource, /const canForceDeleteClosedRequests = isAdmin/);
   assert.match(workspaceSource, /deleteMakeupRequest\(request\.id, currentUserId\)/);
   assert.match(workspaceSource, /onForceDelete=\{handleForceDeleteRequest\}/);
@@ -457,6 +473,14 @@ test("makeup workspace opens row details and uses cards on narrow viewports", ()
 test("makeup service writes notifications and sends google chat without blocking state changes", () => {
   assert.match(serviceSource, /dashboard_notifications/);
   assert.match(serviceSource, /sendGoogleChatNotification/);
+  assert.match(serviceSource, /function buildRequestUrl/);
+  assert.match(serviceSource, /NEXT_PUBLIC_SITE_URL/);
+  assert.match(serviceSource, /NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN/);
+  assert.match(serviceSource, /function formatGoogleChatLink/);
+  assert.match(serviceSource, /<\$\{url\}\|휴보강 바로 열기>/);
+  assert.match(serviceSource, /const requestUrl = buildRequestUrl\(request\.id\)/);
+  assert.match(serviceSource, /const chatMessageBody = \[chatContent\.title, chatContent\.body, formatGoogleChatLink\(requestUrl\)\]/);
+  assert.match(serviceSource, /sendGoogleChatNotification\(chatChannel, chatMessageBody/);
   assert.match(serviceSource, /GOOGLE_CHAT_WEBHOOK_EXECUTIVE/);
   assert.match(serviceSource, /GOOGLE_CHAT_WEBHOOK_ADMIN/);
   assert.match(serviceSource, /google_chat_executive/);
@@ -526,5 +550,19 @@ test("google chat route keeps webhook URLs server-side", () => {
   assert.match(apiRouteSource, /GOOGLE_CHAT_WEBHOOK_ADMIN/);
   assert.match(apiRouteSource, /GOOGLE_CHAT_WEBHOOK_MATH/);
   assert.match(apiRouteSource, /GOOGLE_CHAT_WEBHOOK_ENGLISH/);
+  assert.match(apiRouteSource, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(apiRouteSource, /function getServiceClient/);
+  assert.match(apiRouteSource, /\.from\("google_chat_webhook_settings"\)/);
+  assert.match(apiRouteSource, /export async function GET/);
+  assert.match(apiRouteSource, /export async function PATCH/);
+  assert.match(apiRouteSource, /maskGoogleChatWebhookUrl/);
+  assert.match(apiRouteSource, /getGoogleChatWebhookUrl/);
+  assert.match(apiRouteSource, /const resolvedWebhookUrl = await getGoogleChatWebhookUrl/);
+  assert.match(apiRouteSource, /maskedUrl: maskGoogleChatWebhookUrl\(resolvedWebhookUrl\)/);
+  assert.match(apiRouteSource, /configured: Boolean\(resolvedWebhookUrl\)/);
+  assert.match(apiRouteSource, /upsert\(\{[\s\S]*channel,[\s\S]*webhook_url: webhookUrl/);
+  assert.match(apiRouteSource, /updated_by: user\.id/);
+  assert.match(apiRouteSource, /https:\/\/chat\.googleapis\.com\//);
+  assert.doesNotMatch(apiRouteSource, /webhookUrl:/);
   assert.doesNotMatch(apiRouteSource, /NEXT_PUBLIC_GOOGLE_CHAT/);
 });

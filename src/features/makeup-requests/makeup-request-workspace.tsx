@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowDown, ArrowUp, Bell, Check, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Trash2, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -56,6 +56,7 @@ import {
   resubmitMakeupRequest,
   toggleMakeupNotificationSetting,
   updateMakeupNotificationTriggerContent,
+  type GoogleChatChannel,
   type MakeupClassOption,
   type MakeupNotificationDelivery,
   type MakeupNotificationSetting,
@@ -115,6 +116,13 @@ const MAKEUP_NOTIFICATION_CHANNEL_ORDER: Array<MakeupNotificationSetting["channe
   "google_chat_math",
 ]
 
+const MAKEUP_GOOGLE_CHAT_CHANNEL_MAP: Partial<Record<MakeupNotificationSetting["channel"], GoogleChatChannel>> = {
+  google_chat_executive: "executive",
+  google_chat_admin: "admin",
+  google_chat_english: "english",
+  google_chat_math: "math",
+}
+
 const MAKEUP_NOTIFICATION_TABLE_GRID_STYLE: CSSProperties = {
   gridTemplateColumns: `minmax(160px, 0.95fr) repeat(${MAKEUP_NOTIFICATION_CHANNEL_ORDER.length}, minmax(118px, 1fr))`,
 }
@@ -122,6 +130,22 @@ const MAKEUP_NOTIFICATION_TABLE_GRID_STYLE: CSSProperties = {
 const EMPTY_NOTIFICATION_TEMPLATE_INPUT = {
   titleTemplate: "",
   bodyTemplate: "",
+}
+
+type MakeupGoogleChatWebhookInfo = {
+  channelKey: MakeupNotificationSetting["channel"]
+  channelLabel: string
+  envName: string
+  configured: boolean
+  maskedUrl: string
+}
+
+type GoogleChatWebhookInfoResponse = {
+  ok?: boolean
+  envName?: string
+  configured?: boolean
+  maskedUrl?: string
+  error?: string
 }
 
 const MAKEUP_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> = {
@@ -173,6 +197,10 @@ function formatDateTime(value: string) {
   if (!value) return "-"
   const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
   return match ? `${match[1]} ${match[2]}` : value
+}
+
+function toText(value: unknown) {
+  return String(value || "").trim()
 }
 
 function getStatusLabel(status: MakeupRequest["status"]) {
@@ -1339,7 +1367,7 @@ function hasSlotRoomCollision(
 }
 
 export function MakeupRequestWorkspace() {
-  const { user, role, isAdmin, loading: authLoading } = useAuth()
+  const { user, role, isAdmin, loading: authLoading, session } = useAuth()
   const [view, setView] = useState<MakeupRequestView>("mine")
   const [data, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
@@ -1365,6 +1393,11 @@ export function MakeupRequestWorkspace() {
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false)
   const [selectedNotificationSetting, setSelectedNotificationSetting] = useState<MakeupNotificationSetting | null>(null)
   const [notificationTemplateInput, setNotificationTemplateInput] = useState(EMPTY_NOTIFICATION_TEMPLATE_INPUT)
+  const [selectedWebhookInfo, setSelectedWebhookInfo] = useState<MakeupGoogleChatWebhookInfo | null>(null)
+  const [webhookUrlInput, setWebhookUrlInput] = useState("")
+  const [webhookInfoLoading, setWebhookInfoLoading] = useState<MakeupNotificationSetting["channel"] | "">("")
+  const [webhookInfoSaving, setWebhookInfoSaving] = useState(false)
+  const [webhookInfoError, setWebhookInfoError] = useState("")
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
 
@@ -1672,6 +1705,102 @@ export function MakeupRequestWorkspace() {
       "알림 설정을 저장했습니다.",
     )
   }, [currentUserId, isManager, runAction])
+
+  const handleOpenWebhookInfo = useCallback(async (channel: MakeupNotificationSetting["channel"]) => {
+    const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[channel]
+    if (!googleChatChannel) return
+
+    const channelLabel = MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]
+    setSelectedWebhookInfo({
+      channelKey: channel,
+      channelLabel,
+      envName: "",
+      configured: false,
+      maskedUrl: "",
+    })
+    setWebhookUrlInput("")
+    setWebhookInfoError("")
+
+    if (!session?.access_token) {
+      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
+      return
+    }
+
+    setWebhookInfoLoading(channel)
+    try {
+      const response = await fetch(`/api/google-chat?channel=${encodeURIComponent(googleChatChannel)}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      })
+      const payload = await response.json().catch(() => ({})) as GoogleChatWebhookInfoResponse
+      if (!response.ok || !payload.ok) {
+        throw new Error(toText(payload.error) || "웹훅 정보를 불러오지 못했습니다.")
+      }
+      setSelectedWebhookInfo({
+        channelKey: channel,
+        channelLabel,
+        envName: toText(payload.envName),
+        configured: Boolean(payload.configured),
+        maskedUrl: toText(payload.maskedUrl),
+      })
+    } catch (error) {
+      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 정보를 불러오지 못했습니다.")
+    } finally {
+      setWebhookInfoLoading("")
+    }
+  }, [session?.access_token])
+
+  const handleSaveWebhookInfo = useCallback(async () => {
+    if (!selectedWebhookInfo) return
+    if (!isManager) {
+      setWebhookInfoError("관리 권한이 있는 계정만 웹훅 URL을 변경할 수 있습니다.")
+      return
+    }
+    if (!session?.access_token) {
+      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
+      return
+    }
+
+    const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[selectedWebhookInfo.channelKey]
+    const webhookUrl = toText(webhookUrlInput)
+    if (!googleChatChannel || !webhookUrl) {
+      setWebhookInfoError("저장할 웹훅 URL을 입력해 주세요.")
+      return
+    }
+
+    setWebhookInfoSaving(true)
+    setWebhookInfoError("")
+    try {
+      const response = await fetch("/api/google-chat", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channel: googleChatChannel,
+          webhookUrl,
+        }),
+      })
+      const payload = await response.json().catch(() => ({})) as GoogleChatWebhookInfoResponse
+      if (!response.ok || !payload.ok) {
+        throw new Error(toText(payload.error) || "웹훅 URL을 저장하지 못했습니다.")
+      }
+      setSelectedWebhookInfo((current) => current ? {
+        ...current,
+        envName: toText(payload.envName),
+        configured: Boolean(payload.configured),
+        maskedUrl: toText(payload.maskedUrl),
+      } : current)
+      setWebhookUrlInput("")
+      setMessage("웹훅 URL을 저장했습니다.")
+    } catch (error) {
+      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 URL을 저장하지 못했습니다.")
+    } finally {
+      setWebhookInfoSaving(false)
+    }
+  }, [isManager, selectedWebhookInfo, session?.access_token, webhookUrlInput])
 
   const openNotificationTemplateEditor = useCallback((triggerKind: MakeupNotificationSetting["triggerKind"], settings: MakeupNotificationSetting[]) => {
     const setting = getNotificationTemplateSetting(triggerKind, settings)
@@ -2031,18 +2160,9 @@ export function MakeupRequestWorkspace() {
         <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>알림 설정</DialogTitle>
-            <DialogDescription>
-              알림/웹훅 트리거와 구글챗 발송 현황을 확인합니다.
-            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.8fr)]">
             <div className="grid gap-2">
-              <div className="flex items-center gap-2">
-                <div className="inline-flex items-center gap-2 text-sm font-medium">
-                  <Bell className="size-4" aria-hidden="true" />
-                  알림/웹훅
-                </div>
-              </div>
               <div className="overflow-x-auto rounded-md border" role="table" aria-label="휴보강 알림 설정 표">
                 <div className="min-w-[880px]">
                   <div
@@ -2063,11 +2183,28 @@ export function MakeupRequestWorkspace() {
                     style={MAKEUP_NOTIFICATION_TABLE_GRID_STYLE}
                   >
                     <div role="columnheader" className="border-r px-3 py-2" aria-label="프로세스" />
-                    {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => (
-                      <div key={channel} role="columnheader" className="border-r px-3 py-2 last:border-r-0">
-                        {MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]}
-                      </div>
-                    ))}
+                    {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => {
+                      const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[channel]
+                      const channelLabel = MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]
+                      return (
+                        <div key={channel} role="columnheader" className="border-r px-3 py-2 last:border-r-0">
+                          {googleChatChannel ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-auto min-h-0 w-full justify-start px-0 py-0 text-left text-xs font-medium text-muted-foreground hover:bg-transparent"
+                              disabled={webhookInfoLoading === channel}
+                              aria-label={`${channelLabel} 웹훅 URL 보기`}
+                              title={`${channelLabel} 웹훅 URL 보기`}
+                              onClick={() => void handleOpenWebhookInfo(channel)}
+                            >
+                              <span className="truncate">{channelLabel}</span>
+                            </Button>
+                          ) : channelLabel}
+                        </div>
+                      )
+                    })}
                   </div>
                   {(Object.entries(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as Array<[keyof typeof MAKEUP_NOTIFICATION_TRIGGER_LABELS, string]>).map(([triggerKind, triggerLabel]) => {
                     const settings = notificationSettingsByTrigger.get(triggerKind) || []
@@ -2125,6 +2262,53 @@ export function MakeupRequestWorkspace() {
                   })}
                 </div>
               </div>
+              {selectedWebhookInfo || webhookInfoError ? (
+                <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs">
+                  {selectedWebhookInfo ? (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
+                        <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
+                          {webhookInfoLoading === selectedWebhookInfo.channelKey ? "확인 중" : selectedWebhookInfo.configured ? "연결됨" : "미설정"}
+                        </Badge>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-muted-foreground">환경 변수</div>
+                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-muted-foreground">웹훅 URL</div>
+                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
+                      </div>
+                      <div className="grid gap-1">
+                        <Label htmlFor="makeup-google-chat-webhook-url" className="text-xs text-muted-foreground">
+                          웹훅 URL 수정
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="makeup-google-chat-webhook-url"
+                            type="password"
+                            value={webhookUrlInput}
+                            onChange={(event) => setWebhookUrlInput(event.target.value)}
+                            placeholder="새 구글챗 웹훅 URL 입력"
+                            disabled={!isManager || webhookInfoSaving}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="shrink-0"
+                            disabled={!isManager || webhookInfoSaving || !webhookUrlInput.trim()}
+                            onClick={() => void handleSaveWebhookInfo()}
+                          >
+                            저장
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                  {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="min-w-0 rounded-md border">

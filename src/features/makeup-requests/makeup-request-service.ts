@@ -551,6 +551,18 @@ function buildRequestHref(requestId: string) {
   return `/admin/makeup-requests${requestId ? `?request=${encodeURIComponent(requestId)}` : ""}`
 }
 
+function buildRequestUrl(requestId: string) {
+  const href = buildRequestHref(requestId)
+  const origin = text(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN).replace(/\/+$/, "")
+  if (origin) return `${origin}${href}`
+  if (typeof window !== "undefined" && window.location.origin) return `${window.location.origin.replace(/\/+$/, "")}${href}`
+  return href
+}
+
+function formatGoogleChatLink(url: string) {
+  return url ? `<${url}|휴보강 바로 열기>` : ""
+}
+
 function buildNotificationDedupeKey(requestId: string, triggerKind: string, channel: string, target = "") {
   return [requestId, triggerKind, channel, target].map(text).join(":")
 }
@@ -920,6 +932,7 @@ export async function sendGoogleChatNotification(channel: GoogleChatChannel, tex
 
 async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificationTrigger, profiles: MakeupProfileOption[], actorProfileId = "") {
   const href = buildRequestHref(request.id)
+  const requestUrl = buildRequestUrl(request.id)
   const managementProfileIds = getManagementProfileIds(profiles)
   const fallbackTitle = getDefaultMakeupNotificationTitleTemplate(kind)
   const fallbackBody = renderMakeupNotificationTemplate(getDefaultMakeupNotificationBodyTemplate(), buildMakeupNotificationTemplateContext(request, kind, fallbackTitle, ""))
@@ -1035,8 +1048,10 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
       }
     }
 
-    const result = await sendGoogleChatNotification(chatChannel, `${chatContent.title}\n${chatContent.body}`, {
+    const chatMessageBody = [chatContent.title, chatContent.body, formatGoogleChatLink(requestUrl)].filter(Boolean).join("\n")
+    const result = await sendGoogleChatNotification(chatChannel, chatMessageBody, {
       requestId: request.id,
+      requestUrl,
       status: request.status,
       triggerKind: kind,
       webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel],
