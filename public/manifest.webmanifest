@@ -1,0 +1,24 @@
+{
+  "name": "TIPS Dashboard",
+  "short_name": "TIPS",
+  "description": "TIPS 운영 포털",
+  "start_url": "/admin/makeup-requests",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon-window.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

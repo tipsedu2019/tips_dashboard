@@ -248,7 +248,7 @@ const workspaceMetaEntries: Array<{
     match: "/admin/word-retests",
     meta: {
       section: "운영",
-      title: "단어 재시험",
+      title: "영어 단어 재시험",
       summary: "본관과 별관 단어 재시험 요청, 응시, 점수를 처리합니다.",
     },
   },
@@ -256,7 +256,7 @@ const workspaceMetaEntries: Array<{
     match: "/admin/makeup-requests",
     meta: {
       section: "운영",
-      title: "휴보강 신청서",
+      title: "휴보강",
       summary: "휴강 신청부터 보강 강의실 확인, 결재, 관리팀 최종 반영까지 처리합니다.",
     },
   },
@@ -306,8 +306,8 @@ export function buildAdminNavGroups({
         { title: "완료", url: "/admin/tasks?list=completed" },
       ],
     },
-    { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
-    { title: "휴보강 신청서", url: "/admin/makeup-requests", icon: CalendarClock },
+    { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+    { title: "휴보강", url: "/admin/makeup-requests", icon: CalendarClock },
     {
       title: "학사일정",
       url: "/admin/academic-calendar",
@@ -333,8 +333,8 @@ export function buildAdminNavGroups({
     { title: "등록", url: "/admin/registration", icon: UserPlus },
     { title: "전반", url: "/admin/transfer", icon: Repeat2 },
     { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
-    { title: "단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
-    { title: "휴보강 신청서", url: "/admin/makeup-requests", icon: CalendarClock },
+    { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+    { title: "휴보강", url: "/admin/makeup-requests", icon: CalendarClock },
     { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
     { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
     {

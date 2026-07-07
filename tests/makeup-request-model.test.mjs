@@ -25,12 +25,14 @@ test("makeup request approvers are restricted by subject and division", () => {
   assert.deepEqual(getAllowedApproverNames({ subject: "영어", grade: "고2" }), ["강부희", "김민경", "정보영"]);
 });
 
-test("makeup request workflow keeps approval and manager actions separate", () => {
-  assert.equal(canTransitionMakeupRequest("approval_pending", "manager_pending", { isApprover: true }), true);
+test("makeup request workflow auto-completes on approver approval without a manager handoff", () => {
+  assert.equal(canTransitionMakeupRequest("approval_pending", "completed", { isApprover: true }), true);
+  assert.equal(canTransitionMakeupRequest("approval_pending", "manager_pending", { isApprover: true }), false);
   assert.equal(canTransitionMakeupRequest("approval_pending", "manager_pending", { isManager: true }), false);
-  assert.equal(canTransitionMakeupRequest("manager_pending", "completed", { isManager: true }), true);
+  assert.equal(canTransitionMakeupRequest("manager_pending", "completed", { isManager: true }), false);
   assert.equal(canTransitionMakeupRequest("manager_pending", "completed", { isApprover: true }), false);
-  assert.equal(canTransitionMakeupRequest("completed", "canceled", { isManager: true }), true);
+  assert.equal(canTransitionMakeupRequest("completed", "canceled", { isApprover: true }), true);
+  assert.equal(canTransitionMakeupRequest("completed", "canceled", { isManager: true }), false);
   assert.equal(canTransitionMakeupRequest("completed", "canceled", { isRequester: true }), false);
   assert.equal(canTransitionMakeupRequest("revision_requested", "approval_pending", { isRequester: true }), true);
   assert.equal(canTransitionMakeupRequest("completed", "approval_pending", { isManager: true }), false);
@@ -154,7 +156,7 @@ test("room options are narrowed by the selected subject", () => {
   );
 });
 
-test("manager completion reflects cancellation and makeup into schedule plan", () => {
+test("approved makeup request reflects cancellation and makeup into schedule plan", () => {
   const reflected = applyMakeupRequestToSchedulePlan(
     {
       subject: "수학",

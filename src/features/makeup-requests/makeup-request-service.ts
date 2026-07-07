@@ -161,6 +161,7 @@ export type DashboardNotification = {
 export type GoogleChatChannel = "executive" | "admin" | "math" | "english"
 
 export type MakeupNotificationTrigger = "submitted" | "approved" | "returned" | "rejected" | "completed" | "canceled"
+type ActiveMakeupNotificationTrigger = Exclude<MakeupNotificationTrigger, "completed">
 
 export type MakeupNotificationChannel =
   | "dashboard_personal"
@@ -211,13 +212,12 @@ const EMPTY_WORKSPACE_DATA: MakeupRequestWorkspaceData = {
   notificationDeliveries: [],
 }
 
-export const MAKEUP_NOTIFICATION_TRIGGER_LABELS: Record<MakeupNotificationTrigger, string> = {
+export const MAKEUP_NOTIFICATION_TRIGGER_LABELS: Record<ActiveMakeupNotificationTrigger, string> = {
   submitted: "신청 제출",
   approved: "결재 승인",
   returned: "보완 요청",
   rejected: "반려",
-  completed: "처리 완료",
-  canceled: "완료 취소",
+  canceled: "승인 취소",
 }
 
 export const MAKEUP_NOTIFICATION_CHANNEL_LABELS: Record<MakeupNotificationChannel, string> = {
@@ -225,12 +225,17 @@ export const MAKEUP_NOTIFICATION_CHANNEL_LABELS: Record<MakeupNotificationChanne
   dashboard_management: "웹 알림 · 관리팀",
   google_chat_executive: "Google Chat · 경영팀",
   google_chat_admin: "Google Chat · 관리팀",
-  google_chat_math: "Google Chat · 수학",
-  google_chat_english: "Google Chat · 영어",
+  google_chat_math: "Google Chat · 수학팀",
+  google_chat_english: "Google Chat · 영어팀",
 }
 
-const MAKEUP_NOTIFICATION_TRIGGERS = Object.keys(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as MakeupNotificationTrigger[]
+const MAKEUP_NOTIFICATION_TRIGGERS = Object.keys(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as ActiveMakeupNotificationTrigger[]
 const MAKEUP_NOTIFICATION_CHANNELS = Object.keys(MAKEUP_NOTIFICATION_CHANNEL_LABELS) as MakeupNotificationChannel[]
+
+export function getMakeupNotificationTriggerLabel(triggerKind: string) {
+  if (triggerKind === "completed") return MAKEUP_NOTIFICATION_TRIGGER_LABELS.approved
+  return MAKEUP_NOTIFICATION_TRIGGER_LABELS[triggerKind as ActiveMakeupNotificationTrigger] || triggerKind
+}
 
 function text(value: unknown) {
   return String(value || "").trim()
@@ -630,6 +635,34 @@ export async function createDashboardNotification(input: {
   }
 }
 
+async function sendDashboardWebPushNotification(input: {
+  recipientProfileId?: string
+  recipientTeam?: string
+  title: string
+  body: string
+  href: string
+  metadata?: Row
+}) {
+  if (!supabase) return
+
+  try {
+    const { data } = await supabase.auth.getSession()
+    const accessToken = data.session?.access_token
+    if (!accessToken) return
+
+    await fetch("/api/web-push", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    })
+  } catch (error) {
+    console.warn("Dashboard web push notification skipped", error)
+  }
+}
+
 async function createMonitoredDashboardNotification(input: {
   requestId: string
   triggerKind: MakeupNotificationTrigger
@@ -681,6 +714,14 @@ async function createMonitoredDashboardNotification(input: {
     href: input.href,
     dedupeKey,
     metadata: { requestId: input.requestId, triggerKind: input.triggerKind, channel: input.channel },
+  })
+  void sendDashboardWebPushNotification({
+    recipientProfileId: input.recipientProfileId,
+    recipientTeam: input.recipientTeam,
+    title: input.title,
+    body: input.body,
+    href: input.href,
+    metadata: { requestId: input.requestId, triggerKind: input.triggerKind, channel: input.channel, dedupeKey },
   })
   await recordNotificationDelivery({
     ...input,
@@ -738,11 +779,11 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
   const managementProfileIds = getManagementProfileIds(profiles)
   const titleByKind = {
     submitted: "휴보강 신청서가 올라왔습니다",
-    approved: "휴보강 신청서가 결재 승인되었습니다",
+    approved: "휴보강 신청서가 결재 승인되어 자동 처리되었습니다",
     returned: "휴보강 신청서 보완 요청이 도착했습니다",
     rejected: "휴보강 신청서가 반려되었습니다",
-    completed: "휴보강 처리가 완료되었습니다",
-    canceled: "휴보강 처리가 취소되었습니다",
+    completed: "휴보강 신청서가 결재 승인되어 자동 처리되었습니다",
+    canceled: "휴보강 승인이 취소되었습니다",
   }
   const roomSummary = request.makeupSlots.length > 0
     ? request.makeupSlots.map((slot) => text(slot.classroom || request.makeupClassroom)).filter(Boolean).join(", ")
@@ -757,9 +798,10 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
 
   if (kind === "submitted") {
     addPersonalRecipient(request.approverProfileId)
-  } else if (kind === "approved") {
+  } else if (kind === "approved" || kind === "canceled") {
     addPersonalRecipient(request.requesterId)
-  } else if (kind === "completed" || kind === "canceled") {
+    addPersonalRecipient(request.approverProfileId)
+  } else if (kind === "completed") {
     addPersonalRecipient(request.requesterId)
     addPersonalRecipient(request.approverProfileId)
   } else if (request.requesterId) {
@@ -802,7 +844,7 @@ async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificat
     kind === "submitted"
       ? ["executive", "admin", subjectChannel]
       : kind === "approved"
-        ? ["executive", "admin"]
+        ? ["executive", "admin", subjectChannel]
         : kind === "completed" || kind === "canceled"
           ? ["executive", "admin", subjectChannel]
           : kind === "returned" || kind === "rejected"
@@ -1054,31 +1096,73 @@ async function loadSingleMakeupRequest(requestId: string, data?: MakeupRequestWo
 export async function approveMakeupRequest(requestId: string, actorId: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const { request, data } = await loadSingleMakeupRequest(requestId)
-  if (!canTransitionMakeupRequest(request.status, "manager_pending", { isApprover: request.approverProfileId === actorId })) {
+  if (!canTransitionMakeupRequest(request.status, "completed", { isApprover: request.approverProfileId === actorId })) {
     throw new Error("결재 승인 권한이 없습니다.")
   }
+
+  assertRoomAvailableForCompletion(request, data)
+
+  const classItem = data.classes.find((item) => item.id === request.classId)
+  if (!classItem) {
+    throw new Error("수업 정보를 찾을 수 없습니다.")
+  }
+
+  const schedulePlanBefore = classItem.schedulePlan || {}
+  const schedulePlanAfter = applyMakeupRequestToSchedulePlan(schedulePlanBefore, classItem, request)
+  const { error: classUpdateError } = await supabase
+    .from("classes")
+    .update({ schedule_plan: schedulePlanAfter })
+    .eq("id", request.classId)
+
+  if (classUpdateError) throw classUpdateError
+
+  const [cancelDraft, ...makeupDrafts] = buildMakeupCalendarDrafts(request)
+  const cancelAcademicEventId = await upsertAcademicEventDraft(cancelDraft)
+  const makeupAcademicEventIds = []
+  for (const draft of makeupDrafts) {
+    makeupAcademicEventIds.push(await upsertAcademicEventDraft(draft))
+  }
+  const makeupAcademicEventId = makeupAcademicEventIds[0] || ""
+  const approvedAt = new Date().toISOString()
+  const finalNote = buildAutoCompletionNote(request)
 
   const { error } = await supabase
     .from("makeup_requests")
     .update({
-      status: "manager_pending",
+      status: "completed",
       approved_by: actorId,
-      approved_at: new Date().toISOString(),
+      approved_at: approvedAt,
+      completed_by: actorId,
+      completed_at: approvedAt,
+      final_note: nullable(finalNote),
       returned_reason: null,
       rejected_reason: null,
+      schedule_plan_before: schedulePlanBefore,
+      schedule_plan_after: schedulePlanAfter,
+      cancel_academic_event_id: cancelAcademicEventId,
+      makeup_academic_event_id: makeupAcademicEventId,
+      makeup_academic_event_ids: makeupAcademicEventIds,
     })
     .eq("id", requestId)
 
   if (error) throw error
-  await recordMakeupRequestEvent(requestId, "approved", { actorId, beforeValue: request.status, afterValue: "manager_pending" })
-  await notifyMakeupRequest({ ...request, status: "manager_pending" }, "approved", data.profiles, actorId)
+  await recordMakeupRequestEvent(requestId, "approved", { actorId, beforeValue: request.status, afterValue: "completed", note: finalNote })
+  await notifyMakeupRequest({
+    ...request,
+    status: "completed",
+    approvedBy: actorId,
+    approvedAt,
+    completedBy: actorId,
+    completedAt: approvedAt,
+    finalNote,
+  }, "approved", data.profiles, actorId)
 }
 
 export async function requestMakeupRequestRevision(requestId: string, actorId: string, note: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const { request, data } = await loadSingleMakeupRequest(requestId)
-  const isActor = request.approverProfileId === actorId || getManagementProfileIds(data.profiles).includes(actorId)
-  if (!isActor || !["approval_pending", "manager_pending"].includes(request.status)) {
+  const isActor = request.approverProfileId === actorId
+  if (!isActor || request.status !== "approval_pending") {
     throw new Error("보완 요청 권한이 없습니다.")
   }
 
@@ -1098,8 +1182,8 @@ export async function requestMakeupRequestRevision(requestId: string, actorId: s
 export async function rejectMakeupRequest(requestId: string, actorId: string, note: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const { request, data } = await loadSingleMakeupRequest(requestId)
-  const isActor = request.approverProfileId === actorId || getManagementProfileIds(data.profiles).includes(actorId)
-  if (!isActor || !["approval_pending", "manager_pending"].includes(request.status)) {
+  const isActor = request.approverProfileId === actorId
+  if (!isActor || request.status !== "approval_pending") {
     throw new Error("반려 권한이 없습니다.")
   }
 
@@ -1140,12 +1224,6 @@ export async function resubmitMakeupRequest(requestId: string, input: MakeupRequ
   if (error) throw error
   await recordMakeupRequestEvent(requestId, "resubmitted", { actorId, beforeValue: request.status, afterValue: "approval_pending" })
   await notifyMakeupRequest({ ...request, status: "approval_pending" }, "submitted", data.profiles, actorId)
-}
-
-function assertManager(profileId: string, profiles: MakeupProfileOption[]) {
-  if (!getManagementProfileIds(profiles).includes(profileId)) {
-    throw new Error("관리팀만 최종 확인할 수 있습니다.")
-  }
 }
 
 function assertRoomAvailableForCompletion(request: MakeupRequest, data: MakeupRequestWorkspaceData) {
@@ -1200,69 +1278,39 @@ async function deleteAcademicEventById(eventId: string) {
   if (error && !isMissingRelationError(error)) throw error
 }
 
-export async function completeMakeupRequest(requestId: string, actorId: string, finalNote = "") {
-  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const workspaceData = await loadMakeupRequestWorkspaceData()
-  const { request } = await loadSingleMakeupRequest(requestId, workspaceData)
-  assertManager(actorId, workspaceData.profiles)
+function formatNoteDateTime(value: string) {
+  const raw = text(value)
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  return match ? `${match[1]} ${match[2]}` : raw
+}
 
-  if (!canTransitionMakeupRequest(request.status, "completed", { isManager: true })) {
-    throw new Error("최종 확인할 수 없는 상태입니다.")
-  }
+function formatNoteTime(value: string) {
+  const raw = text(value)
+  const match = raw.match(/T(\d{2}:\d{2})/)
+  return match ? match[1] : raw
+}
 
-  assertRoomAvailableForCompletion(request, workspaceData)
-
-  const classItem = workspaceData.classes.find((item) => item.id === request.classId)
-  if (!classItem) {
-    throw new Error("수업 정보를 찾을 수 없습니다.")
-  }
-
-  const schedulePlanBefore = classItem.schedulePlan || {}
-  const schedulePlanAfter = applyMakeupRequestToSchedulePlan(schedulePlanBefore, classItem, request)
-  const { error: classUpdateError } = await supabase
-    .from("classes")
-    .update({ schedule_plan: schedulePlanAfter })
-    .eq("id", request.classId)
-
-  if (classUpdateError) throw classUpdateError
-
-  const [cancelDraft, ...makeupDrafts] = buildMakeupCalendarDrafts(request)
-  const cancelAcademicEventId = await upsertAcademicEventDraft(cancelDraft)
-  const makeupAcademicEventIds = []
-  for (const draft of makeupDrafts) {
-    makeupAcademicEventIds.push(await upsertAcademicEventDraft(draft))
-  }
-  const makeupAcademicEventId = makeupAcademicEventIds[0] || ""
-
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      status: "completed",
-      final_note: nullable(finalNote),
-      completed_by: actorId,
-      completed_at: new Date().toISOString(),
-      schedule_plan_before: schedulePlanBefore,
-      schedule_plan_after: schedulePlanAfter,
-      cancel_academic_event_id: cancelAcademicEventId,
-      makeup_academic_event_id: makeupAcademicEventId,
-      makeup_academic_event_ids: makeupAcademicEventIds,
+function buildAutoCompletionNote(request: MakeupRequest) {
+  const slots = normalizeMakeupSlots(request, request.makeupClassroom)
+  return slots
+    .map((slot) => {
+      const classroom = text(slot.classroom || request.makeupClassroom)
+      return [
+        `보강 ${formatNoteDateTime(slot.startAt)}-${formatNoteTime(slot.endAt)}`,
+        classroom,
+      ].filter(Boolean).join(" · ")
     })
-    .eq("id", requestId)
-
-  if (error) throw error
-
-  await recordMakeupRequestEvent(requestId, "completed", { actorId, beforeValue: request.status, afterValue: "completed", note: finalNote })
-  await notifyMakeupRequest({ ...request, status: "completed" }, "completed", workspaceData.profiles, actorId)
+    .filter(Boolean)
+    .join(" / ")
 }
 
 export async function cancelCompletedMakeupRequest(requestId: string, actorId: string, note = "") {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const workspaceData = await loadMakeupRequestWorkspaceData()
   const { request } = await loadSingleMakeupRequest(requestId, workspaceData)
-  assertManager(actorId, workspaceData.profiles)
 
-  if (!canTransitionMakeupRequest(request.status, "canceled", { isManager: true })) {
-    throw new Error("처리 완료된 신청서만 취소할 수 있습니다.")
+  if (!canTransitionMakeupRequest(request.status, "canceled", { isApprover: request.approverProfileId === actorId })) {
+    throw new Error("승인 취소할 수 없는 상태입니다.")
   }
 
   if (!request.classId) {
@@ -1296,7 +1344,7 @@ export async function cancelCompletedMakeupRequest(requestId: string, actorId: s
 
   if (error) throw error
 
-  await recordMakeupRequestEvent(requestId, "completed_canceled", { actorId, beforeValue: request.status, afterValue: "canceled", note })
+  await recordMakeupRequestEvent(requestId, "approval_canceled", { actorId, beforeValue: request.status, afterValue: "canceled", note })
   await notifyMakeupRequest({ ...request, status: "canceled" }, "canceled", workspaceData.profiles, actorId)
 }
 

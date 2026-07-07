@@ -525,7 +525,7 @@ test("assistant navigation only exposes allowed operation surfaces", async () =>
   assert.match(navigationSource, /canUseAssistantOperations/);
   assert.match(navigationSource, /const assistantOverviewItems: NavItem\[\]/);
   assert.match(navigationSource, /title: "할 일"[\s\S]*url: "\/admin\/tasks"/);
-  assert.match(navigationSource, /title: "단어 재시험"[\s\S]*url: "\/admin\/word-retests"/);
+  assert.match(navigationSource, /title: "영어 단어 재시험"[\s\S]*url: "\/admin\/word-retests"/);
   assert.match(navigationSource, /title: "학사일정"[\s\S]*url: "\/admin\/academic-calendar"/);
   assert.match(navigationSource, /title: "시간표"[\s\S]*url: "\/admin\/timetable"/);
   assert.match(navigationSource, /canUseAssistantOperations \? assistantOverviewItems : fullOverviewItems/);

@@ -345,7 +345,8 @@ const ROUTES = [
   { path: "/admin/registration", name: "registration", expectedTexts: ["등록", "등록 추가"], interaction: "open-create" },
   { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 추가"], interaction: "open-create" },
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 추가"], interaction: "open-create" },
-  { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["단어 재시험", "단어 재시험 추가"], interaction: "open-create" },
+  { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["영어 단어 재시험", "추가"], interaction: "open-create" },
+  { path: "/admin/makeup-requests", name: "makeup-requests", expectedTexts: ["휴보강", "신청"], interaction: "makeup-request" },
   { path: "/admin/approvals", name: "approvals", expectedTexts: ["전자결재", "영어", "수학", "자유"], interaction: "approval-draft" },
   ...AUTHENTICATED_CORE_SMOKE_ROUTES,
 ]
@@ -914,7 +915,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
       {
         key: "wordRetest",
         routePath: "/admin/word-retests",
-        routeExpectedTexts: ["단어 재시험", "단어 재시험 추가"],
+        routeExpectedTexts: ["영어 단어 재시험", "추가"],
         title: `${prefix} 단어 재시험 완료`,
         id: ids.tasks.wordRetest,
       },
@@ -1454,7 +1455,8 @@ async function fillOperationMinimumFields(page, dialog, route, sampleName) {
 async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
   const sampleName = `${UI_SAMPLE_PREFIX} ${route.name} ${Date.now()}-${sampleIndex}-${Math.random().toString(36).slice(2, 8)}`
   const editedTitle = `${UI_SAMPLE_PREFIX} ${route.name} 수정 ${Date.now()}-${sampleIndex}`
-  const addButton = page.getByRole("button", { name: new RegExp(`${route.expectedTexts[0]} 추가`) }).last()
+  const createButtonName = route.name === "word-retests" ? "추가" : `${route.expectedTexts[0]} 추가`
+  const addButton = page.getByRole("button", { name: createButtonName, exact: true }).last()
   if (!(await addButton.count().catch(() => 0))) throw new Error(`${route.name} create button was not found.`)
 
   try {
@@ -1766,8 +1768,136 @@ async function verifyApprovalDraftInteraction(page) {
   if (!(await submitButton.isDisabled().catch(() => false))) throw new Error("Approval submit button stayed enabled without a body.")
 }
 
+async function verifyMakeupRequestInteraction(page) {
+  const expectedColumns = [
+    "상태",
+    "수업",
+    "과목",
+    "선생님",
+    "사유",
+    "휴강일",
+    "보강일시",
+    "보강 강의실",
+    "신청자",
+    "상신일시",
+    "보완요청일시",
+    "보완 사유",
+    "승인일시",
+    "승인 메모",
+    "반려일시",
+    "반려 사유",
+    "승인취소일시",
+    "승인취소 메모",
+    "결재자",
+    "액션",
+  ]
+  const requiredCardLabels = [
+    "사유",
+    "휴강일",
+    "보강일시",
+    "보강 강의실",
+    "신청자",
+    "상신일시",
+    "결재자",
+  ]
+  const optionalCardLabels = [
+    "보완요청일시",
+    "보완 사유",
+    "승인일시",
+    "승인 메모",
+    "반려일시",
+    "반려 사유",
+    "승인취소일시",
+    "승인취소 메모",
+  ]
+  const hasEmptyCardField = (text, label) => {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return new RegExp(`${escapedLabel}\\s*-`).test(text)
+  }
+  const viewportWidth = await page.evaluate(() => window.innerWidth)
+  const isNarrowViewport = viewportWidth < 768
+  const bodyText = await page.locator("body").innerText({ timeout: 5000 })
+  for (const hiddenColumn of ["신청 ID", "승인자", "관리팀 처리자", "완료일시", "완료취소일시"]) {
+    if (bodyText.includes(hiddenColumn)) throw new Error(`makeup-requests table should hide ${hiddenColumn}.`)
+  }
+
+  if (isNarrowViewport) {
+    const table = page.getByRole("table", { name: "휴보강 신청 데이터테이블" }).first()
+    if (await table.isVisible().catch(() => false)) throw new Error("makeup-requests mobile viewport should not show the horizontal data table.")
+    const cardList = page.getByRole("list", { name: "휴보강 신청 카드목록" }).first()
+    if (!(await cardList.count().catch(() => 0))) throw new Error("makeup-requests mobile card list was not found.")
+    await cardList.waitFor({ state: "visible", timeout: 5000 })
+    const cards = cardList.locator('[role="listitem"]')
+    if (await cards.count().catch(() => 0)) {
+      const cardText = await cards.first().innerText({ timeout: 5000 })
+      for (const label of requiredCardLabels) {
+        if (!cardText.includes(label)) throw new Error(`makeup-requests mobile card is missing ${label}.`)
+      }
+      for (const label of optionalCardLabels) {
+        if (hasEmptyCardField(cardText, label)) throw new Error(`makeup-requests mobile card should hide empty ${label}.`)
+      }
+      for (const duplicateLabel of ["수업", "과목", "선생님"]) {
+        if (cardText.includes(duplicateLabel)) throw new Error(`makeup-requests mobile card should hide duplicate ${duplicateLabel}.`)
+      }
+    }
+  } else {
+    for (const column of expectedColumns) {
+      if (!bodyText.includes(column)) throw new Error(`makeup-requests table is missing ${column}.`)
+    }
+    for (const label of expectedColumns.filter((column) => column !== "액션")) {
+      const headerButton = page.getByRole("button", { name: `${label} 필터/정렬` }).first()
+      if (!(await headerButton.count().catch(() => 0))) throw new Error(`makeup-requests header ${label} filter/sort button was not found.`)
+    }
+    const resizeHandle = page.getByRole("button", { name: "과목 열 너비 조절" }).first()
+    if (!(await resizeHandle.count().catch(() => 0))) throw new Error("makeup-requests subject resize handle was not found.")
+
+    const subjectHeader = page.getByRole("button", { name: "과목 필터/정렬" }).first()
+    await subjectHeader.click()
+    const subjectFilter = page.getByPlaceholder("과목 값 입력")
+    await subjectFilter.fill("영어")
+    if (!(await page.getByText("과목 오름차순").count().catch(() => 0))) {
+      throw new Error("makeup-requests subject sort badge was not shown after header click.")
+    }
+    await subjectFilter.fill("")
+  }
+
+  const detailButton = page.getByRole("button", { name: "휴보강 신청 상세 열기" }).first()
+  if (await detailButton.count().catch(() => 0)) {
+    await detailButton.click()
+    const detailDialog = page.getByRole("dialog").filter({ hasText: "휴보강 상세" }).first()
+    await detailDialog.waitFor({ state: "visible", timeout: 5000 })
+    const detailText = await detailDialog.innerText({ timeout: 5000 })
+    for (const label of requiredCardLabels) {
+      if (!detailText.includes(label)) throw new Error(`makeup-requests detail card is missing ${label}.`)
+    }
+    for (const label of optionalCardLabels) {
+      if (hasEmptyCardField(detailText, label)) throw new Error(`makeup-requests detail card should hide empty ${label}.`)
+    }
+    for (const duplicateLabel of ["수업", "과목", "선생님"]) {
+      if (detailText.includes(`${duplicateLabel}\n`)) throw new Error(`makeup-requests detail card should hide duplicate ${duplicateLabel}.`)
+    }
+    await page.keyboard.press("Escape").catch(() => {})
+    await detailDialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {})
+  }
+
+  const createButton = page.getByRole("button", { name: "신청", exact: true }).last()
+  if (!(await createButton.count().catch(() => 0))) throw new Error("makeup-requests create button was not found.")
+  await waitUntilEnabled(createButton, "makeup request create button")
+  await createButton.click()
+  const dialog = page.getByRole("dialog").filter({ hasText: "휴보강 신청" }).first()
+  await dialog.waitFor({ state: "visible", timeout: 5000 })
+  const dialogText = await dialog.innerText({ timeout: 5000 })
+  for (const expectedLabel of ["과목", "선생님", "수업", "사유", "휴강일", "보강일시", "보강 강의실", "결재자", "보강일시 추가"]) {
+    if (!dialogText.includes(expectedLabel)) throw new Error(`makeup-requests dialog is missing ${expectedLabel}.`)
+  }
+  await page.keyboard.press("Escape").catch(() => {})
+  await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {})
+  return { openedDialog: true, checkedDataTable: !isNarrowViewport, checkedCardList: isNarrowViewport }
+}
+
 async function verifyRouteInteraction(page, route, options = {}) {
   if (route.name === "word-retests") await verifyWordRetestModeInteraction(page)
+  if (route.interaction === "makeup-request") return verifyMakeupRequestInteraction(page)
   if (route.interaction === "quick-add") return verifyQuickAddInteraction(page, options.quickAddSampleCount)
   if (route.interaction === "open-create") return verifyCreateDialogInteraction(page, route, options.operationSampleCount)
   if (route.interaction === "approval-draft") return verifyApprovalDraftInteraction(page)

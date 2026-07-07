@@ -22,9 +22,9 @@ export const MAKEUP_REQUEST_STATUS_LABELS = {
   approval_pending: "결재자 승인 대기",
   revision_requested: "보완 요청",
   rejected: "반려",
-  manager_pending: "관리팀 전달",
-  completed: "처리 완료",
-  canceled: "취소",
+  manager_pending: "이전 관리팀 전달",
+  completed: "완료",
+  canceled: "승인 취소",
 };
 
 export const ACTIVE_ROOM_RESERVATION_STATUSES = new Set([
@@ -196,7 +196,7 @@ export function canTransitionMakeupRequest(status, nextStatus, context = {}) {
 
   if (current === "approval_pending") {
     return (
-      (next === "manager_pending" && isApprover) ||
+      (next === "completed" && isApprover) ||
       (next === "revision_requested" && isApprover) ||
       (next === "rejected" && isApprover) ||
       (next === "canceled" && (isRequester || isManager))
@@ -211,16 +211,11 @@ export function canTransitionMakeupRequest(status, nextStatus, context = {}) {
   }
 
   if (current === "manager_pending") {
-    return (
-      (next === "completed" && isManager) ||
-      (next === "revision_requested" && isManager) ||
-      (next === "rejected" && isManager) ||
-      (next === "canceled" && isManager)
-    );
+    return false;
   }
 
   if (current === "completed") {
-    return next === "canceled" && isManager;
+    return next === "canceled" && isApprover;
   }
 
   return false;

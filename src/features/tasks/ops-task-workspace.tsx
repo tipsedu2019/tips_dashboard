@@ -327,7 +327,7 @@ const WORKSPACE_LABELS: Record<WorkspaceKey, string> = {
   registration: "등록",
   transfer: "전반",
   withdrawal: "퇴원",
-  word_retest: "단어 재시험",
+  word_retest: "영어 단어 재시험",
 }
 
 const WORKSPACE_SEARCH_PLACEHOLDERS: Record<WorkspaceKey, string> = {
@@ -4548,7 +4548,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     ? scopedTasks.length > 0
     : scopedTasks.some((task) => showClosed || isOpenTask(task))
   const showSearch = hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks
-  const emptyActionLabel = `${workspaceLabel} 추가`
+  const emptyActionLabel = isWordRetestWorkspace ? "추가" : `${workspaceLabel} 추가`
   const emptyTaskLabel = isTodoWorkspace
     ? getTodoEmptyLabel(todoView, isFilteredEmpty)
     : isFilteredEmpty
@@ -5758,12 +5758,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             {showToolbarCreate && (
               <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
                 <Plus className="size-4" />
-                {isWordRetestWorkspace ? (
-                  <>
-                    <span className="sm:hidden">추가</span>
-                    <span className="hidden sm:inline">{workspaceLabel} 추가</span>
-                  </>
-                ) : isTodoWorkspace ? "할 일 추가" : `${workspaceLabel} 추가`}
+                {isWordRetestWorkspace ? "추가" : isTodoWorkspace ? "할 일 추가" : `${workspaceLabel} 추가`}
               </Button>
             )}
           </div>
@@ -8109,7 +8104,7 @@ function WordRetestTaskList({
   onBulkDelete,
   onCreate,
   emptyLabel = "단어 재시험 없음",
-  emptyActionLabel = "단어 재시험 추가",
+  emptyActionLabel = "추가",
   showEmptyAction = true,
   completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
 }: {

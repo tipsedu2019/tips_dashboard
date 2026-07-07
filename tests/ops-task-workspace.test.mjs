@@ -30,7 +30,7 @@ const ko = {
   unassigned: "\ubbf8\uc815\ub9ac",
   upcoming: "\uc608\uc815",
   withdrawal: "\ud1f4\uc6d0",
-  wordRetest: "\ub2e8\uc5b4 \uc7ac\uc2dc\ud5d8",
+  wordRetest: "\uc601\uc5b4 \ub2e8\uc5b4 \uc7ac\uc2dc\ud5d8",
 };
 
 async function readSource(pathname) {
@@ -854,7 +854,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'className="relative min-w-0 flex-1"',
     'className="h-9 shrink-0 whitespace-nowrap px-3"',
     "!isWordRetestWorkspace && (",
-    '<span className="sm:hidden">추가</span>',
+    'isWordRetestWorkspace ? "추가" : isTodoWorkspace ? "할 일 추가" : `${workspaceLabel} 추가`',
     "min-w-[720px]",
     "h-10 w-[108px]",
     "현재 진행상태",
@@ -1184,6 +1184,16 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "score_out_of_100 numeric(8,2)",
     "cutoff_question_count numeric(8,2)",
   ]);
+});
+
+test("word retest workspace keeps page title full and add actions compact", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(workspaceSource, /word_retest: "영어 단어 재시험"/);
+  assert.match(workspaceSource, /const emptyActionLabel = isWordRetestWorkspace \? "추가" : `\$\{workspaceLabel\} 추가`/);
+  assert.match(workspaceSource, /isWordRetestWorkspace \? "추가" : isTodoWorkspace \? "할 일 추가" : `\$\{workspaceLabel\} 추가`/);
+  assert.doesNotMatch(workspaceSource, /<span className="hidden sm:inline">\{workspaceLabel\} 추가<\/span>/);
+  assert.doesNotMatch(workspaceSource, /word_retest: "단어 재시험"/);
 });
 
 test("management sync connects registration transfer withdrawal and word retest data", async () => {
