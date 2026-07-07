@@ -95,7 +95,7 @@ type WordRetestScoreDraft = {
   secondScore: string
   thirdScore: string
 }
-type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "score" | "cutoff" | "total" | "result" | "action"
+type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "score" | "total" | "cutoff" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
   kind?: "word_retest_retry"
@@ -1155,8 +1155,8 @@ function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey,
     widths.textbook,
     widths.unit,
     widths.score,
-    widths.cutoff,
     widths.total,
+    widths.cutoff,
     widths.result,
     widths.action,
   ].map((width) => `${width}px`).join(" ")
@@ -3286,18 +3286,18 @@ function DateTimeField({
               aria-expanded={dateTimeOpen}
               aria-controls={popoverId}
               className={[
-                "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
-                value ? "pr-20" : "",
+                "flex h-9 w-full min-w-0 items-center rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
+                value ? "pr-20" : "pr-14",
                 dateTimeOpen ? "border-ring ring-2 ring-ring/40" : "",
               ].filter(Boolean).join(" ")}
             >
-              <span className={value ? "truncate text-foreground" : "truncate text-muted-foreground"}>{buttonText}</span>
-              <span className={["flex shrink-0 items-center gap-1 text-muted-foreground", value ? "mr-7" : ""].join(" ")}>
-                <CalendarDays className="size-4" />
-                <Clock className="size-4" />
-              </span>
+              <span className={value ? "min-w-0 flex-1 truncate text-foreground" : "min-w-0 flex-1 truncate text-muted-foreground"}>{buttonText}</span>
             </button>
           </PopoverTrigger>
+          <span className={["pointer-events-none absolute top-1/2 flex -translate-y-1/2 items-center gap-1 text-muted-foreground", value ? "right-10" : "right-3"].join(" ")}>
+            <CalendarDays className="size-4" />
+            <Clock className="size-4" />
+          </span>
           {value && (
             <button
               type="button"
@@ -3324,12 +3324,15 @@ function DateTimeField({
           sideOffset={6}
           collisionPadding={12}
           disablePortal
-          style={TOUCH_SCROLL_AREA_STYLE}
+          style={{
+            ...TOUCH_SCROLL_AREA_STYLE,
+            maxHeight: "min(30rem, var(--radix-popover-content-available-height), calc(100vh - 4rem))",
+          }}
           onTouchMove={stopTouchScrollPropagation}
-          className="z-[120] w-[min(42rem,calc(100vw-1rem))] max-h-[min(34rem,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain p-0"
+          className="z-[120] w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto overscroll-contain p-0"
         >
-          <div className="grid gap-0 min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
-            <div className="border-b min-[380px]:border-b-0 min-[380px]:border-r">
+          <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="border-b sm:border-b-0 sm:border-r">
               <div className="flex items-center justify-between border-b px-2 py-1.5">
                 <button
                   type="button"
@@ -3380,7 +3383,7 @@ function DateTimeField({
               </div>
             </div>
             <div
-              className="grid max-h-44 gap-1 overflow-y-auto overscroll-contain p-2 min-[380px]:max-h-[16.5rem] md:max-h-72"
+              className="grid max-h-44 gap-1 overflow-y-auto overscroll-contain p-2 sm:max-h-[16.5rem] md:max-h-56"
               style={TOUCH_SCROLL_AREA_STYLE}
               onWheel={handleTimeListWheel}
               onTouchMove={stopTouchScrollPropagation}
@@ -3404,8 +3407,8 @@ function DateTimeField({
               })}
             </div>
           </div>
-          <div className="grid border-t bg-muted/30 min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
-            <div className="border-b p-2 min-[380px]:border-b-0 min-[380px]:border-r">
+          <div className="grid border-t bg-muted/30 sm:grid-cols-[minmax(0,1fr)_8.75rem] md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="border-b p-2 sm:border-b-0 sm:border-r">
               <label htmlFor={manualDateInputId} className="sr-only">직접 날짜 입력</label>
               <Input
                 id={manualDateInputId}
@@ -4613,6 +4616,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const formRequestedByLabel = profileLabelById.get(form.requestedBy || "") || editingTask?.requestedByLabel || (form.requestedBy === currentUserId ? currentUserLabel : "") || "미지정"
   const formRequestedTeamLabel = form.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam || "미지정"
   const isFormDirty = formOpen && serializeOpsTaskInput(form) !== formBaselineRef.current
+  const isEditingLockedCompletedTask = Boolean(editingTask && isClosedOpsTask(editingTask) && !formCompletionIntent)
   const formDialogTitle = editingTask
     ? form.type === "general"
       ? "할 일 수정"
@@ -5805,15 +5809,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             )}
           </div>
         </div>
-        {isWordRetestWorkspace && showClosedToggle && (
-          <div className="flex justify-end">
-            <Button type="button" variant="outline" size="sm" aria-pressed={showClosed} onClick={() => setShowClosed((value) => !value)}>
-              <Check className="size-4" />
-              {showClosed ? "완료 숨김" : "완료 보기"}
-            </Button>
-          </div>
-        )}
-
         {isTodoWorkspace && (
           <div className="grid gap-2">
             <form onSubmit={submitQuickAdd} className="grid gap-2 rounded-md border bg-background p-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
@@ -5874,35 +5869,54 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           </div>
         )}
 
-        {showSearch && (
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            ref={searchInputRef}
-            type="search"
-            value={query}
-            aria-label={`${workspaceLabel} 검색`}
-            autoComplete="off"
-            enterKeyHint="search"
-            data-testid="task-search-input"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setQuery("")
-            }}
-            placeholder={WORKSPACE_SEARCH_PLACEHOLDERS[workspace]}
-            className="pl-9 pr-9"
-          />
-          {query && (
-            <button
-              type="button"
-              aria-label="검색 지우기"
-              onClick={() => setQuery("")}
-              className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <X className="size-4" />
-            </button>
-          )}
-        </div>
+        {(showSearch || (isWordRetestWorkspace && showClosedToggle)) && (
+          <div className="flex items-center gap-2">
+            {showSearch ? (
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  ref={searchInputRef}
+                  type="search"
+                  value={query}
+                  aria-label={`${workspaceLabel} 검색`}
+                  autoComplete="off"
+                  enterKeyHint="search"
+                  data-testid="task-search-input"
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setQuery("")
+                  }}
+                  placeholder={WORKSPACE_SEARCH_PLACEHOLDERS[workspace]}
+                  className="pl-9 pr-9"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    aria-label="검색 지우기"
+                    onClick={() => setQuery("")}
+                    className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="size-4" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="min-w-0 flex-1" />
+            )}
+            {isWordRetestWorkspace && showClosedToggle && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-pressed={showClosed}
+                onClick={() => setShowClosed((value) => !value)}
+                className="h-9 shrink-0 whitespace-nowrap px-3"
+              >
+                <Check className="size-4" />
+                <span>{showClosed ? "완료 숨김" : "완료 보기"}</span>
+              </Button>
+            )}
+          </div>
         )}
 
 	        {isWordRetestWorkspace && (
@@ -6226,7 +6240,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                {message && (
 	                  <div role="alert" className="rounded-md border border-destructive/30 whitespace-pre-line bg-background px-3 py-2 text-sm text-destructive">
 	                    <span>{message}</span>
-	                    {formCompletionBlockers.length > 0 && (
+	                    {!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && (
 	                      <span className="mt-2 flex flex-wrap gap-1">
 	                        {formCompletionBlockers.map((blocker) => (
 	                          <button
@@ -6251,6 +6265,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                <TypeSpecificFields
 	                  step="word_retest_basic"
 	                  form={form}
+	                  formCompletionIntent={formCompletionIntent}
 	                  wordRetestStudentIds={wordRetestStudentIds}
 	                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
 	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
@@ -6266,6 +6281,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                <TypeSpecificFields
 	                  step="word_retest_scope"
 	                  form={form}
+	                  formCompletionIntent={formCompletionIntent}
 	                  wordRetestStudentIds={wordRetestStudentIds}
 	                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
 	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
@@ -6278,14 +6294,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                  updateTransfer={updateTransfer}
 	                  updateWordRetest={updateWordRetest}
 	                />
-	                {editingTask && (
-	                  <section className="grid gap-3 rounded-lg border bg-muted/20 p-3">
+		                {editingTask && formCompletionIntent?.kind !== "word_retest_retry" && (
+		                  <section className="grid gap-3 rounded-lg border bg-muted/20 p-3">
 	                    <div className="flex items-center justify-between gap-2">
 	                      <h3 className="text-sm font-semibold">점수</h3>
 	                    </div>
 	                    <TypeSpecificFields
 	                      step="word_retest_scores"
 	                      form={form}
+	                      formCompletionIntent={formCompletionIntent}
 	                      wordRetestStudentIds={wordRetestStudentIds}
 	                      onWordRetestStudentIdsChange={setWordRetestStudentIds}
 	                      students={data?.students || EMPTY_STUDENT_OPTIONS}
@@ -6336,7 +6353,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 {message && (
                   <div role="alert" className="rounded-md border border-destructive/30 whitespace-pre-line bg-background px-3 py-2 text-sm text-destructive">
                     <span>{message}</span>
-                    {formCompletionBlockers.length > 0 && (
+                    {!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && (
                       <span className="mt-2 flex flex-wrap gap-1">
                         {formCompletionBlockers.map((blocker) => (
                           <button
@@ -6356,6 +6373,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                <TypeSpecificFields
                   step={activeFormDetailStep}
                   form={form}
+                  formCompletionIntent={formCompletionIntent}
                   students={data?.students || EMPTY_STUDENT_OPTIONS}
                   classes={data?.classes || EMPTY_CLASS_OPTIONS}
                   teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
@@ -6395,7 +6413,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             <div className={[
               "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end",
             ].filter(Boolean).join(" ")}>
-              {formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== "word_retest_retry" && (
+              {!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== "word_retest_retry" && (
                 (() => {
                   const firstBlocker = formCompletionBlockers[0]
                   return (
@@ -6442,7 +6460,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               <Button type="button" variant={confirmingFormClose ? "destructive" : "outline"} onClick={confirmingFormClose ? discardFormAndClose : closeForm} className="w-full sm:w-auto">
                 {confirmingFormClose ? "저장하지 않고 닫기" : "닫기"}
               </Button>
-              <Button type="submit" disabled={saving} className="w-full sm:w-auto">{saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent)}</Button>
+              {!isEditingLockedCompletedTask && (
+                <Button type="submit" disabled={saving} className="w-full sm:w-auto">
+                  {saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent)}
+                </Button>
+              )}
             </div>
           </form>
         </DialogContent>
@@ -6711,6 +6733,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 function TypeSpecificFields({
   step,
   form,
+  formCompletionIntent,
   wordRetestStudentIds,
   onWordRetestStudentIdsChange,
   students,
@@ -6725,6 +6748,7 @@ function TypeSpecificFields({
 }: {
   step: FormDetailStepKey
   form: OpsTaskInput
+  formCompletionIntent?: FormCompletionIntent | null
   wordRetestStudentIds?: string[]
   onWordRetestStudentIdsChange?: (values: string[]) => void
   students: OpsStudentOption[]
@@ -7134,6 +7158,8 @@ function TypeSpecificFields({
   }
 
   if (form.type === "word_retest") {
+    const isFailedWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry" && formCompletionIntent.retryReason === "failed"
+
     if (step === "word_retest_basic") {
       return (
         <div className="grid gap-3">
@@ -7230,6 +7256,8 @@ function TypeSpecificFields({
         </div>
       )
     }
+
+    if (step === "word_retest_scores" && isFailedWordRetestRetryForm) return null
 
     if (step === "word_retest_scores") {
       return (
@@ -8229,8 +8257,8 @@ function WordRetestTaskList({
         <WordRetestResizableHeaderCell label="교재" columnKey="textbook" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="시험범위" columnKey="unit" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="맞은 개수" columnKey="score" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="커트라인" columnKey="cutoff" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="출제 개수" columnKey="total" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="커트라인" columnKey="cutoff" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="결과" columnKey="result" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="다음 액션" columnKey="action" align="right" onResizeStart={startColumnResize} />
       </div>
@@ -8409,13 +8437,13 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
           onSave={onScoreSave}
         />
       </span>
-      <span className="order-10 min-w-0 font-medium md:order-none">
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
-        {wordRetest.cutoffQuestionCount || "-"}
-      </span>
       <span className="order-9 min-w-0 font-medium md:order-none">
         <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">출제 개수</span>
         {wordRetest.totalQuestionCount || "-"}
+      </span>
+      <span className="order-10 min-w-0 font-medium md:order-none">
+        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
+        {wordRetest.cutoffQuestionCount || "-"}
       </span>
       <span className="order-12 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">결과</span>

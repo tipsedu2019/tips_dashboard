@@ -817,8 +817,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "className=\"h-9 min-w-0 pr-9\"",
     "className=\"max-h-72 overflow-y-auto overscroll-contain p-1\"",
     "right-2 top-1/2 inline-flex size-6",
-    "value ? \"pr-20\" : \"\"",
-    "value ? \"mr-7\" : \"\"",
+    "value ? \"pr-20\" : \"pr-14\"",
+    'value ? "right-10" : "right-3"',
     "z-[120]",
     "max-h-[min(34rem,var(--radix-popover-content-available-height))]",
     "min-[380px]:grid-cols-[minmax(0,1fr)_8.75rem]",
@@ -847,6 +847,9 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2"',
     'isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto"',
     "showClosedToggle && !isWordRetestWorkspace",
+    "{(showSearch || (isWordRetestWorkspace && showClosedToggle)) && (",
+    'className="relative min-w-0 flex-1"',
+    'className="h-9 shrink-0 whitespace-nowrap px-3"',
     "!isWordRetestWorkspace && (",
     '<span className="sm:hidden">추가</span>',
     "min-w-[720px]",
@@ -911,8 +914,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'label="담당선생님" columnKey="teacher"',
     'label="수업" columnKey="class"',
     'label="맞은 개수" columnKey="score"',
-    'label="커트라인" columnKey="cutoff"',
     'label="출제 개수" columnKey="total"',
+    'label="커트라인" columnKey="cutoff"',
     'label="결과" columnKey="result"',
     "cursor-col-resize",
     "onPointerDown",
@@ -971,6 +974,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "label=\"장소\"",
     "label=\"메모\"",
     "DateTimeField label=\"응시일시\"",
+    "pointer-events-none absolute",
+    'value ? "right-10" : "right-3"',
     "label=\"시험범위\"",
     'blockers.push("커트라인")',
     'blockers.push("출제 개수")',
@@ -1001,7 +1006,10 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "불합격 확인",
     "응시일정 변경",
     "미응시 재요청",
+    'editingTask && formCompletionIntent?.kind !== "word_retest_retry" && (',
     'formCompletionIntent?.kind !== "word_retest_retry"',
+    'const isFailedWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry"',
+    'if (step === "word_retest_scores" && isFailedWordRetestRetryForm) return null',
   ]);
   assert.doesNotMatch(workspaceSource, /세부과목 전체/);
   assert.doesNotMatch(workspaceSource, /shouldRequestReview/);
@@ -1147,7 +1155,7 @@ test("management sync connects registration transfer withdrawal and word retest 
     "function CompletionBlockerActionPanel",
     "function CompletionBlockerInlineChips",
     "getCompletionBlockerActionLabel([blocker])",
-    "{formCompletionBlockers.length > 0 && (",
+    "formCompletionBlockers.length > 0 && (",
     "showNeed",
     "isOwnGeneralTask",
     "[task.requestedBy, task.assigneeId, task.secondaryAssigneeId].includes(currentUserId)",
@@ -1334,6 +1342,17 @@ test("completed operational task details are locked after management sync", asyn
     serviceSource.indexOf("assertCompletedOperationEditable(existingTask)") <
       serviceSource.indexOf("assertManagementSyncReady(input)", serviceSource.indexOf("export async function updateOpsTask")),
     "completed operation edits should be rejected before expensive management-sync validation",
+  );
+  assertIncludesAll(workspaceSource, [
+    "const isEditingLockedCompletedTask = Boolean(editingTask && isClosedOpsTask(editingTask) && !formCompletionIntent)",
+    "{!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== \"word_retest_retry\" && (",
+    "{!isEditingLockedCompletedTask && (",
+    "<Button type=\"submit\" disabled={saving} className=\"w-full sm:w-auto\">",
+  ]);
+  assert.equal(
+    workspaceSource.match(/\{!isEditingLockedCompletedTask && formCompletionBlockers\.length > 0 && \(/g)?.length,
+    2,
+    "locked completed edits should hide completion blocker notices",
   );
 
   assertIncludesAll(migrationSource, [
