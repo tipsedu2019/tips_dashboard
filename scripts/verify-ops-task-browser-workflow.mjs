@@ -344,7 +344,7 @@ const ROUTES = [
   { path: "/admin/tasks?list=completed", name: "todo-completed", expectedTexts: ["할 일", "완료"] },
   { path: "/admin/registration", name: "registration", expectedTexts: ["등록", "등록 추가"], interaction: "open-create" },
   { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 추가"], interaction: "open-create" },
-  { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 추가"], interaction: "open-create" },
+  { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 신청"], interaction: "open-create" },
   { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["영어 단어 재시험", "추가"], interaction: "open-create" },
   { path: "/admin/makeup-requests", name: "makeup-requests", expectedTexts: ["휴보강", "신청"], interaction: "makeup-request" },
   { path: "/admin/approvals", name: "approvals", expectedTexts: ["전자결재", "영어", "수학", "자유"], interaction: "approval-draft" },
@@ -901,7 +901,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
       {
         key: "withdrawal",
         routePath: "/admin/withdrawal",
-        routeExpectedTexts: ["퇴원", "퇴원 추가"],
+        routeExpectedTexts: ["퇴원", "퇴원 신청"],
         title: `${prefix} 퇴원 완료`,
         id: ids.tasks.withdrawal,
       },
@@ -1464,7 +1464,7 @@ async function fillOperationMinimumFields(page, dialog, route, sampleName) {
 async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
   const sampleName = `${UI_SAMPLE_PREFIX} ${route.name} ${Date.now()}-${sampleIndex}-${Math.random().toString(36).slice(2, 8)}`
   const editedTitle = `${UI_SAMPLE_PREFIX} ${route.name} 수정 ${Date.now()}-${sampleIndex}`
-  const createButtonName = route.name === "word-retests" ? "추가" : `${route.expectedTexts[0]} 추가`
+  const createButtonName = route.name === "word-retests" ? "추가" : route.name === "withdrawal" ? "퇴원 신청" : `${route.expectedTexts[0]} 추가`
   const addButton = page.getByRole("button", { name: createButtonName, exact: true }).last()
   if (!(await addButton.count().catch(() => 0))) throw new Error(`${route.name} create button was not found.`)
 

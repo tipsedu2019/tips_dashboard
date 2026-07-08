@@ -3040,6 +3040,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                       "subject",
                       "grade",
                       "teacher",
+                      "schedule",
                       "classroom",
                       "capacity",
                       "fee",

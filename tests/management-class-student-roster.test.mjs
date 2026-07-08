@@ -338,6 +338,18 @@ test("class official summary keeps the period visible as core class identity", a
   assert.match(pageSource, /renderEditableFields\("detail", \[[\s\S]*"classGroupIds"[\s\S]*\]\)/);
 });
 
+test("class detail basic tab keeps editable day and time field", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const tabsStart = pageSource.indexOf('data-testid="class-official-detail-tabs"');
+  const tabsEnd = pageSource.indexOf("<DialogFooter", tabsStart);
+  const tabsSource = pageSource.slice(tabsStart, tabsEnd);
+
+  assert.ok(tabsStart >= 0 && tabsEnd > tabsStart);
+  assert.match(pageSource, /\{ name: "schedule", label: "요일\/시간", placeholder: "월 18:00-20:00" \}/);
+  assert.match(tabsSource, /renderEditableFields\("detail", \[[\s\S]*"teacher"[\s\S]*"schedule"[\s\S]*"classroom"[\s\S]*\]\)/);
+  assert.doesNotMatch(tabsSource, /\{renderClassSchedulePanel\(\)\}/);
+});
+
 test("class official summary hides active textbook progress status", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const summaryStart = pageSource.indexOf("const renderClassSummaryBar = () =>");

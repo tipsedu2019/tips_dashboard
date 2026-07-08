@@ -737,6 +737,195 @@ test("operation forms use staged fields and linked management selectors", async 
   );
 });
 
+test("withdrawal workspace follows applicant operations and approver queues", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const formDialogSource = source.slice(
+    source.indexOf("<Dialog open={formOpen}"),
+    source.indexOf("<Dialog open={detailOpen}"),
+  );
+  const withdrawalFormSource = source.slice(
+    source.indexOf('if (form.type === "withdrawal")'),
+    source.indexOf('if (form.type === "transfer")'),
+  );
+  const withdrawalDetailSource = source.slice(
+    source.indexOf('if (task.type === "withdrawal" && task.withdrawal)'),
+    source.indexOf('if (task.type === "transfer" && task.transfer)'),
+  );
+
+  assertIncludesAll(source, [
+    'type WithdrawalViewKey = "applicant" | "operations" | "approver" | "closed"',
+    'type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"',
+    "type WithdrawalTableColumnKey",
+    "WITHDRAWAL_VIEW_TABS",
+    "WITHDRAWAL_PERIOD_FILTERS",
+    "WITHDRAWAL_TABLE_COLUMNS",
+    "WITHDRAWAL_TABLE_COLUMN_WIDTHS",
+    "WITHDRAWAL_TABLE_COLUMN_MIN_WIDTHS",
+    '{ key: "applicant", label: "신청자" }',
+    '{ key: "operations", label: "관리팀" }',
+    '{ key: "approver", label: "결재자" }',
+    '{ key: "closed", label: "완료" }',
+    "isWithdrawalWorkspace",
+    "withdrawalView",
+    "syncWithdrawalView",
+    "getWithdrawalViewTasks",
+    "withdrawalCounts",
+    "WithdrawalFlowSummary",
+    "WithdrawalOperationsChecklist",
+    "WithdrawalDataTable",
+    "WithdrawalPeriodFilterBar",
+    "WithdrawalFilterSelect",
+    "WithdrawalResizableHeaderCell",
+    "getWithdrawalTableGridTemplate",
+    "matchesWithdrawalSelectionFilters",
+    "matchesWithdrawalPeriodFilter",
+    "getWithdrawalTableValue",
+  ]);
+  assertIncludesAll(source, [
+    'columnKey: "status"',
+    'columnKey: "subject"',
+    'columnKey: "teacher"',
+    'columnKey: "className"',
+    'columnKey: "student"',
+    'columnKey: "withdrawalDate"',
+    'columnKey: "withdrawalSession"',
+    'columnKey: "completedLessonHours"',
+    'columnKey: "fourWeekLessonHours"',
+    'columnKey: "progress"',
+    'columnKey: "customerReason"',
+    'columnKey: "teacherOpinion"',
+    'columnKey: "undistributedTextbooks"',
+    'columnKey: "requester"',
+    'columnKey: "requestedAt"',
+    'columnKey: "action"',
+  ]);
+  assertIncludesAll(source, [
+    'aria-label="퇴원 전체 필터"',
+    'aria-label="퇴원 누가 필터"',
+    'aria-label="퇴원 기간 필터"',
+    'aria-label={`${filterColumn.label} 열 필터`}',
+    'aria-label="퇴원 신청 데이터테이블"',
+    'aria-label="퇴원 상세 열기"',
+    'aria-label={`${label} 열 너비 조절`}',
+    'cursor-col-resize',
+    'role="columnheader"',
+    'setWithdrawalTableSort',
+    'setFilterColumnKey(columnKey)',
+    '[grid-template-columns:var(--withdrawal-grid-template)]',
+  ]);
+
+  assertIncludesAll(withdrawalFormSource, [
+    "selectWithdrawalSubject",
+    "selectWithdrawalTeacher",
+    "withdrawalSubjectOptions",
+    "withdrawalTeacherOptions",
+    "withdrawalClassOptions",
+    "withdrawalStudentOptions",
+    "WithdrawalScheduleCalendarField",
+    "TextareaField",
+    "TextFieldWithHelp",
+    'label="과목"',
+    'label="선생님"',
+    'label="수업"',
+    'label="학생"',
+    'label="고객 퇴원사유"',
+    'label="선생님 의견"',
+    'label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP}',
+  ]);
+
+  assert.ok(
+    withdrawalFormSource.indexOf('label="과목"') < withdrawalFormSource.indexOf('label="선생님"') &&
+      withdrawalFormSource.indexOf('label="선생님"') < withdrawalFormSource.indexOf('label="수업"') &&
+      withdrawalFormSource.indexOf('label="수업"') < withdrawalFormSource.indexOf('label="학생"'),
+    "withdrawal form should narrow selections in subject teacher class student order",
+  );
+  assert.ok(
+    withdrawalFormSource.indexOf("고객 퇴원사유") < withdrawalFormSource.indexOf("WithdrawalScheduleCalendarField"),
+    "withdrawal form should collect applicant reason before the withdrawal schedule calendar in one request",
+  );
+  assert.doesNotMatch(withdrawalFormSource, /if \(step === "withdrawal_reason"\)/);
+  assert.doesNotMatch(withdrawalFormSource, /if \(step === "withdrawal_checks"\)/);
+  assert.doesNotMatch(withdrawalFormSource, /퇴원 신청 내용/);
+  assert.doesNotMatch(withdrawalFormSource, /<TextField label="학년"/);
+  assert.doesNotMatch(withdrawalFormSource, /<WithdrawalFlowSummary/);
+  assert.doesNotMatch(withdrawalFormSource, /<TextField label="퇴원회차"/);
+  assert.doesNotMatch(withdrawalFormSource, /<TextFieldWithHelp label="퇴원일"/);
+  assert.doesNotMatch(withdrawalFormSource, /<TaskListboxField label=\{<FieldHelpLabel label="퇴원회차"/);
+  assert.doesNotMatch(withdrawalFormSource, /<TextField label="진행 수업시수"/);
+  assert.doesNotMatch(withdrawalFormSource, /<TextField label="4주 기준 수업시수"/);
+  assert.doesNotMatch(withdrawalFormSource, /AutoSyncStatusField label="시간표 명단 변경"/);
+  assert.doesNotMatch(withdrawalFormSource, /CheckField label="메이크에듀 퇴원처리"/);
+  assert.doesNotMatch(withdrawalFormSource, /CheckField label="수업료 처리"/);
+  assert.doesNotMatch(withdrawalFormSource, /CheckField label="교재비 처리"/);
+  assertIncludesAll(source, [
+    "getWithdrawalClassScheduleItems",
+    "getFallbackWithdrawalClassScheduleItems",
+    "getWithdrawalScheduleWeekdayIndexes",
+    "parseWithdrawalScheduleHoursByWeekday",
+    "getWithdrawalSessionHours",
+    "getWithdrawalWeeklyLessonHours",
+    "getWithdrawalScheduleMetrics",
+    "getWithdrawalScheduleStateLabel",
+    "isWithdrawalScheduleSelectable",
+    "FieldHelpLabel",
+    "helpOpen",
+    "setHelpOpen",
+    "WITHDRAWAL_DATE_HELP",
+    "수업진행률",
+    "정상",
+    "휴강",
+    "보강",
+    "관리팀으로부터 수령한 교재 중 위 학생에게 아직 배부되지 않은 교재가 있다면 입력하고",
+    "당월 출석부를 보고 학생이 마지막으로 수업 받은 날짜를 선택해 주세요",
+    "수업 일정에서 마지막으로 출석한 날짜를 선택하면 퇴원회차와 수업진행률이 자동 계산됩니다.",
+    "진행 수업시수",
+    "4주 기준 수업시수",
+    "배부되지 않은 교재에 대한 교재비 청구취소나 환불 처리는 교재 반납 이후에 진행됩니다.",
+  ]);
+  assert.match(
+    source,
+    /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && formDetailTabs\.length > 1/,
+  );
+  assert.match(
+    source,
+    /className=\{form\.type === "withdrawal" \? "grid gap-3" : "grid gap-3 rounded-lg border p-3"\}/,
+  );
+  assert.match(
+    formDialogSource,
+    /\{isTemplateForm && !isWordRetestForm && formDetailTabs\.length > 0 && \(/,
+  );
+  assert.match(
+    formDialogSource,
+    /\{shouldShowFormDetailTabs && \([\s\S]*?aria-label=\{`\$\{getTaskTypeLabel\(form\.type\)\} 입력 단계/,
+  );
+  assert.match(source, /<Textarea[\s\S]*className="min-h-20 min-w-0 resize-y"/);
+  assert.match(source, /onClick=\{\(event\) => \{[\s\S]*setHelpOpen\(\(current\) => !current\)/);
+  assert.match(source, /weeklyLessonHours \* 4/);
+  assert.match(source, /completedMinutes[\s\S]*\/ 60/);
+  assert.match(
+    source,
+    /if \(isWithdrawalWorkspace\) return getWithdrawalViewTasks\(nextTasks, withdrawalView\)/,
+  );
+  assert.match(
+    source,
+    /isWithdrawalWorkspace \? \(\s*<WithdrawalDataTable[\s\S]*?tasks=\{visibleTasks\}/,
+  );
+  assert.match(
+    source,
+    /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isWithdrawalWorkspace \? "퇴원 흐름" : `\$\{workspaceLabel\} 보기`\}/,
+  );
+  assertIncludesAll(withdrawalDetailSource, [
+    "신청",
+    "처리",
+    "결재",
+    "고객 퇴원사유",
+    "선생님 의견",
+    "미배부 교재",
+    "진행 수업시수",
+    "4주 기준 수업시수",
+  ]);
+});
+
 test("word retest workspace uses role queues branch filters and dedicated row actions", async () => {
   const [workspaceSource, modelSource, serviceSource, scoreMetadataMigrationSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
@@ -849,7 +1038,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'className="relative min-w-0 flex-1"',
     'className="h-9 shrink-0 whitespace-nowrap px-3"',
     "!isWordRetestWorkspace && (",
-    'isWordRetestWorkspace ? "추가" : isTodoWorkspace ? "할 일 추가" : `${workspaceLabel} 추가`',
+    "getWorkspaceCreateActionLabel(workspace, workspaceLabel)",
     "min-w-[620px]",
     "h-10 w-[108px]",
     "현재 진행상태",
@@ -933,8 +1122,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "onOpen={openEdit}",
     "단어 재시험 수정",
     'if (task.type === "word_retest") return []',
-    "!isTodoWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
-    "!isTodoWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
+    "!isTodoWorkspace && !isWithdrawalWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
+    "!isTodoWorkspace && !isWithdrawalWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
     'selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl"',
     'selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4"',
     'selectedTaskFresh.type !== "word_retest" && (',
@@ -1194,8 +1383,10 @@ test("word retest workspace keeps page title full and add actions compact", asyn
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
   assert.match(workspaceSource, /word_retest: "영어 단어 재시험"/);
-  assert.match(workspaceSource, /const emptyActionLabel = isWordRetestWorkspace \? "추가" : `\$\{workspaceLabel\} 추가`/);
-  assert.match(workspaceSource, /isWordRetestWorkspace \? "추가" : isTodoWorkspace \? "할 일 추가" : `\$\{workspaceLabel\} 추가`/);
+  assert.match(workspaceSource, /function getWorkspaceCreateActionLabel\(workspace: WorkspaceKey, workspaceLabel: string\)/);
+  assert.match(workspaceSource, /if \(workspace === "word_retest"\) return "추가"/);
+  assert.match(workspaceSource, /const emptyActionLabel = getWorkspaceCreateActionLabel\(workspace, workspaceLabel\)/);
+  assert.match(workspaceSource, /\{getWorkspaceCreateActionLabel\(workspace, workspaceLabel\)\}/);
   assert.doesNotMatch(workspaceSource, /<span className="hidden sm:inline">\{workspaceLabel\} 추가<\/span>/);
   assert.doesNotMatch(workspaceSource, /word_retest: "단어 재시험"/);
 });
