@@ -850,12 +850,11 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'className="h-9 shrink-0 whitespace-nowrap px-3"',
     "!isWordRetestWorkspace && (",
     'isWordRetestWorkspace ? "추가" : isTodoWorkspace ? "할 일 추가" : `${workspaceLabel} 추가`',
-    "min-w-[720px]",
+    "min-w-[620px]",
     "h-10 w-[108px]",
     "현재 진행상태",
     "재시험 추가",
     "공통",
-    "복귀",
     "담당선생님",
     "조교선생님",
     "시험 진행",
@@ -874,8 +873,6 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "returnToStart: true",
     "불합격 보고",
     "합격 보고",
-    "leadingSlots={1}",
-    "leadingSlots={3}",
     "WordRetestPeriodFilterBar",
     "WORD_RETEST_PERIOD_FILTERS",
     '{ key: "today", label: "오늘" }',
@@ -1008,6 +1005,34 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'const isFailedWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry"',
     'if (step === "word_retest_scores" && isFailedWordRetestRetryForm) return null',
   ]);
+  assert.match(
+    workspaceSource,
+    /const absentNodes:[\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[0\][\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[1\][\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[2\][\s\S]*label: "재시험 추가"[\s\S]*detail: "담당선생님"/,
+  );
+  assert.match(
+    workspaceSource,
+    /<WordRetestFlowLane label="미응시" nodes=\{absentNodes\} activeKeys=\{activeKeys\} tone="destructive" \/>/,
+  );
+  assert.doesNotMatch(
+    workspaceSource,
+    /<WordRetestFlowLane label="미응시"[\s\S]*leadingSlots=\{1\}/,
+  );
+  assert.match(
+    workspaceSource,
+    /<WordRetestFlowLane label=\{failedBranch.label\} nodes=\{failedNodes\} activeKeys=\{activeKeys\} tone="warning" \/>/,
+  );
+  assert.match(
+    workspaceSource,
+    /<WordRetestFlowLane label=\{passedBranch.label\} nodes=\{passedNodes\} activeKeys=\{activeKeys\} tone="primary" \/>/,
+  );
+  assert.doesNotMatch(workspaceSource, /min-w-\[720px\]/);
+  assert.doesNotMatch(workspaceSource, /min-w-\[700px\]/);
+  assert.doesNotMatch(workspaceSource, /label=\{failedBranch.label\}[\s\S]*leadingSlots=\{3\}/);
+  assert.doesNotMatch(workspaceSource, /label=\{passedBranch.label\}[\s\S]*leadingSlots=\{3\}/);
+  assert.doesNotMatch(
+    workspaceSource,
+    /const absentNodes:[\s\S]*label: "시작 전"[\s\S]*detail: "복귀"[\s\S]*\]/,
+  );
   assert.doesNotMatch(workspaceSource, /세부과목 전체/);
   assert.doesNotMatch(workspaceSource, /shouldRequestReview/);
   assert.doesNotMatch(workspaceSource, /kind: "edit", label: "점수 입력"/);

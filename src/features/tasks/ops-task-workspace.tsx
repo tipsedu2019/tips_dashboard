@@ -7643,7 +7643,7 @@ function WordRetestFlowLane({
         : "border-border bg-muted/40 text-foreground"
 
   return (
-    <span className="grid min-w-[700px] grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 rounded-md px-1.5 py-1">
+    <span className="grid min-w-[620px] grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 rounded-md px-1.5 py-1">
       <span className={["inline-flex h-8 items-center justify-center rounded-full border px-2 text-xs font-bold", labelClass].join(" ")}>
         {label}
       </span>
@@ -7682,7 +7682,8 @@ function WordRetestFlowChart({
   const absentNodes: WordRetestCompactFlowNode[] = [
     WORD_RETEST_DIAGRAM_ABSENT_NODES[0],
     WORD_RETEST_DIAGRAM_ABSENT_NODES[1],
-    { key: "absent_return", label: "시작 전", detail: "복귀", returnToStart: true },
+    WORD_RETEST_DIAGRAM_ABSENT_NODES[2],
+    { key: "absent_retry_create", label: "재시험 추가", detail: "담당선생님", returnToStart: true },
   ]
   const failedNodes: WordRetestCompactFlowNode[] = [
     failedBranch.result,
@@ -7707,11 +7708,11 @@ function WordRetestFlowChart({
 
   return (
     <div className="overflow-x-auto rounded-md border bg-background p-2" aria-label="단어 재시험 업무 흐름">
-      <div className="grid min-w-[720px] gap-1">
+      <div className="grid min-w-[620px] gap-1">
         <WordRetestFlowLane label="공통" nodes={commonNodes} activeKeys={activeKeys} />
-        <WordRetestFlowLane label="미응시" nodes={absentNodes} activeKeys={activeKeys} tone="destructive" leadingSlots={1} />
-        <WordRetestFlowLane label={failedBranch.label} nodes={failedNodes} activeKeys={activeKeys} tone="warning" leadingSlots={3} />
-        <WordRetestFlowLane label={passedBranch.label} nodes={passedNodes} activeKeys={activeKeys} tone="primary" leadingSlots={3} />
+        <WordRetestFlowLane label="미응시" nodes={absentNodes} activeKeys={activeKeys} tone="destructive" />
+        <WordRetestFlowLane label={failedBranch.label} nodes={failedNodes} activeKeys={activeKeys} tone="warning" />
+        <WordRetestFlowLane label={passedBranch.label} nodes={passedNodes} activeKeys={activeKeys} tone="primary" />
       </div>
     </div>
   )
