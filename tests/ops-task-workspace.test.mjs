@@ -737,8 +737,16 @@ test("operation forms use staged fields and linked management selectors", async 
   );
 });
 
-test("withdrawal workspace follows applicant operations and approver queues", async () => {
+test("withdrawal workspace follows request processing and completed queues", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const withdrawalDataTableSource = source.slice(
+    source.indexOf("function WithdrawalResizableHeaderCell"),
+    source.indexOf("function DashboardMetric"),
+  );
+  const withdrawalWorkspaceToolbarSource = source.slice(
+    source.indexOf('aria-label={isTodoWorkspace ? "할 일 목록"'),
+    source.indexOf("{isTodoWorkspace && ("),
+  );
   const formDialogSource = source.slice(
     source.indexOf("<Dialog open={formOpen}"),
     source.indexOf("<Dialog open={detailOpen}"),
@@ -753,17 +761,19 @@ test("withdrawal workspace follows applicant operations and approver queues", as
   );
 
   assertIncludesAll(source, [
-    'type WithdrawalViewKey = "applicant" | "operations" | "approver" | "closed"',
+    'type WithdrawalViewKey = "applicant" | "operations" | "closed"',
     'type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"',
     "type WithdrawalTableColumnKey",
     "WITHDRAWAL_VIEW_TABS",
+    "WITHDRAWAL_NOTIFICATION_CHANNELS",
+    "WITHDRAWAL_NOTIFICATION_TRIGGERS",
+    "WithdrawalNotificationSettingsDialog",
     "WITHDRAWAL_PERIOD_FILTERS",
     "WITHDRAWAL_TABLE_COLUMNS",
     "WITHDRAWAL_TABLE_COLUMN_WIDTHS",
     "WITHDRAWAL_TABLE_COLUMN_MIN_WIDTHS",
-    '{ key: "applicant", label: "신청자" }',
-    '{ key: "operations", label: "관리팀" }',
-    '{ key: "approver", label: "결재자" }',
+    '{ key: "applicant", label: "신청" }',
+    '{ key: "operations", label: "처리 중" }',
     '{ key: "closed", label: "완료" }',
     "isWithdrawalWorkspace",
     "withdrawalView",
@@ -780,6 +790,34 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     "matchesWithdrawalSelectionFilters",
     "matchesWithdrawalPeriodFilter",
     "getWithdrawalTableValue",
+  ]);
+  assert.doesNotMatch(source, /\{ key: "approver", label: "결재자" \}/);
+  assert.doesNotMatch(source, /view === "approver"/);
+  assert.match(
+    source,
+    /if \(view === "operations"\) \{[\s\S]*"review_requested"/,
+    "legacy withdrawal review_requested rows should remain in the processing queue",
+  );
+  assert.match(
+    source,
+    /if \(task\.type === "withdrawal" && task\.status === "in_progress"\) return \{ status: "done", label: "완료" \}/,
+    "withdrawal tasks should move from processing directly to completed without an approval queue",
+  );
+  assertIncludesAll(withdrawalWorkspaceToolbarSource, [
+    'aria-label="퇴원 알림 설정"',
+    "setWithdrawalNotificationOpen(true)",
+    "<Bell className=\"size-4\"",
+  ]);
+  assert.match(
+    withdrawalWorkspaceToolbarSource,
+    /!isWordRetestWorkspace && !isWithdrawalWorkspace && \(/,
+    "withdrawal toolbar should exclude the generic refresh action",
+  );
+  assertIncludesAll(source, [
+    'aria-label="퇴원 알림 설정 표"',
+    "알림 위치",
+    "신청 접수",
+    "처리 완료",
   ]);
   assertIncludesAll(source, [
     'columnKey: "status"',
@@ -799,10 +837,9 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     'columnKey: "requestedAt"',
     'columnKey: "action"',
   ]);
-  assertIncludesAll(source, [
+  assertIncludesAll(withdrawalDataTableSource, [
     'aria-label="퇴원 전체 필터"',
     'aria-label="퇴원 누가 필터"',
-    'aria-label="퇴원 기간 필터"',
     'aria-label={`${filterColumn.label} 열 필터`}',
     'aria-label="퇴원 신청 데이터테이블"',
     'aria-label="퇴원 상세 열기"',
@@ -812,7 +849,13 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     'setWithdrawalTableSort',
     'setFilterColumnKey(columnKey)',
     '[grid-template-columns:var(--withdrawal-grid-template)]',
+    "<WithdrawalPeriodFilterBar",
   ]);
+  assert.match(source, /aria-label="퇴원 기간 필터"/);
+  assert.doesNotMatch(withdrawalDataTableSource, /label="수업 필터"/);
+  assert.doesNotMatch(withdrawalDataTableSource, /allLabel="수업 전체"/);
+  assert.doesNotMatch(withdrawalDataTableSource, /label="학생 필터"/);
+  assert.doesNotMatch(withdrawalDataTableSource, /allLabel="학생 전체"/);
 
   assertIncludesAll(withdrawalFormSource, [
     "selectWithdrawalSubject",
@@ -823,14 +866,15 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     "withdrawalStudentOptions",
     "WithdrawalScheduleCalendarField",
     "TextareaField",
-    "TextFieldWithHelp",
+    "UndistributedTextbookListField",
     'label="과목"',
     'label="선생님"',
     'label="수업"',
     'label="학생"',
     'label="고객 퇴원사유"',
     'label="선생님 의견"',
-    'label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP}',
+    'label="미배부 교재"',
+    "help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP}",
   ]);
   assertIncludesAll(withdrawalFormSource, [
     "canSelectWithdrawalTeacher",
@@ -865,6 +909,21 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     withdrawalFormSource,
     /renderSelected=\{\(option\) => <LinkedSelectedValue label=\{option\.label\} pills=/,
     "withdrawal selected values should not show secondary metadata pills in the closed controls",
+  );
+  assert.doesNotMatch(
+    withdrawalFormSource,
+    /renderOption=\{\(option\) => <LinkedSelectedValue label=\{option\.label\} pills=\{\[option\.meta\]\}/,
+    "withdrawal teacher candidates should not show team metadata pills",
+  );
+  assert.doesNotMatch(
+    withdrawalFormSource,
+    /classItem\?\.subject, classItem\?\.teacher, classItem\?\.room/,
+    "withdrawal class candidates should not show subject teacher or room metadata pills",
+  );
+  assert.match(
+    withdrawalFormSource,
+    /return <LinkedSelectedValue label=\{option\.label\} pills=\{\[student\?\.grade, student\?\.school\]\} \/>/,
+    "withdrawal student candidates should keep grade and school but hide status metadata",
   );
   assert.ok(
     withdrawalFormSource.indexOf("고객 퇴원사유") < withdrawalFormSource.indexOf("WithdrawalScheduleCalendarField"),
@@ -908,7 +967,17 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     "진행 수업시수",
     "4주 기준 수업시수",
     "배부되지 않은 교재에 대한 교재비 청구취소나 환불 처리는 교재 반납 이후에 진행됩니다.",
+    "UndistributedTextbookListField",
+    'aria-label={`${label} 항목 추가`}',
+    "교재 추가",
+    "Math.max(1, rawItems.length) + extraRowCount",
+    "getWithdrawalCalendarSessionLabel",
   ]);
+  assert.doesNotMatch(
+    withdrawalFormSource,
+    /<TextFieldWithHelp label="미배부 교재"/,
+    "undistributed textbooks should support multiple entries instead of a single text input",
+  );
   assert.match(
     source,
     /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && formDetailTabs\.length > 1/,
@@ -926,7 +995,7 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     /\{shouldShowFormDetailTabs && \([\s\S]*?aria-label=\{`\$\{getTaskTypeLabel\(form\.type\)\} 입력 단계/,
   );
   assert.match(source, /<Textarea[\s\S]*className="min-h-20 min-w-0 resize-y"/);
-  assert.match(source, /onClick=\{\(event\) => \{[\s\S]*setHelpOpen\(\(current\) => !current\)/);
+  assert.match(source, /<Popover open=\{helpOpen\} onOpenChange=\{setHelpOpen\}>/);
   assert.match(source, /weeklyLessonHours \* 4/);
   assert.match(source, /completedMinutes[\s\S]*\/ 60/);
   assert.match(
@@ -944,13 +1013,14 @@ test("withdrawal workspace follows applicant operations and approver queues", as
   assertIncludesAll(withdrawalDetailSource, [
     "신청",
     "처리",
-    "결재",
+    "완료",
     "고객 퇴원사유",
     "선생님 의견",
     "미배부 교재",
     "진행 수업시수",
     "4주 기준 수업시수",
   ]);
+  assert.doesNotMatch(withdrawalDetailSource, /결재/);
 });
 
 test("withdrawal schedule calendar defaults to current month and counts the billing-cycle hours", async () => {
@@ -988,6 +1058,21 @@ test("withdrawal schedule calendar defaults to current month and counts the bill
     source,
     /function getWithdrawalBillingCycleItems[\s\S]*sessionNumber === 1/,
     "billing-cycle accumulation should start from the current cycle's 1회차",
+  );
+  assert.match(
+    scheduleFieldSource,
+    /getWithdrawalCalendarSessionLabel\(cell\.dateKey, scheduleItem\.label\)/,
+    "withdrawal calendar cells should show the month with the session label",
+  );
+  assert.match(
+    scheduleFieldSource,
+    /place-items-center[\s\S]*text-center/,
+    "withdrawal calendar session and state labels should be centered",
+  );
+  assert.doesNotMatch(
+    scheduleFieldSource,
+    /classItem\?\.label \|\| "수업 선택 필요"/,
+    "withdrawal calendar should not repeat the selected class name beside the date label",
   );
 });
 

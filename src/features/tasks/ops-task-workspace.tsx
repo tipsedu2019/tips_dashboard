@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -23,7 +23,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAuth } from "@/providers/auth-provider"
 
 import {
@@ -86,8 +85,15 @@ type TodoViewKey = "inbox" | "sent" | "completed"
 type TodoSortKey = "status" | "priority" | "due"
 type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
 type TodoSelectFilterKey = "all" | string
-type WithdrawalViewKey = "applicant" | "operations" | "approver" | "closed"
+type WithdrawalViewKey = "applicant" | "operations" | "closed"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
+type WithdrawalNotificationChannelKey = "applicant" | "operations" | "completed"
+type WithdrawalNotificationTriggerKey = "submitted" | "processing" | "completed"
+type WithdrawalNotificationSetting = {
+  triggerKey: WithdrawalNotificationTriggerKey
+  channelKey: WithdrawalNotificationChannelKey
+  enabled: boolean
+}
 
 type WordRetestMode = "assistant" | "teacher"
 type WordRetestBranchFilter = "all" | "본관" | "별관"
@@ -388,11 +394,40 @@ const OPERATION_VIEW_TABS: Array<{ key: ViewKey; label: string }> = [
 ]
 
 const WITHDRAWAL_VIEW_TABS: Array<{ key: WithdrawalViewKey; label: string }> = [
-  { key: "applicant", label: "신청자" },
-  { key: "operations", label: "관리팀" },
-  { key: "approver", label: "결재자" },
+  { key: "applicant", label: "신청" },
+  { key: "operations", label: "처리 중" },
   { key: "closed", label: "완료" },
 ]
+
+const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChannelKey; label: string }> = [
+  { key: "applicant", label: "담당선생님" },
+  { key: "operations", label: "관리팀" },
+  { key: "completed", label: "완료 알림" },
+]
+
+const WITHDRAWAL_NOTIFICATION_TRIGGERS: Array<{ key: WithdrawalNotificationTriggerKey; label: string; detail: string }> = [
+  { key: "submitted", label: "신청 접수", detail: "담당선생님이 퇴원을 신청하면 관리팀에 알림" },
+  { key: "processing", label: "처리 시작", detail: "관리팀이 확인하거나 처리 중으로 이동하면 담당선생님에 알림" },
+  { key: "completed", label: "처리 완료", detail: "관리팀이 완료 처리하면 담당선생님과 완료 위치에 알림" },
+]
+
+const WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE = {
+  gridTemplateColumns: "minmax(10rem,1.2fr) repeat(3,minmax(7.5rem,1fr))",
+} as CSSProperties
+
+function buildDefaultWithdrawalNotificationSettings(): WithdrawalNotificationSetting[] {
+  return WITHDRAWAL_NOTIFICATION_TRIGGERS.flatMap((trigger) => (
+    WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => ({
+      triggerKey: trigger.key,
+      channelKey: channel.key,
+      enabled: (
+        (trigger.key === "submitted" && channel.key === "operations") ||
+        (trigger.key === "processing" && channel.key === "applicant") ||
+        trigger.key === "completed"
+      ),
+    }))
+  ))
+}
 
 const WORKSPACE_TASK_TYPE: Record<WorkspaceKey, OpsTaskType> = {
   todo: "general",
@@ -494,9 +529,9 @@ function getFormDetailTabs(type: OpsTaskType): Array<{ key: FormDetailStepKey; l
 
   if (type === "withdrawal") {
     return [
-      { key: "withdrawal_basic", label: "신청자" },
-      { key: "withdrawal_reason", label: "관리팀" },
-      { key: "withdrawal_checks", label: "결재자" },
+      { key: "withdrawal_basic", label: "신청" },
+      { key: "withdrawal_reason", label: "처리" },
+      { key: "withdrawal_checks", label: "완료" },
     ]
   }
 
@@ -2139,10 +2174,7 @@ function getWithdrawalViewTasks(tasks: OpsTask[], view: WithdrawalViewKey) {
     return tasks.filter((task) => task.status === "requested")
   }
   if (view === "operations") {
-    return tasks.filter((task) => ["confirmed", "in_progress", "on_hold"].includes(task.status))
-  }
-  if (view === "approver") {
-    return tasks.filter((task) => task.status === "review_requested")
+    return tasks.filter((task) => ["confirmed", "in_progress", "on_hold", "review_requested"].includes(task.status))
   }
   return tasks.filter((task) => isClosedOpsTask(task))
 }
@@ -3131,71 +3163,117 @@ function FieldHelpLabel({ label, help }: { label: string; help: ReactNode }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <span>{label}</span>
-      <Tooltip open={helpOpen} onOpenChange={setHelpOpen}>
-        <TooltipTrigger asChild>
+      <Popover open={helpOpen} onOpenChange={setHelpOpen}>
+        <PopoverTrigger asChild>
           <button
             type="button"
             aria-label={`${label} 도움말`}
             aria-expanded={helpOpen}
             className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
             onClick={(event) => {
-              event.preventDefault()
               event.stopPropagation()
-              setHelpOpen((current) => !current)
             }}
           >
             <CircleHelp className="size-3.5" />
           </button>
-        </TooltipTrigger>
-        <TooltipContent
+        </PopoverTrigger>
+        <PopoverContent
+          role="dialog"
+          aria-label={`${label} 도움말`}
           side="top"
           align="start"
-          className="max-w-[min(34rem,calc(100vw-2rem))] whitespace-pre-line text-left leading-relaxed"
+          className="z-[160] w-[min(34rem,calc(100vw-2rem))] whitespace-pre-line p-3 text-left text-xs leading-relaxed"
         >
           {help}
-        </TooltipContent>
-      </Tooltip>
+        </PopoverContent>
+      </Popover>
     </span>
   )
 }
 
-function TextFieldWithHelp({
+function UndistributedTextbookListField({
   label,
   help,
   value,
   onChange,
-  type = "text",
-  placeholder,
-  inputMode,
 }: {
   label: string
   help: ReactNode
   value: string
   onChange: (value: string) => void
-  type?: string
-  placeholder?: string
-  inputMode?: "none" | "text" | "tel" | "url" | "email" | "numeric" | "decimal" | "search"
 }) {
-  const fieldId = useId()
   const labelId = useId()
-  const handleInputChange = (value: string) => onChange(value)
+  const rawItems = useMemo(() => value.split("\n").filter((item) => item.trim()), [value])
+  const [extraRowCount, setExtraRowCount] = useState(0)
+  const visibleRowCount = Math.max(1, rawItems.length) + extraRowCount
+  const items = Array.from({ length: visibleRowCount }, (_, index) => rawItems[index] || "")
+
+  function emitItems(nextItems: string[]) {
+    onChange(nextItems.map((item) => item.trim()).filter(Boolean).join("\n"))
+  }
+
+  function updateItem(index: number, nextValue: string) {
+    const nextItems = [...items]
+    nextItems[index] = nextValue
+    if (index >= rawItems.length && nextValue.trim()) {
+      setExtraRowCount((count) => Math.max(0, count - 1))
+    }
+    emitItems(nextItems)
+  }
+
+  function addItem() {
+    setExtraRowCount((count) => count + 1)
+  }
+
+  function removeItem(index: number) {
+    const nextItems = items.filter((_, itemIndex) => itemIndex !== index)
+    if (index >= rawItems.length) {
+      setExtraRowCount((count) => Math.max(0, count - 1))
+    }
+    emitItems(nextItems)
+  }
 
   return (
     <div className="grid min-w-0 gap-1.5 text-sm font-medium">
-      <span id={labelId}>
-        <FieldHelpLabel label={label} help={help} />
-      </span>
-      <Input
-        id={fieldId}
-        type={type}
-        aria-labelledby={labelId}
-        value={value}
-        className="min-w-0"
-        placeholder={placeholder}
-        inputMode={inputMode}
-        onChange={(event) => handleInputChange(event.target.value)}
-        onInput={(event) => handleInputChange(event.currentTarget.value)}
-      />
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span id={labelId}>
+          <FieldHelpLabel label={label} help={help} />
+        </span>
+        <button
+          type="button"
+          aria-label={`${label} 항목 추가`}
+          onClick={addItem}
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <Plus className="size-3.5" />
+          <span>교재 추가</span>
+        </button>
+      </div>
+      <div className="grid gap-2">
+        {items.map((item, index) => (
+          <div key={index} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+            <Input
+              type="text"
+              aria-labelledby={labelId}
+              aria-label={`${label} ${index + 1}`}
+              value={item}
+              className="min-w-0"
+              placeholder={`${index + 1}번 교재`}
+              onChange={(event) => updateItem(index, event.target.value)}
+              onInput={(event) => updateItem(index, event.currentTarget.value)}
+            />
+            <button
+              type="button"
+              aria-label={`${index + 1}번 미배부 교재 삭제`}
+              disabled={visibleRowCount <= 1}
+              onClick={() => removeItem(index)}
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -3386,6 +3464,11 @@ function formatWithdrawalLessonHours(value: number) {
 function getWithdrawalCalendarCellDateLabel(dateKey: string) {
   const [, month, day] = dateKey.split("-").map(Number)
   return Number.isFinite(month) && Number.isFinite(day) ? `${month}/${day}` : dateKey
+}
+
+function getWithdrawalCalendarSessionLabel(dateKey: string, label: string) {
+  const [, month] = dateKey.split("-").map(Number)
+  return Number.isFinite(month) ? `${month}월 ${label}` : label
 }
 
 function parseWithdrawalScheduleHoursByWeekday(schedule: string) {
@@ -3840,11 +3923,10 @@ function WithdrawalScheduleCalendarField({
 
   return (
     <section className="grid gap-3 md:col-span-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
         <span id={fieldId} className="text-sm font-medium">
           <FieldHelpLabel label="퇴원일" help={WITHDRAWAL_DATE_HELP} />
         </span>
-        <span className="text-xs font-medium text-muted-foreground">{classItem?.label || "수업 선택 필요"}</span>
       </div>
       <div className="rounded-lg border bg-background">
         <div className="flex items-center justify-between border-b px-2 py-1.5">
@@ -3877,6 +3959,7 @@ function WithdrawalScheduleCalendarField({
             const selectable = Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
             const selected = cell.dateKey === selectedDateKey
             const dateLabel = getWithdrawalCalendarCellDateLabel(cell.dateKey)
+            const sessionLabel = scheduleItem ? getWithdrawalCalendarSessionLabel(cell.dateKey, scheduleItem.label) : ""
             return (
               <button
                 key={cell.dateKey}
@@ -3887,7 +3970,7 @@ function WithdrawalScheduleCalendarField({
                 onClick={() => scheduleItem && handleScheduleSelect(scheduleItem)}
                 disabled={!selectable}
                 className={[
-                  "grid min-h-14 min-w-0 content-start gap-0.5 rounded-md px-1.5 py-1 text-left text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                  "grid min-h-14 min-w-0 place-items-center content-center gap-0.5 rounded-md px-1.5 py-1 text-center text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
                   selected ? "bg-primary text-primary-foreground shadow-xs" : "",
                   !selected && selectable ? "border border-primary/20 bg-primary/5 text-foreground hover:bg-primary/10" : "",
                   !selected && scheduleItem && !selectable ? "border border-dashed border-muted bg-muted/30 text-muted-foreground" : "",
@@ -3898,8 +3981,8 @@ function WithdrawalScheduleCalendarField({
                 <span className="text-[11px] font-medium">{scheduleItem ? dateLabel : cell.dayLabel}</span>
                 {scheduleItem && (
                   <>
-                    <span className="truncate font-semibold leading-tight">{scheduleItem.label}</span>
-                    <span className="truncate text-[10px] font-medium leading-tight opacity-80">{scheduleItem.stateLabel}</span>
+                    <span className="w-full truncate font-semibold leading-tight">{sessionLabel}</span>
+                    <span className="w-full truncate text-[10px] font-medium leading-tight opacity-80">{scheduleItem.stateLabel}</span>
                   </>
                 )}
               </button>
@@ -4197,11 +4280,11 @@ function withdrawalSummaryValue(value: unknown, fallback = "미정") {
   return textValue || fallback
 }
 
-function getWithdrawalApprovalLabel(status?: OpsTaskStatus) {
+function getWithdrawalCompletionLabel(status?: OpsTaskStatus) {
   if (status === "done") return "완료"
   if (status === "canceled") return "취소"
-  if (status === "review_requested") return "결재 대기"
-  return "대기"
+  if (status === "requested") return "신청"
+  return "처리 중"
 }
 
 function WithdrawalFlowSummary({
@@ -4245,8 +4328,8 @@ function WithdrawalFlowSummary({
         </dd>
       </div>
       <div className="grid gap-1">
-        <dt className="text-xs font-medium text-muted-foreground">결재</dt>
-        <dd className="min-w-0 font-semibold">{getWithdrawalApprovalLabel(status)}</dd>
+        <dt className="text-xs font-medium text-muted-foreground">완료</dt>
+        <dd className="min-w-0 font-semibold">{getWithdrawalCompletionLabel(status)}</dd>
         <dd className="min-w-0 truncate text-xs text-muted-foreground">
           처리 체크 {checksDone}/3 · {withdrawal?.timetableRosterUpdated ? "명단 반영" : "명단 대기"}
         </dd>
@@ -4400,13 +4483,9 @@ function matchesWithdrawalSelectionFilters(
   task: OpsTask,
   selectedSubjectFilter: string,
   selectedTeacherFilter: string,
-  selectedClassFilter: string,
-  selectedStudentFilter: string,
 ) {
   if (selectedSubjectFilter !== "all" && getWithdrawalFilterValue(task, "subject") !== selectedSubjectFilter) return false
   if (selectedTeacherFilter !== "all" && getWithdrawalFilterValue(task, "teacher") !== selectedTeacherFilter) return false
-  if (selectedClassFilter !== "all" && getWithdrawalFilterValue(task, "className") !== selectedClassFilter) return false
-  if (selectedStudentFilter !== "all" && getWithdrawalFilterValue(task, "student") !== selectedStudentFilter) return false
   return true
 }
 
@@ -4601,8 +4680,6 @@ function WithdrawalDataTable({
   const [filterValue, setFilterValue] = useState("")
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState("all")
-  const [selectedClassFilter, setSelectedClassFilter] = useState("all")
-  const [selectedStudentFilter, setSelectedStudentFilter] = useState("all")
   const [withdrawalPeriodFilter, setWithdrawalPeriodFilter] = useState<WithdrawalPeriodFilter>("all")
   const [withdrawalPeriodStartDate, setWithdrawalPeriodStartDate] = useState("")
   const [withdrawalPeriodEndDate, setWithdrawalPeriodEndDate] = useState("")
@@ -4625,32 +4702,10 @@ function WithdrawalDataTable({
       label: getWithdrawalFilterValue(task, "teacher"),
     }))
   ), [teacherFilterSourceTasks])
-  const classFilterSourceTasks = useMemo(() => (
-    teacherFilterSourceTasks.filter((task) => (
-      selectedTeacherFilter === "all" || getWithdrawalFilterValue(task, "teacher") === selectedTeacherFilter
-    ))
-  ), [selectedTeacherFilter, teacherFilterSourceTasks])
-  const classFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(classFilterSourceTasks, (task) => ({
-      value: getWithdrawalFilterValue(task, "className"),
-      label: getWithdrawalFilterValue(task, "className"),
-    }))
-  ), [classFilterSourceTasks])
-  const studentFilterSourceTasks = useMemo(() => (
-    classFilterSourceTasks.filter((task) => (
-      selectedClassFilter === "all" || getWithdrawalFilterValue(task, "className") === selectedClassFilter
-    ))
-  ), [classFilterSourceTasks, selectedClassFilter])
-  const studentFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(studentFilterSourceTasks, (task) => ({
-      value: getWithdrawalFilterValue(task, "student"),
-      label: getWithdrawalFilterValue(task, "student"),
-    }))
-  ), [studentFilterSourceTasks])
 
   const visibleWithdrawalTasks = useMemo(() => {
     const selectionFilteredTasks = tasks
-      .filter((task) => matchesWithdrawalSelectionFilters(task, selectedSubjectFilter, selectedTeacherFilter, selectedClassFilter, selectedStudentFilter))
+      .filter((task) => matchesWithdrawalSelectionFilters(task, selectedSubjectFilter, selectedTeacherFilter))
       .filter((task) => matchesWithdrawalPeriodFilter(task, withdrawalPeriodFilter, todayKey, withdrawalPeriodStartDate, withdrawalPeriodEndDate))
     const normalizedFilter = filterValue.trim().toLocaleLowerCase("ko")
     const nextTasks = normalizedFilter
@@ -4670,8 +4725,6 @@ function WithdrawalDataTable({
   }, [
     filterColumnKey,
     filterValue,
-    selectedClassFilter,
-    selectedStudentFilter,
     selectedSubjectFilter,
     selectedTeacherFilter,
     tasks,
@@ -4723,8 +4776,6 @@ function WithdrawalDataTable({
             onChange={(value) => {
               setSelectedSubjectFilter(value)
               setSelectedTeacherFilter("all")
-              setSelectedClassFilter("all")
-              setSelectedStudentFilter("all")
             }}
           />
           <WithdrawalFilterSelect
@@ -4732,28 +4783,7 @@ function WithdrawalDataTable({
             value={selectedTeacherFilter}
             allLabel="선생님 전체"
             options={teacherFilterOptions}
-            onChange={(value) => {
-              setSelectedTeacherFilter(value)
-              setSelectedClassFilter("all")
-              setSelectedStudentFilter("all")
-            }}
-          />
-          <WithdrawalFilterSelect
-            label="수업 필터"
-            value={selectedClassFilter}
-            allLabel="수업 전체"
-            options={classFilterOptions}
-            onChange={(value) => {
-              setSelectedClassFilter(value)
-              setSelectedStudentFilter("all")
-            }}
-          />
-          <WithdrawalFilterSelect
-            label="학생 필터"
-            value={selectedStudentFilter}
-            allLabel="학생 전체"
-            options={studentFilterOptions}
-            onChange={setSelectedStudentFilter}
+            onChange={setSelectedTeacherFilter}
           />
         </div>
         <WithdrawalPeriodFilterBar
@@ -4888,6 +4918,103 @@ function WithdrawalDataTable({
   )
 }
 
+function WithdrawalNotificationSettingsDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const [notificationSettings, setNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
+  const settingsByKey = useMemo(() => (
+    new Map(notificationSettings.map((setting) => [`${setting.triggerKey}:${setting.channelKey}`, setting]))
+  ), [notificationSettings])
+
+  function toggleNotificationSetting(triggerKey: WithdrawalNotificationTriggerKey, channelKey: WithdrawalNotificationChannelKey) {
+    setNotificationSettings((current) => (
+      current.map((setting) => (
+        setting.triggerKey === triggerKey && setting.channelKey === channelKey
+          ? { ...setting, enabled: !setting.enabled }
+          : setting
+      ))
+    ))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>퇴원 알림 설정</DialogTitle>
+          <DialogDescription className="sr-only">
+            퇴원 프로세스별 알림 위치를 켜거나 끕니다.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-x-auto rounded-md border" role="table" aria-label="퇴원 알림 설정 표">
+          <div className="min-w-[640px]">
+            <div
+              role="row"
+              className="grid border-b bg-muted/40 text-xs font-medium text-muted-foreground"
+              style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
+            >
+              <div role="columnheader" className="border-r px-3 py-2">
+                프로세스
+              </div>
+              <div role="columnheader" className="col-span-3 px-3 py-2 text-center">
+                알림 위치
+              </div>
+            </div>
+            <div
+              role="row"
+              className="grid border-b bg-muted/20 text-xs font-medium text-muted-foreground"
+              style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
+            >
+              <div role="columnheader" className="border-r px-3 py-2" aria-label="프로세스" />
+              {WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => (
+                <div key={channel.key} role="columnheader" className="border-r px-3 py-2 text-center last:border-r-0">
+                  {channel.label}
+                </div>
+              ))}
+            </div>
+            {WITHDRAWAL_NOTIFICATION_TRIGGERS.map((trigger) => (
+              <div
+                key={trigger.key}
+                role="row"
+                className="grid border-b last:border-b-0"
+                style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
+              >
+                <div role="rowheader" className="grid gap-0.5 border-r bg-muted/10 px-3 py-2">
+                  <span className="text-sm font-medium">{trigger.label}</span>
+                  <span className="text-xs text-muted-foreground">{trigger.detail}</span>
+                </div>
+                {WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => {
+                  const setting = settingsByKey.get(`${trigger.key}:${channel.key}`)
+                  const enabled = Boolean(setting?.enabled)
+
+                  return (
+                    <div key={`${trigger.key}-${channel.key}`} role="cell" className="border-r px-2 py-2 last:border-r-0">
+                      <Button
+                        type="button"
+                        variant={enabled ? "default" : "outline"}
+                        size="sm"
+                        aria-pressed={enabled}
+                        aria-label={`${trigger.label} ${channel.label} 알림 ${enabled ? "끄기" : "켜기"}`}
+                        onClick={() => toggleNotificationSetting(trigger.key, channel.key)}
+                        className="h-8 w-full justify-center px-2 text-xs"
+                      >
+                        {enabled ? "켜짐" : "꺼짐"}
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function DashboardMetric({
   label,
   value,
@@ -4968,6 +5095,7 @@ function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { stat
   if (task.status === "on_hold") return { status: "in_progress", label: "재개" }
   if (task.status === "requested") return { status: "confirmed", label: "확인" }
   if (task.status === "confirmed") return { status: "in_progress", label: "진행" }
+  if (task.type === "withdrawal" && task.status === "in_progress") return { status: "done", label: "완료" }
   if (task.status === "in_progress") return { status: "review_requested", label: "검토 요청" }
   if (task.status === "review_requested") return { status: "done", label: "완료" }
   return null
@@ -5450,6 +5578,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
   const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
+  const [withdrawalNotificationOpen, setWithdrawalNotificationOpen] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [detailOpen, setDetailOpen] = useState(false)
@@ -5770,7 +5899,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const withdrawalCounts = useMemo(() => ({
     applicant: getWithdrawalViewTasks(scopedTasks, "applicant").length,
     operations: getWithdrawalViewTasks(scopedTasks, "operations").length,
-    approver: getWithdrawalViewTasks(scopedTasks, "approver").length,
     closed: getWithdrawalViewTasks(scopedTasks, "closed").length,
   }), [scopedTasks])
   const wordRetestRoleContext = useMemo(
@@ -7203,7 +7331,13 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 {showClosed ? "완료 숨김" : "완료 보기"}
               </Button>
             )}
-            {!isWordRetestWorkspace && (
+            {isWithdrawalWorkspace && (
+              <Button type="button" variant="outline" size="sm" onClick={() => setWithdrawalNotificationOpen(true)} aria-label="퇴원 알림 설정" title="퇴원 알림 설정" className="size-8 px-0">
+                <Bell className="size-4" aria-hidden="true" />
+                <span className="sr-only">퇴원 알림 설정</span>
+              </Button>
+            )}
+            {!isWordRetestWorkspace && !isWithdrawalWorkspace && (
               <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading} aria-label="새로고침" className="size-8 px-0">
                 <RefreshCw className="size-4" />
                 <span className="sr-only">새로고침</span>
@@ -7528,6 +7662,13 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           />
         )}
       </div>
+
+      {isWithdrawalWorkspace && (
+        <WithdrawalNotificationSettingsDialog
+          open={withdrawalNotificationOpen}
+          onOpenChange={setWithdrawalNotificationOpen}
+        />
+      )}
 
       <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className={[
@@ -8597,7 +8738,7 @@ function TypeSpecificFields({
                 disabled={!canSelectWithdrawalTeacher}
                 disabledPlaceholder="과목 먼저"
 	              onManualSelect={() => openManualField("withdrawalTeacher")}
-	              renderOption={(option) => <LinkedSelectedValue label={option.label} pills={[option.meta]} />}
+	              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
 	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
 	            />
 	            <LinkedSelect
@@ -8608,10 +8749,7 @@ function TypeSpecificFields({
                 disabled={!canSelectWithdrawalClass}
                 disabledPlaceholder="선생님 먼저"
 	              onManualSelect={() => openManualField("withdrawalClass")}
-	              renderOption={(option) => {
-	                const classItem = findClass(option.id)
-	                return <LinkedSelectedValue label={option.label} pills={[classItem?.subject, classItem?.teacher, classItem?.room]} />
-	              }}
+	              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
 	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
 	            />
 	            <LinkedSelect
@@ -8624,7 +8762,7 @@ function TypeSpecificFields({
 	              onManualSelect={() => openManualField("withdrawalStudent")}
 	              renderOption={(option) => {
 	                const student = findStudent(option.id)
-	                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school, student?.status]} />
+	                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
 	              }}
 	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
 	            />
@@ -8636,7 +8774,7 @@ function TypeSpecificFields({
 	        <div className="grid gap-3 md:grid-cols-2">
 	          <TextareaField label="고객 퇴원사유" value={withdrawal.customerReason || ""} onChange={(value) => updateWithdrawal("customerReason", value)} />
 	          <TextareaField label="선생님 의견" value={withdrawal.teacherOpinion || ""} onChange={(value) => updateWithdrawal("teacherOpinion", value)} />
-	          <TextFieldWithHelp label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP} value={withdrawal.undistributedTextbooks || ""} onChange={(value) => updateWithdrawal("undistributedTextbooks", value)} />
+	          <UndistributedTextbookListField label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP} value={withdrawal.undistributedTextbooks || ""} onChange={(value) => updateWithdrawal("undistributedTextbooks", value)} />
 	          <WithdrawalScheduleCalendarField
 	            key={form.classId || "withdrawal-schedule-calendar"}
 	            classItem={selectedWithdrawalClass}
@@ -10888,7 +11026,7 @@ function TypeDetail({ task }: { task: OpsTask }) {
 	  if (task.type === "withdrawal" && task.withdrawal) {
 	    const withdrawal = task.withdrawal
 	    return (
-	      <div className="flex flex-col gap-3" aria-label="퇴원 신청 처리 결재 요약">
+	      <div className="flex flex-col gap-3" aria-label="퇴원 신청 처리 완료 요약">
 	        <WithdrawalFlowSummary
 	          status={task.status}
 	          studentName={task.studentName}
