@@ -83,6 +83,16 @@ test("makeup request schema supports cancel-only and makeup-only flow types", ()
   assert.match(refundFlowMigrationSource, /'refund_pending'/);
 });
 
+test("makeup notification settings schema allows refund request trigger toggles", () => {
+  assert.match(serviceSource, /refund_requested: "환불 신청"/);
+  assert.match(allMigrationSource, /drop constraint if exists makeup_notification_settings_trigger_kind_check/);
+  assert.match(
+    allMigrationSource,
+    /add constraint makeup_notification_settings_trigger_kind_check\s*check \(trigger_kind in \('submitted', 'approved', 'returned', 'rejected', 'completed', 'canceled', 'refund_requested'\)\)/,
+  );
+  assert.match(allMigrationSource, /from unnest\(array\['refund_requested'\]::text\[\]\) trigger_kind/);
+});
+
 test("makeup workspace includes approver queues form fields and room availability states", () => {
   assert.match(workspaceSource, /type MakeupRequestView = "mine" \| "approvalPending" \| "makeupPending" \| "refundPending" \| "closed"/);
   assert.match(workspaceSource, /\{ id: "mine", label: "신청" \}/);
