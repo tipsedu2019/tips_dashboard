@@ -832,12 +832,39 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     'label="선생님 의견"',
     'label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP}',
   ]);
+  assertIncludesAll(withdrawalFormSource, [
+    "canSelectWithdrawalTeacher",
+    "canSelectWithdrawalClass",
+    "canSelectWithdrawalStudent",
+    'disabled={!canSelectWithdrawalTeacher}',
+    'disabledPlaceholder="과목 먼저"',
+    'disabled={!canSelectWithdrawalClass}',
+    'disabledPlaceholder="선생님 먼저"',
+    'disabled={!canSelectWithdrawalStudent}',
+    'disabledPlaceholder="수업 먼저"',
+    "renderSelected={(option) => <LinkedSelectedValue label={option.label} />}",
+  ]);
 
   assert.ok(
     withdrawalFormSource.indexOf('label="과목"') < withdrawalFormSource.indexOf('label="선생님"') &&
       withdrawalFormSource.indexOf('label="선생님"') < withdrawalFormSource.indexOf('label="수업"') &&
       withdrawalFormSource.indexOf('label="수업"') < withdrawalFormSource.indexOf('label="학생"'),
     "withdrawal form should narrow selections in subject teacher class student order",
+  );
+  assert.match(
+    source,
+    /if \(subject !== form\.subject\) \{[\s\S]*?updateWithdrawal\("teacherName", ""\)[\s\S]*?updateForm\("classId", ""\)[\s\S]*?updateForm\("studentId", ""\)/,
+    "changing the withdrawal subject should clear downstream teacher, class and student selections",
+  );
+  assert.match(
+    source,
+    /if \(teacherId !== selectedWithdrawalTeacherId\) \{[\s\S]*?updateForm\("classId", ""\)[\s\S]*?updateForm\("studentId", ""\)/,
+    "changing the withdrawal teacher should clear downstream class and student selections",
+  );
+  assert.doesNotMatch(
+    withdrawalFormSource,
+    /renderSelected=\{\(option\) => <LinkedSelectedValue label=\{option\.label\} pills=/,
+    "withdrawal selected values should not show secondary metadata pills in the closed controls",
   );
   assert.ok(
     withdrawalFormSource.indexOf("고객 퇴원사유") < withdrawalFormSource.indexOf("WithdrawalScheduleCalendarField"),
@@ -924,6 +951,44 @@ test("withdrawal workspace follows applicant operations and approver queues", as
     "진행 수업시수",
     "4주 기준 수업시수",
   ]);
+});
+
+test("withdrawal schedule calendar defaults to current month and counts the billing-cycle hours", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const scheduleFieldSource = source.slice(
+    source.indexOf("function WithdrawalScheduleCalendarField"),
+    source.indexOf("function WordRetestMainExamDateField"),
+  );
+  const metricsSource = source.slice(
+    source.indexOf("function getWithdrawalScheduleMetrics"),
+    source.indexOf("function getCalendarMonthKey"),
+  );
+
+  assert.match(
+    scheduleFieldSource,
+    /const \[calendarMonth, setCalendarMonth\] = useState\(\(\) => getCalendarMonthDate\(selectedDateKey\)\)/,
+    "withdrawal calendar should show the current month by default when no withdrawal date is selected",
+  );
+  assert.doesNotMatch(
+    scheduleFieldSource,
+    /firstScheduleDate/,
+    "the default withdrawal calendar month should not jump to the first schedule date",
+  );
+  assertIncludesAll(metricsSource, [
+    "getWithdrawalBillingCycleItems",
+    "completedCycleItems",
+    ".reduce((sum, item) => sum + item.lessonHours * 60, 0)",
+  ]);
+  assert.doesNotMatch(
+    metricsSource,
+    /item\.dateKey\.slice\(0, 7\) === selectedMonthKey/,
+    "progress hours should not drop the first billing-cycle session just because it falls in the previous calendar month",
+  );
+  assert.match(
+    source,
+    /function getWithdrawalBillingCycleItems[\s\S]*sessionNumber === 1/,
+    "billing-cycle accumulation should start from the current cycle's 1회차",
+  );
 });
 
 test("word retest workspace uses role queues branch filters and dedicated row actions", async () => {

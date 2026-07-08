@@ -2644,6 +2644,9 @@ function LinkedSelect({
   value,
   options,
   onChange,
+  disabled = false,
+  disabledPlaceholder,
+  placeholder = "선택",
   manualLabel,
   onManualSelect,
   renderSelected,
@@ -2654,6 +2657,9 @@ function LinkedSelect({
   value: string
   options: LinkedSelectOption[]
   onChange: (value: string) => void
+  disabled?: boolean
+  disabledPlaceholder?: string
+  placeholder?: string
   manualLabel?: string
   onManualSelect?: () => void
   renderSelected?: (option: LinkedSelectOption) => ReactNode
@@ -2665,7 +2671,7 @@ function LinkedSelect({
   const listId = useId()
   const [linkedQuery, setLinkedQuery] = useState("")
   const [isLinkedSearchOpen, setIsLinkedSearchOpen] = useState(false)
-  const shouldShowLinkedSearch = options.length > LINKED_SELECT_SEARCH_THRESHOLD
+  const shouldShowLinkedSearch = !disabled && options.length > LINKED_SELECT_SEARCH_THRESHOLD
   const normalizedLinkedQuery = linkedQuery.trim().toLowerCase()
   const selectedOption = options.find((option) => option.id === value)
   const matchedOptions = useMemo(() => {
@@ -2686,13 +2692,17 @@ function LinkedSelect({
   const selectedLabel = selectedOption
     ? selectedOption.meta ? `${selectedOption.label} · ${selectedOption.meta}` : selectedOption.label
     : `${label} 검색 후 선택`
+  const emptySelectedLabel = disabled && disabledPlaceholder ? disabledPlaceholder : placeholder
   const emptySearchResultLabel = "검색 결과 없음"
+  const isLinkedSelectOpen = !disabled && isLinkedSearchOpen
 
   function openLinkedSearch() {
+    if (disabled) return
     setIsLinkedSearchOpen(true)
   }
 
   function toggleLinkedSearch() {
+    if (disabled) return
     setIsLinkedSearchOpen((open) => !open)
   }
 
@@ -2755,12 +2765,14 @@ function LinkedSelect({
       type="button"
       aria-labelledby={fieldId}
       aria-haspopup="listbox"
-      aria-expanded={isLinkedSearchOpen}
+      aria-expanded={isLinkedSelectOpen}
       aria-controls={listId}
+      disabled={disabled}
       onClick={shouldShowLinkedSearch ? openLinkedSearch : toggleLinkedSearch}
       className={[
         "flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 py-1.5 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
-        isLinkedSearchOpen ? "border-ring ring-2 ring-ring/40" : "",
+        isLinkedSelectOpen ? "border-ring ring-2 ring-ring/40" : "",
+        disabled ? "cursor-not-allowed bg-muted/30 text-muted-foreground opacity-75 hover:border-border" : "",
       ].join(" ")}
     >
       {selectedOption ? (
@@ -2768,23 +2780,23 @@ function LinkedSelect({
           {renderSelected ? renderSelected(selectedOption) : <span className="block truncate">{selectedLabel}</span>}
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">선택</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{emptySelectedLabel}</span>
       )}
       {shouldShowLinkedSearch ? (
         <Search className="size-4 shrink-0 text-muted-foreground" />
       ) : (
-        <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", isLinkedSearchOpen ? "rotate-90" : ""].join(" ")} />
+        <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", isLinkedSelectOpen ? "rotate-90" : ""].join(" ")} />
       )}
     </button>
   )
 
   return (
-    <Popover open={isLinkedSearchOpen} onOpenChange={setIsLinkedSearchOpen}>
+    <Popover open={isLinkedSelectOpen} onOpenChange={(open) => setIsLinkedSearchOpen(disabled ? false : open)}>
       <div className="relative grid min-w-0 gap-1.5 text-sm font-medium">
         <label id={fieldId}>{label}</label>
         <PopoverAnchor asChild>{linkedSelectControl}</PopoverAnchor>
       </div>
-      {isLinkedSearchOpen && (
+      {isLinkedSelectOpen && (
         <PopoverContent
           id={listId}
           role="listbox"
@@ -3454,20 +3466,25 @@ function getWithdrawalSelectedWeekdays(classItem?: OpsClassOption) {
       ? plan.selected_days
       : []
 
-  return [
-    ...getWithdrawalScheduleWeekdayIndexes(classItem?.schedule || ""),
-    ...planDays.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value >= 0 && value <= 6),
-  ]
+  const normalizedPlanDays = planDays
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value >= 0 && value <= 6)
+
+  return normalizedPlanDays.length > 0
+    ? normalizedPlanDays
+    : getWithdrawalScheduleWeekdayIndexes(classItem?.schedule || "")
 }
 
 function getWithdrawalWeeklyLessonHours(items: WithdrawalClassScheduleItem[], classItem?: OpsClassOption) {
   const hoursByWeekday = parseWithdrawalScheduleHoursByWeekday(classItem?.schedule || "")
   const weekdays = new Set<number>(getWithdrawalSelectedWeekdays(classItem))
-  items.forEach((item) => {
-    if (!isWithdrawalScheduleSelectable(item)) return
-    const weekday = getWithdrawalDateWeekday(item.dateKey)
-    if (weekday != null) weekdays.add(weekday)
-  })
+  if (weekdays.size === 0) {
+    items.forEach((item) => {
+      if (!isWithdrawalScheduleSelectable(item)) return
+      const weekday = getWithdrawalDateWeekday(item.dateKey)
+      if (weekday != null) weekdays.add(weekday)
+    })
+  }
 
   let weeklyLessonHours = 0
   weekdays.forEach((weekday) => {
@@ -3549,20 +3566,43 @@ function getWithdrawalClassScheduleItems(classItem?: OpsClassOption): Withdrawal
   return plannedItems.length > 0 ? plannedItems : getFallbackWithdrawalClassScheduleItems(classItem)
 }
 
+function getWithdrawalBillingCycleItems(items: WithdrawalClassScheduleItem[], selectedItem?: WithdrawalClassScheduleItem) {
+  if (!selectedItem) return []
+
+  const selectableItems = items.filter((item) => isWithdrawalScheduleSelectable(item))
+  const selectedIndex = selectableItems.findIndex((item) => (
+    item.dateKey === selectedItem.dateKey &&
+    item.sessionNumber === selectedItem.sessionNumber &&
+    item.label === selectedItem.label
+  ))
+  if (selectedIndex < 0) return []
+
+  let cycleStartIndex = 0
+  for (let index = selectedIndex; index >= 0; index -= 1) {
+    const item = selectableItems[index]
+    const previous = selectableItems[index - 1]
+    if (item.sessionNumber === 1) {
+      cycleStartIndex = index
+      break
+    }
+    if (previous && previous.sessionNumber > item.sessionNumber) {
+      cycleStartIndex = index
+      break
+    }
+  }
+
+  return selectableItems.slice(cycleStartIndex, selectedIndex + 1)
+}
+
 function getWithdrawalScheduleMetrics(items: WithdrawalClassScheduleItem[], selectedDate: string, classItem?: OpsClassOption) {
   const selectedDateKey = toDateKey(selectedDate)
   const selectedItem = selectedDateKey
     ? items.find((item) => item.dateKey === selectedDateKey && isWithdrawalScheduleSelectable(item)) ||
       items.find((item) => item.dateKey === selectedDateKey)
     : undefined
-  const selectedMonthKey = selectedDateKey.slice(0, 7)
+  const completedCycleItems = getWithdrawalBillingCycleItems(items, selectedItem)
   const completedMinutes = selectedItem && selectedDateKey
-    ? items
-        .filter((item) => (
-          isWithdrawalScheduleSelectable(item) &&
-          item.dateKey.slice(0, 7) === selectedMonthKey &&
-          item.dateKey <= selectedDateKey
-        ))
+    ? completedCycleItems
         .reduce((sum, item) => sum + item.lessonHours * 60, 0)
     : 0
   const completedLessonHours = completedMinutes / 60
@@ -3775,8 +3815,7 @@ function WithdrawalScheduleCalendarField({
   const fieldId = useId()
   const selectedDateKey = dateInputValue(withdrawal.withdrawalDate)
   const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem), [classItem])
-  const firstScheduleDate = scheduleItems[0]?.dateKey || ""
-  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey || firstScheduleDate))
+  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
   const itemsByDate = useMemo(() => {
     const items = new Map<string, WithdrawalClassScheduleItem>()
@@ -3795,6 +3834,7 @@ function WithdrawalScheduleCalendarField({
 
   function handleScheduleSelect(item: WithdrawalClassScheduleItem) {
     if (!isWithdrawalScheduleSelectable(item)) return
+    setCalendarMonth(getCalendarMonthDate(item.dateKey))
     onScheduleSelect(getWithdrawalScheduleMetrics(scheduleItems, item.dateKey, classItem))
   }
 
@@ -8243,6 +8283,13 @@ function TypeSpecificFields({
     return ""
   }
 
+  function clearWithdrawalScheduleSelection() {
+    updateWithdrawal("withdrawalDate", "")
+    updateWithdrawal("withdrawalSession", "")
+    updateWithdrawal("completedLessonHours", "")
+    updateWithdrawal("fourWeekLessonHours", "")
+  }
+
   function renderWordRetestTextbookFilters() {
     if (textbooks.length === 0) return null
     return (
@@ -8325,12 +8372,13 @@ function TypeSpecificFields({
 
   function selectWithdrawalSubject(subject: string) {
     updateForm("subject", subject)
-    const selectedClass = findClass(form.classId || "")
-    if (subject && selectedClass && !matchesWithdrawalSubject(selectedClass.subject, subject)) {
+    if (subject !== form.subject) {
+      updateWithdrawal("teacherName", "")
       updateForm("classId", "")
       updateForm("className", "")
       updateForm("studentId", "")
       updateForm("studentName", "")
+      clearWithdrawalScheduleSelection()
     }
   }
 
@@ -8338,16 +8386,16 @@ function TypeSpecificFields({
     const teacher = findTeacher(teacherId)
     const option = withdrawalTeacherOptions.find((item) => item.id === teacherId)
     const teacherName = teacher?.label || option?.label || ""
-    updateWithdrawal("teacherName", teacherName)
-    if (!teacherId) return
-
-    const selectedClass = findClass(form.classId || "")
-    if (selectedClass && teacherName && normalizeLookupValue(selectedClass.teacher) !== normalizeLookupValue(teacherName)) {
+    if (teacherId !== selectedWithdrawalTeacherId) {
       updateForm("classId", "")
       updateForm("className", "")
       updateForm("studentId", "")
       updateForm("studentName", "")
+      clearWithdrawalScheduleSelection()
     }
+    updateWithdrawal("teacherName", teacherName)
+    if (!teacherId) return
+
     if (!form.subject && teacher?.subjects.length === 1) updateForm("subject", teacher.subjects[0] || "")
   }
 
@@ -8360,9 +8408,15 @@ function TypeSpecificFields({
 
   const selectClass = (classId: string, options: { fillRegistration?: boolean; fillTransferFrom?: boolean; fillTransferTo?: boolean; fillWordRetest?: boolean; fillWithdrawal?: boolean } = {}) => {
     const classItem = findClass(classId)
+    const isWithdrawalClassChange = Boolean(options.fillWithdrawal && classId !== form.classId)
     updateForm("classId", classId)
     if (!classId) {
       updateForm("className", "")
+      if (options.fillWithdrawal) {
+        updateForm("studentId", "")
+        updateForm("studentName", "")
+        clearWithdrawalScheduleSelection()
+      }
       if (options.fillWordRetest) updateWordRetest("className", "")
       if (options.fillTransferFrom) updateTransfer("fromClassName", "")
       if (options.fillTransferTo) updateTransfer("toClassName", "")
@@ -8401,13 +8455,13 @@ function TypeSpecificFields({
       }
       if (textbookId && shouldUsePrimaryTextbook && !wordRetest.textbookName) selectTextbook(textbookId, { fillWordRetest: true })
     }
-    if (options.fillWithdrawal && classItem.teacher) {
+    if (options.fillWithdrawal) {
       updateWithdrawal("schoolGrade", withdrawal.schoolGrade || classItem.grade)
-      updateWithdrawal("teacherName", withdrawal.teacherName || classItem.teacher)
-      const selectedStudent = findStudent(form.studentId || "")
-      if (selectedStudent && !getStudentRosterClassIds(selectedStudent, classes).includes(classItem.id)) {
+      if (classItem.teacher) updateWithdrawal("teacherName", withdrawal.teacherName || classItem.teacher)
+      if (isWithdrawalClassChange) {
         updateForm("studentId", "")
         updateForm("studentName", "")
+        clearWithdrawalScheduleSelection()
       }
     }
   }
@@ -8521,6 +8575,10 @@ function TypeSpecificFields({
   }
 
 	  if (form.type === "withdrawal") {
+      const canSelectWithdrawalTeacher = Boolean(form.subject)
+      const canSelectWithdrawalClass = Boolean(form.subject && selectedWithdrawalTeacherId)
+      const canSelectWithdrawalStudent = Boolean(form.subject && selectedWithdrawalTeacherId && form.classId)
+
 	    return (
 	      <section className="grid gap-4">
 	        <div className="grid gap-3">
@@ -8536,39 +8594,39 @@ function TypeSpecificFields({
 	              value={selectedWithdrawalTeacherId}
 	              options={withdrawalTeacherOptions}
 	              onChange={selectWithdrawalTeacher}
+                disabled={!canSelectWithdrawalTeacher}
+                disabledPlaceholder="과목 먼저"
 	              onManualSelect={() => openManualField("withdrawalTeacher")}
 	              renderOption={(option) => <LinkedSelectedValue label={option.label} pills={[option.meta]} />}
-	              renderSelected={(option) => <LinkedSelectedValue label={option.label} pills={[option.meta]} />}
+	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
 	            />
 	            <LinkedSelect
 	              label="수업"
 	              value={form.classId || ""}
 	              options={withdrawalClassOptions}
 	              onChange={(value) => selectClass(value, { fillWithdrawal: true })}
+                disabled={!canSelectWithdrawalClass}
+                disabledPlaceholder="선생님 먼저"
 	              onManualSelect={() => openManualField("withdrawalClass")}
 	              renderOption={(option) => {
 	                const classItem = findClass(option.id)
 	                return <LinkedSelectedValue label={option.label} pills={[classItem?.subject, classItem?.teacher, classItem?.room]} />
 	              }}
-	              renderSelected={(option) => {
-	                const classItem = findClass(option.id)
-	                return <LinkedSelectedValue label={option.label} pills={[classItem?.subject, classItem?.teacher, classItem?.room]} />
-	              }}
+	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
 	            />
 	            <LinkedSelect
 	              label="학생"
 	              value={form.studentId || ""}
 	              options={withdrawalStudentOptions}
 	              onChange={(value) => selectStudent(value, { fillWithdrawalClass: true })}
+                disabled={!canSelectWithdrawalStudent}
+                disabledPlaceholder="수업 먼저"
 	              onManualSelect={() => openManualField("withdrawalStudent")}
 	              renderOption={(option) => {
 	                const student = findStudent(option.id)
 	                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school, student?.status]} />
 	              }}
-	              renderSelected={(option) => {
-	                const student = findStudent(option.id)
-	                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school, student?.status]} />
-	              }}
+	              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
 	            />
 	            {shouldShowManualField("withdrawalTeacher", selectedWithdrawalTeacherId, withdrawal.teacherName) && <TextField label="선생님명" value={withdrawal.teacherName || ""} onChange={(value) => updateWithdrawal("teacherName", value)} />}
 	            {shouldShowManualField("withdrawalClass", form.classId, form.className) && <TextField label="수업명" value={form.className || ""} onChange={(value) => updateForm("className", value)} />}
