@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowDown, ArrowUp, Check, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Settings, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, Check, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -2152,13 +2152,12 @@ export function MakeupRequestWorkspace() {
           ))}
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <Button type="button" size="sm" onClick={openRequestDialog}>
-            <Plus className="size-4" aria-hidden="true" />
-            신청
+          <Button type="button" variant="outline" size="sm" className="size-8 px-0" onClick={() => setNotificationDialogOpen(true)} aria-label="휴보강 알림 설정" title="휴보강 알림 설정">
+            <Bell className="size-4" aria-hidden="true" />
+            <span className="sr-only">휴보강 알림 설정</span>
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setNotificationDialogOpen(true)}>
-            <Settings className="size-4" aria-hidden="true" />
-            알림 설정
+          <Button type="button" size="sm" onClick={openRequestDialog}>
+            휴보강 신청
           </Button>
         </div>
       </div>

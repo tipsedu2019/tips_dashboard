@@ -1,7 +1,7 @@
 "use client"
 
 import { useSearchParams } from "next/navigation"
-import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
+import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type Dispatch, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction, type TouchEvent, type WheelEvent } from "react"
 import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, Pencil, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -441,13 +441,31 @@ const WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE = {
   gridTemplateColumns: `minmax(10rem,1.15fr) repeat(${WITHDRAWAL_NOTIFICATION_CHANNELS.length}, minmax(7.5rem,1fr))`,
 } as CSSProperties
 
-const WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES = ["학생", "수업", "퇴원일", "퇴원회차", "담당선생님", "관리팀", "프로세스"] as const
+const WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES = [
+  ...WITHDRAWAL_TABLE_COLUMNS
+    .map((column) => column.label)
+    .filter((label) => label !== "액션"),
+  "담당선생님",
+  "관리팀",
+  "프로세스",
+] as const
 
 const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> = {
+  상태: "처리 중",
+  과목: "영어",
+  선생님: "정보영",
   학생: "최소윤",
   수업: "제주여고2A",
   퇴원일: "2026-06-29",
   퇴원회차: "8회차",
+  "진행 수업시수": "16",
+  "4주 기준 수업시수": "16",
+  수업진행률: "100%",
+  "고객 퇴원사유": "타 학원 이동",
+  "선생님 의견": "동일",
+  "미배부 교재": "매3영",
+  신청자: "정보영",
+  신청일시: "2026-07-08 20:27",
   담당선생님: "정보영",
   관리팀: "관리팀",
   프로세스: "처리 완료",
@@ -4390,7 +4408,7 @@ function getWithdrawalTableValue(task: OpsTask, columnKey: WithdrawalTableColumn
   const withdrawal = task.withdrawal || {}
   switch (columnKey) {
     case "status":
-      return getTaskStatusLabel(task.status)
+      return getWithdrawalWorkflowStatusLabel(task.status)
     case "subject":
       return task.subject || "-"
     case "teacher":
@@ -4624,6 +4642,7 @@ function WithdrawalDataTable({
   onOpen,
   onEdit,
   onStatusChange,
+  canManageWorkflow = true,
   statusActionDisabled = false,
   onCreate,
   emptyLabel = "퇴원 신청 없음",
@@ -4637,6 +4656,7 @@ function WithdrawalDataTable({
   onOpen: (task: OpsTask) => void
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
+  canManageWorkflow?: boolean
   statusActionDisabled?: boolean
   onCreate: () => void
   emptyLabel?: string
@@ -4812,6 +4832,7 @@ function WithdrawalDataTable({
           </div>
         ) : visibleWithdrawalTasks.map((task) => {
           const nextAction = getNextTaskStatusAction(task)
+          const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
           const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
@@ -4828,7 +4849,7 @@ function WithdrawalDataTable({
                 if (column.columnKey === "status") {
                   return (
                     <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)}>
-                      <TaskStatusBadge status={task.status} />
+                      <WithdrawalWorkflowStatusBadge status={task.status} />
                     </WithdrawalDataCell>
                   )
                 }
@@ -4836,7 +4857,7 @@ function WithdrawalDataTable({
                   return (
                     <WithdrawalDataCell key={column.columnKey} value="" align="right">
                       <span className="flex flex-wrap justify-end gap-1.5">
-                        {nextAction && (
+                        {canRunStatusAction && nextAction && (
                           <Button
                             type="button"
                             variant={nextActionBlocked ? "outline" : "default"}
@@ -4888,19 +4909,129 @@ function WithdrawalDataTable({
   )
 }
 
+function getWithdrawalNotificationTriggerForStatus(status: OpsTaskStatus): WithdrawalNotificationTriggerKey | null {
+  if (status === "in_progress") return "processing"
+  if (status === "done") return "completed"
+  return null
+}
+
+function buildWithdrawalNotificationContext(task: OpsTask, triggerKey: WithdrawalNotificationTriggerKey): Record<string, string> {
+  const withdrawal = task.withdrawal || {}
+  const teacherName = withdrawal.teacherName || task.assigneeLabel || ""
+  const triggerLabel = WITHDRAWAL_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === triggerKey)?.label || ""
+  const progress = getWithdrawalProgressLabel(task)
+
+  return {
+    상태: getTaskStatusLabel(task.status),
+    과목: task.subject || "",
+    선생님: teacherName,
+    수업: task.className || "",
+    학생: task.studentName || "",
+    퇴원일: dateInputValue(withdrawal.withdrawalDate) || "",
+    퇴원회차: withdrawal.withdrawalSession || "",
+    "진행 수업시수": withdrawal.completedLessonHours || "",
+    "4주 기준 수업시수": withdrawal.fourWeekLessonHours || "",
+    수업진행률: progress === "-" ? "" : progress,
+    "고객 퇴원사유": withdrawal.customerReason || "",
+    "선생님 의견": withdrawal.teacherOpinion || "",
+    "미배부 교재": withdrawal.undistributedTextbooks || "",
+    신청자: task.requestedByLabel || "",
+    신청일시: dateLabel(task.createdAt),
+    담당선생님: teacherName,
+    관리팀: task.assigneeTeam || task.assigneeLabel || "관리팀",
+    프로세스: triggerLabel,
+  }
+}
+
+async function sendWithdrawalGoogleChatNotification({
+  channel,
+  title,
+  body,
+  sessionToken,
+  task,
+  triggerKey,
+}: {
+  channel: GoogleChatChannel
+  title: string
+  body: string
+  sessionToken: string
+  task: OpsTask
+  triggerKey: WithdrawalNotificationTriggerKey
+}) {
+  const textBody = [title, body].map((value) => value.trim()).filter(Boolean).join("\n")
+  if (!sessionToken || !textBody) return
+
+  const response = await fetch("/api/google-chat", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      channel,
+      text: textBody,
+      metadata: {
+        taskId: task.id,
+        taskType: task.type,
+        triggerKey,
+      },
+    }),
+  })
+  if (!response.ok) throw new Error(await response.text())
+}
+
+async function notifyWithdrawalWorkflow(
+  triggerKey: WithdrawalNotificationTriggerKey | null,
+  task: OpsTask,
+  withdrawalNotificationSettings: WithdrawalNotificationSetting[],
+  withdrawalNotificationTemplates: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>,
+  sessionToken: string,
+) {
+  if (!triggerKey || task.type !== "withdrawal") return
+
+  const template = withdrawalNotificationTemplates[triggerKey]
+  if (!template) return
+
+  const context = buildWithdrawalNotificationContext(task, triggerKey)
+  const title = renderWithdrawalNotificationTemplate(template.titleTemplate, context)
+  const body = renderWithdrawalNotificationTemplate(template.bodyTemplate, context)
+  const enabledSettings = withdrawalNotificationSettings.filter((setting) => (
+    setting.triggerKey === triggerKey && setting.enabled
+  ))
+
+  await Promise.allSettled(enabledSettings.map((setting) => {
+    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[setting.channelKey]
+    if (!googleChatChannel) return Promise.resolve()
+    return sendWithdrawalGoogleChatNotification({
+      channel: googleChatChannel,
+      title,
+      body,
+      sessionToken,
+      task,
+      triggerKey,
+    })
+  }))
+}
+
 function WithdrawalNotificationSettingsDialog({
   open,
   onOpenChange,
   isManager,
   sessionToken,
+  notificationSettings,
+  setNotificationSettings,
+  withdrawalNotificationTemplates,
+  setWithdrawalNotificationTemplates,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   isManager: boolean
   sessionToken: string
+  notificationSettings: WithdrawalNotificationSetting[]
+  setNotificationSettings: Dispatch<SetStateAction<WithdrawalNotificationSetting[]>>
+  withdrawalNotificationTemplates: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>
+  setWithdrawalNotificationTemplates: Dispatch<SetStateAction<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>>
 }) {
-  const [notificationSettings, setNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
-  const [withdrawalNotificationTemplates, setWithdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES)
   const [selectedNotificationTrigger, setSelectedNotificationTrigger] = useState<WithdrawalNotificationTriggerKey | null>(null)
   const [notificationTemplateInput, setNotificationTemplateInput] = useState<WithdrawalNotificationTemplate>(DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES.submitted)
   const [selectedWebhookInfo, setSelectedWebhookInfo] = useState<WithdrawalGoogleChatWebhookInfo | null>(null)
@@ -5265,9 +5396,9 @@ function WithdrawalNotificationSettingsDialog({
   )
 }
 
-function renderWithdrawalNotificationTemplate(template: string) {
+function renderWithdrawalNotificationTemplate(template: string, context: Record<string, string> = WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT) {
   return WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES.reduce((result, variable) => (
-    result.split(`{${variable}}`).join(WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT[variable] || "")
+    result.split(`{${variable}}`).join(context[variable] || "")
   ), template)
 }
 
@@ -5303,6 +5434,18 @@ function DashboardMetric({
 function TaskStatusBadge({ status }: { status: OpsTaskStatus }) {
   const variant = status === "done" ? "secondary" : status === "canceled" ? "outline" : "default"
   return <Badge variant={variant}>{getTaskStatusLabel(status)}</Badge>
+}
+
+function getWithdrawalWorkflowStatusLabel(status: OpsTaskStatus) {
+  if (status === "done") return "완료"
+  if (status === "requested") return "신청"
+  if (status === "canceled") return "취소"
+  return "처리 중"
+}
+
+function WithdrawalWorkflowStatusBadge({ status }: { status: OpsTaskStatus }) {
+  const variant = status === "done" ? "secondary" : status === "requested" ? "outline" : "default"
+  return <Badge variant={variant}>{getWithdrawalWorkflowStatusLabel(status)}</Badge>
 }
 
 function TaskTypeBadge({ type }: { type: OpsTaskType }) {
@@ -5346,6 +5489,9 @@ function TodoPriorityBadge({ priority, showNormal = false }: { priority: OpsTask
 }
 
 function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { status: OpsTaskStatus; label: string } | null {
+  if (task.type === "withdrawal" && task.status === "done") return null
+  if (task.type === "withdrawal" && task.status === "canceled") return null
+  if (task.type === "withdrawal" && task.status === "requested") return { status: "in_progress", label: "진행" }
   if (task.status === "canceled") return { status: "requested", label: "다시 열기" }
   if (task.status === "done") return { status: "requested", label: "다시 열기" }
   if (task.status === "on_hold") return { status: "in_progress", label: "재개" }
@@ -5835,6 +5981,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
   const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [withdrawalNotificationOpen, setWithdrawalNotificationOpen] = useState(false)
+  const [withdrawalNotificationSettings, setWithdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
+  const [withdrawalNotificationTemplates, setWithdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [detailOpen, setDetailOpen] = useState(false)
@@ -5882,6 +6030,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     currentUserTeam,
   }), [currentUserId, currentUserLabel, currentUserTeam])
   const canDelete = canManageAll || isStaff
+  const canManageWithdrawalWorkflow = canManageAll || isStaff
   const canDeleteTask = useCallback(
     (task: OpsTask) => {
       const isOwnGeneralTask = (
@@ -6981,6 +7130,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         savedTasks.forEach((task) => prependTask(task))
         setQuery("")
       }
+      if (payload.type === "withdrawal" && !wasEditing) {
+        savedTasks.forEach((task) => {
+          void notifyWithdrawalWorkflow("submitted", task, withdrawalNotificationSettings, withdrawalNotificationTemplates, session?.access_token || "")
+        })
+      }
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
       setNotice(wasEditing
         ? `${itemLabel}을 수정했습니다.`
@@ -7010,13 +7164,23 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       await updateOpsTaskStatus(task, status)
       const shouldRefreshSyncedTask = status === "done" || task.type === "registration" || task.type === "word_retest"
       const syncedTask = shouldRefreshSyncedTask ? await loadOpsTaskById(task.id) : null
+      const changedAt = new Date().toISOString()
+      const notificationTask: OpsTask = syncedTask || {
+        ...task,
+        status,
+        completedAt: status === "done" ? changedAt : "",
+        updatedAt: changedAt,
+      }
       if (syncedTask) {
         replaceTaskInState(syncedTask)
       } else {
         applyTaskPatch(task.id, {
           status,
-          completedAt: status === "done" ? new Date().toISOString() : "",
+          completedAt: status === "done" ? changedAt : "",
         })
+      }
+      if (task.type === "withdrawal") {
+        void notifyWithdrawalWorkflow(getWithdrawalNotificationTriggerForStatus(status), notificationTask, withdrawalNotificationSettings, withdrawalNotificationTemplates, session?.access_token || "")
       }
       const canUndoStatusChange = task.type === "general" || status !== "done"
       if (canUndoStatusChange) {
@@ -7379,6 +7543,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const selectedTaskCanEdit = selectedTaskFresh ? canEditTaskDetails(selectedTaskFresh) : false
   const isWithdrawalDetail = selectedTaskFresh?.type === "withdrawal"
   const isCompletedWithdrawalDetail = Boolean(selectedTaskFresh && isWithdrawalDetail && isClosedOpsTask(selectedTaskFresh))
+  const canManageWithdrawalStatusAction = !isWithdrawalDetail || canManageWithdrawalWorkflow
   const toggleWordRetestSelection = useCallback((task: OpsTask, selected: boolean) => {
     if (task.type !== "word_retest" || !canDeleteTask(task)) return
     setWordRetestSelectedTaskIds((current) => {
@@ -7820,6 +7985,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	            onOpen={openDetail}
 	            onEdit={openEdit}
 	            onStatusChange={(task, status) => void changeStatus(task, status)}
+	            canManageWorkflow={canManageWithdrawalWorkflow}
 	            statusActionDisabled={saving}
 	            onCreate={() => openCreate(scopedTaskType)}
 	            emptyLabel={emptyTaskLabel}
@@ -7927,6 +8093,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           onOpenChange={setWithdrawalNotificationOpen}
           isManager={canManageAll || isStaff}
           sessionToken={session?.access_token || ""}
+          notificationSettings={withdrawalNotificationSettings}
+          setNotificationSettings={setWithdrawalNotificationSettings}
+          withdrawalNotificationTemplates={withdrawalNotificationTemplates}
+          setWithdrawalNotificationTemplates={setWithdrawalNotificationTemplates}
         />
       )}
 
@@ -8385,7 +8555,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                      ))}
 	                    </>
 	                  )}
-                  {((!isWithdrawalDetail || !detailPrimaryActionBlocked) && detailPrimaryAction) && (
+                  {canManageWithdrawalStatusAction && ((!isWithdrawalDetail || !detailPrimaryActionBlocked) && detailPrimaryAction) && (
 	                    <Button
                       type="button"
                       size="sm"
@@ -9348,9 +9518,6 @@ function WordRetestPeriodFilterBar({
   onStartDateChange: (value: string) => void
   onEndDateChange: (value: string) => void
 }) {
-  const startDateId = useId()
-  const endDateId = useId()
-
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <div className="inline-flex max-w-full overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="단어 재시험 본시험일 기간">
@@ -9372,26 +9539,18 @@ function WordRetestPeriodFilterBar({
       </div>
       {value === "custom" && (
         <div className="grid min-w-[18rem] flex-1 gap-2 sm:max-w-sm sm:grid-cols-2">
-          <label htmlFor={startDateId} className="grid gap-1 text-xs font-medium text-muted-foreground">
-            <span>시작일</span>
-            <Input
-              id={startDateId}
-              type="date"
-              value={startDate}
-              onChange={(event) => onStartDateChange(event.target.value)}
-              className="h-9 bg-background"
-            />
-          </label>
-          <label htmlFor={endDateId} className="grid gap-1 text-xs font-medium text-muted-foreground">
-            <span>종료일</span>
-            <Input
-              id={endDateId}
-              type="date"
-              value={endDate}
-              onChange={(event) => onEndDateChange(event.target.value)}
-              className="h-9 bg-background"
-            />
-          </label>
+          <DatePickerControl
+            value={startDate}
+            onChange={onStartDateChange}
+            placeholder="시작일"
+            ariaLabel="단어 재시험 기간 시작일"
+          />
+          <DatePickerControl
+            value={endDate}
+            onChange={onEndDateChange}
+            placeholder="종료일"
+            ariaLabel="단어 재시험 기간 종료일"
+          />
         </div>
       )}
     </div>
@@ -11225,7 +11384,7 @@ function OptionalInfo({ label, value }: { label: string; value?: string | boolea
 function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
   const withdrawal = task.withdrawal || {}
   const progress = getWithdrawalProgressLabel(task)
-  const processedAt = dateLabel(task.completedAt || task.updatedAt || task.createdAt)
+  const completedAt = dateLabel(task.completedAt)
 
   return (
     <section className="grid gap-4" aria-label="퇴원 상세 신청서">
@@ -11237,6 +11396,7 @@ function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
           <Info label="학생" value={task.studentName || "미지정"} />
           <OptionalInfo label="고객 퇴원사유" value={withdrawal.customerReason} />
           <OptionalInfo label="선생님 의견" value={withdrawal.teacherOpinion} />
+          <Info label="미배부 교재" value={withdrawal.undistributedTextbooks || "-"} />
           <Info label="퇴원일" value={dateInputValue(withdrawal.withdrawalDate) || "미정"} />
           <Info label="퇴원회차" value={withdrawal.withdrawalSession || "미정"} />
           <Info label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />
@@ -11250,15 +11410,14 @@ function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
         <dl className="grid gap-3 text-sm md:grid-cols-2">
           <Info label="신청자" value={task.requestedByLabel || "담당선생님"} />
           <Info label="신청일시" value={dateLabel(task.createdAt)} />
-          <OptionalInfo label="미배부 교재" value={withdrawal.undistributedTextbooks} />
         </dl>
       </div>
 
       <div className="grid gap-3 rounded-md border p-3">
         <div className="text-sm font-semibold">처리</div>
         <dl className="grid gap-3 text-sm md:grid-cols-2">
-          <Info label="담당" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
-          <Info label="처리일시" value={processedAt === "-" ? "미정" : processedAt} />
+          <Info label="담당자" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
+          <Info label="완료일시" value={completedAt === "-" ? "미정" : completedAt} />
         </dl>
       </div>
     </section>

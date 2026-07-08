@@ -137,12 +137,16 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.match(workspaceSource, /휴보강 신청/);
   assert.match(workspaceSource, /DialogTitle>\{editingRequestId \? "휴보강 보완 재상신" : "휴보강 신청"\}/);
   assert.doesNotMatch(workspaceSource, /const shouldShowRequestForm = view === "mine"/);
-  const createButtonSource = workspaceSource.slice(
-    workspaceSource.indexOf('<Button type="button" size="sm" onClick={openRequestDialog}'),
-    workspaceSource.indexOf('<Button type="button" variant="outline" size="sm" onClick={() => setNotificationDialogOpen(true)}'),
+  const headerActionSource = workspaceSource.slice(
+    workspaceSource.indexOf('aria-label="휴보강 신청서 보기"'),
+    workspaceSource.indexOf("{message ?"),
   );
-  assert.match(createButtonSource, />\s*신청\s*</);
-  assert.doesNotMatch(createButtonSource, /휴보강 신청/);
+  assert.match(headerActionSource, /aria-label="휴보강 알림 설정"/);
+  assert.match(headerActionSource, /<Bell className="size-4"/);
+  assert.match(headerActionSource, />\s*휴보강 신청\s*</);
+  assert.ok(headerActionSource.indexOf('aria-label="휴보강 알림 설정"') < headerActionSource.indexOf("onClick={openRequestDialog}"));
+  assert.doesNotMatch(headerActionSource, /<Settings className/);
+  assert.doesNotMatch(headerActionSource, /<Plus className="size-4"[\s\S]*onClick=\{openRequestDialog\}/);
   assert.doesNotMatch(workspaceSource, /새로고침/);
   assert.doesNotMatch(workspaceSource, /RefreshCw/);
   assert.ok(workspaceSource.indexOf('htmlFor="makeup-subject">과목') < workspaceSource.indexOf('htmlFor="makeup-teacher">선생님'));

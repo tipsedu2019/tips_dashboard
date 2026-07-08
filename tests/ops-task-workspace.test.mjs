@@ -594,6 +594,7 @@ test("dedicated operations are split into separate admin routes", async () => {
 test("navigation keeps todo queues and separates operation menus", async () => {
   const source = await readSource("src/lib/navigation.ts");
   const todoBlock = source.slice(source.indexOf(`title: "${ko.todo}"`), source.indexOf(`title: "${ko.registration}"`));
+  const fullOverviewBlock = source.slice(source.indexOf("const fullOverviewItems"), source.indexOf("const overview: NavGroup"));
 
   assertIncludesAll(source, [
     `title: "${ko.todo}"`,
@@ -613,7 +614,8 @@ test("navigation keeps todo queues and separates operation menus", async () => {
   assert.doesNotMatch(todoBlock, /url: "\/admin\/registration"/);
   assert.doesNotMatch(todoBlock, /url: "\/admin\/transfer"/);
   assert.doesNotMatch(todoBlock, /url: "\/admin\/withdrawal"/);
-  assert.doesNotMatch(todoBlock, /url: "\/admin\/word-retests"/);
+  assert.ok(fullOverviewBlock.indexOf(`title: "${ko.todo}"`) < fullOverviewBlock.indexOf(`title: "${ko.wordRetest}"`));
+  assert.ok(fullOverviewBlock.indexOf(`title: "${ko.wordRetest}"`) < fullOverviewBlock.indexOf(`title: "${ko.registration}"`));
   assert.doesNotMatch(source, new RegExp(`title: "${ko.taskbox}"`));
 });
 
@@ -779,6 +781,18 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf("function getMissingWithdrawalCheckLabels"),
     source.indexOf("function getMissingTransferCheckLabels"),
   );
+  const nextStatusActionSource = source.slice(
+    source.indexOf("function getNextTaskStatusAction"),
+    source.indexOf("function canEditTaskDetails"),
+  );
+  const withdrawalNotificationVariableSource = source.slice(
+    source.indexOf("const WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES"),
+    source.indexOf("const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT"),
+  );
+  const withdrawalNotificationDispatchSource = source.slice(
+    source.indexOf("async function sendWithdrawalGoogleChatNotification"),
+    source.indexOf("function WithdrawalNotificationSettingsDialog"),
+  );
 
   assertIncludesAll(source, [
     'type WithdrawalViewKey = "applicant" | "operations" | "closed"',
@@ -823,6 +837,16 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source,
     /if \(task\.type === "withdrawal" && task\.status === "in_progress"\) return \{ status: "done", label: "완료" \}/,
     "withdrawal tasks should move from processing directly to completed without an approval queue",
+  );
+  assert.match(
+    nextStatusActionSource,
+    /if \(task\.type === "withdrawal" && task\.status === "done"\) return null/,
+    "completed withdrawal rows should be preserved without a reopen action",
+  );
+  assert.match(
+    nextStatusActionSource,
+    /if \(task\.type === "withdrawal" && task\.status === "requested"\) return \{ status: "in_progress", label: "진행" \}/,
+    "new withdrawal applications should move directly to processing",
   );
   assertIncludesAll(withdrawalWorkspaceToolbarSource, [
     'aria-label="퇴원 알림 설정"',
@@ -1070,6 +1094,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assertIncludesAll(withdrawalDetailTopSource, [
     "고객 퇴원사유",
     "선생님 의견",
+    "미배부 교재",
     "퇴원일",
     "퇴원회차",
     "진행 수업시수",
@@ -1077,17 +1102,35 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "수업진행률",
   ]);
   assertIncludesAll(withdrawalDetailProcessingSource, [
-    "담당",
-    "처리일시",
+    "담당자",
+    "완료일시",
   ]);
+  assert.doesNotMatch(withdrawalDetailProcessingSource, /label="담당"/);
+  assert.doesNotMatch(withdrawalDetailProcessingSource, /처리일시/);
   assert.doesNotMatch(withdrawalDetailProcessingSource, /퇴원일|퇴원회차|진행 수업시수|4주 기준 수업시수|수업진행률/);
   assertIncludesAll(detailDialogSource, [
     "isWithdrawalDetail",
     "isCompletedWithdrawalDetail",
+    "canManageWithdrawalStatusAction",
     "WithdrawalDetailPanel",
     "!isWithdrawalDetail",
     "selectedTaskFresh.type !== \"withdrawal\"",
   ]);
+  assertIncludesAll(source, [
+    "const canManageWithdrawalWorkflow = canManageAll || isStaff",
+    "function getWithdrawalWorkflowStatusLabel",
+    "function WithdrawalWorkflowStatusBadge",
+  ]);
+  assert.match(
+    source,
+    /case "status":\s*return getWithdrawalWorkflowStatusLabel\(task\.status\)/,
+    "withdrawal table filtering and sorting should use the simplified withdrawal workflow labels",
+  );
+  assert.match(
+    source,
+    /<WithdrawalWorkflowStatusBadge status=\{task\.status\} \/>/,
+    "withdrawal table should not expose the generic confirmed status badge",
+  );
   assert.match(
     detailDialogSource,
     /!isWithdrawalDetail && \(\s*<CompletionBlockerActionPanel/,
@@ -1100,16 +1143,71 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     detailDialogSource,
-    /\(\(!isWithdrawalDetail \|\| !detailPrimaryActionBlocked\) && detailPrimaryAction\)/,
-    "blocked completion actions should be hidden on withdrawal detail",
+    /canManageWithdrawalStatusAction && \(\(!isWithdrawalDetail \|\| !detailPrimaryActionBlocked\) && detailPrimaryAction\)/,
+    "withdrawal progress and completion actions should be available only to the management team",
+  );
+  assert.match(
+    source,
+    /canManageWorkflow=\{canManageWithdrawalWorkflow\}/,
+    "withdrawal table status actions should be gated by the management workflow permission",
+  );
+  assert.match(
+    source,
+    /const canRunStatusAction = canManageWorkflow && Boolean\(nextAction\)/,
+    "withdrawal rows should hide progress and completion buttons for non-management users",
   );
   assert.match(withdrawalCheckBlockerSource, /return \[\]/);
   assert.doesNotMatch(withdrawalCheckBlockerSource, /메이크에듀 퇴원처리|수업료 처리|교재비 처리/);
-  assert.doesNotMatch(withdrawalDetailSource, /TaskTypeBadge|TaskStatusBadge|getTaskPriorityLabel|완료 상태|완료일시/);
+  assert.doesNotMatch(withdrawalDetailSource, /TaskTypeBadge|TaskStatusBadge|getTaskPriorityLabel|완료 상태/);
   assert.doesNotMatch(withdrawalDetailSource, /WithdrawalOperationsChecklist/);
   assert.doesNotMatch(withdrawalDetailSource, /WithdrawalFlowSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /AutoSyncResultSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /결재/);
+  assert.match(
+    withdrawalNotificationVariableSource,
+    /WITHDRAWAL_TABLE_COLUMNS[\s\S]*\.map\(\(column\) => column\.label\)[\s\S]*\.filter\(\(label\) => label !== "액션"\)/,
+    "notification templates should expose every data table column except the non-data action column",
+  );
+  assertIncludesAll(withdrawalNotificationVariableSource, [
+    '"담당선생님"',
+    '"관리팀"',
+    '"프로세스"',
+  ]);
+  assertIncludesAll(source.slice(source.indexOf("const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT"), source.indexOf("const DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES")), [
+    "상태",
+    "과목",
+    "선생님",
+    "수업",
+    "학생",
+    "퇴원일",
+    "퇴원회차",
+    "진행 수업시수",
+    "4주 기준 수업시수",
+    "수업진행률",
+    "고객 퇴원사유",
+    "선생님 의견",
+    "미배부 교재",
+    "신청자",
+    "신청일시",
+  ]);
+  assertIncludesAll(withdrawalNotificationDispatchSource, [
+    "sendWithdrawalGoogleChatNotification",
+    "fetch(\"/api/google-chat\"",
+    "method: \"POST\"",
+    "notifyWithdrawalWorkflow",
+    "withdrawalNotificationSettings",
+    "withdrawalNotificationTemplates",
+  ]);
+  assert.match(
+    source,
+    /if \(payload\.type === "withdrawal" && !wasEditing\) \{[\s\S]*notifyWithdrawalWorkflow\("submitted"/,
+    "new withdrawal applications should dispatch the submitted notification",
+  );
+  assert.match(
+    source,
+    /if \(task\.type === "withdrawal"\) \{[\s\S]*notifyWithdrawalWorkflow\(getWithdrawalNotificationTriggerForStatus\(status\)/,
+    "withdrawal status changes should dispatch process notifications",
+  );
 });
 
 test("withdrawal schedule calendar defaults to current month and counts the billing-cycle hours", async () => {
@@ -1307,6 +1405,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     '{ key: "week", label: "이번주" }',
     '{ key: "month", label: "이번달" }',
     '{ key: "custom", label: "직접입력" }',
+    'ariaLabel="단어 재시험 기간 시작일"',
+    'ariaLabel="단어 재시험 기간 종료일"',
     "matchesWordRetestPeriodFilter",
     "shouldAutoMarkWordRetestAbsent",
     "autoMarkPastWordRetestsAbsent",
