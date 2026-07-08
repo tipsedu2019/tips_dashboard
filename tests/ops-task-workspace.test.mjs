@@ -716,7 +716,7 @@ test("operation forms use staged fields and linked management selectors", async 
     "inferWordRetestTextbookGradePill",
     "wordRetestTextbookGradeFilter",
     'const defaultAssigneeId = currentUserId || ""',
-    "const { user, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()",
+    "const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()",
     'setWordRetestMode(isTeacher && !isStaff ? "teacher" : "assistant")',
     "shouldShowFormDetailTabs",
     "{formStepProgressLabel}",
@@ -743,6 +743,14 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf("function WithdrawalResizableHeaderCell"),
     source.indexOf("function DashboardMetric"),
   );
+  const withdrawalPeriodFilterSource = source.slice(
+    source.indexOf("function WithdrawalPeriodFilterBar"),
+    source.indexOf("function WithdrawalResizableHeaderCell"),
+  );
+  const detailDialogSource = source.slice(
+    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={Boolean(deleteTarget)}"),
+  );
   const withdrawalWorkspaceToolbarSource = source.slice(
     source.indexOf('aria-label={isTodoWorkspace ? "할 일 목록"'),
     source.indexOf("{isTodoWorkspace && ("),
@@ -756,8 +764,20 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf('if (form.type === "transfer")'),
   );
   const withdrawalDetailSource = source.slice(
-    source.indexOf('if (task.type === "withdrawal" && task.withdrawal)'),
-    source.indexOf('if (task.type === "transfer" && task.transfer)'),
+    source.indexOf("function WithdrawalDetailPanel"),
+    source.indexOf("function CommentPanelContent"),
+  );
+  const withdrawalDetailTopSource = withdrawalDetailSource.slice(
+    withdrawalDetailSource.indexOf('aria-label="퇴원 상세 신청서"'),
+    withdrawalDetailSource.indexOf('<div className="text-sm font-semibold">신청</div>'),
+  );
+  const withdrawalDetailProcessingSource = withdrawalDetailSource.slice(
+    withdrawalDetailSource.indexOf('<div className="text-sm font-semibold">처리</div>'),
+    withdrawalDetailSource.indexOf("</section>"),
+  );
+  const withdrawalCheckBlockerSource = source.slice(
+    source.indexOf("function getMissingWithdrawalCheckLabels"),
+    source.indexOf("function getMissingTransferCheckLabels"),
   );
 
   assertIncludesAll(source, [
@@ -766,8 +786,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "type WithdrawalTableColumnKey",
     "WITHDRAWAL_VIEW_TABS",
     "WITHDRAWAL_NOTIFICATION_CHANNELS",
+    "WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP",
     "WITHDRAWAL_NOTIFICATION_TRIGGERS",
+    "WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES",
     "WithdrawalNotificationSettingsDialog",
+    "WithdrawalGoogleChatWebhookInfo",
     "WITHDRAWAL_PERIOD_FILTERS",
     "WITHDRAWAL_TABLE_COLUMNS",
     "WITHDRAWAL_TABLE_COLUMN_WIDTHS",
@@ -780,8 +803,6 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "syncWithdrawalView",
     "getWithdrawalViewTasks",
     "withdrawalCounts",
-    "WithdrawalFlowSummary",
-    "WithdrawalOperationsChecklist",
     "WithdrawalDataTable",
     "WithdrawalPeriodFilterBar",
     "WithdrawalFilterSelect",
@@ -816,9 +837,24 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assertIncludesAll(source, [
     'aria-label="퇴원 알림 설정 표"',
     "알림 위치",
+    "구글챗 · 관리팀",
+    "웹훅 URL 보기",
+    "웹훅 URL 수정",
+    "handleOpenWithdrawalWebhookInfo",
+    "handleSaveWithdrawalWebhookInfo",
+    "selectedWebhookInfo",
+    "webhookUrlInput",
+    "/api/google-chat?channel=",
+    'method: "PATCH"',
     "신청 접수",
     "처리 완료",
+    "openWithdrawalNotificationTemplateEditor",
+    "selectedNotificationTrigger",
+    "withdrawalNotificationTemplates",
+    "DialogTitle>알림 내용 수정",
+    'aria-label={`${trigger.label} 알림 내용 수정`}',
   ]);
+  assert.doesNotMatch(source, /완료 알림/);
   assertIncludesAll(source, [
     'columnKey: "status"',
     'columnKey: "subject"',
@@ -852,6 +888,14 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "<WithdrawalPeriodFilterBar",
   ]);
   assert.match(source, /aria-label="퇴원 기간 필터"/);
+  assertIncludesAll(withdrawalPeriodFilterSource, [
+    "<DatePickerControl",
+    'placeholder="시작일"',
+    'placeholder="종료일"',
+    'ariaLabel="퇴원 기간 시작일"',
+    'ariaLabel="퇴원 기간 종료일"',
+  ]);
+  assert.doesNotMatch(withdrawalPeriodFilterSource, /type="date"/);
   assert.doesNotMatch(withdrawalDataTableSource, /label="수업 필터"/);
   assert.doesNotMatch(withdrawalDataTableSource, /allLabel="수업 전체"/);
   assert.doesNotMatch(withdrawalDataTableSource, /label="학생 필터"/);
@@ -1013,13 +1057,58 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assertIncludesAll(withdrawalDetailSource, [
     "신청",
     "처리",
-    "완료",
+    "퇴원 상세 신청서",
     "고객 퇴원사유",
     "선생님 의견",
     "미배부 교재",
+    "퇴원일",
+    "퇴원회차",
     "진행 수업시수",
     "4주 기준 수업시수",
+    "수업진행률",
   ]);
+  assertIncludesAll(withdrawalDetailTopSource, [
+    "고객 퇴원사유",
+    "선생님 의견",
+    "퇴원일",
+    "퇴원회차",
+    "진행 수업시수",
+    "4주 기준 수업시수",
+    "수업진행률",
+  ]);
+  assertIncludesAll(withdrawalDetailProcessingSource, [
+    "담당",
+    "처리일시",
+  ]);
+  assert.doesNotMatch(withdrawalDetailProcessingSource, /퇴원일|퇴원회차|진행 수업시수|4주 기준 수업시수|수업진행률/);
+  assertIncludesAll(detailDialogSource, [
+    "isWithdrawalDetail",
+    "isCompletedWithdrawalDetail",
+    "WithdrawalDetailPanel",
+    "!isWithdrawalDetail",
+    "selectedTaskFresh.type !== \"withdrawal\"",
+  ]);
+  assert.match(
+    detailDialogSource,
+    /!isWithdrawalDetail && \(\s*<CompletionBlockerActionPanel/,
+    "withdrawal detail should not show the completion blocker chip group",
+  );
+  assert.match(
+    detailDialogSource,
+    /!isWithdrawalDetail && getSecondaryTaskStatusOptions\(selectedTaskFresh\)/,
+    "withdrawal detail should not show hold or cancel secondary actions",
+  );
+  assert.match(
+    detailDialogSource,
+    /\(\(!isWithdrawalDetail \|\| !detailPrimaryActionBlocked\) && detailPrimaryAction\)/,
+    "blocked completion actions should be hidden on withdrawal detail",
+  );
+  assert.match(withdrawalCheckBlockerSource, /return \[\]/);
+  assert.doesNotMatch(withdrawalCheckBlockerSource, /메이크에듀 퇴원처리|수업료 처리|교재비 처리/);
+  assert.doesNotMatch(withdrawalDetailSource, /TaskTypeBadge|TaskStatusBadge|getTaskPriorityLabel|완료 상태|완료일시/);
+  assert.doesNotMatch(withdrawalDetailSource, /WithdrawalOperationsChecklist/);
+  assert.doesNotMatch(withdrawalDetailSource, /WithdrawalFlowSummary/);
+  assert.doesNotMatch(withdrawalDetailSource, /AutoSyncResultSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /결재/);
 });
 

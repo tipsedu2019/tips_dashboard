@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, Pencil, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -20,7 +21,9 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { DatePickerControl } from "@/components/ui/date-time-picker"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/providers/auth-provider"
@@ -87,12 +90,31 @@ type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
 type TodoSelectFilterKey = "all" | string
 type WithdrawalViewKey = "applicant" | "operations" | "closed"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
-type WithdrawalNotificationChannelKey = "applicant" | "operations" | "completed"
+type GoogleChatChannel = "executive" | "admin" | "math" | "english"
+type WithdrawalNotificationChannelKey = "applicant" | "operations" | "google_chat_admin"
 type WithdrawalNotificationTriggerKey = "submitted" | "processing" | "completed"
 type WithdrawalNotificationSetting = {
   triggerKey: WithdrawalNotificationTriggerKey
   channelKey: WithdrawalNotificationChannelKey
   enabled: boolean
+}
+type WithdrawalNotificationTemplate = {
+  titleTemplate: string
+  bodyTemplate: string
+}
+type WithdrawalGoogleChatWebhookInfo = {
+  channelKey: WithdrawalNotificationChannelKey
+  channelLabel: string
+  envName: string
+  configured: boolean
+  maskedUrl: string
+}
+type WithdrawalGoogleChatWebhookInfoResponse = {
+  ok?: boolean
+  envName?: string
+  configured?: boolean
+  maskedUrl?: string
+  error?: string
 }
 
 type WordRetestMode = "assistant" | "teacher"
@@ -402,18 +424,49 @@ const WITHDRAWAL_VIEW_TABS: Array<{ key: WithdrawalViewKey; label: string }> = [
 const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChannelKey; label: string }> = [
   { key: "applicant", label: "담당선생님" },
   { key: "operations", label: "관리팀" },
-  { key: "completed", label: "완료 알림" },
+  { key: "google_chat_admin", label: "구글챗 · 관리팀" },
 ]
+
+const WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP: Partial<Record<WithdrawalNotificationChannelKey, GoogleChatChannel>> = {
+  google_chat_admin: "admin",
+}
 
 const WITHDRAWAL_NOTIFICATION_TRIGGERS: Array<{ key: WithdrawalNotificationTriggerKey; label: string; detail: string }> = [
   { key: "submitted", label: "신청 접수", detail: "담당선생님이 퇴원을 신청하면 관리팀에 알림" },
   { key: "processing", label: "처리 시작", detail: "관리팀이 확인하거나 처리 중으로 이동하면 담당선생님에 알림" },
-  { key: "completed", label: "처리 완료", detail: "관리팀이 완료 처리하면 담당선생님과 완료 위치에 알림" },
+  { key: "completed", label: "처리 완료", detail: "관리팀이 완료 처리하면 담당선생님과 관리팀에 알림" },
 ]
 
 const WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE = {
-  gridTemplateColumns: "minmax(10rem,1.2fr) repeat(3,minmax(7.5rem,1fr))",
+  gridTemplateColumns: `minmax(10rem,1.15fr) repeat(${WITHDRAWAL_NOTIFICATION_CHANNELS.length}, minmax(7.5rem,1fr))`,
 } as CSSProperties
+
+const WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES = ["학생", "수업", "퇴원일", "퇴원회차", "담당선생님", "관리팀", "프로세스"] as const
+
+const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> = {
+  학생: "최소윤",
+  수업: "제주여고2A",
+  퇴원일: "2026-06-29",
+  퇴원회차: "8회차",
+  담당선생님: "정보영",
+  관리팀: "관리팀",
+  프로세스: "처리 완료",
+}
+
+const DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate> = {
+  submitted: {
+    titleTemplate: "퇴원 신청 접수 · {학생}",
+    bodyTemplate: "{담당선생님} 선생님이 {학생} 학생의 퇴원을 신청했습니다.\n수업: {수업}",
+  },
+  processing: {
+    titleTemplate: "퇴원 처리 시작 · {학생}",
+    bodyTemplate: "{학생} 학생 퇴원 신청이 관리팀 처리 중으로 이동했습니다.\n퇴원일: {퇴원일}",
+  },
+  completed: {
+    titleTemplate: "퇴원 처리 완료 · {학생}",
+    bodyTemplate: "{학생} 학생 퇴원 처리가 완료되었습니다.\n퇴원일: {퇴원일}\n퇴원회차: {퇴원회차}",
+  },
+}
 
 function buildDefaultWithdrawalNotificationSettings(): WithdrawalNotificationSetting[] {
   return WITHDRAWAL_NOTIFICATION_TRIGGERS.flatMap((trigger) => (
@@ -422,6 +475,7 @@ function buildDefaultWithdrawalNotificationSettings(): WithdrawalNotificationSet
       channelKey: channel.key,
       enabled: (
         (trigger.key === "submitted" && channel.key === "operations") ||
+        (trigger.key === "submitted" && channel.key === "google_chat_admin") ||
         (trigger.key === "processing" && channel.key === "applicant") ||
         trigger.key === "completed"
       ),
@@ -1111,12 +1165,8 @@ function getMissingRegistrationCheckLabels(registration?: OpsTaskInput["registra
   ].filter((item) => !item.checked).map((item) => item.label)
 }
 
-function getMissingWithdrawalCheckLabels(withdrawal?: OpsTaskInput["withdrawal"]) {
-  return [
-    { checked: Boolean(withdrawal?.makeeduWithdrawalDone), label: "메이크에듀 퇴원처리" },
-    { checked: Boolean(withdrawal?.feeProcessed), label: "수업료 처리" },
-    { checked: Boolean(withdrawal?.textbookFeeProcessed), label: "교재비 처리" },
-  ].filter((item) => !item.checked).map((item) => item.label)
+function getMissingWithdrawalCheckLabels() {
+  return []
 }
 
 function getMissingTransferCheckLabels(transfer?: OpsTaskInput["transfer"]) {
@@ -1551,7 +1601,7 @@ function getOperationCompletionBlockers(
     if (hasLinkedRecord(input.studentId) && !findStudentOption(students, input.studentId, indexes)) blockers.push("학생")
     if (!hasLinkedRecord(input.classId)) blockers.push("수업")
     if (hasLinkedRecord(input.classId) && !findClassOption(classes, input.classId, indexes)) blockers.push("수업")
-    getMissingWithdrawalCheckLabels(input.withdrawal).forEach((label) => blockers.push(label))
+    getMissingWithdrawalCheckLabels().forEach((label) => blockers.push(label))
   }
 
   if (input.type === "transfer" && input.status === "done") {
@@ -4275,84 +4325,6 @@ function OperationChecklistSummary({
   )
 }
 
-function withdrawalSummaryValue(value: unknown, fallback = "미정") {
-  const textValue = String(value || "").trim()
-  return textValue || fallback
-}
-
-function getWithdrawalCompletionLabel(status?: OpsTaskStatus) {
-  if (status === "done") return "완료"
-  if (status === "canceled") return "취소"
-  if (status === "requested") return "신청"
-  return "처리 중"
-}
-
-function WithdrawalFlowSummary({
-  status,
-  studentName,
-  className,
-  requesterLabel,
-  assigneeLabel,
-  withdrawal,
-}: {
-  status?: OpsTaskStatus
-  studentName?: string
-  className?: string
-  requesterLabel?: string
-  assigneeLabel?: string
-  withdrawal?: OpsTaskInput["withdrawal"]
-}) {
-  const withdrawalDate = dateInputValue(withdrawal?.withdrawalDate)
-  const lessonHours = [withdrawal?.completedLessonHours, withdrawal?.fourWeekLessonHours].map((value) => String(value || "").trim())
-  const lessonSummary = lessonHours.some(Boolean) ? `${lessonHours[0] || "-"} / ${lessonHours[1] || "-"}` : "시수 미입력"
-  const checksDone = [
-    withdrawal?.makeeduWithdrawalDone,
-    withdrawal?.feeProcessed,
-    withdrawal?.textbookFeeProcessed,
-  ].filter(Boolean).length
-
-  return (
-    <dl className="grid gap-2 rounded-md border bg-background p-3 text-sm md:grid-cols-3">
-      <div className="grid gap-1">
-        <dt className="text-xs font-medium text-muted-foreground">신청</dt>
-        <dd className="min-w-0 font-semibold">{withdrawalSummaryValue(studentName, "학생 미지정")}</dd>
-        <dd className="min-w-0 truncate text-xs text-muted-foreground">
-          {withdrawalSummaryValue(className, "수업 미지정")} · {withdrawalSummaryValue(requesterLabel, "신청자 미정")}
-        </dd>
-      </div>
-      <div className="grid gap-1">
-        <dt className="text-xs font-medium text-muted-foreground">처리</dt>
-        <dd className="min-w-0 font-semibold">{withdrawalDate ? `퇴원일 ${withdrawalDate}` : "퇴원일 미정"}</dd>
-        <dd className="min-w-0 truncate text-xs text-muted-foreground">
-          {withdrawalSummaryValue(assigneeLabel, "관리팀 미정")} · {lessonSummary}
-        </dd>
-      </div>
-      <div className="grid gap-1">
-        <dt className="text-xs font-medium text-muted-foreground">완료</dt>
-        <dd className="min-w-0 font-semibold">{getWithdrawalCompletionLabel(status)}</dd>
-        <dd className="min-w-0 truncate text-xs text-muted-foreground">
-          처리 체크 {checksDone}/3 · {withdrawal?.timetableRosterUpdated ? "명단 반영" : "명단 대기"}
-        </dd>
-      </div>
-    </dl>
-  )
-}
-
-function WithdrawalOperationsChecklist({ withdrawal }: { withdrawal?: OpsTaskInput["withdrawal"] }) {
-  return (
-    <OperationChecklistSummary
-      autoItems={[
-        { label: "시간표 명단 변경", checked: Boolean(withdrawal?.timetableRosterUpdated) },
-      ]}
-      manualItems={[
-        { label: "메이크에듀 퇴원처리", checked: Boolean(withdrawal?.makeeduWithdrawalDone) },
-        { label: "수업료 처리", checked: Boolean(withdrawal?.feeProcessed) },
-        { label: "교재비 처리", checked: Boolean(withdrawal?.textbookFeeProcessed) },
-      ]}
-    />
-  )
-}
-
 function getWithdrawalWeekRange(todayKey: string) {
   return getWordRetestWeekRange(todayKey)
 }
@@ -4550,19 +4522,17 @@ function WithdrawalPeriodFilterBar({
       </div>
       {value === "custom" ? (
         <div className="grid min-w-[18rem] flex-1 gap-2 sm:max-w-sm sm:grid-cols-2">
-          <Input
-            type="date"
+          <DatePickerControl
             value={startDate}
-            aria-label="퇴원 기간 시작일"
-            onChange={(event) => onStartDateChange(event.target.value)}
-            className="h-8 min-w-0 bg-background"
+            onChange={onStartDateChange}
+            placeholder="시작일"
+            ariaLabel="퇴원 기간 시작일"
           />
-          <Input
-            type="date"
+          <DatePickerControl
             value={endDate}
-            aria-label="퇴원 기간 종료일"
-            onChange={(event) => onEndDateChange(event.target.value)}
-            className="h-8 min-w-0 bg-background"
+            onChange={onEndDateChange}
+            placeholder="종료일"
+            ariaLabel="퇴원 기간 종료일"
           />
         </div>
       ) : null}
@@ -4921,14 +4891,30 @@ function WithdrawalDataTable({
 function WithdrawalNotificationSettingsDialog({
   open,
   onOpenChange,
+  isManager,
+  sessionToken,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  isManager: boolean
+  sessionToken: string
 }) {
   const [notificationSettings, setNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
+  const [withdrawalNotificationTemplates, setWithdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES)
+  const [selectedNotificationTrigger, setSelectedNotificationTrigger] = useState<WithdrawalNotificationTriggerKey | null>(null)
+  const [notificationTemplateInput, setNotificationTemplateInput] = useState<WithdrawalNotificationTemplate>(DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES.submitted)
+  const [selectedWebhookInfo, setSelectedWebhookInfo] = useState<WithdrawalGoogleChatWebhookInfo | null>(null)
+  const [webhookUrlInput, setWebhookUrlInput] = useState("")
+  const [webhookInfoLoading, setWebhookInfoLoading] = useState<WithdrawalNotificationChannelKey | "">("")
+  const [webhookInfoSaving, setWebhookInfoSaving] = useState(false)
+  const [webhookInfoError, setWebhookInfoError] = useState("")
   const settingsByKey = useMemo(() => (
     new Map(notificationSettings.map((setting) => [`${setting.triggerKey}:${setting.channelKey}`, setting]))
   ), [notificationSettings])
+  const notificationTemplatePreview = useMemo(() => ({
+    title: renderWithdrawalNotificationTemplate(notificationTemplateInput.titleTemplate),
+    body: renderWithdrawalNotificationTemplate(notificationTemplateInput.bodyTemplate),
+  }), [notificationTemplateInput])
 
   function toggleNotificationSetting(triggerKey: WithdrawalNotificationTriggerKey, channelKey: WithdrawalNotificationChannelKey) {
     setNotificationSettings((current) => (
@@ -4940,79 +4926,349 @@ function WithdrawalNotificationSettingsDialog({
     ))
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>퇴원 알림 설정</DialogTitle>
-          <DialogDescription className="sr-only">
-            퇴원 프로세스별 알림 위치를 켜거나 끕니다.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="overflow-x-auto rounded-md border" role="table" aria-label="퇴원 알림 설정 표">
-          <div className="min-w-[640px]">
-            <div
-              role="row"
-              className="grid border-b bg-muted/40 text-xs font-medium text-muted-foreground"
-              style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
-            >
-              <div role="columnheader" className="border-r px-3 py-2">
-                프로세스
-              </div>
-              <div role="columnheader" className="col-span-3 px-3 py-2 text-center">
-                알림 위치
-              </div>
-            </div>
-            <div
-              role="row"
-              className="grid border-b bg-muted/20 text-xs font-medium text-muted-foreground"
-              style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
-            >
-              <div role="columnheader" className="border-r px-3 py-2" aria-label="프로세스" />
-              {WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => (
-                <div key={channel.key} role="columnheader" className="border-r px-3 py-2 text-center last:border-r-0">
-                  {channel.label}
-                </div>
-              ))}
-            </div>
-            {WITHDRAWAL_NOTIFICATION_TRIGGERS.map((trigger) => (
-              <div
-                key={trigger.key}
-                role="row"
-                className="grid border-b last:border-b-0"
-                style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
-              >
-                <div role="rowheader" className="grid gap-0.5 border-r bg-muted/10 px-3 py-2">
-                  <span className="text-sm font-medium">{trigger.label}</span>
-                  <span className="text-xs text-muted-foreground">{trigger.detail}</span>
-                </div>
-                {WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => {
-                  const setting = settingsByKey.get(`${trigger.key}:${channel.key}`)
-                  const enabled = Boolean(setting?.enabled)
+  async function handleOpenWithdrawalWebhookInfo(channelKey: WithdrawalNotificationChannelKey) {
+    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[channelKey]
+    if (!googleChatChannel) return
 
-                  return (
-                    <div key={`${trigger.key}-${channel.key}`} role="cell" className="border-r px-2 py-2 last:border-r-0">
-                      <Button
-                        type="button"
-                        variant={enabled ? "default" : "outline"}
-                        size="sm"
-                        aria-pressed={enabled}
-                        aria-label={`${trigger.label} ${channel.label} 알림 ${enabled ? "끄기" : "켜기"}`}
-                        onClick={() => toggleNotificationSetting(trigger.key, channel.key)}
-                        className="h-8 w-full justify-center px-2 text-xs"
-                      >
-                        {enabled ? "켜짐" : "꺼짐"}
-                      </Button>
+    const channelLabel = WITHDRAWAL_NOTIFICATION_CHANNELS.find((channel) => channel.key === channelKey)?.label || "구글챗"
+    setSelectedWebhookInfo({
+      channelKey,
+      channelLabel,
+      envName: "",
+      configured: false,
+      maskedUrl: "",
+    })
+    setWebhookUrlInput("")
+    setWebhookInfoError("")
+
+    if (!sessionToken) {
+      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
+      return
+    }
+
+    setWebhookInfoLoading(channelKey)
+    try {
+      const response = await fetch(`/api/google-chat?channel=${encodeURIComponent(googleChatChannel)}`, {
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      })
+      const payload = await response.json().catch(() => ({})) as WithdrawalGoogleChatWebhookInfoResponse
+      if (!response.ok || !payload.ok) {
+        throw new Error(stringValue(payload.error) || "웹훅 정보를 불러오지 못했습니다.")
+      }
+      setSelectedWebhookInfo({
+        channelKey,
+        channelLabel,
+        envName: stringValue(payload.envName),
+        configured: Boolean(payload.configured),
+        maskedUrl: stringValue(payload.maskedUrl),
+      })
+    } catch (error) {
+      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 정보를 불러오지 못했습니다.")
+    } finally {
+      setWebhookInfoLoading("")
+    }
+  }
+
+  async function handleSaveWithdrawalWebhookInfo() {
+    if (!selectedWebhookInfo) return
+    if (!isManager) {
+      setWebhookInfoError("관리 권한이 있는 계정만 웹훅 URL을 변경할 수 있습니다.")
+      return
+    }
+    if (!sessionToken) {
+      setWebhookInfoError("로그인 세션을 확인할 수 없습니다.")
+      return
+    }
+
+    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[selectedWebhookInfo.channelKey]
+    const webhookUrl = stringValue(webhookUrlInput)
+    if (!googleChatChannel || !webhookUrl) {
+      setWebhookInfoError("저장할 웹훅 URL을 입력해 주세요.")
+      return
+    }
+
+    setWebhookInfoSaving(true)
+    setWebhookInfoError("")
+    try {
+      const response = await fetch("/api/google-chat", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channel: googleChatChannel,
+          webhookUrl,
+        }),
+      })
+      const payload = await response.json().catch(() => ({})) as WithdrawalGoogleChatWebhookInfoResponse
+      if (!response.ok || !payload.ok) {
+        throw new Error(stringValue(payload.error) || "웹훅 URL을 저장하지 못했습니다.")
+      }
+      setSelectedWebhookInfo((current) => current ? {
+        ...current,
+        envName: stringValue(payload.envName),
+        configured: Boolean(payload.configured),
+        maskedUrl: stringValue(payload.maskedUrl),
+      } : current)
+      setWebhookUrlInput("")
+    } catch (error) {
+      setWebhookInfoError(error instanceof Error ? error.message : "웹훅 URL을 저장하지 못했습니다.")
+    } finally {
+      setWebhookInfoSaving(false)
+    }
+  }
+
+  function openWithdrawalNotificationTemplateEditor(triggerKey: WithdrawalNotificationTriggerKey) {
+    setSelectedNotificationTrigger(triggerKey)
+    setNotificationTemplateInput(withdrawalNotificationTemplates[triggerKey])
+  }
+
+  function closeWithdrawalNotificationTemplateEditor() {
+    setSelectedNotificationTrigger(null)
+  }
+
+  function saveWithdrawalNotificationTemplate() {
+    if (!selectedNotificationTrigger) return
+    setWithdrawalNotificationTemplates((current) => ({
+      ...current,
+      [selectedNotificationTrigger]: notificationTemplateInput,
+    }))
+    setSelectedNotificationTrigger(null)
+  }
+
+  const selectedTriggerLabel = WITHDRAWAL_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === selectedNotificationTrigger)?.label || "알림 내용"
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>퇴원 알림 설정</DialogTitle>
+            <DialogDescription className="sr-only">
+              퇴원 프로세스별 알림 위치를 켜거나 끄고 구글챗 웹훅과 알림 내용을 수정합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
+            <div className="overflow-x-auto rounded-md border" role="table" aria-label="퇴원 알림 설정 표">
+              <div className="min-w-[680px]">
+                <div
+                  role="row"
+                  className="grid border-b bg-muted/40 text-xs font-medium text-muted-foreground"
+                  style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
+                >
+                  <div role="columnheader" className="border-r px-3 py-2">
+                    프로세스
+                  </div>
+                  <div role="columnheader" className="col-span-3 px-3 py-2 text-center">
+                    알림 위치
+                  </div>
+                </div>
+                <div
+                  role="row"
+                  className="grid border-b bg-muted/20 text-xs font-medium text-muted-foreground"
+                  style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
+                >
+                  <div role="columnheader" className="border-r px-3 py-2" aria-label="프로세스" />
+                  {WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => {
+                    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[channel.key]
+
+                    return (
+                      <div key={channel.key} role="columnheader" className="border-r px-3 py-2 text-center last:border-r-0">
+                        {googleChatChannel ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto min-h-0 w-full justify-center px-0 py-0 text-center text-xs font-medium text-muted-foreground hover:bg-transparent"
+                            disabled={webhookInfoLoading === channel.key}
+                            aria-label={`${channel.label} 웹훅 URL 보기`}
+                            title={`${channel.label} 웹훅 URL 보기`}
+                            onClick={() => void handleOpenWithdrawalWebhookInfo(channel.key)}
+                          >
+                            <span className="truncate">{channel.label}</span>
+                          </Button>
+                        ) : channel.label}
+                      </div>
+                    )
+                  })}
+                </div>
+                {WITHDRAWAL_NOTIFICATION_TRIGGERS.map((trigger) => (
+                  <div
+                    key={trigger.key}
+                    role="row"
+                    className="grid border-b last:border-b-0"
+                    style={WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE}
+                  >
+                    <div role="rowheader" className="grid gap-1 border-r bg-muted/10 px-3 py-2">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium">{trigger.label}</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 shrink-0 px-2 text-xs"
+                          aria-label={`${trigger.label} 알림 내용 수정`}
+                          onClick={() => openWithdrawalNotificationTemplateEditor(trigger.key)}
+                        >
+                          <Pencil className="size-3.5" aria-hidden="true" />
+                          내용
+                        </Button>
+                      </div>
+                      <span className="text-xs text-muted-foreground">{trigger.detail}</span>
                     </div>
-                  )
-                })}
+                    {WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => {
+                      const setting = settingsByKey.get(`${trigger.key}:${channel.key}`)
+                      const enabled = Boolean(setting?.enabled)
+
+                      return (
+                        <div key={`${trigger.key}-${channel.key}`} role="cell" className="border-r px-2 py-2 last:border-r-0">
+                          <Button
+                            type="button"
+                            variant={enabled ? "default" : "outline"}
+                            size="sm"
+                            aria-pressed={enabled}
+                            aria-label={`${trigger.label} ${channel.label} 알림 ${enabled ? "끄기" : "켜기"}`}
+                            onClick={() => toggleNotificationSetting(trigger.key, channel.key)}
+                            className="h-8 w-full justify-center px-2 text-xs"
+                          >
+                            {enabled ? "켜짐" : "꺼짐"}
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+            {selectedWebhookInfo || webhookInfoError ? (
+              <div className="grid content-start gap-2 rounded-md border bg-muted/20 p-3 text-xs">
+                {selectedWebhookInfo ? (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
+                      <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
+                        {webhookInfoLoading === selectedWebhookInfo.channelKey ? "확인 중" : selectedWebhookInfo.configured ? "연결됨" : "미설정"}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-1">
+                      <div className="text-muted-foreground">환경 변수</div>
+                      <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
+                    </div>
+                    <div className="grid gap-1">
+                      <div className="text-muted-foreground">웹훅 URL</div>
+                      <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
+                    </div>
+                    <div className="grid gap-1">
+                      <Label htmlFor="withdrawal-google-chat-webhook-url" className="text-xs text-muted-foreground">
+                        웹훅 URL 수정
+                      </Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="withdrawal-google-chat-webhook-url"
+                          type="password"
+                          value={webhookUrlInput}
+                          onChange={(event) => setWebhookUrlInput(event.target.value)}
+                          placeholder="새 구글챗 웹훅 URL 입력"
+                          disabled={!isManager || webhookInfoSaving}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="shrink-0"
+                          disabled={!isManager || webhookInfoSaving || !webhookUrlInput.trim()}
+                          onClick={() => void handleSaveWithdrawalWebhookInfo()}
+                        >
+                          저장
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+                {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
+              </div>
+            ) : (
+              <div className="grid content-start gap-2 rounded-md border border-dashed bg-muted/10 p-3 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">구글챗 웹훅</span>
+                <span>구글챗 열 이름을 누르면 연결 상태와 웹훅 URL을 확인할 수 있습니다.</span>
+              </div>
+            )}
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedNotificationTrigger)} onOpenChange={(nextOpen) => {
+        if (!nextOpen) closeWithdrawalNotificationTemplateEditor()
+      }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>알림 내용 수정</DialogTitle>
+            <DialogDescription>{selectedTriggerLabel}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="withdrawal-notification-title-template">제목</Label>
+              <Input
+                id="withdrawal-notification-title-template"
+                value={notificationTemplateInput.titleTemplate}
+                onChange={(event) => setNotificationTemplateInput((current) => ({
+                  ...current,
+                  titleTemplate: event.target.value,
+                }))}
+                placeholder="알림 제목"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="withdrawal-notification-body-template">본문</Label>
+              <Textarea
+                id="withdrawal-notification-body-template"
+                value={notificationTemplateInput.bodyTemplate}
+                onChange={(event) => setNotificationTemplateInput((current) => ({
+                  ...current,
+                  bodyTemplate: event.target.value,
+                }))}
+                placeholder="알림 본문"
+                className="min-h-24"
+              />
+            </div>
+            <div className="grid gap-2 rounded-md border bg-muted/20 p-3">
+              <div className="text-sm font-medium">미리보기</div>
+              <div className="grid gap-1 text-sm">
+                <div className="font-medium">{notificationTemplatePreview.title || "-"}</div>
+                <div className="whitespace-pre-wrap text-muted-foreground">{notificationTemplatePreview.body || "-"}</div>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <div className="text-xs font-medium text-muted-foreground">사용 가능 변수</div>
+              <div className="flex flex-wrap gap-1">
+                {WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES.map((variable) => (
+                  <Badge key={variable} variant="outline" className="font-mono">
+                    {`{${variable}}`}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeWithdrawalNotificationTemplateEditor}>
+              취소
+            </Button>
+            <Button type="button" onClick={saveWithdrawalNotificationTemplate}>
+              저장
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
+}
+
+function renderWithdrawalNotificationTemplate(template: string) {
+  return WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES.reduce((result, variable) => (
+    result.split(`{${variable}}`).join(WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT[variable] || "")
+  ), template)
 }
 
 function DashboardMetric({
@@ -5552,7 +5808,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   }
   const initialWorkspaceData = getCachedOpsTaskWorkspaceData(workspaceLoadOptions)
   const searchParams = useSearchParams()
-  const { user, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()
+  const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()
   const [data, setData] = useState<OpsTaskWorkspaceData | null>(() => initialWorkspaceData)
   const [loading, setLoading] = useState(() => !initialWorkspaceData)
   const [view, setView] = useState<ViewKey>("all")
@@ -7121,6 +7377,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     : nextActionBlocked
   const detailBlockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
   const selectedTaskCanEdit = selectedTaskFresh ? canEditTaskDetails(selectedTaskFresh) : false
+  const isWithdrawalDetail = selectedTaskFresh?.type === "withdrawal"
+  const isCompletedWithdrawalDetail = Boolean(selectedTaskFresh && isWithdrawalDetail && isClosedOpsTask(selectedTaskFresh))
   const toggleWordRetestSelection = useCallback((task: OpsTask, selected: boolean) => {
     if (task.type !== "word_retest" || !canDeleteTask(task)) return
     setWordRetestSelectedTaskIds((current) => {
@@ -7667,6 +7925,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         <WithdrawalNotificationSettingsDialog
           open={withdrawalNotificationOpen}
           onOpenChange={setWithdrawalNotificationOpen}
+          isManager={canManageAll || isStaff}
+          sessionToken={session?.access_token || ""}
         />
       )}
 
@@ -8039,7 +8299,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className={[
           "max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
-          selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl" : "sm:max-w-5xl",
+          selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl" : selectedTaskFresh?.type === "withdrawal" ? "sm:max-w-3xl" : "sm:max-w-5xl",
         ].join(" ")}>
           <DialogHeader>
             <DialogTitle>{selectedTaskFresh?.title || "상세"}</DialogTitle>
@@ -8071,12 +8331,14 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             </div>
           )}
           {selectedTaskFresh && (
-            <div className={selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}>
-              <div className="flex flex-col gap-3 rounded-lg border p-4">
+            <div className={selectedTaskFresh.type === "withdrawal" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}>
+              <div className={isWithdrawalDetail ? "flex flex-col gap-3" : "flex flex-col gap-3 rounded-lg border p-4"}>
                 {selectedTaskFresh.type === "general" ? (
                   <GeneralTaskDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "word_retest" ? (
                   <WordRetestDetailPanel task={selectedTaskFresh} />
+                ) : selectedTaskFresh.type === "withdrawal" ? (
+                  <WithdrawalDetailPanel task={selectedTaskFresh} />
                 ) : (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
@@ -8096,15 +8358,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                     </dl>
                   </>
                 )}
-                <CompletionBlockerActionPanel
-                  task={selectedTaskFresh}
-                  blockers={completionBlockers}
-                  onSelect={(blocker) => openEdit(selectedTaskFresh, [blocker])}
-                />
-                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && <TypeDetail task={selectedTaskFresh} />}
-                {selectedTaskFresh.type !== "general" && <AutoSyncResultSummary task={selectedTaskFresh} />}
-	                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
-	                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                {!isWithdrawalDetail && (
+                  <CompletionBlockerActionPanel
+                    task={selectedTaskFresh}
+                    blockers={completionBlockers}
+                    onSelect={(blocker) => openEdit(selectedTaskFresh, [blocker])}
+                  />
+                )}
+                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.type !== "withdrawal" && <TypeDetail task={selectedTaskFresh} />}
+                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "withdrawal" && <AutoSyncResultSummary task={selectedTaskFresh} />}
+	                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.type !== "withdrawal" && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
+	                {!isCompletedWithdrawalDetail && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
 	                  {selectedTaskFresh.type === "word_retest" && (
 	                    <>
 	                      {detailWordRetestPrimaryActions.map((action) => (
@@ -8121,7 +8385,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                      ))}
 	                    </>
 	                  )}
-	                  {detailPrimaryAction && (
+                  {((!isWithdrawalDetail || !detailPrimaryActionBlocked) && detailPrimaryAction) && (
 	                    <Button
                       type="button"
                       size="sm"
@@ -8144,7 +8408,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                       {detailPrimaryActionBlocked ? detailBlockedActionLabel : detailPrimaryAction.label}
                     </Button>
                   )}
-                  {getSecondaryTaskStatusOptions(selectedTaskFresh)
+                  {!isWithdrawalDetail && getSecondaryTaskStatusOptions(selectedTaskFresh)
                     .map((status) => (
                       <Button
                         key={status.value}
@@ -8169,10 +8433,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                       삭제
                     </Button>
                   )}
-                </div>
+                </div>}
               </div>
 
               {selectedTaskFresh.type !== "word_retest" && (
+                selectedTaskFresh.type !== "withdrawal" && (
 			      <div className="flex flex-col gap-3">
                 <details className="rounded-lg border p-4" open={selectedTaskFresh.comments.length > 0}>
                   <summary className="cursor-pointer text-sm font-semibold">
@@ -8240,6 +8505,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   </div>
                 </details>}
               </div>
+                )
               )}
             </div>
           )}
@@ -10956,6 +11222,49 @@ function OptionalInfo({ label, value }: { label: string; value?: string | boolea
   return <Info label={label} value={value === true ? "완료" : String(value)} />
 }
 
+function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
+  const withdrawal = task.withdrawal || {}
+  const progress = getWithdrawalProgressLabel(task)
+  const processedAt = dateLabel(task.completedAt || task.updatedAt || task.createdAt)
+
+  return (
+    <section className="grid gap-4" aria-label="퇴원 상세 신청서">
+      <div className="grid gap-3 rounded-md border p-3">
+        <dl className="grid gap-3 text-sm md:grid-cols-2">
+          <Info label="과목" value={task.subject || "미지정"} />
+          <Info label="선생님" value={withdrawal.teacherName || task.assigneeLabel || "미지정"} />
+          <Info label="수업" value={task.className || "미지정"} />
+          <Info label="학생" value={task.studentName || "미지정"} />
+          <OptionalInfo label="고객 퇴원사유" value={withdrawal.customerReason} />
+          <OptionalInfo label="선생님 의견" value={withdrawal.teacherOpinion} />
+          <Info label="퇴원일" value={dateInputValue(withdrawal.withdrawalDate) || "미정"} />
+          <Info label="퇴원회차" value={withdrawal.withdrawalSession || "미정"} />
+          <Info label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />
+          <Info label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours || "자동 계산"} />
+          <Info label="수업진행률" value={progress === "-" ? "자동 계산" : progress} />
+        </dl>
+      </div>
+
+      <div className="grid gap-3 rounded-md border p-3">
+        <div className="text-sm font-semibold">신청</div>
+        <dl className="grid gap-3 text-sm md:grid-cols-2">
+          <Info label="신청자" value={task.requestedByLabel || "담당선생님"} />
+          <Info label="신청일시" value={dateLabel(task.createdAt)} />
+          <OptionalInfo label="미배부 교재" value={withdrawal.undistributedTextbooks} />
+        </dl>
+      </div>
+
+      <div className="grid gap-3 rounded-md border p-3">
+        <div className="text-sm font-semibold">처리</div>
+        <dl className="grid gap-3 text-sm md:grid-cols-2">
+          <Info label="담당" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
+          <Info label="처리일시" value={processedAt === "-" ? "미정" : processedAt} />
+        </dl>
+      </div>
+    </section>
+  )
+}
+
 function CommentPanelContent({
   task,
   commentBody,
@@ -11024,29 +11333,7 @@ function TypeDetail({ task }: { task: OpsTask }) {
     )
   }
 	  if (task.type === "withdrawal" && task.withdrawal) {
-	    const withdrawal = task.withdrawal
-	    return (
-	      <div className="flex flex-col gap-3" aria-label="퇴원 신청 처리 완료 요약">
-	        <WithdrawalFlowSummary
-	          status={task.status}
-	          studentName={task.studentName}
-	          className={task.className}
-	          requesterLabel={task.requestedByLabel}
-	          assigneeLabel={task.assigneeLabel || task.assigneeTeam}
-	          withdrawal={withdrawal}
-	        />
-	        <dl className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm md:grid-cols-2">
-	          <OptionalInfo label="퇴원일" value={dateInputValue(withdrawal.withdrawalDate)} />
-	          <OptionalInfo label="퇴원회차" value={withdrawal.withdrawalSession} />
-	          <OptionalInfo label="고객 퇴원사유" value={withdrawal.customerReason} />
-	          <OptionalInfo label="선생님 의견" value={withdrawal.teacherOpinion} />
-	          <OptionalInfo label="미배부 교재" value={withdrawal.undistributedTextbooks} />
-	          <OptionalInfo label="진행 수업시수" value={withdrawal.completedLessonHours} />
-	          <OptionalInfo label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours} />
-	        </dl>
-	        <WithdrawalOperationsChecklist withdrawal={withdrawal} />
-	      </div>
-	    )
+	    return <WithdrawalDetailPanel task={task} />
 	  }
   if (task.type === "transfer" && task.transfer) {
     const transfer = task.transfer
