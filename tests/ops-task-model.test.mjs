@@ -202,7 +202,7 @@ test("ops task calendar merges registration withdrawal transfer and word retest 
       "registration-1:레벨테스트:2026-05-23",
       "withdrawal-1:퇴원일:2026-05-24",
       "transfer-1:전 수업 종료:2026-05-25",
-      "word-1:응시:2026-05-26",
+      "word-1:본시험:2026-05-26",
       "transfer-1:후 수업 시작:2026-05-27",
       "general-1:마감:2026-05-28",
       "registration-1:수업 시작:2026-05-29",

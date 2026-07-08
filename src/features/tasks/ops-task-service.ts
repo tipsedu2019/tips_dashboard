@@ -60,6 +60,8 @@ export type OpsClassOption = OpsLinkedOption & {
   grade: string
   teacher: string
   room: string
+  schedule: string
+  schedulePlan?: Record<string, unknown> | null
   studentIds: string[]
   waitlistIds: string[]
   textbookIds: string[]
@@ -332,6 +334,12 @@ function numberValue(value: unknown) {
 function nullable(value: unknown) {
   const trimmed = text(value)
   return trimmed ? trimmed : null
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function nullableDate(value: unknown) {
@@ -905,7 +913,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
         ? readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true)
         : Promise.resolve([]),
       includeManagementOptions
-        ? readTableWithFallback("classes", "id,name,subject,grade,teacher,room,student_ids,waitlist_ids,textbook_ids,status", "id,name,subject,grade,teacher,room,student_ids,waitlist_ids", true)
+        ? readTableWithFallback("classes", "id,name,subject,grade,teacher,room,schedule,schedule_plan,student_ids,waitlist_ids,textbook_ids,status", "id,name,subject,grade,teacher,room,schedule,student_ids,waitlist_ids", true)
         : Promise.resolve([]),
       includeManagementOptions
         ? readTable("textbooks", "id,title,name,publisher,subject", true)
@@ -1005,6 +1013,8 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
         grade: text(row.grade),
         teacher: text(row.teacher),
         room: text(row.room),
+        schedule: text(row.schedule),
+        schedulePlan: recordValue(row.schedule_plan),
         studentIds: normalizeIdList(row.student_ids),
         waitlistIds: normalizeIdList(row.waitlist_ids),
         textbookIds: normalizeIdList(row.textbook_ids),
@@ -1462,7 +1472,7 @@ function isSameManagementReference(first: unknown, second: unknown) {
 }
 
 const MANAGEMENT_LINK_FIELDS = new Set(["학생", "수업", "교재", "전 수업", "후 수업", "선생님"])
-const MANAGEMENT_INPUT_FIELDS = new Set(["수업시작일", "퇴원일", "전 수업 종료일", "후 수업 시작일", "응시일시", "시험범위", "점수"])
+const MANAGEMENT_INPUT_FIELDS = new Set(["수업시작일", "퇴원일", "전 수업 종료일", "후 수업 시작일", "본시험일", "시험범위", "점수"])
 const MANAGEMENT_CHOICE_FIELDS = new Set(["다른 수업"])
 
 function managementMissingFieldLabel(field: string) {
@@ -1510,7 +1520,7 @@ function assertManagementSyncReady(input: OpsTaskInput) {
     if (!hasManagementReference(wordRetest.teacherId)) missingFields.push("선생님")
     if (!hasManagementReference(input.textbookId)) missingFields.push("교재")
     if (!text(wordRetest.branch)) missingFields.push("지점")
-    if (!text(wordRetest.testAt)) missingFields.push("응시일시")
+    if (!text(wordRetest.testAt)) missingFields.push("본시험일")
     if (!text(wordRetest.unit)) missingFields.push("시험범위")
     if (shouldRequireWordRetestScore(wordRetest)) missingFields.push("점수")
   }

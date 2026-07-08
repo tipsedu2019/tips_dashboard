@@ -700,7 +700,7 @@ test("operation forms use staged fields and linked management selectors", async 
     "findCurrentUserTeacherOption",
     "openManualField",
     "shouldShowManualField",
-    "DateTimeField",
+    "WordRetestMainExamDateField",
     "LinkedSelectedValue",
     "renderOption",
     "renderSelected",
@@ -773,7 +773,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "getWordRetestPrimaryActions",
     '"word_retest_complete"',
     '"word_retest_retry"',
-    'retryReason?: "absent" | "failed"',
+    'retryReason?: "failed"',
     "submitWordRetestCompletion",
     'retestStatus: "done"',
     'wordRetestStatus: "not_started"',
@@ -803,8 +803,10 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'if (input.type === "word_retest")',
     'assigneeId: ""',
     'isTemplateForm && !isWordRetestForm',
-    "WORD_RETEST_TIME_OPTIONS",
-    "Clock className",
+    "WordRetestMainExamDateField",
+    "getWordRetestClassScheduleItems",
+    "classScheduleItems",
+    "data-word-retest-class-date",
     "<SelectedValuePill",
     "PopoverContent",
     "TOUCH_SCROLL_AREA_STYLE",
@@ -817,17 +819,10 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "className=\"h-9 min-w-0 pr-9\"",
     "className=\"max-h-72 overflow-y-auto overscroll-contain p-1\"",
     "right-2 top-1/2 inline-flex size-6",
-    "value ? \"pr-20\" : \"pr-14\"",
-    'value ? "right-10" : "right-3"',
+    'value ? "pr-10" : ""',
     "z-[120]",
-    "max-h-[min(34rem,var(--radix-popover-content-available-height))]",
     'side="bottom"',
     "collisionPadding={12}",
-    "grid-cols-[minmax(0,1fr)_7.25rem]",
-    "max-h-[18.5rem]",
-    "md:max-h-[18.875rem]",
-    "handleTimeListWheel",
-    "target.scrollTop += event.deltaY",
     "sortWordRetestTasksByTestAt",
     "WordRetestFilterBar",
     "WordRetestInlineScoreEditor",
@@ -865,12 +860,14 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "조교선생님",
     "시험 진행",
     "결과 판정",
-    "응시일시 경과",
+    "본시험일 + 7일",
     "커트라인 미만",
     "커트라인 이상",
     "불합격",
     "결과: 불합격",
     "불합격 확인",
+    "미응시 보고",
+    "미응시 확인",
     "합격",
     "결과: 합격",
     "합격 확인",
@@ -976,9 +973,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "label=\"담당선생님\"",
     "label=\"장소\"",
     "label=\"메모\"",
-    "DateTimeField label=\"응시일시\"",
-    "pointer-events-none absolute",
-    'value ? "right-10" : "right-3"',
+    "WordRetestMainExamDateField",
+    "label=\"본시험일\"",
     "label=\"시험범위\"",
     'blockers.push("커트라인")',
     'blockers.push("출제 개수")',
@@ -1007,8 +1003,6 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "합격 확인",
     "재시험 추가",
     "불합격 확인",
-    "응시일정 변경",
-    "미응시 재요청",
     'editingTask && formCompletionIntent?.kind !== "word_retest_retry" && (',
     'formCompletionIntent?.kind !== "word_retest_retry"',
     'const isFailedWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry"',
@@ -1022,6 +1016,11 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /label: "재시험"/);
   assert.doesNotMatch(workspaceSource, /label: "미완료 재요청"/);
   assert.doesNotMatch(workspaceSource, /label: "응시일시 변경"/);
+  assert.doesNotMatch(workspaceSource, /응시일정 변경/);
+  assert.doesNotMatch(workspaceSource, /미응시 재요청/);
+  assert.doesNotMatch(workspaceSource, /DateTimeField label="응시일시"/);
+  assert.doesNotMatch(workspaceSource, /Clock className/);
+  assert.doesNotMatch(workspaceSource, /WORD_RETEST_TIME_OPTIONS/);
   assert.doesNotMatch(workspaceSource, /100점 환산/);
   assert.doesNotMatch(workspaceSource, /1차 · 2차 · 3차/);
   assert.doesNotMatch(workspaceSource, /시작 전 복귀/);
@@ -1091,7 +1090,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     ["담당선생님", "order-2"],
     ["수업", "order-3"],
     ["학생", "order-4"],
-    ["응시일시", "order-5"],
+    ["본시험일", "order-5"],
     ["장소", "order-6"],
     ["교재", "order-7"],
     ["시험범위", "order-8"],
@@ -1112,36 +1111,16 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     );
   }
 
-  const wordRetestDateTimeFieldSource = workspaceSource.slice(
-    workspaceSource.indexOf("function DateTimeField"),
+  const wordRetestMainExamDateFieldSource = workspaceSource.slice(
+    workspaceSource.indexOf("function WordRetestMainExamDateField"),
     workspaceSource.indexOf("function ReadonlyInfoField"),
   );
-  const dateSelectSource = wordRetestDateTimeFieldSource.slice(
-    wordRetestDateTimeFieldSource.indexOf("function handleDateTimeDateSelect"),
-    wordRetestDateTimeFieldSource.indexOf("function handleDateTimeTimeSelect"),
-  );
-  const timeSelectSource = wordRetestDateTimeFieldSource.slice(
-    wordRetestDateTimeFieldSource.indexOf("function handleDateTimeTimeSelect"),
-    wordRetestDateTimeFieldSource.indexOf("function handleTimeListWheel"),
-  );
-  assert.doesNotMatch(wordRetestDateTimeFieldSource, /manualDateInputId|manualTimeInputId|applyManualDateTime/);
-  assert.doesNotMatch(wordRetestDateTimeFieldSource, /직접 날짜 입력|직접 시간 입력/);
-  assert.doesNotMatch(wordRetestDateTimeFieldSource, />\s*적용\s*</);
-  assert.doesNotMatch(wordRetestDateTimeFieldSource, /side="top"/);
-  assert.match(wordRetestDateTimeFieldSource, /side="bottom"/);
-  assert.match(wordRetestDateTimeFieldSource, /collisionPadding=\{12\}/);
-  assert.match(wordRetestDateTimeFieldSource, /grid-cols-\[minmax\(0,1fr\)_7\.25rem\]/);
-  assert.match(wordRetestDateTimeFieldSource, /max-h-\[18\.5rem\]/);
-  assert.match(wordRetestDateTimeFieldSource, /md:max-h-\[18\.875rem\]/);
-  assert.doesNotMatch(wordRetestDateTimeFieldSource, /self-start|md:max-h-56|max-h-\[15\.5rem\]/);
-  assert.match(wordRetestDateTimeFieldSource, /const timeListRef = useRef<HTMLDivElement>\(null\)/);
-  assert.match(wordRetestDateTimeFieldSource, /selectedButton\.offsetTop/);
-  assert.match(wordRetestDateTimeFieldSource, /const maxScrollTop = Math\.max\(0, list\.scrollHeight - list\.clientHeight\)/);
-  assert.match(wordRetestDateTimeFieldSource, /list\.scrollTop = Math\.min\(maxScrollTop, Math\.max\(0, nextScrollTop\)\)/);
-  assert.match(wordRetestDateTimeFieldSource, /data-selected=\{selected \? "true" : undefined\}/);
-  assert.doesNotMatch(wordRetestDateTimeFieldSource, /min-\[380px\]:grid-cols/);
-  assert.match(dateSelectSource, /setDateTimeOpen\(false\)/);
-  assert.match(timeSelectSource, /setDateTimeOpen\(false\)/);
+  assert.match(wordRetestMainExamDateFieldSource, /function handleMainExamDateSelect/);
+  assert.match(wordRetestMainExamDateFieldSource, /classScheduleItemsByDate/);
+  assert.match(wordRetestMainExamDateFieldSource, /data-word-retest-class-date/);
+  assert.match(wordRetestMainExamDateFieldSource, /수업일정/);
+  assert.match(wordRetestMainExamDateFieldSource, /setCalendarDateOpen\(false\)/);
+  assert.doesNotMatch(wordRetestMainExamDateFieldSource, /Clock|timeListRef|handleTimeListWheel|WORD_RETEST_TIME_OPTIONS|직접 시간 입력/);
 
   const progressStepperSource = workspaceSource.slice(
     workspaceSource.indexOf("function WordRetestProgressStepper"),

@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock, FileText, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
+import { CalendarDays, Check, ChevronLeft, ChevronRight, FileText, Inbox, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -95,11 +95,16 @@ type WordRetestScoreDraft = {
   secondScore: string
   thirdScore: string
 }
+type WordRetestClassScheduleItem = {
+  dateKey: string
+  label: string
+  state: string
+}
 type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "total" | "cutoff" | "score" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
   kind?: "word_retest_retry"
-  retryReason?: "absent" | "failed"
+  retryReason?: "failed"
   status?: OpsTaskStatus
   registrationPipelineStatus?: string
   wordRetestStatus?: string
@@ -361,14 +366,15 @@ const TASK_FOCUS_LABELS: Record<Exclude<TaskFocus, "none">, string> = {
 
 const VALID_TASK_FOCUSES = new Set<TaskFocus>(["none", "today", "overdue", "mine", "unassigned", "confirmation"])
 const WORD_RETEST_DIAGRAM_MAIN_NODES = [
-  { key: "start", label: "시작 전", detail: "일정 대기" },
+  { key: "start", label: "시작 전", detail: "본시험일 기준" },
   { key: "exam_start", label: "시험 시작", detail: "조교선생님" },
   { key: "in_progress", label: "시험 진행", detail: "점수 입력 및 저장" },
   { key: "decision", label: "결과 판정", detail: "자동" },
 ] as const
 const WORD_RETEST_DIAGRAM_ABSENT_NODES = [
-  { key: "absent", label: "미응시", detail: "응시일시 경과" },
-  { key: "reschedule", label: "응시일정 변경", detail: "담당선생님" },
+  { key: "absent_deadline", label: "본시험일 + 7일", detail: "자동" },
+  { key: "absent", label: "미응시 보고", detail: "자동" },
+  { key: "absent_confirm", label: "미응시 확인", detail: "담당선생님" },
 ] as const
 const WORD_RETEST_DIAGRAM_RESULT_BRANCHES = [
   {
@@ -822,14 +828,6 @@ function inputFromTaskForCompletionCheck(task: OpsTask): OpsTaskInput {
 
 function getCompletionIntentForBlockedEdit(task: OpsTask, blockers: string[]): FormCompletionIntent | null {
   if (blockers.length === 0 || task.type === "general") return null
-  if (task.type === "word_retest" && isWordRetestAbsent(task.wordRetest) && blockers.includes("응시일시")) {
-    return {
-      kind: "word_retest_retry",
-      retryReason: "absent",
-      status: "requested",
-      wordRetestStatus: "not_started",
-    }
-  }
   if (task.type === "registration") {
     return { registrationPipelineStatus: findRegistrationPipelineStatus("7.") || "7. 등록 완료" }
   }
@@ -869,7 +867,7 @@ function applyFormCompletionIntent(input: OpsTaskInput, intent: FormCompletionIn
 function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null) {
   if (!intent) return "저장"
   if (intent.kind === "word_retest_retry") {
-    return intent.retryReason === "failed" ? "재시험 추가 및 불합격 확인" : "미응시 재요청"
+    return "재시험 추가 및 불합격 확인"
   }
   if (intent.registrationPipelineStatus) return `저장 후 ${getCompactRegistrationPipelineLabel(intent.registrationPipelineStatus)}`
   if (intent.status === "done") return "저장 후 완료"
@@ -1114,13 +1112,13 @@ function matchesWordRetestPeriodFilter(
 function getWordRetestAutoAbsentDeadline(task: OpsTask) {
   const rawValue = String(task.wordRetest?.testAt || task.dueAt || task.startAt || "").trim()
   if (!rawValue) return null
-  const dateOnly = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (dateOnly) {
-    const [, year, month, day] = dateOnly
-    return new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999).getTime()
-  }
-  const timestamp = Date.parse(rawValue)
-  return Number.isFinite(timestamp) ? timestamp : null
+  const dateKey = toDateKey(rawValue)
+  if (!dateKey) return null
+  const [year, month, day] = dateKey.split("-").map(Number)
+  if (!year || !month || !day) return null
+  const deadline = new Date(year, month - 1, day, 23, 59, 59, 999)
+  deadline.setDate(deadline.getDate() + 7)
+  return deadline.getTime()
 }
 
 function shouldAutoMarkWordRetestAbsent(task: OpsTask, now = new Date()) {
@@ -1361,7 +1359,7 @@ function getOperationCompletionBlockers(
     if (hasLinkedRecord(wordRetest.teacherId) && !findTeacherOption(teachers, wordRetest.teacherId, indexes)) blockers.push("선생님")
     if (!String(wordRetest.branch || "").trim()) blockers.push("지점")
     if (!hasTextbook) blockers.push("교재")
-    if (!String(wordRetest.testAt || "").trim()) blockers.push("응시일시")
+    if (!String(wordRetest.testAt || "").trim()) blockers.push("본시험일")
     if (!String(wordRetest.unit || "").trim()) blockers.push("시험범위")
     if (shouldRequireWordRetestScore(wordRetest)) blockers.push("점수")
   }
@@ -1386,7 +1384,7 @@ function getWordRetestRequiredInputBlockers(
 
   if (!hasTextbook) blockers.push("교재")
   if (!String(wordRetest.unit || "").trim()) blockers.push("시험범위")
-  if (!String(wordRetest.testAt || "").trim()) blockers.push("응시일시")
+  if (!String(wordRetest.testAt || "").trim()) blockers.push("본시험일")
   if (!String(wordRetest.cutoffQuestionCount || "").trim()) blockers.push("커트라인")
   if (!String(wordRetest.totalQuestionCount || "").trim()) blockers.push("출제 개수")
 
@@ -1437,7 +1435,7 @@ const BLOCKER_ACTION_LABELS: Record<string, string> = {
   "메이크에듀 전반처리": "메이크에듀 전반처리",
   "수업료 처리": "수업료 처리",
   "교재비 처리": "교재비 처리",
-  "응시일시": "응시일시 지정",
+  "본시험일": "본시험일 지정",
   "시험범위": "시험범위 입력",
   "커트라인": "커트라인 입력",
   "출제 개수": "출제 개수 입력",
@@ -1477,7 +1475,7 @@ const INPUT_COMPLETION_BLOCKERS = new Set([
   "퇴원일",
   "전 수업 종료일",
   "후 수업 시작일",
-  "응시일시",
+  "본시험일",
   "시험범위",
   "커트라인",
   "출제 개수",
@@ -1518,7 +1516,7 @@ function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): Fo
   }
 
   if (type === "word_retest") {
-    if (blockers.some((blocker) => ["학생", "수업", "선생님", "응시일시", "수업 명단"].includes(blocker))) return "word_retest_basic"
+    if (blockers.some((blocker) => ["학생", "수업", "선생님", "본시험일", "수업 명단"].includes(blocker))) return "word_retest_basic"
     if (blockers.some((blocker) => ["교재", "시험범위", "커트라인", "출제 개수"].includes(blocker))) return "word_retest_scope"
     if (blockers.some((blocker) => ["점수"].includes(blocker))) return "word_retest_scores"
   }
@@ -1586,7 +1584,7 @@ function getTaskScheduleItems(task: OpsTask) {
   }
 
   if (task.type === "word_retest") {
-    addTaskScheduleItem(items, "응시", task.wordRetest?.testAt)
+    addTaskScheduleItem(items, "본시험", task.wordRetest?.testAt)
   }
 
   return items.sort((left, right) => (
@@ -1706,71 +1704,9 @@ function quickDateTimeFromDate(date: Date) {
   return `${year}-${month}-${day}T09:00`
 }
 
-function dateTimeDateInputValue(value?: string) {
-  const normalized = dateTimeInputValue(value)
-  if (normalized) return normalized.slice(0, 10)
-  return toDateKey(value || "")
+function dateOnlyLabel(value?: string) {
+  return dateInputValue(value) || "-"
 }
-
-function dateTimeTimeInputValue(value?: string) {
-  const normalized = dateTimeInputValue(value)
-  return normalized.includes("T") ? normalized.slice(11, 16) : ""
-}
-
-function buildLocalDateTimeValue(date: string, time: string) {
-  const dateValue = toDateKey(date)
-  if (!dateValue) return ""
-  return `${dateValue}T${time || "09:00"}`
-}
-
-function normalizeTimeInput(value: string) {
-  const raw = value.trim()
-  const match = raw.match(/^(\d{1,2}):?(\d{2})$/)
-  if (!match) return ""
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return ""
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
-}
-
-function formatTimeLabel(value: string) {
-  const normalized = normalizeTimeInput(value)
-  if (!normalized) return "--:--"
-  const [hourRaw, minute] = normalized.split(":")
-  const hour = Number(hourRaw)
-  const period = hour < 12 ? "오전" : "오후"
-  const hour12 = hour % 12 || 12
-  return `${period} ${hour12}:${minute}`
-}
-
-const WORD_RETEST_TIME_OPTIONS = [
-  "09:00",
-  "09:30",
-  "10:00",
-  "10:30",
-  "11:00",
-  "11:30",
-  "12:00",
-  "12:30",
-  "13:00",
-  "13:30",
-  "14:00",
-  "14:30",
-  "15:00",
-  "15:30",
-  "16:00",
-  "16:30",
-  "17:00",
-  "17:30",
-  "18:00",
-  "18:30",
-  "19:00",
-  "19:30",
-  "20:00",
-  "20:30",
-  "21:00",
-  "21:30",
-]
 
 function quickDateTimeForNextWeekday(targetDay: number, forceNextWeek = false) {
   const date = new Date()
@@ -3014,6 +2950,53 @@ function buildCalendarDateCells(calendarMonth: Date) {
   })
 }
 
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function stringValue(value: unknown) {
+  return String(value || "").trim()
+}
+
+function getSchedulePlanSessions(classItem?: OpsClassOption) {
+  const plan = classItem?.schedulePlan || null
+  if (!plan) return []
+  if (Array.isArray(plan.sessions)) return plan.sessions
+  if (Array.isArray(plan.session_list)) return plan.session_list
+  return []
+}
+
+function getWordRetestClassScheduleItems(classItem?: OpsClassOption): WordRetestClassScheduleItem[] {
+  const seen = new Set<string>()
+
+  return getSchedulePlanSessions(classItem).flatMap((entry, index) => {
+    const session = recordValue(entry)
+    if (!session) return []
+
+    const state = stringValue(session.scheduleState || session.schedule_state || session.state) || "active"
+    if (["exception", "tbd", "canceled", "cancelled"].includes(state)) return []
+
+    const dateKey = toDateKey(
+      stringValue(session.date || session.session_date || session.dateValue || session.date_value),
+    )
+    if (!dateKey) return []
+
+    const sessionNumber = Number(session.sessionNumber || session.session_number || index + 1)
+    const label = Number.isFinite(sessionNumber) && sessionNumber > 0 ? `${sessionNumber}회차` : "수업"
+    const uniqueKey = `${dateKey}:${label}:${state}`
+    if (seen.has(uniqueKey)) return []
+    seen.add(uniqueKey)
+
+    return [{ dateKey, label, state }]
+  }).sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.label.localeCompare(right.label, "ko"))
+}
+
+function getCalendarMonthKey(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`
+}
+
 function DateField({
   label,
   value,
@@ -3191,79 +3174,50 @@ function DateField({
   )
 }
 
-function DateTimeField({
+function WordRetestMainExamDateField({
   label,
   value,
   onChange,
+  onClear,
+  classScheduleItems,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  onClear: () => void
+  classScheduleItems: WordRetestClassScheduleItem[]
 }) {
   const fieldId = useId()
-  const popoverId = useId()
-  const dateValue = dateTimeDateInputValue(value)
-  const timeValue = dateTimeTimeInputValue(value)
-  const [dateTimeOpen, setDateTimeOpen] = useState(false)
+  const calendarId = useId()
+  const dateValue = dateInputValue(value)
+  const [calendarDateOpen, setCalendarDateOpen] = useState(false)
   const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(dateValue))
-  const [draftDate, setDraftDate] = useState(dateValue)
-  const [draftTime, setDraftTime] = useState(timeValue)
-  const timeListRef = useRef<HTMLDivElement>(null)
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
-  const selectedDate = draftDate || dateValue
-  const selectedTime = draftTime || timeValue
-  const buttonText = dateValue ? `${dateValue} ${timeValue ? formatTimeLabel(timeValue) : "--:--"}` : "연도. 월. 일.  --:--"
+  const selectedDateLabel = dateValue ? dateOnlyLabel(dateValue) : "연도. 월. 일."
+  const classScheduleItemsByDate = useMemo(() => {
+    const itemsByDate = new Map<string, WordRetestClassScheduleItem[]>()
+    classScheduleItems.forEach((item) => {
+      const items = itemsByDate.get(item.dateKey) || []
+      items.push(item)
+      itemsByDate.set(item.dateKey, items)
+    })
+    return itemsByDate
+  }, [classScheduleItems])
+  const monthKey = getCalendarMonthKey(calendarMonth)
+  const visibleClassScheduleItems = classScheduleItems
+    .filter((item) => item.dateKey.startsWith(monthKey))
+    .slice(0, 12)
 
-  useEffect(() => {
-    if (!dateTimeOpen) return
-    const list = timeListRef.current
-    if (!list) return
-    const selectedButton = list.querySelector<HTMLButtonElement>("[data-selected='true']")
-    if (!selectedButton) return
-    const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight)
-    const nextScrollTop = selectedButton.offsetTop - (list.clientHeight - selectedButton.clientHeight) / 2
-    list.scrollTop = Math.min(maxScrollTop, Math.max(0, nextScrollTop))
-  }, [dateTimeOpen, selectedTime])
-
-  function syncDraftValues() {
-    setCalendarMonth(getCalendarMonthDate(dateValue))
-    setDraftDate(dateValue)
-    setDraftTime(timeValue)
-  }
-
-  function handleDateTimeDateSelect(nextDate: string) {
-    const nextTime = draftTime || timeValue
-    setDraftDate(nextDate)
+  function handleMainExamDateSelect(nextDate: string) {
+    onChange(nextDate)
     setCalendarMonth(getCalendarMonthDate(nextDate))
-    if (!nextTime) return
-    onChange(buildLocalDateTimeValue(nextDate, nextTime))
-    setDateTimeOpen(false)
-  }
-
-  function handleDateTimeTimeSelect(nextTime: string) {
-    const normalized = normalizeTimeInput(nextTime)
-    if (!normalized) return
-    const nextDate = draftDate || dateValue
-    setDraftTime(normalized)
-    if (!nextDate) return
-    onChange(buildLocalDateTimeValue(nextDate, normalized))
-    setDateTimeOpen(false)
-  }
-
-  function handleTimeListWheel(event: WheelEvent<HTMLDivElement>) {
-    const target = event.currentTarget
-    if (target.scrollHeight <= target.clientHeight) return
-    const previousScrollTop = target.scrollTop
-    target.scrollTop += event.deltaY
-    if (target.scrollTop === previousScrollTop) return
-    event.preventDefault()
-    event.stopPropagation()
+    setCalendarDateOpen(false)
   }
 
   return (
-    <Popover open={dateTimeOpen} onOpenChange={(open) => {
-      setDateTimeOpen(open)
-      if (open) syncDraftValues()
+    <Popover open={calendarDateOpen} onOpenChange={(open) => {
+      setCalendarDateOpen(open)
+      if (open) setCalendarMonth(getCalendarMonthDate(dateValue))
     }}>
       <div className="grid min-w-0 gap-1.5 text-sm font-medium">
         <label id={fieldId}>{label}</label>
@@ -3273,30 +3227,25 @@ function DateTimeField({
               type="button"
               aria-labelledby={fieldId}
               aria-haspopup="dialog"
-              aria-expanded={dateTimeOpen}
-              aria-controls={popoverId}
+              aria-expanded={calendarDateOpen}
+              aria-controls={calendarId}
               className={[
-                "flex h-9 w-full min-w-0 items-center rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
-                value ? "pr-20" : "pr-14",
-                dateTimeOpen ? "border-ring ring-2 ring-ring/40" : "",
+                "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
+                value ? "pr-10" : "",
+                calendarDateOpen ? "border-ring ring-2 ring-ring/40" : "",
               ].filter(Boolean).join(" ")}
             >
-              <span className={value ? "min-w-0 flex-1 truncate text-foreground" : "min-w-0 flex-1 truncate text-muted-foreground"}>{buttonText}</span>
+              <span className={value ? "min-w-0 flex-1 truncate text-foreground" : "min-w-0 flex-1 truncate text-muted-foreground"}>{selectedDateLabel}</span>
+              <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
             </button>
           </PopoverTrigger>
-          <span className={["pointer-events-none absolute top-1/2 flex -translate-y-1/2 items-center gap-1 text-muted-foreground", value ? "right-10" : "right-3"].join(" ")}>
-            <CalendarDays className="size-4" />
-            <Clock className="size-4" />
-          </span>
           {value && (
             <button
               type="button"
               aria-label={`${label} 지우기`}
               onClick={(event) => {
                 event.stopPropagation()
-                onChange("")
-                setDraftDate("")
-                setDraftTime("")
+                onClear()
               }}
               className="absolute right-2 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
@@ -3305,9 +3254,9 @@ function DateTimeField({
           )}
         </span>
       </div>
-      {dateTimeOpen && (
+      {calendarDateOpen && (
         <PopoverContent
-          id={popoverId}
+          id={calendarId}
           role="dialog"
           aria-labelledby={fieldId}
           align="start"
@@ -3317,86 +3266,83 @@ function DateTimeField({
           disablePortal
           style={TOUCH_SCROLL_AREA_STYLE}
           onTouchMove={stopTouchScrollPropagation}
-          className="z-[120] max-h-[min(18.5rem,var(--radix-popover-content-available-height))] w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto overscroll-contain p-0 md:max-h-[min(34rem,var(--radix-popover-content-available-height))] md:w-[min(42rem,calc(100vw-2rem))]"
+          className="z-[120] w-[min(23rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden p-0"
         >
-          <div className="grid grid-cols-[minmax(0,1fr)_7.25rem] gap-0 md:grid-cols-[minmax(0,1fr)_14rem]">
-            <div className="border-r">
-              <div className="flex items-center justify-between border-b px-1.5 py-1 min-[390px]:px-2 min-[390px]:py-1.5">
-                <button
-                  type="button"
-                  aria-label="이전 달"
-                  onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
-                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground min-[390px]:size-8"
-                >
-                  <ChevronLeft className="size-4" />
-                </button>
-                <span className="text-xs font-semibold min-[390px]:text-sm">{getCalendarMonthLabel(calendarMonth)}</span>
-                <button
-                  type="button"
-                  aria-label="다음 달"
-                  onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
-                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground min-[390px]:size-8"
-                >
-                  <ChevronRight className="size-4" />
-                </button>
-              </div>
-              <div role="grid" aria-label={`${label} 달력`} className="grid grid-cols-7 gap-0.5 p-1.5 min-[390px]:gap-1 min-[390px]:p-2">
-                {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
-                  <div key={weekday} role="columnheader" className="grid h-5 place-items-center text-[10px] font-medium text-muted-foreground min-[390px]:h-6 min-[390px]:text-[11px]">
-                    {weekday}
-                  </div>
-                ))}
-                {calendarCells.map((cell) => {
-                  const selected = cell.dateKey === selectedDate
-                  return (
-                    <button
-                      key={cell.dateKey}
-                      type="button"
-                      role="gridcell"
-                      aria-selected={selected}
-                      aria-label={`${cell.dateKey} 선택`}
-                      onClick={() => handleDateTimeDateSelect(cell.dateKey)}
-                      className={[
-                        "grid h-7 min-w-0 place-items-center rounded-md text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40 min-[390px]:h-8 min-[390px]:text-sm",
-                        selected ? "bg-primary text-primary-foreground shadow-xs" : "",
-                        !selected && cell.isToday ? "border border-primary/50 text-primary" : "",
-                        !selected && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
-                        !selected && !cell.isToday && !cell.isCurrentMonth ? "text-muted-foreground/45 hover:bg-muted/60" : "",
-                      ].join(" ")}
-                    >
-                      {cell.dayLabel}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            <div
-              ref={timeListRef}
-              className="grid max-h-[18.5rem] gap-0.5 overflow-y-auto overscroll-contain p-1.5 md:max-h-[18.875rem] md:gap-1 md:p-2"
-              style={TOUCH_SCROLL_AREA_STYLE}
-              onWheel={handleTimeListWheel}
-              onTouchMove={stopTouchScrollPropagation}
+          <div className="flex items-center justify-between border-b px-2 py-1.5">
+            <button
+              type="button"
+              aria-label="이전 달"
+              onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
-              {WORD_RETEST_TIME_OPTIONS.map((time) => {
-                const selected = time === selectedTime
-                return (
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="text-sm font-semibold">{getCalendarMonthLabel(calendarMonth)}</span>
+            <button
+              type="button"
+              aria-label="다음 달"
+              onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+          <div role="grid" aria-label={`${label} 달력`} className="grid grid-cols-7 gap-1 p-2">
+            {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
+              <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
+                {weekday}
+              </div>
+            ))}
+            {calendarCells.map((cell) => {
+              const selected = cell.dateKey === dateValue
+              const dayScheduleItems = classScheduleItemsByDate.get(cell.dateKey) || []
+              const isClassScheduleDate = dayScheduleItems.length > 0
+              const scheduleLabel = dayScheduleItems.map((item) => item.label).join(", ")
+              return (
+                <button
+                  key={cell.dateKey}
+                  type="button"
+                  role="gridcell"
+                  aria-selected={selected}
+                  aria-label={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel} 선택` : `${cell.dateKey} 선택`}
+                  data-word-retest-class-date={isClassScheduleDate ? "true" : undefined}
+                  title={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel}` : cell.dateKey}
+                  onClick={() => handleMainExamDateSelect(cell.dateKey)}
+                  className={[
+                    "grid h-10 min-w-0 place-items-center rounded-md text-xs leading-none outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                    selected ? "bg-primary text-primary-foreground shadow-xs" : "",
+                    !selected && isClassScheduleDate ? "border border-primary/35 bg-primary/[0.06] text-primary" : "",
+                    !selected && !isClassScheduleDate && cell.isToday ? "border border-primary/50 text-primary" : "",
+                    !selected && !isClassScheduleDate && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
+                    !selected && !isClassScheduleDate && !cell.isToday && !cell.isCurrentMonth ? "text-muted-foreground/45 hover:bg-muted/60" : "",
+                  ].join(" ")}
+                >
+                  <span className="font-semibold">{cell.dayLabel}</span>
+                  {isClassScheduleDate && <span className="mt-0.5 text-[9px] font-bold">수업</span>}
+                </button>
+              )
+            })}
+          </div>
+          {visibleClassScheduleItems.length > 0 && (
+            <div className="grid gap-1.5 border-t bg-muted/30 px-2.5 py-2">
+              <span className="text-xs font-semibold text-muted-foreground">수업일정</span>
+              <div className="flex flex-wrap gap-1">
+                {visibleClassScheduleItems.map((item) => (
                   <button
-                    key={time}
+                    key={`${item.dateKey}-${item.label}`}
                     type="button"
-                    aria-pressed={selected}
-                    data-selected={selected ? "true" : undefined}
-                    onClick={() => handleDateTimeTimeSelect(time)}
+                    onClick={() => handleMainExamDateSelect(item.dateKey)}
                     className={[
-                      "rounded-md px-1.5 py-1 text-left text-xs font-medium transition focus-visible:ring-2 focus-visible:ring-ring/40 min-[390px]:px-2 min-[390px]:py-1.5 min-[390px]:text-sm",
-                      selected ? "bg-primary text-primary-foreground shadow-xs" : "text-foreground hover:bg-muted",
+                      "rounded border px-2 py-1 text-xs font-semibold transition",
+                      item.dateKey === dateValue ? "border-primary bg-primary text-primary-foreground" : "border-primary/25 bg-background text-primary hover:bg-primary/10",
                     ].join(" ")}
                   >
-                    {formatTimeLabel(time)}
+                    {item.dateKey.slice(5)} {item.label}
                   </button>
-                )
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </PopoverContent>
       )}
     </Popover>
@@ -3655,7 +3601,7 @@ function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, comple
   }
 
   if (mode === "teacher" && task.status === "review_requested") {
-    if (absent) return [{ kind: "edit", label: "응시일정 변경", blockers: ["응시일시"] }]
+    if (absent) return [{ kind: "status", status: "done", label: "미응시 확인" }]
     if (scoreResult === "failed") {
       return [
         { kind: "word_retest_retry", label: "재시험 추가" },
@@ -5064,7 +5010,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         && Boolean(editingTask)
         && payload.type === "word_retest"
       const intentBlockers = formCompletionIntent?.kind === "word_retest_retry" && payload.type === "word_retest" && !String(payload.wordRetest?.testAt || "").trim()
-        ? ["응시일시"]
+        ? ["본시험일"]
         : []
       const wordRetestRequiredBlockers = getWordRetestRequiredInputBlockers(
         payload,
@@ -5292,10 +5238,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         })
         setMessage("")
         setNotice(nextTasks.length > 1
-          ? `지난 응시일시 ${nextTasks.length}건을 미응시로 자동 변경했습니다.`
-          : "지난 응시일시를 미응시로 자동 변경했습니다.")
+          ? `본시험일 기준 일주일 경과 ${nextTasks.length}건을 미응시 보고했습니다.`
+          : "본시험일 기준 일주일 경과 항목을 미응시 보고했습니다.")
       } catch (error) {
-        setMessage(getOpsTaskActionErrorMessage(error, "지난 응시일시를 미응시로 자동 변경하지 못했습니다."))
+        setMessage(getOpsTaskActionErrorMessage(error, "본시험일 기준 미응시 보고를 자동 반영하지 못했습니다."))
       } finally {
         nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.delete(task.id))
       }
@@ -6733,6 +6679,10 @@ function TypeSpecificFields({
   const selectedWordRetestClass = form.type === "word_retest" ? findClass(selectedWordRetestClassId) : undefined
   const selectedWordRetestTeacherId = form.type === "word_retest" ? wordRetest.teacherId || "" : ""
   const selectedWordRetestTeacher = form.type === "word_retest" ? findTeacher(selectedWordRetestTeacherId) : undefined
+  const wordRetestClassScheduleItems = useMemo(
+    () => getWordRetestClassScheduleItems(selectedWordRetestClass),
+    [selectedWordRetestClass],
+  )
   const wordRetestStudentOptions = uniqueStudentOptions([
     ...selectedWordRetestStudents,
     ...getWordRetestStudentOptions(students, selectedWordRetestClass, form.studentId || ""),
@@ -7172,7 +7122,13 @@ function TypeSpecificFields({
             </div>
           )}
           <div className="grid gap-3 md:grid-cols-2">
-            <DateTimeField label="응시일시" value={wordRetest.testAt || ""} onChange={(value) => updateWordRetest("testAt", value)} />
+            <WordRetestMainExamDateField
+              label="본시험일"
+              value={dateInputValue(wordRetest.testAt || "")}
+              onChange={(value) => updateWordRetest("testAt", value)}
+              onClear={() => updateWordRetest("testAt", "")}
+              classScheduleItems={wordRetestClassScheduleItems}
+            />
             <TaskListboxField label="장소" value={wordRetest.branch || "본관"} options={WORD_RETEST_BRANCH_OPTIONS} onChange={(value) => updateWordRetest("branch", value)} emptyClassName="text-foreground" />
           </div>
         </div>
@@ -7358,7 +7314,7 @@ function WordRetestPeriodFilterBar({
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <div className="inline-flex max-w-full overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="단어 재시험 응시일시 기간">
+      <div className="inline-flex max-w-full overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="단어 재시험 본시험일 기간">
         {WORD_RETEST_PERIOD_FILTERS.map((filter) => (
           <button
             key={filter.key}
@@ -8204,7 +8160,7 @@ function WordRetestTaskList({
           />
         </span>
         <WordRetestResizableHeaderCell label="상태" columnKey="status" onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="응시일시" columnKey="testAt" onResizeStart={startColumnResize} />
+        <WordRetestResizableHeaderCell label="본시험일" columnKey="testAt" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="담당선생님" columnKey="teacher" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="수업" columnKey="class" onResizeStart={startColumnResize} />
         <WordRetestResizableHeaderCell label="학생" columnKey="student" onResizeStart={startColumnResize} />
@@ -8342,8 +8298,8 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
         <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
       </span>
       <span className="order-5 min-w-0 md:order-none">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">응시일시</span>
-        <span className="font-medium">{dateLabel(wordRetest.testAt || task.dueAt || "")}</span>
+        <span className="mr-2 text-xs text-muted-foreground md:hidden">본시험일</span>
+        <span className="font-medium">{dateOnlyLabel(wordRetest.testAt || task.dueAt || "")}</span>
       </span>
       <span className="order-6 min-w-0 md:hidden">
         <span className="mr-2 text-xs text-muted-foreground">장소</span>
@@ -9192,7 +9148,7 @@ function WordRetestDetailPanel({ task }: { task: OpsTask }) {
       </div>
       <WordRetestProgressStepper value={wordRetest.retestStatus || "not_started"} taskStatus={task.status} wordRetest={wordRetest} />
       <dl className="grid gap-3 md:grid-cols-2">
-        <DetailInfoTile label="응시일시" value={dateLabel(wordRetest.testAt || task.dueAt || "") === "-" ? "미지정" : dateLabel(wordRetest.testAt || task.dueAt || "")} />
+        <DetailInfoTile label="본시험일" value={dateOnlyLabel(wordRetest.testAt || task.dueAt || "") === "-" ? "미지정" : dateOnlyLabel(wordRetest.testAt || task.dueAt || "")} />
         <DetailInfoTile label="학생" value={getWordRetestStudentLabel(task)} />
         <DetailInfoTile label="교재" value={getWordRetestTextbookLabel(task)} />
         <DetailInfoTile label="시험범위" value={getWordRetestUnitLabel(task)} />
@@ -9343,7 +9299,7 @@ function TypeDetail({ task }: { task: OpsTask }) {
 	      <dl className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm md:grid-cols-2">
 	        <OptionalInfo label="지점" value={wordRetest.branch} />
 	        <OptionalInfo label="담당선생님" value={getWordRetestTeacherLabel(task)} />
-	        <OptionalInfo label="응시일시" value={dateLabel(wordRetest.testAt || "")} />
+	        <OptionalInfo label="본시험일" value={dateOnlyLabel(wordRetest.testAt || "")} />
 	        <OptionalInfo label="교재/시험범위" value={[wordRetest.textbookName, wordRetest.unit].filter(Boolean).join(" · ")} />
 	        <OptionalInfo label="결과" value={getWordRetestScoreSummary(task)} />
 	        <OptionalInfo label="출제 개수" value={wordRetest.totalQuestionCount} />

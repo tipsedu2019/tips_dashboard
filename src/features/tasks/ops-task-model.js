@@ -318,7 +318,7 @@ export function getOpsTaskCalendarItems(tasks = [], { includeClosed = false } = 
 
       if (task.type === "word_retest") {
         const detail = task.wordRetest || task.word_retest || {};
-        addCalendarItem(items, task, "응시", detail.testAt || detail.test_at);
+        addCalendarItem(items, task, "본시험", detail.testAt || detail.test_at);
       }
 
       return items;

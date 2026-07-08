@@ -1413,6 +1413,15 @@ async function fillIfPresent(scope, label, value) {
   return true
 }
 
+async function selectDateIfPresent(page, scope, label, value) {
+  const field = scope.getByLabel(label, { exact: true }).first()
+  if (!(await field.count().catch(() => 0))) return false
+  await field.waitFor({ state: "visible", timeout: 5000 })
+  await field.click()
+  await page.getByRole("gridcell", { name: new RegExp(`${value}.*선택`) }).first().click()
+  return true
+}
+
 async function selectManualIfPresent(page, scope, label) {
   const field = scope.getByLabel(label, { exact: true }).first()
   if (!(await field.count().catch(() => 0))) return false
@@ -1449,7 +1458,7 @@ async function fillOperationMinimumFields(page, dialog, route, sampleName) {
   await fillIfPresent(dialog, "수업명", `${sampleName} 수업`)
   await fillIfPresent(dialog, "전반사유", "브라우저 검증")
   await fillIfPresent(dialog, "고객 퇴원사유", "브라우저 검증")
-  await fillIfPresent(dialog, "응시일시", `${new Date().toISOString().slice(0, 10)}T09:00`)
+  await selectDateIfPresent(page, dialog, "본시험일", new Date().toISOString().slice(0, 10))
 }
 
 async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
@@ -1478,7 +1487,7 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
     }
     await verifyInitialSelectControls(dialog, route)
     if (route.name === "word-retests") {
-      for (const expectedLabel of ["담당선생님", "수업", "학생", "응시일시", "장소", "교재", "시험범위", "커트라인(맞은 개수)", "출제 개수"]) {
+      for (const expectedLabel of ["담당선생님", "수업", "학생", "본시험일", "장소", "교재", "시험범위", "커트라인(맞은 개수)", "출제 개수"]) {
         if (!dialogText.includes(expectedLabel)) throw new Error(`word-retests dialog is missing ${expectedLabel}.`)
       }
       await page.keyboard.press("Escape").catch(() => {})
