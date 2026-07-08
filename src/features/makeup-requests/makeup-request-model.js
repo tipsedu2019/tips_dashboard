@@ -14,6 +14,8 @@ export const MAKEUP_REQUEST_STATUSES = [
   "revision_requested",
   "rejected",
   "manager_pending",
+  "makeup_pending",
+  "refund_pending",
   "completed",
   "canceled",
 ];
@@ -23,13 +25,22 @@ export const MAKEUP_REQUEST_STATUS_LABELS = {
   revision_requested: "보완 요청",
   rejected: "반려",
   manager_pending: "이전 관리팀 전달",
+  makeup_pending: "보강대기",
+  refund_pending: "환불대기",
   completed: "완료",
   canceled: "승인 취소",
 };
 
+export const MAKEUP_REQUEST_KINDS = [
+  "cancel_makeup",
+  "cancel_only",
+  "makeup_only",
+];
+
 export const ACTIVE_ROOM_RESERVATION_STATUSES = new Set([
   "approval_pending",
   "manager_pending",
+  "makeup_pending",
   "completed",
 ]);
 
@@ -197,6 +208,8 @@ export function canTransitionMakeupRequest(status, nextStatus, context = {}) {
   if (current === "approval_pending") {
     return (
       (next === "completed" && isApprover) ||
+      (next === "makeup_pending" && isApprover) ||
+      (next === "refund_pending" && isApprover) ||
       (next === "revision_requested" && isApprover) ||
       (next === "rejected" && isApprover) ||
       (next === "canceled" && (isRequester || isManager))
@@ -212,6 +225,18 @@ export function canTransitionMakeupRequest(status, nextStatus, context = {}) {
 
   if (current === "manager_pending") {
     return false;
+  }
+
+  if (current === "makeup_pending") {
+    return (
+      (next === "approval_pending" && (isRequester || isManager)) ||
+      (next === "completed" && isApprover) ||
+      (next === "canceled" && (isApprover || isManager))
+    );
+  }
+
+  if (current === "refund_pending") {
+    return next === "completed" && isManager;
   }
 
   if (current === "completed") {
@@ -264,6 +289,23 @@ function getRequestEndAt(request = {}) {
 
 function getRequestClassroom(request = {}) {
   return firstValue(request.makeupClassroom, request.makeup_classroom);
+}
+
+export function getMakeupRequestKind(request = {}) {
+  const kind = firstValue(request.requestKind, request.request_kind);
+  if (MAKEUP_REQUEST_KINDS.includes(kind)) {
+    return kind;
+  }
+
+  const cancelDate = firstValue(request.cancelDate, request.cancel_date);
+  const makeupSlots = normalizeMakeupSlots(request, getRequestClassroom(request));
+  if (cancelDate && makeupSlots.length === 0) {
+    return "cancel_only";
+  }
+  if (!cancelDate && makeupSlots.length > 0) {
+    return "makeup_only";
+  }
+  return "cancel_makeup";
 }
 
 function readMakeupSlots(value) {
@@ -335,6 +377,14 @@ export function normalizeMakeupSlots(source = {}, fallbackClassroom = "") {
     endAt,
     classroom: firstValue(fallbackClassroom, getRequestClassroom(source)),
   }];
+}
+
+export function hasCancelPart(request = {}) {
+  return getMakeupRequestKind(request) !== "makeup_only";
+}
+
+export function hasMakeupPart(request = {}) {
+  return getMakeupRequestKind(request) !== "cancel_only";
 }
 
 function addRoom(rooms, value) {
@@ -493,7 +543,7 @@ export function extractMakeupCalendarMeta(note) {
   }
 }
 
-function buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId) {
+function buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId, activeRequestIds = null) {
   const collisions = [];
 
   for (const event of academicEvents || []) {
@@ -502,6 +552,9 @@ function buildAcademicEventCollisions(academicEvents, targetSlots, currentReques
       continue;
     }
     if (text(meta.requestId) && text(meta.requestId) === text(currentRequestId)) {
+      continue;
+    }
+    if (activeRequestIds && text(meta.requestId) && !activeRequestIds.has(text(meta.requestId))) {
       continue;
     }
 
@@ -539,17 +592,24 @@ export function buildRoomAvailability({
   slots = [],
   currentRequestId = "",
   subject = "",
+  ignoreOrphanedMakeupEvents = false,
 } = {}) {
   const selectedSubject = text(subject);
   const roomNames = buildRoomOptions(classrooms, classes, { subject: selectedSubject });
   const targetSlots = normalizeMakeupSlots({ makeupSlots: slots, makeupStartAt: startAt, makeupEndAt: endAt });
+  const activeRequestIds = ignoreOrphanedMakeupEvents
+    ? new Set((requests || [])
+      .filter((request) => ACTIVE_ROOM_RESERVATION_STATUSES.has(getRequestStatus(request)))
+      .map((request) => text(request?.id))
+      .filter(Boolean))
+    : null;
   for (const slot of targetSlots) {
     addRoomName(roomNames, slot.classroom);
   }
   const collisions = [
     ...buildRegularClassCollisions(classes, targetSlots),
     ...buildMakeupRequestCollisions(requests, targetSlots, currentRequestId),
-    ...buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId),
+    ...buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId, activeRequestIds),
   ];
   const collisionsByRoom = new Map();
 
@@ -620,7 +680,9 @@ export function applyMakeupRequestToSchedulePlan(rawPlan = {}, classRecord = {},
   const cancelDate = firstValue(request.cancelDate, request.cancel_date);
   const reason = firstValue(request.reason);
   const classroom = firstValue(request.makeupClassroom, request.makeup_classroom);
-  const makeupSlots = normalizeMakeupSlots(request, classroom);
+  const hasCancel = hasCancelPart(request);
+  const hasMakeup = hasMakeupPart(request);
+  const makeupSlots = hasMakeup ? normalizeMakeupSlots(request, classroom) : [];
   const makeupDate = toDateKey(makeupSlots[0]?.startAt);
   const defaults = buildSchedulePlanDefaults(rawPlan, classRecord);
   const previousState = rawPlan?.sessionStates?.[cancelDate] || {};
@@ -661,18 +723,24 @@ export function applyMakeupRequestToSchedulePlan(rawPlan = {}, classRecord = {},
       : defaults.selectedDays,
     sessionStates: {
       ...(rawPlan?.sessionStates || {}),
-      [cancelDate]: {
-        ...previousState,
-        state: "exception",
-        memo: reason ? `휴강: ${reason}` : firstValue(previousState.memo, "휴강"),
-        makeupMemo,
-        makeupDate,
-      },
+      ...(hasCancel ? {
+        [cancelDate]: {
+          ...previousState,
+          state: "exception",
+          memo: reason ? `휴강: ${reason}` : firstValue(previousState.memo, "휴강"),
+          makeupMemo,
+          makeupDate,
+        },
+      } : {}),
       ...makeupStateEntries,
     },
   };
 
-  if (!parseDateValue(cancelDate) || !parseDateValue(makeupDate)) {
+  if (
+    (hasCancel && !parseDateValue(cancelDate)) ||
+    (hasMakeup && !parseDateValue(makeupDate)) ||
+    (!hasCancel && !hasMakeup)
+  ) {
     return buildSchedulePlanForSave(rawPlan || {}, defaults);
   }
 
@@ -696,13 +764,15 @@ export function buildMakeupCalendarDrafts(request = {}) {
   const cancelDate = firstValue(request.cancelDate, request.cancel_date);
   const makeupStartAt = firstValue(request.makeupStartAt, request.makeup_start_at);
   const makeupEndAt = firstValue(request.makeupEndAt, request.makeup_end_at);
-  const makeupSlots = normalizeMakeupSlots(request, classroom);
+  const hasCancel = hasCancelPart(request);
+  const hasMakeup = hasMakeupPart(request);
+  const makeupSlots = hasMakeup ? normalizeMakeupSlots(request, classroom) : [];
   const cancelEventId = firstValue(request.cancelAcademicEventId, request.cancel_academic_event_id);
   const makeupEventId = firstValue(request.makeupAcademicEventId, request.makeup_academic_event_id);
   const makeupEventIds = readMakeupSlots(request.makeupAcademicEventIds || request.makeup_academic_event_ids);
 
   return [
-    {
+    ...(hasCancel ? [{
       id: cancelEventId,
       title: `[휴강] ${className}`,
       type: "팁스",
@@ -718,8 +788,8 @@ export function buildMakeupCalendarDrafts(request = {}) {
         cancelDate,
         reason,
       }, reason),
-    },
-    ...makeupSlots.map((slot, index) => {
+    }] : []),
+    ...(hasMakeup ? makeupSlots.map((slot, index) => {
       const slotClassroom = firstValue(slot.classroom, classroom);
       return {
         id: firstValue(makeupEventIds[index], index === 0 ? makeupEventId : ""),
@@ -741,6 +811,6 @@ export function buildMakeupCalendarDrafts(request = {}) {
           reason,
         }, reason),
       };
-    }),
+    }) : []),
   ];
 }

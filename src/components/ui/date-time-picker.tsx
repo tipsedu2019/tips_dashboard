@@ -6,7 +6,6 @@ import { CalendarIcon, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
-import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 const TIME_OPTION_START_MINUTES = 9 * 60
@@ -158,21 +157,7 @@ export function TimePickerControl({
   className,
 }: TimePickerControlProps) {
   const [open, setOpen] = React.useState(false)
-  const [manualTime, setManualTime] = React.useState(value || "")
   const normalizedValue = normalizeTimeInput(value)
-
-  React.useEffect(() => {
-    if (open) {
-      setManualTime(normalizedValue || "")
-    }
-  }, [normalizedValue, open])
-
-  function applyManualTime() {
-    const nextTime = normalizeTimeInput(manualTime)
-    if (!nextTime) return
-    onChange(nextTime)
-    setOpen(false)
-  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -188,7 +173,11 @@ export function TimePickerControl({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={6} className="w-[--radix-popover-trigger-width] min-w-44 p-0">
-        <div className="max-h-52 overflow-y-auto p-1">
+        <div
+          className="max-h-52 overscroll-contain overflow-y-auto p-1"
+          onWheelCapture={(event) => event.stopPropagation()}
+          onTouchMoveCapture={(event) => event.stopPropagation()}
+        >
           {TIME_OPTIONS.map((time) => {
             const selected = time === normalizedValue
             return (
@@ -209,24 +198,6 @@ export function TimePickerControl({
               </button>
             )
           })}
-        </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-t bg-muted/30 p-2">
-          <Input
-            type="text"
-            inputMode="numeric"
-            value={manualTime}
-            placeholder="HH:MM"
-            className="h-8"
-            onChange={(event) => setManualTime(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") return
-              event.preventDefault()
-              applyManualTime()
-            }}
-          />
-          <Button type="button" variant="outline" size="sm" className="h-8 px-2.5" onClick={applyManualTime}>
-            적용
-          </Button>
         </div>
       </PopoverContent>
     </Popover>

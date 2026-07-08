@@ -34,7 +34,17 @@ test("makeup request workflow auto-completes on approver approval without a mana
   assert.equal(canTransitionMakeupRequest("completed", "canceled", { isApprover: true }), true);
   assert.equal(canTransitionMakeupRequest("completed", "canceled", { isManager: true }), false);
   assert.equal(canTransitionMakeupRequest("completed", "canceled", { isRequester: true }), false);
+  assert.equal(canTransitionMakeupRequest("makeup_pending", "completed", { isApprover: true }), true);
+  assert.equal(canTransitionMakeupRequest("makeup_pending", "canceled", { isApprover: true }), true);
+  assert.equal(canTransitionMakeupRequest("makeup_pending", "approval_pending", { isRequester: true }), true);
+  assert.equal(canTransitionMakeupRequest("makeup_pending", "refund_pending", { isRequester: true }), false);
+  assert.equal(canTransitionMakeupRequest("makeup_pending", "refund_pending", { isManager: true }), false);
+  assert.equal(canTransitionMakeupRequest("approval_pending", "refund_pending", { isApprover: true }), true);
   assert.equal(canTransitionMakeupRequest("revision_requested", "approval_pending", { isRequester: true }), true);
+  assert.equal(canTransitionMakeupRequest("refund_pending", "approval_pending", { isRequester: true }), false);
+  assert.equal(canTransitionMakeupRequest("refund_pending", "completed", { isManager: true }), true);
+  assert.equal(canTransitionMakeupRequest("refund_pending", "completed", { isApprover: true }), false);
+  assert.equal(canTransitionMakeupRequest("refund_pending", "completed", { isRequester: true }), false);
   assert.equal(canTransitionMakeupRequest("completed", "approval_pending", { isManager: true }), false);
 });
 
@@ -85,6 +95,37 @@ test("room availability blocks regular classes pending requests and calendar eve
       { room: "별관 5강", available: false, collisions: ["academic_event"] },
     ],
   );
+});
+
+test("room availability can ignore orphaned makeup calendar events for operators with a complete request list", () => {
+  const availability = buildRoomAvailability({
+    classrooms: [{ name: "별관 4강" }],
+    requests: [],
+    academicEvents: [
+      {
+        id: "event-1",
+        title: "[보강] 수능대비반1 · 별관 4강",
+        type: "팁스",
+        note: '[[TIPS_MAKEUP]] {"kind":"makeup","requestId":"deleted-request","classroom":"별관 4강","startAt":"2026-10-26T09:00:00+09:00","endAt":"2026-10-26T11:00:00+09:00"}',
+      },
+    ],
+    slots: [
+      {
+        startAt: "2026-10-26T09:00:00+09:00",
+        endAt: "2026-10-26T11:00:00+09:00",
+        classroom: "별관 4강",
+      },
+    ],
+    ignoreOrphanedMakeupEvents: true,
+  });
+
+  assert.deepEqual(availability, [
+    {
+      name: "별관 4강",
+      available: true,
+      collisions: [],
+    },
+  ]);
 });
 
 test("room availability checks every makeup slot before recommending a room", () => {
@@ -205,6 +246,83 @@ test("approved makeup request reflects cancellation and makeup into schedule pla
   assert.ok(reflected.sessions.some((session) => Array.isArray(session.textbookEntries)));
 });
 
+test("approved cancel-only request marks the canceled class date without completing a makeup session", () => {
+  const reflected = applyMakeupRequestToSchedulePlan(
+    {
+      subject: "영어",
+      className: "수능대비반1",
+      selectedDays: [0],
+      billingPeriods: [
+        {
+          id: "2026-10",
+          month: 10,
+          label: "10월",
+          startDate: "2026-10-25",
+          endDate: "2026-10-31",
+        },
+      ],
+      sessionStates: {},
+      sessions: [],
+    },
+    { subject: "영어", name: "수능대비반1", schedule: "일 12:00-14:00" },
+    {
+      id: "request-cancel-only",
+      requestKind: "cancel_only",
+      reason: "상담 일정",
+      cancelDate: "2026-10-25",
+      makeupSlots: [],
+      makeupClassroom: "",
+    },
+  );
+
+  assert.equal(reflected.sessionStates["2026-10-25"].state, "exception");
+  assert.equal(reflected.sessionStates["2026-10-25"].memo, "휴강: 상담 일정");
+  assert.equal(reflected.sessionStates["2026-10-25"].makeupMemo, "");
+  assert.equal(reflected.sessionStates["2026-10-25"].makeupDate, "");
+  assert.ok(!Object.values(reflected.sessionStates).some((state) => state.state === "makeup"));
+});
+
+test("approved makeup-only request adds makeup sessions without requiring a cancel date", () => {
+  const reflected = applyMakeupRequestToSchedulePlan(
+    {
+      subject: "영어",
+      className: "수능대비반1",
+      selectedDays: [0],
+      billingPeriods: [
+        {
+          id: "2026-10",
+          month: 10,
+          label: "10월",
+          startDate: "2026-10-25",
+          endDate: "2026-10-31",
+        },
+      ],
+      sessionStates: {},
+      sessions: [],
+    },
+    { subject: "영어", name: "수능대비반1", schedule: "일 12:00-14:00" },
+    {
+      id: "request-makeup-only",
+      requestKind: "makeup_only",
+      reason: "특강 보강",
+      cancelDate: "",
+      makeupSlots: [
+        {
+          startAt: "2026-10-26T09:00:00+09:00",
+          endAt: "2026-10-26T11:00:00+09:00",
+          classroom: "별관 4강",
+        },
+      ],
+      makeupClassroom: "별관 4강",
+    },
+  );
+
+  assert.equal(reflected.sessionStates["2026-10-26"].state, "makeup");
+  assert.match(reflected.sessionStates["2026-10-26"].memo, /수능대비반1/);
+  assert.ok(!Object.prototype.hasOwnProperty.call(reflected.sessionStates, ""));
+  assert.ok(reflected.sessions.some((session) => session.scheduleState === "makeup" && session.date === "2026-10-26"));
+});
+
 test("makeup calendar drafts are idempotent and include machine-readable metadata for every makeup slot", () => {
   const drafts = buildMakeupCalendarDrafts({
     id: "request-1",
@@ -235,4 +353,35 @@ test("makeup calendar drafts are idempotent and include machine-readable metadat
   assert.match(drafts[1].note, /"requestId":"request-1"/);
   assert.match(drafts[2].note, /"classroom":"별관 7강"/);
   assert.match(drafts[2].note, /"slotIndex":1/);
+});
+
+test("makeup calendar drafts match cancel-only and makeup-only request kinds", () => {
+  const cancelOnlyDrafts = buildMakeupCalendarDrafts({
+    id: "request-cancel-only",
+    requestKind: "cancel_only",
+    className: "수능대비반1",
+    subject: "영어",
+    cancelDate: "2026-10-25",
+    reason: "상담 일정",
+  });
+  const makeupOnlyDrafts = buildMakeupCalendarDrafts({
+    id: "request-makeup-only",
+    requestKind: "makeup_only",
+    className: "수능대비반1",
+    subject: "영어",
+    makeupSlots: [
+      {
+        startAt: "2026-10-26T09:00:00+09:00",
+        endAt: "2026-10-26T11:00:00+09:00",
+        classroom: "별관 4강",
+      },
+    ],
+    makeupClassroom: "별관 4강",
+    reason: "특강 보강",
+  });
+
+  assert.deepEqual(cancelOnlyDrafts.map((draft) => draft.title), ["[휴강] 수능대비반1"]);
+  assert.match(cancelOnlyDrafts[0].note, /"kind":"cancel"/);
+  assert.deepEqual(makeupOnlyDrafts.map((draft) => draft.title), ["[보강] 수능대비반1 · 별관 4강"]);
+  assert.match(makeupOnlyDrafts[0].note, /"kind":"makeup"/);
 });

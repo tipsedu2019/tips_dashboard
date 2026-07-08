@@ -39,19 +39,22 @@ import {
   buildRoomAvailability,
   getAllowedApproverNames,
   getDefaultMakeupEndAt,
+  hasMakeupPart,
   MAKEUP_REQUEST_STATUS_LABELS,
+  type MakeupRequestKind,
 } from "./makeup-request-model.js"
 import {
   approveMakeupRequest,
   cancelCompletedMakeupRequest,
+  completeMakeupRefund,
   createMakeupRequest,
-  deleteMakeupRequest,
   getMakeupNotificationTriggerLabel,
   loadMakeupRequestWorkspaceData,
   MAKEUP_NOTIFICATION_CHANNEL_LABELS,
   MAKEUP_NOTIFICATION_TRIGGER_LABELS,
   rejectMakeupRequest,
   renderMakeupNotificationTemplate,
+  requestMakeupRefund,
   requestMakeupRequestRevision,
   resubmitMakeupRequest,
   toggleMakeupNotificationSetting,
@@ -65,11 +68,19 @@ import {
   type MakeupRequestWorkspaceData,
 } from "./makeup-request-service"
 
-type MakeupRequestView = "mine" | "approvals" | "closed"
+type MakeupRequestView = "mine" | "approvalPending" | "makeupPending" | "refundPending" | "closed"
 type MakeupRequestPeriodFilter = "all" | "today" | "week" | "month" | "custom"
+type MakeupActionNoteKind = "revision" | "reject" | "refund" | "refundComplete"
 
-const MAKEUP_REQUEST_ACTIVE_STATUSES = ["approval_pending", "revision_requested"] as Array<MakeupRequest["status"]>
+const MAKEUP_REQUEST_REQUEST_STATUSES = ["revision_requested"] as Array<MakeupRequest["status"]>
 const MAKEUP_REQUEST_CLOSED_STATUSES = ["completed", "rejected", "canceled"] as Array<MakeupRequest["status"]>
+const MAKEUP_REQUEST_VIEW_TABS: Array<{ id: MakeupRequestView; label: string }> = [
+  { id: "mine", label: "신청" },
+  { id: "approvalPending", label: "결재대기" },
+  { id: "makeupPending", label: "보강대기" },
+  { id: "refundPending", label: "환불대기" },
+  { id: "closed", label: "승인/반려" },
+]
 
 const MAKEUP_REQUEST_PERIOD_FILTERS: Array<{ key: MakeupRequestPeriodFilter; label: string }> = [
   { key: "all", label: "전체 기간" },
@@ -80,6 +91,7 @@ const MAKEUP_REQUEST_PERIOD_FILTERS: Array<{ key: MakeupRequestPeriodFilter; lab
 ]
 
 const EMPTY_INPUT: MakeupRequestInput = {
+  requestKind: "cancel_makeup",
   classId: "",
   reason: "",
   cancelDate: "",
@@ -93,8 +105,54 @@ const STATUS_BADGE_VARIANT: Record<MakeupRequest["status"], "default" | "seconda
   revision_requested: "outline",
   rejected: "destructive",
   manager_pending: "default",
+  makeup_pending: "secondary",
+  refund_pending: "outline",
   completed: "outline",
   canceled: "outline",
+}
+
+const MAKEUP_ACTION_NOTE_CONFIG: Record<MakeupActionNoteKind, {
+  title: string
+  description: string
+  label: string
+  placeholder: string
+  submitLabel: string
+  successMessage: string
+  required?: boolean
+}> = {
+  revision: {
+    title: "보완 요청",
+    description: "신청자가 수정해야 하는 내용을 남깁니다.",
+    label: "보완 요청 사유",
+    placeholder: "보완이 필요한 내용을 입력",
+    submitLabel: "보완 요청",
+    successMessage: "보완 요청을 보냈습니다.",
+  },
+  reject: {
+    title: "반려",
+    description: "반려 사유를 남기고 신청서를 종료합니다.",
+    label: "반려 사유",
+    placeholder: "반려 사유 입력",
+    submitLabel: "반려",
+    successMessage: "반려 처리했습니다.",
+  },
+  refund: {
+    title: "환불 신청",
+    description: "보강 일정을 잡기 어려운 사유를 남기고 결재대기로 다시 올립니다.",
+    label: "환불 신청 사유",
+    placeholder: "환불 신청 사유 입력",
+    submitLabel: "환불 신청",
+    successMessage: "환불 신청을 결재대기로 보냈습니다.",
+  },
+  refundComplete: {
+    title: "환불완료",
+    description: "관리팀에서 환불 처리를 완료하고 프로세스를 마무리합니다.",
+    label: "환불 완료 메모",
+    placeholder: "환불 완료 메모 입력",
+    submitLabel: "환불완료",
+    successMessage: "환불완료 처리했습니다.",
+    required: false,
+  },
 }
 
 const SUBJECT_SORT_ORDER = ["영어", "수학"]
@@ -232,6 +290,51 @@ function getMakeupActionErrorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function RequiredFormLabel({ htmlFor, children }: { htmlFor: string; children: ReactNode }) {
+  return (
+    <Label htmlFor={htmlFor}>
+      {children}<span className="ml-0.5 text-destructive" aria-hidden="true">*</span>
+    </Label>
+  )
+}
+
+function FieldClearButton({
+  "aria-label": ariaLabel,
+  className = "",
+  disabled = false,
+  onClick,
+  show,
+}: {
+  "aria-label": string
+  className?: string
+  disabled?: boolean
+  onClick: () => void
+  show: boolean
+}) {
+  if (!show) return null
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={[
+        "absolute right-8 top-1/2 z-10 size-6 -translate-y-1/2 rounded-full bg-background/90 text-muted-foreground hover:text-foreground",
+        className,
+      ].filter(Boolean).join(" ")}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onClick()
+      }}
+    >
+      <X className="size-3.5" aria-hidden="true" />
+    </Button>
+  )
+}
+
 function getRequestEvent(request: MakeupRequest, eventTypes: string[]) {
   const typeSet = new Set(eventTypes)
   return [...(request.events || [])]
@@ -340,19 +443,39 @@ function matchesMakeupRequestSelectionFilters(
   return true
 }
 
+function isMakeupRequestParticipant(request: MakeupRequest, currentUserId: string) {
+  return request.requesterId === currentUserId || request.teacherProfileId === currentUserId || request.approverProfileId === currentUserId
+}
+
 function getMakeupRequestViewRequests(
   requests: MakeupRequest[],
   view: MakeupRequestView,
   currentUserId: string,
+  canManage = false,
 ) {
   if (view === "mine") {
     return requests.filter((request) => (
-      (request.requesterId === currentUserId || request.teacherProfileId === currentUserId) &&
-      MAKEUP_REQUEST_ACTIVE_STATUSES.includes(request.status)
+      isMakeupRequestParticipant(request, currentUserId) &&
+      MAKEUP_REQUEST_REQUEST_STATUSES.includes(request.status)
     ))
   }
-  if (view === "approvals") {
-    return requests.filter((request) => request.approverProfileId === currentUserId && request.status === "approval_pending")
+  if (view === "approvalPending") {
+    return requests.filter((request) => (
+      isMakeupRequestParticipant(request, currentUserId) &&
+      request.status === "approval_pending"
+    ))
+  }
+  if (view === "makeupPending") {
+    return requests.filter((request) => (
+      isMakeupRequestParticipant(request, currentUserId) &&
+      request.status === "makeup_pending"
+    ))
+  }
+  if (view === "refundPending") {
+    return requests.filter((request) => (
+      request.status === "refund_pending" &&
+      (canManage || isMakeupRequestParticipant(request, currentUserId))
+    ))
   }
   return requests.filter((request) => (
     MAKEUP_REQUEST_CLOSED_STATUSES.includes(request.status)
@@ -414,7 +537,7 @@ const MAKEUP_REQUEST_TABLE_COLUMNS: Array<{
   { columnKey: "canceledAt", label: "승인취소일시", width: 160, minWidth: 132 },
   { columnKey: "canceledNote", label: "승인취소 메모", width: 230, minWidth: 160 },
   { columnKey: "approver", label: "결재자", width: 118, minWidth: 96 },
-  { columnKey: "action", label: "액션", width: 230, minWidth: 180, align: "right" },
+  { columnKey: "action", label: "액션", width: 250, minWidth: 230, align: "right" },
 ]
 
 const MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES = [
@@ -495,6 +618,29 @@ function formatRequestEventDateTime(request: MakeupRequest, eventTypes: string[]
   return formatDateTime(fallback || getRequestEvent(request, eventTypes)?.createdAt || "")
 }
 
+function isSystemMakeupScheduleNote(value: string) {
+  return /^보강\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}-\d{2}:\d{2}/.test(String(value || "").trim())
+}
+
+function getMakeupApprovalNoteValue(request: MakeupRequest) {
+  const approvalNote = getRequestEvent(request, ["approved"])?.note || ""
+  const canceledNote = getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || ""
+  const note = String(approvalNote || request.finalNote || "").trim()
+  if (!note || isSystemMakeupScheduleNote(note) || (canceledNote && note === canceledNote)) return "-"
+  return note
+}
+
+function isRefundApprovalRequest(request: MakeupRequest) {
+  const refundEvent = getRequestEvent(request, ["refund_requested"])
+  if (!refundEvent) return false
+
+  const requestEvent = getRequestEvent(request, ["submitted", "resubmitted"])
+  const approvalEvent = getRequestEvent(request, ["approved"])
+  if (requestEvent && requestEvent.createdAt > refundEvent.createdAt) return false
+  if (approvalEvent && approvalEvent.createdAt > refundEvent.createdAt) return false
+  return true
+}
+
 function getMakeupRequestTableValue(request: MakeupRequest, columnKey: MakeupRequestTableColumnKey) {
   switch (columnKey) {
     case "status":
@@ -532,7 +678,7 @@ function getMakeupRequestTableValue(request: MakeupRequest, columnKey: MakeupReq
     case "rejectedReason":
       return request.rejectedReason || "-"
     case "finalNote":
-      return request.finalNote || "-"
+      return getMakeupApprovalNoteValue(request)
     case "canceledNote":
       return getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || "-"
     case "action":
@@ -563,14 +709,16 @@ type MakeupRequestActionControlsProps = {
   request: MakeupRequest
   data: MakeupRequestWorkspaceData
   currentUserId: string
+  canManage: boolean
   saving: boolean
   onEditForRevision: (request: MakeupRequest) => void
+  onSchedulePendingMakeup: (request: MakeupRequest) => void
   onApprove: (request: MakeupRequest) => void
-  onRequestRevision: (request: MakeupRequest, note: string) => void
-  onReject: (request: MakeupRequest, note: string) => void
+  onRequestRevision: (request: MakeupRequest) => void
+  onReject: (request: MakeupRequest) => void
+  onRequestRefund: (request: MakeupRequest) => void
+  onCompleteRefund: (request: MakeupRequest) => void
   onFinalCancel: (request: MakeupRequest) => void
-  canForceDelete: boolean
-  onForceDelete: (request: MakeupRequest) => void
   align?: "start" | "end"
 }
 
@@ -578,26 +726,29 @@ function MakeupRequestActionControls({
   request,
   data,
   currentUserId,
+  canManage,
   saving,
   onEditForRevision,
+  onSchedulePendingMakeup,
   onApprove,
   onRequestRevision,
   onReject,
+  onRequestRefund,
+  onCompleteRefund,
   onFinalCancel,
-  canForceDelete,
-  onForceDelete,
   align = "end",
 }: MakeupRequestActionControlsProps) {
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
   const canRevise = request.status === "revision_requested" && request.requesterId === currentUserId
   const canApprove = request.status === "approval_pending" && request.approverProfileId === currentUserId
-  const canCancelApproval = request.status === "completed" && request.approverProfileId === currentUserId
-  const canForceDeleteRequest = canForceDelete && MAKEUP_REQUEST_CLOSED_STATUSES.includes(request.status)
+  const canHandleMakeupPending = request.status === "makeup_pending" && request.requesterId === currentUserId
+  const canCompleteRefund = request.status === "refund_pending" && canManage
+  const canCancelApproval = (request.status === "completed" || request.status === "makeup_pending") && request.approverProfileId === currentUserId
 
-  if (!canRevise && !canApprove && !canCancelApproval && !canForceDeleteRequest) return null
+  if (!canRevise && !canApprove && !canHandleMakeupPending && !canCompleteRefund && !canCancelApproval) return null
 
   return (
-    <div className={["flex flex-wrap gap-1.5", align === "end" ? "justify-end" : "justify-start"].join(" ")}>
+    <div className={["flex max-w-full flex-nowrap gap-1.5 overflow-x-auto whitespace-nowrap", align === "end" ? "justify-end" : "justify-start"].join(" ")}>
       {canRevise ? (
         <Button type="button" size="sm" variant="outline" onClick={() => onEditForRevision(request)}>
           보완
@@ -613,10 +764,7 @@ function MakeupRequestActionControls({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => {
-              const note = window.prompt("보완 요청 사유") || ""
-              if (note) onRequestRevision(request, note)
-            }}
+            onClick={() => onRequestRevision(request)}
           >
             보완 요청
           </Button>
@@ -624,26 +772,33 @@ function MakeupRequestActionControls({
             type="button"
             size="sm"
             variant="destructive"
-            onClick={() => {
-              const note = window.prompt("반려 사유") || ""
-              if (note) onReject(request, note)
-            }}
+            onClick={() => onReject(request)}
           >
             <X className="size-4" aria-hidden="true" />
             반려
           </Button>
         </>
       ) : null}
+      {canHandleMakeupPending ? (
+        <>
+          <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => onSchedulePendingMakeup(request)}>
+            <Plus className="size-4" aria-hidden="true" />
+            보강 신청
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => onRequestRefund(request)}>
+            환불 신청
+          </Button>
+        </>
+      ) : null}
+      {canCompleteRefund ? (
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => onCompleteRefund(request)}>
+          환불완료
+        </Button>
+      ) : null}
       {canCancelApproval ? (
         <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => onFinalCancel(request)}>
           <RotateCcw className="size-4" aria-hidden="true" />
           승인 취소
-        </Button>
-      ) : null}
-      {canForceDeleteRequest ? (
-        <Button type="button" size="sm" variant="destructive" disabled={saving} onClick={() => onForceDelete(request)}>
-          <Trash2 className="size-4" aria-hidden="true" />
-          삭제
         </Button>
       ) : null}
     </div>
@@ -654,14 +809,16 @@ function MakeupRequestDetailCard({
   request,
   data,
   currentUserId,
+  canManage,
   saving,
   onEditForRevision,
+  onSchedulePendingMakeup,
   onApprove,
   onRequestRevision,
   onReject,
+  onRequestRefund,
+  onCompleteRefund,
   onFinalCancel,
-  canForceDelete,
-  onForceDelete,
   onOpenDetail,
   variant = "full",
 }: MakeupRequestActionControlsProps & {
@@ -721,14 +878,16 @@ function MakeupRequestDetailCard({
           request={request}
           data={data}
           currentUserId={currentUserId}
+          canManage={canManage}
           saving={saving}
           onEditForRevision={onEditForRevision}
+          onSchedulePendingMakeup={onSchedulePendingMakeup}
           onApprove={onApprove}
           onRequestRevision={onRequestRevision}
           onReject={onReject}
+          onRequestRefund={onRequestRefund}
+          onCompleteRefund={onCompleteRefund}
           onFinalCancel={onFinalCancel}
-          canForceDelete={canForceDelete}
-          onForceDelete={onForceDelete}
           align="start"
         />
       </div>
@@ -741,15 +900,17 @@ function MakeupRequestCardList({
   loading,
   data,
   currentUserId,
+  canManage,
   saving,
   onOpenDetail,
   onEditForRevision,
+  onSchedulePendingMakeup,
   onApprove,
   onRequestRevision,
   onReject,
+  onRequestRefund,
+  onCompleteRefund,
   onFinalCancel,
-  canForceDelete,
-  onForceDelete,
 }: Omit<MakeupRequestActionControlsProps, "request" | "align"> & {
   requests: MakeupRequest[]
   loading: boolean
@@ -783,15 +944,17 @@ function MakeupRequestCardList({
             request={request}
             data={data}
             currentUserId={currentUserId}
+            canManage={canManage}
             saving={saving}
             onOpenDetail={() => onOpenDetail(request)}
             onEditForRevision={onEditForRevision}
+            onSchedulePendingMakeup={onSchedulePendingMakeup}
             onApprove={onApprove}
             onRequestRevision={onRequestRevision}
             onReject={onReject}
+            onRequestRefund={onRequestRefund}
+            onCompleteRefund={onCompleteRefund}
             onFinalCancel={onFinalCancel}
-            canForceDelete={canForceDelete}
-            onForceDelete={onForceDelete}
             variant="compact"
           />
         </div>
@@ -989,28 +1152,32 @@ function MakeupRequestDataTable({
   loading,
   data,
   currentUserId,
+  canManage,
   saving,
   onEditForRevision,
+  onSchedulePendingMakeup,
   onApprove,
   onRequestRevision,
   onReject,
+  onRequestRefund,
+  onCompleteRefund,
   onFinalCancel,
-  canForceDelete,
-  onForceDelete,
   onOpenDetail,
 }: {
   requests: MakeupRequest[]
   loading: boolean
   data: MakeupRequestWorkspaceData
   currentUserId: string
+  canManage: boolean
   saving: boolean
   onEditForRevision: (request: MakeupRequest) => void
+  onSchedulePendingMakeup: (request: MakeupRequest) => void
   onApprove: (request: MakeupRequest) => void
-  onRequestRevision: (request: MakeupRequest, note: string) => void
-  onReject: (request: MakeupRequest, note: string) => void
+  onRequestRevision: (request: MakeupRequest) => void
+  onReject: (request: MakeupRequest) => void
+  onRequestRefund: (request: MakeupRequest) => void
+  onCompleteRefund: (request: MakeupRequest) => void
   onFinalCancel: (request: MakeupRequest) => void
-  canForceDelete: boolean
-  onForceDelete: (request: MakeupRequest) => void
   onOpenDetail: (request: MakeupRequest) => void
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<MakeupRequestTableColumnKey, number>>(MAKEUP_REQUEST_TABLE_COLUMN_WIDTHS)
@@ -1178,10 +1345,10 @@ function MakeupRequestDataTable({
           </div>
         </div>
         <div className="hidden md:block">
-          <div className="overflow-x-auto" role="table" aria-label="휴보강 신청 데이터테이블">
+          <div className="w-full overflow-x-auto" role="table" aria-label="휴보강 신청 데이터테이블">
             <div
               role="row"
-              className="grid min-w-max border-b bg-muted/45 text-xs [grid-template-columns:var(--makeup-request-grid-template)]"
+              className="grid min-w-full border-b bg-muted/45 text-xs [grid-template-columns:var(--makeup-request-grid-template)]"
               style={gridTemplateStyle}
             >
               {MAKEUP_REQUEST_TABLE_COLUMNS.map((column) => (
@@ -1204,7 +1371,7 @@ function MakeupRequestDataTable({
                 <div
                   key={request.id}
                   role="row"
-                  className="grid min-w-max border-b last:border-b-0 hover:bg-muted/30 [grid-template-columns:var(--makeup-request-grid-template)]"
+                  className="grid min-w-full border-b last:border-b-0 hover:bg-muted/30 [grid-template-columns:var(--makeup-request-grid-template)]"
                   style={gridTemplateStyle}
                 >
                   {MAKEUP_REQUEST_TABLE_COLUMNS.map((column) => {
@@ -1226,14 +1393,16 @@ function MakeupRequestDataTable({
                             request={request}
                             data={data}
                             currentUserId={currentUserId}
+                            canManage={canManage}
                             saving={saving}
                             onEditForRevision={onEditForRevision}
+                            onSchedulePendingMakeup={onSchedulePendingMakeup}
                             onApprove={onApprove}
                             onRequestRevision={onRequestRevision}
                             onReject={onReject}
+                            onRequestRefund={onRequestRefund}
+                            onCompleteRefund={onCompleteRefund}
                             onFinalCancel={onFinalCancel}
-                            canForceDelete={canForceDelete}
-                            onForceDelete={onForceDelete}
                           />
                         </MakeupRequestDataCell>
                       )
@@ -1258,15 +1427,17 @@ function MakeupRequestDataTable({
         loading={loading}
         data={data}
         currentUserId={currentUserId}
+        canManage={canManage}
         saving={saving}
         onOpenDetail={onOpenDetail}
         onEditForRevision={onEditForRevision}
+        onSchedulePendingMakeup={onSchedulePendingMakeup}
         onApprove={onApprove}
         onRequestRevision={onRequestRevision}
         onReject={onReject}
+        onRequestRefund={onRequestRefund}
+        onCompleteRefund={onCompleteRefund}
         onFinalCancel={onFinalCancel}
-        canForceDelete={canForceDelete}
-        onForceDelete={onForceDelete}
       />
     </div>
   )
@@ -1324,6 +1495,22 @@ function materializeSlots(input: MakeupRequestInput) {
     .filter((slot): slot is NonNullable<ReturnType<typeof materializeSlot>> => Boolean(slot))
 }
 
+function hasStartedMakeupSlot(slot: MakeupRequestInput["makeupSlots"][number]) {
+  return Boolean(slot.date || slot.startTime || slot.endTime || slot.classroom)
+}
+
+function hasIncompleteStartedMakeupSlot(input: MakeupRequestInput) {
+  return input.makeupSlots.some((slot) => hasStartedMakeupSlot(slot) && !isCompleteSlotDateTime(slot))
+}
+
+function getInputRequestKind(input: MakeupRequestInput, makeupSlots = materializeSlots(input)): MakeupRequestKind {
+  const hasCancel = Boolean(input.cancelDate)
+  const hasMakeup = makeupSlots.length > 0
+  if (hasCancel && !hasMakeup) return "cancel_only"
+  if (!hasCancel && hasMakeup) return "makeup_only"
+  return "cancel_makeup"
+}
+
 function getClassTeacherKey(classItem: MakeupClassOption) {
   return classItem.teacherCatalogId ? `id:${classItem.teacherCatalogId}` : `name:${classItem.teacher}`
 }
@@ -1333,6 +1520,7 @@ function getSlotRoomAvailability(
   data: MakeupRequestWorkspaceData,
   currentRequestId = "",
   subject = "",
+  canIgnoreOrphanedMakeupEvents = false,
 ) {
   const materializedSlot = materializeSlot(slot)
   return buildRoomAvailability({
@@ -1343,6 +1531,7 @@ function getSlotRoomAvailability(
     slots: materializedSlot ? [materializedSlot] : [],
     currentRequestId,
     subject,
+    ignoreOrphanedMakeupEvents: canIgnoreOrphanedMakeupEvents,
   })
 }
 
@@ -1351,10 +1540,11 @@ function getSlotRoomCollisionState(
   data: MakeupRequestWorkspaceData,
   currentRequestId = "",
   subject = "",
+  canIgnoreOrphanedMakeupEvents = false,
 ) {
   const room = slot.classroom || ""
   if (!room) return null
-  return getSlotRoomAvailability(slot, data, currentRequestId, subject).find((item) => item.name === room) || null
+  return getSlotRoomAvailability(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents).find((item) => item.name === room) || null
 }
 
 function hasSlotRoomCollision(
@@ -1362,12 +1552,13 @@ function hasSlotRoomCollision(
   data: MakeupRequestWorkspaceData,
   currentRequestId = "",
   subject = "",
+  canIgnoreOrphanedMakeupEvents = false,
 ) {
-  return slots.some((slot) => Boolean(getSlotRoomCollisionState(slot, data, currentRequestId, subject)?.collisions.length))
+  return slots.some((slot) => Boolean(getSlotRoomCollisionState(slot, data, currentRequestId, subject, canIgnoreOrphanedMakeupEvents)?.collisions.length))
 }
 
 export function MakeupRequestWorkspace() {
-  const { user, role, isAdmin, loading: authLoading, session } = useAuth()
+  const { user, role, loading: authLoading, session } = useAuth()
   const [view, setView] = useState<MakeupRequestView>("mine")
   const [data, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
@@ -1388,6 +1579,10 @@ export function MakeupRequestWorkspace() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [approvalRequest, setApprovalRequest] = useState<MakeupRequest | null>(null)
+  const [approvalNote, setApprovalNote] = useState("")
+  const [actionNoteRequest, setActionNoteRequest] = useState<{ request: MakeupRequest; kind: MakeupActionNoteKind } | null>(null)
+  const [actionNote, setActionNote] = useState("")
   const [finalCancelRequest, setFinalCancelRequest] = useState<MakeupRequest | null>(null)
   const [finalCancelNote, setFinalCancelNote] = useState("")
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false)
@@ -1404,12 +1599,12 @@ export function MakeupRequestWorkspace() {
   const currentUserId = user?.id || ""
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
   const isManager = canUserManage(role)
-  const canForceDeleteClosedRequests = isAdmin
   const detailRequest = useMemo(() => (
     selectedDetailRequest
       ? data.requests.find((request) => request.id === selectedDetailRequest.id) || selectedDetailRequest
       : null
   ), [data.requests, selectedDetailRequest])
+  const actionNoteConfig = actionNoteRequest ? MAKEUP_ACTION_NOTE_CONFIG[actionNoteRequest.kind] : MAKEUP_ACTION_NOTE_CONFIG.revision
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -1467,18 +1662,19 @@ export function MakeupRequestWorkspace() {
   ), [data.classes, selectedSubject, selectedTeacherKey])
 
   const selectedRoomHasCollision = useMemo(() => (
-    hasSlotRoomCollision(input.makeupSlots, data, editingRequestId, selectedClass?.subject || selectedSubject)
-  ), [data, editingRequestId, input.makeupSlots, selectedClass?.subject, selectedSubject])
+    hasSlotRoomCollision(input.makeupSlots, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))
+  ), [data, editingRequestId, input, selectedClass?.subject, selectedSubject, role])
 
   const filteredRequests = useMemo(() => (
-    getMakeupRequestViewRequests(data.requests, view, currentUserId)
-  ), [currentUserId, data.requests, view])
+    getMakeupRequestViewRequests(data.requests, view, currentUserId, isManager)
+  ), [currentUserId, data.requests, isManager, view])
 
-  const viewCounts = useMemo(() => ({
-    mine: getMakeupRequestViewRequests(data.requests, "mine", currentUserId).length,
-    approvals: getMakeupRequestViewRequests(data.requests, "approvals", currentUserId).length,
-    closed: getMakeupRequestViewRequests(data.requests, "closed", currentUserId).length,
-  }), [currentUserId, data.requests])
+  const viewCounts = useMemo(() => (
+    MAKEUP_REQUEST_VIEW_TABS.reduce((counts, tab) => ({
+      ...counts,
+      [tab.id]: getMakeupRequestViewRequests(data.requests, tab.id, currentUserId, isManager).length,
+    }), {} as Record<MakeupRequestView, number>)
+  ), [currentUserId, data.requests, isManager])
 
   const notificationSettingsByTrigger = useMemo(() => {
     const grouped = new Map<string, MakeupNotificationSetting[]>()
@@ -1600,19 +1796,26 @@ export function MakeupRequestWorkspace() {
       setError("로그인 세션을 확인할 수 없습니다.")
       return
     }
-    if (!input.classId || !input.reason || !input.cancelDate || !input.approverTeacherCatalogId) {
+    const makeupSlots = materializeSlots(input)
+    const requestHasCancel = Boolean(input.cancelDate)
+    const requestHasMakeup = makeupSlots.length > 0
+    if (!input.classId || !input.reason || !input.approverTeacherCatalogId) {
       setError("필수 항목을 모두 입력해 주세요.")
       return
     }
-    if (input.makeupSlots.length === 0 || input.makeupSlots.some((slot) => !isCompleteSlotDateTime(slot))) {
+    if (hasIncompleteStartedMakeupSlot(input)) {
       setError("보강일시의 날짜, 시작시각, 종료시각을 모두 입력해 주세요.")
       return
     }
-    if (input.makeupSlots.some((slot) => !slot.classroom)) {
+    if (!requestHasCancel && !requestHasMakeup) {
+      setError("휴강일 또는 보강일시를 입력해 주세요.")
+      return
+    }
+    if (requestHasMakeup && makeupSlots.some((slot) => !slot.classroom)) {
       setError("각 보강일시의 강의실을 선택해 주세요.")
       return
     }
-    if (selectedRoomHasCollision) {
+    if (requestHasMakeup && selectedRoomHasCollision) {
       setError("충돌이 없는 보강 강의실을 선택해 주세요.")
       return
     }
@@ -1621,9 +1824,9 @@ export function MakeupRequestWorkspace() {
     setError("")
     setMessage("")
     try {
-      const makeupSlots = materializeSlots(input)
       const payload = {
         ...input,
+        requestKind: getInputRequestKind(input, makeupSlots),
         makeupClassroom: makeupSlots[0]?.classroom || "",
         makeupSlots,
       }
@@ -1634,6 +1837,7 @@ export function MakeupRequestWorkspace() {
         await createMakeupRequest(payload, currentUserId)
         setMessage("휴보강 신청서를 상신했습니다.")
       }
+      setView("approvalPending")
       resetForm()
       setRequestDialogOpen(false)
       await refresh()
@@ -1661,6 +1865,68 @@ export function MakeupRequestWorkspace() {
     }
   }, [refresh])
 
+  const closeApprovalDialog = useCallback(() => {
+    if (saving) return
+    setApprovalRequest(null)
+    setApprovalNote("")
+  }, [saving])
+
+  const handleApproveWithNote = useCallback(async () => {
+    if (!approvalRequest) return
+    const approved = await runAction(
+      () => approveMakeupRequest(approvalRequest.id, currentUserId, approvalNote),
+      isRefundApprovalRequest(approvalRequest)
+        ? "결재 승인 후 환불대기로 이동했습니다."
+        : hasMakeupPart(approvalRequest)
+          ? "결재 승인 및 자동 처리를 완료했습니다."
+          : "결재 승인 후 보강대기로 이동했습니다.",
+    )
+    if (approved) {
+      setApprovalRequest(null)
+      setApprovalNote("")
+      setSelectedDetailRequest(null)
+    }
+  }, [approvalNote, approvalRequest, currentUserId, runAction])
+
+  const handleOpenActionNoteRequest = useCallback((request: MakeupRequest, kind: MakeupActionNoteKind) => {
+    setActionNoteRequest({ request, kind })
+    setActionNote("")
+  }, [])
+
+  const closeActionNoteDialog = useCallback(() => {
+    if (saving) return
+    setActionNoteRequest(null)
+    setActionNote("")
+  }, [saving])
+
+  const handleSubmitActionNote = useCallback(async () => {
+    if (!actionNoteRequest) return
+    const note = actionNote.trim()
+    if (!note && actionNoteConfig.required !== false) {
+      setError(`${actionNoteConfig.label}를 입력해 주세요.`)
+      return
+    }
+
+    const handled = await runAction(() => {
+      if (actionNoteRequest.kind === "revision") {
+        return requestMakeupRequestRevision(actionNoteRequest.request.id, currentUserId, actionNote)
+      }
+      if (actionNoteRequest.kind === "reject") {
+        return rejectMakeupRequest(actionNoteRequest.request.id, currentUserId, actionNote)
+      }
+      if (actionNoteRequest.kind === "refundComplete") {
+        return completeMakeupRefund(actionNoteRequest.request.id, currentUserId, actionNote)
+      }
+      return requestMakeupRefund(actionNoteRequest.request.id, currentUserId, actionNote)
+    }, actionNoteConfig.successMessage)
+
+    if (handled) {
+      setActionNoteRequest(null)
+      setActionNote("")
+      setSelectedDetailRequest(null)
+    }
+  }, [actionNote, actionNoteConfig.label, actionNoteConfig.required, actionNoteConfig.successMessage, actionNoteRequest, currentUserId, runAction])
+
   const closeFinalCancelDialog = useCallback(() => {
     if (saving) return
     setFinalCancelRequest(null)
@@ -1678,22 +1944,6 @@ export function MakeupRequestWorkspace() {
       setFinalCancelNote("")
     }
   }, [currentUserId, finalCancelNote, finalCancelRequest, runAction])
-
-  const handleForceDeleteRequest = useCallback(async (request: MakeupRequest) => {
-    if (!canForceDeleteClosedRequests || !MAKEUP_REQUEST_CLOSED_STATUSES.includes(request.status)) {
-      setError("운영자만 완료된 휴보강 이력을 삭제할 수 있습니다.")
-      return
-    }
-    const confirmed = window.confirm(`${request.className || "휴보강 신청"} 이력 삭제할까요?`)
-    if (!confirmed) return
-    const deleted = await runAction(
-      () => deleteMakeupRequest(request.id, currentUserId),
-      "휴보강 이력을 삭제했습니다.",
-    )
-    if (deleted) {
-      setSelectedDetailRequest(null)
-    }
-  }, [canForceDeleteClosedRequests, currentUserId, runAction])
 
   const handleToggleNotificationSetting = useCallback(async (setting: MakeupNotificationSetting) => {
     if (!isManager) {
@@ -1848,6 +2098,7 @@ export function MakeupRequestWorkspace() {
       setSelectedTeacherKey(getClassTeacherKey(requestClass))
     }
     setInput({
+      requestKind: request.requestKind,
       classId: request.classId,
       reason: request.reason,
       cancelDate: request.cancelDate,
@@ -1860,15 +2111,32 @@ export function MakeupRequestWorkspace() {
     setRequestDialogOpen(true)
   }, [data.classes])
 
+  const handleSchedulePendingMakeup = useCallback((request: MakeupRequest) => {
+    const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
+    setSelectedDetailRequest(null)
+    setEditingRequestId(request.id)
+    setView("mine")
+    if (requestClass) {
+      setSelectedSubject(requestClass.subject)
+      setSelectedTeacherKey(getClassTeacherKey(requestClass))
+    }
+    setInput({
+      requestKind: "cancel_makeup",
+      classId: request.classId,
+      reason: request.reason,
+      cancelDate: request.cancelDate,
+      makeupSlots: [{ id: createSlotId(), date: "", startTime: "", endTime: "", classroom: "" }],
+      makeupClassroom: "",
+      approverTeacherCatalogId: request.approverTeacherCatalogId,
+    })
+    setRequestDialogOpen(true)
+  }, [data.classes])
+
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 md:px-6">
+    <div className="mx-auto flex w-full max-w-none flex-col gap-4 px-4 py-5 md:px-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="휴보강 신청서 보기">
-          {[
-            { id: "mine", label: "신청" },
-            { id: "approvals", label: "결재함" },
-            { id: "closed", label: "승인/반려" },
-          ].map((tab) => (
+          {MAKEUP_REQUEST_VIEW_TABS.map((tab) => (
             <Button
               key={tab.id}
               type="button"
@@ -1876,10 +2144,10 @@ export function MakeupRequestWorkspace() {
               size="sm"
               role="tab"
               aria-selected={view === tab.id}
-              onClick={() => setView(tab.id as MakeupRequestView)}
+              onClick={() => setView(tab.id)}
             >
               {tab.label}
-              <Badge variant={view === tab.id ? "secondary" : "outline"}>{viewCounts[tab.id as MakeupRequestView]}</Badge>
+              <Badge variant={view === tab.id ? "secondary" : "outline"}>{viewCounts[tab.id]}</Badge>
             </Button>
           ))}
         </div>
@@ -1910,7 +2178,7 @@ export function MakeupRequestWorkspace() {
             <div className="grid gap-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
-                <Label htmlFor="makeup-subject">과목</Label>
+                <RequiredFormLabel htmlFor="makeup-subject">과목</RequiredFormLabel>
                 <Select value={selectedSubject} onValueChange={handleSubjectChange}>
                   <SelectTrigger id="makeup-subject">
                     <SelectValue placeholder="과목 선택" />
@@ -1923,7 +2191,7 @@ export function MakeupRequestWorkspace() {
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="makeup-teacher">선생님</Label>
+                <RequiredFormLabel htmlFor="makeup-teacher">선생님</RequiredFormLabel>
                 <Select value={selectedTeacherKey} onValueChange={handleTeacherChange} disabled={!selectedSubject}>
                   <SelectTrigger id="makeup-teacher">
                     <SelectValue placeholder={selectedSubject ? "선생님 선택" : "과목 먼저"} />
@@ -1936,7 +2204,7 @@ export function MakeupRequestWorkspace() {
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="makeup-class">수업</Label>
+                <RequiredFormLabel htmlFor="makeup-class">수업</RequiredFormLabel>
                 <Select value={input.classId} onValueChange={handleClassChange} disabled={!selectedTeacherKey}>
                   <SelectTrigger id="makeup-class">
                     <SelectValue placeholder={selectedTeacherKey ? "수업 선택" : "선생님 먼저"} />
@@ -1953,25 +2221,34 @@ export function MakeupRequestWorkspace() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="makeup-reason">사유</Label>
+              <RequiredFormLabel htmlFor="makeup-reason">사유</RequiredFormLabel>
               <Textarea
                 id="makeup-reason"
                 value={input.reason}
                 onChange={(event) => patchInput({ reason: event.target.value })}
                 placeholder="휴강 및 보강 사유"
                 rows={3}
+                required
               />
             </div>
 
             <div className="grid gap-2">
               <Label htmlFor="cancel-date">휴강일</Label>
-              <DatePickerControl
-                id="cancel-date"
-                value={input.cancelDate}
-                onChange={(value) => patchInput({ cancelDate: value })}
-                placeholder="휴강일 선택"
-                ariaLabel="휴강일 선택"
-              />
+              <div className="relative">
+                <DatePickerControl
+                  id="cancel-date"
+                  value={input.cancelDate}
+                  onChange={(value) => patchInput({ cancelDate: value })}
+                  placeholder="휴강일 선택"
+                  ariaLabel="휴강일 선택"
+                  className={input.cancelDate ? "pr-14" : ""}
+                />
+                <FieldClearButton
+                  aria-label="휴강일 초기화"
+                  show={Boolean(input.cancelDate)}
+                  onClick={() => patchInput({ cancelDate: "" })}
+                />
+              </div>
             </div>
 
             <div className="grid gap-2">
@@ -1984,8 +2261,8 @@ export function MakeupRequestWorkspace() {
               </div>
               <div className="grid gap-2">
                 {input.makeupSlots.map((slot, index) => {
-                  const slotRoomAvailability = getSlotRoomAvailability(slot, data, editingRequestId, selectedClass?.subject || selectedSubject)
-                  const selectedSlotRoomState = getSlotRoomCollisionState(slot, data, editingRequestId, selectedClass?.subject || selectedSubject)
+                  const slotRoomAvailability = getSlotRoomAvailability(slot, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))
+                  const selectedSlotRoomState = getSlotRoomCollisionState(slot, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))
                   const slotDateTimeReady = isCompleteSlotDateTime(slot)
 
                   return (
@@ -1993,30 +2270,54 @@ export function MakeupRequestWorkspace() {
                       <div className="grid gap-2 md:grid-cols-[minmax(150px,1fr)_minmax(96px,0.55fr)_minmax(96px,0.55fr)_32px]">
                         <div className="grid gap-1">
                           <span className="text-[11px] font-medium text-muted-foreground">날짜</span>
-                          <DatePickerControl
-                            value={slot.date || ""}
-                            onChange={(value) => patchMakeupSlot(slot.id || "", { date: value })}
-                            placeholder="날짜 선택"
-                            ariaLabel={`보강일시 ${index + 1} 날짜`}
-                          />
+                          <div className="relative">
+                            <DatePickerControl
+                              value={slot.date || ""}
+                              onChange={(value) => patchMakeupSlot(slot.id || "", { date: value })}
+                              placeholder="날짜 선택"
+                              ariaLabel={`보강일시 ${index + 1} 날짜`}
+                              className={slot.date ? "pr-14" : ""}
+                            />
+                            <FieldClearButton
+                              aria-label={`보강일시 ${index + 1} 날짜 초기화`}
+                              show={Boolean(slot.date)}
+                              onClick={() => patchMakeupSlot(slot.id || "", { date: "" })}
+                            />
+                          </div>
                         </div>
                         <div className="grid gap-1">
                           <span className="text-[11px] font-medium text-muted-foreground">시작시각</span>
-                          <TimePickerControl
-                            value={slot.startTime || ""}
-                            onChange={(value) => patchMakeupSlot(slot.id || "", { startTime: value })}
-                            placeholder="시작"
-                            ariaLabel={`보강일시 ${index + 1} 시작시각`}
-                          />
+                          <div className="relative">
+                            <TimePickerControl
+                              value={slot.startTime || ""}
+                              onChange={(value) => patchMakeupSlot(slot.id || "", { startTime: value })}
+                              placeholder="시작"
+                              ariaLabel={`보강일시 ${index + 1} 시작시각`}
+                              className={slot.startTime ? "pr-14" : ""}
+                            />
+                            <FieldClearButton
+                              aria-label={`보강일시 ${index + 1} 시작시각 초기화`}
+                              show={Boolean(slot.startTime)}
+                              onClick={() => patchMakeupSlot(slot.id || "", { startTime: "" })}
+                            />
+                          </div>
                         </div>
                         <div className="grid gap-1">
                           <span className="text-[11px] font-medium text-muted-foreground">종료시각</span>
-                          <TimePickerControl
-                            value={slot.endTime || ""}
-                            onChange={(value) => patchMakeupSlot(slot.id || "", { endTime: value })}
-                            placeholder="종료"
-                            ariaLabel={`보강일시 ${index + 1} 종료시각`}
-                          />
+                          <div className="relative">
+                            <TimePickerControl
+                              value={slot.endTime || ""}
+                              onChange={(value) => patchMakeupSlot(slot.id || "", { endTime: value })}
+                              placeholder="종료"
+                              ariaLabel={`보강일시 ${index + 1} 종료시각`}
+                              className={slot.endTime ? "pr-14" : ""}
+                            />
+                            <FieldClearButton
+                              aria-label={`보강일시 ${index + 1} 종료시각 초기화`}
+                              show={Boolean(slot.endTime)}
+                              onClick={() => patchMakeupSlot(slot.id || "", { endTime: "" })}
+                            />
+                          </div>
                         </div>
                         <Button
                           type="button"
@@ -2039,9 +2340,16 @@ export function MakeupRequestWorkspace() {
                             onValueChange={(value) => patchMakeupSlot(slot.id || "", { classroom: value })}
                             disabled={!slotDateTimeReady}
                           >
-                            <SelectTrigger aria-label={`보강일시 ${index + 1} 강의실`}>
-                              <SelectValue placeholder="강의실 선택" />
-                            </SelectTrigger>
+                            <div className="relative">
+                              <SelectTrigger aria-label={`보강일시 ${index + 1} 강의실`} className={slot.classroom ? "pr-14" : ""}>
+                                <SelectValue placeholder="강의실 선택" />
+                              </SelectTrigger>
+                              <FieldClearButton
+                                aria-label={`보강일시 ${index + 1} 강의실 초기화`}
+                                show={Boolean(slot.classroom)}
+                                onClick={() => patchMakeupSlot(slot.id || "", { classroom: "" })}
+                              />
+                            </div>
                             <SelectContent>
                               {slotRoomAvailability.map((room) => (
                                 <SelectItem key={room.name} value={room.name} disabled={!room.available}>
@@ -2064,7 +2372,7 @@ export function MakeupRequestWorkspace() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="makeup-approver">결재자</Label>
+              <RequiredFormLabel htmlFor="makeup-approver">결재자</RequiredFormLabel>
               <Select value={input.approverTeacherCatalogId} onValueChange={(value) => patchInput({ approverTeacherCatalogId: value })}>
                 <SelectTrigger id="makeup-approver">
                   <SelectValue placeholder={selectedClass ? "결재자 선택" : "수업을 먼저 선택"} />
@@ -2097,23 +2405,22 @@ export function MakeupRequestWorkspace() {
           loading={loading}
           data={data}
           currentUserId={currentUserId}
+          canManage={isManager}
           saving={saving}
           onEditForRevision={handleEditForRevision}
+          onSchedulePendingMakeup={handleSchedulePendingMakeup}
           onApprove={(request) => {
-            void runAction(() => approveMakeupRequest(request.id, currentUserId), "결재 승인 및 자동 처리를 완료했습니다.")
+            setApprovalRequest(request)
+            setApprovalNote("")
           }}
-          onRequestRevision={(request, note) => {
-            void runAction(() => requestMakeupRequestRevision(request.id, currentUserId, note), "보완 요청을 보냈습니다.")
-          }}
-          onReject={(request, note) => {
-            void runAction(() => rejectMakeupRequest(request.id, currentUserId, note), "반려 처리했습니다.")
-          }}
+          onRequestRevision={(request) => handleOpenActionNoteRequest(request, "revision")}
+          onReject={(request) => handleOpenActionNoteRequest(request, "reject")}
+          onRequestRefund={(request) => handleOpenActionNoteRequest(request, "refund")}
+          onCompleteRefund={(request) => handleOpenActionNoteRequest(request, "refundComplete")}
           onFinalCancel={(request) => {
             setFinalCancelRequest(request)
             setFinalCancelNote("")
           }}
-          canForceDelete={canForceDeleteClosedRequests}
-          onForceDelete={handleForceDeleteRequest}
           onOpenDetail={setSelectedDetailRequest}
         />
       </div>
@@ -2130,27 +2437,27 @@ export function MakeupRequestWorkspace() {
               request={detailRequest}
               data={data}
               currentUserId={currentUserId}
+              canManage={isManager}
               saving={saving}
               onEditForRevision={(request) => {
                 setSelectedDetailRequest(null)
                 handleEditForRevision(request)
               }}
+              onSchedulePendingMakeup={handleSchedulePendingMakeup}
               onApprove={(request) => {
-                void runAction(() => approveMakeupRequest(request.id, currentUserId), "결재 승인 및 자동 처리를 완료했습니다.")
+                setSelectedDetailRequest(null)
+                setApprovalRequest(request)
+                setApprovalNote("")
               }}
-              onRequestRevision={(request, note) => {
-                void runAction(() => requestMakeupRequestRevision(request.id, currentUserId, note), "보완 요청을 보냈습니다.")
-              }}
-              onReject={(request, note) => {
-                void runAction(() => rejectMakeupRequest(request.id, currentUserId, note), "반려 처리했습니다.")
-              }}
+              onRequestRevision={(request) => handleOpenActionNoteRequest(request, "revision")}
+              onReject={(request) => handleOpenActionNoteRequest(request, "reject")}
+              onRequestRefund={(request) => handleOpenActionNoteRequest(request, "refund")}
+              onCompleteRefund={(request) => handleOpenActionNoteRequest(request, "refundComplete")}
               onFinalCancel={(request) => {
                 setSelectedDetailRequest(null)
                 setFinalCancelRequest(request)
                 setFinalCancelNote("")
               }}
-              canForceDelete={canForceDeleteClosedRequests}
-              onForceDelete={handleForceDeleteRequest}
             />
           ) : null}
         </DialogContent>
@@ -2408,6 +2715,69 @@ export function MakeupRequestWorkspace() {
             </Button>
             <Button type="button" onClick={() => void handleSaveNotificationTemplate()} disabled={saving || !isManager}>
               저장
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(approvalRequest)} onOpenChange={(open) => {
+        if (!open) closeApprovalDialog()
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>승인 메모</DialogTitle>
+            <DialogDescription>
+              수업일정과 캘린더에 바로 반영됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="makeup-approval-note">승인 메모</Label>
+            <Textarea
+              id="makeup-approval-note"
+              value={approvalNote}
+              onChange={(event) => setApprovalNote(event.target.value)}
+              placeholder={approvalRequest?.className || "승인 메모 입력"}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeApprovalDialog} disabled={saving}>
+              닫기
+            </Button>
+            <Button type="button" onClick={() => void handleApproveWithNote()} disabled={saving || !approvalRequest || !approvalNote.trim()}>
+              <Check className="size-4" aria-hidden="true" />
+              승인 처리
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(actionNoteRequest)} onOpenChange={(open) => {
+        if (!open) closeActionNoteDialog()
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{actionNoteConfig.title}</DialogTitle>
+            <DialogDescription>
+              {actionNoteConfig.description}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="makeup-action-note">{actionNoteConfig.label}</Label>
+            <Textarea
+              id="makeup-action-note"
+              value={actionNote}
+              onChange={(event) => setActionNote(event.target.value)}
+              placeholder={actionNoteConfig.placeholder}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeActionNoteDialog} disabled={saving}>
+              닫기
+            </Button>
+            <Button type="button" onClick={() => void handleSubmitActionNote()} disabled={saving || !actionNoteRequest || !actionNote.trim()}>
+              {actionNoteConfig.submitLabel}
             </Button>
           </DialogFooter>
         </DialogContent>

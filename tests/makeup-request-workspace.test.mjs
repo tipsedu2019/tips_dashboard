@@ -15,10 +15,14 @@ const migrationSource = readFileSync("supabase/migrations/20260706102047_makeup_
 const workspaceSource = readFileSync("src/features/makeup-requests/makeup-request-workspace.tsx", "utf8");
 const dateTimePickerSource = readFileSync("src/components/ui/date-time-picker.tsx", "utf8");
 const serviceSource = readFileSync("src/features/makeup-requests/makeup-request-service.ts", "utf8");
+const modelSource = readFileSync("src/features/makeup-requests/makeup-request-model.js", "utf8");
 const apiRouteSource = readFileSync("src/app/api/google-chat/route.ts", "utf8");
 const slotsMigrationSource = readFileSync("supabase/migrations/20260706105512_makeup_request_slots.sql", "utf8");
 const notificationMigrationSource = readFileSync("supabase/migrations/20260706123000_makeup_notification_controls.sql", "utf8");
 const pushMigrationSource = readOptionalSource("supabase/migrations/20260707143000_dashboard_push_subscriptions.sql");
+const flowTypesMigrationSource = readOptionalSource("supabase/migrations/20260707152220_makeup_request_flow_types.sql");
+const notificationRetentionMigrationSource = readOptionalSource("supabase/migrations/20260707152233_makeup_notification_delivery_retention.sql");
+const refundFlowMigrationSource = readOptionalSource("supabase/migrations/20260708025405_makeup_request_refund_flow.sql");
 const manifestSource = readOptionalSource("public/manifest.webmanifest");
 const serviceWorkerSource = readOptionalSource("public/sw.js");
 const pushClientSource = readOptionalSource("src/lib/dashboard-push-client.ts");
@@ -60,10 +64,29 @@ test("makeup request migration creates request event and notification tables", (
   assert.doesNotMatch(allMigrationSource, /grant select, insert, update on public\.google_chat_webhook_settings to authenticated/);
 });
 
+test("makeup request schema supports cancel-only and makeup-only flow types", () => {
+  assert.match(flowTypesMigrationSource, /add column if not exists request_kind text not null default 'cancel_makeup'/);
+  assert.match(flowTypesMigrationSource, /check \(request_kind in \('cancel_makeup', 'cancel_only', 'makeup_only'\)\)/);
+  assert.match(flowTypesMigrationSource, /drop constraint if exists makeup_requests_status_check/);
+  assert.match(flowTypesMigrationSource, /'makeup_pending'/);
+  assert.match(flowTypesMigrationSource, /alter column cancel_date drop not null/);
+  assert.match(flowTypesMigrationSource, /alter column makeup_start_at drop not null/);
+  assert.match(flowTypesMigrationSource, /alter column makeup_end_at drop not null/);
+  assert.match(flowTypesMigrationSource, /alter column makeup_classroom drop not null/);
+  assert.match(flowTypesMigrationSource, /makeup_requests_kind_idx/);
+  assert.match(flowTypesMigrationSource, /delete from public\.academic_events event/);
+  assert.match(flowTypesMigrationSource, /\[\[TIPS_MAKEUP\]\]/);
+  assert.match(flowTypesMigrationSource, /->> 'kind'\) = 'makeup'/);
+  assert.match(flowTypesMigrationSource, /not exists \(\s*select 1\s*from public\.makeup_requests request/);
+  assert.match(flowTypesMigrationSource, /->> 'requestId'\)/);
+  assert.match(refundFlowMigrationSource, /drop constraint if exists makeup_requests_status_check/);
+  assert.match(refundFlowMigrationSource, /'refund_pending'/);
+});
+
 test("makeup workspace includes approver queues form fields and room availability states", () => {
-  assert.match(workspaceSource, /type MakeupRequestView = "mine" \| "approvals" \| "closed"/);
+  assert.match(workspaceSource, /type MakeupRequestView = "mine" \| "approvalPending" \| "makeupPending" \| "refundPending" \| "closed"/);
   assert.match(workspaceSource, /\{ id: "mine", label: "신청" \}/);
-  assert.match(workspaceSource, /결재함/);
+  assert.match(workspaceSource, /\{ id: "approvalPending", label: "결재대기" \}/);
   assert.doesNotMatch(workspaceSource, /id: "manager"/);
   assert.doesNotMatch(workspaceSource, /label: "관리팀"/);
   assert.match(workspaceSource, /\{ id: "closed", label: "승인\/반려" \}/);
@@ -78,16 +101,25 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.match(workspaceSource, /selectedTeacherKey/);
   assert.match(workspaceSource, /availableClasses/);
   assert.match(workspaceSource, /makeupSlots/);
+  assert.match(workspaceSource, /function getInputRequestKind/);
+  assert.match(workspaceSource, /requestKind: getInputRequestKind\(input, makeupSlots\)/);
+  assert.doesNotMatch(workspaceSource, /MAKEUP_REQUEST_KIND_OPTIONS/);
+  assert.doesNotMatch(workspaceSource, /handleRequestKindChange/);
+  assert.doesNotMatch(workspaceSource, /신청 구분/);
+  assert.doesNotMatch(workspaceSource, /휴강\+보강/);
+  assert.doesNotMatch(workspaceSource, /휴강만/);
+  assert.doesNotMatch(workspaceSource, /보강만/);
   assert.match(workspaceSource, /보강일시 추가/);
   assert.match(workspaceSource, /DatePickerControl/);
   assert.match(workspaceSource, /TimePickerControl/);
   assert.match(workspaceSource, /getSlotRoomAvailability/);
-  assert.match(workspaceSource, /getSlotRoomAvailability\(slot, data, editingRequestId, selectedClass\?\.subject \|\| selectedSubject\)/);
+  assert.match(workspaceSource, /getSlotRoomAvailability\(slot, data, editingRequestId, selectedClass\?\.subject \|\| selectedSubject, canUserManage\(role\)\)/);
   assert.match(workspaceSource, /slot\.classroom/);
   assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 강의실`\}/);
   assert.doesNotMatch(workspaceSource, /type="date"/);
   assert.doesNotMatch(workspaceSource, /type="time"/);
   assert.match(workspaceSource, /buildRoomAvailability/);
+  assert.match(workspaceSource, /ignoreOrphanedMakeupEvents: canIgnoreOrphanedMakeupEvents/);
   assert.match(workspaceSource, /빈 강의실/);
   assert.match(workspaceSource, /충돌/);
   assert.doesNotMatch(workspaceSource, /최종 확인/);
@@ -107,8 +139,23 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.ok(workspaceSource.indexOf('htmlFor="makeup-teacher">선생님') < workspaceSource.indexOf('htmlFor="makeup-class">수업'));
   assert.ok(workspaceSource.lastIndexOf("결재자") > workspaceSource.lastIndexOf("보강 강의실"));
   assert.match(workspaceSource, /SelectValue placeholder="강의실 선택"/);
-  assert.match(serviceSource, /makeup_classroom: firstSlot\.classroom/);
+  assert.match(serviceSource, /makeup_classroom: hasMakeup \? firstSlot\.classroom : null/);
   assert.match(serviceSource, /for \(const slot of slots\)/);
+});
+
+test("makeup workspace infers request kind from cancel date and makeup slots", () => {
+  assert.match(workspaceSource, /function hasStartedMakeupSlot/);
+  assert.match(workspaceSource, /function hasIncompleteStartedMakeupSlot/);
+  assert.match(workspaceSource, /function getInputRequestKind/);
+  assert.match(workspaceSource, /const makeupSlots = materializeSlots\(input\)/);
+  assert.match(workspaceSource, /const requestHasCancel = Boolean\(input\.cancelDate\)/);
+  assert.match(workspaceSource, /const requestHasMakeup = makeupSlots\.length > 0/);
+  assert.match(workspaceSource, /if \(!requestHasCancel && !requestHasMakeup\)/);
+  assert.match(workspaceSource, /hasIncompleteStartedMakeupSlot\(input\)/);
+  assert.match(workspaceSource, /requestHasMakeup && makeupSlots\.some\(\(slot\) => !slot\.classroom\)/);
+  assert.match(workspaceSource, /requestHasMakeup && selectedRoomHasCollision/);
+  assert.doesNotMatch(workspaceSource, /requestHasCancel && !input\.cancelDate/);
+  assert.doesNotMatch(workspaceSource, /!input\.classId \|\| !input\.reason \|\| !input\.cancelDate \|\| !input\.approverTeacherCatalogId/);
 });
 
 test("makeup datetime and room controls stay within operational candidates", () => {
@@ -117,21 +164,127 @@ test("makeup datetime and room controls stay within operational candidates", () 
   assert.match(dateTimePickerSource, /TIME_OPTION_END_MINUTES - TIME_OPTION_START_MINUTES/);
   assert.doesNotMatch(dateTimePickerSource, /6 \* 60/);
   assert.doesNotMatch(dateTimePickerSource, /오전 06:00/);
+  assert.doesNotMatch(dateTimePickerSource, /placeholder="HH:MM"/);
+  assert.doesNotMatch(dateTimePickerSource, />\s*적용\s*</);
+  assert.match(dateTimePickerSource, /onWheelCapture=\{\(event\) => event\.stopPropagation\(\)\}/);
+  assert.match(dateTimePickerSource, /onTouchMoveCapture=\{\(event\) => event\.stopPropagation\(\)\}/);
   assert.match(workspaceSource, /getSlotRoomCollisionState\(formSlot, data, request\.id, request\.subject\)/);
 });
 
-test("makeup approval auto-completes without manager confirmation UI", () => {
+test("makeup approval completes makeup-bearing requests and keeps cancel-only requests tracked", () => {
   assert.doesNotMatch(workspaceSource, /finalConfirmRequest/);
   assert.doesNotMatch(workspaceSource, /completeMakeupRequest/);
   assert.match(serviceSource, /approveMakeupRequest/);
-  assert.match(serviceSource, /status: "completed"/);
-  assert.match(serviceSource, /buildAutoCompletionNote/);
+  assert.match(serviceSource, /const nextStatus = isRefundApprovalRequest\(request\) \? "refund_pending" : hasMakeupPart\(request\) \? "completed" : "makeup_pending"/);
+  assert.match(serviceSource, /if \(!isRefundApproval && hasMakeupPart\(request\)\)/);
+  assert.match(serviceSource, /status: nextStatus/);
+  assert.match(workspaceSource, /approvalRequest/);
+  assert.match(workspaceSource, /approvalNote/);
+  assert.match(workspaceSource, /DialogTitle>승인 메모/);
+  assert.match(workspaceSource, /htmlFor="makeup-approval-note"/);
+  assert.match(workspaceSource, /approveMakeupRequest\(approvalRequest\.id, currentUserId, approvalNote\)/);
+  assert.match(serviceSource, /export async function approveMakeupRequest\(requestId: string, actorId: string, note = ""\)/);
+  assert.match(serviceSource, /const approvalNote = text\(note\)/);
+  assert.match(serviceSource, /final_note: nullable\(approvalNote\)/);
+  assert.match(serviceSource, /cancel_academic_event_id: nullable\(cancelAcademicEventId\)/);
+  assert.match(serviceSource, /makeup_academic_event_id: nullable\(makeupAcademicEventId\)/);
+  assert.doesNotMatch(serviceSource, /cancel_academic_event_id: cancelAcademicEventId/);
+  assert.doesNotMatch(serviceSource, /makeup_academic_event_id: makeupAcademicEventId/);
+  assert.match(serviceSource, /recordMakeupRequestEvent\(requestId, "approved", \{ actorId, beforeValue: request\.status, afterValue: nextStatus, note: approvalNote \}\)/);
+  assert.doesNotMatch(serviceSource, /const finalNote = buildAutoCompletionNote\(request\)/);
+  assert.doesNotMatch(serviceSource, /final_note: nullable\(finalNote\)/);
+  assert.doesNotMatch(serviceSource, /recordMakeupRequestEvent\(requestId, "approved", \{ actorId, beforeValue: request\.status, afterValue: "completed", note: finalNote \}\)/);
   assert.match(workspaceSource, /getMakeupActionErrorMessage\(actionError, "요청 처리에 실패했습니다\."\)/);
+  assert.doesNotMatch(workspaceSource, /window\.prompt\("승인 메모"/);
   assert.doesNotMatch(workspaceSource, /window\.prompt\("관리팀 최종 확인 메모"/);
+  assert.doesNotMatch(workspaceSource, /window\.prompt/);
   assert.match(workspaceSource, /DialogContent className="max-h-\[86vh\] overflow-y-auto sm:max-w-4xl"/);
   assert.doesNotMatch(workspaceSource, /xl:grid-cols-\[minmax\(360px,420px\)_1fr\]/);
   assert.match(workspaceSource, /md:grid-cols-\[minmax\(150px,1fr\)_minmax\(96px,0\.55fr\)_minmax\(96px,0\.55fr\)_32px\]/);
   assert.doesNotMatch(workspaceSource, /lg:grid-cols-\[minmax\(0,1\.1fr\)_minmax\(110px,0\.65fr\)_minmax\(110px,0\.65fr\)_minmax\(140px,0\.8fr\)_32px\]/);
+});
+
+test("makeup request action controls keep approval decisions in one row", () => {
+  const actionControlsSource = workspaceSource.slice(
+    workspaceSource.indexOf("function MakeupRequestActionControls"),
+    workspaceSource.indexOf("function MakeupRequestDetailCard"),
+  );
+
+  assert.match(actionControlsSource, /flex-nowrap/);
+  assert.match(actionControlsSource, /whitespace-nowrap/);
+  assert.doesNotMatch(actionControlsSource, /flex-wrap/);
+  assert.match(workspaceSource, /\{ columnKey: "action", label: "액션", width: 250, minWidth: 230, align: "right" \}/);
+});
+
+test("makeup request form marks required fields and exposes clear controls", () => {
+  assert.match(workspaceSource, /function RequiredFormLabel/);
+  assert.match(workspaceSource, /aria-hidden="true">\*<\/span>/);
+  assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-subject">과목<\/RequiredFormLabel>/);
+  assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-teacher">선생님<\/RequiredFormLabel>/);
+  assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-class">수업<\/RequiredFormLabel>/);
+  assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-reason">사유<\/RequiredFormLabel>/);
+  assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-approver">결재자<\/RequiredFormLabel>/);
+  assert.match(workspaceSource, /function FieldClearButton/);
+  assert.match(workspaceSource, /aria-label="휴강일 초기화"/);
+  assert.match(workspaceSource, /patchInput\(\{ cancelDate: "" \}\)/);
+  assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 날짜 초기화`\}/);
+  assert.match(workspaceSource, /patchMakeupSlot\(slot\.id \|\| "", \{ date: "" \}\)/);
+  assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 시작시각 초기화`\}/);
+  assert.match(workspaceSource, /patchMakeupSlot\(slot\.id \|\| "", \{ startTime: "" \}\)/);
+  assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 종료시각 초기화`\}/);
+  assert.match(workspaceSource, /patchMakeupSlot\(slot\.id \|\| "", \{ endTime: "" \}\)/);
+  assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 강의실 초기화`\}/);
+  assert.match(workspaceSource, /patchMakeupSlot\(slot\.id \|\| "", \{ classroom: "" \}\)/);
+});
+
+test("makeup pending requests can continue to makeup scheduling or refund tracking", () => {
+  assert.match(serviceSource, /export async function requestMakeupRefund\(requestId: string, actorId: string, note: string\)/);
+  assert.match(serviceSource, /canTransitionMakeupRequest\(request\.status, "approval_pending"/);
+  assert.match(serviceSource, /status: "approval_pending"/);
+  assert.match(serviceSource, /recordMakeupRequestEvent\(requestId, "refund_requested", \{ actorId, beforeValue: request\.status, afterValue: "approval_pending"/);
+  assert.match(serviceSource, /function isRefundApprovalRequest\(request: MakeupRequest\)/);
+  assert.match(serviceSource, /const nextStatus = isRefundApprovalRequest\(request\) \? "refund_pending" : hasMakeupPart\(request\) \? "completed" : "makeup_pending"/);
+  assert.match(serviceSource, /export async function completeMakeupRefund\(requestId: string, actorId: string, note = ""\)/);
+  assert.match(serviceSource, /recordMakeupRequestEvent\(requestId, "refund_completed"/);
+  assert.match(workspaceSource, /onSchedulePendingMakeup/);
+  assert.match(workspaceSource, /onRequestRefund/);
+  assert.match(workspaceSource, /onCompleteRefund/);
+  assert.match(workspaceSource, /handleSchedulePendingMakeup/);
+  assert.match(workspaceSource, /setView\("approvalPending"\)/);
+  assert.match(workspaceSource, /requestKind: "cancel_makeup"/);
+  assert.match(workspaceSource, /makeupSlots: \[\{ id: createSlotId\(\), date: "", startTime: "", endTime: "", classroom: "" \}\]/);
+  assert.match(workspaceSource, /handleOpenActionNoteRequest\(request, "refund"\)/);
+  assert.match(workspaceSource, /DialogTitle>\{actionNoteConfig\.title\}<\/DialogTitle>/);
+  assert.match(workspaceSource, /requestMakeupRefund\(actionNoteRequest\.request\.id, currentUserId, actionNote\)/);
+  assert.match(workspaceSource, /completeMakeupRefund\(actionNoteRequest\.request\.id, currentUserId, actionNote\)/);
+  assert.match(workspaceSource, /보강 신청/);
+  assert.match(workspaceSource, /환불 신청/);
+  assert.match(workspaceSource, /환불완료/);
+  assert.match(modelSource, /refund_pending: "환불대기"/);
+});
+
+test("makeup workspace separates request status tabs by workflow state", () => {
+  assert.match(workspaceSource, /type MakeupRequestView = "mine" \| "approvalPending" \| "makeupPending" \| "refundPending" \| "closed"/);
+  assert.match(workspaceSource, /const MAKEUP_REQUEST_VIEW_TABS: Array<\{ id: MakeupRequestView; label: string \}> = \[/);
+  assert.match(workspaceSource, /\{ id: "mine", label: "신청" \}/);
+  assert.match(workspaceSource, /\{ id: "approvalPending", label: "결재대기" \}/);
+  assert.match(workspaceSource, /\{ id: "makeupPending", label: "보강대기" \}/);
+  assert.match(workspaceSource, /\{ id: "refundPending", label: "환불대기" \}/);
+  assert.match(workspaceSource, /\{ id: "closed", label: "승인\/반려" \}/);
+  assert.match(workspaceSource, /request\.status === "approval_pending"/);
+  assert.match(workspaceSource, /request\.status === "makeup_pending"/);
+  assert.match(workspaceSource, /request\.status === "refund_pending"/);
+  assert.doesNotMatch(workspaceSource, /const MAKEUP_REQUEST_ACTIVE_STATUSES = \["approval_pending", "revision_requested", "makeup_pending", "refund_pending"\]/);
+  assert.doesNotMatch(workspaceSource, /\{ id: "approvals", label: "결재함" \}/);
+});
+
+test("makeup workspace avoids browser prompt and fills wide screens", () => {
+  assert.doesNotMatch(workspaceSource, /window\.prompt/);
+  assert.match(workspaceSource, /className="mx-auto flex w-full max-w-none flex-col gap-4 px-4 py-5 md:px-6"/);
+  assert.doesNotMatch(workspaceSource, /max-w-7xl/);
+  assert.match(workspaceSource, /className="w-full overflow-x-auto"/);
+  assert.match(workspaceSource, /className="grid min-w-full border-b bg-muted\/45 text-xs \[grid-template-columns:var\(--makeup-request-grid-template\)\]"/);
+  assert.match(workspaceSource, /className="grid min-w-full border-b last:border-b-0 hover:bg-muted\/30 \[grid-template-columns:var\(--makeup-request-grid-template\)\]"/);
 });
 
 test("makeup workspace exposes notification controls cancellation and fixed subject ordering", () => {
@@ -308,6 +461,8 @@ test("makeup notification controls can preview and edit per-process content temp
   assert.match(serviceSource, /body_template: bodyTemplate/);
   assert.match(serviceSource, /renderMakeupNotificationTemplate\(templateSetting\?\.titleTemplate/);
   assert.match(serviceSource, /renderMakeupNotificationTemplate\(templateSetting\?\.bodyTemplate/);
+  assert.match(serviceSource, /function appendLocalMakeupRequestEvent/);
+  assert.match(serviceSource, /function getMakeupApprovalNote/);
   assert.match(workspaceSource, /updateMakeupNotificationTriggerContent/);
   assert.match(workspaceSource, /selectedNotificationSetting/);
   assert.match(workspaceSource, /notificationTemplateInput/);
@@ -354,36 +509,33 @@ test("makeup notification controls can preview and edit per-process content temp
   }
   assert.match(serviceSource, /const roomSummary = buildMakeupNotificationRoomSummary\(request\)/);
   assert.match(serviceSource, /"보강 강의실": roomSummary/);
+  assert.match(serviceSource, /"승인 메모": getMakeupApprovalNote\(request\)/);
   assert.match(serviceSource, /"승인취소 메모": getMakeupNotificationEventNote\(request, \["approval_canceled", "completed_canceled"\]\)/);
+  assert.doesNotMatch(serviceSource, /"승인 메모": request\.finalNote \|\| "-"/);
+  assert.match(workspaceSource, /function getMakeupApprovalNoteValue/);
+  assert.match(workspaceSource, /case "finalNote":[\s\S]*getMakeupApprovalNoteValue\(request\)/);
+  assert.doesNotMatch(workspaceSource, /case "finalNote":[\s\S]*return request\.finalNote \|\| "-"/);
 });
 
-test("makeup workspace keeps approval-canceled requests out of the active request tab", () => {
-  assert.match(workspaceSource, /const MAKEUP_REQUEST_ACTIVE_STATUSES = \["approval_pending", "revision_requested"\]/);
+test("makeup workspace keeps terminal requests in the approval result tab", () => {
+  assert.match(workspaceSource, /const MAKEUP_REQUEST_REQUEST_STATUSES = \["revision_requested"\]/);
   assert.match(workspaceSource, /const MAKEUP_REQUEST_CLOSED_STATUSES = \["completed", "rejected", "canceled"\]/);
   assert.match(workspaceSource, /function getMakeupRequestViewRequests/);
-  assert.match(workspaceSource, /MAKEUP_REQUEST_ACTIVE_STATUSES\.includes\(request\.status\)/);
+  assert.match(workspaceSource, /MAKEUP_REQUEST_REQUEST_STATUSES\.includes\(request\.status\)/);
   assert.match(workspaceSource, /MAKEUP_REQUEST_CLOSED_STATUSES\.includes\(request\.status\)/);
-  assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, view, currentUserId\)/);
-  assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, "mine", currentUserId\)\.length/);
-  assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, "closed", currentUserId\)\.length/);
+  assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, view, currentUserId, isManager\)/);
+  assert.match(workspaceSource, /MAKEUP_REQUEST_VIEW_TABS\.reduce/);
+  assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, tab\.id, currentUserId, isManager\)\.length/);
 });
 
-test("makeup workspace lets only operators delete closed request rows", () => {
-  assert.match(workspaceSource, /const \{ user, role, isAdmin, loading: authLoading, session \} = useAuth\(\)/);
-  assert.match(workspaceSource, /const canForceDeleteClosedRequests = isAdmin/);
-  assert.match(workspaceSource, /deleteMakeupRequest\(request\.id, currentUserId\)/);
-  assert.match(workspaceSource, /onForceDelete=\{handleForceDeleteRequest\}/);
-  assert.match(workspaceSource, /canForceDelete=\{canForceDeleteClosedRequests\}/);
-  assert.match(workspaceSource, /MAKEUP_REQUEST_CLOSED_STATUSES\.includes\(request\.status\)/);
-  assert.match(workspaceSource, /Trash2/);
-  assert.match(serviceSource, /export async function deleteMakeupRequest\(requestId: string, actorId: string\)/);
-  assert.match(serviceSource, /actor\?\.role !== "admin"/);
-  assert.match(serviceSource, /\.from\("makeup_requests"\)\.delete\(\)\.eq\("id", id\)\.select\("id"\)/);
-  assert.match(allMigrationSource, /grant select, insert, update, delete on public\.makeup_requests to authenticated/);
-  assert.match(allMigrationSource, /create policy makeup_requests_delete_operator_closed/);
-  assert.match(allMigrationSource, /for delete\s+to authenticated[\s\S]*public\.current_dashboard_role\(\) = 'admin'/);
-  assert.match(allMigrationSource, /status in \('completed', 'rejected', 'canceled'\)/);
-  assert.doesNotMatch(allMigrationSource, /makeup_requests_delete_operator_closed[\s\S]{0,600}current_dashboard_role\(\) = 'staff'/);
+test("makeup workspace does not expose direct delete for closed request rows", () => {
+  assert.match(workspaceSource, /const \{ user, role, loading: authLoading, session \} = useAuth\(\)/);
+  assert.doesNotMatch(workspaceSource, /isAdmin/);
+  assert.doesNotMatch(workspaceSource, /deleteMakeupRequest/);
+  assert.doesNotMatch(workspaceSource, /handleForceDeleteRequest/);
+  assert.doesNotMatch(workspaceSource, /canForceDeleteClosedRequests/);
+  assert.doesNotMatch(workspaceSource, /canForceDeleteRequest/);
+  assert.doesNotMatch(workspaceSource, /onForceDelete/);
 });
 
 test("makeup workspace filters table rows by subject teacher class and period", () => {
@@ -488,12 +640,52 @@ test("makeup service writes notifications and sends google chat without blocking
   assert.match(serviceSource, /deleteAcademicEventById/);
   assert.match(serviceSource, /makeup_notification_settings/);
   assert.match(serviceSource, /makeup_notification_deliveries/);
+  assert.match(serviceSource, /const MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT = 40/);
+  assert.match(serviceSource, /async function readNotificationDeliveryRows/);
+  assert.match(serviceSource, /\.from\("makeup_notification_deliveries"\)[\s\S]*\.order\("created_at", \{ ascending: false \}\)[\s\S]*\.limit\(MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT\)/);
+  assert.doesNotMatch(serviceSource, /readTable\("makeup_notification_deliveries", "\*", true\)/);
+  assert.doesNotMatch(serviceSource, /\.sort\(\(left, right\) => right\.createdAt\.localeCompare\(left\.createdAt\)\)\s*\.slice\(0, 40\)/);
+  assert.match(notificationRetentionMigrationSource, /create or replace function public\.prune_makeup_notification_deliveries/);
+  assert.match(notificationRetentionMigrationSource, /row_number\(\) over \(order by created_at desc, id desc\)/);
+  assert.match(notificationRetentionMigrationSource, /where row_number > 500/);
+  assert.match(notificationRetentionMigrationSource, /after insert on public\.makeup_notification_deliveries/);
   assert.match(serviceSource, /dedupe_key/);
   assert.match(serviceSource, /buildNotificationDedupeKey/);
   assert.match(serviceSource, /recordNotificationDelivery/);
+  assert.match(serviceSource, /const addPersonalRecipient = \(profileId: string\) => \{\s*if \(!profileId\) return\s*personalRecipients\.add\(profileId\)\s*\}/);
+  assert.doesNotMatch(serviceSource, /managementProfileIds\.includes\(profileId\)/);
+  assert.match(serviceSource, /await Promise\.all\(\[[\s\S]*channel: "dashboard_personal"[\s\S]*channel: "dashboard_management"[\s\S]*\]\)/);
+  assert.match(serviceSource, /for \(const chatChannel of chatTargets\) \{[\s\S]*status: "disabled"[\s\S]*continue/);
   assert.match(serviceSource, /applyMakeupRequestToSchedulePlan/);
   assert.match(serviceSource, /runAcademicEventMutation/);
   assert.match(serviceSource, /buildMakeupCalendarDrafts/);
+  assert.match(serviceSource, /requestKind: MakeupRequestKind/);
+  assert.match(serviceSource, /request_kind: input\.requestKind/);
+  assert.match(serviceSource, /const hasCancel = hasCancelPart\(input\)/);
+  assert.match(serviceSource, /const hasMakeup = hasMakeupPart\(input\)/);
+  assert.match(serviceSource, /if \(hasCancel && !text\(input\.cancelDate\)\)/);
+  assert.match(serviceSource, /if \(hasMakeup && input\.makeupSlots\.some\(\(slot\) => !text\(slot\.classroom\)\)\)/);
+  assert.match(serviceSource, /const nextStatus = isRefundApprovalRequest\(request\) \? "refund_pending" : hasMakeupPart\(request\) \? "completed" : "makeup_pending"/);
+  assert.match(serviceSource, /requestMakeupRefund/);
+  assert.match(serviceSource, /refund_pending/);
+  assert.match(serviceSource, /completed_by: nextStatus === "completed" \? actorId : null/);
+  assert.match(serviceSource, /const calendarDrafts = buildMakeupCalendarDrafts\(request\)/);
+  assert.doesNotMatch(serviceSource, /const \[cancelDraft, \.\.\.makeupDrafts\] = buildMakeupCalendarDrafts\(request\)/);
+  assert.match(serviceSource, /const resubmittedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(serviceSource, /const \{ request: resubmittedRequest \} = await loadSingleMakeupRequest\(requestId, data\)/);
+  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*request: resubmittedRequest[\s\S]*eventType: "resubmitted"/);
+  assert.match(serviceSource, /const revisionRequestedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(serviceSource, /const returnedReason = text\(note\)/);
+  assert.match(serviceSource, /returnedReason \}/);
+  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*eventType: "revision_requested"/);
+  assert.match(serviceSource, /const rejectedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(serviceSource, /const rejectedReason = text\(note\)/);
+  assert.match(serviceSource, /rejectedReason \}/);
+  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*eventType: "rejected"/);
+  assert.match(serviceSource, /const canceledAt = new Date\(\)\.toISOString\(\)/);
+  assert.doesNotMatch(serviceSource, /final_note: nullable\(note \|\| request\.finalNote\)/);
+  assert.match(serviceSource, /canceledAt/);
+  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*eventType: "approval_canceled"/);
 });
 
 test("dashboard header exposes a persistent notification popover", () => {

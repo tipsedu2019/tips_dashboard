@@ -3,10 +3,13 @@ export type MakeupRequestStatus =
   | "revision_requested"
   | "rejected"
   | "manager_pending"
+  | "makeup_pending"
+  | "refund_pending"
   | "completed"
   | "canceled";
 
 export type MakeupApprovalGroup = "math_middle" | "math_high" | "english" | "unknown";
+export type MakeupRequestKind = "cancel_makeup" | "cancel_only" | "makeup_only";
 
 export type MakeupRoomCollision = {
   id?: string;
@@ -35,6 +38,7 @@ export type MakeupSlot = {
 
 export const MAKEUP_REQUEST_STATUSES: MakeupRequestStatus[];
 export const MAKEUP_REQUEST_STATUS_LABELS: Record<MakeupRequestStatus, string>;
+export const MAKEUP_REQUEST_KINDS: MakeupRequestKind[];
 export const ACTIVE_ROOM_RESERVATION_STATUSES: Set<MakeupRequestStatus>;
 export const APPROVER_NAMES_BY_GROUP: Record<MakeupApprovalGroup, string[]>;
 export const MAKEUP_CALENDAR_NOTE_MARKER: string;
@@ -52,6 +56,9 @@ export function buildRoomOptions(
   classes?: unknown[],
   options?: { subject?: string },
 ): string[];
+export function getMakeupRequestKind(request?: unknown): MakeupRequestKind;
+export function hasCancelPart(request?: unknown): boolean;
+export function hasMakeupPart(request?: unknown): boolean;
 export function normalizeMakeupSlots(source?: unknown, fallbackClassroom?: string): MakeupSlot[];
 export function extractMakeupCalendarMeta(note?: string): Record<string, unknown> | null;
 export function buildRoomAvailability(options?: {
@@ -64,6 +71,7 @@ export function buildRoomAvailability(options?: {
   slots?: unknown[];
   currentRequestId?: string;
   subject?: string;
+  ignoreOrphanedMakeupEvents?: boolean;
 }): MakeupRoomAvailability[];
 export function getDefaultMakeupEndAt(startAt: string, classItem?: unknown): string;
 export function applyMakeupRequestToSchedulePlan(
