@@ -919,6 +919,13 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'columnKey: "operationsChecklist"',
     'columnKey: "action"',
   ]);
+  assert.ok(
+    source.indexOf('columnKey: "student"') < source.indexOf('columnKey: "customerReason"') &&
+      source.indexOf('columnKey: "customerReason"') < source.indexOf('columnKey: "teacherOpinion"') &&
+      source.indexOf('columnKey: "teacherOpinion"') < source.indexOf('columnKey: "undistributedTextbooks"') &&
+      source.indexOf('columnKey: "undistributedTextbooks"') < source.indexOf('columnKey: "withdrawalDate"'),
+    "withdrawal table should place reason opinion and undistributed textbooks immediately after student",
+  );
   assertIncludesAll(withdrawalDataTableSource, [
     'aria-label="퇴원 전체 필터"',
     'aria-label="퇴원 누가 필터"',
@@ -938,7 +945,9 @@ test("withdrawal workspace follows request processing and completed queues", asy
     '[grid-template-columns:var(--withdrawal-grid-template)]',
     "<WithdrawalPeriodFilterBar",
     "WithdrawalOperationsChecklistChips",
+    "onChecklistChange",
   ]);
+  assert.ok(source.includes("aria-pressed={item.checked}"));
   assert.match(withdrawalDataTableSource, /className="grid gap-2 p-3 md:hidden"/);
   assert.match(withdrawalDataTableSource, /className="hidden w-full overflow-x-auto md:block"/);
   assert.match(withdrawalDataTableSource, /aria-label=\{`\$\{task\.title\} 퇴원 상세 열기`\}/);
@@ -976,6 +985,9 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'label="고객 퇴원사유"',
     'label="선생님 의견"',
     'label="미배부 교재"',
+    'CheckField label="메이크에듀 퇴원처리"',
+    'CheckField label="수업료 처리"',
+    'CheckField label="교재비 처리"',
     "help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP}",
   ]);
   assertIncludesAll(withdrawalFormSource, [
@@ -1042,9 +1054,6 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.doesNotMatch(withdrawalFormSource, /<TextField label="진행 수업시수"/);
   assert.doesNotMatch(withdrawalFormSource, /<TextField label="4주 기준 수업시수"/);
   assert.doesNotMatch(withdrawalFormSource, /AutoSyncStatusField label="시간표 명단 변경"/);
-  assert.doesNotMatch(withdrawalFormSource, /CheckField label="메이크에듀 퇴원처리"/);
-  assert.doesNotMatch(withdrawalFormSource, /CheckField label="수업료 처리"/);
-  assert.doesNotMatch(withdrawalFormSource, /CheckField label="교재비 처리"/);
   assertIncludesAll(source, [
     "getWithdrawalClassScheduleItems",
     "getFallbackWithdrawalClassScheduleItems",
@@ -1226,8 +1235,14 @@ test("withdrawal workspace follows request processing and completed queues", asy
     /const canRunStatusAction = canManageWorkflow && Boolean\(nextAction\)/,
     "withdrawal rows should hide progress and completion buttons for non-management users",
   );
-  assert.match(withdrawalCheckBlockerSource, /return \[\]/);
-  assert.doesNotMatch(withdrawalCheckBlockerSource, /메이크에듀 퇴원처리|수업료 처리|교재비 처리/);
+  assertIncludesAll(withdrawalCheckBlockerSource, [
+    "withdrawal?.makeeduWithdrawalDone",
+    "withdrawal?.feeProcessed",
+    "withdrawal?.textbookFeeProcessed",
+    "메이크에듀 퇴원처리",
+    "수업료 처리",
+    "교재비 처리",
+  ]);
   assert.doesNotMatch(withdrawalDetailSource, /TaskTypeBadge|TaskStatusBadge|getTaskPriorityLabel|완료 상태/);
   assert.doesNotMatch(withdrawalDetailSource, /WithdrawalFlowSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /AutoSyncResultSummary/);

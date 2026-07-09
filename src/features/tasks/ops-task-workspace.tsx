@@ -190,6 +190,7 @@ type OpsTaskOptionIndexes = {
 }
 type OperationCompletionBlockerMap = Map<string, string[]>
 type OperationConfirmationMap = Map<string, boolean>
+type WithdrawalChecklistField = "makeeduWithdrawalDone" | "feeProcessed" | "textbookFeeProcessed"
 type FormDetailStepKey =
   | "registration_contact"
   | "registration_test"
@@ -238,14 +239,14 @@ const WITHDRAWAL_TABLE_COLUMNS: Array<{
   { columnKey: "teacher", label: "선생님", width: 116, minWidth: 96 },
   { columnKey: "className", label: "수업", width: 170, minWidth: 130 },
   { columnKey: "student", label: "학생", width: 118, minWidth: 96 },
+  { columnKey: "customerReason", label: "고객 퇴원사유", width: 210, minWidth: 150 },
+  { columnKey: "teacherOpinion", label: "선생님 의견", width: 190, minWidth: 140 },
+  { columnKey: "undistributedTextbooks", label: "미배부 교재", width: 170, minWidth: 130 },
   { columnKey: "withdrawalDate", label: "퇴원일", width: 118, minWidth: 104 },
   { columnKey: "withdrawalSession", label: "퇴원회차", width: 110, minWidth: 96 },
   { columnKey: "completedLessonHours", label: "진행 수업시수", width: 120, minWidth: 104, align: "right" },
   { columnKey: "fourWeekLessonHours", label: "4주 기준 수업시수", width: 138, minWidth: 120, align: "right" },
   { columnKey: "progress", label: "수업진행률", width: 108, minWidth: 96, align: "right" },
-  { columnKey: "customerReason", label: "고객 퇴원사유", width: 210, minWidth: 150 },
-  { columnKey: "teacherOpinion", label: "선생님 의견", width: 190, minWidth: 140 },
-  { columnKey: "undistributedTextbooks", label: "미배부 교재", width: 170, minWidth: 130 },
   { columnKey: "operationsChecklist", label: "처리 확인", width: 218, minWidth: 180 },
   { columnKey: "action", label: "액션", width: 188, minWidth: 160, align: "right" },
 ]
@@ -1195,8 +1196,12 @@ function getMissingRegistrationCheckLabels(registration?: OpsTaskInput["registra
   ].filter((item) => !item.checked).map((item) => item.label)
 }
 
-function getMissingWithdrawalCheckLabels() {
-  return []
+function getMissingWithdrawalCheckLabels(withdrawal?: OpsTaskInput["withdrawal"]) {
+  return [
+    { checked: Boolean(withdrawal?.makeeduWithdrawalDone), label: "메이크에듀 퇴원처리" },
+    { checked: Boolean(withdrawal?.feeProcessed), label: "수업료 처리" },
+    { checked: Boolean(withdrawal?.textbookFeeProcessed), label: "교재비 처리" },
+  ].filter((item) => !item.checked).map((item) => item.label)
 }
 
 function getMissingTransferCheckLabels(transfer?: OpsTaskInput["transfer"]) {
@@ -1451,9 +1456,9 @@ function getWithdrawalTableGridTemplate(widths: Record<WithdrawalTableColumnKey,
 
 function getWithdrawalOperationsChecklist(withdrawal?: OpsTask["withdrawal"]) {
   return [
-    { key: "makeedu", label: "메이크에듀", detail: "메이크에듀 퇴원처리", checked: Boolean(withdrawal?.makeeduWithdrawalDone) },
-    { key: "fee", label: "수업료", detail: "수업료 처리", checked: Boolean(withdrawal?.feeProcessed) },
-    { key: "textbookFee", label: "교재비", detail: "교재비 처리", checked: Boolean(withdrawal?.textbookFeeProcessed) },
+    { key: "makeedu", field: "makeeduWithdrawalDone" as const, label: "메이크에듀", detail: "메이크에듀 퇴원처리", checked: Boolean(withdrawal?.makeeduWithdrawalDone) },
+    { key: "fee", field: "feeProcessed" as const, label: "수업료", detail: "수업료 처리", checked: Boolean(withdrawal?.feeProcessed) },
+    { key: "textbookFee", field: "textbookFeeProcessed" as const, label: "교재비", detail: "교재비 처리", checked: Boolean(withdrawal?.textbookFeeProcessed) },
   ]
 }
 
@@ -1464,23 +1469,53 @@ function getWithdrawalOperationsChecklistValue(withdrawal?: OpsTask["withdrawal"
   return pendingItems.length > 0 ? `${completedCount}/3 · ${pendingItems.join(", ")}` : "3/3 · 처리 확인 완료"
 }
 
-function WithdrawalOperationsChecklistChips({ withdrawal }: { withdrawal?: OpsTask["withdrawal"] }) {
+function WithdrawalOperationsChecklistChips({
+  withdrawal,
+  editable = false,
+  disabled = false,
+  onChange,
+}: {
+  withdrawal?: OpsTask["withdrawal"]
+  editable?: boolean
+  disabled?: boolean
+  onChange?: (field: WithdrawalChecklistField, checked: boolean) => void
+}) {
   return (
     <div className="flex min-w-0 flex-wrap gap-1">
-      {getWithdrawalOperationsChecklist(withdrawal).map((item) => (
-        <span
-          key={item.key}
-          className={[
-            "inline-flex h-6 max-w-full items-center rounded-md border px-2 text-xs font-medium",
-            item.checked
-              ? "border-primary/20 bg-primary/10 text-primary"
-              : "border-amber-300 bg-amber-50 text-amber-800",
-          ].join(" ")}
-          title={item.detail}
-        >
-          <span className="truncate">{item.label}</span>
-        </span>
-      ))}
+      {getWithdrawalOperationsChecklist(withdrawal).map((item) => {
+        const className = [
+          "inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-2 text-xs font-medium",
+          item.checked
+            ? "border-primary/20 bg-primary/10 text-primary"
+            : "border-amber-300 bg-amber-50 text-amber-800",
+          editable ? "transition hover:border-primary/40 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-70" : "",
+        ].join(" ")
+
+        if (!editable || !onChange) {
+          return (
+            <span key={item.key} className={className} title={item.detail}>
+              {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
+              <span className="truncate">{item.label}</span>
+            </span>
+          )
+        }
+
+        return (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={item.checked}
+            aria-label={`${item.detail} ${item.checked ? "완료 취소" : "완료 체크"}`}
+            className={className}
+            title={item.detail}
+            disabled={disabled}
+            onClick={() => onChange(item.field, !item.checked)}
+          >
+            {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
+            <span className="truncate">{item.label}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -1667,7 +1702,7 @@ function getOperationCompletionBlockers(
     if (hasLinkedRecord(input.studentId) && !findStudentOption(students, input.studentId, indexes)) blockers.push("학생")
     if (!hasLinkedRecord(input.classId)) blockers.push("수업")
     if (hasLinkedRecord(input.classId) && !findClassOption(classes, input.classId, indexes)) blockers.push("수업")
-    getMissingWithdrawalCheckLabels().forEach((label) => blockers.push(label))
+    getMissingWithdrawalCheckLabels(input.withdrawal).forEach((label) => blockers.push(label))
   }
 
   if (input.type === "transfer" && input.status === "done") {
@@ -4691,6 +4726,7 @@ function WithdrawalDataTable({
   onOpen,
   onEdit,
   onStatusChange,
+  onChecklistChange,
   canManageWorkflow = true,
   statusActionDisabled = false,
   onCreate,
@@ -4705,6 +4741,7 @@ function WithdrawalDataTable({
   onOpen: (task: OpsTask) => void
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
+  onChecklistChange: (task: OpsTask, field: WithdrawalChecklistField, checked: boolean) => void
   canManageWorkflow?: boolean
   statusActionDisabled?: boolean
   onCreate: () => void
@@ -4901,6 +4938,7 @@ function WithdrawalDataTable({
           const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const mobileNextActionLabel = getWithdrawalMobileNextActionLabel(task, completionBlockers)
+          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
           const progress = getWithdrawalProgressLabel(task)
 
           return (
@@ -4938,7 +4976,12 @@ function WithdrawalDataTable({
                 <div className="rounded-md bg-muted/35 px-2 py-1.5">
                   <dt className="text-muted-foreground">처리 확인</dt>
                   <dd className="mt-1">
-                    <WithdrawalOperationsChecklistChips withdrawal={withdrawal} />
+                    <WithdrawalOperationsChecklistChips
+                      withdrawal={withdrawal}
+                      editable={canEditChecklist}
+                      disabled={statusActionDisabled}
+                      onChange={(field, checked) => onChecklistChange(task, field, checked)}
+                    />
                   </dd>
                 </div>
                 {withdrawal.customerReason || withdrawal.teacherOpinion ? (
@@ -5032,6 +5075,7 @@ function WithdrawalDataTable({
           const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
+          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
 
           return (
             <div
@@ -5090,8 +5134,13 @@ function WithdrawalDataTable({
                 }
                 if (column.columnKey === "operationsChecklist") {
                   return (
-                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)}>
-                      <WithdrawalOperationsChecklistChips withdrawal={task.withdrawal} />
+                    <WithdrawalDataCell key={column.columnKey} value={value}>
+                      <WithdrawalOperationsChecklistChips
+                        withdrawal={task.withdrawal}
+                        editable={canEditChecklist}
+                        disabled={statusActionDisabled}
+                        onChange={(field, checked) => onChecklistChange(task, field, checked)}
+                      />
                     </WithdrawalDataCell>
                   )
                 }
@@ -7477,6 +7526,32 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }
   }
 
+  const updateWithdrawalChecklist = async (task: OpsTask, field: WithdrawalChecklistField, checked: boolean) => {
+    if (!canManageWithdrawalWorkflow || !canEditTaskDetails(task)) return
+
+    setSaving(true)
+    setMessage("")
+    setNotice("")
+    setStatusUndo(null)
+    try {
+      const payload = normalizeFormForSubmit({
+        ...formFromTask(task),
+        withdrawal: {
+          ...(task.withdrawal || {}),
+          [field]: checked,
+        },
+      })
+      await updateOpsTask(task.id, payload)
+      const syncedTask = await loadOpsTaskById(task.id)
+      replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      setNotice("처리 확인을 저장했습니다.")
+    } catch (error) {
+      setMessage(getOpsTaskActionErrorMessage(error, "처리 확인을 저장하지 못했습니다."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const updateWordRetestFlow = async (task: OpsTask, input: OpsTaskInput, successMessage: string) => {
     setSaving(true)
     setMessage("")
@@ -8263,6 +8338,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	            onOpen={openDetail}
 	            onEdit={openEdit}
 	            onStatusChange={(task, status) => void changeStatus(task, status)}
+	            onChecklistChange={(task, field, checked) => void updateWithdrawalChecklist(task, field, checked)}
 	            canManageWorkflow={canManageWithdrawalWorkflow}
 	            statusActionDisabled={saving}
 	            onCreate={() => openCreate(scopedTaskType)}
@@ -9488,16 +9564,21 @@ function TypeSpecificFields({
 	        <div className="grid gap-3 md:grid-cols-2">
 	          <TextareaField label="고객 퇴원사유" value={withdrawal.customerReason || ""} onChange={(value) => updateWithdrawal("customerReason", value)} />
 	          <TextareaField label="선생님 의견" value={withdrawal.teacherOpinion || ""} onChange={(value) => updateWithdrawal("teacherOpinion", value)} />
-	          <UndistributedTextbookListField label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP} value={withdrawal.undistributedTextbooks || ""} onChange={(value) => updateWithdrawal("undistributedTextbooks", value)} />
-	          <WithdrawalScheduleCalendarField
-	            key={form.classId || "withdrawal-schedule-calendar"}
-	            classItem={selectedWithdrawalClass}
-	            withdrawal={withdrawal}
-	            onScheduleSelect={syncWithdrawalScheduleSelection}
-	          />
-	        </div>
-	      </section>
-	    )
+		          <UndistributedTextbookListField label="미배부 교재" help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP} value={withdrawal.undistributedTextbooks || ""} onChange={(value) => updateWithdrawal("undistributedTextbooks", value)} />
+		          <WithdrawalScheduleCalendarField
+		            key={form.classId || "withdrawal-schedule-calendar"}
+		            classItem={selectedWithdrawalClass}
+		            withdrawal={withdrawal}
+		            onScheduleSelect={syncWithdrawalScheduleSelection}
+		          />
+		        </div>
+		        <div className="grid gap-2 md:grid-cols-3">
+		          <CheckField label="메이크에듀 퇴원처리" checked={Boolean(withdrawal.makeeduWithdrawalDone)} onChange={(value) => updateWithdrawal("makeeduWithdrawalDone", value)} />
+		          <CheckField label="수업료 처리" checked={Boolean(withdrawal.feeProcessed)} onChange={(value) => updateWithdrawal("feeProcessed", value)} />
+		          <CheckField label="교재비 처리" checked={Boolean(withdrawal.textbookFeeProcessed)} onChange={(value) => updateWithdrawal("textbookFeeProcessed", value)} />
+		        </div>
+		      </section>
+		    )
 
     return null
   }
