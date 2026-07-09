@@ -242,19 +242,25 @@ test("curriculum overview uses row actions instead of a duplicated detail panel"
   assert.doesNotMatch(source, /업데이트 필요/);
 });
 
-test("lesson design can return to the originating class management context", async () => {
+test("lesson design keeps return handling after class management delegates planning navigation", async () => {
   const workspaceSource = await readSource("src/features/operations/class-schedule-workspace.tsx");
   const managementSource = await readSource("src/features/management/management-page.tsx");
 
   assert.match(managementSource, /const buildClassDetailReturnPath = \(/);
   assert.match(managementSource, /params\.set\("returnTo", requestedClassReturnPath\)/);
-  assert.match(managementSource, /params\.set\("returnTo", buildClassDetailReturnPath\(normalizeClassDetailTab\(options\.returnTab\)\)\)/);
+  assert.doesNotMatch(managementSource, /buildLessonDesignFromClassDetailHref/);
+  assert.doesNotMatch(managementSource, /\/admin\/curriculum\/lesson-design\?/);
   assert.match(workspaceSource, /function normalizeAdminReturnPath/);
   assert.match(workspaceSource, /const requestedLessonReturnPath = normalizeAdminReturnPath\(searchParams\.get\("returnTo"\)\)/);
   assert.match(workspaceSource, /params\.delete\("returnTo"\)/);
   assert.match(workspaceSource, /if \(requestedLessonReturnPath\) \{[\s\S]*router\.replace\(requestedLessonReturnPath, \{ scroll: false \}\)/);
-  assert.match(workspaceSource, /const lessonDesignReturnLabel = requestedLessonReturnPath\.includes\("\/admin\/classes"\)/);
-  assert.match(workspaceSource, /\{lessonDesignReturnLabel\}/);
+  assert.match(workspaceSource, /function getLessonDesignReturnLabel\(requestedLessonReturnPath: string\)/);
+  assert.match(workspaceSource, /if \(requestedLessonReturnPath\.includes\("\/admin\/classes"\)\) return "수업 상세"/);
+  assert.match(workspaceSource, /if \(requestedLessonReturnPath\.includes\("\/admin\/class-schedule"\)\) return "수업일정"/);
+  assert.match(workspaceSource, /return "수업계획"/);
+  assert.match(workspaceSource, /const lessonDesignReturnLabel = getLessonDesignReturnLabel\(requestedLessonReturnPath\)/);
+  assert.match(workspaceSource, /const lessonDesignReturnActionLabel = getLessonDesignReturnActionLabel\(lessonDesignReturnLabel\)/);
+  assert.match(workspaceSource, /\{lessonDesignReturnActionLabel\}/);
 });
 
 test("lesson design keeps return action reachable in the bottom save bar", async () => {
@@ -263,9 +269,10 @@ test("lesson design keeps return action reachable in the bottom save bar", async
   assert.match(workspaceSource, /data-testid="lesson-design-bottom-action-bar"/);
   assert.match(workspaceSource, /requestedLessonReturnPath \? \(/);
   assert.match(workspaceSource, /data-testid="lesson-design-bottom-return"/);
-  assert.match(workspaceSource, /aria-label=\{lessonDesignReturnLabel\}/);
+  assert.match(workspaceSource, /aria-label=\{lessonDesignReturnActionLabel\}/);
   assert.match(workspaceSource, /onClick=\{closeLessonDesignWorkspace\}/);
-  assert.match(workspaceSource, /requestedLessonReturnPath\.includes\("\/admin\/classes"\) \? "수업 상세" : "수업계획"/);
+  assert.match(workspaceSource, /\{lessonDesignReturnLabel\}/);
+  assert.doesNotMatch(workspaceSource, /requestedLessonReturnPath\.includes\("\/admin\/classes"\) \? "수업 상세" : "수업계획"/);
 });
 
 test("lesson design session query sync does not override local session clicks", async () => {
@@ -515,14 +522,17 @@ test("class schedule overview opens the official class schedule detail with pres
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
   const databaseStart = source.indexOf('data-testid="class-schedule-database-view"');
   const listSection = source.slice(databaseStart, source.indexOf("\n  );\n\n  return (", databaseStart));
+  const detailHrefStart = source.indexOf("function buildOfficialClassScheduleDetailHref");
+  const detailHrefSource = source.slice(detailHrefStart, source.indexOf("\nfunction ", detailHrefStart + 1));
 
   assert.match(source, /const CLASS_SCHEDULE_SCROLL_STORAGE_PREFIX = "tips:class-schedule-database-scroll:"/);
   assert.match(source, /function buildClassScheduleListHref/);
   assert.match(source, /function buildOfficialClassScheduleDetailHref/);
-  assert.match(source, /params\.set\("tab", "schedule"\)/);
-  assert.match(source, /params\.set\("section", resolvedSectionId\)/);
-  assert.match(source, /params\.set\("sessionId", resolvedSessionId\)/);
-  assert.match(source, /params\.set\("returnTo", normalizedReturnTo\)/);
+  assert.match(detailHrefSource, /params\.set\("tab", "basic"\)/);
+  assert.doesNotMatch(detailHrefSource, /params\.set\("tab", "schedule"\)/);
+  assert.doesNotMatch(detailHrefSource, /params\.set\("section", resolvedSectionId\)/);
+  assert.doesNotMatch(detailHrefSource, /params\.set\("sessionId", resolvedSessionId\)/);
+  assert.match(detailHrefSource, /params\.set\("returnTo", normalizedReturnTo\)/);
   assert.match(source, /const \[search, setSearch\] = useState\(\(\) => text\(searchParams\.get\("q"\)\)\)/);
   assert.match(source, /const classScheduleReturnPath = useMemo/);
   assert.match(source, /router\.replace\(nextHref, \{ scroll: false \}\)/);
@@ -531,9 +541,9 @@ test("class schedule overview opens the official class schedule detail with pres
   assert.match(source, /const openClassScheduleOfficialDetail = useCallback/);
   assert.match(source, /router\.push\(buildOfficialClassScheduleDetailHref/);
   assert.match(listSection, /role="link"/);
-  assert.match(listSection, /onClick=\{\(\) => openClassScheduleOfficialDetail\(row, nextSessionId, LESSON_DESIGN_SECTION_IDS\.periods\)\}/);
-  assert.match(listSection, /onKeyDown=\{\(event\) => handleClassScheduleRowKeyDown\(event, row, nextSessionId, LESSON_DESIGN_SECTION_IDS\.periods\)\}/);
-  assert.match(listSection, /href=\{buildOfficialClassScheduleDetailHref\(row, nextSessionId, LESSON_DESIGN_SECTION_IDS\.periods, classScheduleReturnPath\)\}/);
+  assert.match(listSection, /onClick=\{\(\) => openClassScheduleOfficialDetail\(row\)\}/);
+  assert.match(listSection, /onKeyDown=\{\(event\) => handleClassScheduleRowKeyDown\(event, row\)\}/);
+  assert.match(listSection, /href=\{buildOfficialClassScheduleDetailHref\(row, classScheduleReturnPath\)\}/);
   assert.doesNotMatch(listSection, /onClick=\{\(\) => setSelectedClassId\(row\.id\)\}/);
 });
 

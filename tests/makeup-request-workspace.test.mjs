@@ -143,10 +143,10 @@ test("makeup workspace includes approver queues form fields and room availabilit
   );
   assert.match(headerActionSource, /aria-label="휴보강 알림 설정"/);
   assert.match(headerActionSource, /<Bell className="size-4"/);
+  assert.match(headerActionSource, /<Plus className="size-4"/);
   assert.match(headerActionSource, />\s*휴보강 신청\s*</);
   assert.ok(headerActionSource.indexOf('aria-label="휴보강 알림 설정"') < headerActionSource.indexOf("onClick={openRequestDialog}"));
   assert.doesNotMatch(headerActionSource, /<Settings className/);
-  assert.doesNotMatch(headerActionSource, /<Plus className="size-4"[\s\S]*onClick=\{openRequestDialog\}/);
   assert.doesNotMatch(workspaceSource, /새로고침/);
   assert.doesNotMatch(workspaceSource, /RefreshCw/);
   assert.ok(workspaceSource.indexOf('htmlFor="makeup-subject">과목') < workspaceSource.indexOf('htmlFor="makeup-teacher">선생님'));
@@ -238,6 +238,16 @@ test("makeup request form marks required fields and exposes clear controls", () 
   assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-class">수업<\/RequiredFormLabel>/);
   assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-reason">사유<\/RequiredFormLabel>/);
   assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-approver">결재자<\/RequiredFormLabel>/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-subject" className="w-full">/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-teacher" className="w-full">/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-class" className="w-full">/);
+  assert.match(workspaceSource, /className=\{slot\.classroom \? "w-full pr-14" : "w-full"\}/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-approver" className="w-full">/);
+  assert.match(workspaceSource, /const canSubmitRequest = Boolean\(/);
+  assert.match(workspaceSource, /input\.classId &&[\s\S]*input\.reason\.trim\(\) &&[\s\S]*input\.approverTeacherCatalogId/);
+  assert.match(workspaceSource, /\(requestHasCancelDate \|\| requestHasMakeupSlots\)/);
+  assert.match(workspaceSource, /<Select value=\{input\.approverTeacherCatalogId\} onValueChange=\{\(value\) => patchInput\(\{ approverTeacherCatalogId: value \}\)\} disabled=\{!selectedClass\}>/);
+  assert.match(workspaceSource, /disabled=\{saving \|\| loading \|\| !canSubmitRequest\}/);
   assert.match(workspaceSource, /function FieldClearButton/);
   assert.match(workspaceSource, /aria-label="휴강일 초기화"/);
   assert.match(workspaceSource, /patchInput\(\{ cancelDate: "" \}\)/);
@@ -249,6 +259,28 @@ test("makeup request form marks required fields and exposes clear controls", () 
   assert.match(workspaceSource, /patchMakeupSlot\(slot\.id \|\| "", \{ endTime: "" \}\)/);
   assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 강의실 초기화`\}/);
   assert.match(workspaceSource, /patchMakeupSlot\(slot\.id \|\| "", \{ classroom: "" \}\)/);
+});
+
+test("makeup dialogs provide sr-only descriptions without adding visual helper copy", () => {
+  const requestDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf('<Dialog open={requestDialogOpen}'),
+    workspaceSource.indexOf('<Dialog open={Boolean(detailRequest)}'),
+  );
+  const detailDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf('<Dialog open={Boolean(detailRequest)}'),
+    workspaceSource.indexOf('<Dialog open={notificationDialogOpen}'),
+  );
+  const notificationDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf('<Dialog open={notificationDialogOpen}'),
+    workspaceSource.indexOf('<Dialog open={Boolean(selectedNotificationSetting)}'),
+  );
+
+  assert.match(requestDialogSource, /<DialogDescription className="sr-only">[\s\S]*?휴보강 신청 정보를 입력하고 결재자에게 상신합니다\.[\s\S]*?<\/DialogDescription>/);
+  assert.match(detailDialogSource, /<DialogDescription className="sr-only">[\s\S]*?선택한 휴보강 신청의 결재 상태와 처리 내용을 확인합니다\.[\s\S]*?<\/DialogDescription>/);
+  assert.match(notificationDialogSource, /<DialogDescription className="sr-only">[\s\S]*?휴보강 프로세스별 웹 알림과 구글챗 발송 설정을 관리합니다\.[\s\S]*?<\/DialogDescription>/);
+  assert.doesNotMatch(requestDialogSource, /<DialogDescription(?! className="sr-only")/);
+  assert.doesNotMatch(detailDialogSource, /<DialogDescription(?! className="sr-only")/);
+  assert.doesNotMatch(notificationDialogSource, /<DialogDescription(?! className="sr-only")/);
 });
 
 test("makeup pending requests can continue to makeup scheduling or refund tracking", () => {
@@ -455,6 +487,30 @@ test("makeup notification controls render a process by channel matrix", () => {
   assert.doesNotMatch(notificationDialogSource, /rounded-md border bg-muted\/15 p-3 md:grid-cols-\[120px_minmax\(0,1fr\)\]/);
 });
 
+test("makeup notification controls use mobile cards instead of a clipped desktop matrix", () => {
+  const notificationDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
+    workspaceSource.indexOf("<Dialog open={Boolean(finalCancelRequest)}"),
+  );
+
+  assert.match(notificationDialogSource, /data-testid="makeup-notification-mobile-list"/);
+  assert.match(notificationDialogSource, /className="grid gap-2 md:hidden"/);
+  assert.match(notificationDialogSource, /className="hidden overflow-x-auto rounded-md border md:block"/);
+  assert.match(notificationDialogSource, /aria-label=\{`\$\{triggerLabel\} 모바일 알림 설정`\}/);
+  assert.match(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_ORDER\.map\(\(channel\) => \{/);
+  assert.match(notificationDialogSource, /MAKEUP_NOTIFICATION_CHANNEL_LABELS\[channel\]/);
+  assert.match(notificationDialogSource, /openNotificationTemplateEditor\(triggerKind, settings\)/);
+  assert.match(notificationDialogSource, /handleToggleNotificationSetting\(setting\)/);
+  assert.match(notificationDialogSource, /handleOpenWebhookInfo\(channel\)/);
+  assert.ok(
+    notificationDialogSource.indexOf("{selectedWebhookInfo || webhookInfoError ? (") <
+      notificationDialogSource.indexOf('data-testid="makeup-notification-mobile-list"'),
+    "webhook connection detail should appear before the long mobile settings list",
+  );
+  assert.match(workspaceSource, /webhookInfoPanelRef/);
+  assert.match(workspaceSource, /scrollIntoView\(\{ block: "start" \}\)/);
+});
+
 test("makeup notification controls can preview and edit per-process content templates", () => {
   const notificationDialogSource = workspaceSource.slice(
     workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
@@ -486,6 +542,9 @@ test("makeup notification controls can preview and edit per-process content temp
   assert.match(notificationDialogSource, /미리보기/);
   assert.match(notificationDialogSource, /저장/);
   assert.match(notificationDialogSource, /사용 가능 변수/);
+  assert.match(notificationDialogSource, /className="flex max-h-\[calc\(100dvh-2rem\)\] flex-col overflow-hidden sm:max-w-2xl"/);
+  assert.match(notificationDialogSource, /className="grid min-h-0 gap-4 overflow-y-auto pr-1"/);
+  assert.match(notificationDialogSource, /<DialogFooter className="shrink-0">/);
   const notificationVariableSource = workspaceSource.slice(
     workspaceSource.indexOf("const MAKEUP_NOTIFICATION_TEMPLATE_VARIABLES"),
     workspaceSource.indexOf("const hiddenOnCardColumnKeys"),
@@ -552,7 +611,7 @@ test("makeup workspace does not expose direct delete for closed request rows", (
   assert.doesNotMatch(workspaceSource, /onForceDelete/);
 });
 
-test("makeup workspace filters table rows by subject teacher class and period", () => {
+test("makeup workspace filters table rows by subject teacher period and collapsible search", () => {
   assert.match(workspaceSource, /type MakeupRequestPeriodFilter = "all" \| "today" \| "week" \| "month" \| "custom"/);
   assert.match(workspaceSource, /const MAKEUP_REQUEST_PERIOD_FILTERS/);
   for (const label of ["전체 기간", "오늘", "이번주", "이번달", "직접입력"]) {
@@ -560,7 +619,9 @@ test("makeup workspace filters table rows by subject teacher class and period", 
   }
   assert.match(workspaceSource, /selectedSubjectFilter/);
   assert.match(workspaceSource, /selectedTeacherFilter/);
-  assert.match(workspaceSource, /selectedClassFilter/);
+  assert.doesNotMatch(workspaceSource, /selectedClassFilter/);
+  assert.doesNotMatch(workspaceSource, /ariaLabel="수업 필터"/);
+  assert.doesNotMatch(workspaceSource, /allLabel="수업 전체"/);
   assert.match(workspaceSource, /makeupPeriodFilter/);
   assert.match(workspaceSource, /makeupPeriodStartDate/);
   assert.match(workspaceSource, /makeupPeriodEndDate/);
@@ -571,13 +632,15 @@ test("makeup workspace filters table rows by subject teacher class and period", 
   assert.match(workspaceSource, /slot\.startAt/);
   assert.match(workspaceSource, /과목 전체/);
   assert.match(workspaceSource, /선생님 전체/);
-  assert.match(workspaceSource, /수업 전체/);
   assert.match(workspaceSource, /className="flex flex-wrap items-center gap-2 border-b bg-muted\/20 px-3 py-2"/);
   assert.match(workspaceSource, /aria-label="휴보강 전체 필터"/);
   assert.match(workspaceSource, /className="flex min-w-0 flex-wrap items-center gap-2" aria-label="휴보강 선택 필터"/);
   assert.match(workspaceSource, /aria-label="휴보강 선택 필터"/);
   assert.match(workspaceSource, /aria-label="휴보강 기간 필터"/);
-  assert.match(workspaceSource, /className="ml-auto flex min-w-\[12rem\] items-center gap-2 text-sm font-medium"/);
+  assert.match(workspaceSource, /filterInputOpen/);
+  assert.match(workspaceSource, /const isFilterInputExpanded = filterInputOpen \|\| Boolean\(filterValue\)/);
+  assert.match(workspaceSource, /aria-label=\{isFilterInputExpanded \? `\$\{filterColumn\.label\} 검색 접기` : `\$\{filterColumn\.label\} 검색 펼치기`\}/);
+  assert.match(workspaceSource, /\{isFilterInputExpanded \? \(/);
   assert.match(workspaceSource, /aria-label=\{`\$\{filterColumn\.label\} 필터`\}/);
   assert.doesNotMatch(workspaceSource, /\{filterColumn\.label\} 필터<\/span>/);
   assert.doesNotMatch(workspaceSource, /오름차순/);

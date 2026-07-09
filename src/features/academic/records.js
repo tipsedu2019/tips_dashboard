@@ -338,7 +338,13 @@ function buildClassGroupOptions(groups = []) {
 
   return [...byKey.values()]
     .sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label, "ko", { numeric: true }))
-    .map(({ value, label, aliases, isDefault }) => ({ value, label, aliases, isDefault }));
+    .map(({ value, label, aliases, isDefault }) => {
+      const option = { value, label, aliases };
+      if (isDefault === true) {
+        option.isDefault = true;
+      }
+      return option;
+    });
 }
 
 function getClassGroupFilterValues(classGroupOptions = [], selectedGroup = "") {

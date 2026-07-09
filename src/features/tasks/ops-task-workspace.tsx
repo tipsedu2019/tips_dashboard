@@ -1159,7 +1159,8 @@ function applyFormCompletionIntent(input: OpsTaskInput, intent: FormCompletionIn
   return input
 }
 
-function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null) {
+function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null, taskType: OpsTaskInput["type"], isEditing: boolean) {
+  if (!intent && taskType === "withdrawal" && !isEditing) return "퇴원 신청"
   if (!intent) return "저장"
   if (intent.kind === "word_retest_retry") {
     return "재시험 추가 및 불합격 확인"
@@ -1167,6 +1168,17 @@ function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null)
   if (intent.registrationPipelineStatus) return `저장 후 ${getCompactRegistrationPipelineLabel(intent.registrationPipelineStatus)}`
   if (intent.status === "done") return "저장 후 완료"
   return "저장"
+}
+
+function canSubmitOpsTaskForm(input: OpsTaskInput, isEditing: boolean) {
+  if (input.type !== "withdrawal" || isEditing) return true
+  const withdrawal = input.withdrawal || {}
+  return Boolean(
+    input.subject &&
+    withdrawal.teacherName &&
+    input.classId &&
+    input.studentId,
+  )
 }
 
 function isRegistrationPipelineComplete(input: OpsTaskInput) {
@@ -4635,6 +4647,15 @@ function WithdrawalDataCell({
   )
 }
 
+function getWithdrawalMobileNextActionLabel(task: OpsTask, completionBlockers: string[]) {
+  const nextAction = getNextTaskStatusAction(task)
+  if (!nextAction) return ""
+  if (nextAction.status === "done" && completionBlockers.length > 0) {
+    return getCompletionBlockerActionLabel(completionBlockers)
+  }
+  return nextAction.label
+}
+
 function WithdrawalDataTable({
   tasks,
   todayKey,
@@ -4800,7 +4821,118 @@ function WithdrawalDataTable({
           ) : null}
         </div>
       </div>
-      <div className="w-full overflow-x-auto" role="table" aria-label="퇴원 신청 데이터테이블">
+      <div data-testid="withdrawal-mobile-task-list" className="grid gap-2 p-3 md:hidden" aria-label="퇴원 모바일 목록">
+        {loading ? (
+          <div className="px-3 py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
+        ) : visibleWithdrawalTasks.length === 0 ? (
+          <div className="grid gap-3 px-3 py-10 text-center text-sm text-muted-foreground">
+            <span>{tasks.length === 0 ? emptyLabel : "표시할 퇴원 신청이 없습니다."}</span>
+            {tasks.length === 0 && showEmptyAction ? (
+              <span>
+                <Button type="button" size="sm" onClick={onCreate}>
+                  <Plus className="size-4" />
+                  {emptyActionLabel}
+                </Button>
+              </span>
+            ) : null}
+          </div>
+        ) : visibleWithdrawalTasks.map((task) => {
+          const withdrawal = task.withdrawal || {}
+          const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
+          const nextAction = getNextTaskStatusAction(task)
+          const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
+          const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
+          const mobileNextActionLabel = getWithdrawalMobileNextActionLabel(task, completionBlockers)
+          const progress = getWithdrawalProgressLabel(task)
+
+          return (
+            <article key={task.id} className="grid gap-3 rounded-md border bg-background p-3 shadow-xs" aria-label={`${task.title} 퇴원 신청`}>
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <WithdrawalWorkflowStatusBadge status={task.status} />
+                <Badge variant="outline">{task.subject || "과목 미정"}</Badge>
+                <Badge variant="secondary">{withdrawal.teacherName || task.assigneeLabel || "선생님 미정"}</Badge>
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-foreground">{task.className || task.title}</div>
+                <div className="truncate text-xs text-muted-foreground">{task.studentName || "학생 미정"}</div>
+              </div>
+              <dl className="grid gap-2 text-xs">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">퇴원일</dt>
+                    <dd className="mt-0.5 truncate font-medium">{dateOnlyLabel(withdrawal.withdrawalDate)}</dd>
+                  </div>
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">퇴원회차</dt>
+                    <dd className="mt-0.5 truncate font-medium">{withdrawal.withdrawalSession || "미정"}</dd>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">진행 수업시수</dt>
+                    <dd className="mt-0.5 truncate font-medium">{withdrawal.completedLessonHours || "자동 계산"}</dd>
+                  </div>
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">수업진행률</dt>
+                    <dd className="mt-0.5 truncate font-medium">{progress === "-" ? "자동 계산" : progress}</dd>
+                  </div>
+                </div>
+                {withdrawal.customerReason || withdrawal.teacherOpinion ? (
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">퇴원 메모</dt>
+                    <dd className="mt-0.5 line-clamp-2 font-medium">
+                      {[withdrawal.customerReason, withdrawal.teacherOpinion].filter(Boolean).join(" · ")}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+              <div className="flex flex-wrap justify-end gap-1.5 border-t pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`${task.title} 퇴원 상세 열기`}
+                  onClick={() => onOpen(task)}
+                >
+                  상세
+                </Button>
+                {canRunStatusAction && nextAction ? (
+                  <Button
+                    type="button"
+                    variant={nextActionBlocked ? "outline" : "default"}
+                    size="sm"
+                    aria-label={`${task.title}: ${mobileNextActionLabel}`}
+                    title={nextActionBlocked ? `${completionBlockers.join(", ")} 연결 필요` : undefined}
+                    onClick={() => {
+                      if (nextActionBlocked) {
+                        onEdit(task, completionBlockers)
+                        return
+                      }
+                      onStatusChange(task, nextAction.status)
+                    }}
+                    disabled={statusActionDisabled}
+                  >
+                    {mobileNextActionLabel}
+                  </Button>
+                ) : null}
+                {canEditTaskDetails(task) ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`${task.title} 수정`}
+                    onClick={() => onEdit(task)}
+                    disabled={statusActionDisabled}
+                  >
+                    수정
+                  </Button>
+                ) : null}
+              </div>
+            </article>
+          )
+        })}
+      </div>
+      <div className="hidden w-full overflow-x-auto md:block" role="table" aria-label="퇴원 신청 데이터테이블">
         <div
           role="row"
           className="grid min-w-full border-b bg-muted/45 text-xs [grid-template-columns:var(--withdrawal-grid-template)]"
@@ -5039,6 +5171,7 @@ function WithdrawalNotificationSettingsDialog({
   const [webhookInfoLoading, setWebhookInfoLoading] = useState<WithdrawalNotificationChannelKey | "">("")
   const [webhookInfoSaving, setWebhookInfoSaving] = useState(false)
   const [webhookInfoError, setWebhookInfoError] = useState("")
+  const webhookInfoPanelRef = useRef<HTMLDivElement | null>(null)
   const settingsByKey = useMemo(() => (
     new Map(notificationSettings.map((setting) => [`${setting.triggerKey}:${setting.channelKey}`, setting]))
   ), [notificationSettings])
@@ -5172,6 +5305,11 @@ function WithdrawalNotificationSettingsDialog({
 
   const selectedTriggerLabel = WITHDRAWAL_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === selectedNotificationTrigger)?.label || "알림 내용"
 
+  useEffect(() => {
+    if (!selectedWebhookInfo && !webhookInfoError) return
+    webhookInfoPanelRef.current?.scrollIntoView({ block: "start" })
+  }, [selectedWebhookInfo, webhookInfoError])
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -5183,8 +5321,120 @@ function WithdrawalNotificationSettingsDialog({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
-            <div className="overflow-x-auto rounded-md border" role="table" aria-label="퇴원 알림 설정 표">
-              <div className="min-w-[680px]">
+            <div className="grid gap-2">
+              {selectedWebhookInfo || webhookInfoError ? (
+                <div ref={webhookInfoPanelRef} className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs">
+                  {selectedWebhookInfo ? (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
+                        <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
+                          {webhookInfoLoading === selectedWebhookInfo.channelKey ? "확인 중" : selectedWebhookInfo.configured ? "연결됨" : "미설정"}
+                        </Badge>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-muted-foreground">환경 변수</div>
+                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-muted-foreground">웹훅 URL</div>
+                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
+                      </div>
+                      <div className="grid gap-1">
+                        <Label htmlFor="withdrawal-google-chat-webhook-url" className="text-xs text-muted-foreground">
+                          웹훅 URL 수정
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="withdrawal-google-chat-webhook-url"
+                            type="password"
+                            value={webhookUrlInput}
+                            onChange={(event) => setWebhookUrlInput(event.target.value)}
+                            placeholder="새 구글챗 웹훅 URL 입력"
+                            disabled={!isManager || webhookInfoSaving}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="shrink-0"
+                            disabled={!isManager || webhookInfoSaving || !webhookUrlInput.trim()}
+                            onClick={() => void handleSaveWithdrawalWebhookInfo()}
+                          >
+                            저장
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                  {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
+                </div>
+              ) : null}
+              <div data-testid="withdrawal-notification-mobile-list" className="grid gap-2 md:hidden">
+                {WITHDRAWAL_NOTIFICATION_TRIGGERS.map((trigger) => (
+                  <article key={`mobile-${trigger.key}`} className="grid gap-2 rounded-md border bg-background p-3" aria-label={`${trigger.label} 모바일 퇴원 알림 설정`}>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{trigger.label}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{trigger.detail}</div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 shrink-0 px-2 text-xs"
+                        aria-label={`${trigger.label} 알림 내용 수정`}
+                        onClick={() => openWithdrawalNotificationTemplateEditor(trigger.key)}
+                      >
+                        <Pencil className="size-3.5" aria-hidden="true" />
+                        내용
+                      </Button>
+                    </div>
+                    <div className="grid gap-1.5">
+                      {WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => {
+                        const setting = settingsByKey.get(`${trigger.key}:${channel.key}`)
+                        const enabled = Boolean(setting?.enabled)
+                        const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[channel.key]
+
+                        return (
+                          <div key={`${trigger.key}-${channel.key}-mobile`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-muted/30 px-2 py-2">
+                            <div className="min-w-0">
+                              {googleChatChannel ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-auto min-h-0 max-w-full justify-start px-0 py-0 text-left text-xs font-medium text-muted-foreground hover:bg-transparent"
+                                  disabled={webhookInfoLoading === channel.key}
+                                  aria-label={`${channel.label} 웹훅 URL 보기`}
+                                  title={`${channel.label} 웹훅 URL 보기`}
+                                  onClick={() => void handleOpenWithdrawalWebhookInfo(channel.key)}
+                                >
+                                  <span className="truncate">{channel.label}</span>
+                                </Button>
+                              ) : (
+                                <div className="truncate text-xs font-medium text-muted-foreground">{channel.label}</div>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              variant={enabled ? "default" : "outline"}
+                              size="sm"
+                              aria-pressed={enabled}
+                              aria-label={`${trigger.label} ${channel.label} 알림 ${enabled ? "끄기" : "켜기"}`}
+                              onClick={() => toggleNotificationSetting(trigger.key, channel.key)}
+                              className="h-8 min-w-16 justify-center px-2 text-xs"
+                            >
+                              {enabled ? "켜짐" : "꺼짐"}
+                            </Button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto rounded-md border md:block" role="table" aria-label="퇴원 알림 설정 표">
+                <div className="min-w-[680px]">
                 <div
                   role="row"
                   className="grid border-b bg-muted/40 text-xs font-medium text-muted-foreground"
@@ -5273,54 +5523,9 @@ function WithdrawalNotificationSettingsDialog({
                   </div>
                 ))}
               </div>
-            </div>
-            {selectedWebhookInfo || webhookInfoError ? (
-              <div className="grid content-start gap-2 rounded-md border bg-muted/20 p-3 text-xs">
-                {selectedWebhookInfo ? (
-                  <>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
-                      <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
-                        {webhookInfoLoading === selectedWebhookInfo.channelKey ? "확인 중" : selectedWebhookInfo.configured ? "연결됨" : "미설정"}
-                      </Badge>
-                    </div>
-                    <div className="grid gap-1">
-                      <div className="text-muted-foreground">환경 변수</div>
-                      <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
-                    </div>
-                    <div className="grid gap-1">
-                      <div className="text-muted-foreground">웹훅 URL</div>
-                      <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
-                    </div>
-                    <div className="grid gap-1">
-                      <Label htmlFor="withdrawal-google-chat-webhook-url" className="text-xs text-muted-foreground">
-                        웹훅 URL 수정
-                      </Label>
-                      <div className="flex gap-2">
-                        <Input
-                          id="withdrawal-google-chat-webhook-url"
-                          type="password"
-                          value={webhookUrlInput}
-                          onChange={(event) => setWebhookUrlInput(event.target.value)}
-                          placeholder="새 구글챗 웹훅 URL 입력"
-                          disabled={!isManager || webhookInfoSaving}
-                        />
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="shrink-0"
-                          disabled={!isManager || webhookInfoSaving || !webhookUrlInput.trim()}
-                          onClick={() => void handleSaveWithdrawalWebhookInfo()}
-                        >
-                          저장
-                        </Button>
-                      </div>
-                    </div>
-                  </>
-                ) : null}
-                {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
               </div>
-            ) : (
+            </div>
+            {selectedWebhookInfo || webhookInfoError ? null : (
               <div className="grid content-start gap-2 rounded-md border border-dashed bg-muted/10 p-3 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">구글챗 웹훅</span>
                 <span>구글챗 열 이름을 누르면 연결 상태와 웹훅 URL을 확인할 수 있습니다.</span>
@@ -5333,12 +5538,12 @@ function WithdrawalNotificationSettingsDialog({
       <Dialog open={Boolean(selectedNotificationTrigger)} onOpenChange={(nextOpen) => {
         if (!nextOpen) closeWithdrawalNotificationTemplateEditor()
       }}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>알림 내용 수정</DialogTitle>
             <DialogDescription>{selectedTriggerLabel}</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4">
+          <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
             <div className="grid gap-2">
               <Label htmlFor="withdrawal-notification-title-template">제목</Label>
               <Input
@@ -5382,7 +5587,7 @@ function WithdrawalNotificationSettingsDialog({
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button type="button" variant="outline" onClick={closeWithdrawalNotificationTemplateEditor}>
               취소
             </Button>
@@ -5491,7 +5696,8 @@ function TodoPriorityBadge({ priority, showNormal = false }: { priority: OpsTask
 function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { status: OpsTaskStatus; label: string } | null {
   if (task.type === "withdrawal" && task.status === "done") return null
   if (task.type === "withdrawal" && task.status === "canceled") return null
-  if (task.type === "withdrawal" && task.status === "requested") return { status: "in_progress", label: "진행" }
+  if (task.type === "withdrawal" && task.status === "requested") return { status: "in_progress", label: "처리 시작" }
+  if (task.type === "withdrawal" && task.status === "confirmed") return { status: "in_progress", label: "처리 시작" }
   if (task.status === "canceled") return { status: "requested", label: "다시 열기" }
   if (task.status === "done") return { status: "requested", label: "다시 열기" }
   if (task.status === "on_hold") return { status: "in_progress", label: "재개" }
@@ -6535,6 +6741,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const formRequestedTeamLabel = form.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam || "미지정"
   const isFormDirty = formOpen && serializeOpsTaskInput(form) !== formBaselineRef.current
   const isEditingLockedCompletedTask = Boolean(editingTask && isClosedOpsTask(editingTask) && !formCompletionIntent)
+  const canSubmitCurrentForm = canSubmitOpsTaskForm(form, Boolean(editingTask))
   const formDialogTitle = editingTask
     ? form.type === "general"
       ? "할 일 수정"
@@ -8457,8 +8664,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 {confirmingFormClose ? "저장하지 않고 닫기" : "닫기"}
               </Button>
               {!isEditingLockedCompletedTask && (
-                <Button type="submit" disabled={saving} className="w-full sm:w-auto">
-                  {saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent)}
+                <Button type="submit" disabled={saving || !canSubmitCurrentForm} className="w-full sm:w-auto">
+                  {saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, Boolean(editingTask))}
                 </Button>
               )}
             </div>

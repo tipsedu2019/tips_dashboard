@@ -51,6 +51,10 @@ test("class management exposes only basic and student detail tabs through URL st
   assert.match(pageSource, /data-testid="class-official-summary-bar"/);
   assert.match(pageSource, /data-testid="class-detail-return-to-work-queue"/);
   assert.match(pageSource, /router\.push\(requestedClassReturnPath\)/);
+  assert.match(pageSource, /function getClassReturnPathLabel\(path: string\)/);
+  assert.match(pageSource, /if \(path\.startsWith\("\/admin\/class-schedule"\)\) return "수업일정"/);
+  assert.match(pageSource, /if \(path\.startsWith\("\/admin\/curriculum"\)\) return "수업계획"/);
+  assert.match(pageSource, /\{getClassReturnPathLabel\(requestedClassReturnPath\)\}/);
   assert.match(pageSource, /params\.delete\("returnTo"\)/);
   assert.match(pageSource, /data-testid="class-official-detail-tabs"/);
   assert.match(pageSource, /data-testid="class-detail-students-tab"/);

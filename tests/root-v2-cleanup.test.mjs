@@ -16,7 +16,7 @@ test("project root is promoted to the v2 Next app", () => {
 
   const packageJson = JSON.parse(read("package.json"));
   assert.equal(packageJson.scripts.dev, "next dev");
-  assert.equal(packageJson.scripts.build, "next build");
+  assert.equal(packageJson.scripts.build, "next build --webpack");
 });
 
 test("public routes no longer redirect to legacy static bundles", () => {

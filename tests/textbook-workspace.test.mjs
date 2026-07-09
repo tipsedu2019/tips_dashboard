@@ -915,6 +915,28 @@ test("textbook workspace keeps purchase and sale cases in grouped process tables
   assert.match(ledgerSource, /groupSaleLinesByStatus/);
 });
 
+test("textbook closing history keeps mobile actions visible without horizontal table scrolling", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const closingTableSource = workspaceSource.slice(
+    workspaceSource.indexOf("function MonthlyClosingTable"),
+    workspaceSource.indexOf("function EmptyRow"),
+  );
+
+  assert.match(closingTableSource, /data-testid="textbook-closing-mobile-list"/);
+  assert.match(closingTableSource, /className="grid min-w-0 max-w-full gap-2 overflow-hidden p-2 md:hidden"/);
+  assert.match(closingTableSource, /className="hidden max-w-full overflow-x-auto md:block"/);
+  assert.match(closingTableSource, /const closingA11yLabel = `\$\{text\(row\.closing_month\)\} \$\{subjectLabel\}`/);
+  assert.match(closingTableSource, /aria-label=\{`\$\{closingA11yLabel\} 정산 상세 열기`\}/);
+  assert.match(closingTableSource, />입고</);
+  assert.match(closingTableSource, />출고</);
+  assert.match(closingTableSource, />기말</);
+  assert.match(closingTableSource, />마진</);
+  assert.match(closingTableSource, /<Table className="min-w-\[760px\]">/);
+});
+
 test("textbook workspace removes external payment sync from the issue flow", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
@@ -1502,7 +1524,8 @@ test("textbook workspace fixes second-round browser audit issues", async () => {
   assert.doesNotMatch(workspaceSource, /onPointerDown=\{\(event\) =>/);
   assert.doesNotMatch(workspaceSource, /event\.preventDefault\(\);[\s\S]*closePurchaseDialog\(\);/);
   assert.match(workspaceSource, /dialogFooterClassName/);
-  assert.match(workspaceSource, /sticky bottom-0 mt-1 flex w-full min-w-0 max-w-full justify-self-stretch overflow-hidden flex-col/);
+  assert.match(workspaceSource, /sticky bottom-0 z-20 mt-1 flex w-full min-w-0 max-w-full justify-self-stretch flex-col/);
+  assert.doesNotMatch(workspaceSource, /const dialogFooterClassName =\n\s+"[^"]*overflow-hidden/);
   assert.doesNotMatch(workspaceSource, /sm:-mx-6/);
   assert.doesNotMatch(workspaceSource, /sm:-mb-6/);
   assert.match(workspaceSource, /flex flex-col/);
@@ -1510,9 +1533,12 @@ test("textbook workspace fixes second-round browser audit issues", async () => {
   assert.match(workspaceSource, /sm:flex-row/);
   assert.match(workspaceSource, /\[\&>button\]:w-full/);
   assert.match(workspaceSource, /sm:\[\&>button\]:w-auto/);
-  assert.match(workspaceSource, /<form onSubmit=\{submitPurchase\} className="grid min-w-0 max-w-full gap-3 overflow-hidden \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
-  assert.match(workspaceSource, /<form onSubmit=\{submitSale\} className="grid min-w-0 max-w-full gap-3 overflow-hidden \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
-  assert.match(workspaceSource, /<form onSubmit=\{submitClosing\} className="grid min-w-0 max-w-full gap-3 overflow-hidden \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
+  assert.match(workspaceSource, /<form onSubmit=\{submitPurchase\} className="grid min-w-0 max-w-full gap-3 \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
+  assert.match(workspaceSource, /<form onSubmit=\{submitSale\} className="grid min-w-0 max-w-full gap-3 \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
+  assert.match(workspaceSource, /<form onSubmit=\{submitClosing\} className="grid min-w-0 max-w-full gap-3 \[\&>\*\]:min-w-0 \[\&>\*\]:max-w-full"/);
+  assert.doesNotMatch(workspaceSource, /<form onSubmit=\{submitPurchase\} className="grid min-w-0 max-w-full gap-3 overflow-hidden/);
+  assert.doesNotMatch(workspaceSource, /<form onSubmit=\{submitSale\} className="grid min-w-0 max-w-full gap-3 overflow-hidden/);
+  assert.doesNotMatch(workspaceSource, /<form onSubmit=\{submitClosing\} className="grid min-w-0 max-w-full gap-3 overflow-hidden/);
   assert.doesNotMatch(workspaceSource, /showCloseButton=\{false\}/);
   assert.match(workspaceSource, /closeMasterDialog/);
   assert.match(workspaceSource, /<div className=\{dialogFooterClassName\}>[\s\S]*aria-label="교재 등록 취소"/);

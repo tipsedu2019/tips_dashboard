@@ -53,6 +53,18 @@ function normalizeAdminReturnPath(value: unknown) {
   return path.startsWith("/admin/") ? path : "";
 }
 
+function getLessonDesignReturnLabel(requestedLessonReturnPath: string) {
+  if (requestedLessonReturnPath.includes("/admin/classes")) return "수업 상세";
+  if (requestedLessonReturnPath.includes("/admin/class-schedule")) return "수업일정";
+  return "수업계획";
+}
+
+function getLessonDesignReturnActionLabel(returnLabel: string) {
+  return returnLabel === "수업 상세"
+    ? `${returnLabel}로 돌아가기`
+    : `${returnLabel}으로 돌아가기`;
+}
+
 function getTextbookTitle(book: Record<string, unknown> | null | undefined) {
   return text(book?.title || book?.name || book?.textbook_title || book?.textbookTitle);
 }
@@ -754,8 +766,6 @@ function buildClassScheduleListHref(
 
 function buildOfficialClassScheduleDetailHref(
   row: Record<string, unknown> | null,
-  sessionId = "",
-  sectionId: string = LESSON_DESIGN_SECTION_IDS.periods,
   returnTo = "",
 ) {
   const classId = text(row?.id);
@@ -765,15 +775,7 @@ function buildOfficialClassScheduleDetailHref(
 
   const params = new URLSearchParams();
   params.set("classId", classId);
-  params.set("tab", "schedule");
-
-  const resolvedSectionId = resolveLessonDesignSectionId(sectionId) || LESSON_DESIGN_SECTION_IDS.periods;
-  params.set("section", resolvedSectionId);
-
-  const resolvedSessionId = text(sessionId);
-  if (resolvedSessionId) {
-    params.set("sessionId", resolvedSessionId);
-  }
+  params.set("tab", "basic");
 
   const normalizedReturnTo = normalizeAdminReturnPath(returnTo);
   if (normalizedReturnTo) {
@@ -2639,31 +2641,22 @@ export function ClassScheduleWorkspace() {
   }, [classScheduleReturnPath]);
 
   const openClassScheduleOfficialDetail = useCallback(
-    (
-      row: Record<string, unknown>,
-      sessionId = "",
-      sectionId: string = LESSON_DESIGN_SECTION_IDS.periods,
-    ) => {
+    (row: Record<string, unknown>) => {
       rememberClassScheduleListPosition();
       setSelectedClassId(text(row.id));
-      router.push(buildOfficialClassScheduleDetailHref(row, sessionId, sectionId, classScheduleReturnPath));
+      router.push(buildOfficialClassScheduleDetailHref(row, classScheduleReturnPath));
     },
     [classScheduleReturnPath, rememberClassScheduleListPosition, router],
   );
 
   const handleClassScheduleRowKeyDown = useCallback(
-    (
-      event: KeyboardEvent<HTMLElement>,
-      row: Record<string, unknown>,
-      sessionId = "",
-      sectionId: string = LESSON_DESIGN_SECTION_IDS.periods,
-    ) => {
+    (event: KeyboardEvent<HTMLElement>, row: Record<string, unknown>) => {
       if (event.key !== "Enter" && event.key !== " ") {
         return;
       }
 
       event.preventDefault();
-      openClassScheduleOfficialDetail(row, sessionId, sectionId);
+      openClassScheduleOfficialDetail(row);
     },
     [openClassScheduleOfficialDetail],
   );
@@ -4347,9 +4340,8 @@ export function ClassScheduleWorkspace() {
   const lessonDesignDescription = selectedRow
     ? `${selectedRow.termName || "학기 미정"} · ${selectedRow.teacher || "선생님 미정"}`
     : "수업 설계";
-  const lessonDesignReturnLabel = requestedLessonReturnPath.includes("/admin/classes")
-    ? "수업 상세로 돌아가기"
-    : "수업계획으로 돌아가기";
+  const lessonDesignReturnLabel = getLessonDesignReturnLabel(requestedLessonReturnPath);
+  const lessonDesignReturnActionLabel = getLessonDesignReturnActionLabel(lessonDesignReturnLabel);
 
   if (loading) {
     return <ClassScheduleSkeleton />;
@@ -6006,11 +5998,11 @@ export function ClassScheduleWorkspace() {
                 variant="outline"
                 className="h-9 rounded-md px-3 shadow-none"
                 data-testid="lesson-design-bottom-return"
-                aria-label={lessonDesignReturnLabel}
+                aria-label={lessonDesignReturnActionLabel}
                 onClick={closeLessonDesignWorkspace}
               >
                 <ArrowLeft className="mr-1.5 size-4" />
-                {requestedLessonReturnPath.includes("/admin/classes") ? "수업 상세" : "수업계획"}
+                {lessonDesignReturnLabel}
               </Button>
             ) : null}
             <Button
@@ -6187,8 +6179,8 @@ export function ClassScheduleWorkspace() {
 	                          "min-w-0 cursor-pointer rounded-lg border bg-background px-3 py-3 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
 	                          isSelected ? "border-primary bg-muted/60" : "border-border/70",
 	                        )}
-	                        onClick={() => openClassScheduleOfficialDetail(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
-	                        onKeyDown={(event) => handleClassScheduleRowKeyDown(event, row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
+	                        onClick={() => openClassScheduleOfficialDetail(row)}
+	                        onKeyDown={(event) => handleClassScheduleRowKeyDown(event, row)}
 	                      >
                         <div className="flex min-w-0 items-start justify-between gap-3">
                           <div className="min-w-0 space-y-1">
@@ -6198,7 +6190,7 @@ export function ClassScheduleWorkspace() {
                               {row.syncGroupName ? <Badge variant="outline">{row.syncGroupName}</Badge> : null}
                             </div>
 	                            <Link
-	                              href={buildOfficialClassScheduleDetailHref(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods, classScheduleReturnPath)}
+	                              href={buildOfficialClassScheduleDetailHref(row, classScheduleReturnPath)}
 	                              className="block text-base font-semibold leading-5 break-keep underline-offset-4 hover:underline"
 	                              onClick={(event) => {
 	                                event.stopPropagation();
@@ -6327,8 +6319,8 @@ export function ClassScheduleWorkspace() {
 	                          )}
 	                          aria-label={`${row.title} 일정 상세 열기`}
 	                          tabIndex={0}
-	                          onClick={() => openClassScheduleOfficialDetail(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
-	                          onKeyDown={(event) => handleClassScheduleRowKeyDown(event, row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods)}
+	                          onClick={() => openClassScheduleOfficialDetail(row)}
+	                          onKeyDown={(event) => handleClassScheduleRowKeyDown(event, row)}
 	                        >
                           <TableCell className="align-top whitespace-normal">
                             <div className="min-w-0 space-y-2">
@@ -6340,7 +6332,7 @@ export function ClassScheduleWorkspace() {
                               </div>
                               <div>
 	                                <Link
-	                                  href={buildOfficialClassScheduleDetailHref(row, nextSessionId, LESSON_DESIGN_SECTION_IDS.periods, classScheduleReturnPath)}
+	                                  href={buildOfficialClassScheduleDetailHref(row, classScheduleReturnPath)}
 	                                  className="inline-flex max-w-full text-left font-medium leading-5 break-keep underline-offset-4 hover:underline"
 	                                  onClick={(event) => {
 	                                    event.stopPropagation();
@@ -6471,7 +6463,7 @@ export function ClassScheduleWorkspace() {
             </div>
             <Button type="button" variant="outline" onClick={closeLessonDesignWorkspace}>
               <ArrowLeft className="mr-2 size-4" />
-              {lessonDesignReturnLabel}
+              {lessonDesignReturnActionLabel}
             </Button>
           </div>
           {lessonDesignSnapshot ? (
@@ -6485,7 +6477,7 @@ export function ClassScheduleWorkspace() {
                 <div className="grid gap-3 md:grid-cols-3">
                   <Button type="button" variant="outline" onClick={closeLessonDesignWorkspace}>
                     <ArrowLeft className="mr-2 size-4" />
-                    {lessonDesignReturnLabel}
+                    {lessonDesignReturnActionLabel}
                   </Button>
                   <Link
                     href="/admin/classes"

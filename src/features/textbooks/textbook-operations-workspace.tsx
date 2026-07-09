@@ -399,7 +399,7 @@ const textbookQualityIssueFilterKeys: Exclude<TextbookQualityFilter, "all" | "at
 const textbookTabTriggerClassName =
   "gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm";
 const dialogFooterClassName =
-  "sticky bottom-0 mt-1 flex w-full min-w-0 max-w-full justify-self-stretch overflow-hidden flex-col gap-2 border-t bg-background/95 px-0 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:justify-end [&>button]:w-full sm:[&>button]:w-auto";
+  "sticky bottom-0 z-20 mt-1 flex w-full min-w-0 max-w-full justify-self-stretch flex-col gap-2 border-t bg-background/95 px-0 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:justify-end [&>button]:w-full sm:[&>button]:w-auto";
 const stickyActionHeadClassName =
   "sticky right-0 bg-muted/30 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
 const stickyActionCellClassName =
@@ -5434,7 +5434,7 @@ export function TextbookOperationsWorkspace() {
             <DialogTitle>{getPurchaseDialogTitle(purchaseForm.requestStage, Boolean(selectedPurchaseLineId))}</DialogTitle>
             <DialogDescription className="sr-only">교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitPurchase} className="grid min-w-0 max-w-full gap-3 overflow-hidden [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "purchase"}>
+          <form onSubmit={submitPurchase} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "purchase"}>
             {purchaseForm.requestStage === "request" ? (
               <div className="grid gap-3">
                 <section className="grid gap-2 rounded-lg border bg-muted/20 p-3">
@@ -5807,7 +5807,7 @@ export function TextbookOperationsWorkspace() {
             <DialogTitle>출고 추가</DialogTitle>
             <DialogDescription className="sr-only">수업 또는 선생님과 교재를 선택해 출고 대기 내역을 생성합니다.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitSale} className="grid min-w-0 max-w-full gap-3 overflow-hidden [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "sale"}>
+          <form onSubmit={submitSale} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "sale"}>
             <Field label="대상">
               <div className="grid grid-cols-2 rounded-md border bg-background p-0.5" role="group" aria-label="출고 대상">
                 {textbookCopyScopeOptions.map((option) => (
@@ -6028,7 +6028,7 @@ export function TextbookOperationsWorkspace() {
             <DialogTitle>월마감</DialogTitle>
             <DialogDescription className="sr-only">월별 입고, 출고, 기말 수량과 금액 차이를 정산합니다.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitClosing} className="grid min-w-0 max-w-full gap-3 overflow-hidden [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "closing"}>
+          <form onSubmit={submitClosing} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "closing"}>
             <div className="grid grid-cols-2 gap-3">
               <Field label="월" required>
                 <Input type="month" value={closingForm.closingMonth} onChange={(event) => setClosingForm((current) => ({ ...current, closingMonth: event.target.value }))} aria-label="마감 월" />
@@ -11828,7 +11828,93 @@ function MonthlyClosingTable({
           </Button>
         </div>
       ) : null}
-      <div className="overflow-x-auto">
+      <div data-testid="textbook-closing-mobile-list" className="grid min-w-0 max-w-full gap-2 overflow-hidden p-2 md:hidden">
+        {recentRows.length > 0 ? (
+          <div className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2">
+              <Checkbox
+                checked={allVisibleSelected || (someVisibleSelected && "indeterminate")}
+                onCheckedChange={(value) => onToggleVisibleRows?.(visibleIds, value === true)}
+                title="정산 행 전체 선택"
+                aria-label="정산 행 전체 선택"
+                className="shrink-0"
+              />
+              <span className="truncate">최근 {formatQuantity(visibleIds.length)}건</span>
+            </div>
+            <span className="shrink-0 tabular-nums">선택 {formatQuantity(selectedVisibleCount)}</span>
+          </div>
+        ) : null}
+        {recentRows.map((row) => {
+          const rowId = getRecordId(row);
+          const subjectLabel = text(row.subject) === "all" ? "전체" : getSubjectLabel(row.subject);
+          const closingA11yLabel = `${text(row.closing_month)} ${subjectLabel}`;
+
+          return (
+            <article key={`mobile-${rowId || closingA11yLabel}`} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
+              <div className="flex min-w-0 items-start gap-3">
+                <Checkbox
+                  checked={selectedIdSet.has(rowId)}
+                  disabled={!rowId}
+                  onCheckedChange={(value) => onToggleRow?.(rowId, value === true)}
+                  title={`${closingA11yLabel} 정산 선택`}
+                  aria-label={`${closingA11yLabel} 정산 선택`}
+                  className="mt-1 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 truncate text-left text-sm font-semibold tabular-nums underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      aria-label={`${closingA11yLabel} 정산 상세 열기`}
+                      title={`${closingA11yLabel} 정산 상세`}
+                      onClick={() => onInspectRow?.(row)}
+                    >
+                      {text(row.closing_month)} · {subjectLabel}
+                    </button>
+                    <Badge variant="outline" className="shrink-0 rounded-md">
+                      {text(row.status) || "대기"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
+                <div className="rounded-md bg-muted/50 px-2 py-2">
+                  <div className="text-muted-foreground">입고</div>
+                  <div className="mt-1 font-medium tabular-nums">{formatQuantity(row.purchase_quantity)}</div>
+                </div>
+                <div className="rounded-md bg-muted/50 px-2 py-2">
+                  <div className="text-muted-foreground">출고</div>
+                  <div className="mt-1 font-medium tabular-nums">{formatQuantity(row.sale_quantity)}</div>
+                </div>
+                <div className="rounded-md bg-muted/50 px-2 py-2">
+                  <div className="text-muted-foreground">기말</div>
+                  <div className="mt-1 font-medium tabular-nums">{formatQuantity(row.ending_quantity)}</div>
+                </div>
+                <div className="rounded-md bg-muted/50 px-2 py-2">
+                  <div className="text-muted-foreground">마진</div>
+                  <div className="mt-1 font-medium tabular-nums">{formatCurrency(row.settlement_difference)}</div>
+                </div>
+              </div>
+              <div className="mt-3 flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`${closingA11yLabel} 정산 상세 열기`}
+                  title={`${closingA11yLabel} 정산 상세`}
+                  onClick={() => onInspectRow?.(row)}
+                >
+                  상세
+                </Button>
+              </div>
+            </article>
+          );
+        })}
+        {recentRows.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">마감 이력이 없습니다</div>
+        ) : null}
+      </div>
+      <div className="hidden max-w-full overflow-x-auto md:block">
       <Table className="min-w-[760px]">
         <TableHeader className="sticky top-0 z-10 bg-background">
           <TableRow>

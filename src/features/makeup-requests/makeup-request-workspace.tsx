@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -435,11 +436,9 @@ function matchesMakeupRequestSelectionFilters(
   request: MakeupRequest,
   selectedSubjectFilter: string,
   selectedTeacherFilter: string,
-  selectedClassFilter: string,
 ) {
   if (selectedSubjectFilter !== "all" && request.subject !== selectedSubjectFilter) return false
   if (selectedTeacherFilter !== "all" && getMakeupRequestTeacherFilterValue(request) !== selectedTeacherFilter) return false
-  if (selectedClassFilter !== "all" && request.classId !== selectedClassFilter) return false
   return true
 }
 
@@ -1184,15 +1183,17 @@ function MakeupRequestDataTable({
   const [makeupTableSort, setMakeupTableSort] = useState<MakeupRequestTableSort>(null)
   const [filterColumnKey, setFilterColumnKey] = useState<MakeupRequestTableColumnKey>("className")
   const [filterValue, setFilterValue] = useState("")
+  const [filterInputOpen, setFilterInputOpen] = useState(false)
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState("all")
-  const [selectedClassFilter, setSelectedClassFilter] = useState("all")
   const [makeupPeriodFilter, setMakeupPeriodFilter] = useState<MakeupRequestPeriodFilter>("all")
   const [makeupPeriodStartDate, setMakeupPeriodStartDate] = useState("")
   const [makeupPeriodEndDate, setMakeupPeriodEndDate] = useState("")
+  const filterInputRef = useRef<HTMLInputElement>(null)
   const gridTemplateColumns = getMakeupRequestTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--makeup-request-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = MAKEUP_REQUEST_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || MAKEUP_REQUEST_TABLE_COLUMNS[1]
+  const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
   const todayKey = useMemo(() => toDateKey(new Date()), [])
 
   const subjectFilterOptions = useMemo(() => (
@@ -1211,22 +1212,9 @@ function MakeupRequestDataTable({
     }))
   ), [teacherFilterSourceRequests])
 
-  const classFilterSourceRequests = useMemo(() => (
-    teacherFilterSourceRequests.filter((request) => (
-      selectedTeacherFilter === "all" || getMakeupRequestTeacherFilterValue(request) === selectedTeacherFilter
-    ))
-  ), [selectedTeacherFilter, teacherFilterSourceRequests])
-
-  const classFilterOptions = useMemo(() => (
-    buildMakeupRequestSelectFilterOptions(classFilterSourceRequests, (request) => ({
-      value: request.classId,
-      label: request.className,
-    }))
-  ), [classFilterSourceRequests])
-
   const visibleRequests = useMemo(() => {
     const selectionFilteredRequests = requests
-      .filter((request) => matchesMakeupRequestSelectionFilters(request, selectedSubjectFilter, selectedTeacherFilter, selectedClassFilter))
+      .filter((request) => matchesMakeupRequestSelectionFilters(request, selectedSubjectFilter, selectedTeacherFilter))
       .filter((request) => matchesMakeupRequestPeriodFilter(request, makeupPeriodFilter, todayKey, makeupPeriodStartDate, makeupPeriodEndDate))
     const normalizedFilter = filterValue.trim().toLocaleLowerCase("ko")
     const nextRequests = normalizedFilter
@@ -1251,11 +1239,14 @@ function MakeupRequestDataTable({
     makeupPeriodStartDate,
     makeupTableSort,
     requests,
-    selectedClassFilter,
     selectedSubjectFilter,
     selectedTeacherFilter,
     todayKey,
   ])
+
+  useEffect(() => {
+    if (filterInputOpen) filterInputRef.current?.focus()
+  }, [filterInputOpen])
 
   function handleHeaderSelect(columnKey: MakeupRequestTableColumnKey) {
     if (columnKey === "action") return
@@ -1299,7 +1290,6 @@ function MakeupRequestDataTable({
               onChange={(value) => {
                 setSelectedSubjectFilter(value)
                 setSelectedTeacherFilter("all")
-                setSelectedClassFilter("all")
               }}
             />
             <MakeupRequestFilterSelect
@@ -1307,17 +1297,7 @@ function MakeupRequestDataTable({
               value={selectedTeacherFilter}
               allLabel="선생님 전체"
               options={teacherFilterOptions}
-              onChange={(value) => {
-                setSelectedTeacherFilter(value)
-                setSelectedClassFilter("all")
-              }}
-            />
-            <MakeupRequestFilterSelect
-              ariaLabel="수업 필터"
-              value={selectedClassFilter}
-              allLabel="수업 전체"
-              options={classFilterOptions}
-              onChange={setSelectedClassFilter}
+              onChange={setSelectedTeacherFilter}
             />
           </div>
           <MakeupRequestPeriodFilterBar
@@ -1328,19 +1308,42 @@ function MakeupRequestDataTable({
             onStartDateChange={setMakeupPeriodStartDate}
             onEndDateChange={setMakeupPeriodEndDate}
           />
-          <div className="ml-auto flex min-w-[12rem] items-center gap-2 text-sm font-medium">
-            <Filter className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <Input
-              aria-label={`${filterColumn.label} 필터`}
-              value={filterValue}
-              onChange={(event) => setFilterValue(event.target.value)}
-              placeholder={`${filterColumn.label} 값 입력`}
-              className="h-8 min-w-0 flex-1 sm:w-48"
-            />
-            {filterValue ? (
-              <Button type="button" variant="ghost" size="sm" onClick={() => setFilterValue("")}>
-                지우기
-              </Button>
+          <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium">
+            <Button
+              type="button"
+              variant={isFilterInputExpanded ? "secondary" : "outline"}
+              size="sm"
+              className="size-8 px-0"
+              aria-label={isFilterInputExpanded ? `${filterColumn.label} 검색 접기` : `${filterColumn.label} 검색 펼치기`}
+              aria-expanded={isFilterInputExpanded}
+              onClick={() => setFilterInputOpen((current) => !current)}
+            >
+              <Filter className="size-4" aria-hidden="true" />
+            </Button>
+            {isFilterInputExpanded ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <Input
+                  ref={filterInputRef}
+                  aria-label={`${filterColumn.label} 필터`}
+                  value={filterValue}
+                  onChange={(event) => setFilterValue(event.target.value)}
+                  placeholder={`${filterColumn.label} 값 입력`}
+                  className="h-8 min-w-0 flex-1 sm:w-48"
+                />
+                {filterValue ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setFilterValue("")
+                      setFilterInputOpen(false)
+                    }}
+                  >
+                    지우기
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>
@@ -1593,6 +1596,7 @@ export function MakeupRequestWorkspace() {
   const [webhookInfoLoading, setWebhookInfoLoading] = useState<MakeupNotificationSetting["channel"] | "">("")
   const [webhookInfoSaving, setWebhookInfoSaving] = useState(false)
   const [webhookInfoError, setWebhookInfoError] = useState("")
+  const webhookInfoPanelRef = useRef<HTMLDivElement | null>(null)
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
 
@@ -1605,6 +1609,11 @@ export function MakeupRequestWorkspace() {
       : null
   ), [data.requests, selectedDetailRequest])
   const actionNoteConfig = actionNoteRequest ? MAKEUP_ACTION_NOTE_CONFIG[actionNoteRequest.kind] : MAKEUP_ACTION_NOTE_CONFIG.revision
+
+  useEffect(() => {
+    if (!selectedWebhookInfo && !webhookInfoError) return
+    webhookInfoPanelRef.current?.scrollIntoView({ block: "start" })
+  }, [selectedWebhookInfo, webhookInfoError])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -1664,6 +1673,19 @@ export function MakeupRequestWorkspace() {
   const selectedRoomHasCollision = useMemo(() => (
     hasSlotRoomCollision(input.makeupSlots, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))
   ), [data, editingRequestId, input, selectedClass?.subject, selectedSubject, role])
+  const materializedMakeupSlots = useMemo(() => materializeSlots(input), [input])
+  const requestHasCancelDate = Boolean(input.cancelDate)
+  const requestHasMakeupSlots = materializedMakeupSlots.length > 0
+  const canSubmitRequest = Boolean(
+    currentUserId &&
+    input.classId &&
+    input.reason.trim() &&
+    input.approverTeacherCatalogId &&
+    (requestHasCancelDate || requestHasMakeupSlots) &&
+    !hasIncompleteStartedMakeupSlot(input) &&
+    (!requestHasMakeupSlots || materializedMakeupSlots.every((slot) => slot.classroom)) &&
+    !selectedRoomHasCollision,
+  )
 
   const filteredRequests = useMemo(() => (
     getMakeupRequestViewRequests(data.requests, view, currentUserId, isManager)
@@ -2157,6 +2179,7 @@ export function MakeupRequestWorkspace() {
             <span className="sr-only">휴보강 알림 설정</span>
           </Button>
           <Button type="button" size="sm" onClick={openRequestDialog}>
+            <Plus className="size-4" aria-hidden="true" />
             휴보강 신청
           </Button>
         </div>
@@ -2173,13 +2196,16 @@ export function MakeupRequestWorkspace() {
           <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-4xl">
             <DialogHeader>
               <DialogTitle>{editingRequestId ? "휴보강 보완 재상신" : "휴보강 신청"}</DialogTitle>
+              <DialogDescription className="sr-only">
+                휴보강 신청 정보를 입력하고 결재자에게 상신합니다.
+              </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <RequiredFormLabel htmlFor="makeup-subject">과목</RequiredFormLabel>
                 <Select value={selectedSubject} onValueChange={handleSubjectChange}>
-                  <SelectTrigger id="makeup-subject">
+                  <SelectTrigger id="makeup-subject" className="w-full">
                     <SelectValue placeholder="과목 선택" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2192,7 +2218,7 @@ export function MakeupRequestWorkspace() {
               <div className="grid gap-1.5">
                 <RequiredFormLabel htmlFor="makeup-teacher">선생님</RequiredFormLabel>
                 <Select value={selectedTeacherKey} onValueChange={handleTeacherChange} disabled={!selectedSubject}>
-                  <SelectTrigger id="makeup-teacher">
+                  <SelectTrigger id="makeup-teacher" className="w-full">
                     <SelectValue placeholder={selectedSubject ? "선생님 선택" : "과목 먼저"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2205,7 +2231,7 @@ export function MakeupRequestWorkspace() {
               <div className="grid gap-1.5">
                 <RequiredFormLabel htmlFor="makeup-class">수업</RequiredFormLabel>
                 <Select value={input.classId} onValueChange={handleClassChange} disabled={!selectedTeacherKey}>
-                  <SelectTrigger id="makeup-class">
+                  <SelectTrigger id="makeup-class" className="w-full">
                     <SelectValue placeholder={selectedTeacherKey ? "수업 선택" : "선생님 먼저"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2340,7 +2366,7 @@ export function MakeupRequestWorkspace() {
                             disabled={!slotDateTimeReady}
                           >
                             <div className="relative">
-                              <SelectTrigger aria-label={`보강일시 ${index + 1} 강의실`} className={slot.classroom ? "pr-14" : ""}>
+                              <SelectTrigger aria-label={`보강일시 ${index + 1} 강의실`} className={slot.classroom ? "w-full pr-14" : "w-full"}>
                                 <SelectValue placeholder="강의실 선택" />
                               </SelectTrigger>
                               <FieldClearButton
@@ -2372,8 +2398,8 @@ export function MakeupRequestWorkspace() {
 
             <div className="grid gap-2">
               <RequiredFormLabel htmlFor="makeup-approver">결재자</RequiredFormLabel>
-              <Select value={input.approverTeacherCatalogId} onValueChange={(value) => patchInput({ approverTeacherCatalogId: value })}>
-                <SelectTrigger id="makeup-approver">
+              <Select value={input.approverTeacherCatalogId} onValueChange={(value) => patchInput({ approverTeacherCatalogId: value })} disabled={!selectedClass}>
+                <SelectTrigger id="makeup-approver" className="w-full">
                   <SelectValue placeholder={selectedClass ? "결재자 선택" : "수업을 먼저 선택"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -2387,7 +2413,7 @@ export function MakeupRequestWorkspace() {
             </div>
 
             <div className="flex gap-2">
-              <Button type="button" onClick={() => void handleSubmit()} disabled={saving || loading || selectedRoomHasCollision}>
+              <Button type="button" onClick={() => void handleSubmit()} disabled={saving || loading || !canSubmitRequest}>
                 <Send className="size-4" aria-hidden="true" />
                 {editingRequestId ? "재상신" : "상신"}
               </Button>
@@ -2430,6 +2456,9 @@ export function MakeupRequestWorkspace() {
         <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>휴보강 상세</DialogTitle>
+            <DialogDescription className="sr-only">
+              선택한 휴보강 신청의 결재 상태와 처리 내용을 확인합니다.
+            </DialogDescription>
           </DialogHeader>
           {detailRequest ? (
             <MakeupRequestDetailCard
@@ -2466,10 +2495,128 @@ export function MakeupRequestWorkspace() {
         <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>알림 설정</DialogTitle>
+            <DialogDescription className="sr-only">
+              휴보강 프로세스별 웹 알림과 구글챗 발송 설정을 관리합니다.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.8fr)]">
             <div className="grid gap-2">
-              <div className="overflow-x-auto rounded-md border" role="table" aria-label="휴보강 알림 설정 표">
+              {selectedWebhookInfo || webhookInfoError ? (
+                <div ref={webhookInfoPanelRef} className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs">
+                  {selectedWebhookInfo ? (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
+                        <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
+                          {webhookInfoLoading === selectedWebhookInfo.channelKey ? "확인 중" : selectedWebhookInfo.configured ? "연결됨" : "미설정"}
+                        </Badge>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-muted-foreground">환경 변수</div>
+                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
+                      </div>
+                      <div className="grid gap-1">
+                        <div className="text-muted-foreground">웹훅 URL</div>
+                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
+                      </div>
+                      <div className="grid gap-1">
+                        <Label htmlFor="makeup-google-chat-webhook-url" className="text-xs text-muted-foreground">
+                          웹훅 URL 수정
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="makeup-google-chat-webhook-url"
+                            type="password"
+                            value={webhookUrlInput}
+                            onChange={(event) => setWebhookUrlInput(event.target.value)}
+                            placeholder="새 구글챗 웹훅 URL 입력"
+                            disabled={!isManager || webhookInfoSaving}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="shrink-0"
+                            disabled={!isManager || webhookInfoSaving || !webhookUrlInput.trim()}
+                            onClick={() => void handleSaveWebhookInfo()}
+                          >
+                            저장
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                  {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
+                </div>
+              ) : null}
+              <div data-testid="makeup-notification-mobile-list" className="grid gap-2 md:hidden">
+                {(Object.entries(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as Array<[keyof typeof MAKEUP_NOTIFICATION_TRIGGER_LABELS, string]>).map(([triggerKind, triggerLabel]) => {
+                  const settings = notificationSettingsByTrigger.get(triggerKind) || []
+                  return (
+                    <article key={`mobile-${triggerKind}`} className="grid gap-2 rounded-md border bg-background p-3" aria-label={`${triggerLabel} 모바일 알림 설정`}>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <div className="truncate text-sm font-semibold">{triggerLabel}</div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 px-2 text-xs"
+                          disabled={saving || !isManager || settings.length === 0}
+                          aria-label={`${triggerLabel} 알림 내용 수정`}
+                          onClick={() => openNotificationTemplateEditor(triggerKind, settings)}
+                        >
+                          <Pencil className="size-3.5" aria-hidden="true" />
+                          내용
+                        </Button>
+                      </div>
+                      <div className="grid gap-1.5">
+                        {MAKEUP_NOTIFICATION_CHANNEL_ORDER.map((channel) => {
+                          const setting = settings.find((item) => item.channel === channel)
+                          const googleChatChannel = MAKEUP_GOOGLE_CHAT_CHANNEL_MAP[channel]
+                          const channelLabel = MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]
+                          return (
+                            <div key={`${triggerKind}-${channel}-mobile`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-muted/30 px-2 py-2">
+                              <div className="min-w-0">
+                                {googleChatChannel ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-auto min-h-0 max-w-full justify-start px-0 py-0 text-left text-xs font-medium text-muted-foreground hover:bg-transparent"
+                                    disabled={webhookInfoLoading === channel}
+                                    aria-label={`${channelLabel} 웹훅 URL 보기`}
+                                    title={`${channelLabel} 웹훅 URL 보기`}
+                                    onClick={() => void handleOpenWebhookInfo(channel)}
+                                  >
+                                    <span className="truncate">{channelLabel}</span>
+                                  </Button>
+                                ) : (
+                                  <div className="truncate text-xs font-medium text-muted-foreground">{channelLabel}</div>
+                                )}
+                              </div>
+                              {setting ? (
+                                <Button
+                                  type="button"
+                                  variant={setting.enabled ? "default" : "outline"}
+                                  size="sm"
+                                  className="h-8 min-w-16 justify-center px-2 text-xs"
+                                  disabled={saving || !isManager}
+                                  aria-label={`${triggerLabel} ${MAKEUP_NOTIFICATION_CHANNEL_LABELS[channel]} 알림 ${setting.enabled ? "끄기" : "켜기"}`}
+                                  onClick={() => void handleToggleNotificationSetting(setting)}
+                                >
+                                  {setting.enabled ? "켜짐" : "꺼짐"}
+                                </Button>
+                              ) : (
+                                <span className="rounded-md border border-dashed px-2 py-1.5 text-center text-xs text-muted-foreground">-</span>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+              <div className="hidden overflow-x-auto rounded-md border md:block" role="table" aria-label="휴보강 알림 설정 표">
                 <div className="min-w-[880px]">
                   <div
                     role="row"
@@ -2568,53 +2715,6 @@ export function MakeupRequestWorkspace() {
                   })}
                 </div>
               </div>
-              {selectedWebhookInfo || webhookInfoError ? (
-                <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs">
-                  {selectedWebhookInfo ? (
-                    <>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{selectedWebhookInfo.channelLabel}</span>
-                        <Badge variant={selectedWebhookInfo.configured ? "default" : "outline"}>
-                          {webhookInfoLoading === selectedWebhookInfo.channelKey ? "확인 중" : selectedWebhookInfo.configured ? "연결됨" : "미설정"}
-                        </Badge>
-                      </div>
-                      <div className="grid gap-1">
-                        <div className="text-muted-foreground">환경 변수</div>
-                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.envName || "-"}</code>
-                      </div>
-                      <div className="grid gap-1">
-                        <div className="text-muted-foreground">웹훅 URL</div>
-                        <code className="break-all rounded bg-background px-2 py-1">{selectedWebhookInfo.maskedUrl || "-"}</code>
-                      </div>
-                      <div className="grid gap-1">
-                        <Label htmlFor="makeup-google-chat-webhook-url" className="text-xs text-muted-foreground">
-                          웹훅 URL 수정
-                        </Label>
-                        <div className="flex gap-2">
-                          <Input
-                            id="makeup-google-chat-webhook-url"
-                            type="password"
-                            value={webhookUrlInput}
-                            onChange={(event) => setWebhookUrlInput(event.target.value)}
-                            placeholder="새 구글챗 웹훅 URL 입력"
-                            disabled={!isManager || webhookInfoSaving}
-                          />
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="shrink-0"
-                            disabled={!isManager || webhookInfoSaving || !webhookUrlInput.trim()}
-                            onClick={() => void handleSaveWebhookInfo()}
-                          >
-                            저장
-                          </Button>
-                        </div>
-                      </div>
-                    </>
-                  ) : null}
-                  {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
-                </div>
-              ) : null}
             </div>
 
             <div className="min-w-0 rounded-md border">
@@ -2653,7 +2753,7 @@ export function MakeupRequestWorkspace() {
       <Dialog open={Boolean(selectedNotificationSetting)} onOpenChange={(open) => {
         if (!open) closeNotificationTemplateEditor()
       }}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>알림 내용 수정</DialogTitle>
             <DialogDescription>
@@ -2662,7 +2762,7 @@ export function MakeupRequestWorkspace() {
                 : "알림 내용"}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4">
+          <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
             <div className="grid gap-2">
               <Label htmlFor="makeup-notification-title-template">제목</Label>
               <Input
@@ -2708,7 +2808,7 @@ export function MakeupRequestWorkspace() {
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button type="button" variant="outline" onClick={closeNotificationTemplateEditor} disabled={saving}>
               취소
             </Button>

@@ -37,7 +37,8 @@ test("curriculum default period follows the configured period option", async () 
   const workspaceSource = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
   assert.match(source, /isDefault: group\.isDefault === true/);
-  assert.match(source, /\.map\(\(\{ value, label, aliases, isDefault \}\) => \(\{ value, label, aliases, isDefault \}\)\)/);
+  assert.match(source, /const option = \{ value, label, aliases \}/);
+  assert.match(source, /if \(isDefault === true\) \{\s*option\.isDefault = true;\s*\}/);
   assert.match(typeSource, /classGroupOptions: Array<\{ value: string; label: string; aliases\?: string\[\]; isDefault\?: boolean \}>/);
   assert.match(workspaceSource, /const defaultPeriod = useMemo\(\(\) => pickDefaultPeriodValue\(baseModel\.classGroupOptions\), \[baseModel\.classGroupOptions\]\)/);
 });

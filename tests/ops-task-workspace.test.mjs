@@ -793,6 +793,10 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf("async function sendWithdrawalGoogleChatNotification"),
     source.indexOf("function WithdrawalNotificationSettingsDialog"),
   );
+  const withdrawalNotificationDialogSource = source.slice(
+    source.indexOf("function WithdrawalNotificationSettingsDialog"),
+    source.indexOf("function renderWithdrawalNotificationTemplate"),
+  );
 
   assertIncludesAll(source, [
     'type WithdrawalViewKey = "applicant" | "operations" | "closed"',
@@ -845,8 +849,13 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     nextStatusActionSource,
-    /if \(task\.type === "withdrawal" && task\.status === "requested"\) return \{ status: "in_progress", label: "진행" \}/,
+    /if \(task\.type === "withdrawal" && task\.status === "requested"\) return \{ status: "in_progress", label: "처리 시작" \}/,
     "new withdrawal applications should move directly to processing",
+  );
+  assert.match(
+    nextStatusActionSource,
+    /if \(task\.type === "withdrawal" && task\.status === "confirmed"\) return \{ status: "in_progress", label: "처리 시작" \}/,
+    "legacy confirmed withdrawal rows should use the same processing action language",
   );
   assertIncludesAll(withdrawalWorkspaceToolbarSource, [
     'aria-label="퇴원 알림 설정"',
@@ -877,7 +886,21 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "withdrawalNotificationTemplates",
     "DialogTitle>알림 내용 수정",
     'aria-label={`${trigger.label} 알림 내용 수정`}',
+    'className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl"',
+    'className="grid min-h-0 gap-4 overflow-y-auto pr-1"',
+    '<DialogFooter className="shrink-0">',
   ]);
+  assert.match(withdrawalNotificationDialogSource, /data-testid="withdrawal-notification-mobile-list"/);
+  assert.match(withdrawalNotificationDialogSource, /className="grid gap-2 md:hidden"/);
+  assert.match(withdrawalNotificationDialogSource, /className="hidden overflow-x-auto rounded-md border md:block"/);
+  assert.match(withdrawalNotificationDialogSource, /aria-label=\{`\$\{trigger\.label\} 모바일 퇴원 알림 설정`\}/);
+  assert.ok(
+    withdrawalNotificationDialogSource.indexOf("{selectedWebhookInfo || webhookInfoError ? (") <
+      withdrawalNotificationDialogSource.indexOf('data-testid="withdrawal-notification-mobile-list"'),
+    "withdrawal webhook detail should appear before the long mobile settings list",
+  );
+  assert.match(withdrawalNotificationDialogSource, /webhookInfoPanelRef/);
+  assert.match(withdrawalNotificationDialogSource, /scrollIntoView\(\{ block: "start" \}\)/);
   assert.doesNotMatch(source, /완료 알림/);
   assertIncludesAll(source, [
     'columnKey: "status"',
@@ -902,6 +925,8 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'aria-label="퇴원 누가 필터"',
     'aria-label={`${filterColumn.label} 열 필터`}',
     'aria-label="퇴원 신청 데이터테이블"',
+    'data-testid="withdrawal-mobile-task-list"',
+    'aria-label="퇴원 모바일 목록"',
     'aria-label="퇴원 상세 열기"',
     'aria-label={`${label} 열 너비 조절`}',
     'cursor-col-resize',
@@ -911,6 +936,10 @@ test("withdrawal workspace follows request processing and completed queues", asy
     '[grid-template-columns:var(--withdrawal-grid-template)]',
     "<WithdrawalPeriodFilterBar",
   ]);
+  assert.match(withdrawalDataTableSource, /className="grid gap-2 p-3 md:hidden"/);
+  assert.match(withdrawalDataTableSource, /className="hidden w-full overflow-x-auto md:block"/);
+  assert.match(withdrawalDataTableSource, /aria-label=\{`\$\{task\.title\} 퇴원 상세 열기`\}/);
+  assert.match(withdrawalDataTableSource, /getWithdrawalMobileNextActionLabel/);
   assert.match(source, /aria-label="퇴원 기간 필터"/);
   assertIncludesAll(withdrawalPeriodFilterSource, [
     "<DatePickerControl",
@@ -1061,6 +1090,36 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.match(
     formDialogSource,
     /\{shouldShowFormDetailTabs && \([\s\S]*?aria-label=\{`\$\{getTaskTypeLabel\(form\.type\)\} 입력 단계/,
+  );
+  assert.match(
+    source,
+    /function getFormCompletionIntentSubmitLabel\(intent: FormCompletionIntent \| null, taskType: OpsTaskInput\["type"\], isEditing: boolean\)/,
+  );
+  assert.match(
+    source,
+    /if \(!intent && taskType === "withdrawal" && !isEditing\) return "퇴원 신청"/,
+  );
+  assert.match(
+    source,
+    /function canSubmitOpsTaskForm\(input: OpsTaskInput, isEditing: boolean\)/,
+    "withdrawal submit gating should be centralized with the form state",
+  );
+  assert.match(
+    source,
+    /function canSubmitOpsTaskForm\(input: OpsTaskInput, isEditing: boolean\) \{[\s\S]*?if \(input\.type !== "withdrawal" \|\| isEditing\) return true[\s\S]*?return Boolean\([\s\S]*?input\.subject &&[\s\S]*?withdrawal\.teacherName &&[\s\S]*?input\.classId &&[\s\S]*?input\.studentId/,
+    "new withdrawal applications should require subject, teacher, class, and student before submit is enabled",
+  );
+  assert.match(
+    source,
+    /const canSubmitCurrentForm = canSubmitOpsTaskForm\(form, Boolean\(editingTask\)\)/,
+  );
+  assert.match(
+    formDialogSource,
+    /<Button type="submit" disabled=\{saving \|\| !canSubmitCurrentForm\} className="w-full sm:w-auto">/,
+  );
+  assert.match(
+    formDialogSource,
+    /getFormCompletionIntentSubmitLabel\(formCompletionIntent, form\.type, Boolean\(editingTask\)\)/,
   );
   assert.match(source, /<Textarea[\s\S]*className="min-h-20 min-w-0 resize-y"/);
   assert.match(source, /<Popover open=\{helpOpen\} onOpenChange=\{setHelpOpen\}>/);
@@ -1953,9 +2012,10 @@ test("completed operational task details are locked after management sync", asyn
   );
   assertIncludesAll(workspaceSource, [
     "const isEditingLockedCompletedTask = Boolean(editingTask && isClosedOpsTask(editingTask) && !formCompletionIntent)",
+    "const canSubmitCurrentForm = canSubmitOpsTaskForm(form, Boolean(editingTask))",
     "{!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== \"word_retest_retry\" && (",
     "{!isEditingLockedCompletedTask && (",
-    "<Button type=\"submit\" disabled={saving} className=\"w-full sm:w-auto\">",
+    "<Button type=\"submit\" disabled={saving || !canSubmitCurrentForm} className=\"w-full sm:w-auto\">",
   ]);
   assert.equal(
     workspaceSource.match(/\{!isEditingLockedCompletedTask && formCompletionBlockers\.length > 0 && \(/g)?.length,
