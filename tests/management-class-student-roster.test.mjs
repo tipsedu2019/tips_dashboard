@@ -509,9 +509,16 @@ test("class detail hides the official class type from dashboard editing surfaces
 });
 
 test("class teacher choices are narrowed by the selected subject", async () => {
+  const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(pageSource, /function getClassTeacherOptionsForSubject\(rawRows: Record<string, unknown>\[\], subject: string\)/);
+  assert.match(hookSource, /readOptionalTable\("teacher_catalogs", "id,name,subjects,is_visible,sort_order"\)/);
+  assert.match(hookSource, /available_teacher_catalogs: teacherCatalogs/);
+  assert.match(pageSource, /function getClassTeacherCatalogOptionsForSubject/);
+  assert.match(pageSource, /catalog\.is_visible !== false && isClassTeacherCatalogForSubject\(catalog, subject\)/);
+  assert.match(pageSource, /\.\.\.catalogOptions,[\s\S]*\.\.\.sourceRows\.flatMap\(\(raw\) => getClassTeacherValues\(raw\)\)/);
   assert.match(pageSource, /const subjectRows = selectedSubject[\s\S]*rawRows\.filter\(\(raw\) => getClassSubjectValue\(raw\) === selectedSubject\)/);
   assert.match(pageSource, /const sourceRows = subjectRows\.length > 0 \? subjectRows : rawRows/);
   assert.match(pageSource, /teacher: getClassTeacherOptionsForSubject\(rawRows, selectedClassSubject\)/);
@@ -520,6 +527,9 @@ test("class teacher choices are narrowed by the selected subject", async () => {
   assert.match(pageSource, /const teacherOptions = getClassTeacherOptionsForSubject\(rawRows, normalizedValue\)/);
   assert.match(pageSource, /if \(next\.teacher && teacherOptions\.length > 0 && !teacherOptions\.includes\(next\.teacher\)\)/);
   assert.match(pageSource, /next\.teacher = ""/);
+  assert.match(tableSource, /function getManagementTeacherCatalogOptions/);
+  assert.match(tableSource, /getManagementTeacherCatalogOptions\(tableSourceRows, selectedSubjectFilter\)/);
+  assert.match(tableSource, /\[\.\.\.new Set\(\[\.\.\.catalogOptions, \.\.\.sourceRows\.flatMap\(\(row\) => getClassFilterValues\(row, filter\.id\)\)\]\)\]/);
 });
 
 test("student recent issues stay out of dashboard class counseling surfaces", async () => {

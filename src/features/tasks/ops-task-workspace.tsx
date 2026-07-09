@@ -135,6 +135,22 @@ type WithdrawalClassScheduleItem = WordRetestClassScheduleItem & {
   sessionNumber: number
   lessonHours: number
   stateLabel: string
+  billingLabel: string
+  billingColor: string
+}
+type TransferTuitionSettlementType = "not_ready" | "balanced" | "refund_or_carry" | "additional_payment" | "month_mismatch"
+type TransferTuitionAdjustment = {
+  settlementType: TransferTuitionSettlementType
+  settlementLabel: string
+  message: string
+  detail: string
+  fromSessionLabel: string
+  fromProgressLabel: string
+  fromTuitionLabel: string
+  toSessionLabel: string
+  toProgressLabel: string
+  toTuitionLabel: string
+  amountLabel: string
 }
 type WithdrawalTableColumnKey =
   | "status"
@@ -154,6 +170,27 @@ type WithdrawalTableColumnKey =
   | "action"
 type WithdrawalTableSort = {
   columnKey: WithdrawalTableColumnKey
+  direction: "asc" | "desc"
+} | null
+type TransferTableColumnKey =
+  | "status"
+  | "subject"
+  | "fromTeacher"
+  | "fromClassName"
+  | "student"
+  | "transferReason"
+  | "fromUndistributedTextbooks"
+  | "fromClassEndDate"
+  | "fromClassEndSession"
+  | "toTeacher"
+  | "toClassName"
+  | "toClassStartDate"
+  | "toClassStartSession"
+  | "toUndistributedTextbooks"
+  | "operationsChecklist"
+  | "action"
+type TransferTableSort = {
+  columnKey: TransferTableColumnKey
   direction: "asc" | "desc"
 } | null
 type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "total" | "cutoff" | "score" | "result" | "action"
@@ -191,6 +228,7 @@ type OpsTaskOptionIndexes = {
 type OperationCompletionBlockerMap = Map<string, string[]>
 type OperationConfirmationMap = Map<string, boolean>
 type WithdrawalChecklistField = "makeeduWithdrawalDone" | "feeProcessed" | "textbookFeeProcessed"
+type TransferChecklistField = "makeeduTransferDone" | "feeProcessed" | "textbookFeeProcessed"
 type FormDetailStepKey =
   | "registration_contact"
   | "registration_test"
@@ -258,6 +296,38 @@ const WITHDRAWAL_TABLE_COLUMN_MIN_WIDTHS = WITHDRAWAL_TABLE_COLUMNS.reduce((widt
   widths[column.columnKey] = column.minWidth
   return widths
 }, {} as Record<WithdrawalTableColumnKey, number>)
+const TRANSFER_TABLE_COLUMNS: Array<{
+  columnKey: TransferTableColumnKey
+  label: string
+  width: number
+  minWidth: number
+  align?: "left" | "right"
+}> = [
+  { columnKey: "status", label: "상태", width: 104, minWidth: 88 },
+  { columnKey: "subject", label: "과목", width: 88, minWidth: 72 },
+  { columnKey: "fromTeacher", label: "전 선생님", width: 116, minWidth: 96 },
+  { columnKey: "fromClassName", label: "전 수업", width: 170, minWidth: 130 },
+  { columnKey: "student", label: "학생", width: 118, minWidth: 96 },
+  { columnKey: "transferReason", label: "전반사유", width: 190, minWidth: 140 },
+  { columnKey: "fromUndistributedTextbooks", label: "전 미배부 교재", width: 160, minWidth: 128 },
+  { columnKey: "fromClassEndDate", label: "전 수업 종료일", width: 122, minWidth: 108 },
+  { columnKey: "fromClassEndSession", label: "전 종료회차", width: 112, minWidth: 96 },
+  { columnKey: "toTeacher", label: "후 선생님", width: 116, minWidth: 96 },
+  { columnKey: "toClassName", label: "후 수업", width: 170, minWidth: 130 },
+  { columnKey: "toClassStartDate", label: "후 수업 시작일", width: 122, minWidth: 108 },
+  { columnKey: "toClassStartSession", label: "후 시작회차", width: 112, minWidth: 96 },
+  { columnKey: "toUndistributedTextbooks", label: "후 미배부 교재", width: 160, minWidth: 128 },
+  { columnKey: "operationsChecklist", label: "처리 확인", width: 218, minWidth: 180 },
+  { columnKey: "action", label: "액션", width: 188, minWidth: 160, align: "right" },
+]
+const TRANSFER_TABLE_COLUMN_WIDTHS = TRANSFER_TABLE_COLUMNS.reduce((widths, column) => {
+  widths[column.columnKey] = column.width
+  return widths
+}, {} as Record<TransferTableColumnKey, number>)
+const TRANSFER_TABLE_COLUMN_MIN_WIDTHS = TRANSFER_TABLE_COLUMNS.reduce((widths, column) => {
+  widths[column.columnKey] = column.minWidth
+  return widths
+}, {} as Record<TransferTableColumnKey, number>)
 const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> = {
   select: 40,
   status: 102,
@@ -436,6 +506,12 @@ const WITHDRAWAL_NOTIFICATION_TRIGGERS: Array<{ key: WithdrawalNotificationTrigg
   { key: "completed", label: "처리 완료", detail: "관리팀이 완료 처리하면 담당선생님과 관리팀에 알림" },
 ]
 
+const TRANSFER_NOTIFICATION_TRIGGERS: Array<{ key: WithdrawalNotificationTriggerKey; label: string; detail: string }> = [
+  { key: "submitted", label: "신청 접수", detail: "담당선생님이 전반을 신청하면 관리팀에 알림" },
+  { key: "processing", label: "처리 시작", detail: "관리팀이 확인하거나 처리 중으로 이동하면 담당선생님에 알림" },
+  { key: "completed", label: "처리 완료", detail: "관리팀이 완료 처리하면 담당선생님과 관리팀에 알림" },
+]
+
 const WITHDRAWAL_NOTIFICATION_TABLE_GRID_STYLE = {
   gridTemplateColumns: `minmax(10rem,1.15fr) repeat(${WITHDRAWAL_NOTIFICATION_CHANNELS.length}, minmax(7.5rem,1fr))`,
 } as CSSProperties
@@ -472,6 +548,39 @@ const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> =
   프로세스: "처리 완료",
 }
 
+const TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES = [
+  ...TRANSFER_TABLE_COLUMNS
+    .map((column) => column.label)
+    .filter((label) => label !== "액션"),
+  "신청자",
+  "신청일시",
+  "담당선생님",
+  "관리팀",
+  "프로세스",
+] as const
+
+const TRANSFER_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> = {
+  상태: "처리 중",
+  과목: "수학",
+  "전 선생님": "김민재",
+  "전 수업": "중3A",
+  학생: "이서준",
+  전반사유: "시간표 변경",
+  "전 미배부 교재": "블랙라벨",
+  "전 수업 종료일": "2026-07-15",
+  "전 종료회차": "6회차",
+  "후 선생님": "박서연",
+  "후 수업": "중3B",
+  "후 수업 시작일": "2026-07-17",
+  "후 시작회차": "7회차",
+  "후 미배부 교재": "-",
+  신청자: "김민재",
+  신청일시: "2026-07-09 15:10",
+  담당선생님: "김민재",
+  관리팀: "관리팀",
+  프로세스: "처리 완료",
+}
+
 const DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate> = {
   submitted: {
     titleTemplate: "퇴원 신청 접수 · {학생}",
@@ -484,6 +593,21 @@ const DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTr
   completed: {
     titleTemplate: "퇴원 처리 완료 · {학생}",
     bodyTemplate: "{학생} 학생 퇴원 처리가 완료되었습니다.\n퇴원일: {퇴원일}\n퇴원회차: {퇴원회차}",
+  },
+}
+
+const DEFAULT_TRANSFER_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate> = {
+  submitted: {
+    titleTemplate: "전반 신청 접수 · {학생}",
+    bodyTemplate: "{담당선생님} 선생님이 {학생} 학생의 전반을 신청했습니다.\n전 수업: {전 수업}\n후 수업: {후 수업}",
+  },
+  processing: {
+    titleTemplate: "전반 처리 시작 · {학생}",
+    bodyTemplate: "{학생} 학생 전반 신청이 관리팀 처리 중으로 이동했습니다.\n전 수업 종료일: {전 수업 종료일}",
+  },
+  completed: {
+    titleTemplate: "전반 처리 완료 · {학생}",
+    bodyTemplate: "{학생} 학생 전반 처리가 완료되었습니다.\n전 수업 종료일: {전 수업 종료일}\n후 수업 시작일: {후 수업 시작일}",
   },
 }
 
@@ -528,6 +652,7 @@ const WORKSPACE_SEARCH_PLACEHOLDERS: Record<WorkspaceKey, string> = {
 
 function getWorkspaceCreateActionLabel(workspace: WorkspaceKey, workspaceLabel: string) {
   if (workspace === "withdrawal") return "퇴원 신청"
+  if (workspace === "transfer") return "전반 신청"
   if (workspace === "word_retest") return "추가"
   if (workspace === "todo") return "할 일 추가"
   return `${workspaceLabel} 추가`
@@ -1162,6 +1287,7 @@ function applyFormCompletionIntent(input: OpsTaskInput, intent: FormCompletionIn
 
 function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null, taskType: OpsTaskInput["type"], isEditing: boolean) {
   if (!intent && taskType === "withdrawal" && !isEditing) return "퇴원 신청"
+  if (!intent && taskType === "transfer" && !isEditing) return "전반 신청"
   if (!intent) return "저장"
   if (intent.kind === "word_retest_retry") {
     return "재시험 추가 및 불합격 확인"
@@ -1172,6 +1298,17 @@ function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null,
 }
 
 function canSubmitOpsTaskForm(input: OpsTaskInput, isEditing: boolean) {
+  if (input.type === "transfer" && !isEditing) {
+    const transfer = input.transfer || {}
+    return Boolean(
+      input.subject &&
+      transfer.fromTeacherName &&
+      transfer.fromClassId &&
+      input.studentId &&
+      transfer.toTeacherName &&
+      transfer.toClassId,
+    )
+  }
   if (input.type !== "withdrawal" || isEditing) return true
   const withdrawal = input.withdrawal || {}
   return Boolean(
@@ -1454,6 +1591,10 @@ function getWithdrawalTableGridTemplate(widths: Record<WithdrawalTableColumnKey,
   return WITHDRAWAL_TABLE_COLUMNS.map((column) => `${widths[column.columnKey]}px`).join(" ")
 }
 
+function getTransferTableGridTemplate(widths: Record<TransferTableColumnKey, number>) {
+  return TRANSFER_TABLE_COLUMNS.map((column) => `${widths[column.columnKey]}px`).join(" ")
+}
+
 function getWithdrawalOperationsChecklist(withdrawal?: OpsTask["withdrawal"]) {
   return [
     { key: "makeedu", field: "makeeduWithdrawalDone" as const, label: "메이크에듀", detail: "메이크에듀 퇴원처리", checked: Boolean(withdrawal?.makeeduWithdrawalDone) },
@@ -1464,6 +1605,21 @@ function getWithdrawalOperationsChecklist(withdrawal?: OpsTask["withdrawal"]) {
 
 function getWithdrawalOperationsChecklistValue(withdrawal?: OpsTask["withdrawal"]) {
   const items = getWithdrawalOperationsChecklist(withdrawal)
+  const completedCount = items.filter((item) => item.checked).length
+  const pendingItems = items.filter((item) => !item.checked).map((item) => item.detail)
+  return pendingItems.length > 0 ? `${completedCount}/3 · ${pendingItems.join(", ")}` : "3/3 · 처리 확인 완료"
+}
+
+function getTransferOperationsChecklist(transfer?: OpsTask["transfer"]) {
+  return [
+    { key: "makeedu", field: "makeeduTransferDone" as const, label: "메이크에듀", detail: "메이크에듀 전반처리", checked: Boolean(transfer?.makeeduTransferDone) },
+    { key: "fee", field: "feeProcessed" as const, label: "수업료", detail: "수업료 처리", checked: Boolean(transfer?.feeProcessed) },
+    { key: "textbookFee", field: "textbookFeeProcessed" as const, label: "교재비", detail: "교재비 처리", checked: Boolean(transfer?.textbookFeeProcessed) },
+  ]
+}
+
+function getTransferOperationsChecklistValue(transfer?: OpsTask["transfer"]) {
+  const items = getTransferOperationsChecklist(transfer)
   const completedCount = items.filter((item) => item.checked).length
   const pendingItems = items.filter((item) => !item.checked).map((item) => item.detail)
   return pendingItems.length > 0 ? `${completedCount}/3 · ${pendingItems.join(", ")}` : "3/3 · 처리 확인 완료"
@@ -1483,6 +1639,57 @@ function WithdrawalOperationsChecklistChips({
   return (
     <div className="flex min-w-0 flex-wrap gap-1">
       {getWithdrawalOperationsChecklist(withdrawal).map((item) => {
+        const className = [
+          "inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-2 text-xs font-medium",
+          item.checked
+            ? "border-primary/20 bg-primary/10 text-primary"
+            : "border-amber-300 bg-amber-50 text-amber-800",
+          editable ? "transition hover:border-primary/40 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-70" : "",
+        ].join(" ")
+
+        if (!editable || !onChange) {
+          return (
+            <span key={item.key} className={className} title={item.detail}>
+              {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
+              <span className="truncate">{item.label}</span>
+            </span>
+          )
+        }
+
+        return (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={item.checked}
+            aria-label={`${item.detail} ${item.checked ? "완료 취소" : "완료 체크"}`}
+            className={className}
+            title={item.detail}
+            disabled={disabled}
+            onClick={() => onChange(item.field, !item.checked)}
+          >
+            {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
+            <span className="truncate">{item.label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function TransferOperationsChecklistChips({
+  transfer,
+  editable = false,
+  disabled = false,
+  onChange,
+}: {
+  transfer?: OpsTask["transfer"]
+  editable?: boolean
+  disabled?: boolean
+  onChange?: (field: TransferChecklistField, checked: boolean) => void
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {getTransferOperationsChecklist(transfer).map((item) => {
         const className = [
           "inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-2 text-xs font-medium",
           item.checked
@@ -2659,6 +2866,21 @@ const WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP = [
   "[ 교재비 청구 ⇒ 담당선생님이 관리팀으로부터 교재 수령 ⇒ 담당선생님이 관리팀에게 교재 반납 ⇒ 교재비 청구취소나 환불 ]",
 ].join("\n")
 
+const TRANSFER_FROM_UNDISTRIBUTED_TEXTBOOK_HELP = [
+  "관리팀으로부터 수령한 교재 중 위 학생에게 아직 배부되지 않은 교재가 있다면 입력하고, 전반신청서를 제출하는 즉시 해당 교재를 관리팀에게 반납해 주세요.",
+  "",
+  "교재비는 담당선생님들의 교재 수령 전에 학생들에게 미리 청구됩니다.",
+  "[ 교재비 청구 ⇒ 담당선생님이 관리팀으로부터 교재 수령 ⇒ 담당선생님이 학생에게 교재 배부 ]",
+  "",
+  "배부되지 않은 교재에 대한 교재비 청구취소나 환불 처리는 교재 반납 이후에 진행됩니다.",
+  "[ 교재비 청구 ⇒ 담당선생님이 관리팀으로부터 교재 수령 ⇒ 담당선생님이 관리팀에게 교재 반납 ⇒ 교재비 청구취소나 환불 ]",
+].join("\n")
+
+const TRANSFER_TO_UNDISTRIBUTED_TEXTBOOK_HELP = [
+  "청구 예정 교재 중(전반 후 수업의 현재 진행 교재) 위 학생에게 배부하지 않을 교재가 있다면 입력해 주세요.",
+  "[ 미배부 교재 내용 입력 및 제출 ⇒ 해당 교재는 교재비 청구하지 않음 ]",
+].join("\n")
+
 const WITHDRAWAL_DATE_HELP = "당월 출석부를 보고 학생이 마지막으로 수업 받은 날짜를 선택해 주세요. 퇴원요청이 있는 날로부터 거슬러 올라가서 최종 출석한 날이 퇴원일입니다. 퇴원일 이후의 결석에는 수강료가 청구되지 않습니다.\n\n수업 일정에서 마지막으로 출석한 날짜를 선택하면 퇴원회차와 수업진행률이 자동 계산됩니다."
 
 function TaskListboxField({
@@ -2668,6 +2890,7 @@ function TaskListboxField({
   onChange,
   emptyClassName = "text-muted-foreground",
   placeholder,
+  attention = false,
 }: {
   label: ReactNode
   value: string
@@ -2675,6 +2898,7 @@ function TaskListboxField({
   onChange: (value: string) => void
   emptyClassName?: string
   placeholder?: string
+  attention?: boolean
 }) {
   const fieldId = useId()
   const listId = useId()
@@ -2706,6 +2930,7 @@ function TaskListboxField({
         onClick={() => setListboxOpen((open) => !open)}
         className={[
           "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition",
+          attention ? "border-primary/60 bg-primary/5 ring-2 ring-primary/15 hover:border-primary/70" : "",
           listboxOpen ? "border-ring ring-2 ring-ring/40" : "hover:border-foreground/30",
         ].join(" ")}
       >
@@ -2830,6 +3055,7 @@ function LinkedSelect({
   disabled = false,
   disabledPlaceholder,
   placeholder = "선택",
+  attention = false,
   manualLabel,
   onManualSelect,
   renderSelected,
@@ -2843,6 +3069,7 @@ function LinkedSelect({
   disabled?: boolean
   disabledPlaceholder?: string
   placeholder?: string
+  attention?: boolean
   manualLabel?: string
   onManualSelect?: () => void
   renderSelected?: (option: LinkedSelectOption) => ReactNode
@@ -2878,6 +3105,7 @@ function LinkedSelect({
   const emptySelectedLabel = disabled && disabledPlaceholder ? disabledPlaceholder : placeholder
   const emptySearchResultLabel = "검색 결과 없음"
   const isLinkedSelectOpen = !disabled && isLinkedSearchOpen
+  const dependencyAttention = disabled && Boolean(disabledPlaceholder)
 
   function openLinkedSearch() {
     if (disabled) return
@@ -2954,8 +3182,10 @@ function LinkedSelect({
       onClick={shouldShowLinkedSearch ? openLinkedSearch : toggleLinkedSearch}
       className={[
         "flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 py-1.5 text-left text-sm shadow-xs outline-none transition hover:border-foreground/30 focus:border-ring focus:ring-ring/40 focus:ring-2",
+        attention ? "border-primary/60 bg-primary/5 ring-2 ring-primary/15 hover:border-primary/70" : "",
+        dependencyAttention ? "border-amber-300 bg-amber-50 text-amber-950 opacity-100 hover:border-amber-400 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100" : "",
         isLinkedSelectOpen ? "border-ring ring-2 ring-ring/40" : "",
-        disabled ? "cursor-not-allowed bg-muted/30 text-muted-foreground opacity-75 hover:border-border" : "",
+        disabled && !dependencyAttention ? "cursor-not-allowed bg-muted/30 text-muted-foreground opacity-75 hover:border-border" : "",
       ].join(" ")}
     >
       {selectedOption ? (
@@ -2963,7 +3193,7 @@ function LinkedSelect({
           {renderSelected ? renderSelected(selectedOption) : <span className="block truncate">{selectedLabel}</span>}
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">{emptySelectedLabel}</span>
+        <span className={["min-w-0 flex-1 truncate", dependencyAttention ? "text-amber-900 dark:text-amber-100" : "text-muted-foreground"].join(" ")}>{emptySelectedLabel}</span>
       )}
       {shouldShowLinkedSearch ? (
         <Search className="size-4 shrink-0 text-muted-foreground" />
@@ -3622,6 +3852,85 @@ function getWithdrawalCalendarSessionLabel(dateKey: string, label: string) {
   return Number.isFinite(month) ? `${month}월 ${label}` : label
 }
 
+function getWithdrawalCalendarMonthLabel(dateKey: string) {
+  const [, month] = dateKey.split("-").map(Number)
+  return Number.isFinite(month) ? `${month}월` : ""
+}
+
+function getWithdrawalScheduleMonthKey(dateKey: string) {
+  return dateKey.slice(0, 7)
+}
+
+function getWithdrawalScheduleDisplayMonthLabel(item?: WithdrawalClassScheduleItem) {
+  const billingLabel = stringValue(item?.billingLabel)
+  return billingLabel || (item ? getWithdrawalCalendarMonthLabel(item.dateKey) : "")
+}
+
+function getWithdrawalScheduleBillingMonthKey(item?: WithdrawalClassScheduleItem) {
+  if (!item) return ""
+  const billingLabel = getWithdrawalScheduleDisplayMonthLabel(item)
+  return billingLabel ? `billing:${billingLabel}` : getWithdrawalScheduleMonthKey(item.dateKey)
+}
+
+function getWithdrawalScheduleBillingMonthNumber(item?: WithdrawalClassScheduleItem) {
+  const billingLabel = getWithdrawalScheduleDisplayMonthLabel(item)
+  const labelMonth = billingLabel.match(/(\d{1,2})\s*월/)
+  if (labelMonth) {
+    const month = Number(labelMonth[1])
+    if (Number.isFinite(month) && month >= 1 && month <= 12) return month
+  }
+
+  const [, month] = String(item?.dateKey || "").split("-").map(Number)
+  return Number.isFinite(month) ? month : 1
+}
+
+function getWithdrawalScheduleSessionLabel(item?: WithdrawalClassScheduleItem) {
+  if (!item || !isWithdrawalScheduleSelectable(item)) return ""
+  const displayMonthLabel = getWithdrawalScheduleDisplayMonthLabel(item)
+  return displayMonthLabel ? `${displayMonthLabel} ${item.label}` : getWithdrawalCalendarSessionLabel(item.dateKey, item.label)
+}
+
+function getWithdrawalCalendarDisplaySessionLabel(
+  item: WithdrawalClassScheduleItem | undefined,
+  options: { includeMonth?: boolean } = {},
+) {
+  if (!item || !isWithdrawalScheduleSelectable(item)) return ""
+  return options.includeMonth ? getWithdrawalScheduleSessionLabel(item) : item.label
+}
+
+function getWithdrawalCalendarCellTitle(dateKey: string, item: WithdrawalClassScheduleItem | undefined) {
+  if (!item) return `${dateKey} 수업 없음`
+  const sessionLabel = getWithdrawalCalendarDisplaySessionLabel(item, { includeMonth: true })
+  return [dateKey, sessionLabel, item.stateLabel].filter(Boolean).join(" ")
+}
+
+const WITHDRAWAL_CALENDAR_MONTH_TONE_CLASSES = [
+  {
+    selected: "bg-sky-600 text-white shadow-xs dark:bg-sky-500 dark:text-sky-950",
+    idle: "border border-sky-200 bg-sky-50 text-sky-950 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-100",
+  },
+  {
+    selected: "bg-emerald-600 text-white shadow-xs dark:bg-emerald-500 dark:text-emerald-950",
+    idle: "border border-emerald-200 bg-emerald-50 text-emerald-950 hover:bg-emerald-100 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100",
+  },
+  {
+    selected: "bg-amber-500 text-white shadow-xs dark:bg-amber-400 dark:text-amber-950",
+    idle: "border border-amber-200 bg-amber-50 text-amber-950 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100",
+  },
+  {
+    selected: "bg-rose-600 text-white shadow-xs dark:bg-rose-500 dark:text-rose-950",
+    idle: "border border-rose-200 bg-rose-50 text-rose-950 hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-100",
+  },
+] as const
+
+function getWithdrawalCalendarCellToneClass(dateKey: string, selected: boolean, selectable: boolean, item?: WithdrawalClassScheduleItem) {
+  if (!selectable && !selected) return ""
+  const month = getWithdrawalScheduleBillingMonthNumber(item || ({ dateKey } as WithdrawalClassScheduleItem))
+  const toneIndex = Number.isFinite(month) ? (month - 1) % 4 : 0
+  const tone = WITHDRAWAL_CALENDAR_MONTH_TONE_CLASSES[toneIndex] || WITHDRAWAL_CALENDAR_MONTH_TONE_CLASSES[0]
+  return selected ? tone.selected : tone.idle
+}
+
 function parseWithdrawalScheduleHoursByWeekday(schedule: string) {
   const hoursByWeekday = new Map<number, number>()
   const pattern = /([월화수목금토일]+)\s*(\d{1,2})(?::(\d{2}))?\s*[~\-–—]\s*(\d{1,2})(?::(\d{2}))?/g
@@ -3651,6 +3960,14 @@ function getWithdrawalSessionDateKey(session: Record<string, unknown>, fallbackD
   return toDateKey(
     stringValue(session.date || session.session_date || session.dateValue || session.date_value || fallbackDateKey),
   )
+}
+
+function getWithdrawalSessionBillingLabel(session: Record<string, unknown>) {
+  return stringValue(session.billingLabel || session.billing_label || session.periodLabel || session.period_label)
+}
+
+function getWithdrawalSessionBillingColor(session: Record<string, unknown>) {
+  return stringValue(session.billingColor || session.billing_color || session.periodColor || session.period_color)
 }
 
 function getWithdrawalSessionHours(
@@ -3760,6 +4077,8 @@ function getFallbackWithdrawalClassScheduleItems(classItem?: OpsClassOption): Wi
         stateLabel: getWithdrawalScheduleStateLabel("active"),
         sessionNumber,
         lessonHours: hoursByWeekday.get(cursor.getDay()) || 1,
+        billingLabel: getWithdrawalCalendarMonthLabel(toDateKey(cursor)),
+        billingColor: "",
       })
     }
     cursor.setDate(cursor.getDate() + 1)
@@ -3783,6 +4102,7 @@ function getWithdrawalClassScheduleItems(classItem?: OpsClassOption): Withdrawal
     const sessionNumber = Number(session.sessionNumber || session.session_number || index + 1)
     const normalizedSessionNumber = Number.isFinite(sessionNumber) && sessionNumber > 0 ? sessionNumber : index + 1
     const label = `${normalizedSessionNumber}회차`
+    const billingLabel = getWithdrawalSessionBillingLabel(session)
     const uniqueKey = `${dateKey}:${label}:${state}`
     if (seen.has(uniqueKey)) return []
     seen.add(uniqueKey)
@@ -3794,6 +4114,8 @@ function getWithdrawalClassScheduleItems(classItem?: OpsClassOption): Withdrawal
       stateLabel: getWithdrawalScheduleStateLabel(state),
       sessionNumber: normalizedSessionNumber,
       lessonHours: getWithdrawalSessionHours(session, classItem, dateKey),
+      billingLabel,
+      billingColor: getWithdrawalSessionBillingColor(session),
     }]
   }).sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.sessionNumber - right.sessionNumber)
 
@@ -3849,10 +4171,184 @@ function getWithdrawalScheduleMetrics(items: WithdrawalClassScheduleItem[], sele
   return {
     selectedItem,
     withdrawalDate: selectedItem?.dateKey || "",
-    withdrawalSession: selectedItem?.label || "",
+    withdrawalSession: getWithdrawalScheduleSessionLabel(selectedItem),
     completedLessonHours: completedLessonHours ? formatWithdrawalLessonHours(completedLessonHours) : "",
     fourWeekLessonHours: fourWeekLessonHours ? formatWithdrawalLessonHours(fourWeekLessonHours) : "",
     progressPercent,
+  }
+}
+
+function getTransferClassScheduleMetrics(items: WithdrawalClassScheduleItem[], selectedDate: string, classItem?: OpsClassOption) {
+  const metrics = getWithdrawalScheduleMetrics(items, selectedDate, classItem)
+  return {
+    selectedItem: metrics.selectedItem,
+    transferDate: metrics.withdrawalDate,
+    transferSession: metrics.withdrawalSession,
+  }
+}
+
+function getTransferClassTuition(classItem?: OpsClassOption) {
+  return getWithdrawalNumberValue(classItem?.fee)
+}
+
+function getTransferBillingSessionCount(
+  items: WithdrawalClassScheduleItem[],
+  classItem?: OpsClassOption,
+  selectedItem?: WithdrawalClassScheduleItem,
+) {
+  const selectedWeekdayCount = new Set(getWithdrawalSelectedWeekdays(classItem)).size
+  if (selectedWeekdayCount > 0) return selectedWeekdayCount * 4
+
+  const selectableItems = items.filter((item) => isWithdrawalScheduleSelectable(item))
+  const maxSessionNumber = Math.max(
+    0,
+    selectedItem?.sessionNumber || 0,
+    ...selectableItems.map((item) => item.sessionNumber).filter((value) => Number.isFinite(value) && value > 0),
+  )
+  return maxSessionNumber
+}
+
+function formatTransferTuitionCurrency(value: number) {
+  const rounded = Math.round(Math.abs(value))
+  return `${new Intl.NumberFormat("ko-KR").format(rounded)}원`
+}
+
+function formatTransferProgressLabel(sessionCount: number, cycleSessionCount: number) {
+  if (!sessionCount || !cycleSessionCount) return "자동 계산"
+  const percent = Math.round((sessionCount / cycleSessionCount) * 100)
+  return `${sessionCount}/${cycleSessionCount}회 (${percent}%)`
+}
+
+function getTransferMonthlyCycleContext(
+  items: WithdrawalClassScheduleItem[],
+  classItem: OpsClassOption | undefined,
+  selectedItem: WithdrawalClassScheduleItem | undefined,
+) {
+  if (!selectedItem || !isWithdrawalScheduleSelectable(selectedItem)) {
+    return {
+      monthKey: "",
+      monthLabel: "",
+      sessionNumber: 0,
+      cycleSessionCount: 0,
+      remainingSessionCount: 0,
+      servedSessionCount: 0,
+    }
+  }
+
+  const sessionNumber = selectedItem.sessionNumber
+  const fallbackCycleSessionCount = getTransferBillingSessionCount(items, classItem, selectedItem)
+  const cycleSessionCount = Math.max(fallbackCycleSessionCount, sessionNumber)
+  const remainingSessionCount = sessionNumber && cycleSessionCount
+    ? Math.max(0, cycleSessionCount - sessionNumber + 1)
+    : 0
+
+  return {
+    monthKey: getWithdrawalScheduleBillingMonthKey(selectedItem),
+    monthLabel: getWithdrawalScheduleDisplayMonthLabel(selectedItem),
+    sessionNumber,
+    cycleSessionCount,
+    remainingSessionCount,
+    servedSessionCount: sessionNumber,
+  }
+}
+
+function getTransferTuitionAdjustment({
+  fromClass,
+  toClass,
+  fromDate,
+  toDate,
+}: {
+  fromClass?: OpsClassOption
+  toClass?: OpsClassOption
+  fromDate: string
+  toDate: string
+}): TransferTuitionAdjustment {
+  const fromItems = getWithdrawalClassScheduleItems(fromClass)
+  const toItems = getWithdrawalClassScheduleItems(toClass)
+  const fromMetrics = getTransferClassScheduleMetrics(fromItems, fromDate, fromClass)
+  const toMetrics = getTransferClassScheduleMetrics(toItems, toDate, toClass)
+  const fromCycle = getTransferMonthlyCycleContext(fromItems, fromClass, fromMetrics.selectedItem)
+  const toCycle = getTransferMonthlyCycleContext(toItems, toClass, toMetrics.selectedItem)
+  const fromTuition = getTransferClassTuition(fromClass)
+  const toTuition = getTransferClassTuition(toClass)
+  const fromTuitionLabel = fromTuition ? formatTransferTuitionCurrency(fromTuition) : "수업료 미등록"
+  const toTuitionLabel = toTuition ? formatTransferTuitionCurrency(toTuition) : "수업료 미등록"
+  const fromSessionLabel = fromMetrics.transferSession || "종료일 선택"
+  const toSessionLabel = toMetrics.transferSession || "시작일 선택"
+  const fromProgressLabel = formatTransferProgressLabel(fromCycle.servedSessionCount, fromCycle.cycleSessionCount)
+  const toProgressLabel = formatTransferProgressLabel(toCycle.remainingSessionCount, toCycle.cycleSessionCount)
+  const baseAdjustment: TransferTuitionAdjustment = {
+    settlementType: "not_ready",
+    settlementLabel: "자동 계산",
+    message: "전/후 수업과 날짜를 선택하면 정산액이 자동 계산됩니다.",
+    detail: "수업료가 등록된 수업만 추가 납부 또는 환불/이월 금액을 계산할 수 있습니다.",
+    fromSessionLabel,
+    fromProgressLabel,
+    fromTuitionLabel,
+    toSessionLabel,
+    toProgressLabel,
+    toTuitionLabel,
+    amountLabel: "자동 계산",
+  }
+
+  if (!fromMetrics.selectedItem || !toMetrics.selectedItem || !fromCycle.cycleSessionCount || !toCycle.cycleSessionCount || !fromTuition || !toTuition) {
+    return baseAdjustment
+  }
+
+  const fromUnitTuition = fromTuition / fromCycle.cycleSessionCount
+  const toUnitTuition = toTuition / toCycle.cycleSessionCount
+  const fromServedValue = fromCycle.servedSessionCount * fromUnitTuition
+  const toRemainingValue = toCycle.remainingSessionCount * toUnitTuition
+  const fromRemainingSessionCount = Math.max(0, fromCycle.cycleSessionCount - fromCycle.servedSessionCount)
+  const fromRemainingValue = fromRemainingSessionCount * fromUnitTuition
+  const toSkippedSessionCount = Math.max(0, toCycle.sessionNumber - 1)
+  const toSkippedValue = toSkippedSessionCount * toUnitTuition
+
+  if (fromCycle.monthKey && toCycle.monthKey && fromCycle.monthKey !== toCycle.monthKey) {
+    return {
+      ...baseAdjustment,
+      settlementType: "month_mismatch",
+      settlementLabel: "월별 확인",
+      message: "전/후 수업월이 달라 연속 회차로 계산하지 않습니다.",
+      detail: `전 수업 ${fromSessionLabel} 이후 잔여 ${fromRemainingSessionCount}회(${formatTransferTuitionCurrency(fromRemainingValue)})와 후 수업 ${toSessionLabel} 이전 미수강 ${toSkippedSessionCount}회(${formatTransferTuitionCurrency(toSkippedValue)})를 월별로 확인하세요.`,
+      amountLabel: "월별 확인",
+    }
+  }
+
+  const paidValue = fromTuition
+  const servedValue = fromServedValue + toRemainingValue
+  const difference = servedValue - paidValue
+  const amountLabel = formatTransferTuitionCurrency(difference)
+
+  if (Math.abs(Math.round(difference)) < 1) {
+    return {
+      ...baseAdjustment,
+      settlementType: "balanced",
+      settlementLabel: "정산 없음",
+      message: "추가 납부나 환불/이월 없이 맞습니다.",
+      detail: `전 수업 ${fromSessionLabel}까지 + 후 수업 ${toSessionLabel}부터 잔여 ${toCycle.remainingSessionCount}회 기준으로 납부 수업료와 일치합니다.`,
+      amountLabel: "0원",
+    }
+  }
+
+  if (difference < 0) {
+    return {
+      ...baseAdjustment,
+      settlementType: "refund_or_carry",
+      settlementLabel: "환불/이월",
+      message: `${amountLabel} 환불/이월 필요`,
+      detail: `전 수업 ${fromSessionLabel}까지 + 후 수업 ${toSessionLabel}부터 잔여 ${toCycle.remainingSessionCount}회 기준으로 납부 수업료보다 적게 수강합니다.`,
+      amountLabel,
+    }
+  }
+
+  return {
+    ...baseAdjustment,
+    settlementType: "additional_payment",
+    settlementLabel: "추가 납부",
+    message: `${amountLabel} 추가 납부 필요`,
+    detail: `전 수업 ${fromSessionLabel}까지 + 후 수업 ${toSessionLabel}부터 잔여 ${toCycle.remainingSessionCount}회 기준으로 납부 수업료보다 많이 수강합니다.`,
+    amountLabel,
   }
 }
 
@@ -4110,20 +4606,22 @@ function WithdrawalScheduleCalendarField({
             const selectable = Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
             const selected = cell.dateKey === selectedDateKey
             const dateLabel = getWithdrawalCalendarCellDateLabel(cell.dateKey)
-            const sessionLabel = scheduleItem ? getWithdrawalCalendarSessionLabel(cell.dateKey, scheduleItem.label) : ""
+            const sessionLabel = getWithdrawalCalendarDisplaySessionLabel(scheduleItem, { includeMonth: true })
+            const calendarCellTitle = getWithdrawalCalendarCellTitle(cell.dateKey, scheduleItem)
+            const toneClass = getWithdrawalCalendarCellToneClass(cell.dateKey, selected, selectable, scheduleItem)
             return (
               <button
                 key={cell.dateKey}
                 type="button"
                 role="gridcell"
                 aria-selected={selected}
-                aria-label={scheduleItem ? `${cell.dateKey} ${scheduleItem.label} ${scheduleItem.stateLabel}` : `${cell.dateKey} 수업 없음`}
+                aria-label={calendarCellTitle}
+                title={calendarCellTitle}
                 onClick={() => scheduleItem && handleScheduleSelect(scheduleItem)}
                 disabled={!selectable}
                 className={[
-                  "grid min-h-14 min-w-0 place-items-center content-center gap-0.5 rounded-md px-1.5 py-1 text-center text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
-                  selected ? "bg-primary text-primary-foreground shadow-xs" : "",
-                  !selected && selectable ? "border border-primary/20 bg-primary/5 text-foreground hover:bg-primary/10" : "",
+                  "grid min-h-16 min-w-0 place-items-center content-center gap-0.5 rounded-md px-1.5 py-1 text-center text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                  toneClass,
                   !selected && scheduleItem && !selectable ? "border border-dashed border-muted bg-muted/30 text-muted-foreground" : "",
                   !selected && !selectable && cell.isCurrentMonth ? "text-muted-foreground/55" : "",
                   !selected && !selectable && !cell.isCurrentMonth ? "text-muted-foreground/25" : "",
@@ -4132,8 +4630,8 @@ function WithdrawalScheduleCalendarField({
                 <span className="text-[11px] font-medium">{scheduleItem ? dateLabel : cell.dayLabel}</span>
                 {scheduleItem && (
                   <>
-                    <span className="w-full truncate font-semibold leading-tight">{sessionLabel}</span>
-                    <span className="w-full truncate text-[10px] font-medium leading-tight opacity-80">{scheduleItem.stateLabel}</span>
+                    {sessionLabel && <span className="w-full whitespace-normal break-keep font-semibold leading-tight">{sessionLabel}</span>}
+                    <span className="w-full whitespace-normal break-keep text-[10px] font-medium leading-tight opacity-80">{scheduleItem.stateLabel}</span>
                   </>
                 )}
               </button>
@@ -4152,6 +4650,264 @@ function WithdrawalScheduleCalendarField({
         <ReadonlyInfoField label="4주 기준 수업시수" value={metrics.fourWeekLessonHours || withdrawal.fourWeekLessonHours || "자동 계산"} />
         <ReadonlyInfoField label="수업진행률" value={progressLabel} />
       </div>
+    </section>
+  )
+}
+
+function TransferScheduleCalendarField({
+  label,
+  classItem,
+  dateValue,
+  sessionValue,
+  onScheduleSelect,
+}: {
+  label: string
+  classItem?: OpsClassOption
+  dateValue: string
+  sessionValue: string
+  onScheduleSelect: (metrics: ReturnType<typeof getTransferClassScheduleMetrics>) => void
+}) {
+  const fieldId = useId()
+  const selectedDateKey = dateInputValue(dateValue)
+  const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem), [classItem])
+  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
+  const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
+  const itemsByDate = useMemo(() => {
+    const items = new Map<string, WithdrawalClassScheduleItem>()
+    scheduleItems.forEach((item) => {
+      const current = items.get(item.dateKey)
+      if (!current || (!isWithdrawalScheduleSelectable(current) && isWithdrawalScheduleSelectable(item))) {
+        items.set(item.dateKey, item)
+      }
+    })
+    return items
+  }, [scheduleItems])
+
+  function handleScheduleSelect(item: WithdrawalClassScheduleItem) {
+    if (!isWithdrawalScheduleSelectable(item)) return
+    setCalendarMonth(getCalendarMonthDate(item.dateKey))
+    onScheduleSelect(getTransferClassScheduleMetrics(scheduleItems, item.dateKey, classItem))
+  }
+
+  return (
+    <section className="grid gap-3">
+      <div className="flex items-center gap-2">
+        <span id={fieldId} className="text-sm font-medium">
+          {label}
+        </span>
+      </div>
+      <div className="rounded-lg border bg-background">
+        <div className="flex items-center justify-between border-b px-2 py-1.5">
+          <button
+            type="button"
+            aria-label="이전 달"
+            onClick={() => setCalendarMonth((month) => addCalendarMonths(month, -1))}
+            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <span className="text-sm font-semibold">{getCalendarMonthLabel(calendarMonth)}</span>
+          <button
+            type="button"
+            aria-label="다음 달"
+            onClick={() => setCalendarMonth((month) => addCalendarMonths(month, 1))}
+            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+        <div role="grid" aria-labelledby={fieldId} className="grid grid-cols-7 gap-1 p-2">
+          {CALENDAR_WEEKDAY_LABELS.map((weekday) => (
+            <div key={weekday} role="columnheader" className="grid h-6 place-items-center text-[11px] font-medium text-muted-foreground">
+              {weekday}
+            </div>
+          ))}
+          {calendarCells.map((cell) => {
+            const scheduleItem = itemsByDate.get(cell.dateKey)
+            const selectable = Boolean(scheduleItem && isWithdrawalScheduleSelectable(scheduleItem))
+            const selected = cell.dateKey === selectedDateKey
+            const dateLabel = getWithdrawalCalendarCellDateLabel(cell.dateKey)
+            const sessionLabel = getWithdrawalCalendarDisplaySessionLabel(scheduleItem, { includeMonth: true })
+            const calendarCellTitle = getWithdrawalCalendarCellTitle(cell.dateKey, scheduleItem)
+            const toneClass = getWithdrawalCalendarCellToneClass(cell.dateKey, selected, selectable, scheduleItem)
+            return (
+              <button
+                key={cell.dateKey}
+                type="button"
+                role="gridcell"
+                aria-selected={selected}
+                aria-label={calendarCellTitle}
+                title={calendarCellTitle}
+                onClick={() => scheduleItem && handleScheduleSelect(scheduleItem)}
+                disabled={!selectable}
+                className={[
+                  "grid min-h-16 min-w-0 place-items-center content-center gap-0.5 rounded-md px-1.5 py-1 text-center text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                  toneClass,
+                  !selected && scheduleItem && !selectable ? "border border-dashed border-muted bg-muted/30 text-muted-foreground" : "",
+                  !selected && !selectable && cell.isCurrentMonth ? "text-muted-foreground/55" : "",
+                  !selected && !selectable && !cell.isCurrentMonth ? "text-muted-foreground/25" : "",
+                ].join(" ")}
+              >
+                <span className="text-[11px] font-medium">{scheduleItem ? dateLabel : cell.dayLabel}</span>
+                {scheduleItem && (
+                  <>
+                    {sessionLabel && <span className="w-full whitespace-normal break-keep font-semibold leading-tight">{sessionLabel}</span>}
+                    <span className="w-full whitespace-normal break-keep text-[10px] font-medium leading-tight opacity-80">{scheduleItem.stateLabel}</span>
+                  </>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        {scheduleItems.length === 0 && (
+          <p className="border-t px-3 py-2 text-sm text-muted-foreground">
+            수업을 선택하면 등록된 수업일정이 표시됩니다.
+          </p>
+        )}
+      </div>
+      <ReadonlyInfoField label={`${label}회차`} value={sessionValue || "자동 계산"} />
+    </section>
+  )
+}
+
+function TransferAdjustmentMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid min-w-0 gap-1 rounded-md border bg-background px-3 py-2">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-sm font-semibold text-foreground">{value || "-"}</dd>
+    </div>
+  )
+}
+
+function TransferTuitionAdjustmentPanel({ adjustment }: { adjustment: TransferTuitionAdjustment }) {
+  const toneClass = adjustment.settlementType === "additional_payment"
+    ? "border-amber-300/60 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100"
+    : adjustment.settlementType === "refund_or_carry"
+      ? "border-blue-300/60 bg-blue-50 text-blue-950 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-100"
+      : adjustment.settlementType === "balanced"
+        ? "border-emerald-300/60 bg-emerald-50 text-emerald-950 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100"
+        : adjustment.settlementType === "month_mismatch"
+          ? "border-orange-300/60 bg-orange-50 text-orange-950 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-100"
+          : "border-muted bg-muted/35 text-muted-foreground"
+
+  return (
+    <section aria-label="수업료 정산" className="grid gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">수업료 정산</h3>
+        <Badge variant="outline">{adjustment.settlementLabel}</Badge>
+      </div>
+      <dl className="grid gap-2 md:grid-cols-3">
+        <TransferAdjustmentMetric label="전 종료회차" value={adjustment.fromSessionLabel} />
+        <TransferAdjustmentMetric label="전 진행률" value={adjustment.fromProgressLabel} />
+        <TransferAdjustmentMetric label="전 수업료" value={adjustment.fromTuitionLabel} />
+        <TransferAdjustmentMetric label="후 시작회차" value={adjustment.toSessionLabel} />
+        <TransferAdjustmentMetric label="후 잔여진행률" value={adjustment.toProgressLabel} />
+        <TransferAdjustmentMetric label="후 수업료" value={adjustment.toTuitionLabel} />
+      </dl>
+      <div role="status" aria-live="polite" className={["rounded-md border px-3 py-2 text-sm", toneClass].join(" ")}>
+        <p className="font-semibold">{adjustment.message}</p>
+        <p className="mt-1 text-xs opacity-85">{adjustment.detail}</p>
+      </div>
+    </section>
+  )
+}
+
+const TRANSFER_WORKFLOW_LANES = [
+  {
+    title: "담당선생님 요청",
+    steps: [
+      "전/후 선생님 타당성 논의",
+      "타당하면 입학상담 책임자와 논의",
+      "입학상담 책임자 승인",
+      "전/후 선생님 공동 제출",
+      "관리팀 전반 처리",
+    ],
+  },
+  {
+    title: "고객 요청",
+    steps: [
+      "입학상담 책임자와 전/후 선생님 타당성 논의",
+      "전/후 선생님 공동 제출",
+      "관리팀 전반 처리",
+    ],
+  },
+] as const
+
+const TRANSFER_VALIDATION_ITEMS = [
+  "현재 실력: 객관적인 시험 점수",
+  "학습태도 및 성장가능성: 선생님 의견",
+  "승급 수업: 난이도 적합성",
+  "동급 수업: 수업계획표 상의 진도",
+  "시간표 변동 이슈",
+] as const
+
+const TRANSFER_COUNSELOR_GROUPS = [
+  { label: "영어", value: "강부희, 김민경, 정보영" },
+  { label: "수학 고등부", value: "양소윤" },
+  { label: "수학 초중등부", value: "강정은" },
+] as const
+
+function TransferWorkflowChart() {
+  const [open, setOpen] = useState(false)
+  const contentId = useId()
+
+  return (
+    <section data-testid="transfer-workflow-chart" data-state={open ? "open" : "closed"} className="overflow-hidden rounded-md border bg-muted/20">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold">전반 업무 흐름</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">타당성 검토, 공동 제출, 관리팀 처리</span>
+        </span>
+        <ChevronRight className={["size-4 shrink-0 text-muted-foreground transition-transform", open ? "rotate-90" : ""].join(" ")} aria-hidden="true" />
+      </button>
+      {open && (
+        <div id={contentId} className="grid gap-3 border-t bg-background px-3 py-3">
+          <div className="grid gap-3 lg:grid-cols-2">
+            {TRANSFER_WORKFLOW_LANES.map((lane) => (
+              <section key={lane.title} className="grid gap-2 rounded-md border bg-muted/15 p-3">
+                <h4 className="text-sm font-semibold">{lane.title}</h4>
+                <ol className="grid gap-1.5">
+                  {lane.steps.map((step, index) => (
+                    <li key={step} className="flex min-w-0 items-center gap-2 text-sm">
+                      <span className="grid size-6 shrink-0 place-items-center rounded-full border bg-background text-xs font-semibold text-muted-foreground">{index + 1}</span>
+                      <span className="min-w-0 flex-1 break-keep">{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ))}
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[1.35fr_1fr]">
+            <section className="grid gap-2 rounded-md border bg-muted/15 p-3">
+              <h4 className="text-sm font-semibold">전반 타당성 검토 사항</h4>
+              <div className="flex flex-wrap gap-1.5">
+                {TRANSFER_VALIDATION_ITEMS.map((item) => (
+                  <Badge key={item} variant="outline" className="rounded-md bg-background">
+                    {item}
+                  </Badge>
+                ))}
+              </div>
+            </section>
+            <section className="grid gap-2 rounded-md border bg-muted/15 p-3">
+              <h4 className="text-sm font-semibold">입학상담 책임자</h4>
+              <dl className="grid gap-1.5 text-sm">
+                {TRANSFER_COUNSELOR_GROUPS.map((group) => (
+                  <div key={group.label} className="grid grid-cols-[5rem_1fr] gap-2">
+                    <dt className="text-muted-foreground">{group.label}</dt>
+                    <dd className="font-medium">{group.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -4185,6 +4941,7 @@ function WordRetestMainExamDateField({
     })
     return itemsByDate
   }, [classScheduleItems])
+  const shouldRestrictToClassSchedule = classScheduleItems.length > 0
   const monthKey = getCalendarMonthKey(calendarMonth)
   const visibleClassScheduleItems = classScheduleItems
     .filter((item) => item.dateKey.startsWith(monthKey))
@@ -4275,30 +5032,33 @@ function WordRetestMainExamDateField({
                 {weekday}
               </div>
             ))}
-            {calendarCells.map((cell) => {
-              const selected = cell.dateKey === dateValue
-              const dayScheduleItems = classScheduleItemsByDate.get(cell.dateKey) || []
-              const isClassScheduleDate = dayScheduleItems.length > 0
-              const scheduleLabel = dayScheduleItems.map((item) => item.label).join(", ")
-              return (
-                <button
+	            {calendarCells.map((cell) => {
+	              const selected = cell.dateKey === dateValue
+	              const dayScheduleItems = classScheduleItemsByDate.get(cell.dateKey) || []
+	              const isClassScheduleDate = dayScheduleItems.length > 0
+	              const selectable = !shouldRestrictToClassSchedule || isClassScheduleDate
+	              const scheduleLabel = dayScheduleItems.map((item) => item.label).join(", ")
+	              return (
+	                <button
                   key={cell.dateKey}
                   type="button"
                   role="gridcell"
                   aria-selected={selected}
-                  aria-label={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel} 선택` : `${cell.dateKey} 선택`}
-                  data-word-retest-class-date={isClassScheduleDate ? "true" : undefined}
-                  title={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel}` : cell.dateKey}
-                  onClick={() => handleMainExamDateSelect(cell.dateKey)}
-                  className={[
-                    "grid h-10 min-w-0 place-items-center rounded-md text-xs leading-none outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
-                    selected ? "bg-primary text-primary-foreground shadow-xs" : "",
-                    !selected && isClassScheduleDate ? "border border-primary/35 bg-primary/[0.06] text-primary" : "",
-                    !selected && !isClassScheduleDate && cell.isToday ? "border border-primary/50 text-primary" : "",
-                    !selected && !isClassScheduleDate && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
-                    !selected && !isClassScheduleDate && !cell.isToday && !cell.isCurrentMonth ? "text-muted-foreground/45 hover:bg-muted/60" : "",
-                  ].join(" ")}
-                >
+	                  aria-label={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel} 선택` : shouldRestrictToClassSchedule ? `${cell.dateKey} 수업일정 없음` : `${cell.dateKey} 선택`}
+	                  data-word-retest-class-date={isClassScheduleDate ? "true" : undefined}
+	                  title={isClassScheduleDate ? `${cell.dateKey} ${scheduleLabel}` : cell.dateKey}
+	                  onClick={() => selectable && handleMainExamDateSelect(cell.dateKey)}
+	                  disabled={!selectable}
+	                  className={[
+	                    "grid h-10 min-w-0 place-items-center rounded-md text-xs leading-none outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+	                    selected ? "bg-primary text-primary-foreground shadow-xs" : "",
+	                    !selected && isClassScheduleDate ? "border border-primary/35 bg-primary/[0.06] text-primary" : "",
+	                    !selected && !isClassScheduleDate && !shouldRestrictToClassSchedule && cell.isToday ? "border border-primary/50 text-primary" : "",
+	                    !selected && !isClassScheduleDate && !shouldRestrictToClassSchedule && !cell.isToday && cell.isCurrentMonth ? "text-foreground hover:bg-muted" : "",
+	                    !selected && !isClassScheduleDate && !shouldRestrictToClassSchedule && !cell.isToday && !cell.isCurrentMonth ? "text-muted-foreground/45 hover:bg-muted/60" : "",
+	                    !selected && !isClassScheduleDate && shouldRestrictToClassSchedule ? "cursor-not-allowed text-muted-foreground/35" : "",
+	                  ].join(" ")}
+	                >
                   <span className="font-semibold">{cell.dayLabel}</span>
                   {isClassScheduleDate && <span className="mt-0.5 text-[9px] font-bold">수업</span>}
                 </button>
@@ -4438,6 +5198,14 @@ function getWithdrawalTeacherLabel(task: OpsTask) {
   return task.withdrawal?.teacherName || "미지정"
 }
 
+function getTransferFromTeacherLabel(task: OpsTask) {
+  return task.transfer?.fromTeacherName || "미지정"
+}
+
+function getTransferToTeacherLabel(task: OpsTask) {
+  return task.transfer?.toTeacherName || "미지정"
+}
+
 function getWithdrawalProgressLabel(task: OpsTask) {
   const completed = Number(task.withdrawal?.completedLessonHours || 0)
   const total = Number(task.withdrawal?.fourWeekLessonHours || 0)
@@ -4463,6 +5231,43 @@ function matchesWithdrawalPeriodFilter(
 ) {
   if (periodFilter === "all") return true
   const dateKeys = getWithdrawalPeriodDateKeys(task)
+  if (dateKeys.length === 0) return false
+
+  if (periodFilter === "today") return dateKeys.some((dateKey) => dateKey === todayKey)
+  if (periodFilter === "week") {
+    const range = getWithdrawalWeekRange(todayKey)
+    return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, range.start, range.end))
+  }
+  if (periodFilter === "month") {
+    const range = getWithdrawalMonthRange(todayKey)
+    return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, range.start, range.end))
+  }
+
+  const startDateKey = toDateKey(customStartDate)
+  const endDateKey = toDateKey(customEndDate)
+  if (!startDateKey && !endDateKey) return true
+  return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, startDateKey, endDateKey))
+}
+
+function getTransferPeriodDateKeys(task: OpsTask) {
+  return [
+    toDateKey(task.transfer?.fromClassEndDate),
+    toDateKey(task.transfer?.toClassStartDate),
+    toDateKey(task.dueAt),
+    toDateKey(task.startAt),
+    toDateKey(task.createdAt),
+  ].filter(Boolean)
+}
+
+function matchesTransferPeriodFilter(
+  task: OpsTask,
+  periodFilter: WithdrawalPeriodFilter,
+  todayKey: string,
+  customStartDate: string,
+  customEndDate: string,
+) {
+  if (periodFilter === "all") return true
+  const dateKeys = getTransferPeriodDateKeys(task)
   if (dateKeys.length === 0) return false
 
   if (periodFilter === "today") return dateKeys.some((dateKey) => dateKey === todayKey)
@@ -4519,8 +5324,52 @@ function getWithdrawalTableValue(task: OpsTask, columnKey: WithdrawalTableColumn
   }
 }
 
+function getTransferTableValue(task: OpsTask, columnKey: TransferTableColumnKey) {
+  const transfer = task.transfer || {}
+  switch (columnKey) {
+    case "status":
+      return getWithdrawalWorkflowStatusLabel(task.status)
+    case "subject":
+      return task.subject || "-"
+    case "fromTeacher":
+      return getTransferFromTeacherLabel(task)
+    case "fromClassName":
+      return transfer.fromClassName || "-"
+    case "student":
+      return task.studentName || "-"
+    case "transferReason":
+      return transfer.transferReason || "-"
+    case "fromUndistributedTextbooks":
+      return transfer.fromUndistributedTextbooks || "-"
+    case "fromClassEndDate":
+      return dateOnlyLabel(transfer.fromClassEndDate)
+    case "fromClassEndSession":
+      return transfer.fromClassEndSession || "-"
+    case "toTeacher":
+      return getTransferToTeacherLabel(task)
+    case "toClassName":
+      return transfer.toClassName || task.className || "-"
+    case "toClassStartDate":
+      return dateOnlyLabel(transfer.toClassStartDate)
+    case "toClassStartSession":
+      return transfer.toClassStartSession || "-"
+    case "toUndistributedTextbooks":
+      return transfer.toUndistributedTextbooks || "-"
+    case "operationsChecklist":
+      return getTransferOperationsChecklistValue(transfer)
+    case "action":
+      return ""
+    default:
+      return "-"
+  }
+}
+
 function getWithdrawalFilterValue(task: OpsTask, columnKey: "subject" | "teacher" | "className" | "student") {
   return getWithdrawalTableValue(task, columnKey)
+}
+
+function getTransferFilterValue(task: OpsTask, columnKey: "subject" | "fromTeacher" | "fromClassName" | "student") {
+  return getTransferTableValue(task, columnKey)
 }
 
 function buildWithdrawalSelectFilterOptions(
@@ -4586,6 +5435,7 @@ function WithdrawalPeriodFilterBar({
   onChange,
   onStartDateChange,
   onEndDateChange,
+  labelPrefix = "퇴원",
 }: {
   value: WithdrawalPeriodFilter
   startDate: string
@@ -4593,16 +5443,17 @@ function WithdrawalPeriodFilterBar({
   onChange: (value: WithdrawalPeriodFilter) => void
   onStartDateChange: (value: string) => void
   onEndDateChange: (value: string) => void
+  labelPrefix?: string
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="퇴원 기간 필터">
+    <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label={`${labelPrefix} 기간 필터`}>
       <div className="inline-flex max-w-full overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {WITHDRAWAL_PERIOD_FILTERS.map((filter) => (
           <button
             key={filter.key}
             type="button"
             aria-pressed={value === filter.key}
-            aria-label={`${filter.label} 퇴원 보기`}
+            aria-label={`${filter.label} ${labelPrefix} 보기`}
             onClick={() => onChange(filter.key)}
             className={[
               "shrink-0 rounded px-3 py-1.5 text-sm font-medium",
@@ -4619,13 +5470,13 @@ function WithdrawalPeriodFilterBar({
             value={startDate}
             onChange={onStartDateChange}
             placeholder="시작일"
-            ariaLabel="퇴원 기간 시작일"
+            ariaLabel={`${labelPrefix} 기간 시작일`}
           />
           <DatePickerControl
             value={endDate}
             onChange={onEndDateChange}
             placeholder="종료일"
-            ariaLabel="퇴원 기간 종료일"
+            ariaLabel={`${labelPrefix} 기간 종료일`}
           />
         </div>
       ) : null}
@@ -4679,16 +5530,64 @@ function WithdrawalResizableHeaderCell({
   )
 }
 
+function TransferResizableHeaderCell({
+  column,
+  sort,
+  onHeaderSelect,
+  onResizeStart,
+}: {
+  column: (typeof TRANSFER_TABLE_COLUMNS)[number]
+  sort: TransferTableSort
+  onHeaderSelect: (columnKey: TransferTableColumnKey) => void
+  onResizeStart: (key: TransferTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) => void
+}) {
+  const { columnKey, label, align } = column
+  const isActiveSort = sort?.columnKey === columnKey
+  const SortIcon = isActiveSort ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown
+  const sortable = columnKey !== "action"
+  const ariaSort = !isActiveSort ? "none" : sort.direction === "asc" ? "ascending" : "descending"
+
+  return (
+    <div
+      role="columnheader"
+      aria-sort={ariaSort}
+      className={["relative min-w-0 border-r px-2 py-2 last:border-r-0", align === "right" ? "text-right" : ""].join(" ")}
+    >
+      <button
+        type="button"
+        disabled={!sortable}
+        aria-label={`${label} 필터/정렬`}
+        onClick={() => onHeaderSelect(columnKey)}
+        className={[
+          "flex w-full min-w-0 items-center gap-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-60",
+          align === "right" ? "justify-end text-right" : "",
+        ].join(" ")}
+      >
+        <span className="truncate">{label}</span>
+        {sortable ? <SortIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+      </button>
+      <button
+        type="button"
+        aria-label={`${label} 열 너비 조절`}
+        onPointerDown={(event) => onResizeStart(columnKey, event)}
+        className="absolute -right-1 top-1/2 h-5 w-2 -translate-y-1/2 cursor-col-resize rounded-full hover:bg-primary/25 focus-visible:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </div>
+  )
+}
+
 function WithdrawalDataCell({
   value,
   children,
   align = "left",
   onOpenDetail,
+  detailAriaLabel = "퇴원 상세 열기",
 }: {
   value: string
   children?: ReactNode
   align?: "left" | "right"
   onOpenDetail?: () => void
+  detailAriaLabel?: string
 }) {
   const content = children || <span className="block truncate" title={value}>{value}</span>
   return (
@@ -4696,7 +5595,7 @@ function WithdrawalDataCell({
       {onOpenDetail ? (
         <button
           type="button"
-          aria-label="퇴원 상세 열기"
+          aria-label={detailAriaLabel}
           title={value}
           onClick={onOpenDetail}
           className={["block w-full min-w-0 text-left outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring", align === "right" ? "text-right" : ""].join(" ")}
@@ -5161,6 +6060,454 @@ function WithdrawalDataTable({
   )
 }
 
+function TransferDataTable({
+  tasks,
+  todayKey,
+  loading,
+  onOpen,
+  onEdit,
+  onStatusChange,
+  onChecklistChange,
+  canManageWorkflow = true,
+  statusActionDisabled = false,
+  onCreate,
+  emptyLabel = "전반 신청 없음",
+  emptyActionLabel = "전반 신청",
+  showEmptyAction = true,
+  completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
+}: {
+  tasks: OpsTask[]
+  todayKey: string
+  loading: boolean
+  onOpen: (task: OpsTask) => void
+  onEdit: (task: OpsTask, blockers?: string[]) => void
+  onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
+  onChecklistChange: (task: OpsTask, field: TransferChecklistField, checked: boolean) => void
+  canManageWorkflow?: boolean
+  statusActionDisabled?: boolean
+  onCreate: () => void
+  emptyLabel?: string
+  emptyActionLabel?: string
+  showEmptyAction?: boolean
+  completionBlockersByTaskId?: OperationCompletionBlockerMap
+}) {
+  const [columnWidths, setColumnWidths] = useState<Record<TransferTableColumnKey, number>>(TRANSFER_TABLE_COLUMN_WIDTHS)
+  const [transferTableSort, setTransferTableSort] = useState<TransferTableSort>(null)
+  const [filterColumnKey, setFilterColumnKey] = useState<TransferTableColumnKey>("fromClassName")
+  const [filterValue, setFilterValue] = useState("")
+  const [filterInputOpen, setFilterInputOpen] = useState(false)
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState("all")
+  const [transferPeriodFilter, setTransferPeriodFilter] = useState<WithdrawalPeriodFilter>("all")
+  const [transferPeriodStartDate, setTransferPeriodStartDate] = useState("")
+  const [transferPeriodEndDate, setTransferPeriodEndDate] = useState("")
+  const filterInputRef = useRef<HTMLInputElement>(null)
+  const gridTemplateColumns = getTransferTableGridTemplate(columnWidths)
+  const gridTemplateStyle = { "--transfer-grid-template": gridTemplateColumns } as CSSProperties
+  const filterColumn = TRANSFER_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || TRANSFER_TABLE_COLUMNS[3]
+  const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
+
+  const subjectFilterOptions = useMemo(() => (
+    buildWithdrawalSelectFilterOptions(tasks, (task) => ({
+      value: getTransferFilterValue(task, "subject"),
+      label: getTransferFilterValue(task, "subject"),
+    }))
+  ), [tasks])
+  const teacherFilterSourceTasks = useMemo(() => (
+    selectedSubjectFilter === "all" ? tasks : tasks.filter((task) => getTransferFilterValue(task, "subject") === selectedSubjectFilter)
+  ), [selectedSubjectFilter, tasks])
+  const teacherFilterOptions = useMemo(() => (
+    buildWithdrawalSelectFilterOptions(teacherFilterSourceTasks, (task) => ({
+      value: getTransferFilterValue(task, "fromTeacher"),
+      label: getTransferFilterValue(task, "fromTeacher"),
+    }))
+  ), [teacherFilterSourceTasks])
+
+  const visibleTransferTasks = useMemo(() => {
+    const selectionFilteredTasks = tasks
+      .filter((task) => {
+        if (selectedSubjectFilter !== "all" && getTransferFilterValue(task, "subject") !== selectedSubjectFilter) return false
+        if (selectedTeacherFilter !== "all" && getTransferFilterValue(task, "fromTeacher") !== selectedTeacherFilter) return false
+        return true
+      })
+      .filter((task) => matchesTransferPeriodFilter(task, transferPeriodFilter, todayKey, transferPeriodStartDate, transferPeriodEndDate))
+    const normalizedFilter = filterValue.trim().toLocaleLowerCase("ko")
+    const nextTasks = normalizedFilter
+      ? selectionFilteredTasks.filter((task) => getTransferTableValue(task, filterColumnKey).toLocaleLowerCase("ko").includes(normalizedFilter))
+      : [...selectionFilteredTasks]
+
+    if (transferTableSort) {
+      nextTasks.sort((left, right) => {
+        const leftValue = getTransferTableValue(left, transferTableSort.columnKey)
+        const rightValue = getTransferTableValue(right, transferTableSort.columnKey)
+        const result = leftValue.localeCompare(rightValue, "ko", { numeric: true })
+        return transferTableSort.direction === "asc" ? result : -result
+      })
+    }
+
+    return nextTasks
+  }, [
+    filterColumnKey,
+    filterValue,
+    selectedSubjectFilter,
+    selectedTeacherFilter,
+    tasks,
+    todayKey,
+    transferPeriodEndDate,
+    transferPeriodFilter,
+    transferPeriodStartDate,
+    transferTableSort,
+  ])
+
+  function handleHeaderSelect(columnKey: TransferTableColumnKey) {
+    if (columnKey === "action") return
+    setFilterColumnKey(columnKey)
+    setTransferTableSort((current) => {
+      if (!current || current.columnKey !== columnKey) return { columnKey, direction: "asc" }
+      if (current.direction === "asc") return { columnKey, direction: "desc" }
+      return null
+    })
+  }
+
+  useEffect(() => {
+    if (filterInputOpen) filterInputRef.current?.focus()
+  }, [filterInputOpen])
+
+  function startColumnResize(key: TransferTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = columnWidths[key]
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      const nextWidth = Math.max(TRANSFER_TABLE_COLUMN_MIN_WIDTHS[key], startWidth + moveEvent.clientX - startX)
+      setColumnWidths((current) => ({ ...current, [key]: nextWidth }))
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", handlePointerUp)
+    }
+
+    window.addEventListener("pointermove", handlePointerMove)
+    window.addEventListener("pointerup", handlePointerUp)
+  }
+
+  return (
+    <div className="overflow-hidden rounded-md border bg-card">
+      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2" aria-label="전반 전체 필터">
+        <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="전반 누가 필터">
+          <WithdrawalFilterSelect
+            label="과목 필터"
+            value={selectedSubjectFilter}
+            allLabel="과목 전체"
+            options={subjectFilterOptions}
+            onChange={(value) => {
+              setSelectedSubjectFilter(value)
+              setSelectedTeacherFilter("all")
+            }}
+          />
+          <WithdrawalFilterSelect
+            label="선생님 필터"
+            value={selectedTeacherFilter}
+            allLabel="선생님 전체"
+            options={teacherFilterOptions}
+            onChange={setSelectedTeacherFilter}
+          />
+        </div>
+        <WithdrawalPeriodFilterBar
+          labelPrefix="전반"
+          value={transferPeriodFilter}
+          startDate={transferPeriodStartDate}
+          endDate={transferPeriodEndDate}
+          onChange={setTransferPeriodFilter}
+          onStartDateChange={setTransferPeriodStartDate}
+          onEndDateChange={setTransferPeriodEndDate}
+        />
+        <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium" aria-label="전반 데이터테이블 열 필터">
+          <Button
+            type="button"
+            variant={isFilterInputExpanded ? "secondary" : "outline"}
+            size="sm"
+            className="size-8 px-0"
+            aria-label={isFilterInputExpanded ? `${filterColumn.label} 열 필터 접기` : `${filterColumn.label} 열 필터 펼치기`}
+            aria-expanded={isFilterInputExpanded}
+            onClick={() => setFilterInputOpen((current) => !current)}
+          >
+            <Filter className="size-4" aria-hidden="true" />
+          </Button>
+          {isFilterInputExpanded ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Input
+                ref={filterInputRef}
+                aria-label={`${filterColumn.label} 열 필터`}
+                value={filterValue}
+                onChange={(event) => setFilterValue(event.target.value)}
+                placeholder={`${filterColumn.label} 값 입력`}
+                className="h-8 min-w-0 flex-1 sm:w-48"
+              />
+              {filterValue ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFilterValue("")
+                    setFilterInputOpen(false)
+                  }}
+                >
+                  지우기
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div data-testid="transfer-mobile-task-list" className="grid gap-2 p-3 md:hidden" aria-label="전반 모바일 목록">
+        {loading ? (
+          <div className="px-3 py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
+        ) : visibleTransferTasks.length === 0 ? (
+          <div className="grid gap-3 px-3 py-10 text-center text-sm text-muted-foreground">
+            <span>{tasks.length === 0 ? emptyLabel : "표시할 전반 신청이 없습니다."}</span>
+            {tasks.length === 0 && showEmptyAction ? (
+              <span>
+                <Button type="button" size="sm" onClick={onCreate}>
+                  <Plus className="size-4" />
+                  {emptyActionLabel}
+                </Button>
+              </span>
+            ) : null}
+          </div>
+        ) : visibleTransferTasks.map((task) => {
+          const transfer = task.transfer || {}
+          const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
+          const nextAction = getNextTaskStatusAction(task)
+          const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
+          const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
+          const mobileNextActionLabel = getWithdrawalMobileNextActionLabel(task, completionBlockers)
+          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
+
+          return (
+            <article key={task.id} className="grid gap-3 rounded-md border bg-background p-3 shadow-xs" aria-label={`${task.title} 전반 신청`}>
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <WithdrawalWorkflowStatusBadge status={task.status} />
+                <Badge variant="outline">{task.subject || "과목 미정"}</Badge>
+                <Badge variant="secondary">{transfer.fromTeacherName || "전 선생님 미정"}</Badge>
+                <Badge variant="secondary">{transfer.toTeacherName || "후 선생님 미정"}</Badge>
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-foreground">
+                  {[transfer.fromClassName, transfer.toClassName || task.className].filter(Boolean).join(" → ") || task.title}
+                </div>
+                <div className="truncate text-xs text-muted-foreground">{task.studentName || "학생 미정"}</div>
+              </div>
+              <dl className="grid gap-2 text-xs">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">전 수업 종료일</dt>
+                    <dd className="mt-0.5 truncate font-medium">{dateOnlyLabel(transfer.fromClassEndDate)}</dd>
+                  </div>
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">후 수업 시작일</dt>
+                    <dd className="mt-0.5 truncate font-medium">{dateOnlyLabel(transfer.toClassStartDate)}</dd>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">전 종료회차</dt>
+                    <dd className="mt-0.5 truncate font-medium">{transfer.fromClassEndSession || "미정"}</dd>
+                  </div>
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">후 시작회차</dt>
+                    <dd className="mt-0.5 truncate font-medium">{transfer.toClassStartSession || "미정"}</dd>
+                  </div>
+                </div>
+                <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                  <dt className="text-muted-foreground">처리 확인</dt>
+                  <dd className="mt-1">
+                    <TransferOperationsChecklistChips
+                      transfer={transfer}
+                      editable={canEditChecklist}
+                      disabled={statusActionDisabled}
+                      onChange={(field, checked) => onChecklistChange(task, field, checked)}
+                    />
+                  </dd>
+                </div>
+                {transfer.transferReason ? (
+                  <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                    <dt className="text-muted-foreground">전반사유</dt>
+                    <dd className="mt-0.5 line-clamp-2 font-medium">{transfer.transferReason}</dd>
+                  </div>
+                ) : null}
+              </dl>
+              <div className="flex flex-wrap justify-end gap-1.5 border-t pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`${task.title} 전반 상세 열기`}
+                  onClick={() => onOpen(task)}
+                >
+                  상세
+                </Button>
+                {canRunStatusAction && nextAction ? (
+                  <Button
+                    type="button"
+                    variant={nextActionBlocked ? "outline" : "default"}
+                    size="sm"
+                    aria-label={`${task.title}: ${mobileNextActionLabel}`}
+                    title={nextActionBlocked ? `${completionBlockers.join(", ")} 연결 필요` : undefined}
+                    onClick={() => {
+                      if (nextActionBlocked) {
+                        onEdit(task, completionBlockers)
+                        return
+                      }
+                      onStatusChange(task, nextAction.status)
+                    }}
+                    disabled={statusActionDisabled}
+                  >
+                    {mobileNextActionLabel}
+                  </Button>
+                ) : null}
+                {canEditTaskDetails(task) ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`${task.title} 수정`}
+                    onClick={() => onEdit(task)}
+                    disabled={statusActionDisabled}
+                  >
+                    수정
+                  </Button>
+                ) : null}
+              </div>
+            </article>
+          )
+        })}
+      </div>
+      <div className="hidden w-full overflow-x-auto md:block" role="table" aria-label="전반 신청 데이터테이블">
+        <div
+          role="row"
+          className="grid min-w-full border-b bg-muted/45 text-xs [grid-template-columns:var(--transfer-grid-template)]"
+          style={gridTemplateStyle}
+        >
+          {TRANSFER_TABLE_COLUMNS.map((column) => (
+            <TransferResizableHeaderCell
+              key={column.columnKey}
+              column={column}
+              sort={transferTableSort}
+              onHeaderSelect={handleHeaderSelect}
+              onResizeStart={startColumnResize}
+            />
+          ))}
+        </div>
+        {loading ? (
+          <div className="px-4 py-12 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
+        ) : visibleTransferTasks.length === 0 ? (
+          <div className="grid gap-3 px-4 py-12 text-center text-sm text-muted-foreground">
+            <span>{tasks.length === 0 ? emptyLabel : "표시할 전반 신청이 없습니다."}</span>
+            {tasks.length === 0 && showEmptyAction ? (
+              <span>
+                <Button type="button" size="sm" onClick={onCreate}>
+                  <Plus className="size-4" />
+                  {emptyActionLabel}
+                </Button>
+              </span>
+            ) : null}
+          </div>
+        ) : visibleTransferTasks.map((task) => {
+          const nextAction = getNextTaskStatusAction(task)
+          const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
+          const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
+          const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
+          const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
+          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
+
+          return (
+            <div
+              key={task.id}
+              role="row"
+              className="grid min-w-full border-b last:border-b-0 hover:bg-muted/30 [grid-template-columns:var(--transfer-grid-template)]"
+              style={gridTemplateStyle}
+            >
+              {TRANSFER_TABLE_COLUMNS.map((column) => {
+                const value = getTransferTableValue(task, column.columnKey)
+                if (column.columnKey === "status") {
+                  return (
+                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)} detailAriaLabel="전반 상세 열기">
+                      <WithdrawalWorkflowStatusBadge status={task.status} />
+                    </WithdrawalDataCell>
+                  )
+                }
+                if (column.columnKey === "action") {
+                  return (
+                    <WithdrawalDataCell key={column.columnKey} value="" align="right">
+                      <span className="flex flex-wrap justify-end gap-1.5">
+                        {canRunStatusAction && nextAction && (
+                          <Button
+                            type="button"
+                            variant={nextActionBlocked ? "outline" : "default"}
+                            size="sm"
+                            aria-label={`${task.title}: ${nextActionBlocked ? blockedActionLabel : nextAction.label}`}
+                            title={nextActionBlocked ? `${completionBlockers.join(", ")} 연결 필요` : undefined}
+                            onClick={() => {
+                              if (nextActionBlocked) {
+                                onEdit(task, completionBlockers)
+                                return
+                              }
+                              onStatusChange(task, nextAction.status)
+                            }}
+                            disabled={statusActionDisabled}
+                          >
+                            {nextActionBlocked ? blockedActionLabel : nextAction.label}
+                          </Button>
+                        )}
+                        {canEditTaskDetails(task) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-label={`${task.title} 수정`}
+                            onClick={() => onEdit(task)}
+                            disabled={statusActionDisabled}
+                          >
+                            수정
+                          </Button>
+                        )}
+                      </span>
+                    </WithdrawalDataCell>
+                  )
+                }
+                if (column.columnKey === "operationsChecklist") {
+                  return (
+                    <WithdrawalDataCell key={column.columnKey} value={value}>
+                      <TransferOperationsChecklistChips
+                        transfer={task.transfer}
+                        editable={canEditChecklist}
+                        disabled={statusActionDisabled}
+                        onChange={(field, checked) => onChecklistChange(task, field, checked)}
+                      />
+                    </WithdrawalDataCell>
+                  )
+                }
+                return (
+                  <WithdrawalDataCell
+                    key={column.columnKey}
+                    value={value}
+                    align={column.align}
+                    onOpenDetail={() => onOpen(task)}
+                    detailAriaLabel="전반 상세 열기"
+                  />
+                )
+              })}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function getWithdrawalNotificationTriggerForStatus(status: OpsTaskStatus): WithdrawalNotificationTriggerKey | null {
   if (status === "in_progress") return "processing"
   if (status === "done") return "completed"
@@ -5187,6 +6534,34 @@ function buildWithdrawalNotificationContext(task: OpsTask, triggerKey: Withdrawa
     "고객 퇴원사유": withdrawal.customerReason || "",
     "선생님 의견": withdrawal.teacherOpinion || "",
     "미배부 교재": withdrawal.undistributedTextbooks || "",
+    신청자: task.requestedByLabel || "",
+    신청일시: dateLabel(task.createdAt),
+    담당선생님: teacherName,
+    관리팀: task.assigneeTeam || task.assigneeLabel || "관리팀",
+    프로세스: triggerLabel,
+  }
+}
+
+function buildTransferNotificationContext(task: OpsTask, triggerKey: WithdrawalNotificationTriggerKey): Record<string, string> {
+  const transfer = task.transfer || {}
+  const teacherName = transfer.fromTeacherName || task.assigneeLabel || ""
+  const triggerLabel = WITHDRAWAL_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === triggerKey)?.label || ""
+
+  return {
+    상태: getTaskStatusLabel(task.status),
+    과목: task.subject || "",
+    "전 선생님": transfer.fromTeacherName || "",
+    "전 수업": transfer.fromClassName || "",
+    학생: task.studentName || "",
+    전반사유: transfer.transferReason || "",
+    "전 미배부 교재": transfer.fromUndistributedTextbooks || "",
+    "전 수업 종료일": dateInputValue(transfer.fromClassEndDate) || "",
+    "전 종료회차": transfer.fromClassEndSession || "",
+    "후 선생님": transfer.toTeacherName || "",
+    "후 수업": transfer.toClassName || task.className || "",
+    "후 수업 시작일": dateInputValue(transfer.toClassStartDate) || "",
+    "후 시작회차": transfer.toClassStartSession || "",
+    "후 미배부 교재": transfer.toUndistributedTextbooks || "",
     신청자: task.requestedByLabel || "",
     신청일시: dateLabel(task.createdAt),
     담당선생님: teacherName,
@@ -5265,6 +6640,39 @@ async function notifyWithdrawalWorkflow(
   }))
 }
 
+async function notifyTransferWorkflow(
+  triggerKey: WithdrawalNotificationTriggerKey | null,
+  task: OpsTask,
+  transferNotificationSettings: WithdrawalNotificationSetting[],
+  transferNotificationTemplates: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>,
+  sessionToken: string,
+) {
+  if (!triggerKey || task.type !== "transfer") return
+
+  const template = transferNotificationTemplates[triggerKey]
+  if (!template) return
+
+  const context = buildTransferNotificationContext(task, triggerKey)
+  const title = renderWithdrawalNotificationTemplate(template.titleTemplate, context, TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES)
+  const body = renderWithdrawalNotificationTemplate(template.bodyTemplate, context, TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES)
+  const enabledSettings = transferNotificationSettings.filter((setting) => (
+    setting.triggerKey === triggerKey && setting.enabled
+  ))
+
+  await Promise.allSettled(enabledSettings.map((setting) => {
+    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[setting.channelKey]
+    if (!googleChatChannel) return Promise.resolve()
+    return sendWithdrawalGoogleChatNotification({
+      channel: googleChatChannel,
+      title,
+      body,
+      sessionToken,
+      task,
+      triggerKey,
+    })
+  }))
+}
+
 function WithdrawalNotificationSettingsDialog({
   open,
   onOpenChange,
@@ -5274,6 +6682,12 @@ function WithdrawalNotificationSettingsDialog({
   setNotificationSettings,
   withdrawalNotificationTemplates,
   setWithdrawalNotificationTemplates,
+  workflowLabel = "퇴원",
+  mobileListTestId = "withdrawal-notification-mobile-list",
+  tableAriaLabel = "퇴원 알림 설정 표",
+  notificationTriggers = WITHDRAWAL_NOTIFICATION_TRIGGERS,
+  notificationTemplateVariables = WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES,
+  notificationTemplatePreviewContext = WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -5283,6 +6697,12 @@ function WithdrawalNotificationSettingsDialog({
   setNotificationSettings: Dispatch<SetStateAction<WithdrawalNotificationSetting[]>>
   withdrawalNotificationTemplates: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>
   setWithdrawalNotificationTemplates: Dispatch<SetStateAction<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>>
+  workflowLabel?: string
+  mobileListTestId?: string
+  tableAriaLabel?: string
+  notificationTriggers?: Array<{ key: WithdrawalNotificationTriggerKey; label: string; detail: string }>
+  notificationTemplateVariables?: ReadonlyArray<string>
+  notificationTemplatePreviewContext?: Record<string, string>
 }) {
   const [selectedNotificationTrigger, setSelectedNotificationTrigger] = useState<WithdrawalNotificationTriggerKey | null>(null)
   const [notificationTemplateInput, setNotificationTemplateInput] = useState<WithdrawalNotificationTemplate>(DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES.submitted)
@@ -5296,9 +6716,9 @@ function WithdrawalNotificationSettingsDialog({
     new Map(notificationSettings.map((setting) => [`${setting.triggerKey}:${setting.channelKey}`, setting]))
   ), [notificationSettings])
   const notificationTemplatePreview = useMemo(() => ({
-    title: renderWithdrawalNotificationTemplate(notificationTemplateInput.titleTemplate),
-    body: renderWithdrawalNotificationTemplate(notificationTemplateInput.bodyTemplate),
-  }), [notificationTemplateInput])
+    title: renderWithdrawalNotificationTemplate(notificationTemplateInput.titleTemplate, notificationTemplatePreviewContext, notificationTemplateVariables),
+    body: renderWithdrawalNotificationTemplate(notificationTemplateInput.bodyTemplate, notificationTemplatePreviewContext, notificationTemplateVariables),
+  }), [notificationTemplateInput, notificationTemplatePreviewContext, notificationTemplateVariables])
 
   function toggleNotificationSetting(triggerKey: WithdrawalNotificationTriggerKey, channelKey: WithdrawalNotificationChannelKey) {
     setNotificationSettings((current) => (
@@ -5423,7 +6843,7 @@ function WithdrawalNotificationSettingsDialog({
     setSelectedNotificationTrigger(null)
   }
 
-  const selectedTriggerLabel = WITHDRAWAL_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === selectedNotificationTrigger)?.label || "알림 내용"
+  const selectedTriggerLabel = notificationTriggers.find((trigger) => trigger.key === selectedNotificationTrigger)?.label || "알림 내용"
 
   useEffect(() => {
     if (!selectedWebhookInfo && !webhookInfoError) return
@@ -5435,9 +6855,9 @@ function WithdrawalNotificationSettingsDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
-            <DialogTitle>퇴원 알림 설정</DialogTitle>
+            <DialogTitle>{workflowLabel} 알림 설정</DialogTitle>
             <DialogDescription className="sr-only">
-              퇴원 프로세스별 알림 위치를 켜거나 끄고 구글챗 웹훅과 알림 내용을 수정합니다.
+              {workflowLabel} 프로세스별 알림 위치를 켜거나 끄고 구글챗 웹훅과 알림 내용을 수정합니다.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.75fr)]">
@@ -5489,9 +6909,9 @@ function WithdrawalNotificationSettingsDialog({
                   {webhookInfoError ? <div className="text-destructive">{webhookInfoError}</div> : null}
                 </div>
               ) : null}
-              <div data-testid="withdrawal-notification-mobile-list" className="grid gap-2 md:hidden">
-                {WITHDRAWAL_NOTIFICATION_TRIGGERS.map((trigger) => (
-                  <article key={`mobile-${trigger.key}`} className="grid gap-2 rounded-md border bg-background p-3" aria-label={`${trigger.label} 모바일 퇴원 알림 설정`}>
+              <div data-testid={mobileListTestId} className="grid gap-2 md:hidden">
+                {notificationTriggers.map((trigger) => (
+                  <article key={`mobile-${trigger.key}`} className="grid gap-2 rounded-md border bg-background p-3" aria-label={`${trigger.label} 모바일 ${workflowLabel} 알림 설정`}>
                     <div className="flex min-w-0 items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold">{trigger.label}</div>
@@ -5553,7 +6973,7 @@ function WithdrawalNotificationSettingsDialog({
                   </article>
                 ))}
               </div>
-              <div className="hidden overflow-x-auto rounded-md border md:block" role="table" aria-label="퇴원 알림 설정 표">
+              <div className="hidden overflow-x-auto rounded-md border md:block" role="table" aria-label={tableAriaLabel}>
                 <div className="min-w-[680px]">
                 <div
                   role="row"
@@ -5596,7 +7016,7 @@ function WithdrawalNotificationSettingsDialog({
                     )
                   })}
                 </div>
-                {WITHDRAWAL_NOTIFICATION_TRIGGERS.map((trigger) => (
+                {notificationTriggers.map((trigger) => (
                   <div
                     key={trigger.key}
                     role="row"
@@ -5699,7 +7119,7 @@ function WithdrawalNotificationSettingsDialog({
             <div className="grid gap-2">
               <div className="text-xs font-medium text-muted-foreground">사용 가능 변수</div>
               <div className="flex flex-wrap gap-1">
-                {WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES.map((variable) => (
+                {notificationTemplateVariables.map((variable) => (
                   <Badge key={variable} variant="outline" className="font-mono">
                     {`{${variable}}`}
                   </Badge>
@@ -5721,8 +7141,26 @@ function WithdrawalNotificationSettingsDialog({
   )
 }
 
-function renderWithdrawalNotificationTemplate(template: string, context: Record<string, string> = WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT) {
-  return WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES.reduce((result, variable) => (
+function TransferNotificationSettingsDialog(props: Omit<Parameters<typeof WithdrawalNotificationSettingsDialog>[0], "workflowLabel" | "mobileListTestId" | "tableAriaLabel" | "notificationTriggers" | "notificationTemplateVariables" | "notificationTemplatePreviewContext">) {
+  return (
+    <WithdrawalNotificationSettingsDialog
+      {...props}
+      workflowLabel="전반"
+      mobileListTestId="transfer-notification-mobile-list"
+      tableAriaLabel="전반 알림 설정 표"
+      notificationTriggers={TRANSFER_NOTIFICATION_TRIGGERS}
+      notificationTemplateVariables={TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES}
+      notificationTemplatePreviewContext={TRANSFER_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT}
+    />
+  )
+}
+
+function renderWithdrawalNotificationTemplate(
+  template: string,
+  context: Record<string, string> = WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT,
+  variables: ReadonlyArray<string> = WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES,
+) {
+  return variables.reduce((result, variable) => (
     result.split(`{${variable}}`).join(context[variable] || "")
   ), template)
 }
@@ -6273,6 +7711,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const isTodoWorkspace = workspace === "todo"
   const isRegistrationWorkspace = workspace === "registration"
   const isWithdrawalWorkspace = workspace === "withdrawal"
+  const isTransferWorkspace = workspace === "transfer"
   const isWordRetestWorkspace = workspace === "word_retest"
   const workspaceLoadOptions = {
     taskType: scopedTaskType,
@@ -6307,8 +7746,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
   const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [withdrawalNotificationOpen, setWithdrawalNotificationOpen] = useState(false)
+  const [transferNotificationOpen, setTransferNotificationOpen] = useState(false)
   const [withdrawalNotificationSettings, setWithdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
   const [withdrawalNotificationTemplates, setWithdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES)
+  const [transferNotificationSettings, setTransferNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
+  const [transferNotificationTemplates, setTransferNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_TRANSFER_NOTIFICATION_TEMPLATES)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [detailOpen, setDetailOpen] = useState(false)
@@ -6357,6 +7799,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   }), [currentUserId, currentUserLabel, currentUserTeam])
   const canDelete = canManageAll || isStaff
   const canManageWithdrawalWorkflow = canManageAll || isStaff
+  const canManageTransferWorkflow = canManageAll || isStaff
   const canDeleteTask = useCallback(
     (task: OpsTask) => {
       const isOwnGeneralTask = (
@@ -6397,7 +7840,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (nextTodoRouteState) {
       setTodoView(nextTodoRouteState.list)
       setTodoSort(nextTodoRouteState.sort || (nextTodoRouteState.status ? "status" : "due"))
-    } else if (isWithdrawalWorkspace) {
+    } else if (isWithdrawalWorkspace || isTransferWorkspace) {
       if (isWithdrawalViewKey(nextWithdrawalFlow)) setWithdrawalView(nextWithdrawalFlow)
     } else if (isWordRetestWorkspace) {
       if (isWordRetestModeKey(nextWordRetestRole)) setWordRetestMode(nextWordRetestRole)
@@ -6411,7 +7854,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (nextFocus && isTaskFocus(nextFocus)) {
       setTaskFocus(nextFocus)
     }
-  }, [isTodoWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, searchParams])
+  }, [isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, searchParams])
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
@@ -6632,6 +8075,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     operations: getWithdrawalViewTasks(scopedTasks, "operations").length,
     closed: getWithdrawalViewTasks(scopedTasks, "closed").length,
   }), [scopedTasks])
+  const transferCounts = useMemo(() => ({
+    applicant: getWithdrawalViewTasks(scopedTasks, "applicant").length,
+    operations: getWithdrawalViewTasks(scopedTasks, "operations").length,
+    closed: getWithdrawalViewTasks(scopedTasks, "closed").length,
+  }), [scopedTasks])
   const wordRetestRoleContext = useMemo(
     () => (canManageAll || isStaff ? {} : currentUserContext),
     [canManageAll, currentUserContext, isStaff],
@@ -6704,7 +8152,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       .filter((task) => showClosed || isOpenTask(task))
       .filter((task) => matchesSearch(task, deferredQuery))
   }, [deferredQuery, isRegistrationWorkspace, scopedTasks, showClosed])
-  const hasQuery = !isWithdrawalWorkspace && query.trim().length > 0
+  const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query.trim().length > 0
 
   const visibleTasks = useMemo(() => {
     const todoTaskSource = scopedTasks
@@ -6716,7 +8164,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           return isClosedOpsTask(task)
         }
 
-        if (!isWithdrawalWorkspace && !showClosed && !isOpenTask(task)) return false
+        if (!isWithdrawalWorkspace && !isTransferWorkspace && !showClosed && !isOpenTask(task)) return false
         if (isRegistrationWorkspace && registrationPipeline !== REGISTRATION_PIPELINE_ALL) {
           if ((task.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value) !== registrationPipeline) return false
         }
@@ -6736,25 +8184,25 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	          if (wordRetestMode === "assistant") return isWordRetestInAssistantQueue(task, wordRetestRoleContext)
 	          return isWordRetestInTeacherQueue(task, wordRetestRoleContext)
 	        }
-		        if (isWithdrawalWorkspace) return true
+		        if (isWithdrawalWorkspace || isTransferWorkspace) return true
 		        if (view === "calendar" || view === "all" || view === "status" || view === "assignee") return true
 		        return true
 	      })
-      .filter((task) => isWithdrawalWorkspace || matchesSearch(task, deferredQuery))
+      .filter((task) => isWithdrawalWorkspace || isTransferWorkspace || matchesSearch(task, deferredQuery))
       .filter((task) => !isTodoWorkspace || matchesTodoTeamFilters(task, {
         requestedByFilter,
         requestedTeamFilter,
         assigneeFilter,
         assigneeTeamFilter,
       }))
-	    if (isWithdrawalWorkspace) return getWithdrawalViewTasks(nextTasks, withdrawalView)
+	    if (isWithdrawalWorkspace || isTransferWorkspace) return getWithdrawalViewTasks(nextTasks, withdrawalView)
 	    if (isWordRetestWorkspace) return sortWordRetestTasksByTestAt(nextTasks)
     if (!isTodoWorkspace) return nextTasks
     if (todoView === "completed") return sortCompletedTodoTasks(nextTasks)
     if (todoSort === "status") return sortOpsTasksByWorkflowStatus(nextTasks, todayKey)
     if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
     return sortOpsTasksByWorkDate(nextTasks, todayKey)
-  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
+  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, registrationPipeline, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
@@ -6819,20 +8267,20 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     wordRetestTeacherFilter !== "all" ||
     wordRetestClassFilter !== "all"
   )
-  const isWithdrawalFilteredEmpty = isWithdrawalWorkspace && withdrawalView !== "applicant"
+  const isWithdrawalFilteredEmpty = (isWithdrawalWorkspace || isTransferWorkspace) && withdrawalView !== "applicant"
   const isFilteredEmpty = hasQuery || isTodoFilteredEmpty || isWordRetestFilteredEmpty || isWithdrawalFilteredEmpty || (!isTodoWorkspace && taskFocus !== "none") || (isRegistrationWorkspace && registrationPipeline !== REGISTRATION_PIPELINE_ALL)
   const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleTasks.length === 0
-  const showToolbarCreate = !isTodoWorkspace && (isWithdrawalWorkspace || !showEmptyCreate)
+  const showToolbarCreate = !isTodoWorkspace && (isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
   const canOpenCreate = isTodoWorkspace || !loading
   const createActionDisabled = saving || !canOpenCreate
   const closedScopedTaskCount = scopedTasks.filter((task) => isClosedOpsTask(task)).length
-  const showClosedToggle = !isTodoWorkspace && !isWithdrawalWorkspace && (closedScopedTaskCount > 0 || showClosed)
+  const showClosedToggle = !isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (closedScopedTaskCount > 0 || showClosed)
   const hasSearchableScopedTasks = isTodoWorkspace
     ? scopedTasks.length > 0
-    : isWithdrawalWorkspace
+    : isWithdrawalWorkspace || isTransferWorkspace
       ? scopedTasks.length > 0
       : scopedTasks.some((task) => showClosed || isOpenTask(task))
-  const showSearch = !isWithdrawalWorkspace && (hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
+  const showSearch = !isWithdrawalWorkspace && !isTransferWorkspace && (hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
   const emptyActionLabel = getWorkspaceCreateActionLabel(workspace, workspaceLabel)
   const emptyTaskLabel = isTodoWorkspace
     ? getTodoEmptyLabel(todoView, isFilteredEmpty)
@@ -6851,7 +8299,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	  const activeFormStepIndex = Math.max(0, formDetailTabs.findIndex((tab) => tab.key === activeFormDetailStep))
 	  const previousFormDetailStep = formDetailTabs[activeFormStepIndex - 1]
 	  const nextFormDetailStep = formDetailTabs[activeFormStepIndex + 1]
-	  const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form.type !== "withdrawal" && formDetailTabs.length > 1
+	  const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form.type !== "withdrawal" && form.type !== "transfer" && formDetailTabs.length > 1
 	  const formStepProgressLabel = shouldShowFormDetailTabs ? `${activeFormStepIndex + 1}/${formDetailTabs.length}` : ""
   const previousFormStepLabel = previousFormDetailStep ? `이전: ${previousFormDetailStep.label}` : ""
   const nextFormStepLabel = nextFormDetailStep ? `다음: ${nextFormDetailStep.label}` : ""
@@ -7462,6 +8910,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           void notifyWithdrawalWorkflow("submitted", task, withdrawalNotificationSettings, withdrawalNotificationTemplates, session?.access_token || "")
         })
       }
+      if (payload.type === "transfer" && !wasEditing) {
+        savedTasks.forEach((task) => {
+          void notifyTransferWorkflow("submitted", task, transferNotificationSettings, transferNotificationTemplates, session?.access_token || "")
+        })
+      }
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
       setNotice(wasEditing
         ? `${itemLabel}을 수정했습니다.`
@@ -7509,6 +8962,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       if (task.type === "withdrawal") {
         void notifyWithdrawalWorkflow(getWithdrawalNotificationTriggerForStatus(status), notificationTask, withdrawalNotificationSettings, withdrawalNotificationTemplates, session?.access_token || "")
       }
+      if (task.type === "transfer") {
+        void notifyTransferWorkflow(getWithdrawalNotificationTriggerForStatus(status), notificationTask, transferNotificationSettings, transferNotificationTemplates, session?.access_token || "")
+      }
       const canUndoStatusChange = task.type === "general" || status !== "done"
       if (canUndoStatusChange) {
         setStatusUndo({
@@ -7538,6 +8994,32 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         ...formFromTask(task),
         withdrawal: {
           ...(task.withdrawal || {}),
+          [field]: checked,
+        },
+      })
+      await updateOpsTask(task.id, payload)
+      const syncedTask = await loadOpsTaskById(task.id)
+      replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      setNotice("처리 확인을 저장했습니다.")
+    } catch (error) {
+      setMessage(getOpsTaskActionErrorMessage(error, "처리 확인을 저장하지 못했습니다."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const updateTransferChecklist = async (task: OpsTask, field: TransferChecklistField, checked: boolean) => {
+    if (!canManageTransferWorkflow || !canEditTaskDetails(task)) return
+
+    setSaving(true)
+    setMessage("")
+    setNotice("")
+    setStatusUndo(null)
+    try {
+      const payload = normalizeFormForSubmit({
+        ...formFromTask(task),
+        transfer: {
+          ...(task.transfer || {}),
           [field]: checked,
         },
       })
@@ -7895,8 +9377,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const detailBlockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
   const selectedTaskCanEdit = selectedTaskFresh ? canEditTaskDetails(selectedTaskFresh) : false
   const isWithdrawalDetail = selectedTaskFresh?.type === "withdrawal"
-  const isCompletedWithdrawalDetail = Boolean(selectedTaskFresh && isWithdrawalDetail && isClosedOpsTask(selectedTaskFresh))
-  const canManageWithdrawalStatusAction = !isWithdrawalDetail || canManageWithdrawalWorkflow
+  const isTransferDetail = selectedTaskFresh?.type === "transfer"
+  const isProcessDetail = isWithdrawalDetail || isTransferDetail
+  const isCompletedProcessDetail = Boolean(selectedTaskFresh && isProcessDetail && isClosedOpsTask(selectedTaskFresh))
+  const canManageWithdrawalStatusAction = (!isWithdrawalDetail || canManageWithdrawalWorkflow) && (!isTransferDetail || canManageTransferWorkflow)
   const toggleWordRetestSelection = useCallback((task: OpsTask, selected: boolean) => {
     if (task.type !== "word_retest" || !canDeleteTask(task)) return
     setWordRetestSelectedTaskIds((current) => {
@@ -7975,7 +9459,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   return (
     <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
-      {!isTodoWorkspace && !isWithdrawalWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0 && (
+      {!isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0 && (
         <div className={HORIZONTAL_CHIP_BAR_CLASS}>
           {visibleOperationMetrics.map((metric) => (
             <DashboardMetric
@@ -7991,7 +9475,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
       <div className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs">
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
-	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isWithdrawalWorkspace ? "퇴원 흐름" : `${workspaceLabel} 보기`}>
+	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
 	              ? WORD_RETEST_ROLE_TABS.map((tab) => {
 	                const roleCount = wordRetestRoleCounts[tab.key]
@@ -8020,9 +9504,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                  </button>
 	                )
 	              })
-	              : isWithdrawalWorkspace
+	              : isWithdrawalWorkspace || isTransferWorkspace
 	                ? WITHDRAWAL_VIEW_TABS.map((tab) => {
-	                  const withdrawalCount = withdrawalCounts[tab.key]
+	                  const withdrawalCount = (isTransferWorkspace ? transferCounts : withdrawalCounts)[tab.key]
 
 	                  return (
 	                    <button
@@ -8095,7 +9579,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               ))}
           </div>
           <div className={isTodoWorkspace ? "flex shrink-0 flex-wrap items-center justify-end gap-2" : isWordRetestWorkspace ? "flex shrink-0 items-center justify-end gap-2" : "flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"}>
-	            {!isTodoWorkspace && !isWithdrawalWorkspace && !isWordRetestWorkspace && taskFocus !== "none" && (
+	            {!isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== "none" && (
               <Button type="button" variant="secondary" size="sm" onClick={() => syncView(view)}>
                 <X className="size-4" />
                 {TASK_FOCUS_LABELS[taskFocus]} 해제
@@ -8107,13 +9591,24 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 {showClosed ? "완료 숨김" : "완료 보기"}
               </Button>
             )}
-            {isWithdrawalWorkspace && (
-              <Button type="button" variant="outline" size="sm" onClick={() => setWithdrawalNotificationOpen(true)} aria-label="퇴원 알림 설정" title="퇴원 알림 설정" className="size-8 px-0">
+            {(isWithdrawalWorkspace || isTransferWorkspace) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (isTransferWorkspace) setTransferNotificationOpen(true)
+                  else setWithdrawalNotificationOpen(true)
+                }}
+                aria-label={isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}
+                title={isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}
+                className="size-8 px-0"
+              >
                 <Bell className="size-4" aria-hidden="true" />
-                <span className="sr-only">퇴원 알림 설정</span>
+                <span className="sr-only">{isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}</span>
               </Button>
             )}
-            {!isWordRetestWorkspace && !isWithdrawalWorkspace && (
+            {!isWordRetestWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (
               <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading} aria-label="새로고침" className="size-8 px-0">
                 <RefreshCw className="size-4" />
                 <span className="sr-only">새로고침</span>
@@ -8347,6 +9842,23 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	          />
+	        ) : isTransferWorkspace ? (
+	          <TransferDataTable
+	            tasks={visibleTasks}
+	            todayKey={todayKey}
+	            loading={loading}
+	            onOpen={openDetail}
+	            onEdit={openEdit}
+	            onStatusChange={(task, status) => void changeStatus(task, status)}
+	            onChecklistChange={(task, field, checked) => void updateTransferChecklist(task, field, checked)}
+	            canManageWorkflow={canManageTransferWorkflow}
+	            statusActionDisabled={saving}
+	            onCreate={() => openCreate(scopedTaskType)}
+	            emptyLabel={emptyTaskLabel}
+	            emptyActionLabel={emptyActionLabel}
+	            showEmptyAction={false}
+	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
+	          />
 	        ) : isWordRetestWorkspace ? (
 	          <WordRetestTaskList
 	            tasks={visibleTasks}
@@ -8454,10 +9966,23 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         />
       )}
 
+      {isTransferWorkspace && (
+        <TransferNotificationSettingsDialog
+          open={transferNotificationOpen}
+          onOpenChange={setTransferNotificationOpen}
+          isManager={canManageAll || isStaff}
+          sessionToken={session?.access_token || ""}
+          notificationSettings={transferNotificationSettings}
+          setNotificationSettings={setTransferNotificationSettings}
+          withdrawalNotificationTemplates={transferNotificationTemplates}
+          setWithdrawalNotificationTemplates={setTransferNotificationTemplates}
+        />
+      )}
+
       <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className={[
           "z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
-          isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
+          form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
         ].join(" ")}>
           <DialogHeader className="-mx-6 -mt-6 border-b px-6 py-4">
             <DialogTitle>{formDialogTitle}</DialogTitle>
@@ -8669,7 +10194,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	            )}
 
             {isTemplateForm && !isWordRetestForm && formDetailTabs.length > 0 && (
-              <section className={form.type === "withdrawal" ? "grid gap-3" : "grid gap-3 rounded-lg border p-3"}>
+              <section className={form.type === "withdrawal" || form.type === "transfer" ? "grid gap-3" : "grid gap-3 rounded-lg border p-3"}>
 	                {shouldShowFormDetailTabs && formStepProgressLabel && (
 	                  <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium text-muted-foreground">
                     <span>{getTaskTypeLabel(form.type)}</span>
@@ -8737,7 +10262,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
               </section>
             )}
 
-            {isTemplateForm && !isWordRetestForm && form.type !== "withdrawal" && (
+            {isTemplateForm && !isWordRetestForm && form.type !== "withdrawal" && form.type !== "transfer" && (
               <section className="grid gap-3 rounded-lg border bg-muted/20 p-3">
                 <div className={showTemplateDueAt ? "grid gap-3 md:grid-cols-2" : "grid gap-3"}>
                   <ProfileSelect
@@ -8856,7 +10381,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           )}
           {selectedTaskFresh && (
             <div className={selectedTaskFresh.type === "withdrawal" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}>
-              <div className={isWithdrawalDetail ? "flex flex-col gap-3" : "flex flex-col gap-3 rounded-lg border p-4"}>
+              <div className={isProcessDetail ? "flex flex-col gap-3" : "flex flex-col gap-3 rounded-lg border p-4"}>
                 {selectedTaskFresh.type === "general" ? (
                   <GeneralTaskDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "word_retest" ? (
@@ -8882,7 +10407,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                     </dl>
                   </>
                 )}
-                {!isWithdrawalDetail && (
+                {!isProcessDetail && (
                   <CompletionBlockerActionPanel
                     task={selectedTaskFresh}
                     blockers={completionBlockers}
@@ -8892,7 +10417,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.type !== "withdrawal" && <TypeDetail task={selectedTaskFresh} />}
                 {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "withdrawal" && <AutoSyncResultSummary task={selectedTaskFresh} />}
 	                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.type !== "withdrawal" && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
-	                {!isCompletedWithdrawalDetail && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+	                {!isCompletedProcessDetail && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
 	                  {selectedTaskFresh.type === "word_retest" && (
 	                    <>
 	                      {detailWordRetestPrimaryActions.map((action) => (
@@ -8909,7 +10434,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                      ))}
 	                    </>
 	                  )}
-                  {canManageWithdrawalStatusAction && ((!isWithdrawalDetail || !detailPrimaryActionBlocked) && detailPrimaryAction) && (
+                  {canManageWithdrawalStatusAction && ((!isProcessDetail || !detailPrimaryActionBlocked) && detailPrimaryAction) && (
 	                    <Button
                       type="button"
                       size="sm"
@@ -8932,7 +10457,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                       {detailPrimaryActionBlocked ? detailBlockedActionLabel : detailPrimaryAction.label}
                     </Button>
                   )}
-                  {!isWithdrawalDetail && getSecondaryTaskStatusOptions(selectedTaskFresh)
+                  {!isProcessDetail && getSecondaryTaskStatusOptions(selectedTaskFresh)
                     .map((status) => (
                       <Button
                         key={status.value}
@@ -9121,6 +10646,14 @@ function TypeSpecificFields({
   const withdrawal = form.withdrawal || {}
   const transfer = form.transfer || {}
   const wordRetest = form.wordRetest || {}
+  const formSubject = form.subject || ""
+  const formClassId = form.classId || ""
+  const formStudentId = form.studentId || ""
+  const withdrawalTeacherName = withdrawal.teacherName || ""
+  const transferFromTeacherName = transfer.fromTeacherName || ""
+  const transferFromClassId = transfer.fromClassId || ""
+  const transferToTeacherName = transfer.toTeacherName || ""
+  const transferToClassId = transfer.toClassId || ""
   const wordRetestAbsent = isWordRetestAbsent(wordRetest)
   const findStudent = (id: string) => students.find((student) => student.id === id)
   const findClass = (id: string) => classes.find((classItem) => classItem.id === id)
@@ -9146,27 +10679,36 @@ function TypeSpecificFields({
   const wordRetestClassOptions = getWordRetestClassOptions(classes, selectedWordRetestStudent, selectedWordRetestClassId, selectedWordRetestTeacher)
   const wordRetestTeacherOptions = getWordRetestTeacherOptions(teachers, selectedWordRetestTeacherId)
   const selectedWithdrawalTeacher = form.type === "withdrawal"
-    ? findTeacherByName(withdrawal.teacherName || "")
+    ? findTeacherByName(withdrawalTeacherName)
     : undefined
   const selectedWithdrawalTeacherId = selectedWithdrawalTeacher?.id ||
-    (withdrawal.teacherName ? `withdrawal-teacher:${normalizeLookupValue(withdrawal.teacherName)}` : "")
-  const withdrawalSubjectOptions = useMemo(
-    () => getWithdrawalSubjectOptions(classes, form.subject || ""),
-    [classes, form.subject],
-  )
-  const withdrawalTeacherOptions = useMemo(
-    () => getWithdrawalTeacherOptions(teachers, classes, form.subject || "", withdrawal.teacherName || ""),
-    [classes, form.subject, teachers, withdrawal.teacherName],
-  )
-  const withdrawalClassOptions = useMemo(
-    () => getWithdrawalClassOptions(classes, form.subject || "", withdrawal.teacherName || "", form.classId || ""),
-    [classes, form.classId, form.subject, withdrawal.teacherName],
-  )
-  const selectedWithdrawalClass = form.type === "withdrawal" ? findClass(form.classId || "") : undefined
-  const withdrawalStudentOptions = useMemo(
-    () => getWithdrawalStudentOptions(students, classes, withdrawalClassOptions, form.classId || "", form.studentId || ""),
-    [classes, form.classId, form.studentId, students, withdrawalClassOptions],
-  )
+    (withdrawalTeacherName ? `withdrawal-teacher:${normalizeLookupValue(withdrawalTeacherName)}` : "")
+  const withdrawalSubjectOptions = getWithdrawalSubjectOptions(classes, formSubject)
+  const withdrawalTeacherOptions = getWithdrawalTeacherOptions(teachers, classes, formSubject, withdrawalTeacherName)
+  const withdrawalClassOptions = getWithdrawalClassOptions(classes, formSubject, withdrawalTeacherName, formClassId)
+  const selectedWithdrawalClass = form.type === "withdrawal" ? findClass(formClassId) : undefined
+  const withdrawalStudentOptions = getWithdrawalStudentOptions(students, classes, withdrawalClassOptions, formClassId, formStudentId)
+  const selectedTransferFromTeacher = form.type === "transfer"
+    ? findTeacherByName(transferFromTeacherName)
+    : undefined
+  const selectedTransferFromTeacherId = selectedTransferFromTeacher?.id ||
+    (transferFromTeacherName ? `withdrawal-teacher:${normalizeLookupValue(transferFromTeacherName)}` : "")
+  const selectedTransferToTeacher = form.type === "transfer"
+    ? findTeacherByName(transferToTeacherName)
+    : undefined
+  const selectedTransferToTeacherId = selectedTransferToTeacher?.id ||
+    (transferToTeacherName ? `withdrawal-teacher:${normalizeLookupValue(transferToTeacherName)}` : "")
+  const transferSubjectOptions = getWithdrawalSubjectOptions(classes, formSubject)
+  const transferFromTeacherOptions = getWithdrawalTeacherOptions(teachers, classes, formSubject, transferFromTeacherName)
+  const transferFromClassOptions = getWithdrawalClassOptions(classes, formSubject, transferFromTeacherName, transferFromClassId)
+  const selectedTransferFromClass = form.type === "transfer" ? findClass(transferFromClassId) : undefined
+  const transferStudentOptions = getWithdrawalStudentOptions(students, classes, transferFromClassOptions, transferFromClassId, formStudentId)
+  const transferToTeacherOptions = getWithdrawalTeacherOptions(teachers, classes, formSubject, transferToTeacherName)
+  const rawTransferToClassOptions = getWithdrawalClassOptions(classes, formSubject, transferToTeacherName, transferToClassId || formClassId)
+  const transferToClassOptions = rawTransferToClassOptions.filter((classItem) => (
+    !transferFromClassId || classItem.id !== transferFromClassId || classItem.id === transferToClassId
+  ))
+  const selectedTransferToClass = form.type === "transfer" ? findClass(transferToClassId || formClassId) : undefined
   const [manualLinkedFields, setManualLinkedFields] = useState<Record<string, boolean>>({})
   const [wordRetestTextbookGradeFilter, setWordRetestTextbookGradeFilter] = useState("all")
   const wordRetestTextbookGradeFilters = useMemo(() => getWordRetestTextbookGradeFilters(textbooks), [textbooks])
@@ -9219,6 +10761,16 @@ function TypeSpecificFields({
     updateWithdrawal("withdrawalSession", "")
     updateWithdrawal("completedLessonHours", "")
     updateWithdrawal("fourWeekLessonHours", "")
+  }
+
+  function clearTransferFromScheduleSelection() {
+    updateTransfer("fromClassEndDate", "")
+    updateTransfer("fromClassEndSession", "")
+  }
+
+  function clearTransferToScheduleSelection() {
+    updateTransfer("toClassStartDate", "")
+    updateTransfer("toClassStartSession", "")
   }
 
   function renderWordRetestTextbookFilters() {
@@ -9330,6 +10882,58 @@ function TypeSpecificFields({
     if (!form.subject && teacher?.subjects.length === 1) updateForm("subject", teacher.subjects[0] || "")
   }
 
+  function selectTransferSubject(subject: string) {
+    updateForm("subject", subject)
+    if (subject !== form.subject) {
+      updateTransfer("fromTeacherName", "")
+      updateTransfer("fromClassId", "")
+      updateTransfer("fromClassName", "")
+      updateForm("studentId", "")
+      updateForm("studentName", "")
+      updateTransfer("toTeacherName", "")
+      updateTransfer("toClassId", "")
+      updateTransfer("toClassName", "")
+      updateForm("classId", "")
+      updateForm("className", "")
+      clearTransferFromScheduleSelection()
+      clearTransferToScheduleSelection()
+    }
+  }
+
+  function selectTransferFromTeacher(teacherId: string) {
+    const teacher = findTeacher(teacherId)
+    const option = transferFromTeacherOptions.find((item) => item.id === teacherId)
+    const teacherName = teacher?.label || option?.label || ""
+    if (teacherId !== selectedTransferFromTeacherId) {
+      updateTransfer("fromClassId", "")
+      updateTransfer("fromClassName", "")
+      updateForm("studentId", "")
+      updateForm("studentName", "")
+      clearTransferFromScheduleSelection()
+    }
+    updateTransfer("fromTeacherName", teacherName)
+    if (!teacherId) return
+
+    if (!form.subject && teacher?.subjects.length === 1) updateForm("subject", teacher.subjects[0] || "")
+  }
+
+  function selectTransferToTeacher(teacherId: string) {
+    const teacher = findTeacher(teacherId)
+    const option = transferToTeacherOptions.find((item) => item.id === teacherId)
+    const teacherName = teacher?.label || option?.label || ""
+    if (teacherId !== selectedTransferToTeacherId) {
+      updateTransfer("toClassId", "")
+      updateTransfer("toClassName", "")
+      updateForm("classId", "")
+      updateForm("className", "")
+      clearTransferToScheduleSelection()
+    }
+    updateTransfer("toTeacherName", teacherName)
+    if (!teacherId) return
+
+    if (!form.subject && teacher?.subjects.length === 1) updateForm("subject", teacher.subjects[0] || "")
+  }
+
   function syncWithdrawalScheduleSelection(metrics: ReturnType<typeof getWithdrawalScheduleMetrics>) {
     updateWithdrawal("withdrawalDate", metrics.withdrawalDate)
     updateWithdrawal("withdrawalSession", metrics.withdrawalSession)
@@ -9337,9 +10941,45 @@ function TypeSpecificFields({
     updateWithdrawal("fourWeekLessonHours", metrics.fourWeekLessonHours)
   }
 
+  function syncTransferFromScheduleSelection(metrics: ReturnType<typeof getTransferClassScheduleMetrics>) {
+    updateTransfer("fromClassEndDate", metrics.transferDate)
+    updateTransfer("fromClassEndSession", metrics.transferSession)
+  }
+
+  function syncTransferToScheduleSelection(metrics: ReturnType<typeof getTransferClassScheduleMetrics>) {
+    updateTransfer("toClassStartDate", metrics.transferDate)
+    updateTransfer("toClassStartSession", metrics.transferSession)
+  }
+
   const selectClass = (classId: string, options: { fillRegistration?: boolean; fillTransferFrom?: boolean; fillTransferTo?: boolean; fillWordRetest?: boolean; fillWithdrawal?: boolean } = {}) => {
     const classItem = findClass(classId)
     const isWithdrawalClassChange = Boolean(options.fillWithdrawal && classId !== form.classId)
+    const isTransferToClassChange = Boolean(options.fillTransferTo && classId !== (transfer.toClassId || form.classId || ""))
+    if (options.fillTransferFrom) {
+      const isTransferFromClassChange = classId !== (transfer.fromClassId || "")
+      updateTransfer("fromClassId", classId)
+      if (!classId) {
+        updateTransfer("fromClassName", "")
+        updateForm("studentId", "")
+        updateForm("studentName", "")
+        clearTransferFromScheduleSelection()
+        return
+      }
+      if (!classItem) return
+
+      updateTransfer("fromClassName", classItem.label)
+      updateTransfer("fromTeacherName", transfer.fromTeacherName || classItem.teacher)
+      if (!form.subject) updateForm("subject", classItem.subject)
+      if (isTransferFromClassChange) {
+        updateForm("studentId", "")
+        updateForm("studentName", "")
+        clearTransferFromScheduleSelection()
+      }
+      const textbookId = findClassPrimaryTextbook(classItem)
+      const primaryTextbook = textbookId ? findTextbook(textbookId) : undefined
+      if (textbookId && primaryTextbook && !form.textbookId) selectTextbook(textbookId)
+      return
+    }
     updateForm("classId", classId)
     if (!classId) {
       updateForm("className", "")
@@ -9349,8 +10989,11 @@ function TypeSpecificFields({
         clearWithdrawalScheduleSelection()
       }
       if (options.fillWordRetest) updateWordRetest("className", "")
-      if (options.fillTransferFrom) updateTransfer("fromClassName", "")
-      if (options.fillTransferTo) updateTransfer("toClassName", "")
+      if (options.fillTransferTo) {
+        updateTransfer("toClassId", "")
+        updateTransfer("toClassName", "")
+        clearTransferToScheduleSelection()
+      }
       return
     }
     if (!classItem) return
@@ -9374,6 +11017,7 @@ function TypeSpecificFields({
       updateTransfer("toClassId", classItem.id)
       updateTransfer("toClassName", classItem.label)
       updateTransfer("toTeacherName", transfer.toTeacherName || classItem.teacher)
+      if (isTransferToClassChange) clearTransferToScheduleSelection()
     }
     if (options.fillWordRetest) {
       updateWordRetest("className", classItem.label)
@@ -9584,49 +11228,125 @@ function TypeSpecificFields({
   }
 
   if (form.type === "transfer") {
-    if (step === "transfer_basic") {
-      return (
-        <div className="grid gap-3 md:grid-cols-2">
-          <LinkedSelect label="학생" value={form.studentId || ""} options={students} onChange={(value) => selectStudent(value, { fillTransferFromClass: true })} onManualSelect={() => openManualField("transferStudent")} />
-          {shouldShowManualField("transferStudent", form.studentId, form.studentName) && <TextField label="학생명" value={form.studentName || ""} autoFocus onChange={(value) => updateForm("studentName", value)} />}
-          <TextField label="전반사유" value={transfer.transferReason || ""} onChange={(value) => updateTransfer("transferReason", value)} />
-          <TextField label="전 선생님" value={transfer.fromTeacherName || ""} onChange={(value) => updateTransfer("fromTeacherName", value)} />
-          <TextField label="후 선생님" value={transfer.toTeacherName || ""} onChange={(value) => updateTransfer("toTeacherName", value)} />
-        </div>
-      )
-    }
+    const canSelectTransferFromTeacher = Boolean(form.subject)
+    const canSelectTransferFromClass = Boolean(form.subject && selectedTransferFromTeacherId)
+    const canSelectTransferStudent = Boolean(form.subject && selectedTransferFromTeacherId && transfer.fromClassId)
+    const canSelectTransferToTeacher = Boolean(form.subject)
+    const canSelectTransferToClass = Boolean(form.subject && selectedTransferToTeacherId)
+    const transferTuitionAdjustment = getTransferTuitionAdjustment({
+      fromClass: selectedTransferFromClass,
+      toClass: selectedTransferToClass,
+      fromDate: transfer.fromClassEndDate || "",
+      toDate: transfer.toClassStartDate || "",
+    })
 
-    if (step === "transfer_schedule") {
-      return (
-        <div className="grid gap-3 md:grid-cols-2">
-          <LinkedSelect label="전 수업" value={transfer.fromClassId || ""} options={classes} onChange={(value) => selectClass(value, { fillTransferFrom: true })} onManualSelect={() => openManualField("transferFromClass")} />
-          <LinkedSelect label="후 수업" value={transfer.toClassId || form.classId || ""} options={classes} onChange={(value) => selectClass(value, { fillTransferTo: true })} onManualSelect={() => openManualField("transferToClass")} />
-          {shouldShowManualField("transferFromClass", transfer.fromClassId, transfer.fromClassName) && <TextField label="전 수업명" value={transfer.fromClassName || ""} onChange={(value) => updateTransfer("fromClassName", value)} />}
-          {shouldShowManualField("transferToClass", transfer.toClassId || form.classId, transfer.toClassName) && <TextField label="후 수업명" value={transfer.toClassName || ""} onChange={(value) => updateTransfer("toClassName", value)} />}
-          <TextField label="전 수업 종료일" type="date" value={dateInputValue(transfer.fromClassEndDate)} onChange={(value) => updateTransfer("fromClassEndDate", value)} />
-          <TextField label="후 수업 시작일" type="date" value={dateInputValue(transfer.toClassStartDate)} onChange={(value) => updateTransfer("toClassStartDate", value)} />
-          <TextField label="전 수업 종료회차" value={transfer.fromClassEndSession || ""} onChange={(value) => updateTransfer("fromClassEndSession", value)} />
-          <TextField label="후 수업 시작회차" value={transfer.toClassStartSession || ""} onChange={(value) => updateTransfer("toClassStartSession", value)} />
+    return (
+      <section className="grid gap-4">
+        <TransferWorkflowChart />
+        <section aria-label="전반 공통 정보" className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <TaskListboxField
+              label="과목"
+              value={form.subject || ""}
+              options={transferSubjectOptions}
+              onChange={selectTransferSubject}
+              attention={!form.subject}
+            />
+            <LinkedSelect
+              label="학생"
+              value={form.studentId || ""}
+              options={transferStudentOptions}
+              onChange={(value) => selectStudent(value, { fillTransferFromClass: true })}
+              disabled={!canSelectTransferStudent}
+              disabledPlaceholder="전 수업 먼저"
+              attention={canSelectTransferStudent && !form.studentId}
+              renderOption={(option) => {
+                const student = findStudent(option.id)
+                return <LinkedSelectedValue label={option.label} pills={[student?.grade, student?.school]} />
+              }}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+          </div>
+          <TextareaField label="전반사유" value={transfer.transferReason || ""} onChange={(value) => updateTransfer("transferReason", value)} />
+        </section>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section aria-label="전 수업 정보" className="grid content-start gap-3 rounded-md border bg-muted/20 p-3">
+            <h3 className="text-sm font-semibold">전 수업 정보</h3>
+            <LinkedSelect
+              label="전 선생님"
+              value={selectedTransferFromTeacherId}
+              options={transferFromTeacherOptions}
+              onChange={selectTransferFromTeacher}
+              disabled={!canSelectTransferFromTeacher}
+              disabledPlaceholder="과목 먼저"
+              attention={canSelectTransferFromTeacher && !selectedTransferFromTeacherId}
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <LinkedSelect
+              label="전 수업"
+              value={transfer.fromClassId || ""}
+              options={transferFromClassOptions}
+              onChange={(value) => selectClass(value, { fillTransferFrom: true })}
+              disabled={!canSelectTransferFromClass}
+              disabledPlaceholder="전 선생님 먼저"
+              attention={canSelectTransferFromClass && !transfer.fromClassId}
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <UndistributedTextbookListField label="전 미배부 교재" help={TRANSFER_FROM_UNDISTRIBUTED_TEXTBOOK_HELP} value={transfer.fromUndistributedTextbooks || ""} onChange={(value) => updateTransfer("fromUndistributedTextbooks", value)} />
+            <TransferScheduleCalendarField
+              key={transfer.fromClassId || "transfer-from-schedule-calendar"}
+              label="전 수업 종료일"
+              classItem={selectedTransferFromClass}
+              dateValue={transfer.fromClassEndDate || ""}
+              sessionValue={transfer.fromClassEndSession || ""}
+              onScheduleSelect={syncTransferFromScheduleSelection}
+            />
+          </section>
+          <section aria-label="후 수업 정보" className="grid content-start gap-3 rounded-md border bg-muted/20 p-3">
+            <h3 className="text-sm font-semibold">후 수업 정보</h3>
+            <LinkedSelect
+              label="후 선생님"
+              value={selectedTransferToTeacherId}
+              options={transferToTeacherOptions}
+              onChange={selectTransferToTeacher}
+              disabled={!canSelectTransferToTeacher}
+              disabledPlaceholder="과목 먼저"
+              attention={canSelectTransferToTeacher && !selectedTransferToTeacherId}
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <LinkedSelect
+              label="후 수업"
+              value={transfer.toClassId || form.classId || ""}
+              options={transferToClassOptions}
+              onChange={(value) => selectClass(value, { fillTransferTo: true })}
+              disabled={!canSelectTransferToClass}
+              disabledPlaceholder="후 선생님 먼저"
+              attention={canSelectTransferToClass && !(transfer.toClassId || form.classId)}
+              renderOption={(option) => <LinkedSelectedValue label={option.label} />}
+              renderSelected={(option) => <LinkedSelectedValue label={option.label} />}
+            />
+            <UndistributedTextbookListField label="후 미배부 교재" help={TRANSFER_TO_UNDISTRIBUTED_TEXTBOOK_HELP} value={transfer.toUndistributedTextbooks || ""} onChange={(value) => updateTransfer("toUndistributedTextbooks", value)} />
+            <TransferScheduleCalendarField
+              key={transfer.toClassId || form.classId || "transfer-to-schedule-calendar"}
+              label="후 수업 시작일"
+              classItem={selectedTransferToClass}
+              dateValue={transfer.toClassStartDate || ""}
+              sessionValue={transfer.toClassStartSession || ""}
+              onScheduleSelect={syncTransferToScheduleSelection}
+            />
+          </section>
         </div>
-      )
-    }
-
-    if (step === "transfer_checks") {
-      return (
-        <section className="grid gap-3">
-        <TextField label="전 미배부 교재" value={transfer.fromUndistributedTextbooks || ""} onChange={(value) => updateTransfer("fromUndistributedTextbooks", value)} />
-        <TextField label="후 미배부 교재" value={transfer.toUndistributedTextbooks || ""} onChange={(value) => updateTransfer("toUndistributedTextbooks", value)} />
-        <div className="grid gap-2 md:grid-cols-4">
-          <AutoSyncStatusField label="시간표 명단 변경" checked={Boolean(transfer.timetableRosterUpdated)} />
+        <TransferTuitionAdjustmentPanel adjustment={transferTuitionAdjustment} />
+        <div className="grid gap-2 md:grid-cols-3">
           <CheckField label="메이크에듀 전반처리" checked={Boolean(transfer.makeeduTransferDone)} onChange={(value) => updateTransfer("makeeduTransferDone", value)} />
           <CheckField label="수업료 처리" checked={Boolean(transfer.feeProcessed)} onChange={(value) => updateTransfer("feeProcessed", value)} />
           <CheckField label="교재비 처리" checked={Boolean(transfer.textbookFeeProcessed)} onChange={(value) => updateTransfer("textbookFeeProcessed", value)} />
         </div>
-        </section>
-      )
-    }
-
-    return null
+      </section>
+    )
   }
 
   if (form.type === "word_retest") {

@@ -47,6 +47,8 @@ export type MakeupTeacherOption = {
   id: string
   name: string
   subjects: string
+  isVisible: boolean
+  sortOrder: number
   profileId: string
   accountEmail: string
   dashboardRole: string
@@ -330,10 +332,15 @@ function mapProfile(row: Row): MakeupProfileOption {
 }
 
 function mapTeacher(row: Row): MakeupTeacherOption {
+  const subjects = Array.isArray(row.subjects)
+    ? row.subjects.map(text).filter(Boolean).join(", ")
+    : text(row.subjects)
   return {
     id: text(row.id),
     name: text(row.name),
-    subjects: text(row.subjects),
+    subjects,
+    isVisible: row.is_visible !== false,
+    sortOrder: Number(row.sort_order || row.sortOrder || 0),
     profileId: text(row.profile_id),
     accountEmail: text(row.account_email),
     dashboardRole: text(row.dashboard_role),

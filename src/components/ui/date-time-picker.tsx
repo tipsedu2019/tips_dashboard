@@ -98,6 +98,10 @@ type DatePickerControlProps = {
   placeholder?: string
   ariaLabel?: string
   className?: string
+  disabled?: boolean
+  linkedDates?: Array<{ value: string; label?: string }>
+  linkedDatesLabel?: string
+  restrictToLinkedDates?: boolean
 }
 
 export function DatePickerControl({
@@ -107,19 +111,42 @@ export function DatePickerControl({
   placeholder = "날짜 선택",
   ariaLabel = "날짜 선택",
   className,
+  disabled = false,
+  linkedDates = [],
+  linkedDatesLabel = "선택 가능 날짜",
+  restrictToLinkedDates = false,
 }: DatePickerControlProps) {
   const [open, setOpen] = React.useState(false)
   const selectedDate = parseDateKey(value)
+  const normalizedLinkedDates = React.useMemo(() => (
+    linkedDates
+      .map((item) => ({ value: toDateKey(item.value), label: item.label || toDateKey(item.value) }))
+      .filter((item) => item.value)
+  ), [linkedDates])
+  const linkedDateSet = React.useMemo(() => new Set(normalizedLinkedDates.map((item) => item.value)), [normalizedLinkedDates])
+
+  function handleDateSelect(nextDate: string) {
+    if (!nextDate) return
+    if (restrictToLinkedDates && linkedDateSet.size > 0 && !linkedDateSet.has(nextDate)) return
+    onChange(nextDate)
+    setOpen(false)
+  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}>
       <PopoverTrigger asChild>
         <Button
           id={id}
           type="button"
           variant="outline"
+          disabled={disabled}
           aria-label={ariaLabel}
-          className={cn("h-9 w-full justify-between px-3 font-normal", !value && "text-muted-foreground", className)}
+          className={cn(
+            "h-9 w-full justify-between px-3 font-normal",
+            !value && "text-muted-foreground",
+            disabled && "cursor-not-allowed bg-muted/30 opacity-75",
+            className,
+          )}
         >
           <span className="truncate">{formatDateLabel(value) || placeholder}</span>
           <CalendarIcon aria-hidden="true" />
@@ -129,13 +156,34 @@ export function DatePickerControl({
         <Calendar
           mode="single"
           selected={selectedDate}
+          disabled={restrictToLinkedDates && linkedDateSet.size > 0 ? (date) => !linkedDateSet.has(toDateKey(date)) : undefined}
           onSelect={(date) => {
             const nextDate = toDateKey(date)
-            if (!nextDate) return
-            onChange(nextDate)
-            setOpen(false)
+            handleDateSelect(nextDate)
           }}
         />
+        {normalizedLinkedDates.length > 0 ? (
+          <div className="grid gap-1.5 border-t bg-muted/30 px-2.5 py-2">
+            <span className="text-xs font-semibold text-muted-foreground">{linkedDatesLabel}</span>
+            <div className="flex max-w-72 flex-wrap gap-1">
+              {normalizedLinkedDates.slice(0, 18).map((item) => (
+                <button
+                  key={`${item.value}-${item.label}`}
+                  type="button"
+                  onClick={() => handleDateSelect(item.value)}
+                  className={cn(
+                    "rounded border px-2 py-1 text-xs font-semibold transition",
+                    item.value === toDateKey(value)
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-primary/25 bg-background text-primary hover:bg-primary/10",
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   )

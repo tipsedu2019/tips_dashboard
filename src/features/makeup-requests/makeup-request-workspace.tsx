@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
 import {
   buildRoomAvailability,
@@ -66,6 +67,7 @@ import {
   type MakeupNotificationSetting,
   type MakeupRequest,
   type MakeupRequestInput,
+  type MakeupTeacherOption,
   type MakeupRequestWorkspaceData,
 } from "./makeup-request-service"
 
@@ -299,6 +301,23 @@ function RequiredFormLabel({ htmlFor, children }: { htmlFor: string; children: R
   )
 }
 
+function getSequencedSelectTriggerClassName({
+  active,
+  dependency,
+  className,
+}: {
+  active?: boolean
+  dependency?: boolean
+  className?: string
+}) {
+  return cn(
+    "w-full",
+    active && "border-primary/60 bg-primary/5 ring-2 ring-primary/15 hover:border-primary/70",
+    dependency && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 hover:border-amber-400 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100",
+    className,
+  )
+}
+
 function FieldClearButton({
   "aria-label": ariaLabel,
   className = "",
@@ -358,6 +377,52 @@ function toDateKey(value: string | Date) {
   }
   const match = String(value || "").match(/^(\d{4}-\d{2}-\d{2})/)
   return match ? match[1] : ""
+}
+
+function getMakeupSchedulePlanSessions(classItem?: MakeupClassOption | null) {
+  const plan = classItem?.schedulePlan || null
+  if (!plan) return []
+  if (Array.isArray(plan.sessions)) return plan.sessions
+  if (Array.isArray(plan.session_list)) return plan.session_list
+  return []
+}
+
+function getMakeupScheduleSessionDateKey(session: unknown) {
+  if (!session || typeof session !== "object") return ""
+  const row = session as Record<string, unknown>
+  return toDateKey(toText(row.date || row.session_date || row.dateValue || row.date_value))
+}
+
+function isMakeupScheduleSessionSelectable(session: unknown) {
+  if (!session || typeof session !== "object") return false
+  const row = session as Record<string, unknown>
+  const state = toText(row.scheduleState || row.schedule_state || row.state) || "active"
+  return !["exception", "tbd", "canceled", "cancelled"].includes(state)
+}
+
+function getMakeupScheduleSessionLabel(session: unknown, fallbackIndex: number) {
+  if (!session || typeof session !== "object") return "수업"
+  const row = session as Record<string, unknown>
+  const billingLabel = toText(row.billingLabel || row.billing_label || row.periodLabel || row.period_label)
+  const sessionNumber = Number(row.sessionNumber || row.session_number || fallbackIndex + 1)
+  const sessionLabel = Number.isFinite(sessionNumber) && sessionNumber > 0 ? `${sessionNumber}회차` : "수업"
+  return [billingLabel, sessionLabel].filter(Boolean).join(" ")
+}
+
+function getMakeupClassScheduleDateOptions(classItem?: MakeupClassOption | null) {
+  const seen = new Set<string>()
+  return getMakeupSchedulePlanSessions(classItem)
+    .flatMap((session, index) => {
+      if (!isMakeupScheduleSessionSelectable(session)) return []
+      const dateKey = getMakeupScheduleSessionDateKey(session)
+      if (!dateKey || seen.has(dateKey)) return []
+      seen.add(dateKey)
+      return [{
+        value: dateKey,
+        label: `${dateKey.slice(5)} ${getMakeupScheduleSessionLabel(session, index)}`,
+      }]
+    })
+    .sort((left, right) => left.value.localeCompare(right.value))
 }
 
 function getDateFromKey(dateKey: string) {
@@ -1206,11 +1271,20 @@ function MakeupRequestDataTable({
   ), [requests, selectedSubjectFilter])
 
   const teacherFilterOptions = useMemo(() => (
-    buildMakeupRequestSelectFilterOptions(teacherFilterSourceRequests, (request) => ({
-      value: getMakeupRequestTeacherFilterValue(request),
-      label: request.teacherLabel,
-    }))
-  ), [teacherFilterSourceRequests])
+    [
+      ...data.teachers
+        .filter((teacher) => teacher.isVisible && matchesMakeupTeacherSubject(teacher, selectedSubjectFilter === "all" ? "" : selectedSubjectFilter))
+        .sort(sortMakeupTeachers)
+        .map((teacher) => ({ value: getTeacherOptionKey(teacher), label: teacher.name, count: 0 })),
+      ...buildMakeupRequestSelectFilterOptions(teacherFilterSourceRequests, (request) => ({
+        value: getMakeupRequestTeacherFilterValue(request),
+        label: request.teacherLabel,
+      })),
+    ].reduce<MakeupRequestSelectFilterOption[]>((options, option) => {
+      if (!option.value || !option.label || options.some((current) => current.value === option.value)) return options
+      return [...options, option]
+    }, [])
+  ), [data.teachers, selectedSubjectFilter, teacherFilterSourceRequests])
 
   const visibleRequests = useMemo(() => {
     const selectionFilteredRequests = requests
@@ -1518,6 +1592,49 @@ function getClassTeacherKey(classItem: MakeupClassOption) {
   return classItem.teacherCatalogId ? `id:${classItem.teacherCatalogId}` : `name:${classItem.teacher}`
 }
 
+function getTeacherOptionKey(teacher: MakeupTeacherOption) {
+  return teacher.id ? `id:${teacher.id}` : `name:${teacher.name}`
+}
+
+function normalizeMakeupTeacherSubjects(subjects: string) {
+  return subjects
+    .split(/[,，/]+/)
+    .map((subject) => subject.trim())
+    .filter(Boolean)
+}
+
+function normalizeMakeupSubjectToken(value: string) {
+  return value.trim().replace(/\s+/g, "").replace(/(과목|팀)$/g, "")
+}
+
+function matchesMakeupTeacherSubject(teacher: MakeupTeacherOption, subject: string) {
+  const selectedSubject = subject.trim()
+  if (!selectedSubject) return true
+  const subjects = normalizeMakeupTeacherSubjects(teacher.subjects)
+  if (subjects.length === 0) return true
+  const selectedToken = normalizeMakeupSubjectToken(selectedSubject)
+  return subjects.some((teacherSubject) => (
+    teacherSubject === selectedSubject || normalizeMakeupSubjectToken(teacherSubject) === selectedToken
+  ))
+}
+
+function getClassTeacherSelectionKey(classItem: MakeupClassOption, teachers: MakeupTeacherOption[]) {
+  if (classItem.teacherCatalogId) return `id:${classItem.teacherCatalogId}`
+  const teacher = teachers.find((item) => item.name === classItem.teacher)
+  return teacher ? getTeacherOptionKey(teacher) : getClassTeacherKey(classItem)
+}
+
+function matchesClassTeacherSelection(classItem: MakeupClassOption, selectedTeacherKey: string, teachers: MakeupTeacherOption[]) {
+  if (!selectedTeacherKey) return true
+  if (getClassTeacherKey(classItem) === selectedTeacherKey) return true
+  const teacher = teachers.find((item) => getTeacherOptionKey(item) === selectedTeacherKey)
+  return Boolean(teacher && teacher.name && teacher.name === classItem.teacher)
+}
+
+function sortMakeupTeachers(left: MakeupTeacherOption, right: MakeupTeacherOption) {
+  return left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ko", { numeric: true })
+}
+
 function getSlotRoomAvailability(
   slot: MakeupRequestInput["makeupSlots"][number],
   data: MakeupRequestWorkspaceData,
@@ -1652,27 +1769,37 @@ export function MakeupRequestWorkspace() {
 
   const teacherOptions = useMemo(() => {
     const optionMap = new Map<string, string>()
+    data.teachers
+      .filter((teacher) => teacher.isVisible && matchesMakeupTeacherSubject(teacher, selectedSubject))
+      .sort(sortMakeupTeachers)
+      .forEach((teacher) => {
+        const key = getTeacherOptionKey(teacher)
+        if (key) optionMap.set(key, teacher.name)
+      })
     data.classes
       .filter((classItem) => !selectedSubject || classItem.subject === selectedSubject)
       .forEach((classItem) => {
-        const key = getClassTeacherKey(classItem)
+        const key = getClassTeacherSelectionKey(classItem, data.teachers)
         if (key) optionMap.set(key, classItem.teacher || "선생님 미지정")
       })
     return [...optionMap.entries()]
       .map(([value, label]) => ({ value, label }))
       .sort((left, right) => left.label.localeCompare(right.label, "ko"))
-  }, [data.classes, selectedSubject])
+  }, [data.classes, data.teachers, selectedSubject])
 
   const availableClasses = useMemo(() => (
     data.classes.filter((classItem) => (
       (!selectedSubject || classItem.subject === selectedSubject) &&
-      (!selectedTeacherKey || getClassTeacherKey(classItem) === selectedTeacherKey)
+      matchesClassTeacherSelection(classItem, selectedTeacherKey, data.teachers)
     ))
-  ), [data.classes, selectedSubject, selectedTeacherKey])
+  ), [data.classes, data.teachers, selectedSubject, selectedTeacherKey])
 
   const selectedRoomHasCollision = useMemo(() => (
     hasSlotRoomCollision(input.makeupSlots, data, editingRequestId, selectedClass?.subject || selectedSubject, canUserManage(role))
   ), [data, editingRequestId, input, selectedClass?.subject, selectedSubject, role])
+  const selectedClassScheduleDateOptions = useMemo(() => (
+    getMakeupClassScheduleDateOptions(selectedClass)
+  ), [selectedClass])
   const materializedMakeupSlots = useMemo(() => materializeSlots(input), [input])
   const requestHasCancelDate = Boolean(input.cancelDate)
   const requestHasMakeupSlots = materializedMakeupSlots.length > 0
@@ -1723,6 +1850,7 @@ export function MakeupRequestWorkspace() {
     setInput((current) => ({
       ...current,
       classId: "",
+      cancelDate: "",
       makeupClassroom: "",
       makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, classroom: "" })),
       approverTeacherCatalogId: "",
@@ -1734,6 +1862,7 @@ export function MakeupRequestWorkspace() {
     setInput((current) => ({
       ...current,
       classId: "",
+      cancelDate: "",
       makeupClassroom: "",
       makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, classroom: "" })),
       approverTeacherCatalogId: "",
@@ -1742,16 +1871,18 @@ export function MakeupRequestWorkspace() {
 
   const handleClassChange = useCallback((classId: string) => {
     const classItem = data.classes.find((item) => item.id === classId) || null
+    const scheduleDateOptions = getMakeupClassScheduleDateOptions(classItem)
     const allowedNames = classItem ? getAllowedApproverNames(classItem) : []
     const firstApprover = data.teachers.find((teacher) => allowedNames.includes(teacher.name))
     setInput((current) => ({
       ...current,
       classId,
+      cancelDate: scheduleDateOptions.length === 0 || scheduleDateOptions.some((item) => item.value === current.cancelDate) ? current.cancelDate : "",
       approverTeacherCatalogId: firstApprover?.id || "",
     }))
     if (classItem) {
       setSelectedSubject(classItem.subject)
-      setSelectedTeacherKey(getClassTeacherKey(classItem))
+      setSelectedTeacherKey(getClassTeacherSelectionKey(classItem, data.teachers))
     }
   }, [data.classes, data.teachers])
 
@@ -2203,11 +2334,11 @@ export function MakeupRequestWorkspace() {
             <div className="grid gap-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
-                <RequiredFormLabel htmlFor="makeup-subject">과목</RequiredFormLabel>
-                <Select value={selectedSubject} onValueChange={handleSubjectChange}>
-                  <SelectTrigger id="makeup-subject" className="w-full">
-                    <SelectValue placeholder="과목 선택" />
-                  </SelectTrigger>
+	                <RequiredFormLabel htmlFor="makeup-subject">과목</RequiredFormLabel>
+	                <Select value={selectedSubject} onValueChange={handleSubjectChange}>
+	                  <SelectTrigger id="makeup-subject" className={getSequencedSelectTriggerClassName({ active: !selectedSubject })}>
+	                    <SelectValue placeholder="과목 선택" />
+	                  </SelectTrigger>
                   <SelectContent>
                     {subjectOptions.map((subject) => (
                       <SelectItem key={subject} value={subject}>{subject}</SelectItem>
@@ -2215,12 +2346,12 @@ export function MakeupRequestWorkspace() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-1.5">
-                <RequiredFormLabel htmlFor="makeup-teacher">선생님</RequiredFormLabel>
-                <Select value={selectedTeacherKey} onValueChange={handleTeacherChange} disabled={!selectedSubject}>
-                  <SelectTrigger id="makeup-teacher" className="w-full">
-                    <SelectValue placeholder={selectedSubject ? "선생님 선택" : "과목 먼저"} />
-                  </SelectTrigger>
+	              <div className="grid gap-1.5">
+	                <RequiredFormLabel htmlFor="makeup-teacher">선생님</RequiredFormLabel>
+	                <Select value={selectedTeacherKey} onValueChange={handleTeacherChange} disabled={!selectedSubject}>
+	                  <SelectTrigger id="makeup-teacher" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedSubject) && !selectedTeacherKey, dependency: !selectedSubject })}>
+	                    <SelectValue placeholder={selectedSubject ? "선생님 선택" : "과목 먼저"} />
+	                  </SelectTrigger>
                   <SelectContent>
                     {teacherOptions.map((teacher) => (
                       <SelectItem key={teacher.value} value={teacher.value}>{teacher.label}</SelectItem>
@@ -2228,12 +2359,12 @@ export function MakeupRequestWorkspace() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-1.5">
-                <RequiredFormLabel htmlFor="makeup-class">수업</RequiredFormLabel>
-                <Select value={input.classId} onValueChange={handleClassChange} disabled={!selectedTeacherKey}>
-                  <SelectTrigger id="makeup-class" className="w-full">
-                    <SelectValue placeholder={selectedTeacherKey ? "수업 선택" : "선생님 먼저"} />
-                  </SelectTrigger>
+	              <div className="grid gap-1.5">
+	                <RequiredFormLabel htmlFor="makeup-class">수업</RequiredFormLabel>
+	                <Select value={input.classId} onValueChange={handleClassChange} disabled={!selectedTeacherKey}>
+	                  <SelectTrigger id="makeup-class" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedTeacherKey) && !input.classId, dependency: !selectedTeacherKey })}>
+	                    <SelectValue placeholder={selectedTeacherKey ? "수업 선택" : "선생님 먼저"} />
+	                  </SelectTrigger>
                   <SelectContent>
                     {availableClasses.map((classItem) => (
                       <SelectItem key={classItem.id} value={classItem.id}>
@@ -2259,15 +2390,19 @@ export function MakeupRequestWorkspace() {
 
             <div className="grid gap-2">
               <Label htmlFor="cancel-date">휴강일</Label>
-              <div className="relative">
-                <DatePickerControl
-                  id="cancel-date"
-                  value={input.cancelDate}
-                  onChange={(value) => patchInput({ cancelDate: value })}
-                  placeholder="휴강일 선택"
-                  ariaLabel="휴강일 선택"
-                  className={input.cancelDate ? "pr-14" : ""}
-                />
+	              <div className="relative">
+	                <DatePickerControl
+	                  id="cancel-date"
+	                  value={input.cancelDate}
+	                  onChange={(value) => patchInput({ cancelDate: value })}
+	                  placeholder={!selectedClass ? "수업을 먼저 선택" : selectedClassScheduleDateOptions.length > 0 ? "수업일정에서 휴강일 선택" : "휴강일 선택"}
+	                  ariaLabel="휴강일 선택"
+	                  disabled={!selectedClass}
+	                  linkedDates={selectedClassScheduleDateOptions}
+	                  linkedDatesLabel="수업일정"
+	                  restrictToLinkedDates={selectedClassScheduleDateOptions.length > 0}
+	                  className={cn(input.cancelDate ? "pr-14" : "", !selectedClass && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
+	                />
                 <FieldClearButton
                   aria-label="휴강일 초기화"
                   show={Boolean(input.cancelDate)}
@@ -2399,7 +2534,7 @@ export function MakeupRequestWorkspace() {
             <div className="grid gap-2">
               <RequiredFormLabel htmlFor="makeup-approver">결재자</RequiredFormLabel>
               <Select value={input.approverTeacherCatalogId} onValueChange={(value) => patchInput({ approverTeacherCatalogId: value })} disabled={!selectedClass}>
-                <SelectTrigger id="makeup-approver" className="w-full">
+                <SelectTrigger id="makeup-approver" className={getSequencedSelectTriggerClassName({ active: Boolean(selectedClass) && !input.approverTeacherCatalogId, dependency: !selectedClass })}>
                   <SelectValue placeholder={selectedClass ? "결재자 선택" : "수업을 먼저 선택"} />
                 </SelectTrigger>
                 <SelectContent>

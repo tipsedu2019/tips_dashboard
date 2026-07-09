@@ -190,13 +190,71 @@ function getClassTeacherValues(raw: Record<string, unknown> = {}) {
   return splitOptionValues(raw.teacher || raw.teacher_name || raw.teacherName);
 }
 
+function getClassTeacherCatalogRows(rawRows: Record<string, unknown>[]) {
+  const byIdOrName = new Map<string, Record<string, unknown>>();
+  for (const raw of rawRows) {
+    const catalogs = Array.isArray(raw.available_teacher_catalogs)
+      ? raw.available_teacher_catalogs
+      : Array.isArray(raw.availableTeacherCatalogs)
+        ? raw.availableTeacherCatalogs
+        : [];
+    for (const catalog of catalogs) {
+      if (!catalog || typeof catalog !== "object") continue;
+      const catalogRow = catalog as Record<string, unknown>;
+      const name = text(catalogRow.name);
+      const key = text(catalogRow.id) || name;
+      if (!key || !name) continue;
+      byIdOrName.set(key, catalogRow);
+    }
+  }
+  return [...byIdOrName.values()];
+}
+
+function normalizeClassTeacherCatalogSubjects(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map(text).filter(Boolean);
+  }
+  return splitOptionValues(value);
+}
+
+function normalizeClassTeacherSubjectToken(value: unknown) {
+  return text(value).replace(/\s+/g, "").replace(/(과목|팀)$/g, "");
+}
+
+function isClassTeacherCatalogForSubject(catalog: Record<string, unknown>, subject: string) {
+  const selectedSubject = text(subject);
+  if (!selectedSubject) return true;
+  const subjects = normalizeClassTeacherCatalogSubjects(catalog.subjects);
+  if (subjects.length === 0) return true;
+  const selectedToken = normalizeClassTeacherSubjectToken(selectedSubject);
+  return subjects.some((catalogSubject) => {
+    const catalogToken = normalizeClassTeacherSubjectToken(catalogSubject);
+    return catalogSubject === selectedSubject || catalogToken === selectedToken;
+  });
+}
+
+function getClassTeacherCatalogOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
+  return getClassTeacherCatalogRows(rawRows)
+    .filter((catalog) => catalog.is_visible !== false && isClassTeacherCatalogForSubject(catalog, subject))
+    .sort((left, right) => Number(left.sort_order || left.sortOrder || 0) - Number(right.sort_order || right.sortOrder || 0) || text(left.name).localeCompare(text(right.name), "ko", { numeric: true }))
+    .map((catalog) => text(catalog.name))
+    .filter(Boolean);
+}
+
 function getClassTeacherOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
   const selectedSubject = text(subject);
   const subjectRows = selectedSubject
     ? rawRows.filter((raw) => getClassSubjectValue(raw) === selectedSubject)
     : rawRows;
   const sourceRows = subjectRows.length > 0 ? subjectRows : rawRows;
-  return uniqueSortedOptions(sourceRows.flatMap((raw) => getClassTeacherValues(raw)));
+  const catalogOptions = getClassTeacherCatalogOptionsForSubject(rawRows, selectedSubject);
+  return uniqueSortedOptions(
+    [
+      ...catalogOptions,
+      ...sourceRows.flatMap((raw) => getClassTeacherValues(raw)),
+    ],
+    catalogOptions,
+  );
 }
 
 function uniqueSortedOptions(values: string[], preferredOrder: string[] = []) {

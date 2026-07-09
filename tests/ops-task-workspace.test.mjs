@@ -858,17 +858,18 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "legacy confirmed withdrawal rows should use the same processing action language",
   );
   assertIncludesAll(withdrawalWorkspaceToolbarSource, [
-    'aria-label="퇴원 알림 설정"',
+    'aria-label={isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
     "setWithdrawalNotificationOpen(true)",
     "<Bell className=\"size-4\"",
   ]);
   assert.match(
     withdrawalWorkspaceToolbarSource,
-    /!isWordRetestWorkspace && !isWithdrawalWorkspace && \(/,
+    /!isWordRetestWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && \(/,
     "withdrawal toolbar should exclude the generic refresh action",
   );
   assertIncludesAll(source, [
-    'aria-label="퇴원 알림 설정 표"',
+    'tableAriaLabel = "퇴원 알림 설정 표"',
+    'aria-label={tableAriaLabel}',
     "알림 위치",
     "구글챗 · 관리팀",
     "웹훅 URL 보기",
@@ -890,13 +891,14 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'className="grid min-h-0 gap-4 overflow-y-auto pr-1"',
     '<DialogFooter className="shrink-0">',
   ]);
-  assert.match(withdrawalNotificationDialogSource, /data-testid="withdrawal-notification-mobile-list"/);
+  assert.match(withdrawalNotificationDialogSource, /mobileListTestId = "withdrawal-notification-mobile-list"/);
+  assert.match(withdrawalNotificationDialogSource, /data-testid=\{mobileListTestId\}/);
   assert.match(withdrawalNotificationDialogSource, /className="grid gap-2 md:hidden"/);
   assert.match(withdrawalNotificationDialogSource, /className="hidden overflow-x-auto rounded-md border md:block"/);
-  assert.match(withdrawalNotificationDialogSource, /aria-label=\{`\$\{trigger\.label\} 모바일 퇴원 알림 설정`\}/);
+  assert.match(withdrawalNotificationDialogSource, /aria-label=\{`\$\{trigger\.label\} 모바일 \$\{workflowLabel\} 알림 설정`\}/);
   assert.ok(
     withdrawalNotificationDialogSource.indexOf("{selectedWebhookInfo || webhookInfoError ? (") <
-      withdrawalNotificationDialogSource.indexOf('data-testid="withdrawal-notification-mobile-list"'),
+      withdrawalNotificationDialogSource.indexOf("data-testid={mobileListTestId}"),
     "withdrawal webhook detail should appear before the long mobile settings list",
   );
   assert.match(withdrawalNotificationDialogSource, /webhookInfoPanelRef/);
@@ -936,7 +938,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'aria-label="퇴원 신청 데이터테이블"',
     'data-testid="withdrawal-mobile-task-list"',
     'aria-label="퇴원 모바일 목록"',
-    'aria-label="퇴원 상세 열기"',
+    'detailAriaLabel = "퇴원 상세 열기"',
     'aria-label={`${label} 열 너비 조절`}',
     'cursor-col-resize',
     'role="columnheader"',
@@ -952,13 +954,14 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.match(withdrawalDataTableSource, /className="hidden w-full overflow-x-auto md:block"/);
   assert.match(withdrawalDataTableSource, /aria-label=\{`\$\{task\.title\} 퇴원 상세 열기`\}/);
   assert.match(withdrawalDataTableSource, /getWithdrawalMobileNextActionLabel/);
-  assert.match(source, /aria-label="퇴원 기간 필터"/);
+  assert.match(source, /labelPrefix = "퇴원"/);
+  assert.match(source, /aria-label=\{`\$\{labelPrefix\} 기간 필터`\}/);
   assertIncludesAll(withdrawalPeriodFilterSource, [
     "<DatePickerControl",
     'placeholder="시작일"',
     'placeholder="종료일"',
-    'ariaLabel="퇴원 기간 시작일"',
-    'ariaLabel="퇴원 기간 종료일"',
+    'ariaLabel={`${labelPrefix} 기간 시작일`}',
+    'ariaLabel={`${labelPrefix} 기간 종료일`}',
   ]);
   assert.doesNotMatch(withdrawalPeriodFilterSource, /type="date"/);
   assert.doesNotMatch(withdrawalDataTableSource, /label="수업 필터"/);
@@ -1091,11 +1094,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     source,
-    /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && formDetailTabs\.length > 1/,
+    /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && form\.type !== "transfer" && formDetailTabs\.length > 1/,
   );
   assert.match(
     source,
-    /className=\{form\.type === "withdrawal" \? "grid gap-3" : "grid gap-3 rounded-lg border p-3"\}/,
+    /className=\{form\.type === "withdrawal" \|\| form\.type === "transfer" \? "grid gap-3" : "grid gap-3 rounded-lg border p-3"\}/,
   );
   assert.match(
     formDialogSource,
@@ -1141,7 +1144,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.match(source, /completedMinutes[\s\S]*\/ 60/);
   assert.match(
     source,
-    /if \(isWithdrawalWorkspace\) return getWithdrawalViewTasks\(nextTasks, withdrawalView\)/,
+    /if \(isWithdrawalWorkspace \|\| isTransferWorkspace\) return getWithdrawalViewTasks\(nextTasks, withdrawalView\)/,
   );
   assert.match(
     source,
@@ -1149,7 +1152,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     source,
-    /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isWithdrawalWorkspace \? "퇴원 흐름" : `\$\{workspaceLabel\} 보기`\}/,
+    /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isWithdrawalWorkspace \? "퇴원 흐름" : isTransferWorkspace \? "전반 흐름" : `\$\{workspaceLabel\} 보기`\}/,
   );
   assertIncludesAll(withdrawalDetailSource, [
     "신청 · 처리",
@@ -1187,12 +1190,16 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.doesNotMatch(withdrawalDetailProcessingSource, /label="담당"/);
   assert.doesNotMatch(withdrawalDetailProcessingSource, /처리일시/);
   assert.doesNotMatch(withdrawalDetailProcessingSource, /퇴원일|퇴원회차|진행 수업시수|4주 기준 수업시수|수업진행률/);
-  assertIncludesAll(detailDialogSource, [
+  assertIncludesAll(source, [
     "isWithdrawalDetail",
-    "isCompletedWithdrawalDetail",
+    "isTransferDetail",
+    "isProcessDetail",
+    "isCompletedProcessDetail",
     "canManageWithdrawalStatusAction",
+  ]);
+  assertIncludesAll(detailDialogSource, [
     "WithdrawalDetailPanel",
-    "!isWithdrawalDetail",
+    "!isProcessDetail",
     "selectedTaskFresh.type !== \"withdrawal\"",
   ]);
   assertIncludesAll(source, [
@@ -1212,17 +1219,17 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     detailDialogSource,
-    /!isWithdrawalDetail && \(\s*<CompletionBlockerActionPanel/,
+    /!isProcessDetail && \(\s*<CompletionBlockerActionPanel/,
     "withdrawal detail should not show the completion blocker chip group",
   );
   assert.match(
     detailDialogSource,
-    /!isWithdrawalDetail && getSecondaryTaskStatusOptions\(selectedTaskFresh\)/,
+    /!isProcessDetail && getSecondaryTaskStatusOptions\(selectedTaskFresh\)/,
     "withdrawal detail should not show hold or cancel secondary actions",
   );
   assert.match(
     detailDialogSource,
-    /canManageWithdrawalStatusAction && \(\(!isWithdrawalDetail \|\| !detailPrimaryActionBlocked\) && detailPrimaryAction\)/,
+    /canManageWithdrawalStatusAction && \(\(!isProcessDetail \|\| !detailPrimaryActionBlocked\) && detailPrimaryAction\)/,
     "withdrawal progress and completion actions should be available only to the management team",
   );
   assert.match(
@@ -1332,8 +1339,34 @@ test("withdrawal schedule calendar defaults to current month and counts the bill
   );
   assert.match(
     scheduleFieldSource,
-    /getWithdrawalCalendarSessionLabel\(cell\.dateKey, scheduleItem\.label\)/,
-    "withdrawal calendar cells should show the month with the session label",
+    /getWithdrawalCalendarDisplaySessionLabel\(scheduleItem, \{ includeMonth: true \}\)/,
+    "withdrawal calendar cells should show the month with the saved schedule label only for selectable schedules",
+  );
+  assertIncludesAll(source, [
+    "function getWithdrawalCalendarMonthLabel",
+    "function getWithdrawalScheduleSessionLabel",
+    "function getWithdrawalScheduleDisplayMonthLabel",
+    "function getWithdrawalScheduleBillingMonthKey",
+    "function getWithdrawalCalendarDisplaySessionLabel",
+    "function getWithdrawalCalendarCellTitle",
+    "function getWithdrawalCalendarCellToneClass",
+    "if (!item || !isWithdrawalScheduleSelectable(item)) return \"\"",
+    "const billingLabel = getWithdrawalSessionBillingLabel(session)",
+    "billingLabel,",
+    "billingColor: getWithdrawalSessionBillingColor(session)",
+    "return options.includeMonth ? getWithdrawalScheduleSessionLabel(item) : item.label",
+    "return [dateKey, sessionLabel, item.stateLabel].filter(Boolean).join(\" \")",
+    "border border-sky-200 bg-sky-50",
+    "border border-emerald-200 bg-emerald-50",
+    "border border-amber-200 bg-amber-50",
+    "border border-rose-200 bg-rose-50",
+    "toneClass",
+    "{sessionLabel && <span",
+  ]);
+  assert.doesNotMatch(
+    source,
+    /getWithdrawalScheduleMonth(SessionNumber|Items)/,
+    "calendar display must use the saved class schedule label instead of recalculating a monthly session number",
   );
   assert.match(
     scheduleFieldSource,
@@ -1344,6 +1377,317 @@ test("withdrawal schedule calendar defaults to current month and counts the bill
     scheduleFieldSource,
     /classItem\?\.label \|\| "수업 선택 필요"/,
     "withdrawal calendar should not repeat the selected class name beside the date label",
+  );
+});
+
+test("transfer workspace inherits withdrawal layout while preserving transfer fields", async () => {
+  const [source, serviceSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+  ]);
+  const transferFormSource = source.slice(
+    source.indexOf('if (form.type === "transfer")'),
+    source.indexOf('if (form.type === "word_retest")'),
+  );
+  const formDialogSource = source.slice(
+    source.indexOf("<Dialog open={formOpen}"),
+    source.indexOf("<Dialog open={detailOpen}"),
+  );
+  const transferDataTableSource = source.slice(
+    source.indexOf("function TransferDataTable"),
+    source.indexOf("function DashboardMetric"),
+  );
+  const transferScheduleFieldSource = source.slice(
+    source.indexOf("function TransferScheduleCalendarField"),
+    source.indexOf("function WordRetestMainExamDateField"),
+  );
+  const workspaceToolbarSource = source.slice(
+    source.indexOf('aria-label={isTodoWorkspace ? "할 일 목록"'),
+    source.indexOf("{isTodoWorkspace && ("),
+  );
+
+  assertIncludesAll(source, [
+    "type TransferTableColumnKey",
+    "TRANSFER_TABLE_COLUMNS",
+    "TRANSFER_TABLE_COLUMN_WIDTHS",
+    "TRANSFER_TABLE_COLUMN_MIN_WIDTHS",
+    "TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES",
+    "DEFAULT_TRANSFER_NOTIFICATION_TEMPLATES",
+    "isTransferWorkspace",
+    "transferCounts",
+    "TransferDataTable",
+    "TransferScheduleCalendarField",
+    "TransferOperationsChecklistChips",
+    "getTransferTableValue",
+    "getTransferClassScheduleMetrics",
+    "getTransferTuitionAdjustment",
+    "TransferWorkflowChart",
+    "TransferTuitionAdjustmentPanel",
+    "notifyTransferWorkflow",
+    "TransferNotificationSettingsDialog",
+  ]);
+  assertIncludesAll(serviceSource, [
+    "fee?: number",
+    "const normalized = String(value || \"\").replace(/[^0-9.-]+/g, \"\")",
+    "OPS_CLASS_COLUMN_CANDIDATES",
+    "fee,tuition",
+    '"id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,tuition,student_ids,waitlist_ids,textbook_ids,status"',
+    '"id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,status"',
+    '"id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,status"',
+    "async function readOpsClassRows()",
+    "for (const columns of OPS_CLASS_COLUMN_CANDIDATES)",
+    "if (!isMissingColumnError(result.error))",
+    "fee: numberValue(row.fee || row.tuition)",
+  ]);
+  assert.match(
+    formDialogSource,
+    /form\.type === "transfer" \? "sm:max-w-5xl xl:max-w-6xl"/,
+    "transfer request modal should be wider than the generic template form",
+  );
+  assert.match(
+    source,
+    /if \(isWithdrawalWorkspace \|\| isTransferWorkspace\) return getWithdrawalViewTasks\(nextTasks, withdrawalView\)/,
+    "transfer should use the same request processing completed queue split as withdrawal",
+  );
+  assert.match(
+    source,
+    /isWithdrawalWorkspace \|\| isTransferWorkspace\s*\?\s*\([\s\S]*?<WithdrawalDataTable|isTransferWorkspace\s*\?\s*\([\s\S]*?<TransferDataTable/,
+    "transfer should render a dedicated data table instead of the generic operation task list",
+  );
+  assertIncludesAll(workspaceToolbarSource, [
+    'aria-label={isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
+    "setTransferNotificationOpen(true)",
+    "setWithdrawalNotificationOpen(true)",
+  ]);
+
+  assertIncludesAll(transferDataTableSource, [
+    'aria-label="전반 전체 필터"',
+    'aria-label="전반 누가 필터"',
+    'aria-label="전반 신청 데이터테이블"',
+    'data-testid="transfer-mobile-task-list"',
+    'aria-label="전반 모바일 목록"',
+    'aria-label={`${task.title} 전반 상세 열기`}',
+    '[grid-template-columns:var(--transfer-grid-template)]',
+    "<WithdrawalPeriodFilterBar",
+    "TransferOperationsChecklistChips",
+    "onChecklistChange",
+    "setTransferTableSort",
+  ]);
+  assertIncludesAll(source, [
+    'columnKey: "transferReason"',
+    'columnKey: "fromClassEndDate"',
+    'columnKey: "toClassStartDate"',
+    'columnKey: "fromUndistributedTextbooks"',
+    'columnKey: "toUndistributedTextbooks"',
+  ]);
+  assert.doesNotMatch(transferDataTableSource, /TaskList/);
+
+  assertIncludesAll(transferFormSource, [
+    "transferSubjectOptions",
+    "transferFromTeacherOptions",
+    "transferFromClassOptions",
+    "transferStudentOptions",
+    "transferToTeacherOptions",
+    "transferToClassOptions",
+    "selectedTransferFromClass",
+    "selectedTransferToClass",
+    "selectTransferSubject",
+    "selectTransferFromTeacher",
+    "selectTransferToTeacher",
+    "<TransferWorkflowChart />",
+    "TransferScheduleCalendarField",
+    "TextareaField",
+    "UndistributedTextbookListField",
+    'label="과목"',
+    'label="전 선생님"',
+    'label="전 수업"',
+    'label="학생"',
+    'label="후 선생님"',
+    'label="후 수업"',
+    'label="전반사유"',
+    'label="전 미배부 교재"',
+    'label="후 미배부 교재"',
+    "help={TRANSFER_FROM_UNDISTRIBUTED_TEXTBOOK_HELP}",
+    "help={TRANSFER_TO_UNDISTRIBUTED_TEXTBOOK_HELP}",
+    'CheckField label="메이크에듀 전반처리"',
+    'CheckField label="수업료 처리"',
+    'CheckField label="교재비 처리"',
+  ]);
+  assert.ok(
+    transferFormSource.indexOf("<TransferWorkflowChart />") < transferFormSource.indexOf('aria-label="전반 공통 정보"') &&
+    transferFormSource.indexOf('aria-label="전반 공통 정보"') < transferFormSource.indexOf('aria-label="전 수업 정보"') &&
+      transferFormSource.indexOf('aria-label="전반 공통 정보"') < transferFormSource.indexOf('aria-label="후 수업 정보"'),
+    "transfer form should show the collapsible workflow chart before shared fields and mirrored before/after columns",
+  );
+  const transferCommonSource = transferFormSource.slice(
+    transferFormSource.indexOf('aria-label="전반 공통 정보"'),
+    transferFormSource.indexOf('aria-label="전 수업 정보"'),
+  );
+  const transferFromSource = transferFormSource.slice(
+    transferFormSource.indexOf('aria-label="전 수업 정보"'),
+    transferFormSource.indexOf('aria-label="후 수업 정보"'),
+  );
+  const transferToSource = transferFormSource.slice(
+    transferFormSource.indexOf('aria-label="후 수업 정보"'),
+    transferFormSource.indexOf('<div className="grid gap-2 md:grid-cols-3">'),
+  );
+  assertIncludesAll(transferCommonSource, [
+    'label="과목"',
+    'label="학생"',
+    'label="전반사유"',
+  ]);
+  assertIncludesAll(transferFromSource, [
+    'label="전 선생님"',
+    'label="전 수업"',
+    'label="전 미배부 교재"',
+    'label="전 수업 종료일"',
+  ]);
+  assertIncludesAll(transferToSource, [
+    'label="후 선생님"',
+    'label="후 수업"',
+    'label="후 미배부 교재"',
+    'label="후 수업 시작일"',
+  ]);
+  assert.doesNotMatch(
+    transferFromSource,
+    /label="후 (선생님|수업|미배부 교재|수업 시작일)"/,
+    "before-transfer column should not mix after-transfer fields",
+  );
+  assert.doesNotMatch(
+    transferToSource,
+    /label="전 (선생님|수업|미배부 교재|수업 종료일)"/,
+    "after-transfer column should not mix before-transfer fields",
+  );
+  assert.doesNotMatch(
+    transferFormSource,
+    /openManualField\("transfer(?:Student|FromTeacher|FromClass|ToTeacher|ToClass)"\)/,
+    "transfer student, teacher, and class selectors should not offer direct input",
+  );
+  assert.doesNotMatch(
+    transferFormSource,
+    /shouldShowManualField\("transfer(?:Student|FromTeacher|FromClass|ToTeacher|ToClass)"/,
+    "transfer student, teacher, and class fields should stay selector-only",
+  );
+  assertIncludesAll(transferFormSource, [
+    "canSelectTransferFromTeacher",
+    "canSelectTransferFromClass",
+    "canSelectTransferStudent",
+    "canSelectTransferToTeacher",
+    "canSelectTransferToClass",
+    "attention={!form.subject}",
+    "attention={canSelectTransferFromTeacher && !selectedTransferFromTeacherId}",
+    "attention={canSelectTransferFromClass && !transfer.fromClassId}",
+    "attention={canSelectTransferStudent && !form.studentId}",
+    "attention={canSelectTransferToTeacher && !selectedTransferToTeacherId}",
+    "attention={canSelectTransferToClass && !(transfer.toClassId || form.classId)}",
+    'disabled={!canSelectTransferFromTeacher}',
+    'disabledPlaceholder="과목 먼저"',
+    'disabled={!canSelectTransferFromClass}',
+    'disabledPlaceholder="전 선생님 먼저"',
+    'disabled={!canSelectTransferStudent}',
+    'disabledPlaceholder="전 수업 먼저"',
+    'disabled={!canSelectTransferToTeacher}',
+    'disabled={!canSelectTransferToClass}',
+    'disabledPlaceholder="후 선생님 먼저"',
+  ]);
+  assert.match(
+    source,
+    /function selectTransferSubject\(subject: string\) \{[\s\S]*?updateTransfer\("fromTeacherName", ""\)[\s\S]*?updateTransfer\("fromClassId", ""\)[\s\S]*?updateForm\("studentId", ""\)[\s\S]*?updateTransfer\("toTeacherName", ""\)[\s\S]*?updateTransfer\("toClassId", ""\)/,
+    "changing transfer subject should clear both from and to downstream selections",
+  );
+  assert.match(
+    source,
+    /function selectTransferFromTeacher\(teacherId: string\) \{[\s\S]*?updateTransfer\("fromClassId", ""\)[\s\S]*?updateForm\("studentId", ""\)/,
+    "changing transfer from teacher should clear from class and student selections",
+  );
+  assert.match(
+    source,
+    /function selectTransferToTeacher\(teacherId: string\) \{[\s\S]*?updateTransfer\("toClassId", ""\)/,
+    "changing transfer to teacher should clear to class selections",
+  );
+  assert.doesNotMatch(transferFormSource, /if \(step === "transfer_schedule"\)/);
+  assert.doesNotMatch(transferFormSource, /if \(step === "transfer_checks"\)/);
+  assert.doesNotMatch(transferFormSource, /type="date"/);
+  assert.doesNotMatch(transferFormSource, /AutoSyncStatusField label="시간표 명단 변경"/);
+
+  assertIncludesAll(transferScheduleFieldSource, [
+    "getTransferClassScheduleMetrics",
+    "isWithdrawalScheduleSelectable",
+    "수업을 선택하면 등록된 수업일정이 표시됩니다.",
+    "disabled={!selectable}",
+    "getWithdrawalCalendarDisplaySessionLabel(scheduleItem, { includeMonth: true })",
+    "getWithdrawalCalendarCellTitle(cell.dateKey, scheduleItem)",
+    "getWithdrawalCalendarCellToneClass(cell.dateKey, selected, selectable, scheduleItem)",
+    "calendarCellTitle",
+    "title={calendarCellTitle}",
+    "whitespace-normal",
+    "onScheduleSelect(getTransferClassScheduleMetrics(scheduleItems, item.dateKey, classItem))",
+    'ReadonlyInfoField label={`${label}회차`}',
+  ]);
+  assertIncludesAll(transferFormSource, [
+    'label="전 수업 종료일"',
+    'label="후 수업 시작일"',
+    "<TransferTuitionAdjustmentPanel",
+    "adjustment={transferTuitionAdjustment}",
+  ]);
+  assertIncludesAll(source, [
+    "function getTransferTuitionAdjustment",
+    "getSchedulePlanSessions(classItem)",
+    "function getTransferMonthlyCycleContext",
+    "const sessionNumber = selectedItem.sessionNumber",
+    "const cycleSessionCount = Math.max(fallbackCycleSessionCount, sessionNumber)",
+    "monthKey: getWithdrawalScheduleBillingMonthKey(selectedItem)",
+    "monthLabel: getWithdrawalScheduleDisplayMonthLabel(selectedItem)",
+    "fromCycle.monthKey !== toCycle.monthKey",
+    "월별 확인",
+    "연속 회차로 계산하지 않습니다.",
+    "fromServedValue",
+    "toRemainingValue",
+    "difference = servedValue - paidValue",
+    'settlementType: "refund_or_carry"',
+    'settlementType: "additional_payment"',
+    "수업료 정산",
+    "전반 업무 흐름",
+    'data-testid="transfer-workflow-chart"',
+    'data-state={open ? "open" : "closed"}',
+    "const [open, setOpen] = useState(false)",
+    "aria-expanded={open}",
+    "담당선생님 요청",
+    "고객 요청",
+    "전/후 선생님 타당성 논의",
+    "타당하면 입학상담 책임자와 논의",
+    "입학상담 책임자 승인",
+    "관리팀 전반 처리",
+    "현재 실력: 객관적인 시험 점수",
+    "학습태도 및 성장가능성",
+    "승급 수업: 난이도 적합성",
+    "동급 수업: 수업계획표 상의 진도",
+    "수업계획표 상의 진도",
+    "관리팀으로부터 수령한 교재 중 위 학생에게 아직 배부되지 않은 교재가 있다면 입력하고, 전반신청서를 제출하는 즉시 해당 교재를 관리팀에게 반납해 주세요.",
+    "청구 예정 교재 중(전반 후 수업의 현재 진행 교재) 위 학생에게 배부하지 않을 교재가 있다면 입력해 주세요.",
+    "강부희, 김민경, 정보영",
+    "양소윤",
+    "강정은",
+    "전 진행률",
+    "후 잔여진행률",
+    "환불/이월",
+    "추가 납부",
+    "attention?: boolean",
+    "border-primary/60 bg-primary/5",
+    "border-amber-300 bg-amber-50",
+  ]);
+  assert.doesNotMatch(source, /전 항목은 전 선생님이 직접 입력하거나 후 선생님에게 대신 입력요청/);
+  assert.doesNotMatch(source, /영어 원장\(강부희, 김민경, 정보영\)/);
+  assert.doesNotMatch(source, /고등부: 소윤T/);
+  assert.doesNotMatch(source, /초중등부: 정은T/);
+  assert.match(
+    source,
+    /function canSubmitOpsTaskForm\(input: OpsTaskInput, isEditing: boolean\) \{[\s\S]*?if \(input\.type === "transfer" && !isEditing\) \{[\s\S]*?input\.subject &&[\s\S]*?transfer\.fromTeacherName &&[\s\S]*?transfer\.fromClassId &&[\s\S]*?input\.studentId &&[\s\S]*?transfer\.toTeacherName &&[\s\S]*?transfer\.toClassId/,
+    "new transfer requests should require subject, teachers, classes, and student before submit is enabled",
+  );
+  assert.match(
+    source,
+    /if \(!intent && taskType === "transfer" && !isEditing\) return "전반 신청"/,
   );
 });
 
@@ -1545,8 +1889,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "onOpen={openEdit}",
     "단어 재시험 수정",
     'if (task.type === "word_retest") return []',
-    "!isTodoWorkspace && !isWithdrawalWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
-    "!isTodoWorkspace && !isWithdrawalWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
+    "!isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
+    "!isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
     'selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl"',
     'selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4"',
     'selectedTaskFresh.type !== "word_retest" && (',
@@ -1754,7 +2098,10 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   );
   assert.match(wordRetestMainExamDateFieldSource, /function handleMainExamDateSelect/);
   assert.match(wordRetestMainExamDateFieldSource, /classScheduleItemsByDate/);
+  assert.match(wordRetestMainExamDateFieldSource, /const shouldRestrictToClassSchedule = classScheduleItems\.length > 0/);
   assert.match(wordRetestMainExamDateFieldSource, /data-word-retest-class-date/);
+  assert.match(wordRetestMainExamDateFieldSource, /disabled=\{!selectable\}/);
+  assert.match(wordRetestMainExamDateFieldSource, /수업일정 없음/);
   assert.match(wordRetestMainExamDateFieldSource, /수업일정/);
   assert.match(wordRetestMainExamDateFieldSource, /setCalendarDateOpen\(false\)/);
   assert.doesNotMatch(wordRetestMainExamDateFieldSource, /Clock|timeListRef|handleTimeListWheel|WORD_RETEST_TIME_OPTIONS|직접 시간 입력/);

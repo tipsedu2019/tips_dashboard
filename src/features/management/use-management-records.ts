@@ -527,7 +527,7 @@ export function useManagementRecords(kind: ManagementKind) {
       }
 
       if (kind === "classes") {
-        const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs] = await Promise.all([
+        const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs, teacherCatalogs] = await Promise.all([
           readOptionalTable("students"),
           readOptionalTable("class_schedule_sync_groups"),
           readOptionalTable("class_schedule_sync_group_members", "group_id,class_id,sort_order"),
@@ -535,6 +535,7 @@ export function useManagementRecords(kind: ManagementKind) {
           readOptionalTable("textbooks"),
           readOptionalTable("progress_logs"),
           readOptionalClassAuditLogs(),
+          readOptionalTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order"),
         ]);
         const studentsById = new Map(
           students.map((student) => [textValue(student.id), student]),
@@ -582,6 +583,8 @@ export function useManagementRecords(kind: ManagementKind) {
             ),
             available_class_groups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
             availableClassGroups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
+            available_teacher_catalogs: teacherCatalogs,
+            availableTeacherCatalogs: teacherCatalogs,
           }),
         );
       }

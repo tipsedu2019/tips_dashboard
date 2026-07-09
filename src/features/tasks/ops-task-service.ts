@@ -61,6 +61,7 @@ export type OpsClassOption = OpsLinkedOption & {
   teacher: string
   room: string
   schedule: string
+  fee?: number
   schedulePlan?: Record<string, unknown> | null
   studentIds: string[]
   waitlistIds: string[]
@@ -281,6 +282,17 @@ export const emptyOpsTaskWorkspaceData: OpsTaskWorkspaceData = {
 }
 
 const OPS_TASK_WORKSPACE_CACHE_TTL_MS = 15_000
+const OPS_CLASS_COLUMN_CANDIDATES = [
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,tuition,student_ids,waitlist_ids,textbook_ids,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,textbook_ids,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,textbook_ids,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,student_ids,waitlist_ids,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,status",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,status",
+  "id,name,subject,grade,teacher,room,schedule,status",
+] as const
 type OpsTaskWorkspaceLoadOptions = {
   force?: boolean
   taskType?: OpsTaskType
@@ -327,7 +339,8 @@ function numberText(value: unknown) {
 }
 
 function numberValue(value: unknown) {
-  const parsed = Number(value || 0)
+  const normalized = String(value || "").replace(/[^0-9.-]+/g, "")
+  const parsed = Number(normalized || 0)
   return Number.isFinite(parsed) ? parsed : 0
 }
 
@@ -507,6 +520,22 @@ async function readTableWithFallback(table: string, columns: string, fallbackCol
 
   if (optional || isMissingRelationError(result.error)) return []
   throw result.error
+}
+
+async function readOpsClassRows() {
+  if (!supabase) return []
+
+  for (const columns of OPS_CLASS_COLUMN_CANDIDATES) {
+    const result = await supabase.from("classes").select(columns)
+    if (!result.error) {
+      return (result.data || []) as unknown as Row[]
+    }
+    if (!isMissingColumnError(result.error)) {
+      return []
+    }
+  }
+
+  return []
 }
 
 async function readTaskScopedTable(table: string, taskIds: string[], columns = "*", optional = true) {
@@ -913,7 +942,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
         ? readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true)
         : Promise.resolve([]),
       includeManagementOptions
-        ? readTableWithFallback("classes", "id,name,subject,grade,teacher,room,schedule,schedule_plan,student_ids,waitlist_ids,textbook_ids,status", "id,name,subject,grade,teacher,room,schedule,student_ids,waitlist_ids", true)
+        ? readOpsClassRows()
         : Promise.resolve([]),
       includeManagementOptions
         ? readTable("textbooks", "id,title,name,publisher,subject", true)
@@ -1014,6 +1043,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
         teacher: text(row.teacher),
         room: text(row.room),
         schedule: text(row.schedule),
+        fee: numberValue(row.fee || row.tuition),
         schedulePlan: recordValue(row.schedule_plan),
         studentIds: normalizeIdList(row.student_ids),
         waitlistIds: normalizeIdList(row.waitlist_ids),

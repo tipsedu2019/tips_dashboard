@@ -238,11 +238,14 @@ test("makeup request form marks required fields and exposes clear controls", () 
   assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-class">수업<\/RequiredFormLabel>/);
   assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-reason">사유<\/RequiredFormLabel>/);
   assert.match(workspaceSource, /<RequiredFormLabel htmlFor="makeup-approver">결재자<\/RequiredFormLabel>/);
-  assert.match(workspaceSource, /<SelectTrigger id="makeup-subject" className="w-full">/);
-  assert.match(workspaceSource, /<SelectTrigger id="makeup-teacher" className="w-full">/);
-  assert.match(workspaceSource, /<SelectTrigger id="makeup-class" className="w-full">/);
+  assert.match(workspaceSource, /function getSequencedSelectTriggerClassName/);
+  assert.match(workspaceSource, /border-primary\/60 bg-primary\/5/);
+  assert.match(workspaceSource, /border-amber-300 bg-amber-50/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-subject" className=\{getSequencedSelectTriggerClassName\(\{ active: !selectedSubject \}\)\}>/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-teacher" className=\{getSequencedSelectTriggerClassName\(\{ active: Boolean\(selectedSubject\) && !selectedTeacherKey, dependency: !selectedSubject \}\)\}>/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-class" className=\{getSequencedSelectTriggerClassName\(\{ active: Boolean\(selectedTeacherKey\) && !input\.classId, dependency: !selectedTeacherKey \}\)\}>/);
   assert.match(workspaceSource, /className=\{slot\.classroom \? "w-full pr-14" : "w-full"\}/);
-  assert.match(workspaceSource, /<SelectTrigger id="makeup-approver" className="w-full">/);
+  assert.match(workspaceSource, /<SelectTrigger id="makeup-approver" className=\{getSequencedSelectTriggerClassName\(\{ active: Boolean\(selectedClass\) && !input\.approverTeacherCatalogId, dependency: !selectedClass \}\)\}>/);
   assert.match(workspaceSource, /const canSubmitRequest = Boolean\(/);
   assert.match(workspaceSource, /input\.classId &&[\s\S]*input\.reason\.trim\(\) &&[\s\S]*input\.approverTeacherCatalogId/);
   assert.match(workspaceSource, /\(requestHasCancelDate \|\| requestHasMakeupSlots\)/);
@@ -251,6 +254,13 @@ test("makeup request form marks required fields and exposes clear controls", () 
   assert.match(workspaceSource, /function FieldClearButton/);
   assert.match(workspaceSource, /aria-label="휴강일 초기화"/);
   assert.match(workspaceSource, /patchInput\(\{ cancelDate: "" \}\)/);
+  assert.match(workspaceSource, /function getMakeupClassScheduleDateOptions/);
+  assert.match(workspaceSource, /const selectedClassScheduleDateOptions = useMemo/);
+  assert.match(workspaceSource, /linkedDates=\{selectedClassScheduleDateOptions\}/);
+  assert.match(workspaceSource, /linkedDatesLabel="수업일정"/);
+  assert.match(workspaceSource, /restrictToLinkedDates=\{selectedClassScheduleDateOptions\.length > 0\}/);
+  assert.match(dateTimePickerSource, /linkedDates\?: Array<\{ value: string; label\?: string \}>/);
+  assert.match(dateTimePickerSource, /disabled=\{restrictToLinkedDates && linkedDateSet\.size > 0 \? \(date\) => !linkedDateSet\.has\(toDateKey\(date\)\) : undefined\}/);
   assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 날짜 초기화`\}/);
   assert.match(workspaceSource, /patchMakeupSlot\(slot\.id \|\| "", \{ date: "" \}\)/);
   assert.match(workspaceSource, /aria-label=\{`보강일시 \$\{index \+ 1\} 시작시각 초기화`\}/);
@@ -619,6 +629,14 @@ test("makeup workspace filters table rows by subject teacher period and collapsi
   }
   assert.match(workspaceSource, /selectedSubjectFilter/);
   assert.match(workspaceSource, /selectedTeacherFilter/);
+  assert.match(serviceSource, /isVisible: row\.is_visible !== false/);
+  assert.match(serviceSource, /sortOrder: Number\(row\.sort_order \|\| row\.sortOrder \|\| 0\)/);
+  assert.match(workspaceSource, /function matchesMakeupTeacherSubject/);
+  assert.match(workspaceSource, /function getClassTeacherSelectionKey/);
+  assert.match(workspaceSource, /function matchesClassTeacherSelection/);
+  assert.match(workspaceSource, /data\.teachers[\s\S]*matchesMakeupTeacherSubject\(teacher, selectedSubjectFilter === "all" \? "" : selectedSubjectFilter\)/);
+  assert.match(workspaceSource, /data\.teachers[\s\S]*matchesMakeupTeacherSubject\(teacher, selectedSubject\)/);
+  assert.match(workspaceSource, /matchesClassTeacherSelection\(classItem, selectedTeacherKey, data\.teachers\)/);
   assert.doesNotMatch(workspaceSource, /selectedClassFilter/);
   assert.doesNotMatch(workspaceSource, /ariaLabel="수업 필터"/);
   assert.doesNotMatch(workspaceSource, /allLabel="수업 전체"/);

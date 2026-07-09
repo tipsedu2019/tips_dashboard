@@ -580,6 +580,57 @@ function getClassFilterValues(row: ManagementRow, columnId: ClassFilterColumnId)
   return value ? [value] : [];
 }
 
+function getManagementTeacherCatalogRows(rows: ManagementRow[]) {
+  const byIdOrName = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const raw = row.raw || {};
+    const catalogs = Array.isArray(raw.available_teacher_catalogs)
+      ? raw.available_teacher_catalogs
+      : Array.isArray(raw.availableTeacherCatalogs)
+        ? raw.availableTeacherCatalogs
+        : [];
+    for (const catalog of catalogs) {
+      if (!catalog || typeof catalog !== "object") continue;
+      const catalogRow = catalog as Record<string, unknown>;
+      const name = normalizeScalar(catalogRow.name);
+      const key = normalizeScalar(catalogRow.id) || name;
+      if (!key || !name) continue;
+      byIdOrName.set(key, catalogRow);
+    }
+  }
+  return [...byIdOrName.values()];
+}
+
+function normalizeManagementTeacherSubjects(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeScalar).filter(Boolean);
+  }
+  return splitClassFilterValue(normalizeScalar(value), "teacher");
+}
+
+function normalizeManagementSubjectToken(value: unknown) {
+  return normalizeScalar(value).replace(/\s+/g, "").replace(/(과목|팀)$/g, "");
+}
+
+function matchesManagementTeacherSubject(catalog: Record<string, unknown>, subject: string) {
+  const selectedSubject = normalizeScalar(subject);
+  if (!selectedSubject) return true;
+  const subjects = normalizeManagementTeacherSubjects(catalog.subjects);
+  if (subjects.length === 0) return true;
+  const selectedToken = normalizeManagementSubjectToken(selectedSubject);
+  return subjects.some((catalogSubject) => (
+    catalogSubject === selectedSubject || normalizeManagementSubjectToken(catalogSubject) === selectedToken
+  ));
+}
+
+function getManagementTeacherCatalogOptions(rows: ManagementRow[], subject: string) {
+  return getManagementTeacherCatalogRows(rows)
+    .filter((catalog) => catalog.is_visible !== false && matchesManagementTeacherSubject(catalog, subject))
+    .sort((left, right) => Number(left.sort_order || left.sortOrder || 0) - Number(right.sort_order || right.sortOrder || 0) || normalizeScalar(left.name).localeCompare(normalizeScalar(right.name), "ko", { numeric: true }))
+    .map((catalog) => normalizeScalar(catalog.name))
+    .filter(Boolean);
+}
+
 function sortClassFilterOptions(columnId: ClassFilterColumnId, values: string[]) {
   if (columnId !== "subject") {
     return [...values].sort((a, b) => a.localeCompare(b, "ko"));
@@ -2013,9 +2064,12 @@ export function ManagementDataTable({
       const sourceRows = selectedSubjectFilter && (filter.id === "teacher" || filter.id === "classroom")
         ? tableSourceRows.filter((row) => getClassFilterValues(row, "subject").includes(selectedSubjectFilter))
         : tableSourceRows;
+      const catalogOptions = filter.id === "teacher"
+        ? getManagementTeacherCatalogOptions(tableSourceRows, selectedSubjectFilter)
+        : [];
       current[filter.id] = sortClassFilterOptions(
         filter.id,
-        [...new Set(sourceRows.flatMap((row) => getClassFilterValues(row, filter.id)))],
+        [...new Set([...catalogOptions, ...sourceRows.flatMap((row) => getClassFilterValues(row, filter.id))])],
       );
       return current;
     }, emptyOptions);
