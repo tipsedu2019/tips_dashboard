@@ -771,11 +771,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   const withdrawalDetailTopSource = withdrawalDetailSource.slice(
     withdrawalDetailSource.indexOf('aria-label="퇴원 상세 신청서"'),
-    withdrawalDetailSource.indexOf('<div className="text-sm font-semibold">신청</div>'),
+    withdrawalDetailSource.indexOf('<details className="group rounded-md border">'),
   );
   const withdrawalDetailProcessingSource = withdrawalDetailSource.slice(
-    withdrawalDetailSource.indexOf('<div className="text-sm font-semibold">처리</div>'),
-    withdrawalDetailSource.indexOf("</section>"),
+    withdrawalDetailSource.indexOf('<details className="group rounded-md border">'),
+    withdrawalDetailSource.indexOf("</details>"),
   );
   const withdrawalCheckBlockerSource = source.slice(
     source.indexOf("function getMissingWithdrawalCheckLabels"),
@@ -916,14 +916,16 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'columnKey: "customerReason"',
     'columnKey: "teacherOpinion"',
     'columnKey: "undistributedTextbooks"',
-    'columnKey: "requester"',
-    'columnKey: "requestedAt"',
+    'columnKey: "operationsChecklist"',
     'columnKey: "action"',
   ]);
   assertIncludesAll(withdrawalDataTableSource, [
     'aria-label="퇴원 전체 필터"',
     'aria-label="퇴원 누가 필터"',
     'aria-label={`${filterColumn.label} 열 필터`}',
+    "filterInputOpen",
+    "isFilterInputExpanded",
+    "setFilterInputOpen((current) => !current)",
     'aria-label="퇴원 신청 데이터테이블"',
     'data-testid="withdrawal-mobile-task-list"',
     'aria-label="퇴원 모바일 목록"',
@@ -935,6 +937,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'setFilterColumnKey(columnKey)',
     '[grid-template-columns:var(--withdrawal-grid-template)]',
     "<WithdrawalPeriodFilterBar",
+    "WithdrawalOperationsChecklistChips",
   ]);
   assert.match(withdrawalDataTableSource, /className="grid gap-2 p-3 md:hidden"/);
   assert.match(withdrawalDataTableSource, /className="hidden w-full overflow-x-auto md:block"/);
@@ -953,6 +956,8 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.doesNotMatch(withdrawalDataTableSource, /allLabel="수업 전체"/);
   assert.doesNotMatch(withdrawalDataTableSource, /label="학생 필터"/);
   assert.doesNotMatch(withdrawalDataTableSource, /allLabel="학생 전체"/);
+  assert.doesNotMatch(withdrawalDataTableSource, /columnKey: "requester"/);
+  assert.doesNotMatch(withdrawalDataTableSource, /columnKey: "requestedAt"/);
 
   assertIncludesAll(withdrawalFormSource, [
     "selectWithdrawalSubject",
@@ -1138,8 +1143,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
     /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isWithdrawalWorkspace \? "퇴원 흐름" : `\$\{workspaceLabel\} 보기`\}/,
   );
   assertIncludesAll(withdrawalDetailSource, [
-    "신청",
-    "처리",
+    "신청 · 처리",
     "퇴원 상세 신청서",
     "고객 퇴원사유",
     "선생님 의견",
@@ -1149,6 +1153,9 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "진행 수업시수",
     "4주 기준 수업시수",
     "수업진행률",
+    "처리 확인",
+    "신청자",
+    "신청일시",
   ]);
   assertIncludesAll(withdrawalDetailTopSource, [
     "고객 퇴원사유",
@@ -1159,8 +1166,12 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "진행 수업시수",
     "4주 기준 수업시수",
     "수업진행률",
+    "처리 확인",
   ]);
   assertIncludesAll(withdrawalDetailProcessingSource, [
+    "신청 · 처리",
+    "신청자",
+    "신청일시",
     "담당자",
     "완료일시",
   ]);
@@ -1218,7 +1229,6 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.match(withdrawalCheckBlockerSource, /return \[\]/);
   assert.doesNotMatch(withdrawalCheckBlockerSource, /메이크에듀 퇴원처리|수업료 처리|교재비 처리/);
   assert.doesNotMatch(withdrawalDetailSource, /TaskTypeBadge|TaskStatusBadge|getTaskPriorityLabel|완료 상태/);
-  assert.doesNotMatch(withdrawalDetailSource, /WithdrawalOperationsChecklist/);
   assert.doesNotMatch(withdrawalDetailSource, /WithdrawalFlowSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /AutoSyncResultSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /결재/);

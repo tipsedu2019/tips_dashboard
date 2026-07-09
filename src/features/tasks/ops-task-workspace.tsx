@@ -150,8 +150,7 @@ type WithdrawalTableColumnKey =
   | "customerReason"
   | "teacherOpinion"
   | "undistributedTextbooks"
-  | "requester"
-  | "requestedAt"
+  | "operationsChecklist"
   | "action"
 type WithdrawalTableSort = {
   columnKey: WithdrawalTableColumnKey
@@ -247,8 +246,7 @@ const WITHDRAWAL_TABLE_COLUMNS: Array<{
   { columnKey: "customerReason", label: "고객 퇴원사유", width: 210, minWidth: 150 },
   { columnKey: "teacherOpinion", label: "선생님 의견", width: 190, minWidth: 140 },
   { columnKey: "undistributedTextbooks", label: "미배부 교재", width: 170, minWidth: 130 },
-  { columnKey: "requester", label: "신청자", width: 110, minWidth: 94 },
-  { columnKey: "requestedAt", label: "신청일시", width: 152, minWidth: 124 },
+  { columnKey: "operationsChecklist", label: "처리 확인", width: 218, minWidth: 180 },
   { columnKey: "action", label: "액션", width: 188, minWidth: 160, align: "right" },
 ]
 const WITHDRAWAL_TABLE_COLUMN_WIDTHS = WITHDRAWAL_TABLE_COLUMNS.reduce((widths, column) => {
@@ -445,6 +443,8 @@ const WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES = [
   ...WITHDRAWAL_TABLE_COLUMNS
     .map((column) => column.label)
     .filter((label) => label !== "액션"),
+  "신청자",
+  "신청일시",
   "담당선생님",
   "관리팀",
   "프로세스",
@@ -1447,6 +1447,42 @@ function sortWordRetestTasksByTestAt(tasks: OpsTask[]) {
 
 function getWithdrawalTableGridTemplate(widths: Record<WithdrawalTableColumnKey, number>) {
   return WITHDRAWAL_TABLE_COLUMNS.map((column) => `${widths[column.columnKey]}px`).join(" ")
+}
+
+function getWithdrawalOperationsChecklist(withdrawal?: OpsTask["withdrawal"]) {
+  return [
+    { key: "makeedu", label: "메이크에듀", detail: "메이크에듀 퇴원처리", checked: Boolean(withdrawal?.makeeduWithdrawalDone) },
+    { key: "fee", label: "수업료", detail: "수업료 처리", checked: Boolean(withdrawal?.feeProcessed) },
+    { key: "textbookFee", label: "교재비", detail: "교재비 처리", checked: Boolean(withdrawal?.textbookFeeProcessed) },
+  ]
+}
+
+function getWithdrawalOperationsChecklistValue(withdrawal?: OpsTask["withdrawal"]) {
+  const items = getWithdrawalOperationsChecklist(withdrawal)
+  const completedCount = items.filter((item) => item.checked).length
+  const pendingItems = items.filter((item) => !item.checked).map((item) => item.detail)
+  return pendingItems.length > 0 ? `${completedCount}/3 · ${pendingItems.join(", ")}` : "3/3 · 처리 확인 완료"
+}
+
+function WithdrawalOperationsChecklistChips({ withdrawal }: { withdrawal?: OpsTask["withdrawal"] }) {
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {getWithdrawalOperationsChecklist(withdrawal).map((item) => (
+        <span
+          key={item.key}
+          className={[
+            "inline-flex h-6 max-w-full items-center rounded-md border px-2 text-xs font-medium",
+            item.checked
+              ? "border-primary/20 bg-primary/10 text-primary"
+              : "border-amber-300 bg-amber-50 text-amber-800",
+          ].join(" ")}
+          title={item.detail}
+        >
+          <span className="truncate">{item.label}</span>
+        </span>
+      ))}
+    </div>
+  )
 }
 
 function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey, number>) {
@@ -4363,12 +4399,6 @@ function getWithdrawalMonthRange(todayKey: string) {
   return getWordRetestMonthRange(todayKey)
 }
 
-function getWithdrawalDateTimeLabel(value?: string) {
-  const dateTime = dateTimeInputValue(value)
-  if (dateTime) return dateTime.replace("T", " ")
-  return dateOnlyLabel(value)
-}
-
 function getWithdrawalTeacherLabel(task: OpsTask) {
   return task.withdrawal?.teacherName || "미지정"
 }
@@ -4445,10 +4475,8 @@ function getWithdrawalTableValue(task: OpsTask, columnKey: WithdrawalTableColumn
       return withdrawal.teacherOpinion || "-"
     case "undistributedTextbooks":
       return withdrawal.undistributedTextbooks || "-"
-    case "requester":
-      return task.requestedByLabel || "-"
-    case "requestedAt":
-      return getWithdrawalDateTimeLabel(task.createdAt)
+    case "operationsChecklist":
+      return getWithdrawalOperationsChecklistValue(withdrawal)
     case "action":
       return ""
     default:
@@ -4689,14 +4717,17 @@ function WithdrawalDataTable({
   const [withdrawalTableSort, setWithdrawalTableSort] = useState<WithdrawalTableSort>(null)
   const [filterColumnKey, setFilterColumnKey] = useState<WithdrawalTableColumnKey>("className")
   const [filterValue, setFilterValue] = useState("")
+  const [filterInputOpen, setFilterInputOpen] = useState(false)
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState("all")
   const [withdrawalPeriodFilter, setWithdrawalPeriodFilter] = useState<WithdrawalPeriodFilter>("all")
   const [withdrawalPeriodStartDate, setWithdrawalPeriodStartDate] = useState("")
   const [withdrawalPeriodEndDate, setWithdrawalPeriodEndDate] = useState("")
+  const filterInputRef = useRef<HTMLInputElement>(null)
   const gridTemplateColumns = getWithdrawalTableGridTemplate(columnWidths)
   const gridTemplateStyle = { "--withdrawal-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = WITHDRAWAL_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || WITHDRAWAL_TABLE_COLUMNS[3]
+  const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
 
   const subjectFilterOptions = useMemo(() => (
     buildWithdrawalSelectFilterOptions(tasks, (task) => ({
@@ -4756,6 +4787,10 @@ function WithdrawalDataTable({
     })
   }
 
+  useEffect(() => {
+    if (filterInputOpen) filterInputRef.current?.focus()
+  }, [filterInputOpen])
+
   function startColumnResize(key: WithdrawalTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault()
     const startX = event.clientX
@@ -4805,19 +4840,42 @@ function WithdrawalDataTable({
           onStartDateChange={setWithdrawalPeriodStartDate}
           onEndDateChange={setWithdrawalPeriodEndDate}
         />
-        <div className="ml-auto flex min-w-[12rem] items-center gap-2 text-sm font-medium" aria-label="퇴원 데이터테이블 열 필터">
-          <Filter className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <Input
-            aria-label={`${filterColumn.label} 열 필터`}
-            value={filterValue}
-            onChange={(event) => setFilterValue(event.target.value)}
-            placeholder={`${filterColumn.label} 값 입력`}
-            className="h-8 min-w-0 flex-1 sm:w-48"
-          />
-          {filterValue ? (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setFilterValue("")}>
-              지우기
-            </Button>
+        <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium" aria-label="퇴원 데이터테이블 열 필터">
+          <Button
+            type="button"
+            variant={isFilterInputExpanded ? "secondary" : "outline"}
+            size="sm"
+            className="size-8 px-0"
+            aria-label={isFilterInputExpanded ? `${filterColumn.label} 열 필터 접기` : `${filterColumn.label} 열 필터 펼치기`}
+            aria-expanded={isFilterInputExpanded}
+            onClick={() => setFilterInputOpen((current) => !current)}
+          >
+            <Filter className="size-4" aria-hidden="true" />
+          </Button>
+          {isFilterInputExpanded ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Input
+                ref={filterInputRef}
+                aria-label={`${filterColumn.label} 열 필터`}
+                value={filterValue}
+                onChange={(event) => setFilterValue(event.target.value)}
+                placeholder={`${filterColumn.label} 값 입력`}
+                className="h-8 min-w-0 flex-1 sm:w-48"
+              />
+              {filterValue ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFilterValue("")
+                    setFilterInputOpen(false)
+                  }}
+                >
+                  지우기
+                </Button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -4876,6 +4934,12 @@ function WithdrawalDataTable({
                     <dt className="text-muted-foreground">수업진행률</dt>
                     <dd className="mt-0.5 truncate font-medium">{progress === "-" ? "자동 계산" : progress}</dd>
                   </div>
+                </div>
+                <div className="rounded-md bg-muted/35 px-2 py-1.5">
+                  <dt className="text-muted-foreground">처리 확인</dt>
+                  <dd className="mt-1">
+                    <WithdrawalOperationsChecklistChips withdrawal={withdrawal} />
+                  </dd>
                 </div>
                 {withdrawal.customerReason || withdrawal.teacherOpinion ? (
                   <div className="rounded-md bg-muted/35 px-2 py-1.5">
@@ -5021,6 +5085,13 @@ function WithdrawalDataTable({
                           </Button>
                         )}
                       </span>
+                    </WithdrawalDataCell>
+                  )
+                }
+                if (column.columnKey === "operationsChecklist") {
+                  return (
+                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)}>
+                      <WithdrawalOperationsChecklistChips withdrawal={task.withdrawal} />
                     </WithdrawalDataCell>
                   )
                 }
@@ -6702,7 +6773,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const isWithdrawalFilteredEmpty = isWithdrawalWorkspace && withdrawalView !== "applicant"
   const isFilteredEmpty = hasQuery || isTodoFilteredEmpty || isWordRetestFilteredEmpty || isWithdrawalFilteredEmpty || (!isTodoWorkspace && taskFocus !== "none") || (isRegistrationWorkspace && registrationPipeline !== REGISTRATION_PIPELINE_ALL)
   const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleTasks.length === 0
-  const showToolbarCreate = !isTodoWorkspace && !showEmptyCreate
+  const showToolbarCreate = !isTodoWorkspace && (isWithdrawalWorkspace || !showEmptyCreate)
   const canOpenCreate = isTodoWorkspace || !loading
   const createActionDisabled = saving || !canOpenCreate
   const closedScopedTaskCount = scopedTasks.filter((task) => isClosedOpsTask(task)).length
@@ -8197,7 +8268,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	            onCreate={() => openCreate(scopedTaskType)}
 	            emptyLabel={emptyTaskLabel}
 	            emptyActionLabel={emptyActionLabel}
-	            showEmptyAction={showEmptyCreate}
+	            showEmptyAction={false}
 	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	          />
 	        ) : isWordRetestWorkspace ? (
@@ -11609,24 +11680,27 @@ function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
           <Info label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />
           <Info label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours || "자동 계산"} />
           <Info label="수업진행률" value={progress === "-" ? "자동 계산" : progress} />
+          <div className="md:col-span-2">
+            <dt className="text-xs text-muted-foreground">처리 확인</dt>
+            <dd className="mt-1">
+              <WithdrawalOperationsChecklistChips withdrawal={withdrawal} />
+            </dd>
+          </div>
         </dl>
       </div>
 
-      <div className="grid gap-3 rounded-md border p-3">
-        <div className="text-sm font-semibold">신청</div>
-        <dl className="grid gap-3 text-sm md:grid-cols-2">
+      <details className="group rounded-md border">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+          <span>신청 · 처리</span>
+          <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
+        </summary>
+        <dl className="grid gap-3 border-t px-3 py-3 text-sm md:grid-cols-2">
           <Info label="신청자" value={task.requestedByLabel || "담당선생님"} />
           <Info label="신청일시" value={dateLabel(task.createdAt)} />
-        </dl>
-      </div>
-
-      <div className="grid gap-3 rounded-md border p-3">
-        <div className="text-sm font-semibold">처리</div>
-        <dl className="grid gap-3 text-sm md:grid-cols-2">
           <Info label="담당자" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
           <Info label="완료일시" value={completedAt === "-" ? "미정" : completedAt} />
         </dl>
-      </div>
+      </details>
     </section>
   )
 }
