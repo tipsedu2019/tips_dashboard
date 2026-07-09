@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -1970,74 +1970,6 @@ function findLessonDesignSessionByDate(
   return matches.find((session) => session.scheduleState !== "makeup") || matches[0] || null;
 }
 
-function buildLessonDesignReadinessActions(
-  lessonDesignSnapshot: ReturnType<typeof buildLessonDesignSnapshot>,
-  selectedLessonSession: { id: string; label: string } | null,
-) {
-  if (!lessonDesignSnapshot) {
-    return [] as Array<{
-      key: string;
-      label: string;
-      summary: string;
-      sectionId: string;
-      variant: "default" | "secondary" | "outline";
-    }>;
-  }
-
-  const plannedTemplateCount = lessonDesignSnapshot.sessions.filter(
-    (session) =>
-      session.rangeLabel !== "범위 기록 없음" ||
-      session.textbookEntries.some((entry) => entry.hasPlanContent),
-  ).length;
-  const actions: Array<{
-    key: string;
-    label: string;
-    summary: string;
-    sectionId: string;
-    variant: "default" | "secondary" | "outline";
-  }> = [];
-
-  const needsPeriodCheck =
-    lessonDesignSnapshot.billingPeriods.length === 0 ||
-    lessonDesignSnapshot.periodRange === "운영 기간 미정" ||
-    lessonDesignSnapshot.saveReadiness.blockers.some(
-      (item) => item.includes("생성 구간") || item.includes("시작일") || item.includes("종료일") || item.includes("겹치는"),
-    );
-  if (needsPeriodCheck) {
-    actions.push({
-      key: "periods",
-      label: "생성 구간 점검",
-      summary: "구간 수 · 날짜 범위 · 겹침 여부를 현재 저장 검토 기준으로 확인합니다.",
-      sectionId: LESSON_DESIGN_SECTION_IDS.periods,
-      variant: "secondary",
-    });
-  }
-
-  if (lessonDesignSnapshot.sessionCount === 0) {
-    actions.push({
-      key: "calendar",
-      label: "생성 일정 확인",
-      summary: "회차가 생성되지 않은 상태인지 월 캘린더 기준으로 확인합니다.",
-      sectionId: LESSON_DESIGN_SECTION_IDS.calendar,
-      variant: "secondary",
-    });
-  }
-
-  if (plannedTemplateCount === 0) {
-    actions.push({
-      key: "board",
-      label: "회차 목록 확인",
-      summary: "회차별 계획 범위와 실진도 템플릿 준비 상태를 점검합니다.",
-      sectionId: LESSON_DESIGN_SECTION_IDS.board,
-      variant: "outline",
-    });
-  }
-
-  void selectedLessonSession;
-
-  return actions;
-}
-
 function buildLessonCalendarCells(year: number, month: number) {
   const firstDay = new Date(year, month, 1);
   const lastDate = new Date(year, month + 1, 0).getDate();
@@ -2517,6 +2449,7 @@ export function ClassScheduleWorkspace() {
   const searchParamString = searchParams.toString();
   const isLessonDesignPage = pathname.endsWith("/lesson-design");
   const isLessonDesignRouteActive = isLessonDesignPage || searchParams.get("lessonDesign") === "1";
+  const isLessonDesignModalRoute = searchParams.get("lessonDesign") === "1" && !isLessonDesignPage;
   const classScheduleListRef = useRef<HTMLDivElement | null>(null);
   const [search, setSearch] = useState(() => text(searchParams.get("q")));
   const [termId, setTermId] = useState(() => text(searchParams.get("term")));
@@ -3246,10 +3179,6 @@ export function ClassScheduleWorkspace() {
     : selectedLessonSession && selectedLessonSession.textbookEntries.length > 0
       ? `${selectedLessonSessionAssignedTextbookCount}/${selectedLessonSession.textbookEntries.length}권`
       : "";
-  const lessonDesignReadinessActions = useMemo(
-    () => buildLessonDesignReadinessActions(lessonDesignSnapshot, selectedLessonSession),
-    [lessonDesignSnapshot, selectedLessonSession],
-  );
   const updateLessonPlanDraft = useCallback(
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       setLessonPlanDraft((current) => {
@@ -3892,7 +3821,8 @@ export function ClassScheduleWorkspace() {
 
   const requestedClassId = text(searchParams.get("classId"));
   const requestedSessionId = text(searchParams.get("sessionId"));
-  const requestedLessonDesignSectionId = resolveLessonDesignSectionId(text(searchParams.get("section")));
+  const requestedLessonDesignSectionId = isLessonDesignModalRoute ? "" : resolveLessonDesignSectionId(text(searchParams.get("section")));
+  const lessonDesignDefaultSectionId = isLessonDesignModalRoute ? LESSON_DESIGN_SECTION_IDS.periods : isLessonDesignPage && selectedLessonSessionId ? LESSON_DESIGN_SECTION_IDS.board : "";
   const requestedLessonReturnPath = normalizeAdminReturnPath(searchParams.get("returnTo"));
   const requestedLessonMonthKeys = useMemo(
     () =>
@@ -4163,9 +4093,13 @@ export function ClassScheduleWorkspace() {
       return;
     }
 
+    const fallbackLessonDesignSectionId = isLessonDesignPage && requestedSessionId
+      ? LESSON_DESIGN_SECTION_IDS.board
+      : LESSON_DESIGN_SECTION_IDS.periods;
     const targetSectionId =
       requestedLessonDesignSectionId ||
-      (requestedSessionId ? LESSON_DESIGN_SECTION_IDS.board : LESSON_DESIGN_SECTION_IDS.periods);
+      lessonDesignDefaultSectionId ||
+      fallbackLessonDesignSectionId;
 
     if (lessonDesignOpen && selectedClassId === requestedClassId) {
       return;
@@ -4187,6 +4121,7 @@ export function ClassScheduleWorkspace() {
     router,
     searchParams,
     requestedLessonDesignSectionId,
+    lessonDesignDefaultSectionId,
     requestedLessonMonthKeys,
     selectedClassId,
     selectedLessonSessionId,
@@ -4285,8 +4220,7 @@ export function ClassScheduleWorkspace() {
             : "",
         sectionId:
           isLessonDesignRouteActive
-            ? requestedLessonDesignSectionId ||
-              (isLessonDesignPage && selectedLessonSessionId ? LESSON_DESIGN_SECTION_IDS.board : "")
+            ? requestedLessonDesignSectionId || lessonDesignDefaultSectionId
             : "",
         monthKeys:
           isLessonDesignRouteActive &&
@@ -4330,6 +4264,7 @@ export function ClassScheduleWorkspace() {
     selectedLessonPeriodId,
     selectedLessonScheduleState,
     lessonDesignSnapshot,
+    lessonDesignDefaultSectionId,
     requestedLessonDesignSectionId,
     requestedSessionId,
     selectedLessonSessionId,
@@ -4347,9 +4282,11 @@ export function ClassScheduleWorkspace() {
     return <ClassScheduleSkeleton />;
   }
 
-  const lessonDesignActiveMode =
+  const lessonDesignRequestedProgressMode =
     requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.board ||
-    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.textbooks
+    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.textbooks;
+  const lessonDesignActiveMode =
+    !isLessonDesignModalRoute && lessonDesignRequestedProgressMode
       ? "progress"
       : "schedule";
   const isLessonDesignProgressMode = lessonDesignActiveMode === "progress";
@@ -4751,31 +4688,6 @@ export function ClassScheduleWorkspace() {
               <AlertDescription>{lessonDesignSaveNotice}</AlertDescription>
             </Alert>
           ) : null}
-          {!lessonDesignSnapshot.saveReadiness.ready &&
-          (lessonDesignReadinessActions.length > 0 || lessonDesignSnapshot.saveReadiness.blockers.length > 0) ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-[1.5rem] border bg-background/90 px-4 py-3 xl:col-span-2 2xl:col-span-full">
-              <span className="text-sm font-medium text-foreground">저장 전 확인</span>
-              {lessonDesignReadinessActions.map((action) => (
-                <Button
-                  key={action.key}
-                  type="button"
-                  size="sm"
-                  variant={action.variant}
-                  onClick={() => scrollLessonDesignSection(action.sectionId)}
-                >
-                  {action.label}
-                </Button>
-              ))}
-              {lessonDesignReadinessActions.length === 0
-                ? lessonDesignSnapshot.saveReadiness.blockers.map((item) => (
-                    <Badge key={item} variant="outline">
-                      {item}
-                    </Badge>
-                  ))
-                : null}
-            </div>
-          ) : null}
-
           <div className="border-b bg-background pb-4 pt-1 xl:col-span-full">
             <div className="flex flex-wrap items-center gap-2">
               <div
@@ -6497,18 +6409,20 @@ export function ClassScheduleWorkspace() {
           )}
         </div>
       ) : (
-        <Dialog open={lessonDesignOpen} onOpenChange={handleLessonDesignOpenChange}>
-          <DialogContent
-            data-testid="lesson-design-fullscreen-dialog"
-            className="fixed !inset-0 !left-0 !top-0 z-[80] !flex h-dvh w-screen !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 !rounded-none overflow-hidden !border-0 !p-0 !shadow-none sm:!max-w-none"
-          >
-            <DialogTitle className="sr-only">{lessonDesignTitle}</DialogTitle>
-            <DialogDescription className="sr-only">
-              수업 일정과 수업교재를 연결하고 회차별 진도를 설계합니다.
-            </DialogDescription>
-            <div
-              data-testid="lesson-design-dialog-scroll"
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-28"
+	        <Dialog open={lessonDesignOpen} onOpenChange={handleLessonDesignOpenChange}>
+	          <DialogContent
+	            data-testid="lesson-design-modal-dialog"
+	            className="z-[80] flex max-h-[calc(100dvh-5rem)] w-[calc(100vw-2rem)] max-w-6xl flex-col overflow-hidden p-0 sm:max-w-6xl"
+	          >
+	            <DialogHeader className="border-b px-4 py-3 sm:px-5">
+	              <DialogTitle className="truncate text-base font-semibold">{lessonDesignTitle}</DialogTitle>
+	              <DialogDescription className="sr-only">
+	                수업 일정과 수업교재를 연결하고 회차별 진도를 설계합니다.
+	              </DialogDescription>
+	            </DialogHeader>
+	            <div
+	              data-testid="lesson-design-dialog-scroll"
+	              className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-28"
             >
               {lessonDesignWorkspaceContent}
             </div>

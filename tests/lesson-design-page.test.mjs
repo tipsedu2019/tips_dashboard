@@ -22,15 +22,18 @@ test("shared lesson design workspace content does not depend on dialog title pri
   assert.doesNotMatch(workspaceContentMatch[1], /DialogDescription/);
 });
 
-test("lesson design modal opens fullscreen with its own scroll viewport", async () => {
+test("lesson design opens as a contained modal with its own scroll viewport", async () => {
   const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
 
-  assert.match(source, /data-testid="lesson-design-fullscreen-dialog"/);
-  assert.match(source, /<DialogTitle className="sr-only">\{lessonDesignTitle\}<\/DialogTitle>/);
-  assert.match(source, /className="[^"]*fixed[^"]*!inset-0[^"]*!flex[^"]*h-dvh[^"]*w-screen[^"]*!max-w-none[^"]*!translate-x-0[^"]*!translate-y-0[^"]*!rounded-none[^"]*overflow-hidden[^"]*"/);
+  assert.match(source, /data-testid="lesson-design-modal-dialog"/);
+  assert.match(source, /<DialogTitle className="truncate text-base font-semibold">\{lessonDesignTitle\}<\/DialogTitle>/);
   assert.match(source, /data-testid="lesson-design-dialog-scroll"/);
+  assert.match(source, /className="[^"]*max-h-\[calc\(100dvh-5rem\)\][^"]*w-\[calc\(100vw-2rem\)\][^"]*max-w-6xl[^"]*overflow-hidden[^"]*p-0[^"]*"/);
   assert.match(source, /className="[^"]*min-h-0[^"]*flex-1[^"]*overflow-y-auto[^"]*overscroll-contain[^"]*scroll-pb-28[^"]*"/);
-  assert.doesNotMatch(source, /h-\[92vh\] w-\[98vw\] max-w-\[1600px\]/);
+  assert.doesNotMatch(source, /data-testid="lesson-design-fullscreen-dialog"/);
+  assert.doesNotMatch(source, /!inset-0/);
+  assert.doesNotMatch(source, /w-screen/);
+  assert.doesNotMatch(source, /!rounded-none/);
 });
 
 test("lesson design page keeps schedule controls direct and non-duplicative", async () => {
@@ -413,6 +416,8 @@ test("lesson design splits schedule generation from progress generation", async 
   assert.match(source, /lessonDesignActiveMode/);
   assert.match(source, /isLessonDesignProgressMode/);
   assert.match(source, /const isLessonDesignRouteActive = isLessonDesignPage \|\| searchParams\.get\("lessonDesign"\) === "1"/);
+  assert.match(source, /const isLessonDesignModalRoute = searchParams\.get\("lessonDesign"\) === "1" && !isLessonDesignPage/);
+  assert.match(source, /const lessonDesignDefaultSectionId = isLessonDesignModalRoute \? LESSON_DESIGN_SECTION_IDS\.periods/);
   assert.match(source, /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.board \|\|\s*requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.textbooks/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.periods\)/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.board\)/);
@@ -428,12 +433,29 @@ test("lesson design splits schedule generation from progress generation", async 
   assert.match(source, /sectionId: LESSON_DESIGN_SECTION_IDS\.board/);
   assert.match(
     source,
-    /sectionId:\s*isLessonDesignRouteActive\s*\?\s*requestedLessonDesignSectionId \|\|\s*\(isLessonDesignPage && selectedLessonSessionId \? LESSON_DESIGN_SECTION_IDS\.board : ""\)\s*: ""/,
+    /sectionId:\s*isLessonDesignRouteActive\s*\?\s*requestedLessonDesignSectionId \|\| lessonDesignDefaultSectionId\s*: ""/,
   );
   assert.doesNotMatch(
     source,
     /sectionId:\s*isLessonDesignPage\s*\?\s*requestedLessonDesignSectionId \|\|\s*\(selectedLessonSessionId \? LESSON_DESIGN_SECTION_IDS\.board : ""\)\s*: ""/,
   );
+  assert.doesNotMatch(
+    source,
+    /requestedSessionId \? LESSON_DESIGN_SECTION_IDS\.board : LESSON_DESIGN_SECTION_IDS\.periods/,
+  );
+});
+
+test("lesson design modal removes the readiness jump strip", async () => {
+  const source = await readSource("src/features/operations/class-schedule-workspace.tsx");
+  const workspaceContentMatch = source.match(
+    /const lessonDesignWorkspaceContent = \(([\s\S]*?)\r?\n\r?\n  const classScheduleWorkspaceContent = \(/,
+  );
+
+  assert.ok(workspaceContentMatch, "lesson design workspace content block should exist");
+  assert.doesNotMatch(workspaceContentMatch[1], />저장 전 확인<\/span>/);
+  assert.doesNotMatch(workspaceContentMatch[1], /lessonDesignReadinessActions\.map/);
+  assert.doesNotMatch(workspaceContentMatch[1], /scrollLessonDesignSection\(action\.sectionId\)/);
+  assert.match(source, /lessonDesignSnapshot\.saveReadiness\.ready/);
 });
 
 test("lesson design keeps navigation, recovery, and save actions stable", async () => {

@@ -963,6 +963,27 @@ function formatManagementCurrency(value: unknown) {
   return `${new Intl.NumberFormat("ko-KR").format(amount)}원`;
 }
 
+function normalizeClassScheduleMeta(value: unknown) {
+  return formatDelimitedLabel(value).replace(/\s+/g, " ").trim();
+}
+
+function formatClassScheduleLineForList(line: string, row: ManagementRow) {
+  const raw = row.raw || {};
+  const teacher = normalizeClassScheduleMeta(raw.teacher || raw.teacher_name || raw.teacherName);
+  const classroom = normalizeClassScheduleMeta(raw.classroom || raw.room);
+  const expectedScheduleMeta = [teacher, classroom].filter(Boolean).join(", ");
+  if (!expectedScheduleMeta) {
+    return line;
+  }
+
+  return line.replace(/\s*\(([^()]*)\)\s*$/, (match, slotMeta) => {
+    if (normalizeClassScheduleMeta(slotMeta) !== normalizeClassScheduleMeta(expectedScheduleMeta)) {
+      return match;
+    }
+    return "";
+  });
+}
+
 function renderClassScheduleCell(row: ManagementRow) {
   const scheduleLines = Array.isArray((row.raw || {}).scheduleLines)
     ? ((row.raw || {}).scheduleLines as string[])
@@ -977,7 +998,7 @@ function renderClassScheduleCell(row: ManagementRow) {
     <div className="grid min-w-[11rem] gap-1 py-0.5 text-sm text-foreground">
       {lines.map((line, index) => (
         <span key={`${row.id}-schedule-${index}`} className="leading-5">
-          {line}
+          {formatClassScheduleLineForList(line, row)}
         </span>
       ))}
     </div>
@@ -1095,10 +1116,6 @@ function renderEnrollmentRosterPopover(
 function renderEnrollmentStatusCell(row: ManagementRow) {
   const registeredCount = Number((row.raw || {}).registeredCount || (row.raw || {}).registered_count || row.metrics.studentCount || 0);
   const waitlistCount = Number((row.raw || {}).waitlistCount || (row.raw || {}).waitlist_count || row.metrics.waitlistCount || 0);
-  const capacity = getClassCapacity(row);
-  const capacityStatus = capacity > 0
-    ? normalizeScalar((row.raw || {}).capacityStatus || (row.raw || {}).capacity_status) || `${registeredCount}/${capacity}`
-    : "";
   const registeredStudents = normalizeClassStudentSummaries((row.raw || {}).registeredStudents || (row.raw || {}).registered_students);
   const waitlistStudents = normalizeClassStudentSummaries((row.raw || {}).waitlistStudents || (row.raw || {}).waitlist_students);
 
@@ -1106,7 +1123,6 @@ function renderEnrollmentStatusCell(row: ManagementRow) {
     <div className="flex min-w-[12rem] flex-wrap items-center gap-2 py-0.5">
       {renderEnrollmentRosterPopover("등록", registeredCount, registeredStudents)}
       {renderEnrollmentRosterPopover("대기", waitlistCount, waitlistStudents)}
-      {capacityStatus ? <span className="text-xs text-muted-foreground">정원 {capacityStatus}</span> : null}
     </div>
   );
 }
@@ -3241,10 +3257,12 @@ export function ManagementDataTable({
             globalFilterCompositionRef.current = false;
             updateGlobalFilter(value, { syncUrl: true });
           }}
-          summaryLabel={showSummaryBadge ? summaryLabel : ""}
-          chips={classFilterChips}
+          summaryLabel={""}
+          chips={[]}
+          filterCount={classFilterChips.length}
           primaryLabel={activePeriodLabel}
           showReset={hasActiveFilters}
+          showFooterReset={false}
           onReset={resetFilters}
           createLabel={createLabel}
           onCreate={actions.onCreate}

@@ -22,6 +22,19 @@ test("class toolbar uses the shared class filter panel", async () => {
   assert.match(panelSource, /조건 초기화/);
 });
 
+test("class toolbar removes the secondary result summary strip under filters", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
+
+  assert.match(source, /summaryLabel=\{""\}/);
+  assert.match(source, /chips=\{\[\]\}/);
+  assert.match(source, /showFooterReset=\{false\}/);
+  assert.doesNotMatch(source, /summaryLabel=\{showSummaryBadge \? summaryLabel : ""\}/);
+  assert.match(panelSource, /showFooterReset\?: boolean/);
+  assert.match(panelSource, /showFooterReset = true/);
+  assert.match(panelSource, /\{showFooterReset && showReset \? \(/);
+});
+
 test("student management filters lifecycle status separately from school filters", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
@@ -195,6 +208,28 @@ test("class teacher and classroom cells space comma-delimited values for scannin
   assert.match(source, /replace\(\/\\s\*,\\s\*\/g, ", "\)/);
   assert.match(source, /renderPlainCell\(formatDelimitedLabel\(\(row\.original\.raw \|\| \{\}\)\.teacher/);
   assert.match(source, /renderPlainCell\(formatDelimitedLabel\(\(row\.original\.raw \|\| \{\}\)\.classroom/);
+});
+
+test("class schedule omits repeated teacher and classroom details", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(source, /function formatClassScheduleLineForList\(line: string, row: ManagementRow\)/);
+  assert.match(source, /const expectedScheduleMeta = \[teacher, classroom\]\.filter\(Boolean\)\.join\(", "\)/);
+  assert.match(source, /if \(normalizeClassScheduleMeta\(slotMeta\) !== normalizeClassScheduleMeta\(expectedScheduleMeta\)\) \{/);
+  assert.match(source, /\{formatClassScheduleLineForList\(line, row\)\}/);
+});
+
+test("class enrollment status cell does not repeat capacity text", async () => {
+  const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const cellSource = source.slice(
+    source.indexOf("function renderEnrollmentStatusCell"),
+    source.indexOf("type StudentClassSummary"),
+  );
+
+  assert.match(cellSource, /renderEnrollmentRosterPopover\("등록", registeredCount, registeredStudents\)/);
+  assert.match(cellSource, /renderEnrollmentRosterPopover\("대기", waitlistCount, waitlistStudents\)/);
+  assert.doesNotMatch(cellSource, /capacityStatus/);
+  assert.doesNotMatch(cellSource, />정원 \{/);
 });
 
 test("class table caption announces operational totals instead of status counts", async () => {

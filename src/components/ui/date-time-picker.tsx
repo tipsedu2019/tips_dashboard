@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 
 const TIME_OPTION_START_MINUTES = 9 * 60
 const TIME_OPTION_END_MINUTES = 23 * 60 + 30
-const TIME_OPTION_STEP_MINUTES = 15
+const TIME_OPTION_STEP_MINUTES = 10
 const TIME_OPTIONS = Array.from({
   length: Math.floor((TIME_OPTION_END_MINUTES - TIME_OPTION_START_MINUTES) / TIME_OPTION_STEP_MINUTES) + 1,
 }, (_, index) => {

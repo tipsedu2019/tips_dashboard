@@ -50,6 +50,7 @@ type ClassFilterPanelProps = {
   summaryLabel?: ReactNode;
   chips?: ClassFilterPanelChip[];
   showReset?: boolean;
+  showFooterReset?: boolean;
   onReset?: () => void;
   filterCount?: number;
   primaryLabel?: string;
@@ -80,6 +81,7 @@ export function ClassFilterPanel({
   summaryLabel,
   chips = [],
   showReset = false,
+  showFooterReset = true,
   onReset,
   filterCount,
   primaryLabel,
@@ -99,7 +101,9 @@ export function ClassFilterPanel({
   const menuSelects = selects.filter((select) => !quickSelectIdSet.has(select.id));
   const menuSelectIdSet = new Set(menuSelects.map((select) => select.id));
   const activeMenuFilterCount = quickSelects.length > 0
-    ? chips.filter((chip) => menuSelectIdSet.has(chip.id)).length
+    ? chips.length > 0
+      ? chips.filter((chip) => menuSelectIdSet.has(chip.id)).length
+      : activeFilterCount
     : activeFilterCount;
 
   const renderSelectField = (select: ClassFilterPanelSelect) => {
@@ -242,7 +246,7 @@ export function ClassFilterPanel({
         </div>
       ) : null}
 
-      {summaryLabel || chips.length > 0 || showReset || footerAction ? (
+      {summaryLabel || chips.length > 0 || (showFooterReset && showReset) || footerAction ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
           {summaryLabel ? <Badge variant="secondary">{summaryLabel}</Badge> : null}
           {chips.map((chip) => (
@@ -250,7 +254,7 @@ export function ClassFilterPanel({
               {chip.label}
             </Badge>
           ))}
-          {showReset ? (
+          {showFooterReset && showReset ? (
             <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={onReset}>
               <X className="mr-1.5 size-3.5" />
               조건 초기화
