@@ -11,11 +11,10 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowDown, ArrowUp, Bell, Check, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, Check, ChevronRight, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { DatePickerControl, TimePickerControl } from "@/components/ui/date-time-picker"
 import {
   Dialog,
@@ -869,6 +868,15 @@ function MakeupRequestActionControls({
   )
 }
 
+function MakeupDetailInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 min-w-0 whitespace-pre-wrap break-words font-medium">{value || "-"}</dd>
+    </div>
+  )
+}
+
 function MakeupRequestDetailCard({
   request,
   data,
@@ -887,13 +895,82 @@ function MakeupRequestDetailCard({
   variant = "full",
 }: MakeupRequestActionControlsProps & {
   onOpenDetail?: () => void
-  variant?: "full" | "compact"
+  variant?: "full" | "compact" | "detail"
 }) {
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
   const isCompact = variant === "compact"
   const detailColumns = getVisibleMakeupRequestCardColumns(request)
   const title = request.className || "휴보강 신청"
   const subtitle = [request.subject, request.teacherLabel].filter(Boolean).join(" · ")
+  if (variant === "detail") {
+    return (
+      <section className="grid gap-4" aria-label="휴보강 상세 신청서">
+        <div className="grid gap-3 rounded-md border p-3">
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="truncate text-lg font-semibold">{title}</h3>
+              {subtitle ? <p className="mt-1 truncate text-xs text-muted-foreground">{subtitle}</p> : null}
+            </div>
+            <Badge variant={STATUS_BADGE_VARIANT[request.status]} className="shrink-0">
+              {getStatusLabel(request.status)}
+            </Badge>
+          </div>
+          {hasRoomCollision ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              보강 강의실 충돌 있음
+            </div>
+          ) : null}
+          <dl className="grid gap-3 text-sm md:grid-cols-2">
+            <MakeupDetailInfo label="수업" value={request.className || "미지정"} />
+            <MakeupDetailInfo label="과목" value={request.subject || "미지정"} />
+            <MakeupDetailInfo label="선생님" value={request.teacherLabel || "미지정"} />
+            <MakeupDetailInfo label="사유" value={request.reason || "-"} />
+            <MakeupDetailInfo label="휴강일" value={request.cancelDate || "-"} />
+            <MakeupDetailInfo label="보강일시" value={formatRequestSlotsTime(request)} />
+            <MakeupDetailInfo label="보강 강의실" value={formatRequestSlotsRooms(request)} />
+          </dl>
+        </div>
+
+        <details className="group rounded-md border">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+            <span>신청 · 처리 · 결재</span>
+            <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
+          </summary>
+          <dl className="grid gap-3 border-t px-3 py-3 text-sm md:grid-cols-2">
+            <MakeupDetailInfo label="신청자" value={request.requesterLabel || "-"} />
+            <MakeupDetailInfo label="상신일시" value={formatRequestEventDateTime(request, ["submitted", "resubmitted"], request.createdAt)} />
+            <MakeupDetailInfo label="보완요청일시" value={formatRequestEventDateTime(request, ["revision_requested"])} />
+            <MakeupDetailInfo label="보완 사유" value={request.returnedReason || "-"} />
+            <MakeupDetailInfo label="승인일시" value={formatRequestEventDateTime(request, ["approved"], request.approvedAt)} />
+            <MakeupDetailInfo label="승인 메모" value={getMakeupApprovalNoteValue(request)} />
+            <MakeupDetailInfo label="반려일시" value={formatRequestEventDateTime(request, ["rejected"])} />
+            <MakeupDetailInfo label="반려 사유" value={request.rejectedReason || "-"} />
+            <MakeupDetailInfo label="승인취소일시" value={formatRequestEventDateTime(request, ["approval_canceled", "completed_canceled"], request.canceledAt)} />
+            <MakeupDetailInfo label="승인취소 메모" value={getRequestEvent(request, ["approval_canceled", "completed_canceled"])?.note || "-"} />
+            <MakeupDetailInfo label="결재자" value={request.approverLabel || "-"} />
+          </dl>
+        </details>
+
+        <MakeupRequestActionControls
+          request={request}
+          data={data}
+          currentUserId={currentUserId}
+          canManage={canManage}
+          saving={saving}
+          onEditForRevision={onEditForRevision}
+          onSchedulePendingMakeup={onSchedulePendingMakeup}
+          onApprove={onApprove}
+          onRequestRevision={onRequestRevision}
+          onReject={onReject}
+          onRequestRefund={onRequestRefund}
+          onCompleteRefund={onCompleteRefund}
+          onFinalCancel={onFinalCancel}
+          align="start"
+        />
+      </section>
+    )
+  }
+
   const headerText = (
     <span className="grid min-w-0 gap-0.5">
       <span className={["truncate font-semibold", isCompact ? "text-base" : "text-lg"].join(" ")}>{title}</span>
@@ -1352,8 +1429,8 @@ function MakeupRequestDataTable({
   }
 
   return (
-    <div className="grid gap-2">
-      <Card className="gap-0 overflow-hidden rounded-lg py-0">
+    <div className="grid min-w-0 gap-2">
+      <div className="overflow-hidden rounded-md border bg-card">
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2" aria-label="휴보강 전체 필터">
           <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="휴보강 선택 필터">
             <MakeupRequestFilterSelect
@@ -1498,7 +1575,7 @@ function MakeupRequestDataTable({
             })}
           </div>
         </div>
-      </Card>
+      </div>
       <MakeupRequestCardList
         requests={visibleRequests}
         loading={loading}
@@ -1800,6 +1877,7 @@ export function MakeupRequestWorkspace() {
   const selectedClassScheduleDateOptions = useMemo(() => (
     getMakeupClassScheduleDateOptions(selectedClass)
   ), [selectedClass])
+  const canEditMakeupSlots = Boolean(selectedClass)
   const materializedMakeupSlots = useMemo(() => materializeSlots(input), [input])
   const requestHasCancelDate = Boolean(input.cancelDate)
   const requestHasMakeupSlots = materializedMakeupSlots.length > 0
@@ -1852,7 +1930,7 @@ export function MakeupRequestWorkspace() {
       classId: "",
       cancelDate: "",
       makeupClassroom: "",
-      makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, classroom: "" })),
+      makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, date: "", startTime: "", endTime: "", classroom: "" })),
       approverTeacherCatalogId: "",
     }))
   }, [])
@@ -1864,7 +1942,7 @@ export function MakeupRequestWorkspace() {
       classId: "",
       cancelDate: "",
       makeupClassroom: "",
-      makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, classroom: "" })),
+      makeupSlots: current.makeupSlots.map((slot) => ({ ...slot, date: "", startTime: "", endTime: "", classroom: "" })),
       approverTeacherCatalogId: "",
     }))
   }, [])
@@ -1902,6 +1980,7 @@ export function MakeupRequestWorkspace() {
   }, [selectedClass])
 
   const addMakeupSlot = useCallback(() => {
+    if (!selectedClass) return
     setInput((current) => ({
       ...current,
       makeupSlots: [
@@ -1915,7 +1994,7 @@ export function MakeupRequestWorkspace() {
         },
       ],
     }))
-  }, [])
+  }, [selectedClass])
 
   const removeMakeupSlot = useCallback((slotId: string) => {
     setInput((current) => ({
@@ -2286,33 +2365,48 @@ export function MakeupRequestWorkspace() {
   }, [data.classes])
 
   return (
-    <div className="mx-auto flex w-full max-w-none flex-col gap-4 px-4 py-5 md:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="휴보강 신청서 보기">
-          {MAKEUP_REQUEST_VIEW_TABS.map((tab) => (
-            <Button
-              key={tab.id}
-              type="button"
-              variant={view === tab.id ? "default" : "outline"}
-              size="sm"
-              role="tab"
-              aria-selected={view === tab.id}
-              onClick={() => setView(tab.id)}
-            >
-              {tab.label}
-              <Badge variant={view === tab.id ? "secondary" : "outline"}>{viewCounts[tab.id]}</Badge>
+    <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+      <div className="grid min-w-0 gap-2">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden w-full lg:flex-1" role="tablist" aria-label="휴보강 흐름">
+            {MAKEUP_REQUEST_VIEW_TABS.map((tab) => {
+              const count = viewCounts[tab.id]
+
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === tab.id}
+                  aria-label={count > 0 ? `${tab.label} ${count}건` : tab.label}
+                  onClick={() => setView(tab.id)}
+                  className={[
+                    "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    view === tab.id
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  ].join(" ")}
+                >
+                  <span>{tab.label}</span>
+                  {count > 0 && (
+                    <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
+                      {count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="outline" size="sm" className="size-8 px-0" onClick={() => setNotificationDialogOpen(true)} aria-label="휴보강 알림 설정" title="휴보강 알림 설정">
+              <Bell className="size-4" aria-hidden="true" />
+              <span className="sr-only">휴보강 알림 설정</span>
             </Button>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <Button type="button" variant="outline" size="sm" className="size-8 px-0" onClick={() => setNotificationDialogOpen(true)} aria-label="휴보강 알림 설정" title="휴보강 알림 설정">
-            <Bell className="size-4" aria-hidden="true" />
-            <span className="sr-only">휴보강 알림 설정</span>
-          </Button>
-          <Button type="button" size="sm" onClick={openRequestDialog}>
-            <Plus className="size-4" aria-hidden="true" />
-            휴보강 신청
-          </Button>
+            <Button type="button" size="sm" onClick={openRequestDialog}>
+              <Plus className="size-4" aria-hidden="true" />
+              휴보강 신청
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -2324,7 +2418,12 @@ export function MakeupRequestWorkspace() {
           if (open) setRequestDialogOpen(true)
           else closeRequestDialog()
         }}>
-          <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-4xl">
+          <DialogContent
+            className="max-h-[86vh] overflow-y-auto sm:max-w-4xl"
+            closeButtonLabel="저장하지 않고 닫기"
+            onCloseButtonClick={closeRequestDialog}
+            showCloseButtonText
+          >
             <DialogHeader>
               <DialogTitle>{editingRequestId ? "휴보강 보완 재상신" : "휴보강 신청"}</DialogTitle>
               <DialogDescription className="sr-only">
@@ -2414,7 +2513,7 @@ export function MakeupRequestWorkspace() {
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">
                 <Label>보강일시</Label>
-                <Button type="button" variant="outline" size="sm" onClick={addMakeupSlot}>
+                <Button type="button" variant="outline" size="sm" onClick={addMakeupSlot} disabled={!canEditMakeupSlots}>
                   <Plus className="size-4" aria-hidden="true" />
                   보강일시 추가
                 </Button>
@@ -2434,14 +2533,16 @@ export function MakeupRequestWorkspace() {
                             <DatePickerControl
                               value={slot.date || ""}
                               onChange={(value) => patchMakeupSlot(slot.id || "", { date: value })}
-                              placeholder="날짜 선택"
+                              placeholder={canEditMakeupSlots ? "날짜 선택" : "수업을 먼저 선택"}
                               ariaLabel={`보강일시 ${index + 1} 날짜`}
-                              className={slot.date ? "pr-14" : ""}
+                              disabled={!canEditMakeupSlots}
+                              className={cn(slot.date ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
                             />
                             <FieldClearButton
                               aria-label={`보강일시 ${index + 1} 날짜 초기화`}
                               show={Boolean(slot.date)}
                               onClick={() => patchMakeupSlot(slot.id || "", { date: "" })}
+                              disabled={!canEditMakeupSlots}
                             />
                           </div>
                         </div>
@@ -2451,14 +2552,16 @@ export function MakeupRequestWorkspace() {
                             <TimePickerControl
                               value={slot.startTime || ""}
                               onChange={(value) => patchMakeupSlot(slot.id || "", { startTime: value })}
-                              placeholder="시작"
+                              placeholder={canEditMakeupSlots ? "시작" : "수업 먼저"}
                               ariaLabel={`보강일시 ${index + 1} 시작시각`}
-                              className={slot.startTime ? "pr-14" : ""}
+                              disabled={!canEditMakeupSlots}
+                              className={cn(slot.startTime ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
                             />
                             <FieldClearButton
                               aria-label={`보강일시 ${index + 1} 시작시각 초기화`}
                               show={Boolean(slot.startTime)}
                               onClick={() => patchMakeupSlot(slot.id || "", { startTime: "" })}
+                              disabled={!canEditMakeupSlots}
                             />
                           </div>
                         </div>
@@ -2468,14 +2571,16 @@ export function MakeupRequestWorkspace() {
                             <TimePickerControl
                               value={slot.endTime || ""}
                               onChange={(value) => patchMakeupSlot(slot.id || "", { endTime: value })}
-                              placeholder="종료"
+                              placeholder={canEditMakeupSlots ? "종료" : "수업 먼저"}
                               ariaLabel={`보강일시 ${index + 1} 종료시각`}
-                              className={slot.endTime ? "pr-14" : ""}
+                              disabled={!canEditMakeupSlots}
+                              className={cn(slot.endTime ? "pr-14" : "", !canEditMakeupSlots && "border-amber-300 bg-amber-50 text-amber-950 opacity-100 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100")}
                             />
                             <FieldClearButton
                               aria-label={`보강일시 ${index + 1} 종료시각 초기화`}
                               show={Boolean(slot.endTime)}
                               onClick={() => patchMakeupSlot(slot.id || "", { endTime: "" })}
+                              disabled={!canEditMakeupSlots}
                             />
                           </div>
                         </div>
@@ -2553,7 +2658,7 @@ export function MakeupRequestWorkspace() {
                 {editingRequestId ? "재상신" : "상신"}
               </Button>
               <Button type="button" variant="outline" onClick={closeRequestDialog} disabled={saving}>
-                취소
+                저장하지 않고 닫기
               </Button>
             </div>
             </div>
@@ -2588,7 +2693,7 @@ export function MakeupRequestWorkspace() {
       <Dialog open={Boolean(detailRequest)} onOpenChange={(open) => {
         if (!open) setSelectedDetailRequest(null)
       }}>
-        <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-h-[92vh] sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>휴보강 상세</DialogTitle>
             <DialogDescription className="sr-only">
@@ -2621,6 +2726,7 @@ export function MakeupRequestWorkspace() {
                 setFinalCancelRequest(request)
                 setFinalCancelNote("")
               }}
+              variant="detail"
             />
           ) : null}
         </DialogContent>

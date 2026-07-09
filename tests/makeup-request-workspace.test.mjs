@@ -122,6 +122,16 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.match(workspaceSource, /보강일시 추가/);
   assert.match(workspaceSource, /DatePickerControl/);
   assert.match(workspaceSource, /TimePickerControl/);
+  assert.match(workspaceSource, /const canEditMakeupSlots = Boolean\(selectedClass\)/);
+  assert.match(
+    workspaceSource,
+    /<Button type="button" variant="outline" size="sm" onClick=\{addMakeupSlot\} disabled=\{!canEditMakeupSlots\}>/,
+    "makeup slot creation should wait until a class is selected",
+  );
+  assert.match(workspaceSource, /placeholder=\{canEditMakeupSlots \? "날짜 선택" : "수업을 먼저 선택"\}/);
+  assert.match(workspaceSource, /ariaLabel=\{`보강일시 \$\{index \+ 1\} 시작시각`\}[\s\S]*disabled=\{!canEditMakeupSlots\}/);
+  assert.match(dateTimePickerSource, /disabled\?: boolean/);
+  assert.match(dateTimePickerSource, /onOpenChange=\{\(nextOpen\) => setOpen\(disabled \? false : nextOpen\)\}/);
   assert.match(workspaceSource, /getSlotRoomAvailability/);
   assert.match(workspaceSource, /getSlotRoomAvailability\(slot, data, editingRequestId, selectedClass\?\.subject \|\| selectedSubject, canUserManage\(role\)\)/);
   assert.match(workspaceSource, /slot\.classroom/);
@@ -138,7 +148,7 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.match(workspaceSource, /DialogTitle>\{editingRequestId \? "휴보강 보완 재상신" : "휴보강 신청"\}/);
   assert.doesNotMatch(workspaceSource, /const shouldShowRequestForm = view === "mine"/);
   const headerActionSource = workspaceSource.slice(
-    workspaceSource.indexOf('aria-label="휴보강 신청서 보기"'),
+    workspaceSource.indexOf('aria-label="휴보강 흐름"'),
     workspaceSource.indexOf("{message ?"),
   );
   assert.match(headerActionSource, /aria-label="휴보강 알림 설정"/);
@@ -212,7 +222,8 @@ test("makeup approval completes makeup-bearing requests and keeps cancel-only re
   assert.doesNotMatch(workspaceSource, /window\.prompt\("승인 메모"/);
   assert.doesNotMatch(workspaceSource, /window\.prompt\("관리팀 최종 확인 메모"/);
   assert.doesNotMatch(workspaceSource, /window\.prompt/);
-  assert.match(workspaceSource, /DialogContent className="max-h-\[86vh\] overflow-y-auto sm:max-w-4xl"/);
+  assert.match(workspaceSource, /DialogContent[\s\S]*className="max-h-\[86vh\] overflow-y-auto sm:max-w-4xl"[\s\S]*closeButtonLabel="저장하지 않고 닫기"[\s\S]*onCloseButtonClick=\{closeRequestDialog\}[\s\S]*showCloseButtonText/);
+  assert.match(workspaceSource, />\s*저장하지 않고 닫기\s*<\/Button>/);
   assert.doesNotMatch(workspaceSource, /xl:grid-cols-\[minmax\(360px,420px\)_1fr\]/);
   assert.match(workspaceSource, /md:grid-cols-\[minmax\(150px,1fr\)_minmax\(96px,0\.55fr\)_minmax\(96px,0\.55fr\)_32px\]/);
   assert.doesNotMatch(workspaceSource, /lg:grid-cols-\[minmax\(0,1\.1fr\)_minmax\(110px,0\.65fr\)_minmax\(110px,0\.65fr\)_minmax\(140px,0\.8fr\)_32px\]/);
@@ -336,9 +347,14 @@ test("makeup workspace separates request status tabs by workflow state", () => {
 
 test("makeup workspace avoids browser prompt and fills wide screens", () => {
   assert.doesNotMatch(workspaceSource, /window\.prompt/);
-  assert.match(workspaceSource, /className="mx-auto flex w-full max-w-none flex-col gap-4 px-4 py-5 md:px-6"/);
+  assert.match(workspaceSource, /className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6"/);
+  assert.doesNotMatch(workspaceSource, /className="mx-auto flex w-full max-w-none flex-col gap-4 px-4 py-5 md:px-6"/);
   assert.doesNotMatch(workspaceSource, /max-w-7xl/);
   assert.match(workspaceSource, /className="w-full overflow-x-auto"/);
+  assert.match(workspaceSource, /className="grid min-w-0 gap-2"/);
+  assert.match(workspaceSource, /className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"/);
+  assert.match(workspaceSource, /role="tablist" aria-label="휴보강 흐름"/);
+  assert.doesNotMatch(workspaceSource, /<Card className="gap-0 overflow-hidden rounded-lg py-0">/);
   assert.match(workspaceSource, /className="grid min-w-full border-b bg-muted\/45 text-xs \[grid-template-columns:var\(--makeup-request-grid-template\)\]"/);
   assert.match(workspaceSource, /className="grid min-w-full border-b last:border-b-0 hover:bg-muted\/30 \[grid-template-columns:var\(--makeup-request-grid-template\)\]"/);
 });
@@ -668,18 +684,49 @@ test("makeup workspace filters table rows by subject teacher period and collapsi
 });
 
 test("makeup workspace opens row details and uses cards on narrow viewports", () => {
+  const detailDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("<Dialog open={Boolean(detailRequest)}"),
+    workspaceSource.indexOf("<Dialog open={notificationDialogOpen}"),
+  );
+  const detailCardSource = workspaceSource.slice(
+    workspaceSource.indexOf("function MakeupRequestDetailCard"),
+    workspaceSource.indexOf("function MakeupRequestCardList"),
+  );
+
   assert.match(workspaceSource, /const MAKEUP_REQUEST_CARD_COLUMNS/);
   assert.match(workspaceSource, /function MakeupRequestDetailCard/);
   assert.match(workspaceSource, /function MakeupRequestCardList/);
   assert.match(workspaceSource, /selectedDetailRequest/);
   assert.match(workspaceSource, /setSelectedDetailRequest/);
   assert.match(workspaceSource, /DialogTitle>휴보강 상세/);
+  assert.match(detailDialogSource, /variant="detail"/);
+  assert.match(detailDialogSource, /className="max-h-\[calc\(100dvh-1rem\)\] overflow-y-auto sm:max-h-\[92vh\] sm:max-w-3xl"/);
   assert.match(workspaceSource, /aria-label="휴보강 신청 상세 열기"/);
   assert.match(workspaceSource, /onKeyDown=\{\(event\) => handleOpenKeyDown\(event, onOpenDetail\)\}/);
   assert.match(workspaceSource, /aria-label="휴보강 신청 카드목록"/);
   assert.match(workspaceSource, /md:hidden/);
   assert.match(workspaceSource, /hidden md:block/);
   assert.match(workspaceSource, /MakeupRequestDetailCard[\s\S]*variant="compact"/);
+  assert.match(detailCardSource, /variant\?: "full" \| "compact" \| "detail"/);
+  assert.match(detailCardSource, /if \(variant === "detail"\)/);
+  assert.match(detailCardSource, /aria-label="휴보강 상세 신청서"/);
+  assert.match(detailCardSource, /수업/);
+  assert.match(detailCardSource, /과목/);
+  assert.match(detailCardSource, /선생님/);
+  assert.match(detailCardSource, /사유/);
+  assert.match(detailCardSource, /휴강일/);
+  assert.match(detailCardSource, /보강일시/);
+  assert.match(detailCardSource, /보강 강의실/);
+  assert.match(detailCardSource, /신청 · 처리 · 결재/);
+  assert.match(detailCardSource, /group rounded-md border/);
+  assert.match(detailCardSource, /ChevronRight/);
+  assert.match(detailCardSource, /신청자/);
+  assert.match(detailCardSource, /상신일시/);
+  assert.match(detailCardSource, /보완요청일시/);
+  assert.match(detailCardSource, /승인일시/);
+  assert.match(detailCardSource, /반려일시/);
+  assert.match(detailCardSource, /승인취소일시/);
+  assert.match(detailCardSource, /결재자/);
   assert.match(workspaceSource, /const subtitle = \[request\.subject, request\.teacherLabel\]/);
   assert.doesNotMatch(workspaceSource, /\[request\.subject, request\.teacherLabel, request\.requesterLabel\]/);
   assert.match(workspaceSource, /function getVisibleMakeupRequestCardColumns/);

@@ -552,7 +552,11 @@ test("todo form close confirmation stays quiet and uses explicit discard copy", 
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
   assertIncludesAll(workspaceSource, [
+    'const formCloseLabel = confirmingFormClose ? "저장하지 않고 닫기" : "닫기"',
     'confirmingFormClose ? "저장하지 않고 닫기" : "닫기"',
+    "closeButtonLabel={formCloseLabel}",
+    "onCloseButtonClick={confirmingFormClose ? discardFormAndClose : closeForm}",
+    "showCloseButtonText",
     "discardFormAndClose",
   ]);
 
@@ -938,7 +942,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'aria-label="퇴원 신청 데이터테이블"',
     'data-testid="withdrawal-mobile-task-list"',
     'aria-label="퇴원 모바일 목록"',
-    'detailAriaLabel = "퇴원 상세 열기"',
+    "getWithdrawalTaskDetailAriaLabel(task)",
     'aria-label={`${label} 열 너비 조절`}',
     'cursor-col-resize',
     'role="columnheader"',
@@ -952,7 +956,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.ok(source.includes("aria-pressed={item.checked}"));
   assert.match(withdrawalDataTableSource, /className="grid gap-2 p-3 md:hidden"/);
   assert.match(withdrawalDataTableSource, /className="hidden w-full overflow-x-auto md:block"/);
-  assert.match(withdrawalDataTableSource, /aria-label=\{`\$\{task\.title\} 퇴원 상세 열기`\}/);
+  assert.doesNotMatch(
+    withdrawalDataTableSource,
+    /detailAriaLabel = "퇴원 상세 열기"/,
+    "withdrawal desktop detail buttons should use row-specific labels instead of a repeated generic name",
+  );
   assert.match(withdrawalDataTableSource, /getWithdrawalMobileNextActionLabel/);
   assert.match(source, /labelPrefix = "퇴원"/);
   assert.match(source, /aria-label=\{`\$\{labelPrefix\} 기간 필터`\}/);
@@ -1154,6 +1162,12 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source,
     /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isWithdrawalWorkspace \? "퇴원 흐름" : isTransferWorkspace \? "전반 흐름" : `\$\{workspaceLabel\} 보기`\}/,
   );
+  assertIncludesAll(source, [
+    "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace",
+    '? "flex flex-col gap-2"',
+    ': "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"',
+    "className={workspaceSurfaceClassName}",
+  ]);
   assertIncludesAll(withdrawalDetailSource, [
     "신청 · 처리",
     "퇴원 상세 신청서",
@@ -1199,8 +1213,9 @@ test("withdrawal workspace follows request processing and completed queues", asy
   ]);
   assertIncludesAll(detailDialogSource, [
     "WithdrawalDetailPanel",
+    "TransferDetailPanel",
     "!isProcessDetail",
-    "selectedTaskFresh.type !== \"withdrawal\"",
+    "selectedTaskFresh.type !== \"word_retest\" && !isProcessDetail",
   ]);
   assertIncludesAll(source, [
     "const canManageWithdrawalWorkflow = canManageAll || isStaff",
@@ -1317,6 +1332,11 @@ test("withdrawal schedule calendar defaults to current month and counts the bill
     /const \[calendarMonth, setCalendarMonth\] = useState\(\(\) => getCalendarMonthDate\(selectedDateKey\)\)/,
     "withdrawal calendar should show the current month by default when no withdrawal date is selected",
   );
+  assert.match(
+    scheduleFieldSource,
+    /if \(!classItem\) \{[\s\S]*ScheduleSelectionDependencyState fieldId=\{fieldId\}[\s\S]*ReadonlyInfoField label="퇴원회차"/,
+    "withdrawal should show a compact dependency state instead of a full empty calendar before class selection",
+  );
   assert.doesNotMatch(
     scheduleFieldSource,
     /firstScheduleDate/,
@@ -1405,6 +1425,18 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     source.indexOf('aria-label={isTodoWorkspace ? "할 일 목록"'),
     source.indexOf("{isTodoWorkspace && ("),
   );
+  const detailDialogSource = source.slice(
+    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={Boolean(deleteTarget)}"),
+  );
+  const transferDetailSource = source.slice(
+    source.indexOf("function TransferDetailPanel"),
+    source.indexOf("function CommentPanelContent"),
+  );
+  const nextStatusActionSource = source.slice(
+    source.indexOf("function getNextTaskStatusAction"),
+    source.indexOf("function canEditTaskDetails"),
+  );
 
   assertIncludesAll(source, [
     "type TransferTableColumnKey",
@@ -1425,6 +1457,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "TransferTuitionAdjustmentPanel",
     "notifyTransferWorkflow",
     "TransferNotificationSettingsDialog",
+    "TransferDetailPanel",
   ]);
   assertIncludesAll(serviceSource, [
     "fee?: number",
@@ -1454,11 +1487,53 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     /isWithdrawalWorkspace \|\| isTransferWorkspace\s*\?\s*\([\s\S]*?<WithdrawalDataTable|isTransferWorkspace\s*\?\s*\([\s\S]*?<TransferDataTable/,
     "transfer should render a dedicated data table instead of the generic operation task list",
   );
+  assert.match(
+    nextStatusActionSource,
+    /if \(task\.type === "transfer" && task\.status === "done"\) return null/,
+    "completed transfer rows should be preserved without a reopen action",
+  );
+  assert.match(
+    nextStatusActionSource,
+    /if \(task\.type === "transfer" && task\.status === "requested"\) return \{ status: "in_progress", label: "처리 시작" \}/,
+    "new transfer applications should move directly to processing like withdrawal",
+  );
+  assert.match(
+    nextStatusActionSource,
+    /if \(task\.type === "transfer" && task\.status === "in_progress"\) return \{ status: "done", label: "완료" \}/,
+    "transfer processing rows should complete without an approval queue",
+  );
   assertIncludesAll(workspaceToolbarSource, [
     'aria-label={isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
     "setTransferNotificationOpen(true)",
     "setWithdrawalNotificationOpen(true)",
   ]);
+  assertIncludesAll(detailDialogSource, [
+    "TransferDetailPanel",
+    'selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl"',
+    'selectedTaskFresh.type === "withdrawal" || selectedTaskFresh.type === "transfer" ? "grid gap-4"',
+    "selectedTaskFresh.type !== \"word_retest\" && !isProcessDetail",
+  ]);
+  assertIncludesAll(transferDetailSource, [
+    "전반 상세 신청서",
+    "전 선생님",
+    "후 선생님",
+    "전 수업",
+    "후 수업",
+    "전 미배부 교재",
+    "후 미배부 교재",
+    "전 수업 종료일",
+    "전 수업 종료회차",
+    "후 수업 시작일",
+    "후 수업 시작회차",
+    "처리 확인",
+    "신청 · 처리",
+    "신청자",
+    "신청일시",
+    "담당자",
+    "완료일시",
+  ]);
+  assert.doesNotMatch(transferDetailSource, /시간표 명단 변경/);
+  assert.doesNotMatch(transferDetailSource, /AutoSyncResultSummary/);
 
   assertIncludesAll(transferDataTableSource, [
     'aria-label="전반 전체 필터"',
@@ -1466,13 +1541,18 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     'aria-label="전반 신청 데이터테이블"',
     'data-testid="transfer-mobile-task-list"',
     'aria-label="전반 모바일 목록"',
-    'aria-label={`${task.title} 전반 상세 열기`}',
+    "getTransferTaskDetailAriaLabel(task)",
     '[grid-template-columns:var(--transfer-grid-template)]',
     "<WithdrawalPeriodFilterBar",
     "TransferOperationsChecklistChips",
     "onChecklistChange",
     "setTransferTableSort",
   ]);
+  assert.doesNotMatch(
+    transferDataTableSource,
+    /detailAriaLabel="전반 상세 열기"/,
+    "transfer desktop detail buttons should use row-specific labels instead of a repeated generic name",
+  );
   assertIncludesAll(source, [
     'columnKey: "transferReason"',
     'columnKey: "fromClassEndDate"',
@@ -1622,8 +1702,13 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "title={calendarCellTitle}",
     "whitespace-normal",
     "onScheduleSelect(getTransferClassScheduleMetrics(scheduleItems, item.dateKey, classItem))",
-    'ReadonlyInfoField label={`${label}회차`}',
+    'ReadonlyInfoField label={`${label} 회차`}',
   ]);
+  assert.doesNotMatch(
+    transferScheduleFieldSource,
+    /ReadonlyInfoField label=\{`\$\{label\}회차`\}/,
+    "transfer dependency state should not render labels like 전 수업 종료일회차",
+  );
   assertIncludesAll(transferFormSource, [
     'label="전 수업 종료일"',
     'label="후 수업 시작일"',
@@ -1634,8 +1719,10 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "function getTransferTuitionAdjustment",
     "getSchedulePlanSessions(classItem)",
     "function getTransferMonthlyCycleContext",
+    "function getTransferBillingCycleItems",
     "const sessionNumber = selectedItem.sessionNumber",
-    "const cycleSessionCount = Math.max(fallbackCycleSessionCount, sessionNumber)",
+    "const sameMonthItems = getTransferBillingCycleItems(items, selectedItem)",
+    "const cycleSessionCount = Math.max(sameMonthItems.length, fallbackCycleSessionCount, sessionNumber)",
     "monthKey: getWithdrawalScheduleBillingMonthKey(selectedItem)",
     "monthLabel: getWithdrawalScheduleDisplayMonthLabel(selectedItem)",
     "fromCycle.monthKey !== toCycle.monthKey",
@@ -1893,7 +1980,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "!isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
     'selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl"',
     'selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4"',
-    'selectedTaskFresh.type !== "word_retest" && (',
+    'selectedTaskFresh.type !== "word_retest" && !isProcessDetail && (',
     'label="담당선생님" allLabel="담당선생님 전체"',
     'label="수업" allLabel="수업 전체"',
     "const teacherLabel = getWordRetestTeacherLabel(task)",

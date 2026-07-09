@@ -195,6 +195,7 @@ type TimePickerControlProps = {
   placeholder?: string
   ariaLabel?: string
   className?: string
+  disabled?: boolean
 }
 
 export function TimePickerControl({
@@ -203,18 +204,25 @@ export function TimePickerControl({
   placeholder = "시각 선택",
   ariaLabel = "시각 선택",
   className,
+  disabled = false,
 }: TimePickerControlProps) {
   const [open, setOpen] = React.useState(false)
   const normalizedValue = normalizeTimeInput(value)
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}>
       <PopoverTrigger asChild>
         <Button
           type="button"
           variant="outline"
+          disabled={disabled}
           aria-label={ariaLabel}
-          className={cn("h-9 w-full justify-between px-3 font-normal", !normalizedValue && "text-muted-foreground", className)}
+          className={cn(
+            "h-9 w-full justify-between px-3 font-normal",
+            !normalizedValue && "text-muted-foreground",
+            disabled && "cursor-not-allowed bg-muted/30 opacity-75",
+            className,
+          )}
         >
           <span className="truncate">{formatTimeLabel(normalizedValue) || placeholder}</span>
           <Clock aria-hidden="true" />

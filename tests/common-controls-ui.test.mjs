@@ -47,3 +47,14 @@ test("ported option panels stay above high-layer management dialogs", async () =
   assert.doesNotMatch(selectSource, /data-slot="select-content"[\s\S]*relative z-50/);
   assert.doesNotMatch(popoverSource, /data-slot="popover-content"[\s\S]*z-50/);
 });
+
+test("shared dialog can expose explicit top close copy for unsaved forms", async () => {
+  const source = await readFile(new URL("src/components/ui/dialog.tsx", root), "utf8");
+
+  assert.match(source, /closeButtonLabel = "모달 닫기"/);
+  assert.match(source, /onCloseButtonClick\?: React\.MouseEventHandler<HTMLButtonElement>/);
+  assert.match(source, /showCloseButtonText\?: boolean/);
+  assert.match(source, /showCloseButtonText \? "whitespace-nowrap" : "sr-only"/);
+  assert.match(source, /aria-label=\{closeButtonLabel\}/);
+  assert.match(source, /onClick=\{onCloseButtonClick\}/);
+});

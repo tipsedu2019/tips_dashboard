@@ -4191,6 +4191,17 @@ function getTransferClassTuition(classItem?: OpsClassOption) {
   return getWithdrawalNumberValue(classItem?.fee)
 }
 
+function getTransferBillingCycleItems(items: WithdrawalClassScheduleItem[], selectedItem?: WithdrawalClassScheduleItem) {
+  if (!selectedItem || !isWithdrawalScheduleSelectable(selectedItem)) return []
+  const selectedMonthKey = getWithdrawalScheduleBillingMonthKey(selectedItem)
+  if (!selectedMonthKey) return []
+
+  return items.filter((item) => (
+    isWithdrawalScheduleSelectable(item) &&
+    getWithdrawalScheduleBillingMonthKey(item) === selectedMonthKey
+  ))
+}
+
 function getTransferBillingSessionCount(
   items: WithdrawalClassScheduleItem[],
   classItem?: OpsClassOption,
@@ -4237,7 +4248,8 @@ function getTransferMonthlyCycleContext(
 
   const sessionNumber = selectedItem.sessionNumber
   const fallbackCycleSessionCount = getTransferBillingSessionCount(items, classItem, selectedItem)
-  const cycleSessionCount = Math.max(fallbackCycleSessionCount, sessionNumber)
+  const sameMonthItems = getTransferBillingCycleItems(items, selectedItem)
+  const cycleSessionCount = Math.max(sameMonthItems.length, fallbackCycleSessionCount, sessionNumber)
   const remainingSessionCount = sessionNumber && cycleSessionCount
     ? Math.max(0, cycleSessionCount - sessionNumber + 1)
     : 0
@@ -4533,6 +4545,18 @@ function DateField({
   )
 }
 
+function ScheduleSelectionDependencyState({ fieldId }: { fieldId: string }) {
+  return (
+    <div
+      role="note"
+      aria-labelledby={fieldId}
+      className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-950 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100"
+    >
+      수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.
+    </div>
+  )
+}
+
 function WithdrawalScheduleCalendarField({
   classItem,
   withdrawal,
@@ -4561,6 +4585,25 @@ function WithdrawalScheduleCalendarField({
   const progressLabel = metrics.fourWeekLessonHours
     ? `${metrics.progressPercent}%`
     : "자동 계산"
+
+  if (!classItem) {
+    return (
+      <section className="grid gap-3 md:col-span-2">
+        <div className="flex items-center gap-2">
+          <span id={fieldId} className="text-sm font-medium">
+            <FieldHelpLabel label="퇴원일" help={WITHDRAWAL_DATE_HELP} />
+          </span>
+        </div>
+        <ScheduleSelectionDependencyState fieldId={fieldId} />
+        <div className="grid gap-2 md:grid-cols-4">
+          <ReadonlyInfoField label="퇴원회차" value={withdrawal.withdrawalSession || "자동 계산"} />
+          <ReadonlyInfoField label="진행 수업시수" value={withdrawal.completedLessonHours || "자동 계산"} />
+          <ReadonlyInfoField label="4주 기준 수업시수" value={withdrawal.fourWeekLessonHours || "자동 계산"} />
+          <ReadonlyInfoField label="수업진행률" value={progressLabel} />
+        </div>
+      </section>
+    )
+  }
 
   function handleScheduleSelect(item: WithdrawalClassScheduleItem) {
     if (!isWithdrawalScheduleSelectable(item)) return
@@ -4683,6 +4726,20 @@ function TransferScheduleCalendarField({
     return items
   }, [scheduleItems])
 
+  if (!classItem) {
+    return (
+      <section className="grid gap-3">
+        <div className="flex items-center gap-2">
+          <span id={fieldId} className="text-sm font-medium">
+            {label}
+          </span>
+        </div>
+        <ScheduleSelectionDependencyState fieldId={fieldId} />
+        <ReadonlyInfoField label={`${label} 회차`} value={sessionValue || "자동 계산"} />
+      </section>
+    )
+  }
+
   function handleScheduleSelect(item: WithdrawalClassScheduleItem) {
     if (!isWithdrawalScheduleSelectable(item)) return
     setCalendarMonth(getCalendarMonthDate(item.dateKey))
@@ -4765,7 +4822,7 @@ function TransferScheduleCalendarField({
           </p>
         )}
       </div>
-      <ReadonlyInfoField label={`${label}회차`} value={sessionValue || "자동 계산"} />
+      <ReadonlyInfoField label={`${label} 회차`} value={sessionValue || "자동 계산"} />
     </section>
   )
 }
@@ -5581,7 +5638,7 @@ function WithdrawalDataCell({
   children,
   align = "left",
   onOpenDetail,
-  detailAriaLabel = "퇴원 상세 열기",
+  detailAriaLabel,
 }: {
   value: string
   children?: ReactNode
@@ -5595,7 +5652,7 @@ function WithdrawalDataCell({
       {onOpenDetail ? (
         <button
           type="button"
-          aria-label={detailAriaLabel}
+          aria-label={detailAriaLabel || `${value || "항목"} 상세 열기`}
           title={value}
           onClick={onOpenDetail}
           className={["block w-full min-w-0 text-left outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring", align === "right" ? "text-right" : ""].join(" ")}
@@ -5607,6 +5664,32 @@ function WithdrawalDataCell({
       )}
     </div>
   )
+}
+
+function getWithdrawalTaskDetailAriaLabel(task: OpsTask) {
+  const withdrawal = task.withdrawal || {}
+  const detailContext = [
+    task.title,
+    task.studentName,
+    task.className,
+    dateOnlyLabel(withdrawal.withdrawalDate),
+  ].filter((item) => item && item !== "-")
+  return `${detailContext.join(" · ") || "퇴원"} 퇴원 상세 열기`
+}
+
+function getTransferTaskDetailAriaLabel(task: OpsTask) {
+  const transfer = task.transfer || {}
+  const classFlow = [transfer.fromClassName, transfer.toClassName || task.className].filter(Boolean).join(" → ")
+  const dateFlow = [dateOnlyLabel(transfer.fromClassEndDate), dateOnlyLabel(transfer.toClassStartDate)]
+    .filter((item) => item && item !== "-")
+    .join(" → ")
+  const detailContext = [
+    task.title,
+    task.studentName,
+    classFlow,
+    dateFlow,
+  ].filter(Boolean)
+  return `${detailContext.join(" · ") || "전반"} 전반 상세 열기`
 }
 
 function getWithdrawalMobileNextActionLabel(task: OpsTask, completionBlockers: string[]) {
@@ -5839,6 +5922,7 @@ function WithdrawalDataTable({
           const mobileNextActionLabel = getWithdrawalMobileNextActionLabel(task, completionBlockers)
           const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
           const progress = getWithdrawalProgressLabel(task)
+          const detailAriaLabel = getWithdrawalTaskDetailAriaLabel(task)
 
           return (
             <article key={task.id} className="grid gap-3 rounded-md border bg-background p-3 shadow-xs" aria-label={`${task.title} 퇴원 신청`}>
@@ -5897,7 +5981,7 @@ function WithdrawalDataTable({
                   type="button"
                   variant="outline"
                   size="sm"
-                  aria-label={`${task.title} 퇴원 상세 열기`}
+                  aria-label={detailAriaLabel}
                   onClick={() => onOpen(task)}
                 >
                   상세
@@ -5975,6 +6059,7 @@ function WithdrawalDataTable({
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
           const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
+          const detailAriaLabel = getWithdrawalTaskDetailAriaLabel(task)
 
           return (
             <div
@@ -5987,7 +6072,7 @@ function WithdrawalDataTable({
                 const value = getWithdrawalTableValue(task, column.columnKey)
                 if (column.columnKey === "status") {
                   return (
-                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)}>
+                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)} detailAriaLabel={detailAriaLabel}>
                       <WithdrawalWorkflowStatusBadge status={task.status} />
                     </WithdrawalDataCell>
                   )
@@ -6049,6 +6134,7 @@ function WithdrawalDataTable({
                     value={value}
                     align={column.align}
                     onOpenDetail={() => onOpen(task)}
+                    detailAriaLabel={detailAriaLabel}
                   />
                 )
               })}
@@ -6285,6 +6371,7 @@ function TransferDataTable({
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const mobileNextActionLabel = getWithdrawalMobileNextActionLabel(task, completionBlockers)
           const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
+          const detailAriaLabel = getTransferTaskDetailAriaLabel(task)
 
           return (
             <article key={task.id} className="grid gap-3 rounded-md border bg-background p-3 shadow-xs" aria-label={`${task.title} 전반 신청`}>
@@ -6344,7 +6431,7 @@ function TransferDataTable({
                   type="button"
                   variant="outline"
                   size="sm"
-                  aria-label={`${task.title} 전반 상세 열기`}
+                  aria-label={detailAriaLabel}
                   onClick={() => onOpen(task)}
                 >
                   상세
@@ -6422,6 +6509,7 @@ function TransferDataTable({
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
           const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
+          const detailAriaLabel = getTransferTaskDetailAriaLabel(task)
 
           return (
             <div
@@ -6434,7 +6522,7 @@ function TransferDataTable({
                 const value = getTransferTableValue(task, column.columnKey)
                 if (column.columnKey === "status") {
                   return (
-                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)} detailAriaLabel="전반 상세 열기">
+                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)} detailAriaLabel={detailAriaLabel}>
                       <WithdrawalWorkflowStatusBadge status={task.status} />
                     </WithdrawalDataCell>
                   )
@@ -6496,7 +6584,7 @@ function TransferDataTable({
                     value={value}
                     align={column.align}
                     onOpenDetail={() => onOpen(task)}
-                    detailAriaLabel="전반 상세 열기"
+                    detailAriaLabel={detailAriaLabel}
                   />
                 )
               })}
@@ -7253,15 +7341,20 @@ function TodoPriorityBadge({ priority, showNormal = false }: { priority: OpsTask
 
 function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { status: OpsTaskStatus; label: string } | null {
   if (task.type === "withdrawal" && task.status === "done") return null
+  if (task.type === "transfer" && task.status === "done") return null
   if (task.type === "withdrawal" && task.status === "canceled") return null
+  if (task.type === "transfer" && task.status === "canceled") return null
   if (task.type === "withdrawal" && task.status === "requested") return { status: "in_progress", label: "처리 시작" }
+  if (task.type === "transfer" && task.status === "requested") return { status: "in_progress", label: "처리 시작" }
   if (task.type === "withdrawal" && task.status === "confirmed") return { status: "in_progress", label: "처리 시작" }
+  if (task.type === "transfer" && task.status === "confirmed") return { status: "in_progress", label: "처리 시작" }
   if (task.status === "canceled") return { status: "requested", label: "다시 열기" }
   if (task.status === "done") return { status: "requested", label: "다시 열기" }
   if (task.status === "on_hold") return { status: "in_progress", label: "재개" }
   if (task.status === "requested") return { status: "confirmed", label: "확인" }
   if (task.status === "confirmed") return { status: "in_progress", label: "진행" }
   if (task.type === "withdrawal" && task.status === "in_progress") return { status: "done", label: "완료" }
+  if (task.type === "transfer" && task.status === "in_progress") return { status: "done", label: "완료" }
   if (task.status === "in_progress") return { status: "review_requested", label: "검토 요청" }
   if (task.status === "review_requested") return { status: "done", label: "완료" }
   return null
@@ -8319,6 +8412,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	      : isTodoWorkspace
 	        ? "할 일 추가"
 	        : `${workspaceLabel} 추가`
+  const formCloseLabel = confirmingFormClose ? "저장하지 않고 닫기" : "닫기"
 
   function openCreate(type: OpsTaskType = scopedTaskType) {
     if (!canOpenCreate) return
@@ -9426,6 +9520,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }
     if (isTodoWorkspace) focusQuickAdd()
   }, [focusQuickAdd, isTodoWorkspace])
+  const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace
+    ? "flex flex-col gap-2"
+    : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
 
   useEffect(() => {
     if (!isTodoWorkspace) return
@@ -9473,7 +9570,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         </div>
       )}
 
-      <div className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs">
+      <div className={workspaceSurfaceClassName}>
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
 	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
@@ -9983,7 +10080,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         <DialogContent className={[
           "z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
           form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
-        ].join(" ")}>
+        ].join(" ")}
+          closeButtonLabel={formCloseLabel}
+          onCloseButtonClick={confirmingFormClose ? discardFormAndClose : closeForm}
+          showCloseButtonText
+        >
           <DialogHeader className="-mx-6 -mt-6 border-b px-6 py-4">
             <DialogTitle>{formDialogTitle}</DialogTitle>
             <DialogDescription className="sr-only">
@@ -10333,7 +10434,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 </div>
               )}
               <Button type="button" variant={confirmingFormClose ? "destructive" : "outline"} onClick={confirmingFormClose ? discardFormAndClose : closeForm} className="w-full sm:w-auto">
-                {confirmingFormClose ? "저장하지 않고 닫기" : "닫기"}
+                {formCloseLabel}
               </Button>
               {!isEditingLockedCompletedTask && (
                 <Button type="submit" disabled={saving || !canSubmitCurrentForm} className="w-full sm:w-auto">
@@ -10348,7 +10449,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className={[
           "max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
-          selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl" : selectedTaskFresh?.type === "withdrawal" ? "sm:max-w-3xl" : "sm:max-w-5xl",
+          selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl" : selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl" : "sm:max-w-5xl",
         ].join(" ")}>
           <DialogHeader>
             <DialogTitle>{selectedTaskFresh?.title || "상세"}</DialogTitle>
@@ -10380,7 +10481,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             </div>
           )}
           {selectedTaskFresh && (
-            <div className={selectedTaskFresh.type === "withdrawal" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}>
+            <div className={selectedTaskFresh.type === "withdrawal" || selectedTaskFresh.type === "transfer" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}>
               <div className={isProcessDetail ? "flex flex-col gap-3" : "flex flex-col gap-3 rounded-lg border p-4"}>
                 {selectedTaskFresh.type === "general" ? (
                   <GeneralTaskDetailPanel task={selectedTaskFresh} />
@@ -10388,6 +10489,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   <WordRetestDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "withdrawal" ? (
                   <WithdrawalDetailPanel task={selectedTaskFresh} />
+                ) : selectedTaskFresh.type === "transfer" ? (
+                  <TransferDetailPanel task={selectedTaskFresh} />
                 ) : (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
@@ -10414,9 +10517,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                     onSelect={(blocker) => openEdit(selectedTaskFresh, [blocker])}
                   />
                 )}
-                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.type !== "withdrawal" && <TypeDetail task={selectedTaskFresh} />}
-                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "withdrawal" && <AutoSyncResultSummary task={selectedTaskFresh} />}
-	                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.type !== "withdrawal" && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
+                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && !isProcessDetail && <TypeDetail task={selectedTaskFresh} />}
+                {selectedTaskFresh.type !== "general" && !isProcessDetail && <AutoSyncResultSummary task={selectedTaskFresh} />}
+	                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && !isProcessDetail && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
 	                {!isCompletedProcessDetail && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
 	                  {selectedTaskFresh.type === "word_retest" && (
 	                    <>
@@ -10485,8 +10588,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 </div>}
               </div>
 
-              {selectedTaskFresh.type !== "word_retest" && (
-                selectedTaskFresh.type !== "withdrawal" && (
+              {selectedTaskFresh.type !== "word_retest" && !isProcessDetail && (
 			      <div className="flex flex-col gap-3">
                 <details className="rounded-lg border p-4" open={selectedTaskFresh.comments.length > 0}>
                   <summary className="cursor-pointer text-sm font-semibold">
@@ -10554,7 +10656,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   </div>
                 </details>}
               </div>
-                )
               )}
             </div>
           )}
@@ -13485,6 +13586,52 @@ function WithdrawalDetailPanel({ task }: { task: OpsTask }) {
             <dt className="text-xs text-muted-foreground">처리 확인</dt>
             <dd className="mt-1">
               <WithdrawalOperationsChecklistChips withdrawal={withdrawal} />
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      <details className="group rounded-md border">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+          <span>신청 · 처리</span>
+          <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
+        </summary>
+        <dl className="grid gap-3 border-t px-3 py-3 text-sm md:grid-cols-2">
+          <Info label="신청자" value={task.requestedByLabel || "담당선생님"} />
+          <Info label="신청일시" value={dateLabel(task.createdAt)} />
+          <Info label="담당자" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
+          <Info label="완료일시" value={completedAt === "-" ? "미정" : completedAt} />
+        </dl>
+      </details>
+    </section>
+  )
+}
+
+function TransferDetailPanel({ task }: { task: OpsTask }) {
+  const transfer = task.transfer || {}
+  const completedAt = dateLabel(task.completedAt)
+
+  return (
+    <section className="grid gap-4" aria-label="전반 상세 신청서">
+      <div className="grid gap-3 rounded-md border p-3">
+        <dl className="grid gap-3 text-sm md:grid-cols-2">
+          <Info label="과목" value={task.subject || "미지정"} />
+          <Info label="학생" value={task.studentName || "미지정"} />
+          <Info label="전 선생님" value={transfer.fromTeacherName || "미지정"} />
+          <Info label="후 선생님" value={transfer.toTeacherName || "미지정"} />
+          <Info label="전 수업" value={transfer.fromClassName || "미지정"} />
+          <Info label="후 수업" value={transfer.toClassName || task.className || "미지정"} />
+          <OptionalInfo label="전반사유" value={transfer.transferReason} />
+          <Info label="전 미배부 교재" value={transfer.fromUndistributedTextbooks || "-"} />
+          <Info label="후 미배부 교재" value={transfer.toUndistributedTextbooks || "-"} />
+          <Info label="전 수업 종료일" value={dateInputValue(transfer.fromClassEndDate) || "미정"} />
+          <Info label="전 수업 종료회차" value={transfer.fromClassEndSession || "미정"} />
+          <Info label="후 수업 시작일" value={dateInputValue(transfer.toClassStartDate) || "미정"} />
+          <Info label="후 수업 시작회차" value={transfer.toClassStartSession || "미정"} />
+          <div className="md:col-span-2">
+            <dt className="text-xs text-muted-foreground">처리 확인</dt>
+            <dd className="mt-1">
+              <TransferOperationsChecklistChips transfer={transfer} />
             </dd>
           </div>
         </dl>

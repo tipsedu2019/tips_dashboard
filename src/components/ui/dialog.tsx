@@ -49,11 +49,30 @@ function DialogOverlay({
 function DialogContent({
   className,
   children,
+  closeButtonLabel = "모달 닫기",
+  onCloseButtonClick,
   showCloseButton = true,
+  showCloseButtonText = false,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  closeButtonLabel?: string
+  onCloseButtonClick?: React.MouseEventHandler<HTMLButtonElement>
   showCloseButton?: boolean
+  showCloseButtonText?: boolean
 }) {
+  const closeButtonClassName = cn(
+    "ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 z-30 inline-flex items-center justify-center transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+    showCloseButtonText
+      ? "h-8 gap-1.5 rounded-md border bg-background px-2 text-xs font-medium text-muted-foreground opacity-95 shadow-xs"
+      : "rounded-xs opacity-70",
+  )
+  const closeButtonContent = (
+    <>
+      <XIcon />
+      <span className={showCloseButtonText ? "whitespace-nowrap" : "sr-only"}>{closeButtonLabel}</span>
+    </>
+  )
+
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
@@ -67,14 +86,25 @@ function DialogContent({
       >
         {children}
         {showCloseButton && (
-          <DialogPrimitive.Close
-            data-slot="dialog-close"
-            aria-label="모달 닫기"
-            className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 z-30 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-          >
-            <XIcon />
-            <span className="sr-only">모달 닫기</span>
-          </DialogPrimitive.Close>
+          onCloseButtonClick ? (
+            <button
+              type="button"
+              data-slot="dialog-close"
+              aria-label={closeButtonLabel}
+              className={closeButtonClassName}
+              onClick={onCloseButtonClick}
+            >
+              {closeButtonContent}
+            </button>
+          ) : (
+            <DialogPrimitive.Close
+              data-slot="dialog-close"
+              aria-label={closeButtonLabel}
+              className={closeButtonClassName}
+            >
+              {closeButtonContent}
+            </DialogPrimitive.Close>
+          )
         )}
       </DialogPrimitive.Content>
     </DialogPortal>
