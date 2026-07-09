@@ -58,6 +58,7 @@ type ClassFilterPanelProps = {
   createDisabled?: boolean;
   footerAction?: ReactNode;
   quickSelectIds?: string[];
+  quickSelectGridClassName?: string;
   className?: string;
 };
 
@@ -87,6 +88,7 @@ export function ClassFilterPanel({
   createDisabled = false,
   footerAction,
   quickSelectIds = [],
+  quickSelectGridClassName,
   className,
 }: ClassFilterPanelProps) {
   const hasCreate = Boolean(createLabel);
@@ -232,7 +234,10 @@ export function ClassFilterPanel({
       </div>
 
       {quickSelects.length > 0 ? (
-        <div data-testid="class-filter-quick-selects" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div
+          data-testid="class-filter-quick-selects"
+          className={cn("grid gap-2 sm:grid-cols-2 xl:grid-cols-4", quickSelectGridClassName)}
+        >
           {quickSelects.map(renderSelectField)}
         </div>
       ) : null}

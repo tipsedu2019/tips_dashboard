@@ -10,6 +10,7 @@ test("curriculum workspace reuses the class management filter panel", async () =
   assert.match(source, /@\/features\/management\/class-filter-panel/);
   assert.match(source, /<ClassFilterPanel\s+selects=\{filterSelects\}/);
   assert.match(source, /quickSelectIds=\{CURRICULUM_QUICK_FILTER_IDS\}/);
+  assert.match(source, /quickSelectGridClassName="grid-cols-2"/);
   assert.match(source, /const CURRICULUM_QUICK_FILTER_IDS = \["subject", "grade", "teacher", "classroom"\]/);
   assert.doesNotMatch(source, /AcademicFilterToolbar/);
   assert.match(source, /id: "period"/);
@@ -58,6 +59,8 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /CURRICULUM_VIEW_MODES\.map/);
   assert.match(source, /\[model\.rows\]/);
   assert.match(source, /data-testid="curriculum-work-queue"/);
+  assert.match(source, /className="grid grid-cols-2 gap-2 xl:grid-cols-5"/);
+  assert.match(source, /flex h-10 items-center justify-between rounded-md border px-3 text-left text-sm transition-colors/);
   assert.match(source, /const viewRowSessionCount = viewRowTotals\.sessions/);
   assert.match(source, /const viewRowTextbookCount = viewRowTotals\.textbooks/);
   assert.match(source, /const CURRICULUM_CLASS_PAGE_SIZE = 40/);
@@ -92,7 +95,7 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /교재 미연결/);
   assert.match(source, /진도 미배정/);
   assert.match(source, /sticky top-0 z-10 bg-background/);
-  assert.match(source, /min-w-\[980px\]/);
+  assert.match(source, /min-w-\[920px\]/);
   assert.match(source, /<TableHead className="w-\[12%\] text-right">작업<\/TableHead>/);
   assert.match(source, /const hasLinkedTextbooks = row\.textbookCount > 0/);
   assert.match(source, /inline-flex h-8 items-center rounded-md border border-dashed/);
@@ -222,9 +225,11 @@ test("shared class filter panel separates search and view state from filter coun
 
   assert.match(source, /filterCount\?: number/);
   assert.match(source, /quickSelectIds\?: string\[\]/);
+  assert.match(source, /quickSelectGridClassName\?: string/);
   assert.match(source, /const quickSelects = selects\.filter/);
   assert.match(source, /const menuSelects = selects\.filter/);
   assert.match(source, /data-testid="class-filter-quick-selects"/);
+  assert.match(source, /className=\{cn\("grid gap-2 sm:grid-cols-2 xl:grid-cols-4", quickSelectGridClassName\)\}/);
   assert.match(source, /quickSelects\.map\(renderSelectField\)/);
   assert.match(source, /menuSelects\.map\(renderSelectField\)/);
   assert.match(source, /const activeFilterCount = filterCount \?\? chips\.length/);

@@ -628,6 +628,7 @@ export function AcademicCurriculumWorkspace() {
           onReset={resetFilters}
           filterCount={filterChips.length}
           quickSelectIds={CURRICULUM_QUICK_FILTER_IDS}
+          quickSelectGridClassName="grid-cols-2"
           footerAction={
             <Popover>
               <PopoverTrigger asChild>
@@ -661,14 +662,14 @@ export function AcademicCurriculumWorkspace() {
       </div>
 
       <div className="px-4 lg:px-6">
-        <div data-testid="curriculum-work-queue" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <div data-testid="curriculum-work-queue" className="grid grid-cols-2 gap-2 xl:grid-cols-5">
           {curriculumWorkQueueItems.map((item) => (
             <button
               key={`curriculum-work-queue-${item.value}`}
               type="button"
               aria-pressed={viewMode === item.value}
               className={[
-                "flex h-12 items-center justify-between rounded-md border px-3 text-left text-sm transition-colors",
+                "flex h-10 items-center justify-between rounded-md border px-3 text-left text-sm transition-colors",
                 viewMode === item.value
                   ? "border-primary bg-primary text-primary-foreground shadow-xs"
                   : "border-border/70 bg-background hover:border-primary/40 hover:bg-muted/40",
@@ -805,7 +806,7 @@ export function AcademicCurriculumWorkspace() {
 
                 <div ref={desktopListRef} data-testid="curriculum-desktop-scroll-anchor">
                 <ScrollArea className="hidden h-[38rem] [contain-intrinsic-size:640px] [content-visibility:auto] md:block">
-                  <Table className="min-w-[980px] table-fixed">
+                  <Table className="min-w-[920px] table-fixed">
                     <TableHeader className="sticky top-0 z-10 bg-background shadow-[0_1px_0_var(--border)]">
                       <TableRow>
                         <TableHead className="w-[28%]">수업</TableHead>
