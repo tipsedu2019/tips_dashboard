@@ -281,9 +281,13 @@ test("R41 text fields emit one state update per browser input event", async () =
   assert.doesNotMatch(source.slice(start, end), /onInput=/);
 });
 
-test("R42 the long one-page registration form keeps its action bar visible", async () => {
+test("R42 the long one-page registration form action bar does not float over fields", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  assert.match(source, /sticky bottom-0 z-10/);
+  const start = source.indexOf('"-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4');
+  const end = source.indexOf("</form>", start);
+  const actionBarSource = source.slice(start, end);
+  assert.match(actionBarSource, /-mx-6 -mb-6/);
+  assert.doesNotMatch(actionBarSource, /sticky bottom-0|backdrop-blur/);
 });
 
 test("R43 checklist labels wrap instead of hiding important words", async () => {

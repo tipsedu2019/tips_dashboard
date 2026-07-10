@@ -611,6 +611,27 @@ const REGISTRATION_VIEW_STATUS_PREFIXES: Record<RegistrationViewKey, string[]> =
 
 const REGISTRATION_GRADE_OPTIONS = getRegistrationGradeOptions()
 
+const REGISTRATION_INQUIRY_CHANNEL_OPTIONS = [
+  { value: "", label: "미지정" },
+  { value: "전화", label: "전화" },
+  { value: "채널톡", label: "채널톡" },
+  { value: "선생님 전화", label: "선생님 전화" },
+  { value: "바로 방문", label: "바로 방문" },
+  { value: "인스타", label: "인스타" },
+] as const
+
+const REGISTRATION_SUBJECT_OPTIONS = [
+  { value: "", label: "미지정" },
+  { value: "영어", label: "영어" },
+  { value: "수학", label: "수학" },
+] as const
+
+const REGISTRATION_LOCATION_OPTIONS = [
+  { value: "", label: "미지정" },
+  { value: "본관", label: "본관" },
+  { value: "별관", label: "별관" },
+] as const
+
 const REGISTRATION_TEXTBOOK_PREPARATION_OPTIONS = [
   "전부 학원에서 준비",
   "개인적으로 준비",
@@ -987,12 +1008,15 @@ function RegistrationFormSection({
       ].join(" ")}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <h3 id={headingId} className="min-w-0 text-sm font-semibold">{title}</h3>
-        {active ? (
-          <span className="ml-auto shrink-0 rounded-sm bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">지금 입력</span>
-        ) : !enabled ? (
-          <span className="ml-auto shrink-0 text-xs font-medium text-muted-foreground">이전 단계 완료 후</span>
-        ) : null}
+        <h3
+          id={headingId}
+          className={[
+            "min-w-0 text-sm font-semibold transition-colors",
+            active ? "text-primary" : !enabled ? "text-muted-foreground" : "",
+          ].join(" ")}
+        >
+          {title}
+        </h3>
       </div>
       <fieldset disabled={!enabled} className={[
         "grid min-w-0 gap-3",
@@ -3261,35 +3285,6 @@ function buildOperationConfirmationMap(
   }
 
   return confirmationByTaskId
-}
-
-function SelectField({
-  label,
-  value,
-  onChange,
-  children,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  children: ReactNode
-}) {
-  const fieldId = useId()
-
-  return (
-    <div className="grid min-w-0 gap-1.5 text-sm font-medium">
-      <label htmlFor={fieldId}>{label}</label>
-      <select
-        id={fieldId}
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm shadow-xs outline-none focus:border-ring focus:ring-ring/40 focus:ring-2"
-      >
-        {children}
-      </select>
-    </div>
-  )
 }
 
 type TaskListboxOption = {
@@ -11987,7 +11982,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           onCloseButtonClick={confirmingFormClose ? discardFormAndClose : closeForm}
           showCloseButtonText
         >
-          <DialogHeader className="-mx-6 -mt-6 border-b px-6 py-4">
+          <DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-5 pt-4">
             <DialogTitle>{formDialogTitle}</DialogTitle>
             <DialogDescription className="sr-only">
               운영 업무를 입력하고 저장합니다.
@@ -12338,10 +12333,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 )}
               </section>
             )}
-            <div className={[
-              "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end",
-              "sticky bottom-0 z-10 bg-background/95 backdrop-blur-sm",
-            ].filter(Boolean).join(" ")}>
+            <div className="-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
               {!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== "word_retest_retry" && (
                 (() => {
                   const firstBlocker = formCompletionBlockers[0]
@@ -13181,19 +13173,13 @@ function TypeSpecificFields({
             <RegistrationFocusTarget focusKey="studentName">
               <TextField label="학생명" value={form.studentName || ""} autoFocus={!form.studentName && sectionActive("inquiry")} onChange={(value) => updateForm("studentName", value)} />
             </RegistrationFocusTarget>
-            <RegistrationFocusTarget focusKey="parentPhone">
-              <TextField label="학부모 전화" value={registration.parentPhone || ""} inputMode="tel" onChange={(value) => updateRegistration("parentPhone", normalizeRegistrationPhone(value))} />
-            </RegistrationFocusTarget>
-            <SelectField label="문의 채널" value={registration.inquiryChannel || ""} onChange={(value) => updateRegistration("inquiryChannel", value)}>
-              <option value="">미지정</option>
-              {["전화", "채널톡", "선생님 전화", "바로 방문", "인스타"].map((item) => <option key={item} value={item}>{item}</option>)}
-            </SelectField>
             <RegistrationFocusTarget focusKey="subject">
-              <SelectField label="과목" value={form.subject || ""} onChange={(value) => updateForm("subject", value)}>
-                <option value="">미지정</option>
-                <option value="영어">영어</option>
-                <option value="수학">수학</option>
-              </SelectField>
+              <TaskListboxField
+                label="과목"
+                value={form.subject || ""}
+                options={REGISTRATION_SUBJECT_OPTIONS}
+                onChange={(value) => updateForm("subject", value)}
+              />
             </RegistrationFocusTarget>
             <TaskListboxField
               label="학년"
@@ -13208,7 +13194,17 @@ function TypeSpecificFields({
               onChange={(value) => updateRegistration("schoolGrade", value)}
             />
             <TextField label="학교" value={registration.schoolName || ""} onChange={(value) => updateRegistration("schoolName", value)} />
+            <RegistrationFocusTarget focusKey="parentPhone">
+              <TextField label="학부모 전화" value={registration.parentPhone || ""} inputMode="tel" onChange={(value) => updateRegistration("parentPhone", normalizeRegistrationPhone(value))} />
+            </RegistrationFocusTarget>
             <TextField label="학생 전화" value={registration.studentPhone || ""} inputMode="tel" onChange={(value) => updateRegistration("studentPhone", normalizeRegistrationPhone(value))} />
+            <TaskListboxField
+              label="문의 채널"
+              value={registration.inquiryChannel || ""}
+              options={REGISTRATION_INQUIRY_CHANNEL_OPTIONS}
+              onChange={(value) => updateRegistration("inquiryChannel", value)}
+            />
+            <TextField label="문의일시" type="datetime-local" value={dateTimeInputValue(registration.inquiryAt)} onChange={(value) => updateRegistration("inquiryAt", value)} />
             <LinkedSelect
               label="기존 학생 연결"
               value={form.studentId || ""}
@@ -13221,7 +13217,6 @@ function TypeSpecificFields({
                 updateForm("studentId", "")
               }}
             />
-            <TextField label="문의일시" type="datetime-local" value={dateTimeInputValue(registration.inquiryAt)} onChange={(value) => updateRegistration("inquiryAt", value)} />
           </div>
         </RegistrationFormSection>
 
@@ -13236,11 +13231,12 @@ function TypeSpecificFields({
               <TextField label="레벨테스트 예약일시" type="datetime-local" value={dateTimeInputValue(registration.levelTestAt)} onChange={(value) => updateRegistration("levelTestAt", value)} />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="levelTestPlace">
-              <SelectField label="레벨테스트 장소" value={registration.levelTestPlace || ""} onChange={(value) => updateRegistration("levelTestPlace", value)}>
-                <option value="">미지정</option>
-                <option value="본관">본관</option>
-                <option value="별관">별관</option>
-              </SelectField>
+              <TaskListboxField
+                label="레벨테스트 장소"
+                value={registration.levelTestPlace || ""}
+                options={REGISTRATION_LOCATION_OPTIONS}
+                onChange={(value) => updateRegistration("levelTestPlace", value)}
+              />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="levelTestCompletedAt">
               <TextField label="레벨테스트 완료일시" type="datetime-local" value={dateTimeInputValue(registration.levelTestCompletedAt)} onChange={(value) => updateRegistration("levelTestCompletedAt", value)} />
@@ -13266,11 +13262,12 @@ function TypeSpecificFields({
               <TextField label="방문상담 예약일시" type="datetime-local" value={dateTimeInputValue(registration.visitConsultationAt)} onChange={(value) => updateRegistration("visitConsultationAt", value)} />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="visitConsultationPlace">
-              <SelectField label="방문상담실" value={registration.visitConsultationPlace || ""} onChange={(value) => updateRegistration("visitConsultationPlace", value)}>
-                <option value="">미지정</option>
-                <option value="본관">본관</option>
-                <option value="별관">별관</option>
-              </SelectField>
+              <TaskListboxField
+                label="방문상담실"
+                value={registration.visitConsultationPlace || ""}
+                options={REGISTRATION_LOCATION_OPTIONS}
+                onChange={(value) => updateRegistration("visitConsultationPlace", value)}
+              />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="consultationAt">
               <TextField label="상담 완료일시" type="datetime-local" value={dateTimeInputValue(registration.consultationAt)} onChange={(value) => updateRegistration("consultationAt", value)} />

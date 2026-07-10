@@ -287,7 +287,7 @@ test("todo form uses compact polished controls for dates priority and team selec
     "onWheel={handleLinkedListWheel}",
     "onOpenAutoFocus={(event) => event.preventDefault()}",
     "setIsLinkedSearchOpen(false)",
-    'DialogHeader className="-mx-6 -mt-6 border-b px-6 py-4"',
+    'DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-5 pt-4"',
     "<PrioritySelectField",
     "<TeamSelectField",
     "<DateField",
@@ -903,14 +903,15 @@ test("registration form is one progressive application with future steps locked 
     "RegistrationFormSection",
     'data-registration-current={active ? "true" : "false"}',
     "<fieldset disabled={!enabled}",
-    "지금 입력",
-    "이전 단계 완료 후",
     "registrationOperationsOpen",
     'aria-label="담당자 및 일시 이력"',
     "CollapsibleContent",
     "focusRegistrationFormSection",
     'scrollIntoView({ block: "start", behavior: "smooth" })',
   ]);
+  assert.doesNotMatch(formDialogSource, /지금 입력|이전 단계 완료 후/);
+  assert.match(source, /active \? "-mx-3 border-l-2 border-l-primary bg-primary\/5 px-3"/);
+  assert.match(source, /active \? "text-primary" : !enabled \? "text-muted-foreground" : ""/);
   assert.doesNotMatch(registrationFormSource, /if \(step === "registration_/);
   assert.match(
     source,
@@ -921,6 +922,46 @@ test("registration form is one progressive application with future steps locked 
     /\{form\.type === "registration" && \([\s\S]*?<SelectField\s+label="진행상태"/,
     "registration status should be workflow-controlled rather than a top-level jump selector",
   );
+
+  assertIncludesAll(registrationFormSource, [
+    '<TaskListboxField\n              label="문의 채널"',
+    '<TaskListboxField\n                label="과목"',
+    '<TaskListboxField\n                label="레벨테스트 장소"',
+    '<TaskListboxField\n                label="방문상담실"',
+  ]);
+  assert.doesNotMatch(registrationFormSource, /<SelectField/);
+
+  const inquiryStart = registrationFormSource.indexOf('sectionKey="inquiry"');
+  const inquiryEnd = registrationFormSource.indexOf('sectionKey="level_test"', inquiryStart);
+  const inquirySource = registrationFormSource.slice(inquiryStart, inquiryEnd);
+  const orderedInquiryFields = [
+    'focusKey="studentName"',
+    'label="과목"',
+    'label="학년"',
+    'label="학교"',
+    'focusKey="parentPhone"',
+    'label="학생 전화"',
+    'label="문의 채널"',
+    'label="문의일시"',
+    'label="기존 학생 연결"',
+  ];
+  for (let index = 1; index < orderedInquiryFields.length; index += 1) {
+    assert.ok(
+      inquirySource.indexOf(orderedInquiryFields[index - 1]) < inquirySource.indexOf(orderedInquiryFields[index]),
+      `${orderedInquiryFields[index - 1]} should appear before ${orderedInquiryFields[index]}`,
+    );
+  }
+});
+
+test("shared operation form actions sit flush below content instead of floating over fields", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const start = source.indexOf('"-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4');
+  const end = source.indexOf("</form>", start);
+  const actionBarSource = source.slice(start, end);
+
+  assert.ok(start >= 0, "shared operation action bar should exist");
+  assert.match(actionBarSource, /-mx-6 -mb-6/);
+  assert.doesNotMatch(actionBarSource, /sticky bottom-0|backdrop-blur/);
 });
 
 test("operation class options query the canonical fee schema before legacy tuition fallbacks", async () => {
