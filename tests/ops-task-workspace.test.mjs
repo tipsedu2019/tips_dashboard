@@ -623,25 +623,33 @@ test("navigation keeps todo queues and separates operation menus", async () => {
   assert.doesNotMatch(source, new RegExp(`title: "${ko.taskbox}"`));
 });
 
-test("registration keeps the Notion pipeline as first-class state", async () => {
-  const [workspaceSource, modelSource, serviceSource, migrationSource] = await Promise.all([
+test("registration keeps the operational pipeline as first-class state", async () => {
+  assert.equal(
+    await pathExists("supabase/migrations/20260710052921_registration_application_workflow.sql"),
+    true,
+    "registration operational flow migration should exist",
+  );
+  const [workspaceSource, modelSource, serviceSource, migrationSource, operationalFlowMigrationSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-model.js"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("supabase/migrations/20260522103000_ops_registration_pipeline_status.sql"),
+    readSource("supabase/migrations/20260710052921_registration_application_workflow.sql"),
   ]);
-  const combined = `${workspaceSource}\n${modelSource}\n${serviceSource}\n${migrationSource}`;
+  const combined = `${workspaceSource}\n${modelSource}\n${serviceSource}\n${migrationSource}\n${operationalFlowMigrationSource}`;
 
   for (const status of [
     "0. \ub4f1\ub85d \ubb38\uc758",
-    "1. \ub808\ubca8\ud14c\uc2a4\ud2b8 \uc2e0\uccad",
-    "2. \uc0c1\ub2f4 \uc2e0\uccad",
+    "1. \ub808\ubca8\ud14c\uc2a4\ud2b8 \uc608\uc57d",
+    "1-1. \ub808\ubca8\ud14c\uc2a4\ud2b8 \uc644\ub8cc",
+    "2. \uc0c1\ub2f4 \uc608\uc57d",
     "3. \uc0c1\ub2f4 \uc644\ub8cc",
     "4-1. \ud604\uc7ac\ubc18 \ub300\uae30",
     "4-2. \uc2e0\uaddc\ubc18 \ub300\uae30",
     "4-3. \ub2e4\uc74c \uac1c\uac15 \uc54c\ub9bc",
-    "5. \ub4f1\ub85d \uc2e0\uccad",
-    "6. \uc218\ub0a9 \uc9c4\ud589 \uc911",
+    "5. \uc785\ud559 \ub4f1\ub85d \uacb0\uc815",
+    "5-1. \uc785\ud559\uc2e0\uccad\uc11c \ubc1c\uc1a1 \uc644\ub8cc",
+    "6. \uc218\ub0a9 \ud655\uc778",
     "7. \ub4f1\ub85d \uc644\ub8cc",
     "8. \ubbf8\ub4f1\ub85d",
     "9. \ubb38\uc758\ub9cc",
@@ -657,7 +665,275 @@ test("registration keeps the Notion pipeline as first-class state", async () => 
     "ops_registration_details_pipeline_status_idx",
     "findRegistrationPipelineStatus",
     "syncRegistrationPipelineStatusForTaskStatus",
+    "registration_pipeline_status_check",
   ]);
+});
+
+test("registration workspace replaces Notion registration management with process tabs table filters and notifications", async () => {
+  const [workspaceSource, serviceSource, migrationSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+    readSource("supabase/migrations/20260710052914_registration_operational_fields.sql"),
+  ]);
+  const combined = `${workspaceSource}\n${serviceSource}\n${migrationSource}`;
+  const registrationTableSource = workspaceSource.slice(
+    workspaceSource.indexOf("const REGISTRATION_TABLE_COLUMNS"),
+    workspaceSource.indexOf("function WithdrawalDataTable"),
+  );
+  const detailDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("<Dialog open={detailOpen}"),
+    workspaceSource.indexOf("<Dialog open={Boolean(deleteTarget)}"),
+  );
+
+  assertIncludesAll(combined, [
+    'type RegistrationViewKey = "inquiry" | "consulting" | "waiting" | "enrollment" | "closed"',
+    "REGISTRATION_VIEW_TABS",
+    "REGISTRATION_VIEW_STATUS_PREFIXES",
+    "REGISTRATION_TABLE_COLUMNS",
+    "REGISTRATION_NOTIFICATION_TEMPLATE_VARIABLES",
+    "DEFAULT_REGISTRATION_NOTIFICATION_TEMPLATES",
+    "RegistrationDataTable",
+    "RegistrationFilterSelect",
+    "RegistrationPeriodFilterBar",
+    "RegistrationResizableHeaderCell",
+    "RegistrationWorkflowStatusBadge",
+    "RegistrationOperationsChecklistChips",
+    "RegistrationNotificationSettingsDialog",
+    "RegistrationDetailPanel",
+    "getRegistrationViewTasks",
+    "getRegistrationTableValue",
+    "matchesRegistrationPeriodFilter",
+    "notifyRegistrationWorkflow",
+    "getRegistrationNotificationTriggerForPipelineStatus",
+    "textbookPreparation",
+    "visitConsultationPlace",
+    "timetableRosterUpdated",
+    "textbook_preparation",
+    "visit_consultation_place",
+    "timetable_roster_updated",
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    '{ key: "inquiry", label: "문의" }',
+    '{ key: "consulting", label: "상담/레벨테스트" }',
+    '{ key: "waiting", label: "대기" }',
+    '{ key: "enrollment", label: "등록" }',
+    '{ key: "closed", label: "완료" }',
+    'aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}',
+    "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace",
+    "setRegistrationNotificationOpen(true)",
+    'isRegistrationWorkspace ? "등록 알림 설정"',
+    "registrationCounts",
+    "registrationView",
+  ]);
+
+  assertIncludesAll(registrationTableSource, [
+    '"pipelineStatus"',
+    '"subject"',
+    '"schoolGrade"',
+    '"schoolName"',
+    '"student"',
+    '"parentPhone"',
+    '"inquiryChannel"',
+    '"inquiryAt"',
+    '"counselor"',
+    '"levelTestAt"',
+    '"phoneConsultationAt"',
+    '"visitConsultationAt"',
+    '"className"',
+    '"classStartDate"',
+    '"classStartSession"',
+    '"requestNote"',
+    '"operationsChecklist"',
+    '"action"',
+    'aria-label="등록 전체 필터"',
+    'aria-label="등록 데이터테이블 열 필터"',
+    'data-testid="registration-mobile-task-list"',
+    'aria-label="등록 신청 데이터테이블"',
+    'labelPrefix="등록"',
+    "selectedCounselorFilter",
+    "selectedGradeFilter",
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    'label="진행상태"',
+    'label="과목"',
+    'label="학년"',
+    'label="방문상담실"',
+    'label="교재 준비"',
+    'label="수업시작회차"',
+    'label="수업시간표 명단"',
+    "전부 학원에서 준비",
+    "개인적으로 준비",
+    "일부만 학원에서 준비(메모 확인 필수)",
+  ]);
+
+  assertIncludesAll(detailDialogSource, [
+    "RegistrationDetailPanel",
+    'selectedTaskFresh?.type === "registration" || selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl"',
+  ]);
+});
+
+test("registration follows the real decision waitlist admission form and manual payment workflow", async () => {
+  assert.equal(
+    await pathExists("src/app/api/solapi/registration/route.ts"),
+    true,
+    "registration SOLAPI route should exist",
+  );
+  assert.equal(
+    await pathExists("supabase/migrations/20260710053001_registration_message_least_privilege.sql"),
+    true,
+    "registration SOLAPI history should have an explicit least-privilege migration",
+  );
+  assert.equal(
+    await pathExists("supabase/migrations/20260710053144_registration_message_policy_performance.sql"),
+    true,
+    "registration SOLAPI history should keep its RLS policy index-friendly",
+  );
+
+  const [workspaceSource, registrationWorkflowSource, serviceSource, routeSource, migrationSource, leastPrivilegeMigrationSource, policyPerformanceMigrationSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-workflow.js"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+    readSource("src/app/api/solapi/registration/route.ts"),
+    readSource("supabase/migrations/20260710052921_registration_application_workflow.sql"),
+    readSource("supabase/migrations/20260710053001_registration_message_least_privilege.sql"),
+    readSource("supabase/migrations/20260710053144_registration_message_policy_performance.sql"),
+  ]);
+  const combined = `${workspaceSource}\n${serviceSource}\n${routeSource}\n${migrationSource}\n${leastPrivilegeMigrationSource}\n${policyPerformanceMigrationSource}`;
+  const detailDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("<Dialog open={detailOpen}"),
+    workspaceSource.indexOf("<Dialog open={Boolean(deleteTarget)}"),
+  );
+
+  assertIncludesAll(`${workspaceSource}\n${registrationWorkflowSource}`, [
+    "REGISTRATION_DECISION_ACTIONS",
+    "RegistrationDecisionActions",
+    "getRegistrationPipelineActionBlockers",
+    "toDateKey(registration.consultationAt)",
+    'studentName.endsWith("학생")',
+    "RegistrationCustomerMessageDialog",
+    "openRegistrationCustomerMessage",
+    "sendRegistrationAdmissionMessage",
+    "copyMakeEduAdmissionMessage",
+    "입학 등록",
+    "현재반 대기",
+    "신규반 대기",
+    "다음 개강 알림",
+    "미등록",
+    "입학신청서 발송",
+    "메이크에듀용 내용 복사",
+    "레벨테스트 예약일시",
+    "상담 예약일시",
+    "상담 완료일시",
+    "수납 완료 확인",
+  ]);
+  assertIncludesAll(serviceSource, [
+    "assignOpsStudentToWaitlist",
+    "syncRegistrationWaitlist",
+    "removeRegistrationWaitlistOnDelete",
+    "registration_waitlist",
+    "waitlist_registered",
+    "previousTask",
+  ]);
+  assertIncludesAll(routeSource, [
+    'from "node:crypto"',
+    "createHmac",
+    "randomBytes",
+    "SOLAPI_API_KEY",
+    "SOLAPI_API_SECRET",
+    "SOLAPI_KAKAO_PF_ID",
+    "SOLAPI_REGISTRATION_ADMISSION_TEMPLATE_ID",
+    "https://api.solapi.com/messages/v4/send-many/detail",
+    'type: "ATA"',
+    "disableSms: true",
+    '"#{학생명}"',
+    "template_key: ADMISSION_TEMPLATE_KEY",
+    'event_type: "customer_message_sent"',
+    'status: "pending"',
+    "claimMessageRecord",
+  ]);
+  assertIncludesAll(migrationSource, [
+    "create table if not exists public.ops_registration_messages",
+    "recipient_last4",
+    "provider_message_id",
+    "provider_group_id",
+    "request_key",
+    "updated_at",
+    "'pending', 'accepted', 'failed'",
+    "ops_registration_messages_task_created_idx",
+  ]);
+  assertIncludesAll(leastPrivilegeMigrationSource, [
+    "revoke all privileges",
+    "from anon",
+    "revoke insert, update, delete, truncate, references, trigger",
+    "from authenticated",
+    "grant select",
+  ]);
+  assertIncludesAll(policyPerformanceMigrationSource, [
+    "ops_registration_messages_sent_by_idx",
+    "(select public.current_dashboard_role())",
+    "(select auth.uid())",
+  ]);
+  assertIncludesAll(combined, [
+    "입학신청서 작성 안내",
+    "https://bit.ly/3rurm5t",
+  ]);
+  assert.match(
+    detailDialogSource,
+    /selectedTaskFresh\.type !== "registration" && selectedTaskFresh\.type !== "word_retest" && !isProcessDetail/,
+    "registration detail should not render the generic comment and attachment rail",
+  );
+});
+
+test("registration form is one progressive application with future steps locked and operations history collapsed", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const formDialogSource = source.slice(
+    source.indexOf("<Dialog open={formOpen}"),
+    source.indexOf("<Dialog open={detailOpen}"),
+  );
+  const registrationFormSource = source.slice(
+    source.indexOf('if (form.type === "registration") {', source.indexOf("function TypeSpecificFields")),
+    source.indexOf('if (form.type === "withdrawal")', source.indexOf("function TypeSpecificFields")),
+  );
+
+  assertIncludesAll(source, [
+    "REGISTRATION_FORM_SECTIONS",
+    "getRegistrationFormStage",
+    "RegistrationFormSection",
+    'data-registration-current={active ? "true" : "false"}',
+    "<fieldset disabled={!enabled}",
+    "지금 입력",
+    "이전 단계 완료 후",
+    "registrationOperationsOpen",
+    'aria-label="담당자 및 일시 이력"',
+    "CollapsibleContent",
+    "focusRegistrationFormSection",
+    'scrollIntoView({ block: "start", behavior: "smooth" })',
+  ]);
+  assert.doesNotMatch(registrationFormSource, /if \(step === "registration_/);
+  assert.match(
+    source,
+    /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && form\.type !== "transfer" && form\.type !== "registration" && formDetailTabs\.length > 1/,
+  );
+  assert.doesNotMatch(
+    formDialogSource,
+    /\{form\.type === "registration" && \([\s\S]*?<SelectField\s+label="진행상태"/,
+    "registration status should be workflow-controlled rather than a top-level jump selector",
+  );
+});
+
+test("operation class options query the canonical fee schema before legacy tuition fallbacks", async () => {
+  const serviceSource = await readSource("src/features/tasks/ops-task-service.ts");
+  const candidatesSource = serviceSource.slice(
+    serviceSource.indexOf("const OPS_CLASS_COLUMN_CANDIDATES"),
+    serviceSource.indexOf("const OPS_REGISTRATION_OPTIONAL_DETAIL_COLUMNS"),
+  );
+  const firstCandidate = candidatesSource.match(/\n\s*"([^"]+)",/)?.[1] || "";
+
+  assert.match(firstCandidate, /schedule_plan,fee,/);
+  assert.match(firstCandidate, /textbook_ids/);
+  assert.doesNotMatch(firstCandidate, /tuition/);
 });
 
 test("operation forms use staged fields and linked management selectors", async () => {
@@ -862,13 +1138,13 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "legacy confirmed withdrawal rows should use the same processing action language",
   );
   assertIncludesAll(withdrawalWorkspaceToolbarSource, [
-    'aria-label={isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
+    'aria-label={isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
     "setWithdrawalNotificationOpen(true)",
     "<Bell className=\"size-4\"",
   ]);
   assert.match(
     withdrawalWorkspaceToolbarSource,
-    /!isWordRetestWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && \(/,
+    /!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && \(/,
     "withdrawal toolbar should exclude the generic refresh action",
   );
   assertIncludesAll(source, [
@@ -1102,11 +1378,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     source,
-    /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && form\.type !== "transfer" && formDetailTabs\.length > 1/,
+    /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && form\.type !== "transfer" && form\.type !== "registration" && formDetailTabs\.length > 1/,
   );
   assert.match(
     source,
-    /className=\{form\.type === "withdrawal" \|\| form\.type === "transfer" \? "grid gap-3" : "grid gap-3 rounded-lg border p-3"\}/,
+    /className=\{form\.type === "withdrawal" \|\| form\.type === "transfer" \|\| form\.type === "registration" \? "grid gap-3" : "grid gap-3 rounded-lg border p-3"\}/,
   );
   assert.match(
     formDialogSource,
@@ -1160,7 +1436,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     source,
-    /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isWithdrawalWorkspace \? "퇴원 흐름" : isTransferWorkspace \? "전반 흐름" : `\$\{workspaceLabel\} 보기`\}/,
+    /aria-label=\{isTodoWorkspace \? "할 일 목록" : isWordRetestWorkspace \? "단어 재시험 역할" : isRegistrationWorkspace \? "등록 흐름" : isWithdrawalWorkspace \? "퇴원 흐름" : isTransferWorkspace \? "전반 흐름" : `\$\{workspaceLabel\} 보기`\}/,
   );
   assertIncludesAll(source, [
     "const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace",
@@ -1463,8 +1739,8 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "fee?: number",
     "const normalized = String(value || \"\").replace(/[^0-9.-]+/g, \"\")",
     "OPS_CLASS_COLUMN_CANDIDATES",
-    "fee,tuition",
-    '"id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,tuition,student_ids,waitlist_ids,textbook_ids,status"',
+    '"id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,textbook_ids,status"',
+    '"id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,textbook_ids,status"',
     '"id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,status"',
     '"id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,status"',
     "async function readOpsClassRows()",
@@ -1503,7 +1779,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "transfer processing rows should complete without an approval queue",
   );
   assertIncludesAll(workspaceToolbarSource, [
-    'aria-label={isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
+    'aria-label={isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}',
     "setTransferNotificationOpen(true)",
     "setWithdrawalNotificationOpen(true)",
   ]);
@@ -1976,8 +2252,8 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "onOpen={openEdit}",
     "단어 재시험 수정",
     'if (task.type === "word_retest") return []',
-    "!isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
-    "!isTodoWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
+    "!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0",
+    "!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== \"none\"",
     'selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl"',
     'selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4"',
     'selectedTaskFresh.type !== "word_retest" && !isProcessDetail && (',
@@ -2329,7 +2605,7 @@ test("management sync connects registration transfer withdrawal and word retest 
     "identityFields.length === 0",
     "supportingFields",
     "return null",
-    "const existingStudent = completed ? await resolveOpsRegistrationStudent(input) : null",
+    "const existingStudent = shouldEnsureStudent ? await resolveOpsRegistrationStudent(input) : null",
     "const firstDelete = await supabase.from(\"ops_tasks\").delete().eq(\"id\", taskId)",
     "export async function deleteOpsTask",
     "MANAGEMENT_INPUT_FIELDS",
@@ -2389,7 +2665,8 @@ test("management sync connects registration transfer withdrawal and word retest 
   ]);
   assertIncludesAll(deleteOpsTaskSource, [
     ".from(\"ops_tasks\").delete().eq(\"id\", taskId).select(\"id\")",
-    "if (!didMutateOpsTask(data)) throw new Error(\"업무 데이터를 다시 불러오세요.\")",
+    "if (error || !didMutateOpsTask(data)) {",
+    "if (rollbackWaitlist) await rollbackWaitlist()",
   ]);
   assert.doesNotMatch(deleteOpsTaskSource, /deleteOpsTaskChildRows/);
 
@@ -2672,6 +2949,8 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     "OPS_BROWSER_QUICK_ADD_SAMPLE_COUNT",
     "OPS_BROWSER_OPERATION_SAMPLE_COUNT",
     "OPS_BROWSER_OPERATION_COMPLETE_SAMPLE",
+    "OPS_BROWSER_OPERATION_COMPLETE_FILTER",
+    "OPS_BROWSER_REGISTRATION_WORKFLOW_SAMPLE",
     "DEFAULT_QUICK_ADD_SAMPLE_COUNT",
     "DEFAULT_OPERATION_SAMPLE_COUNT",
     "UI_COMPLETION_PREFIX",
@@ -2684,12 +2963,31 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     'getByRole("button", { name: "완료" })',
     'getByRole("button", { name: "다시 열기" })',
     "verifySingleCreateDialogInteraction",
+    "verifyRegistrationSinglePageDialog",
+    "verifyFlatOperationDialog",
+    "await verifyFlatOperationDialog(dialog, route)",
+    "options.enabledOnly",
+    'expectedTexts: ["전반", "전반 신청"]',
+    "const createButtonName = route.expectedTexts[1]",
     "createOperationCompletionFixtures",
+    'routePath: "/admin/registration?flow=enrollment"',
     "verifyOperationCompletionInteraction",
     "verifyOperationCompletionSet",
     "verifyOperationCompletionSync",
     "cleanupOperationCompletionFixtures",
+    "createRegistrationWorkflowFixture",
+    "verifyRegistrationWorkflowSet",
+    "waitForRegistrationWorkflowState",
+    "const hasWaitlistHistory = state.history.some",
+    "waitForRegistrationMessageReadiness",
+    "assertLocatorFitsViewport",
+    "waitlistRemovedOnEnrollmentDecision",
     "fillOperationMinimumFields",
+    "isFillableFormControl",
+    "const editedOperationRowLabel = sampleName",
+    "openOperationSampleDetail",
+    "await openOperationSampleDetail(page, fixture.title)",
+    "await openOperationSampleDetail(page, task.title)",
     "selectManualIfPresent",
     "제목 직접 지정",
     "다음: 등록 완료",
@@ -2781,7 +3079,7 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     'authMode = "temp-user-storage"',
     'authMode = "ui-login"',
     "catch {",
-    "fixed step progress label",
+    "still shows the old step progress label",
     'getByRole("button", { name: "완료" })',
     'getByRole("button", { name: "해당 없음" })',
     'hiddenStatus of ["요청", "진행", "보류", "취소"]',

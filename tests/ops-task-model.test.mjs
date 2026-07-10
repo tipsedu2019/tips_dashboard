@@ -503,7 +503,7 @@ test("ops task model simulates 30 sample workflows from create edit complete to 
           inquiryAt: `2026-07-${day}T10:00:00+09:00`,
           levelTestAt: `2026-07-${day}T17:00:00+09:00`,
           classStartDate: `2026-07-${String(15 + index).padStart(2, "0")}`,
-          pipelineStatus: "5. 등록 신청",
+          pipelineStatus: "5. 입학 등록 결정",
         },
       };
     }

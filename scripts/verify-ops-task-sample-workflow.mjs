@@ -194,7 +194,7 @@ function buildDetailRows(tasks) {
         counselor: "샘플 상담",
         class_start_date: `2026-08-${dayFromIndex(index, 14)}`,
         class_start_session: "1회차",
-        pipeline_status: "5. 등록 신청",
+        pipeline_status: "5. 입학 등록 결정",
         request_note: RUN_TAG,
       })
     }
@@ -393,7 +393,7 @@ select
   '샘플 상담',
   current_date + interval '7 days',
   '1회차',
-  '5. 등록 신청',
+  '5. 입학 등록 결정',
   ${tag}
 from codex_ops_sample_ids t
 where t.task_type = 'registration';

@@ -10,6 +10,7 @@ const DEFAULT_LOGIN_EMAIL_DOMAIN = "tipsedu.co.kr"
 const SAMPLE_TAG = "codex-sample-workflow:"
 const UI_SAMPLE_PREFIX = "Codex UI 점검"
 const UI_COMPLETION_PREFIX = "Codex 완료검증"
+const UI_REGISTRATION_PREFIX = "Codex 등록검증"
 const TEMP_USER_PREFIX = "codex-browser-verifier"
 const DEFAULT_QUICK_ADD_SAMPLE_COUNT = 1
 const DEFAULT_OPERATION_SAMPLE_COUNT = 1
@@ -343,7 +344,7 @@ const ROUTES = [
   { path: "/admin/tasks?list=sent", name: "todo-sent", expectedTexts: ["할 일", "보낸함"] },
   { path: "/admin/tasks?list=completed", name: "todo-completed", expectedTexts: ["할 일", "완료"] },
   { path: "/admin/registration", name: "registration", expectedTexts: ["등록", "등록 추가"], interaction: "open-create" },
-  { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 추가"], interaction: "open-create" },
+  { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 신청"], interaction: "open-create" },
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 신청"], interaction: "open-create" },
   { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["영어 단어 재시험", "추가"], interaction: "open-create" },
   { path: "/admin/makeup-requests", name: "makeup-requests", expectedTexts: ["휴보강", "신청"], interaction: "makeup-request" },
@@ -591,7 +592,7 @@ async function countRemainingUiSamples(loginId, password) {
   if (error || !data.session) return null
 
   let remaining = 0
-  for (const prefix of [UI_SAMPLE_PREFIX, UI_COMPLETION_PREFIX]) {
+  for (const prefix of [UI_SAMPLE_PREFIX, UI_COMPLETION_PREFIX, UI_REGISTRATION_PREFIX]) {
     const { count, error: countError } = await client
       .from("ops_tasks")
       .select("id", { count: "exact", head: true })
@@ -893,7 +894,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
     const tasks = [
       {
         key: "registration",
-        routePath: "/admin/registration",
+        routePath: "/admin/registration?flow=enrollment",
         routeExpectedTexts: ["등록", "등록 추가"],
         title: `${prefix} 등록 완료`,
         id: ids.tasks.registration,
@@ -908,7 +909,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
       {
         key: "transfer",
         routePath: "/admin/transfer",
-        routeExpectedTexts: ["전반", "전반 추가"],
+        routeExpectedTexts: ["전반", "전반 신청"],
         title: `${prefix} 전반 완료`,
         id: ids.tasks.transfer,
       },
@@ -1008,7 +1009,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
       makeedu_registered: true,
       makeedu_invoice_sent: true,
       textbook_billing_issued: true,
-      pipeline_status: "6. 수납 진행 중",
+      pipeline_status: "6. 수납 확인",
       request_note: UI_COMPLETION_PREFIX,
     }), "registration detail fixture insert")
 
@@ -1092,6 +1093,239 @@ async function cleanupOperationCompletionFixtures(fixtureSet) {
   await deleteByIds(client, "classes", "id", classIds).catch(() => {})
   await deleteByIds(client, "textbooks", "id", textbookIds).catch(() => {})
   await deleteByIds(client, "teacher_catalogs", "id", teacherIds).catch(() => {})
+}
+
+async function createRegistrationWorkflowFixture(viewportName, loginId, password) {
+  const client = await createAdminSupabaseClient(loginId, password)
+  const token = `${viewportName}-${Date.now()}-${compactUuid()}`
+  const prefix = `${UI_REGISTRATION_PREFIX} ${token}`
+  const ids = {
+    task: randomUUID(),
+    student: randomUUID(),
+    class: randomUUID(),
+  }
+  const now = nowIsoValue()
+
+  try {
+    ensureQueryOk(await client.from("students").insert({
+      id: ids.student,
+      name: `${prefix} 학생`,
+      grade: "고1",
+      enroll_date: todayDateValue(),
+      class_ids: [],
+      waitlist_class_ids: [],
+      school: "검증고",
+      contact: "010-0000-0101",
+      parent_contact: "010-1000-0101",
+      status: "재원",
+    }), "registration workflow student fixture insert")
+
+    ensureQueryOk(await client.from("classes").insert({
+      id: ids.class,
+      name: `${prefix} 대기반`,
+      teacher: "브라우저 검증",
+      schedule: "",
+      student_ids: [],
+      waitlist_ids: [],
+      textbook_ids: [],
+      room: "본관 1강",
+      subject: "영어",
+      grade: "고1",
+      capacity: 12,
+      fee: 0,
+      status: "수강",
+    }), "registration workflow class fixture insert")
+
+    ensureQueryOk(await client.from("ops_tasks").insert({
+      id: ids.task,
+      title: `${prefix} 신청서`,
+      type: "registration",
+      status: "in_progress",
+      priority: "normal",
+      student_id: ids.student,
+      class_id: ids.class,
+      student_name: `${prefix} 학생`,
+      class_name: `${prefix} 대기반`,
+      campus: "본관",
+      subject: "영어",
+      due_at: now,
+      memo: `${UI_REGISTRATION_PREFIX} fixture`,
+    }), "registration workflow task fixture insert")
+
+    ensureQueryOk(await client.from("ops_registration_details").insert({
+      task_id: ids.task,
+      inquiry_channel: "전화",
+      inquiry_at: now,
+      school_grade: "고1",
+      school_name: "검증고",
+      parent_phone: "010-1000-0101",
+      student_phone: "010-0000-0101",
+      level_test_at: now,
+      level_test_place: "본관",
+      counselor: "브라우저 검증",
+      phone_consultation_at: now,
+      consultation_at: now,
+      pipeline_status: "3. 상담 완료",
+      request_note: UI_REGISTRATION_PREFIX,
+    }), "registration workflow detail fixture insert")
+
+    return { client, ids, title: `${prefix} 신청서` }
+  } catch (error) {
+    await cleanupRegistrationWorkflowFixture({ client, ids }).catch(() => {})
+    throw error
+  }
+}
+
+async function cleanupRegistrationWorkflowFixture(fixture) {
+  const client = fixture?.client
+  const ids = fixture?.ids
+  if (!client || !ids) return
+  await deleteByIds(client, "ops_registration_messages", "task_id", [ids.task]).catch(() => {})
+  await deleteByIds(client, "ops_task_events", "task_id", [ids.task]).catch(() => {})
+  await deleteByIds(client, "ops_task_comments", "task_id", [ids.task]).catch(() => {})
+  await deleteByIds(client, "ops_task_attachments", "task_id", [ids.task]).catch(() => {})
+  await deleteByIds(client, "ops_registration_details", "task_id", [ids.task]).catch(() => {})
+  await deleteByIds(client, "ops_tasks", "id", [ids.task]).catch(() => {})
+  await deleteByIds(client, "student_class_enrollment_history", "student_id", [ids.student]).catch(() => {})
+  await deleteByIds(client, "students", "id", [ids.student]).catch(() => {})
+  await deleteByIds(client, "classes", "id", [ids.class]).catch(() => {})
+}
+
+async function readRegistrationWorkflowState(fixture) {
+  const { client, ids } = fixture
+  const [taskResult, detailResult, studentResult, classResult, historyResult] = await Promise.all([
+    client.from("ops_tasks").select("id,status").eq("id", ids.task).maybeSingle(),
+    client.from("ops_registration_details").select("pipeline_status").eq("task_id", ids.task).maybeSingle(),
+    client.from("students").select("class_ids,waitlist_class_ids").eq("id", ids.student).maybeSingle(),
+    client.from("classes").select("student_ids,waitlist_ids").eq("id", ids.class).maybeSingle(),
+    client.from("student_class_enrollment_history").select("action").eq("student_id", ids.student).eq("class_id", ids.class),
+  ])
+  for (const [label, result] of Object.entries({ taskResult, detailResult, studentResult, classResult, historyResult })) {
+    if (result.error) throw new Error(`${label}: ${result.error.message}`)
+  }
+  return {
+    task: taskResult.data || {},
+    detail: detailResult.data || {},
+    student: studentResult.data || {},
+    classRow: classResult.data || {},
+    history: historyResult.data || [],
+  }
+}
+
+async function waitForRegistrationWorkflowState(fixture, expectedStatus, expectedWaitlist, timeoutMs = 15000) {
+  const startedAt = Date.now()
+  let state = null
+  while (Date.now() - startedAt < timeoutMs) {
+    state = await readRegistrationWorkflowState(fixture)
+    const waitlistLinked = includesId(state.student.waitlist_class_ids, fixture.ids.class) &&
+      includesId(state.classRow.waitlist_ids, fixture.ids.student)
+    const enrolled = includesId(state.student.class_ids, fixture.ids.class) ||
+      includesId(state.classRow.student_ids, fixture.ids.student)
+    const hasWaitlistHistory = state.history.some((item) => item.action === "waitlist")
+    const historyReady = !expectedWaitlist || hasWaitlistHistory
+    if (state.detail.pipeline_status === expectedStatus && waitlistLinked === expectedWaitlist && !enrolled && historyReady) return state
+    await new Promise((resolveReady) => setTimeout(resolveReady, 250))
+  }
+  throw new Error(`Registration workflow did not reach ${expectedStatus} with waitlist=${expectedWaitlist}.`)
+}
+
+async function openRegistrationFixtureDetail(page, baseUrl, flow, fixture) {
+  const route = {
+    path: `/admin/registration?flow=${flow}`,
+    name: `registration-${flow}`,
+    expectedTexts: ["등록", "등록 추가"],
+  }
+  await page.goto(joinUrl(baseUrl, route.path), { waitUntil: "networkidle" })
+  await waitForRouteText(page, route)
+  await openOperationSampleDetail(page, fixture.title)
+  const detailDialog = page.getByRole("dialog").filter({ hasText: fixture.title }).first()
+  await detailDialog.waitFor({ state: "visible", timeout: 5000 })
+  return detailDialog
+}
+
+async function waitForRegistrationMessageReadiness(messageDialog, timeoutMs = 10000) {
+  const startedAt = Date.now()
+  let messageText = ""
+  while (Date.now() - startedAt < timeoutMs) {
+    messageText = await messageDialog.innerText({ timeout: 2000 }).catch(() => "")
+    if (messageText.includes("SOLAPI 연결됨") || messageText.includes("검수/설정 대기")) return messageText
+    await new Promise((resolveReady) => setTimeout(resolveReady, 250))
+  }
+  throw new Error(`Registration message readiness did not finish. Visible text: ${messageText.replace(/\s+/g, " ").slice(0, 300)}`)
+}
+
+async function assertLocatorFitsViewport(page, locator, label) {
+  const [box, viewport] = await Promise.all([
+    locator.boundingBox(),
+    Promise.resolve(page.viewportSize()),
+  ])
+  if (!box || !viewport) throw new Error(`${label} bounds could not be measured.`)
+  const tolerance = 1
+  if (
+    box.x < -tolerance ||
+    box.y < -tolerance ||
+    box.x + box.width > viewport.width + tolerance ||
+    box.y + box.height > viewport.height + tolerance
+  ) {
+    throw new Error(`${label} is outside the viewport: ${JSON.stringify({ box, viewport })}`)
+  }
+  return box
+}
+
+async function verifyRegistrationWorkflowSet(page, baseUrl, viewportName, loginId, password, artifactDir) {
+  let fixture = null
+  try {
+    fixture = await createRegistrationWorkflowFixture(viewportName, loginId, password)
+    let detailDialog = await openRegistrationFixtureDetail(page, baseUrl, "consulting", fixture)
+    const decisionButton = detailDialog.getByRole("button", { name: /상담 결과 선택|결과 선택/ }).last()
+    await waitUntilEnabled(decisionButton, "registration decision button")
+    await decisionButton.click()
+    const waitlistDecision = page.getByRole("menuitem", { name: "현재반 대기", exact: true }).last()
+    await waitUntilEnabled(waitlistDecision, "registration waitlist decision")
+    await waitlistDecision.click()
+    const waitlistState = await waitForRegistrationWorkflowState(fixture, "4-1. 현재반 대기 신청", true)
+    if (!waitlistState.history.some((item) => item.action === "waitlist")) {
+      throw new Error("Registration waitlist history was not recorded.")
+    }
+
+    await page.keyboard.press("Escape").catch(() => {})
+    detailDialog = await openRegistrationFixtureDetail(page, baseUrl, "waiting", fixture)
+    const enrollmentDecision = detailDialog.getByRole("button", { name: "다음: 입학 등록 결정", exact: true }).last()
+    await waitUntilEnabled(enrollmentDecision, "registration enrollment decision")
+    await enrollmentDecision.click()
+    await waitForRegistrationWorkflowState(fixture, "5. 입학 등록 결정", false)
+
+    await page.keyboard.press("Escape").catch(() => {})
+    detailDialog = await openRegistrationFixtureDetail(page, baseUrl, "enrollment", fixture)
+    const messageButton = detailDialog.getByRole("button", { name: "입학신청서 발송", exact: true }).last()
+    await waitUntilEnabled(messageButton, "registration admission message button")
+    await messageButton.click()
+    const messageDialog = page.getByRole("dialog").filter({ hasText: "입학신청서 발송" }).last()
+    await messageDialog.waitFor({ state: "visible", timeout: 5000 })
+    const messageText = await waitForRegistrationMessageReadiness(messageDialog)
+    const messageDialogBounds = await assertLocatorFitsViewport(page, messageDialog, "Registration message dialog")
+    for (const expectedText of ["알림톡 미리보기", "메이크에듀용 내용 복사", "입학신청서 열기"]) {
+      if (!messageText.includes(expectedText)) throw new Error(`Registration message dialog is missing ${expectedText}.`)
+    }
+    if (!messageText.includes("SOLAPI 연결됨") && !messageText.includes("검수/설정 대기")) {
+      throw new Error("Registration message dialog did not show the SOLAPI readiness state.")
+    }
+    const sendButton = messageDialog.getByRole("button", { name: "알림톡 발송", exact: true }).last()
+    if (messageText.includes("검수/설정 대기") && !(await sendButton.isDisabled().catch(() => false))) {
+      throw new Error("Registration AlimTalk send button should stay disabled before template configuration.")
+    }
+    const screenshotPath = await writeDebugArtifacts(page, artifactDir, `registration-workflow-${viewportName}`, { fullPage: false })
+
+    return {
+      waitlistLinked: true,
+      waitlistRemovedOnEnrollmentDecision: true,
+      messageDialogReady: true,
+      messageDialogBounds,
+      screenshotPath,
+    }
+  } finally {
+    if (fixture) await cleanupRegistrationWorkflowFixture(fixture)
+  }
 }
 
 async function createTemporaryBrowserUserStorage(baseUrl) {
@@ -1188,13 +1422,15 @@ async function waitUntilEnabled(locator, label, timeoutMs = 10000) {
   throw new Error(`${label} did not become enabled.`)
 }
 
-async function countVisibleControls(locator) {
-  return locator.locator('input:not([type="hidden"]), select, textarea, button').evaluateAll((controls) =>
-    controls.filter((control) => {
-      const rect = control.getBoundingClientRect()
-      const style = window.getComputedStyle(control)
-      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
-    }).length,
+async function countVisibleControls(locator, { enabledOnly = false } = {}) {
+  return locator.locator('input:not([type="hidden"]), select, textarea, button').evaluateAll(
+    (controls, options) => controls.filter((control) => {
+        const rect = control.getBoundingClientRect()
+        const style = window.getComputedStyle(control)
+        const visible = rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden"
+        return visible && (!options.enabledOnly || !control.matches(":disabled"))
+      }).length,
+    { enabledOnly },
   )
 }
 
@@ -1225,6 +1461,49 @@ async function verifyInitialSelectControls(dialog, route) {
   if (denseSelects.length > 0) {
     const details = denseSelects.map((select) => `${select.label || "select"}:${select.optionCount}`).join(", ")
     throw new Error(`${route.name} first step has dense select controls: ${details}.`)
+  }
+}
+
+async function verifyRegistrationSinglePageDialog(dialog) {
+  const dialogText = await dialog.innerText({ timeout: 5000 })
+  for (const expectedLabel of ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리", "지금 입력"]) {
+    if (!dialogText.includes(expectedLabel)) throw new Error(`registration dialog is missing ${expectedLabel}.`)
+  }
+  if (/\b1\/4\b/.test(dialogText)) throw new Error("registration dialog still shows the old step progress label.")
+  if (await dialog.getByRole("group", { name: /등록 입력 단계/ }).count().catch(() => 0)) {
+    throw new Error("registration dialog still shows the old input tabs.")
+  }
+
+  const currentSections = dialog.locator('[data-registration-current="true"]')
+  if (await currentSections.count() !== 1 || !(await currentSections.first().innerText()).includes("문의 정보")) {
+    throw new Error("registration inquiry section is not the single highlighted current step.")
+  }
+  if (!(await dialog.getByLabel("학생명", { exact: true }).isEnabled().catch(() => false))) {
+    throw new Error("registration inquiry fields are not enabled.")
+  }
+  for (const futureField of ["레벨테스트 예약일시", "전화상담 예약일시", "수업", "수납 완료 확인"]) {
+    const field = dialog.getByLabel(futureField, { exact: true }).first()
+    if (!(await field.count().catch(() => 0)) || !(await field.isDisabled().catch(() => false))) {
+      throw new Error(`registration future field is not locked: ${futureField}.`)
+    }
+  }
+
+  const historyTrigger = dialog.getByLabel("담당자 및 일시 이력", { exact: true })
+  if ((await historyTrigger.getAttribute("aria-expanded")) !== "false") {
+    throw new Error("registration operations history is not collapsed by default.")
+  }
+  if (await dialog.getByLabel("진행상태", { exact: true }).count().catch(() => 0)) {
+    throw new Error("registration operations history content is visible before expansion.")
+  }
+}
+
+async function verifyFlatOperationDialog(dialog, route) {
+  const dialogText = await dialog.innerText({ timeout: 5000 })
+  if (new RegExp(`${route.expectedTexts[0]}\\s+1\\/\\d+`).test(dialogText)) {
+    throw new Error(`${route.name} dialog still shows the old step progress label.`)
+  }
+  if (await dialog.getByRole("group", { name: `${route.expectedTexts[0]} 입력 단계` }).count().catch(() => 0)) {
+    throw new Error(`${route.name} dialog still shows the old input tabs.`)
   }
 }
 
@@ -1301,12 +1580,12 @@ async function clickLogin(page) {
   await loginButton.click()
 }
 
-async function writeDebugArtifacts(page, artifactDir, name) {
+async function writeDebugArtifacts(page, artifactDir, name, options = {}) {
   if (!artifactDir) return ""
   mkdirSync(artifactDir, { recursive: true })
   const safeName = name.replace(/[^a-z0-9_.-]+/gi, "-").replace(/^-|-$/g, "")
   const screenshotPath = resolve(artifactDir, `${safeName}.png`)
-  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
+  await page.screenshot({ path: screenshotPath, fullPage: options.fullPage ?? true }).catch(() => {})
   return screenshotPath
 }
 
@@ -1405,10 +1684,18 @@ async function verifyQuickAddInteraction(page, sampleCount = DEFAULT_QUICK_ADD_S
   return { samplesCreated: sampleCount }
 }
 
+async function isFillableFormControl(field) {
+  return field.evaluate((element) => {
+    const tagName = element.tagName.toLowerCase()
+    return tagName === "input" || tagName === "textarea" || element.getAttribute("contenteditable") === "true"
+  }).catch(() => false)
+}
+
 async function fillIfPresent(scope, label, value) {
   const field = scope.getByLabel(label, { exact: true }).first()
   if (!(await field.count().catch(() => 0))) return false
   await field.waitFor({ state: "visible", timeout: 5000 })
+  if (!(await isFillableFormControl(field))) return false
   await field.fill(value)
   return true
 }
@@ -1461,10 +1748,23 @@ async function fillOperationMinimumFields(page, dialog, route, sampleName) {
   await selectDateIfPresent(page, dialog, "본시험일", new Date().toISOString().slice(0, 10))
 }
 
+async function openOperationSampleDetail(page, sampleName) {
+  const detailButtons = page.getByRole("button", { name: /(상세 열기|상세 보기)$/ })
+  const count = await detailButtons.count().catch(() => 0)
+  for (let index = 0; index < count; index += 1) {
+    const button = detailButtons.nth(index)
+    const label = await button.getAttribute("aria-label").catch(() => "")
+    if (!label?.includes(sampleName) || !(await button.isVisible().catch(() => false))) continue
+    await button.click()
+    return
+  }
+  throw new Error(`Operation detail button was not found for ${sampleName}.`)
+}
+
 async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
   const sampleName = `${UI_SAMPLE_PREFIX} ${route.name} ${Date.now()}-${sampleIndex}-${Math.random().toString(36).slice(2, 8)}`
   const editedTitle = `${UI_SAMPLE_PREFIX} ${route.name} 수정 ${Date.now()}-${sampleIndex}`
-  const createButtonName = route.name === "word-retests" ? "추가" : route.name === "withdrawal" ? "퇴원 신청" : `${route.expectedTexts[0]} 추가`
+  const createButtonName = route.expectedTexts[1]
   const addButton = page.getByRole("button", { name: createButtonName, exact: true }).last()
   if (!(await addButton.count().catch(() => 0))) throw new Error(`${route.name} create button was not found.`)
 
@@ -1476,12 +1776,14 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
     await dialog.waitFor({ state: "visible", timeout: 5000 })
     const dialogText = await dialog.innerText({ timeout: 5000 })
     if (!dialogText.includes(route.expectedTexts[0])) throw new Error(`${route.name} dialog did not show the operation name.`)
-    if (route.name === "word-retests") {
+    if (route.name === "registration") {
+      await verifyRegistrationSinglePageDialog(dialog)
+    } else if (route.name === "word-retests") {
       if (!dialogText.includes("진행상태")) throw new Error("word-retests dialog did not show the progress stepper.")
-    } else if (!new RegExp(`${route.expectedTexts[0]}\\s+1\\/\\d+`).test(dialogText)) {
-      throw new Error(`${route.name} dialog did not show a fixed step progress label.`)
+    } else {
+      await verifyFlatOperationDialog(dialog, route)
     }
-    const visibleControls = await countVisibleControls(dialog)
+    const visibleControls = await countVisibleControls(dialog, { enabledOnly: route.name === "registration" })
     if (visibleControls > MAX_INITIAL_TEMPLATE_CONTROLS) {
       throw new Error(`${route.name} first step is too dense: ${visibleControls} visible controls.`)
     }
@@ -1501,9 +1803,7 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
     await saveButton.click()
     await dialog.waitFor({ state: "hidden", timeout: 10000 }).catch(() => {})
 
-    const createdRow = await firstVisibleText(page, sampleName, { exact: false })
-    await createdRow.waitFor({ state: "visible", timeout: 10000 })
-    await createdRow.click()
+    await openOperationSampleDetail(page, sampleName)
 
     const detailDialog = page.getByRole("dialog").filter({ hasText: sampleName }).first()
     await detailDialog.waitFor({ state: "visible", timeout: 5000 })
@@ -1513,15 +1813,17 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
 
     const editDialog = page.getByRole("dialog").filter({ hasText: `${route.expectedTexts[0]} 수정` }).first()
     await editDialog.waitFor({ state: "visible", timeout: 5000 })
+    if (route.name === "registration") {
+      await editDialog.getByLabel("담당자 및 일시 이력", { exact: true }).click()
+    }
     await editDialog.getByLabel("제목 직접 지정").fill(editedTitle)
     const updateButton = editDialog.getByRole("button", { name: "저장" }).last()
     await waitUntilEnabled(updateButton, `${route.name} update button`)
     await updateButton.click()
     await editDialog.waitFor({ state: "hidden", timeout: 10000 }).catch(() => {})
 
-    const editedRow = await firstVisibleText(page, editedTitle, { exact: false })
-    await editedRow.waitFor({ state: "visible", timeout: 10000 })
-    await editedRow.click()
+    const editedOperationRowLabel = sampleName
+    await openOperationSampleDetail(page, editedOperationRowLabel)
 
     if (!(await clickDeleteInTaskDialog(page, editedTitle))) {
       throw new Error(`${route.name} detail dialog was not opened for the edited sample.`)
@@ -1549,9 +1851,7 @@ async function verifyOperationCompletionInteraction(page, baseUrl, task) {
   await page.goto(joinUrl(baseUrl, task.routePath), { waitUntil: "networkidle" })
   await waitForRouteText(page, route)
 
-  const createdRow = await firstVisibleText(page, task.title, { exact: false })
-  await createdRow.waitFor({ state: "visible", timeout: 15000 })
-  await createdRow.click()
+  await openOperationSampleDetail(page, task.title)
 
   const detailDialog = page.getByRole("dialog").filter({ hasText: task.title }).first()
   await detailDialog.waitFor({ state: "visible", timeout: 5000 })
@@ -1576,12 +1876,11 @@ function detailRowByTaskId(rows, taskId) {
   return rows.find((row) => String(row.task_id || "") === String(taskId || "")) || {}
 }
 
-async function verifyOperationCompletionSync(fixtureSet) {
+async function verifyOperationCompletionSync(fixtureSet, completedTaskKeys) {
   const { client, ids } = fixtureSet
   const taskIds = Object.values(ids.tasks)
   const studentIds = Object.values(ids.students)
   const classIds = Object.values(ids.classes)
-  const textbookIds = Object.values(ids.textbooks)
   const [
     taskRows,
     studentRows,
@@ -1657,26 +1956,44 @@ async function verifyOperationCompletionSync(fixtureSet) {
       wordRetestDetail.retest_status === "done",
   }
 
-  const failed = Object.entries(operationCompletionSync)
+  const completionPrefixes = {
+    registration: "registration_",
+    withdrawal: "withdrawal_",
+    transfer: "transfer_",
+    wordRetest: "word_retest_",
+  }
+  const selectedPrefixes = completedTaskKeys.map((key) => completionPrefixes[key]).filter(Boolean)
+  const scopedCompletionSync = Object.fromEntries(
+    Object.entries(operationCompletionSync).filter(([key]) => selectedPrefixes.some((prefix) => key.startsWith(prefix))),
+  )
+  const failed = Object.entries(scopedCompletionSync)
     .filter(([, value]) => !value)
     .map(([key]) => key)
   if (failed.length > 0) {
     throw new Error(`Operation completion sync failed: ${failed.join(", ")}`)
   }
 
-  return operationCompletionSync
+  return scopedCompletionSync
 }
 
 async function verifyOperationCompletionSet(page, baseUrl, viewportName, loginId, password) {
   let fixtureSet = null
   try {
     fixtureSet = await createOperationCompletionFixtures(viewportName, loginId, password)
-    for (const task of fixtureSet.tasks) {
+    const operationFilter = env("OPS_BROWSER_OPERATION_COMPLETE_FILTER")
+    const filterTerms = operationFilter.split(",").map((term) => term.trim()).filter(Boolean)
+    const completedTasks = filterTerms.length > 0
+      ? fixtureSet.tasks.filter((task) => filterTerms.some((term) => task.key.toLowerCase().includes(term.toLowerCase())))
+      : fixtureSet.tasks
+    if (completedTasks.length === 0) {
+      throw new Error(`OPS_BROWSER_OPERATION_COMPLETE_FILTER matched no tasks: ${operationFilter}`)
+    }
+    for (const task of completedTasks) {
       await verifyOperationCompletionInteraction(page, baseUrl, task)
     }
-    const operationCompletionSync = await verifyOperationCompletionSync(fixtureSet)
+    const operationCompletionSync = await verifyOperationCompletionSync(fixtureSet, completedTasks.map((task) => task.key))
     return {
-      completedOperationSamples: fixtureSet.tasks.length,
+      completedOperationSamples: completedTasks.length,
       operationCompletionSync,
     }
   } finally {
@@ -1951,6 +2268,7 @@ async function login(page, baseUrl, candidates, password, artifactDir) {
 async function inspectRoute(page, baseUrl, route, options = {}) {
   const consoleMessages = []
   const pageErrors = []
+  const responseErrors = []
   const isKnownRedirectMeasureError = (value) =>
     route.name === "lesson-design" &&
     String(value || "").includes("LegacyClassScheduleLessonDesignRedirect") &&
@@ -1961,8 +2279,14 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
   const onPageError = (error) => {
     if (!isKnownRedirectMeasureError(error.message)) pageErrors.push(error.message)
   }
+  const onResponse = (response) => {
+    if (response.status() < 400) return
+    const request = response.request()
+    responseErrors.push(`${response.status()} ${request.method()} ${response.url()}`)
+  }
   page.on("console", onConsole)
   page.on("pageerror", onPageError)
+  page.on("response", onResponse)
 
   try {
     await page.goto(joinUrl(baseUrl, route.path), { waitUntil: "networkidle" })
@@ -1984,8 +2308,8 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
     if (metrics.scrollWidth > metrics.viewportWidth + 8) {
       throw new Error(`${route.name} has horizontal overflow: ${metrics.scrollWidth}px over ${metrics.viewportWidth}px.`)
     }
-    if (consoleMessages.length > 0 || pageErrors.length > 0) {
-      throw new Error(`${route.name} has browser errors: ${[...consoleMessages, ...pageErrors].join(" | ")}`)
+    if (consoleMessages.length > 0 || pageErrors.length > 0 || responseErrors.length > 0) {
+      throw new Error(`${route.name} has browser errors: ${[...consoleMessages, ...pageErrors, ...responseErrors].join(" | ")}`)
     }
     const interactionResult = await verifyRouteInteraction(page, route, options)
 
@@ -2001,6 +2325,7 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
   } finally {
     page.off("console", onConsole)
     page.off("pageerror", onPageError)
+    page.off("response", onResponse)
   }
 }
 
@@ -2105,6 +2430,22 @@ async function runViewport(browser, baseUrl, candidates, password, viewport, sto
         ok: true,
         interaction: "operation-completion",
         ...(await verifyOperationCompletionSet(page, baseUrl, viewport.name, candidates[0] || "", password)),
+      })
+    }
+    if (isEnabledEnv(env("OPS_BROWSER_REGISTRATION_WORKFLOW_SAMPLE"))) {
+      routes.push({
+        name: "registration-workflow",
+        path: "/admin/registration",
+        ok: true,
+        interaction: "registration-workflow",
+        ...(await verifyRegistrationWorkflowSet(
+          page,
+          baseUrl,
+          viewport.name,
+          candidates[0] || "",
+          password,
+          artifactDir,
+        )),
       })
     }
     return { viewport: viewport.name, routes }
