@@ -18,29 +18,109 @@ alter table public.ops_registration_consultations
     or (mode = 'visit' and ready_at is null and ready_source is null)
   ) not valid;
 
+create function dashboard_private.try_registration_event_jsonb_object(
+  p_value text
+)
+returns jsonb
+language plpgsql
+immutable
+security invoker
+set search_path = ''
+as $$
+declare
+  v_value jsonb;
+begin
+  if p_value is null then
+    return null;
+  end if;
+  begin
+    v_value := p_value::jsonb;
+  exception
+    when data_exception then
+      return null;
+  end;
+  if pg_catalog.jsonb_typeof(v_value) is distinct from 'object' then
+    return null;
+  end if;
+  return v_value;
+end;
+$$;
+
+alter function dashboard_private.try_registration_event_jsonb_object(text)
+  owner to postgres;
+revoke execute on function dashboard_private.try_registration_event_jsonb_object(text)
+  from public, anon, authenticated;
+
+create function dashboard_private.try_registration_event_timestamptz(
+  p_value text
+)
+returns timestamptz
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $$
+begin
+  if nullif(pg_catalog.btrim(p_value), '') is null then
+    return null;
+  end if;
+  begin
+    return p_value::timestamptz;
+  exception
+    when data_exception then
+      return null;
+  end;
+end;
+$$;
+
+alter function dashboard_private.try_registration_event_timestamptz(text)
+  owner to postgres;
+revoke execute on function dashboard_private.try_registration_event_timestamptz(text)
+  from public, anon, authenticated;
+
 -- registration_phone_readiness_backfill
-with registration_track_events as (
+alter table public.ops_registration_consultations
+  disable trigger set_updated_at_ops_registration_consultations;
+
+with parsed_task_events as materialized (
+  select
+    event.id,
+    event.task_id,
+    event.event_type,
+    event.created_at,
+    dashboard_private.try_registration_event_jsonb_object(event.after_value) as payload
+  from public.ops_task_events event
+  where event.event_type in (
+    'registration_track_event',
+    'legacy_registration_imported'
+  )
+), registration_track_events as (
   select
     event.id,
     event.task_id,
     event.created_at,
-    event.after_value::jsonb as payload
-  from public.ops_task_events event
+    event.payload
+  from parsed_task_events event
   where event.event_type = 'registration_track_event'
-    and event.after_value is not null
-    and pg_catalog.left(pg_catalog.ltrim(event.after_value), 1) = '{'
-    and event.after_value::jsonb ->> 'version' = '1'
-), legacy_phone_times as (
-  select distinct on (event.task_id)
+    and event.payload ->> 'version' = '1'
+), legacy_phone_candidates as (
+  select
+    event.id,
     event.task_id,
-    nullif(event.after_value::jsonb #>> '{timestamps,phoneConsultationAt}', '')::timestamptz
-      as phone_consultation_at
-  from public.ops_task_events event
+    event.created_at,
+    dashboard_private.try_registration_event_timestamptz(
+      event.payload #>> '{timestamps,phoneConsultationAt}'
+    ) as phone_consultation_at
+  from parsed_task_events event
   where event.event_type = 'legacy_registration_imported'
-    and event.after_value is not null
-    and pg_catalog.left(pg_catalog.ltrim(event.after_value), 1) = '{'
-    and event.after_value::jsonb ->> 'version' = '1'
-  order by event.task_id, event.created_at, event.id
+    and event.payload ->> 'version' = '1'
+), legacy_phone_times as (
+  select distinct on (candidate.task_id)
+    candidate.task_id,
+    candidate.phone_consultation_at
+  from legacy_phone_candidates candidate
+  where candidate.phone_consultation_at is not null
+  order by candidate.task_id, candidate.created_at, candidate.id
 ), readiness_candidates as (
   select
     consultation.id as consultation_id,
@@ -54,13 +134,17 @@ with registration_track_events as (
         'appointment_canceled', 'appointment_subject_deselected', 'track_reopened'
       )
         then coalesce(
-          nullif(track_event.payload ->> 'occurredAt', '')::timestamptz,
+          dashboard_private.try_registration_event_timestamptz(
+            track_event.payload ->> 'occurredAt'
+          ),
           track_event.created_at
         )
       when track_event.payload ->> 'eventType' = 'migration_review_resolved'
         then coalesce(
           legacy.phone_consultation_at,
-          nullif(track_event.payload ->> 'occurredAt', '')::timestamptz,
+          dashboard_private.try_registration_event_timestamptz(
+            track_event.payload ->> 'occurredAt'
+          ),
           track_event.created_at
         )
       when track_event.payload ->> 'eventType' in (
@@ -163,6 +247,9 @@ set
   ready_source = 'legacy'
 where consultation.mode = 'phone'
   and (consultation.ready_at is null or consultation.ready_source is null);
+
+alter table public.ops_registration_consultations
+  enable trigger set_updated_at_ops_registration_consultations;
 
 alter table public.ops_registration_consultations
   validate constraint ops_registration_consultations_ready_source_check;
@@ -4233,8 +4320,8 @@ begin
   then
     raise exception 'registration_access_denied' using errcode = '42501';
   end if;
-  if v_request_key is null then
-    raise exception 'request_key_required' using errcode = '22023';
+  if v_campus is null or v_campus not in ('본관', '별관') then
+    raise exception 'registration_campus_invalid' using errcode = '22023';
   end if;
 
   if exists (
@@ -4263,27 +4350,6 @@ begin
   end if;
   if pg_catalog.cardinality(v_subjects) not between 1 and 2 then
     raise exception 'registration_subject_invalid' using errcode = '22023';
-  end if;
-  if v_student_name is null then
-    raise exception 'registration_student_name_required' using errcode = '22023';
-  end if;
-  if v_school_grade is null then
-    raise exception 'registration_school_grade_required' using errcode = '22023';
-  end if;
-  v_parent_phone_digits := pg_catalog.regexp_replace(
-    coalesce(v_parent_phone, ''), '\D+', '', 'g'
-  );
-  if v_parent_phone_digits !~ '^01(0|1|[6-9])[0-9]{7,8}$' then
-    raise exception 'registration_parent_phone_invalid' using errcode = '22023';
-  end if;
-  if p_inquiry_at is null then
-    raise exception 'registration_inquiry_at_required' using errcode = '22023';
-  end if;
-  if v_campus is null or v_campus not in ('본관', '별관') then
-    raise exception 'registration_campus_invalid' using errcode = '22023';
-  end if;
-  if v_priority is null or v_priority not in ('low', 'normal', 'high', 'urgent') then
-    raise exception 'registration_priority_invalid' using errcode = '22023';
   end if;
 
   -- Validate every JSON container before using object or array expansion.
@@ -4342,34 +4408,32 @@ begin
       then null
     else p_level_test_appointment
   end;
+  v_visit_appointment := case
+    when p_visit_appointment is null
+      or pg_catalog.jsonb_typeof(p_visit_appointment) = 'null'
+      then null
+    else p_visit_appointment
+  end;
+
+  -- Validate all appointment membership before any time or place details.
   if (pg_catalog.cardinality(v_level_test_subjects) = 0)
       is distinct from (v_level_test_appointment is null)
   then
     raise exception 'registration_initial_appointment_membership_invalid'
       using errcode = '22023';
   end if;
-  if v_level_test_appointment is not null then
-    if pg_catalog.jsonb_typeof(v_level_test_appointment) <> 'object' then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end if;
-    if exists (
-        select 1
-        from pg_catalog.jsonb_object_keys(v_level_test_appointment) appointment_key
-        where appointment_key not in ('scheduledAt', 'place', 'subjects')
-      )
-      or (
-        select pg_catalog.count(*)
-        from pg_catalog.jsonb_object_keys(v_level_test_appointment)
-      ) <> 3
+  if (pg_catalog.cardinality(v_visit_subjects) = 0)
+      is distinct from (v_visit_appointment is null)
+  then
+    raise exception 'registration_initial_appointment_membership_invalid'
+      using errcode = '22023';
+  end if;
+  if v_level_test_appointment is not null
+    and pg_catalog.jsonb_typeof(v_level_test_appointment) = 'object'
+  then
+    if pg_catalog.jsonb_typeof(v_level_test_appointment -> 'subjects')
+        is distinct from 'array'
     then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end if;
-    if pg_catalog.jsonb_typeof(v_level_test_appointment -> 'scheduledAt') <> 'string'
-      or pg_catalog.jsonb_typeof(v_level_test_appointment -> 'place') <> 'string'
-    then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end if;
-    if pg_catalog.jsonb_typeof(v_level_test_appointment -> 'subjects') <> 'array' then
       raise exception 'registration_initial_appointment_membership_invalid'
         using errcode = '22023';
     end if;
@@ -4404,60 +4468,13 @@ begin
       raise exception 'registration_initial_appointment_membership_invalid'
         using errcode = '22023';
     end if;
-    v_level_test_place := nullif(
-      pg_catalog.btrim(v_level_test_appointment ->> 'place'), ''
-    );
-    begin
-      v_level_test_scheduled_at := nullif(
-        pg_catalog.btrim(v_level_test_appointment ->> 'scheduledAt'), ''
-      )::timestamptz;
-    exception when others then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end;
-    if v_level_test_scheduled_at is null or v_level_test_place is null then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end if;
-    v_level_test_appointment := pg_catalog.jsonb_build_object(
-      'scheduledAt', v_level_test_scheduled_at,
-      'place', v_level_test_place,
-      'subjects', pg_catalog.to_jsonb(v_level_test_subjects)
-    );
   end if;
-
-  v_visit_appointment := case
-    when p_visit_appointment is null
-      or pg_catalog.jsonb_typeof(p_visit_appointment) = 'null'
-      then null
-    else p_visit_appointment
-  end;
-  if (pg_catalog.cardinality(v_visit_subjects) = 0)
-      is distinct from (v_visit_appointment is null)
+  if v_visit_appointment is not null
+    and pg_catalog.jsonb_typeof(v_visit_appointment) = 'object'
   then
-    raise exception 'registration_initial_appointment_membership_invalid'
-      using errcode = '22023';
-  end if;
-  if v_visit_appointment is not null then
-    if pg_catalog.jsonb_typeof(v_visit_appointment) <> 'object' then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end if;
-    if exists (
-        select 1
-        from pg_catalog.jsonb_object_keys(v_visit_appointment) appointment_key
-        where appointment_key not in ('scheduledAt', 'place', 'subjects')
-      )
-      or (
-        select pg_catalog.count(*)
-        from pg_catalog.jsonb_object_keys(v_visit_appointment)
-      ) <> 3
+    if pg_catalog.jsonb_typeof(v_visit_appointment -> 'subjects')
+        is distinct from 'array'
     then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end if;
-    if pg_catalog.jsonb_typeof(v_visit_appointment -> 'scheduledAt') <> 'string'
-      or pg_catalog.jsonb_typeof(v_visit_appointment -> 'place') <> 'string'
-    then
-      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
-    end if;
-    if pg_catalog.jsonb_typeof(v_visit_appointment -> 'subjects') <> 'array' then
       raise exception 'registration_initial_appointment_membership_invalid'
         using errcode = '22023';
     end if;
@@ -4489,6 +4506,71 @@ begin
     then
       raise exception 'registration_initial_appointment_membership_invalid'
         using errcode = '22023';
+    end if;
+  end if;
+
+  -- Validate and normalize appointment time/place details only after membership.
+  if v_level_test_appointment is not null then
+    if pg_catalog.jsonb_typeof(v_level_test_appointment) <> 'object' then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
+    end if;
+    if exists (
+        select 1
+        from pg_catalog.jsonb_object_keys(v_level_test_appointment) appointment_key
+        where appointment_key not in ('scheduledAt', 'place', 'subjects')
+      )
+      or (
+        select pg_catalog.count(*)
+        from pg_catalog.jsonb_object_keys(v_level_test_appointment)
+      ) <> 3
+    then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
+    end if;
+    if pg_catalog.jsonb_typeof(v_level_test_appointment -> 'scheduledAt') <> 'string'
+      or pg_catalog.jsonb_typeof(v_level_test_appointment -> 'place') <> 'string'
+    then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
+    end if;
+    v_level_test_place := nullif(
+      pg_catalog.btrim(v_level_test_appointment ->> 'place'), ''
+    );
+    begin
+      v_level_test_scheduled_at := nullif(
+        pg_catalog.btrim(v_level_test_appointment ->> 'scheduledAt'), ''
+      )::timestamptz;
+    exception when others then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
+    end;
+    if v_level_test_scheduled_at is null or v_level_test_place is null then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
+    end if;
+    v_level_test_appointment := pg_catalog.jsonb_build_object(
+      'scheduledAt', v_level_test_scheduled_at,
+      'place', v_level_test_place,
+      'subjects', pg_catalog.to_jsonb(v_level_test_subjects)
+    );
+  end if;
+
+  if v_visit_appointment is not null then
+    if pg_catalog.jsonb_typeof(v_visit_appointment) <> 'object' then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
+    end if;
+    if exists (
+        select 1
+        from pg_catalog.jsonb_object_keys(v_visit_appointment) appointment_key
+        where appointment_key not in ('scheduledAt', 'place', 'subjects')
+      )
+      or (
+        select pg_catalog.count(*)
+        from pg_catalog.jsonb_object_keys(v_visit_appointment)
+      ) <> 3
+    then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
+    end if;
+    if pg_catalog.jsonb_typeof(v_visit_appointment -> 'scheduledAt') <> 'string'
+      or pg_catalog.jsonb_typeof(v_visit_appointment -> 'place') <> 'string'
+    then
+      raise exception 'registration_initial_appointment_invalid' using errcode = '22023';
     end if;
     v_visit_place := nullif(pg_catalog.btrim(v_visit_appointment ->> 'place'), '');
     begin
@@ -4545,6 +4627,28 @@ begin
   )
   into v_director_overrides
   from pg_catalog.jsonb_each(v_director_overrides) override_entry;
+
+  if v_request_key is null then
+    raise exception 'request_key_required' using errcode = '22023';
+  end if;
+  if v_student_name is null then
+    raise exception 'registration_student_name_required' using errcode = '22023';
+  end if;
+  if v_school_grade is null then
+    raise exception 'registration_school_grade_required' using errcode = '22023';
+  end if;
+  v_parent_phone_digits := pg_catalog.regexp_replace(
+    coalesce(v_parent_phone, ''), '\D+', '', 'g'
+  );
+  if v_parent_phone_digits !~ '^01(0|1|[6-9])[0-9]{7,8}$' then
+    raise exception 'registration_parent_phone_invalid' using errcode = '22023';
+  end if;
+  if p_inquiry_at is null then
+    raise exception 'registration_inquiry_at_required' using errcode = '22023';
+  end if;
+  if v_priority is null or v_priority not in ('low', 'normal', 'high', 'urgent') then
+    raise exception 'registration_priority_invalid' using errcode = '22023';
+  end if;
 
   v_target_fingerprint := pg_catalog.jsonb_build_object(
     'studentName', v_student_name,

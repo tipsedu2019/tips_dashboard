@@ -239,6 +239,68 @@ select ok(
   'inquiry-only atomic intake leaves one independent inquiry track'
 );
 
+-- Malformed historical evidence is unavailable, so timestamp fallback stays safe.
+set local role postgres;
+insert into public.ops_task_events(
+  task_id, actor_id, event_type, field_name, before_value, after_value
+)
+values
+  (
+    (select (payload ->> 'taskId')::uuid
+     from registration_intake_runtime_cases where case_key = 'inquiry_only'),
+    '10000000-0000-4000-8000-000000007001',
+    'registration_track_event',
+    'intake_malformed_json_evidence',
+    null,
+    '{not-json'
+  ),
+  (
+    (select (payload ->> 'taskId')::uuid
+     from registration_intake_runtime_cases where case_key = 'inquiry_only'),
+    '10000000-0000-4000-8000-000000007001',
+    'registration_track_event',
+    'intake_malformed_timestamp_evidence',
+    null,
+    pg_catalog.jsonb_build_object(
+      'version', 1,
+      'eventType', 'appointment_canceled',
+      'trackId', pg_temp.registration_intake_track('inquiry_only', '영어'),
+      'occurredAt', 'not-a-timestamp',
+      'metadata', pg_catalog.jsonb_build_object(
+        'phoneConsultationId', '10000000-0000-4000-8000-000000007999'
+      )
+    )::text
+  );
+select ok(
+  (
+    select dashboard_private.try_registration_event_jsonb_object(event.after_value) is null
+    from public.ops_task_events event
+    where event.field_name = 'intake_malformed_json_evidence'
+  )
+  and (
+    select parsed.payload is not null
+      and dashboard_private.try_registration_event_timestamptz(
+        parsed.payload ->> 'occurredAt'
+      ) is null
+      and coalesce(
+        dashboard_private.try_registration_event_timestamptz(
+          parsed.payload ->> 'occurredAt'
+        ),
+        event.created_at
+      ) = event.created_at
+    from public.ops_task_events event
+    cross join lateral (
+      select dashboard_private.try_registration_event_jsonb_object(event.after_value) as payload
+    ) parsed
+    where event.field_name = 'intake_malformed_timestamp_evidence'
+  ),
+  'malformed historical event evidence is ignored and falls back safely'
+);
+set local role authenticated;
+select pg_temp.registration_intake_set_actor(
+  '10000000-0000-4000-8000-000000007001'
+);
+
 -- Level-test-only initial plan.
 insert into registration_intake_runtime_cases(case_key, payload)
 select 'level_test_only', pg_temp.registration_intake_create(
@@ -476,6 +538,60 @@ select ok(
       and canonical.payload #>> '{metadata,changeKind}' = 'created'
   ),
   'two-subject visit writes one canonical notification event per subject'
+);
+
+-- Validation precedence: membership wins over malformed level-test details.
+select ok(
+  pg_temp.registration_intake_throws(
+    $$select public.create_registration_case_with_initial_workflow_v1(
+      '초기레벨복합검증', '중1', '초기등록런타임중', '01077000081', null,
+      '본관', '2026-07-13 09:30+09'::timestamptz, array['영어'],
+      'compound level-test validation', 'normal', '{"영어":"level_test"}'::jsonb,
+      '{"scheduledAt":42,"place":false,"subjects":["수학"]}'::jsonb,
+      null, '{}'::jsonb, 'intake-level-membership-precedence'
+    )$$,
+    'registration_initial_appointment_membership_invalid'
+  )
+  and not exists (
+    select 1 from public.ops_tasks task where task.student_name = '초기레벨복합검증'
+  ),
+  'level-test membership beats malformed details'
+);
+
+-- Validation precedence: membership wins over malformed visit details.
+select ok(
+  pg_temp.registration_intake_throws(
+    $$select public.create_registration_case_with_initial_workflow_v1(
+      '초기방문복합검증', '중1', '초기등록런타임중', '01077000082', null,
+      '본관', '2026-07-13 09:30+09'::timestamptz, array['영어'],
+      'compound visit validation', 'normal', '{"영어":"visit"}'::jsonb,
+      null,
+      '{"scheduledAt":42,"place":false,"subjects":["수학"]}'::jsonb,
+      '{}'::jsonb, 'intake-visit-membership-precedence'
+    )$$,
+    'registration_initial_appointment_membership_invalid'
+  )
+  and not exists (
+    select 1 from public.ops_tasks task where task.student_name = '초기방문복합검증'
+  ),
+  'visit membership beats malformed details'
+);
+
+-- Validation precedence: an earlier campus error wins over a blank request key.
+select ok(
+  pg_temp.registration_intake_throws(
+    $$select public.create_registration_case_with_initial_workflow_v1(
+      '초기캠퍼스우선검증', '중1', '초기등록런타임중', '01077000083', null,
+      '외부', '2026-07-13 09:30+09'::timestamptz, array['영어'],
+      'compound campus validation', 'normal', '{"영어":"inquiry"}'::jsonb,
+      null, null, '{}'::jsonb, '   '
+    )$$,
+    'registration_campus_invalid'
+  )
+  and not exists (
+    select 1 from public.ops_tasks task where task.student_name = '초기캠퍼스우선검증'
+  ),
+  'campus validation beats request key'
 );
 
 -- Appointment membership mismatch rolls the entire requested case back.

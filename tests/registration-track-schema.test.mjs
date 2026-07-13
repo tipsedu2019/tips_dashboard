@@ -613,6 +613,53 @@ test("registration intake migration adds canonical phone-queue readiness", async
   assert.match(sourceConstraint, /not valid/)
   assert.match(sql.slice(modeConstraintStart), /mode = 'phone'[\s\S]*?ready_at is not null[\s\S]*?ready_source is not null[\s\S]*?mode = 'visit'[\s\S]*?ready_at is null[\s\S]*?ready_source is null[\s\S]*?not valid/)
 
+  const jsonEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_jsonb_object",
+  )
+  const timestampEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_timestamptz",
+  )
+  assert.deepEqual(readFunctionArgumentTypes(jsonEvidenceParser), ["text"])
+  assert.deepEqual(readFunctionArgumentTypes(timestampEvidenceParser), ["text"])
+  for (const parser of [jsonEvidenceParser, timestampEvidenceParser]) {
+    assert.match(parser, /security invoker/)
+    assert.match(parser, /set search_path = ''/)
+    assert.match(parser, /exception\s+when data_exception then\s+return null;/)
+  }
+  assert.match(jsonEvidenceParser, /immutable/)
+  assert.match(timestampEvidenceParser, /stable/)
+  assert.match(jsonEvidenceParser, /p_value::jsonb/)
+  assert.match(jsonEvidenceParser, /jsonb_typeof\(v_value\) is distinct from 'object'/)
+  assert.match(timestampEvidenceParser, /p_value::timestamptz/)
+  for (const functionName of [
+    "try_registration_event_jsonb_object",
+    "try_registration_event_timestamptz",
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(
+        `alter function dashboard_private\\.${functionName}\\(text\\)\\s+owner to postgres;`,
+      ),
+    )
+    assert.match(
+      sql,
+      new RegExp(
+        `revoke execute on function dashboard_private\\.${functionName}\\(text\\)\\s+` +
+          `from public, anon, authenticated;`,
+      ),
+    )
+    assert.doesNotMatch(
+      sql,
+      new RegExp(
+        `grant execute on function dashboard_private\\.${functionName}\\(text\\)[^;]*authenticated`,
+      ),
+    )
+  }
+
   const backfillStart = sql.indexOf("-- registration_phone_readiness_backfill")
   const indexStart = sql.indexOf(
     "create index ops_registration_consultations_phone_waiting_ready_idx",
@@ -621,8 +668,29 @@ test("registration intake migration adds canonical phone-queue readiness", async
   assert.ok(indexStart > backfillStart)
   const backfill = sql.slice(backfillStart, indexStart)
   assert.equal(
-    (backfill.match(/event\.after_value::jsonb ->> 'version' = '1'/g) || []).length,
+    (backfill.match(/payload ->> 'version' = '1'/g) || []).length,
     2,
+  )
+  assert.match(
+    backfill,
+    /dashboard_private\.try_registration_event_jsonb_object\(event\.after_value\)/,
+  )
+  assert.equal(
+    (backfill.match(/dashboard_private\.try_registration_event_timestamptz\(/g) || []).length,
+    3,
+  )
+  const legacyCandidatesStart = backfill.indexOf("legacy_phone_candidates as (")
+  const legacyTimesStart = backfill.indexOf("legacy_phone_times as (")
+  assert.ok(legacyCandidatesStart !== -1 && legacyCandidatesStart < legacyTimesStart)
+  assert.match(
+    backfill.slice(legacyTimesStart, backfill.indexOf("), readiness_candidates as (")),
+    /where candidate\.phone_consultation_at is not null/,
+  )
+  assert.doesNotMatch(backfill, /event\.after_value::jsonb/)
+  assert.doesNotMatch(backfill, /pg_catalog\.ltrim\(event\.after_value\)/)
+  assert.doesNotMatch(
+    backfill,
+    /nullif\(track_event\.payload ->> 'occurredAt',[\s\S]{0,80}?::timestamptz/,
   )
   assert.match(backfill, /metadata[\s\S]*?consultationId/)
   assert.match(backfill, /metadata[\s\S]*?phoneConsultationId/)
@@ -640,6 +708,41 @@ test("registration intake migration adds canonical phone-queue readiness", async
     assert.match(backfill, new RegExp(`'${eventType}'[\\s\\S]*?'${source}'`))
   }
   assert.match(backfill, /consultation\.created_at[\s\S]*?'legacy'/)
+  const disableReadinessTrigger = backfill.indexOf(
+    "alter table public.ops_registration_consultations\n" +
+      "  disable trigger set_updated_at_ops_registration_consultations;",
+  )
+  const rankedReadinessUpdate = backfill.indexOf(
+    "update public.ops_registration_consultations consultation",
+  )
+  const legacyReadinessUpdate = backfill.indexOf(
+    "update public.ops_registration_consultations consultation",
+    rankedReadinessUpdate + 1,
+  )
+  const enableReadinessTrigger = backfill.indexOf(
+    "alter table public.ops_registration_consultations\n" +
+      "  enable trigger set_updated_at_ops_registration_consultations;",
+  )
+  const firstReadinessValidation = backfill.indexOf(
+    "validate constraint ops_registration_consultations_ready_source_check",
+  )
+  assert.equal(
+    (sql.match(/disable trigger set_updated_at_ops_registration_consultations;/g) || []).length,
+    1,
+  )
+  assert.equal(
+    (sql.match(/enable trigger set_updated_at_ops_registration_consultations;/g) || []).length,
+    1,
+  )
+  assert.ok(disableReadinessTrigger !== -1)
+  assert.ok(disableReadinessTrigger < rankedReadinessUpdate)
+  assert.ok(rankedReadinessUpdate < legacyReadinessUpdate)
+  assert.ok(legacyReadinessUpdate < enableReadinessTrigger)
+  assert.ok(enableReadinessTrigger < firstReadinessValidation)
+  assert.doesNotMatch(
+    backfill.slice(rankedReadinessUpdate, enableReadinessTrigger),
+    /updated_at\s*=/,
+  )
   assert.match(backfill, /validate constraint ops_registration_consultations_ready_source_check/)
   assert.match(backfill, /validate constraint ops_registration_consultations_mode_readiness_check/)
 
@@ -778,6 +881,40 @@ test("registration intake creation is one authenticated atomic workflow", async 
     assert.match(privateImplementation, new RegExp(`'${normalizedInput}'`))
   }
 
+  const validationMarkers = {
+    access: privateImplementation.indexOf("if v_actor_id is null"),
+    campus: privateImplementation.indexOf("'registration_campus_invalid'"),
+    subjectStart: Math.min(
+      privateImplementation.indexOf("'registration_subject_invalid'"),
+      privateImplementation.indexOf("'registration_subjects_required'"),
+    ),
+    subjectEnd: Math.max(
+      privateImplementation.lastIndexOf("'registration_subject_invalid'"),
+      privateImplementation.lastIndexOf("'registration_subjects_required'"),
+    ),
+    planStart: privateImplementation.indexOf("'registration_initial_subject_plan_invalid'"),
+    planEnd: privateImplementation.lastIndexOf("'registration_initial_subject_plan_invalid'"),
+    membershipStart: privateImplementation.indexOf(
+      "'registration_initial_appointment_membership_invalid'",
+    ),
+    membershipEnd: privateImplementation.lastIndexOf(
+      "'registration_initial_appointment_membership_invalid'",
+    ),
+    appointmentStart: privateImplementation.indexOf("'registration_initial_appointment_invalid'"),
+    appointmentEnd: privateImplementation.lastIndexOf("'registration_initial_appointment_invalid'"),
+    overrideStart: privateImplementation.indexOf("'registration_director_override_invalid'"),
+    overrideEnd: privateImplementation.lastIndexOf("'registration_director_override_invalid'"),
+    requestKey: privateImplementation.indexOf("if v_request_key is null then"),
+  }
+  assert.ok(Object.values(validationMarkers).every((marker) => marker !== -1))
+  assert.ok(validationMarkers.access < validationMarkers.campus)
+  assert.ok(validationMarkers.campus < validationMarkers.subjectStart)
+  assert.ok(validationMarkers.subjectEnd < validationMarkers.planStart)
+  assert.ok(validationMarkers.planEnd < validationMarkers.membershipStart)
+  assert.ok(validationMarkers.membershipEnd < validationMarkers.appointmentStart)
+  assert.ok(validationMarkers.appointmentEnd < validationMarkers.overrideStart)
+  assert.ok(validationMarkers.overrideEnd < validationMarkers.requestKey)
+
   const firstJsonTypeCheck = privateImplementation.indexOf("jsonb_typeof")
   const firstObjectKeys = privateImplementation.indexOf("jsonb_object_keys")
   const firstArrayElements = privateImplementation.indexOf("jsonb_array_elements")
@@ -844,6 +981,10 @@ test("registration intake creation is one authenticated atomic workflow", async 
     "two-subject test",
     "two-subject visit",
     "membership mismatch",
+    "level-test membership beats malformed details",
+    "visit membership beats malformed details",
+    "campus validation beats request key",
+    "malformed historical event evidence is ignored",
     "missing required director",
     "identical sequential retry",
     "changed fingerprint",
@@ -877,7 +1018,8 @@ test("registration intake creation is one authenticated atomic workflow", async 
     "create function public.registration_intake_workflow_runtime_version()",
   )
   assert.notEqual(intakeMarkerIndex, -1)
-  assert.equal(sql.lastIndexOf("create function "), intakeMarkerIndex)
+  const createdFunctions = [...sql.matchAll(/^create(?: or replace)? function\s+/gm)]
+  assert.equal(createdFunctions.at(-1)?.index, intakeMarkerIndex)
   assert.match(sql.slice(intakeMarkerIndex), /returns integer[\s\S]*?security invoker[\s\S]*?select 1/)
   assert.match(sql.trim(), /create function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?alter function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?revoke execute on function public\.registration_intake_workflow_runtime_version\(\) from public, anon;[\s\S]*?grant execute on function public\.registration_intake_workflow_runtime_version\(\) to authenticated;\s*commit;$/)
 })
