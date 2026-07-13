@@ -41,6 +41,45 @@ test("registration subject migrations keep lock and temporary-table work in expl
   }
 })
 
+test("schema migration removes deleted-class roster references and preserves an audit trail", async () => {
+  const sql = await readMigration("registration_subject_tracks_schema")
+  const repairStart = sql.indexOf("-- deterministic_orphaned_class_projection_repairs")
+  const attributionStart = sql.indexOf("-- registration_subject_attribution_preflight")
+  assert.notEqual(repairStart, -1)
+  assert.ok(attributionStart > repairStart)
+  const repair = sql.slice(repairStart, attributionStart)
+
+  assert.match(repair, /insert into reviewed_roster_projection_repairs_input[\s\S]*?select[\s\S]*?required\.student_id[\s\S]*?required\.class_id[\s\S]*?'removed'/)
+  assert.match(repair, /left join public\.classes class on class\.id = required\.class_id[\s\S]*?where class\.id is null/)
+  assert.match(repair, /left join public\.classes class on class\.id = reviewed\.class_id[\s\S]*?reviewed\.target_mode = 'removed'[\s\S]*?global_roster_projection_repair_required_pairs/)
+  assert.match(repair, /case[\s\S]*?when exists \([\s\S]*?from public\.classes existing_class[\s\S]*?then repair\.class_id[\s\S]*?else null[\s\S]*?end/)
+  assert.match(repair, /deterministic_orphaned_class_projection_repair/)
+  assert.match(repair, /global_roster_projection_symmetric[\s\S]*?registration_global_roster_repair_required/)
+})
+
+test("schema migration quarantines only explicitly reviewed empty registration fixtures", async () => {
+  const sql = await readMigration("registration_subject_tracks_schema")
+  const quarantineStart = sql.indexOf("-- reviewed_invalid_registration_parent_quarantine")
+  const attributionStart = sql.indexOf("-- registration_subject_attribution_preflight")
+  assert.notEqual(quarantineStart, -1)
+  assert.ok(attributionStart > quarantineStart)
+  const quarantine = sql.slice(quarantineStart, attributionStart)
+
+  assert.match(quarantine, /create temporary table reviewed_invalid_registration_parents_input/)
+  assert.match(quarantine, /registration_invalid_parent_quarantine_review_required/)
+  assert.match(quarantine, /ops_task_comments[\s\S]*?ops_task_attachments[\s\S]*?ops_registration_messages[\s\S]*?ops_task_notification_deliveries[\s\S]*?ops_task_automation_runs/)
+  assert.match(quarantine, /expected_event_count[\s\S]*?actual_event_count/)
+  assert.match(quarantine, /to_jsonb\(task\) as task_snapshot[\s\S]*?to_jsonb\(detail\) as detail_snapshot/)
+  assert.match(quarantine, /to_regclass[\s\S]*?execute format/)
+  assert.match(quarantine, /insert into public\.ops_task_events[\s\S]*?'migration_quarantined'[\s\S]*?'registration'[\s\S]*?'general'/)
+  assert.match(quarantine, /'status'[\s\S]*?reviewed\.actual_status[\s\S]*?'canceled'/)
+  assert.match(quarantine, /'registration_pipeline_status'[\s\S]*?reviewed\.pipeline_status[\s\S]*?null::text/)
+  assert.match(quarantine, /delete from public\.ops_registration_details[\s\S]*?update public\.ops_tasks task[\s\S]*?type = 'general'[\s\S]*?status = 'canceled'/)
+  assert.doesNotMatch(quarantine, /delete from public\.ops_tasks/)
+  assert.doesNotMatch(quarantine, /\btask\.(?:checklist_items|automation_rule_id|automation_source_id|automation_source_key|automation_source_type|automation_generated_at)\b/)
+  assert.doesNotMatch(quarantine, /\bdetail\.(?:principal_review_note|principal_placement_checked)\b/)
+})
+
 test("subject-track schema is additive, exposed deliberately, and RLS protected", async () => {
   const sql = await readMigration("registration_subject_tracks_schema")
   const publicTables = [

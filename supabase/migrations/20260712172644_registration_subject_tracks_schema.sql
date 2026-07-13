@@ -188,6 +188,30 @@ create temporary table reviewed_roster_projection_repairs_input (
 insert into reviewed_roster_projection_repairs_input (student_id, class_id, target_mode)
 values (null::uuid, null::uuid, null::text);
 
+-- deterministic_orphaned_class_projection_repairs
+-- A class that no longer exists cannot truthfully remain enrolled or waitlisted.
+-- Remove only those stale student-side references; every other asymmetry still
+-- requires an explicit operator-reviewed target below.
+insert into reviewed_roster_projection_repairs_input (
+  student_id,
+  class_id,
+  target_mode
+)
+select
+  required.student_id,
+  required.class_id,
+  'removed'
+from global_roster_projection_repair_required_pairs required
+join public.students student on student.id = required.student_id
+left join public.classes class on class.id = required.class_id
+where class.id is null
+  and not exists (
+    select 1
+    from reviewed_roster_projection_repairs_input reviewed
+    where reviewed.student_id = required.student_id
+      and reviewed.class_id = required.class_id
+  );
+
 create temporary table reviewed_roster_projection_repairs
 on commit drop
 as
@@ -197,7 +221,17 @@ select
   reviewed.target_mode
 from reviewed_roster_projection_repairs_input reviewed
 join public.students student on student.id = reviewed.student_id
-join public.classes class on class.id = reviewed.class_id;
+left join public.classes class on class.id = reviewed.class_id
+where class.id is not null
+  or (
+    reviewed.target_mode = 'removed'
+    and exists (
+      select 1
+      from global_roster_projection_repair_required_pairs required
+      where required.student_id = reviewed.student_id
+        and required.class_id = reviewed.class_id
+    )
+  );
 
 do $$
 begin
@@ -323,11 +357,28 @@ begin
       changed_by
     ) values (
       repair.student_id,
-      repair.class_id,
+      case
+        when exists (
+          select 1
+          from public.classes existing_class
+          where existing_class.id = repair.class_id
+        ) then repair.class_id
+        else null
+      end,
       repair.target_mode,
       null,
       case when repair.target_mode = 'removed' then null else repair.target_mode end,
-      'reviewed_roster_projection_repair: prior projection was asymmetric or incompatible with student status',
+      case
+        when exists (
+          select 1
+          from public.classes existing_class
+          where existing_class.id = repair.class_id
+        ) then 'reviewed_roster_projection_repair: prior projection was asymmetric or incompatible with student status'
+        else format(
+          'deterministic_orphaned_class_projection_repair: removed missing class reference %s',
+          repair.class_id
+        )
+      end,
       null
     );
   end loop;
@@ -427,6 +478,343 @@ begin
   end if;
 end
 $$;
+
+-- reviewed_invalid_registration_parent_quarantine
+-- These rows are known empty UI fixtures with no student, subject, contact,
+-- class, message, comment, or attachment evidence. Preserve their task/event
+-- history, but remove them from the registration domain instead of inventing a
+-- subject. Exact signatures keep this portable and fail closed if they change.
+create temporary table reviewed_invalid_registration_parents_input (
+  task_id uuid not null,
+  expected_title text not null,
+  expected_status text not null,
+  expected_requested_by uuid not null,
+  expected_assignee_id uuid not null,
+  expected_student_name text,
+  expected_class_name text,
+  expected_pipeline_status text not null,
+  expected_event_count integer not null,
+  expected_created_event_count integer not null,
+  expected_status_event_count integer not null,
+  expected_updated_event_count integer not null
+) on commit drop;
+
+insert into reviewed_invalid_registration_parents_input (
+  task_id,
+  expected_title,
+  expected_status,
+  expected_requested_by,
+  expected_assignee_id,
+  expected_student_name,
+  expected_class_name,
+  expected_pipeline_status,
+  expected_event_count,
+  expected_created_event_count,
+  expected_status_event_count,
+  expected_updated_event_count
+)
+values
+  (
+    '235f6b4e-c3c0-4c95-9bcc-e913c42bacde'::uuid,
+    '등록: ZZZREGFOCUS',
+    'requested',
+    '258f57c6-a6f9-4793-81d3-188307fd8eb6'::uuid,
+    '258f57c6-a6f9-4793-81d3-188307fd8eb6'::uuid,
+    null,
+    'ZZZREGFOCUS',
+    '0. 등록 문의',
+    3,
+    1,
+    2,
+    0
+  ),
+  (
+    '98e8eb56-27c0-4515-83d7-e6ee385cd5db'::uuid,
+    '등록: ㄴㄴ',
+    'in_progress',
+    '258f57c6-a6f9-4793-81d3-188307fd8eb6'::uuid,
+    '258f57c6-a6f9-4793-81d3-188307fd8eb6'::uuid,
+    'ㄴㄴ',
+    null,
+    '1. 레벨테스트 예약',
+    4,
+    1,
+    2,
+    1
+  );
+
+create temporary table reviewed_invalid_registration_parents
+on commit drop
+as
+select
+  reviewed.*,
+  task.type as actual_type,
+  task.title as actual_title,
+  task.status as actual_status,
+  task.priority as actual_priority,
+  task.requested_by as actual_requested_by,
+  task.assignee_id as actual_assignee_id,
+  task.secondary_assignee_id as actual_secondary_assignee_id,
+  task.requested_team as actual_requested_team,
+  task.assignee_team as actual_assignee_team,
+  task.start_at as actual_start_at,
+  task.subject as actual_subject,
+  task.student_id as actual_student_id,
+  task.class_id as actual_class_id,
+  task.textbook_id as actual_textbook_id,
+  task.student_name as actual_student_name,
+  task.class_name as actual_class_name,
+  task.textbook_title as actual_textbook_title,
+  task.campus as actual_campus,
+  task.due_at as actual_due_at,
+  task.completed_at as actual_completed_at,
+  task.memo as actual_memo,
+  to_jsonb(task) as task_snapshot,
+  detail.task_id as detail_task_id,
+  detail.pipeline_status,
+  detail.inquiry_at,
+  detail.school_grade,
+  detail.school_name,
+  detail.parent_phone,
+  detail.student_phone,
+  detail.level_test_at,
+  detail.level_test_place,
+  detail.level_test_material_link,
+  detail.level_test_completed_at,
+  detail.level_test_result,
+  detail.counselor,
+  detail.phone_consultation_at,
+  detail.visit_consultation_at,
+  detail.visit_consultation_place,
+  detail.consultation_at,
+  detail.class_start_date,
+  detail.class_start_session,
+  detail.textbook_ready,
+  detail.admission_notice_sent,
+  detail.payment_checked,
+  detail.makeedu_registered,
+  detail.makeedu_invoice_sent,
+  detail.textbook_billing_issued,
+  detail.timetable_roster_updated,
+  detail.request_note,
+  detail.textbook_preparation,
+  to_jsonb(detail) as detail_snapshot,
+  (
+    select count(*)::integer
+    from public.ops_task_events event
+    where event.task_id = task.id
+  ) as actual_event_count,
+  (
+    select count(*)::integer
+    from public.ops_task_events event
+    where event.task_id = task.id
+      and event.event_type = 'created'
+  ) as actual_created_event_count,
+  (
+    select count(*)::integer
+    from public.ops_task_events event
+    where event.task_id = task.id
+      and event.event_type = 'status_changed'
+  ) as actual_status_event_count,
+  (
+    select count(*)::integer
+    from public.ops_task_events event
+    where event.task_id = task.id
+      and event.event_type = 'updated'
+  ) as actual_updated_event_count
+from reviewed_invalid_registration_parents_input reviewed
+join public.ops_tasks task on task.id = reviewed.task_id
+left join public.ops_registration_details detail on detail.task_id = task.id;
+
+do $$
+begin
+  if exists (
+    select 1
+    from reviewed_invalid_registration_parents reviewed
+    where reviewed.actual_type <> 'registration'
+      or reviewed.actual_title is distinct from reviewed.expected_title
+      or reviewed.actual_status is distinct from reviewed.expected_status
+      or reviewed.actual_priority <> 'normal'
+      or reviewed.actual_requested_by is distinct from reviewed.expected_requested_by
+      or reviewed.actual_assignee_id is distinct from reviewed.expected_assignee_id
+      or reviewed.actual_secondary_assignee_id is not null
+      or reviewed.actual_requested_team is not null
+      or reviewed.actual_assignee_team is not null
+      or reviewed.actual_start_at is not null
+      or reviewed.actual_subject is not null
+      or reviewed.actual_student_id is not null
+      or reviewed.actual_class_id is not null
+      or reviewed.actual_textbook_id is not null
+      or reviewed.actual_student_name is distinct from reviewed.expected_student_name
+      or reviewed.actual_class_name is distinct from reviewed.expected_class_name
+      or reviewed.actual_textbook_title is not null
+      or reviewed.actual_campus is not null
+      or reviewed.actual_due_at is not null
+      or reviewed.actual_completed_at is not null
+      or reviewed.actual_memo is not null
+      or coalesce(reviewed.task_snapshot -> 'checklist_items', '[]'::jsonb) <> '[]'::jsonb
+      or nullif(reviewed.task_snapshot ->> 'automation_rule_id', '') is not null
+      or nullif(reviewed.task_snapshot ->> 'automation_source_id', '') is not null
+      or nullif(reviewed.task_snapshot ->> 'automation_source_key', '') is not null
+      or nullif(reviewed.task_snapshot ->> 'automation_source_type', '') is not null
+      or nullif(reviewed.task_snapshot ->> 'automation_generated_at', '') is not null
+      or reviewed.detail_task_id is null
+      or reviewed.pipeline_status is distinct from reviewed.expected_pipeline_status
+      or reviewed.inquiry_at is not null
+      or reviewed.school_grade is not null
+      or reviewed.school_name is not null
+      or reviewed.parent_phone is not null
+      or reviewed.student_phone is not null
+      or reviewed.level_test_at is not null
+      or reviewed.level_test_place is not null
+      or reviewed.level_test_material_link is not null
+      or reviewed.level_test_completed_at is not null
+      or reviewed.level_test_result is not null
+      or reviewed.counselor is not null
+      or reviewed.phone_consultation_at is not null
+      or reviewed.visit_consultation_at is not null
+      or reviewed.visit_consultation_place is not null
+      or reviewed.consultation_at is not null
+      or reviewed.class_start_date is not null
+      or reviewed.class_start_session is not null
+      or reviewed.textbook_ready is distinct from false
+      or reviewed.admission_notice_sent is distinct from false
+      or reviewed.payment_checked is distinct from false
+      or reviewed.makeedu_registered is distinct from false
+      or reviewed.makeedu_invoice_sent is distinct from false
+      or reviewed.textbook_billing_issued is distinct from false
+      or reviewed.timetable_roster_updated is distinct from false
+      or reviewed.request_note is not null
+      or reviewed.textbook_preparation is not null
+      or nullif(btrim(reviewed.detail_snapshot ->> 'principal_review_note'), '') is not null
+      or coalesce((reviewed.detail_snapshot ->> 'principal_placement_checked')::boolean, false)
+      or reviewed.actual_event_count <> reviewed.expected_event_count
+      or reviewed.actual_created_event_count <> reviewed.expected_created_event_count
+      or reviewed.actual_status_event_count <> reviewed.expected_status_event_count
+      or reviewed.actual_updated_event_count <> reviewed.expected_updated_event_count
+      or exists (
+        select 1
+        from public.ops_task_events event
+        where event.task_id = reviewed.task_id
+          and (
+            event.event_type not in ('created', 'status_changed', 'updated')
+            or (
+              event.event_type = 'created'
+              and (
+                event.field_name is distinct from 'type'
+                or event.before_value is not null
+                or event.after_value is distinct from 'registration'
+              )
+            )
+            or (
+              event.event_type = 'status_changed'
+              and (
+                event.field_name is distinct from 'status'
+                or event.before_value is null
+                or event.before_value not in ('requested', 'canceled')
+                or event.after_value is null
+                or event.after_value not in ('requested', 'canceled')
+              )
+            )
+            or (
+              event.event_type = 'updated'
+              and (
+                event.field_name is distinct from 'task'
+                or event.before_value is not null
+                or event.after_value is distinct from reviewed.expected_title
+              )
+            )
+          )
+      )
+      or exists (
+        select 1
+        from public.ops_task_comments comment
+        where comment.task_id = reviewed.task_id
+      )
+      or exists (
+        select 1
+        from public.ops_task_attachments attachment
+        where attachment.task_id = reviewed.task_id
+      )
+      or exists (
+        select 1
+        from public.ops_registration_messages message
+        where message.task_id = reviewed.task_id
+      )
+  ) then
+    raise exception 'registration_invalid_parent_quarantine_review_required';
+  end if;
+end
+$$;
+
+do $$
+declare
+  optional_relation text;
+  has_operational_evidence boolean;
+begin
+  foreach optional_relation in array array[
+    'ops_task_notification_deliveries',
+    'ops_task_automation_runs'
+  ]
+  loop
+    if to_regclass('public.' || optional_relation) is not null then
+      execute format(
+        'select exists (
+          select 1
+          from public.%I evidence
+          join reviewed_invalid_registration_parents reviewed
+            on reviewed.task_id = evidence.task_id
+        )',
+        optional_relation
+      ) into has_operational_evidence;
+
+      if has_operational_evidence then
+        raise exception 'registration_invalid_parent_quarantine_review_required';
+      end if;
+    end if;
+  end loop;
+end
+$$;
+
+insert into public.ops_task_events (
+  task_id,
+  actor_id,
+  event_type,
+  field_name,
+  before_value,
+  after_value,
+  created_at
+)
+select
+  reviewed.task_id,
+  null,
+  'migration_quarantined',
+  change.field_name,
+  change.before_value,
+  change.after_value,
+  now()
+from reviewed_invalid_registration_parents reviewed
+cross join lateral (
+  values
+    ('type'::text, 'registration'::text, 'general'::text),
+    ('status'::text, reviewed.actual_status, 'canceled'::text),
+    ('registration_pipeline_status'::text, reviewed.pipeline_status, null::text)
+) change(field_name, before_value, after_value)
+order by reviewed.task_id, change.field_name;
+
+delete from public.ops_registration_details detail
+using reviewed_invalid_registration_parents reviewed
+where detail.task_id = reviewed.task_id;
+
+update public.ops_tasks task
+set
+  type = 'general',
+  status = 'canceled',
+  title = '[격리된 이전 등록 테스트] ' || task.title,
+  memo = 'registration_subject_tracks_schema: empty legacy UI fixture quarantined without subject inference',
+  updated_at = now()
+from reviewed_invalid_registration_parents reviewed
+where task.id = reviewed.task_id;
 
 -- registration_subject_attribution_preflight
 create temporary table registration_legacy_parents
