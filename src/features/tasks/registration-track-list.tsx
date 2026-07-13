@@ -27,6 +27,7 @@ export type RegistrationTrackListItem = {
   directorName: string
   directorProfileId: string | null
   stageEnteredAt: string
+  phoneReadyAt: string | null
   migrationReviewRequired: boolean
   visitScheduledAt: string
   visitPlace: string
@@ -54,6 +55,7 @@ export function buildRegistrationTrackListItems(tasks: OpsTask[]) {
       directorProfileId: track.directorProfileId,
       directorName: track.directorName,
       stageEnteredAt: track.stageEnteredAt,
+      phoneReadyAt: track.phoneReadyAt,
       migrationReviewRequired: track.migrationReviewRequired,
       visitScheduledAt: track.visitScheduledAt || "",
       visitPlace: track.visitPlace || "",
@@ -78,26 +80,21 @@ export function filterRegistrationTrackListItems(
   return [...sortedPhoneQueue, ...scheduledVisits]
 }
 
-export function sortRegistrationConsultationItems<T extends Pick<RegistrationTrackListItem, "key" | "stageEnteredAt">>(items: T[]) {
+export function sortRegistrationConsultationItems<T extends Pick<RegistrationTrackListItem, "key" | "phoneReadyAt">>(items: T[]) {
   return [...items].sort((left, right) => {
-    const leftTime = Date.parse(left.stageEnteredAt)
-    const rightTime = Date.parse(right.stageEnteredAt)
+    const leftTime = Date.parse(left.phoneReadyAt || "")
+    const rightTime = Date.parse(right.phoneReadyAt || "")
     const normalizedLeft = Number.isFinite(leftTime) ? leftTime : Number.POSITIVE_INFINITY
     const normalizedRight = Number.isFinite(rightTime) ? rightTime : Number.POSITIVE_INFINITY
-    return normalizedLeft - normalizedRight || left.key.localeCompare(right.key)
+    if (normalizedLeft !== normalizedRight) return normalizedLeft < normalizedRight ? -1 : 1
+    return left.key.localeCompare(right.key)
   })
 }
 
-export function getRegistrationConsultationTimeLabel(
-  item: Pick<RegistrationTrackListItem, "status">,
-) {
-  return item.status === "consultation_waiting" ? "전화상담 대기" : ""
-}
-
 export function getRegistrationTrackTimeValue(
-  item: Pick<RegistrationTrackListItem, "status" | "stageEnteredAt" | "visitScheduledAt">,
+  item: Pick<RegistrationTrackListItem, "status" | "stageEnteredAt" | "phoneReadyAt" | "visitScheduledAt">,
 ) {
-  if (item.status === "consultation_waiting") return ""
+  if (item.status === "consultation_waiting") return item.phoneReadyAt || ""
   if (item.status === "visit_consultation_scheduled") return item.visitScheduledAt
   return item.stageEnteredAt
 }
@@ -194,8 +191,7 @@ function formatStageEnteredAt(value: string) {
 }
 
 function getRegistrationTrackTimeLabel(item: RegistrationTrackListItem) {
-  return getRegistrationConsultationTimeLabel(item)
-    || formatStageEnteredAt(getRegistrationTrackTimeValue(item))
+  return formatStageEnteredAt(getRegistrationTrackTimeValue(item))
 }
 
 function getRegistrationTrackPlaceLabel(item: RegistrationTrackListItem) {
@@ -321,7 +317,7 @@ export function RegistrationTrackList({
                 <dd className="mt-0.5 truncate font-medium">{item.directorName || "미지정"}</dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-muted-foreground">{item.status === "visit_consultation_scheduled" ? "방문상담 일시" : "현재 단계 진입"}</dt>
+                <dt className="text-muted-foreground">{item.status === "consultation_waiting" ? "전화상담 대기 기준" : item.status === "visit_consultation_scheduled" ? "방문상담 일시" : "현재 단계 진입"}</dt>
                 <dd className="mt-0.5 truncate font-medium">{getRegistrationTrackTimeLabel(item)}</dd>
                 {item.status === "visit_consultation_scheduled" ? <dd className="mt-0.5 truncate text-muted-foreground">방문상담 장소 · {getRegistrationTrackPlaceLabel(item)}</dd> : null}
               </div>
@@ -369,7 +365,7 @@ export function RegistrationTrackList({
               {item.directorName || "미지정"}
             </div>
             <div className="min-w-0 truncate px-3 py-2 text-xs text-muted-foreground" role="cell">
-              <span className="block">{item.status === "visit_consultation_scheduled" ? "방문상담 일시 · " : ""}{getRegistrationTrackTimeLabel(item)}</span>
+              <span className="block">{item.status === "consultation_waiting" ? "전화상담 대기 · " : item.status === "visit_consultation_scheduled" ? "방문상담 일시 · " : ""}{getRegistrationTrackTimeLabel(item)}</span>
               {item.status === "visit_consultation_scheduled" ? <span className="block truncate">방문상담 장소 · {getRegistrationTrackPlaceLabel(item)}</span> : null}
             </div>
             <div className="min-w-0 px-3 py-2" role="cell">

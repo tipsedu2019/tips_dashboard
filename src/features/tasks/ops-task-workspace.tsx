@@ -9898,7 +9898,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? visibleRegistrationTrackItems.length
     : visibleTasks.length
   const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
-  const showToolbarCreate = !registrationFixtureEnabled && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
+  const showToolbarCreate = (!registrationFixtureEnabled || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
   const hasLoadBlocker = Boolean(data && !data.schemaReady)
   const canOpenCreate = isTodoWorkspace || (!loading && !hasLoadBlocker)
   const createActionDisabled = saving || !canOpenCreate

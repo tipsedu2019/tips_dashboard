@@ -14,15 +14,24 @@ import type {
   OpsRegistrationConsultation,
   OpsRegistrationEnrollment,
   OpsRegistrationLevelTest,
+  OpsRegistrationTrackEvent,
   OpsRegistrationTrackStatus,
   OpsRegistrationTrackSummary,
+  RegistrationCaseCreateWithInitialWorkflowInput,
+  RegistrationCaseCreateWithInitialWorkflowResponse,
+  RegistrationPhoneReadySource,
   RegistrationSubject,
 } from "./registration-track-service"
 import type { RegistrationSubjectTrackFixtureAdapter } from "./registration-track-fixture-runtime"
 
 const FIXTURE_NOW = "2026-07-13T09:00:00+09:00"
+const FIXTURE_ACTOR_ID = "fixture-profile-staff"
+const REGISTRATION_SUBJECT_ORDER: RegistrationSubject[] = ["영어", "수학"]
+const REGISTRATION_INITIAL_ACTIONS = ["inquiry", "level_test", "direct_phone", "visit"] as const
+type RegistrationInitialAction = typeof REGISTRATION_INITIAL_ACTIONS[number]
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
+  "createRegistrationCaseWithInitialWorkflow",
   "syncRegistrationCaseSubjects",
   "updateRegistrationCaseCommon",
   "routeRegistrationInquiry",
@@ -108,6 +117,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
   runtime: RegistrationSubjectTrackFixtureRuntime,
 ): RegistrationSubjectTrackFixtureAdapter {
   return {
+    intakeWorkflowRuntimeVersion: 1,
     executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => {
       const outcome = reduceRegistrationSubjectTrackFixture(runtime.getState(), {
         type,
@@ -193,6 +203,8 @@ function track(input: {
   directorName?: string
   migrationReviewRequired?: boolean
   stageEnteredAt?: string
+  phoneReadyAt?: string | null
+  phoneReadySource?: RegistrationPhoneReadySource | null
 }): OpsRegistrationTrackSummary {
   return {
     id: input.id,
@@ -200,7 +212,9 @@ function track(input: {
     subject: input.subject,
     status: input.status,
     legacy: false,
-    directorProfileId: input.directorProfileId ?? (input.subject === "영어" ? "fixture-profile-english-director" : "fixture-profile-math-director"),
+    directorProfileId: input.directorProfileId === undefined
+      ? (input.subject === "영어" ? "fixture-profile-english-director" : "fixture-profile-math-director")
+      : input.directorProfileId,
     directorName: input.directorName ?? (input.subject === "영어" ? "강부희" : "양소윤"),
     directorAssignmentSource: input.migrationReviewRequired ? "migration" : "default",
     directorAssignmentRuleKey: input.migrationReviewRequired ? "" : `academic-director-v1:2026:${input.subject}:고1`,
@@ -208,8 +222,8 @@ function track(input: {
     levelTestRetakeDecision: "",
     migrationReviewRequired: Boolean(input.migrationReviewRequired),
     stageEnteredAt: input.stageEnteredAt || "2026-07-12T10:00:00+09:00",
-    phoneReadyAt: null,
-    phoneReadySource: null,
+    phoneReadyAt: input.phoneReadyAt ?? null,
+    phoneReadySource: input.phoneReadySource ?? null,
   }
 }
 
@@ -378,8 +392,8 @@ function buildFixtureCases() {
       mode: "phone",
       status: "waiting",
       directorProfileId: "fixture-profile-math-director",
-      readyAt: null,
-      readySource: null,
+      readyAt: "2026-07-10T09:00:00+09:00",
+      readySource: "inquiry",
       completedAt: null,
       outcome: null,
       createdAt: "2026-07-10T09:00:00+09:00",
@@ -421,8 +435,8 @@ function buildFixtureCases() {
     mode: "phone",
     status: "waiting",
     directorProfileId: "fixture-profile-english-director",
-    readyAt: null,
-    readySource: null,
+    readyAt: "2026-07-09T09:00:00+09:00",
+    readySource: "inquiry",
     completedAt: null,
     outcome: null,
     createdAt: "2026-07-09T09:00:00+09:00",
@@ -560,6 +574,10 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     { id: "fixture-teacher-math", label: "양소윤", subjects: ["수학"], profileId: "fixture-profile-math-director", accountEmail: "math-director@fixture.local", sortOrder: 2 },
   ]
   const caseDetails = buildFixtureCases()
+  for (const detail of Object.values(caseDetails)) {
+    projectFixturePhoneReadiness(detail)
+    detail.task.registrationTracks = detail.tracks
+  }
   const workspaceData: OpsTaskWorkspaceData = {
     tasks: Object.values(caseDetails).map((detail) => detail.task),
     profiles,
@@ -661,12 +679,37 @@ function requireCase<T>(value: T | null | undefined, code: string): T {
   return value
 }
 
+function projectFixturePhoneReadiness(detail: OpsRegistrationCaseDetail) {
+  for (const selected of detail.tracks) {
+    const activePhone = detail.consultations
+      .filter((item) => (
+        item.trackId === selected.id
+        && item.mode === "phone"
+        && item.status === "waiting"
+      ))
+      .sort((left, right) => {
+        const leftParsed = Date.parse(left.createdAt)
+        const rightParsed = Date.parse(right.createdAt)
+        const leftTime = Number.isFinite(leftParsed) ? leftParsed : Number.NEGATIVE_INFINITY
+        const rightTime = Number.isFinite(rightParsed) ? rightParsed : Number.NEGATIVE_INFINITY
+        if (leftTime !== rightTime) return leftTime > rightTime ? -1 : 1
+        return right.id.localeCompare(left.id)
+      })[0] || null
+    selected.phoneReadyAt = activePhone?.readyAt || null
+    selected.phoneReadySource = activePhone?.readySource || null
+  }
+}
+
 function syncCase(state: RegistrationSubjectTrackFixtureState, detail: OpsRegistrationCaseDetail) {
+  projectFixturePhoneReadiness(detail)
   detail.task.registrationTracks = detail.tracks
   detail.task.subject = detail.tracks.map((item) => item.subject).join(", ")
   detail.task.updatedAt = FIXTURE_NOW
   state.caseDetails[detail.task.id] = detail
-  state.workspaceData.tasks = state.workspaceData.tasks.map((task) => task.id === detail.task.id ? detail.task : task)
+  const existingTask = state.workspaceData.tasks.some((task) => task.id === detail.task.id)
+  state.workspaceData.tasks = existingTask
+    ? state.workspaceData.tasks.map((task) => task.id === detail.task.id ? detail.task : task)
+    : [...state.workspaceData.tasks, detail.task]
 }
 
 function nextId(state: RegistrationSubjectTrackFixtureState, kind: string) {
@@ -711,6 +754,500 @@ function fixturePayloadFingerprint(payload: Record<string, unknown>) {
   return JSON.stringify(canonicalizeFixturePayload(payload))
 }
 
+function fixtureInputText(value: unknown) {
+  return String(value ?? "").trim()
+}
+
+function fixtureInitialError(code: string): never {
+  throw new Error(code)
+}
+
+function orderedFixtureSubjects(value: unknown): RegistrationSubject[] {
+  if (!Array.isArray(value)) fixtureInitialError("registration_subjects_required")
+  if (value.some((entry) => !REGISTRATION_SUBJECT_ORDER.includes(fixtureInputText(entry) as RegistrationSubject))) {
+    fixtureInitialError("registration_subject_invalid")
+  }
+  const selected = new Set(value.map(fixtureInputText))
+  const subjects = REGISTRATION_SUBJECT_ORDER.filter((subject) => selected.has(subject))
+  if (subjects.length === 0) fixtureInitialError("registration_subjects_required")
+  return subjects
+}
+
+function normalizeFixtureAppointment(
+  raw: unknown,
+  participants: RegistrationSubject[],
+): RegistrationCaseCreateWithInitialWorkflowInput["levelTestAppointment"] {
+  const absent = raw === null || raw === undefined
+  if ((participants.length === 0) !== absent) {
+    fixtureInitialError("registration_initial_appointment_membership_invalid")
+  }
+  if (absent) return null
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    fixtureInitialError("registration_initial_appointment_invalid")
+  }
+  const appointment = raw as Record<string, unknown>
+  if (!Array.isArray(appointment.subjects)) {
+    fixtureInitialError("registration_initial_appointment_membership_invalid")
+  }
+  const rawSubjects = appointment.subjects.map(fixtureInputText)
+  if (rawSubjects.some((subject) => !REGISTRATION_SUBJECT_ORDER.includes(subject as RegistrationSubject))) {
+    fixtureInitialError("registration_initial_appointment_membership_invalid")
+  }
+  const selected = new Set(rawSubjects)
+  const appointmentSubjects = REGISTRATION_SUBJECT_ORDER.filter((subject) => selected.has(subject))
+  if (
+    appointmentSubjects.length !== rawSubjects.length
+    || appointmentSubjects.length !== participants.length
+    || appointmentSubjects.some((subject, index) => subject !== participants[index])
+  ) {
+    fixtureInitialError("registration_initial_appointment_membership_invalid")
+  }
+  const keys = Object.keys(appointment).sort()
+  if (
+    keys.length !== 3
+    || keys[0] !== "place"
+    || keys[1] !== "scheduledAt"
+    || keys[2] !== "subjects"
+    || typeof appointment.scheduledAt !== "string"
+    || typeof appointment.place !== "string"
+  ) {
+    fixtureInitialError("registration_initial_appointment_invalid")
+  }
+  const scheduledAt = fixtureInputText(appointment.scheduledAt)
+  const place = fixtureInputText(appointment.place)
+  if (!Number.isFinite(Date.parse(scheduledAt)) || !place) {
+    fixtureInitialError("registration_initial_appointment_invalid")
+  }
+  return { scheduledAt, place, subjects: appointmentSubjects }
+}
+
+function isFixtureDirectorEligible(
+  state: RegistrationSubjectTrackFixtureState,
+  subject: RegistrationSubject,
+  profileId: string,
+) {
+  const profile = state.optionData.profiles.find((item) => item.id === profileId)
+  return Boolean(
+    profile
+    && ["admin", "staff"].includes(profile.role)
+    && state.optionData.teachers.some((teacher) => (
+      teacher.profileId === profileId && teacher.subjects.includes(subject)
+    )),
+  )
+}
+
+function normalizeFixtureInitialWorkflowInput(
+  state: RegistrationSubjectTrackFixtureState,
+  payload: Record<string, unknown>,
+  commandRequestKey: string | undefined,
+): RegistrationCaseCreateWithInitialWorkflowInput {
+  const campus = fixtureInputText(payload.campus)
+  if (!campus || !["본관", "별관"].includes(campus)) {
+    fixtureInitialError("registration_campus_invalid")
+  }
+  const subjects = orderedFixtureSubjects(payload.subjects)
+  const rawPlans = payload.subjectPlans
+  if (!rawPlans || typeof rawPlans !== "object" || Array.isArray(rawPlans)) {
+    fixtureInitialError("registration_initial_subject_plan_invalid")
+  }
+  const planEntries = Object.entries(rawPlans as Record<string, unknown>)
+  if (
+    planEntries.length !== subjects.length
+    || planEntries.some(([subject, action]) => (
+      !subjects.includes(subject as RegistrationSubject)
+      || !REGISTRATION_INITIAL_ACTIONS.includes(action as RegistrationInitialAction)
+    ))
+  ) {
+    fixtureInitialError("registration_initial_subject_plan_invalid")
+  }
+  const subjectPlans: Partial<Record<RegistrationSubject, RegistrationInitialAction>> = {}
+  for (const subject of subjects) subjectPlans[subject] = (rawPlans as Record<string, RegistrationInitialAction>)[subject]
+  const levelTestSubjects = subjects.filter((subject) => subjectPlans[subject] === "level_test")
+  const visitSubjects = subjects.filter((subject) => subjectPlans[subject] === "visit")
+  const levelTestAppointment = normalizeFixtureAppointment(payload.levelTestAppointment, levelTestSubjects)
+  const visitAppointment = normalizeFixtureAppointment(payload.visitAppointment, visitSubjects)
+
+  const rawOverrides = payload.directorOverrides ?? {}
+  if (!rawOverrides || typeof rawOverrides !== "object" || Array.isArray(rawOverrides)) {
+    fixtureInitialError("registration_director_override_invalid")
+  }
+  const directorOverrides: Partial<Record<RegistrationSubject, string>> = {}
+  for (const [rawSubject, rawProfileId] of Object.entries(rawOverrides as Record<string, unknown>)) {
+    const subject = rawSubject as RegistrationSubject
+    const profileId = fixtureInputText(rawProfileId)
+    if (!subjects.includes(subject) || !profileId || !isFixtureDirectorEligible(state, subject, profileId)) {
+      fixtureInitialError("registration_director_override_invalid")
+    }
+    directorOverrides[subject] = profileId
+  }
+
+  const studentName = fixtureInputText(payload.studentName)
+  if (!studentName) fixtureInitialError("registration_student_name_required")
+  const schoolGrade = fixtureInputText(payload.schoolGrade)
+  if (!schoolGrade) fixtureInitialError("registration_school_grade_required")
+  const parentPhone = fixtureInputText(payload.parentPhone)
+  const parentPhoneDigits = parentPhone.replace(/\D+/g, "")
+  if (!/^01(0|1|[6-9])[0-9]{7,8}$/.test(parentPhoneDigits)) {
+    fixtureInitialError("registration_parent_phone_invalid")
+  }
+  const inquiryAt = fixtureInputText(payload.inquiryAt)
+  if (!inquiryAt || !Number.isFinite(Date.parse(inquiryAt))) {
+    fixtureInitialError("registration_inquiry_at_required")
+  }
+  const priority = fixtureInputText(payload.priority)
+  if (!["low", "normal", "high", "urgent"].includes(priority)) {
+    fixtureInitialError("registration_priority_invalid")
+  }
+  const requestKey = fixtureInputText(payload.requestKey || commandRequestKey)
+  if (!requestKey) fixtureInitialError("request_key_required")
+
+  return {
+    studentName,
+    schoolGrade,
+    schoolName: fixtureInputText(payload.schoolName),
+    parentPhone,
+    studentPhone: fixtureInputText(payload.studentPhone),
+    campus,
+    inquiryAt,
+    subjects,
+    requestNote: fixtureInputText(payload.requestNote),
+    priority,
+    subjectPlans,
+    levelTestAppointment,
+    visitAppointment,
+    directorOverrides,
+    requestKey,
+  }
+}
+
+type FixtureDirectorResolution = {
+  profileId: string | null
+  source: "default" | "manual" | ""
+  ruleKey: string
+  name: string
+}
+
+function resolveFixtureInitialDirectors(
+  state: RegistrationSubjectTrackFixtureState,
+  input: RegistrationCaseCreateWithInitialWorkflowInput,
+) {
+  const resolutions: Partial<Record<RegistrationSubject, FixtureDirectorResolution>> = {}
+  for (const subject of input.subjects) {
+    const override = input.directorOverrides[subject]
+    const teacher = override
+      ? state.optionData.teachers.find((item) => item.profileId === override)
+      : state.optionData.teachers.find((item) => item.subjects.includes(subject))
+    const profileId = override || teacher?.profileId || null
+    const profile = state.optionData.profiles.find((item) => item.id === profileId)
+    const eligibleProfileId = profileId && isFixtureDirectorEligible(state, subject, profileId)
+      ? profileId
+      : null
+    const action = input.subjectPlans[subject]
+    if ((action === "direct_phone" || action === "visit") && !eligibleProfileId) {
+      fixtureInitialError("registration_director_required")
+    }
+    resolutions[subject] = {
+      profileId: eligibleProfileId,
+      source: eligibleProfileId ? (override ? "manual" : "default") : "",
+      ruleKey: eligibleProfileId && !override
+        ? `academic-director-v1:2026:${subject}:${input.schoolGrade}`
+        : "",
+      name: eligibleProfileId ? profile?.label || teacher?.label || "" : "",
+    }
+  }
+  return resolutions
+}
+
+function createFixtureTrackEvent(
+  state: RegistrationSubjectTrackFixtureState,
+  input: Omit<OpsRegistrationTrackEvent, "id" | "actorId" | "occurredAt" | "legacyText">,
+): OpsRegistrationTrackEvent {
+  return {
+    ...input,
+    id: nextId(state, "event"),
+    metadata: clone(input.metadata),
+    actorId: FIXTURE_ACTOR_ID,
+    occurredAt: FIXTURE_NOW,
+    legacyText: null,
+  }
+}
+
+function projectFixtureInitialParent(detail: OpsRegistrationCaseDetail) {
+  const workflowOrder: Partial<Record<OpsRegistrationTrackStatus, number>> = {
+    inquiry: 0,
+    migration_review: 0,
+    level_test_scheduled: 1,
+    level_test_in_progress: 1,
+    consultation_waiting: 2,
+    visit_consultation_scheduled: 2,
+    waiting: 3,
+    enrollment_decided: 4,
+    enrollment_processing: 5,
+  }
+  const pipelineStatus: Partial<Record<OpsRegistrationTrackStatus, string>> = {
+    inquiry: "0. 등록 문의",
+    migration_review: "0. 등록 문의",
+    level_test_scheduled: "1. 레벨테스트 예약",
+    level_test_in_progress: "1. 레벨테스트 예약",
+    consultation_waiting: "2. 상담 예약",
+    visit_consultation_scheduled: "2. 상담 예약",
+  }
+  const subjectOrder = (subject: RegistrationSubject) => REGISTRATION_SUBJECT_ORDER.indexOf(subject)
+  const selectedTrack = [...detail.tracks].sort((left, right) => (
+    (workflowOrder[left.status] ?? 9) - (workflowOrder[right.status] ?? 9)
+    || subjectOrder(left.subject) - subjectOrder(right.subject)
+    || left.id.localeCompare(right.id)
+  ))[0]
+  const selectedDirector = [...detail.tracks].sort((left, right) => (
+    subjectOrder(left.subject) - subjectOrder(right.subject)
+    || left.id.localeCompare(right.id)
+  ))[0]
+
+  detail.task.status = detail.tracks.every((selected) => selected.status === "inquiry")
+    ? "requested"
+    : "in_progress"
+  detail.task.secondaryAssigneeId = selectedDirector?.directorProfileId || ""
+  detail.task.secondaryAssigneeLabel = selectedDirector?.directorName || ""
+  if (detail.task.registration) {
+    detail.task.registration.counselor = selectedDirector?.directorName || ""
+    detail.task.registration.pipelineStatus = selectedTrack
+      ? pipelineStatus[selectedTrack.status] || "0. 등록 문의"
+      : "0. 등록 문의"
+  }
+}
+
+function createFixtureRegistrationCaseWithInitialWorkflow(
+  state: RegistrationSubjectTrackFixtureState,
+  input: RegistrationCaseCreateWithInitialWorkflowInput,
+): RegistrationCaseCreateWithInitialWorkflowResponse {
+  const directors = resolveFixtureInitialDirectors(state, input)
+  const taskId = nextId(state, "task")
+  const tracks = input.subjects.map((subject) => {
+    const director = directors[subject]!
+    const selected = track({
+      id: nextId(state, "track"),
+      taskId,
+      subject,
+      status: "inquiry",
+      directorProfileId: director.profileId,
+      directorName: director.name,
+      stageEnteredAt: FIXTURE_NOW,
+    })
+    selected.directorAssignmentSource = director.source
+    selected.directorAssignmentRuleKey = director.ruleKey
+    return selected
+  })
+  const task = taskTemplate({
+    id: taskId,
+    studentName: input.studentName,
+    subject: input.subjects.join(", "),
+    tracks,
+  })
+  task.status = "requested"
+  task.priority = input.priority as OpsTask["priority"]
+  task.assigneeId = ""
+  task.assigneeLabel = ""
+  task.assigneeTeam = ""
+  task.studentId = ""
+  task.campus = input.campus
+  task.createdAt = FIXTURE_NOW
+  task.updatedAt = FIXTURE_NOW
+  task.registration = {
+    pipelineStatus: "0. 등록 문의",
+    inquiryAt: input.inquiryAt,
+    schoolGrade: input.schoolGrade,
+    schoolName: input.schoolName,
+    parentPhone: input.parentPhone,
+    studentPhone: input.studentPhone,
+    counselor: "",
+    requestNote: input.requestNote,
+    admissionNoticeSent: false,
+  }
+  const detail = caseDetail({ task, tracks })
+  detail.events.push(createFixtureTrackEvent(state, {
+    taskId,
+    trackId: null,
+    eventType: "registration_case_created",
+    subject: null,
+    source: null,
+    destination: null,
+    reason: null,
+    metadata: {
+      version: 1,
+      actorId: FIXTURE_ACTOR_ID,
+      subjects: [...input.subjects],
+      occurredAt: FIXTURE_NOW,
+    },
+  }))
+
+  const levelTestSubjects = input.subjects.filter((subject) => input.subjectPlans[subject] === "level_test")
+  if (input.levelTestAppointment && levelTestSubjects.length > 0) {
+    const appointment: OpsRegistrationAppointment = {
+      id: nextId(state, "appointment"),
+      taskId,
+      kind: "level_test",
+      scheduledAt: input.levelTestAppointment.scheduledAt,
+      place: input.levelTestAppointment.place,
+      status: "scheduled",
+      notificationRevision: 1,
+      createdAt: FIXTURE_NOW,
+      updatedAt: FIXTURE_NOW,
+    }
+    detail.appointments.push(appointment)
+    const activeTracks = tracks.filter((selected) => levelTestSubjects.includes(selected.subject))
+    const activeTrackIds = activeTracks.map((selected) => selected.id).sort()
+    for (const selected of activeTracks) {
+      const attempt: OpsRegistrationLevelTest = {
+        id: nextId(state, "attempt"),
+        trackId: selected.id,
+        appointmentId: appointment.id,
+        attemptNumber: 1,
+        status: "scheduled",
+        startedAt: null,
+        completedAt: null,
+        materialLink: null,
+      }
+      detail.levelTests.push(attempt)
+      selected.status = "level_test_scheduled"
+      selected.stageEnteredAt = FIXTURE_NOW
+      detail.events.push(createFixtureTrackEvent(state, {
+        taskId,
+        trackId: selected.id,
+        eventType: "level_test_scheduled",
+        subject: selected.subject,
+        source: "inquiry",
+        destination: "level_test_scheduled",
+        reason: null,
+        metadata: {
+          appointmentId: appointment.id,
+          notificationRevision: 1,
+          kind: "level_test",
+          scheduledAt: appointment.scheduledAt,
+          place: appointment.place,
+          activityId: attempt.id,
+          attemptNumber: 1,
+          activeTrackIds,
+          canceledTrackIds: [],
+          changeKind: "created",
+        },
+      }))
+    }
+  }
+
+  for (const selected of tracks.filter((item) => input.subjectPlans[item.subject] === "direct_phone")) {
+    const consultation: OpsRegistrationConsultation = {
+      id: nextId(state, "consultation"),
+      trackId: selected.id,
+      appointmentId: null,
+      mode: "phone",
+      status: "waiting",
+      directorProfileId: selected.directorProfileId || "",
+      readyAt: input.inquiryAt,
+      readySource: "inquiry",
+      completedAt: null,
+      outcome: null,
+      createdAt: FIXTURE_NOW,
+      updatedAt: FIXTURE_NOW,
+    }
+    detail.consultations.push(consultation)
+    selected.status = "consultation_waiting"
+    selected.stageEnteredAt = FIXTURE_NOW
+    detail.events.push(createFixtureTrackEvent(state, {
+      taskId,
+      trackId: selected.id,
+      eventType: "inquiry_routed",
+      subject: selected.subject,
+      source: "inquiry",
+      destination: "consultation_waiting",
+      reason: null,
+      metadata: { consultationId: consultation.id, initialAction: "direct_phone" },
+    }))
+  }
+
+  const notificationTargets: Array<{ appointmentId: string; notificationRevision: number }> = []
+  const visitSubjects = input.subjects.filter((subject) => input.subjectPlans[subject] === "visit")
+  if (input.visitAppointment && visitSubjects.length > 0) {
+    const appointment: OpsRegistrationAppointment = {
+      id: nextId(state, "appointment"),
+      taskId,
+      kind: "visit_consultation",
+      scheduledAt: input.visitAppointment.scheduledAt,
+      place: input.visitAppointment.place,
+      status: "scheduled",
+      notificationRevision: 1,
+      createdAt: FIXTURE_NOW,
+      updatedAt: FIXTURE_NOW,
+    }
+    detail.appointments.push(appointment)
+    const activeTracks = tracks.filter((selected) => visitSubjects.includes(selected.subject))
+    const activeTrackIds = activeTracks.map((selected) => selected.id).sort()
+    for (const selected of activeTracks) {
+      const consultation: OpsRegistrationConsultation = {
+        id: nextId(state, "consultation"),
+        trackId: selected.id,
+        appointmentId: appointment.id,
+        mode: "visit",
+        status: "scheduled",
+        directorProfileId: selected.directorProfileId || "",
+        readyAt: null,
+        readySource: null,
+        completedAt: null,
+        outcome: null,
+        createdAt: FIXTURE_NOW,
+        updatedAt: FIXTURE_NOW,
+      }
+      detail.consultations.push(consultation)
+      selected.status = "visit_consultation_scheduled"
+      selected.stageEnteredAt = FIXTURE_NOW
+      detail.events.push(createFixtureTrackEvent(state, {
+        taskId,
+        trackId: selected.id,
+        eventType: "visit_scheduled",
+        subject: selected.subject,
+        source: "inquiry",
+        destination: "visit_consultation_scheduled",
+        reason: null,
+        metadata: {
+          appointmentId: appointment.id,
+          notificationRevision: 1,
+          kind: "visit_consultation",
+          scheduledAt: appointment.scheduledAt,
+          place: appointment.place,
+          activityId: consultation.id,
+          activeTrackIds,
+          canceledTrackIds: [],
+          changeKind: "created",
+        },
+      }))
+    }
+    notificationTargets.push({ appointmentId: appointment.id, notificationRevision: 1 })
+  }
+
+  for (const selected of tracks.filter((item) => input.subjectPlans[item.subject] === "inquiry")) {
+    detail.events.push(createFixtureTrackEvent(state, {
+      taskId,
+      trackId: selected.id,
+      eventType: "initial_inquiry_selected",
+      subject: selected.subject,
+      source: "inquiry",
+      destination: "inquiry",
+      reason: null,
+      metadata: { initialAction: "inquiry" },
+    }))
+  }
+
+  projectFixtureInitialParent(detail)
+  syncCase(state, detail)
+  return {
+    taskId,
+    commonRevision: 1,
+    subjects: [...input.subjects],
+    tracks: clone(detail.tracks),
+    appointments: clone(detail.appointments),
+    notificationTargets,
+  }
+}
+
 export function reduceRegistrationSubjectTrackFixture(
   current: RegistrationSubjectTrackFixtureState,
   command: RegistrationSubjectTrackFixtureCommand,
@@ -719,8 +1256,18 @@ export function reduceRegistrationSubjectTrackFixture(
     throw new Error("registration_subject_track_fixture_unsupported_action")
   }
   const type = command.type as RegistrationSubjectTrackFixtureAction
-  const key = receiptKey(command)
-  const payloadFingerprint = fixturePayloadFingerprint(command.payload || {})
+  const rawPayload = clone(command.payload || {})
+  const normalizedInitialInput = type === "createRegistrationCaseWithInitialWorkflow"
+    ? normalizeFixtureInitialWorkflowInput(current, rawPayload, command.requestKey)
+    : null
+  const payload = normalizedInitialInput
+    ? normalizedInitialInput as unknown as Record<string, unknown>
+    : rawPayload
+  const key = normalizedInitialInput?.requestKey || receiptKey(command)
+  const fingerprintPayload = normalizedInitialInput
+    ? Object.fromEntries(Object.entries(payload).filter(([entryKey]) => entryKey !== "requestKey"))
+    : payload
+  const payloadFingerprint = fixturePayloadFingerprint(fingerprintPayload)
   const existing = current.receipts[key]
   if (existing) {
     if (existing.action !== type || existing.payloadFingerprint !== payloadFingerprint) {
@@ -730,10 +1277,13 @@ export function reduceRegistrationSubjectTrackFixture(
   }
 
   const state = clone(current)
-  const payload = clone(command.payload || {})
   let result: unknown
 
   switch (type) {
+    case "createRegistrationCaseWithInitialWorkflow": {
+      result = createFixtureRegistrationCaseWithInitialWorkflow(state, normalizedInitialInput!)
+      break
+    }
     case "syncRegistrationCaseSubjects": {
       const taskId = asText(payload, "taskId")
       const detail = requireCase(state.caseDetails[taskId], "case_not_found")
@@ -785,8 +1335,8 @@ export function reduceRegistrationSubjectTrackFixture(
           mode: "phone",
           status: "waiting",
           directorProfileId: selected.directorProfileId || "",
-          readyAt: null,
-          readySource: null,
+          readyAt: detail.task.registration?.inquiryAt || null,
+          readySource: detail.task.registration?.inquiryAt ? "inquiry" : null,
           completedAt: null,
           outcome: null,
           createdAt: FIXTURE_NOW,
@@ -809,6 +1359,26 @@ export function reduceRegistrationSubjectTrackFixture(
       detail.consultations.forEach((item) => {
         if (item.trackId === selected.id && !["completed", "canceled"].includes(item.status)) item.directorProfileId = profileId || ""
       })
+      if (
+        selected.status === "consultation_waiting"
+        && profileId
+        && !detail.consultations.some((item) => item.trackId === selected.id && item.mode === "phone" && item.status === "waiting")
+      ) {
+        detail.consultations.push({
+          id: nextId(state, "consultation"),
+          trackId: selected.id,
+          appointmentId: null,
+          mode: "phone",
+          status: "waiting",
+          directorProfileId: profileId,
+          readyAt: FIXTURE_NOW,
+          readySource: "director_resolved",
+          completedAt: null,
+          outcome: null,
+          createdAt: FIXTURE_NOW,
+          updatedAt: FIXTURE_NOW,
+        })
+      }
       syncCase(state, detail)
       result = { ...transitionResult(selected), directorProfileId: profileId, directorAssignmentSource: selected.directorAssignmentSource, directorAssignmentRuleKey: selected.directorAssignmentRuleKey, commonRevision: detail.commonRevision }
       break
@@ -959,8 +1529,8 @@ export function reduceRegistrationSubjectTrackFixture(
               mode: "phone",
               status: "waiting",
               directorProfileId: selected.directorProfileId,
-              readyAt: null,
-              readySource: null,
+              readyAt: FIXTURE_NOW,
+              readySource: "visit_reopened",
               completedAt: null,
               outcome: null,
               createdAt: FIXTURE_NOW,
@@ -1037,7 +1607,7 @@ export function reduceRegistrationSubjectTrackFixture(
           selected.status = "consultation_waiting"
           const hasActiveConsultation = detail.consultations.some((item) => item.trackId === trackId && ["waiting", "scheduled"].includes(item.status))
           if (selected.directorProfileId && !hasActiveConsultation) {
-            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId, readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
+            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId, readyAt: FIXTURE_NOW, readySource: "visit_reopened", completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
           } else if (!selected.directorProfileId) {
             requiresDirectorAssignmentTrackIds.push(trackId)
           }
@@ -1076,7 +1646,7 @@ export function reduceRegistrationSubjectTrackFixture(
       let consultationId: string | null = null
       if (attempt.status === "completed") {
         selected.status = "consultation_waiting"
-        const consultation: OpsRegistrationConsultation = { id: nextId(state, "consultation"), trackId: selected.id, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId || "", readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW }
+        const consultation: OpsRegistrationConsultation = { id: nextId(state, "consultation"), trackId: selected.id, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId || "", readyAt: FIXTURE_NOW, readySource: "level_test_completion", completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW }
         detail.consultations.push(consultation)
         consultationId = consultation.id
       } else {
@@ -1266,8 +1836,8 @@ export function reduceRegistrationSubjectTrackFixture(
             mode: "phone",
             status: "waiting",
             directorProfileId: item.directorProfileId,
-            readyAt: null,
-            readySource: null,
+            readyAt: FIXTURE_NOW,
+            readySource: "migration",
             completedAt: null,
             outcome: null,
             createdAt: FIXTURE_NOW,

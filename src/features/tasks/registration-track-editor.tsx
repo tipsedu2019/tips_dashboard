@@ -1124,6 +1124,7 @@ function RegistrationTrackStageEditor({
   onOpenVisit,
   onOpenOutcome,
   hasLevelTestHistory,
+  activeConsultation,
   visitAppointment,
 }: {
   track: OpsRegistrationTrackSummary
@@ -1136,6 +1137,7 @@ function RegistrationTrackStageEditor({
   onOpenVisit: () => void
   onOpenOutcome: () => void
   hasLevelTestHistory: boolean
+  activeConsultation: OpsRegistrationConsultation | null
   visitAppointment: OpsRegistrationAppointment | null
 }) {
   if (track.status === "inquiry") {
@@ -1151,6 +1153,9 @@ function RegistrationTrackStageEditor({
           <h3 className="text-sm font-semibold">[{track.subject}] 전화상담 대기</h3>
           <p className="text-xs text-muted-foreground">전화상담은 예약 없이 담당자가 순서대로 처리합니다.</p>
         </div>
+        <dl className="grid gap-2 rounded-md bg-muted/35 p-3 text-sm">
+          <div><dt className="text-xs text-muted-foreground">전화상담 대기 기준일시</dt><dd className="mt-1 font-medium">{formatRegistrationDateTime(activeConsultation?.readyAt || "")}</dd></div>
+        </dl>
         {permissions.canManage ? (
           <div className="flex flex-wrap justify-end gap-2">
             {hasLevelTestHistory ? <Button type="button" variant="ghost" onClick={onOpenLevelTestHistory}>레벨테스트 결과 보기</Button> : null}
@@ -1851,6 +1856,7 @@ export function RegistrationTrackEditor({
           })}
           onOpenOutcome={() => setOutcomeDialogOpen(true)}
           hasLevelTestHistory={Boolean(selectedLevelTestHistory?.status === "completed")}
+          activeConsultation={activeConsultation}
           visitAppointment={visitAppointment}
         />
       ) : null}

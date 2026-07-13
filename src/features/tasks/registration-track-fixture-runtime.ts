@@ -4,6 +4,7 @@ import type { OpsRegistrationCaseDetail, OpsRegistrationWorkspaceOptionData } fr
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
 
 export type RegistrationSubjectTrackFixtureAdapter = {
+  readonly intakeWorkflowRuntimeVersion: 1
   executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => Promise<T>
   loadCase: (taskId: string) => Promise<OpsRegistrationCaseDetail>
   loadWorkspaceData: () => Promise<OpsTaskWorkspaceData>
@@ -43,6 +44,10 @@ export function executeRegistrationSubjectTrackFixtureAction<T = unknown>(
   payload: Record<string, unknown> = {},
 ): Promise<T> | null {
   return getActiveFixtureAdapter()?.executeAction<T>(type, payload) || null
+}
+
+export function loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(): 1 | null {
+  return getActiveFixtureAdapter()?.intakeWorkflowRuntimeVersion || null
 }
 
 export function loadRegistrationSubjectTrackFixtureCase(taskId: string): Promise<OpsRegistrationCaseDetail> | null {

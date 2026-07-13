@@ -806,13 +806,21 @@ test("registration workspace replaces Notion registration management with subjec
     "item.subject",
     "item.directorName",
     "getRegistrationTrackTimeValue(item)",
+    'if (item.status === "consultation_waiting") return item.phoneReadyAt || ""',
     'if (item.status === "visit_consultation_scheduled") return item.visitScheduledAt',
     "formatStageEnteredAt(getRegistrationTrackTimeValue(item))",
+    '전화상담 대기 기준',
+    '전화상담 대기 ·',
   ]);
   assert.doesNotMatch(
     registrationTableSource,
     /formatStageEnteredAt\(item\.stageEnteredAt\)/,
     "visit rows must not relabel stage entry as their appointment time",
+  );
+  assert.doesNotMatch(
+    registrationTableSource,
+    /if \(item\.status === "consultation_waiting"\) return item\.stageEnteredAt/,
+    "phone rows must not synthesize readiness from stage entry",
   );
 
   assertIncludesAll(workspaceSource, [
@@ -832,6 +840,18 @@ test("registration workspace replaces Notion registration management with subjec
     "RegistrationDetailPanel",
     'selectedTaskFresh?.type === "registration" || selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl"',
   ]);
+});
+
+test("fixture registration create keeps production conditions and follows management-role permissions", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const createGate = workspaceSource.slice(
+    workspaceSource.indexOf("const showToolbarCreate"),
+    workspaceSource.indexOf("const hasLoadBlocker"),
+  );
+
+  assert.match(workspaceSource, /const canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/);
+  assert.match(createGate, /\(!registrationFixtureEnabled \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /!isTodoWorkspace && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace \|\| !showEmptyCreate\)/);
 });
 
 test("registration exposes six ordered work tabs with separate level-test and consultation track states", async () => {

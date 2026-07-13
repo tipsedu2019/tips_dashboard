@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase"
 import {
   executeRegistrationSubjectTrackFixtureAction,
   loadRegistrationSubjectTrackFixtureCase,
+  loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion,
   loadRegistrationSubjectTrackFixtureOptionData,
 } from "./registration-track-fixture-runtime"
 
@@ -17,7 +18,7 @@ import type {
 } from "./ops-task-service"
 import type { RegistrationInitialWorkflowPayload } from "./registration-intake-workflow"
 import {
-  probeRegistrationIntakeWorkflowRuntime,
+  probeRegistrationIntakeWorkflowRuntime as probeRegistrationIntakeWorkflowRuntimeFromDatabase,
   resetRegistrationIntakeWorkflowRuntimeProbe,
 } from "./registration-intake-runtime-probe"
 import type { RegistrationIntakeRuntimeState } from "./registration-intake-runtime-probe"
@@ -29,6 +30,12 @@ import type { RegistrationRuntimeState } from "./registration-runtime-probe"
 
 export { probeRegistrationSubjectTrackRuntime }
 export type { RegistrationRuntimeState }
+function probeRegistrationIntakeWorkflowRuntime(): Promise<RegistrationIntakeRuntimeState> {
+  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() === 1) {
+    return Promise.resolve({ available: true, version: 1 })
+  }
+  return probeRegistrationIntakeWorkflowRuntimeFromDatabase()
+}
 export {
   probeRegistrationIntakeWorkflowRuntime,
   resetRegistrationIntakeWorkflowRuntimeProbe,
@@ -2079,6 +2086,11 @@ export function createRegistrationCase(
 export function createRegistrationCaseWithInitialWorkflow(
   input: RegistrationCaseCreateWithInitialWorkflowInput,
 ): Promise<RegistrationCaseCreateWithInitialWorkflowResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationCaseCreateWithInitialWorkflowResponse>(
+    "createRegistrationCaseWithInitialWorkflow",
+    input as unknown as Record<string, unknown>,
+  )
+  if (fixture !== null) return fixture
   return defaultRegistrationTrackService.createRegistrationCaseWithInitialWorkflow(input)
 }
 

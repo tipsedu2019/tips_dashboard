@@ -40,7 +40,7 @@ async function loadListAdapter() {
     "// registration-track-list-adapter:end",
   );
   const compiled = ts.transpileModule(
-    `${adapterSource}\nmodule.exports = { buildRegistrationTrackListItems, filterRegistrationTrackListItems, sortRegistrationConsultationItems, getRegistrationConsultationTimeLabel, getRegistrationTrackTimeValue };`,
+    `${adapterSource}\nmodule.exports = { buildRegistrationTrackListItems, filterRegistrationTrackListItems, sortRegistrationConsultationItems, getRegistrationTrackTimeValue };`,
     {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
@@ -71,6 +71,8 @@ function fixtureTasks() {
         directorProfileId: "director-1",
         directorName: "강부희",
         stageEnteredAt: "2026-07-10T00:00:00Z",
+        phoneReadyAt: "2026-07-10T02:00:00Z",
+        phoneReadySource: "inquiry",
         migrationReviewRequired: false,
       },
       {
@@ -90,24 +92,42 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function consultationItem(trackId, stageEnteredAt, mode = "phone") {
+function consultationItem(trackId, stageEnteredAt, phoneReadyAt, mode = "phone") {
   return {
     key: `case:${trackId}`,
     taskId: "case",
     trackId,
     status: mode === "phone" ? "consultation_waiting" : "visit_consultation_scheduled",
     stageEnteredAt,
+    phoneReadyAt,
   }
 }
 
-test("phone queue is oldest first and never shows a reservation time", async () => {
-  const { sortRegistrationConsultationItems, getRegistrationConsultationTimeLabel } = await loadListAdapter()
+test("phone queue sorts and displays only canonical readiness when stage order conflicts", async () => {
+  const { sortRegistrationConsultationItems, getRegistrationTrackTimeValue } = await loadListAdapter()
   const items = sortRegistrationConsultationItems([
-    consultationItem("new", "2026-07-12T03:00:00Z", "phone"),
-    consultationItem("old", "2026-07-10T03:00:00Z", "phone"),
+    consultationItem("stage-old-ready-new", "2026-07-10T03:00:00Z", "2026-07-12T03:00:00Z"),
+    consultationItem("stage-new-ready-old", "2026-07-12T03:00:00Z", "2026-07-10T03:00:00Z"),
   ])
-  assert.deepEqual(plain(items.map((item) => item.trackId)), ["old", "new"])
-  assert.equal(getRegistrationConsultationTimeLabel(items[0]), "전화상담 대기")
+  assert.deepEqual(plain(items.map((item) => item.trackId)), ["stage-new-ready-old", "stage-old-ready-new"])
+  assert.equal(getRegistrationTrackTimeValue(items[0]), "2026-07-10T03:00:00Z")
+})
+
+test("phone queue puts invalid and missing readiness last with a stable key tie-break", async () => {
+  const { sortRegistrationConsultationItems, getRegistrationTrackTimeValue } = await loadListAdapter()
+  const items = sortRegistrationConsultationItems([
+    consultationItem("missing-z", "2026-07-01T00:00:00Z", null),
+    consultationItem("equal-b", "2026-07-01T00:00:00Z", "2026-07-10T03:00:00Z"),
+    consultationItem("invalid-a", "2026-07-01T00:00:00Z", "not-a-date"),
+    consultationItem("equal-a", "2026-07-20T00:00:00Z", "2026-07-10T03:00:00Z"),
+    consultationItem("missing-a", "2026-07-30T00:00:00Z", ""),
+  ])
+
+  assert.deepEqual(plain(items.map((item) => item.trackId)), [
+    "equal-a", "equal-b", "invalid-a", "missing-a", "missing-z",
+  ])
+  assert.equal(getRegistrationTrackTimeValue(items[2]), "not-a-date")
+  assert.equal(getRegistrationTrackTimeValue(items[3]), "")
 })
 
 test("visit rows use only the canonical active appointment time and never relabel stage entry as the booking", async () => {
@@ -174,6 +194,7 @@ test("phone consultation queue is oldest-first without reordering other tabs", a
       id: "eng-newer",
       taskId: "case-2",
       stageEnteredAt: "2026-07-12T00:00:00Z",
+      phoneReadyAt: "2026-07-12T02:00:00Z",
     }],
   });
   tasks.push({
@@ -236,6 +257,9 @@ test("track list renders compact subject-scoped desktop and mobile rows", async 
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /visitScheduledAt/);
   assert.match(source, /visitPlace/);
+  assert.match(source, /phoneReadyAt/);
+  assert.match(source, /전화상담 대기 기준/);
+  assert.match(source, /전화상담 대기 ·/);
   assert.match(source, /방문상담 일시/);
   assert.match(source, /방문상담 장소/);
 });
@@ -248,6 +272,21 @@ test("selected visit consultation card shows the canonical appointment time and 
   assert.match(source, /방문상담 장소/)
   assert.match(source, /visitAppointment\.scheduledAt/)
   assert.match(source, /visitAppointment\.place/)
+})
+
+test("selected phone consultation card shows active readiness without a stage fallback", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const phoneCard = sourceBetween(
+    source,
+    'if (track.status === "consultation_waiting")',
+    'if (["level_test_scheduled", "level_test_in_progress"].includes(track.status))',
+  )
+
+  assert.match(phoneCard, /전화상담 대기 기준일시/)
+  assert.match(phoneCard, /activeConsultation\?\.readyAt/)
+  assert.match(phoneCard, /formatRegistrationDateTime/)
+  assert.doesNotMatch(phoneCard, /stageEnteredAt/)
+  assert.match(source, /activeConsultation=\{activeConsultation\}/)
 })
 
 test("unbatched enrollment drafts may omit a schedule while batch start requires complete schedules", async () => {
