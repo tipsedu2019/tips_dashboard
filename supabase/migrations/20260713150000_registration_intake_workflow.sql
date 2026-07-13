@@ -78,6 +78,87 @@ alter function dashboard_private.try_registration_event_timestamptz(text)
 revoke execute on function dashboard_private.try_registration_event_timestamptz(text)
   from public, anon, authenticated;
 
+create function dashboard_private.try_registration_event_uuid(
+  p_value text
+)
+returns uuid
+language plpgsql
+immutable
+security invoker
+set search_path = ''
+as $$
+begin
+  if nullif(pg_catalog.btrim(p_value), '') is null then
+    return null;
+  end if;
+  begin
+    return p_value::uuid;
+  exception
+    when data_exception then
+      return null;
+  end;
+end;
+$$;
+
+alter function dashboard_private.try_registration_event_uuid(text)
+  owner to postgres;
+revoke execute on function dashboard_private.try_registration_event_uuid(text)
+  from public, anon, authenticated;
+
+create function dashboard_private.try_registration_event_date(
+  p_value text
+)
+returns date
+language plpgsql
+stable
+security invoker
+set search_path = ''
+as $$
+begin
+  if nullif(pg_catalog.btrim(p_value), '') is null then
+    return null;
+  end if;
+  begin
+    return p_value::date;
+  exception
+    when data_exception then
+      return null;
+  end;
+end;
+$$;
+
+alter function dashboard_private.try_registration_event_date(text)
+  owner to postgres;
+revoke execute on function dashboard_private.try_registration_event_date(text)
+  from public, anon, authenticated;
+
+create function dashboard_private.try_registration_event_boolean(
+  p_value text
+)
+returns boolean
+language plpgsql
+immutable
+security invoker
+set search_path = ''
+as $$
+begin
+  if nullif(pg_catalog.btrim(p_value), '') is null then
+    return null;
+  end if;
+  begin
+    return p_value::boolean;
+  exception
+    when data_exception then
+      return null;
+  end;
+end;
+$$;
+
+alter function dashboard_private.try_registration_event_boolean(text)
+  owner to postgres;
+revoke execute on function dashboard_private.try_registration_event_boolean(text)
+  from public, anon, authenticated;
+
 -- registration_phone_readiness_backfill
 alter table public.ops_registration_consultations
   disable trigger set_updated_at_ops_registration_consultations;
@@ -3478,58 +3559,140 @@ begin
       and track.pipeline_status = 'migration_review'
       and track.migration_review_required
       and not exists (
+        with parsed_legacy_events as materialized (
+          select
+            event.task_id,
+            event.event_type,
+            dashboard_private.try_registration_event_jsonb_object(
+              event.before_value
+            ) as before_payload,
+            dashboard_private.try_registration_event_jsonb_object(
+              event.after_value
+            ) as after_payload
+          from public.ops_task_events event
+          where event.task_id = p_task_id
+            and event.event_type = 'legacy_registration_imported'
+        )
         select 1
-        from public.ops_task_events event
-        where event.task_id = p_task_id
-          and event.event_type = 'legacy_registration_imported'
-          and (event.after_value::jsonb ->> 'version') = '1'
-          and nullif(event.after_value::jsonb ->> 'trackId', '')::uuid = track.id
+        from parsed_legacy_events parsed
+        where parsed.after_payload ->> 'version' = '1'
+          and dashboard_private.try_registration_event_uuid(
+            parsed.after_payload ->> 'trackId'
+          ) = track.id
       )
   ) then
     raise exception 'registration_migration_legacy_snapshot_missing' using errcode = '23514';
   end if;
   if (
+    with parsed_legacy_events as materialized (
+      select
+        dashboard_private.try_registration_event_jsonb_object(
+          event.before_value
+        ) as before_payload,
+        dashboard_private.try_registration_event_jsonb_object(
+          event.after_value
+        ) as after_payload
+      from public.ops_task_events event
+      where event.task_id = p_task_id
+        and event.event_type = 'legacy_registration_imported'
+    )
     select pg_catalog.count(distinct pg_catalog.jsonb_build_object(
-      'pipelineStatus', event.before_value::jsonb ->> 'pipelineStatus',
-      'studentId', event.before_value::jsonb ->> 'studentId',
-      'classId', event.before_value::jsonb ->> 'classId',
-      'textbookId', event.before_value::jsonb ->> 'textbookId',
-      'timestamps', event.after_value::jsonb -> 'timestamps',
-      'legacyBooleans', event.after_value::jsonb -> 'legacyBooleans'
+      'pipelineStatus', parsed.before_payload ->> 'pipelineStatus',
+      'studentId', parsed.before_payload ->> 'studentId',
+      'classId', parsed.before_payload ->> 'classId',
+      'textbookId', parsed.before_payload ->> 'textbookId',
+      'timestamps', parsed.after_payload -> 'timestamps',
+      'legacyBooleans', parsed.after_payload -> 'legacyBooleans'
     ))
-    from public.ops_task_events event
-    where event.task_id = p_task_id
-      and event.event_type = 'legacy_registration_imported'
-      and (event.after_value::jsonb ->> 'version') = '1'
+    from parsed_legacy_events parsed
+    where parsed.after_payload ->> 'version' = '1'
+      and dashboard_private.try_registration_event_uuid(
+        parsed.after_payload ->> 'trackId'
+      ) is not null
   ) <> 1 then
     raise exception 'registration_migration_legacy_snapshot_conflict' using errcode = '23514';
   end if;
 
-  select event.before_value::jsonb, event.after_value::jsonb
+  with parsed_legacy_events as materialized (
+    select
+      event.id,
+      event.created_at,
+      dashboard_private.try_registration_event_jsonb_object(
+        event.before_value
+      ) as before_payload,
+      dashboard_private.try_registration_event_jsonb_object(
+        event.after_value
+      ) as after_payload
+    from public.ops_task_events event
+    where event.task_id = p_task_id
+      and event.event_type = 'legacy_registration_imported'
+  )
+  select parsed.before_payload, parsed.after_payload
   into v_legacy_before, v_legacy_after
-  from public.ops_task_events event
-  where event.task_id = p_task_id
-    and event.event_type = 'legacy_registration_imported'
-    and (event.after_value::jsonb ->> 'version') = '1'
-  order by event.created_at, event.id
+  from parsed_legacy_events parsed
+  where parsed.after_payload ->> 'version' = '1'
+    and dashboard_private.try_registration_event_uuid(
+      parsed.after_payload ->> 'trackId'
+    ) is not null
+  order by parsed.created_at, parsed.id
   limit 1;
   v_legacy_pipeline_status := nullif(v_legacy_before ->> 'pipelineStatus', '');
-  v_legacy_student_id := nullif(v_legacy_before ->> 'studentId', '')::uuid;
-  v_legacy_class_id := nullif(v_legacy_before ->> 'classId', '')::uuid;
-  v_legacy_textbook_id := nullif(v_legacy_before ->> 'textbookId', '')::uuid;
+  v_legacy_student_id := dashboard_private.try_registration_event_uuid(
+    v_legacy_before ->> 'studentId'
+  );
+  v_legacy_class_id := dashboard_private.try_registration_event_uuid(
+    v_legacy_before ->> 'classId'
+  );
+  v_legacy_textbook_id := dashboard_private.try_registration_event_uuid(
+    v_legacy_before ->> 'textbookId'
+  );
   v_legacy_booleans := coalesce(v_legacy_after -> 'legacyBooleans', '{}'::jsonb);
-  v_legacy_updated_at := nullif(v_legacy_after #>> '{timestamps,taskUpdatedAt}', '')::timestamptz;
-  v_level_test_at := nullif(v_legacy_after #>> '{timestamps,levelTestAt}', '')::timestamptz;
-  v_level_test_completed_at := nullif(v_legacy_after #>> '{timestamps,levelTestCompletedAt}', '')::timestamptz;
-  v_phone_consultation_at := nullif(v_legacy_after #>> '{timestamps,phoneConsultationAt}', '')::timestamptz;
-  v_visit_consultation_at := nullif(v_legacy_after #>> '{timestamps,visitConsultationAt}', '')::timestamptz;
-  v_consultation_completed_at := nullif(v_legacy_after #>> '{timestamps,consultationAt}', '')::timestamptz;
-  v_class_start_date := nullif(v_legacy_after #>> '{timestamps,classStartDate}', '')::date;
+  v_legacy_updated_at := dashboard_private.try_registration_event_timestamptz(
+    v_legacy_after #>> '{timestamps,taskUpdatedAt}'
+  );
+  v_level_test_at := dashboard_private.try_registration_event_timestamptz(
+    v_legacy_after #>> '{timestamps,levelTestAt}'
+  );
+  v_level_test_completed_at := dashboard_private.try_registration_event_timestamptz(
+    v_legacy_after #>> '{timestamps,levelTestCompletedAt}'
+  );
+  v_phone_consultation_at := dashboard_private.try_registration_event_timestamptz(
+    v_legacy_after #>> '{timestamps,phoneConsultationAt}'
+  );
+  v_visit_consultation_at := dashboard_private.try_registration_event_timestamptz(
+    v_legacy_after #>> '{timestamps,visitConsultationAt}'
+  );
+  v_consultation_completed_at := dashboard_private.try_registration_event_timestamptz(
+    v_legacy_after #>> '{timestamps,consultationAt}'
+  );
+  v_class_start_date := dashboard_private.try_registration_event_date(
+    v_legacy_after #>> '{timestamps,classStartDate}'
+  );
   v_class_start_session := nullif(pg_catalog.btrim(v_legacy_after #>> '{timestamps,classStartSession}'), '');
-  v_admission_notice_sent := coalesce((v_legacy_booleans ->> 'admissionNoticeSent')::boolean, false);
-  v_makeedu_registered := coalesce((v_legacy_booleans ->> 'makeeduRegistered')::boolean, false);
-  v_invoice_sent := coalesce((v_legacy_booleans ->> 'makeeduInvoiceSent')::boolean, false);
-  v_payment_checked := coalesce((v_legacy_booleans ->> 'paymentChecked')::boolean, false);
+  v_admission_notice_sent := coalesce(
+    dashboard_private.try_registration_event_boolean(
+      v_legacy_booleans ->> 'admissionNoticeSent'
+    ),
+    false
+  );
+  v_makeedu_registered := coalesce(
+    dashboard_private.try_registration_event_boolean(
+      v_legacy_booleans ->> 'makeeduRegistered'
+    ),
+    false
+  );
+  v_invoice_sent := coalesce(
+    dashboard_private.try_registration_event_boolean(
+      v_legacy_booleans ->> 'makeeduInvoiceSent'
+    ),
+    false
+  );
+  v_payment_checked := coalesce(
+    dashboard_private.try_registration_event_boolean(
+      v_legacy_booleans ->> 'paymentChecked'
+    ),
+    false
+  );
 
   v_level_group_present := v_level_test_at is not null
     or v_level_test_completed_at is not null
@@ -3539,7 +3702,7 @@ begin
   v_consultation_group_present := v_visit_consultation_at is not null
     or v_consultation_completed_at is not null
     or nullif(pg_catalog.btrim(v_detail.visit_consultation_place), '') is not null
-    or nullif(v_legacy_after #>> '{timestamps,phoneConsultationAt}', '') is not null;
+    or v_phone_consultation_at is not null;
   v_placement_group_present := v_legacy_student_id is not null
     or v_legacy_class_id is not null
     or v_legacy_textbook_id is not null
@@ -3848,10 +4011,10 @@ begin
       if not (v_legacy_pipeline_status like '7.%')
         or v_student.id is null
         or v_student.status <> '재원'
-        or not coalesce((v_legacy_booleans ->> 'admissionNoticeSent')::boolean, false)
-        or not coalesce((v_legacy_booleans ->> 'makeeduRegistered')::boolean, false)
-        or not coalesce((v_legacy_booleans ->> 'makeeduInvoiceSent')::boolean, false)
-        or not coalesce((v_legacy_booleans ->> 'paymentChecked')::boolean, false)
+        or not v_admission_notice_sent
+        or not v_makeedu_registered
+        or not v_invoice_sent
+        or not v_payment_checked
         or v_legacy_updated_at is null
         or not (coalesce(v_student.class_ids, '[]'::jsonb) ? v_class.id::text)
         or coalesce(v_student.waitlist_class_ids, '[]'::jsonb) ? v_class.id::text
@@ -4628,9 +4791,6 @@ begin
   into v_director_overrides
   from pg_catalog.jsonb_each(v_director_overrides) override_entry;
 
-  if v_request_key is null then
-    raise exception 'request_key_required' using errcode = '22023';
-  end if;
   if v_student_name is null then
     raise exception 'registration_student_name_required' using errcode = '22023';
   end if;
@@ -4648,6 +4808,9 @@ begin
   end if;
   if v_priority is null or v_priority not in ('low', 'normal', 'high', 'urgent') then
     raise exception 'registration_priority_invalid' using errcode = '22023';
+  end if;
+  if v_request_key is null then
+    raise exception 'request_key_required' using errcode = '22023';
   end if;
 
   v_target_fingerprint := pg_catalog.jsonb_build_object(

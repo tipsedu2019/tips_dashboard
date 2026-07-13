@@ -594,6 +594,23 @@ select ok(
   'campus validation beats request key'
 );
 
+-- Validation precedence: all common fields, including priority, beat a blank request key.
+select ok(
+  pg_temp.registration_intake_throws(
+    $$select public.create_registration_case_with_initial_workflow_v1(
+      '초기우선순위우선검증', '중1', '초기등록런타임중', '01077000084', null,
+      '본관', '2026-07-13 09:30+09'::timestamptz, array['영어'],
+      'compound priority validation', 'impossible', '{"영어":"inquiry"}'::jsonb,
+      null, null, '{}'::jsonb, '   '
+    )$$,
+    'registration_priority_invalid'
+  )
+  and not exists (
+    select 1 from public.ops_tasks task where task.student_name = '초기우선순위우선검증'
+  ),
+  'priority validation beats request key'
+);
+
 -- Appointment membership mismatch rolls the entire requested case back.
 select ok(
   pg_temp.registration_intake_throws(
@@ -937,6 +954,205 @@ select ok(
       and attempt.status = 'completed'
   ),
   'completed level test reuses the exact attempt completed_at readiness'
+);
+
+-- Migration-review consumer path: malformed raw evidence fails canonically and atomically.
+set local role postgres;
+insert into public.ops_tasks(
+  id, title, type, status, priority, requested_by, student_name, campus, subject
+) values (
+  '10000000-0000-4000-8000-000000007601',
+  '초기등록 malformed migration review',
+  'registration', 'in_progress', 'normal',
+  '10000000-0000-4000-8000-000000007001',
+  '초기마이그레이션오염', '본관', '영어'
+);
+insert into public.ops_registration_details(
+  task_id, inquiry_at, school_grade, school_name, parent_phone,
+  student_phone, request_note, pipeline_status, common_revision
+) values (
+  '10000000-0000-4000-8000-000000007601',
+  '2026-07-01 09:00+09', '중1', '초기등록런타임중', '01077000601',
+  null, 'malformed migration review runtime', '0. 등록 문의', 1
+);
+insert into public.ops_registration_subject_tracks(
+  id, task_id, subject, pipeline_status,
+  director_profile_id, director_assignment_source,
+  director_assignment_rule_key, director_assigned_at,
+  migration_review_required
+) values (
+  '10000000-0000-4000-8000-000000007611',
+  '10000000-0000-4000-8000-000000007601',
+  '영어', 'migration_review',
+  '10000000-0000-4000-8000-000000007002', 'manual', null, now(), true
+);
+insert into public.ops_task_events(
+  task_id, actor_id, event_type, field_name, before_value, after_value
+) values (
+  '10000000-0000-4000-8000-000000007601',
+  '10000000-0000-4000-8000-000000007001',
+  'legacy_registration_imported',
+  'registration_track:10000000-0000-4000-8000-000000007611:malformed-container',
+  '{not-json',
+  '{not-json'
+);
+create temporary table registration_intake_malformed_review_result (
+  stable_error boolean not null
+) on commit drop;
+grant select, insert on registration_intake_malformed_review_result to authenticated;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor(
+  '10000000-0000-4000-8000-000000007001'
+);
+insert into registration_intake_malformed_review_result(stable_error)
+select pg_temp.registration_intake_throws(
+  $$select public.resolve_registration_migration_review(
+    '10000000-0000-4000-8000-000000007601',
+    pg_catalog.jsonb_build_object(
+      'assignments', '[]'::jsonb,
+      'trackStates', pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'trackId', '10000000-0000-4000-8000-000000007611',
+          'targetStatus', 'consultation_waiting',
+          'waitingKind', null,
+          'classId', null
+        )
+      )
+    ),
+    'intake-malformed-migration-container'
+  )$$,
+  '^registration_migration_legacy_snapshot_missing$'
+);
+set local role postgres;
+select ok(
+  (select stable_error from registration_intake_malformed_review_result)
+  and exists (
+    select 1
+    from public.ops_registration_subject_tracks track
+    where track.id = '10000000-0000-4000-8000-000000007611'
+      and track.pipeline_status = 'migration_review'
+      and track.migration_review_required
+  )
+  and not exists (
+    select 1
+    from public.ops_registration_consultations consultation
+    where consultation.track_id = '10000000-0000-4000-8000-000000007611'
+  )
+  and not exists (
+    select 1
+    from public.ops_registration_appointments appointment
+    where appointment.task_id = '10000000-0000-4000-8000-000000007601'
+  )
+  and not exists (
+    select 1
+    from public.ops_registration_enrollments enrollment
+    where enrollment.track_id = '10000000-0000-4000-8000-000000007611'
+  )
+  and not exists (
+    select 1
+    from dashboard_private.ops_registration_mutations mutation
+    where mutation.request_key = 'intake-malformed-migration-container'
+  )
+  and not exists (
+    select 1
+    from public.ops_task_events event
+    where event.task_id = '10000000-0000-4000-8000-000000007601'
+      and event.event_type = 'registration_track_event'
+  ),
+  'malformed migration-review container fails canonically without mutation'
+);
+
+-- A usable version-1 container with malformed nested scalars follows canonical fallbacks.
+insert into public.ops_task_events(
+  task_id, actor_id, event_type, field_name, before_value, after_value
+) values (
+  '10000000-0000-4000-8000-000000007601',
+  '10000000-0000-4000-8000-000000007001',
+  'legacy_registration_imported',
+  'registration_track:10000000-0000-4000-8000-000000007611:malformed-scalars',
+  pg_catalog.jsonb_build_object(
+    'pipelineStatus', '2. 상담 예약',
+    'studentId', 'not-a-uuid',
+    'classId', 'not-a-uuid',
+    'textbookId', 'not-a-uuid'
+  )::text,
+  pg_catalog.jsonb_build_object(
+    'version', 1,
+    'trackId', '10000000-0000-4000-8000-000000007611',
+    'timestamps', pg_catalog.jsonb_build_object(
+      'taskUpdatedAt', 'not-a-timestamp',
+      'levelTestAt', 'not-a-timestamp',
+      'levelTestCompletedAt', 'not-a-timestamp',
+      'phoneConsultationAt', 'not-a-timestamp',
+      'visitConsultationAt', 'not-a-timestamp',
+      'consultationAt', 'not-a-timestamp',
+      'classStartDate', 'not-a-date'
+    ),
+    'legacyBooleans', pg_catalog.jsonb_build_object(
+      'admissionNoticeSent', 'not-a-boolean',
+      'makeeduRegistered', 'not-a-boolean',
+      'makeeduInvoiceSent', 'not-a-boolean',
+      'paymentChecked', 'not-a-boolean'
+    )
+  )::text
+);
+set local role authenticated;
+select pg_temp.registration_intake_set_actor(
+  '10000000-0000-4000-8000-000000007001'
+);
+select public.resolve_registration_migration_review(
+  '10000000-0000-4000-8000-000000007601',
+  pg_catalog.jsonb_build_object(
+    'assignments', '[]'::jsonb,
+    'trackStates', pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'trackId', '10000000-0000-4000-8000-000000007611',
+        'targetStatus', 'consultation_waiting',
+        'waitingKind', null,
+        'classId', null
+      )
+    )
+  ),
+  'intake-malformed-migration-scalars'
+);
+set local role postgres;
+select ok(
+  exists (
+    select 1
+    from public.ops_registration_subject_tracks track
+    where track.id = '10000000-0000-4000-8000-000000007611'
+      and track.pipeline_status = 'consultation_waiting'
+      and not track.migration_review_required
+  )
+  and (
+    select pg_catalog.count(*) = 1
+      and pg_catalog.bool_and(
+        consultation.mode = 'phone'
+        and consultation.status = 'waiting'
+        and consultation.ready_at = pg_catalog.now()
+        and consultation.ready_source = 'migration'
+      )
+    from public.ops_registration_consultations consultation
+    where consultation.track_id = '10000000-0000-4000-8000-000000007611'
+  )
+  and not exists (
+    select 1
+    from public.ops_registration_appointments appointment
+    where appointment.task_id = '10000000-0000-4000-8000-000000007601'
+  )
+  and not exists (
+    select 1
+    from public.ops_registration_enrollments enrollment
+    where enrollment.track_id = '10000000-0000-4000-8000-000000007611'
+  )
+  and (
+    select pg_catalog.count(*) = 1
+    from dashboard_private.ops_registration_mutations mutation
+    where mutation.actor_id = '10000000-0000-4000-8000-000000007001'
+      and mutation.request_key = 'intake-malformed-migration-scalars'
+      and mutation.mutation_type = 'resolve_migration_review'
+  ),
+  'malformed migration-review scalars use canonical fallback'
 );
 
 -- Writer 6: migration recovery uses the legacy phone timestamp.

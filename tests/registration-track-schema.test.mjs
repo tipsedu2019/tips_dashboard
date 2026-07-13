@@ -623,21 +623,51 @@ test("registration intake migration adds canonical phone-queue readiness", async
     "dashboard_private",
     "try_registration_event_timestamptz",
   )
-  assert.deepEqual(readFunctionArgumentTypes(jsonEvidenceParser), ["text"])
-  assert.deepEqual(readFunctionArgumentTypes(timestampEvidenceParser), ["text"])
-  for (const parser of [jsonEvidenceParser, timestampEvidenceParser]) {
+  const uuidEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_uuid",
+  )
+  const dateEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_date",
+  )
+  const booleanEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_boolean",
+  )
+  const evidenceParsers = [
+    jsonEvidenceParser,
+    timestampEvidenceParser,
+    uuidEvidenceParser,
+    dateEvidenceParser,
+    booleanEvidenceParser,
+  ]
+  for (const parser of evidenceParsers) {
+    assert.deepEqual(readFunctionArgumentTypes(parser), ["text"])
     assert.match(parser, /security invoker/)
     assert.match(parser, /set search_path = ''/)
     assert.match(parser, /exception\s+when data_exception then\s+return null;/)
   }
   assert.match(jsonEvidenceParser, /immutable/)
   assert.match(timestampEvidenceParser, /stable/)
+  assert.match(uuidEvidenceParser, /immutable/)
+  assert.match(dateEvidenceParser, /stable/)
+  assert.match(booleanEvidenceParser, /immutable/)
   assert.match(jsonEvidenceParser, /p_value::jsonb/)
   assert.match(jsonEvidenceParser, /jsonb_typeof\(v_value\) is distinct from 'object'/)
   assert.match(timestampEvidenceParser, /p_value::timestamptz/)
+  assert.match(uuidEvidenceParser, /p_value::uuid/)
+  assert.match(dateEvidenceParser, /p_value::date/)
+  assert.match(booleanEvidenceParser, /p_value::boolean/)
   for (const functionName of [
     "try_registration_event_jsonb_object",
     "try_registration_event_timestamptz",
+    "try_registration_event_uuid",
+    "try_registration_event_date",
+    "try_registration_event_boolean",
   ]) {
     assert.match(
       sql,
@@ -786,6 +816,62 @@ test("registration intake migration adds canonical phone-queue readiness", async
   assert.match(writers.complete_registration_level_test_attempt_impl, /v_attempt\.completed_at,\s*'level_test_completion'/)
   assert.match(writers.resolve_registration_migration_review_impl, /v_phone_consultation_at timestamptz[\s\S]*?coalesce\(v_phone_consultation_at, pg_catalog\.now\(\)\),\s*'migration'/)
   assert.match(writers.resolve_registration_migration_review_impl, /'visit',\s*'scheduled',[\s\S]{0,160}?null,\s*null/)
+  const migrationReviewWriter = writers.resolve_registration_migration_review_impl
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_jsonb_object\(\s*event\.before_value\s*\)/,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_jsonb_object\(\s*event\.after_value\s*\)/,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_uuid\(\s*parsed\.after_payload ->> 'trackId'\s*\)/,
+  )
+  assert.equal(
+    (migrationReviewWriter.match(
+      /try_registration_event_uuid\(\s*parsed\.after_payload ->> 'trackId'\s*\)/g,
+    ) || []).length,
+    3,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_uuid\(\s*v_legacy_before ->> 'studentId'\s*\)/,
+  )
+  assert.equal(
+    (migrationReviewWriter.match(
+      /try_registration_event_timestamptz\(\s*v_legacy_after #>>/g,
+    ) || []).length,
+    6,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_date\(\s*v_legacy_after #>> '\{timestamps,classStartDate\}'/,
+  )
+  assert.equal(
+    (migrationReviewWriter.match(
+      /try_registration_event_boolean\(\s*v_legacy_booleans ->>/g,
+    ) || []).length,
+    4,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /v_consultation_group_present :=[\s\S]*?v_phone_consultation_at is not null/,
+  )
+  assert.doesNotMatch(migrationReviewWriter, /event\.(?:before|after)_value::jsonb/)
+  assert.doesNotMatch(
+    migrationReviewWriter,
+    /v_legacy_before ->> '(?:studentId|classId|textbookId)'[^;]*::uuid/,
+  )
+  assert.doesNotMatch(
+    migrationReviewWriter,
+    /v_legacy_after #>> '\{timestamps,[^}]+\}'[^;]*::(?:timestamptz|date)/,
+  )
+  assert.doesNotMatch(
+    migrationReviewWriter,
+    /v_legacy_booleans ->> '[^']+'[^;]*::boolean/,
+  )
   assert.match(writers.reopen_registration_track_impl, /pg_catalog\.now\(\),\s*'track_reopened'/)
 
   const pgTap = await readFile(
@@ -904,7 +990,14 @@ test("registration intake creation is one authenticated atomic workflow", async 
     appointmentEnd: privateImplementation.lastIndexOf("'registration_initial_appointment_invalid'"),
     overrideStart: privateImplementation.indexOf("'registration_director_override_invalid'"),
     overrideEnd: privateImplementation.lastIndexOf("'registration_director_override_invalid'"),
+    studentName: privateImplementation.indexOf("'registration_student_name_required'"),
+    schoolGrade: privateImplementation.indexOf("'registration_school_grade_required'"),
+    parentPhone: privateImplementation.indexOf("'registration_parent_phone_invalid'"),
+    inquiryAt: privateImplementation.indexOf("'registration_inquiry_at_required'"),
+    priority: privateImplementation.indexOf("'registration_priority_invalid'"),
     requestKey: privateImplementation.indexOf("if v_request_key is null then"),
+    fingerprint: privateImplementation.indexOf("v_target_fingerprint :="),
+    lock: privateImplementation.indexOf("pg_advisory_xact_lock"),
   }
   assert.ok(Object.values(validationMarkers).every((marker) => marker !== -1))
   assert.ok(validationMarkers.access < validationMarkers.campus)
@@ -913,7 +1006,14 @@ test("registration intake creation is one authenticated atomic workflow", async 
   assert.ok(validationMarkers.planEnd < validationMarkers.membershipStart)
   assert.ok(validationMarkers.membershipEnd < validationMarkers.appointmentStart)
   assert.ok(validationMarkers.appointmentEnd < validationMarkers.overrideStart)
-  assert.ok(validationMarkers.overrideEnd < validationMarkers.requestKey)
+  assert.ok(validationMarkers.overrideEnd < validationMarkers.studentName)
+  assert.ok(validationMarkers.studentName < validationMarkers.schoolGrade)
+  assert.ok(validationMarkers.schoolGrade < validationMarkers.parentPhone)
+  assert.ok(validationMarkers.parentPhone < validationMarkers.inquiryAt)
+  assert.ok(validationMarkers.inquiryAt < validationMarkers.priority)
+  assert.ok(validationMarkers.priority < validationMarkers.requestKey)
+  assert.ok(validationMarkers.requestKey < validationMarkers.fingerprint)
+  assert.ok(validationMarkers.fingerprint < validationMarkers.lock)
 
   const firstJsonTypeCheck = privateImplementation.indexOf("jsonb_typeof")
   const firstObjectKeys = privateImplementation.indexOf("jsonb_object_keys")
@@ -984,7 +1084,10 @@ test("registration intake creation is one authenticated atomic workflow", async 
     "level-test membership beats malformed details",
     "visit membership beats malformed details",
     "campus validation beats request key",
+    "priority validation beats request key",
     "malformed historical event evidence is ignored",
+    "malformed migration-review container fails canonically without mutation",
+    "malformed migration-review scalars use canonical fallback",
     "missing required director",
     "identical sequential retry",
     "changed fingerprint",
