@@ -471,8 +471,8 @@ begin
   end if;
 
   if not (
-    select symmetric.global_roster_projection_symmetric
-    from global_roster_projection_symmetric symmetric
+    select projection_check.global_roster_projection_symmetric
+    from global_roster_projection_symmetric projection_check
   ) then
     raise exception 'registration_global_roster_repair_required';
   end if;

@@ -55,6 +55,7 @@ test("schema migration removes deleted-class roster references and preserves an 
   assert.match(repair, /case[\s\S]*?when exists \([\s\S]*?from public\.classes existing_class[\s\S]*?then repair\.class_id[\s\S]*?else null[\s\S]*?end/)
   assert.match(repair, /deterministic_orphaned_class_projection_repair/)
   assert.match(repair, /global_roster_projection_symmetric[\s\S]*?registration_global_roster_repair_required/)
+  assert.doesNotMatch(repair, /\bsymmetric\./)
 })
 
 test("schema migration quarantines only explicitly reviewed empty registration fixtures", async () => {
