@@ -335,14 +335,56 @@ test("Task 3A director and roster foundations preserve exact boundaries", async 
     globalPreflight,
     /count\(distinct element\.value #>> '\{\}'\)/,
   )
+  const canonicalOrderNormalizationStart = globalPreflight.indexOf(
+    "-- global_roster_canonical_order_normalization",
+  )
+  const duplicateValidationStart = globalPreflight.indexOf(
+    "-- global_roster_duplicate_validation",
+  )
   const canonicalOrderStart = globalPreflight.indexOf(
     "-- global_roster_canonical_order_preflight",
   )
   const symmetryStart = globalPreflight.indexOf(
     "-- global_roster_symmetry_preflight",
   )
+  assert.notEqual(
+    canonicalOrderNormalizationStart,
+    -1,
+    "missing legacy roster order normalization",
+  )
+  assert.notEqual(duplicateValidationStart, -1, "missing roster duplicate validation")
   assert.notEqual(canonicalOrderStart, -1, "missing canonical roster order preflight")
+  assert.ok(duplicateValidationStart < canonicalOrderNormalizationStart)
+  assert.ok(canonicalOrderNormalizationStart < canonicalOrderStart)
   assert.ok(symmetryStart > canonicalOrderStart)
+  const canonicalOrderNormalizationBlock = globalPreflight.slice(
+    canonicalOrderNormalizationStart,
+    canonicalOrderStart,
+  )
+  assert.match(
+    canonicalOrderNormalizationBlock,
+    /update public\.students student[\s\S]*?set class_ids = canonical\.class_ids,[\s\S]*?waitlist_class_ids = canonical\.waitlist_class_ids/,
+  )
+  assert.match(
+    canonicalOrderNormalizationBlock,
+    /update public\.classes class[\s\S]*?set student_ids = canonical\.student_ids,[\s\S]*?waitlist_ids = canonical\.waitlist_ids/,
+  )
+  assert.equal(
+    (canonicalOrderNormalizationBlock.match(
+      /jsonb_agg\(\s*element\.value\s*order by element\.value #>> '\{\}'\s*\)/g,
+    ) || []).length,
+    4,
+  )
+  assert.equal(
+    (canonicalOrderNormalizationBlock.match(/is not null then/g) || []).length,
+    4,
+    "null roster projections must remain null",
+  )
+  assert.doesNotMatch(
+    canonicalOrderNormalizationBlock,
+    /select distinct|\bunion\b/i,
+    "order normalization must not change roster membership",
+  )
   const canonicalOrderBlock = globalPreflight.slice(canonicalOrderStart, symmetryStart)
   for (const field of [
     "student.class_ids",

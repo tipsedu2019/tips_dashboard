@@ -14385,6 +14385,7 @@ begin
     raise exception 'registration_roster_projection_invalid' using errcode = '22023';
   end if;
 
+  -- global_roster_duplicate_validation
   if exists (
     select 1
     from public.students student
@@ -14410,6 +14411,77 @@ begin
   ) then
     raise exception 'registration_roster_projection_invalid' using errcode = '22023';
   end if;
+
+  -- global_roster_canonical_order_normalization
+  with canonical as materialized (
+    select
+      student.id,
+      case when student.class_ids is not null then (
+        select coalesce(
+          pg_catalog.jsonb_agg(
+            element.value
+            order by element.value #>> '{}'
+          ),
+          '[]'::jsonb
+        )
+        from pg_catalog.jsonb_array_elements(student.class_ids) element(value)
+      ) end as class_ids,
+      case when student.waitlist_class_ids is not null then (
+        select coalesce(
+          pg_catalog.jsonb_agg(
+            element.value
+            order by element.value #>> '{}'
+          ),
+          '[]'::jsonb
+        )
+        from pg_catalog.jsonb_array_elements(student.waitlist_class_ids) element(value)
+      ) end as waitlist_class_ids
+    from public.students student
+  )
+  update public.students student
+  set class_ids = canonical.class_ids,
+      waitlist_class_ids = canonical.waitlist_class_ids
+  from canonical
+  where canonical.id = student.id
+    and (
+      student.class_ids is distinct from canonical.class_ids
+      or student.waitlist_class_ids is distinct from canonical.waitlist_class_ids
+    );
+
+  with canonical as materialized (
+    select
+      class.id,
+      case when class.student_ids is not null then (
+        select coalesce(
+          pg_catalog.jsonb_agg(
+            element.value
+            order by element.value #>> '{}'
+          ),
+          '[]'::jsonb
+        )
+        from pg_catalog.jsonb_array_elements(class.student_ids) element(value)
+      ) end as student_ids,
+      case when class.waitlist_ids is not null then (
+        select coalesce(
+          pg_catalog.jsonb_agg(
+            element.value
+            order by element.value #>> '{}'
+          ),
+          '[]'::jsonb
+        )
+        from pg_catalog.jsonb_array_elements(class.waitlist_ids) element(value)
+      ) end as waitlist_ids
+    from public.classes class
+  )
+  update public.classes class
+  set student_ids = canonical.student_ids,
+      waitlist_ids = canonical.waitlist_ids
+  from canonical
+  where canonical.id = class.id
+    and (
+      class.student_ids is distinct from canonical.student_ids
+      or class.waitlist_ids is distinct from canonical.waitlist_ids
+    );
 
   -- global_roster_canonical_order_preflight
   if exists (
