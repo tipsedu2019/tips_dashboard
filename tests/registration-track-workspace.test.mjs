@@ -330,6 +330,11 @@ test("consultation completion hint reloads exact detail and rechecks strict owne
 
 test("track editor shows common information once and subject-scoped navigation", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const commonInfoSource = sourceBetween(
+    source,
+    "function RegistrationCommonInfoSection(",
+    "function RegistrationSubjectSyncSection(",
+  )
   assert.match(source, /등록 공통 정보/)
   assert.match(source, /detail\.tracks\.map/)
   assert.match(source, /selectedTrackId/)
@@ -342,7 +347,14 @@ test("track editor shows common information once and subject-scoped navigation",
   assert.match(source, /getRegistrationIdentityEditLock\(detail\)/)
   assert.match(source, /admissionApplicationAccepted/)
   assert.match(source, /공통 정보 저장/)
-  assert.match(source, /문의일시/)
+  assert.doesNotMatch(commonInfoSource, /문의일시|DateTimePickerControl/)
+  assert.match(
+    commonInfoSource,
+    /inquiryAt: toLocalDateTime\(registration\.inquiryAt \|\| task\.createdAt\)/,
+    "legacy cases without inquiryAt must remain editable by falling back to their immutable creation time",
+  )
+  assert.match(commonInfoSource, /const valid = Boolean\([\s\S]*?draft\.inquiryAt/)
+  assert.match(commonInfoSource, /inquiryAt: draft\.inquiryAt/)
   assert.match(source, /필수/)
 })
 
@@ -528,6 +540,8 @@ test("ready-mode creation atomically creates the parent and both selected subjec
 test("appointment editor uses one schedule and one result control per subject", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /DateTimePickerControl/)
+  assert.match(source, /REGISTRATION_TIME_OPTIONS/)
+  assert.match(source, /timeOptions=\{REGISTRATION_TIME_OPTIONS\}/)
   assert.match(source, /적용 과목/)
   assert.match(source, /activities\.map/)
   assert.match(source, /시험지·결과지 URL/)

@@ -1347,19 +1347,16 @@ test("registration form keeps one application while early reservation fields sta
     "completion timestamps and the legacy result must not be editable registration inputs",
   );
   assert.match(source, /import \{ DateTimePickerControl, DatePickerControl \} from "@\/components\/ui\/date-time-picker"/);
+  assert.match(source, /ensureRegistrationInquiryAt/);
+  assert.match(source, /REGISTRATION_TIME_OPTIONS/);
   const registrationDateTimeControls = registrationFormSource.match(/<DateTimePickerControl[\s\S]*?\/>/g) || [];
-  assert.equal(registrationDateTimeControls.length, 4);
+  assert.equal(registrationDateTimeControls.length, 3);
   for (const controlSource of registrationDateTimeControls) {
     assert.match(controlSource, /disablePortal/);
-  }
-  assert.match(registrationDateTimeControls[0], /\n\s+required\n/);
-  for (const controlSource of registrationDateTimeControls.slice(1)) {
+    assert.match(controlSource, /timeOptions=\{REGISTRATION_TIME_OPTIONS\}/);
     assert.doesNotMatch(controlSource, /\brequired\b/);
   }
   assertIncludesAll(registrationFormSource, [
-    "dateAriaLabel=\"문의일 날짜\"",
-    "timeAriaLabel=\"문의일 시각\"",
-    "value={dateTimeInputValue(registration.inquiryAt)}",
     "dateAriaLabel=\"레벨테스트 예약일 날짜\"",
     "timeAriaLabel=\"레벨테스트 예약일 시각\"",
     "value={dateTimeInputValue(registration.levelTestAt)}",
@@ -1370,6 +1367,7 @@ test("registration form keeps one application while early reservation fields sta
     "timeAriaLabel=\"방문상담 예약일 시각\"",
     "value={dateTimeInputValue(registration.visitConsultationAt)}",
   ]);
+  assert.doesNotMatch(registrationFormSource, /문의일 날짜|문의일 시각|dateTimeInputValue\(registration\.inquiryAt\)/);
   assert.doesNotMatch(registrationFormSource, /type="datetime-local"/);
   assert.match(
     formDialogSource,
@@ -1381,16 +1379,15 @@ test("registration form keeps one application while early reservation fields sta
   const inquiryStart = registrationFormSource.indexOf('sectionKey="inquiry"');
   const inquiryEnd = registrationFormSource.indexOf('sectionKey="level_test"', inquiryStart);
   const inquirySource = registrationFormSource.slice(inquiryStart, inquiryEnd);
+  assert.match(inquirySource, /className="grid gap-3 md:grid-cols-2"/);
   const orderedInquiryFields = [
-    'focusKey="studentName"',
     '<RegistrationSubjectField',
+    'focusKey="studentName"',
     'focusKey="schoolGrade"',
     'label="학년" requirement="required"',
     'label="학교" requirement="optional"',
     'focusKey="parentPhone"',
     'label="학생 전화" requirement="optional"',
-    'focusKey="inquiryAt"',
-    'label="문의일시" requirement="required"',
   ];
   for (let index = 1; index < orderedInquiryFields.length; index += 1) {
     assert.ok(
@@ -1403,8 +1400,9 @@ test("registration form keeps one application while early reservation fields sta
     'label="과목" requirement="required"',
     'label="학년" requirement="required"',
     'label="학부모 전화" requirement="required"',
-    'label="문의일시" requirement="required"',
   ]);
+  assert.doesNotMatch(inquirySource, /문의일시|focusKey="inquiryAt"|DateTimePickerControl/);
+  assert.doesNotMatch(inquirySource, /autoFocus=/);
   assertIncludesAll(source, [
     "aria-describedby={required ? requiredDescriptionId : undefined}",
     "하나 이상 선택해야 하는 필수 항목입니다.",
@@ -1418,8 +1416,12 @@ test("registration form keeps one application while early reservation fields sta
     source,
     /getRegistrationPrefillPipelineStatus\(inputWithCompletionIntent\)/,
   );
+  assert.match(
+    source,
+    /const submissionForm = !editingTask[\s\S]*?ensureRegistrationInquiryAt\(form, new Date\(\)\.toISOString\(\)\)[\s\S]*?getRegistrationCreateBlockers\(submissionForm\)/,
+  );
   assert.match(source, /prepareRegistrationPipelineTransition/);
-  assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(form\)\)/);
+  assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(submissionForm\)\)/);
 });
 
 test("registration subject tracks split combined inquiries and preserve subjects during class sync", async () => {
@@ -1459,7 +1461,7 @@ test("registration required inquiry fields remain invariant after the workflow a
 
   assert.match(
     workspaceSource,
-    /const registrationCreateBlockers = form\.type === "registration"\s*\? getRegistrationCreateBlockers\(form\)\s*:\s*\[\]/,
+    /const registrationCreateBlockers = submissionForm\.type === "registration"\s*\? getRegistrationCreateBlockers\(submissionForm\)\s*:\s*\[\]/,
   );
   assert.match(
     serviceSource,

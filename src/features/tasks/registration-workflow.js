@@ -65,6 +65,17 @@ const REGISTRATION_GRADE_OPTIONS = [
 ];
 
 const REGISTRATION_SUBJECT_ORDER = ["영어", "수학"];
+const REGISTRATION_TIME_START_MINUTES = 9 * 60;
+const REGISTRATION_TIME_END_MINUTES = 21 * 60;
+const REGISTRATION_TIME_STEP_MINUTES = 10;
+export const REGISTRATION_TIME_OPTIONS = Array.from({
+  length: Math.floor((REGISTRATION_TIME_END_MINUTES - REGISTRATION_TIME_START_MINUTES) / REGISTRATION_TIME_STEP_MINUTES) + 1,
+}, (_, index) => {
+  const totalMinutes = REGISTRATION_TIME_START_MINUTES + index * REGISTRATION_TIME_STEP_MINUTES;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+});
 const REGISTRATION_FORM_STAGES = ["inquiry", "level_test", "consultation", "placement", "admission"];
 const REGISTRATION_WORKFLOW_STAGES = Object.freeze([
   Object.freeze({
@@ -72,7 +83,8 @@ const REGISTRATION_WORKFLOW_STAGES = Object.freeze([
     label: "문의",
     summary: "기본 정보 입력 · 다음 방향 결정",
     details: Object.freeze([
-      "입력 · 학생명, 학년, 과목, 연락처, 문의일시",
+      "입력 · 과목, 학생명, 학년, 학교, 학부모·학생 전화",
+      "자동 기록 · 문의일시는 접수할 때 현재 시각으로 저장합니다.",
       "전이 · 레벨테스트 예약, 성적 기반 상담 예약, 대기, 문의 완료 중 다음 방향을 정합니다.",
       "예외 · 고1 1학기 내신 또는 모의고사 성적 제출 시 레벨테스트를 생략할 수 있습니다.",
     ]),
@@ -367,18 +379,17 @@ export function isValidRegistrationMobilePhone(value) {
 /** @param {any} input */
 export function getRegistrationCreateBlockers(input = {}) {
   const blockers = [];
-  if (!hasValue(input.studentName)) blockers.push("학생명");
   if (!hasValue(input.subject)) blockers.push("과목");
+  if (!hasValue(input.studentName)) blockers.push("학생명");
   if (!hasValue(input.registration?.schoolGrade)) blockers.push("학년");
   if (!isValidRegistrationMobilePhone(input.registration?.parentPhone)) blockers.push("학부모 전화");
-  if (!hasValue(input.registration?.inquiryAt)) blockers.push("문의일시");
   return blockers;
 }
 
 export function getRegistrationCreateErrorMessage(input = {}) {
   const messages = [];
-  if (!hasValue(input.studentName)) messages.push("학생명을 입력하세요.");
   if (!hasValue(input.subject)) messages.push("과목을 하나 이상 선택하세요.");
+  if (!hasValue(input.studentName)) messages.push("학생명을 입력하세요.");
   if (!hasValue(input.registration?.schoolGrade)) messages.push("학년을 선택하세요.");
   const parentPhone = text(input.registration?.parentPhone);
   if (!parentPhone) {
@@ -386,8 +397,19 @@ export function getRegistrationCreateErrorMessage(input = {}) {
   } else if (!isValidRegistrationMobilePhone(parentPhone)) {
     messages.push("학부모 전화번호를 010-1234-5678 형식으로 입력하세요.");
   }
-  if (!hasValue(input.registration?.inquiryAt)) messages.push("문의일시를 입력하세요.");
   return messages.join(" ");
+}
+
+/** @param {any} input */
+export function ensureRegistrationInquiryAt(input = {}, now = new Date().toISOString()) {
+  if (input.type !== "registration" || hasValue(input.registration?.inquiryAt)) return input;
+  return {
+    ...input,
+    registration: {
+      ...(input.registration || {}),
+      inquiryAt: now,
+    },
+  };
 }
 
 export function getRegistrationCreateDefaults(now = new Date().toISOString()) {

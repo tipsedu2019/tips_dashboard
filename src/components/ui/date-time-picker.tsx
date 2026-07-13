@@ -242,6 +242,29 @@ type TimePickerControlProps = {
   showIcon?: boolean
 }
 
+function scrollTimeOptionWithinList(
+  list: HTMLDivElement | null,
+  option: HTMLButtonElement | null,
+  align: "center" | "nearest",
+) {
+  if (!list || !option) return
+
+  const listRect = list.getBoundingClientRect()
+  const optionRect = option.getBoundingClientRect()
+
+  if (align === "center") {
+    const optionTop = optionRect.top - listRect.top + list.scrollTop
+    list.scrollTop = Math.max(0, optionTop - ((list.clientHeight - optionRect.height) / 2))
+    return
+  }
+
+  if (optionRect.top < listRect.top) {
+    list.scrollTop -= listRect.top - optionRect.top
+  } else if (optionRect.bottom > listRect.bottom) {
+    list.scrollTop += optionRect.bottom - listRect.bottom
+  }
+}
+
 export function TimePickerControl({
   value,
   onChange,
@@ -261,6 +284,7 @@ export function TimePickerControl({
   const [activeTime, setActiveTime] = React.useState(() => normalizedValue || timeOptions[0] || "")
   const selectedOptionRef = React.useRef<HTMLButtonElement>(null)
   const timeOptionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
+  const timeListRef = React.useRef<HTMLDivElement>(null)
 
   function handleOpenChange(nextOpen: boolean) {
     const resolvedOpen = disabled ? false : nextOpen
@@ -276,17 +300,17 @@ export function TimePickerControl({
     setActiveTime(nextTime)
     const nextOption = timeOptionRefs.current[nextIndex]
     nextOption?.focus({ preventScroll: true })
-    nextOption?.scrollIntoView({ block: "nearest" })
+    scrollTimeOptionWithinList(timeListRef.current, nextOption, "nearest")
   }
 
   React.useEffect(() => {
-    if (!open || !activeTime) return
+    if (!open) return
     const animationFrame = window.requestAnimationFrame(() => {
       selectedOptionRef.current?.focus({ preventScroll: true })
-      selectedOptionRef.current?.scrollIntoView({ block: "center" })
+      scrollTimeOptionWithinList(timeListRef.current, selectedOptionRef.current, "center")
     })
     return () => window.cancelAnimationFrame(animationFrame)
-  }, [activeTime, open])
+  }, [open])
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -310,6 +334,7 @@ export function TimePickerControl({
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={6} disablePortal={disablePortal} className="w-[--radix-popover-trigger-width] min-w-44 p-0">
         <div
+          ref={timeListRef}
           role="listbox"
           aria-label={ariaLabel}
           className="max-h-52 overscroll-contain overflow-y-auto p-1"
@@ -361,6 +386,7 @@ type DateTimePickerControlProps = {
   required?: boolean
   className?: string
   disablePortal?: boolean
+  timeOptions?: string[]
 }
 
 export function DateTimePickerControl({
@@ -374,6 +400,7 @@ export function DateTimePickerControl({
   required = false,
   className,
   disablePortal = false,
+  timeOptions = FULL_DAY_TIME_OPTIONS,
 }: DateTimePickerControlProps) {
   const requiredDescriptionId = React.useId()
   const [dateDraft, setDateDraft] = React.useState(() => splitLocalDateTime(value).date)
@@ -428,7 +455,7 @@ export function DateTimePickerControl({
           ariaDescribedBy={required ? requiredDescriptionId : undefined}
           placeholder={timePlaceholder}
           disabled={disabled}
-          options={FULL_DAY_TIME_OPTIONS}
+          options={timeOptions}
           disablePortal={disablePortal}
           showIcon={!hasDraft}
           className="min-w-0 flex-1"

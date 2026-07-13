@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { DateTimePickerControl } from "@/components/ui/date-time-picker"
 import {
   Dialog,
   DialogContent,
@@ -711,7 +710,7 @@ function RegistrationCommonInfoSection({
     parentPhone: registration.parentPhone || "",
     studentPhone: registration.studentPhone || "",
     campus: task.campus || "",
-    inquiryAt: toLocalDateTime(registration.inquiryAt),
+    inquiryAt: toLocalDateTime(registration.inquiryAt || task.createdAt),
     requestNote: registration.requestNote || "",
     priority: task.priority || "normal",
   }))
@@ -791,18 +790,6 @@ function RegistrationCommonInfoSection({
           {requiredLabel("캠퍼스")}
           <Input value={draft.campus} onChange={(event) => update("campus", event.target.value)} disabled={!canEdit || saving} />
         </Label>
-        <div className="grid min-w-0 gap-1.5 sm:col-span-2">
-          <Label>{requiredLabel("문의일시", true)}</Label>
-          <DateTimePickerControl
-            value={draft.inquiryAt}
-            onChange={(value) => update("inquiryAt", value)}
-            dateAriaLabel="문의 날짜 선택"
-            timeAriaLabel="문의 시각 선택"
-            disabled={!canEdit || saving}
-            required
-            disablePortal
-          />
-        </div>
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("우선순위")}
           <select className="h-9 rounded-md border bg-background px-3 text-sm" value={draft.priority} onChange={(event) => update("priority", event.target.value)} disabled={!canEdit || saving}>
