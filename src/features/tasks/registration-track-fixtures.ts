@@ -208,6 +208,8 @@ function track(input: {
     levelTestRetakeDecision: "",
     migrationReviewRequired: Boolean(input.migrationReviewRequired),
     stageEnteredAt: input.stageEnteredAt || "2026-07-12T10:00:00+09:00",
+    phoneReadyAt: null,
+    phoneReadySource: null,
   }
 }
 
@@ -362,6 +364,8 @@ function buildFixtureCases() {
       mode: "visit",
       status: "scheduled",
       directorProfileId: "fixture-profile-english-director",
+      readyAt: null,
+      readySource: null,
       completedAt: null,
       outcome: null,
       createdAt: FIXTURE_NOW,
@@ -374,6 +378,8 @@ function buildFixtureCases() {
       mode: "phone",
       status: "waiting",
       directorProfileId: "fixture-profile-math-director",
+      readyAt: null,
+      readySource: null,
       completedAt: null,
       outcome: null,
       createdAt: "2026-07-10T09:00:00+09:00",
@@ -415,6 +421,8 @@ function buildFixtureCases() {
     mode: "phone",
     status: "waiting",
     directorProfileId: "fixture-profile-english-director",
+    readyAt: null,
+    readySource: null,
     completedAt: null,
     outcome: null,
     createdAt: "2026-07-09T09:00:00+09:00",
@@ -777,6 +785,8 @@ export function reduceRegistrationSubjectTrackFixture(
           mode: "phone",
           status: "waiting",
           directorProfileId: selected.directorProfileId || "",
+          readyAt: null,
+          readySource: null,
           completedAt: null,
           outcome: null,
           createdAt: FIXTURE_NOW,
@@ -881,7 +891,7 @@ export function reduceRegistrationSubjectTrackFixture(
               materialLink: null,
             })
           } else if (selected.directorProfileId) {
-            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
+            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId, readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
           } else {
             requiresDirectorAssignmentTrackIds.push(trackId)
           }
@@ -949,6 +959,8 @@ export function reduceRegistrationSubjectTrackFixture(
               mode: "phone",
               status: "waiting",
               directorProfileId: selected.directorProfileId,
+              readyAt: null,
+              readySource: null,
               completedAt: null,
               outcome: null,
               createdAt: FIXTURE_NOW,
@@ -978,7 +990,7 @@ export function reduceRegistrationSubjectTrackFixture(
                 item.updatedAt = FIXTURE_NOW
               }
             })
-            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId || "", completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
+            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: appointment.id, mode: "visit", status: "scheduled", directorProfileId: selected.directorProfileId || "", readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
           }
         }
       }
@@ -1025,7 +1037,7 @@ export function reduceRegistrationSubjectTrackFixture(
           selected.status = "consultation_waiting"
           const hasActiveConsultation = detail.consultations.some((item) => item.trackId === trackId && ["waiting", "scheduled"].includes(item.status))
           if (selected.directorProfileId && !hasActiveConsultation) {
-            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
+            detail.consultations.push({ id: nextId(state, "consultation"), trackId, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId, readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW })
           } else if (!selected.directorProfileId) {
             requiresDirectorAssignmentTrackIds.push(trackId)
           }
@@ -1064,7 +1076,7 @@ export function reduceRegistrationSubjectTrackFixture(
       let consultationId: string | null = null
       if (attempt.status === "completed") {
         selected.status = "consultation_waiting"
-        const consultation: OpsRegistrationConsultation = { id: nextId(state, "consultation"), trackId: selected.id, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId || "", completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW }
+        const consultation: OpsRegistrationConsultation = { id: nextId(state, "consultation"), trackId: selected.id, appointmentId: null, mode: "phone", status: "waiting", directorProfileId: selected.directorProfileId || "", readyAt: null, readySource: null, completedAt: null, outcome: null, createdAt: FIXTURE_NOW, updatedAt: FIXTURE_NOW }
         detail.consultations.push(consultation)
         consultationId = consultation.id
       } else {
@@ -1254,6 +1266,8 @@ export function reduceRegistrationSubjectTrackFixture(
             mode: "phone",
             status: "waiting",
             directorProfileId: item.directorProfileId,
+            readyAt: null,
+            readySource: null,
             completedAt: null,
             outcome: null,
             createdAt: FIXTURE_NOW,
