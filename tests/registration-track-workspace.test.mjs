@@ -335,6 +335,11 @@ test("track editor shows common information once and subject-scoped navigation",
     "function RegistrationCommonInfoSection(",
     "function RegistrationSubjectSyncSection(",
   )
+  const campusSource = sourceBetween(
+    commonInfoSource,
+    '{requiredLabel("캠퍼스", true)}',
+    "</Label>",
+  )
   assert.match(source, /등록 공통 정보/)
   assert.match(source, /detail\.tracks\.map/)
   assert.match(source, /selectedTrackId/)
@@ -353,8 +358,15 @@ test("track editor shows common information once and subject-scoped navigation",
     /inquiryAt: toLocalDateTime\(registration\.inquiryAt \|\| task\.createdAt\)/,
     "legacy cases without inquiryAt must remain editable by falling back to their immutable creation time",
   )
-  assert.match(commonInfoSource, /const valid = Boolean\([\s\S]*?draft\.inquiryAt/)
+  assert.match(commonInfoSource, /campus: task\.campus \|\| "본관"/)
+  assert.match(commonInfoSource, /const valid = Boolean\([\s\S]*?draft\.campus\.trim\(\)[\s\S]*?draft\.inquiryAt/)
   assert.match(commonInfoSource, /inquiryAt: draft\.inquiryAt/)
+  assert.match(campusSource, /<select[\s\S]*?aria-label="캠퍼스"[\s\S]*?value=\{draft\.campus\}/)
+  assert.deepEqual(
+    [...campusSource.matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map((match) => [match[1], match[2]]),
+    [["본관", "본관"], ["별관", "별관"]],
+  )
+  assert.doesNotMatch(campusSource, /<Input/)
   assert.match(source, /필수/)
 })
 

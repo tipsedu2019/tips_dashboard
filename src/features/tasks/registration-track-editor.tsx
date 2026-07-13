@@ -709,7 +709,7 @@ function RegistrationCommonInfoSection({
     schoolName: registration.schoolName || "",
     parentPhone: registration.parentPhone || "",
     studentPhone: registration.studentPhone || "",
-    campus: task.campus || "",
+    campus: task.campus || "본관",
     inquiryAt: toLocalDateTime(registration.inquiryAt || task.createdAt),
     requestNote: registration.requestNote || "",
     priority: task.priority || "normal",
@@ -720,6 +720,7 @@ function RegistrationCommonInfoSection({
     draft.studentName.trim()
     && draft.schoolGrade.trim()
     && isValidRegistrationMobilePhone(draft.parentPhone)
+    && draft.campus.trim()
     && draft.inquiryAt,
   )
 
@@ -787,8 +788,16 @@ function RegistrationCommonInfoSection({
           <Input inputMode="tel" value={draft.studentPhone} onChange={(event) => update("studentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving} />
         </Label>
         <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("캠퍼스")}
-          <Input value={draft.campus} onChange={(event) => update("campus", event.target.value)} disabled={!canEdit || saving} />
+          {requiredLabel("캠퍼스", true)}
+          <select
+            aria-label="캠퍼스"
+            value={draft.campus}
+            onChange={(event) => update("campus", event.target.value)}
+            disabled={!canEdit || saving}
+          >
+            <option value="본관">본관</option>
+            <option value="별관">별관</option>
+          </select>
         </Label>
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("우선순위")}

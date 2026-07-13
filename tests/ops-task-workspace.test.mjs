@@ -1278,8 +1278,9 @@ test("registration follows the real decision waitlist admission form and manual 
 });
 
 test("registration form keeps one application while early reservation fields stay available", async () => {
-  const [source, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+  const [source, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-workflow.js"),
     readSource("scripts/verify-ops-task-sample-workflow.mjs"),
     readSource("scripts/verify-ops-task-browser-workflow.mjs"),
   ]);
@@ -1290,6 +1291,22 @@ test("registration form keeps one application while early reservation fields sta
   const registrationFormSource = source.slice(
     source.indexOf('if (form.type === "registration") {', source.indexOf("function TypeSpecificFields")),
     source.indexOf('if (form.type === "withdrawal")', source.indexOf("function TypeSpecificFields")),
+  );
+  const emptyFormSource = source.slice(
+    source.indexOf("const EMPTY_FORM"),
+    source.indexOf("function cloneForm"),
+  );
+  const registrationCreateDefaultsSource = registrationWorkflowSource.slice(
+    registrationWorkflowSource.indexOf("export function getRegistrationCreateDefaults"),
+    registrationWorkflowSource.indexOf("export function getRegistrationPrefillPipelineStatus"),
+  );
+  const readyCreateSource = source.slice(
+    source.indexOf('if (runtime.mode === "ready" && runtime.version === 1)'),
+    source.indexOf("registrationCreateRequestRef.current = null", source.indexOf('if (runtime.mode === "ready" && runtime.version === 1)')),
+  );
+  const submitFormSource = source.slice(
+    source.indexOf("const submitForm = async"),
+    source.indexOf("const handleFormKeyDown", source.indexOf("const submitForm = async")),
   );
 
   assertIncludesAll(source, [
@@ -1348,6 +1365,13 @@ test("registration form keeps one application while early reservation fields sta
   );
   assert.match(source, /import \{ DateTimePickerControl, DatePickerControl \} from "@\/components\/ui\/date-time-picker"/);
   assert.match(source, /ensureRegistrationInquiryAt/);
+  assert.match(emptyFormSource, /campus: ""/);
+  assert.match(registrationCreateDefaultsSource, /campus: "본관"/);
+  assert.match(readyCreateSource, /campus: normalizeRegistrationCampus\(createPayload\.campus\)/);
+  assert.match(
+    submitFormSource,
+    /getRegistrationPersistenceErrorMessage\(error,\s*getOpsTaskActionErrorMessage\(error, "저장하지 못했습니다\."\)\)/,
+  );
   assert.match(source, /REGISTRATION_TIME_OPTIONS/);
   const registrationDateTimeControls = registrationFormSource.match(/<DateTimePickerControl[\s\S]*?\/>/g) || [];
   assert.equal(registrationDateTimeControls.length, 3);
@@ -1402,6 +1426,7 @@ test("registration form keeps one application while early reservation fields sta
     'label="학부모 전화" requirement="required"',
   ]);
   assert.doesNotMatch(inquirySource, /문의일시|focusKey="inquiryAt"|DateTimePickerControl/);
+  assert.doesNotMatch(registrationFormSource, /label="캠퍼스"|updateForm\("campus"/);
   assert.doesNotMatch(inquirySource, /autoFocus=/);
   assertIncludesAll(source, [
     "aria-describedby={required ? requiredDescriptionId : undefined}",

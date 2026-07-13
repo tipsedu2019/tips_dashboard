@@ -104,6 +104,7 @@ import {
   getRegistrationFormState,
   getRegistrationGradeOptions,
   getRegistrationMobileSections,
+  getRegistrationPersistenceErrorMessage,
   getRegistrationPipelinePrefix,
   getRegistrationPrefillPipelineStatus,
   getRegistrationReopenStatus,
@@ -114,6 +115,7 @@ import {
   isValidRegistrationMobilePhone,
   isRegistrationCompletionImmutable,
   normalizeRegistrationPhone,
+  normalizeRegistrationCampus,
   parseRegistrationSubjects,
   prepareRegistrationLevelTestRetry,
   prepareRegistrationPipelineTransition,
@@ -10904,7 +10906,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 schoolName: registration.schoolName || "",
                 parentPhone: registration.parentPhone || "",
                 studentPhone: registration.studentPhone || "",
-                campus: createPayload.campus || "",
+                campus: normalizeRegistrationCampus(createPayload.campus),
                 inquiryAt: registration.inquiryAt || "",
                 subjects: parseRegistrationSubjects(createPayload.subject) as RegistrationSubject[],
                 requestNote: registration.requestNote || "",
@@ -10976,7 +10978,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ? `${savedNotice} 최신 상세는 새로고침해 확인하세요.`
           : savedNotice)
     } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."))
+      setMessage(
+        submissionForm.type === "registration" && !editingTask
+          ? getRegistrationPersistenceErrorMessage(error, getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."))
+          : getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."),
+      )
     } finally {
       setSaving(false)
     }

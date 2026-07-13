@@ -376,6 +376,23 @@ export function isValidRegistrationMobilePhone(value) {
   return /^01(?:0|1|[6-9])\d{7,8}$/.test(digits);
 }
 
+export function normalizeRegistrationCampus(value) {
+  const campus = String(value ?? "").trim();
+  if (!campus) return "본관";
+  return campus === "본관" || campus === "별관" ? campus : "";
+}
+
+export function getRegistrationPersistenceErrorMessage(error, fallback = "저장하지 못했습니다.") {
+  const message = String(error?.message ?? error ?? "");
+  if (message.includes("registration_campus_invalid")) return "캠퍼스 정보를 확인해 주세요.";
+  if (message.includes("registration_initial_subject_plan_invalid")) return "과목별 다음 업무를 확인해 주세요.";
+  if (message.includes("registration_initial_appointment_membership_invalid")) return "예약에 포함된 과목을 다시 확인해 주세요.";
+  if (message.includes("registration_initial_appointment_invalid")) return "예약 일시와 장소를 확인해 주세요.";
+  if (message.includes("registration_director_required") || message.includes("registration_director_override_invalid")) return "상담 책임자를 지정해 주세요.";
+  if (message.includes("idempotency_key_reused")) return "입력 내용이 변경되었습니다. 다시 저장해 주세요.";
+  return fallback;
+}
+
 /** @param {any} input */
 export function getRegistrationCreateBlockers(input = {}) {
   const blockers = [];
@@ -414,6 +431,7 @@ export function ensureRegistrationInquiryAt(input = {}, now = new Date().toISOSt
 
 export function getRegistrationCreateDefaults(now = new Date().toISOString()) {
   return {
+    campus: "본관",
     registration: {
       pipelineStatus: statusForPrefix("0.") || "0. 등록 문의",
       inquiryAt: now,
