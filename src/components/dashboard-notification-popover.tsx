@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/popover"
 import {
   loadDashboardNotifications,
+  loadDashboardUnreadNotificationCount,
   markDashboardNotificationRead,
   type DashboardNotification,
 } from "@/features/makeup-requests/makeup-request-service"
@@ -46,27 +47,50 @@ function getPushStateLabel(state: DashboardPushState) {
 
 export function DashboardNotificationPopover() {
   const { session } = useAuth()
+  const viewerId = session?.user?.id || ""
   const [open, setOpen] = React.useState(false)
-  const [notifications, setNotifications] = React.useState<DashboardNotification[]>([])
+  const [notificationState, setNotificationState] = React.useState<{
+    viewerId: string
+    items: DashboardNotification[]
+  }>({ viewerId: "", items: [] })
+  const [unreadState, setUnreadState] = React.useState({ viewerId: "", count: 0 })
   const [loading, setLoading] = React.useState(false)
+  const [notificationError, setNotificationError] = React.useState("")
   const [pushState, setPushState] = React.useState<DashboardPushState>("unsupported")
   const [pushLoading, setPushLoading] = React.useState(false)
   const [pushError, setPushError] = React.useState("")
 
-  const unreadCount = notifications.filter((item) => !item.readAt).length
+  const notifications = notificationState.viewerId === viewerId ? notificationState.items : []
+  const unreadCount = unreadState.viewerId === viewerId ? unreadState.count : 0
 
   const refresh = React.useCallback(async () => {
+    if (!viewerId) return
     setLoading(true)
     try {
-      setNotifications(await loadDashboardNotifications())
+      const nextNotifications = await loadDashboardNotifications(viewerId)
+      setNotificationState({ viewerId, items: nextNotifications })
+      setUnreadState({
+        viewerId,
+        count: nextNotifications.filter((item) => !item.readAt).length,
+      })
+      setNotificationError("")
+    } catch (error) {
+      console.error("대시보드 알림 조회 실패", error)
+      setNotificationError("알림을 불러오지 못했습니다. 다시 시도하세요.")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [viewerId])
 
-  React.useEffect(() => {
-    void refresh()
-  }, [refresh])
+  const refreshUnreadCount = React.useCallback(async () => {
+    if (!viewerId) return
+    try {
+      const count = await loadDashboardUnreadNotificationCount(viewerId)
+      setUnreadState({ viewerId, count })
+    } catch (error) {
+      console.error("대시보드 읽지 않은 알림 수 조회 실패", error)
+    }
+  }, [viewerId])
 
   const refreshPushState = React.useCallback(async () => {
     try {
@@ -83,6 +107,15 @@ export function DashboardNotificationPopover() {
   }, [refreshPushState])
 
   React.useEffect(() => {
+    if (!viewerId) return
+    const unreadCountTimer = window.setTimeout(() => {
+      void refreshUnreadCount()
+    }, 1500)
+
+    return () => window.clearTimeout(unreadCountTimer)
+  }, [refreshUnreadCount, viewerId])
+
+  React.useEffect(() => {
     if (open) {
       void refresh()
       void refreshPushState()
@@ -92,12 +125,20 @@ export function DashboardNotificationPopover() {
   const handleOpenNotification = React.useCallback(async (notification: DashboardNotification) => {
     if (!notification.readAt) {
       await markDashboardNotificationRead(notification.id)
-      setNotifications((current) => current.map((item) => (
-        item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item
-      )))
+      setNotificationState((current) => current.viewerId !== viewerId
+        ? current
+        : {
+            ...current,
+            items: current.items.map((item) => (
+              item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item
+            )),
+          })
+      setUnreadState((current) => current.viewerId !== viewerId
+        ? current
+        : { ...current, count: Math.max(0, current.count - 1) })
     }
     setOpen(false)
-  }, [])
+  }, [viewerId])
 
   const handleTogglePush = React.useCallback(async () => {
     if (!session?.access_token) {
@@ -162,6 +203,11 @@ export function DashboardNotificationPopover() {
             {pushLoading ? "저장 중" : pushState === "subscribed" ? "끄기" : "켜기"}
           </Button>
         </div>
+        {notificationError ? (
+          <div role="alert" className="border-b px-3 py-2 text-xs text-destructive">
+            {notificationError}
+          </div>
+        ) : null}
         <div className="max-h-96 overflow-y-auto">
           {loading && notifications.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>

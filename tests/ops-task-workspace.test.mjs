@@ -52,6 +52,16 @@ function assertIncludesAll(source, values) {
   }
 }
 
+function assertInOrder(source, values) {
+  let cursor = -1;
+  for (const value of values) {
+    const next = source.indexOf(value, cursor + 1);
+    assert.notEqual(next, -1, `missing ordered source contract: ${value}`);
+    assert.ok(next > cursor, `${value} must appear after the previous item`);
+    cursor = next;
+  }
+}
+
 test("/admin/tasks is a focused team task inbox workspace", async () => {
   const [pageSource, workspaceSource] = await Promise.all([
     readSource("src/app/admin/tasks/page.tsx"),
@@ -180,7 +190,7 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
     'syncTaskDeepLink(null)',
     "setSelectedTask(deepLinkedTask)",
     "setDetailOpen(true)",
-	    "syncTaskDeepLink(task.id)",
+	    "syncTaskDeepLink(task.id, nextTrackId)",
 	    "syncTaskDeepLink(null)",
 	    "data-testid=\"todo-mobile-task-list\"",
 	    "data-testid=\"todo-table-task-list\"",
@@ -397,7 +407,7 @@ test("simple todo details stay completion focused", async () => {
     source.indexOf("function shouldShowDetailStatusBadge"),
   );
   const detailDialogSource = source.slice(
-    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
     source.indexOf("<Dialog open={Boolean(deleteTarget)}"),
   );
 
@@ -548,21 +558,33 @@ test("team workflow migration adds review request and explicit team fields", asy
   ]);
 });
 
-test("todo form close confirmation stays quiet and uses explicit discard copy", async () => {
+test("operation form close keeps the header icon-only and asks before discarding visible input", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const dialogSource = await readSource("src/components/ui/dialog.tsx");
+  const formDialogSource = workspaceSource.slice(
+    workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
+    workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
+  );
 
   assertIncludesAll(workspaceSource, [
-    'const formCloseLabel = confirmingFormClose ? "저장하지 않고 닫기" : "닫기"',
-    'confirmingFormClose ? "저장하지 않고 닫기" : "닫기"',
-    "closeButtonLabel={formCloseLabel}",
-    "onCloseButtonClick={confirmingFormClose ? discardFormAndClose : closeForm}",
-    "showCloseButtonText",
+    'const formCloseLabel = "닫기"',
     "discardFormAndClose",
+    'open={workspaceDataBelongsToCurrentViewer && confirmingFormClose}',
+    '입력한 내용을 버릴까요?',
+    '계속 작성',
+    '저장하지 않고 닫기',
+    "cancelFormCloseConfirmation",
+    "formCloseReturnFocusRef.current?.focus()",
+  ]);
+  assertIncludesAll(formDialogSource, [
+    "closeButtonLabel={formCloseLabel}",
+    "onCloseButtonClick={closeForm}",
   ]);
 
-  assert.doesNotMatch(workspaceSource, />\s*버리고 닫기\s*</);
-  assert.doesNotMatch(workspaceSource, />\s*입력 중\s*</);
-  assert.doesNotMatch(workspaceSource, />\s*계속 작성\s*</);
+  assert.doesNotMatch(formDialogSource, /\bshowCloseButtonText\b/);
+  assert.doesNotMatch(workspaceSource, /function blurActiveElementBeforeDialog/);
+  assert.doesNotMatch(workspaceSource, /blurActiveElementBeforeDialog\(\)/);
+  assert.match(dialogSource, /showCloseButtonText[\s\S]*: "size-8 rounded-md/);
 });
 
 test("linked selectors support one-result keyboard selection", async () => {
@@ -578,6 +600,57 @@ test("linked selectors support one-result keyboard selection", async () => {
     '"검색 결과 없음"',
     "matchedOptions.length === 1 ? matchedOptions[0] : undefined",
   ]);
+});
+
+test("custom listboxes and registration tabs implement their declared keyboard patterns", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const listboxSource = source.slice(
+    source.indexOf("function TaskListboxField"),
+    source.indexOf("function PrioritySelectField"),
+  );
+
+  assertIncludesAll(listboxSource, [
+    "handleListboxTriggerKeyDown",
+    "handleListboxOptionKeyDown",
+    'event.key === "ArrowDown"',
+    'event.key === "ArrowUp"',
+    'event.key === "Home"',
+    'event.key === "End"',
+    'event.key === "Escape"',
+    "window.requestAnimationFrame(() => triggerRef.current?.focus())",
+    "focus-visible:ring-2 focus-visible:ring-ring/40",
+    "tabIndex={selected || (!selectedOption && index === 0) ? 0 : -1}",
+  ]);
+  assertIncludesAll(source, [
+    "handleRegistrationViewTabKeyDown",
+    'data-registration-view-tab={tab.key}',
+    "tabIndex={registrationView === tab.key ? 0 : -1}",
+    "onKeyDown={(event) => handleRegistrationViewTabKeyDown(event, tab.key)}",
+  ]);
+});
+
+test("required task listboxes expose opt-in accessibility semantics without changing optional defaults", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const taskListboxSource = source.slice(
+    source.indexOf("function TaskListboxField"),
+    source.indexOf("function PrioritySelectField"),
+  );
+  const gradeFieldStart = source.indexOf('<RegistrationFocusTarget focusKey="schoolGrade">');
+  const gradeFieldSource = source.slice(
+    gradeFieldStart,
+    source.indexOf('<RegistrationFieldLabel label="학교"', gradeFieldStart),
+  );
+
+  assertIncludesAll(taskListboxSource, [
+    "required = false",
+    "required?: boolean",
+    "const requiredDescriptionId = useId()",
+    'role="combobox"',
+    "aria-required={required || undefined}",
+    "aria-describedby={required ? requiredDescriptionId : undefined}",
+    '<span id={requiredDescriptionId} className="sr-only">필수 입력</span>',
+  ]);
+  assert.match(gradeFieldSource, /<TaskListboxField[\s\S]*?\n\s+required\n/);
 });
 
 test("dedicated operations are split into separate admin routes", async () => {
@@ -658,7 +731,8 @@ test("registration keeps the operational pipeline as first-class state", async (
   }
 
   assertIncludesAll(combined, [
-    "RegistrationPipelineFilter",
+    "RegistrationTrackList",
+    "getRegistrationTrackTabCounts",
     "pipelineStatus",
     "pipeline_status",
     "REGISTRATION_PIPELINE_STATUSES",
@@ -669,40 +743,36 @@ test("registration keeps the operational pipeline as first-class state", async (
   ]);
 });
 
-test("registration workspace replaces Notion registration management with process tabs table filters and notifications", async () => {
-  const [workspaceSource, serviceSource, migrationSource] = await Promise.all([
+test("registration workspace replaces Notion registration management with subject-track tabs and notifications", async () => {
+  const [workspaceSource, serviceSource, migrationSource, trackListSource, trackModelSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("supabase/migrations/20260710052914_registration_operational_fields.sql"),
+    readSource("src/features/tasks/registration-track-list.tsx"),
+    readSource("src/features/tasks/registration-track-model.js"),
   ]);
-  const combined = `${workspaceSource}\n${serviceSource}\n${migrationSource}`;
-  const registrationTableSource = workspaceSource.slice(
-    workspaceSource.indexOf("const REGISTRATION_TABLE_COLUMNS"),
-    workspaceSource.indexOf("function WithdrawalDataTable"),
-  );
+  const combined = `${workspaceSource}\n${serviceSource}\n${migrationSource}\n${trackListSource}\n${trackModelSource}`;
+  const registrationTableSource = trackListSource;
   const detailDialogSource = workspaceSource.slice(
-    workspaceSource.indexOf("<Dialog open={detailOpen}"),
+    workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
     workspaceSource.indexOf("<Dialog open={Boolean(deleteTarget)}"),
   );
 
   assertIncludesAll(combined, [
-    'type RegistrationViewKey = "inquiry" | "consulting" | "waiting" | "enrollment" | "closed"',
+    'type RegistrationViewKey = "inquiry" | "level_test" | "consulting" | "waiting" | "enrollment" | "closed"',
     "REGISTRATION_VIEW_TABS",
-    "REGISTRATION_VIEW_STATUS_PREFIXES",
-    "REGISTRATION_TABLE_COLUMNS",
+    "STATUS_TO_VIEW",
+    "getRegistrationTrackViewKey",
     "REGISTRATION_NOTIFICATION_TEMPLATE_VARIABLES",
     "DEFAULT_REGISTRATION_NOTIFICATION_TEMPLATES",
-    "RegistrationDataTable",
-    "RegistrationFilterSelect",
-    "RegistrationPeriodFilterBar",
-    "RegistrationResizableHeaderCell",
+    "RegistrationTrackList",
+    "buildRegistrationTrackListItems",
+    "filterRegistrationTrackListItems",
     "RegistrationWorkflowStatusBadge",
     "RegistrationOperationsChecklistChips",
     "RegistrationNotificationSettingsDialog",
     "RegistrationDetailPanel",
-    "getRegistrationViewTasks",
-    "getRegistrationTableValue",
-    "matchesRegistrationPeriodFilter",
+    "getRegistrationTrackTabCounts",
     "notifyRegistrationWorkflow",
     "getRegistrationNotificationTriggerForPipelineStatus",
     "textbookPreparation",
@@ -715,7 +785,8 @@ test("registration workspace replaces Notion registration management with proces
 
   assertIncludesAll(workspaceSource, [
     '{ key: "inquiry", label: "문의" }',
-    '{ key: "consulting", label: "상담/레벨테스트" }',
+    '{ key: "level_test", label: "레벨테스트" }',
+    '{ key: "consulting", label: "상담" }',
     '{ key: "waiting", label: "대기" }',
     '{ key: "enrollment", label: "등록" }',
     '{ key: "closed", label: "완료" }',
@@ -728,49 +799,365 @@ test("registration workspace replaces Notion registration management with proces
   ]);
 
   assertIncludesAll(registrationTableSource, [
-    '"pipelineStatus"',
-    '"subject"',
-    '"schoolGrade"',
-    '"schoolName"',
-    '"student"',
-    '"parentPhone"',
-    '"inquiryChannel"',
-    '"inquiryAt"',
-    '"counselor"',
-    '"levelTestAt"',
-    '"phoneConsultationAt"',
-    '"visitConsultationAt"',
-    '"className"',
-    '"classStartDate"',
-    '"classStartSession"',
-    '"requestNote"',
-    '"operationsChecklist"',
-    '"action"',
-    'aria-label="등록 전체 필터"',
-    'aria-label="등록 데이터테이블 열 필터"',
-    'data-testid="registration-mobile-task-list"',
-    'aria-label="등록 신청 데이터테이블"',
-    'labelPrefix="등록"',
-    "selectedCounselorFilter",
-    "selectedGradeFilter",
+    'data-testid="registration-track-mobile-list"',
+    'data-testid="registration-track-desktop-list"',
+    'aria-label="과목별 등록 데이터테이블"',
+    "RegistrationTrackActions",
+    "item.subject",
+    "item.directorName",
+    "getRegistrationTrackTimeValue(item)",
+    'if (item.status === "visit_consultation_scheduled") return item.visitScheduledAt',
+    "formatStageEnteredAt(getRegistrationTrackTimeValue(item))",
   ]);
+  assert.doesNotMatch(
+    registrationTableSource,
+    /formatStageEnteredAt\(item\.stageEnteredAt\)/,
+    "visit rows must not relabel stage entry as their appointment time",
+  );
 
   assertIncludesAll(workspaceSource, [
     'label="진행상태"',
     'label="과목"',
     'label="학년"',
     'label="방문상담실"',
-    'label="교재 준비"',
-    'label="수업시작회차"',
-    'label="수업시간표 명단"',
-    "전부 학원에서 준비",
-    "개인적으로 준비",
-    "일부만 학원에서 준비(메모 확인 필수)",
+    'label="수업 시작 일정"',
+    'label="입학신청서 발송"',
+    'label="메이크에듀 등록(수업, 교재)"',
+    'label="청구서 발송"',
+    'label="수납 완료 확인"',
+    'label="등록 완료"',
   ]);
 
   assertIncludesAll(detailDialogSource, [
     "RegistrationDetailPanel",
     'selectedTaskFresh?.type === "registration" || selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl"',
+  ]);
+});
+
+test("registration exposes six ordered work tabs with separate level-test and consultation track states", async () => {
+  const [workspaceSource, trackListSource, trackModelSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-track-list.tsx"),
+    readSource("src/features/tasks/registration-track-model.js"),
+  ]);
+  const tabsSource = workspaceSource.slice(
+    workspaceSource.indexOf("const REGISTRATION_VIEW_TABS"),
+    workspaceSource.indexOf("const REGISTRATION_GRADE_OPTIONS"),
+  );
+
+  const orderedTabs = [
+    '{ key: "inquiry", label: "문의" }',
+    '{ key: "level_test", label: "레벨테스트" }',
+    '{ key: "consulting", label: "상담" }',
+    '{ key: "waiting", label: "대기" }',
+    '{ key: "enrollment", label: "등록" }',
+    '{ key: "closed", label: "완료" }',
+  ];
+  for (let index = 1; index < orderedTabs.length; index += 1) {
+    assert.ok(
+      tabsSource.indexOf(orderedTabs[index - 1]) < tabsSource.indexOf(orderedTabs[index]),
+      `${orderedTabs[index - 1]} should appear before ${orderedTabs[index]}`,
+    );
+  }
+  assertIncludesAll(trackModelSource, [
+    'level_test_scheduled: "level_test"',
+    'level_test_in_progress: "level_test"',
+    'consultation_waiting: "consulting"',
+    'visit_consultation_scheduled: "consulting"',
+  ]);
+
+  assertIncludesAll(trackListSource, [
+    'level_test_scheduled: "레벨테스트 예약"',
+    'level_test_in_progress: "레벨테스트 진행"',
+    'consultation_waiting: "전화상담 대기"',
+    'visit_consultation_scheduled: "방문상담 예약"',
+    'onAction(item.taskId, item.trackId, "complete_consultation")',
+  ]);
+});
+
+test("registration process manual opens from an icon beside the tabs without duplicating the workflow inline", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const dialogDefinitionStart = workspaceSource.indexOf("function RegistrationProcessManualDialog");
+
+  assert.notEqual(dialogDefinitionStart, -1, "RegistrationProcessManualDialog should exist");
+  const dialogDefinitionEnd = workspaceSource.indexOf("\nfunction ", dialogDefinitionStart + "function RegistrationProcessManualDialog".length);
+  const dialogSource = workspaceSource.slice(
+    dialogDefinitionStart,
+    dialogDefinitionEnd > dialogDefinitionStart ? dialogDefinitionEnd : workspaceSource.length,
+  );
+  assertIncludesAll(dialogSource, [
+    "getRegistrationWorkflowStages()",
+    '<Dialog open={open} onOpenChange={onOpenChange}>',
+    '<DialogTitle>등록 프로세스 &amp; 매뉴얼</DialogTitle>',
+    'aria-label="등록 프로세스 6단계"',
+  ]);
+
+  const registrationTabsRender = workspaceSource.indexOf("? REGISTRATION_VIEW_TABS.map");
+  const manualButtonRender = workspaceSource.indexOf('aria-label="등록 프로세스 & 매뉴얼"', registrationTabsRender);
+  const notificationButtonRender = workspaceSource.indexOf('isRegistrationWorkspace ? "등록 알림 설정"', registrationTabsRender);
+  assert.ok(registrationTabsRender >= 0, "registration top tabs should render");
+  assert.ok(manualButtonRender > registrationTabsRender, "process manual icon should render beside the registration tabs");
+  assert.ok(manualButtonRender < notificationButtonRender, "process manual icon should render before notification settings");
+  assert.doesNotMatch(workspaceSource, /RegistrationWorkflowChart|registration-workflow-chart|등록 업무 6단계/);
+  assert.doesNotMatch(workspaceSource, /aria-label="학년 필터"|allLabel="학년 전체"|selectedGradeFilter|appliedGradeFilter/);
+
+  assert.doesNotMatch(
+    workspaceSource,
+    /\{isRegistrationWorkspace && \(\s*<Button[\s\S]{0,500}onClick=\{\(\) => void reload/,
+  );
+});
+
+test("registration uses the operational 시험지·결과지 URL label in form and detail surfaces", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const registrationFormSource = workspaceSource.slice(
+    workspaceSource.indexOf('if (form.type === "registration") {', workspaceSource.indexOf("function TypeSpecificFields")),
+    workspaceSource.indexOf('if (form.type === "withdrawal")', workspaceSource.indexOf("function TypeSpecificFields")),
+  );
+  const registrationDetailSource = workspaceSource.slice(
+    workspaceSource.indexOf("function RegistrationDetailPanel"),
+    workspaceSource.indexOf("function WithdrawalDetailPanel"),
+  );
+
+  assert.match(registrationFormSource, /label="시험지·결과지 URL"/);
+  assert.match(registrationDetailSource, /RegistrationExternalLinkInfo label="시험지·결과지 URL"/);
+  assert.doesNotMatch(registrationFormSource, /레벨테스트 자료 Drive 링크/);
+});
+
+test("registration tabs render compact subject-track rows without the retired parent table filters", async () => {
+  const [workspaceSource, tableSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-track-list.tsx"),
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    "key={registrationView}",
+    "items={visibleRegistrationTrackItems}",
+    "viewerRole={registrationViewerRole}",
+  ]);
+  assertIncludesAll(tableSource, [
+    'aria-label="과목별 등록 업무 목록"',
+    'aria-label="과목별 등록 모바일 목록"',
+    'aria-label="과목별 등록 데이터테이블"',
+    "const visibleItems = items.slice(0, visibleCount)",
+    "RegistrationTrackIdentity",
+  ]);
+  assert.doesNotMatch(workspaceSource, /RegistrationDataTable|RegistrationPipelineFilter/);
+  assert.doesNotMatch(tableSource, /selectedGradeFilter|selectedCounselorFilter|RegistrationResizableHeaderCell/);
+});
+
+test("registration hold and terminal states expose only valid explicit actions", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const actionSource = workspaceSource.slice(
+    workspaceSource.indexOf("function getNextTaskStatusAction"),
+    workspaceSource.indexOf("function getWordRetestPrimaryActions"),
+  );
+
+  assertIncludesAll(workspaceSource, [
+    'task.status === "on_hold" ? `보류 · ${pipelineLabel}` : pipelineLabel',
+    'task.status === "on_hold") return null',
+    'return [{ value: "in_progress", label: "다시 진행" }]',
+    "isCanonicalRegistrationTrackDetail",
+    "!isCanonicalRegistrationTrackDetail",
+    'getRegistrationPipelinePrefix(selectedTaskFresh.registration?.pipelineStatus) === "9."',
+    '"문의로 다시 열기"',
+    '"상담 결과로 다시 열기"',
+    "function getRegistrationDecisionActionsForTask",
+    "getRegistrationBranchActions(task.registration?.pipelineStatus)",
+    '? "다음 방향"',
+    '? "상담 결과"',
+    ': "등록 전환"',
+    '"1.": "진행 후 결과 입력"',
+    '"2.": "진행 후 상담 결과 입력"',
+  ]);
+  assert.match(actionSource, /if \(task\.type === "registration"\) return null/);
+  assert.match(actionSource, /if \(task\.status === "on_hold"\) return \[\{ value: "in_progress", label: "다시 진행" \}\]/);
+});
+
+test("registration load failure can retry and a committed create survives detail refresh failure", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assertIncludesAll(workspaceSource, [
+    'data?.error || "할 일 DB 마이그레이션을 적용하세요."',
+    'onClick={() => void reload(true)}',
+    '다시 시도',
+    "const canOpenCreate = isTodoWorkspace || (!loading && !hasLoadBlocker)",
+    "let savedWithRefreshWarning = false",
+    "loadSavedTaskOrFallback",
+    "savedWithRefreshWarning = true",
+  ]);
+});
+
+test("registration list renders core data without starting option reads until a form opens", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const reloadSource = workspaceSource.slice(
+    workspaceSource.indexOf("const reload = useCallback"),
+    workspaceSource.indexOf("useEffect(() => {\n    void reload()"),
+  );
+
+  assertIncludesAll(workspaceSource, [
+    "const workspaceLoadGenerationRef = useRef(0)",
+    "function mergeOpsTaskWorkspaceOptionData",
+    "const enrichedTasks = current.tasks.map",
+    "requestedByLabel: profileLabels.get(task.requestedBy) || task.requestedByLabel",
+    "authorLabel: profileLabels.get(comment.authorId) || comment.authorLabel",
+    "uploadedByLabel: profileLabels.get(attachment.uploadedBy) || attachment.uploadedByLabel",
+    "actorLabel: profileLabels.get(event.actorId) || event.actorLabel",
+    "tasks: enrichedTasks",
+    "includeManagementOptions: false",
+    "includeTeacherOptions: false",
+    "includeProfileOptions: false",
+    "const loadGeneration = ++workspaceLoadGenerationRef.current",
+    "mergeOpsTaskWorkspaceOptionData(nextData, enrichmentData)",
+    "setLoading(false)",
+    "const ensureRegistrationOptions = useCallback",
+    "loadOpsTaskWorkspaceOptionData({",
+    "viewerId: currentUserId",
+    "mergeOpsTaskWorkspaceOptionData(current, enrichmentData)",
+    "workspaceLoadGenerationRef.current !== loadGeneration",
+    "if (type === \"registration\") void ensureRegistrationOptions()",
+    "if (task.type === \"registration\") void ensureRegistrationOptions()",
+  ]);
+  assert.doesNotMatch(reloadSource, /loadOpsTaskWorkspaceOptionData/);
+});
+
+test("registration alone uses the subject-track list while neighboring operation tables stay wired", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(workspaceSource, /isRegistrationWorkspace \? \([\s\S]*?<RegistrationTrackList/);
+  assert.match(workspaceSource, /isWithdrawalWorkspace \? \([\s\S]*?<WithdrawalDataTable/);
+  assert.match(workspaceSource, /isTransferWorkspace \? \([\s\S]*?<TransferDataTable/);
+  assert.match(workspaceSource, /onOpen=\{\(taskId, trackId\) => void openRegistrationTrack\(taskId, trackId\)\}/);
+  assert.match(workspaceSource, /onEdit=\{\(taskId, trackId\) => void editRegistrationTrack\(taskId, trackId\)\}/);
+  assert.match(workspaceSource, /onAction=\{\(taskId, trackId, action\) => void handleRegistrationTrackAction\(taskId, trackId, action\)\}/);
+});
+
+test("local task mutations invalidate stale background workspace reloads before committing state", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const invalidationSource = workspaceSource.slice(
+    workspaceSource.indexOf("const invalidatePendingWorkspaceReloads"),
+    workspaceSource.indexOf("const applyTaskPatch"),
+  );
+  assert.match(invalidationSource, /workspaceLoadGenerationRef\.current \+= 1/);
+  assert.match(invalidationSource, /setLoading\(false\)/);
+  assert.match(invalidationSource, /registrationOptionsLoadGenerationRef\.current \+= 1/);
+  assert.match(invalidationSource, /setRegistrationOptionsLoading\(false\)/);
+
+  for (const [start, end] of [
+    ["const applyTaskPatch", "const prependTask"],
+    ["const prependTask", "const replaceTaskInState"],
+    ["const replaceTaskInState", "const handleRegistrationCustomerMessageSent"],
+    ["const updateTaskInState", "const appendTaskComment"],
+    ["const removeTaskFromState", "const buildLocalTaskFromInput"],
+  ]) {
+    const helperSource = workspaceSource.slice(
+      workspaceSource.indexOf(start),
+      workspaceSource.indexOf(end),
+    );
+    assert.ok(
+      helperSource.indexOf("invalidatePendingWorkspaceReloads()") < helperSource.indexOf("setData("),
+      `${start} must invalidate an older reload before committing local mutation state`,
+    );
+  }
+});
+
+test("registration option enrichment survives a slower core revalidation", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const reloadSource = workspaceSource.slice(
+    workspaceSource.indexOf("const reload = useCallback"),
+    workspaceSource.indexOf("useEffect(() => {\n    void reload()"),
+  );
+  const optionSource = workspaceSource.slice(
+    workspaceSource.indexOf("const ensureRegistrationOptions = useCallback"),
+    workspaceSource.indexOf("useEffect(() => {", workspaceSource.indexOf("const ensureRegistrationOptions = useCallback")),
+  );
+
+  assert.match(workspaceSource, /const registrationOptionsDataRef = useRef<OpsTaskWorkspaceOptionData \| null>\(null\)/);
+  assert.match(workspaceSource, /const registrationOptionsLoadGenerationRef = useRef\(0\)/);
+  assert.match(reloadSource, /const enrichmentData = registrationOptionsDataRef\.current/);
+  assert.match(reloadSource, /mergeOpsTaskWorkspaceOptionData\(nextData, enrichmentData\)/);
+  assert.doesNotMatch(
+    reloadSource.slice(reloadSource.indexOf("const nextData = await")),
+    /registrationOptionsLoadedRef\.current = false/,
+  );
+  assert.match(optionSource, /\+\+registrationOptionsLoadGenerationRef\.current/);
+  assert.match(optionSource, /registrationOptionsDataRef\.current = enrichmentData/);
+  assert.doesNotMatch(optionSource, /workspaceLoadGenerationRef\.current !== loadGeneration/);
+});
+
+test("automatic word-retest mutations cannot commit across viewer or reload ownership changes", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const autoMutationSource = workspaceSource.slice(
+    workspaceSource.indexOf("async function autoMarkPastWordRetestsAbsent"),
+    workspaceSource.indexOf("void autoMarkPastWordRetestsAbsent()"),
+  );
+
+  assert.match(autoMutationSource, /const mutationViewerId = currentUserId/);
+  assert.match(autoMutationSource, /const mutationLoadGeneration = workspaceLoadGenerationRef\.current/);
+  assert.match(autoMutationSource, /!workspaceMountedRef\.current/);
+  assert.match(autoMutationSource, /latestWorkspaceViewerIdRef\.current !== mutationViewerId/);
+  assert.match(autoMutationSource, /workspaceLoadGenerationRef\.current !== mutationLoadGeneration/);
+  assert.match(autoMutationSource, /void reload\(true, false\)/);
+  assert.match(autoMutationSource, /invalidatePendingWorkspaceReloads\(\)/);
+  assert.doesNotMatch(autoMutationSource, /workspaceLoadGenerationRef\.current \+= 1/);
+});
+
+test("viewer transitions hide and reset the previous viewer's workspace state before passive reload", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const reloadSource = workspaceSource.slice(
+    workspaceSource.indexOf("const reload = useCallback"),
+    workspaceSource.indexOf("useEffect(() => {\n    workspaceMountedRef.current = true"),
+  );
+
+  assert.match(workspaceSource, /<OpsTaskWorkspaceSession key=\{user\?\.id \|\| "anonymous"\} workspace=\{workspace\} \/>/);
+  assert.match(workspaceSource, /const latestWorkspaceViewerIdRef = useRef\(currentUserId\)\s*latestWorkspaceViewerIdRef\.current = currentUserId/);
+  assert.match(workspaceSource, /const workspaceDataBelongsToCurrentViewer = workspaceDataViewerIdRef\.current === currentUserId/);
+  assert.match(workspaceSource, /const tasks = workspaceDataBelongsToCurrentViewer \? data\?\.tasks \|\| EMPTY_TASKS : EMPTY_TASKS/);
+  assert.match(workspaceSource, /const selectedTaskFresh = workspaceDataBelongsToCurrentViewer && selectedTask/);
+  assert.match(reloadSource, /workspaceDataViewerIdRef\.current = ""/);
+  assert.match(reloadSource, /setSelectedTask\(null\)/);
+  assert.match(reloadSource, /setEditingTask\(null\)/);
+  assert.match(reloadSource, /setFormOpen\(false\)/);
+  assert.match(reloadSource, /setDetailOpen\(false\)/);
+  assert.match(reloadSource, /setRegistrationCustomerMessageTask\(null\)/);
+  assert.match(reloadSource, /setDeleteTarget\(null\)/);
+  assert.match(reloadSource, /setBulkDeleteTargets\(\[\]\)/);
+  assert.match(reloadSource, /workspaceDataViewerIdRef\.current = currentUserId[\s\S]*setData/);
+  assert.match(workspaceSource, /open=\{workspaceDataBelongsToCurrentViewer && formOpen\}/);
+  assert.match(workspaceSource, /open=\{workspaceDataBelongsToCurrentViewer && detailOpen\}/);
+});
+
+test("registration detail prioritizes reached sections instead of listing empty future work", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const detailSource = workspaceSource.slice(
+    workspaceSource.indexOf("function RegistrationDetailPanel"),
+    workspaceSource.indexOf("function WithdrawalDetailPanel"),
+  );
+
+  assertIncludesAll(detailSource, [
+    "getRegistrationMobileSections(pipelineStatus, getRegistrationMobileSectionData(task, registration))",
+    "const showLevelTestDetail =",
+    "const showConsultationDetail =",
+    "const showPlacementDetail =",
+    "const showAdmissionDetail =",
+    'aria-label="문의 정보"',
+    'aria-label="레벨테스트 정보"',
+    'aria-label="상담 정보"',
+    'aria-label="등록·대기 정보"',
+    'aria-label="입학 처리 정보"',
+  ]);
+});
+
+test("registration mobile cards derive terminal sections from task links as well as detail fields", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assertIncludesAll(workspaceSource, [
+    "function getRegistrationMobileSectionData",
+    "classId: task.classId",
+    "className: task.className",
+    "textbookId: task.textbookId",
+    "textbookTitle: task.textbookTitle",
+    "registration.pipelineStatus",
+    "getRegistrationMobileSectionData(task, registration)",
   ]);
 });
 
@@ -791,36 +1178,40 @@ test("registration follows the real decision waitlist admission form and manual 
     "registration SOLAPI history should keep its RLS policy index-friendly",
   );
 
-  const [workspaceSource, registrationWorkflowSource, serviceSource, routeSource, migrationSource, leastPrivilegeMigrationSource, policyPerformanceMigrationSource] = await Promise.all([
+  const [workspaceSource, registrationWorkflowSource, serviceSource, routeSource, routeCoreSource, legacyRouteSource, migrationSource, leastPrivilegeMigrationSource, policyPerformanceMigrationSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-workflow.js"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("src/app/api/solapi/registration/route.ts"),
+    readSource("src/app/api/solapi/registration/core.js"),
+    readSource("src/app/api/solapi/registration/legacy.ts"),
     readSource("supabase/migrations/20260710052921_registration_application_workflow.sql"),
     readSource("supabase/migrations/20260710053001_registration_message_least_privilege.sql"),
     readSource("supabase/migrations/20260710053144_registration_message_policy_performance.sql"),
   ]);
   const combined = `${workspaceSource}\n${serviceSource}\n${routeSource}\n${migrationSource}\n${leastPrivilegeMigrationSource}\n${policyPerformanceMigrationSource}`;
   const detailDialogSource = workspaceSource.slice(
-    workspaceSource.indexOf("<Dialog open={detailOpen}"),
+    workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
     workspaceSource.indexOf("<Dialog open={Boolean(deleteTarget)}"),
   );
 
   assertIncludesAll(`${workspaceSource}\n${registrationWorkflowSource}`, [
-    "REGISTRATION_DECISION_ACTIONS",
+    "REGISTRATION_BRANCH_ACTIONS",
     "RegistrationDecisionActions",
+    "getRegistrationBranchActions",
     "getRegistrationPipelineActionBlockers",
-    "toDateKey(registration.consultationAt)",
     'studentName.endsWith("학생")',
     "RegistrationCustomerMessageDialog",
     "openRegistrationCustomerMessage",
     "sendRegistrationAdmissionMessage",
     "copyMakeEduAdmissionMessage",
-    "입학 등록",
-    "현재반 대기",
-    "신규반 대기",
-    "다음 개강 알림",
-    "미등록",
+    'label: "등록"',
+    "현재 학기 수강반 대기",
+    "현재 학기 개강반 대기",
+    "다음 학기 개강반 대기",
+    "미등록 완료",
+    "문의 완료",
+    "레벨테스트 재응시",
     "입학신청서 발송",
     "메이크에듀용 내용 복사",
     "레벨테스트 예약일시",
@@ -836,7 +1227,7 @@ test("registration follows the real decision waitlist admission form and manual 
     "waitlist_registered",
     "previousTask",
   ]);
-  assertIncludesAll(routeSource, [
+  assertIncludesAll(`${routeSource}\n${routeCoreSource}\n${legacyRouteSource}`, [
     'from "node:crypto"',
     "createHmac",
     "randomBytes",
@@ -886,11 +1277,15 @@ test("registration follows the real decision waitlist admission form and manual 
   );
 });
 
-test("registration form is one progressive application with future steps locked and operations history collapsed", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+test("registration form keeps one application while early reservation fields stay available", async () => {
+  const [source, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("scripts/verify-ops-task-sample-workflow.mjs"),
+    readSource("scripts/verify-ops-task-browser-workflow.mjs"),
+  ]);
   const formDialogSource = source.slice(
-    source.indexOf("<Dialog open={formOpen}"),
-    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
   );
   const registrationFormSource = source.slice(
     source.indexOf('if (form.type === "registration") {', source.indexOf("function TypeSpecificFields")),
@@ -898,7 +1293,6 @@ test("registration form is one progressive application with future steps locked 
   );
 
   assertIncludesAll(source, [
-    "REGISTRATION_FORM_SECTIONS",
     "getRegistrationFormStage",
     "RegistrationFormSection",
     'data-registration-current={active ? "true" : "false"}',
@@ -909,6 +1303,14 @@ test("registration form is one progressive application with future steps locked 
     "focusRegistrationFormSection",
     'scrollIntoView({ block: "start", behavior: "smooth" })',
   ]);
+  assert.match(
+    registrationFormSource,
+    /registrationFormState\.enabledSections\.includes\(sectionKey\)/,
+  );
+  assert.doesNotMatch(
+    registrationFormSource,
+    /getRegistrationFormSectionIndex\(sectionKey\) <= activeSectionIndex/,
+  );
   assert.doesNotMatch(formDialogSource, /지금 입력|이전 단계 완료 후/);
   assert.match(source, /active \? "-mx-3 border-l-2 border-l-primary bg-primary\/5 px-3"/);
   assert.match(source, /active \? "text-primary" : !enabled \? "text-muted-foreground" : ""/);
@@ -924,26 +1326,71 @@ test("registration form is one progressive application with future steps locked 
   );
 
   assertIncludesAll(registrationFormSource, [
-    '<TaskListboxField\n              label="문의 채널"',
-    '<TaskListboxField\n                label="과목"',
+    "<RegistrationSubjectField",
+    "values={registrationSubjects}",
+    'onChange={(values) => updateForm("subject", serializeRegistrationSubjects(values))}',
     '<TaskListboxField\n                label="레벨테스트 장소"',
     '<TaskListboxField\n                label="방문상담실"',
   ]);
   assert.doesNotMatch(registrationFormSource, /<SelectField/);
+  assert.doesNotMatch(source, /inquiryChannel|\{문의채널\}|문의채널|문의 채널/);
+  assert.doesNotMatch(sampleWorkflowSource, /inquiry_channel/);
+  assert.doesNotMatch(browserWorkflowSource, /inquiry_channel/);
+  assertIncludesAll(browserWorkflowSource, [
+    "async function selectListboxOptionIfPresent",
+    'await selectListboxOptionIfPresent(page, dialog, "학년", "고1")',
+  ]);
+  assert.doesNotMatch(browserWorkflowSource, /fillIfPresent\(dialog, "학년"/);
+  assert.doesNotMatch(
+    registrationFormSource,
+    /updateRegistration\("(?:levelTestCompletedAt|levelTestResult|consultationAt)"/,
+    "completion timestamps and the legacy result must not be editable registration inputs",
+  );
+  assert.match(source, /import \{ DateTimePickerControl, DatePickerControl \} from "@\/components\/ui\/date-time-picker"/);
+  const registrationDateTimeControls = registrationFormSource.match(/<DateTimePickerControl[\s\S]*?\/>/g) || [];
+  assert.equal(registrationDateTimeControls.length, 4);
+  for (const controlSource of registrationDateTimeControls) {
+    assert.match(controlSource, /disablePortal/);
+  }
+  assert.match(registrationDateTimeControls[0], /\n\s+required\n/);
+  for (const controlSource of registrationDateTimeControls.slice(1)) {
+    assert.doesNotMatch(controlSource, /\brequired\b/);
+  }
+  assertIncludesAll(registrationFormSource, [
+    "dateAriaLabel=\"문의일 날짜\"",
+    "timeAriaLabel=\"문의일 시각\"",
+    "value={dateTimeInputValue(registration.inquiryAt)}",
+    "dateAriaLabel=\"레벨테스트 예약일 날짜\"",
+    "timeAriaLabel=\"레벨테스트 예약일 시각\"",
+    "value={dateTimeInputValue(registration.levelTestAt)}",
+    "dateAriaLabel=\"전화상담 예약일 날짜\"",
+    "timeAriaLabel=\"전화상담 예약일 시각\"",
+    "value={dateTimeInputValue(registration.phoneConsultationAt)}",
+    "dateAriaLabel=\"방문상담 예약일 날짜\"",
+    "timeAriaLabel=\"방문상담 예약일 시각\"",
+    "value={dateTimeInputValue(registration.visitConsultationAt)}",
+  ]);
+  assert.doesNotMatch(registrationFormSource, /type="datetime-local"/);
+  assert.match(
+    formDialogSource,
+    /label=\{getDueAtDisplayLabel\(form\.type\)\}[\s\S]{0,160}type="datetime-local"/,
+    "unrelated task due-date inputs should remain native datetime-local controls",
+  );
+  assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
   const inquiryStart = registrationFormSource.indexOf('sectionKey="inquiry"');
   const inquiryEnd = registrationFormSource.indexOf('sectionKey="level_test"', inquiryStart);
   const inquirySource = registrationFormSource.slice(inquiryStart, inquiryEnd);
   const orderedInquiryFields = [
     'focusKey="studentName"',
-    'label="과목"',
-    'label="학년"',
-    'label="학교"',
+    '<RegistrationSubjectField',
+    'focusKey="schoolGrade"',
+    'label="학년" requirement="required"',
+    'label="학교" requirement="optional"',
     'focusKey="parentPhone"',
-    'label="학생 전화"',
-    'label="문의 채널"',
-    'label="문의일시"',
-    'label="기존 학생 연결"',
+    'label="학생 전화" requirement="optional"',
+    'focusKey="inquiryAt"',
+    'label="문의일시" requirement="required"',
   ];
   for (let index = 1; index < orderedInquiryFields.length; index += 1) {
     assert.ok(
@@ -951,6 +1398,148 @@ test("registration form is one progressive application with future steps locked 
       `${orderedInquiryFields[index - 1]} should appear before ${orderedInquiryFields[index]}`,
     );
   }
+  assertIncludesAll(inquirySource, [
+    'label="학생명" requirement="required"',
+    'label="과목" requirement="required"',
+    'label="학년" requirement="required"',
+    'label="학부모 전화" requirement="required"',
+    'label="문의일시" requirement="required"',
+  ]);
+  assertIncludesAll(source, [
+    "aria-describedby={required ? requiredDescriptionId : undefined}",
+    "하나 이상 선택해야 하는 필수 항목입니다.",
+  ]);
+  assert.doesNotMatch(inquirySource, /기존 학생 연결/);
+  assert.match(
+    formDialogSource,
+    /disabled=\{saving \|\| \(!canSubmitCurrentForm && form\.type !== "registration"\)\}/,
+  );
+  assert.match(
+    source,
+    /getRegistrationPrefillPipelineStatus\(inputWithCompletionIntent\)/,
+  );
+  assert.match(source, /prepareRegistrationPipelineTransition/);
+  assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(form\)\)/);
+});
+
+test("registration subject tracks split combined inquiries and preserve subjects during class sync", async () => {
+  const [workspaceSource, serviceSource, trackListSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+    readSource("src/features/tasks/registration-track-list.tsx"),
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    "buildRegistrationTrackListItems(scopedTasks)",
+    "filterRegistrationTrackListItems(registrationTrackItems, registrationView)",
+    'form.type !== "registration" || !form.subject',
+  ]);
+  assertIncludesAll(trackListSource, [
+    "tasks.flatMap((task)",
+    "registrationTracks.map((track)",
+    "taskId: task.id",
+    "trackId: track.id",
+    "subject: track.subject",
+  ]);
+  assertIncludesAll(serviceSource, [
+    "assertRegistrationInquiryBaseReady",
+    "assertRegistrationInquiryBaseReady(input)",
+  ]);
+  assert.match(
+    serviceSource,
+    /subject: text\(input\.subject\) \|\| text\(classRow\?\.subject\) \|\| null/,
+  );
+});
+
+test("registration required inquiry fields remain invariant after the workflow advances", async () => {
+  const [workspaceSource, serviceSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+  ]);
+
+  assert.match(
+    workspaceSource,
+    /const registrationCreateBlockers = form\.type === "registration"\s*\? getRegistrationCreateBlockers\(form\)\s*:\s*\[\]/,
+  );
+  assert.match(
+    serviceSource,
+    /function assertRegistrationInquiryBaseReady\(input: OpsTaskInput\)/,
+  );
+  assert.match(serviceSource, /assertRegistrationInquiryBaseReady\(input\)/);
+  assert.doesNotMatch(
+    serviceSource,
+    /assertRegistrationInquiryBaseReady\(input, existingTask\.registration\?\.pipelineStatus/,
+  );
+});
+
+test("registration consumes the shared academic-director default with guarded automatic tracking", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const effectSource = source.slice(
+    source.indexOf("const registrationDirectorDefaultStateRef"),
+    source.indexOf("const scopedTasks", source.indexOf("const registrationDirectorDefaultStateRef")),
+  );
+  const openCreateSource = source.slice(
+    source.indexOf("function openCreate"),
+    source.indexOf("const openEdit", source.indexOf("function openCreate")),
+  );
+  const openEditSource = source.slice(
+    source.indexOf("const openEdit"),
+    source.indexOf("const openFailedWordRetestRetryForm", source.indexOf("const openEdit")),
+  );
+  const manualChangeSource = source.slice(
+    source.indexOf("function handleRegistrationCounselorChange"),
+    source.indexOf("const updateWithdrawal", source.indexOf("function handleRegistrationCounselorChange")),
+  );
+
+  assertIncludesAll(source, [
+    'from "./registration-director-default.js"',
+    "resolveRegistrationDirectorDefault({",
+    "subjects: parseRegistrationSubjects(form.subject)",
+    "grade: form.registration?.schoolGrade",
+    "inquiryAt: form.registration?.inquiryAt",
+    "getRegistrationDirectorDefaultTransition({",
+  ]);
+  assertIncludesAll(effectSource, [
+    "const registrationDirectorDefaultPendingRef",
+    "if (!formOpen || form.type !== \"registration\") {",
+    "const session = registrationDirectorDefaultSessionRef.current",
+    "const pendingTransition = registrationDirectorDefaultPendingRef.current",
+    "pendingTransition.targetProfileId",
+    "registrationDirectorDefaultStateRef.current = pendingTransition.state",
+    "registrationDirectorDefaultPendingRef.current = null",
+    "const nextPendingTransition =",
+    "registrationDirectorDefaultPendingRef.current = nextPendingTransition",
+    "setForm((current) => {",
+    "if (registrationDirectorDefaultSessionRef.current !== session) return current",
+    "registrationDirectorDefaultPendingRef.current?.token !== token",
+    "secondaryAssigneeId: transition.profileId",
+    "counselor: transition.counselor",
+  ]);
+  const automaticUpdaterSource = effectSource.slice(
+    effectSource.indexOf("setForm((current) => {"),
+    effectSource.indexOf("\n    })", effectSource.indexOf("setForm((current) => {")) + 7,
+  );
+  assert.doesNotMatch(
+    automaticUpdaterSource,
+    /registrationDirectorDefault(?:State|Pending)Ref\.current\s*=/,
+    "the replayable React state updater must not mutate provenance refs",
+  );
+  assert.match(openCreateSource, /registrationDirectorDefaultStateRef\.current = createRegistrationDirectorDefaultState\(\)/);
+  assert.match(openCreateSource, /registrationDirectorDefaultPendingRef\.current = null/);
+  assert.match(openEditSource, /createRegistrationDirectorDefaultState\(\{[\s\S]*?profileId: nextForm\.secondaryAssigneeId[\s\S]*?counselor: nextForm\.registration\?\.counselor/);
+  assert.match(openEditSource, /registrationDirectorDefaultPendingRef\.current = null/);
+  assertIncludesAll(manualChangeSource, [
+    "markRegistrationDirectorDefaultManual",
+    "registrationDirectorDefaultStateRef.current =",
+    "registrationDirectorDefaultPendingRef.current = null",
+    "setForm((current)",
+    "secondaryAssigneeId: profileId",
+    "counselor: nextCounselor",
+  ]);
+  assert.ok(
+    manualChangeSource.indexOf("markRegistrationDirectorDefaultManual") < manualChangeSource.indexOf("setForm((current)"),
+    "manual tracking must be set before the atomic form update",
+  );
 });
 
 test("shared operation form actions sit flush below content instead of floating over fields", async () => {
@@ -980,8 +1569,8 @@ test("operation class options query the canonical fee schema before legacy tuiti
 test("operation forms use staged fields and linked management selectors", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const formDialogSource = source.slice(
-    source.indexOf("<Dialog open={formOpen}"),
-    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
   );
 
   assertIncludesAll(source, [
@@ -1071,7 +1660,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf("function WithdrawalResizableHeaderCell"),
   );
   const detailDialogSource = source.slice(
-    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
     source.indexOf("<Dialog open={Boolean(deleteTarget)}"),
   );
   const withdrawalWorkspaceToolbarSource = source.slice(
@@ -1079,8 +1668,8 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf("{isTodoWorkspace && ("),
   );
   const formDialogSource = source.slice(
-    source.indexOf("<Dialog open={formOpen}"),
-    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
   );
   const withdrawalFormSource = source.slice(
     source.indexOf('if (form.type === "withdrawal")'),
@@ -1457,7 +2046,7 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     formDialogSource,
-    /<Button type="submit" disabled=\{saving \|\| !canSubmitCurrentForm\} className="w-full sm:w-auto">/,
+    /<Button type="submit" disabled=\{saving \|\| \(!canSubmitCurrentForm && form\.type !== "registration"\)\} className="w-full sm:w-auto">/,
   );
   assert.match(
     formDialogSource,
@@ -1727,8 +2316,8 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     source.indexOf('if (form.type === "word_retest")'),
   );
   const formDialogSource = source.slice(
-    source.indexOf("<Dialog open={formOpen}"),
-    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
   );
   const transferDataTableSource = source.slice(
     source.indexOf("function TransferDataTable"),
@@ -1743,7 +2332,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     source.indexOf("{isTodoWorkspace && ("),
   );
   const detailDialogSource = source.slice(
-    source.indexOf("<Dialog open={detailOpen}"),
+    source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
     source.indexOf("<Dialog open={Boolean(deleteTarget)}"),
   );
   const transferDetailSource = source.slice(
@@ -1784,8 +2373,8 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     '"id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,textbook_ids,status"',
     '"id,name,subject,grade,teacher,room,schedule,schedule_plan,tuition,student_ids,waitlist_ids,status"',
     '"id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,status"',
-    "async function readOpsClassRows()",
-    "for (const columns of OPS_CLASS_COLUMN_CANDIDATES)",
+    "async function readOpsClassRows(taskType?: OpsTaskType)",
+    "readOpsClassRows(options.taskType)",
     "if (!isMissingColumnError(result.error))",
     "fee: numberValue(row.fee || row.tuition)",
   ]);
@@ -2243,7 +2832,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "shouldAutoMarkWordRetestAbsent",
     "autoMarkPastWordRetestsAbsent",
     "const nextTasks = wordRetestFilterSourceTasks.filter((task) =>",
-    "}, [data, isWordRetestWorkspace, loading, wordRetestFilterSourceTasks])",
+    "}, [currentUserId, data, invalidatePendingWorkspaceReloads, isWordRetestWorkspace, loading, reload, wordRetestFilterSourceTasks])",
     "WORD_RETEST_TABLE_COLUMN_WIDTHS",
     "WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS",
     "select: 40",
@@ -2578,7 +3167,6 @@ test("management sync connects registration transfer withdrawal and word retest 
     "getOperationCompletionBlockers",
     "hasLinkedRecord(input.studentId)",
     "!hasLinkedRecord(input.classId)",
-    "!hasLinkedRecord(input.textbookId)",
     "fromClass && toClass && fromClass.id === toClass.id",
     "findStudentOptionByReference",
     "findClassOptionByReference",
@@ -2792,7 +3380,7 @@ test("completed operational task details are locked after management sync", asyn
     "const canSubmitCurrentForm = canSubmitOpsTaskForm(form, Boolean(editingTask))",
     "{!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== \"word_retest_retry\" && (",
     "{!isEditingLockedCompletedTask && (",
-    "<Button type=\"submit\" disabled={saving || !canSubmitCurrentForm} className=\"w-full sm:w-auto\">",
+    "<Button type=\"submit\" disabled={saving || (!canSubmitCurrentForm && form.type !== \"registration\")} className=\"w-full sm:w-auto\">",
   ]);
   assert.equal(
     workspaceSource.match(/\{!isEditingLockedCompletedTask && formCompletionBlockers\.length > 0 && \(/g)?.length,
@@ -2925,7 +3513,11 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     "getOpsTaskWorkspaceCacheKey",
     "const opsTaskWorkspaceDataCache = new Map",
     "if (options.taskType) taskQuery = taskQuery.eq(\"type\", options.taskType)",
-    "shouldReadRegistration ? readTaskScopedTable",
+    'return readOpsRegistrationParentWorkspaceData(options, metrics)',
+    "loadRegistrationTrackSummaries(",
+    "registrationTracks: tracksByTaskId.get(task.id) || []",
+    "OPS_REGISTRATION_PARENT_LIST_COLUMNS",
+    '"ops_registration_details(task_id,pipeline_status,school_grade,school_name,inquiry_at)"',
     "export async function loadOpsTodoDashboardSummaryData",
     '.select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,class_id,textbook_id,student_name,class_name,textbook_title,campus,subject,start_at,due_at,completed_at,memo,created_at,updated_at")',
     '.eq("type", "general")',
@@ -2934,8 +3526,9 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
 
 	  assertIncludesAll(workspaceSource, [
 	    "getCachedOpsTaskWorkspaceData(workspaceLoadOptions)",
-	    "const loadOptions = { taskType: scopedTaskType, includeManagementOptions: !isTodoWorkspace, includeTeacherOptions: true }",
+	    "includeProfileOptions: false",
 	    "loadOpsTaskWorkspaceData({ ...loadOptions, force })",
+	    "loadOpsTaskWorkspaceOptionData({",
 	  ]);
 
   assertIncludesAll(scriptSource, [
@@ -3139,5 +3732,114 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     "absent_word_retest_count",
     "absentWordRetest !== 1",
     'update({ retest_status: "absent", first_score: null, second_score: null, third_score: null })',
+  ]);
+});
+
+test("registration placement uses one selected-class schedule control with atomic date and session updates", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const placementStart = source.indexOf('sectionKey="placement"');
+  const placementEnd = source.indexOf('sectionKey="admission"', placementStart);
+  const placementSource = source.slice(placementStart, placementEnd);
+
+  assert.match(placementSource, /label="수업 시작 일정"/);
+  assert.match(source, /수업을 먼저 선택하세요/);
+  assert.match(source, /수업 일정을 불러오는 중/);
+  assert.match(source, /수업 일정 설정 필요/);
+  assert.match(source, /updateRegistrationPatch\(\{ classStartDate: selectedSession\.dateKey, classStartSession: selectedSession\.sessionLabel \}\)/);
+  assert.doesNotMatch(placementSource, /label="수업시작일"|label="수업시작회차"|type="date"/);
+});
+
+test("registration selected-class detail and textbook default guards reject stale responses and preserve intentional empties", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assertIncludesAll(source, [
+    "loadOpsRegistrationClassDetail",
+    "registrationClassDetailRequestRef.current += 1",
+    "requestToken !== registrationClassDetailRequestRef.current",
+    "detail.id !== selectedClassId",
+    "registrationClassDetailResult.viewerId === selectedRegistrationViewerId",
+    "registrationTextbookDefaultPendingClassRef",
+    "registrationTextbookClearedClassRef",
+    "resolveRegistrationLinkedTextbookDefault",
+    "allowDeselect",
+    "선택 안 함 · 이미 보유",
+  ]);
+  assert.ok(
+    [...source.matchAll(/textbookBillingIssued: false/g)].length >= 2,
+    "class changes and explicit textbook clears must each discard stale textbook billing state",
+  );
+});
+
+test("registration completion keeps textbook optional while validating a nonempty linked textbook", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const blockerSource = source.slice(
+    source.indexOf("function getOperationCompletionBlockers"),
+    source.indexOf("function getTaskCompletionBlockers"),
+  );
+
+  assert.match(blockerSource, /if \(!String\(input\.registration\?\.classStartSession/);
+  assert.doesNotMatch(blockerSource, /if \(!hasLinkedRecord\(input\.textbookId\)\) blockers\.push\("교재"\)/);
+  assert.match(blockerSource, /if \(hasLinkedRecord\(input\.textbookId\) && !findTextbookOption/);
+});
+
+test("registration admission checklist is chronological and hides legacy automatic work", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const checklistStart = source.indexOf("function getRegistrationOperationsChecklist(");
+  const checklistSource = source.slice(
+    checklistStart,
+    source.indexOf("function getRegistrationOperationsChecklistValue", checklistStart),
+  );
+  const placementStart = source.indexOf('sectionKey="placement"');
+  const placementSource = source.slice(placementStart, source.indexOf('sectionKey="admission"', placementStart));
+  const admissionStart = source.indexOf('sectionKey="admission"');
+  const admissionSource = source.slice(admissionStart, source.indexOf('if (form.type === "withdrawal")', admissionStart));
+  const detailStart = source.indexOf("function RegistrationDetailPanel");
+  const registrationDetailSource = source.slice(detailStart, source.indexOf("function WithdrawalDetailPanel", detailStart));
+  const summaryStart = source.indexOf('if (task.type === "registration" && task.registration)');
+  const registrationSummarySource = source.slice(summaryStart, source.indexOf('if (task.type === "withdrawal"', summaryStart));
+  const orderedLabels = [
+    "입학신청서 발송",
+    "메이크에듀 등록(수업, 교재)",
+    "청구서 발송",
+    "수납 완료 확인",
+    "등록 완료",
+  ];
+
+  assertInOrder(checklistSource, orderedLabels);
+  assertInOrder(admissionSource, orderedLabels.map((label) => `label="${label}"`));
+  assert.match(checklistSource, /getRegistrationPipelinePrefix\(registration\?\.pipelineStatus\) === "7\."/);
+  assert.doesNotMatch(checklistSource, /textbookBillingIssued|textbookReady|timetableRosterUpdated|교재 청구출고표|교재 준비|수업시간표 명단/);
+  assert.doesNotMatch(placementSource, /textbookPreparation|REGISTRATION_TEXTBOOK_PREPARATION_OPTIONS|label="교재 준비"/);
+  assert.doesNotMatch(admissionSource, /AutoSyncStatusField|textbookBillingIssued|교재 청구출고표|교재 준비|수업시간표 명단/);
+  assert.doesNotMatch(registrationDetailSource, /<Info label="교재 준비"|textbookBillingIssued/);
+  assertInOrder(registrationSummarySource, orderedLabels);
+  assert.doesNotMatch(registrationSummarySource, /autoItems=|textbookBillingIssued|교재 청구출고표|교재 준비|수업시간표 명단/);
+});
+
+test("registration form checklist updates use the shared downstream cascade and exclude legacy billing actions", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const actionTypeStart = source.indexOf("type RegistrationChecklistField");
+  const actionTypeSource = source.slice(actionTypeStart, source.indexOf("type WithdrawalChecklistField", actionTypeStart));
+  const directUpdateStart = source.indexOf("const updateAdmissionChecklist = (");
+  const directUpdateSource = source.slice(directUpdateStart, source.indexOf('if (form.type === "registration")', directUpdateStart));
+
+  assert.doesNotMatch(actionTypeSource, /textbookBillingIssued/);
+  assert.match(directUpdateSource, /applyRegistrationChecklistChange/);
+  assert.doesNotMatch(directUpdateSource, /nextRegistration\.textbookBillingIssued/);
+});
+
+test("pending registration completion edits use the source operational stage without rendering a false completed check", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const registrationFormStart = source.indexOf('if (form.type === "registration")');
+  const registrationFormSource = source.slice(
+    registrationFormStart,
+    source.indexOf('if (form.type === "withdrawal")', registrationFormStart),
+  );
+
+  assertIncludesAll(registrationFormSource, [
+    "getRegistrationChecklistEditorState",
+    "completionIntentPipelineStatus: formCompletionIntent?.registrationPipelineStatus",
+    "pipelineStatus: registrationChecklistEditorState.availabilityPipelineStatus",
+    "checked={registrationChecklistEditorState.completed}",
   ]);
 });

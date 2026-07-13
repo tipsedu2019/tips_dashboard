@@ -64,7 +64,7 @@ function DialogContent({
     "ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 z-30 inline-flex items-center justify-center transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
     showCloseButtonText
       ? "h-8 gap-1.5 rounded-md border bg-background px-2 text-xs font-medium text-muted-foreground opacity-95 shadow-xs"
-      : "rounded-xs opacity-70",
+      : "size-8 rounded-md opacity-70",
   )
   const closeButtonContent = (
     <>

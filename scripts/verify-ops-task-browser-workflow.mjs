@@ -17,6 +17,87 @@ const DEFAULT_OPERATION_SAMPLE_COUNT = 1
 const MAX_INITIAL_TEMPLATE_CONTROLS = 22
 const MAX_INITIAL_SELECT_OPTIONS = 16
 const SIGN_IN_EXPECTED_TEXTS = ["TIPS 로그인", "아이디", "비밀번호"]
+const SUBJECT_TRACK_SAMPLES = [
+  {
+    name: "same-day dual level test",
+    tracks: [
+      { id: "english", subject: "영어", status: "level_test_scheduled" },
+      { id: "math", subject: "수학", status: "level_test_scheduled" },
+    ],
+    appointments: [{ id: "level-test-1", trackIds: ["english", "math"], startsAt: "2026-07-14T10:00:00+09:00" }],
+  },
+  {
+    name: "split visit and phone consultation",
+    tracks: [
+      { id: "english", subject: "영어", status: "visit_consultation_scheduled" },
+      { id: "math", subject: "수학", status: "consultation_waiting" },
+    ],
+  },
+  {
+    name: "partial registration with later batch",
+    tracks: [
+      { id: "english", subject: "영어", status: "registered" },
+      { id: "math", subject: "수학", status: "enrollment_processing" },
+    ],
+    batches: [
+      { id: "batch-1", revision: 1, status: "completed", trackIds: ["english"] },
+      { id: "batch-2", revision: 2, status: "open", trackIds: ["math"] },
+    ],
+  },
+  {
+    name: "multiple English classes",
+    tracks: [{ id: "english", subject: "영어", status: "enrollment_processing" }],
+    enrollments: [
+      { trackId: "english", classId: "eng-a" },
+      { trackId: "english", classId: "eng-special" },
+    ],
+  },
+]
+
+function getSubjectTrackTabCounts(tracks) {
+  const counts = { inquiry: 0, level_test: 0, consulting: 0, waiting: 0, enrollment: 0, closed: 0 }
+  for (const track of tracks) {
+    const status = String(track.status || "")
+    const tab = status === "inquiry" || status === "migration_review"
+      ? "inquiry"
+      : status.startsWith("level_test_")
+        ? "level_test"
+        : status.startsWith("consultation_") || status.startsWith("visit_consultation_")
+          ? "consulting"
+          : status === "waiting"
+            ? "waiting"
+            : status === "enrollment_decided" || status === "enrollment_processing"
+              ? "enrollment"
+              : "closed"
+    counts[tab] += 1
+  }
+  return counts
+}
+
+function verifySubjectTrackSamples() {
+  const byName = Object.fromEntries(SUBJECT_TRACK_SAMPLES.map((sample) => [sample.name, sample]))
+  const dual = byName["same-day dual level test"]
+  const split = byName["split visit and phone consultation"]
+  const partial = byName["partial registration with later batch"]
+  const multiple = byName["multiple English classes"]
+  const transitioned = dual.tracks.map((track) => track.id === "english" ? { ...track, status: "consultation_waiting" } : track)
+  const tabCounts = getSubjectTrackTabCounts(dual.tracks)
+
+  if (tabCounts.level_test !== 2) throw new Error("dual level-test tabs were not counted per subject")
+  if (dual.appointments[0].trackIds.join(",") !== "english,math") throw new Error("dual level-test fixture is not shared")
+  if (transitioned[0].status !== "consultation_waiting" || transitioned[1].status !== "level_test_scheduled") {
+    throw new Error("subject transition leaked to a sibling")
+  }
+  if (split.tracks.map((track) => track.status).join(",") !== "visit_consultation_scheduled,consultation_waiting") {
+    throw new Error("split consultation fixture changed modes")
+  }
+  if (partial.batches.map((batch) => batch.revision).join(",") !== "1,2") throw new Error("batch revisions are not fresh")
+  if (multiple.enrollments.length !== 2) throw new Error("multiple English enrollment rows are missing")
+
+  const result = { subjectTrackSamples: SUBJECT_TRACK_SAMPLES.length, network: false }
+  console.log(JSON.stringify(result))
+  return result
+}
 function buildAdminPublicSmokeRoute(path, name, expectedSearchIncludes) {
   return {
     path,
@@ -344,6 +425,7 @@ const ROUTES = [
   { path: "/admin/tasks?list=sent", name: "todo-sent", expectedTexts: ["할 일", "보낸함"] },
   { path: "/admin/tasks?list=completed", name: "todo-completed", expectedTexts: ["할 일", "완료"] },
   { path: "/admin/registration", name: "registration", expectedTexts: ["등록", "등록 추가"], interaction: "open-create" },
+  { path: "/admin/registration?fixture=registration-subject-tracks", name: "registration-subject-track-fixture", expectedTexts: ["등록", "윤지호"], interaction: "registration-subject-track-fixture" },
   { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 신청"], interaction: "open-create" },
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 신청"], interaction: "open-create" },
   { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["영어 단어 재시험", "추가"], interaction: "open-create" },
@@ -448,6 +530,10 @@ function buildOpsBrowserAuthPreflight() {
   const supabaseUrl = env("SUPABASE_URL", env("NEXT_PUBLIC_SUPABASE_URL", env("VITE_SUPABASE_URL")))
   const supabaseAnonKey = env("NEXT_PUBLIC_SUPABASE_ANON_KEY", env("VITE_SUPABASE_ANON_KEY"))
   const serviceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY", env("SUPABASE_SERVICE_KEY"))
+  const rosterLoginId = env("OPS_BROWSER_ROSTER_LOGIN_ID", loginId)
+  const rosterPassword = env("OPS_BROWSER_ROSTER_PASSWORD", password)
+  const fixtureScope = env("OPS_FIXTURE_DATABASE_SCOPE").toLowerCase()
+  const disposableFixtureDatabase = isEnabledEnv(env("OPS_FIXTURE_DISPOSABLE")) && fixtureScope === "local" && Boolean(env("OPS_SAMPLE_DB_URL"))
   const storageStateFileExists = Boolean(storageStatePath && existsSync(storageStatePath))
   const storageStateMissing = storageStatePath
     ? storageStateFileExists
@@ -497,13 +583,20 @@ function buildOpsBrowserAuthPreflight() {
     },
   }
   const canRunAuthenticatedWorkflow = Object.values(authModes).some((mode) => mode.ready)
-  const canCreateCompletionFixtures = Boolean(serviceRoleKey || (loginId && password))
+  const canCreateCompletionFixtures = Boolean(
+    supabaseUrl &&
+    supabaseAnonKey &&
+    rosterLoginId &&
+    rosterPassword &&
+    disposableFixtureDatabase &&
+    (serviceRoleKey || (loginId && password)),
+  )
 
   return {
     canRunAuthenticatedWorkflow,
     canCreateCompletionFixtures,
     authModes,
-    hint: "Set OPS_BROWSER_STORAGE_STATE, OPS_BROWSER_TEMP_USER=1, or OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD in .env.ops-browser.local.",
+    hint: "Set OPS_BROWSER_STORAGE_STATE, OPS_BROWSER_TEMP_USER=1, or OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD in .env.ops-browser.local. Database-backed roster fixtures additionally require an authenticated admin/staff roster login plus OPS_FIXTURE_DISPOSABLE=1, OPS_FIXTURE_DATABASE_SCOPE=local, and an explicit localhost OPS_SAMPLE_DB_URL.",
   }
 }
 
@@ -604,34 +697,63 @@ async function countRemainingUiSamples(loginId, password) {
   return remaining
 }
 
-async function createAdminSupabaseClient(loginId, password) {
+function assertAuthorizedLocalFixtureDatabase(url) {
+  const scope = env("OPS_FIXTURE_DATABASE_SCOPE").toLowerCase()
+  const disposable = isEnabledEnv(env("OPS_FIXTURE_DISPOSABLE"))
+  if (!disposable || scope !== "local") {
+    throw new Error("Roster verification is audit-bearing and may run only on an explicitly authorized localhost database. Set OPS_FIXTURE_DISPOSABLE=1 and OPS_FIXTURE_DATABASE_SCOPE=local.")
+  }
+  const localDatabaseUrl = env("OPS_SAMPLE_DB_URL")
+  if (!localDatabaseUrl) {
+    throw new Error("Roster verification requires OPS_SAMPLE_DB_URL for the exact disposable localhost database.")
+  }
+  const allowedHosts = new Set(["127.0.0.1", "localhost", "::1"])
+  const target = new URL(url)
+  const database = new URL(localDatabaseUrl)
+  if (!allowedHosts.has(target.hostname) || !allowedHosts.has(database.hostname)) {
+    throw new Error("Remote and production targets are denied; both the Supabase URL and OPS_SAMPLE_DB_URL must use localhost.")
+  }
+  if (!/^postgres(?:ql)?:$/.test(database.protocol)) {
+    throw new Error("OPS_SAMPLE_DB_URL must be a PostgreSQL URL.")
+  }
+  return "local"
+}
+
+async function createFixtureClients(loginId, password) {
   const supabaseUrl = env("SUPABASE_URL", env("NEXT_PUBLIC_SUPABASE_URL", env("VITE_SUPABASE_URL")))
   const serviceRoleKey = env("SUPABASE_SERVICE_ROLE_KEY", env("SUPABASE_SERVICE_KEY"))
   const supabaseAnonKey = env("NEXT_PUBLIC_SUPABASE_ANON_KEY", env("VITE_SUPABASE_ANON_KEY"))
   if (!supabaseUrl) throw new Error("OPS_BROWSER_OPERATION_COMPLETE_SAMPLE=1 requires SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL.")
+  const databaseScope = assertAuthorizedLocalFixtureDatabase(supabaseUrl)
+  const rosterLoginId = env("OPS_BROWSER_ROSTER_LOGIN_ID", loginId)
+  const rosterPassword = env("OPS_BROWSER_ROSTER_PASSWORD", password)
+  if (!supabaseAnonKey || !rosterLoginId || !rosterPassword) {
+    throw new Error("Ready-mode roster fixtures require OPS_BROWSER_ROSTER_LOGIN_ID/OPS_BROWSER_ROSTER_PASSWORD (or the browser login) for an independent authenticated admin/staff client.")
+  }
 
   const { createClient } = await importSupabaseClient()
-  if (serviceRoleKey) {
-    return createClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    })
-  }
-
-  if (!supabaseAnonKey || !loginId || !password) {
-    throw new Error("OPS_BROWSER_OPERATION_COMPLETE_SAMPLE=1 requires SUPABASE_SERVICE_ROLE_KEY or OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD.")
-  }
-  const client = createClient(supabaseUrl, supabaseAnonKey, {
+  const authenticatedRosterClient = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
   })
-  const { error } = await client.auth.signInWithPassword({ email: normalizeLoginIdentifier(loginId), password })
+  const { error } = await authenticatedRosterClient.auth.signInWithPassword({
+    email: normalizeLoginIdentifier(rosterLoginId),
+    password: rosterPassword,
+  })
   if (error) throw new Error(`Operation fixture login failed: ${error.message}`)
-  return client
+  const setupClient = serviceRoleKey
+    ? createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
+    : createClient(supabaseUrl, supabaseAnonKey, { auth: { autoRefreshToken: false, persistSession: false } })
+  if (!serviceRoleKey) {
+    const setupAuth = await setupClient.auth.signInWithPassword({
+      email: normalizeLoginIdentifier(rosterLoginId),
+      password: rosterPassword,
+    })
+    if (setupAuth.error) throw new Error(`Operation setup login failed: ${setupAuth.error.message}`)
+  }
+  return { setupClient, authenticatedRosterClient, databaseScope }
 }
 
 function compactUuid() {
@@ -664,6 +786,148 @@ function normalizeIdListValue(value) {
     }
   }
   return []
+}
+
+function normalizeRosterIds(value) {
+  return [...new Set(normalizeIdListValue(value))].sort()
+}
+
+function sortRosterPairs(pairs) {
+  return [...pairs].sort((left, right) =>
+    `${left.studentId}:${left.classId}`.localeCompare(`${right.studentId}:${right.classId}`),
+  )
+}
+
+function assertCommittedRosterResponse(committed, { studentId, classId, expectedMode, nextMode }) {
+  if (!committed || typeof committed !== "object" || Array.isArray(committed)) {
+    throw new Error("Roster RPC did not return a committed object.")
+  }
+  if (
+    String(committed.studentId || "") !== studentId ||
+    String(committed.classId || "") !== classId ||
+    committed.previousMode !== expectedMode ||
+    committed.nextMode !== nextMode ||
+    committed.changed !== (expectedMode !== nextMode)
+  ) {
+    throw new Error(`Roster RPC response mismatch: ${JSON.stringify(committed)}`)
+  }
+  for (const field of ["studentClassIds", "studentWaitlistClassIds", "classStudentIds", "classWaitlistIds"]) {
+    if (!Array.isArray(committed[field]) || JSON.stringify(committed[field]) !== JSON.stringify(normalizeRosterIds(committed[field]))) {
+      throw new Error(`Roster RPC ${field} projection is not a sorted array.`)
+    }
+  }
+  return committed
+}
+
+async function readRosterProjection(client, studentId, classId) {
+  const [studentResult, classResult] = await Promise.all([
+    client.from("students").select("id,class_ids,waitlist_class_ids").eq("id", studentId).maybeSingle(),
+    client.from("classes").select("id,student_ids,waitlist_ids").eq("id", classId).maybeSingle(),
+  ])
+  if (studentResult.error) throw new Error(`student roster read failed: ${studentResult.error.message}`)
+  if (classResult.error) throw new Error(`class roster read failed: ${classResult.error.message}`)
+  if (!studentResult.data || !classResult.data) throw new Error("Roster fixture pair was not found.")
+  return {
+    studentClassIds: normalizeRosterIds(studentResult.data.class_ids),
+    studentWaitlistClassIds: normalizeRosterIds(studentResult.data.waitlist_class_ids),
+    classStudentIds: normalizeRosterIds(classResult.data.student_ids),
+    classWaitlistIds: normalizeRosterIds(classResult.data.waitlist_ids),
+  }
+}
+
+function rosterModeFromProjection(projection, studentId, classId) {
+  const enrolled = projection.studentClassIds.includes(classId) && projection.classStudentIds.includes(studentId)
+  const waitlisted = projection.studentWaitlistClassIds.includes(classId) && projection.classWaitlistIds.includes(studentId)
+  const asymmetric =
+    projection.studentClassIds.includes(classId) !== projection.classStudentIds.includes(studentId) ||
+    projection.studentWaitlistClassIds.includes(classId) !== projection.classWaitlistIds.includes(studentId)
+  if (asymmetric || (enrolled && waitlisted)) throw new Error("Roster fixture projection is asymmetric.")
+  return enrolled ? "enrolled" : waitlisted ? "waitlist" : "removed"
+}
+
+async function verifyRosterProjection(client, { studentId, classId, nextMode }, committed) {
+  const projection = await readRosterProjection(client, studentId, classId)
+  if (rosterModeFromProjection(projection, studentId, classId) !== nextMode) {
+    throw new Error(`Roster projection did not commit ${nextMode}.`)
+  }
+  for (const field of ["studentClassIds", "studentWaitlistClassIds", "classStudentIds", "classWaitlistIds"]) {
+    if (JSON.stringify(projection[field]) !== JSON.stringify(normalizeRosterIds(committed[field]))) {
+      throw new Error(`Roster ${field} did not match the committed RPC response.`)
+    }
+  }
+  return projection
+}
+
+async function setRosterMode(authenticatedRosterClient, { studentId, classId, expectedMode, nextMode, memo }) {
+  const result = await authenticatedRosterClient.rpc("set_student_class_roster_mode", {
+    p_student_id: studentId,
+    p_class_id: classId,
+    p_expected_mode: expectedMode,
+    p_next_mode: nextMode,
+    p_memo: memo,
+  })
+  if (result.error) throw new Error(`set_student_class_roster_mode failed: ${result.error.message}`)
+  const committed = assertCommittedRosterResponse(result.data, { studentId, classId, expectedMode, nextMode })
+  await verifyRosterProjection(authenticatedRosterClient, { studentId, classId, nextMode }, committed)
+  return committed
+}
+
+async function removeRosterPairs(authenticatedRosterClient, pairs, memo, { allowMissing = false } = {}) {
+  for (const pair of sortRosterPairs(pairs)) {
+    let projection
+    try {
+      projection = await readRosterProjection(authenticatedRosterClient, pair.studentId, pair.classId)
+    } catch (error) {
+      if (allowMissing && error instanceof Error && error.message === "Roster fixture pair was not found.") continue
+      throw error
+    }
+    const expectedMode = rosterModeFromProjection(projection, pair.studentId, pair.classId)
+    await setRosterMode(authenticatedRosterClient, { ...pair, expectedMode, nextMode: "removed", memo })
+  }
+}
+
+async function captureBrowserFixtureCleanup(cleanupErrors, label, operation) {
+  try {
+    return await operation()
+  } catch (error) {
+    cleanupErrors.push(new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }))
+    return null
+  }
+}
+
+async function archiveAuditFixtures(setupClient, { taskIds = [], studentIds, classIds, textbookIds = [], teacherIds = [], prefix }) {
+  const archivedName = `[ARCHIVED] ${prefix}`
+  const writes = [
+    setupClient.from("students").update({ name: `${archivedName} student`, status: "퇴원" }).in("id", studentIds),
+    setupClient.from("classes").update({ name: `${archivedName} class`, status: "종강" }).in("id", classIds),
+  ]
+  if (textbookIds.length > 0) writes.push(setupClient.from("textbooks").update({ name: `${archivedName} textbook`, title: `${archivedName} textbook`, status: "inactive" }).in("id", textbookIds))
+  if (teacherIds.length > 0) writes.push(setupClient.from("teacher_catalogs").update({ name: `${archivedName} teacher`, is_visible: false }).in("id", teacherIds))
+  for (const result of await Promise.all(writes)) {
+    if (result.error) throw new Error(`audit fixture archive failed: ${result.error.message}`)
+  }
+  const zeroCount = Promise.resolve({ count: 0, error: null })
+  const [activeTasks, activeStudents, activeClasses, activeTextbooks, activeTeachers, history] = await Promise.all([
+    taskIds.length > 0 ? setupClient.from("ops_tasks").select("id", { count: "exact", head: true }).in("id", taskIds) : zeroCount,
+    setupClient.from("students").select("id", { count: "exact", head: true }).ilike("name", `${prefix}%`),
+    setupClient.from("classes").select("id", { count: "exact", head: true }).ilike("name", `${prefix}%`),
+    textbookIds.length > 0 ? setupClient.from("textbooks").select("id", { count: "exact", head: true }).ilike("name", `${prefix}%`) : zeroCount,
+    teacherIds.length > 0 ? setupClient.from("teacher_catalogs").select("id", { count: "exact", head: true }).ilike("name", `${prefix}%`) : zeroCount,
+    setupClient.from("student_class_enrollment_history").select("id", { count: "exact", head: true }).in("student_id", studentIds),
+  ])
+  for (const result of [activeTasks, activeStudents, activeClasses, activeTextbooks, activeTeachers, history]) {
+    if (result.error) throw new Error(`audit fixture verification failed: ${result.error.message}`)
+  }
+  const activeCounts = [activeTasks, activeStudents, activeClasses, activeTextbooks, activeTeachers]
+    .map((result) => Number(result.count || 0))
+  return {
+    activeFixtureRows: activeCounts.reduce((sum, count) => sum + count, 0),
+    auditHistoryRetained: Number(history.count || 0),
+  }
+}
+
+function printAuditFixtureResetInstruction(scope) {
+  console.log(`Audit-bearing roster fixtures were archived on the disposable localhost database (${scope}). Cleanup: pnpm dlx supabase@2.109.1 db reset.`)
 }
 
 function includesId(value, id) {
@@ -707,7 +971,7 @@ function buildOperationCompletionFixtureIds() {
 }
 
 async function createOperationCompletionFixtures(viewportName, loginId, password) {
-  const client = await createAdminSupabaseClient(loginId, password)
+  const { setupClient: client, authenticatedRosterClient, databaseScope } = await createFixtureClients(loginId, password)
   const token = `${viewportName}-${Date.now()}-${compactUuid()}`
   const prefix = `${UI_COMPLETION_PREFIX} ${token}`
   const ids = buildOperationCompletionFixtureIds()
@@ -780,7 +1044,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
         name: `${prefix} 퇴원학생`,
         grade: "고1",
         enroll_date: today,
-        class_ids: [ids.classes.withdrawal],
+        class_ids: [],
         waitlist_class_ids: [],
         school: "검증고",
         contact: "010-0000-0002",
@@ -792,7 +1056,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
         name: `${prefix} 전반학생`,
         grade: "고1",
         enroll_date: today,
-        class_ids: [ids.classes.transferFrom],
+        class_ids: [],
         waitlist_class_ids: [],
         school: "검증고",
         contact: "010-0000-0003",
@@ -804,7 +1068,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
         name: `${prefix} 재시험학생`,
         grade: "고1",
         enroll_date: today,
-        class_ids: [ids.classes.wordRetest],
+        class_ids: [],
         waitlist_class_ids: [],
         school: "검증고",
         contact: "010-0000-0004",
@@ -834,7 +1098,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
         name: `${prefix} 퇴원반`,
         teacher: teacherName,
         schedule: "",
-        student_ids: [ids.students.withdrawal],
+        student_ids: [],
         waitlist_ids: [],
         textbook_ids: [],
         room: "본관 2강",
@@ -849,7 +1113,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
         name: `${prefix} 전반 전반`,
         teacher: teacherName,
         schedule: "",
-        student_ids: [ids.students.transfer],
+        student_ids: [],
         waitlist_ids: [],
         textbook_ids: [],
         room: "별관 1강",
@@ -879,7 +1143,7 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
         name: `${prefix} 재시험반`,
         teacher: teacherName,
         schedule: "",
-        student_ids: [ids.students.wordRetest],
+        student_ids: [],
         waitlist_ids: [],
         textbook_ids: [ids.textbooks.wordRetest],
         room: "본관 3강",
@@ -890,6 +1154,19 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
         status: "수강",
       },
     ]), "class fixture insert")
+
+    for (const pair of sortRosterPairs([
+      { studentId: ids.students.withdrawal, classId: ids.classes.withdrawal },
+      { studentId: ids.students.transfer, classId: ids.classes.transferFrom },
+      { studentId: ids.students.wordRetest, classId: ids.classes.wordRetest },
+    ])) {
+      await setRosterMode(authenticatedRosterClient, {
+        ...pair,
+        expectedMode: "removed",
+        nextMode: "enrolled",
+        memo: `${UI_COMPLETION_PREFIX} roster seed`,
+      })
+    }
 
     const tasks = [
       {
@@ -991,7 +1268,6 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
 
     ensureQueryOk(await client.from("ops_registration_details").insert({
       task_id: ids.tasks.registration,
-      inquiry_channel: "검증",
       inquiry_at: now,
       school_grade: "고1",
       school_name: "검증고",
@@ -1059,22 +1335,41 @@ async function createOperationCompletionFixtures(viewportName, loginId, password
       retest_status: "in_progress",
     }), "word retest detail fixture insert")
 
-    return { client, prefix, ids, tasks }
+    return { client, authenticatedRosterClient, databaseScope, prefix, ids, tasks }
   } catch (error) {
-    await cleanupOperationCompletionFixtures({ client, ids }).catch(() => {})
+    try {
+      await cleanupOperationCompletionFixtures(
+        { client, authenticatedRosterClient, databaseScope, prefix, ids },
+        { allowPartial: true },
+      )
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Operation fixture creation and cleanup failed.")
+    }
     throw error
   }
 }
 
-async function cleanupOperationCompletionFixtures(fixtureSet) {
+async function cleanupOperationCompletionFixtures(fixtureSet, { allowPartial = false } = {}) {
   const client = fixtureSet?.client
+  const authenticatedRosterClient = fixtureSet?.authenticatedRosterClient
   const ids = fixtureSet?.ids
-  if (!client || !ids) return
+  if (!client || !authenticatedRosterClient || !ids) return
   const taskIds = Object.values(ids.tasks || {})
   const studentIds = Object.values(ids.students || {})
   const classIds = Object.values(ids.classes || {})
   const textbookIds = Object.values(ids.textbooks || {})
   const teacherIds = [ids.teacher].filter(Boolean)
+  const cleanupErrors = []
+
+  await captureBrowserFixtureCleanup(cleanupErrors, "roster cleanup", () =>
+    removeRosterPairs(authenticatedRosterClient, [
+      { studentId: ids.students.registration, classId: ids.classes.registration },
+      { studentId: ids.students.withdrawal, classId: ids.classes.withdrawal },
+      { studentId: ids.students.transfer, classId: ids.classes.transferFrom },
+      { studentId: ids.students.transfer, classId: ids.classes.transferTo },
+      { studentId: ids.students.wordRetest, classId: ids.classes.wordRetest },
+    ], `${UI_COMPLETION_PREFIX} roster cleanup`, { allowMissing: allowPartial }),
+  )
 
   for (const table of [
     "ops_task_comments",
@@ -1085,18 +1380,33 @@ async function cleanupOperationCompletionFixtures(fixtureSet) {
     "ops_transfer_details",
     "ops_word_retests",
   ]) {
-    await deleteByIds(client, table, "task_id", taskIds).catch(() => {})
+    await captureBrowserFixtureCleanup(cleanupErrors, `${table} cleanup`, () =>
+      deleteByIds(client, table, "task_id", taskIds),
+    )
   }
-  await deleteByIds(client, "ops_tasks", "id", taskIds).catch(() => {})
-  await deleteByIds(client, "student_class_enrollment_history", "student_id", studentIds).catch(() => {})
-  await deleteByIds(client, "students", "id", studentIds).catch(() => {})
-  await deleteByIds(client, "classes", "id", classIds).catch(() => {})
-  await deleteByIds(client, "textbooks", "id", textbookIds).catch(() => {})
-  await deleteByIds(client, "teacher_catalogs", "id", teacherIds).catch(() => {})
+  await captureBrowserFixtureCleanup(cleanupErrors, "ops_tasks cleanup", () =>
+    deleteByIds(client, "ops_tasks", "id", taskIds),
+  )
+  const archive = await captureBrowserFixtureCleanup(cleanupErrors, "audit fixture archive", () =>
+    archiveAuditFixtures(client, {
+      taskIds,
+      studentIds,
+      classIds,
+      textbookIds,
+      teacherIds,
+      prefix: fixtureSet.prefix,
+    }),
+  )
+  if (archive && (archive.activeFixtureRows !== 0 || (!allowPartial && archive.auditHistoryRetained < 1))) {
+    cleanupErrors.push(new Error(`Operation fixture archive verification failed: ${JSON.stringify(archive)}`))
+  }
+  if (archive) printAuditFixtureResetInstruction(fixtureSet.databaseScope)
+  if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, "Browser fixture cleanup failed.")
+  return archive
 }
 
 async function createRegistrationWorkflowFixture(viewportName, loginId, password) {
-  const client = await createAdminSupabaseClient(loginId, password)
+  const { setupClient: client, authenticatedRosterClient, databaseScope } = await createFixtureClients(loginId, password)
   const token = `${viewportName}-${Date.now()}-${compactUuid()}`
   const prefix = `${UI_REGISTRATION_PREFIX} ${token}`
   const ids = {
@@ -1154,7 +1464,6 @@ async function createRegistrationWorkflowFixture(viewportName, loginId, password
 
     ensureQueryOk(await client.from("ops_registration_details").insert({
       task_id: ids.task,
-      inquiry_channel: "전화",
       inquiry_at: now,
       school_grade: "고1",
       school_name: "검증고",
@@ -1169,26 +1478,59 @@ async function createRegistrationWorkflowFixture(viewportName, loginId, password
       request_note: UI_REGISTRATION_PREFIX,
     }), "registration workflow detail fixture insert")
 
-    return { client, ids, title: `${prefix} 신청서` }
+    return { client, authenticatedRosterClient, databaseScope, prefix, ids, title: `${prefix} 신청서` }
   } catch (error) {
-    await cleanupRegistrationWorkflowFixture({ client, ids }).catch(() => {})
+    try {
+      await cleanupRegistrationWorkflowFixture(
+        { client, authenticatedRosterClient, databaseScope, prefix, ids },
+        { allowPartial: true },
+      )
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Registration fixture creation and cleanup failed.")
+    }
     throw error
   }
 }
 
-async function cleanupRegistrationWorkflowFixture(fixture) {
+async function cleanupRegistrationWorkflowFixture(fixture, { allowPartial = false } = {}) {
   const client = fixture?.client
+  const authenticatedRosterClient = fixture?.authenticatedRosterClient
   const ids = fixture?.ids
-  if (!client || !ids) return
-  await deleteByIds(client, "ops_registration_messages", "task_id", [ids.task]).catch(() => {})
-  await deleteByIds(client, "ops_task_events", "task_id", [ids.task]).catch(() => {})
-  await deleteByIds(client, "ops_task_comments", "task_id", [ids.task]).catch(() => {})
-  await deleteByIds(client, "ops_task_attachments", "task_id", [ids.task]).catch(() => {})
-  await deleteByIds(client, "ops_registration_details", "task_id", [ids.task]).catch(() => {})
-  await deleteByIds(client, "ops_tasks", "id", [ids.task]).catch(() => {})
-  await deleteByIds(client, "student_class_enrollment_history", "student_id", [ids.student]).catch(() => {})
-  await deleteByIds(client, "students", "id", [ids.student]).catch(() => {})
-  await deleteByIds(client, "classes", "id", [ids.class]).catch(() => {})
+  if (!client || !authenticatedRosterClient || !ids) return
+  const cleanupErrors = []
+  await captureBrowserFixtureCleanup(cleanupErrors, "roster cleanup", () =>
+    removeRosterPairs(authenticatedRosterClient, [
+      { studentId: ids.student, classId: ids.class },
+    ], `${UI_REGISTRATION_PREFIX} roster cleanup`, { allowMissing: allowPartial }),
+  )
+  for (const table of [
+    "ops_registration_messages",
+    "ops_task_events",
+    "ops_task_comments",
+    "ops_task_attachments",
+    "ops_registration_details",
+  ]) {
+    await captureBrowserFixtureCleanup(cleanupErrors, `${table} cleanup`, () =>
+      deleteByIds(client, table, "task_id", [ids.task]),
+    )
+  }
+  await captureBrowserFixtureCleanup(cleanupErrors, "ops_tasks cleanup", () =>
+    deleteByIds(client, "ops_tasks", "id", [ids.task]),
+  )
+  const archive = await captureBrowserFixtureCleanup(cleanupErrors, "audit fixture archive", () =>
+    archiveAuditFixtures(client, {
+      taskIds: [ids.task],
+      studentIds: [ids.student],
+      classIds: [ids.class],
+      prefix: fixture.prefix,
+    }),
+  )
+  if (archive && (archive.activeFixtureRows !== 0 || (!allowPartial && archive.auditHistoryRetained < 2))) {
+    cleanupErrors.push(new Error(`Registration fixture archive verification failed: ${JSON.stringify(archive)}`))
+  }
+  if (archive) printAuditFixtureResetInstruction(fixture.databaseScope)
+  if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, "Browser fixture cleanup failed.")
+  return archive
 }
 
 async function readRegistrationWorkflowState(fixture) {
@@ -1466,7 +1808,7 @@ async function verifyInitialSelectControls(dialog, route) {
 
 async function verifyRegistrationSinglePageDialog(dialog) {
   const dialogText = await dialog.innerText({ timeout: 5000 })
-  for (const expectedLabel of ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리", "지금 입력"]) {
+  for (const expectedLabel of ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리", "필수", "선택"]) {
     if (!dialogText.includes(expectedLabel)) throw new Error(`registration dialog is missing ${expectedLabel}.`)
   }
   if (/\b1\/4\b/.test(dialogText)) throw new Error("registration dialog still shows the old step progress label.")
@@ -1481,7 +1823,13 @@ async function verifyRegistrationSinglePageDialog(dialog) {
   if (!(await dialog.getByLabel("학생명", { exact: true }).isEnabled().catch(() => false))) {
     throw new Error("registration inquiry fields are not enabled.")
   }
-  for (const futureField of ["레벨테스트 예약일시", "전화상담 예약일시", "수업", "수납 완료 확인"]) {
+  for (const earlyField of ["레벨테스트 예약일시", "전화상담 예약일시"]) {
+    const field = dialog.getByLabel(earlyField, { exact: true }).first()
+    if (!(await field.count().catch(() => 0)) || !(await field.isEnabled().catch(() => false))) {
+      throw new Error(`registration early field is not enabled: ${earlyField}.`)
+    }
+  }
+  for (const futureField of ["수업", "수납 완료 확인"]) {
     const field = dialog.getByLabel(futureField, { exact: true }).first()
     if (!(await field.count().catch(() => 0)) || !(await field.isDisabled().catch(() => false))) {
       throw new Error(`registration future field is not locked: ${futureField}.`)
@@ -1728,12 +2076,31 @@ async function selectManualIfPresent(page, scope, label) {
   return true
 }
 
+async function selectListboxOptionIfPresent(page, scope, label, optionLabel) {
+  const field = scope.getByLabel(label, { exact: true }).first()
+  if (!(await field.count().catch(() => 0))) return false
+  await field.waitFor({ state: "visible", timeout: 5000 })
+  await field.click()
+  const option = page.getByRole("option", { name: optionLabel, exact: true }).first()
+  await option.waitFor({ state: "visible", timeout: 5000 })
+  await option.click()
+  return true
+}
+
 async function fillOperationMinimumFields(page, dialog, route, sampleName) {
   if (route.name === "registration") {
     if (!(await fillIfPresent(dialog, "학생명", sampleName))) {
       throw new Error("Registration student name input was not found.")
     }
-    await fillIfPresent(dialog, "학년", "테스트")
+    const englishSubject = dialog.getByRole("button", { name: "영어", exact: true }).first()
+    await englishSubject.waitFor({ state: "visible", timeout: 5000 })
+    await englishSubject.click()
+    if (!(await fillIfPresent(dialog, "학부모 전화", "010-1234-5678"))) {
+      throw new Error("Registration parent phone input was not found.")
+    }
+    if (!(await selectListboxOptionIfPresent(page, dialog, "학년", "고1"))) {
+      throw new Error("Registration grade listbox was not found.")
+    }
     await fillIfPresent(dialog, "학교", "테스트")
     return
   }
@@ -1784,7 +2151,8 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
       await verifyFlatOperationDialog(dialog, route)
     }
     const visibleControls = await countVisibleControls(dialog, { enabledOnly: route.name === "registration" })
-    if (visibleControls > MAX_INITIAL_TEMPLATE_CONTROLS) {
+    const maxVisibleControls = route.name === "registration" ? 32 : MAX_INITIAL_TEMPLATE_CONTROLS
+    if (visibleControls > maxVisibleControls) {
       throw new Error(`${route.name} first step is too dense: ${visibleControls} visible controls.`)
     }
     await verifyInitialSelectControls(dialog, route)
@@ -2227,7 +2595,134 @@ async function verifyRouteInteraction(page, route, options = {}) {
   if (route.interaction === "quick-add") return verifyQuickAddInteraction(page, options.quickAddSampleCount)
   if (route.interaction === "open-create") return verifyCreateDialogInteraction(page, route, options.operationSampleCount)
   if (route.interaction === "approval-draft") return verifyApprovalDraftInteraction(page)
+  if (route.interaction === "registration-subject-track-fixture") return verifyRegistrationSubjectTrackFixture(page, options)
   return {}
+}
+
+async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
+  async function assertNoHorizontalOverflow(locator, label) {
+    const metrics = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }))
+    if (metrics.scrollWidth > metrics.viewportWidth + 8) {
+      throw new Error(`${label} has page-level horizontal overflow: ${metrics.scrollWidth}px over ${metrics.viewportWidth}px.`)
+    }
+    const surface = await locator.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      viewportWidth: element.clientWidth,
+    }))
+    if (surface.scrollWidth > surface.viewportWidth + 8) {
+      throw new Error(`${label} has dialog horizontal overflow: ${surface.scrollWidth}px over ${surface.viewportWidth}px.`)
+    }
+  }
+
+  async function openRegistrationSubjectTrackFixtureCase({ taskId, trackId, studentName, fixtureRole = "english_admin" }) {
+    const search = new URLSearchParams({
+      fixture: "registration-subject-tracks",
+      fixtureRole,
+      taskId,
+      trackId,
+    })
+    await page.goto(joinUrl(baseUrl, `/admin/registration?${search.toString()}`), { waitUntil: "networkidle" })
+    const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
+    await dialog.waitFor({ state: "visible", timeout: 5000 })
+    await assertNoHorizontalOverflow(dialog, `${studentName} subject-track fixture`)
+    return dialog
+  }
+
+  async function requireVisibleText(locator, text, label = text) {
+    const candidates = locator.getByText(text, { exact: false })
+    const count = await candidates.count().catch(() => 0)
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index)
+      if (await candidate.isVisible().catch(() => false)) return candidate
+    }
+    throw new Error(`registration subject-track fixture is missing visible ${label}.`)
+  }
+
+  const tabs = ["문의", "레벨테스트", "상담", "대기", "등록", "완료"]
+  for (const label of tabs) {
+    await page.getByRole("tab", { name: new RegExp(`^${label}`) }).first().waitFor({ state: "visible", timeout: 5000 })
+  }
+  await page.getByRole("tab", { name: /^레벨테스트/ }).first().click()
+  await page.getByText("김다미", { exact: true }).first().waitFor({ state: "visible", timeout: 5000 })
+  await page.getByRole("tab", { name: /^상담/ }).first().click()
+  await page.getByText("박서준", { exact: true }).first().waitFor({ state: "visible", timeout: 5000 })
+  await page.getByRole("tab", { name: /^등록/ }).first().click()
+  await page.getByText("최유진", { exact: true }).first().waitFor({ state: "visible", timeout: 5000 })
+
+  const dualDialog = await openRegistrationSubjectTrackFixtureCase({
+    taskId: "fixture-task-dual-test",
+    trackId: "fixture-track-dual-english",
+    studentName: "김다미",
+  })
+  await dualDialog.getByRole("button", { name: "예약 및 과목별 결과 관리" }).click()
+  const sharedAppointment = dualDialog.locator('section[aria-label="레벨테스트 예약"]')
+  await requireVisibleText(sharedAppointment, "적용 과목")
+  const selectedSubjects = sharedAppointment.locator('button[aria-pressed="true"]')
+  if (await selectedSubjects.count() !== 2) throw new Error("shared level-test fixture does not select exactly two subjects.")
+  const selectedSubjectText = await selectedSubjects.allInnerTexts()
+  if (!selectedSubjectText.includes("영어") || !selectedSubjectText.includes("수학")) {
+    throw new Error("shared level-test fixture is missing an English or Math participant.")
+  }
+
+  const splitPhoneDialog = await openRegistrationSubjectTrackFixtureCase({
+    taskId: "fixture-task-split-consultation",
+    trackId: "fixture-track-split-math",
+    studentName: "박서준",
+  })
+  await requireVisibleText(splitPhoneDialog, "전화상담은 예약 없이")
+  const phoneStage = splitPhoneDialog.locator('section[aria-label="수학 상담 대기"]')
+  if ((await phoneStage.getByText("예약 일시", { exact: false }).count()) > 0) {
+    throw new Error("phone consultation fixture rendered a reservation time.")
+  }
+  await splitPhoneDialog.getByRole("tab", { name: /^영어 · 방문상담 예약$/ }).click()
+  await requireVisibleText(splitPhoneDialog, "방문상담 일시")
+  await requireVisibleText(splitPhoneDialog, "방문상담 장소")
+  await requireVisibleText(splitPhoneDialog, "본관 상담실")
+
+  const multipleDialog = await openRegistrationSubjectTrackFixtureCase({
+    taskId: "fixture-task-multiple-classes",
+    trackId: "fixture-track-multiple-english",
+    studentName: "최유진",
+  })
+  await requireVisibleText(multipleDialog, "고1 영어 정규 A")
+  await requireVisibleText(multipleDialog, "고1 영어 특강")
+  await requireVisibleText(multipleDialog, "수업 추가")
+  await requireVisibleText(multipleDialog, "1. 입학신청서 발송")
+
+  const readOnlyAdmissionDialog = await openRegistrationSubjectTrackFixtureCase({
+    taskId: "fixture-task-partial-registration",
+    trackId: "fixture-track-partial-math",
+    studentName: "이도윤",
+    fixtureRole: "assistant",
+  })
+  await requireVisibleText(readOnlyAdmissionDialog, "읽기 전용 입학 처리 상태")
+  if ((await readOnlyAdmissionDialog.getByRole("button", { name: "입학 처리 시작" }).count()) > 0) {
+    throw new Error("assistant fixture exposed an admission mutation button.")
+  }
+
+  const migrationDialog = await openRegistrationSubjectTrackFixtureCase({
+    taskId: "fixture-task-migration-review",
+    trackId: "fixture-track-review-english",
+    studentName: "윤지호",
+  })
+  await requireVisibleText(migrationDialog, "과목 분리 확인 필요")
+  if ((await migrationDialog.locator('section[aria-label="영어 문의 처리"]').count()) > 0) {
+    throw new Error("migration review fixture exposed ordinary stage actions before attribution.")
+  }
+
+  return {
+    subjectTrackFixture: true,
+    scenarios: [
+      "same-day dual level test",
+      "split visit and phone consultation",
+      "multiple English classes",
+      "admission checklist permissions",
+      "migration review gate",
+    ],
+  }
 }
 
 async function login(page, baseUrl, candidates, password, artifactDir) {
@@ -2311,7 +2806,7 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
     if (consoleMessages.length > 0 || pageErrors.length > 0 || responseErrors.length > 0) {
       throw new Error(`${route.name} has browser errors: ${[...consoleMessages, ...pageErrors, ...responseErrors].join(" | ")}`)
     }
-    const interactionResult = await verifyRouteInteraction(page, route, options)
+    const interactionResult = await verifyRouteInteraction(page, route, { ...options, baseUrl })
 
     return {
       name: route.name,
@@ -2455,6 +2950,7 @@ async function runViewport(browser, baseUrl, candidates, password, viewport, sto
 }
 
 async function run() {
+  verifySubjectTrackSamples()
   loadEnvFile(resolve(ROOT, ".env.ops-browser.local"))
   loadEnvFile(resolve(ROOT, ".env.local"))
 
@@ -2475,6 +2971,16 @@ async function run() {
     }
     if (!requireEnabled()) return
   }
+
+  const browserTarget = new URL(baseUrl)
+  if (!["localhost", "127.0.0.1", "::1"].includes(browserTarget.hostname)) {
+    throw new Error("OPS_BROWSER_BASE_URL must use localhost for authenticated workflow verification.")
+  }
+  const authorizedSupabaseUrl = env("SUPABASE_URL", env("NEXT_PUBLIC_SUPABASE_URL", env("VITE_SUPABASE_URL")))
+  if (!authorizedSupabaseUrl) {
+    throw new Error("Authenticated browser verification requires an explicit localhost Supabase URL.")
+  }
+  assertAuthorizedLocalFixtureDatabase(authorizedSupabaseUrl)
 
   const loginId = env("OPS_BROWSER_LOGIN_ID", env("OPS_BROWSER_EMAIL"))
   const password = env("OPS_BROWSER_PASSWORD")

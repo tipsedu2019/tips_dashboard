@@ -6,6 +6,295 @@ import {
   filterChangedTeacherCatalogPayload,
 } from "../src/features/management/management-service.js";
 
+function makeReadyRosterRpcClient() {
+  const calls = { rpc: [], tables: [] };
+  const rows = {
+    students: [{
+      id: "student-1",
+      name: "김학생",
+      class_ids: [],
+      waitlist_class_ids: ["class-1"],
+    }],
+    classes: [{
+      id: "class-1",
+      name: "영어 A",
+      student_ids: [],
+      waitlist_ids: ["student-1"],
+    }],
+  };
+
+  return {
+    calls,
+    from(table) {
+      calls.tables.push(table);
+      return {
+        async select() {
+          return { data: rows[table] || [], error: null };
+        },
+      };
+    },
+    async rpc(name, args) {
+      calls.rpc.push([name, args]);
+      const removed = args.p_next_mode === "removed";
+      return {
+        data: {
+          studentId: "student-1",
+          classId: "class-1",
+          previousMode: "waitlist",
+          nextMode: args.p_next_mode,
+          changed: true,
+          studentClassIds: removed ? [] : ["class-1"],
+          studentWaitlistClassIds: [],
+          classStudentIds: removed ? [] : ["student-1"],
+          classWaitlistIds: [],
+        },
+        error: null,
+      };
+    },
+  };
+}
+
+function makeStudentDeleteGuardClient({ student, classes = [], history = [], registrationEnrollments = [] }) {
+  const calls = { deletes: [] };
+  const rows = {
+    students: student ? [student] : [],
+    classes,
+    student_class_enrollment_history: history,
+    ops_registration_enrollments: registrationEnrollments,
+  };
+  return {
+    calls,
+    from(table) {
+      return {
+        async select() {
+          return { data: rows[table] || [], error: null };
+        },
+        delete() {
+          return {
+            async in(column, ids) {
+              calls.deletes.push([table, column, ids]);
+              return { data: [], error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+test("ready management roster assignment returns only the committed atomic RPC projection", async () => {
+  const client = makeReadyRosterRpcClient();
+  const service = createManagementService({
+    supabase: client,
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+  });
+
+  const result = await service.assignStudentToClass({
+    studentId: "student-1",
+    classId: "class-1",
+    mode: "enrolled",
+  });
+
+  assert.deepEqual(client.calls.rpc, [["set_student_class_roster_mode", {
+    p_student_id: "student-1",
+    p_class_id: "class-1",
+    p_next_mode: "enrolled",
+    p_expected_mode: "waitlist",
+    p_memo: "management_roster",
+  }]]);
+  assert.deepEqual(result.student.class_ids, ["class-1"]);
+  assert.deepEqual(result.student.waitlist_class_ids, []);
+  assert.equal(result.student.status, "재원");
+  assert.deepEqual(result.class.student_ids, ["student-1"]);
+  assert.deepEqual(result.class.waitlist_ids, []);
+  assert.deepEqual(client.calls.tables.sort(), ["classes", "students"]);
+});
+
+test("ready management roster rejects an incomplete or mismatched committed projection", async () => {
+  const missingArraysClient = makeReadyRosterRpcClient();
+  missingArraysClient.rpc = async () => ({
+    data: {
+      studentId: "student-1",
+      classId: "class-1",
+      previousMode: "waitlist",
+      nextMode: "enrolled",
+      changed: true,
+    },
+    error: null,
+  });
+  const missingArraysService = createManagementService({
+    supabase: missingArraysClient,
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+  });
+  await assert.rejects(
+    missingArraysService.assignStudentToClass({ studentId: "student-1", classId: "class-1", mode: "enrolled" }),
+    /명단 변경 결과를 다시 불러오세요/,
+  );
+
+  const mismatchedClient = makeReadyRosterRpcClient();
+  const originalRpc = mismatchedClient.rpc.bind(mismatchedClient);
+  mismatchedClient.rpc = async (name, args) => {
+    const result = await originalRpc(name, args);
+    return { ...result, data: { ...result.data, studentId: "student-other" } };
+  };
+  const mismatchedService = createManagementService({
+    supabase: mismatchedClient,
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+  });
+  await assert.rejects(
+    mismatchedService.assignStudentToClass({ studentId: "student-1", classId: "class-1", mode: "enrolled" }),
+    /명단 변경 결과를 다시 불러오세요/,
+  );
+
+  const wrongModeClient = makeReadyRosterRpcClient();
+  const wrongModeRpc = wrongModeClient.rpc.bind(wrongModeClient);
+  wrongModeClient.rpc = async (name, args) => {
+    const result = await wrongModeRpc(name, args);
+    return { ...result, data: { ...result.data, nextMode: "waitlist" } };
+  };
+  const wrongModeService = createManagementService({
+    supabase: wrongModeClient,
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+  });
+  await assert.rejects(
+    wrongModeService.assignStudentToClass({ studentId: "student-1", classId: "class-1", mode: "enrolled" }),
+    /명단 변경 결과를 다시 불러오세요/,
+  );
+});
+
+test("maintenance management roster controls fail closed before any table or RPC write", async () => {
+  const client = makeReadyRosterRpcClient();
+  const service = createManagementService({
+    supabase: client,
+    probeRegistrationRuntime: async () => ({ mode: "maintenance", version: 0 }),
+  });
+
+  await assert.rejects(
+    service.removeStudentFromClass({ studentId: "student-1", classId: "class-1" }),
+    /데이터 전환 중/,
+  );
+  assert.deepEqual(client.calls.rpc, []);
+  assert.deepEqual(client.calls.tables, []);
+});
+
+test("ready management roster removal returns the committed removed projection", async () => {
+  const client = makeReadyRosterRpcClient();
+  const service = createManagementService({
+    supabase: client,
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+  });
+
+  const result = await service.removeStudentFromClass({
+    studentId: "student-1",
+    classId: "class-1",
+  });
+
+  assert.deepEqual(client.calls.rpc, [["set_student_class_roster_mode", {
+    p_student_id: "student-1",
+    p_class_id: "class-1",
+    p_next_mode: "removed",
+    p_expected_mode: "waitlist",
+    p_memo: "management_roster",
+  }]]);
+  assert.deepEqual(result.student.class_ids, []);
+  assert.deepEqual(result.student.waitlist_class_ids, []);
+  assert.deepEqual(result.class.student_ids, []);
+  assert.deepEqual(result.class.waitlist_ids, []);
+});
+
+test("a missing ready management roster RPC invalidates readiness instead of falling back", async () => {
+  const client = makeReadyRosterRpcClient();
+  const missingRpc = { code: "PGRST202", message: "Could not find the function in the schema cache" };
+  let invalidatedWith = null;
+  client.rpc = async () => ({ data: null, error: missingRpc });
+  const service = createManagementService({
+    supabase: client,
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+    invalidateRegistrationRuntimeAfterReadyFailure(error) {
+      invalidatedWith = error;
+      throw new Error("runtime integrity failure");
+    },
+  });
+
+  await assert.rejects(
+    service.assignStudentToClass({ studentId: "student-1", classId: "class-1", mode: "enrolled" }),
+    /runtime integrity failure/,
+  );
+  assert.equal(invalidatedWith, missingRpc);
+});
+
+test("ready student and class saves strip canonical roster fields and direct student status", async () => {
+  const studentClient = makeStudentUpsertClient("__never_missing__");
+  const studentService = createManagementService({
+    supabase: studentClient,
+    generateId: () => "student-1",
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+  });
+  await studentService.updateStudent({
+    id: "student-1",
+    name: "김학생",
+    status: "퇴원",
+    classIds: ["class-1"],
+    waitlistClassIds: ["class-2"],
+  });
+  assert.ok(!Object.prototype.hasOwnProperty.call(studentClient.calls[0], "status"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(studentClient.calls[0], "class_ids"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(studentClient.calls[0], "waitlist_class_ids"));
+
+  const classClient = makeClassUpsertClient("__never_missing__");
+  const classService = createManagementService({
+    supabase: classClient,
+    generateId: () => "class-1",
+    probeRegistrationRuntime: async () => ({ mode: "ready", version: 1 }),
+  });
+  await classService.updateClass({
+    id: "class-1",
+    name: "영어 A",
+    studentIds: ["student-1"],
+    waitlistIds: ["student-2"],
+  });
+  assert.ok(!Object.prototype.hasOwnProperty.call(classClient.calls[0], "student_ids"));
+  assert.ok(!Object.prototype.hasOwnProperty.call(classClient.calls[0], "waitlist_ids"));
+});
+
+test("student physical deletion checks reverse roster links and immutable history", async () => {
+  const reverseLinkedClient = makeStudentDeleteGuardClient({
+    student: { id: "student-1", class_ids: [], waitlist_class_ids: [] },
+    classes: [{ id: "class-1", student_ids: ["student-1"], waitlist_ids: [] }],
+  });
+  await assert.rejects(
+    createManagementService({ supabase: reverseLinkedClient }).deleteStudent("student-1"),
+    /퇴원 처리하세요/,
+  );
+  assert.deepEqual(reverseLinkedClient.calls.deletes, []);
+
+  const historyClient = makeStudentDeleteGuardClient({
+    student: { id: "student-1", class_ids: [], waitlist_class_ids: [] },
+    history: [{ student_id: "student-1", class_id: "class-old" }],
+  });
+  await assert.rejects(
+    createManagementService({ supabase: historyClient }).deleteStudent("student-1"),
+    /퇴원 처리하세요/,
+  );
+  assert.deepEqual(historyClient.calls.deletes, []);
+
+  const registrationHistoryClient = makeStudentDeleteGuardClient({
+    student: { id: "student-1", class_ids: [], waitlist_class_ids: [] },
+    registrationEnrollments: [{ student_id: "student-1", class_id: "class-old", status: "canceled" }],
+  });
+  await assert.rejects(
+    createManagementService({ supabase: registrationHistoryClient }).deleteStudent("student-1"),
+    /퇴원 처리하세요/,
+  );
+  assert.deepEqual(registrationHistoryClient.calls.deletes, []);
+
+  const mistakenRowClient = makeStudentDeleteGuardClient({
+    student: { id: "student-1", class_ids: [], waitlist_class_ids: [] },
+  });
+  await createManagementService({ supabase: mistakenRowClient }).deleteStudent("student-1");
+  assert.deepEqual(mistakenRowClient.calls.deletes, [["students", "id", ["student-1"]]]);
+});
+
 function makeStudentUpsertClient(errorColumn) {
   const calls = [];
 

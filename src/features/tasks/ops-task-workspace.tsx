@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type Dispatch, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, MessageSquareText, Pencil, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, BookOpenCheck, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, MessageSquareText, Pencil, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,7 +21,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { DatePickerControl } from "@/components/ui/date-time-picker"
+import { DateTimePickerControl, DatePickerControl } from "@/components/ui/date-time-picker"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -61,14 +61,19 @@ import {
   deleteOpsTask,
   emptyOpsTaskWorkspaceData,
   getCachedOpsTaskWorkspaceData,
+  getPersistedOpsTaskWorkspaceData,
+  loadOpsRegistrationCaseDetail,
   loadOpsTaskById,
+  loadOpsRegistrationClassDetail,
   loadOpsTaskWorkspaceData,
+  loadOpsTaskWorkspaceOptionData,
   summarizeOpsTasks,
   updateOpsTask,
   updateOpsTaskStatus,
   type OpsTaskAttachment,
   type OpsTaskEvent,
   type OpsClassOption,
+  type OpsRegistrationClassDetail,
   type OpsLinkedOption,
   type OpsTaskComment,
   type OpsProfileOption,
@@ -81,32 +86,76 @@ import {
   type OpsTaskStatus,
   type OpsTaskType,
   type OpsTaskWorkspaceData,
+  type OpsTaskWorkspaceOptionData,
 } from "./ops-task-service"
 import {
+  applyRegistrationChecklistChange,
   canEditRegistrationTask,
   canSendRegistrationAdmissionMessage,
-  compareRegistrationTasks,
-  getEmptyRegistrationFilters,
   getManualAdmissionCompletionStatus,
   getRegistrationBlockerFocusKey,
+  getRegistrationBranchActions,
   getRegistrationChecklistAvailability,
+  getRegistrationChecklistEditorState,
   getRegistrationCreateBlockers,
   getRegistrationCreateDefaults,
-  getRegistrationDecisionActions,
-  getRegistrationFilterColumnChange,
+  getRegistrationCreateErrorMessage,
   getRegistrationFormState,
   getRegistrationGradeOptions,
   getRegistrationMobileSections,
   getRegistrationPipelinePrefix,
+  getRegistrationPrefillPipelineStatus,
   getRegistrationReopenStatus,
+  getSelectableRegistrationScheduleSessions,
+  getRegistrationTaskStatusForPipeline,
   getRegistrationTransitionBlockers,
-  getRegistrationViewKey,
-  hasActiveRegistrationFilters,
-  isRegistrationFilterInputExpanded,
-  normalizeRegistrationDateRange,
+  getRegistrationWorkflowStages,
+  isValidRegistrationMobilePhone,
+  isRegistrationCompletionImmutable,
   normalizeRegistrationPhone,
+  parseRegistrationSubjects,
+  prepareRegistrationLevelTestRetry,
+  prepareRegistrationPipelineTransition,
+  resolveRegistrationLinkedTextbookDefault,
+  serializeRegistrationSubjects,
   shouldShowRegistrationCompletionBlockers,
 } from "./registration-workflow"
+import {
+  createRegistrationDirectorDefaultState,
+  getRegistrationDirectorDefaultTransition,
+  markRegistrationDirectorDefaultManual,
+  resolveRegistrationDirectorDefault,
+  resolveRegistrationTrackDirectorDefaults,
+} from "./registration-director-default.js"
+import {
+  RegistrationTrackList,
+  buildRegistrationTrackListItems,
+  filterRegistrationTrackListItems,
+  type RegistrationTrackListAction,
+} from "./registration-track-list"
+import { RegistrationTrackEditor } from "./registration-track-editor"
+import { RegistrationAdmissionPanel } from "./registration-enrollment-editor"
+import {
+  assignRegistrationTrackDirector,
+  createRegistrationCase,
+  createRegistrationMutationRequestKey,
+  probeRegistrationSubjectTrackRuntime,
+  type OpsRegistrationCaseDetail,
+  type RegistrationCaseCreateResponse,
+  type RegistrationSubject,
+} from "./registration-track-service"
+import {
+  getRegistrationActionPermissions,
+  getRegistrationTrackTabCounts,
+} from "./registration-track-model.js"
+import {
+  executeRegistrationSubjectTrackFixtureAction,
+  installRegistrationSubjectTrackFixtureRuntime,
+  shouldEnableRegistrationSubjectTrackFixture,
+} from "./registration-track-fixture-runtime"
+import type { RegistrationSubjectTrackFixtureState } from "./registration-track-fixtures"
+
+type RegistrationSubjectTrackFixtureModule = typeof import("./registration-track-fixtures")
 
 type WorkspaceKey = "todo" | "registration" | "transfer" | "withdrawal" | "word_retest"
 type ViewKey = "all" | "status" | "assignee" | "calendar"
@@ -115,7 +164,7 @@ type TodoSortKey = "status" | "priority" | "due"
 type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
 type TodoSelectFilterKey = "all" | string
 type WithdrawalViewKey = "applicant" | "operations" | "closed"
-type RegistrationViewKey = "inquiry" | "consulting" | "waiting" | "enrollment" | "closed"
+type RegistrationViewKey = "inquiry" | "level_test" | "consulting" | "waiting" | "enrollment" | "closed"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
 type GoogleChatChannel = "executive" | "admin" | "math" | "english"
 type WithdrawalNotificationChannelKey = "applicant" | "operations" | "google_chat_admin"
@@ -237,29 +286,6 @@ type TransferTableSort = {
   columnKey: TransferTableColumnKey
   direction: "asc" | "desc"
 } | null
-type RegistrationTableColumnKey =
-  | "pipelineStatus"
-  | "subject"
-  | "schoolGrade"
-  | "schoolName"
-  | "student"
-  | "parentPhone"
-  | "inquiryChannel"
-  | "inquiryAt"
-  | "counselor"
-  | "levelTestAt"
-  | "phoneConsultationAt"
-  | "visitConsultationAt"
-  | "className"
-  | "classStartDate"
-  | "classStartSession"
-  | "requestNote"
-  | "operationsChecklist"
-  | "action"
-type RegistrationTableSort = {
-  columnKey: RegistrationTableColumnKey
-  direction: "asc" | "desc"
-} | null
 type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "total" | "cutoff" | "score" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
 type FormCompletionIntent = {
@@ -294,7 +320,7 @@ type OpsTaskOptionIndexes = {
 }
 type OperationCompletionBlockerMap = Map<string, string[]>
 type OperationConfirmationMap = Map<string, boolean>
-type RegistrationChecklistField = "admissionNoticeSent" | "paymentChecked" | "makeeduRegistered" | "makeeduInvoiceSent" | "textbookBillingIssued"
+type RegistrationChecklistField = "admissionNoticeSent" | "makeeduRegistered" | "makeeduInvoiceSent" | "paymentChecked"
 type WithdrawalChecklistField = "makeeduWithdrawalDone" | "feeProcessed" | "textbookFeeProcessed"
 type TransferChecklistField = "makeeduTransferDone" | "feeProcessed" | "textbookFeeProcessed"
 type FormDetailStepKey =
@@ -397,40 +423,6 @@ const TRANSFER_TABLE_COLUMN_MIN_WIDTHS = TRANSFER_TABLE_COLUMNS.reduce((widths, 
   widths[column.columnKey] = column.minWidth
   return widths
 }, {} as Record<TransferTableColumnKey, number>)
-const REGISTRATION_TABLE_COLUMNS: Array<{
-  columnKey: RegistrationTableColumnKey
-  label: string
-  width: number
-  minWidth: number
-  align?: "left" | "right"
-}> = [
-  { columnKey: "pipelineStatus", label: "진행상태", width: 146, minWidth: 118 },
-  { columnKey: "subject", label: "과목", width: 88, minWidth: 72 },
-  { columnKey: "schoolGrade", label: "학년", width: 96, minWidth: 78 },
-  { columnKey: "schoolName", label: "학교", width: 136, minWidth: 104 },
-  { columnKey: "student", label: "학생", width: 118, minWidth: 96 },
-  { columnKey: "parentPhone", label: "학부모 전화", width: 132, minWidth: 112 },
-  { columnKey: "inquiryChannel", label: "문의채널", width: 110, minWidth: 92 },
-  { columnKey: "inquiryAt", label: "문의일시", width: 140, minWidth: 118 },
-  { columnKey: "counselor", label: "상담 책임자", width: 124, minWidth: 104 },
-  { columnKey: "levelTestAt", label: "레벨테스트", width: 140, minWidth: 118 },
-  { columnKey: "phoneConsultationAt", label: "전화상담", width: 140, minWidth: 118 },
-  { columnKey: "visitConsultationAt", label: "방문상담", width: 140, minWidth: 118 },
-  { columnKey: "className", label: "수업", width: 170, minWidth: 130 },
-  { columnKey: "classStartDate", label: "수업시작일", width: 122, minWidth: 108 },
-  { columnKey: "classStartSession", label: "수업시작회차", width: 118, minWidth: 104 },
-  { columnKey: "requestNote", label: "요청 사항", width: 210, minWidth: 150 },
-  { columnKey: "operationsChecklist", label: "등록 확인", width: 266, minWidth: 214 },
-  { columnKey: "action", label: "액션", width: 188, minWidth: 160, align: "right" },
-]
-const REGISTRATION_TABLE_COLUMN_WIDTHS = REGISTRATION_TABLE_COLUMNS.reduce((widths, column) => {
-  widths[column.columnKey] = column.width
-  return widths
-}, {} as Record<RegistrationTableColumnKey, number>)
-const REGISTRATION_TABLE_COLUMN_MIN_WIDTHS = REGISTRATION_TABLE_COLUMNS.reduce((widths, column) => {
-  widths[column.columnKey] = column.minWidth
-  return widths
-}, {} as Record<RegistrationTableColumnKey, number>)
 const WORD_RETEST_TABLE_COLUMN_WIDTHS: Record<WordRetestTableColumnKey, number> = {
   select: 40,
   status: 102,
@@ -595,30 +587,14 @@ const WITHDRAWAL_VIEW_TABS: Array<{ key: WithdrawalViewKey; label: string }> = [
 
 const REGISTRATION_VIEW_TABS: Array<{ key: RegistrationViewKey; label: string }> = [
   { key: "inquiry", label: "문의" },
-  { key: "consulting", label: "상담/레벨테스트" },
+  { key: "level_test", label: "레벨테스트" },
+  { key: "consulting", label: "상담" },
   { key: "waiting", label: "대기" },
   { key: "enrollment", label: "등록" },
   { key: "closed", label: "완료" },
 ]
 
-const REGISTRATION_VIEW_STATUS_PREFIXES: Record<RegistrationViewKey, string[]> = {
-  inquiry: ["0."],
-  consulting: ["1.", "1-1.", "2.", "3."],
-  waiting: ["4-1.", "4-2.", "4-3."],
-  enrollment: ["5.", "5-1.", "6."],
-  closed: ["7.", "8.", "9."],
-}
-
 const REGISTRATION_GRADE_OPTIONS = getRegistrationGradeOptions()
-
-const REGISTRATION_INQUIRY_CHANNEL_OPTIONS = [
-  { value: "", label: "미지정" },
-  { value: "전화", label: "전화" },
-  { value: "채널톡", label: "채널톡" },
-  { value: "선생님 전화", label: "선생님 전화" },
-  { value: "바로 방문", label: "바로 방문" },
-  { value: "인스타", label: "인스타" },
-] as const
 
 const REGISTRATION_SUBJECT_OPTIONS = [
   { value: "", label: "미지정" },
@@ -631,14 +607,6 @@ const REGISTRATION_LOCATION_OPTIONS = [
   { value: "본관", label: "본관" },
   { value: "별관", label: "별관" },
 ] as const
-
-const REGISTRATION_TEXTBOOK_PREPARATION_OPTIONS = [
-  "전부 학원에서 준비",
-  "개인적으로 준비",
-  "일부만 학원에서 준비(메모 확인 필수)",
-] as const
-
-const REGISTRATION_CLASS_START_SESSION_OPTIONS = Array.from({ length: 12 }, (_, index) => `${index + 1}회차`)
 
 const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChannelKey; label: string }> = [
   { key: "applicant", label: "담당선생님" },
@@ -716,9 +684,21 @@ const TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES = [
 ] as const
 
 const REGISTRATION_NOTIFICATION_TEMPLATE_VARIABLES = [
-  ...REGISTRATION_TABLE_COLUMNS
-    .map((column) => column.label)
-    .filter((label) => label !== "액션"),
+  "진행상태",
+  "과목",
+  "학년",
+  "학교",
+  "학생",
+  "학부모 전화",
+  "문의일시",
+  "레벨테스트",
+  "전화상담",
+  "방문상담",
+  "수업",
+  "수업시작일",
+  "수업시작회차",
+  "요청 사항",
+  "등록 확인",
   "신청자",
   "신청일시",
   "상담 책임자",
@@ -755,7 +735,6 @@ const REGISTRATION_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string>
   학교: "탐라중",
   학생: "김하윤",
   "학부모 전화": "010-0000-0000",
-  문의채널: "채널톡",
   문의일시: "2026-07-10 14:20",
   "상담 책임자": "정보영",
   레벨테스트: "2026-07-12 17:00",
@@ -765,7 +744,7 @@ const REGISTRATION_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string>
   수업시작일: "2026-07-17",
   수업시작회차: "3회차",
   "요청 사항": "수학 상담도 함께 희망",
-  "등록 확인": "입학신청서 완료 / 수납 필요",
+  "등록 확인": "1/5 · 메이크에듀 등록(수업, 교재), 청구서 발송, 수납 완료 확인, 등록 완료",
   신청자: "관리팀",
   신청일시: "2026-07-10 14:20",
   관리팀: "관리팀",
@@ -805,7 +784,7 @@ const DEFAULT_TRANSFER_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTrig
 const DEFAULT_REGISTRATION_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate> = {
   submitted: {
     titleTemplate: "등록 문의 접수 · {학생}",
-    bodyTemplate: "{학생} 학생 등록 문의가 접수되었습니다.\n문의채널: {문의채널}\n학년: {학년}",
+    bodyTemplate: "{학생} 학생 등록 문의가 접수되었습니다.\n학년: {학년}\n문의일시: {문의일시}",
   },
   processing: {
     titleTemplate: "등록 진행 · {학생}",
@@ -900,20 +879,21 @@ function getWorkspaceCreateActionLabel(workspace: WorkspaceKey, workspaceLabel: 
   return `${workspaceLabel} 추가`
 }
 
-const REGISTRATION_PIPELINE_ALL = "all"
 const REGISTRATION_PIPELINE_NEXT_PREFIXES: Record<string, string> = {
-  "0.": "1.",
   "1.": "1-1.",
   "1-1.": "2.",
   "2.": "3.",
-  "4-1.": "5.",
-  "4-2.": "5.",
-  "4-3.": "5.",
   "5-1.": "6.",
   "6.": "7.",
 }
 
-const REGISTRATION_DECISION_ACTIONS = getRegistrationDecisionActions()
+const REGISTRATION_PIPELINE_NEXT_LABELS: Record<string, string> = {
+  "1.": "진행 후 결과 입력",
+  "1-1.": "상담 예약",
+  "2.": "진행 후 상담 결과 입력",
+  "5-1.": "수납·운영 확인",
+  "6.": "등록 완료",
+}
 
 const TASK_FOCUS_LABELS: Record<Exclude<TaskFocus, "none">, string> = {
   today: "오늘 예정",
@@ -959,27 +939,94 @@ const WORD_RETEST_DIAGRAM_RESULT_BRANCHES = [
   },
 ] as const
 
-const REGISTRATION_FORM_SECTIONS: ReadonlyArray<{
-  key: RegistrationFormSectionKey
-  title: string
-}> = [
-  { key: "inquiry", title: "문의 정보" },
-  { key: "level_test", title: "레벨테스트" },
-  { key: "consultation", title: "상담" },
-  { key: "placement", title: "등록·대기 정보" },
-  { key: "admission", title: "입학 처리" },
-]
-
 function getRegistrationFormStage(pipelineStatus?: string, taskStatus?: OpsTaskStatus): RegistrationFormSectionKey | null {
   return getRegistrationFormState(pipelineStatus, taskStatus).activeSection as RegistrationFormSectionKey | null
 }
 
-function getRegistrationFormSectionIndex(sectionKey: RegistrationFormSectionKey) {
-  return REGISTRATION_FORM_SECTIONS.findIndex((section) => section.key === sectionKey)
-}
-
 function RegistrationFocusTarget({ focusKey, children }: { focusKey: string; children: ReactNode }) {
   return <div className="min-w-0" data-registration-focus={focusKey}>{children}</div>
+}
+
+function RegistrationFieldLabel({
+  label,
+  requirement,
+}: {
+  label: string
+  requirement: "required" | "optional"
+}) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span>{label}</span>
+      <span
+        aria-hidden="true"
+        className={[
+          "rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+          requirement === "required"
+            ? "bg-primary/10 text-primary"
+            : "bg-muted text-muted-foreground",
+        ].join(" ")}
+      >
+        {requirement === "required" ? "필수" : "선택"}
+      </span>
+    </span>
+  )
+}
+
+function RegistrationSubjectField({
+  label,
+  values,
+  onChange,
+  required = false,
+}: {
+  label: ReactNode
+  values: string[]
+  onChange: (values: string[]) => void
+  required?: boolean
+}) {
+  const fieldId = useId()
+  const requiredDescriptionId = useId()
+  const valueSet = new Set(values)
+  const options = REGISTRATION_SUBJECT_OPTIONS.filter((option) => option.value)
+
+  return (
+    <div className="grid min-w-0 gap-1.5 text-sm font-medium">
+      <span id={fieldId}>{label}</span>
+      {required && (
+        <span id={requiredDescriptionId} className="sr-only">
+          하나 이상 선택해야 하는 필수 항목입니다.
+        </span>
+      )}
+      <div
+        className="grid grid-cols-2 gap-1.5"
+        role="group"
+        aria-labelledby={fieldId}
+        aria-describedby={required ? requiredDescriptionId : undefined}
+      >
+        {options.map((option) => {
+          const selected = valueSet.has(option.value)
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(selected
+                ? values.filter((value) => value !== option.value)
+                : [...values, option.value])}
+              className={[
+                "inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium shadow-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
+                selected
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+              ].join(" ")}
+            >
+              {selected && <Check className="size-3.5" aria-hidden="true" />}
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 function RegistrationFormSection({
@@ -1643,11 +1690,10 @@ function isRegistrationPipelineComplete(input: OpsTaskInput) {
 
 function getMissingRegistrationCheckLabels(registration?: OpsTaskInput["registration"]) {
   return [
-    { checked: Boolean(registration?.admissionNoticeSent), label: "입학신청서" },
-    { checked: Boolean(registration?.paymentChecked), label: "수납 완료" },
-    { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록" },
+    { checked: Boolean(registration?.admissionNoticeSent), label: "입학신청서 발송" },
+    { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록(수업, 교재)" },
     { checked: Boolean(registration?.makeeduInvoiceSent), label: "청구서 발송" },
-    { checked: Boolean(registration?.textbookBillingIssued), label: "교재 청구출고표" },
+    { checked: Boolean(registration?.paymentChecked), label: "수납 완료 확인" },
   ].filter((item) => !item.checked).map((item) => item.label)
 }
 
@@ -1913,10 +1959,6 @@ function getTransferTableGridTemplate(widths: Record<TransferTableColumnKey, num
   return TRANSFER_TABLE_COLUMNS.map((column) => `${widths[column.columnKey]}px`).join(" ")
 }
 
-function getRegistrationTableGridTemplate(widths: Record<RegistrationTableColumnKey, number>) {
-  return REGISTRATION_TABLE_COLUMNS.map((column) => `${widths[column.columnKey]}px`).join(" ")
-}
-
 function getWithdrawalOperationsChecklist(withdrawal?: OpsTask["withdrawal"]) {
   return [
     { key: "makeedu", field: "makeeduWithdrawalDone" as const, label: "메이크에듀", detail: "메이크에듀 퇴원처리", checked: Boolean(withdrawal?.makeeduWithdrawalDone) },
@@ -1949,7 +1991,6 @@ function getTransferOperationsChecklistValue(transfer?: OpsTask["transfer"]) {
 
 function getRegistrationOperationsChecklist(
   registration?: OpsTask["registration"],
-  task?: Pick<OpsTask, "classId" | "textbookId">,
 ): Array<{
   key: string
   field?: RegistrationChecklistField
@@ -1963,27 +2004,21 @@ function getRegistrationOperationsChecklist(
   const availability = getRegistrationChecklistAvailability({
     pipelineStatus: registration?.pipelineStatus,
     registration,
-    classId: task?.classId,
-    textbookId: task?.textbookId,
   })
   return [
-    { key: "admission", field: "admissionNoticeSent" as const, label: "입학신청서", detail: "입학신청서 발송", checked: Boolean(registration?.admissionNoticeSent), editable: true, available: availability.admissionNoticeSent.enabled, unavailableReason: availability.admissionNoticeSent.reason },
-    { key: "payment", field: "paymentChecked" as const, label: "수납 완료", detail: "수납 완료 확인", checked: Boolean(registration?.paymentChecked), editable: true, available: availability.paymentChecked.enabled, unavailableReason: availability.paymentChecked.reason },
-    { key: "makeedu", field: "makeeduRegistered" as const, label: "메이크에듀", detail: "메이크에듀 등록", checked: Boolean(registration?.makeeduRegistered), editable: true, available: availability.makeeduRegistered.enabled, unavailableReason: availability.makeeduRegistered.reason },
-    { key: "invoice", field: "makeeduInvoiceSent" as const, label: "청구서", detail: "청구서 발송", checked: Boolean(registration?.makeeduInvoiceSent), editable: true, available: availability.makeeduInvoiceSent.enabled, unavailableReason: availability.makeeduInvoiceSent.reason },
-    { key: "roster", label: "시간표", detail: "수업시간표 명단에 입력", checked: Boolean(registration?.timetableRosterUpdated), editable: false, available: false, unavailableReason: "등록 완료 시 자동 반영됩니다." },
-    { key: "textbook", label: "교재 준비", detail: "교재 준비", checked: Boolean(registration?.textbookReady), editable: false, available: false, unavailableReason: "등록 완료 시 자동 반영됩니다." },
-    { key: "textbookBilling", field: "textbookBillingIssued" as const, label: "교재 청구", detail: "교재 청구출고표에 반영", checked: Boolean(registration?.textbookBillingIssued), editable: true, available: availability.textbookBillingIssued.enabled, unavailableReason: availability.textbookBillingIssued.reason },
+    { key: "admission", field: "admissionNoticeSent" as const, label: "입학신청서 발송", detail: "입학신청서 발송", checked: Boolean(registration?.admissionNoticeSent), editable: true, available: availability.admissionNoticeSent.enabled, unavailableReason: availability.admissionNoticeSent.reason },
+    { key: "makeedu", field: "makeeduRegistered" as const, label: "메이크에듀 등록(수업, 교재)", detail: "메이크에듀 등록(수업, 교재)", checked: Boolean(registration?.makeeduRegistered), editable: true, available: availability.makeeduRegistered.enabled, unavailableReason: availability.makeeduRegistered.reason },
+    { key: "invoice", field: "makeeduInvoiceSent" as const, label: "청구서 발송", detail: "청구서 발송", checked: Boolean(registration?.makeeduInvoiceSent), editable: true, available: availability.makeeduInvoiceSent.enabled, unavailableReason: availability.makeeduInvoiceSent.reason },
+    { key: "payment", field: "paymentChecked" as const, label: "수납 완료 확인", detail: "수납 완료 확인", checked: Boolean(registration?.paymentChecked), editable: true, available: availability.paymentChecked.enabled, unavailableReason: availability.paymentChecked.reason },
+    { key: "complete", label: "등록 완료", detail: "등록 완료", checked: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", editable: false, available: getRegistrationPipelinePrefix(registration?.pipelineStatus) === "7.", unavailableReason: "네 단계와 등록 정보를 모두 확인한 뒤 등록 완료로 이동합니다." },
   ]
 }
 
 function getRegistrationOperationsChecklistValue(registration?: OpsTask["registration"]) {
   const items = getRegistrationOperationsChecklist(registration)
-  const relevantItems = items.filter((item) => item.checked || item.available)
-  if (relevantItems.length === 0) return "입학 처리 전"
-  const completedCount = relevantItems.filter((item) => item.checked).length
-  const pendingItems = relevantItems.filter((item) => !item.checked).map((item) => item.detail)
-  return pendingItems.length > 0 ? `${completedCount}/${relevantItems.length} · ${pendingItems.join(", ")}` : `${relevantItems.length}/${relevantItems.length} · 등록 확인 완료`
+  const completedCount = items.filter((item) => item.checked).length
+  const pendingItems = items.filter((item) => !item.checked).map((item) => item.detail)
+  return pendingItems.length > 0 ? `${completedCount}/${items.length} · ${pendingItems.join(", ")}` : `${items.length}/${items.length} · 등록 확인 완료`
 }
 
 function WithdrawalOperationsChecklistChips({
@@ -2094,20 +2129,18 @@ function TransferOperationsChecklistChips({
 
 function RegistrationOperationsChecklistChips({
   registration,
-  task,
   editable = false,
   disabled = false,
   onChange,
 }: {
   registration?: OpsTask["registration"]
-  task?: Pick<OpsTask, "classId" | "textbookId">
   editable?: boolean
   disabled?: boolean
   onChange?: (field: RegistrationChecklistField, checked: boolean) => void
 }) {
   return (
     <div className="flex min-w-0 flex-wrap gap-1">
-      {getRegistrationOperationsChecklist(registration, task).map((item) => {
+      {getRegistrationOperationsChecklist(registration).map((item) => {
         const canToggle = Boolean(item.editable && item.available && item.field && editable && onChange)
         const className = [
           "inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-2 text-xs font-medium",
@@ -2317,11 +2350,11 @@ function getOperationCompletionBlockers(
 
   if (input.type === "registration" && isRegistrationPipelineComplete(input)) {
     if (!String(input.registration?.classStartDate || "").trim()) blockers.push("수업시작일")
+    if (!String(input.registration?.classStartSession || "").trim()) blockers.push("수업시작일")
     if (!hasNewRegistrationStudent(input)) blockers.push("학생")
     if (hasLinkedRecord(input.studentId) && !findStudentOption(students, input.studentId, indexes)) blockers.push("학생")
     if (!hasLinkedRecord(input.classId)) blockers.push("수업")
     if (hasLinkedRecord(input.classId) && !findClassOption(classes, input.classId, indexes)) blockers.push("수업")
-    if (!hasLinkedRecord(input.textbookId)) blockers.push("교재")
     if (hasLinkedRecord(input.textbookId) && !findTextbookOption(textbooks, input.textbookId, indexes)) blockers.push("교재")
     getMissingRegistrationCheckLabels(input.registration).forEach((label) => blockers.push(label))
   }
@@ -2445,11 +2478,10 @@ const BLOCKER_ACTION_LABELS: Record<string, string> = {
   "퇴원일": "퇴원일 지정",
   "전 수업 종료일": "전 수업 종료일 지정",
   "후 수업 시작일": "후 수업 시작일 지정",
-  "입학신청서": "입학신청서",
-  "수납 완료": "수납 완료 확인",
-  "메이크에듀 등록": "메이크에듀 등록",
+  "입학신청서 발송": "입학신청서 발송",
+  "메이크에듀 등록(수업, 교재)": "메이크에듀 등록(수업, 교재)",
   "청구서 발송": "청구서 발송",
-  "교재 청구출고표": "교재 청구출고표",
+  "수납 완료 확인": "수납 완료 확인",
   "메이크에듀 퇴원처리": "메이크에듀 퇴원처리",
   "메이크에듀 전반처리": "메이크에듀 전반처리",
   "수업료 처리": "수업료 처리",
@@ -2478,11 +2510,10 @@ function getCompletionBlockerPriority(blocker: string) {
 const CHECK_COMPLETION_BLOCKERS = new Set([
   "수업 명단",
   "전 수업 명단",
-  "입학신청서",
-  "수납 완료",
-  "메이크에듀 등록",
+  "입학신청서 발송",
+  "메이크에듀 등록(수업, 교재)",
   "청구서 발송",
-  "교재 청구출고표",
+  "수납 완료 확인",
   "메이크에듀 퇴원처리",
   "메이크에듀 전반처리",
   "수업료 처리",
@@ -2529,7 +2560,7 @@ function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): Fo
     if (blockers.some((blocker) => ["학생", "학생명", "학부모 전화", "과목"].includes(blocker))) return "registration_contact"
     if (blockers.some((blocker) => ["레벨테스트 예약일시", "레벨테스트 장소", "레벨테스트 완료일시", "레벨테스트 결과", "상담 예약일시", "방문상담실", "상담 완료일시", "상담 책임자"].includes(blocker))) return "registration_test"
     if (blockers.some((blocker) => ["수업", "교재", "수업시작일"].includes(blocker))) return "registration_start"
-    if (blockers.some((blocker) => ["입학신청서", "수납 완료", "메이크에듀 등록", "청구서 발송", "교재 청구출고표"].includes(blocker))) return "registration_checks"
+    if (blockers.some((blocker) => ["입학신청서 발송", "메이크에듀 등록(수업, 교재)", "청구서 발송", "수납 완료 확인"].includes(blocker))) return "registration_checks"
   }
 
   if (type === "withdrawal") {
@@ -2558,12 +2589,6 @@ function getRegistrationFormSectionForBlocker(blocker: string): RegistrationForm
   if (["상담 예약일시", "방문상담실", "상담 완료일시", "상담 책임자"].includes(blocker)) return "consultation"
   if (["수업", "교재", "수업시작일"].includes(blocker)) return "placement"
   return "admission"
-}
-
-function blurActiveElementBeforeDialog() {
-  if (typeof document === "undefined") return
-  const activeElement = document.activeElement
-  if (activeElement instanceof HTMLElement) activeElement.blur()
 }
 
 function dateLabel(value: string) {
@@ -2992,19 +3017,49 @@ function isRegistrationViewKey(value: string): value is RegistrationViewKey {
   return REGISTRATION_VIEW_TABS.some((tab) => tab.key === value)
 }
 
-function getRegistrationPipelineStatus(task: OpsTask) {
-  return task.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"
+function isLegacyRegistrationTrackId(trackId: string) {
+  return trackId.startsWith("legacy:")
 }
 
-function isRegistrationPipelineInView(task: OpsTask, view: RegistrationViewKey) {
-  const status = getRegistrationPipelineStatus(task)
-  const matchedView = (Object.keys(REGISTRATION_VIEW_STATUS_PREFIXES) as RegistrationViewKey[])
-    .find((candidate) => REGISTRATION_VIEW_STATUS_PREFIXES[candidate].some((prefix) => status.startsWith(prefix)))
-  return (matchedView || getRegistrationViewKey(status, task.status)) === view
-}
+function RegistrationProcessManualDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const stages = getRegistrationWorkflowStages()
 
-function getRegistrationViewTasks(tasks: OpsTask[], view: RegistrationViewKey) {
-  return tasks.filter((task) => isRegistrationPipelineInView(task, view))
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="z-[80] max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-h-[90vh] sm:max-w-4xl" closeButtonLabel="닫기">
+        <DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-4 pt-4">
+          <DialogTitle>등록 프로세스 &amp; 매뉴얼</DialogTitle>
+          <DialogDescription>
+            상단 탭 순서에 맞춘 단계별 처리, 입력, 자동화와 완료 기준입니다.
+          </DialogDescription>
+        </DialogHeader>
+        <ol className="grid gap-3 md:grid-cols-2" aria-label="등록 프로세스 6단계">
+          {stages.map((stage, index) => (
+            <li key={stage.key} className="grid content-start gap-3 rounded-lg border bg-muted/15 p-4">
+              <div className="flex items-start gap-2">
+                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">{index + 1}</span>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold">{stage.label}</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{stage.summary}</p>
+                </div>
+              </div>
+              <ul className="grid gap-1.5 text-xs leading-5 text-muted-foreground">
+                {stage.details.map((detail) => (
+                  <li key={detail} className="pl-3 before:-ml-3 before:mr-1.5 before:text-primary before:content-['•']">{detail}</li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ol>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function matchesSearch(task: OpsTask, query: string) {
@@ -3332,6 +3387,8 @@ function TaskListboxField({
   emptyClassName = "text-muted-foreground",
   placeholder,
   attention = false,
+  required = false,
+  disabled = false,
 }: {
   label: ReactNode
   value: string
@@ -3340,16 +3397,59 @@ function TaskListboxField({
   emptyClassName?: string
   placeholder?: string
   attention?: boolean
+  required?: boolean
+  disabled?: boolean
 }) {
   const fieldId = useId()
   const listId = useId()
+  const requiredDescriptionId = useId()
   const [listboxOpen, setListboxOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const listboxRef = useRef<HTMLDivElement>(null)
   const selectedOption = options.find((option) => option.value === value)
+  const selectedOptionIndex = options.findIndex((option) => option.value === value)
   const selectedLabel = selectedOption?.label || placeholder || options[0]?.label || "선택"
 
   function handleListboxSelect(nextValue: string) {
     onChange(nextValue)
     setListboxOpen(false)
+    window.requestAnimationFrame(() => triggerRef.current?.focus())
+  }
+
+  function focusListboxOption(index: number) {
+    const optionElements = listboxRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]')
+    if (!optionElements?.length) return
+    const normalizedIndex = (index + optionElements.length) % optionElements.length
+    optionElements[normalizedIndex]?.focus()
+  }
+
+  function openListboxAndFocus(index: number) {
+    setListboxOpen(true)
+    window.requestAnimationFrame(() => focusListboxOption(index))
+  }
+
+  function handleListboxTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return
+    event.preventDefault()
+    if (event.key === "ArrowUp" || event.key === "End") {
+      openListboxAndFocus(options.length - 1)
+      return
+    }
+    openListboxAndFocus(selectedOptionIndex >= 0 && event.key === "ArrowDown" ? selectedOptionIndex : 0)
+  }
+
+  function handleListboxOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      setListboxOpen(false)
+      window.requestAnimationFrame(() => triggerRef.current?.focus())
+      return
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return
+    event.preventDefault()
+    if (event.key === "Home") focusListboxOption(0)
+    else if (event.key === "End") focusListboxOption(options.length - 1)
+    else focusListboxOption(index + (event.key === "ArrowDown" ? 1 : -1))
   }
 
   return (
@@ -3362,17 +3462,32 @@ function TaskListboxField({
       }}
     >
       <span id={fieldId}>{label}</span>
+      {required ? <span id={requiredDescriptionId} className="sr-only">필수 입력</span> : null}
       <button
+        ref={triggerRef}
         type="button"
+        role="combobox"
         aria-labelledby={fieldId}
+        aria-describedby={required ? requiredDescriptionId : undefined}
+        aria-required={required || undefined}
         aria-haspopup="listbox"
         aria-expanded={listboxOpen}
         aria-controls={listId}
-        onClick={() => setListboxOpen((open) => !open)}
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return
+          if (listboxOpen) {
+            setListboxOpen(false)
+            return
+          }
+          openListboxAndFocus(selectedOptionIndex >= 0 ? selectedOptionIndex : 0)
+        }}
+        onKeyDown={handleListboxTriggerKeyDown}
         className={[
-          "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition",
+          "flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm shadow-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40",
           attention ? "border-primary/60 bg-primary/5 ring-2 ring-primary/15 hover:border-primary/70" : "",
           listboxOpen ? "border-ring ring-2 ring-ring/40" : "hover:border-foreground/30",
+          disabled ? "cursor-not-allowed bg-muted/30 text-muted-foreground opacity-75 hover:border-border" : "",
         ].join(" ")}
       >
         <span className={value ? "truncate text-foreground" : `truncate ${emptyClassName}`}>{selectedLabel}</span>
@@ -3380,6 +3495,7 @@ function TaskListboxField({
       </button>
       {listboxOpen && (
         <div
+          ref={listboxRef}
           id={listId}
           role="listbox"
           aria-labelledby={fieldId}
@@ -3387,7 +3503,7 @@ function TaskListboxField({
           style={TOUCH_SCROLL_AREA_STYLE}
           onTouchMove={stopTouchScrollPropagation}
         >
-          {options.map((option) => {
+          {options.map((option, index) => {
             const selected = option.value === value
             return (
               <button
@@ -3395,9 +3511,11 @@ function TaskListboxField({
                 type="button"
                 role="option"
                 aria-selected={selected}
+                tabIndex={selected || (!selectedOption && index === 0) ? 0 : -1}
                 onClick={() => handleListboxSelect(option.value)}
+                onKeyDown={(event) => handleListboxOptionKeyDown(event, index)}
                 className={[
-                  "flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-sm outline-none transition-colors",
+                  "flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40",
                   selected ? "bg-primary/10 text-primary" : "hover:bg-muted",
                 ].join(" ")}
               >
@@ -3502,6 +3620,8 @@ function LinkedSelect({
   renderSelected,
   renderOption,
   listHeader,
+  allowDeselect = false,
+  onDeselect,
 }: {
   label: string
   value: string
@@ -3516,6 +3636,8 @@ function LinkedSelect({
   renderSelected?: (option: LinkedSelectOption) => ReactNode
   renderOption?: (option: LinkedSelectOption) => ReactNode
   listHeader?: ReactNode
+  allowDeselect?: boolean
+  onDeselect?: () => void
 }) {
   const fieldId = useId()
   const queryId = useId()
@@ -3674,6 +3796,22 @@ function LinkedSelect({
             onWheel={handleLinkedListWheel}
             onTouchMove={stopTouchScrollPropagation}
           >
+            {allowDeselect && (
+              <button
+                type="button"
+                role="option"
+                aria-selected={!value}
+                onClick={() => {
+                  onDeselect?.()
+                  if (!onDeselect) onChange("")
+                  setLinkedQuery("")
+                  setIsLinkedSearchOpen(false)
+                }}
+                className="flex w-full items-center rounded px-2.5 py-2 text-left text-sm hover:bg-muted"
+              >
+                선택 안 함 · 이미 보유
+              </button>
+            )}
             {onManualSelect && (
               <button
                 type="button"
@@ -3920,16 +4058,21 @@ function TextField({
   placeholder,
   inputMode,
   autoFocus,
+  required = false,
+  error,
 }: {
-  label: string
+  label: ReactNode
   value: string
   onChange: (value: string) => void
   type?: string
   placeholder?: string
   inputMode?: "none" | "text" | "tel" | "url" | "email" | "numeric" | "decimal" | "search"
   autoFocus?: boolean
+  required?: boolean
+  error?: string
 }) {
   const fieldId = useId()
+  const errorId = useId()
   const handleInputChange = (value: string) => onChange(value)
 
   return (
@@ -3941,10 +4084,18 @@ function TextField({
         value={value}
         className="min-w-0"
         placeholder={placeholder}
-      inputMode={inputMode}
-      autoFocus={autoFocus}
-      onChange={(event) => handleInputChange(event.target.value)}
-    />
+        inputMode={inputMode}
+        autoFocus={autoFocus}
+        aria-required={required || undefined}
+        aria-invalid={Boolean(error) || undefined}
+        aria-describedby={error ? errorId : undefined}
+        onChange={(event) => handleInputChange(event.target.value)}
+      />
+      {error && (
+        <span id={errorId} className="text-xs font-normal text-destructive" aria-live="polite">
+          {error}
+        </span>
+      )}
     </label>
   )
 }
@@ -4203,28 +4354,11 @@ function getSchedulePlanSessions(classItem?: OpsClassOption) {
 }
 
 function getWordRetestClassScheduleItems(classItem?: OpsClassOption): WordRetestClassScheduleItem[] {
-  const seen = new Set<string>()
-
-  return getSchedulePlanSessions(classItem).flatMap((entry, index) => {
-    const session = recordValue(entry)
-    if (!session) return []
-
-    const state = stringValue(session.scheduleState || session.schedule_state || session.state) || "active"
-    if (["exception", "tbd", "canceled", "cancelled"].includes(state)) return []
-
-    const dateKey = toDateKey(
-      stringValue(session.date || session.session_date || session.dateValue || session.date_value),
-    )
-    if (!dateKey) return []
-
-    const sessionNumber = Number(session.sessionNumber || session.session_number || index + 1)
-    const label = Number.isFinite(sessionNumber) && sessionNumber > 0 ? `${sessionNumber}회차` : "수업"
-    const uniqueKey = `${dateKey}:${label}:${state}`
-    if (seen.has(uniqueKey)) return []
-    seen.add(uniqueKey)
-
-    return [{ dateKey, label, state }]
-  }).sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.label.localeCompare(right.label, "ko"))
+  return getSelectableRegistrationScheduleSessions(classItem?.schedulePlan).map((session) => ({
+    dateKey: session.dateKey,
+    label: session.sessionLabel,
+    state: session.state,
+  }))
 }
 
 const WITHDRAWAL_WEEKDAY_ENTRIES: Array<[string, number]> = [
@@ -5632,29 +5766,6 @@ function CheckField({
   )
 }
 
-function AutoSyncStatusField({ label, checked }: { label: string; checked: boolean }) {
-  return (
-    <div
-      aria-label={`${label} 자동 반영 상태`}
-      aria-readonly="true"
-      className="flex min-w-0 items-center gap-2 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-sm font-medium text-muted-foreground"
-    >
-      <span
-        className={[
-          "grid size-4 shrink-0 place-items-center rounded-full border text-[10px]",
-          checked ? "border-primary bg-primary text-primary-foreground" : "bg-background",
-        ].join(" ")}
-      >
-        {checked ? <Check className="size-3" /> : null}
-      </span>
-      <span className="min-w-0 truncate">{label}</span>
-      <span className="ml-auto shrink-0 rounded bg-background px-1.5 py-0.5 text-xs">
-        {checked ? "자동 완료" : "자동 대기"}
-      </span>
-    </div>
-  )
-}
-
 type ChecklistStatusItem = {
   label: string
   checked: boolean
@@ -5802,48 +5913,6 @@ function matchesTransferPeriodFilter(
   return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, startDateKey, endDateKey))
 }
 
-function getRegistrationPeriodDateKeys(task: OpsTask) {
-  const registration = task.registration || {}
-  return [
-    toDateKey(registration.inquiryAt),
-    toDateKey(registration.levelTestAt),
-    toDateKey(registration.phoneConsultationAt),
-    toDateKey(registration.visitConsultationAt),
-    toDateKey(registration.consultationAt),
-    toDateKey(registration.classStartDate),
-    toDateKey(task.dueAt),
-    toDateKey(task.startAt),
-    toDateKey(task.createdAt),
-  ].filter(Boolean)
-}
-
-function matchesRegistrationPeriodFilter(
-  task: OpsTask,
-  periodFilter: WithdrawalPeriodFilter,
-  todayKey: string,
-  customStartDate: string,
-  customEndDate: string,
-) {
-  if (periodFilter === "all") return true
-  const dateKeys = getRegistrationPeriodDateKeys(task)
-  if (dateKeys.length === 0) return false
-
-  if (periodFilter === "today") return dateKeys.some((dateKey) => dateKey === todayKey)
-  if (periodFilter === "week") {
-    const range = getWithdrawalWeekRange(todayKey)
-    return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, range.start, range.end))
-  }
-  if (periodFilter === "month") {
-    const range = getWithdrawalMonthRange(todayKey)
-    return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, range.start, range.end))
-  }
-
-  const normalizedRange = normalizeRegistrationDateRange(toDateKey(customStartDate), toDateKey(customEndDate))
-  const startDateKey = normalizedRange.start
-  const endDateKey = normalizedRange.end
-  if (!startDateKey && !endDateKey) return true
-  return dateKeys.some((dateKey) => isDateKeyInRange(dateKey, startDateKey, endDateKey))
-}
 
 function getWithdrawalTableValue(task: OpsTask, columnKey: WithdrawalTableColumnKey) {
   const withdrawal = task.withdrawal || {}
@@ -5883,52 +5952,14 @@ function getWithdrawalTableValue(task: OpsTask, columnKey: WithdrawalTableColumn
   }
 }
 
-function getRegistrationTableValue(task: OpsTask, columnKey: RegistrationTableColumnKey) {
+function getRegistrationVisitConsultationLabel(task: OpsTask) {
   const registration = task.registration || {}
-  switch (columnKey) {
-    case "pipelineStatus":
-      return getCompactRegistrationPipelineLabel(getRegistrationPipelineStatus(task))
-    case "subject":
-      return task.subject || "-"
-    case "schoolGrade":
-      return registration.schoolGrade || "-"
-    case "schoolName":
-      return registration.schoolName || "-"
-    case "student":
-      return task.studentName || "-"
-    case "parentPhone":
-      return registration.parentPhone || "-"
-    case "inquiryChannel":
-      return registration.inquiryChannel || "-"
-    case "inquiryAt":
-      return dateLabel(registration.inquiryAt || "")
-    case "counselor":
-      return registration.counselor || "-"
-    case "levelTestAt":
-      return dateLabel(registration.levelTestAt || "")
-    case "phoneConsultationAt":
-      return dateLabel(registration.phoneConsultationAt || "")
-    case "visitConsultationAt":
-      return [
-        dateLabel(registration.visitConsultationAt || ""),
-        registration.visitConsultationPlace,
-      ].filter((value) => value && value !== "-").join(" · ") || "-"
-    case "className":
-      return task.className || "-"
-    case "classStartDate":
-      return dateOnlyLabel(registration.classStartDate)
-    case "classStartSession":
-      return registration.classStartSession || "-"
-    case "requestNote":
-      return registration.requestNote || "-"
-    case "operationsChecklist":
-      return getRegistrationOperationsChecklistValue(registration)
-    case "action":
-      return ""
-    default:
-      return "-"
-  }
+  return [
+    dateLabel(registration.visitConsultationAt || ""),
+    registration.visitConsultationPlace,
+  ].filter((value) => value && value !== "-").join(" · ") || "-"
 }
+
 
 function getTransferTableValue(task: OpsTask, columnKey: TransferTableColumnKey) {
   const transfer = task.transfer || {}
@@ -5978,10 +6009,6 @@ function getTransferFilterValue(task: OpsTask, columnKey: "subject" | "fromTeach
   return getTransferTableValue(task, columnKey)
 }
 
-function getRegistrationFilterValue(task: OpsTask, columnKey: "subject" | "counselor" | "schoolGrade") {
-  return getRegistrationTableValue(task, columnKey)
-}
-
 function buildWithdrawalSelectFilterOptions(
   tasks: OpsTask[],
   resolveOption: (task: OpsTask) => { value: string; label: string },
@@ -6003,6 +6030,7 @@ function buildWithdrawalSelectFilterOptions(
     .map((option) => ({ value: option.value, label: `${option.label}${option.count ? ` ${option.count}` : ""}` }))
 }
 
+
 function matchesWithdrawalSelectionFilters(
   task: OpsTask,
   selectedSubjectFilter: string,
@@ -6013,17 +6041,6 @@ function matchesWithdrawalSelectionFilters(
   return true
 }
 
-function matchesRegistrationSelectionFilters(
-  task: OpsTask,
-  selectedSubjectFilter: string,
-  selectedCounselorFilter: string,
-  selectedGradeFilter: string,
-) {
-  if (selectedSubjectFilter !== "all" && getRegistrationFilterValue(task, "subject") !== selectedSubjectFilter) return false
-  if (selectedCounselorFilter !== "all" && getRegistrationFilterValue(task, "counselor") !== selectedCounselorFilter) return false
-  if (selectedGradeFilter !== "all" && getRegistrationFilterValue(task, "schoolGrade") !== selectedGradeFilter) return false
-  return true
-}
 
 function WithdrawalFilterSelect({
   label,
@@ -6048,14 +6065,6 @@ function WithdrawalFilterSelect({
       />
     </div>
   )
-}
-
-function RegistrationFilterSelect(props: Parameters<typeof WithdrawalFilterSelect>[0]) {
-  return <WithdrawalFilterSelect {...props} />
-}
-
-function RegistrationPeriodFilterBar(props: Parameters<typeof WithdrawalPeriodFilterBar>[0]) {
-  return <WithdrawalPeriodFilterBar {...props} />
 }
 
 function WithdrawalPeriodFilterBar({
@@ -6206,51 +6215,6 @@ function TransferResizableHeaderCell({
   )
 }
 
-function RegistrationResizableHeaderCell({
-  column,
-  sort,
-  onHeaderSelect,
-  onResizeStart,
-}: {
-  column: (typeof REGISTRATION_TABLE_COLUMNS)[number]
-  sort: RegistrationTableSort
-  onHeaderSelect: (columnKey: RegistrationTableColumnKey) => void
-  onResizeStart: (key: RegistrationTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) => void
-}) {
-  const { columnKey, label, align } = column
-  const isActiveSort = sort?.columnKey === columnKey
-  const SortIcon = isActiveSort ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown
-  const sortable = columnKey !== "action"
-  const ariaSort = !isActiveSort ? "none" : sort.direction === "asc" ? "ascending" : "descending"
-
-  return (
-    <div
-      role="columnheader"
-      aria-sort={ariaSort}
-      className={["relative min-w-0 border-r px-2 py-2 last:border-r-0", align === "right" ? "text-right" : ""].join(" ")}
-    >
-      <button
-        type="button"
-        disabled={!sortable}
-        aria-label={`${label} 필터/정렬`}
-        onClick={() => onHeaderSelect(columnKey)}
-        className={[
-          "flex w-full min-w-0 items-center gap-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-60",
-          align === "right" ? "justify-end text-right" : "",
-        ].join(" ")}
-      >
-        <span className="truncate">{label}</span>
-        {sortable ? <SortIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
-      </button>
-      <button
-        type="button"
-        aria-label={`${label} 열 너비 조절`}
-        onPointerDown={(event) => onResizeStart(columnKey, event)}
-        className="absolute -right-1 top-1/2 h-5 w-2 -translate-y-1/2 cursor-col-resize rounded-full hover:bg-primary/25 focus-visible:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
-    </div>
-  )
-}
 
 function WithdrawalDataCell({
   value,
@@ -6258,16 +6222,18 @@ function WithdrawalDataCell({
   align = "left",
   onOpenDetail,
   detailAriaLabel,
+  className = "",
 }: {
   value: string
   children?: ReactNode
   align?: "left" | "right"
   onOpenDetail?: () => void
   detailAriaLabel?: string
+  className?: string
 }) {
   const content = children || <span className="block truncate" title={value}>{value}</span>
   return (
-    <div role="cell" className={["min-w-0 border-r px-2 py-2 text-sm last:border-r-0", align === "right" ? "text-right" : ""].join(" ")}>
+    <div role="cell" className={["min-w-0 border-r px-2 py-2 text-sm last:border-r-0", align === "right" ? "text-right" : "", className].join(" ")}>
       {onOpenDetail ? (
         <button
           type="button"
@@ -6311,18 +6277,6 @@ function getTransferTaskDetailAriaLabel(task: OpsTask) {
   return `${detailContext.join(" · ") || "전반"} 전반 상세 열기`
 }
 
-function getRegistrationTaskDetailAriaLabel(task: OpsTask) {
-  const registration = task.registration || {}
-  const detailContext = [
-    task.title,
-    task.studentName,
-    registration.schoolGrade,
-    registration.schoolName,
-    getCompactRegistrationPipelineLabel(getRegistrationPipelineStatus(task)),
-  ].filter(Boolean)
-  return `${detailContext.join(" · ") || "등록"} 등록 상세 열기`
-}
-
 function getWithdrawalMobileNextActionLabel(task: OpsTask, completionBlockers: string[]) {
   const nextAction = getNextTaskStatusAction(task)
   if (!nextAction) return ""
@@ -6332,575 +6286,16 @@ function getWithdrawalMobileNextActionLabel(task: OpsTask, completionBlockers: s
   return nextAction.label
 }
 
-function getRegistrationMobileNextActionLabel(task: OpsTask, completionBlockers: string[]) {
-  const nextAction = getNextRegistrationPipelineAction(task)
-  if (!nextAction) return ""
-  if (nextAction.pipelineStatus.startsWith("7.") && completionBlockers.length > 0) {
-    return getCompletionBlockerActionLabel(completionBlockers)
+function getRegistrationMobileSectionData(task: OpsTask, registration: OpsTask["registration"] = {}) {
+  return {
+    ...(registration || {}),
+    classId: task.classId,
+    className: task.className,
+    textbookId: task.textbookId,
+    textbookTitle: task.textbookTitle,
   }
-  return nextAction.label
 }
 
-function RegistrationDataTable({
-  tasks,
-  todayKey,
-  loading,
-  onOpen,
-  onEdit,
-  onOpenCustomerMessage,
-  onRegistrationPipelineAdvance,
-  onChecklistChange,
-  canManageWorkflow = true,
-  statusActionDisabled = false,
-  onCreate,
-  emptyLabel = "등록 신청 없음",
-  emptyActionLabel = "등록 추가",
-  showEmptyAction = true,
-  completionBlockersByTaskId = EMPTY_COMPLETION_BLOCKERS_BY_TASK_ID,
-}: {
-  tasks: OpsTask[]
-  todayKey: string
-  loading: boolean
-  onOpen: (task: OpsTask) => void
-  onEdit: (task: OpsTask, blockers?: string[]) => void
-  onOpenCustomerMessage: (task: OpsTask) => void
-  onRegistrationPipelineAdvance: (task: OpsTask, pipelineStatus: string) => void
-  onChecklistChange: (task: OpsTask, field: RegistrationChecklistField, checked: boolean) => void
-  canManageWorkflow?: boolean
-  statusActionDisabled?: boolean
-  onCreate: () => void
-  emptyLabel?: string
-  emptyActionLabel?: string
-  showEmptyAction?: boolean
-  completionBlockersByTaskId?: OperationCompletionBlockerMap
-}) {
-  const [columnWidths, setColumnWidths] = useState<Record<RegistrationTableColumnKey, number>>(REGISTRATION_TABLE_COLUMN_WIDTHS)
-  const [registrationTableSort, setRegistrationTableSort] = useState<RegistrationTableSort>(null)
-  const [filterColumnKey, setFilterColumnKey] = useState<RegistrationTableColumnKey>("student")
-  const [filterValue, setFilterValue] = useState("")
-  const [filterInputOpen, setFilterInputOpen] = useState(false)
-  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState("all")
-  const [selectedCounselorFilter, setSelectedCounselorFilter] = useState("all")
-  const [selectedGradeFilter, setSelectedGradeFilter] = useState("all")
-  const [registrationPeriodFilter, setRegistrationPeriodFilter] = useState<WithdrawalPeriodFilter>("all")
-  const [registrationPeriodStartDate, setRegistrationPeriodStartDate] = useState("")
-  const [registrationPeriodEndDate, setRegistrationPeriodEndDate] = useState("")
-  const filterInputRef = useRef<HTMLInputElement>(null)
-  const gridTemplateColumns = getRegistrationTableGridTemplate(columnWidths)
-  const gridTemplateStyle = { "--registration-grid-template": gridTemplateColumns } as CSSProperties
-  const filterColumn = REGISTRATION_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || REGISTRATION_TABLE_COLUMNS[4]
-  const isFilterInputExpanded = isRegistrationFilterInputExpanded(filterInputOpen)
-  const activeRegistrationFilters = hasActiveRegistrationFilters({
-    selectedSubjectFilter,
-    selectedCounselorFilter,
-    selectedGradeFilter,
-    registrationPeriodFilter,
-    registrationPeriodStartDate,
-    registrationPeriodEndDate,
-    filterValue,
-  })
-
-  const subjectFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(tasks, (task) => ({
-      value: getRegistrationFilterValue(task, "subject"),
-      label: getRegistrationFilterValue(task, "subject"),
-    }))
-  ), [tasks])
-  const counselorFilterSourceTasks = useMemo(() => (
-    selectedSubjectFilter === "all" ? tasks : tasks.filter((task) => getRegistrationFilterValue(task, "subject") === selectedSubjectFilter)
-  ), [selectedSubjectFilter, tasks])
-  const counselorFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(counselorFilterSourceTasks, (task) => ({
-      value: getRegistrationFilterValue(task, "counselor"),
-      label: getRegistrationFilterValue(task, "counselor"),
-    }))
-  ), [counselorFilterSourceTasks])
-  const gradeFilterSourceTasks = useMemo(() => (
-    counselorFilterSourceTasks.filter((task) => (
-      selectedCounselorFilter === "all" || getRegistrationFilterValue(task, "counselor") === selectedCounselorFilter
-    ))
-  ), [counselorFilterSourceTasks, selectedCounselorFilter])
-  const gradeFilterOptions = useMemo(() => (
-    buildWithdrawalSelectFilterOptions(gradeFilterSourceTasks, (task) => ({
-      value: getRegistrationFilterValue(task, "schoolGrade"),
-      label: getRegistrationFilterValue(task, "schoolGrade"),
-    }))
-  ), [gradeFilterSourceTasks])
-
-  const visibleRegistrationTasks = useMemo(() => {
-    const selectionFilteredTasks = tasks
-      .filter((task) => matchesRegistrationSelectionFilters(task, selectedSubjectFilter, selectedCounselorFilter, selectedGradeFilter))
-      .filter((task) => matchesRegistrationPeriodFilter(task, registrationPeriodFilter, todayKey, registrationPeriodStartDate, registrationPeriodEndDate))
-    const normalizedFilter = filterValue.trim().toLocaleLowerCase("ko")
-    const nextTasks = normalizedFilter
-      ? selectionFilteredTasks.filter((task) => getRegistrationTableValue(task, filterColumnKey).toLocaleLowerCase("ko").includes(normalizedFilter))
-      : [...selectionFilteredTasks]
-
-    if (registrationTableSort) {
-      nextTasks.sort((left, right) => compareRegistrationTasks(left, right, registrationTableSort.columnKey, registrationTableSort.direction))
-    }
-
-    return nextTasks
-  }, [
-    filterColumnKey,
-    filterValue,
-    registrationPeriodEndDate,
-    registrationPeriodFilter,
-    registrationPeriodStartDate,
-    registrationTableSort,
-    selectedCounselorFilter,
-    selectedGradeFilter,
-    selectedSubjectFilter,
-    tasks,
-    todayKey,
-  ])
-
-  function handleHeaderSelect(columnKey: RegistrationTableColumnKey) {
-    if (columnKey === "action") return
-    if (columnKey !== filterColumnKey) {
-      const nextFilter = getRegistrationFilterColumnChange(filterValue, columnKey)
-      setFilterColumnKey(nextFilter.filterColumnKey as RegistrationTableColumnKey)
-      setFilterValue(nextFilter.filterValue)
-      setFilterInputOpen(false)
-    }
-    setRegistrationTableSort((current) => {
-      if (!current || current.columnKey !== columnKey) return { columnKey, direction: "asc" }
-      if (current.direction === "asc") return { columnKey, direction: "desc" }
-      return null
-    })
-  }
-
-  useEffect(() => {
-    if (filterInputOpen) filterInputRef.current?.focus()
-  }, [filterInputOpen])
-
-  function resetRegistrationFilters() {
-    const defaults = getEmptyRegistrationFilters()
-    setSelectedSubjectFilter(defaults.selectedSubjectFilter)
-    setSelectedCounselorFilter(defaults.selectedCounselorFilter)
-    setSelectedGradeFilter(defaults.selectedGradeFilter)
-    setRegistrationPeriodFilter(defaults.registrationPeriodFilter as WithdrawalPeriodFilter)
-    setRegistrationPeriodStartDate(defaults.registrationPeriodStartDate)
-    setRegistrationPeriodEndDate(defaults.registrationPeriodEndDate)
-    setFilterValue(defaults.filterValue)
-    setFilterInputOpen(false)
-  }
-
-  function startColumnResize(key: RegistrationTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
-    event.preventDefault()
-    const startX = event.clientX
-    const startWidth = columnWidths[key]
-
-    function handlePointerMove(moveEvent: PointerEvent) {
-      const nextWidth = Math.max(REGISTRATION_TABLE_COLUMN_MIN_WIDTHS[key], startWidth + moveEvent.clientX - startX)
-      setColumnWidths((current) => ({ ...current, [key]: nextWidth }))
-    }
-
-    function handlePointerUp() {
-      window.removeEventListener("pointermove", handlePointerMove)
-      window.removeEventListener("pointerup", handlePointerUp)
-    }
-
-    window.addEventListener("pointermove", handlePointerMove)
-    window.addEventListener("pointerup", handlePointerUp)
-  }
-
-  return (
-    <div className="overflow-hidden rounded-md border bg-card">
-      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2" aria-label="등록 전체 필터">
-        <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="등록 대상 필터">
-          <RegistrationFilterSelect
-            label="과목 필터"
-            value={selectedSubjectFilter}
-            allLabel="과목 전체"
-            options={subjectFilterOptions}
-            onChange={(value) => {
-              setSelectedSubjectFilter(value)
-              setSelectedCounselorFilter("all")
-              setSelectedGradeFilter("all")
-            }}
-          />
-          <RegistrationFilterSelect
-            label="상담 책임자 필터"
-            value={selectedCounselorFilter}
-            allLabel="상담 책임자 전체"
-            options={counselorFilterOptions}
-            onChange={(value) => {
-              setSelectedCounselorFilter(value)
-              setSelectedGradeFilter("all")
-            }}
-          />
-          <RegistrationFilterSelect
-            label="학년 필터"
-            value={selectedGradeFilter}
-            allLabel="학년 전체"
-            options={gradeFilterOptions}
-            onChange={setSelectedGradeFilter}
-          />
-        </div>
-        <RegistrationPeriodFilterBar
-          labelPrefix="등록"
-          value={registrationPeriodFilter}
-          startDate={registrationPeriodStartDate}
-          endDate={registrationPeriodEndDate}
-          onChange={setRegistrationPeriodFilter}
-          onStartDateChange={setRegistrationPeriodStartDate}
-          onEndDateChange={setRegistrationPeriodEndDate}
-        />
-        {activeRegistrationFilters ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="size-8 px-0"
-            aria-label="등록 필터 전체 초기화"
-            title="필터 전체 초기화"
-            onClick={resetRegistrationFilters}
-          >
-            <X className="size-4" aria-hidden="true" />
-          </Button>
-        ) : null}
-        <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium" aria-label="등록 데이터테이블 열 필터">
-          <Button
-            type="button"
-            variant={isFilterInputExpanded ? "secondary" : "outline"}
-            size="sm"
-            className="size-8 px-0"
-            aria-label={isFilterInputExpanded ? `${filterColumn.label} 열 필터 접기` : `${filterColumn.label} 열 필터 펼치기`}
-            aria-expanded={isFilterInputExpanded}
-            onClick={() => setFilterInputOpen((current) => !current)}
-          >
-            <Filter className="size-4" aria-hidden="true" />
-          </Button>
-          {isFilterInputExpanded ? (
-            <div className="flex min-w-0 items-center gap-2">
-              <Input
-                ref={filterInputRef}
-                aria-label={`${filterColumn.label} 열 필터`}
-                value={filterValue}
-                onChange={(event) => setFilterValue(event.target.value)}
-                placeholder={`${filterColumn.label} 값 입력`}
-                className="h-8 min-w-0 flex-1 sm:w-48"
-              />
-              {filterValue ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setFilterValue("")
-                    setFilterInputOpen(false)
-                  }}
-                >
-                  지우기
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <div data-testid="registration-mobile-task-list" className="grid gap-2 p-3 md:hidden" aria-label="등록 모바일 목록">
-        {loading ? (
-          <div className="px-3 py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
-        ) : visibleRegistrationTasks.length === 0 ? (
-          <div className="grid gap-3 px-3 py-10 text-center text-sm text-muted-foreground">
-            <span>{tasks.length === 0 ? emptyLabel : "표시할 등록 항목이 없습니다."}</span>
-            {tasks.length > 0 && activeRegistrationFilters ? (
-              <span><Button type="button" variant="outline" size="sm" onClick={resetRegistrationFilters}>필터 초기화</Button></span>
-            ) : tasks.length === 0 && showEmptyAction ? (
-              <span>
-                <Button type="button" size="sm" onClick={onCreate}>
-                  <Plus className="size-4" />
-                  {emptyActionLabel}
-                </Button>
-              </span>
-            ) : null}
-          </div>
-        ) : visibleRegistrationTasks.map((task) => {
-          const registration = task.registration || {}
-          const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
-          const nextAction = getNextRegistrationPipelineAction(task)
-          const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
-          const nextActionBlocked = nextAction?.pipelineStatus.startsWith("7.") && completionBlockers.length > 0
-          const mobileNextActionLabel = getRegistrationMobileNextActionLabel(task, completionBlockers)
-          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
-          const detailAriaLabel = getRegistrationTaskDetailAriaLabel(task)
-          const mobileSections = getRegistrationMobileSections(registration.pipelineStatus)
-          const showsMobileSection = (section: RegistrationFormSectionKey) => mobileSections.includes(section)
-
-          return (
-            <article key={task.id} className="grid gap-3 rounded-md border bg-background p-3 shadow-xs" aria-label={`${task.title} 등록 신청`}>
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <RegistrationWorkflowStatusBadge task={task} />
-                <Badge variant="outline">{task.subject || "과목 미정"}</Badge>
-                <Badge variant="secondary">{registration.schoolGrade || "학년 미정"}</Badge>
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-foreground">{task.studentName || task.title}</div>
-                <div className="truncate text-xs text-muted-foreground">{[registration.schoolName, registration.parentPhone].filter(Boolean).join(" · ") || "문의 정보 미정"}</div>
-              </div>
-              <dl className="grid gap-2 text-xs">
-                <div className="grid grid-cols-2 gap-3 border-t pt-2">
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">문의일시</dt>
-                    <dd className="mt-0.5 truncate font-medium">{dateLabel(registration.inquiryAt || "")}</dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">문의 채널</dt>
-                    <dd className="mt-0.5 truncate font-medium">{registration.inquiryChannel || "미정"}</dd>
-                  </div>
-                </div>
-                {showsMobileSection("level_test") ? <div className="grid grid-cols-2 gap-3 border-t pt-2">
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">레벨테스트</dt>
-                    <dd className="mt-0.5 truncate font-medium">{dateLabel(registration.levelTestAt || "")}</dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">테스트 결과</dt>
-                    <dd className="mt-0.5 truncate font-medium">{registration.levelTestResult || "미정"}</dd>
-                  </div>
-                </div> : null}
-                {showsMobileSection("consultation") ? <div className="grid grid-cols-2 gap-3 border-t pt-2">
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">상담 책임자</dt>
-                    <dd className="mt-0.5 truncate font-medium">{registration.counselor || "미정"}</dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-muted-foreground">방문상담</dt>
-                    <dd className="mt-0.5 truncate font-medium">{getRegistrationTableValue(task, "visitConsultationAt")}</dd>
-                  </div>
-                </div> : null}
-                {showsMobileSection("placement") ? <div className="border-t pt-2">
-                  <dt className="text-muted-foreground">등록 수업</dt>
-                  <dd className="mt-0.5 truncate font-medium">{[task.className, dateOnlyLabel(registration.classStartDate), registration.classStartSession].filter((value) => value && value !== "-").join(" · ") || "미정"}</dd>
-                </div> : null}
-                {showsMobileSection("admission") ? <div className="border-t pt-2">
-                  <dt className="text-muted-foreground">등록 확인</dt>
-                  <dd className="mt-1">
-                    <RegistrationOperationsChecklistChips
-                      registration={registration}
-                      task={task}
-                      editable={canEditChecklist}
-                      disabled={statusActionDisabled}
-                      onChange={(field, checked) => onChecklistChange(task, field, checked)}
-                    />
-                  </dd>
-                </div> : null}
-                {registration.requestNote ? (
-                  <div className="border-t pt-2">
-                    <dt className="text-muted-foreground">요청 사항</dt>
-                    <dd className="mt-0.5 line-clamp-2 font-medium">{registration.requestNote}</dd>
-                  </div>
-                ) : null}
-              </dl>
-              <div className="flex flex-wrap justify-end gap-1.5 border-t pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-label={detailAriaLabel}
-                  onClick={() => onOpen(task)}
-                >
-                  상세
-                </Button>
-                <RegistrationDecisionActions
-                  task={task}
-                  onSelect={onRegistrationPipelineAdvance}
-                  disabled={statusActionDisabled || !canManageWorkflow}
-                />
-                {canOpenRegistrationCustomerMessage(task) ? (
-                  <Button
-                    type="button"
-                    variant={registration.admissionNoticeSent ? "outline" : "default"}
-                    size="sm"
-                    aria-label={`${task.title} 입학신청서 ${registration.admissionNoticeSent ? "다시 " : ""}발송`}
-                    onClick={() => onOpenCustomerMessage(task)}
-                    disabled={statusActionDisabled || !canManageWorkflow}
-                  >
-                    <MessageSquareText className="size-4" aria-hidden="true" />
-                    {registration.admissionNoticeSent ? "다시 발송" : "입학신청서 발송"}
-                  </Button>
-                ) : null}
-                {canRunStatusAction && nextAction ? (
-                  <Button
-                    type="button"
-                    variant={nextActionBlocked ? "outline" : "default"}
-                    size="sm"
-                    aria-label={`${task.title}: ${mobileNextActionLabel}`}
-                    title={nextActionBlocked ? `${completionBlockers.join(", ")} 연결 필요` : undefined}
-                    onClick={() => {
-                      if (nextActionBlocked) {
-                        onEdit(task, completionBlockers)
-                        return
-                      }
-                      onRegistrationPipelineAdvance(task, nextAction.pipelineStatus)
-                    }}
-                    disabled={statusActionDisabled}
-                  >
-                    {mobileNextActionLabel}
-                  </Button>
-                ) : null}
-                {canEditTaskDetails(task) ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={`${task.title} 수정`}
-                    onClick={() => onEdit(task)}
-                    disabled={statusActionDisabled}
-                  >
-                    수정
-                  </Button>
-                ) : null}
-              </div>
-            </article>
-          )
-        })}
-      </div>
-      <div className="hidden w-full overflow-x-auto md:block" role="table" aria-label="등록 신청 데이터테이블">
-        <div
-          role="row"
-          className="grid min-w-full border-b bg-muted/45 text-xs [grid-template-columns:var(--registration-grid-template)]"
-          style={gridTemplateStyle}
-        >
-          {REGISTRATION_TABLE_COLUMNS.map((column) => (
-            <RegistrationResizableHeaderCell
-              key={column.columnKey}
-              column={column}
-              sort={registrationTableSort}
-              onHeaderSelect={handleHeaderSelect}
-              onResizeStart={startColumnResize}
-            />
-          ))}
-        </div>
-        {loading ? (
-          <div className="px-4 py-12 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
-        ) : visibleRegistrationTasks.length === 0 ? (
-          <div className="grid gap-3 px-4 py-12 text-center text-sm text-muted-foreground">
-            <span>{tasks.length === 0 ? emptyLabel : "표시할 등록 항목이 없습니다."}</span>
-            {tasks.length > 0 && activeRegistrationFilters ? (
-              <span><Button type="button" variant="outline" size="sm" onClick={resetRegistrationFilters}>필터 초기화</Button></span>
-            ) : tasks.length === 0 && showEmptyAction ? (
-              <span>
-                <Button type="button" size="sm" onClick={onCreate}>
-                  <Plus className="size-4" />
-                  {emptyActionLabel}
-                </Button>
-              </span>
-            ) : null}
-          </div>
-        ) : visibleRegistrationTasks.map((task) => {
-          const nextAction = getNextRegistrationPipelineAction(task)
-          const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
-          const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
-          const nextActionBlocked = nextAction?.pipelineStatus.startsWith("7.") && completionBlockers.length > 0
-          const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
-          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
-          const detailAriaLabel = getRegistrationTaskDetailAriaLabel(task)
-
-          return (
-            <div
-              key={task.id}
-              role="row"
-              className="grid min-w-full border-b last:border-b-0 hover:bg-muted/30 [grid-template-columns:var(--registration-grid-template)]"
-              style={gridTemplateStyle}
-            >
-              {REGISTRATION_TABLE_COLUMNS.map((column) => {
-                const value = getRegistrationTableValue(task, column.columnKey)
-                if (column.columnKey === "pipelineStatus") {
-                  return (
-                    <WithdrawalDataCell key={column.columnKey} value={value} onOpenDetail={() => onOpen(task)} detailAriaLabel={detailAriaLabel}>
-                      <RegistrationWorkflowStatusBadge task={task} />
-                    </WithdrawalDataCell>
-                  )
-                }
-                if (column.columnKey === "action") {
-                  return (
-                    <WithdrawalDataCell key={column.columnKey} value="" align="right">
-                      <span className="flex flex-wrap justify-end gap-1.5">
-                        <RegistrationDecisionActions
-                          task={task}
-                          onSelect={onRegistrationPipelineAdvance}
-                          disabled={statusActionDisabled || !canManageWorkflow}
-                        />
-                        {canOpenRegistrationCustomerMessage(task) ? (
-                          <Button
-                            type="button"
-                            variant={task.registration?.admissionNoticeSent ? "outline" : "default"}
-                            size="sm"
-                            aria-label={`${task.title} 입학신청서 ${task.registration?.admissionNoticeSent ? "다시 " : ""}발송`}
-                            onClick={() => onOpenCustomerMessage(task)}
-                            disabled={statusActionDisabled || !canManageWorkflow}
-                          >
-                            <MessageSquareText className="size-4" aria-hidden="true" />
-                            {task.registration?.admissionNoticeSent ? "다시 발송" : "입학신청서 발송"}
-                          </Button>
-                        ) : null}
-                        {canRunStatusAction && nextAction && (
-                          <Button
-                            type="button"
-                            variant={nextActionBlocked ? "outline" : "default"}
-                            size="sm"
-                            aria-label={`${task.title}: ${nextActionBlocked ? blockedActionLabel : nextAction.label}`}
-                            title={nextActionBlocked ? `${completionBlockers.join(", ")} 연결 필요` : undefined}
-                            onClick={() => {
-                              if (nextActionBlocked) {
-                                onEdit(task, completionBlockers)
-                                return
-                              }
-                              onRegistrationPipelineAdvance(task, nextAction.pipelineStatus)
-                            }}
-                            disabled={statusActionDisabled}
-                          >
-                            {nextActionBlocked ? blockedActionLabel : nextAction.label}
-                          </Button>
-                        )}
-                        {canEditTaskDetails(task) && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            aria-label={`${task.title} 수정`}
-                            onClick={() => onEdit(task)}
-                            disabled={statusActionDisabled}
-                          >
-                            수정
-                          </Button>
-                        )}
-                      </span>
-                    </WithdrawalDataCell>
-                  )
-                }
-                if (column.columnKey === "operationsChecklist") {
-                  return (
-                    <WithdrawalDataCell key={column.columnKey} value={value}>
-                      <RegistrationOperationsChecklistChips
-                        registration={task.registration}
-                        task={task}
-                        editable={canEditChecklist}
-                        disabled={statusActionDisabled}
-                        onChange={(field, checked) => onChecklistChange(task, field, checked)}
-                      />
-                    </WithdrawalDataCell>
-                  )
-                }
-                return (
-                  <WithdrawalDataCell
-                    key={column.columnKey}
-                    value={value}
-                    align={column.align}
-                    onOpenDetail={() => onOpen(task)}
-                    detailAriaLabel={detailAriaLabel}
-                  />
-                )
-              })}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 function WithdrawalDataTable({
   tasks,
@@ -7878,12 +7273,11 @@ function buildRegistrationNotificationContext(task: OpsTask, triggerKey: Withdra
     학교: registration.schoolName || "",
     학생: task.studentName || "",
     "학부모 전화": registration.parentPhone || "",
-    문의채널: registration.inquiryChannel || "",
     문의일시: dateLabel(registration.inquiryAt || ""),
     "상담 책임자": counselor,
     레벨테스트: dateLabel(registration.levelTestAt || ""),
     전화상담: dateLabel(registration.phoneConsultationAt || ""),
-    방문상담: getRegistrationTableValue(task, "visitConsultationAt"),
+    방문상담: getRegistrationVisitConsultationLabel(task),
     수업: task.className || "",
     수업시작일: dateInputValue(registration.classStartDate) || "",
     수업시작회차: registration.classStartSession || "",
@@ -8007,6 +7401,7 @@ async function notifyRegistrationWorkflow(
   sessionToken: string,
 ) {
   if (!triggerKey || task.type !== "registration") return
+  if (getRegistrationPipelinePrefix(task.registration?.pipelineStatus) === "2.") return
 
   const template = registrationNotificationTemplates[triggerKey]
   if (!template) return
@@ -8817,10 +8212,12 @@ function WithdrawalWorkflowStatusBadge({ status }: { status: OpsTaskStatus }) {
 }
 
 function RegistrationWorkflowStatusBadge({ task }: { task: OpsTask }) {
-  const status = getRegistrationPipelineStatus(task)
+  const status = task.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"
   const prefix = getRegistrationPipelinePrefix(status)
   const variant = prefix.startsWith("7.") ? "secondary" : prefix.startsWith("8.") || prefix.startsWith("9.") ? "outline" : prefix.startsWith("0.") ? "outline" : "default"
-  return <Badge variant={variant}>{getCompactRegistrationPipelineLabel(status)}</Badge>
+  const pipelineLabel = getCompactRegistrationPipelineLabel(status)
+  const label = task.status === "on_hold" ? `보류 · ${pipelineLabel}` : pipelineLabel
+  return <Badge variant={task.status === "on_hold" ? "outline" : variant}>{label}</Badge>
 }
 
 function TaskTypeBadge({ type }: { type: OpsTaskType }) {
@@ -8864,6 +8261,7 @@ function TodoPriorityBadge({ priority, showNormal = false }: { priority: OpsTask
 }
 
 function getNextTaskStatusAction(task: Pick<OpsTask, "status" | "type">): { status: OpsTaskStatus; label: string } | null {
+  if (task.type === "registration") return null
   if (task.type === "withdrawal" && task.status === "done") return null
   if (task.type === "transfer" && task.status === "done") return null
   if (task.type === "withdrawal" && task.status === "canceled") return null
@@ -8904,14 +8302,24 @@ function getRegistrationPipelineActionBlockers(task: Pick<OpsTask, "studentId" |
   return getRegistrationTransitionBlockers(task, pipelineStatus)
 }
 
-function isRegistrationDecisionPending(task: Pick<OpsTask, "type" | "status" | "registration">) {
-  if (task.type !== "registration" || task.status === "done" || task.status === "canceled") return false
-  return getRegistrationPipelinePrefix(task.registration?.pipelineStatus) === "3."
+function getRegistrationDecisionActionsForTask(task: Pick<OpsTask, "type" | "status" | "registration">) {
+  if (task.type !== "registration" || task.status === "done" || task.status === "canceled" || task.status === "on_hold") return []
+  return getRegistrationBranchActions(task.registration?.pipelineStatus)
 }
 
-function canOpenRegistrationCustomerMessage(task: Pick<OpsTask, "type" | "registration">) {
-  if (task.type !== "registration") return false
+function isRegistrationDecisionPending(task: Pick<OpsTask, "type" | "status" | "registration">) {
+  return getRegistrationDecisionActionsForTask(task).length > 0
+}
+
+function canOpenRegistrationCustomerMessage(task: Pick<OpsTask, "type" | "status" | "registration">) {
+  if (task.type !== "registration" || task.status === "on_hold") return false
   return canSendRegistrationAdmissionMessage(task.registration?.pipelineStatus)
+}
+
+type RegistrationBranchAction = {
+  prefix: string
+  label: string
+  tone: "primary" | "outline"
 }
 
 function RegistrationDecisionActions({
@@ -8924,7 +8332,14 @@ function RegistrationDecisionActions({
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const [pendingTerminalAction, setPendingTerminalAction] = useState<(typeof REGISTRATION_DECISION_ACTIONS)[number] | null>(null)
+  const [pendingTerminalAction, setPendingTerminalAction] = useState<RegistrationBranchAction | null>(null)
+  const availableActions = getRegistrationDecisionActionsForTask(task) as RegistrationBranchAction[]
+  const currentPrefix = getRegistrationPipelinePrefix(task.registration?.pipelineStatus)
+  const triggerLabel = currentPrefix === "0."
+    ? "다음 방향"
+    : currentPrefix === "3."
+      ? "상담 결과"
+      : "등록 전환"
   if (!isRegistrationDecisionPending(task)) return null
 
   return (
@@ -8934,16 +8349,17 @@ function RegistrationDecisionActions({
           <Button
             type="button"
             size="sm"
-            aria-label={`${task.title} 상담 결과 선택`}
+            variant="default"
+            aria-label={`${task.title} ${triggerLabel}`}
             disabled={disabled}
           >
-            결과 선택
+            {triggerLabel}
             <ChevronsUpDown className="size-3.5" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-56 p-1">
-          <div className="grid gap-1" role="menu" aria-label={`${task.title} 등록 결과`}>
-            {REGISTRATION_DECISION_ACTIONS.map((action) => {
+          <div className="grid gap-1" role="menu" aria-label={`${task.title} ${triggerLabel} 선택`}>
+            {availableActions.map((action) => {
               const pipelineStatus = findRegistrationPipelineStatus(action.prefix)
               if (!pipelineStatus) return null
               return (
@@ -8999,7 +8415,7 @@ function RegistrationDecisionActions({
 }
 
 function getNextRegistrationPipelineAction(task: Pick<OpsTask, "type" | "status" | "registration">): { pipelineStatus: string; label: string } | null {
-  if (task.type !== "registration" || task.status === "done" || task.status === "canceled") return null
+  if (task.type !== "registration" || task.status === "done" || task.status === "canceled" || task.status === "on_hold") return null
 
   const currentPipelineStatus = task.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || ""
   const currentPrefix = getRegistrationPipelinePrefix(currentPipelineStatus) || "0."
@@ -9011,7 +8427,7 @@ function getNextRegistrationPipelineAction(task: Pick<OpsTask, "type" | "status"
 
   return {
     pipelineStatus,
-    label: `다음: ${getCompactRegistrationPipelineLabel(pipelineStatus)}`,
+    label: REGISTRATION_PIPELINE_NEXT_LABELS[currentPrefix] || `다음: ${getCompactRegistrationPipelineLabel(pipelineStatus)}`,
   }
 }
 
@@ -9019,6 +8435,7 @@ function getSecondaryTaskStatusOptions(task: Pick<OpsTask, "status" | "type">) {
   if (task.status === "done" || task.status === "canceled") return []
   if (task.type === "word_retest") return []
   if (task.type === "registration") {
+    if (task.status === "on_hold") return [{ value: "in_progress", label: "다시 진행" }]
     return OPS_TASK_STATUSES.filter((status) => status.value === "on_hold" && status.value !== task.status)
   }
   if (task.type !== "general") {
@@ -9128,25 +8545,17 @@ function normalizeFormForSubmit(input: OpsTaskInput): OpsTaskInput {
   if (input.type !== "registration") return input
 
   const pipelineStatus = input.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"
-  const nextStatus: OpsTaskStatus = pipelineStatus.startsWith("7.")
-    ? "done"
-    : pipelineStatus.startsWith("8.") || pipelineStatus.startsWith("9.")
-      ? "canceled"
-      : pipelineStatus.startsWith("0.")
-        ? "requested"
-        : "in_progress"
+  const nextStatus = getRegistrationTaskStatusForPipeline(pipelineStatus, input.status) as OpsTaskStatus
+  const transitionAt = new Date().toISOString()
   const nextCompletedAt = nextStatus === "done"
-    ? input.completedAt || new Date().toISOString()
+    ? input.completedAt || transitionAt
     : ""
 
   return {
     ...input,
     status: nextStatus,
     completedAt: nextCompletedAt,
-    registration: {
-      ...(input.registration || {}),
-      pipelineStatus,
-    },
+    registration: prepareRegistrationPipelineTransition(input.registration || {}, pipelineStatus, transitionAt),
   }
 }
 
@@ -9420,22 +8829,113 @@ function parseTodoistQuickAdd(
   }
 }
 
+function mergeOpsTaskWorkspaceOptionData(
+  current: OpsTaskWorkspaceData,
+  enrichment: OpsTaskWorkspaceOptionData,
+): OpsTaskWorkspaceData {
+  const profileLabels = new Map(enrichment.profiles.map((profile) => [profile.id, profile.label]))
+  const enrichedTasks = current.tasks.map((task) => ({
+    ...task,
+    requestedByLabel: profileLabels.get(task.requestedBy) || task.requestedByLabel,
+    assigneeLabel: profileLabels.get(task.assigneeId) || task.assigneeLabel,
+    secondaryAssigneeLabel: profileLabels.get(task.secondaryAssigneeId) || task.secondaryAssigneeLabel,
+    comments: task.comments.map((comment) => ({
+      ...comment,
+      authorLabel: profileLabels.get(comment.authorId) || comment.authorLabel,
+    })),
+    attachments: task.attachments.map((attachment) => ({
+      ...attachment,
+      uploadedByLabel: profileLabels.get(attachment.uploadedBy) || attachment.uploadedByLabel,
+    })),
+    events: task.events.map((event) => ({
+      ...event,
+      actorLabel: profileLabels.get(event.actorId) || event.actorLabel,
+    })),
+  }))
+
+  return {
+    ...current,
+    tasks: enrichedTasks,
+    profiles: enrichment.profiles,
+    students: enrichment.students,
+    classes: enrichment.classes,
+    textbooks: enrichment.textbooks,
+    teachers: enrichment.teachers,
+  }
+}
+
 export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: WorkspaceKey }) {
+  const { user } = useAuth()
+  return <OpsTaskWorkspaceSession key={user?.id || "anonymous"} workspace={workspace} />
+}
+
+function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const scopedTaskType = WORKSPACE_TASK_TYPE[workspace]
   const isTodoWorkspace = workspace === "todo"
   const isRegistrationWorkspace = workspace === "registration"
   const isWithdrawalWorkspace = workspace === "withdrawal"
   const isTransferWorkspace = workspace === "transfer"
   const isWordRetestWorkspace = workspace === "word_retest"
-  const workspaceLoadOptions = {
-    taskType: scopedTaskType,
-    includeManagementOptions: !isTodoWorkspace,
-  }
-  const initialWorkspaceData = getCachedOpsTaskWorkspaceData(workspaceLoadOptions)
   const searchParams = useSearchParams()
   const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()
+  const currentUserId = user?.id || ""
+  const registrationFixtureValue = searchParams.get("fixture")
+  const registrationFixtureRequested = isRegistrationWorkspace
+    && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, registrationFixtureValue)
+  const [registrationFixtureModule, setRegistrationFixtureModule] = useState<RegistrationSubjectTrackFixtureModule | null>(null)
+  const registrationFixtureStateRef = useRef<RegistrationSubjectTrackFixtureState | null>(null)
+  const [, setRegistrationFixtureRevision] = useState(0)
+  useEffect(() => {
+    if (!registrationFixtureRequested) {
+      registrationFixtureStateRef.current = null
+      setRegistrationFixtureModule(null)
+      return
+    }
+    let disposed = false
+    void import("./registration-track-fixtures").then((fixtureModule) => {
+      if (disposed) return
+      registrationFixtureStateRef.current = fixtureModule.createRegistrationSubjectTrackFixtureState()
+      setRegistrationFixtureModule(fixtureModule)
+      setRegistrationFixtureRevision((current) => current + 1)
+    })
+    return () => {
+      disposed = true
+      registrationFixtureStateRef.current = null
+    }
+  }, [registrationFixtureRequested])
+  const registrationFixtureEnabled = Boolean(
+    registrationFixtureRequested
+    && registrationFixtureModule
+    && registrationFixtureStateRef.current,
+  )
+  const registrationFixtureViewer = registrationFixtureEnabled
+    ? registrationFixtureModule?.resolveRegistrationSubjectTrackFixtureViewer(
+        registrationFixtureStateRef.current!,
+        searchParams.get("fixtureRole"),
+      ) || null
+    : null
+  const workspaceLoadOptions = isRegistrationWorkspace
+    ? {
+        taskType: scopedTaskType,
+        viewerId: currentUserId,
+        includeManagementOptions: false,
+        includeTeacherOptions: false,
+        includeProfileOptions: false,
+      }
+    : {
+        taskType: scopedTaskType,
+        viewerId: currentUserId,
+        includeManagementOptions: !isTodoWorkspace,
+        includeTeacherOptions: true,
+        includeProfileOptions: true,
+      }
+  const initialWorkspaceData = registrationFixtureRequested
+    ? null
+    : getCachedOpsTaskWorkspaceData(workspaceLoadOptions)
   const [data, setData] = useState<OpsTaskWorkspaceData | null>(() => initialWorkspaceData)
   const [loading, setLoading] = useState(() => !initialWorkspaceData)
+  const [registrationOptionsLoading, setRegistrationOptionsLoading] = useState(false)
+  const [registrationOptionsError, setRegistrationOptionsError] = useState("")
   const [view, setView] = useState<ViewKey>("all")
   const [todoView, setTodoView] = useState<TodoViewKey>("inbox")
   const [withdrawalView, setWithdrawalView] = useState<WithdrawalViewKey>("applicant")
@@ -9446,7 +8946,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [assigneeFilter, setAssigneeFilter] = useState<TodoSelectFilterKey>("all")
   const [assigneeTeamFilter, setAssigneeTeamFilter] = useState<TodoSelectFilterKey>("all")
   const [taskFocus, setTaskFocus] = useState<TaskFocus>("none")
-  const [registrationPipeline, setRegistrationPipeline] = useState(REGISTRATION_PIPELINE_ALL)
   const [query, setQuery] = useState("")
   const [quickAddText, setQuickAddText] = useState("")
   const [showClosed, setShowClosed] = useState(false)
@@ -9463,6 +8962,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [withdrawalNotificationOpen, setWithdrawalNotificationOpen] = useState(false)
   const [transferNotificationOpen, setTransferNotificationOpen] = useState(false)
   const [registrationNotificationOpen, setRegistrationNotificationOpen] = useState(false)
+  const [registrationProcessManualOpen, setRegistrationProcessManualOpen] = useState(false)
   const [registrationCustomerMessageTask, setRegistrationCustomerMessageTask] = useState<OpsTask | null>(null)
   const [withdrawalNotificationSettings, setWithdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
   const [withdrawalNotificationTemplates, setWithdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES)
@@ -9476,13 +8976,42 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const [detailOpen, setDetailOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<OpsTask | null>(null)
   const [selectedTask, setSelectedTask] = useState<OpsTask | null>(null)
+  const [selectedRegistrationTrackId, setSelectedRegistrationTrackId] = useState<string | null>(null)
+  const selectedRegistrationTrackIdRef = useRef<string | null>(selectedRegistrationTrackId)
+  selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
+  const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationCaseDetail | null>(null)
+  const [registrationConsultationOutcomeTrackId, setRegistrationConsultationOutcomeTrackId] = useState<string | null>(null)
   const [form, setForm] = useState<OpsTaskInput>(() => cloneForm())
   const formBaselineRef = useRef(serializeOpsTaskInput(form))
+  const registrationDirectorDefaultStateRef = useRef(createRegistrationDirectorDefaultState())
+  const registrationDirectorDefaultSessionRef = useRef(0)
+  const registrationDirectorDefaultPendingTokenRef = useRef(0)
+  const registrationDirectorDefaultPendingRef = useRef<{
+    token: number
+    session: number
+    expectedProfileId: string
+    expectedCounselor: string
+    targetProfileId: string
+    targetCounselor: string
+    state: ReturnType<typeof createRegistrationDirectorDefaultState>
+  } | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [formCompletionBlockers, setFormCompletionBlockers] = useState<string[]>([])
   const [formCompletionIntent, setFormCompletionIntent] = useState<FormCompletionIntent | null>(null)
   const [confirmingFormClose, setConfirmingFormClose] = useState(false)
+  const formCloseReturnFocusRef = useRef<HTMLElement | null>(null)
+  const workspaceMountedRef = useRef(false)
+  const latestWorkspaceViewerIdRef = useRef(currentUserId)
+  latestWorkspaceViewerIdRef.current = currentUserId
+  const workspaceLoadGenerationRef = useRef(0)
+  const workspaceViewerIdRef = useRef(currentUserId)
+  const workspaceDataViewerIdRef = useRef(currentUserId)
+  const registrationTrackSelectionRef = useRef("")
+  const registrationCreateRequestRef = useRef<{ signature: string; requestKey: string } | null>(null)
+  const registrationOptionsLoadedRef = useRef(false)
+  const registrationOptionsLoadGenerationRef = useRef(0)
+  const registrationOptionsDataRef = useRef<OpsTaskWorkspaceOptionData | null>(null)
   const [notice, setNotice] = useState("")
   const [commentBody, setCommentBody] = useState("")
   const [attachmentName, setAttachmentName] = useState("")
@@ -9499,7 +9028,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const wordRetestTeacherFilterTouchedRef = useRef(false)
   const deferredQuery = useDeferredValue(query)
 
-  const currentUserId = user?.id || ""
   const currentUserLabel = useMemo(
     () => [user?.name, user?.email, user?.loginId].map((value) => String(value || "").trim()).find(Boolean) || "",
     [user?.email, user?.loginId, user?.name],
@@ -9518,11 +9046,26 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     currentUserTeam,
   }), [currentUserId, currentUserLabel, currentUserTeam])
   const canDelete = canManageAll || isStaff
-  const canManageRegistrationWorkflow = canManageAll || isStaff
+  const registrationViewerId = registrationFixtureEnabled
+    ? registrationFixtureViewer?.viewerId || ""
+    : currentUserId
+  const registrationViewerRole = registrationFixtureEnabled
+    ? registrationFixtureViewer?.viewerRole || "assistant"
+    : isAdmin
+      ? "admin"
+      : isStaff
+        ? "staff"
+        : isTeacher
+          ? "teacher"
+          : "assistant"
+  const canManageRegistrationWorkflow = registrationFixtureEnabled
+    ? ["admin", "staff"].includes(registrationFixtureViewer?.viewerRole || "")
+    : canManageAll || isStaff
   const canManageWithdrawalWorkflow = canManageAll || isStaff
   const canManageTransferWorkflow = canManageAll || isStaff
   const canDeleteTask = useCallback(
     (task: OpsTask) => {
+      if (task.type === "registration" && isRegistrationCompletionImmutable(task.registration?.pipelineStatus)) return false
       const isOwnGeneralTask = (
         task.type === "general" &&
         Boolean(currentUserId) &&
@@ -9536,17 +9079,237 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   )
   const workspaceLabel = WORKSPACE_LABELS[workspace]
 
+  const replaceRegistrationFixtureState = useCallback((nextState: RegistrationSubjectTrackFixtureState) => {
+    registrationFixtureStateRef.current = nextState
+    setRegistrationFixtureRevision((current) => current + 1)
+  }, [])
+
+  useEffect(() => {
+    if (!registrationFixtureEnabled || !registrationFixtureModule || !registrationFixtureStateRef.current) return
+    const adapter = registrationFixtureModule.createRegistrationSubjectTrackFixtureAdapter({
+      getState: () => {
+        if (!registrationFixtureStateRef.current) throw new Error("registration_subject_track_fixture_not_ready")
+        return registrationFixtureStateRef.current
+      },
+      replaceState: replaceRegistrationFixtureState,
+    })
+    return installRegistrationSubjectTrackFixtureRuntime(
+      process.env.NODE_ENV,
+      registrationFixtureValue,
+      adapter,
+    )
+  }, [registrationFixtureEnabled, registrationFixtureModule, registrationFixtureValue, replaceRegistrationFixtureState])
+
   const reload = useCallback(async (force = false, showPending = true) => {
-    const loadOptions = { taskType: scopedTaskType, includeManagementOptions: !isTodoWorkspace, includeTeacherOptions: true }
-    if (showPending && (force || !getCachedOpsTaskWorkspaceData(loadOptions))) setLoading(true)
+    if (latestWorkspaceViewerIdRef.current !== currentUserId) return
+    if (registrationFixtureRequested && !registrationFixtureEnabled) {
+      setLoading(true)
+      return
+    }
+    if (registrationFixtureEnabled) {
+      workspaceDataViewerIdRef.current = currentUserId
+      setData(registrationFixtureStateRef.current!.workspaceData)
+      setLoading(false)
+      return
+    }
+    const loadGeneration = ++workspaceLoadGenerationRef.current
+    const viewerChanged = workspaceViewerIdRef.current !== currentUserId
+    if (viewerChanged) {
+      workspaceViewerIdRef.current = currentUserId
+      workspaceDataViewerIdRef.current = ""
+      registrationOptionsLoadedRef.current = false
+      registrationOptionsLoadGenerationRef.current += 1
+      registrationOptionsDataRef.current = null
+      registrationDirectorDefaultSessionRef.current += 1
+      registrationDirectorDefaultPendingTokenRef.current += 1
+      registrationDirectorDefaultPendingRef.current = null
+      registrationDirectorDefaultStateRef.current = createRegistrationDirectorDefaultState()
+      setRegistrationOptionsLoading(false)
+      setRegistrationOptionsError("")
+      const resetForm = cloneForm()
+      formBaselineRef.current = serializeOpsTaskInput(resetForm)
+      setForm(resetForm)
+      setSelectedTask(null)
+      setSelectedRegistrationTrackId(null)
+      setRegistrationCaseDetail(null)
+      registrationTrackSelectionRef.current = ""
+      registrationCreateRequestRef.current = null
+      setEditingTask(null)
+      setFormOpen(false)
+      setDetailOpen(false)
+      setRegistrationOperationsOpen(false)
+      setRegistrationCustomerMessageTask(null)
+      setConfirmingFormClose(false)
+      setFormCompletionBlockers([])
+      setFormCompletionIntent(null)
+      setDeleteTarget(null)
+      setBulkDeleteTargets([])
+      setWordRetestSelectedTaskIds(new Set())
+      setWordRetestStudentIds([])
+      setWithdrawalNotificationOpen(false)
+      setTransferNotificationOpen(false)
+      setRegistrationNotificationOpen(false)
+      setRegistrationProcessManualOpen(false)
+      setStatusUndo(null)
+      setCommentBody("")
+      setAttachmentName("")
+      setAttachmentLink("")
+      setQuery("")
+      setQuickAddText("")
+      setMessage("")
+      setNotice("")
+      setSaving(false)
+      setData(null)
+    }
+    const loadOptions = isRegistrationWorkspace
+      ? {
+          taskType: scopedTaskType,
+          viewerId: currentUserId,
+          includeManagementOptions: false,
+          includeTeacherOptions: false,
+          includeProfileOptions: false,
+        }
+      : {
+          taskType: scopedTaskType,
+          viewerId: currentUserId,
+          includeManagementOptions: !isTodoWorkspace,
+          includeTeacherOptions: true,
+          includeProfileOptions: true,
+        }
+    const cachedData = force
+      ? null
+      : getCachedOpsTaskWorkspaceData(loadOptions) || getPersistedOpsTaskWorkspaceData(loadOptions)
+    if (cachedData) {
+      workspaceDataViewerIdRef.current = currentUserId
+      setData((current) => current || cachedData)
+      setLoading(false)
+    }
+    if (showPending && !cachedData) setLoading(true)
     const nextData = await loadOpsTaskWorkspaceData({ ...loadOptions, force })
-    setData(nextData)
+    if (
+      latestWorkspaceViewerIdRef.current !== currentUserId
+      || workspaceLoadGenerationRef.current !== loadGeneration
+    ) return
+    const enrichmentData = registrationOptionsDataRef.current
+    workspaceDataViewerIdRef.current = currentUserId
+    setData(
+      isRegistrationWorkspace && enrichmentData
+        ? mergeOpsTaskWorkspaceOptionData(nextData, enrichmentData)
+        : nextData,
+    )
     setLoading(false)
-  }, [isTodoWorkspace, scopedTaskType])
+  }, [currentUserId, isRegistrationWorkspace, isTodoWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType])
+
+  useEffect(() => {
+    workspaceMountedRef.current = true
+    return () => {
+      workspaceMountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     void reload()
+    return () => {
+      workspaceLoadGenerationRef.current += 1
+      registrationOptionsLoadGenerationRef.current += 1
+    }
   }, [reload])
+
+  const ensureRegistrationOptions = useCallback(async (force = false) => {
+    if (registrationFixtureRequested && !registrationFixtureEnabled) return false
+    if (registrationFixtureEnabled) {
+      const enrichmentData = registrationFixtureStateRef.current!.optionData
+      registrationOptionsLoadedRef.current = true
+      registrationOptionsDataRef.current = enrichmentData
+      setRegistrationOptionsLoading(false)
+      setRegistrationOptionsError("")
+      setData(registrationFixtureStateRef.current!.workspaceData)
+      return true
+    }
+    if (
+      !isRegistrationWorkspace
+      || latestWorkspaceViewerIdRef.current !== currentUserId
+      || (!force && registrationOptionsLoadedRef.current)
+    ) return registrationOptionsLoadedRef.current
+    const loadGeneration = ++registrationOptionsLoadGenerationRef.current
+    setRegistrationOptionsLoading(true)
+    setRegistrationOptionsError("")
+
+    const enrichmentData = await loadOpsTaskWorkspaceOptionData({
+      taskType: scopedTaskType,
+      viewerId: currentUserId,
+      force,
+    })
+    if (
+      latestWorkspaceViewerIdRef.current !== currentUserId
+      || registrationOptionsLoadGenerationRef.current !== loadGeneration
+    ) return false
+
+    if (!enrichmentData.schemaReady) {
+      setRegistrationOptionsError(enrichmentData.error || "선택 정보를 불러오지 못했습니다.")
+      setRegistrationOptionsLoading(false)
+      return false
+    }
+
+    registrationOptionsLoadedRef.current = true
+    registrationOptionsDataRef.current = enrichmentData
+    setData((current) => current
+      ? mergeOpsTaskWorkspaceOptionData(current, enrichmentData)
+      : current)
+    setRegistrationOptionsLoading(false)
+    return enrichmentData.directorCatalogStatus === "authoritative"
+  }, [currentUserId, isRegistrationWorkspace, registrationFixtureEnabled, registrationFixtureRequested, scopedTaskType])
+
+  const retryRegistrationOptions = useCallback(async () => {
+    registrationOptionsLoadedRef.current = false
+    registrationOptionsDataRef.current = null
+    return ensureRegistrationOptions(true)
+  }, [ensureRegistrationOptions])
+
+  const persistCreatedRegistrationDirectorDefaults = useCallback(async (
+    response: RegistrationCaseCreateResponse,
+    registration: NonNullable<OpsTaskInput["registration"]>,
+  ) => {
+    if (!canManageRegistrationWorkflow) return true
+    let optionSnapshot = registrationOptionsDataRef.current
+    if (optionSnapshot?.directorCatalogStatus !== "authoritative") {
+      try {
+        await ensureRegistrationOptions(true)
+      } catch {
+        return false
+      }
+      optionSnapshot = registrationOptionsDataRef.current
+    }
+    if (optionSnapshot?.directorCatalogStatus !== "authoritative") return false
+    const resolutions = resolveRegistrationTrackDirectorDefaults({
+      tracks: response.tracks,
+      grade: registration.schoolGrade || "",
+      inquiryAt: registration.inquiryAt || "",
+      teachers: optionSnapshot?.teachers || EMPTY_TEACHER_OPTIONS,
+      profiles: optionSnapshot?.profiles || EMPTY_PROFILE_OPTIONS,
+      catalogStatus: optionSnapshot?.directorCatalogStatus || "loading",
+    })
+    let complete = resolutions.every((resolution) => resolution.status === "resolved")
+    for (const resolution of resolutions.filter((item) => item.shouldAssign || item.shouldClear)) {
+      const assignmentSource = resolution.shouldClear ? "clear_default" : "default"
+      try {
+        await assignRegistrationTrackDirector({
+          trackId: resolution.trackId,
+          directorProfileId: resolution.shouldClear ? null : resolution.profileId,
+          assignmentSource,
+          ruleKey: resolution.shouldClear ? null : resolution.ruleKey,
+          expectedCommonRevision: response.commonRevision,
+          requestKey: createRegistrationMutationRequestKey(
+            "registration-create-director-default",
+            `${response.taskId}:${resolution.trackId}:${assignmentSource}:${resolution.profileId}:${resolution.ruleKey || ""}:${response.commonRevision}`,
+          ),
+        })
+      } catch {
+        complete = false
+      }
+    }
+    return complete
+  }, [canManageRegistrationWorkflow, ensureRegistrationOptions])
 
   useEffect(() => {
     const nextView = searchParams.get("view")
@@ -9588,7 +9351,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   const syncView = (nextView: ViewKey, nextFocus: TaskFocus = "none") => {
     setView(nextView)
     setTaskFocus(nextFocus)
-    setRegistrationPipeline(REGISTRATION_PIPELINE_ALL)
 
     const searchParams = new URLSearchParams(window.location.search)
     searchParams.set("view", nextView)
@@ -9630,15 +9392,37 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const syncRegistrationView = (nextView: RegistrationViewKey) => {
     setRegistrationView(nextView)
-    setRegistrationPipeline(REGISTRATION_PIPELINE_ALL)
     setTaskFocus("none")
+    setDetailOpen(false)
+    setSelectedRegistrationTrackId(null)
+    setRegistrationCaseDetail(null)
+    registrationTrackSelectionRef.current = ""
     const searchParams = new URLSearchParams(window.location.search)
     searchParams.set("flow", nextView)
+    searchParams.delete("taskId")
+    searchParams.delete("trackId")
     searchParams.delete("view")
     searchParams.delete("list")
     searchParams.delete("focus")
     const queryString = searchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }
+
+  function handleRegistrationViewTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentView: RegistrationViewKey) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+    event.preventDefault()
+    const currentIndex = REGISTRATION_VIEW_TABS.findIndex((tab) => tab.key === currentView)
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? REGISTRATION_VIEW_TABS.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + REGISTRATION_VIEW_TABS.length) % REGISTRATION_VIEW_TABS.length
+    const nextView = REGISTRATION_VIEW_TABS[nextIndex]?.key
+    if (!nextView) return
+    syncRegistrationView(nextView)
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(`[data-registration-view-tab="${nextView}"]`)?.focus()
+    })
   }
 
   const syncWordRetestMode = (nextMode: WordRetestMode) => {
@@ -9716,18 +9500,24 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
-  const syncTaskDeepLink = useCallback((nextTaskId: string | null) => {
+  const syncTaskDeepLink = useCallback((nextTaskId: string | null, nextTrackId: string | null = null) => {
     const searchParams = new URLSearchParams(window.location.search)
     if (nextTaskId) {
       searchParams.set("taskId", nextTaskId)
     } else {
       searchParams.delete("taskId")
     }
+    if (nextTaskId && nextTrackId && !isLegacyRegistrationTrackId(nextTrackId)) {
+      searchParams.set("trackId", nextTrackId)
+    } else {
+      searchParams.delete("trackId")
+    }
     const queryString = searchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }, [])
 
-  const tasks = data?.tasks || EMPTY_TASKS
+  const workspaceDataBelongsToCurrentViewer = workspaceDataViewerIdRef.current === currentUserId
+  const tasks = workspaceDataBelongsToCurrentViewer ? data?.tasks || EMPTY_TASKS : EMPTY_TASKS
   const profiles = data?.profiles || EMPTY_PROFILE_OPTIONS
   const students = data?.students || EMPTY_STUDENT_OPTIONS
   const classes = data?.classes || EMPTY_CLASS_OPTIONS
@@ -9771,6 +9561,97 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     () => getProfilesForTeam(profiles, form.assigneeTeam || "", profileTeamById, form.assigneeId || ""),
     [form.assigneeId, form.assigneeTeam, profileTeamById, profiles],
   )
+  useEffect(() => {
+    if (!formOpen || form.type !== "registration") {
+      registrationDirectorDefaultPendingRef.current = null
+      return
+    }
+    const session = registrationDirectorDefaultSessionRef.current
+    const currentProfileId = form.secondaryAssigneeId || ""
+    const currentCounselor = form.registration?.counselor || ""
+    let defaultState = registrationDirectorDefaultStateRef.current
+    const pendingTransition = registrationDirectorDefaultPendingRef.current
+
+    if (pendingTransition?.session === session) {
+      const reachedTarget = (
+        currentProfileId === pendingTransition.targetProfileId
+        && currentCounselor === pendingTransition.targetCounselor
+      )
+      const stillWaiting = (
+        currentProfileId === pendingTransition.expectedProfileId
+        && currentCounselor === pendingTransition.expectedCounselor
+      )
+      if (reachedTarget) {
+        defaultState = pendingTransition.state
+        registrationDirectorDefaultStateRef.current = pendingTransition.state
+        registrationDirectorDefaultPendingRef.current = null
+      } else if (stillWaiting) {
+        return
+      } else {
+        defaultState = markRegistrationDirectorDefaultManual()
+        registrationDirectorDefaultStateRef.current = defaultState
+        registrationDirectorDefaultPendingRef.current = null
+      }
+    } else if (pendingTransition) {
+      registrationDirectorDefaultPendingRef.current = null
+    }
+
+    const resolution = resolveRegistrationDirectorDefault({
+      subjects: parseRegistrationSubjects(form.subject),
+      grade: form.registration?.schoolGrade,
+      inquiryAt: form.registration?.inquiryAt,
+      teachers,
+      profiles,
+    })
+    const transition = getRegistrationDirectorDefaultTransition({
+      currentProfileId,
+      currentCounselor,
+      state: defaultState,
+      resolution,
+    })
+    if (!transition.shouldUpdate) {
+      registrationDirectorDefaultStateRef.current = transition.state
+      return
+    }
+
+    const token = registrationDirectorDefaultPendingTokenRef.current + 1
+    registrationDirectorDefaultPendingTokenRef.current = token
+    const nextPendingTransition = {
+      token,
+      session,
+      expectedProfileId: currentProfileId,
+      expectedCounselor: currentCounselor,
+      targetProfileId: transition.profileId,
+      targetCounselor: transition.counselor,
+      state: transition.state,
+    }
+    registrationDirectorDefaultPendingRef.current = nextPendingTransition
+    setForm((current) => {
+      if (registrationDirectorDefaultSessionRef.current !== session) return current
+      if (current.type !== "registration") return current
+      if (registrationDirectorDefaultPendingRef.current?.token !== token) return current
+      if ((current.secondaryAssigneeId || "") !== currentProfileId) return current
+      if ((current.registration?.counselor || "") !== currentCounselor) return current
+      return {
+        ...current,
+        secondaryAssigneeId: transition.profileId,
+        registration: {
+          ...(current.registration || {}),
+          counselor: transition.counselor,
+        },
+      }
+    })
+  }, [
+    form.registration?.counselor,
+    form.registration?.inquiryAt,
+    form.registration?.schoolGrade,
+    form.secondaryAssigneeId,
+    form.subject,
+    form.type,
+    formOpen,
+    profiles,
+    teachers,
+  ])
   const scopedTasks = useMemo(
     () => tasks.filter((task) => task.type === scopedTaskType),
     [scopedTaskType, tasks],
@@ -9816,13 +9697,18 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     operations: getWithdrawalViewTasks(scopedTasks, "operations").length,
     closed: getWithdrawalViewTasks(scopedTasks, "closed").length,
   }), [scopedTasks])
-  const registrationCounts = useMemo(() => ({
-    inquiry: getRegistrationViewTasks(scopedTasks, "inquiry").length,
-    consulting: getRegistrationViewTasks(scopedTasks, "consulting").length,
-    waiting: getRegistrationViewTasks(scopedTasks, "waiting").length,
-    enrollment: getRegistrationViewTasks(scopedTasks, "enrollment").length,
-    closed: getRegistrationViewTasks(scopedTasks, "closed").length,
-  }), [scopedTasks])
+  const registrationTrackItems = useMemo(
+    () => buildRegistrationTrackListItems(scopedTasks),
+    [scopedTasks],
+  )
+  const registrationCounts = useMemo(
+    () => getRegistrationTrackTabCounts(registrationTrackItems.map((item) => item.track)),
+    [registrationTrackItems],
+  )
+  const visibleRegistrationTrackItems = useMemo(
+    () => filterRegistrationTrackListItems(registrationTrackItems, registrationView),
+    [registrationTrackItems, registrationView],
+  )
   const wordRetestRoleContext = useMemo(
     () => (canManageAll || isStaff ? {} : currentUserContext),
     [canManageAll, currentUserContext, isStaff],
@@ -9888,13 +9774,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     wordRetestFilterOptions.teacher,
     wordRetestTeacherFilter,
   ])
-  const registrationPipelineCountTasks = useMemo(() => {
-    if (!isRegistrationWorkspace) return EMPTY_TASKS
-
-    return scopedTasks
-      .filter((task) => isRegistrationPipelineInView(task, registrationView))
-      .filter((task) => matchesSearch(task, deferredQuery))
-  }, [deferredQuery, isRegistrationWorkspace, registrationView, scopedTasks])
   const hasQuery = !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && query.trim().length > 0
 
   const visibleTasks = useMemo(() => {
@@ -9908,10 +9787,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         }
 
         if (!isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !showClosed && !isOpenTask(task)) return false
-        if (isRegistrationWorkspace && !isRegistrationPipelineInView(task, registrationView)) return false
-        if (isRegistrationWorkspace && registrationPipeline !== REGISTRATION_PIPELINE_ALL) {
-          if ((task.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value) !== registrationPipeline) return false
-        }
         if (taskFocus === "today" && !hasOpsTaskCalendarDate(task, todayKey)) return false
         if (taskFocus === "overdue") {
           if (!hasOpsTaskOverdueCalendarDate(task, todayKey)) return false
@@ -9947,7 +9822,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (todoSort === "status") return sortOpsTasksByWorkflowStatus(nextTasks, todayKey)
     if (todoSort === "priority") return sortOpsTasksByPriority(nextTasks, todayKey)
     return sortOpsTasksByWorkDate(nextTasks, todayKey)
-  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, registrationPipeline, registrationView, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
+  }, [assigneeFilter, assigneeTeamFilter, confirmationByTaskId, currentUserContext, currentUserId, currentUserLabel, deferredQuery, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, requestedByFilter, requestedTeamFilter, scopedTasks, showClosed, taskFocus, todayKey, todoSort, todoView, view, withdrawalView, wordRetestBranchFilter, wordRetestClassFilter, wordRetestCustomEndDate, wordRetestCustomStartDate, wordRetestMode, wordRetestPeriodFilter, wordRetestRoleContext, wordRetestTeacherFilter])
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
@@ -10013,11 +9888,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     wordRetestClassFilter !== "all"
   )
   const isWithdrawalFilteredEmpty = (isWithdrawalWorkspace || isTransferWorkspace) && withdrawalView !== "applicant"
-  const isRegistrationFilteredEmpty = isRegistrationWorkspace && (registrationView !== "inquiry" || registrationPipeline !== REGISTRATION_PIPELINE_ALL)
+  const isRegistrationFilteredEmpty = isRegistrationWorkspace && registrationView !== "inquiry"
   const isFilteredEmpty = hasQuery || isTodoFilteredEmpty || isWordRetestFilteredEmpty || isWithdrawalFilteredEmpty || isRegistrationFilteredEmpty || (!isTodoWorkspace && taskFocus !== "none")
-  const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleTasks.length === 0
-  const showToolbarCreate = !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
-  const canOpenCreate = isTodoWorkspace || !loading
+  const visibleWorkspaceItemCount = isRegistrationWorkspace
+    ? visibleRegistrationTrackItems.length
+    : visibleTasks.length
+  const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
+  const showToolbarCreate = !registrationFixtureEnabled && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
+  const hasLoadBlocker = Boolean(data && !data.schemaReady)
+  const canOpenCreate = isTodoWorkspace || (!loading && !hasLoadBlocker)
   const createActionDisabled = saving || !canOpenCreate
   const closedScopedTaskCount = scopedTasks.filter((task) => isClosedOpsTask(task)).length
   const showClosedToggle = !isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (closedScopedTaskCount > 0 || showClosed)
@@ -10034,8 +9913,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       ? "조건에 맞는 항목 없음"
       : `${workspaceLabel} 없음`
   const emptyCalendarLabel = isFilteredEmpty ? "조건에 맞는 일정 없음" : "일정 없음"
-  const hasLoadBlocker = Boolean(data && !data.schemaReady)
-  const shouldHideEmptySurface = !loading && visibleTasks.length === 0 && (hasLoadBlocker || Boolean(message && !formOpen && !detailOpen))
+  const shouldHideEmptySurface = !loading && visibleWorkspaceItemCount === 0 && (hasLoadBlocker || Boolean(message && !formOpen && !detailOpen))
 	  const formDetailTabs = useMemo(() => getFormDetailTabs(form.type), [form.type])
 	  const isTemplateForm = form.type !== "general"
 	  const isWordRetestForm = form.type === "word_retest"
@@ -10066,10 +9944,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	      : isTodoWorkspace
 	        ? "할 일 추가"
 	        : `${workspaceLabel} 추가`
-  const formCloseLabel = confirmingFormClose ? "저장하지 않고 닫기" : "닫기"
+  const formCloseLabel = "닫기"
 
   function openCreate(type: OpsTaskType = scopedTaskType) {
     if (!canOpenCreate) return
+    if (type === "registration") void ensureRegistrationOptions()
     const defaultAssigneeId = currentUserId || ""
     const defaultAssigneeTeam = profileTeamById.get(defaultAssigneeId) || ""
     const defaultDueAt = taskFocus === "today" ? dueTodayValue : ""
@@ -10093,7 +9972,10 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       ...registrationDefaults,
       ...wordRetestDefaults,
     })
-    blurActiveElementBeforeDialog()
+    registrationDirectorDefaultSessionRef.current += 1
+    registrationDirectorDefaultPendingTokenRef.current += 1
+    registrationDirectorDefaultPendingRef.current = null
+    registrationDirectorDefaultStateRef.current = createRegistrationDirectorDefaultState()
     setEditingTask(null)
     setForm(nextForm)
     setWordRetestStudentIds([])
@@ -10110,10 +9992,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   }
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
+    if (task.type === "registration") void ensureRegistrationOptions()
     const inferredCompletionIntent = completionIntent || getCompletionIntentForBlockedEdit(task, blockers)
     const shouldDeferWordRetestRetryBlockers = inferredCompletionIntent?.kind === "word_retest_retry"
     const nextForm = applyFormCompletionIntent(formFromTask(task), inferredCompletionIntent)
-    blurActiveElementBeforeDialog()
+    registrationDirectorDefaultSessionRef.current += 1
+    registrationDirectorDefaultPendingTokenRef.current += 1
+    registrationDirectorDefaultPendingRef.current = null
+    registrationDirectorDefaultStateRef.current = createRegistrationDirectorDefaultState({
+      profileId: nextForm.secondaryAssigneeId,
+      counselor: nextForm.registration?.counselor,
+    })
     setDetailOpen(false)
     syncTaskDeepLink(null)
     setEditingTask(task)
@@ -10129,7 +10018,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setNotice("")
     setStatusUndo(null)
     setFormOpen(true)
-  }, [syncTaskDeepLink])
+  }, [ensureRegistrationOptions, syncTaskDeepLink])
 
   const openFailedWordRetestRetryForm = useCallback((task: OpsTask) => {
     const baseForm = formFromTask(task)
@@ -10155,7 +10044,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       },
     })
 
-    blurActiveElementBeforeDialog()
     setDetailOpen(false)
     syncTaskDeepLink(null)
     setEditingTask(task)
@@ -10177,11 +10065,23 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setFormOpen(true)
   }, [currentUserId, currentUserTaskTeam, syncTaskDeepLink])
 
-  const openDetail = useCallback((task: OpsTask) => {
-    blurActiveElementBeforeDialog()
+  const loadRegistrationCaseForWorkspace = useCallback((taskId: string, force = false) => {
+    if (registrationFixtureEnabled && registrationFixtureModule && registrationFixtureStateRef.current) {
+      const detail = registrationFixtureModule.getRegistrationSubjectTrackFixtureCase(registrationFixtureStateRef.current, taskId)
+      if (!detail) return Promise.reject(new Error("registration_subject_track_fixture_case_not_found"))
+      return Promise.resolve(detail)
+    }
+    return loadOpsRegistrationCaseDetail(taskId, registrationViewerId, { force })
+  }, [registrationFixtureEnabled, registrationFixtureModule, registrationViewerId])
+
+  const openDetail = useCallback((task: OpsTask, trackId: string | null = null) => {
+    const nextTrackId = task.type === "registration" ? trackId : null
+    registrationTrackSelectionRef.current = nextTrackId ? `${task.id}:${nextTrackId}` : ""
+    setRegistrationCaseDetail(null)
     setSelectedTask(task)
+    setSelectedRegistrationTrackId(nextTrackId)
     setDetailOpen(true)
-    syncTaskDeepLink(task.id)
+    syncTaskDeepLink(task.id, nextTrackId)
     setMessage("")
     setFormCompletionBlockers([])
     setFormCompletionIntent(null)
@@ -10193,38 +10093,236 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   }, [syncTaskDeepLink])
 
   const openRegistrationCustomerMessage = useCallback((task: OpsTask) => {
-    blurActiveElementBeforeDialog()
     setDetailOpen(false)
+    setSelectedRegistrationTrackId(null)
+    setRegistrationCaseDetail(null)
+    registrationTrackSelectionRef.current = ""
     syncTaskDeepLink(null)
     setRegistrationCustomerMessageTask(task)
     setMessage("")
     setNotice("")
   }, [syncTaskDeepLink])
 
+  const openRegistrationTrack = useCallback(async (taskId: string, trackId: string) => {
+    const task = taskById.get(taskId)
+    if (!task || task.type !== "registration") {
+      setMessage("선택한 등록 업무를 찾을 수 없습니다. 목록을 다시 불러오세요.")
+      return null
+    }
+
+    openDetail(task, trackId)
+    if (isLegacyRegistrationTrackId(trackId)) {
+      syncTaskDeepLink(taskId, null)
+      return { task, track: task.registrationTracks?.find((item) => item.id === trackId) || null, detail: null }
+    }
+
+    syncTaskDeepLink(taskId, trackId)
+    const selectionKey = `${taskId}:${trackId}`
+    registrationTrackSelectionRef.current = selectionKey
+    try {
+      const [detail] = await Promise.all([
+        loadRegistrationCaseForWorkspace(taskId),
+        canManageRegistrationWorkflow ? ensureRegistrationOptions() : Promise.resolve(),
+      ])
+      if (registrationTrackSelectionRef.current !== selectionKey) return null
+      const track = detail.tracks.find((item) => item.id === trackId)
+      if (!track) {
+        setSelectedRegistrationTrackId(null)
+        setRegistrationCaseDetail(null)
+        registrationTrackSelectionRef.current = ""
+        syncTaskDeepLink(taskId, null)
+        setMessage("선택한 과목 흐름이 변경되었습니다. 목록을 다시 불러오세요.")
+        return null
+      }
+      const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      setRegistrationCaseDetail(detail)
+      setSelectedTask(exactTask)
+      setDetailOpen(true)
+      return { task: exactTask, track, detail }
+    } catch (error) {
+      if (registrationTrackSelectionRef.current === selectionKey) {
+        setMessage(getOpsTaskActionErrorMessage(error, "선택한 과목 상세를 불러오지 못했습니다."))
+      }
+      return null
+    }
+  }, [canManageRegistrationWorkflow, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, openDetail, syncTaskDeepLink, taskById])
+
+  const editRegistrationTrack = useCallback(async (taskId: string, trackId: string) => {
+    const selection = await openRegistrationTrack(taskId, trackId)
+    if (!selection) return
+    if (isLegacyRegistrationTrackId(trackId)) {
+      openEdit(selection.task)
+      return
+    }
+    setNotice(`[${selection.track?.subject || "과목"}] 과목별 상세를 확인하세요.`)
+  }, [openEdit, openRegistrationTrack])
+
+  const handleSelectRegistrationTrack = useCallback((trackId: string) => {
+    const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
+    if (!taskId || !trackId) return
+    registrationTrackSelectionRef.current = `${taskId}:${trackId}`
+    setSelectedRegistrationTrackId(trackId)
+    setRegistrationConsultationOutcomeTrackId(null)
+    syncTaskDeepLink(taskId, trackId)
+    setMessage("")
+  }, [registrationCaseDetail?.task.id, selectedTask?.id, syncTaskDeepLink])
+
+  const reloadRegistrationCaseDetail = useCallback(async (preferredTrackId?: string) => {
+    const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
+    const currentTrackId = preferredTrackId || selectedRegistrationTrackIdRef.current || ""
+    if (!taskId || !registrationViewerId || !currentTrackId || isLegacyRegistrationTrackId(currentTrackId)) return
+    const selectionKey = `${taskId}:${currentTrackId}`
+    registrationTrackSelectionRef.current = selectionKey
+    try {
+      const [detail] = await Promise.all([
+        loadRegistrationCaseForWorkspace(taskId, true),
+        reload(true, false),
+      ])
+      if (registrationTrackSelectionRef.current !== selectionKey) return
+      const nextTrack = detail.tracks.find((track) => track.id === currentTrackId) || detail.tracks[0] || null
+      setRegistrationCaseDetail(detail)
+      setSelectedTask({ ...detail.task, registrationTracks: detail.tracks })
+      setSelectedRegistrationTrackId(nextTrack?.id || null)
+      syncTaskDeepLink(taskId, nextTrack?.id || null)
+    } catch (error) {
+      if (registrationTrackSelectionRef.current === selectionKey) {
+        setMessage(getOpsTaskActionErrorMessage(error, "등록 상세를 다시 불러오지 못했습니다."))
+      }
+      throw error
+    }
+  }, [loadRegistrationCaseForWorkspace, registrationCaseDetail?.task.id, registrationViewerId, reload, selectedTask?.id, syncTaskDeepLink])
+
+  const postRegistrationAdmissionAction = useCallback(async (payload: Record<string, unknown>) => {
+    if (registrationFixtureEnabled) {
+      const fixture = payload.action === "check"
+        ? executeRegistrationSubjectTrackFixtureAction("checkRegistrationAdmissionMessage", payload)
+        : payload.action === "reconcile"
+          ? executeRegistrationSubjectTrackFixtureAction("reconcileRegistrationAdmissionMessage", payload)
+          : payload.action === "release"
+            ? executeRegistrationSubjectTrackFixtureAction("releaseRegistrationAdmissionMessageRetry", payload)
+            : executeRegistrationSubjectTrackFixtureAction("sendRegistrationAdmissionMessage", payload)
+      if (!fixture) throw new Error("registration_subject_track_fixture_runtime_unavailable")
+      await fixture
+      return
+    }
+    const sessionToken = session?.access_token || ""
+    if (!sessionToken) throw new Error("인증 정보를 다시 확인하세요.")
+    const response = await fetch("/api/solapi/registration", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sessionToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+    const result = await response.json().catch(() => ({})) as { error?: string; warning?: string }
+    if (!response.ok) throw new Error(result.error || "입학신청서 상태를 변경하지 못했습니다.")
+    if (result.warning) setNotice(result.warning)
+  }, [registrationFixtureEnabled, session?.access_token])
+
+  const handleRegistrationTrackAction = useCallback(async (
+    taskId: string,
+    trackId: string,
+    action: RegistrationTrackListAction,
+  ) => {
+    if (action !== "complete_consultation") return
+    if (isLegacyRegistrationTrackId(trackId)) {
+      await openRegistrationTrack(taskId, trackId)
+      setMessage("데이터 전환 전 등록 업무는 기존 상세에서 처리하세요.")
+      return
+    }
+
+    setSaving(true)
+    setMessage("")
+    const actionSelectionKey = `action:${taskId}:${trackId}`
+    registrationTrackSelectionRef.current = actionSelectionKey
+    try {
+      const detail = await loadRegistrationCaseForWorkspace(taskId, true)
+      if (registrationTrackSelectionRef.current !== actionSelectionKey) return
+      const track = detail.tracks.find((item) => item.id === trackId) || null
+      const activeConsultation = detail.consultations.find((consultation) => (
+        consultation.trackId === trackId
+        && ((track?.status === "consultation_waiting" && consultation.mode === "phone" && consultation.status === "waiting")
+          || (track?.status === "visit_consultation_scheduled" && consultation.mode === "visit" && consultation.status === "scheduled"))
+      )) || null
+      const permissions = getRegistrationActionPermissions({
+        viewerId: registrationViewerId,
+        viewerRole: registrationViewerRole,
+        track,
+        activeConsultation,
+      })
+
+      if (!track || !permissions.canCompleteConsultation) {
+        setMessage("상담 담당자 또는 진행 상태가 변경되었습니다. 목록을 다시 불러왔습니다.")
+        await reload(true, false)
+        return
+      }
+
+      registrationTrackSelectionRef.current = `${taskId}:${trackId}`
+      setSelectedRegistrationTrackId(trackId)
+      setRegistrationCaseDetail(detail)
+      setSelectedTask({ ...detail.task, registrationTracks: detail.tracks })
+      setDetailOpen(true)
+      setRegistrationConsultationOutcomeTrackId(trackId)
+      syncTaskDeepLink(taskId, trackId)
+      setNotice(`[${track.subject}] 상담 결과 입력을 계속 진행하세요.`)
+    } catch (error) {
+      if (registrationTrackSelectionRef.current === actionSelectionKey) {
+        setMessage(getOpsTaskActionErrorMessage(error, "상담 상세를 확인하지 못했습니다."))
+      }
+    } finally {
+      setSaving(false)
+    }
+  }, [loadRegistrationCaseForWorkspace, openRegistrationTrack, registrationViewerId, registrationViewerRole, reload, syncTaskDeepLink])
+
   useEffect(() => {
     const deepLinkedTaskId = searchParams.get("taskId") || ""
-    if (!deepLinkedTaskId || !data) return
+    const deepLinkedTrackId = searchParams.get("trackId") || ""
+    if (!deepLinkedTaskId || !data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
       syncTaskDeepLink(null)
       return
     }
+    if (deepLinkedTask.type !== "registration" && deepLinkedTrackId) {
+      syncTaskDeepLink(deepLinkedTaskId, null)
+    }
     if (deepLinkedTask.type === "word_retest") {
       openEdit(deepLinkedTask)
       return
     }
+    if (deepLinkedTask.type === "registration" && deepLinkedTrackId) {
+      if (
+        selectedRegistrationTrackId === deepLinkedTrackId
+        && selectedTask?.id === deepLinkedTaskId
+        && detailOpen
+      ) return
+      setSelectedRegistrationTrackId(deepLinkedTrackId)
+      void openRegistrationTrack(deepLinkedTaskId, deepLinkedTrackId)
+      return
+    }
+    setSelectedRegistrationTrackId(null)
+    setRegistrationCaseDetail(null)
+    registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, openEdit, searchParams, syncTaskDeepLink, taskById])
+  }, [data, detailOpen, openEdit, openRegistrationTrack, searchParams, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
-    if (!nextOpen) syncTaskDeepLink(null)
+    if (!nextOpen) {
+      setSelectedRegistrationTrackId(null)
+      setRegistrationCaseDetail(null)
+      setRegistrationConsultationOutcomeTrackId(null)
+      registrationTrackSelectionRef.current = ""
+      syncTaskDeepLink(null)
+    }
   }
 
   function closeForm() {
     if (saving) return
     if (isFormDirty) {
+      formCloseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setConfirmingFormClose(true)
       return
     }
@@ -10233,9 +10331,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   }
 
   function discardFormAndClose() {
+    formCloseReturnFocusRef.current = null
     setConfirmingFormClose(false)
     setFormOpen(false)
     setFormCompletionIntent(null)
+  }
+
+  function cancelFormCloseConfirmation() {
+    setConfirmingFormClose(false)
+    window.requestAnimationFrame(() => formCloseReturnFocusRef.current?.focus())
   }
 
   function handleFormOpenChange(nextOpen: boolean) {
@@ -10251,6 +10355,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setFormCompletionBlockers([])
     setConfirmingFormClose(false)
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const updateFormPatch = (patch: Partial<OpsTaskInput>) => {
+    setMessage("")
+    setFormCompletionBlockers([])
+    setConfirmingFormClose(false)
+    setForm((current) => ({
+      ...current,
+      ...patch,
+      ...(patch.registration
+        ? { registration: { ...(current.registration || {}), ...patch.registration } }
+        : {}),
+    }))
   }
 
   function resetFormFeedback() {
@@ -10289,6 +10406,36 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }))
   }
 
+  const updateRegistrationPatch = (patch: Partial<NonNullable<OpsTaskInput["registration"]>>) => {
+    setMessage("")
+    setFormCompletionBlockers([])
+    setConfirmingFormClose(false)
+    setForm((current) => ({
+      ...current,
+      registration: { ...(current.registration || {}), ...patch },
+    }))
+  }
+
+  function handleRegistrationCounselorChange(profileId: string) {
+    registrationDirectorDefaultPendingTokenRef.current += 1
+    registrationDirectorDefaultPendingRef.current = null
+    registrationDirectorDefaultStateRef.current = markRegistrationDirectorDefaultManual()
+    resetFormFeedback()
+    setForm((current) => {
+      const teacher = teachers.find((item) => item.profileId === profileId)
+      const profile = profiles.find((item) => item.id === profileId)
+      const nextCounselor = profileId ? teacher?.label || profile?.label || "" : ""
+      return {
+        ...current,
+        secondaryAssigneeId: profileId,
+        registration: {
+          ...(current.registration || {}),
+          counselor: nextCounselor,
+        },
+      }
+    })
+  }
+
   const updateWithdrawal = (key: keyof NonNullable<OpsTaskInput["withdrawal"]>, value: string | boolean) => {
     setMessage("")
     setFormCompletionBlockers([])
@@ -10319,15 +10466,30 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }))
   }
 
+  const invalidatePendingWorkspaceReloads = useCallback(() => {
+    if (latestWorkspaceViewerIdRef.current !== currentUserId) return false
+    workspaceLoadGenerationRef.current += 1
+    setLoading(false)
+    if (isRegistrationWorkspace) {
+      registrationOptionsLoadGenerationRef.current += 1
+      registrationOptionsLoadedRef.current = false
+      setRegistrationOptionsLoading(false)
+    }
+    return true
+  }, [currentUserId, isRegistrationWorkspace])
+
   const applyTaskPatch = (taskId: string, patch: Partial<OpsTask>) => {
+    if (!invalidatePendingWorkspaceReloads()) return false
     setData((current) => current ? {
       ...current,
       tasks: sortWorkspaceTasks(current.tasks.map((task) => task.id === taskId ? { ...task, ...patch } : task)),
     } : current)
     setSelectedTask((current) => current?.id === taskId ? { ...current, ...patch } : current)
+    return true
   }
 
   const prependTask = (task: OpsTask) => {
+    if (!invalidatePendingWorkspaceReloads()) return false
     setData((current) => {
       const workspaceData = current || emptyOpsTaskWorkspaceData
 
@@ -10336,9 +10498,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         tasks: sortWorkspaceTasks([task, ...workspaceData.tasks]),
       }
     })
+    return true
   }
 
   const replaceTaskInState = (nextTask: OpsTask) => {
+    if (!invalidatePendingWorkspaceReloads()) return false
     setData((current) => {
       const workspaceData = current || emptyOpsTaskWorkspaceData
       const replaced = workspaceData.tasks.some((task) => task.id === nextTask.id)
@@ -10351,12 +10515,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       }
     })
     setSelectedTask((current) => current?.id === nextTask.id ? nextTask : current)
+    return true
   }
 
   const handleRegistrationCustomerMessageSent = async (taskId: string) => {
     const syncedTask = await loadOpsTaskById(taskId)
-    if (syncedTask) {
-      replaceTaskInState(syncedTask)
+    if (syncedTask && replaceTaskInState(syncedTask)) {
       setRegistrationCustomerMessageTask(syncedTask)
     }
     setNotice("입학신청서 발송을 반영했습니다.")
@@ -10379,16 +10543,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     await updateOpsTask(task.id, payload)
     const syncedTask = await loadOpsTaskById(task.id)
     if (!syncedTask) throw new Error("발송 완료 후 등록 업무를 다시 불러오지 못했습니다.")
-    replaceTaskInState(syncedTask)
-    setRegistrationCustomerMessageTask(syncedTask)
+    if (replaceTaskInState(syncedTask)) {
+      setRegistrationCustomerMessageTask(syncedTask)
+    }
   }
 
   const updateTaskInState = (taskId: string, updater: (task: OpsTask) => OpsTask) => {
+    if (!invalidatePendingWorkspaceReloads()) return false
     setData((current) => current ? {
       ...current,
       tasks: sortWorkspaceTasks(current.tasks.map((task) => task.id === taskId ? updater(task) : task)),
     } : current)
     setSelectedTask((current) => current?.id === taskId ? updater(current) : current)
+    return true
   }
 
   const appendTaskComment = (taskId: string, comment: OpsTaskComment) => {
@@ -10408,11 +10575,13 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
   }
 
   const removeTaskFromState = (taskId: string) => {
+    if (!invalidatePendingWorkspaceReloads()) return false
     setData((current) => current ? {
       ...current,
       tasks: current.tasks.filter((task) => task.id !== taskId),
     } : current)
     setSelectedTask((current) => current?.id === taskId ? null : current)
+    return true
   }
 
   const buildLocalTaskFromInput = (taskId: string, input: OpsTaskInput, existing?: OpsTask): OpsTask => {
@@ -10560,11 +10729,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const submitForm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const registrationCreateBlockers = form.type === "registration" && !editingTask
+    const registrationCreateBlockers = form.type === "registration"
       ? getRegistrationCreateBlockers(form)
       : []
     if (registrationCreateBlockers.length > 0) {
-      setMessage(`${registrationCreateBlockers.join(", ")} 입력 필요`)
+      setMessage(getRegistrationCreateErrorMessage(form))
       setFormCompletionBlockers(registrationCreateBlockers)
       focusRegistrationFormSection(registrationCreateBlockers[0])
       return
@@ -10581,6 +10750,16 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setMessage("")
     setNotice("")
     setStatusUndo(null)
+    let savedWithRefreshWarning = false
+    let savedWithDirectorWarning = false
+    const loadSavedTaskOrFallback = async (taskId: string, input: OpsTaskInput, existing?: OpsTask) => {
+      try {
+        return (await loadOpsTaskById(taskId)) || buildLocalTaskFromInput(taskId, input, existing)
+      } catch {
+        savedWithRefreshWarning = true
+        return buildLocalTaskFromInput(taskId, input, existing)
+      }
+    }
     try {
       const wasEditing = Boolean(editingTask)
       const formWithRequesterDefaults: OpsTaskInput = form.type === "general"
@@ -10592,7 +10771,17 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         }
         : { ...form, title: nextTitle }
       const inputWithCompletionIntent = applyFormCompletionIntent(formWithRequesterDefaults, formCompletionIntent)
-      const payload = normalizeFormForSubmit(inputWithCompletionIntent)
+      const prefilledRegistrationPipelineStatus = getRegistrationPrefillPipelineStatus(inputWithCompletionIntent)
+      const inputWithRegistrationPrefillStatus = inputWithCompletionIntent.type === "registration"
+        ? {
+          ...inputWithCompletionIntent,
+          registration: {
+            ...(inputWithCompletionIntent.registration || {}),
+            pipelineStatus: prefilledRegistrationPipelineStatus,
+          },
+        }
+        : inputWithCompletionIntent
+      const payload = normalizeFormForSubmit(inputWithRegistrationPrefillStatus)
       const isFailedWordRetestRetry = formCompletionIntent?.kind === "word_retest_retry"
         && formCompletionIntent.retryReason === "failed"
         && Boolean(editingTask)
@@ -10656,18 +10845,20 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         await updateOpsTask(editingTask.id, completedPayload)
         const taskId = await createOpsTask(retryPayload)
         const [syncedOriginal, syncedRetry] = await Promise.all([
-          loadOpsTaskById(editingTask.id),
-          loadOpsTaskById(taskId),
+          loadSavedTaskOrFallback(editingTask.id, completedPayload, editingTask),
+          loadSavedTaskOrFallback(taskId, retryPayload),
         ])
-        replaceTaskInState(syncedOriginal || buildLocalTaskFromInput(editingTask.id, completedPayload, editingTask))
-        prependTask(syncedRetry || buildLocalTaskFromInput(taskId, retryPayload))
+        replaceTaskInState(syncedOriginal)
+        prependTask(syncedRetry)
         setFormOpen(false)
         setFormCompletionBlockers([])
         setFormCompletionIntent(null)
         setConfirmingFormClose(false)
         setWordRetestStudentIds([])
         setQuery("")
-        setNotice("재시험을 추가하고 불합격을 확인했습니다.")
+        setNotice(savedWithRefreshWarning
+          ? "재시험 저장은 완료했습니다. 최신 상세는 새로고침해 확인하세요."
+          : "재시험을 추가하고 불합격을 확인했습니다.")
         return
       }
       const createWordRetestStudentIds = wasEditing || payload.type !== "word_retest"
@@ -10685,13 +10876,55 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       const savedTasks: OpsTask[] = []
       if (editingTask) {
         await updateOpsTask(editingTask.id, payload)
-        const syncedTask = await loadOpsTaskById(editingTask.id)
-        savedTasks.push(syncedTask || buildLocalTaskFromInput(editingTask.id, payload, editingTask))
+        savedTasks.push(await loadSavedTaskOrFallback(editingTask.id, payload, editingTask))
       } else {
         for (const createPayload of createPayloads) {
+          if (createPayload.type === "registration") {
+            const runtime = await probeRegistrationSubjectTrackRuntime()
+            if (runtime.mode === "maintenance") {
+              throw new Error("등록 데이터 전환 중입니다. 전환이 끝난 뒤 다시 저장하세요.")
+            }
+            if (runtime.mode === "ready" && runtime.version === 1) {
+              const registration = createPayload.registration || {}
+              const signature = serializeOpsTaskInput(createPayload)
+              if (registrationCreateRequestRef.current?.signature !== signature) {
+                registrationCreateRequestRef.current = {
+                  signature,
+                  requestKey: createRegistrationMutationRequestKey("registration-create"),
+                }
+              }
+              const response = await createRegistrationCase({
+                studentName: createPayload.studentName || "",
+                schoolGrade: registration.schoolGrade || "",
+                schoolName: registration.schoolName || "",
+                parentPhone: registration.parentPhone || "",
+                studentPhone: registration.studentPhone || "",
+                campus: createPayload.campus || "",
+                inquiryAt: registration.inquiryAt || "",
+                subjects: parseRegistrationSubjects(createPayload.subject) as RegistrationSubject[],
+                requestNote: registration.requestNote || "",
+                priority: createPayload.priority || "normal",
+                requestKey: registrationCreateRequestRef.current.requestKey,
+              })
+              registrationCreateRequestRef.current = null
+              const directorDefaultsPersisted = await persistCreatedRegistrationDirectorDefaults(response, registration)
+              if (!directorDefaultsPersisted) savedWithDirectorWarning = true
+              try {
+                const detail = await loadOpsRegistrationCaseDetail(response.taskId, currentUserId, { force: true })
+                savedTasks.push({ ...detail.task, registrationTracks: detail.tracks })
+              } catch {
+                savedWithRefreshWarning = true
+                savedTasks.push({
+                  ...buildLocalTaskFromInput(response.taskId, createPayload),
+                  registrationTracks: response.tracks,
+                })
+              }
+              continue
+            }
+          }
           const taskId = await createOpsTask(createPayload)
-          const syncedTask = await loadOpsTaskById(taskId)
-          savedTasks.push(syncedTask || buildLocalTaskFromInput(taskId, createPayload))
+          if (createPayload.type === "registration") registrationCreateRequestRef.current = null
+          savedTasks.push(await loadSavedTaskOrFallback(taskId, createPayload))
         }
       }
       setFormOpen(false)
@@ -10727,11 +10960,16 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         })
       }
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
-      setNotice(wasEditing
+      const savedNotice = wasEditing
         ? `${itemLabel}을 수정했습니다.`
         : savedTasks.length > 1
           ? `${itemLabel} ${savedTasks.length}건을 추가했습니다.`
-          : `${itemLabel}을 추가했습니다.`)
+          : `${itemLabel}을 추가했습니다.`
+      setNotice(savedWithDirectorWarning
+        ? `${savedNotice} 상담 책임자를 자동 지정하지 못했습니다. 상세에서 담당자를 지정하세요.`
+        : savedWithRefreshWarning
+          ? `${savedNotice} 최신 상세는 새로고침해 확인하세요.`
+          : savedNotice)
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."))
     } finally {
@@ -10823,59 +11061,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }
   }
 
-  const updateRegistrationChecklist = async (task: OpsTask, field: RegistrationChecklistField, checked: boolean) => {
-    if (!canManageRegistrationWorkflow || !canEditTaskDetails(task)) return
-
-    const availability = getRegistrationChecklistAvailability({
-      pipelineStatus: task.registration?.pipelineStatus,
-      registration: task.registration,
-      classId: task.classId,
-      textbookId: task.textbookId,
-    })[field]
-    if (checked && !availability.enabled) {
-      setMessage(availability.reason || "이 단계에서는 확인할 수 없습니다.")
-      setNotice("")
-      return
-    }
-
-    setSaving(true)
-    setMessage("")
-    setNotice("")
-    setStatusUndo(null)
-    try {
-      const nextRegistration = {
-        ...(task.registration || {}),
-        [field]: checked,
-      }
-      if (!checked && field === "admissionNoticeSent") {
-        nextRegistration.paymentChecked = false
-        nextRegistration.makeeduRegistered = false
-        nextRegistration.makeeduInvoiceSent = false
-        nextRegistration.textbookBillingIssued = false
-      }
-      if (!checked && field === "paymentChecked") {
-        nextRegistration.makeeduRegistered = false
-        nextRegistration.makeeduInvoiceSent = false
-        nextRegistration.textbookBillingIssued = false
-      }
-      if (!checked && field === "makeeduRegistered") nextRegistration.makeeduInvoiceSent = false
-      if (checked && field === "admissionNoticeSent") {
-        nextRegistration.pipelineStatus = getManualAdmissionCompletionStatus(task.registration?.pipelineStatus) || task.registration?.pipelineStatus
-      }
-      const payload = normalizeFormForSubmit({
-        ...formFromTask(task),
-        registration: nextRegistration,
-      })
-      await updateOpsTask(task.id, payload)
-      const syncedTask = await loadOpsTaskById(task.id)
-      replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
-      setNotice("등록 확인을 저장했습니다.")
-    } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "등록 확인을 저장하지 못했습니다."))
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const updateWithdrawalChecklist = async (task: OpsTask, field: WithdrawalChecklistField, checked: boolean) => {
     if (!canManageWithdrawalWorkflow || !canEditTaskDetails(task)) return
@@ -10957,6 +11142,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     if (nextTasks.length === 0) return
 
     async function autoMarkPastWordRetestsAbsent() {
+      const mutationViewerId = currentUserId
+      const mutationLoadGeneration = workspaceLoadGenerationRef.current
       nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.add(task.id))
       try {
         const syncedTasks = await Promise.all(nextTasks.map(async (task) => {
@@ -10981,6 +11168,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             updatedAt: new Date().toISOString(),
           }
         }))
+        if (!workspaceMountedRef.current || latestWorkspaceViewerIdRef.current !== mutationViewerId) return
+        if (workspaceLoadGenerationRef.current !== mutationLoadGeneration) {
+          void reload(true, false)
+          return
+        }
+        if (!invalidatePendingWorkspaceReloads()) return
         setData((current) => {
           const workspaceData = current || emptyOpsTaskWorkspaceData
           return {
@@ -10999,14 +11192,16 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           ? `본시험일 기준 일주일 경과 ${nextTasks.length}건을 미응시 보고했습니다.`
           : "본시험일 기준 일주일 경과 항목을 미응시 보고했습니다.")
       } catch (error) {
-        setMessage(getOpsTaskActionErrorMessage(error, "본시험일 기준 미응시 보고를 자동 반영하지 못했습니다."))
+        if (workspaceMountedRef.current && latestWorkspaceViewerIdRef.current === mutationViewerId) {
+          setMessage(getOpsTaskActionErrorMessage(error, "본시험일 기준 미응시 보고를 자동 반영하지 못했습니다."))
+        }
       } finally {
         nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.delete(task.id))
       }
     }
 
     void autoMarkPastWordRetestsAbsent()
-  }, [data, isWordRetestWorkspace, loading, wordRetestFilterSourceTasks])
+  }, [currentUserId, data, invalidatePendingWorkspaceReloads, isWordRetestWorkspace, loading, reload, wordRetestFilterSourceTasks])
 
   const submitWordRetestCompletion = async (task: OpsTask) => {
     const wordRetest = task.wordRetest || {}
@@ -11054,19 +11249,32 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     })
   }
 
-	  const changeRegistrationPipeline = async (task: OpsTask, pipelineStatus: string) => {
-    const pipelineActionBlockers = getRegistrationPipelineActionBlockers(task, pipelineStatus)
+  const changeRegistrationPipeline = async (task: OpsTask, pipelineStatus: string) => {
+    const currentPipelinePrefix = getRegistrationPipelinePrefix(task.registration?.pipelineStatus)
+    const nextPipelinePrefix = getRegistrationPipelinePrefix(pipelineStatus)
+    if (currentPipelinePrefix.startsWith("4-") && nextPipelinePrefix === "1.") {
+      const retryTask = {
+        ...task,
+        registration: prepareRegistrationLevelTestRetry(task.registration || {}),
+      }
+      const retryBlockers = getRegistrationPipelineActionBlockers(retryTask, pipelineStatus)
+      openEdit(retryTask, retryBlockers, { registrationPipelineStatus: pipelineStatus })
+      return
+    }
+
+    const transitionTask: OpsTask = {
+      ...task,
+      registration: prepareRegistrationPipelineTransition(task.registration || {}, pipelineStatus),
+    }
+    const pipelineActionBlockers = getRegistrationPipelineActionBlockers(transitionTask, pipelineStatus)
     if (pipelineActionBlockers.length > 0) {
-      openEdit(task, pipelineActionBlockers, { registrationPipelineStatus: pipelineStatus })
+      openEdit(transitionTask, pipelineActionBlockers, { registrationPipelineStatus: pipelineStatus })
       return
     }
 
     const payload = normalizeFormForSubmit({
-      ...formFromTask(task),
-      registration: {
-        ...(task.registration || {}),
-        pipelineStatus,
-      },
+      ...formFromTask(transitionTask),
+      registration: transitionTask.registration,
     })
     const completionBlockers = getOperationCompletionBlockers(
       payload,
@@ -11077,7 +11285,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       optionIndexes,
     )
     if (completionBlockers.length > 0) {
-      openEdit(task, completionBlockers, { registrationPipelineStatus: pipelineStatus })
+      openEdit(transitionTask, completionBlockers, { registrationPipelineStatus: pipelineStatus })
       return
     }
 
@@ -11087,8 +11295,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     setStatusUndo(null)
     try {
       await updateOpsTask(task.id, payload)
-      const syncedTask = await loadOpsTaskById(task.id)
-      const notificationTask = syncedTask || buildLocalTaskFromInput(task.id, payload, task)
+      const fallbackNotificationTask = buildLocalTaskFromInput(task.id, payload, task)
+      let notificationTask = fallbackNotificationTask
+      let refreshWarning = ""
+      try {
+        const syncedTask = await loadOpsTaskById(task.id)
+        if (syncedTask) {
+          notificationTask = syncedTask
+        } else {
+          refreshWarning = "최신 상세는 새로고침해 확인하세요."
+        }
+      } catch {
+        refreshWarning = "최신 상세는 새로고침해 확인하세요."
+      }
       replaceTaskInState(notificationTask)
       void notifyRegistrationWorkflow(
         getRegistrationNotificationTriggerForPipelineStatus(notificationTask.registration?.pipelineStatus),
@@ -11097,7 +11316,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         registrationNotificationTemplates,
         session?.access_token || "",
       )
-      setNotice("등록 단계를 변경했습니다.")
+      setNotice(refreshWarning ? `등록 단계를 변경했습니다. ${refreshWarning}` : "등록 단계를 변경했습니다.")
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "등록 단계를 변경하지 못했습니다."))
     } finally {
@@ -11181,7 +11400,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
   const requestRemoveTask = (task: OpsTask) => {
     if (!canDeleteTask(task)) return
-    blurActiveElementBeforeDialog()
     setDetailOpen(false)
     setFormOpen(false)
     setMessage("")
@@ -11198,7 +11416,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       return
     }
 
-    blurActiveElementBeforeDialog()
     setDetailOpen(false)
     setFormOpen(false)
     setMessage("")
@@ -11247,6 +11464,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         deletedTaskIds.forEach((taskId) => next.delete(taskId))
         return next
       })
+      if (!invalidatePendingWorkspaceReloads()) return
       setData((current) => current
         ? { ...current, tasks: current.tasks.filter((task) => !deletedTaskIds.has(task.id)) }
         : current)
@@ -11261,11 +11479,21 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     }
   }
 
-  const selectedTaskFresh = selectedTask ? taskById.get(selectedTask.id) || selectedTask : null
+  const selectedTaskFresh = workspaceDataBelongsToCurrentViewer && selectedTask
+    ? selectedTask.type === "registration" && selectedRegistrationTrackId
+      ? selectedTask
+      : taskById.get(selectedTask.id) || selectedTask
+    : null
+  const isRegistrationDetail = selectedTaskFresh?.type === "registration"
+  const isCanonicalRegistrationTrackDetail = Boolean(
+    isRegistrationDetail
+    && selectedRegistrationTrackId
+    && !isLegacyRegistrationTrackId(selectedRegistrationTrackId),
+  )
   const deleteTargetRemovesCompletedOperation = deleteTarget ? deleteTarget.type !== "general" && isClosedOpsTask(deleteTarget) : false
-  const nextAction = selectedTaskFresh ? getNextTaskStatusAction(selectedTaskFresh) : null
-  const selectedRegistrationAction = selectedTaskFresh ? getNextRegistrationPipelineAction(selectedTaskFresh) : null
-  const selectedRegistrationReopenStatus = selectedTaskFresh?.type === "registration"
+  const nextAction = selectedTaskFresh && !isCanonicalRegistrationTrackDetail ? getNextTaskStatusAction(selectedTaskFresh) : null
+  const selectedRegistrationAction = selectedTaskFresh && !isCanonicalRegistrationTrackDetail ? getNextRegistrationPipelineAction(selectedTaskFresh) : null
+  const selectedRegistrationReopenStatus = selectedTaskFresh?.type === "registration" && !isCanonicalRegistrationTrackDetail
     ? getRegistrationReopenStatus(selectedTaskFresh.registration?.pipelineStatus)
     : ""
 	  const completionBlockers = selectedTaskFresh
@@ -11288,7 +11516,6 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
     : nextActionBlocked
   const detailBlockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
   const selectedTaskCanEdit = selectedTaskFresh ? canEditTaskDetails(selectedTaskFresh) : false
-  const isRegistrationDetail = selectedTaskFresh?.type === "registration"
   const showRegistrationDetailCompletionBlockers = Boolean(
     isRegistrationDetail && shouldShowRegistrationCompletionBlockers(selectedTaskFresh?.registration?.pipelineStatus),
   )
@@ -11435,11 +11662,14 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                      key={tab.key}
 	                      type="button"
 	                      role="tab"
+	                      data-registration-view-tab={tab.key}
+	                      tabIndex={registrationView === tab.key ? 0 : -1}
 	                      onClick={() => syncRegistrationView(tab.key)}
+	                      onKeyDown={(event) => handleRegistrationViewTabKeyDown(event, tab.key)}
 	                      aria-selected={registrationView === tab.key}
 	                      aria-label={registrationCount > 0 ? `${tab.label} ${registrationCount}건` : tab.label}
 	                      className={[
-	                        "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+	                        "shrink-0 rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40",
 	                        registrationView === tab.key
 	                          ? "bg-primary text-primary-foreground"
 	                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -11541,7 +11771,22 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 {showClosed ? "완료 숨김" : "완료 보기"}
               </Button>
             )}
-            {(isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace) && (
+            {isRegistrationWorkspace && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setRegistrationProcessManualOpen(true)}
+                aria-label="등록 프로세스 & 매뉴얼"
+                title="등록 프로세스 & 매뉴얼"
+                aria-haspopup="dialog"
+                className="size-8 px-0"
+              >
+                <BookOpenCheck className="size-4" aria-hidden="true" />
+                <span className="sr-only">등록 프로세스 &amp; 매뉴얼</span>
+              </Button>
+            )}
+            {!registrationFixtureEnabled && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace) && (
               <Button
                 type="button"
                 variant="outline"
@@ -11741,17 +11986,13 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
           </div>
         )}
 
-        {isRegistrationWorkspace && (
-          <RegistrationPipelineFilter
-            value={registrationPipeline}
-            tasks={registrationPipelineCountTasks}
-            onChange={setRegistrationPipeline}
-          />
-        )}
-
         {data && !data.schemaReady && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {data?.error || "할 일 DB 마이그레이션을 적용하세요."}
+          <div role="alert" className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+            <span>{data?.error || "할 일 DB 마이그레이션을 적용하세요."}</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading}>
+              <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} aria-hidden="true" />
+              다시 시도
+            </Button>
           </div>
         )}
         {notice && !detailOpen && (
@@ -11774,25 +12015,20 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         )}
         {message && !formOpen && !detailOpen && <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">{message}</div>}
 
-        {loading ? (
+	        {loading ? (
           <TaskListSkeleton showType={!isTodoWorkspace} />
 	        ) : shouldHideEmptySurface ? null : isRegistrationWorkspace ? (
-	          <RegistrationDataTable
-	            tasks={visibleTasks}
-	            todayKey={todayKey}
+	          <RegistrationTrackList
+	            key={registrationView}
+	            items={visibleRegistrationTrackItems}
+	            viewerId={registrationViewerId}
+	            viewerRole={registrationViewerRole}
 	            loading={loading}
-	            onOpen={openDetail}
-	            onEdit={openEdit}
-	            onOpenCustomerMessage={openRegistrationCustomerMessage}
-	            onRegistrationPipelineAdvance={(task, pipelineStatus) => void changeRegistrationPipeline(task, pipelineStatus)}
-	            onChecklistChange={(task, field, checked) => void updateRegistrationChecklist(task, field, checked)}
-	            canManageWorkflow={canManageRegistrationWorkflow}
-	            statusActionDisabled={saving}
-	            onCreate={() => openCreate(scopedTaskType)}
+	            disabled={saving}
+	            onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}
+	            onEdit={(taskId, trackId) => void editRegistrationTrack(taskId, trackId)}
+	            onAction={(taskId, trackId, action) => void handleRegistrationTrackAction(taskId, trackId, action)}
 	            emptyLabel={emptyTaskLabel}
-	            emptyActionLabel={emptyActionLabel}
-	            showEmptyAction={false}
-	            completionBlockersByTaskId={visibleCompletionBlockersByTaskId}
 	          />
 	        ) : isWithdrawalWorkspace ? (
 	          <WithdrawalDataTable
@@ -11924,7 +12160,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
       {isWithdrawalWorkspace && (
         <WithdrawalNotificationSettingsDialog
-          open={withdrawalNotificationOpen}
+          open={workspaceDataBelongsToCurrentViewer && withdrawalNotificationOpen}
           onOpenChange={setWithdrawalNotificationOpen}
           isManager={canManageAll || isStaff}
           sessionToken={session?.access_token || ""}
@@ -11937,7 +12173,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
       {isTransferWorkspace && (
         <TransferNotificationSettingsDialog
-          open={transferNotificationOpen}
+          open={workspaceDataBelongsToCurrentViewer && transferNotificationOpen}
           onOpenChange={setTransferNotificationOpen}
           isManager={canManageAll || isStaff}
           sessionToken={session?.access_token || ""}
@@ -11949,8 +12185,15 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       )}
 
       {isRegistrationWorkspace && (
+        <RegistrationProcessManualDialog
+          open={workspaceDataBelongsToCurrentViewer && registrationProcessManualOpen}
+          onOpenChange={setRegistrationProcessManualOpen}
+        />
+      )}
+
+      {isRegistrationWorkspace && (
         <RegistrationNotificationSettingsDialog
-          open={registrationNotificationOpen}
+          open={workspaceDataBelongsToCurrentViewer && registrationNotificationOpen}
           onOpenChange={setRegistrationNotificationOpen}
           isManager={canManageAll || isStaff}
           sessionToken={session?.access_token || ""}
@@ -11962,7 +12205,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
       )}
 
       <RegistrationCustomerMessageDialog
-        open={Boolean(registrationCustomerMessageTask)}
+        open={workspaceDataBelongsToCurrentViewer && Boolean(registrationCustomerMessageTask)}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setRegistrationCustomerMessageTask(null)
         }}
@@ -11973,14 +12216,13 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         onManualSent={completeManualRegistrationAdmissionMessage}
       />
 
-      <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
+      <Dialog open={workspaceDataBelongsToCurrentViewer && formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className={[
           "z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
           form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : form.type === "registration" ? "sm:max-w-4xl" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
         ].join(" ")}
           closeButtonLabel={formCloseLabel}
-          onCloseButtonClick={confirmingFormClose ? discardFormAndClose : closeForm}
-          showCloseButtonText
+          onCloseButtonClick={closeForm}
         >
           <DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-5 pt-4">
             <DialogTitle>{formDialogTitle}</DialogTitle>
@@ -11989,6 +12231,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
+            {form.type === "registration" && registrationOptionsLoading && (
+              <div role="status" aria-live="polite" className="rounded-md border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
+                상담 책임자·수업·교재 선택 정보를 불러오는 중입니다.
+              </div>
+            )}
+            {form.type === "registration" && registrationOptionsError && (
+              <div role="alert" className="flex flex-col gap-2 rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
+                <span>{registrationOptionsError}</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => void ensureRegistrationOptions()}>
+                  다시 불러오기
+                </Button>
+              </div>
+            )}
             {message && !isTemplateForm && (
               <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">
                 {message}
@@ -12126,12 +12381,16 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                  formCompletionIntent={formCompletionIntent}
 	                  wordRetestStudentIds={wordRetestStudentIds}
 	                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
+	                  profiles={profiles}
 	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
 	                  classes={data?.classes || EMPTY_CLASS_OPTIONS}
 	                  teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
 	                  textbooks={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
 	                  updateForm={updateForm}
+	                  updateFormPatch={updateFormPatch}
 	                  updateRegistration={updateRegistration}
+	                  updateRegistrationPatch={updateRegistrationPatch}
+	                  onRegistrationCounselorChange={handleRegistrationCounselorChange}
 	                  updateWithdrawal={updateWithdrawal}
 	                  updateTransfer={updateTransfer}
 	                  updateWordRetest={updateWordRetest}
@@ -12142,12 +12401,16 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                  formCompletionIntent={formCompletionIntent}
 	                  wordRetestStudentIds={wordRetestStudentIds}
 	                  onWordRetestStudentIdsChange={setWordRetestStudentIds}
+	                  profiles={profiles}
 	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
 	                  classes={data?.classes || EMPTY_CLASS_OPTIONS}
 	                  teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
 	                  textbooks={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
 	                  updateForm={updateForm}
+	                  updateFormPatch={updateFormPatch}
 	                  updateRegistration={updateRegistration}
+	                  updateRegistrationPatch={updateRegistrationPatch}
+	                  onRegistrationCounselorChange={handleRegistrationCounselorChange}
 	                  updateWithdrawal={updateWithdrawal}
 	                  updateTransfer={updateTransfer}
 	                  updateWordRetest={updateWordRetest}
@@ -12163,12 +12426,16 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                      formCompletionIntent={formCompletionIntent}
 	                      wordRetestStudentIds={wordRetestStudentIds}
 	                      onWordRetestStudentIdsChange={setWordRetestStudentIds}
+	                      profiles={profiles}
 	                      students={data?.students || EMPTY_STUDENT_OPTIONS}
 	                      classes={data?.classes || EMPTY_CLASS_OPTIONS}
 	                      teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
 	                      textbooks={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
 	                      updateForm={updateForm}
+	                      updateFormPatch={updateFormPatch}
 	                      updateRegistration={updateRegistration}
+	                      updateRegistrationPatch={updateRegistrationPatch}
+	                      onRegistrationCounselorChange={handleRegistrationCounselorChange}
 	                      updateWithdrawal={updateWithdrawal}
 	                      updateTransfer={updateTransfer}
 	                      updateWordRetest={updateWordRetest}
@@ -12231,15 +12498,19 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   </div>
                 )}
 	                <TypeSpecificFields
-                  step={activeFormDetailStep}
-                  form={form}
-                  formCompletionIntent={formCompletionIntent}
-                  students={data?.students || EMPTY_STUDENT_OPTIONS}
+	                  step={activeFormDetailStep}
+	                  form={form}
+	                  formCompletionIntent={formCompletionIntent}
+	                  profiles={profiles}
+	                  students={data?.students || EMPTY_STUDENT_OPTIONS}
                   classes={data?.classes || EMPTY_CLASS_OPTIONS}
                   teachers={data?.teachers || EMPTY_TEACHER_OPTIONS}
                   textbooks={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
                   updateForm={updateForm}
+                  updateFormPatch={updateFormPatch}
                   updateRegistration={updateRegistration}
+                  updateRegistrationPatch={updateRegistrationPatch}
+                  onRegistrationCounselorChange={handleRegistrationCounselorChange}
                   updateWithdrawal={updateWithdrawal}
                   updateTransfer={updateTransfer}
                   updateWordRetest={updateWordRetest}
@@ -12249,7 +12520,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 
             {form.type === "registration" && (
               <Collapsible
-                open={registrationOperationsOpen}
+                open={workspaceDataBelongsToCurrentViewer && registrationOperationsOpen}
                 onOpenChange={setRegistrationOperationsOpen}
                 className="border-t pt-1"
               >
@@ -12378,11 +12649,11 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                   )}
                 </div>
               )}
-              <Button type="button" variant={confirmingFormClose ? "destructive" : "outline"} onClick={confirmingFormClose ? discardFormAndClose : closeForm} className="w-full sm:w-auto">
+              <Button type="button" variant="outline" onClick={closeForm} className="w-full sm:w-auto">
                 {formCloseLabel}
               </Button>
               {!isEditingLockedCompletedTask && (
-                <Button type="submit" disabled={saving || !canSubmitCurrentForm} className="w-full sm:w-auto">
+                <Button type="submit" disabled={saving || (!canSubmitCurrentForm && form.type !== "registration")} className="w-full sm:w-auto">
                   {saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, Boolean(editingTask))}
                 </Button>
               )}
@@ -12391,7 +12662,34 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
+      <Dialog
+        open={workspaceDataBelongsToCurrentViewer && confirmingFormClose}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) cancelFormCloseConfirmation()
+        }}
+      >
+        <DialogContent className="z-[90] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>입력한 내용을 버릴까요?</DialogTitle>
+            <DialogDescription className="sr-only">
+              저장하지 않은 입력 내용 폐기를 확인합니다.
+            </DialogDescription>
+            <p className="text-sm text-muted-foreground">
+              저장하지 않은 내용은 복구할 수 없습니다.
+            </p>
+          </DialogHeader>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row">
+            <Button type="button" variant="outline" onClick={cancelFormCloseConfirmation} disabled={saving}>
+              계속 작성
+            </Button>
+            <Button type="button" variant="destructive" onClick={discardFormAndClose} disabled={saving}>
+              저장하지 않고 닫기
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen} onOpenChange={handleDetailOpenChange}>
         <DialogContent className={[
           "max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
           selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl" : selectedTaskFresh?.type === "registration" || selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl" : "sm:max-w-5xl",
@@ -12433,7 +12731,61 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 ) : selectedTaskFresh.type === "word_retest" ? (
                   <WordRetestDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "registration" ? (
-                  <RegistrationDetailPanel task={selectedTaskFresh} />
+                  registrationCaseDetail && isCanonicalRegistrationTrackDetail ? (
+                    <RegistrationTrackEditor
+                      task={selectedTaskFresh}
+                      detail={registrationCaseDetail}
+                      selectedTrackId={selectedRegistrationTrackId}
+                      viewerId={registrationViewerId}
+                      viewerRole={registrationViewerRole}
+                      onSelectTrack={handleSelectRegistrationTrack}
+                      onReload={reloadRegistrationCaseDetail}
+                      onWarning={setMessage}
+                      consultationOutcomeOpen={registrationConsultationOutcomeTrackId === selectedRegistrationTrackId}
+                      onConsultationOutcomeOpenChange={(open) => setRegistrationConsultationOutcomeTrackId(open ? selectedRegistrationTrackId : null)}
+                      notificationToken={registrationFixtureEnabled ? "" : session?.access_token || ""}
+                      directorOptions={data?.profiles || EMPTY_PROFILE_OPTIONS}
+                      teacherOptions={data?.teachers || EMPTY_TEACHER_OPTIONS}
+                      directorCatalogStatus={registrationOptionsLoading ? "loading" : registrationOptionsDataRef.current?.directorCatalogStatus || (registrationOptionsError ? "error" : "loading")}
+                      onRetryDirectorCatalog={retryRegistrationOptions}
+                      classOptions={data?.classes || EMPTY_CLASS_OPTIONS}
+                      textbookOptions={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
+                      caseLevelActions={(
+                        registrationCaseDetail.tracks.some((track) => ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status))
+                        || registrationCaseDetail.admissionBatches.length > 0
+                        || Boolean(registrationCaseDetail.admissionApplicationMessageId)
+                        || Boolean(registrationCaseDetail.admissionApplicationMessageStatus)
+                        || registrationCaseDetail.admissionApplicationMessageClaimActive
+                        || Boolean(registrationCaseDetail.task.registration?.admissionNoticeSent)
+                      ) ? (
+                        <RegistrationAdmissionPanel
+                          taskId={registrationCaseDetail.task.id}
+                          tracks={registrationCaseDetail.tracks}
+                          enrollments={registrationCaseDetail.enrollments}
+                          batches={registrationCaseDetail.admissionBatches}
+                          classes={data?.classes || EMPTY_CLASS_OPTIONS}
+                          admissionNoticeSent={Boolean(registrationCaseDetail.task.registration?.admissionNoticeSent)}
+                          admissionApplicationMessageId={registrationCaseDetail.admissionApplicationMessageId}
+                          admissionApplicationMessageStatus={registrationCaseDetail.admissionApplicationMessageStatus}
+                          admissionApplicationMessageClaimActive={registrationCaseDetail.admissionApplicationMessageClaimActive}
+                          admissionApplicationMessageUpdatedAt={registrationCaseDetail.admissionApplicationMessageUpdatedAt}
+                          permissions={{ canManage: canManageRegistrationWorkflow, readOnly: !canManageRegistrationWorkflow }}
+                          onSendAdmissionMessage={({ taskId, requestKey }) => postRegistrationAdmissionAction({ taskId, requestKey })}
+                          onCheckAdmissionMessage={({ messageId }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "check", messageId })}
+                          onReconcileAdmissionMessage={({ messageId, resolution, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "reconcile", messageId, resolution, providerEvidence, reason, requestKey })}
+                          onReleaseAdmissionMessageRetry={({ messageId, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "release", messageId, providerEvidence, reason, requestKey })}
+                          onReload={reloadRegistrationCaseDetail}
+                          onWarning={setMessage}
+                        />
+                      ) : null}
+                    />
+                  ) : isCanonicalRegistrationTrackDetail ? (
+                    <div role="status" aria-live="polite" className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">
+                      과목별 등록 상세를 불러오는 중입니다.
+                    </div>
+                  ) : (
+                    <RegistrationDetailPanel task={selectedTaskFresh} selectedTrackId={selectedRegistrationTrackId} />
+                  )
                 ) : selectedTaskFresh.type === "withdrawal" ? (
                   <WithdrawalDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "transfer" ? (
@@ -12467,7 +12819,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                 {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && selectedTaskFresh.type !== "registration" && !isProcessDetail && <TypeDetail task={selectedTaskFresh} />}
                 {selectedTaskFresh.type !== "general" && !isProcessDetail && <AutoSyncResultSummary task={selectedTaskFresh} />}
 	                {selectedTaskFresh.type !== "general" && selectedTaskFresh.type !== "word_retest" && !isProcessDetail && selectedTaskFresh.memo && <p className="rounded-md bg-muted p-3 text-sm">{selectedTaskFresh.memo}</p>}
-	                {!isCompletedProcessDetail && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+	                {!isCompletedProcessDetail && !isCanonicalRegistrationTrackDetail && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
 	                  {selectedTaskFresh.type === "word_retest" && (
 	                    <>
 	                      {detailWordRetestPrimaryActions.map((action) => (
@@ -12484,14 +12836,14 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 	                      ))}
 	                    </>
 	                  )}
-                  {selectedTaskFresh.type === "registration" ? (
+                  {selectedTaskFresh.type === "registration" && !isCanonicalRegistrationTrackDetail ? (
                     <RegistrationDecisionActions
                       task={selectedTaskFresh}
                       onSelect={(task, pipelineStatus) => void changeRegistrationPipeline(task, pipelineStatus)}
                       disabled={saving || !canManageRegistrationWorkflow}
                     />
                   ) : null}
-                  {selectedTaskFresh.type === "registration" && canOpenRegistrationCustomerMessage(selectedTaskFresh) ? (
+                  {selectedTaskFresh.type === "registration" && !isCanonicalRegistrationTrackDetail && canOpenRegistrationCustomerMessage(selectedTaskFresh) ? (
                     <Button
                       type="button"
                       size="sm"
@@ -12513,7 +12865,9 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                       onClick={() => void changeRegistrationPipeline(selectedTaskFresh, selectedRegistrationReopenStatus)}
                       disabled={saving || !canManageRegistrationWorkflow}
                     >
-                      상담 완료로 다시 열기
+                      {getRegistrationPipelinePrefix(selectedTaskFresh.registration?.pipelineStatus) === "9."
+                        ? "문의로 다시 열기"
+                        : "상담 결과로 다시 열기"}
                     </Button>
                   ) : null}
                   {canManageWithdrawalStatusAction && ((!isProcessDetail || !detailPrimaryActionBlocked) && detailPrimaryAction) && (
@@ -12553,12 +12907,12 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
                         {status.label}
                       </Button>
                     ))}
-                  {selectedTaskCanEdit && (
+                  {selectedTaskCanEdit && !isCanonicalRegistrationTrackDetail && (
                     <Button type="button" variant="outline" size="sm" onClick={() => openEdit(selectedTaskFresh)} className="w-full sm:w-auto">
                       수정
                     </Button>
                   )}
-                  {canDeleteTask(selectedTaskFresh) && (
+                  {canDeleteTask(selectedTaskFresh) && !isCanonicalRegistrationTrackDetail && (
                     <Button type="button" variant="destructive" size="sm" onClick={() => requestRemoveTask(selectedTaskFresh)} className="w-full sm:w-auto">
                       <Trash2 className="size-4" />
                       삭제
@@ -12641,7 +12995,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         </DialogContent>
       </Dialog>
 
-      <Dialog open={bulkDeleteTargets.length > 0} onOpenChange={(open) => !open && setBulkDeleteTargets([])}>
+      <Dialog open={workspaceDataBelongsToCurrentViewer && bulkDeleteTargets.length > 0} onOpenChange={(open) => !open && setBulkDeleteTargets([])}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>단어 재시험 {bulkDeleteTargets.length}건 삭제할까요?</DialogTitle>
@@ -12664,7 +13018,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <Dialog open={workspaceDataBelongsToCurrentViewer && Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
@@ -12697,12 +13051,16 @@ function TypeSpecificFields({
   formCompletionIntent,
   wordRetestStudentIds,
   onWordRetestStudentIdsChange,
+  profiles,
   students,
   classes,
   teachers,
   textbooks,
   updateForm,
+  updateFormPatch,
   updateRegistration,
+  updateRegistrationPatch,
+  onRegistrationCounselorChange,
   updateWithdrawal,
   updateTransfer,
   updateWordRetest,
@@ -12712,16 +13070,21 @@ function TypeSpecificFields({
   formCompletionIntent?: FormCompletionIntent | null
   wordRetestStudentIds?: string[]
   onWordRetestStudentIdsChange?: (values: string[]) => void
+  profiles: OpsProfileOption[]
   students: OpsStudentOption[]
   classes: OpsClassOption[]
   teachers: OpsTeacherOption[]
   textbooks: OpsTextbookOption[]
   updateForm: <Key extends keyof OpsTaskInput>(key: Key, value: OpsTaskInput[Key]) => void
+  updateFormPatch: (patch: Partial<OpsTaskInput>) => void
   updateRegistration: (key: keyof NonNullable<OpsTaskInput["registration"]>, value: string | boolean) => void
+  updateRegistrationPatch: (patch: Partial<NonNullable<OpsTaskInput["registration"]>>) => void
+  onRegistrationCounselorChange: (profileId: string) => void
   updateWithdrawal: (key: keyof NonNullable<OpsTaskInput["withdrawal"]>, value: string | boolean) => void
   updateTransfer: (key: keyof NonNullable<OpsTaskInput["transfer"]>, value: string | boolean) => void
   updateWordRetest: (key: keyof NonNullable<OpsTaskInput["wordRetest"]>, value: string) => void
 }) {
+  const { user: typeSpecificUser } = useAuth()
   const registration = form.registration || {}
   const withdrawal = form.withdrawal || {}
   const transfer = form.transfer || {}
@@ -12735,6 +13098,25 @@ function TypeSpecificFields({
   const transferToTeacherName = transfer.toTeacherName || ""
   const transferToClassId = transfer.toClassId || ""
   const wordRetestAbsent = isWordRetestAbsent(wordRetest)
+  const profileRoleById = new Map(profiles.map((profile) => [profile.id, profile.role]))
+  const principalCounselorOptions = teachers
+    .filter((teacher) => teacher.profileId && profileRoleById.get(teacher.profileId) === "admin")
+    .map((teacher) => ({ value: teacher.profileId, label: teacher.label }))
+  const selectedCounselorIsVisible = teachers.some((teacher) => (
+    teacher.profileId === form.secondaryAssigneeId && profileRoleById.get(teacher.profileId) === "admin"
+  ))
+  const selectedCounselorProfileLabel = profiles.find((profile) => profile.id === form.secondaryAssigneeId)?.label || ""
+  const preservedCounselorOptions = form.secondaryAssigneeId && !selectedCounselorIsVisible
+    ? [{
+      value: form.secondaryAssigneeId,
+      label: registration.counselor || selectedCounselorProfileLabel || "기존 상담 책임자",
+    }]
+    : []
+  const registrationCounselorOptions = [
+    { value: "", label: "원장 선택" },
+    ...preservedCounselorOptions,
+    ...principalCounselorOptions,
+  ]
   const findStudent = (id: string) => students.find((student) => student.id === id)
   const findClass = (id: string) => classes.find((classItem) => classItem.id === id)
   const findTeacher = (id: string) => teachers.find((teacher) => teacher.id === id)
@@ -12797,6 +13179,81 @@ function TypeSpecificFields({
     form.textbookId || "",
     wordRetestTextbookGradeFilter,
   ), [form.textbookId, textbooks, wordRetestTextbookGradeFilter])
+  const selectedRegistrationClassId = form.type === "registration" ? formClassId : ""
+  const selectedRegistrationViewerId = typeSpecificUser?.id || ""
+  const [registrationClassDetailResult, setRegistrationClassDetailResult] = useState<{
+    classId: string
+    viewerId: string
+    detail: OpsRegistrationClassDetail | null
+  }>({ classId: "", viewerId: "", detail: null })
+  const registrationClassDetailRequestRef = useRef(0)
+  const registrationTextbookDefaultPendingClassRef = useRef("")
+  const registrationTextbookClearedClassRef = useRef("")
+  const selectedRegistrationClass = selectedRegistrationClassId ? findClass(selectedRegistrationClassId) : undefined
+  const currentRegistrationClassDetail = registrationClassDetailResult.viewerId === selectedRegistrationViewerId
+    && registrationClassDetailResult.classId === selectedRegistrationClassId
+    ? registrationClassDetailResult.detail
+    : null
+  const registrationClassDetailLoading = Boolean(selectedRegistrationClassId) && (
+    registrationClassDetailResult.viewerId !== selectedRegistrationViewerId
+    || registrationClassDetailResult.classId !== selectedRegistrationClassId
+  )
+  const registrationScheduleSessions = useMemo(
+    () => getSelectableRegistrationScheduleSessions(currentRegistrationClassDetail?.schedulePlan),
+    [currentRegistrationClassDetail],
+  )
+  const registrationScheduleValue = registrationScheduleSessions.find((session) => (
+    session.dateKey === dateInputValue(registration.classStartDate)
+    && session.sessionLabel === String(registration.classStartSession || "").trim()
+  ))?.value || ""
+  const registrationLinkedTextbookIds = useMemo(
+    () => currentRegistrationClassDetail
+      ? currentRegistrationClassDetail.textbookIds
+      : selectedRegistrationClass?.textbookIds || [],
+    [currentRegistrationClassDetail, selectedRegistrationClass],
+  )
+
+  useEffect(() => {
+    const selectedClassId = selectedRegistrationClassId
+    registrationClassDetailRequestRef.current += 1
+    const requestToken = registrationClassDetailRequestRef.current
+    if (!selectedClassId) return
+    let disposed = false
+
+    void loadOpsRegistrationClassDetail(selectedClassId, { viewerId: selectedRegistrationViewerId })
+      .then((detail) => {
+        if (disposed || requestToken !== registrationClassDetailRequestRef.current) return
+        if (!detail || detail.id !== selectedClassId) {
+          setRegistrationClassDetailResult({ classId: selectedClassId, viewerId: selectedRegistrationViewerId, detail: null })
+          return
+        }
+        setRegistrationClassDetailResult({ classId: selectedClassId, viewerId: selectedRegistrationViewerId, detail })
+      })
+      .catch(() => {
+        if (disposed || requestToken !== registrationClassDetailRequestRef.current) return
+        setRegistrationClassDetailResult({ classId: selectedClassId, viewerId: selectedRegistrationViewerId, detail: null })
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [selectedRegistrationClassId, selectedRegistrationViewerId])
+
+  useEffect(() => {
+    const pendingRegistrationTextbookId = resolveRegistrationLinkedTextbookDefault({
+      classId: formClassId,
+      pendingClassId: registrationTextbookDefaultPendingClassRef.current,
+      clearedClassId: registrationTextbookClearedClassRef.current,
+      textbookId: form.textbookId,
+      linkedTextbookIds: registrationLinkedTextbookIds,
+      availableTextbookIds: textbooks.map((textbook) => textbook.id),
+    })
+    if (!pendingRegistrationTextbookId) return
+    const textbook = textbooks.find((item) => item.id === pendingRegistrationTextbookId)
+    if (!textbook) return
+    registrationTextbookDefaultPendingClassRef.current = ""
+    updateFormPatch({ textbookId: textbook.id, textbookTitle: textbook.label })
+  }, [form.textbookId, formClassId, registrationLinkedTextbookIds, textbooks, updateFormPatch])
 
   function openManualField(field: string) {
     setManualLinkedFields((current) => ({ ...current, [field]: true }))
@@ -13033,6 +13490,36 @@ function TypeSpecificFields({
 
   const selectClass = (classId: string, options: { fillRegistration?: boolean; fillTransferFrom?: boolean; fillTransferTo?: boolean; fillWordRetest?: boolean; fillWithdrawal?: boolean } = {}) => {
     const classItem = findClass(classId)
+    if (options.fillRegistration) {
+      if (classId === formClassId) return
+      registrationClassDetailRequestRef.current += 1
+      registrationTextbookDefaultPendingClassRef.current = classId
+      registrationTextbookClearedClassRef.current = ""
+      const defaultTextbookId = resolveRegistrationLinkedTextbookDefault({
+        classId,
+        pendingClassId: classId,
+        clearedClassId: "",
+        textbookId: "",
+        linkedTextbookIds: classItem?.textbookIds || [],
+        availableTextbookIds: textbooks.map((textbook) => textbook.id),
+      })
+      const defaultTextbook = defaultTextbookId ? findTextbook(defaultTextbookId) : undefined
+      if (defaultTextbook) registrationTextbookDefaultPendingClassRef.current = ""
+      updateFormPatch({
+        classId,
+        className: classItem?.label || "",
+        subject: form.subject || classItem?.subject || "",
+        textbookId: defaultTextbook?.id || "",
+        textbookTitle: defaultTextbook?.label || "",
+        registration: {
+          schoolGrade: registration.schoolGrade || classItem?.grade || "",
+          classStartDate: "",
+          classStartSession: "",
+          textbookBillingIssued: false,
+        },
+      })
+      return
+    }
     const isWithdrawalClassChange = Boolean(options.fillWithdrawal && classId !== form.classId)
     const isTransferToClassChange = Boolean(options.fillTransferTo && classId !== (transfer.toClassId || form.classId || ""))
     if (options.fillTransferFrom) {
@@ -13079,7 +13566,7 @@ function TypeSpecificFields({
     if (!classItem) return
 
     updateForm("className", classItem.label)
-    updateForm("subject", classItem.subject)
+    if (form.type !== "registration" || !form.subject) updateForm("subject", classItem.subject)
     const shouldPreferWordRetestTextbook = form.type === "word_retest" || options.fillWordRetest
     const textbookId = shouldPreferWordRetestTextbook ? findClassWordRetestTextbook(classItem) : findClassPrimaryTextbook(classItem)
     const primaryTextbook = textbookId ? findTextbook(textbookId) : undefined
@@ -13145,21 +13632,72 @@ function TypeSpecificFields({
     if (options.fillWordRetest) updateWordRetest("textbookName", textbook.label)
   }
 
+  const selectRegistrationTextbook = (textbookId: string, options: { explicitClear?: boolean } = {}) => {
+    const textbook = findTextbook(textbookId)
+    registrationTextbookDefaultPendingClassRef.current = ""
+    registrationTextbookClearedClassRef.current = options.explicitClear && !textbookId ? formClassId : ""
+    updateFormPatch({
+      textbookId: textbook?.id || "",
+      textbookTitle: textbook?.label || "",
+      registration: { textbookBillingIssued: false },
+    })
+  }
+
+  const selectRegistrationSchedule = (value: string) => {
+    const selectedSession = registrationScheduleSessions.find((session) => session.value === value)
+    if (!selectedSession) {
+      updateRegistrationPatch({ classStartDate: "", classStartSession: "" })
+      return
+    }
+    updateRegistrationPatch({ classStartDate: selectedSession.dateKey, classStartSession: selectedSession.sessionLabel })
+  }
+
+  const updateAdmissionChecklist = (field: RegistrationChecklistField, checked: boolean) => {
+    const nextRegistration = applyRegistrationChecklistChange(
+      registration,
+      field,
+      checked,
+    ) as NonNullable<OpsTaskInput["registration"]>
+    if (checked && field === "admissionNoticeSent") {
+      nextRegistration.pipelineStatus = getManualAdmissionCompletionStatus(registration.pipelineStatus) || registration.pipelineStatus
+    }
+    updateRegistrationPatch(nextRegistration)
+  }
+
   if (form.type === "registration") {
     const pipelineStatus = registration.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"
+    const registrationChecklistEditorState = getRegistrationChecklistEditorState({
+      pipelineStatus,
+      taskStatus: form.status,
+      completionIntentPipelineStatus: formCompletionIntent?.registrationPipelineStatus,
+    })
     const registrationFormState = getRegistrationFormState(pipelineStatus, form.status)
     const activeSection = getRegistrationFormStage(pipelineStatus, form.status)
-    const activeSectionIndex = activeSection ? getRegistrationFormSectionIndex(activeSection) : -1
+    const registrationSubjects = parseRegistrationSubjects(form.subject)
     const sectionEnabled = (sectionKey: RegistrationFormSectionKey) => (
-      registrationFormState.editable && getRegistrationFormSectionIndex(sectionKey) <= activeSectionIndex
+      registrationFormState.editable && registrationFormState.enabledSections.includes(sectionKey)
     )
     const sectionActive = (sectionKey: RegistrationFormSectionKey) => sectionKey === activeSection
     const checklistAvailability = getRegistrationChecklistAvailability({
-      pipelineStatus,
+      pipelineStatus: registrationChecklistEditorState.availabilityPipelineStatus,
       registration,
-      classId: form.classId,
-      textbookId: form.textbookId,
     })
+    const registrationSchedulePlaceholder = !formClassId
+      ? "수업을 먼저 선택하세요"
+      : registrationClassDetailLoading
+        ? "수업 일정을 불러오는 중"
+        : registrationScheduleSessions.length === 0
+          ? "수업 일정 설정 필요"
+          : "수업 시작 일정 선택"
+    const registrationScheduleOptions = registrationScheduleSessions.length > 0
+      ? [
+        { value: "", label: "일정 선택" },
+        ...registrationScheduleSessions.map((session) => ({
+          value: session.value,
+          label: `${dateOnlyLabel(session.dateKey)} · ${session.sessionLabel}${session.state === "makeup" ? " · 보강" : ""}`,
+        })),
+      ]
+      : []
 
     return (
       <div className="grid min-w-0">
@@ -13171,52 +13709,73 @@ function TypeSpecificFields({
         >
           <div className="grid gap-3 md:grid-cols-3">
             <RegistrationFocusTarget focusKey="studentName">
-              <TextField label="학생명" value={form.studentName || ""} autoFocus={!form.studentName && sectionActive("inquiry")} onChange={(value) => updateForm("studentName", value)} />
-            </RegistrationFocusTarget>
-            <RegistrationFocusTarget focusKey="subject">
-              <TaskListboxField
-                label="과목"
-                value={form.subject || ""}
-                options={REGISTRATION_SUBJECT_OPTIONS}
-                onChange={(value) => updateForm("subject", value)}
+              <TextField
+                label={<RegistrationFieldLabel label="학생명" requirement="required" />}
+                value={form.studentName || ""}
+                required
+                autoFocus={!form.studentName && sectionActive("inquiry")}
+                onChange={(value) => updateForm("studentName", value)}
               />
             </RegistrationFocusTarget>
-            <TaskListboxField
-              label="학년"
-              value={registration.schoolGrade || ""}
-              options={[
-                { value: "", label: "미정" },
-                ...(registration.schoolGrade && !REGISTRATION_GRADE_OPTIONS.includes(registration.schoolGrade)
-                  ? [{ value: registration.schoolGrade, label: registration.schoolGrade }]
-                  : []),
-                ...REGISTRATION_GRADE_OPTIONS.map((grade) => ({ value: grade, label: grade })),
-              ]}
-              onChange={(value) => updateRegistration("schoolGrade", value)}
-            />
-            <TextField label="학교" value={registration.schoolName || ""} onChange={(value) => updateRegistration("schoolName", value)} />
-            <RegistrationFocusTarget focusKey="parentPhone">
-              <TextField label="학부모 전화" value={registration.parentPhone || ""} inputMode="tel" onChange={(value) => updateRegistration("parentPhone", normalizeRegistrationPhone(value))} />
+            <RegistrationFocusTarget focusKey="subject">
+              <RegistrationSubjectField
+                label={<RegistrationFieldLabel label="과목" requirement="required" />}
+                values={registrationSubjects}
+                required
+                onChange={(values) => updateForm("subject", serializeRegistrationSubjects(values))}
+              />
             </RegistrationFocusTarget>
-            <TextField label="학생 전화" value={registration.studentPhone || ""} inputMode="tel" onChange={(value) => updateRegistration("studentPhone", normalizeRegistrationPhone(value))} />
-            <TaskListboxField
-              label="문의 채널"
-              value={registration.inquiryChannel || ""}
-              options={REGISTRATION_INQUIRY_CHANNEL_OPTIONS}
-              onChange={(value) => updateRegistration("inquiryChannel", value)}
+            <RegistrationFocusTarget focusKey="schoolGrade">
+              <TaskListboxField
+                label={<RegistrationFieldLabel label="학년" requirement="required" />}
+                value={registration.schoolGrade || ""}
+                options={[
+                  { value: "", label: "미정" },
+                  ...(registration.schoolGrade && !REGISTRATION_GRADE_OPTIONS.includes(registration.schoolGrade)
+                    ? [{ value: registration.schoolGrade, label: registration.schoolGrade }]
+                    : []),
+                  ...REGISTRATION_GRADE_OPTIONS.map((grade) => ({ value: grade, label: grade })),
+                ]}
+                required
+                onChange={(value) => updateRegistration("schoolGrade", value)}
+              />
+            </RegistrationFocusTarget>
+            <TextField
+              label={<RegistrationFieldLabel label="학교" requirement="optional" />}
+              value={registration.schoolName || ""}
+              onChange={(value) => updateRegistration("schoolName", value)}
             />
-            <TextField label="문의일시" type="datetime-local" value={dateTimeInputValue(registration.inquiryAt)} onChange={(value) => updateRegistration("inquiryAt", value)} />
-            <LinkedSelect
-              label="기존 학생 연결"
-              value={form.studentId || ""}
-              options={students}
-              onChange={(value) => {
-                if (value) {
-                  selectStudent(value, { fillRegistration: true })
-                  return
-                }
-                updateForm("studentId", "")
-              }}
+            <RegistrationFocusTarget focusKey="parentPhone">
+              <TextField
+                label={<RegistrationFieldLabel label="학부모 전화" requirement="required" />}
+                value={registration.parentPhone || ""}
+                inputMode="tel"
+                required
+                error={registration.parentPhone && !isValidRegistrationMobilePhone(registration.parentPhone)
+                  ? "010으로 시작하는 휴대전화 번호를 입력하세요."
+                  : ""}
+                onChange={(value) => updateRegistration("parentPhone", normalizeRegistrationPhone(value))}
+              />
+            </RegistrationFocusTarget>
+            <TextField
+              label={<RegistrationFieldLabel label="학생 전화" requirement="optional" />}
+              value={registration.studentPhone || ""}
+              inputMode="tel"
+              onChange={(value) => updateRegistration("studentPhone", normalizeRegistrationPhone(value))}
             />
+            <RegistrationFocusTarget focusKey="inquiryAt">
+              <div className="grid gap-1.5 text-sm font-medium">
+                <span><RegistrationFieldLabel label="문의일시" requirement="required" /></span>
+                <DateTimePickerControl
+                  value={dateTimeInputValue(registration.inquiryAt)}
+                  onChange={(value) => updateRegistration("inquiryAt", value)}
+                  dateAriaLabel="문의일 날짜"
+                  timeAriaLabel="문의일 시각"
+                  required
+                  disablePortal
+                />
+              </div>
+            </RegistrationFocusTarget>
           </div>
         </RegistrationFormSection>
 
@@ -13228,7 +13787,16 @@ function TypeSpecificFields({
         >
           <div className="grid gap-3 md:grid-cols-2">
             <RegistrationFocusTarget focusKey="levelTestAt">
-              <TextField label="레벨테스트 예약일시" type="datetime-local" value={dateTimeInputValue(registration.levelTestAt)} onChange={(value) => updateRegistration("levelTestAt", value)} />
+              <div className="grid gap-1.5 text-sm font-medium">
+                <span>레벨테스트 예약일시</span>
+                <DateTimePickerControl
+                  value={dateTimeInputValue(registration.levelTestAt)}
+                  onChange={(value) => updateRegistration("levelTestAt", value)}
+                  dateAriaLabel="레벨테스트 예약일 날짜"
+                  timeAriaLabel="레벨테스트 예약일 시각"
+                  disablePortal
+                />
+              </div>
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="levelTestPlace">
               <TaskListboxField
@@ -13238,14 +13806,10 @@ function TypeSpecificFields({
                 onChange={(value) => updateRegistration("levelTestPlace", value)}
               />
             </RegistrationFocusTarget>
-            <RegistrationFocusTarget focusKey="levelTestCompletedAt">
-              <TextField label="레벨테스트 완료일시" type="datetime-local" value={dateTimeInputValue(registration.levelTestCompletedAt)} onChange={(value) => updateRegistration("levelTestCompletedAt", value)} />
-            </RegistrationFocusTarget>
-            <RegistrationFocusTarget focusKey="levelTestResult">
-              <TextField label="레벨테스트 결과" value={registration.levelTestResult || ""} onChange={(value) => updateRegistration("levelTestResult", value)} />
-            </RegistrationFocusTarget>
           </div>
-          <TextField label="레벨테스트 자료 Drive 링크" value={registration.levelTestMaterialLink || ""} inputMode="url" onChange={(value) => updateRegistration("levelTestMaterialLink", value)} />
+          <RegistrationFocusTarget focusKey="levelTestMaterialLink">
+            <TextField label="시험지·결과지 URL" value={registration.levelTestMaterialLink || ""} inputMode="url" onChange={(value) => updateRegistration("levelTestMaterialLink", value)} />
+          </RegistrationFocusTarget>
         </RegistrationFormSection>
 
         <RegistrationFormSection
@@ -13256,10 +13820,28 @@ function TypeSpecificFields({
         >
           <div className="grid gap-3 md:grid-cols-3">
             <RegistrationFocusTarget focusKey="consultationAtReservation">
-              <TextField label="전화상담 예약일시" type="datetime-local" value={dateTimeInputValue(registration.phoneConsultationAt)} onChange={(value) => updateRegistration("phoneConsultationAt", value)} />
+              <div className="grid gap-1.5 text-sm font-medium">
+                <span>전화상담 예약일시</span>
+                <DateTimePickerControl
+                  value={dateTimeInputValue(registration.phoneConsultationAt)}
+                  onChange={(value) => updateRegistration("phoneConsultationAt", value)}
+                  dateAriaLabel="전화상담 예약일 날짜"
+                  timeAriaLabel="전화상담 예약일 시각"
+                  disablePortal
+                />
+              </div>
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="consultationAtReservation">
-              <TextField label="방문상담 예약일시" type="datetime-local" value={dateTimeInputValue(registration.visitConsultationAt)} onChange={(value) => updateRegistration("visitConsultationAt", value)} />
+              <div className="grid gap-1.5 text-sm font-medium">
+                <span>방문상담 예약일시</span>
+                <DateTimePickerControl
+                  value={dateTimeInputValue(registration.visitConsultationAt)}
+                  onChange={(value) => updateRegistration("visitConsultationAt", value)}
+                  dateAriaLabel="방문상담 예약일 날짜"
+                  timeAriaLabel="방문상담 예약일 시각"
+                  disablePortal
+                />
+              </div>
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="visitConsultationPlace">
               <TaskListboxField
@@ -13269,11 +13851,18 @@ function TypeSpecificFields({
                 onChange={(value) => updateRegistration("visitConsultationPlace", value)}
               />
             </RegistrationFocusTarget>
-            <RegistrationFocusTarget focusKey="consultationAt">
-              <TextField label="상담 완료일시" type="datetime-local" value={dateTimeInputValue(registration.consultationAt)} onChange={(value) => updateRegistration("consultationAt", value)} />
-            </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="counselor">
-              <TextField label="상담 담당자" value={registration.counselor || ""} onChange={(value) => updateRegistration("counselor", value)} />
+              <div className="grid gap-1.5">
+                <TaskListboxField
+                  label="상담 책임자"
+                  value={form.secondaryAssigneeId || ""}
+                  options={registrationCounselorOptions}
+                  onChange={onRegistrationCounselorChange}
+                />
+                {!form.secondaryAssigneeId && registration.counselor ? (
+                  <p role="note" className="text-xs font-medium text-amber-700 dark:text-amber-300">{`기존 담당 ${registration.counselor}, 원장 계정 다시 선택`}</p>
+                ) : null}
+              </div>
             </RegistrationFocusTarget>
           </div>
         </RegistrationFormSection>
@@ -13289,31 +13878,29 @@ function TypeSpecificFields({
               <LinkedSelect label="수업" value={form.classId || ""} options={classes} onChange={(value) => selectClass(value, { fillRegistration: true })} onManualSelect={() => openManualField("registrationClass")} />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="textbookId">
-              <LinkedSelect label="교재" value={form.textbookId || ""} options={textbooks} onChange={(value) => selectTextbook(value)} onManualSelect={() => openManualField("registrationTextbook")} />
+              <LinkedSelect
+                label="교재"
+                value={form.textbookId || ""}
+                options={textbooks}
+                onChange={(value) => selectRegistrationTextbook(value)}
+                onManualSelect={() => openManualField("registrationTextbook")}
+                allowDeselect
+                onDeselect={() => selectRegistrationTextbook("", { explicitClear: true })}
+              />
             </RegistrationFocusTarget>
             {shouldShowManualField("registrationClass", form.classId, form.className) && <TextField label="수업명" value={form.className || ""} onChange={(value) => updateForm("className", value)} />}
             {shouldShowManualField("registrationTextbook", form.textbookId, form.textbookTitle) && <TextField label="교재명" value={form.textbookTitle || ""} onChange={(value) => updateForm("textbookTitle", value)} />}
             <RegistrationFocusTarget focusKey="classStartDate">
-              <TextField label="수업시작일" type="date" value={dateInputValue(registration.classStartDate)} onChange={(value) => updateRegistration("classStartDate", value)} />
+              <TaskListboxField
+                label="수업 시작 일정"
+                value={registrationScheduleValue}
+                options={registrationScheduleOptions}
+                placeholder={registrationSchedulePlaceholder}
+                disabled={!formClassId || registrationClassDetailLoading || registrationScheduleSessions.length === 0}
+                required
+                onChange={selectRegistrationSchedule}
+              />
             </RegistrationFocusTarget>
-            <TaskListboxField
-              label="수업시작회차"
-              value={registration.classStartSession || ""}
-              options={[
-                { value: "", label: "미정" },
-                ...REGISTRATION_CLASS_START_SESSION_OPTIONS.map((session) => ({ value: session, label: session })),
-              ]}
-              onChange={(value) => updateRegistration("classStartSession", value)}
-            />
-            <TaskListboxField
-              label="교재 준비"
-              value={registration.textbookPreparation || ""}
-              options={[
-                { value: "", label: "미정" },
-                ...REGISTRATION_TEXTBOOK_PREPARATION_OPTIONS.map((option) => ({ value: option, label: option })),
-              ]}
-              onChange={(value) => updateRegistration("textbookPreparation", value)}
-            />
           </div>
           <TextField label="요청 사항" value={registration.requestNote || ""} onChange={(value) => updateRegistration("requestNote", value)} />
         </RegistrationFormSection>
@@ -13325,23 +13912,25 @@ function TypeSpecificFields({
           enabled={sectionEnabled("admission")}
         >
           <div className="grid gap-2 md:grid-cols-3">
-            <AutoSyncStatusField label="교재 준비" checked={Boolean(registration.textbookReady)} />
-            <AutoSyncStatusField label="수업시간표 명단" checked={Boolean(registration.timetableRosterUpdated)} />
             <RegistrationFocusTarget focusKey="admissionNoticeSent">
-              <CheckField label="입학신청서" checked={Boolean(registration.admissionNoticeSent)} onChange={(value) => updateRegistration("admissionNoticeSent", value)} disabled={!checklistAvailability.admissionNoticeSent.enabled} title={checklistAvailability.admissionNoticeSent.reason} />
-            </RegistrationFocusTarget>
-            <RegistrationFocusTarget focusKey="paymentChecked">
-              <CheckField label="수납 완료 확인" checked={Boolean(registration.paymentChecked)} onChange={(value) => updateRegistration("paymentChecked", value)} disabled={!checklistAvailability.paymentChecked.enabled} title={checklistAvailability.paymentChecked.reason} />
+              <CheckField label="입학신청서 발송" checked={Boolean(registration.admissionNoticeSent)} onChange={(value) => updateAdmissionChecklist("admissionNoticeSent", value)} disabled={!checklistAvailability.admissionNoticeSent.enabled} title={checklistAvailability.admissionNoticeSent.reason} />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="makeeduRegistered">
-              <CheckField label="메이크에듀 등록" checked={Boolean(registration.makeeduRegistered)} onChange={(value) => updateRegistration("makeeduRegistered", value)} disabled={!checklistAvailability.makeeduRegistered.enabled} title={checklistAvailability.makeeduRegistered.reason} />
+              <CheckField label="메이크에듀 등록(수업, 교재)" checked={Boolean(registration.makeeduRegistered)} onChange={(value) => updateAdmissionChecklist("makeeduRegistered", value)} disabled={!checklistAvailability.makeeduRegistered.enabled} title={checklistAvailability.makeeduRegistered.reason} />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="makeeduInvoiceSent">
-              <CheckField label="청구서 발송" checked={Boolean(registration.makeeduInvoiceSent)} onChange={(value) => updateRegistration("makeeduInvoiceSent", value)} disabled={!checklistAvailability.makeeduInvoiceSent.enabled} title={checklistAvailability.makeeduInvoiceSent.reason} />
+              <CheckField label="청구서 발송" checked={Boolean(registration.makeeduInvoiceSent)} onChange={(value) => updateAdmissionChecklist("makeeduInvoiceSent", value)} disabled={!checklistAvailability.makeeduInvoiceSent.enabled} title={checklistAvailability.makeeduInvoiceSent.reason} />
             </RegistrationFocusTarget>
-            <RegistrationFocusTarget focusKey="textbookBillingIssued">
-              <CheckField label="교재 청구출고표" checked={Boolean(registration.textbookBillingIssued)} onChange={(value) => updateRegistration("textbookBillingIssued", value)} disabled={!checklistAvailability.textbookBillingIssued.enabled} title={checklistAvailability.textbookBillingIssued.reason} />
+            <RegistrationFocusTarget focusKey="paymentChecked">
+              <CheckField label="수납 완료 확인" checked={Boolean(registration.paymentChecked)} onChange={(value) => updateAdmissionChecklist("paymentChecked", value)} disabled={!checklistAvailability.paymentChecked.enabled} title={checklistAvailability.paymentChecked.reason} />
             </RegistrationFocusTarget>
+            <CheckField
+              label="등록 완료"
+              checked={registrationChecklistEditorState.completed}
+              onChange={() => undefined}
+              disabled
+              title="네 단계와 등록 정보를 모두 확인한 뒤 등록 완료로 이동합니다."
+            />
           </div>
         </RegistrationFormSection>
       </div>
@@ -13698,57 +14287,6 @@ function TypeSpecificFields({
   return null
 }
 
-function RegistrationPipelineFilter({
-  value,
-  tasks,
-  onChange,
-}: {
-  value: string
-  tasks: OpsTask[]
-  onChange: (value: string) => void
-}) {
-  const counts = new Map<string, number>()
-  tasks.forEach((task) => {
-    const status = task.registration?.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"
-    counts.set(status, (counts.get(status) || 0) + 1)
-  })
-  const visibleStatuses = REGISTRATION_PIPELINE_STATUSES.filter((status) => (
-    value === status.value || (counts.get(status.value) || 0) > 0
-  ))
-  const countedStatusCount = visibleStatuses.filter((status) => (counts.get(status.value) || 0) > 0).length
-
-  if (value === REGISTRATION_PIPELINE_ALL && countedStatusCount <= 1) return null
-
-  return (
-    <div className={HORIZONTAL_CHIP_BAR_CLASS} aria-label="등록 진행상태">
-      <button
-        type="button"
-        onClick={() => onChange(REGISTRATION_PIPELINE_ALL)}
-        aria-pressed={value === REGISTRATION_PIPELINE_ALL}
-        className={[
-          "shrink-0 rounded px-3 py-1.5 text-sm font-medium",
-          value === REGISTRATION_PIPELINE_ALL ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-        ].join(" ")}
-      >
-        전체 {tasks.length > 0 && <span className="ml-1 text-xs opacity-80">{tasks.length}</span>}
-      </button>
-      {visibleStatuses.map((status) => (
-        <button
-          key={status.value}
-          type="button"
-          onClick={() => onChange(status.value)}
-          aria-pressed={value === status.value}
-          className={[
-            "shrink-0 rounded px-3 py-1.5 text-sm font-medium",
-            value === status.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-          ].join(" ")}
-        >
-          {getCompactRegistrationPipelineLabel(status.value)} {(counts.get(status.value) || 0) > 0 && <span className="ml-1 text-xs opacity-80">{counts.get(status.value) || 0}</span>}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 function TodoTeamFilterBar({
   options,
@@ -15673,46 +16211,94 @@ function RegistrationExternalLinkInfo({ label, href }: { label: string; href?: s
   )
 }
 
-function RegistrationDetailPanel({ task }: { task: OpsTask }) {
+function RegistrationDetailPanel({ task, selectedTrackId }: { task: OpsTask; selectedTrackId?: string | null }) {
   const registration = task.registration || {}
+  const selectedTrack = task.registrationTracks?.find((track) => track.id === selectedTrackId) || null
   const completedAt = dateLabel(task.completedAt)
+  const pipelineStatus = registration.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"
+  const reachedSections = getRegistrationMobileSections(pipelineStatus, getRegistrationMobileSectionData(task, registration))
+  const hasLevelTestDetail = Boolean(
+    registration.levelTestAt || registration.levelTestPlace || registration.levelTestCompletedAt || registration.levelTestResult || registration.levelTestMaterialLink,
+  )
+  const hasConsultationDetail = Boolean(
+    registration.phoneConsultationAt || registration.visitConsultationAt || registration.visitConsultationPlace || registration.consultationAt || registration.counselor,
+  )
+  const hasPlacementDetail = Boolean(
+    task.classId || task.className || task.textbookId || task.textbookTitle || registration.classStartDate || registration.classStartSession || registration.requestNote,
+  )
+  const hasAdmissionDetail = Boolean(
+    registration.admissionNoticeSent || registration.makeeduRegistered || registration.makeeduInvoiceSent || registration.paymentChecked,
+  )
+  const showLevelTestDetail = reachedSections.includes("level_test") && hasLevelTestDetail
+  const showConsultationDetail = reachedSections.includes("consultation") && hasConsultationDetail
+  const showPlacementDetail = reachedSections.includes("placement") || hasPlacementDetail
+  const showAdmissionDetail = reachedSections.includes("admission") || hasAdmissionDetail
 
   return (
     <section className="grid gap-4" aria-label="등록 상세 신청서">
-      <div className="grid gap-3 rounded-md border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <RegistrationWorkflowStatusBadge task={task} />
+        <Badge variant="outline">{selectedTrack ? `${selectedTrack.subject} 과목별 흐름` : task.subject || "과목 미정"}</Badge>
+        {selectedTrack?.directorName ? <Badge variant="secondary">상담 {selectedTrack.directorName}</Badge> : null}
+        <span className="text-sm font-semibold">{task.studentName || "학생 미정"}</span>
+      </div>
+
+      <section className="grid gap-3 rounded-md border p-3" aria-label="문의 정보">
+        <h3 className="text-sm font-semibold">문의 정보</h3>
         <dl className="grid gap-3 text-sm md:grid-cols-2">
-          <Info label="진행상태" value={registration.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"} />
-          <Info label="과목" value={task.subject || "미지정"} />
           <Info label="학생" value={task.studentName || "미지정"} />
           <Info label="학년" value={registration.schoolGrade || "미정"} />
           <Info label="학교" value={registration.schoolName || "미정"} />
           <Info label="학부모 전화" value={registration.parentPhone || "미정"} />
           <OptionalInfo label="학생 전화" value={registration.studentPhone} />
-          <OptionalInfo label="문의 채널" value={registration.inquiryChannel} />
           <Info label="문의일시" value={dateLabel(registration.inquiryAt || "")} />
+        </dl>
+      </section>
+
+      {showLevelTestDetail ? (
+        <section className="grid gap-3 rounded-md border p-3" aria-label="레벨테스트 정보">
+          <h3 className="text-sm font-semibold">레벨테스트</h3>
+          <dl className="grid gap-3 text-sm md:grid-cols-2">
           <Info label="레벨테스트" value={dateLabel(registration.levelTestAt || "")} />
           <OptionalInfo label="레벨테스트 장소" value={registration.levelTestPlace} />
           <Info label="레벨테스트 완료일시" value={dateLabel(registration.levelTestCompletedAt || "")} />
           <OptionalInfo label="레벨테스트 결과" value={registration.levelTestResult} />
-          <RegistrationExternalLinkInfo label="레벨테스트 자료" href={registration.levelTestMaterialLink} />
+          <RegistrationExternalLinkInfo label="시험지·결과지 URL" href={registration.levelTestMaterialLink} />
+          </dl>
+        </section>
+      ) : null}
+
+      {showConsultationDetail ? (
+        <section className="grid gap-3 rounded-md border p-3" aria-label="상담 정보">
+          <h3 className="text-sm font-semibold">상담</h3>
+          <dl className="grid gap-3 text-sm md:grid-cols-2">
           <Info label="상담 책임자" value={registration.counselor || task.assigneeLabel || "미정"} />
           <Info label="전화상담" value={dateLabel(registration.phoneConsultationAt || "")} />
-          <Info label="방문상담" value={getRegistrationTableValue(task, "visitConsultationAt")} />
+          <Info label="방문상담" value={getRegistrationVisitConsultationLabel(task)} />
           <Info label="상담 완료일시" value={dateLabel(registration.consultationAt || "")} />
+          </dl>
+        </section>
+      ) : null}
+
+      {showPlacementDetail ? (
+        <section className="grid gap-3 rounded-md border p-3" aria-label="등록·대기 정보">
+          <h3 className="text-sm font-semibold">등록·대기 정보</h3>
+          <dl className="grid gap-3 text-sm md:grid-cols-2">
           <Info label="수업" value={task.className || "미정"} />
           <Info label="교재" value={task.textbookTitle || "미정"} />
           <Info label="수업시작일" value={dateInputValue(registration.classStartDate) || "미정"} />
           <Info label="수업시작회차" value={registration.classStartSession || "미정"} />
-          <Info label="교재 준비" value={registration.textbookPreparation || "미정"} />
           <OptionalInfo label="요청 사항" value={registration.requestNote} />
-          <div className="md:col-span-2">
-            <dt className="text-xs text-muted-foreground">등록 확인</dt>
-            <dd className="mt-1">
-              <RegistrationOperationsChecklistChips registration={registration} task={task} />
-            </dd>
-          </div>
-        </dl>
-      </div>
+          </dl>
+        </section>
+      ) : null}
+
+      {showAdmissionDetail ? (
+        <section className="grid gap-3 rounded-md border p-3" aria-label="입학 처리 정보">
+          <h3 className="text-sm font-semibold">입학 처리</h3>
+          <RegistrationOperationsChecklistChips registration={registration} />
+        </section>
+      ) : null}
 
       <details className="group rounded-md border">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
@@ -15724,6 +16310,7 @@ function RegistrationDetailPanel({ task }: { task: OpsTask }) {
           <Info label="신청일시" value={dateLabel(task.createdAt)} />
           <Info label="담당자" value={task.assigneeLabel || task.assigneeTeam || "관리팀"} />
           <Info label="완료일시" value={completedAt === "-" ? "미정" : completedAt} />
+          <Info label="진행상태 원문" value={pipelineStatus} />
         </dl>
       </details>
     </section>
@@ -15868,23 +16455,18 @@ function TypeDetail({ task }: { task: OpsTask }) {
 	      <div className="flex flex-col gap-3">
         <dl className="grid gap-3 rounded-md bg-muted/50 p-3 text-sm md:grid-cols-2">
           <Info label="진행상태" value={registration.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의"} />
-          <OptionalInfo label="문의 채널" value={registration.inquiryChannel} />
           <OptionalInfo label="전화상담" value={dateInputValue(registration.phoneConsultationAt)} />
           <OptionalInfo label="방문상담" value={dateInputValue(registration.visitConsultationAt)} />
           <OptionalInfo label="레벨테스트" value={dateInputValue(registration.levelTestAt)} />
           <OptionalInfo label="수업 시작" value={dateInputValue(registration.classStartDate)} />
         </dl>
         <OperationChecklistSummary
-          autoItems={[
-            { label: "교재 준비", checked: Boolean(registration.textbookReady) },
-            { label: "수업시간표 명단", checked: Boolean(registration.timetableRosterUpdated) },
-          ]}
           manualItems={[
-            { label: "입학신청서", checked: Boolean(registration.admissionNoticeSent) },
-            { label: "수납 완료", checked: Boolean(registration.paymentChecked) },
-            { label: "메이크에듀 등록", checked: Boolean(registration.makeeduRegistered) },
+            { label: "입학신청서 발송", checked: Boolean(registration.admissionNoticeSent) },
+            { label: "메이크에듀 등록(수업, 교재)", checked: Boolean(registration.makeeduRegistered) },
             { label: "청구서 발송", checked: Boolean(registration.makeeduInvoiceSent) },
-            { label: "교재 청구출고표", checked: Boolean(registration.textbookBillingIssued) },
+            { label: "수납 완료 확인", checked: Boolean(registration.paymentChecked) },
+            { label: "등록 완료", checked: getRegistrationPipelinePrefix(registration.pipelineStatus) === "7." },
           ]}
         />
       </div>

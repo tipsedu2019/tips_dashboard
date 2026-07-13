@@ -20,8 +20,11 @@ test("student lifecycle status is a persisted student field", async () => {
 
 test("class relation removal can clear orphaned student references", async () => {
   const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
-  const assignSource = serviceSource.match(/async assignStudentToClass[\s\S]*?return \{ student: nextStudent, class: nextClass \};/)?.[0] || "";
-  const removeSource = serviceSource.match(/async removeStudentFromClass[\s\S]*?return \{ student: nextStudent, class: nextClass \};/)?.[0] || "";
+  const assignStart = serviceSource.indexOf("async assignStudentToClass");
+  const removeStart = serviceSource.indexOf("async removeStudentFromClass", assignStart);
+  const serviceEnd = serviceSource.indexOf("\n  };\n}", removeStart);
+  const assignSource = serviceSource.slice(assignStart, removeStart);
+  const removeSource = serviceSource.slice(removeStart, serviceEnd);
 
   assert.match(serviceSource, /function getClassWaitlistIds/);
   assert.match(serviceSource, /function getClassStudentMode/);

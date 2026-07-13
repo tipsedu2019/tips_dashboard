@@ -36,18 +36,18 @@ export const WORD_RETEST_STATUSES = [
 export const REGISTRATION_PIPELINE_STATUSES = [
   { value: "0. 등록 문의", label: "0. 등록 문의" },
   { value: "1. 레벨테스트 예약", label: "1. 레벨테스트 예약" },
-  { value: "1-1. 레벨테스트 완료", label: "1-1. 레벨테스트 완료" },
+  { value: "1-1. 레벨테스트 완료", label: "1-1. 레벨테스트 결과" },
   { value: "2. 상담 예약", label: "2. 상담 예약" },
-  { value: "3. 상담 완료", label: "3. 상담 완료" },
-  { value: "4-1. 현재반 대기 신청", label: "4-1. 현재반 대기" },
-  { value: "4-2. 신규반 대기 신청", label: "4-2. 신규반 대기" },
-  { value: "4-3. 다음 개강 알림 요청", label: "4-3. 다음 개강 알림" },
+  { value: "3. 상담 완료", label: "3. 상담 결과" },
+  { value: "4-1. 현재반 대기 신청", label: "4-1. 현재 학기 수강반 대기" },
+  { value: "4-2. 신규반 대기 신청", label: "4-2. 현재 학기 개강반 대기" },
+  { value: "4-3. 다음 개강 알림 요청", label: "4-3. 다음 학기 개강반 대기" },
   { value: "5. 입학 등록 결정", label: "5. 입학 등록 결정" },
   { value: "5-1. 입학신청서 발송 완료", label: "5-1. 입학신청서 발송 완료" },
   { value: "6. 수납 확인", label: "6. 수납 확인" },
   { value: "7. 등록 완료", label: "7. 등록 완료" },
-  { value: "8. 미등록", label: "8. 미등록" },
-  { value: "9. 문의만", label: "9. 문의만" },
+  { value: "8. 미등록", label: "8. 미등록 완료" },
+  { value: "9. 문의만", label: "9. 문의 완료" },
 ];
 
 export function getTaskTypeLabel(value) {

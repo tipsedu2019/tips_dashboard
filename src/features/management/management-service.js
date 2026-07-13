@@ -146,6 +146,13 @@ function isMissingRelationError(error) {
   );
 }
 
+function isMissingRegistrationRosterRpc(error) {
+  const code = trimText(error?.code).toUpperCase();
+  const message = trimText(error?.message).toLowerCase();
+  return code === "PGRST202" || code === "42883"
+    || (message.includes("schema cache") && message.includes("could not find the function"));
+}
+
 function resolveClient(client) {
   if (client) {
     return client;
@@ -488,6 +495,15 @@ async function selectRows(client, table) {
   return data || [];
 }
 
+async function selectOptionalRows(client, table) {
+  try {
+    return await selectRows(client, table);
+  } catch (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return [];
+    throw error;
+  }
+}
+
 function stripFields(row, fields) {
   const nextRow = { ...row };
   for (const field of fields) {
@@ -500,6 +516,14 @@ function stripPayloadFields(payload, fields) {
   return Array.isArray(payload)
     ? payload.map((row) => stripFields(row, fields))
     : stripFields(payload, fields);
+}
+
+function stripReadyStudentWriteFields(payload) {
+  return stripPayloadFields(payload, ["status", "class_ids", "waitlist_class_ids"]);
+}
+
+function stripReadyClassWriteFields(payload) {
+  return stripPayloadFields(payload, ["student_ids", "waitlist_ids"]);
 }
 
 function getStaleSchemaFallbackFields(error, optionalFields) {
@@ -586,6 +610,94 @@ function getClassStudentMode(classItem, studentId) {
     return "waitlist";
   }
   return "";
+}
+
+async function assertStudentPhysicalDeleteAllowed(client, studentId) {
+  const safeStudentId = trimText(studentId);
+  if (!safeStudentId) return;
+  const [students, classes, history, registrationEnrollments] = await Promise.all([
+    selectRows(client, "students"),
+    selectRows(client, "classes"),
+    selectOptionalRows(client, "student_class_enrollment_history"),
+    selectOptionalRows(client, "ops_registration_enrollments"),
+  ]);
+  const student = findById(students, safeStudentId);
+  const ownLinks = normalizeIdList(student?.class_ids || student?.classIds).length
+    + normalizeIdList(student?.waitlist_class_ids || student?.waitlistClassIds).length;
+  const reverseLinks = classes.some((classItem) => (
+    normalizeIdList(classItem?.student_ids || classItem?.studentIds).includes(safeStudentId)
+    || getClassWaitlistIds(classItem).includes(safeStudentId)
+  ));
+  const hasHistory = history.some((row) => trimText(row?.student_id || row?.studentId) === safeStudentId);
+  const hasRegistrationHistory = registrationEnrollments.some((row) => (
+    trimText(row?.student_id || row?.studentId) === safeStudentId
+  ));
+  if (ownLinks > 0 || reverseLinks || hasHistory || hasRegistrationHistory) {
+    throw new Error("연결 또는 수강 이력이 있는 학생은 퇴원 처리하세요.");
+  }
+}
+
+function assertCommittedRosterProjection(student, classItem, committed = {}, expectedNextMode = "") {
+  const requiredArrayFields = [
+    "studentClassIds",
+    "studentWaitlistClassIds",
+    "classStudentIds",
+    "classWaitlistIds",
+  ];
+  const committedNextMode = trimText(committed.nextMode);
+  const validMode = ["enrolled", "waitlist", "removed"].includes(committedNextMode)
+    && committedNextMode === trimText(expectedNextMode);
+  const idsMatch = trimText(committed.studentId) === trimText(student?.id)
+    && trimText(committed.classId) === trimText(classItem?.id);
+  const arraysAreComplete = requiredArrayFields.every((field) => Array.isArray(committed[field]));
+  const studentClassIds = normalizeIdList(committed.studentClassIds);
+  const studentWaitlistClassIds = normalizeIdList(committed.studentWaitlistClassIds);
+  const classStudentIds = normalizeIdList(committed.classStudentIds);
+  const classWaitlistIds = normalizeIdList(committed.classWaitlistIds);
+  const studentId = trimText(student?.id);
+  const classId = trimText(classItem?.id);
+  const enrolled = studentClassIds.includes(classId) && classStudentIds.includes(studentId)
+    && !studentWaitlistClassIds.includes(classId) && !classWaitlistIds.includes(studentId);
+  const waitlisted = studentWaitlistClassIds.includes(classId) && classWaitlistIds.includes(studentId)
+    && !studentClassIds.includes(classId) && !classStudentIds.includes(studentId);
+  const removed = !studentClassIds.includes(classId) && !studentWaitlistClassIds.includes(classId)
+    && !classStudentIds.includes(studentId) && !classWaitlistIds.includes(studentId);
+  const projectionMatchesMode = (committedNextMode === "enrolled" && enrolled)
+    || (committedNextMode === "waitlist" && waitlisted)
+    || (committedNextMode === "removed" && removed);
+  if (!validMode || !idsMatch || !arraysAreComplete || !projectionMatchesMode) {
+    throw new Error("학생 명단 변경 결과를 다시 불러오세요.");
+  }
+}
+
+function buildCommittedRosterRecords(student, classItem, committed = {}, expectedNextMode = "") {
+  assertCommittedRosterProjection(student, classItem, committed, expectedNextMode);
+  const studentClassIds = normalizeIdList(committed.studentClassIds);
+  const studentWaitlistClassIds = normalizeIdList(committed.studentWaitlistClassIds);
+  const classStudentIds = normalizeIdList(committed.classStudentIds);
+  const classWaitlistIds = normalizeIdList(committed.classWaitlistIds);
+
+  return {
+    student: {
+      ...student,
+      status: ["enrolled", "waitlist"].includes(trimText(committed.nextMode))
+        ? "재원"
+        : student?.status,
+      class_ids: studentClassIds,
+      classIds: studentClassIds,
+      waitlist_class_ids: studentWaitlistClassIds,
+      waitlistClassIds: studentWaitlistClassIds,
+    },
+    class: {
+      ...classItem,
+      student_ids: classStudentIds,
+      studentIds: classStudentIds,
+      waitlist_ids: classWaitlistIds,
+      waitlistIds: classWaitlistIds,
+      waitlist_student_ids: classWaitlistIds,
+      waitlistStudentIds: classWaitlistIds,
+    },
+  };
 }
 
 async function insertStudentClassHistory(client, rows = []) {
@@ -700,6 +812,21 @@ export function buildTextbookPayload(record = {}, options = {}) {
 
 export function createManagementService(options = {}) {
   const { supabase = sharedSupabase, generateId = createId } = options;
+  let registrationRuntimeProbe = null;
+  const probeRegistrationRuntime = options.probeRegistrationRuntime || (async () => {
+    if (!supabase || typeof supabase.rpc !== "function") {
+      return { mode: "legacy", version: 0 };
+    }
+    if (!registrationRuntimeProbe) {
+      const { createRegistrationRuntimeProbe } = await import("../tasks/registration-runtime-probe");
+      registrationRuntimeProbe = createRegistrationRuntimeProbe(supabase);
+    }
+    return registrationRuntimeProbe.probe();
+  });
+  const invalidateRegistrationRuntimeAfterReadyFailure = options.invalidateRegistrationRuntimeAfterReadyFailure || ((cause) => {
+    if (registrationRuntimeProbe) return registrationRuntimeProbe.invalidateAfterReadyFailure(cause);
+    throw cause;
+  });
 
   return {
     get configError() {
@@ -844,13 +971,23 @@ export function createManagementService(options = {}) {
 
     async createStudent(record = {}) {
       const client = ensureClient(supabase);
-      const created = await upsertStudentRows(client, buildStudentPayload(record, { generateId }));
+      const runtime = await probeRegistrationRuntime();
+      const payload = buildStudentPayload(record, { generateId });
+      const created = await upsertStudentRows(
+        client,
+        runtime.mode === "legacy" ? payload : stripReadyStudentWriteFields(payload),
+      );
       return Array.isArray(created) ? created[0] || null : created || null;
     },
 
     async updateStudent(record = {}) {
       const client = ensureClient(supabase);
-      const updated = await upsertStudentRows(client, buildStudentPayload(record, { generateId }));
+      const runtime = await probeRegistrationRuntime();
+      const payload = buildStudentPayload(record, { generateId });
+      const updated = await upsertStudentRows(
+        client,
+        runtime.mode === "legacy" ? payload : stripReadyStudentWriteFields(payload),
+      );
       return Array.isArray(updated) ? updated[0] || null : updated || null;
     },
 
@@ -873,18 +1010,29 @@ export function createManagementService(options = {}) {
 
     async deleteStudent(id) {
       const client = ensureClient(supabase);
+      await assertStudentPhysicalDeleteAllowed(client, id);
       return deleteRows(client, "students", id ? [id] : []);
     },
 
     async createClass(record = {}) {
       const client = ensureClient(supabase);
-      const created = await upsertClassRows(client, buildClassPayload(record, { generateId }));
+      const runtime = await probeRegistrationRuntime();
+      const payload = buildClassPayload(record, { generateId });
+      const created = await upsertClassRows(
+        client,
+        runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
+      );
       return Array.isArray(created) ? created[0] || null : created || null;
     },
 
     async updateClass(record = {}) {
       const client = ensureClient(supabase);
-      const updated = await upsertClassRows(client, buildClassPayload(record, { generateId }));
+      const runtime = await probeRegistrationRuntime();
+      const payload = buildClassPayload(record, { generateId });
+      const updated = await upsertClassRows(
+        client,
+        runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
+      );
       return Array.isArray(updated) ? updated[0] || null : updated || null;
     },
 
@@ -961,6 +1109,10 @@ export function createManagementService(options = {}) {
       const client = ensureClient(supabase);
       const safeStudentId = trimText(studentId);
       const safeClassId = trimText(classId);
+      const registrationRuntime = await probeRegistrationRuntime();
+      if (registrationRuntime.mode === "maintenance") {
+        throw new Error("데이터 전환 중에는 학생 명단을 변경할 수 없습니다.");
+      }
       const [students, classes] = await Promise.all([
         selectRows(client, "students"),
         selectRows(client, "classes"),
@@ -974,6 +1126,31 @@ export function createManagementService(options = {}) {
       const enrolled = mode === "enrolled";
       const previousMode = getStudentClassMode(student, safeClassId);
       const nextMode = enrolled ? "enrolled" : "waitlist";
+      if (registrationRuntime.mode === "ready") {
+        const committed = await client.rpc("set_student_class_roster_mode", {
+          p_student_id: safeStudentId,
+          p_class_id: safeClassId,
+          p_next_mode: nextMode,
+          p_expected_mode: previousMode || "removed",
+          p_memo: "management_roster",
+        });
+        if (committed.error) {
+          if (isMissingRegistrationRosterRpc(committed.error)) {
+            invalidateRegistrationRuntimeAfterReadyFailure(committed.error);
+          }
+          throw committed.error;
+        }
+        if (!committed.data || typeof committed.data !== "object" || Array.isArray(committed.data)) {
+          throw new Error("학생 명단 변경 결과를 다시 불러오세요.");
+        }
+        const { student: nextStudent, class: nextClass } = buildCommittedRosterRecords(
+          student,
+          classItem,
+          committed.data,
+          nextMode,
+        );
+        return { student: nextStudent, class: nextClass };
+      }
       const nextStudentClassIds = enrolled ? addUnique(student.class_ids || student.classIds, safeClassId) : removeId(student.class_ids || student.classIds, safeClassId);
       const nextStudentWaitlistIds = enrolled
         ? removeId(student.waitlist_class_ids || student.waitlistClassIds, safeClassId)
@@ -1033,6 +1210,10 @@ export function createManagementService(options = {}) {
       const client = ensureClient(supabase);
       const safeStudentId = trimText(studentId);
       const safeClassId = trimText(classId);
+      const registrationRuntime = await probeRegistrationRuntime();
+      if (registrationRuntime.mode === "maintenance") {
+        throw new Error("데이터 전환 중에는 학생 명단을 변경할 수 없습니다.");
+      }
       const [students, classes] = await Promise.all([
         selectRows(client, "students"),
         selectRows(client, "classes"),
@@ -1043,6 +1224,34 @@ export function createManagementService(options = {}) {
         throw new Error("학생 또는 수업 데이터를 찾을 수 없습니다.");
       }
       const previousMode = getStudentClassMode(student, safeClassId) || getClassStudentMode(classItem, safeStudentId);
+      if (registrationRuntime.mode === "ready") {
+        if (!student || !classItem) {
+          throw new Error("학생 또는 수업 데이터를 찾을 수 없습니다.");
+        }
+        const committed = await client.rpc("set_student_class_roster_mode", {
+          p_student_id: safeStudentId,
+          p_class_id: safeClassId,
+          p_next_mode: "removed",
+          p_expected_mode: previousMode || "removed",
+          p_memo: "management_roster",
+        });
+        if (committed.error) {
+          if (isMissingRegistrationRosterRpc(committed.error)) {
+            invalidateRegistrationRuntimeAfterReadyFailure(committed.error);
+          }
+          throw committed.error;
+        }
+        if (!committed.data || typeof committed.data !== "object" || Array.isArray(committed.data)) {
+          throw new Error("학생 명단 변경 결과를 다시 불러오세요.");
+        }
+        const { student: nextStudent, class: nextClass } = buildCommittedRosterRecords(
+          student,
+          classItem,
+          committed.data,
+          "removed",
+        );
+        return { student: nextStudent, class: nextClass };
+      }
       const nextStudent = student
         ? {
             ...student,

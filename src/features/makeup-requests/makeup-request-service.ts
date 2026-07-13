@@ -7,10 +7,11 @@ import {
   buildRoomAvailability,
   canTransitionMakeupRequest,
   extractMakeupCalendarMeta,
-  getAllowedApproverNames,
+  getMakeupRequestEffectiveYear,
   getMakeupRequestKind,
   hasCancelPart,
   hasMakeupPart,
+  isMakeupApproverAllowed,
   MAKEUP_REQUEST_STATUS_LABELS,
   normalizeMakeupSlots,
   resolveMakeupApprovalGroup,
@@ -20,6 +21,8 @@ import {
   buildAcademicEventMutationPayload,
   runAcademicEventMutation,
 } from "@/features/operations/academic-event-utils.js"
+import { REGISTRATION_ADMIN_CHAT_CLAIM_TYPE } from "@/features/tasks/registration-consultation-notification.js"
+import { createInFlightRequestStore } from "@/lib/in-flight-request.js"
 
 type Row = Record<string, unknown>
 
@@ -247,6 +250,8 @@ export const MAKEUP_NOTIFICATION_CHANNEL_LABELS: Record<MakeupNotificationChanne
 const MAKEUP_NOTIFICATION_TRIGGERS = Object.keys(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as ActiveMakeupNotificationTrigger[]
 const MAKEUP_NOTIFICATION_CHANNELS = Object.keys(MAKEUP_NOTIFICATION_CHANNEL_LABELS) as MakeupNotificationChannel[]
 const MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT = 40
+const dashboardNotificationLoadInFlight = createInFlightRequestStore()
+const dashboardNotificationUnreadCountInFlight = createInFlightRequestStore()
 
 export function getMakeupNotificationTriggerLabel(triggerKind: string) {
   if (triggerKind === "completed") return MAKEUP_NOTIFICATION_TRIGGER_LABELS.approved
@@ -577,6 +582,10 @@ function resolveTeacherForClass(classItem: MakeupClassOption, teachers: MakeupTe
 
   const profile = profiles.find((item) => item.id && item.id === classItem.teacherCatalogId)
   return profile ? teachers.find((teacher) => teacher.profileId === profile.id) : undefined
+}
+
+function isMakeupManagerRole(role: string) {
+  return ["admin", "staff", "super_admin", "manager"].includes(text(role))
 }
 
 function buildRequestHref(requestId: string) {
@@ -1234,7 +1243,12 @@ export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWor
   }
 }
 
-function buildCreatePayload(input: MakeupRequestInput, requesterId: string, data: MakeupRequestWorkspaceData) {
+function buildCreatePayload(
+  input: MakeupRequestInput,
+  requesterId: string,
+  data: MakeupRequestWorkspaceData,
+  options: { effectiveYear?: number; allowApproverOverride?: boolean } = {},
+) {
   const classItem = data.classes.find((item) => item.id === input.classId)
   if (!classItem) {
     throw new Error("신청할 수업을 선택해 주세요.")
@@ -1246,9 +1260,15 @@ function buildCreatePayload(input: MakeupRequestInput, requesterId: string, data
   }
 
   const approvalGroup = resolveMakeupApprovalGroup(classItem)
-  const allowedNames = getAllowedApproverNames(classItem)
+  const effectiveYear = options.effectiveYear ?? getMakeupRequestEffectiveYear()
+  const allowApproverOverride = options.allowApproverOverride === true
   const approver = data.teachers.find((item) => item.id === input.approverTeacherCatalogId)
-  if (!approver || !allowedNames.includes(approver.name)) {
+  if (!approver || !isMakeupApproverAllowed({
+    classRecord: classItem,
+    approverName: approver.name,
+    effectiveYear,
+    isManager: allowApproverOverride,
+  })) {
     throw new Error("선택할 수 없는 결재자입니다.")
   }
   if (!approver.profileId) {
@@ -1299,7 +1319,11 @@ export async function createMakeupRequest(input: MakeupRequestInput, requesterId
   const data = await loadMakeupRequestWorkspaceData()
   if (!data.schemaReady) throw new Error(data.error || "휴보강 신청서 DB를 사용할 수 없습니다.")
 
-  const payload = buildCreatePayload(input, requesterId, data)
+  const requester = data.profiles.find((profile) => profile.id === requesterId)
+  const payload = buildCreatePayload(input, requesterId, data, {
+    effectiveYear: getMakeupRequestEffectiveYear(),
+    allowApproverOverride: isMakeupManagerRole(requester?.role || ""),
+  })
   const { data: inserted, error } = await supabase
     .from("makeup_requests")
     .insert(payload)
@@ -1576,7 +1600,11 @@ export async function resubmitMakeupRequest(requestId: string, input: MakeupRequ
     throw new Error("재상신 권한이 없습니다.")
   }
 
-  const payload = buildCreatePayload(input, actorId, data)
+  const actor = data.profiles.find((profile) => profile.id === actorId)
+  const payload = buildCreatePayload(input, actorId, data, {
+    effectiveYear: getMakeupRequestEffectiveYear(request.createdAt),
+    allowApproverOverride: isMakeupManagerRole(actor?.role || ""),
+  })
   const resubmittedAt = new Date().toISOString()
   const { error } = await supabase
     .from("makeup_requests")
@@ -1779,12 +1807,46 @@ export async function updateMakeupNotificationTriggerContent(
   if (error) throw error
 }
 
-export async function loadDashboardNotifications(limit = 20): Promise<DashboardNotification[]> {
+export function loadDashboardNotifications(viewerId: string, limit = 20): Promise<DashboardNotification[]> {
+  if (!supabase || !text(viewerId)) return Promise.resolve([])
+
+  const loadKey = `${viewerId}:${limit}`
+  return dashboardNotificationLoadInFlight.run(
+    loadKey,
+    () => readDashboardNotifications(limit),
+  )
+}
+
+export function loadDashboardUnreadNotificationCount(viewerId: string): Promise<number> {
+  if (!supabase || !text(viewerId)) return Promise.resolve(0)
+  const client = supabase
+
+  return dashboardNotificationUnreadCountInFlight.run(
+    viewerId,
+    async () => {
+      const { count, error } = await client
+        .from("dashboard_notifications")
+        .select("id", { count: "exact", head: true })
+        .is("read_at", null)
+        .neq("type", REGISTRATION_ADMIN_CHAT_CLAIM_TYPE)
+
+      if (error) {
+        if (isMissingRelationError(error)) return 0
+        throw error
+      }
+
+      return Math.max(0, Number(count || 0))
+    },
+  )
+}
+
+async function readDashboardNotifications(limit: number): Promise<DashboardNotification[]> {
   if (!supabase) return []
 
   const { data, error } = await supabase
     .from("dashboard_notifications")
     .select("*")
+    .neq("type", REGISTRATION_ADMIN_CHAT_CLAIM_TYPE)
     .order("created_at", { ascending: false })
     .limit(limit * 4)
 
@@ -1795,6 +1857,7 @@ export async function loadDashboardNotifications(limit = 20): Promise<DashboardN
 
   const grouped = new Map<string, DashboardNotification>()
   for (const row of ((data || []) as Row[])) {
+    if (text(row.type) === REGISTRATION_ADMIN_CHAT_CLAIM_TYPE) continue
     const metadata = parseObject(row.metadata)
     const notification: DashboardNotification = {
       id: text(row.id),

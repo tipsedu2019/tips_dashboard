@@ -1,5 +1,6 @@
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -13,6 +14,96 @@ const SAMPLE_TAG = "codex-sample-workflow:"
 const RUN_TAG = `${SAMPLE_TAG}${RUN_ID}`
 const SAMPLE_COUNT = 30
 const DEFAULT_LOGIN_EMAIL_DOMAIN = "tipsedu.co.kr"
+
+const SUBJECT_TRACK_SAMPLES = [
+  {
+    name: "same-day dual level test",
+    tracks: [
+      { id: "english", subject: "영어", status: "level_test_scheduled" },
+      { id: "math", subject: "수학", status: "level_test_scheduled" },
+    ],
+    appointments: [{ id: "level-test-1", kind: "level_test", trackIds: ["english", "math"], startsAt: "2026-07-14T10:00:00+09:00" }],
+  },
+  {
+    name: "split visit and phone consultation",
+    tracks: [
+      { id: "english", subject: "영어", status: "visit_consultation_scheduled" },
+      { id: "math", subject: "수학", status: "consultation_waiting" },
+    ],
+  },
+  {
+    name: "partial registration with later batch",
+    tracks: [
+      { id: "english", subject: "영어", status: "registered" },
+      { id: "math", subject: "수학", status: "enrollment_processing" },
+    ],
+    batches: [
+      { id: "batch-1", revision: 1, status: "completed", trackIds: ["english"] },
+      { id: "batch-2", revision: 2, status: "open", trackIds: ["math"] },
+    ],
+  },
+  {
+    name: "multiple English classes",
+    tracks: [{ id: "english", subject: "영어", status: "enrollment_processing" }],
+    enrollments: [
+      { trackId: "english", classId: "eng-a" },
+      { trackId: "english", classId: "eng-special" },
+    ],
+  },
+]
+
+function getSubjectTrackTabCounts(tracks) {
+  const counts = { inquiry: 0, level_test: 0, consulting: 0, waiting: 0, enrollment: 0, closed: 0 }
+  for (const track of tracks) {
+    const status = String(track.status || "")
+    const tab = status === "inquiry" || status === "migration_review"
+      ? "inquiry"
+      : status.startsWith("level_test_")
+        ? "level_test"
+        : status.startsWith("consultation_") || status.startsWith("visit_consultation_")
+          ? "consulting"
+          : status === "waiting"
+            ? "waiting"
+            : status === "enrollment_decided" || status === "enrollment_processing"
+              ? "enrollment"
+              : "closed"
+    counts[tab] += 1
+  }
+  return counts
+}
+
+function verifySubjectTrackSamples() {
+  const byName = Object.fromEntries(SUBJECT_TRACK_SAMPLES.map((sample) => [sample.name, sample]))
+  const dual = byName["same-day dual level test"]
+  const split = byName["split visit and phone consultation"]
+  const partial = byName["partial registration with later batch"]
+  const multiple = byName["multiple English classes"]
+
+  const tabCounts = getSubjectTrackTabCounts(dual.tracks)
+  if (tabCounts.level_test !== 2) {
+    throw new Error("subject-track tab mapping is not independent")
+  }
+  if (dual.appointments[0].trackIds.join(",") !== "english,math") {
+    throw new Error("same-day level-test appointment lost a subject")
+  }
+  const transitioned = dual.tracks.map((track) => track.id === "english" ? { ...track, status: "consultation_waiting" } : track)
+  if (transitioned[0].status !== "consultation_waiting" || transitioned[1].status !== "level_test_scheduled") {
+    throw new Error("one subject transition changed its sibling")
+  }
+  if (split.tracks[0].status !== "visit_consultation_scheduled" || split.tracks[1].status !== "consultation_waiting") {
+    throw new Error("split consultation modes were not preserved")
+  }
+  if (partial.batches[0].revision !== 1 || partial.batches[1].revision !== 2 || partial.batches[1].trackIds[0] !== "math") {
+    throw new Error("later subject did not receive a fresh batch revision")
+  }
+  if (multiple.enrollments.length !== 2 || new Set(multiple.enrollments.map((row) => row.classId)).size !== 2) {
+    throw new Error("multiple classes did not remain separate enrollment rows")
+  }
+
+  const result = { subjectTrackSamples: SUBJECT_TRACK_SAMPLES.length, network: false }
+  console.log(JSON.stringify(result))
+  return result
+}
 
 function loadEnvFile(pathname) {
   try {
@@ -65,7 +156,14 @@ function wrapWindowsCmdInvocation(command, args) {
 
 function supabaseCliInvocation(sqlFile) {
   const configuredCli = getEnv("SUPABASE_CLI_PATH", "SUPABASE_CLI")
-  const args = ["db", "query", "--linked", "-o", "json", "--file", sqlFile]
+  const databaseUrl = getEnv("OPS_SAMPLE_DB_URL")
+  if (!databaseUrl) throw new Error("CLI verification requires OPS_SAMPLE_DB_URL for the exact disposable local database.")
+  if (getEnv("OPS_FIXTURE_DATABASE_SCOPE").toLowerCase() !== "local") {
+    throw new Error("CLI verification requires OPS_FIXTURE_DATABASE_SCOPE=local; linked and remote preview targets are not accepted.")
+  }
+  assertAuthorizedLocalFixtureDatabase(databaseUrl)
+  if (!/^postgres(?:ql)?:\/\//i.test(databaseUrl)) throw new Error("OPS_SAMPLE_DB_URL must be a PostgreSQL URL.")
+  const args = ["db", "query", "--db-url", databaseUrl, "-o", "json", "--file", sqlFile]
   if (configuredCli) return wrapWindowsCmdInvocation(configuredCli, args)
   if (process.platform === "win32") return wrapWindowsCmdInvocation("npx.cmd", ["supabase", ...args])
   return { command: "npx", args: ["supabase", ...args] }
@@ -183,7 +281,6 @@ function buildDetailRows(tasks) {
     if (task.type === "registration") {
       registration.push({
         task_id: task.id,
-        inquiry_channel: "샘플",
         inquiry_at: `2026-08-${day}T10:00:00+09:00`,
         school_grade: "중2",
         school_name: "샘플중",
@@ -276,6 +373,150 @@ async function cleanupSamples(supabase, tagPrefix = RUN_TAG) {
   return ids.length
 }
 
+function assertAuthorizedLocalFixtureDatabase(url) {
+  const scope = getEnv("OPS_FIXTURE_DATABASE_SCOPE").toLowerCase()
+  const disposable = ["1", "true", "yes"].includes(getEnv("OPS_FIXTURE_DISPOSABLE").toLowerCase())
+  if (!disposable || scope !== "local") {
+    throw new Error("Roster verification is audit-bearing and may run only on an explicitly authorized localhost database. Set OPS_FIXTURE_DISPOSABLE=1 and OPS_FIXTURE_DATABASE_SCOPE=local.")
+  }
+  const localDatabaseUrl = getEnv("OPS_SAMPLE_DB_URL")
+  if (!localDatabaseUrl) {
+    throw new Error("Roster verification requires OPS_SAMPLE_DB_URL for the exact disposable localhost database.")
+  }
+  const allowedHosts = new Set(["127.0.0.1", "localhost", "::1"])
+  const target = new URL(url)
+  const database = new URL(localDatabaseUrl)
+  if (!allowedHosts.has(target.hostname) || !allowedHosts.has(database.hostname)) {
+    throw new Error("Remote and production targets are denied; both the Supabase URL and OPS_SAMPLE_DB_URL must use localhost.")
+  }
+  if (!/^postgres(?:ql)?:$/.test(database.protocol)) {
+    throw new Error("OPS_SAMPLE_DB_URL must be a PostgreSQL URL.")
+  }
+  return "local"
+}
+
+function normalizeRosterIds(value) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))].sort()
+}
+
+function sortRosterPairs(pairs) {
+  return [...pairs].sort((left, right) =>
+    `${left.studentId}:${left.classId}`.localeCompare(`${right.studentId}:${right.classId}`),
+  )
+}
+
+function assertCommittedRosterResponse(committed, { studentId, classId, expectedMode, nextMode }) {
+  if (!committed || typeof committed !== "object" || Array.isArray(committed)) {
+    throw new Error("Roster RPC did not return a committed object.")
+  }
+  if (
+    String(committed.studentId || "") !== studentId ||
+    String(committed.classId || "") !== classId ||
+    committed.previousMode !== expectedMode ||
+    committed.nextMode !== nextMode ||
+    committed.changed !== (expectedMode !== nextMode)
+  ) {
+    throw new Error(`Roster RPC response mismatch: ${JSON.stringify(committed)}`)
+  }
+  for (const field of ["studentClassIds", "studentWaitlistClassIds", "classStudentIds", "classWaitlistIds"]) {
+    if (!Array.isArray(committed[field]) || JSON.stringify(committed[field]) !== JSON.stringify(normalizeRosterIds(committed[field]))) {
+      throw new Error(`Roster RPC ${field} projection is not a sorted array.`)
+    }
+  }
+  return committed
+}
+
+async function readRosterProjection(client, studentId, classId) {
+  const [studentResult, classResult] = await Promise.all([
+    client.from("students").select("id,class_ids,waitlist_class_ids").eq("id", studentId).maybeSingle(),
+    client.from("classes").select("id,student_ids,waitlist_ids").eq("id", classId).maybeSingle(),
+  ])
+  if (studentResult.error) throw new Error(`student roster read failed: ${studentResult.error.message}`)
+  if (classResult.error) throw new Error(`class roster read failed: ${classResult.error.message}`)
+  if (!studentResult.data || !classResult.data) throw new Error("Roster fixture pair was not found.")
+  return {
+    studentClassIds: normalizeRosterIds(studentResult.data.class_ids),
+    studentWaitlistClassIds: normalizeRosterIds(studentResult.data.waitlist_class_ids),
+    classStudentIds: normalizeRosterIds(classResult.data.student_ids),
+    classWaitlistIds: normalizeRosterIds(classResult.data.waitlist_ids),
+  }
+}
+
+function rosterModeFromProjection(projection, studentId, classId) {
+  const enrolled = projection.studentClassIds.includes(classId) && projection.classStudentIds.includes(studentId)
+  const waitlisted = projection.studentWaitlistClassIds.includes(classId) && projection.classWaitlistIds.includes(studentId)
+  const asymmetric =
+    projection.studentClassIds.includes(classId) !== projection.classStudentIds.includes(studentId) ||
+    projection.studentWaitlistClassIds.includes(classId) !== projection.classWaitlistIds.includes(studentId)
+  if (asymmetric || (enrolled && waitlisted)) throw new Error("Roster fixture projection is asymmetric.")
+  return enrolled ? "enrolled" : waitlisted ? "waitlist" : "removed"
+}
+
+async function verifyRosterProjection(client, { studentId, classId, nextMode }, committed) {
+  const projection = await readRosterProjection(client, studentId, classId)
+  if (rosterModeFromProjection(projection, studentId, classId) !== nextMode) {
+    throw new Error(`Roster projection did not commit ${nextMode}.`)
+  }
+  for (const field of ["studentClassIds", "studentWaitlistClassIds", "classStudentIds", "classWaitlistIds"]) {
+    if (JSON.stringify(projection[field]) !== JSON.stringify(normalizeRosterIds(committed[field]))) {
+      throw new Error(`Roster ${field} did not match the committed RPC response.`)
+    }
+  }
+  return projection
+}
+
+async function setRosterMode(authenticatedRosterClient, { studentId, classId, expectedMode, nextMode, memo }) {
+  const result = await authenticatedRosterClient.rpc("set_student_class_roster_mode", {
+    p_student_id: studentId,
+    p_class_id: classId,
+    p_expected_mode: expectedMode,
+    p_next_mode: nextMode,
+    p_memo: memo,
+  })
+  if (result.error) throw new Error(`set_student_class_roster_mode failed: ${result.error.message}`)
+  const committed = assertCommittedRosterResponse(result.data, { studentId, classId, expectedMode, nextMode })
+  await verifyRosterProjection(authenticatedRosterClient, { studentId, classId, nextMode }, committed)
+  return committed
+}
+
+async function removeRosterPairs(authenticatedRosterClient, pairs, memo) {
+  for (const pair of sortRosterPairs(pairs)) {
+    const projection = await readRosterProjection(authenticatedRosterClient, pair.studentId, pair.classId)
+    const expectedMode = rosterModeFromProjection(projection, pair.studentId, pair.classId)
+    await setRosterMode(authenticatedRosterClient, {
+      ...pair,
+      expectedMode,
+      nextMode: "removed",
+      memo,
+    })
+  }
+}
+
+async function archiveAuditFixtures(setupClient, { studentIds, classIds, prefix }) {
+  const archivedName = `[ARCHIVED] ${prefix}`
+  const studentResult = await setupClient.from("students").update({ name: `${archivedName} student`, status: "퇴원" }).in("id", studentIds)
+  if (studentResult.error) throw new Error(`student archive failed: ${studentResult.error.message}`)
+  const classResult = await setupClient.from("classes").update({ name: `${archivedName} class`, status: "종강" }).in("id", classIds)
+  if (classResult.error) throw new Error(`class archive failed: ${classResult.error.message}`)
+  const [activeStudents, activeClasses, history] = await Promise.all([
+    setupClient.from("students").select("id", { count: "exact", head: true }).ilike("name", `${prefix}%`),
+    setupClient.from("classes").select("id", { count: "exact", head: true }).ilike("name", `${prefix}%`),
+    setupClient.from("student_class_enrollment_history").select("id", { count: "exact", head: true }).like("memo", `${RUN_TAG} roster%`),
+  ])
+  for (const result of [activeStudents, activeClasses, history]) {
+    if (result.error) throw new Error(`archive verification failed: ${result.error.message}`)
+  }
+  return {
+    activeFixtureRows: Number(activeStudents.count || 0) + Number(activeClasses.count || 0),
+    auditHistoryRetained: Number(history.count || 0),
+  }
+}
+
+function printAuditFixtureResetInstruction(scope) {
+  console.log(`Audit-bearing roster fixtures were archived on the disposable localhost database (${scope}). Cleanup: pnpm dlx supabase@2.109.1 db reset.`)
+}
+
 async function createClientForWorkflow() {
   loadEnvFile(resolve(ROOT, ".env.local"))
   const url = getEnv("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL", "VITE_SUPABASE_URL")
@@ -286,17 +527,98 @@ async function createClientForWorkflow() {
   const password = getEnv("OPS_SAMPLE_PASSWORD")
 
   if (!url) throw new Error("Supabase URL is missing.")
-  if (serviceRoleKey) {
-    return { supabase: createClient(url, serviceRoleKey), userId: "" }
-  }
+  const databaseScope = assertAuthorizedLocalFixtureDatabase(url)
   if (!anonKey || !email || !password) {
-    throw new Error("Set SUPABASE_SERVICE_ROLE_KEY or OPS_SAMPLE_LOGIN_ID/OPS_SAMPLE_EMAIL and OPS_SAMPLE_PASSWORD with an anon key.")
+    throw new Error("Ready-mode roster verification requires OPS_SAMPLE_LOGIN_ID/OPS_SAMPLE_EMAIL and OPS_SAMPLE_PASSWORD for an independent authenticated admin/staff client.")
   }
 
-  const supabase = createClient(url, anonKey)
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  const authenticatedRosterClient = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  const { data, error } = await authenticatedRosterClient.auth.signInWithPassword({ email, password })
   if (error) throw new Error(`sample auth failed: ${error.message}`)
-  return { supabase, userId: data.user?.id || "" }
+  const workflowClient = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  const workflowAuth = await workflowClient.auth.signInWithPassword({ email, password })
+  if (workflowAuth.error) throw new Error(`sample workflow auth failed: ${workflowAuth.error.message}`)
+  const setupClient = serviceRoleKey
+    ? createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
+    : createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  if (!serviceRoleKey) {
+    const setupAuth = await setupClient.auth.signInWithPassword({ email, password })
+    if (setupAuth.error) throw new Error(`sample setup auth failed: ${setupAuth.error.message}`)
+  }
+  return { supabase: workflowClient, setupClient, authenticatedRosterClient, userId: data.user?.id || "", databaseScope }
+}
+
+async function runReadyModeRosterSample({ setupClient, authenticatedRosterClient, databaseScope }) {
+  const prefix = `codex-roster-${RUN_ID}`
+  const pairs = ["enrolled", "waitlist", "removed"].map((label) => ({
+    label,
+    studentId: randomUUID(),
+    classId: randomUUID(),
+  }))
+  const studentIds = pairs.map((pair) => pair.studentId)
+  const classIds = pairs.map((pair) => pair.classId)
+  let seeded = false
+  let rosterPairsReady = false
+  let workflowError = null
+
+  try {
+    const studentResult = await setupClient.from("students").insert(pairs.map((pair) => ({
+      id: pair.studentId,
+      name: `${prefix}-${pair.label}-student`,
+      grade: "고1",
+      enroll_date: "2026-07-13",
+      class_ids: [],
+      waitlist_class_ids: [],
+      school: "검증고",
+      contact: "010-0000-0000",
+      parent_contact: "010-0000-0000",
+      status: "재원",
+    })))
+    if (studentResult.error) throw new Error(`roster student seed failed: ${studentResult.error.message}`)
+    seeded = true
+    const classResult = await setupClient.from("classes").insert(pairs.map((pair) => ({
+      id: pair.classId,
+      name: `${prefix}-${pair.label}-class`,
+      teacher: "검증",
+      schedule: "",
+      student_ids: [],
+      waitlist_ids: [],
+      textbook_ids: [],
+      room: "검증",
+      subject: "영어",
+      grade: "고1",
+      capacity: 12,
+      fee: 0,
+      status: "수강",
+    })))
+    if (classResult.error) throw new Error(`roster class seed failed: ${classResult.error.message}`)
+    rosterPairsReady = true
+
+    await setRosterMode(authenticatedRosterClient, { ...pairs[0], expectedMode: "removed", nextMode: "enrolled", memo: `${RUN_TAG} roster enrolled` })
+    await setRosterMode(authenticatedRosterClient, { ...pairs[1], expectedMode: "removed", nextMode: "waitlist", memo: `${RUN_TAG} roster waitlist` })
+    await setRosterMode(authenticatedRosterClient, { ...pairs[2], expectedMode: "removed", nextMode: "enrolled", memo: `${RUN_TAG} roster removed setup` })
+    await setRosterMode(authenticatedRosterClient, { ...pairs[2], expectedMode: "enrolled", nextMode: "removed", memo: `${RUN_TAG} roster removed` })
+  } catch (error) {
+    workflowError = error
+  } finally {
+    if (rosterPairsReady) {
+      try {
+        await removeRosterPairs(authenticatedRosterClient, pairs, `${RUN_TAG} roster cleanup`)
+      } catch (cleanupError) {
+        workflowError = new AggregateError([workflowError, cleanupError].filter(Boolean), "Roster sample or cleanup failed.")
+      }
+    }
+  }
+
+  const archive = seeded
+    ? await archiveAuditFixtures(setupClient, { studentIds, classIds, prefix })
+    : { activeFixtureRows: 0, auditHistoryRetained: 0 }
+  printAuditFixtureResetInstruction(databaseScope)
+  if (workflowError) throw workflowError
+  if (archive.activeFixtureRows !== 0 || archive.auditHistoryRetained < 4) {
+    throw new Error(`Roster audit cleanup mismatch: ${JSON.stringify(archive)}`)
+  }
+  return archive
 }
 
 function buildCliWorkflowSql() {
@@ -366,7 +688,6 @@ select id, type from inserted;
 
 insert into public.ops_registration_details(
   task_id,
-  inquiry_channel,
   inquiry_at,
   school_grade,
   school_name,
@@ -382,7 +703,6 @@ insert into public.ops_registration_details(
 )
 select
   t.id,
-  '샘플',
   now(),
   '중2',
   '샘플중',
@@ -499,8 +819,9 @@ with registration_done as (
   set pipeline_status = '7. 등록 완료',
       textbook_ready = true,
       admission_notice_sent = true,
-      payment_checked = true,
-      makeedu_registered = true
+      makeedu_registered = true,
+      makeedu_invoice_sent = true,
+      payment_checked = true
   where task_id in (select id from codex_ops_sample_ids where task_type = 'registration')
   returning task_id
 ),
@@ -550,630 +871,9 @@ from codex_ops_sample_result r;
 `.trim()
 }
 
-function buildCliManagementSyncSql() {
-  const tag = sqlString(RUN_TAG)
-  const prefix = sqlString(`codex-sync-${RUN_ID}`)
-  return `
-create temp table codex_ops_management_sync_ids(
-  entity text not null,
-  label text not null,
-  id uuid primary key
-) on commit drop;
-
-create temp table codex_ops_management_sync_result(
-  registration_student_linked boolean not null,
-  registration_textbook_linked boolean not null,
-  withdrawal_unlinked boolean not null,
-  withdrawal_status_applied boolean not null,
-  transfer_removed_from_old_class boolean not null,
-  transfer_assigned_to_new_class boolean not null,
-  word_retest_links_resolved boolean not null,
-  cleaned int not null default 0,
-  leftover int not null default 0
-) on commit drop;
-
-with generated as (
-  select
-    gen_random_uuid() as registration_student_id,
-    gen_random_uuid() as withdrawal_student_id,
-    gen_random_uuid() as transfer_student_id,
-    gen_random_uuid() as word_retest_student_id,
-    gen_random_uuid() as registration_class_id,
-    gen_random_uuid() as withdrawal_class_id,
-    gen_random_uuid() as transfer_from_class_id,
-    gen_random_uuid() as transfer_to_class_id,
-    gen_random_uuid() as word_retest_class_id,
-    gen_random_uuid() as registration_textbook_id,
-    gen_random_uuid() as word_retest_textbook_id,
-    gen_random_uuid() as teacher_id,
-    gen_random_uuid() as registration_task_id,
-    gen_random_uuid() as withdrawal_task_id,
-    gen_random_uuid() as transfer_task_id,
-    gen_random_uuid() as word_retest_task_id
-)
-insert into codex_ops_management_sync_ids(entity, label, id)
-select entity, label, id
-from generated,
-lateral (
-  values
-    ('student', 'registration_student', registration_student_id),
-    ('student', 'withdrawal_student', withdrawal_student_id),
-    ('student', 'transfer_student', transfer_student_id),
-    ('student', 'word_retest_student', word_retest_student_id),
-    ('class', 'registration_class', registration_class_id),
-    ('class', 'withdrawal_class', withdrawal_class_id),
-    ('class', 'transfer_from_class', transfer_from_class_id),
-    ('class', 'transfer_to_class', transfer_to_class_id),
-    ('class', 'word_retest_class', word_retest_class_id),
-    ('textbook', 'registration_textbook', registration_textbook_id),
-    ('textbook', 'word_retest_textbook', word_retest_textbook_id),
-    ('teacher', 'word_retest_teacher', teacher_id),
-    ('task', 'registration_task', registration_task_id),
-    ('task', 'withdrawal_task', withdrawal_task_id),
-    ('task', 'transfer_task', transfer_task_id),
-    ('task', 'word_retest_task', word_retest_task_id)
-) as rows(entity, label, id);
-
-insert into public.teacher_catalogs(id, name, subjects, is_visible, sort_order, dashboard_role)
-select id, ${prefix} || '-teacher', array['영어'], true, 9900, 'teacher'
-from codex_ops_management_sync_ids
-where entity = 'teacher';
-
-insert into public.textbooks(
-  id,
-  title,
-  name,
-  subject,
-  category,
-  publisher,
-  price,
-  list_price,
-  sale_price,
-  status,
-  is_returnable,
-  lessons,
-  school_level,
-  grade_level,
-  sub_subject
-)
-select
-  id,
-  ${prefix} || '-' || label,
-  ${prefix} || '-' || label,
-  '영어',
-  '샘플',
-  '샘플 출판사',
-  10000,
-  10000,
-  10000,
-  'active',
-  false,
-  '[]'::jsonb,
-  '고등',
-  '고1',
-  '영어'
-from codex_ops_management_sync_ids
-where entity = 'textbook';
-
-insert into public.classes(
-  id,
-  name,
-  teacher,
-  schedule,
-  student_ids,
-  waitlist_ids,
-  textbook_ids,
-  room,
-  subject,
-  grade,
-  capacity,
-  fee,
-  status
-)
-select
-  id,
-  ${prefix} || '-' || label,
-  ${prefix} || '-teacher',
-  '',
-  case label
-    when 'withdrawal_class' then jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'withdrawal_student'))
-    when 'transfer_from_class' then jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'transfer_student'))
-    when 'word_retest_class' then jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'word_retest_student'))
-    else '[]'::jsonb
-  end,
-  '[]'::jsonb,
-  case label
-    when 'word_retest_class' then jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'word_retest_textbook'))
-    else '[]'::jsonb
-  end,
-  '본관 1강',
-  '영어',
-  '고1',
-  12,
-  0,
-  '수강'
-from codex_ops_management_sync_ids
-where entity = 'class';
-
-insert into public.students(id, name, grade, enroll_date, class_ids, waitlist_class_ids, school, contact, parent_contact, status)
-select
-  id,
-  ${prefix} || '-' || label,
-  '고1',
-  current_date,
-  case label
-    when 'withdrawal_student' then jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'withdrawal_class'))
-    when 'transfer_student' then jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'transfer_from_class'))
-    when 'word_retest_student' then jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'word_retest_class'))
-    else '[]'::jsonb
-  end,
-  '[]'::jsonb,
-  '샘플고',
-  '010-0000-0000',
-  '010-1111-1111',
-  '재원'
-from codex_ops_management_sync_ids
-where entity = 'student';
-
-insert into public.ops_tasks(
-  id,
-  title,
-  type,
-  status,
-  priority,
-  student_id,
-  class_id,
-  textbook_id,
-  student_name,
-  class_name,
-  textbook_title,
-  campus,
-  subject,
-  due_at,
-  memo
-)
-values
-  (
-    (select id from codex_ops_management_sync_ids where label = 'registration_task'),
-    '[연동검증] 등록',
-    'registration',
-    'done',
-    'normal',
-    (select id from codex_ops_management_sync_ids where label = 'registration_student'),
-    (select id from codex_ops_management_sync_ids where label = 'registration_class'),
-    (select id from codex_ops_management_sync_ids where label = 'registration_textbook'),
-    ${prefix} || '-registration_student',
-    ${prefix} || '-registration_class',
-    ${prefix} || '-registration_textbook',
-    '본관',
-    '영어',
-    now(),
-    ${tag} || ' management_sync registration'
-  ),
-  (
-    (select id from codex_ops_management_sync_ids where label = 'withdrawal_task'),
-    '[연동검증] 퇴원',
-    'withdrawal',
-    'done',
-    'normal',
-    (select id from codex_ops_management_sync_ids where label = 'withdrawal_student'),
-    (select id from codex_ops_management_sync_ids where label = 'withdrawal_class'),
-    null,
-    ${prefix} || '-withdrawal_student',
-    ${prefix} || '-withdrawal_class',
-    null,
-    '본관',
-    '영어',
-    now(),
-    ${tag} || ' management_sync withdrawal'
-  ),
-  (
-    (select id from codex_ops_management_sync_ids where label = 'transfer_task'),
-    '[연동검증] 전반',
-    'transfer',
-    'done',
-    'normal',
-    (select id from codex_ops_management_sync_ids where label = 'transfer_student'),
-    (select id from codex_ops_management_sync_ids where label = 'transfer_to_class'),
-    null,
-    ${prefix} || '-transfer_student',
-    ${prefix} || '-transfer_to_class',
-    null,
-    '본관',
-    '영어',
-    now(),
-    ${tag} || ' management_sync transfer'
-  ),
-  (
-    (select id from codex_ops_management_sync_ids where label = 'word_retest_task'),
-    '[연동검증] 단어 재시험',
-    'word_retest',
-    'done',
-    'normal',
-    (select id from codex_ops_management_sync_ids where label = 'word_retest_student'),
-    (select id from codex_ops_management_sync_ids where label = 'word_retest_class'),
-    (select id from codex_ops_management_sync_ids where label = 'word_retest_textbook'),
-    ${prefix} || '-word_retest_student',
-    ${prefix} || '-word_retest_class',
-    ${prefix} || '-word_retest_textbook',
-    '본관',
-    '영어',
-    now(),
-    ${tag} || ' management_sync word_retest'
-  );
-
-insert into public.ops_registration_details(
-  task_id,
-  inquiry_channel,
-  inquiry_at,
-  school_grade,
-  school_name,
-  parent_phone,
-  student_phone,
-  level_test_at,
-  level_test_place,
-  counselor,
-  consultation_at,
-  class_start_date,
-  class_start_session,
-  textbook_ready,
-  admission_notice_sent,
-  payment_checked,
-  makeedu_registered,
-  pipeline_status,
-  request_note
-)
-values (
-  (select id from codex_ops_management_sync_ids where label = 'registration_task'),
-  '샘플',
-  now(),
-  '고1',
-  '샘플고',
-  '010-1111-1111',
-  '010-0000-0000',
-  now(),
-  '본관',
-  '샘플 상담',
-  now(),
-  current_date,
-  '1회차',
-  true,
-  true,
-  true,
-  true,
-  '7. 등록 완료',
-  ${tag}
-);
-
-insert into public.ops_withdrawal_details(
-  task_id,
-  school_grade,
-  teacher_name,
-  withdrawal_date,
-  withdrawal_session,
-  customer_reason,
-  teacher_opinion,
-  makeedu_withdrawal_done,
-  fee_processed,
-  textbook_fee_processed
-)
-values (
-  (select id from codex_ops_management_sync_ids where label = 'withdrawal_task'),
-  '고1',
-  ${prefix} || '-teacher',
-  current_date,
-  '마지막 회차',
-  '샘플 검증',
-  ${tag},
-  true,
-  true,
-  true
-);
-
-insert into public.ops_transfer_details(
-  task_id,
-  transfer_reason,
-  from_class_id,
-  to_class_id,
-  from_teacher_name,
-  to_teacher_name,
-  from_class_name,
-  to_class_name,
-  from_class_end_date,
-  from_class_end_session,
-  to_class_start_date,
-  to_class_start_session,
-  makeedu_transfer_done,
-  fee_processed,
-  textbook_fee_processed
-)
-values (
-  (select id from codex_ops_management_sync_ids where label = 'transfer_task'),
-  '샘플 검증',
-  (select id from codex_ops_management_sync_ids where label = 'transfer_from_class'),
-  (select id from codex_ops_management_sync_ids where label = 'transfer_to_class'),
-  ${prefix} || '-teacher',
-  ${prefix} || '-teacher',
-  ${prefix} || '-transfer_from_class',
-  ${prefix} || '-transfer_to_class',
-  current_date,
-  '종료 회차',
-  current_date,
-  '시작 회차',
-  true,
-  true,
-  true
-);
-
-insert into public.ops_word_retests(
-  task_id,
-  branch,
-  teacher_catalog_id,
-  teacher_name,
-  class_name,
-  student_name,
-  test_at,
-  textbook_name,
-  unit,
-  request_note,
-  first_score,
-  retest_status
-)
-values (
-  (select id from codex_ops_management_sync_ids where label = 'word_retest_task'),
-  '본관',
-  (select id from codex_ops_management_sync_ids where label = 'word_retest_teacher'),
-  ${prefix} || '-teacher',
-  ${prefix} || '-word_retest_class',
-  ${prefix} || '-word_retest_student',
-  now(),
-  ${prefix} || '-word_retest_textbook',
-  '1단원',
-  ${tag},
-  100,
-  'done'
-);
-
-update public.students
-set class_ids = jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'registration_class')),
-    status = '재원'
-where id = (select id from codex_ops_management_sync_ids where label = 'registration_student');
-
-update public.classes
-set student_ids = jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'registration_student')),
-    textbook_ids = jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'registration_textbook'))
-where id = (select id from codex_ops_management_sync_ids where label = 'registration_class');
-
-insert into public.student_class_enrollment_history(student_id, class_id, action, previous_mode, next_mode, memo)
-values (
-  (select id from codex_ops_management_sync_ids where label = 'registration_student'),
-  (select id from codex_ops_management_sync_ids where label = 'registration_class'),
-  'enrolled',
-  null,
-  'enrolled',
-  ${tag} || ' management_sync registration_completed'
-);
-
-update public.students
-set class_ids = '[]'::jsonb,
-    waitlist_class_ids = '[]'::jsonb,
-    status = '퇴원'
-where id = (select id from codex_ops_management_sync_ids where label = 'withdrawal_student');
-
-update public.classes
-set student_ids = '[]'::jsonb,
-    waitlist_ids = '[]'::jsonb
-where id = (select id from codex_ops_management_sync_ids where label = 'withdrawal_class');
-
-update public.ops_withdrawal_details
-set timetable_roster_updated = true
-where task_id = (select id from codex_ops_management_sync_ids where label = 'withdrawal_task');
-
-insert into public.student_class_enrollment_history(student_id, class_id, action, previous_mode, next_mode, memo)
-values (
-  (select id from codex_ops_management_sync_ids where label = 'withdrawal_student'),
-  (select id from codex_ops_management_sync_ids where label = 'withdrawal_class'),
-  'removed',
-  'enrolled',
-  null,
-  ${tag} || ' management_sync withdrawal_completed'
-);
-
-update public.students
-set class_ids = jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'transfer_to_class')),
-    waitlist_class_ids = '[]'::jsonb,
-    status = '재원'
-where id = (select id from codex_ops_management_sync_ids where label = 'transfer_student');
-
-update public.classes
-set student_ids = '[]'::jsonb,
-    waitlist_ids = '[]'::jsonb
-where id = (select id from codex_ops_management_sync_ids where label = 'transfer_from_class');
-
-update public.classes
-set student_ids = jsonb_build_array((select id::text from codex_ops_management_sync_ids where label = 'transfer_student')),
-    waitlist_ids = '[]'::jsonb
-where id = (select id from codex_ops_management_sync_ids where label = 'transfer_to_class');
-
-update public.ops_transfer_details
-set timetable_roster_updated = true
-where task_id = (select id from codex_ops_management_sync_ids where label = 'transfer_task');
-
-insert into public.student_class_enrollment_history(student_id, class_id, action, previous_mode, next_mode, memo)
-values
-  (
-    (select id from codex_ops_management_sync_ids where label = 'transfer_student'),
-    (select id from codex_ops_management_sync_ids where label = 'transfer_from_class'),
-    'removed',
-    'enrolled',
-    null,
-    ${tag} || ' management_sync transfer_from_class'
-  ),
-  (
-    (select id from codex_ops_management_sync_ids where label = 'transfer_student'),
-    (select id from codex_ops_management_sync_ids where label = 'transfer_to_class'),
-    'enrolled',
-    null,
-    'enrolled',
-    ${tag} || ' management_sync transfer_to_class'
-  );
-
-insert into codex_ops_management_sync_result(
-  registration_student_linked,
-  registration_textbook_linked,
-  withdrawal_unlinked,
-  withdrawal_status_applied,
-  transfer_removed_from_old_class,
-  transfer_assigned_to_new_class,
-  word_retest_links_resolved
-)
-select
-  coalesce(registration_student.class_ids, '[]'::jsonb) ? registration_class.id::text
-    and coalesce(registration_class.student_ids, '[]'::jsonb) ? registration_student.id::text,
-  coalesce(registration_class.textbook_ids, '[]'::jsonb) ? registration_textbook.id::text
-    and registration_detail.textbook_ready,
-  not (coalesce(withdrawal_student.class_ids, '[]'::jsonb) ? withdrawal_class.id::text)
-    and not (coalesce(withdrawal_class.student_ids, '[]'::jsonb) ? withdrawal_student.id::text),
-  withdrawal_student.status = '퇴원'
-    and withdrawal_detail.timetable_roster_updated,
-  not (coalesce(transfer_student.class_ids, '[]'::jsonb) ? transfer_from_class.id::text)
-    and not (coalesce(transfer_from_class.student_ids, '[]'::jsonb) ? transfer_student.id::text),
-  coalesce(transfer_student.class_ids, '[]'::jsonb) ? transfer_to_class.id::text
-    and coalesce(transfer_to_class.student_ids, '[]'::jsonb) ? transfer_student.id::text
-    and transfer_student.status = '재원'
-    and transfer_detail.timetable_roster_updated,
-  word_task.student_id = word_student.id
-    and word_task.class_id = word_class.id
-    and word_task.textbook_id = word_textbook.id
-    and word_detail.teacher_catalog_id = word_teacher.id
-    and word_detail.retest_status = 'done'
-    and word_detail.first_score = 100
-from public.students registration_student
-join public.classes registration_class on registration_class.id = (select id from codex_ops_management_sync_ids where label = 'registration_class')
-join public.textbooks registration_textbook on registration_textbook.id = (select id from codex_ops_management_sync_ids where label = 'registration_textbook')
-join public.ops_registration_details registration_detail on registration_detail.task_id = (select id from codex_ops_management_sync_ids where label = 'registration_task')
-join public.students withdrawal_student on withdrawal_student.id = (select id from codex_ops_management_sync_ids where label = 'withdrawal_student')
-join public.classes withdrawal_class on withdrawal_class.id = (select id from codex_ops_management_sync_ids where label = 'withdrawal_class')
-join public.ops_withdrawal_details withdrawal_detail on withdrawal_detail.task_id = (select id from codex_ops_management_sync_ids where label = 'withdrawal_task')
-join public.students transfer_student on transfer_student.id = (select id from codex_ops_management_sync_ids where label = 'transfer_student')
-join public.classes transfer_from_class on transfer_from_class.id = (select id from codex_ops_management_sync_ids where label = 'transfer_from_class')
-join public.classes transfer_to_class on transfer_to_class.id = (select id from codex_ops_management_sync_ids where label = 'transfer_to_class')
-join public.ops_transfer_details transfer_detail on transfer_detail.task_id = (select id from codex_ops_management_sync_ids where label = 'transfer_task')
-join public.ops_tasks word_task on word_task.id = (select id from codex_ops_management_sync_ids where label = 'word_retest_task')
-join public.students word_student on word_student.id = (select id from codex_ops_management_sync_ids where label = 'word_retest_student')
-join public.classes word_class on word_class.id = (select id from codex_ops_management_sync_ids where label = 'word_retest_class')
-join public.textbooks word_textbook on word_textbook.id = (select id from codex_ops_management_sync_ids where label = 'word_retest_textbook')
-join public.teacher_catalogs word_teacher on word_teacher.id = (select id from codex_ops_management_sync_ids where label = 'word_retest_teacher')
-join public.ops_word_retests word_detail on word_detail.task_id = word_task.id
-where registration_student.id = (select id from codex_ops_management_sync_ids where label = 'registration_student');
-
-with deleted_comments as (
-  delete from public.ops_task_comments
-  where task_id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_events as (
-  delete from public.ops_task_events
-  where task_id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_attachments as (
-  delete from public.ops_task_attachments
-  where task_id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_registration as (
-  delete from public.ops_registration_details
-  where task_id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_withdrawal as (
-  delete from public.ops_withdrawal_details
-  where task_id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_transfer as (
-  delete from public.ops_transfer_details
-  where task_id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_retests as (
-  delete from public.ops_word_retests
-  where task_id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_tasks as (
-  delete from public.ops_tasks
-  where id in (select id from codex_ops_management_sync_ids where entity = 'task')
-  returning 1
-),
-deleted_history as (
-  delete from public.student_class_enrollment_history
-  where memo like ${tag} || ' management_sync%'
-  returning 1
-),
-deleted_students as (
-  delete from public.students
-  where id in (select id from codex_ops_management_sync_ids where entity = 'student')
-  returning 1
-),
-deleted_classes as (
-  delete from public.classes
-  where id in (select id from codex_ops_management_sync_ids where entity = 'class')
-  returning 1
-),
-deleted_textbooks as (
-  delete from public.textbooks
-  where id in (select id from codex_ops_management_sync_ids where entity = 'textbook')
-  returning 1
-),
-deleted_teachers as (
-  delete from public.teacher_catalogs
-  where id in (select id from codex_ops_management_sync_ids where entity = 'teacher')
-  returning 1
-)
-update codex_ops_management_sync_result
-set cleaned =
-  (select count(*) from deleted_comments)
-  + (select count(*) from deleted_events)
-  + (select count(*) from deleted_attachments)
-  + (select count(*) from deleted_registration)
-  + (select count(*) from deleted_withdrawal)
-  + (select count(*) from deleted_transfer)
-  + (select count(*) from deleted_retests)
-  + (select count(*) from deleted_tasks)
-  + (select count(*) from deleted_history)
-  + (select count(*) from deleted_students)
-  + (select count(*) from deleted_classes)
-  + (select count(*) from deleted_textbooks)
-  + (select count(*) from deleted_teachers);
-
-update codex_ops_management_sync_result
-set leftover =
-  (select count(*) from public.ops_tasks where memo like ${tag} || ' management_sync%')
-  + (select count(*) from public.students where name like ${prefix} || '%')
-  + (select count(*) from public.classes where name like ${prefix} || '%')
-  + (select count(*) from public.textbooks where name like ${prefix} || '%')
-  + (select count(*) from public.teacher_catalogs where name like ${prefix} || '%')
-  + (select count(*) from public.student_class_enrollment_history where memo like ${tag} || ' management_sync%');
-
-select
-  registration_student_linked,
-  registration_textbook_linked,
-  withdrawal_unlinked,
-  withdrawal_status_applied,
-  transfer_removed_from_old_class,
-  transfer_assigned_to_new_class,
-  word_retest_links_resolved,
-  cleaned,
-  leftover
-from codex_ops_management_sync_result;
-`.trim()
-}
 
 function cleanupCliSamples() {
   const tag = sqlString(RUN_TAG)
-  const prefix = sqlString(`codex-sync-${RUN_ID}`)
   runSupabaseCliQuery(`
 delete from public.ops_task_comments
 where task_id in (select id from public.ops_tasks where memo like ${tag} || '%');
@@ -1198,21 +898,6 @@ where task_id in (select id from public.ops_tasks where memo like ${tag} || '%')
 
 delete from public.ops_tasks
 where memo like ${tag} || '%';
-
-delete from public.student_class_enrollment_history
-where memo like ${tag} || ' management_sync%';
-
-delete from public.students
-where name like ${prefix} || '%';
-
-delete from public.classes
-where name like ${prefix} || '%';
-
-delete from public.textbooks
-where name like ${prefix} || '%';
-
-delete from public.teacher_catalogs
-where name like ${prefix} || '%';
 
 select count(*)::int as leftover
 from public.ops_tasks
@@ -1254,6 +939,7 @@ where memo like ${tag} || '%';
 }
 
 async function runCliWorkflow() {
+  const clients = await createClientForWorkflow()
   try {
     cleanupCliStaleSamples()
     const result = runSupabaseCliQuery(buildCliWorkflowSql())
@@ -1267,28 +953,7 @@ async function runCliWorkflow() {
     if (created !== SAMPLE_COUNT || edited !== SAMPLE_COUNT || completed !== SAMPLE_COUNT || cleaned !== SAMPLE_COUNT || leftover !== 0 || absentWordRetest !== 1) {
       throw new Error(`Expected ${SAMPLE_COUNT} clean CLI samples, got ${JSON.stringify(row)}`)
     }
-    const management = runSupabaseCliQuery(buildCliManagementSyncSql()).rows?.[0] || {}
-    const requiredManagementFlags = [
-      "registration_student_linked",
-      "registration_textbook_linked",
-      "withdrawal_unlinked",
-      "withdrawal_status_applied",
-      "transfer_removed_from_old_class",
-      "transfer_assigned_to_new_class",
-      "word_retest_links_resolved",
-    ]
-    const failedManagementFlags = requiredManagementFlags.filter((flag) => management[flag] !== true && management[flag] !== "true")
-    if (!management.registration_student_linked || !management.registration_textbook_linked ||
-      !management.withdrawal_unlinked ||
-      !management.withdrawal_status_applied ||
-      !management.transfer_removed_from_old_class ||
-      !management.transfer_assigned_to_new_class ||
-      !management.word_retest_links_resolved ||
-      failedManagementFlags.length > 0 ||
-      Number(management.leftover || 0) !== 0
-    ) {
-      throw new Error(`Expected clean management sync samples, got ${JSON.stringify(management)}`)
-    }
+    const management = await runReadyModeRosterSample(clients)
     console.log(JSON.stringify({ ok: true, driver: "cli", ...row, management_sync: management, runId: RUN_ID }, null, 2))
   } catch (error) {
     try {
@@ -1301,12 +966,14 @@ async function runCliWorkflow() {
 }
 
 async function run() {
+  verifySubjectTrackSamples()
   if (!requireEnabled()) return
   if (shouldUseCliDriver()) {
     await runCliWorkflow()
     return
   }
-  const { supabase, userId } = await createClientForWorkflow()
+  const clients = await createClientForWorkflow()
+  const { supabase, userId } = clients
   let createdCount = 0
 
   try {
@@ -1350,8 +1017,9 @@ async function run() {
           pipeline_status: "7. 등록 완료",
           textbook_ready: true,
           admission_notice_sent: true,
-          payment_checked: true,
           makeedu_registered: true,
+          makeedu_invoice_sent: true,
+          payment_checked: true,
         })
         .in("task_id", registrationIds)
       if (result.error) throw new Error(`registration complete failed: ${result.error.message}`)
@@ -1394,7 +1062,8 @@ async function run() {
     const leftoverCount = await cleanupSamples(supabase, RUN_TAG)
     if (leftoverCount !== 0) throw new Error(`Expected no remaining samples, found ${leftoverCount}.`)
 
-    console.log(JSON.stringify({ ok: true, created: createdCount, completed: count, cleaned: removedCount, leftover: leftoverCount, absent_word_retest: absentWordRetestCount || 0, runId: RUN_ID }, null, 2))
+    const management = await runReadyModeRosterSample(clients)
+    console.log(JSON.stringify({ ok: true, created: createdCount, completed: count, cleaned: removedCount, leftover: leftoverCount, absent_word_retest: absentWordRetestCount || 0, management_sync: management, runId: RUN_ID }, null, 2))
   } catch (error) {
     try {
       await cleanupSamples(supabase)

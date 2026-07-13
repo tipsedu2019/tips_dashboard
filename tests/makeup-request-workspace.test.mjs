@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import vm from "node:vm";
+
+import ts from "typescript";
+
+import {
+  getAllowedApproverNames,
+  getMakeupRequestEffectiveYear,
+  hasCancelPart,
+  hasMakeupPart,
+  isMakeupApproverAllowed,
+  normalizeMakeupSlots,
+  resolveMakeupApprovalGroup,
+} from "../src/features/makeup-requests/makeup-request-model.js";
 
 function readOptionalSource(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -29,10 +42,78 @@ const pushClientSource = readOptionalSource("src/lib/dashboard-push-client.ts");
 const pushSubscriptionsRouteSource = readOptionalSource("src/app/api/push-subscriptions/route.ts");
 const webPushRouteSource = readOptionalSource("src/app/api/web-push/route.ts");
 const notificationPopoverSource = readFileSync("src/components/dashboard-notification-popover.tsx", "utf8");
+const inFlightRequestModule = await import("../src/lib/in-flight-request.js").catch(() => ({}));
 const allMigrationSource = readdirSync("supabase/migrations")
   .filter((name) => name.endsWith(".sql"))
   .map((name) => readFileSync(`supabase/migrations/${name}`, "utf8"))
   .join("\n");
+
+function sourceBetween(source, start, end) {
+  const startIndex = source.indexOf(start);
+  assert.notEqual(startIndex, -1, `missing source marker: ${start}`);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  assert.notEqual(endIndex, -1, `missing source marker: ${end}`);
+  return source.slice(startIndex, endIndex);
+}
+
+function transpileAndLoad(source, exports, mocks = {}) {
+  const compiled = ts.transpileModule(
+    `${source}\nmodule.exports = { ${exports.join(", ")} }`,
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2020,
+      },
+    },
+  ).outputText;
+  const sandboxModule = { exports: {} };
+  vm.runInNewContext(compiled, {
+    module: sandboxModule,
+    exports: sandboxModule.exports,
+    ...mocks,
+  });
+  return sandboxModule.exports;
+}
+
+function loadWorkspaceApproverHelpers() {
+  const source = sourceBetween(
+    workspaceSource,
+    "function getMakeupApproverEffectiveYear",
+    "function getMakeupActionErrorMessage",
+  );
+  return transpileAndLoad(
+    source,
+    ["getMakeupApproverEffectiveYear", "resolveMakeupSubmissionApproverCatalogId"],
+    { getAllowedApproverNames, getMakeupRequestEffectiveYear },
+  );
+}
+
+function loadMakeupPayloadValidation() {
+  const managerRoleSource = sourceBetween(
+    serviceSource,
+    "function isMakeupManagerRole",
+    "function buildRequestHref",
+  );
+  const payloadSource = sourceBetween(
+    serviceSource,
+    "function buildCreatePayload",
+    "export async function createMakeupRequest",
+  );
+  return transpileAndLoad(
+    `${managerRoleSource}\n${payloadSource}`,
+    ["buildCreatePayload", "isMakeupManagerRole"],
+    {
+      getMakeupRequestEffectiveYear,
+      hasCancelPart,
+      hasMakeupPart,
+      isMakeupApproverAllowed,
+      normalizeMakeupSlots,
+      resolveMakeupApprovalGroup,
+      resolveTeacherForClass: (classItem, teachers) => teachers.find((teacher) => teacher.id === classItem.teacherCatalogId),
+      text: (value) => String(value ?? "").trim(),
+    },
+  );
+}
 
 test("makeup request route is exposed in admin navigation and quick search", () => {
   assert.match(navigationSource, /title: "휴보강"/);
@@ -165,6 +246,128 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.match(workspaceSource, /SelectValue placeholder="강의실 선택"/);
   assert.match(serviceSource, /makeup_classroom: hasMakeup \? firstSlot\.classroom : null/);
   assert.match(serviceSource, /for \(const slot of slots\)/);
+});
+
+test("makeup requests auto-select the year-aware director by catalog ID and revalidate submissions", () => {
+  assert.match(workspaceSource, /getMakeupRequestEffectiveYear/);
+  assert.match(workspaceSource, /getAllowedApproverNames\(selectedClass, approverEffectiveYear\)/);
+  assert.match(workspaceSource, /data\.teachers\.find\(\(teacher\) => allowedNames\.includes\(teacher\.name\)\)/);
+  assert.match(workspaceSource, /approverTeacherCatalogId: firstApprover\?\.id \|\| ""/);
+  assert.match(serviceSource, /getMakeupRequestEffectiveYear/);
+  assert.match(serviceSource, /isMakeupApproverAllowed\(\{/);
+  assert.match(serviceSource, /classRecord: classItem/);
+  assert.match(serviceSource, /approverName: approver\.name/);
+  assert.match(serviceSource, /isManager: allowApproverOverride/);
+  assert.match(serviceSource, /effectiveYear/);
+  assert.match(serviceSource, /throw new Error\("선택할 수 없는 결재자입니다\."\)/);
+});
+
+test("new makeup requests refresh the Seoul year at submission while edits keep their created year", () => {
+  assert.doesNotMatch(
+    workspaceSource,
+    /const approverEffectiveYear = useMemo\([\s\S]{0,180}editingRequest\?\.createdAt/,
+    "a new request must not cache its effective year for the lifetime of the mounted workspace",
+  );
+  assert.match(workspaceSource, /const approverEffectiveYear = getMakeupApproverEffectiveYear\(editingRequest\?\.createdAt\)/);
+
+  const submitSource = sourceBetween(
+    workspaceSource,
+    "const handleSubmit = useCallback",
+    "const runAction = useCallback",
+  );
+  assert.match(submitSource, /const submissionEffectiveYear = getMakeupApproverEffectiveYear\(editingRequest\?\.createdAt\)/);
+  assert.match(submitSource, /resolveMakeupSubmissionApproverCatalogId\(\{/);
+  assert.match(submitSource, /patchInput\(\{ approverTeacherCatalogId: submissionApproverTeacherCatalogId \}\)/);
+  assert.match(submitSource, /approverTeacherCatalogId: submissionApproverTeacherCatalogId/);
+
+  const {
+    getMakeupApproverEffectiveYear,
+    resolveMakeupSubmissionApproverCatalogId,
+  } = loadWorkspaceApproverHelpers();
+  const beforeRollover = "2026-12-31T14:59:59.999Z";
+  const afterRollover = "2026-12-31T15:00:00.000Z";
+
+  assert.equal(getMakeupApproverEffectiveYear("", beforeRollover), 2026);
+  assert.equal(getMakeupApproverEffectiveYear("", afterRollover), 2027);
+  assert.equal(getMakeupApproverEffectiveYear("2026-07-11T00:00:00.000Z", afterRollover), 2026);
+
+  const classItem = { id: "english-high-2", subject: "영어", grade: "고2" };
+  const teachers = [
+    { id: "director-2026", name: "정보영" },
+    { id: "director-2027", name: "강부희" },
+  ];
+  assert.equal(resolveMakeupSubmissionApproverCatalogId({
+    classItem,
+    teachers,
+    selectedApproverTeacherCatalogId: "director-2026",
+    effectiveYear: 2027,
+    isManager: false,
+  }), "director-2027");
+  assert.equal(resolveMakeupSubmissionApproverCatalogId({
+    classItem,
+    teachers,
+    selectedApproverTeacherCatalogId: "director-2026",
+    effectiveYear: 2027,
+    isManager: true,
+  }), "director-2026");
+});
+
+test("makeup service payload validation executes non-manager rejection and manager override behavior", () => {
+  const { buildCreatePayload, isMakeupManagerRole } = loadMakeupPayloadValidation();
+  const classItem = {
+    id: "english-high-2",
+    name: "고2 영어",
+    subject: "영어",
+    grade: "고2",
+    teacher: "담당 교사",
+    teacherCatalogId: "class-teacher",
+  };
+  const teachers = [
+    { id: "class-teacher", name: "담당 교사", profileId: "class-teacher-profile" },
+    { id: "director-2026", name: "정보영", profileId: "director-2026-profile" },
+    { id: "director-2027", name: "강부희", profileId: "director-2027-profile" },
+  ];
+  const data = { classes: [classItem], teachers, profiles: [] };
+  const baseInput = {
+    requestKind: "cancel_only",
+    classId: classItem.id,
+    reason: "연도 경계 검증",
+    cancelDate: "2027-01-02",
+    makeupSlots: [],
+    makeupClassroom: "",
+    approverTeacherCatalogId: "director-2026",
+  };
+
+  assert.equal(isMakeupManagerRole("teacher"), false);
+  assert.throws(
+    () => buildCreatePayload(baseInput, "teacher-actor", data, {
+      effectiveYear: 2027,
+      allowApproverOverride: isMakeupManagerRole("teacher"),
+    }),
+    /선택할 수 없는 결재자입니다/,
+  );
+
+  const resolvedPayload = buildCreatePayload({
+    ...baseInput,
+    approverTeacherCatalogId: "director-2027",
+  }, "teacher-actor", data, {
+    effectiveYear: 2027,
+    allowApproverOverride: isMakeupManagerRole("teacher"),
+  });
+  assert.equal(resolvedPayload.approver_teacher_catalog_id, "director-2027");
+
+  assert.equal(isMakeupManagerRole("admin"), true);
+  const managerPayload = buildCreatePayload(baseInput, "manager-actor", data, {
+    effectiveYear: 2027,
+    allowApproverOverride: isMakeupManagerRole("admin"),
+  });
+  assert.equal(managerPayload.approver_teacher_catalog_id, "director-2026");
+
+  const existingRequestPayload = buildCreatePayload(baseInput, "teacher-actor", data, {
+    effectiveYear: getMakeupRequestEffectiveYear("2026-07-11T00:00:00.000Z"),
+    allowApproverOverride: isMakeupManagerRole("teacher"),
+  });
+  assert.equal(existingRequestPayload.approver_teacher_catalog_id, "director-2026");
 });
 
 test("makeup workspace infers request kind from cancel date and makeup slots", () => {
@@ -833,6 +1036,49 @@ test("makeup service writes notifications and sends google chat without blocking
 test("dashboard header exposes a persistent notification popover", () => {
   assert.match(headerSource, /DashboardNotificationPopover/);
   assert.match(headerSource, /알림/);
+});
+
+test("dashboard notifications defer full reads while loading a lightweight unread badge", () => {
+  assert.match(serviceSource, /createInFlightRequestStore/);
+  assert.match(serviceSource, /loadDashboardNotifications\(viewerId: string, limit = 20\)/);
+  assert.match(serviceSource, /loadDashboardUnreadNotificationCount\(viewerId: string\)/);
+  assert.match(serviceSource, /count: "exact", head: true/);
+  assert.match(serviceSource, /const loadKey = `\$\{viewerId\}:\$\{limit\}`/);
+  assert.match(serviceSource, /dashboardNotificationLoadInFlight\.run\(\s*loadKey/);
+  assert.match(notificationPopoverSource, /loadDashboardNotifications\(viewerId\)/);
+  assert.match(notificationPopoverSource, /loadDashboardUnreadNotificationCount\(viewerId\)/);
+  assert.match(notificationPopoverSource, /if \(!viewerId\) return/);
+  assert.match(notificationPopoverSource, /unreadCountTimer = window\.setTimeout/);
+  assert.match(notificationPopoverSource, /if \(open\) \{[\s\S]{0,120}void refresh\(\)/);
+});
+
+test("in-flight read sharing is isolated by viewer and recovers after failure", async () => {
+  const createStore = inFlightRequestModule.createInFlightRequestStore;
+  assert.equal(typeof createStore, "function");
+  if (typeof createStore !== "function") return;
+
+  const store = createStore();
+  let sameViewerCalls = 0;
+  let releaseFirst;
+  const first = store.run("viewer-a:20", () => {
+    sameViewerCalls += 1;
+    return new Promise((resolve) => { releaseFirst = resolve; });
+  });
+  const shared = store.run("viewer-a:20", () => {
+    sameViewerCalls += 1;
+    return Promise.resolve("unexpected");
+  });
+  const otherViewer = store.run("viewer-b:20", () => Promise.resolve("viewer-b"));
+
+  assert.equal(first, shared);
+  assert.equal(sameViewerCalls, 1);
+  assert.notEqual(first, otherViewer);
+  releaseFirst("viewer-a");
+  assert.equal(await shared, "viewer-a");
+  assert.equal(await otherViewer, "viewer-b");
+
+  await assert.rejects(store.run("viewer-a:20", () => Promise.reject(new Error("network"))));
+  assert.equal(await store.run("viewer-a:20", () => Promise.resolve("retried")), "retried");
 });
 
 test("dashboard supports installable web push subscriptions", () => {

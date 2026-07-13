@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { CalendarIcon, Clock } from "lucide-react"
+import { CalendarIcon, Clock, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 const TIME_OPTION_START_MINUTES = 9 * 60
 const TIME_OPTION_END_MINUTES = 23 * 60 + 30
 const TIME_OPTION_STEP_MINUTES = 10
+const FULL_DAY_TIME_OPTION_END_MINUTES = 24 * 60 - TIME_OPTION_STEP_MINUTES
 const TIME_OPTIONS = Array.from({
   length: Math.floor((TIME_OPTION_END_MINUTES - TIME_OPTION_START_MINUTES) / TIME_OPTION_STEP_MINUTES) + 1,
 }, (_, index) => {
@@ -19,12 +20,62 @@ const TIME_OPTIONS = Array.from({
   const minutes = totalMinutes % 60
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
 })
+const FULL_DAY_TIME_OPTIONS = Array.from({
+  length: Math.floor(FULL_DAY_TIME_OPTION_END_MINUTES / TIME_OPTION_STEP_MINUTES) + 1,
+}, (_, index) => {
+  const totalMinutes = index * TIME_OPTION_STEP_MINUTES
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
+})
 
-function isTimeWithinOptionRange(value: string) {
-  const match = value.match(/^(\d{2}):(\d{2})$/)
-  if (!match) return false
-  const totalMinutes = Number(match[1]) * 60 + Number(match[2])
-  return totalMinutes >= TIME_OPTION_START_MINUTES && totalMinutes <= TIME_OPTION_END_MINUTES
+function normalizeTimeInput(value: string) {
+  const raw = value.trim()
+  if (!raw) return ""
+
+  const colonMatch = raw.match(/^(\d{1,2}):(\d{1,2})$/)
+  if (colonMatch) {
+    const hours = Number(colonMatch[1])
+    const minutes = Number(colonMatch[2])
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
+    }
+    return ""
+  }
+
+  const digits = raw.replace(/\D/g, "")
+  if (digits.length === 3 || digits.length === 4) {
+    const hourText = digits.length === 3 ? digits.slice(0, 1) : digits.slice(0, 2)
+    const minuteText = digits.slice(-2)
+    const hours = Number(hourText)
+    const minutes = Number(minuteText)
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
+    }
+  }
+
+  return ""
+}
+
+function getTimePickerOptions(options: string[], value: string) {
+  const normalizedOptions = Array.from(new Set(options.map(normalizeTimeInput).filter(Boolean)))
+  const normalizedValue = normalizeTimeInput(value)
+  if (normalizedValue && !normalizedOptions.includes(normalizedValue)) normalizedOptions.push(normalizedValue)
+  return normalizedOptions.sort()
+}
+
+function splitLocalDateTime(value: string) {
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$/)
+  if (!match) return { date: "", time: "" }
+  const time = normalizeTimeInput(match[2])
+  if (!time) return { date: "", time: "" }
+  return { date: match[1], time }
+}
+
+function mergeLocalDateTime(dateValue: string, timeValue: string) {
+  const date = toDateKey(dateValue)
+  const time = normalizeTimeInput(timeValue)
+  return date && time ? `${date}T${time}` : ""
 }
 
 function toDateKey(value: Date | string | undefined) {
@@ -51,36 +102,6 @@ function formatDateLabel(value: string) {
   return `${match[1]}. ${match[2]}. ${match[3]}.`
 }
 
-function normalizeTimeInput(value: string) {
-  const raw = value.trim()
-  if (!raw) return ""
-
-  const colonMatch = raw.match(/^(\d{1,2}):(\d{1,2})$/)
-  if (colonMatch) {
-    const hours = Number(colonMatch[1])
-    const minutes = Number(colonMatch[2])
-    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-      const normalized = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
-      return isTimeWithinOptionRange(normalized) ? normalized : ""
-    }
-    return ""
-  }
-
-  const digits = raw.replace(/\D/g, "")
-  if (digits.length === 3 || digits.length === 4) {
-    const hourText = digits.length === 3 ? digits.slice(0, 1) : digits.slice(0, 2)
-    const minuteText = digits.slice(-2)
-    const hours = Number(hourText)
-    const minutes = Number(minuteText)
-    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-      const normalized = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
-      return isTimeWithinOptionRange(normalized) ? normalized : ""
-    }
-  }
-
-  return ""
-}
-
 function formatTimeLabel(value: string) {
   const normalized = normalizeTimeInput(value)
   if (!normalized) return ""
@@ -91,17 +112,32 @@ function formatTimeLabel(value: string) {
   return `${meridiem} ${String(displayHour).padStart(2, "0")}:${minuteText}`
 }
 
+function getPickerAccessibleLabel(label: string, selectedLabel: string) {
+  return selectedLabel ? `${label}: ${selectedLabel}` : label
+}
+
+function getNextTimeOptionIndex(key: string, currentIndex: number, optionCount: number) {
+  if (optionCount <= 0) return -1
+  if (key === "ArrowDown") return (currentIndex + 1) % optionCount
+  if (key === "ArrowUp") return (currentIndex - 1 + optionCount) % optionCount
+  if (key === "Home") return 0
+  if (key === "End") return optionCount - 1
+  return -1
+}
+
 type DatePickerControlProps = {
   id?: string
   value: string
   onChange: (value: string) => void
   placeholder?: string
   ariaLabel?: string
+  ariaDescribedBy?: string
   className?: string
   disabled?: boolean
   linkedDates?: Array<{ value: string; label?: string }>
   linkedDatesLabel?: string
   restrictToLinkedDates?: boolean
+  disablePortal?: boolean
 }
 
 export function DatePickerControl({
@@ -110,14 +146,17 @@ export function DatePickerControl({
   onChange,
   placeholder = "날짜 선택",
   ariaLabel = "날짜 선택",
+  ariaDescribedBy,
   className,
   disabled = false,
   linkedDates = [],
   linkedDatesLabel = "선택 가능 날짜",
   restrictToLinkedDates = false,
+  disablePortal = false,
 }: DatePickerControlProps) {
   const [open, setOpen] = React.useState(false)
   const selectedDate = parseDateKey(value)
+  const selectedDateLabel = formatDateLabel(value)
   const normalizedLinkedDates = React.useMemo(() => (
     linkedDates
       .map((item) => ({ value: toDateKey(item.value), label: item.label || toDateKey(item.value) }))
@@ -140,7 +179,8 @@ export function DatePickerControl({
           type="button"
           variant="outline"
           disabled={disabled}
-          aria-label={ariaLabel}
+          aria-label={getPickerAccessibleLabel(ariaLabel, selectedDateLabel)}
+          aria-describedby={ariaDescribedBy}
           className={cn(
             "h-9 w-full justify-between px-3 font-normal",
             !value && "text-muted-foreground",
@@ -148,11 +188,11 @@ export function DatePickerControl({
             className,
           )}
         >
-          <span className="truncate">{formatDateLabel(value) || placeholder}</span>
+          <span className="truncate">{selectedDateLabel || placeholder}</span>
           <CalendarIcon aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="w-auto p-0">
+      <PopoverContent align="start" sideOffset={6} disablePortal={disablePortal} className="w-auto p-0">
         <Calendar
           mode="single"
           selected={selectedDate}
@@ -194,8 +234,12 @@ type TimePickerControlProps = {
   onChange: (value: string) => void
   placeholder?: string
   ariaLabel?: string
+  ariaDescribedBy?: string
   className?: string
   disabled?: boolean
+  options?: string[]
+  disablePortal?: boolean
+  showIcon?: boolean
 }
 
 export function TimePickerControl({
@@ -203,20 +247,56 @@ export function TimePickerControl({
   onChange,
   placeholder = "시각 선택",
   ariaLabel = "시각 선택",
+  ariaDescribedBy,
   className,
   disabled = false,
+  options = TIME_OPTIONS,
+  disablePortal = false,
+  showIcon = true,
 }: TimePickerControlProps) {
-  const [open, setOpen] = React.useState(false)
   const normalizedValue = normalizeTimeInput(value)
+  const selectedTimeLabel = formatTimeLabel(normalizedValue)
+  const timeOptions = getTimePickerOptions(options, normalizedValue)
+  const [open, setOpen] = React.useState(false)
+  const [activeTime, setActiveTime] = React.useState(() => normalizedValue || timeOptions[0] || "")
+  const selectedOptionRef = React.useRef<HTMLButtonElement>(null)
+  const timeOptionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
+
+  function handleOpenChange(nextOpen: boolean) {
+    const resolvedOpen = disabled ? false : nextOpen
+    if (resolvedOpen) setActiveTime(normalizedValue || timeOptions[0] || "")
+    setOpen(resolvedOpen)
+  }
+
+  function handleTimeOptionKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    const nextIndex = getNextTimeOptionIndex(event.key, index, timeOptions.length)
+    if (nextIndex < 0) return
+    event.preventDefault()
+    const nextTime = timeOptions[nextIndex]
+    setActiveTime(nextTime)
+    const nextOption = timeOptionRefs.current[nextIndex]
+    nextOption?.focus({ preventScroll: true })
+    nextOption?.scrollIntoView({ block: "nearest" })
+  }
+
+  React.useEffect(() => {
+    if (!open || !activeTime) return
+    const animationFrame = window.requestAnimationFrame(() => {
+      selectedOptionRef.current?.focus({ preventScroll: true })
+      selectedOptionRef.current?.scrollIntoView({ block: "center" })
+    })
+    return () => window.cancelAnimationFrame(animationFrame)
+  }, [activeTime, open])
 
   return (
-    <Popover open={open} onOpenChange={(nextOpen) => setOpen(disabled ? false : nextOpen)}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
           variant="outline"
           disabled={disabled}
-          aria-label={ariaLabel}
+          aria-label={getPickerAccessibleLabel(ariaLabel, selectedTimeLabel)}
+          aria-describedby={ariaDescribedBy}
           className={cn(
             "h-9 w-full justify-between px-3 font-normal",
             !normalizedValue && "text-muted-foreground",
@@ -224,23 +304,31 @@ export function TimePickerControl({
             className,
           )}
         >
-          <span className="truncate">{formatTimeLabel(normalizedValue) || placeholder}</span>
-          <Clock aria-hidden="true" />
+          <span className="truncate">{selectedTimeLabel || placeholder}</span>
+          {showIcon ? <Clock aria-hidden="true" /> : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="w-[--radix-popover-trigger-width] min-w-44 p-0">
+      <PopoverContent align="start" sideOffset={6} disablePortal={disablePortal} className="w-[--radix-popover-trigger-width] min-w-44 p-0">
         <div
+          role="listbox"
+          aria-label={ariaLabel}
           className="max-h-52 overscroll-contain overflow-y-auto p-1"
           onWheelCapture={(event) => event.stopPropagation()}
           onTouchMoveCapture={(event) => event.stopPropagation()}
         >
-          {TIME_OPTIONS.map((time) => {
+          {timeOptions.map((time, index) => {
             const selected = time === normalizedValue
             return (
               <button
                 key={time}
+                ref={(node) => {
+                  timeOptionRefs.current[index] = node
+                  if (time === activeTime) selectedOptionRef.current = node
+                }}
                 type="button"
-                aria-pressed={selected}
+                role="option"
+                aria-selected={selected}
+                tabIndex={time === activeTime ? 0 : -1}
                 className={cn(
                   "flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40",
                   selected && "bg-primary text-primary-foreground hover:bg-primary",
@@ -249,6 +337,8 @@ export function TimePickerControl({
                   onChange(time)
                   setOpen(false)
                 }}
+                onFocus={() => setActiveTime(time)}
+                onKeyDown={(event) => handleTimeOptionKeyDown(event, index)}
               >
                 {formatTimeLabel(time)}
               </button>
@@ -257,5 +347,106 @@ export function TimePickerControl({
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+type DateTimePickerControlProps = {
+  value: string
+  onChange: (value: string) => void
+  dateAriaLabel?: string
+  timeAriaLabel?: string
+  datePlaceholder?: string
+  timePlaceholder?: string
+  disabled?: boolean
+  required?: boolean
+  className?: string
+  disablePortal?: boolean
+}
+
+export function DateTimePickerControl({
+  value,
+  onChange,
+  dateAriaLabel = "날짜 선택",
+  timeAriaLabel = "시각 선택",
+  datePlaceholder = "날짜 선택",
+  timePlaceholder = "시각 선택",
+  disabled = false,
+  required = false,
+  className,
+  disablePortal = false,
+}: DateTimePickerControlProps) {
+  const requiredDescriptionId = React.useId()
+  const [dateDraft, setDateDraft] = React.useState(() => splitLocalDateTime(value).date)
+  const [timeDraft, setTimeDraft] = React.useState(() => splitLocalDateTime(value).time)
+
+  React.useEffect(() => {
+    const nextDraft = splitLocalDateTime(value)
+    setDateDraft(nextDraft.date)
+    setTimeDraft(nextDraft.time)
+  }, [value])
+
+  function commitIfComplete(nextDate: string, nextTime: string) {
+    const nextValue = mergeLocalDateTime(nextDate, nextTime)
+    if (nextValue) onChange(nextValue)
+  }
+
+  function handleDateChange(nextDate: string) {
+    setDateDraft(nextDate)
+    commitIfComplete(nextDate, timeDraft)
+  }
+
+  function handleTimeChange(nextTime: string) {
+    setTimeDraft(nextTime)
+    commitIfComplete(dateDraft, nextTime)
+  }
+
+  function handleClear() {
+    setDateDraft("")
+    setTimeDraft("")
+    onChange("")
+  }
+
+  const hasDraft = Boolean(dateDraft || timeDraft)
+
+  return (
+    <div className={cn("grid min-w-0 gap-2 sm:grid-cols-2", className)}>
+      {required ? <span id={requiredDescriptionId} className="sr-only">필수 입력</span> : null}
+      <DatePickerControl
+        value={dateDraft}
+        onChange={handleDateChange}
+        ariaLabel={dateAriaLabel}
+        ariaDescribedBy={required ? requiredDescriptionId : undefined}
+        placeholder={datePlaceholder}
+        disabled={disabled}
+        disablePortal={disablePortal}
+      />
+      <div className="flex min-w-0 items-start gap-2">
+        <TimePickerControl
+          value={timeDraft}
+          onChange={handleTimeChange}
+          ariaLabel={timeAriaLabel}
+          ariaDescribedBy={required ? requiredDescriptionId : undefined}
+          placeholder={timePlaceholder}
+          disabled={disabled}
+          options={FULL_DAY_TIME_OPTIONS}
+          disablePortal={disablePortal}
+          showIcon={!hasDraft}
+          className="min-w-0 flex-1"
+        />
+        {hasDraft ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={disabled}
+            aria-label="날짜와 시각 지우기"
+            className="size-9 shrink-0"
+            onClick={handleClear}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
+    </div>
   )
 }

@@ -8,6 +8,7 @@ import {
   deriveSelectedDaysFromSchedule,
   parseDateValue,
 } from "../../lib/class-schedule-planner.js";
+import { resolveAcademicDirector } from "../../lib/academic-director-assignment.js";
 
 export const MAKEUP_REQUEST_STATUSES = [
   "approval_pending",
@@ -186,12 +187,44 @@ export function resolveMakeupApprovalGroup(classRecord = {}) {
   return "unknown";
 }
 
-export function getAllowedApproverNames(classRecordOrGroup = {}) {
+export function getAllowedApproverNames(classRecordOrGroup = {}, effectiveYear = getMakeupRequestEffectiveYear()) {
+  if (typeof classRecordOrGroup !== "string") {
+    const subject = normalizeSubject(
+      firstValue(classRecordOrGroup.subject, classRecordOrGroup.subjectName, classRecordOrGroup.subject_name),
+    );
+    const grade = firstValue(classRecordOrGroup.grade, classRecordOrGroup.gradeName, classRecordOrGroup.grade_name);
+    const assignment = resolveAcademicDirector({ subjects: subject ? [subject] : [], grade, effectiveYear });
+    return assignment.status === "resolved" ? [assignment.directorName] : [];
+  }
+
   const group =
-    typeof classRecordOrGroup === "string"
-      ? normalizeApprovalGroup(classRecordOrGroup)
-      : resolveMakeupApprovalGroup(classRecordOrGroup);
+    normalizeApprovalGroup(classRecordOrGroup);
   return [...(APPROVER_NAMES_BY_GROUP[group] || [])];
+}
+
+export function getMakeupRequestEffectiveYear(value) {
+  const candidate = value instanceof Date
+    ? value
+    : value
+      ? new Date(value)
+      : new Date();
+  const date = Number.isFinite(candidate.getTime()) ? candidate : new Date();
+  return Number(new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+  }).format(date));
+}
+
+export function isMakeupApproverAllowed({
+  classRecord = {},
+  approverName = "",
+  effectiveYear = getMakeupRequestEffectiveYear(),
+  isManager = false,
+} = {}) {
+  const normalizedApproverName = text(approverName);
+  if (!normalizedApproverName) return false;
+  if (isManager) return true;
+  return getAllowedApproverNames(classRecord, effectiveYear).includes(normalizedApproverName);
 }
 
 export function canTransitionMakeupRequest(status, nextStatus, context = {}) {

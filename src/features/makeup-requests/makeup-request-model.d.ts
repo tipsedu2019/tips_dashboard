@@ -44,7 +44,14 @@ export const APPROVER_NAMES_BY_GROUP: Record<MakeupApprovalGroup, string[]>;
 export const MAKEUP_CALENDAR_NOTE_MARKER: string;
 
 export function resolveMakeupApprovalGroup(classRecord?: unknown): MakeupApprovalGroup;
-export function getAllowedApproverNames(classRecordOrGroup?: unknown): string[];
+export function getAllowedApproverNames(classRecordOrGroup?: unknown, effectiveYear?: number | string): string[];
+export function getMakeupRequestEffectiveYear(value?: string | number | Date): number;
+export function isMakeupApproverAllowed(options?: {
+  classRecord?: unknown;
+  approverName?: string;
+  effectiveYear?: number | string;
+  isManager?: boolean;
+}): boolean;
 export function canTransitionMakeupRequest(
   status: MakeupRequestStatus,
   nextStatus: MakeupRequestStatus,

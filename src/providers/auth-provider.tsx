@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import type { Session, User } from "@supabase/supabase-js"
+import type { Session, SupabaseClient, User } from "@supabase/supabase-js"
 
 import {
   fallbackAdminEmails,
@@ -26,6 +26,7 @@ import {
   type DashboardRole,
 } from "@/lib/auth-utils"
 import { getAuthErrorMessage } from "@/lib/auth-error-messages"
+import { createAuthResolutionCoordinator } from "@/lib/auth-resolution-coordinator.js"
 
 type DashboardUser = User & {
   name?: string
@@ -56,6 +57,32 @@ type AuthContextValue = {
   defaultAdminPath: string
   login: (identifier: string, password: string) => Promise<boolean>
   logout: () => Promise<boolean>
+}
+
+type DashboardProfileResult = {
+  user: DashboardUser
+  authError: string | null
+}
+
+type AuthResolutionToken = {
+  sessionKey: string
+  generation: number
+}
+
+type ResolvedDashboardProfile = DashboardProfileResult & AuthResolutionToken
+
+type InitialAuthSessionResult = Awaited<
+  ReturnType<SupabaseClient["auth"]["getSession"]>
+>
+
+let initialAuthSessionPromise: Promise<InitialAuthSessionResult> | null = null
+
+function loadInitialAuthSession(client: SupabaseClient) {
+  initialAuthSessionPromise ||= client.auth.getSession().finally(() => {
+    initialAuthSessionPromise = null
+  })
+
+  return initialAuthSessionPromise
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -124,13 +151,15 @@ function isStaleRefreshTokenError(error: unknown) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<DashboardUser | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [authError, setAuthError] = useState<string | null>(null)
-  const lastResolvedSessionKeyRef = useRef("")
-  const profileRequestRef = useRef<{ key: string; promise: Promise<void> | null }>({
-    key: "",
-    promise: null,
-  })
+  const [loading, setLoading] = useState(Boolean(supabase))
+  const [authError, setAuthError] = useState<string | null>(
+    supabase ? null : supabaseConfigError,
+  )
+  const authResolutionRef = useRef(createAuthResolutionCoordinator())
+  const profileRequestRef = useRef<{
+    key: string
+    promise: Promise<DashboardProfileResult> | null
+  }>({ key: "", promise: null })
 
   useEffect(() => {
     let isActive = true
@@ -143,8 +172,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return `${nextSession.user.id}:${nextSession.expires_at || ""}`
     }
 
-    const resetAnonymousSession = () => {
-      lastResolvedSessionKeyRef.current = "anonymous"
+    const resetAnonymousSession = (resolution: AuthResolutionToken) => {
+      if (!authResolutionRef.current.markResolvedProfile(resolution)) return
       profileRequestRef.current = { key: "", promise: null }
       setSession(null)
       setUser(null)
@@ -152,7 +181,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
     }
 
-    const fetchProfile = async (supabaseUser: User) => {
+    const resolveDashboardProfile = async (
+      supabaseUser: User,
+    ): Promise<DashboardProfileResult> => {
       try {
         const normalizedEmail = normalizeEmail(supabaseUser.email || "")
         const normalizedLoginId = normalizedEmail.includes("@")
@@ -179,55 +210,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           error = profileByIdentity.error
         }
 
-        if (!isActive) return
-
         if (error || !data) {
           const fallbackRole = resolveFallbackRole(supabaseUser.email)
-          setUser(createFallbackUser(supabaseUser, fallbackRole))
-          setAuthError(fallbackRole === "viewer" ? buildReadonlyMessage(Boolean(error)) : null)
-          return
+          return {
+            user: createFallbackUser(supabaseUser, fallbackRole),
+            authError:
+              fallbackRole === "viewer" ? buildReadonlyMessage(Boolean(error)) : null,
+          }
         }
 
-        setUser({
-          ...supabaseUser,
-          ...data,
-          name: data.name || getFallbackName(supabaseUser),
-          role: normalizeDashboardRole(data.role || "viewer"),
-          loginId:
-            data.login_id ||
-            (supabaseUser.email?.includes("@")
-              ? supabaseUser.email.split("@")[0]
-              : supabaseUser.email || ""),
-          teacherCatalogId: data.teacher_catalog_id || "",
-          mustChangePassword:
-            shouldForcePasswordChange(data) || shouldForcePasswordChange(supabaseUser),
-          isFallbackRole: false,
-        })
-        setAuthError(null)
+        return {
+          user: {
+            ...supabaseUser,
+            ...data,
+            name: data.name || getFallbackName(supabaseUser),
+            role: normalizeDashboardRole(data.role || "viewer"),
+            loginId:
+              data.login_id ||
+              (supabaseUser.email?.includes("@")
+                ? supabaseUser.email.split("@")[0]
+                : supabaseUser.email || ""),
+            teacherCatalogId: data.teacher_catalog_id || "",
+            mustChangePassword:
+              shouldForcePasswordChange(data) || shouldForcePasswordChange(supabaseUser),
+            isFallbackRole: false,
+          },
+          authError: null,
+        }
       } catch (error) {
-        if (!isActive) return
-
         console.error("Auth: profile fetch error", error)
         const fallbackRole = resolveFallbackRole(supabaseUser.email)
-        setUser(createFallbackUser(supabaseUser, fallbackRole))
-        setAuthError(fallbackRole === "viewer" ? buildReadonlyMessage(true) : null)
-      } finally {
-        if (isActive) {
-          setLoading(false)
+        return {
+          user: createFallbackUser(supabaseUser, fallbackRole),
+          authError: fallbackRole === "viewer" ? buildReadonlyMessage(true) : null,
         }
       }
     }
 
-    const applyResolvedUser = async (nextSession: Session | null) => {
-      const sessionKey = getSessionKey(nextSession)
+    const applyResolvedProfile = (resolvedProfile: ResolvedDashboardProfile) => {
+      if (!isActive || !authResolutionRef.current.markResolvedProfile(resolvedProfile)) return
+
+      setUser(resolvedProfile.user)
+      setAuthError(resolvedProfile.authError)
+      setLoading(false)
+    }
+
+    const applyResolvedUser = async (
+      nextSession: Session | null,
+      resolution: AuthResolutionToken,
+      event: string,
+    ) => {
+      if (!isActive || !authResolutionRef.current.isCurrent(resolution)) return
+      const { sessionKey } = resolution
 
       if (sessionKey === "anonymous") {
-        if (lastResolvedSessionKeyRef.current === sessionKey) {
-          setLoading(false)
-          return
-        }
-
-        resetAnonymousSession()
+        resetAnonymousSession(resolution)
         return
       }
 
@@ -236,70 +273,96 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      if (lastResolvedSessionKeyRef.current === sessionKey) {
-        const inflight = profileRequestRef.current
-        if (inflight.key === sessionKey && inflight.promise) {
-          return inflight.promise
-        }
+      setSession(nextSession)
 
+      const shouldRefreshProfile = event === "USER_UPDATED"
+      const canReuseResolvedProfile = authResolutionRef.current.canReuseResolvedProfile(sessionKey)
+      if (!shouldRefreshProfile && canReuseResolvedProfile) {
         setLoading(false)
         return
       }
 
-      lastResolvedSessionKeyRef.current = sessionKey
-      setSession(nextSession)
-      setLoading(true)
+      if (!canReuseResolvedProfile) {
+        const provisionalUser = createFallbackUser(
+          nextSession.user,
+          "viewer",
+        )
+        setUser(provisionalUser)
+        setAuthError(null)
+        setLoading(false)
+      }
 
-      const profilePromise = fetchProfile(nextSession.user).finally(() => {
-        if (profileRequestRef.current.key === sessionKey) {
+      const requestKey = shouldRefreshProfile
+        ? `${sessionKey}:user-updated:${resolution.generation}`
+        : sessionKey
+      const inflight = profileRequestRef.current
+      if (inflight.key === requestKey && inflight.promise) {
+        const resolvedProfile = { ...(await inflight.promise), ...resolution }
+        applyResolvedProfile(resolvedProfile)
+        return
+      }
+
+      const profilePromise = resolveDashboardProfile(nextSession.user).finally(() => {
+        if (profileRequestRef.current.key === requestKey) {
           profileRequestRef.current = { key: "", promise: null }
         }
       })
 
-      profileRequestRef.current = { key: sessionKey, promise: profilePromise }
-      return profilePromise
+      profileRequestRef.current = { key: requestKey, promise: profilePromise }
+      const resolvedProfile = { ...(await profilePromise), ...resolution }
+      applyResolvedProfile(resolvedProfile)
     }
 
     if (!supabase) {
-      setAuthError(supabaseConfigError)
-      setLoading(false)
       return undefined
     }
 
     const client = supabase
+    const authResolution = authResolutionRef.current
+    const initialSnapshot = authResolution.captureSnapshot()
 
-    client.auth
-      .getSession()
+    loadInitialAuthSession(client)
       .then(async ({ data, error }) => {
-        if (!isActive) return
+        if (!isActive || !authResolution.isSnapshotCurrent(initialSnapshot)) return
         if (error) {
           if (isStaleRefreshTokenError(error)) {
             await client.auth.signOut({ scope: "local" })
             if (!isActive) return
-            resetAnonymousSession()
+            if (!authResolution.isSnapshotCurrent(initialSnapshot)) return
+            const resolution = authResolution.begin("anonymous")
+            resetAnonymousSession(resolution)
             return
           }
           setAuthError(getAuthErrorMessage(error, "로그인 상태를 확인하지 못했습니다."))
           setLoading(false)
           return
         }
-        void applyResolvedUser(data.session)
+        const resolution = authResolution.begin(getSessionKey(data.session))
+        await applyResolvedUser(data.session, resolution, "INITIAL_SESSION")
       })
       .catch((error) => {
-        if (!isActive) return
+        if (!isActive || !authResolution.isSnapshotCurrent(initialSnapshot)) return
         setAuthError(getAuthErrorMessage(error, "로그인 상태를 확인하지 못했습니다."))
         setLoading(false)
       })
 
-    const {
-      data: { subscription },
-    } = client.auth.onAuthStateChange((_event, nextSession) => {
-      void applyResolvedUser(nextSession)
-    })
+    let subscription: ReturnType<typeof client.auth.onAuthStateChange>["data"]["subscription"] | null = null
+    const authSubscriptionTimer = setTimeout(() => {
+      if (!isActive) return
+      const result = client.auth.onAuthStateChange((event, nextSession) => {
+        setTimeout(() => {
+          if (!isActive) return
+          const resolution = authResolution.begin(getSessionKey(nextSession))
+          void applyResolvedUser(nextSession, resolution, event)
+        }, 0)
+      })
+      subscription = result.data.subscription
+    }, 0)
 
     return () => {
       isActive = false
-      subscription.unsubscribe()
+      clearTimeout(authSubscriptionTimer)
+      subscription?.unsubscribe()
     }
   }, [])
 

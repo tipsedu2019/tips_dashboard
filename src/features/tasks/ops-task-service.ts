@@ -9,11 +9,31 @@ import {
 } from "./ops-task-model"
 import {
   getRegistrationCreateBlockers,
+  getRegistrationViewKey,
+  getSelectableRegistrationScheduleSessions,
   getRegistrationTransitionBlockers,
   getRegistrationWaitlistAssignmentBlockers,
   isRegistrationClassWaitlistStatus,
+  isRegistrationCompletionImmutable,
+  parseRegistrationSubjects,
   shouldEnsureRegistrationStudent,
 } from "./registration-workflow"
+import {
+  clearRegistrationTrackServiceCaches,
+  loadOpsRegistrationWorkspaceOptionData as loadRegistrationWorkspaceOptionData,
+  loadRegistrationCaseDetail,
+  loadRegistrationTrackSummaries,
+  setRegistrationTrackMutationCacheInvalidator,
+  type OpsRegistrationCaseDetail,
+  type OpsRegistrationTrackStatus,
+  type OpsRegistrationTrackSummary,
+  type OpsRegistrationWorkspaceOptionData,
+} from "./registration-track-service"
+import {
+  invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
+  probeRegistrationSubjectTrackRuntime,
+} from "./registration-runtime-probe"
+import { loadRegistrationSubjectTrackFixtureClassDetails } from "./registration-track-fixture-runtime"
 
 export type OpsTaskType =
   | "registration"
@@ -37,6 +57,10 @@ export type OpsTaskPriority = "low" | "normal" | "high" | "urgent"
 type Row = Record<string, unknown>
 type OpsTaskLinkPatchValue = string | null
 type OpsCompletionRollback = () => Promise<void>
+type OpsRegistrationProjectionRollback = {
+  createdStudentId: string
+  rollback: OpsCompletionRollback
+}
 
 export type OpsProfileOption = {
   id: string
@@ -75,6 +99,8 @@ export type OpsClassOption = OpsLinkedOption & {
   textbookIds: string[]
 }
 
+export type OpsRegistrationClassDetail = OpsClassOption
+
 export type OpsTextbookOption = OpsLinkedOption & {
   publisher: string
   subject: string
@@ -89,7 +115,6 @@ export type OpsTeacherOption = OpsLinkedOption & {
 
 export type OpsRegistrationDetail = {
   pipelineStatus?: string
-  inquiryChannel?: string
   inquiryAt?: string
   schoolGrade?: string
   schoolName?: string
@@ -235,6 +260,7 @@ export type OpsTask = {
   createdAt: string
   updatedAt: string
   registration?: OpsRegistrationDetail
+  registrationTracks?: OpsRegistrationTrackSummary[]
   withdrawal?: OpsWithdrawalDetail
   transfer?: OpsTransferDetail
   wordRetest?: OpsWordRetestDetail
@@ -252,6 +278,13 @@ export type OpsTaskWorkspaceData = {
   teachers: OpsTeacherOption[]
   schemaReady: boolean
   error: string | null
+}
+
+export type OpsTaskWorkspaceOptionData = Pick<
+  OpsTaskWorkspaceData,
+  "profiles" | "students" | "classes" | "textbooks" | "teachers" | "schemaReady" | "error"
+> & {
+  directorCatalogStatus?: "authoritative" | "partial" | "error"
 }
 
 export type OpsTaskInput = {
@@ -293,7 +326,44 @@ export const emptyOpsTaskWorkspaceData: OpsTaskWorkspaceData = {
   error: null,
 }
 
+const emptyOpsTaskWorkspaceOptionData: OpsTaskWorkspaceOptionData = {
+  profiles: [],
+  students: [],
+  classes: [],
+  textbooks: [],
+  teachers: [],
+  schemaReady: true,
+  error: null,
+}
+
 const OPS_TASK_WORKSPACE_CACHE_TTL_MS = 15_000
+const OPS_REGISTRATION_SESSION_CACHE_TTL_MS = 60_000
+const OPS_REGISTRATION_SESSION_CACHE_PREFIX = "tips:registration-workspace:"
+const OPS_REGISTRATION_PARENT_LIST_COLUMNS = [
+  "id",
+  "title",
+  "type",
+  "status",
+  "priority",
+  "requested_by",
+  "assignee_id",
+  "secondary_assignee_id",
+  "student_id",
+  "student_name",
+  "campus",
+  "subject",
+  "created_at",
+  "updated_at",
+  "ops_registration_details(task_id,pipeline_status,school_grade,school_name,inquiry_at)",
+].join(",")
+const OPS_REGISTRATION_CLASS_COLUMN_CANDIDATES = [
+  "id,name,subject,grade,teacher,room,textbook_ids",
+  "id,name,subject,grade,teacher,room",
+] as const
+const OPS_REGISTRATION_CLASS_DETAIL_COLUMN_CANDIDATES = [
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,textbook_ids",
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan",
+] as const
 const OPS_CLASS_COLUMN_CANDIDATES = [
   "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,textbook_ids,status",
   "id,name,subject,grade,teacher,room,schedule,schedule_plan,fee,student_ids,waitlist_ids,status",
@@ -316,10 +386,22 @@ const OPS_REGISTRATION_OPTIONAL_DETAIL_COLUMNS = [
 type OpsTaskWorkspaceLoadOptions = {
   force?: boolean
   taskType?: OpsTaskType
+  viewerId?: string
   includeManagementOptions?: boolean
   includeTeacherOptions?: boolean
+  includeProfileOptions?: boolean
+}
+type OpsTaskWorkspaceOptionLoadOptions = {
+  force?: boolean
+  taskType?: OpsTaskType
+  viewerId?: string
 }
 const opsTaskWorkspaceDataCache = new Map<string, { data: OpsTaskWorkspaceData; expiresAt: number }>()
+const opsTaskWorkspaceDataInFlight = new Map<string, Promise<OpsTaskWorkspaceData>>()
+const opsTaskWorkspaceOptionDataCache = new Map<string, { data: OpsTaskWorkspaceOptionData; expiresAt: number }>()
+const opsTaskWorkspaceOptionDataInFlight = new Map<string, Promise<OpsTaskWorkspaceOptionData>>()
+const opsRegistrationClassDetailDataCache = new Map<string, { data: OpsRegistrationClassDetail | null; expiresAt: number }>()
+const opsRegistrationClassDetailDataInFlight = new Map<string, Promise<OpsRegistrationClassDetail | null>>()
 
 function shouldIncludeOpsTeacherOptions(options: OpsTaskWorkspaceLoadOptions = {}) {
   return options.includeManagementOptions !== false || options.includeTeacherOptions === true
@@ -328,14 +410,111 @@ function shouldIncludeOpsTeacherOptions(options: OpsTaskWorkspaceLoadOptions = {
 function getOpsTaskWorkspaceCacheKey(options: OpsTaskWorkspaceLoadOptions = {}) {
   return [
     options.taskType || "all",
+    options.viewerId || "anonymous",
     options.includeManagementOptions === false ? "light" : "full",
     shouldIncludeOpsTeacherOptions(options) ? "teachers" : "no-teachers",
+    options.includeProfileOptions === false ? "no-profiles" : "profiles",
   ].join(":")
 }
 
-function clearOpsTaskWorkspaceDataCache() {
-  opsTaskWorkspaceDataCache.clear()
+function getOpsTaskWorkspaceOptionCacheKey(options: OpsTaskWorkspaceOptionLoadOptions = {}) {
+  return [options.taskType || "all", options.viewerId || "anonymous"].join(":")
 }
+
+function getOpsRegistrationClassDetailCacheKey(classId: string, options: { viewerId?: string } = {}) {
+  return [options.viewerId || "anonymous", classId].join(":")
+}
+
+function shouldPersistOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions = {}) {
+  return (
+    options.taskType === "registration"
+    && options.includeManagementOptions === false
+    && Boolean(options.viewerId)
+  )
+}
+
+function getOpsTaskWorkspaceSessionStorageKey(options: OpsTaskWorkspaceLoadOptions = {}) {
+  return `${OPS_REGISTRATION_SESSION_CACHE_PREFIX}${encodeURIComponent(getOpsTaskWorkspaceCacheKey(options))}`
+}
+
+export function getPersistedOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions = {}) {
+  if (typeof window === "undefined" || !shouldPersistOpsTaskWorkspaceData(options)) return null
+
+  const storageKey = getOpsTaskWorkspaceSessionStorageKey(options)
+  try {
+    const rawValue = window.sessionStorage.getItem(storageKey)
+    if (!rawValue) return null
+
+    const persisted = JSON.parse(rawValue) as { expiresAt?: unknown; data?: unknown }
+    const expiresAt = Number(persisted.expiresAt || 0)
+    const data = persisted.data as OpsTaskWorkspaceData | undefined
+    if (
+      !expiresAt
+      || expiresAt <= Date.now()
+      || !data
+      || !Array.isArray(data.tasks)
+      || data.schemaReady !== true
+      || data.error !== null
+    ) {
+      window.sessionStorage.removeItem(storageKey)
+      return null
+    }
+
+    return data
+  } catch {
+    try {
+      window.sessionStorage.removeItem(storageKey)
+    } catch {
+      // Storage may be unavailable in privacy-restricted browser contexts.
+    }
+    return null
+  }
+}
+
+function persistOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions, data: OpsTaskWorkspaceData) {
+  if (
+    typeof window === "undefined"
+    || !shouldPersistOpsTaskWorkspaceData(options)
+    || data.schemaReady !== true
+    || data.error !== null
+  ) return
+
+  try {
+    window.sessionStorage.setItem(
+      getOpsTaskWorkspaceSessionStorageKey(options),
+      JSON.stringify({
+        expiresAt: Date.now() + OPS_REGISTRATION_SESSION_CACHE_TTL_MS,
+        data,
+      }),
+    )
+  } catch {
+    // Keep registration usable when the browser rejects or exhausts session storage.
+  }
+}
+
+export function clearOpsTaskWorkspaceDataCache() {
+  opsTaskWorkspaceDataCache.clear()
+  opsTaskWorkspaceDataInFlight.clear()
+  opsTaskWorkspaceOptionDataCache.clear()
+  opsTaskWorkspaceOptionDataInFlight.clear()
+  opsRegistrationClassDetailDataCache.clear()
+  opsRegistrationClassDetailDataInFlight.clear()
+  clearRegistrationTrackServiceCaches()
+
+  if (typeof window === "undefined") return
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const storageKey = window.sessionStorage.key(index)
+      if (storageKey?.startsWith(OPS_REGISTRATION_SESSION_CACHE_PREFIX)) {
+        window.sessionStorage.removeItem(storageKey)
+      }
+    }
+  } catch {
+    // Storage may be unavailable in privacy-restricted browser contexts.
+  }
+}
+
+setRegistrationTrackMutationCacheInvalidator(clearOpsTaskWorkspaceDataCache)
 
 export function getCachedOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions = {}) {
   const cached = opsTaskWorkspaceDataCache.get(getOpsTaskWorkspaceCacheKey(options))
@@ -345,8 +524,77 @@ export function getCachedOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptio
   return null
 }
 
+// ops-task-read-measure:start
+export type OpsTaskReadMeasureRecord = {
+  name: string
+  cacheHit: boolean
+  queryCount: number
+  ok: boolean
+}
+
+type OpsTaskReadMeasureOptions = {
+  performance?: {
+    mark: (name: string) => void
+    measure: (name: string, startMark: string, endMark: string) => void
+  }
+  recordMeasure?: (record: OpsTaskReadMeasureRecord) => void
+}
+
+export function createOpsTaskReadMeasureRunner(options: OpsTaskReadMeasureOptions = {}) {
+  let sequence = 0
+  return function runOpsTaskReadMeasure<T>(
+    name: string,
+    cacheHit: boolean,
+    work: (metrics: { queryCount: number }) => Promise<T> | T,
+  ): Promise<T> {
+    sequence += 1
+    const metrics = { queryCount: 0 }
+    const startMark = `${name}:start:${sequence}`
+    const endMark = `${name}:end:${sequence}`
+    options.performance?.mark(startMark)
+    let ok = false
+    let workResult: Promise<T> | T
+    try {
+      workResult = work(metrics)
+    } catch (error) {
+      workResult = Promise.reject(error)
+    }
+    return Promise.resolve(workResult)
+      .then((result) => {
+        ok = true
+        return result
+      })
+      .finally(() => {
+        options.performance?.mark(endMark)
+        options.performance?.measure(name, startMark, endMark)
+        options.recordMeasure?.({ name, cacheHit, queryCount: metrics.queryCount, ok })
+      })
+  }
+}
+
+let opsTaskReadMeasureLogger: ((record: OpsTaskReadMeasureRecord) => void) | null = null
+
+export function setOpsTaskReadMeasureLogger(logger: ((record: OpsTaskReadMeasureRecord) => void) | null) {
+  opsTaskReadMeasureLogger = logger
+}
+
+const runOpsTaskReadMeasure = createOpsTaskReadMeasureRunner({
+  performance: typeof performance === "undefined"
+    ? undefined
+    : {
+        mark: (name) => performance.mark(name),
+        measure: (name, startMark, endMark) => performance.measure(name, startMark, endMark),
+      },
+  recordMeasure: (record) => opsTaskReadMeasureLogger?.(record),
+})
+// ops-task-read-measure:end
+
 function text(value: unknown) {
   return String(value || "").trim()
+}
+
+function registrationPhoneIdentity(value: unknown) {
+  return text(value).replace(/\D/g, "")
 }
 
 function bool(value: unknown) {
@@ -509,12 +757,21 @@ function singleByTaskId<T extends { taskId: string }>(items: T[]) {
   return new Map(items.map((item) => [item.taskId, item]))
 }
 
+function embeddedTaskRows(taskRows: Row[], key: string) {
+  return taskRows.flatMap((row) => {
+    const embedded = row[key]
+    if (Array.isArray(embedded)) return embedded as Row[]
+    if (embedded && typeof embedded === "object") return [embedded as Row]
+    return []
+  })
+}
+
 async function readTable(table: string, columns = "*", optional = true) {
   if (!supabase) return []
 
   const result = await supabase.from(table).select(columns)
   if (result.error) {
-    if (optional || isMissingRelationError(result.error)) return []
+    if (optional && isMissingRelationError(result.error)) return []
     throw result.error
   }
 
@@ -534,28 +791,105 @@ async function readTableWithFallback(table: string, columns: string, fallbackCol
     if (!fallback.error) {
       return (fallback.data || []) as unknown as Row[]
     }
-    if (optional || isMissingRelationError(fallback.error)) return []
+    if (optional && isMissingRelationError(fallback.error)) return []
     throw fallback.error
   }
 
-  if (optional || isMissingRelationError(result.error)) return []
+  if (optional && isMissingRelationError(result.error)) return []
   throw result.error
 }
 
-async function readOpsClassRows() {
+async function readOpsClassRows(taskType?: OpsTaskType) {
   if (!supabase) return []
 
-  for (const columns of OPS_CLASS_COLUMN_CANDIDATES) {
+  const columnCandidates = taskType === "registration"
+    ? OPS_REGISTRATION_CLASS_COLUMN_CANDIDATES
+    : OPS_CLASS_COLUMN_CANDIDATES
+  for (const columns of columnCandidates) {
     const result = await supabase.from("classes").select(columns)
     if (!result.error) {
       return (result.data || []) as unknown as Row[]
     }
     if (!isMissingColumnError(result.error)) {
-      return []
+      throw result.error
     }
   }
 
   return []
+}
+
+async function readOpsRegistrationClassDetail(
+  classId: string,
+  metrics: { queryCount: number },
+): Promise<OpsRegistrationClassDetail | null> {
+  if (!supabase) return null
+  const safeClassId = text(classId)
+  if (!safeClassId) return null
+
+  for (const columns of OPS_REGISTRATION_CLASS_DETAIL_COLUMN_CANDIDATES) {
+    metrics.queryCount += 1
+    const result = await supabase.from("classes").select(columns).eq("id", safeClassId).limit(1)
+    if (!result.error) {
+      const row = ((result.data || []) as unknown as Row[])[0]
+      return row ? mapOpsClassOption(row) : null
+    }
+    if (!isMissingColumnError(result.error)) throw result.error
+  }
+
+  return null
+}
+
+export async function loadOpsRegistrationClassDetail(
+  classId: string,
+  options: { force?: boolean; viewerId?: string } = {},
+): Promise<OpsRegistrationClassDetail | null> {
+  const safeClassId = text(classId)
+  if (!safeClassId) return null
+  const safeViewerId = text(options.viewerId)
+  if (!safeViewerId) throw new Error("인증된 사용자 정보를 확인할 수 없습니다.")
+  const measureName = `registration:class-detail:${safeClassId}`
+  const cacheKey = getOpsRegistrationClassDetailCacheKey(safeClassId, { viewerId: safeViewerId })
+  const cached = opsRegistrationClassDetailDataCache.get(cacheKey)
+  if (!options.force && cached && cached.expiresAt > Date.now()) {
+    return runOpsTaskReadMeasure(measureName, true, async () => cached.data)
+  }
+  const inFlight = opsRegistrationClassDetailDataInFlight.get(cacheKey)
+  if (!options.force && inFlight) return inFlight
+
+  const loadPromise = runOpsTaskReadMeasure(
+    measureName,
+    false,
+    (metrics) => readOpsRegistrationClassDetail(safeClassId, metrics),
+  )
+  opsRegistrationClassDetailDataInFlight.set(cacheKey, loadPromise)
+  try {
+    const data = await loadPromise
+    if (opsRegistrationClassDetailDataInFlight.get(cacheKey) === loadPromise) {
+      opsRegistrationClassDetailDataCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + OPS_TASK_WORKSPACE_CACHE_TTL_MS,
+      })
+    }
+    return data
+  } finally {
+    if (opsRegistrationClassDetailDataInFlight.get(cacheKey) === loadPromise) {
+      opsRegistrationClassDetailDataInFlight.delete(cacheKey)
+    }
+  }
+}
+
+export async function loadOpsRegistrationClassDetails(
+  classIds: readonly string[],
+  options: { force?: boolean; viewerId?: string } = {},
+): Promise<Record<string, OpsRegistrationClassDetail | null>> {
+  const uniqueClassIds = Array.from(new Set(classIds.map(text).filter(Boolean)))
+  const fixture = loadRegistrationSubjectTrackFixtureClassDetails(uniqueClassIds)
+  if (fixture) return fixture
+  const entries = await Promise.all(uniqueClassIds.map(async (classId) => [
+    classId,
+    await loadOpsRegistrationClassDetail(classId, options),
+  ] as const))
+  return Object.fromEntries(entries)
 }
 
 async function readTaskScopedTable(table: string, taskIds: string[], columns = "*", optional = true) {
@@ -563,7 +897,7 @@ async function readTaskScopedTable(table: string, taskIds: string[], columns = "
 
   const result = await supabase.from(table).select(columns).in("task_id", taskIds)
   if (result.error) {
-    if (optional || isMissingRelationError(result.error)) return []
+    if (optional && isMissingRelationError(result.error)) return []
     throw result.error
   }
 
@@ -580,6 +914,16 @@ async function writeEvent(taskId: string, eventType: string, fieldName = "", bef
     after_value: nullable(afterValue),
   })
   if (error && !isMissingRelationError(error) && !isMissingColumnError(error)) throw error
+}
+
+async function writeCommittedEvent(taskId: string, eventType: string, fieldName = "", beforeValue = "", afterValue = "") {
+  try {
+    await writeEvent(taskId, eventType, fieldName, beforeValue, afterValue)
+  } catch (error) {
+    // The business mutation already committed. Reporting failure here would invite a
+    // duplicate retry, so surface the audit degradation to diagnostics only.
+    console.error("등록 감사 이력 저장 실패", error)
+  }
 }
 
 async function writeAutoSyncEventOnce(taskId: string, fieldName: string, afterValue: string, beforeValue = "") {
@@ -613,11 +957,10 @@ const MANUAL_CHECK_FIELD_DEFINITIONS: Partial<Record<OpsTaskType, { table: strin
   registration: {
     table: "ops_registration_details",
     fields: [
-      { column: "admission_notice_sent", label: "입학신청서", getValue: (input) => Boolean(input.registration?.admissionNoticeSent) },
-      { column: "payment_checked", label: "수납 완료", getValue: (input) => Boolean(input.registration?.paymentChecked) },
-      { column: "makeedu_registered", label: "메이크에듀 등록", getValue: (input) => Boolean(input.registration?.makeeduRegistered) },
+      { column: "admission_notice_sent", label: "입학신청서 발송", getValue: (input) => Boolean(input.registration?.admissionNoticeSent) },
+      { column: "makeedu_registered", label: "메이크에듀 등록(수업, 교재)", getValue: (input) => Boolean(input.registration?.makeeduRegistered) },
       { column: "makeedu_invoice_sent", label: "청구서 발송", getValue: (input) => Boolean(input.registration?.makeeduInvoiceSent) },
-      { column: "textbook_billing_issued", label: "교재 청구출고표", getValue: (input) => Boolean(input.registration?.textbookBillingIssued) },
+      { column: "payment_checked", label: "수납 완료 확인", getValue: (input) => Boolean(input.registration?.paymentChecked) },
     ],
   },
   withdrawal: {
@@ -669,7 +1012,6 @@ function mapRegistration(row: Row | undefined): OpsRegistrationDetail | undefine
   if (!row) return undefined
   return {
     pipelineStatus: text(row.pipeline_status) || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의",
-    inquiryChannel: text(row.inquiry_channel),
     inquiryAt: text(row.inquiry_at),
     schoolGrade: text(row.school_grade),
     schoolName: text(row.school_name),
@@ -931,11 +1273,397 @@ export async function loadOpsTodoDashboardSummaryData(): Promise<OpsTodoDashboar
   }
 }
 
+function mapOpsClassOption(row: Row): OpsClassOption {
+  return {
+    id: text(row.id),
+    label: text(row.name) || text(row.id),
+    meta: optionMeta([row.subject, row.teacher, row.room]),
+    subject: text(row.subject),
+    grade: text(row.grade),
+    teacher: text(row.teacher),
+    room: text(row.room),
+    schedule: text(row.schedule),
+    fee: numberValue(row.fee || row.tuition),
+    schedulePlan: recordValue(row.schedule_plan),
+    studentIds: normalizeIdList(row.student_ids),
+    waitlistIds: normalizeIdList(row.waitlist_ids),
+    textbookIds: normalizeIdList(row.textbook_ids),
+  }
+}
+
+function buildOpsTaskWorkspaceOptionData(
+  profileRows: Row[],
+  studentRows: Row[],
+  classRows: Row[],
+  textbookRows: Row[],
+  teacherRows: Row[],
+): Omit<OpsTaskWorkspaceOptionData, "schemaReady" | "error"> {
+  const profileLabelCounts = new Map<string, number>()
+  profileRows.forEach((row) => {
+    const label = profileLabel(row)
+    profileLabelCounts.set(label, (profileLabelCounts.get(label) || 0) + 1)
+  })
+  const duplicatedProfileLabels = new Set(
+    Array.from(profileLabelCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([label]) => label),
+  )
+
+  return {
+    profiles: profileRows
+      .map((row) => ({
+        id: text(row.id),
+        label: profileOptionLabel(row, duplicatedProfileLabels),
+        email: text(row.email),
+        loginId: text(row.login_id),
+        role: text(row.role),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, "ko")),
+    students: studentRows.map((row) => ({
+      id: text(row.id),
+      label: text(row.name) || text(row.id),
+      meta: optionMeta([row.grade, row.school, row.status]),
+      grade: text(row.grade),
+      school: text(row.school),
+      contact: text(row.contact),
+      parentContact: text(row.parent_contact),
+      status: text(row.status),
+      classIds: normalizeIdList(row.class_ids),
+      waitlistClassIds: normalizeIdList(row.waitlist_class_ids),
+    } satisfies OpsStudentOption)),
+    classes: classRows.map(mapOpsClassOption),
+    textbooks: textbookRows.map((row) => ({
+      id: text(row.id),
+      label: text(row.title) || text(row.name) || text(row.id),
+      meta: optionMeta([row.publisher, row.subject]),
+      publisher: text(row.publisher),
+      subject: text(row.subject),
+    } satisfies OpsTextbookOption)),
+    teachers: teacherRows
+      .filter((row) => row.is_visible !== false)
+      .map((row) => ({
+        id: text(row.id),
+        label: text(row.name) || text(row.id),
+        meta: optionMeta([Array.isArray(row.subjects) ? row.subjects.join(", ") : "", row.account_email]),
+        subjects: Array.isArray(row.subjects) ? row.subjects.map((subject) => text(subject)).filter(Boolean) : [],
+        profileId: text(row.profile_id),
+        accountEmail: text(row.account_email),
+        sortOrder: numberValue(row.sort_order),
+      } satisfies OpsTeacherOption))
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label, "ko")),
+  }
+}
+
+async function readOpsTaskWorkspaceOptionData(
+  options: OpsTaskWorkspaceOptionLoadOptions,
+): Promise<OpsTaskWorkspaceOptionData> {
+  if (!supabase) {
+    return {
+      ...emptyOpsTaskWorkspaceOptionData,
+      schemaReady: false,
+      error: "Supabase 연결 설정이 필요합니다.",
+    }
+  }
+
+  try {
+    const [profileRows, studentRows, classRows, textbookRows, teacherRows] = await Promise.all([
+      readTable("profiles", "id,name,email,role,login_id", true),
+      readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true),
+      readOpsClassRows(options.taskType),
+      readTable("textbooks", "id,title,name,publisher,subject", true),
+      readTableWithFallback("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email", "id,name,subjects,is_visible,sort_order", true),
+    ])
+
+    return {
+      ...buildOpsTaskWorkspaceOptionData(profileRows, studentRows, classRows, textbookRows, teacherRows),
+      schemaReady: true,
+      error: null,
+    }
+  } catch (error) {
+    if (isMissingRelationError(error)) {
+      return {
+        ...emptyOpsTaskWorkspaceOptionData,
+        schemaReady: false,
+        error: "할 일 DB 마이그레이션을 적용한 뒤 새로고침하세요.",
+      }
+    }
+
+    return {
+      ...emptyOpsTaskWorkspaceOptionData,
+      schemaReady: false,
+      error: error instanceof Error ? error.message : "선택 정보를 불러오지 못했습니다.",
+    }
+  }
+}
+
+export async function loadOpsRegistrationWorkspaceOptionData(
+  options: { viewerId?: string; force?: boolean } = {},
+): Promise<OpsRegistrationWorkspaceOptionData> {
+  const safeViewerId = text(options.viewerId)
+  if (!safeViewerId) throw new Error("인증된 사용자 정보를 확인할 수 없습니다.")
+  return loadRegistrationWorkspaceOptionData({
+    viewerId: safeViewerId,
+    force: options.force,
+  })
+}
+
+export async function loadOpsTaskWorkspaceOptionData(
+  options: OpsTaskWorkspaceOptionLoadOptions = {},
+): Promise<OpsTaskWorkspaceOptionData> {
+  if (options.taskType === "registration") {
+    return loadOpsRegistrationWorkspaceOptionData({
+      viewerId: options.viewerId,
+      force: options.force,
+    })
+  }
+
+  const cacheKey = getOpsTaskWorkspaceOptionCacheKey(options)
+  const cached = opsTaskWorkspaceOptionDataCache.get(cacheKey)
+  if (!options.force && cached && cached.expiresAt > Date.now()) return cached.data
+  const inFlight = opsTaskWorkspaceOptionDataInFlight.get(cacheKey)
+  if (!options.force && inFlight) return inFlight
+
+  const loadPromise = readOpsTaskWorkspaceOptionData(options)
+  opsTaskWorkspaceOptionDataInFlight.set(cacheKey, loadPromise)
+
+  try {
+    const data = await loadPromise
+    if (
+      data.schemaReady
+      && data.error === null
+      && opsTaskWorkspaceOptionDataInFlight.get(cacheKey) === loadPromise
+    ) {
+      opsTaskWorkspaceOptionDataCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + OPS_TASK_WORKSPACE_CACHE_TTL_MS,
+      })
+    }
+    return data
+  } finally {
+    if (opsTaskWorkspaceOptionDataInFlight.get(cacheKey) === loadPromise) {
+      opsTaskWorkspaceOptionDataInFlight.delete(cacheKey)
+    }
+  }
+}
+
 export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOptions = {}): Promise<OpsTaskWorkspaceData> {
   const cacheKey = getOpsTaskWorkspaceCacheKey(options)
   const cached = opsTaskWorkspaceDataCache.get(cacheKey)
   if (!options.force && cached && cached.expiresAt > Date.now()) {
+    if (options.taskType === "registration") {
+      return runOpsTaskReadMeasure("registration:parent-list", true, async () => cached.data)
+    }
     return cached.data
+  }
+  const inFlight = opsTaskWorkspaceDataInFlight.get(cacheKey)
+  if (!options.force && inFlight) return inFlight
+
+  const loadPromise = options.taskType === "registration"
+    ? runOpsTaskReadMeasure(
+        "registration:parent-list",
+        false,
+        (metrics) => readOpsTaskWorkspaceData(options, metrics),
+      )
+    : readOpsTaskWorkspaceData(options)
+  opsTaskWorkspaceDataInFlight.set(cacheKey, loadPromise)
+
+  try {
+    const data = await loadPromise
+    if (
+      data.schemaReady
+      && data.error === null
+      && opsTaskWorkspaceDataInFlight.get(cacheKey) === loadPromise
+    ) {
+      opsTaskWorkspaceDataCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + OPS_TASK_WORKSPACE_CACHE_TTL_MS,
+      })
+      persistOpsTaskWorkspaceData(options, data)
+    }
+    return data
+  } finally {
+    if (opsTaskWorkspaceDataInFlight.get(cacheKey) === loadPromise) {
+      opsTaskWorkspaceDataInFlight.delete(cacheKey)
+    }
+  }
+}
+
+function getLegacyRegistrationTrackStatus(task: OpsTask): OpsRegistrationTrackStatus {
+  const pipelineStatus = text(task.registration?.pipelineStatus)
+  const viewKey = getRegistrationViewKey(pipelineStatus, task.status)
+  if (viewKey === "level_test") return "level_test_scheduled"
+  if (viewKey === "consulting") return "consultation_waiting"
+  if (viewKey === "waiting") return "waiting"
+  if (viewKey === "enrollment") return "enrollment_processing"
+  if (viewKey === "closed") {
+    if (pipelineStatus.startsWith("7.")) return "registered"
+    if (pipelineStatus.startsWith("8.")) return "not_registered"
+    return "inquiry_closed"
+  }
+  return "inquiry"
+}
+
+function createLegacyRegistrationTrackSummaries(tasks: OpsTask[]): OpsRegistrationTrackSummary[] {
+  return tasks.flatMap((task) => {
+    const subjects = parseRegistrationSubjects(task.subject)
+      .filter((subject): subject is "영어" | "수학" => subject === "영어" || subject === "수학")
+    const status = getLegacyRegistrationTrackStatus(task)
+    const pipelineStatus = text(task.registration?.pipelineStatus)
+    const waitingKind = pipelineStatus.startsWith("4-1.")
+      ? "current_class"
+      : pipelineStatus.startsWith("4-2.")
+        ? "current_term_opening"
+        : pipelineStatus.startsWith("4-3.")
+          ? "next_term_opening"
+          : ""
+
+    return subjects.map((subject) => ({
+      id: `legacy:${task.id}:${subject}`,
+      taskId: task.id,
+      subject,
+      status,
+      legacy: true,
+      directorProfileId: null,
+      directorName: "",
+      directorAssignmentSource: "",
+      directorAssignmentRuleKey: "",
+      waitingKind,
+      levelTestRetakeDecision: "",
+      migrationReviewRequired: false,
+      stageEnteredAt: task.registration?.inquiryAt || task.createdAt,
+    }))
+  })
+}
+
+function resolveRegistrationTrackSummariesForParents(
+  parentTasks: OpsTask[],
+  summary: Awaited<ReturnType<typeof loadRegistrationTrackSummaries>>,
+): OpsRegistrationTrackSummary[] {
+  if (summary.mode === "legacy") return createLegacyRegistrationTrackSummaries(parentTasks)
+
+  const childTracksByTaskId = new Map<string, OpsRegistrationTrackSummary[]>()
+  summary.tracks.forEach((track) => {
+    const current = childTracksByTaskId.get(track.taskId) || []
+    current.push(track)
+    childTracksByTaskId.set(track.taskId, current)
+  })
+  return parentTasks.flatMap((task) => {
+    const registrationTracks = childTracksByTaskId.get(task.id) || []
+    return registrationTracks.length > 0
+      ? registrationTracks
+      : createLegacyRegistrationTrackSummaries([task])
+  })
+}
+
+async function readOpsRegistrationParentWorkspaceData(
+  options: OpsTaskWorkspaceLoadOptions,
+  metrics: { queryCount: number },
+): Promise<OpsTaskWorkspaceData> {
+  const safeViewerId = text(options.viewerId)
+  if (!safeViewerId) {
+    return {
+      ...emptyOpsTaskWorkspaceData,
+      schemaReady: false,
+      error: "인증된 사용자 정보를 확인할 수 없습니다.",
+    }
+  }
+  if (!supabase) {
+    return {
+      ...emptyOpsTaskWorkspaceData,
+      schemaReady: false,
+      error: "Supabase 연결 설정이 필요합니다.",
+    }
+  }
+
+  try {
+    metrics.queryCount += 1
+    const taskReadPromise = supabase
+      .from("ops_tasks")
+      .select(OPS_REGISTRATION_PARENT_LIST_COLUMNS)
+      .eq("type", "registration")
+      .then(({ data, error }) => {
+        if (error) throw error
+        return (data || []) as unknown as Row[]
+      })
+    const taskRows = await taskReadPromise
+    const registrationRows = embeddedTaskRows(taskRows, "ops_registration_details")
+    const registration = singleByTaskId(registrationRows.map((row) => ({
+      taskId: text(row.task_id),
+      ...mapRegistration(row)!,
+    })))
+    const emptyProfiles = new Map<string, Row>()
+    const emptyWithdrawal = new Map<string, OpsWithdrawalDetail>()
+    const emptyTransfer = new Map<string, OpsTransferDetail>()
+    const emptyWordRetest = new Map<string, OpsWordRetestDetail>()
+    const emptyComments = new Map<string, OpsTaskComment[]>()
+    const emptyAttachments = new Map<string, OpsTaskAttachment[]>()
+    const emptyEvents = new Map<string, OpsTaskEvent[]>()
+    const parentTasks = taskRows.map((row) => mapTask(
+      row,
+      emptyProfiles,
+      registration,
+      emptyWithdrawal,
+      emptyTransfer,
+      emptyWordRetest,
+      emptyComments,
+      emptyAttachments,
+      emptyEvents,
+    ))
+    const taskIds = parentTasks.map((task) => task.id).filter(Boolean)
+    const summary = await loadRegistrationTrackSummaries(
+      taskIds,
+      safeViewerId,
+      { force: options.force },
+    )
+
+    if (summary.mode === "maintenance") {
+      return {
+        ...emptyOpsTaskWorkspaceData,
+        schemaReady: false,
+        error: "등록 데이터 전환 중입니다. 잠시 후 다시 시도하세요.",
+      }
+    }
+
+    const tracks = resolveRegistrationTrackSummariesForParents(parentTasks, summary)
+    const tracksByTaskId = byTaskId(tracks)
+    const tasks = parentTasks
+      .map((task) => ({
+        ...task,
+        registrationTracks: tracksByTaskId.get(task.id) || [],
+      }))
+      .sort((left, right) => (
+        String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
+      ))
+
+    return {
+      ...emptyOpsTaskWorkspaceData,
+      tasks,
+      schemaReady: true,
+      error: null,
+    }
+  } catch (error) {
+    if (isMissingRelationError(error)) {
+      return {
+        ...emptyOpsTaskWorkspaceData,
+        schemaReady: false,
+        error: "할 일 DB 마이그레이션을 적용한 뒤 새로고침하세요.",
+      }
+    }
+
+    return {
+      ...emptyOpsTaskWorkspaceData,
+      schemaReady: false,
+      error: error instanceof Error ? error.message : "등록 업무 목록을 불러오지 못했습니다.",
+    }
+  }
+}
+
+async function readOpsTaskWorkspaceData(
+  options: OpsTaskWorkspaceLoadOptions,
+  metrics: { queryCount: number } = { queryCount: 0 },
+): Promise<OpsTaskWorkspaceData> {
+  if (options.taskType === "registration") {
+    return readOpsRegistrationParentWorkspaceData(options, metrics)
   }
 
   if (!supabase) {
@@ -955,6 +1683,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
     })
     const includeManagementOptions = options.includeManagementOptions !== false
     const includeTeacherOptions = shouldIncludeOpsTeacherOptions(options)
+    const includeProfileOptions = options.includeProfileOptions !== false
     const [
       taskRows,
       profileRows,
@@ -964,12 +1693,14 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
       teacherRows,
     ] = await Promise.all([
       taskReadPromise,
-      readTable("profiles", "id,name,email,role,login_id", true),
+      includeProfileOptions
+        ? readTable("profiles", "id,name,email,role,login_id", true)
+        : Promise.resolve([]),
       includeManagementOptions
         ? readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true)
         : Promise.resolve([]),
       includeManagementOptions
-        ? readOpsClassRows()
+        ? readOpsClassRows(options.taskType)
         : Promise.resolve([]),
       includeManagementOptions
         ? readTable("textbooks", "id,title,name,publisher,subject", true)
@@ -980,7 +1711,7 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
     ])
 
     const taskIds = taskRows.map((row) => text(row.id)).filter(Boolean)
-    const shouldReadRegistration = !options.taskType || options.taskType === "registration"
+    const shouldReadRegistration = !options.taskType
     const shouldReadWithdrawal = !options.taskType || options.taskType === "withdrawal"
     const shouldReadTransfer = !options.taskType || options.taskType === "transfer"
     const shouldReadWordRetest = !options.taskType || options.taskType === "word_retest"
@@ -1023,85 +1754,16 @@ export async function loadOpsTaskWorkspaceData(options: OpsTaskWorkspaceLoadOpti
       ...mapWordRetest(row)!,
     })))
 
-    const profileLabelCounts = new Map<string, number>()
-    profileRows.forEach((row) => {
-      const label = profileLabel(row)
-      profileLabelCounts.set(label, (profileLabelCounts.get(label) || 0) + 1)
-    })
-    const duplicatedProfileLabels = new Set(
-      Array.from(profileLabelCounts.entries())
-        .filter(([, count]) => count > 1)
-        .map(([label]) => label),
-    )
-
     const data = {
       tasks: taskRows
         .map((row) => mapTask(row, profiles, registration, withdrawal, transfer, wordRetest, comments, attachments, events))
         .sort((left, right) => (
           String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
         )),
-      profiles: profileRows
-        .map((row) => ({
-          id: text(row.id),
-          label: profileOptionLabel(row, duplicatedProfileLabels),
-          email: text(row.email),
-          loginId: text(row.login_id),
-          role: text(row.role),
-        }))
-        .sort((left, right) => left.label.localeCompare(right.label, "ko")),
-      students: studentRows.map((row) => ({
-        id: text(row.id),
-        label: text(row.name) || text(row.id),
-        meta: optionMeta([row.grade, row.school, row.status]),
-        grade: text(row.grade),
-        school: text(row.school),
-        contact: text(row.contact),
-        parentContact: text(row.parent_contact),
-        status: text(row.status),
-        classIds: normalizeIdList(row.class_ids),
-        waitlistClassIds: normalizeIdList(row.waitlist_class_ids),
-      } satisfies OpsStudentOption)),
-      classes: classRows.map((row) => ({
-        id: text(row.id),
-        label: text(row.name) || text(row.id),
-        meta: optionMeta([row.subject, row.teacher, row.room]),
-        subject: text(row.subject),
-        grade: text(row.grade),
-        teacher: text(row.teacher),
-        room: text(row.room),
-        schedule: text(row.schedule),
-        fee: numberValue(row.fee || row.tuition),
-        schedulePlan: recordValue(row.schedule_plan),
-        studentIds: normalizeIdList(row.student_ids),
-        waitlistIds: normalizeIdList(row.waitlist_ids),
-        textbookIds: normalizeIdList(row.textbook_ids),
-      } satisfies OpsClassOption)),
-      textbooks: textbookRows.map((row) => ({
-        id: text(row.id),
-        label: text(row.title) || text(row.name) || text(row.id),
-        meta: optionMeta([row.publisher, row.subject]),
-        publisher: text(row.publisher),
-        subject: text(row.subject),
-      } satisfies OpsTextbookOption)),
-      teachers: teacherRows
-        .filter((row) => row.is_visible !== false)
-        .map((row) => ({
-          id: text(row.id),
-          label: text(row.name) || text(row.id),
-          meta: optionMeta([Array.isArray(row.subjects) ? row.subjects.join(", ") : "", row.account_email]),
-          subjects: Array.isArray(row.subjects) ? row.subjects.map((subject) => text(subject)).filter(Boolean) : [],
-          profileId: text(row.profile_id),
-          accountEmail: text(row.account_email),
-          sortOrder: numberValue(row.sort_order),
-        } satisfies OpsTeacherOption))
-        .sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label, "ko")),
+      ...buildOpsTaskWorkspaceOptionData(profileRows, studentRows, classRows, textbookRows, teacherRows),
       schemaReady: true,
       error: null,
     }
-    opsTaskWorkspaceDataCache.set(cacheKey, {
-      data,
-      expiresAt: Date.now() + OPS_TASK_WORKSPACE_CACHE_TTL_MS,
-    })
     return data
   } catch (error) {
     if (isMissingRelationError(error)) {
@@ -1175,6 +1837,18 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
   })))
 
   return mapTask(taskRows[0], profiles, registration, withdrawal, transfer, wordRetest, comments, attachments, events)
+}
+
+export function loadOpsRegistrationCaseDetail(
+  taskId: string,
+  viewerId: string,
+  options: { force?: boolean } = {},
+): Promise<OpsRegistrationCaseDetail> {
+  const safeTaskId = text(taskId)
+  const safeViewerId = text(viewerId)
+  if (!safeTaskId) throw new Error("등록 업무를 선택하세요.")
+  if (!safeViewerId) throw new Error("인증된 사용자 정보를 확인할 수 없습니다.")
+  return loadRegistrationCaseDetail(safeTaskId, safeViewerId, options)
 }
 
 async function assertOpsTaskExists(taskId: string) {
@@ -1252,7 +1926,6 @@ function buildRegistrationRow(taskId: string, detail: OpsRegistrationDetail = {}
   return {
     task_id: taskId,
     pipeline_status: nullable(detail.pipelineStatus) || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의",
-    inquiry_channel: nullable(detail.inquiryChannel),
     inquiry_at: nullableDate(detail.inquiryAt),
     school_grade: nullable(detail.schoolGrade),
     school_name: nullable(detail.schoolName),
@@ -1445,11 +2118,10 @@ function isRegistrationWaitlistPipelineStatus(value?: string) {
 
 function getMissingRegistrationCheckLabels(registration?: OpsRegistrationDetail) {
   return [
-    { checked: Boolean(registration?.admissionNoticeSent), label: "입학신청서" },
-    { checked: Boolean(registration?.paymentChecked), label: "수납 완료" },
-    { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록" },
+    { checked: Boolean(registration?.admissionNoticeSent), label: "입학신청서 발송" },
+    { checked: Boolean(registration?.makeeduRegistered), label: "메이크에듀 등록(수업, 교재)" },
     { checked: Boolean(registration?.makeeduInvoiceSent), label: "청구서 발송" },
-    { checked: Boolean(registration?.textbookBillingIssued), label: "교재 청구출고표" },
+    { checked: Boolean(registration?.paymentChecked), label: "수납 완료 확인" },
   ].filter((item) => !item.checked).map((item) => item.label)
 }
 
@@ -1556,8 +2228,8 @@ function isSameManagementReference(first: unknown, second: unknown) {
 }
 
 const MANAGEMENT_LINK_FIELDS = new Set(["학생", "수업", "교재", "전 수업", "후 수업", "선생님"])
-const MANAGEMENT_INPUT_FIELDS = new Set(["학생명", "학부모 전화", "레벨테스트 예약일시", "레벨테스트 완료일시", "레벨테스트 결과", "상담 예약일시", "상담 완료일시", "상담 책임자", "수업시작일", "퇴원일", "전 수업 종료일", "후 수업 시작일", "본시험일", "시험범위", "점수"])
-const MANAGEMENT_CHOICE_FIELDS = new Set(["과목", "레벨테스트 장소", "방문상담실", "다른 수업"])
+const MANAGEMENT_INPUT_FIELDS = new Set(["학생명", "학부모 전화", "문의일시", "레벨테스트 예약일시", "레벨테스트 완료일시", "레벨테스트 결과", "시험지·결과지 URL", "상담 예약일시", "상담 완료일시", "상담 책임자", "수업시작일", "퇴원일", "전 수업 종료일", "후 수업 시작일", "본시험일", "시험범위", "점수"])
+const MANAGEMENT_CHOICE_FIELDS = new Set(["과목", "학년", "레벨테스트 장소", "방문상담실", "다른 수업"])
 
 function managementMissingFieldLabel(field: string) {
   if (MANAGEMENT_INPUT_FIELDS.has(field)) return `${field} 입력 필요`
@@ -1584,9 +2256,9 @@ function assertManagementSyncReady(input: OpsTaskInput) {
 
   if (input.type === "registration" && isRegistrationWorkflowComplete(input)) {
     if (!text(input.registration?.classStartDate)) missingFields.push("수업시작일")
+    if (!text(input.registration?.classStartSession)) missingFields.push("수업시작일")
     if (!hasManagementReference(input.studentId, input.studentName)) missingFields.push("학생")
     if (!hasManagementReference(input.classId)) missingFields.push("수업")
-    if (!hasManagementReference(input.textbookId)) missingFields.push("교재")
     getMissingRegistrationCheckLabels(input.registration).forEach((label) => missingFields.push(label))
   }
 
@@ -1628,9 +2300,16 @@ function assertManagementSyncReady(input: OpsTaskInput) {
   }
 }
 
+function assertRegistrationInquiryBaseReady(input: OpsTaskInput) {
+  if (input.type !== "registration") return
+  const missingFields = getRegistrationCreateBlockers(input)
+  if (missingFields.length === 0) return
+  throw new Error(`${getTaskTypeLabel(input.type)} 완료 전: ${missingFields.map(managementMissingFieldLabel).join(", ")}`)
+}
+
 async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
   if (input.type === "registration" && isRegistrationWaitlistPipelineStatus(input.registration?.pipelineStatus)) {
-    const student = hasManagementReference(input.studentId) ? await resolveOpsStudent(input) : null
+    const student = hasManagementReference(input.studentId) ? await resolveOpsRegistrationStudent(input) : null
     const classRow = await selectOpsRowById("classes", input.classId || "")
 
     if (hasManagementReference(input.studentId)) assertResolvedManagementRecord(student, "대기 등록 전에 학생 정보를 다시 선택하세요.")
@@ -1638,13 +2317,20 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
   }
 
   if (input.type === "registration" && isRegistrationWorkflowComplete(input)) {
-    const student = hasManagementReference(input.studentId) ? await resolveOpsStudent(input) : null
+    const student = hasManagementReference(input.studentId) ? await resolveOpsRegistrationStudent(input) : null
     const classRow = await selectOpsRowById("classes", input.classId || "")
-    const textbook = await selectOpsRowById("textbooks", input.textbookId || "")
+    const textbook = hasManagementReference(input.textbookId)
+      ? await selectOpsRowById("textbooks", input.textbookId || "")
+      : null
 
     if (hasManagementReference(input.studentId)) assertResolvedManagementRecord(student, "등록 완료 전에 학생 정보를 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "등록 완료 전에 등록할 수업을 다시 선택하세요.")
-    assertResolvedManagementRecord(textbook, "등록 완료 전에 등록 교재를 다시 선택하세요.")
+    if (hasManagementReference(input.textbookId)) assertResolvedManagementRecord(textbook, "등록 완료 전에 등록 교재를 다시 선택하세요.")
+    const selectedScheduleExists = getSelectableRegistrationScheduleSessions(recordValue(classRow.schedule_plan)).some((session) => (
+      session.dateKey === text(input.registration?.classStartDate).slice(0, 10)
+      && session.sessionLabel === text(input.registration?.classStartSession)
+    ))
+    if (!selectedScheduleExists) throw new Error("등록 완료 전에 수업 시작 일정을 다시 선택하세요.")
   }
 
   if (input.type === "withdrawal" && input.status === "done") {
@@ -1722,6 +2408,9 @@ async function findOpsStudentByName(input: OpsTaskInput) {
   }
 
   const rows = ((data || []) as unknown as Row[])
+  if (input.type === "registration") {
+    return rows.find((row) => matchesOpsRegistrationStudent(row, input)) || null
+  }
   const school = text(input.registration?.schoolName)
   const studentPhone = text(input.registration?.studentPhone)
   return rows.find((row) => (
@@ -1731,14 +2420,17 @@ async function findOpsStudentByName(input: OpsTaskInput) {
 }
 
 async function resolveOpsStudent(input: OpsTaskInput) {
+  if (input.type === "registration") return await resolveOpsRegistrationStudent(input)
   return await selectOpsRowById("students", input.studentId || "") || await findOpsStudentByName(input)
 }
 
 function matchesOpsRegistrationStudent(row: Row, input: OpsTaskInput) {
   const registration = input.registration || {}
+  const studentName = text(input.studentName)
+  if (!studentName || text(row.name) !== studentName) return false
   const identityFields = [
-    { input: text(registration.studentPhone), row: text(row.contact) },
-    { input: text(registration.parentPhone), row: text(row.parent_contact) },
+    { input: registrationPhoneIdentity(registration.studentPhone), row: registrationPhoneIdentity(row.contact) },
+    { input: registrationPhoneIdentity(registration.parentPhone), row: registrationPhoneIdentity(row.parent_contact) },
   ].filter((field) => Boolean(field.input))
   const supportingFields = [
     { input: text(registration.schoolName), row: text(row.school) },
@@ -1749,8 +2441,12 @@ function matchesOpsRegistrationStudent(row: Row, input: OpsTaskInput) {
 }
 
 async function resolveOpsRegistrationStudent(input: OpsTaskInput) {
-  const byId = await selectOpsRowById("students", input.studentId || "")
-  if (byId) return byId
+  const persistedStudentId = text(input.studentId)
+  if (persistedStudentId) {
+    const byId = await selectOpsRowById("students", persistedStudentId)
+    if (byId && matchesOpsRegistrationStudent(byId, input)) return byId
+    throw new Error("연결된 학생 정보가 등록 문의 정보와 일치하지 않습니다.")
+  }
   if (!supabase) return null
 
   const studentName = text(input.studentName)
@@ -1765,7 +2461,7 @@ async function resolveOpsRegistrationStudent(input: OpsTaskInput) {
   return (((data || []) as unknown as Row[]).find((row) => matchesOpsRegistrationStudent(row, input))) || null
 }
 
-async function ensureOpsStudent(input: OpsTaskInput, existingStudent?: Row | null) {
+async function ensureOpsStudent(input: OpsTaskInput, existingStudent?: Row | null, createdStudentId = "") {
   if (!supabase) return null
   const existing = existingStudent === undefined ? await resolveOpsStudent(input) : existingStudent
   const studentName = text(input.studentName || input.wordRetest?.studentName || existing?.name)
@@ -1773,7 +2469,7 @@ async function ensureOpsStudent(input: OpsTaskInput, existingStudent?: Row | nul
 
   const registration = input.registration || {}
   const payload = {
-    id: text(existing?.id) || createOpsId(),
+    id: text(existing?.id) || text(createdStudentId) || createOpsId(),
     name: studentName,
     school: nullable(registration.schoolName) || nullable(existing?.school),
     grade: nullable(registration.schoolGrade) || nullable(existing?.grade),
@@ -1870,6 +2566,29 @@ function hasOpsStudentClassRosterLink(student: Row | null, classRow: Row | null)
   )
 }
 
+function hasSymmetricOpsStudentClassRosterLink(student: Row | null, classRow: Row | null) {
+  const studentId = text(student?.id)
+  const classId = text(classRow?.id)
+  if (!studentId || !classId) return false
+
+  const studentMode = getOpsStudentClassMode(student, classId)
+  const classMode = normalizeIdList(classRow?.student_ids).includes(studentId)
+    ? "enrolled"
+    : normalizeIdList(classRow?.waitlist_ids).includes(studentId)
+      ? "waitlist"
+      : ""
+  return (studentMode === "enrolled" && classMode === "enrolled")
+    || (studentMode === "waitlist" && classMode === "waitlist")
+}
+
+function hasSymmetricOpsWaitlistLink(student: Row | null, classRow: Row | null) {
+  const studentId = text(student?.id)
+  const classId = text(classRow?.id)
+  if (!studentId || !classId) return false
+  return getOpsStudentClassMode(student, classId) === "waitlist"
+    && normalizeIdList(classRow?.waitlist_ids).includes(studentId)
+}
+
 function hasOpsClassTextbookLink(classRow: Row | null, textbookId: string) {
   const safeTextbookId = text(textbookId)
   if (!safeTextbookId) return false
@@ -1877,7 +2596,11 @@ function hasOpsClassTextbookLink(classRow: Row | null, textbookId: string) {
 }
 
 function assertOpsStudentInClass(student: Row | null, classRow: Row | null, message: string) {
-  if (!hasOpsStudentClassRosterLink(student, classRow)) throw new Error(message)
+  const studentId = text(student?.id)
+  const classId = text(classRow?.id)
+  const enrolledOnStudent = Boolean(classId) && normalizeIdList(student?.class_ids).includes(classId)
+  const enrolledOnClass = Boolean(studentId) && normalizeIdList(classRow?.student_ids).includes(studentId)
+  if (!enrolledOnStudent || !enrolledOnClass) throw new Error(message)
 }
 
 function assertDifferentOpsClass(firstClass: Row | null, secondClass: Row | null, message: string) {
@@ -1892,7 +2615,7 @@ async function assertOpsRosterLinked(studentId: string, classId: string, message
     selectOpsRowById("students", studentId),
     selectOpsRowById("classes", classId),
   ])
-  if (!hasOpsStudentClassRosterLink(student, classRow)) throw new Error(message)
+  if (!hasSymmetricOpsStudentClassRosterLink(student, classRow)) throw new Error(message)
 }
 
 async function assertOpsRosterUnlinked(studentId: string, classId: string, message: string) {
@@ -1916,14 +2639,102 @@ async function assertOpsStudentStatus(studentId: string, status: string, message
   if (text(student?.status) !== status) throw new Error(message)
 }
 
+function isMissingOpsRosterRpc(error: unknown) {
+  if (!error || typeof error !== "object") return false
+  const row = error as Row
+  const code = text(row.code).toUpperCase()
+  const message = text(row.message).toLowerCase()
+  return code === "PGRST202" || code === "42883"
+    || (message.includes("schema cache") && message.includes("could not find the function"))
+}
+
+async function getOpsRosterRuntimeState() {
+  const runtime = await probeRegistrationSubjectTrackRuntime()
+  if (runtime.mode === "maintenance") {
+    throw new Error("데이터 전환 중에는 학생 명단을 변경할 수 없습니다.")
+  }
+  return runtime
+}
+
+async function applyReadyOpsRosterMode(
+  studentId: string,
+  classId: string,
+  nextMode: "enrolled" | "waitlist" | "removed",
+  expectedMode: "enrolled" | "waitlist" | "removed",
+  memo: string,
+) {
+  if (!supabase || !studentId || !classId) return false
+  const runtime = await getOpsRosterRuntimeState()
+  if (runtime.mode === "legacy") return false
+
+  const { data, error } = await supabase.rpc("set_student_class_roster_mode", {
+    p_student_id: studentId,
+    p_class_id: classId,
+    p_next_mode: nextMode,
+    p_expected_mode: expectedMode,
+    p_memo: memo,
+  })
+  if (error) {
+    if (isMissingOpsRosterRpc(error)) {
+      invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure(error)
+    }
+    throw error
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("학생 명단 변경 결과를 다시 불러오세요.")
+  }
+  return true
+}
+
+async function completeReadyOpsRosterTransition(taskId: string, type: OpsTaskType) {
+  if (!supabase || !taskId || !["withdrawal", "transfer"].includes(type)) return false
+  const runtime = await getOpsRosterRuntimeState()
+  if (runtime.mode === "legacy") return false
+
+  const functionName = type === "withdrawal"
+    ? "complete_ops_withdrawal_roster_transition"
+    : "complete_ops_transfer_roster_transition"
+  const { data, error } = await supabase.rpc(functionName, {
+    p_task_id: taskId,
+    p_request_key: `ops-${type}-completion-${taskId}`,
+  })
+  if (error) {
+    if (isMissingOpsRosterRpc(error)) {
+      invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure(error)
+    }
+    throw error
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("업무 완료 결과를 다시 불러오세요.")
+  }
+  return true
+}
+
+function getReadyOpsCompletionInput(input: OpsTaskInput): OpsTaskInput {
+  if (input.type === "withdrawal") {
+    return {
+      ...input,
+      withdrawal: { ...(input.withdrawal || {}), timetableRosterUpdated: false },
+    }
+  }
+  if (input.type === "transfer") {
+    return {
+      ...input,
+      transfer: { ...(input.transfer || {}), timetableRosterUpdated: false },
+    }
+  }
+  return input
+}
+
 async function restoreOpsStudentRosterSnapshot(studentId: string, student: Row | null) {
   if (!supabase || !studentId || !student) return
-  const { error } = await supabase.from("students").update({
+  const { data, error } = await supabase.from("students").update({
     status: text(student.status) || null,
     class_ids: normalizeIdList(student.class_ids),
     waitlist_class_ids: normalizeIdList(student.waitlist_class_ids),
-  }).eq("id", studentId)
+  }).eq("id", studentId).select("id")
   if (error && !isMissingColumnError(error)) throw error
+  if (!error && !didMutateOpsTask(data)) throw new Error("학생 명단 복원 대상을 찾지 못했습니다.")
 }
 
 async function restoreOpsRegistrationStudentSnapshot(studentId: string, student: Row | null) {
@@ -1941,38 +2752,43 @@ async function restoreOpsRegistrationStudentSnapshot(studentId: string, student:
     waitlist_class_ids: normalizeIdList(student.waitlist_class_ids),
   }
 
-  let result = await supabase.from("students").update(payload).eq("id", studentId)
+  let result = await supabase.from("students").update(payload).eq("id", studentId).select("id")
   if (result.error && isMissingColumnError(result.error)) {
     result = await supabase
       .from("students")
       .update(stripMissingMigrationColumns(payload, ["parent_contact", "enroll_date", "status", "class_ids", "waitlist_class_ids"]))
       .eq("id", studentId)
+      .select("id")
   }
   if (result.error && !isMissingColumnError(result.error)) throw result.error
+  if (!result.error && !didMutateOpsTask(result.data)) throw new Error("등록 학생 복원 대상을 찾지 못했습니다.")
 }
 
 async function restoreOpsClassRosterSnapshot(classId: string, classRow: Row | null) {
   if (!supabase || !classId || !classRow) return
-  const { error } = await supabase.from("classes").update({
+  const { data, error } = await supabase.from("classes").update({
     student_ids: normalizeIdList(classRow.student_ids),
     waitlist_ids: normalizeIdList(classRow.waitlist_ids),
-  }).eq("id", classId)
+  }).eq("id", classId).select("id")
   if (error && !isMissingColumnError(error)) throw error
+  if (!error && !didMutateOpsTask(data)) throw new Error("수업 명단 복원 대상을 찾지 못했습니다.")
 }
 
 async function restoreOpsStudentClassRosterSnapshots(studentId: string, student: Row | null, classId: string, classRow: Row | null) {
-  await Promise.allSettled([
+  const rollbackResults = await Promise.allSettled([
     restoreOpsStudentRosterSnapshot(studentId, student),
     restoreOpsClassRosterSnapshot(classId, classRow),
   ])
+  throwFirstRejectedRollback(rollbackResults)
 }
 
 async function restoreOpsClassTextbookSnapshot(classId: string, classRow: Row | null) {
   if (!supabase || !classId || !classRow) return
-  const { error } = await supabase.from("classes").update({
+  const { data, error } = await supabase.from("classes").update({
     textbook_ids: normalizeIdList(classRow.textbook_ids),
-  }).eq("id", classId)
+  }).eq("id", classId).select("id")
   if (error && !isMissingColumnError(error)) throw error
+  if (!error && !didMutateOpsTask(data)) throw new Error("수업 교재 복원 대상을 찾지 못했습니다.")
 }
 
 async function deleteOpsRegistrationCreatedStudent(student: Row | null, shouldDelete: boolean) {
@@ -1991,18 +2807,53 @@ function throwFirstRejectedRollback(rollbackResults: PromiseSettledResult<unknow
 async function rollbackOpsRegistrationCompletionSync(taskId: string, student: Row, classRow: Row, originalStudent: Row | null = null, shouldDeleteCreatedStudent = false) {
   const studentId = text(student.id)
   const classId = text(classRow.id)
+  let projectedStudent: Row | null = student
+  let projectionReadError: unknown = null
+  if (!shouldDeleteCreatedStudent) {
+    try {
+      projectedStudent = await selectOpsRowById("students", studentId) || student
+    } catch (error) {
+      projectionReadError = error
+    }
+  }
+  const previousMode = getOpsStudentClassMode(projectedStudent, classId)
+  const nextMode = getOpsStudentClassMode(originalStudent || student, classId)
   const studentRollback = shouldDeleteCreatedStudent
     ? deleteOpsRegistrationCreatedStudent(student, true)
     : restoreOpsRegistrationStudentSnapshot(studentId, originalStudent || student)
   const rollbackResults = await Promise.allSettled([
     studentRollback,
     restoreOpsClassRosterSnapshot(classId, classRow),
+    restoreOpsClassTextbookSnapshot(classId, classRow),
   ])
-  throwFirstRejectedRollback(rollbackResults)
+  const rollbackErrors: unknown[] = projectionReadError ? [projectionReadError] : []
+  for (const rollbackResult of rollbackResults) {
+    if (rollbackResult.status === "rejected") rollbackErrors.push(rollbackResult.reason)
+  }
+
+  if (!shouldDeleteCreatedStudent && previousMode !== nextMode) {
+    try {
+      await insertOpsStudentClassHistory(
+        studentId,
+        classId,
+        nextMode === "enrolled" ? "enrolled" : nextMode === "waitlist" ? "waitlist" : "removed",
+        previousMode,
+        nextMode,
+        "registration_projection_rollback",
+      )
+    } catch (error) {
+      rollbackErrors.push(error)
+    }
+  }
 
   const studentLabel = text(student.name) || studentId
   const classLabel = text(classRow.name) || classId
-  await writeAutoSyncEventOnce(taskId, "registration_rollback", `${studentLabel} · ${classLabel}`)
+  try {
+    await writeAutoSyncEventOnce(taskId, "registration_rollback", `${studentLabel} · ${classLabel}`)
+  } catch (error) {
+    rollbackErrors.push(error)
+  }
+  if (rollbackErrors.length > 0) throw rollbackErrors[0]
 }
 
 async function rollbackOpsTransferCompletionSync(taskId: string, student: Row, fromClass: Row, toClass: Row) {
@@ -2088,22 +2939,150 @@ async function restoreOpsTaskDetailSnapshot(task: OpsTask) {
   }
 }
 
-async function prepareOpsCompletionStatusRollback(task: OpsTask, input: OpsTaskInput): Promise<OpsCompletionRollback | null> {
-  if (input.type === "registration" && isRegistrationWorkflowComplete(input)) {
-    const originalStudent = await resolveOpsStudent(input)
-    const classRow = await resolveOpsClass(input.classId, input.className)
-    const shouldDeleteCreatedStudent = !originalStudent
+function uniqueOpsRowsById(rows: Array<Row | null>) {
+  const rowsById = new Map<string, Row>()
+  rows.forEach((row) => {
+    const id = text(row?.id)
+    if (id && row && !rowsById.has(id)) rowsById.set(id, row)
+  })
+  return [...rowsById.values()]
+}
 
-    return async () => {
-      const student = await resolveOpsStudent(input)
-      if (student && classRow) {
-        await rollbackOpsRegistrationCompletionSync(task.id, student, classRow, originalStudent, shouldDeleteCreatedStudent)
-      }
-      await restoreOpsTaskLinkSnapshot(task)
-      await restoreOpsTaskDetailSnapshot(task)
+function equalOpsIdLists(first: unknown, second: unknown) {
+  const firstIds = normalizeIdList(first).sort()
+  const secondIds = normalizeIdList(second).sort()
+  return firstIds.length === secondIds.length && firstIds.every((id, index) => id === secondIds[index])
+}
+
+async function assertRegistrationProjectionSnapshotsRestored(
+  studentSnapshots: Row[],
+  classSnapshots: Row[],
+  createdStudentId: string,
+) {
+  for (const snapshot of studentSnapshots) {
+    const restored = await selectOpsRowById("students", text(snapshot.id))
+    if (
+      !restored
+      || text(restored.status) !== text(snapshot.status)
+      || !equalOpsIdLists(restored.class_ids, snapshot.class_ids)
+      || !equalOpsIdLists(restored.waitlist_class_ids, snapshot.waitlist_class_ids)
+    ) {
+      throw new Error("등록 학생 명단을 원래 상태로 복원하지 못했습니다.")
     }
   }
+  for (const snapshot of classSnapshots) {
+    const restored = await selectOpsRowById("classes", text(snapshot.id))
+    if (
+      !restored
+      || !equalOpsIdLists(restored.student_ids, snapshot.student_ids)
+      || !equalOpsIdLists(restored.waitlist_ids, snapshot.waitlist_ids)
+      || !equalOpsIdLists(restored.textbook_ids, snapshot.textbook_ids)
+    ) {
+      throw new Error("등록 수업 명단을 원래 상태로 복원하지 못했습니다.")
+    }
+  }
+  if (createdStudentId && await selectOpsRowById("students", createdStudentId)) {
+    throw new Error("등록 실패 후 임시 학생 정보를 정리하지 못했습니다.")
+  }
+}
 
+type OpsRegistrationRollbackHistory = {
+  studentId: string
+  classId: string
+  previousMode: string
+  nextMode: string
+}
+
+async function getRegistrationProjectionRollbackHistory(studentSnapshots: Row[], classSnapshots: Row[]) {
+  const transitions: OpsRegistrationRollbackHistory[] = []
+  for (const studentSnapshot of studentSnapshots) {
+    const studentId = text(studentSnapshot.id)
+    const currentStudent = await selectOpsRowById("students", studentId)
+    if (!currentStudent) continue
+    for (const classSnapshot of classSnapshots) {
+      const classId = text(classSnapshot.id)
+      const previousMode = getOpsStudentClassMode(currentStudent, classId)
+      const nextMode = getOpsStudentClassMode(studentSnapshot, classId)
+      if (previousMode !== nextMode) transitions.push({ studentId, classId, previousMode, nextMode })
+    }
+  }
+  return transitions
+}
+
+async function writeRegistrationProjectionRollbackHistory(transitions: OpsRegistrationRollbackHistory[]) {
+  const historyWrites = await Promise.allSettled(transitions.map((transition) => (
+    insertOpsStudentClassHistory(
+      transition.studentId,
+      transition.classId,
+      transition.nextMode === "enrolled" ? "enrolled" : transition.nextMode === "waitlist" ? "waitlist" : "removed",
+      transition.previousMode,
+      transition.nextMode,
+      "registration_projection_rollback",
+    )
+  )))
+  throwFirstRejectedRollback(historyWrites)
+}
+
+async function prepareRegistrationProjectionRollback(task: OpsTask, input: OpsTaskInput): Promise<OpsRegistrationProjectionRollback> {
+  const previousInput = inputFromTask(task)
+  const [previousStudent, targetStudent, previousClass, targetClass] = await Promise.all([
+    text(task.studentId)
+      ? selectOpsRowById("students", task.studentId)
+      : resolveOpsRegistrationStudent(previousInput),
+    resolveOpsRegistrationStudent(input),
+    resolveOpsClass(task.classId, task.className),
+    resolveOpsClass(input.classId, input.className),
+  ])
+  const studentSnapshots = uniqueOpsRowsById([previousStudent, targetStudent])
+  const classSnapshots = uniqueOpsRowsById([previousClass, targetClass])
+  const shouldEnsureStudent = shouldEnsureRegistrationStudent(
+    input.registration?.pipelineStatus,
+    isRegistrationWorkflowComplete(input),
+  )
+  const createdStudentId = !targetStudent && shouldEnsureStudent ? createOpsId() : ""
+
+  return {
+    createdStudentId,
+    rollback: async () => {
+      if (!supabase) return
+      let firstRollbackError: unknown = null
+      let rollbackHistory: OpsRegistrationRollbackHistory[] = []
+      const captureRollback = async (operation: () => Promise<void>) => {
+        try {
+          await operation()
+        } catch (rollbackError) {
+          firstRollbackError ||= rollbackError
+        }
+      }
+
+      await captureRollback(async () => {
+        rollbackHistory = await getRegistrationProjectionRollbackHistory(studentSnapshots, classSnapshots)
+      })
+      await captureRollback(async () => {
+        const projectionRollbackResults = await Promise.allSettled([
+          ...studentSnapshots.map((student) => restoreOpsRegistrationStudentSnapshot(text(student.id), student)),
+          ...classSnapshots.flatMap((classRow) => [
+            restoreOpsClassRosterSnapshot(text(classRow.id), classRow),
+            restoreOpsClassTextbookSnapshot(text(classRow.id), classRow),
+          ]),
+        ])
+        throwFirstRejectedRollback(projectionRollbackResults)
+      })
+      await captureRollback(() => deleteOpsRegistrationCreatedStudent(
+        createdStudentId ? { id: createdStudentId } : null,
+        Boolean(createdStudentId),
+      ))
+      await captureRollback(() => assertRegistrationProjectionSnapshotsRestored(studentSnapshots, classSnapshots, createdStudentId))
+      await captureRollback(() => restoreOpsTaskLinkSnapshot(task))
+      await captureRollback(() => restoreOpsTaskDetailSnapshot(task))
+      await captureRollback(() => writeRegistrationProjectionRollbackHistory(rollbackHistory))
+      await captureRollback(() => writeEvent(task.id, "rollback", "등록 저장", "변경 시도", "원래 상태 복원"))
+      if (firstRollbackError) throw firstRollbackError
+    },
+  }
+}
+
+async function prepareOpsCompletionStatusRollback(task: OpsTask, input: OpsTaskInput): Promise<OpsCompletionRollback | null> {
   if (input.type === "withdrawal" && input.status === "done") {
     const student = await resolveOpsStudent(input)
     const classRow = await resolveOpsClass(input.classId, input.className, input.withdrawal?.teacherName)
@@ -2143,30 +3122,45 @@ async function prepareOpsCompletionStatusRollback(task: OpsTask, input: OpsTaskI
   return null
 }
 
-async function prepareCreatedOpsCompletionSyncRollback(taskId: string, input: OpsTaskInput): Promise<OpsCompletionRollback | null> {
-  if (input.status !== "done") return null
-
-  if (input.type === "registration" && isRegistrationWorkflowComplete(input)) {
+async function prepareCreatedOpsCompletionSyncRollback(taskId: string, input: OpsTaskInput) {
+  const shouldRollbackRegistrationProjection = input.type === "registration" && (
+    isRegistrationWorkflowComplete(input) || isRegistrationWaitlistPipelineStatus(input.registration?.pipelineStatus)
+  )
+  if (shouldRollbackRegistrationProjection) {
     const originalStudent = await resolveOpsStudent(input)
     const classRow = await resolveOpsClass(input.classId, input.className)
-    const shouldDeleteCreatedStudent = !originalStudent
+    const registrationCreatedStudentId = originalStudent ? "" : createOpsId()
 
-    return async () => {
-      const student = await resolveOpsStudent(input)
-      if (student && classRow) {
-        await rollbackOpsRegistrationCompletionSync(taskId, student, classRow, originalStudent, shouldDeleteCreatedStudent)
-      }
+    return {
+      registrationCreatedStudentId,
+      rollback: async () => {
+        const studentId = text(originalStudent?.id) || registrationCreatedStudentId
+        const student = studentId ? await selectOpsRowById("students", studentId) : null
+        if (student && classRow) {
+          await rollbackOpsRegistrationCompletionSync(taskId, student, classRow, originalStudent, Boolean(registrationCreatedStudentId))
+          return
+        }
+        if (classRow) {
+          await restoreOpsClassRosterSnapshot(text(classRow.id), classRow)
+          await restoreOpsClassTextbookSnapshot(text(classRow.id), classRow)
+        }
+      },
     }
   }
+
+  if (input.status !== "done") return { rollback: null, registrationCreatedStudentId: "" }
 
   if (input.type === "withdrawal") {
     const student = await resolveOpsStudent(input)
     const classRow = await resolveOpsClass(input.classId, input.className, input.withdrawal?.teacherName)
 
-    return async () => {
-      if (student && classRow) {
-        await rollbackOpsWithdrawalCompletionSync(taskId, student, classRow)
-      }
+    return {
+      registrationCreatedStudentId: "",
+      rollback: async () => {
+        if (student && classRow) {
+          await rollbackOpsWithdrawalCompletionSync(taskId, student, classRow)
+        }
+      },
     }
   }
 
@@ -2176,14 +3170,17 @@ async function prepareCreatedOpsCompletionSyncRollback(taskId: string, input: Op
     const fromClass = await resolveOpsClass(transfer.fromClassId, transfer.fromClassName, transfer.fromTeacherName)
     const toClass = await resolveOpsClass(transfer.toClassId || input.classId, transfer.toClassName || input.className, transfer.toTeacherName)
 
-    return async () => {
-      if (student && fromClass && toClass) {
-        await rollbackOpsTransferCompletionSync(taskId, student, fromClass, toClass)
-      }
+    return {
+      registrationCreatedStudentId: "",
+      rollback: async () => {
+        if (student && fromClass && toClass) {
+          await rollbackOpsTransferCompletionSync(taskId, student, fromClass, toClass)
+        }
+      },
     }
   }
 
-  return null
+  return { rollback: null, registrationCreatedStudentId: "" }
 }
 
 async function rollbackAppliedCompletionSync(rollbackCompletionSync: OpsCompletionRollback | null, completionSyncApplied: boolean, originalError: unknown) {
@@ -2209,6 +3206,18 @@ async function insertOpsStudentClassHistory(studentId: string, classId: string, 
   if (error && !isMissingRelationError(error) && !isMissingColumnError(error)) throw error
 }
 
+async function waitForOpsRosterWriteResults(
+  writes: Array<PromiseLike<{ data: unknown; error: unknown }>>,
+) {
+  const settledWrites = await Promise.allSettled(writes)
+  const results: Array<{ data: unknown; error: unknown }> = []
+  for (const settledWrite of settledWrites) {
+    if (settledWrite.status === "rejected") throw settledWrite.reason
+    results.push(settledWrite.value)
+  }
+  return results
+}
+
 async function assignOpsStudentToClass(student: Row | null, classRow: Row | null, memo = "ops_task") {
   if (!supabase || !student || !classRow) return
   const studentId = text(student.id)
@@ -2216,6 +3225,7 @@ async function assignOpsStudentToClass(student: Row | null, classRow: Row | null
   if (!studentId || !classId) return
 
   const previousMode = getOpsStudentClassMode(student, classId)
+  if (await applyReadyOpsRosterMode(studentId, classId, "enrolled", previousMode || "removed", memo)) return
   const studentPatch = {
     status: ACTIVE_STUDENT_STATUS,
     class_ids: addUniqueId(student.class_ids, classId),
@@ -2227,12 +3237,15 @@ async function assignOpsStudentToClass(student: Row | null, classRow: Row | null
   }
 
   try {
-    const [studentResult, classResult] = await Promise.all([
-      supabase.from("students").update(studentPatch).eq("id", studentId),
-      supabase.from("classes").update(classPatch).eq("id", classId),
+    const [studentResult, classResult] = await waitForOpsRosterWriteResults([
+      supabase.from("students").update(studentPatch).eq("id", studentId).select("id"),
+      supabase.from("classes").update(classPatch).eq("id", classId).select("id"),
     ])
     if (studentResult.error) throw studentResult.error
     if (classResult.error) throw classResult.error
+    if (!didMutateOpsTask(studentResult.data) || !didMutateOpsTask(classResult.data)) {
+      throw new Error("수업명단 등록 중 대상 학생 또는 수업을 찾지 못했습니다.")
+    }
     await assertOpsRosterLinked(studentId, classId, "수업명단 등록 후 학생과 수업 연결을 확인하지 못했습니다.")
   } catch (error) {
     await restoreOpsStudentClassRosterSnapshots(studentId, student, classId, classRow)
@@ -2258,6 +3271,7 @@ async function assignOpsStudentToWaitlist(student: Row | null, classRow: Row | n
   }
 
   const previousMode = getOpsStudentClassMode(student, classId)
+  if (await applyReadyOpsRosterMode(studentId, classId, "waitlist", previousMode || "removed", memo)) return
   const studentPatch = {
     status: ACTIVE_STUDENT_STATUS,
     class_ids: removeId(student.class_ids, classId),
@@ -2269,12 +3283,15 @@ async function assignOpsStudentToWaitlist(student: Row | null, classRow: Row | n
   }
 
   try {
-    const [studentResult, classResult] = await Promise.all([
-      supabase.from("students").update(studentPatch).eq("id", studentId),
-      supabase.from("classes").update(classPatch).eq("id", classId),
+    const [studentResult, classResult] = await waitForOpsRosterWriteResults([
+      supabase.from("students").update(studentPatch).eq("id", studentId).select("id"),
+      supabase.from("classes").update(classPatch).eq("id", classId).select("id"),
     ])
     if (studentResult.error) throw studentResult.error
     if (classResult.error) throw classResult.error
+    if (!didMutateOpsTask(studentResult.data) || !didMutateOpsTask(classResult.data)) {
+      throw new Error("대기명단 등록 중 대상 학생 또는 수업을 찾지 못했습니다.")
+    }
     await assertOpsRosterLinked(studentId, classId, "대기명단 등록 후 학생과 수업 연결을 확인하지 못했습니다.")
   } catch (error) {
     await restoreOpsStudentClassRosterSnapshots(studentId, student, classId, classRow)
@@ -2293,13 +3310,15 @@ async function assignOpsTextbookToClass(classRow: Row | null, textbook: Row | nu
   if (!classId || !textbookId) return
 
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("classes")
       .update({
         textbook_ids: addUniqueId(classRow.textbook_ids, textbookId),
       })
       .eq("id", classId)
+      .select("id")
     if (error && !isMissingColumnError(error)) throw error
+    if (!error && !didMutateOpsTask(data)) throw new Error("등록 교재를 연결할 수업을 찾지 못했습니다.")
     await assertOpsClassTextbookLinked(classId, textbookId, "등록 교재를 수업에 연결하지 못했습니다.")
   } catch (error) {
     await restoreOpsClassTextbookSnapshot(classId, classRow)
@@ -2314,19 +3333,23 @@ async function removeOpsStudentFromClass(student: Row | null, classRow: Row | nu
   if (!studentId || !classId) return
 
   const previousMode = getOpsStudentClassMode(student, classId)
+  if (await applyReadyOpsRosterMode(studentId, classId, "removed", previousMode || "removed", memo)) return
   try {
-    const [studentResult, classResult] = await Promise.all([
+    const [studentResult, classResult] = await waitForOpsRosterWriteResults([
       supabase.from("students").update({
         class_ids: removeId(student.class_ids, classId),
         waitlist_class_ids: removeId(student.waitlist_class_ids, classId),
-      }).eq("id", studentId),
+      }).eq("id", studentId).select("id"),
       supabase.from("classes").update({
         student_ids: removeId(classRow.student_ids, studentId),
         waitlist_ids: removeId(classRow.waitlist_ids, studentId),
-      }).eq("id", classId),
+      }).eq("id", classId).select("id"),
     ])
     if (studentResult.error) throw studentResult.error
     if (classResult.error) throw classResult.error
+    if (!didMutateOpsTask(studentResult.data) || !didMutateOpsTask(classResult.data)) {
+      throw new Error("수업명단 제거 중 대상 학생 또는 수업을 찾지 못했습니다.")
+    }
     await assertOpsRosterUnlinked(studentId, classId, "수업명단 제거 후 학생과 수업 연결이 남아 있습니다.")
   } catch (error) {
     await restoreOpsStudentClassRosterSnapshots(studentId, student, classId, classRow)
@@ -2353,25 +3376,39 @@ async function updateOpsTaskLinkFields(taskId: string, patch: Record<string, Ops
       .filter(([, value]) => value === null || Boolean(value)),
   )
   if (Object.keys(nextPatch).length === 0) return
-  let { error } = await supabase.from("ops_tasks").update(nextPatch).eq("id", taskId)
+  let { data, error } = await supabase.from("ops_tasks").update(nextPatch).eq("id", taskId).select("id")
   if (error && isMissingColumnError(error)) {
     const fallbackPatch = stripMissingMigrationColumns(nextPatch, OPS_TASK_OPTIONAL_TEAM_WORKFLOW_COLUMNS)
     if (Object.keys(fallbackPatch).length === 0) return
-    ;({ error } = await supabase.from("ops_tasks").update(fallbackPatch).eq("id", taskId))
+    ;({ data, error } = await supabase.from("ops_tasks").update(fallbackPatch).eq("id", taskId).select("id"))
   }
   if (error) throw error
+  if (!didMutateOpsTask(data)) throw new Error("업무 연결 정보를 다시 불러오세요.")
 }
 
-async function syncRegistrationPipelineStatusForTaskStatus(task: OpsTask, status: OpsTaskStatus) {
-  if (!supabase || task.type !== "registration") return
+async function syncRegistrationPipelineStatusForTaskStatus(task: OpsTask, status: OpsTaskStatus): Promise<OpsCompletionRollback | null> {
+  if (!supabase || task.type !== "registration") return null
 
-  const pipelineStatus = getRegistrationPipelineStatusForTaskStatus(status, task.registration?.pipelineStatus)
-  if (!pipelineStatus || pipelineStatus === text(task.registration?.pipelineStatus)) return
+  const previousPipelineStatus = text(task.registration?.pipelineStatus)
+  const pipelineStatus = getRegistrationPipelineStatusForTaskStatus(status, previousPipelineStatus)
+  if (!pipelineStatus || pipelineStatus === previousPipelineStatus) return null
 
   const { error } = await supabase
     .from("ops_registration_details")
     .upsert({ task_id: task.id, pipeline_status: pipelineStatus })
   if (error) throw error
+
+  return async () => {
+    if (!supabase) return
+    if (!previousPipelineStatus) {
+      await deleteOpsTaskChildRows("ops_registration_details", task.id)
+      return
+    }
+    const { error: rollbackError } = await supabase
+      .from("ops_registration_details")
+      .upsert({ task_id: task.id, pipeline_status: previousPipelineStatus })
+    if (rollbackError) throw rollbackError
+  }
 }
 
 async function restorePreviousRegistrationWaitlist(student: Row, classRow: Row) {
@@ -2389,7 +3426,7 @@ async function syncRegistrationWaitlist(
 ) {
   const waiting = isRegistrationWaitlistPipelineStatus(input.registration?.pipelineStatus)
   const previousInput = previousTask ? inputFromTask(previousTask) : null
-  const previousStudent = previousInput ? await resolveOpsStudent(previousInput) : null
+  const previousStudent = previousInput ? await resolveOpsRegistrationStudent(previousInput) : null
   const previousClass = previousTask
     ? await resolveOpsClass(previousTask.classId, previousTask.className)
     : null
@@ -2439,14 +3476,24 @@ async function syncRegistrationWaitlist(
   )
 }
 
-async function syncRegistrationManagementLinks(taskId: string, input: OpsTaskInput, previousTask: OpsTask | null = null) {
+async function syncRegistrationManagementLinks(
+  taskId: string,
+  input: OpsTaskInput,
+  previousTask: OpsTask | null = null,
+  options: { createdStudentId?: string } = {},
+) {
   const completed = isRegistrationWorkflowComplete(input)
   const shouldEnsureStudent = shouldEnsureRegistrationStudent(input.registration?.pipelineStatus, completed)
   const existingStudent = shouldEnsureStudent ? await resolveOpsRegistrationStudent(input) : null
-  const student = shouldEnsureStudent ? await ensureOpsStudent(input, existingStudent) : await resolveOpsStudent(input)
+  const linkedStudent = shouldEnsureStudent ? existingStudent : await resolveOpsRegistrationStudent(input)
+  const student = shouldEnsureStudent
+    ? await ensureOpsStudent(input, existingStudent, options.createdStudentId)
+    : linkedStudent
   const shouldDeleteCreatedStudent = completed && !existingStudent && Boolean(text(student?.id))
   const classRow = await resolveOpsClass(input.classId, input.className)
-  const textbook = await resolveOpsTextbook(input.textbookId, input.textbookTitle)
+  const textbook = hasManagementReference(input.textbookId)
+    ? await resolveOpsTextbook(input.textbookId)
+    : null
 
   await updateOpsTaskLinkFields(taskId, {
     student_id: text(student?.id) || null,
@@ -2454,8 +3501,8 @@ async function syncRegistrationManagementLinks(taskId: string, input: OpsTaskInp
     class_id: text(classRow?.id) || null,
     class_name: text(classRow?.name) || text(input.className) || null,
     textbook_id: text(textbook?.id) || null,
-    textbook_title: text(textbook?.title || textbook?.name) || text(input.textbookTitle) || null,
-    subject: text(classRow?.subject) || text(input.subject) || null,
+    textbook_title: textbook ? text(textbook.title || textbook.name) || null : null,
+    subject: text(input.subject) || text(classRow?.subject) || null,
   })
 
   await syncRegistrationWaitlist(taskId, input, previousTask, student, classRow)
@@ -2463,15 +3510,17 @@ async function syncRegistrationManagementLinks(taskId: string, input: OpsTaskInp
   if (completed) {
     assertResolvedManagementRecord(student, "등록 완료 전에 학생 정보를 입력하세요.")
     assertResolvedManagementRecord(classRow, "등록 완료 전에 등록할 수업을 선택하세요.")
-    assertResolvedManagementRecord(textbook, "등록 완료 전에 등록 교재를 선택하세요.")
+    if (hasManagementReference(input.textbookId)) assertResolvedManagementRecord(textbook, "등록 완료 전에 등록 교재를 선택하세요.")
     const studentLabel = text(student.name) || text(input.studentName)
     const classLabel = text(classRow.name) || text(input.className)
-    const textbookLabel = text(textbook.title || textbook.name) || text(input.textbookTitle)
+    const textbookLabel = textbook ? text(textbook.title || textbook.name) || text(input.textbookTitle) : ""
     try {
       await assignOpsStudentToClass(student, classRow, "registration_completed")
       await markRegistrationRosterUpdated(taskId)
-      await assignOpsTextbookToClass(classRow, textbook)
-      await markRegistrationTextbookReady(taskId)
+      if (textbook) {
+        await assignOpsTextbookToClass(classRow, textbook)
+        await markRegistrationTextbookReady(taskId)
+      }
     } catch (error) {
       try {
         await rollbackOpsRegistrationCompletionSync(taskId, student, classRow, existingStudent, shouldDeleteCreatedStudent)
@@ -2482,7 +3531,9 @@ async function syncRegistrationManagementLinks(taskId: string, input: OpsTaskInp
     }
     await writeAutoSyncEventOnce(taskId, "학생관리", `${studentLabel} 등록`)
     await writeAutoSyncEventOnce(taskId, "수업명단", `${classLabel} 등록 · registration_completed`)
-    await writeAutoSyncEventOnce(taskId, "교재 연결", `${textbookLabel} · ${classLabel}`)
+    if (textbook) {
+      await writeAutoSyncEventOnce(taskId, "교재 연결", `${textbookLabel} · ${classLabel}`)
+    }
   }
 }
 
@@ -2628,10 +3679,19 @@ async function syncWordRetestManagementLinks(taskId: string, input: OpsTaskInput
   if (error && !isMissingColumnError(error)) throw error
 }
 
-async function syncOpsTaskManagementLinks(taskId: string, input: OpsTaskInput, previousTask: OpsTask | null = null) {
+async function syncOpsTaskManagementLinks(
+  taskId: string,
+  input: OpsTaskInput,
+  previousTask: OpsTask | null = null,
+  options: { registrationCreatedStudentId?: string } = {},
+) {
   if (!supabase) return
   assertManagementSyncReady(input)
-  if (input.type === "registration") await syncRegistrationManagementLinks(taskId, input, previousTask)
+  if (input.type === "registration") {
+    await syncRegistrationManagementLinks(taskId, input, previousTask, {
+      createdStudentId: options.registrationCreatedStudentId,
+    })
+  }
   if (input.type === "withdrawal") await syncWithdrawalManagementLinks(taskId, input)
   if (input.type === "transfer") await syncTransferManagementLinks(taskId, input)
   if (input.type === "word_retest") await syncWordRetestManagementLinks(taskId, input)
@@ -2654,8 +3714,8 @@ async function deleteOpsTaskChildRows(tableName: string, taskId: string) {
 
 async function deleteCreatedOpsTaskOnFailure(taskId: string) {
   if (!supabase || !text(taskId)) return null
-  const firstDelete = await supabase.from("ops_tasks").delete().eq("id", taskId)
-  if (!firstDelete.error || isMissingRelationError(firstDelete.error) || isMissingColumnError(firstDelete.error)) return null
+  const firstDelete = await supabase.from("ops_tasks").delete().eq("id", taskId).select("id")
+  if (!firstDelete.error && didMutateOpsTask(firstDelete.data)) return null
 
   const childCleanupErrors = await Promise.all([
     deleteOpsTaskChildRowsOnFailure("ops_task_comments", taskId),
@@ -2667,8 +3727,16 @@ async function deleteCreatedOpsTaskOnFailure(taskId: string) {
     deleteOpsTaskChildRowsOnFailure("ops_word_retests", taskId),
   ])
   const cleanupError = childCleanupErrors.find(Boolean)
-  const retryDelete = await supabase.from("ops_tasks").delete().eq("id", taskId)
+  const retryDelete = await supabase.from("ops_tasks").delete().eq("id", taskId).select("id")
   if (retryDelete.error && !isMissingRelationError(retryDelete.error) && !isMissingColumnError(retryDelete.error)) return retryDelete.error
+  if (didMutateOpsTask(retryDelete.data)) return cleanupError || null
+
+  try {
+    const remainingTask = await selectOpsRowById("ops_tasks", taskId)
+    if (remainingTask) return new Error("생성 실패 업무를 정리하지 못했습니다. 화면을 새로고침하고 관리자에게 문의하세요.")
+  } catch (error) {
+    return error
+  }
   return cleanupError || null
 }
 
@@ -2681,11 +3749,20 @@ function attachOpsTaskCleanupError(originalError: unknown, cleanupError: unknown
 export async function createOpsTask(input: OpsTaskInput) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
+  assertRegistrationInquiryBaseReady(input)
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
+  const stagesReadyOpsRosterCompletion = input.status === "done"
+    && ["withdrawal", "transfer"].includes(input.type)
+    && (await getOpsRosterRuntimeState()).mode === "ready"
+  const stagesTerminalRegistrationParent = input.type === "registration"
+    && ["done", "canceled"].includes(input.status || "requested")
+  const initialParentInput: OpsTaskInput = stagesTerminalRegistrationParent || stagesReadyOpsRosterCompletion
+    ? { ...input, status: "in_progress" }
+    : input
 
   const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
-    buildTaskRow(input, { completedAtFallback: new Date().toISOString() }),
+    buildTaskRow(initialParentInput, { completedAtFallback: new Date().toISOString() }),
     (row) => client
       .from("ops_tasks")
       .insert(row)
@@ -2698,12 +3775,25 @@ export async function createOpsTask(input: OpsTaskInput) {
   let rollbackCompletionSync: OpsCompletionRollback | null = null
   let completionSyncApplied = false
   try {
-    await writeManualCheckEvents(taskId, input)
-    await upsertDetail(taskId, input)
-    rollbackCompletionSync = await prepareCreatedOpsCompletionSyncRollback(taskId, input)
-    await syncOpsTaskManagementLinks(taskId, input)
-    completionSyncApplied = true
+    const readyCompletionInput = stagesReadyOpsRosterCompletion ? getReadyOpsCompletionInput(input) : input
+    await writeManualCheckEvents(taskId, readyCompletionInput)
+    await upsertDetail(taskId, readyCompletionInput)
+    if (stagesReadyOpsRosterCompletion) {
+      await completeReadyOpsRosterTransition(taskId, input.type)
+      await writeCommittedEvent(taskId, "created", "type", "", input.type)
+      clearOpsTaskWorkspaceDataCache()
+      return taskId
+    }
+    const completionMutation = await prepareCreatedOpsCompletionSyncRollback(taskId, input)
+    rollbackCompletionSync = completionMutation.rollback
+    completionSyncApplied = Boolean(rollbackCompletionSync)
+    await syncOpsTaskManagementLinks(taskId, input, null, {
+      registrationCreatedStudentId: completionMutation.registrationCreatedStudentId,
+    })
     await writeEvent(taskId, "created", "type", "", input.type)
+    if (stagesTerminalRegistrationParent) {
+      await updateRegistrationTaskParent(taskId, input, { preserveManagementLinks: true })
+    }
     clearOpsTaskWorkspaceDataCache()
     return taskId
   } catch (error) {
@@ -2714,43 +3804,89 @@ export async function createOpsTask(input: OpsTaskInput) {
   }
 }
 
-function taskSnapshotFromInput(input: OpsTaskInput, fallback: OpsTask): OpsTask {
-  return {
-    ...fallback,
-    title: text(input.title) || fallback.title,
-    status: input.status || fallback.status,
-    studentId: text(input.studentId),
-    studentName: text(input.studentName),
-    classId: text(input.classId),
-    className: text(input.className),
-    textbookId: text(input.textbookId),
-    textbookTitle: text(input.textbookTitle),
-    subject: text(input.subject),
-    registration: input.registration,
-  }
+async function updateRegistrationTaskParent(
+  taskId: string,
+  input: OpsTaskInput,
+  options: { preserveManagementLinks?: boolean } = {},
+) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const client = supabase
+  const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
+    buildTaskRow(input, { preserveManagementLinks: options.preserveManagementLinks }),
+    (row) => client
+      .from("ops_tasks")
+      .update(row)
+      .eq("id", taskId)
+      .select("id"),
+  )
+  if (error) throw error
+  if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
 }
 
-async function rollbackRegistrationUpdate(taskId: string, existingTask: OpsTask, attemptedInput: OpsTaskInput, originalError: unknown) {
-  if (!supabase || existingTask.type !== "registration") return
-  const client = supabase
-  const existingInput = inputFromTask(existingTask)
-  const attemptedTask = taskSnapshotFromInput(attemptedInput, existingTask)
+async function applyRegistrationTaskChildren(
+  taskId: string,
+  input: OpsTaskInput,
+  existingTask: OpsTask,
+  createdStudentId = "",
+) {
+  await upsertDetail(taskId, input)
+  await syncOpsTaskManagementLinks(taskId, input, existingTask, {
+    registrationCreatedStudentId: createdStudentId,
+  })
+  await writeManualCheckEvents(taskId, input, inputFromTask(existingTask))
+}
 
+async function rollbackRegistrationUpdate(
+  taskId: string,
+  existingTask: OpsTask,
+  originalError: unknown,
+  rollbackRegistrationProjection: OpsCompletionRollback,
+  options: { parentWriteOrder: "first" | "last" },
+) {
+  if (!supabase || existingTask.type !== "registration") return
+  const existingInput = inputFromTask(existingTask)
+  let firstRollbackError: unknown = null
+  const captureRollback = async (operation: () => Promise<void>) => {
+    try {
+      await operation()
+    } catch (rollbackError) {
+      firstRollbackError ||= rollbackError
+    }
+  }
+
+  if (options.parentWriteOrder === "first") {
+    await captureRollback(() => updateRegistrationTaskParent(taskId, existingInput))
+  }
+  await captureRollback(() => rollbackRegistrationProjection())
+  if (options.parentWriteOrder === "last") {
+    await captureRollback(() => updateRegistrationTaskParent(taskId, existingInput))
+  }
+  if (firstRollbackError) attachOpsTaskCleanupError(originalError, firstRollbackError)
+}
+
+async function updateRegistrationOpsTask(taskId: string, input: OpsTaskInput, existingTask: OpsTask) {
+  const registrationProjectionRollback = await prepareRegistrationProjectionRollback(existingTask, input)
+  const nextStatus = input.status || "requested"
+  const reopensTerminalTask = ["done", "canceled"].includes(existingTask.status)
+    && !["done", "canceled"].includes(nextStatus)
+
+  if (!reopensTerminalTask) {
+    try {
+      await applyRegistrationTaskChildren(taskId, input, existingTask, registrationProjectionRollback.createdStudentId)
+      await updateRegistrationTaskParent(taskId, input, { preserveManagementLinks: true })
+    } catch (error) {
+      await rollbackRegistrationUpdate(taskId, existingTask, error, registrationProjectionRollback.rollback, { parentWriteOrder: "first" })
+      throw error
+    }
+    return
+  }
+
+  await updateRegistrationTaskParent(taskId, input)
   try {
-    await upsertDetail(taskId, existingInput)
-    await syncRegistrationManagementLinks(taskId, existingInput, attemptedTask)
-    const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
-      buildTaskRow(existingInput),
-      (row) => client
-        .from("ops_tasks")
-        .update(row)
-        .eq("id", taskId)
-        .select("id"),
-    )
-    if (error) throw error
-    if (!didMutateOpsTask(data)) throw new Error("등록 업무 원상 복구를 확인하지 못했습니다.")
-  } catch (rollbackError) {
-    attachOpsTaskCleanupError(originalError, rollbackError)
+    await applyRegistrationTaskChildren(taskId, input, existingTask, registrationProjectionRollback.createdStudentId)
+  } catch (error) {
+    await rollbackRegistrationUpdate(taskId, existingTask, error, registrationProjectionRollback.rollback, { parentWriteOrder: "last" })
+    throw error
   }
 }
 
@@ -2762,37 +3898,71 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
   if (!existingTask) throw new Error("업무 데이터를 다시 불러오세요.")
   assertCompletedOperationStatusTransition(existingTask, nextStatus)
   assertCompletedOperationEditable(existingTask)
+  assertRegistrationInquiryBaseReady(input)
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
+
+  if (nextStatus === "done" && ["withdrawal", "transfer"].includes(input.type)) {
+    const runtime = await getOpsRosterRuntimeState()
+    if (runtime.mode === "ready") {
+      const pendingInput = { ...input, status: existingTask.status }
+      const readyCompletionInput = getReadyOpsCompletionInput(input)
+      const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
+        buildTaskRow(pendingInput),
+        (row) => client
+          .from("ops_tasks")
+          .update(row)
+          .eq("id", taskId)
+          .select("id"),
+      )
+      if (error) throw error
+      if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
+      await writeManualCheckEvents(taskId, readyCompletionInput, inputFromTask(existingTask))
+      await upsertDetail(taskId, readyCompletionInput)
+      await completeReadyOpsRosterTransition(taskId, input.type)
+      clearOpsTaskWorkspaceDataCache()
+      return
+    }
+  }
+
+  if (input.type === "registration") {
+    const runtime = await getOpsRosterRuntimeState()
+    if (runtime.mode !== "legacy") {
+      throw new Error("과목별 등록 화면에서 변경하세요.")
+    }
+    await updateRegistrationOpsTask(taskId, input, existingTask)
+    await writeCommittedEvent(taskId, "updated", "task", "", input.title)
+    clearOpsTaskWorkspaceDataCache()
+    return
+  }
 
   if (nextStatus === "done") {
     let rollbackCompletionSync: OpsCompletionRollback | null = null
     let completionSyncApplied = false
-
-    await writeManualCheckEvents(taskId, input)
-    await upsertDetail(taskId, input)
     rollbackCompletionSync = await prepareOpsCompletionStatusRollback(existingTask, input)
+    const completionRollbackArmed = Boolean(rollbackCompletionSync)
     try {
+      await writeManualCheckEvents(taskId, input, inputFromTask(existingTask))
+      await upsertDetail(taskId, input)
       await syncOpsTaskManagementLinks(taskId, input, existingTask)
       completionSyncApplied = true
-    } catch (error) {
-      await rollbackAppliedCompletionSync(rollbackCompletionSync, true, error)
-      throw error
-    }
-
-    const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
-      buildTaskRow(input, { preserveManagementLinks: true, completedAtFallback: new Date().toISOString() }),
-      (row) => client
-        .from("ops_tasks")
-        .update(row)
-        .eq("id", taskId)
-        .select("id"),
-    )
-
-    if (error || !didMutateOpsTask(data)) {
-      await rollbackAppliedCompletionSync(rollbackCompletionSync, completionSyncApplied, error)
+      const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
+        buildTaskRow(input, { preserveManagementLinks: true, completedAtFallback: new Date().toISOString() }),
+        (row) => client
+          .from("ops_tasks")
+          .update(row)
+          .eq("id", taskId)
+          .select("id"),
+      )
       if (error) throw error
-      throw new Error("업무 데이터를 다시 불러오세요.")
+      if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
+    } catch (error) {
+      await rollbackAppliedCompletionSync(
+        rollbackCompletionSync,
+        completionRollbackArmed || completionSyncApplied,
+        error,
+      )
+      throw error
     }
     await writeEvent(taskId, "updated", "task", "", input.title)
     clearOpsTaskWorkspaceDataCache()
@@ -2815,13 +3985,74 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
     await syncOpsTaskManagementLinks(taskId, input, existingTask)
     await writeManualCheckEvents(taskId, input, inputFromTask(existingTask))
   } catch (syncError) {
-    if (input.type === "registration") {
-      await rollbackRegistrationUpdate(taskId, existingTask, input, syncError)
-    }
     throw syncError
   }
   await writeEvent(taskId, "updated", "task", "", input.title)
   clearOpsTaskWorkspaceDataCache()
+}
+
+async function updateOpsTaskStatusRow(taskId: string, status: OpsTaskStatus) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase
+    .from("ops_tasks")
+    .update({
+      status,
+      completed_at: status === "done" ? new Date().toISOString() : null,
+    })
+    .eq("id", taskId)
+    .select("id")
+  if (error) throw error
+  if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
+}
+
+async function updateRegistrationOpsTaskStatus(currentTask: OpsTask, status: OpsTaskStatus) {
+  let rollbackPipelineStatus: OpsCompletionRollback | null = null
+  const reopensTerminalTask = ["done", "canceled"].includes(currentTask.status)
+    && !["done", "canceled"].includes(status)
+
+  if (status === "done") {
+    const nextPipelineStatus = getRegistrationPipelineStatusForTaskStatus(status, currentTask.registration?.pipelineStatus)
+    const nextInput = {
+      ...inputFromTask(currentTask, status),
+      registration: {
+        ...(currentTask.registration || {}),
+        pipelineStatus: nextPipelineStatus,
+      },
+    }
+    assertManagementSyncReady(nextInput)
+    await assertManagementSyncRecordsReady(nextInput)
+    await updateRegistrationOpsTask(currentTask.id, nextInput, currentTask)
+    return
+  }
+
+  if (reopensTerminalTask) {
+    await updateOpsTaskStatusRow(currentTask.id, status)
+    try {
+      await syncRegistrationPipelineStatusForTaskStatus(currentTask, status)
+    } catch (error) {
+      try {
+        await updateOpsTaskStatusRow(currentTask.id, currentTask.status)
+      } catch (rollbackError) {
+        attachOpsTaskCleanupError(error, rollbackError)
+      }
+      throw error
+    }
+    return
+  }
+
+  try {
+    rollbackPipelineStatus = await syncRegistrationPipelineStatusForTaskStatus(currentTask, status)
+    await updateOpsTaskStatusRow(currentTask.id, status)
+  } catch (error) {
+    if (rollbackPipelineStatus) {
+      try {
+        await rollbackPipelineStatus()
+      } catch (rollbackError) {
+        attachOpsTaskCleanupError(error, rollbackError)
+      }
+    }
+    throw error
+  }
 }
 
 export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) {
@@ -2831,6 +4062,27 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
   const currentTask = await loadOpsTaskById(task.id)
   if (!currentTask) throw new Error("업무 데이터를 다시 불러오세요.")
   assertCompletedOperationStatusTransition(currentTask, status)
+
+  if (currentTask.type === "registration") {
+    const runtime = await getOpsRosterRuntimeState()
+    if (runtime.mode !== "legacy") {
+      throw new Error("과목별 등록 화면에서 변경하세요.")
+    }
+    await updateRegistrationOpsTaskStatus(currentTask, status)
+    await writeCommittedEvent(currentTask.id, "status_changed", "status", currentTask.status, status)
+    if (currentTask.status === "review_requested" && status === "in_progress") {
+      await writeCommittedEvent(currentTask.id, "revision_requested", "검토", "검토 요청", "수정 요청")
+    }
+    clearOpsTaskWorkspaceDataCache()
+    return
+  }
+
+  if (status === "done" && ["withdrawal", "transfer"].includes(currentTask.type)) {
+    if (await completeReadyOpsRosterTransition(currentTask.id, currentTask.type)) {
+      clearOpsTaskWorkspaceDataCache()
+      return
+    }
+  }
 
   if (status === "done") {
     const nextInput = inputFromTask(currentTask, status)
@@ -2863,7 +4115,6 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
     const nextInput = inputFromTask(currentTask, status)
     await syncWordRetestManagementLinks(currentTask.id, nextInput)
   }
-  if (currentTask.type === "registration") await syncRegistrationPipelineStatusForTaskStatus(currentTask, status)
   await writeEvent(currentTask.id, "status_changed", "status", currentTask.status, status)
   if (currentTask.status === "review_requested" && status === "in_progress") {
     await writeEvent(currentTask.id, "revision_requested", "검토", "검토 요청", "수정 요청")
@@ -2871,16 +4122,89 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
   clearOpsTaskWorkspaceDataCache()
 }
 
+async function rollbackRegistrationWaitlistRemovalAfterFailure(student: Row, classRow: Row, originalError: unknown) {
+  const studentId = text(student.id)
+  const classId = text(classRow.id)
+  let firstCleanupError: unknown = null
+  let projectedStudent: Row | null = null
+  try {
+    projectedStudent = await selectOpsRowById("students", studentId)
+  } catch (error) {
+    firstCleanupError = error
+  }
+  const projectedMode = getOpsStudentClassMode(projectedStudent, classId)
+  const restoreResults = await Promise.allSettled([
+    restoreOpsStudentRosterSnapshot(studentId, student),
+    restoreOpsClassRosterSnapshot(classId, classRow),
+  ])
+  for (const restoreResult of restoreResults) {
+    if (restoreResult.status === "rejected") firstCleanupError ||= restoreResult.reason
+  }
+  if (projectedMode !== "waitlist") {
+    try {
+      await insertOpsStudentClassHistory(
+        studentId,
+        classId,
+        "waitlist",
+        projectedMode,
+        "waitlist",
+        "registration_waitlist_delete_rollback",
+      )
+    } catch (error) {
+      firstCleanupError ||= error
+    }
+  }
+  if (firstCleanupError) attachOpsTaskCleanupError(originalError, firstCleanupError)
+}
+
+async function resolveRegistrationWaitlistClassForDelete(task: OpsTask, student: Row) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const persistedClassId = text(task.classId)
+  if (persistedClassId) {
+    const persistedClass = await selectOpsRowById("classes", persistedClassId)
+    if (!persistedClass || !hasSymmetricOpsWaitlistLink(student, persistedClass)) {
+      throw new Error("저장된 대기 수업 연결을 양쪽 명단에서 확인할 수 없어 삭제할 수 없습니다.")
+    }
+    return persistedClass
+  }
+
+  const candidateIds = normalizeIdList(student.waitlist_class_ids)
+  if (candidateIds.length === 0) {
+    throw new Error("대기 수업 연결 ID가 없어 안전하게 삭제할 수 없습니다.")
+  }
+  const { data, error } = await supabase.from("classes").select("*").in("id", candidateIds)
+  if (error) throw error
+  const expectedClassName = text(task.className)
+  const symmetricCandidates = ((data || []) as unknown as Row[]).filter((classRow) => (
+    hasSymmetricOpsWaitlistLink(student, classRow)
+    && (!expectedClassName || text(classRow.name) === expectedClassName)
+  ))
+  if (symmetricCandidates.length !== 1) {
+    throw new Error("대기 수업 연결을 하나로 확인할 수 없습니다. 수업 연결을 먼저 정리하세요.")
+  }
+  return symmetricCandidates[0]
+}
+
 async function removeRegistrationWaitlistOnDelete(task: OpsTask | null) {
   if (!task || task.type !== "registration" || !isRegistrationWaitlistPipelineStatus(task.registration?.pipelineStatus)) return null
   const input = inputFromTask(task)
-  const student = await resolveOpsStudent(input)
-  const classRow = await resolveOpsClass(task.classId, task.className)
-  if (!student || !classRow) return null
+  const student = await resolveOpsRegistrationStudent(input)
+  if (!student) return null
+  const classRow = await resolveRegistrationWaitlistClassForDelete(task, student)
 
-  await removeOpsStudentFromClass(student, classRow, "registration_waitlist_deleted")
+  try {
+    await removeOpsStudentFromClass(student, classRow, "registration_waitlist_deleted")
+  } catch (error) {
+    await rollbackRegistrationWaitlistRemovalAfterFailure(student, classRow, error)
+    throw error
+  }
   return async () => {
-    await assignOpsStudentToWaitlist(student, classRow, "registration_waitlist_restore")
+    const [currentStudent, currentClass] = await Promise.all([
+      selectOpsRowById("students", text(student.id)),
+      selectOpsRowById("classes", text(classRow.id)),
+    ])
+    if (!currentStudent || !currentClass) throw new Error("대기명단 삭제 복원 대상을 다시 불러오지 못했습니다.")
+    await assignOpsStudentToWaitlist(currentStudent, currentClass, "registration_waitlist_restore")
   }
 }
 
@@ -2888,6 +4212,9 @@ export async function deleteOpsTask(taskId: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   await assertOpsTaskExists(taskId)
   const task = await loadOpsTaskById(taskId)
+  if (task?.type === "registration" && (task.status === "done" || isRegistrationCompletionImmutable(task.registration?.pipelineStatus))) {
+    throw new Error("등록 완료 건은 학생·수업·교재 연결을 유지해야 하므로 삭제할 수 없습니다.")
+  }
   const rollbackWaitlist = await removeRegistrationWaitlistOnDelete(task)
   const { data, error } = await supabase.from("ops_tasks").delete().eq("id", taskId).select("id")
   if (error || !didMutateOpsTask(data)) {

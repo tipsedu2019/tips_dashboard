@@ -37,9 +37,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
 import {
+  APPROVER_NAMES_BY_GROUP,
   buildRoomAvailability,
   getAllowedApproverNames,
   getDefaultMakeupEndAt,
+  getMakeupRequestEffectiveYear,
   hasMakeupPart,
   MAKEUP_REQUEST_STATUS_LABELS,
   type MakeupRequestKind,
@@ -158,6 +160,7 @@ const MAKEUP_ACTION_NOTE_CONFIG: Record<MakeupActionNoteKind, {
 }
 
 const SUBJECT_SORT_ORDER = ["영어", "수학"]
+const MAKEUP_MANAGER_APPROVER_NAMES = new Set(Object.values(APPROVER_NAMES_BY_GROUP).flat())
 
 const NOTIFICATION_DELIVERY_STATUS_LABELS: Record<string, string> = {
   sent: "발송",
@@ -273,6 +276,34 @@ function findSelectedClass(data: MakeupRequestWorkspaceData, input: MakeupReques
 
 function canUserManage(userRole: string) {
   return userRole === "admin" || userRole === "staff"
+}
+
+function getMakeupApproverEffectiveYear(
+  editingRequestCreatedAt = "",
+  now: string | number | Date = new Date(),
+) {
+  return getMakeupRequestEffectiveYear(editingRequestCreatedAt || now)
+}
+
+function resolveMakeupSubmissionApproverCatalogId({
+  classItem,
+  teachers,
+  selectedApproverTeacherCatalogId,
+  effectiveYear,
+  isManager,
+}: {
+  classItem: MakeupClassOption | null
+  teachers: MakeupTeacherOption[]
+  selectedApproverTeacherCatalogId: string
+  effectiveYear: number
+  isManager: boolean
+}) {
+  if (!classItem) return ""
+  const selectedApprover = teachers.find((teacher) => teacher.id === selectedApproverTeacherCatalogId)
+  if (isManager && selectedApprover) return selectedApprover.id
+
+  const allowedNames = getAllowedApproverNames(classItem, effectiveYear)
+  return teachers.find((teacher) => allowedNames.includes(teacher.name))?.id || ""
 }
 
 function getMakeupActionErrorMessage(error: unknown, fallback: string) {
@@ -1797,6 +1828,10 @@ export function MakeupRequestWorkspace() {
   const currentUserId = user?.id || ""
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
   const isManager = canUserManage(role)
+  const editingRequest = useMemo(() => (
+    data.requests.find((request) => request.id === editingRequestId) || null
+  ), [data.requests, editingRequestId])
+  const approverEffectiveYear = getMakeupApproverEffectiveYear(editingRequest?.createdAt)
   const detailRequest = useMemo(() => (
     selectedDetailRequest
       ? data.requests.find((request) => request.id === selectedDetailRequest.id) || selectedDetailRequest
@@ -1832,12 +1867,15 @@ export function MakeupRequestWorkspace() {
   }, [authLoading, refresh])
 
   const allowedApproverNames = useMemo(() => (
-    selectedClass ? getAllowedApproverNames(selectedClass) : []
-  ), [selectedClass])
+    selectedClass ? getAllowedApproverNames(selectedClass, approverEffectiveYear) : []
+  ), [approverEffectiveYear, selectedClass])
 
   const approverOptions = useMemo(() => (
-    data.teachers.filter((teacher) => allowedApproverNames.includes(teacher.name))
-  ), [allowedApproverNames, data.teachers])
+    data.teachers.filter((teacher) => (
+      allowedApproverNames.includes(teacher.name) ||
+      (isManager && MAKEUP_MANAGER_APPROVER_NAMES.has(teacher.name))
+    ))
+  ), [allowedApproverNames, data.teachers, isManager])
 
   const subjectOptions = useMemo(() => (
     [...new Set(data.classes.map((classItem) => classItem.subject).filter(Boolean))]
@@ -1950,7 +1988,7 @@ export function MakeupRequestWorkspace() {
   const handleClassChange = useCallback((classId: string) => {
     const classItem = data.classes.find((item) => item.id === classId) || null
     const scheduleDateOptions = getMakeupClassScheduleDateOptions(classItem)
-    const allowedNames = classItem ? getAllowedApproverNames(classItem) : []
+    const allowedNames = classItem ? getAllowedApproverNames(classItem, approverEffectiveYear) : []
     const firstApprover = data.teachers.find((teacher) => allowedNames.includes(teacher.name))
     setInput((current) => ({
       ...current,
@@ -1962,7 +2000,7 @@ export function MakeupRequestWorkspace() {
       setSelectedSubject(classItem.subject)
       setSelectedTeacherKey(getClassTeacherSelectionKey(classItem, data.teachers))
     }
-  }, [data.classes, data.teachers])
+  }, [approverEffectiveYear, data.classes, data.teachers])
 
   const patchMakeupSlot = useCallback((slotId: string, patch: Partial<MakeupRequestInput["makeupSlots"][number]>) => {
     setInput((current) => ({
@@ -2031,7 +2069,15 @@ export function MakeupRequestWorkspace() {
     const makeupSlots = materializeSlots(input)
     const requestHasCancel = Boolean(input.cancelDate)
     const requestHasMakeup = makeupSlots.length > 0
-    if (!input.classId || !input.reason || !input.approverTeacherCatalogId) {
+    const submissionEffectiveYear = getMakeupApproverEffectiveYear(editingRequest?.createdAt)
+    const submissionApproverTeacherCatalogId = resolveMakeupSubmissionApproverCatalogId({
+      classItem: selectedClass,
+      teachers: data.teachers,
+      selectedApproverTeacherCatalogId: input.approverTeacherCatalogId,
+      effectiveYear: submissionEffectiveYear,
+      isManager,
+    })
+    if (!input.classId || !input.reason || !submissionApproverTeacherCatalogId) {
       setError("필수 항목을 모두 입력해 주세요.")
       return
     }
@@ -2051,6 +2097,9 @@ export function MakeupRequestWorkspace() {
       setError("충돌이 없는 보강 강의실을 선택해 주세요.")
       return
     }
+    if (submissionApproverTeacherCatalogId !== input.approverTeacherCatalogId) {
+      patchInput({ approverTeacherCatalogId: submissionApproverTeacherCatalogId })
+    }
 
     setSaving(true)
     setError("")
@@ -2061,6 +2110,7 @@ export function MakeupRequestWorkspace() {
         requestKind: getInputRequestKind(input, makeupSlots),
         makeupClassroom: makeupSlots[0]?.classroom || "",
         makeupSlots,
+        approverTeacherCatalogId: submissionApproverTeacherCatalogId,
       }
       if (editingRequestId) {
         await resubmitMakeupRequest(editingRequestId, payload, currentUserId)
@@ -2078,7 +2128,7 @@ export function MakeupRequestWorkspace() {
     } finally {
       setSaving(false)
     }
-  }, [currentUserId, editingRequestId, input, refresh, resetForm, selectedRoomHasCollision])
+  }, [currentUserId, data.teachers, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision])
 
   const runAction = useCallback(async (action: () => Promise<void>, successMessage: string) => {
     setSaving(true)

@@ -8,6 +8,8 @@ import {
   buildRoomOptions,
   canTransitionMakeupRequest,
   getAllowedApproverNames,
+  getMakeupRequestEffectiveYear,
+  isMakeupApproverAllowed,
   resolveMakeupApprovalGroup,
 } from "../src/features/makeup-requests/makeup-request-model.js";
 
@@ -22,7 +24,21 @@ test("makeup request approvers are restricted by subject and division", () => {
   assert.deepEqual(getAllowedApproverNames({ subject: "수학", grade: "고1" }), ["양소윤"]);
 
   assert.equal(resolveMakeupApprovalGroup({ subject: "영어", grade: "고2" }), "english");
-  assert.deepEqual(getAllowedApproverNames({ subject: "영어", grade: "고2" }), ["강부희", "김민경", "정보영"]);
+  assert.deepEqual(getAllowedApproverNames({ subject: "영어", grade: "고2" }, 2026), ["정보영"]);
+  assert.deepEqual(getAllowedApproverNames({ subject: "영어", grade: "고2" }, 2027), ["강부희"]);
+});
+
+test("makeup approver validation rejects a tampered non-manager selection and permits an explicit manager override", () => {
+  const classRecord = { subject: "영어", grade: "고2" };
+
+  assert.equal(isMakeupApproverAllowed({ classRecord, approverName: "정보영", effectiveYear: 2026 }), true);
+  assert.equal(isMakeupApproverAllowed({ classRecord, approverName: "강부희", effectiveYear: 2026 }), false);
+  assert.equal(isMakeupApproverAllowed({ classRecord, approverName: "강부희", effectiveYear: 2026, isManager: true }), true);
+});
+
+test("makeup effective years use the Seoul calendar boundary", () => {
+  assert.equal(getMakeupRequestEffectiveYear("2026-12-31T14:59:59.999Z"), 2026);
+  assert.equal(getMakeupRequestEffectiveYear("2026-12-31T15:00:00.000Z"), 2027);
 });
 
 test("makeup request workflow auto-completes on approver approval without a manager handoff", () => {

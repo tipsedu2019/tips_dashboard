@@ -156,8 +156,71 @@ test("stale refresh token sessions recover to a clean sign-in state", async () =
   assert.match(source, /refresh token not found/);
   assert.match(source, /refresh token already used/);
   assert.match(source, /await client\.auth\.signOut\(\{ scope: "local" \}\)/);
-  assert.match(source, /resetAnonymousSession\(\)/);
+  assert.match(source, /resetAnonymousSession\(resolution\)/);
   assert.doesNotMatch(source, /Invalid Refresh Token/);
+});
+
+test("auth initialization survives React strict-effect replay without duplicate session locks", async () => {
+  const source = await readSource("src/providers/auth-provider.tsx");
+
+  assert.match(source, /let initialAuthSessionPromise/);
+  assert.match(source, /function loadInitialAuthSession/);
+  assert.match(source, /initialAuthSessionPromise \|\|= client\.auth\.getSession\(\)/);
+  assert.match(source, /loadInitialAuthSession\(client\)/);
+  assert.match(source, /type ResolvedDashboardProfile/);
+  assert.match(source, /await inflight\.promise/);
+  assert.match(source, /applyResolvedProfile\(resolvedProfile\)/);
+  assert.match(source, /createAuthResolutionCoordinator/);
+  assert.match(source, /authResolutionRef\.current\.canReuseResolvedProfile\(sessionKey\)/);
+  assert.match(source, /authResolutionRef\.current\.markResolvedProfile\(resolvedProfile\)/);
+  assert.match(source, /const authSubscriptionTimer = setTimeout/);
+  assert.match(source, /clearTimeout\(authSubscriptionTimer\)/);
+  assert.match(
+    source,
+    /const provisionalUser = createFallbackUser\(\s*nextSession\.user,\s*"viewer",?\s*\)[\s\S]*setUser\(provisionalUser\)[\s\S]*setLoading\(false\)[\s\S]*resolveDashboardProfile/,
+  );
+  assert.match(
+    source,
+    /onAuthStateChange\([\s\S]*setTimeout\(\(\) => \{[\s\S]*void applyResolvedUser\(nextSession, resolution, event\)/,
+  );
+  assert.match(source, /event === "USER_UPDATED"/);
+});
+
+test("auth resolution tokens reject stale snapshots and signed-in work after sign-out", async () => {
+  const { createAuthResolutionCoordinator } = await import(
+    "../src/lib/auth-resolution-coordinator.js"
+  );
+  const coordinator = createAuthResolutionCoordinator();
+  const initialSnapshot = coordinator.captureSnapshot();
+  const signedIn = coordinator.begin("user-1:100");
+
+  assert.equal(coordinator.isSnapshotCurrent(initialSnapshot), false);
+  assert.equal(coordinator.isCurrent(signedIn), true);
+
+  const signedOut = coordinator.begin("anonymous");
+  assert.equal(coordinator.isCurrent(signedIn), false);
+  assert.equal(coordinator.isCurrent(signedOut), true);
+});
+
+test("auth profile reuse cannot leave session A displaying provisional user B", async () => {
+  const { createAuthResolutionCoordinator } = await import(
+    "../src/lib/auth-resolution-coordinator.js"
+  );
+  const coordinator = createAuthResolutionCoordinator();
+
+  const firstA = coordinator.begin("user-a:1");
+  assert.equal(coordinator.markResolvedProfile(firstA), true);
+  assert.equal(coordinator.canReuseResolvedProfile("user-a:1"), true);
+
+  const pendingB = coordinator.begin("user-b:1");
+  assert.equal(coordinator.canReuseResolvedProfile("user-a:1"), false);
+  assert.equal(coordinator.canReuseResolvedProfile("user-b:1"), false);
+
+  const returnedA = coordinator.begin("user-a:1");
+  assert.equal(coordinator.canReuseResolvedProfile("user-a:1"), false);
+  assert.equal(coordinator.markResolvedProfile(pendingB), false);
+  assert.equal(coordinator.markResolvedProfile(returnedA), true);
+  assert.equal(coordinator.canReuseResolvedProfile("user-a:1"), true);
 });
 
 test("self sign-up uses a receivable email and Supabase signUp", async () => {

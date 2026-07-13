@@ -30,6 +30,32 @@ test("class student rosters never use raw UUIDs as display names", async () => {
   assert.doesNotMatch(tableSource, /const name = student\.name \|\| student\.id \|\| "학생"/);
 });
 
+test("management roster writes are readiness-gated and use the atomic roster RPC", async () => {
+  const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
+  const assignSource = serviceSource.match(/async assignStudentToClass[\s\S]*?return \{ student: nextStudent, class: nextClass \};/)?.[0] || "";
+  const removeSource = serviceSource.match(/async removeStudentFromClass[\s\S]*?return \{ student: nextStudent, class: nextClass \};/)?.[0] || "";
+
+  assert.match(serviceSource, /createRegistrationRuntimeProbe/);
+  assert.match(serviceSource, /probeRegistrationRuntime/);
+  assert.match(serviceSource, /데이터 전환 중/);
+  assert.match(serviceSource, /invalidateRegistrationRuntimeAfterReadyFailure/);
+  assert.match(serviceSource, /isMissingRegistrationRosterRpc/);
+  assert.match(assignSource, /set_student_class_roster_mode/);
+  assert.match(assignSource, /p_expected_mode:\s*previousMode \|\| "removed"/);
+  assert.match(assignSource, /buildCommittedRosterRecords/);
+  assert.match(removeSource, /set_student_class_roster_mode/);
+  assert.match(removeSource, /p_next_mode:\s*"removed"/);
+  assert.match(removeSource, /p_expected_mode:\s*previousMode \|\| "removed"/);
+  assert.match(removeSource, /buildCommittedRosterRecords/);
+  assert.match(serviceSource, /stripReadyStudentWriteFields/);
+  assert.match(serviceSource, /stripReadyClassWriteFields/);
+  assert.match(serviceSource, /assertStudentPhysicalDeleteAllowed/);
+  assert.match(serviceSource, /student_class_enrollment_history/);
+  assert.match(serviceSource, /ops_registration_enrollments/);
+  assert.match(serviceSource, /assertCommittedRosterProjection/);
+  assert.match(serviceSource, /연결 또는 수강 이력이 있는 학생은 퇴원 처리하세요/);
+});
+
 test("class management accepts legacy class detail tab URLs without rendering detail tabs", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
