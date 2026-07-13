@@ -580,6 +580,308 @@ function readFunctionArgumentTypes(block) {
     .map((match) => match[1])
 }
 
+test("registration intake migration adds canonical phone-queue readiness", async () => {
+  const sql = await readMigration("registration_intake_workflow")
+  const trimmed = sql.trim()
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.equal((trimmed.match(/^begin;$/gim) || []).length, 1)
+  assert.equal((trimmed.match(/^commit;$/gim) || []).length, 1)
+  assert.match(sql, /alter table public\.ops_registration_consultations[\s\S]*?add column ready_at timestamptz[\s\S]*?add column ready_source text/)
+
+  const sourceConstraintStart = sql.indexOf(
+    "add constraint ops_registration_consultations_ready_source_check",
+  )
+  const modeConstraintStart = sql.indexOf(
+    "add constraint ops_registration_consultations_mode_readiness_check",
+  )
+  assert.notEqual(sourceConstraintStart, -1)
+  assert.ok(modeConstraintStart > sourceConstraintStart)
+  const sourceConstraint = sql.slice(sourceConstraintStart, modeConstraintStart)
+  for (const source of [
+    "inquiry",
+    "level_test_completion",
+    "visit_reopened",
+    "director_resolved",
+    "track_reopened",
+    "migration",
+    "legacy",
+  ]) {
+    assert.match(sourceConstraint, new RegExp(`'${source}'`))
+  }
+  assert.match(sourceConstraint, /not valid/)
+  assert.match(sql.slice(modeConstraintStart), /mode = 'phone'[\s\S]*?ready_at is not null[\s\S]*?ready_source is not null[\s\S]*?mode = 'visit'[\s\S]*?ready_at is null[\s\S]*?ready_source is null[\s\S]*?not valid/)
+
+  const backfillStart = sql.indexOf("-- registration_phone_readiness_backfill")
+  const indexStart = sql.indexOf(
+    "create index ops_registration_consultations_phone_waiting_ready_idx",
+  )
+  assert.notEqual(backfillStart, -1)
+  assert.ok(indexStart > backfillStart)
+  const backfill = sql.slice(backfillStart, indexStart)
+  assert.equal(
+    (backfill.match(/event\.after_value::jsonb ->> 'version' = '1'/g) || []).length,
+    2,
+  )
+  assert.match(backfill, /metadata[\s\S]*?consultationId/)
+  assert.match(backfill, /metadata[\s\S]*?phoneConsultationId/)
+  assert.match(backfill, /attempt\.completed_at[\s\S]*?'level_test_completion'/)
+  for (const [eventType, source] of [
+    ["inquiry_routed", "inquiry"],
+    ["appointment_canceled", "visit_reopened"],
+    ["appointment_subject_deselected", "visit_reopened"],
+    ["track_reopened", "track_reopened"],
+    ["migration_review_resolved", "migration"],
+    ["director_default_resolved", "director_resolved"],
+    ["director_manual_override", "director_resolved"],
+    ["director_phone_queue_repaired", "director_resolved"],
+  ]) {
+    assert.match(backfill, new RegExp(`'${eventType}'[\\s\\S]*?'${source}'`))
+  }
+  assert.match(backfill, /consultation\.created_at[\s\S]*?'legacy'/)
+  assert.match(backfill, /validate constraint ops_registration_consultations_ready_source_check/)
+  assert.match(backfill, /validate constraint ops_registration_consultations_mode_readiness_check/)
+
+  assert.match(sql, /create index ops_registration_consultations_phone_waiting_ready_idx\s+on public\.ops_registration_consultations\(ready_at, track_id\)\s+where mode = 'phone' and status = 'waiting';/)
+  const viewStart = sql.indexOf(
+    "create or replace view public.ops_registration_subject_track_summaries",
+  )
+  const viewEnd = sql.indexOf(";", viewStart)
+  assert.notEqual(viewStart, -1)
+  const view = sql.slice(viewStart, viewEnd + 1)
+  assert.match(view, /with \(security_invoker = true\)/)
+  assert.match(view, /active_visit\.place as visit_place,\s*active_phone\.ready_at as phone_ready_at,\s*active_phone\.ready_source as phone_ready_source/)
+  assert.match(view, /left join lateral \([\s\S]*?consultation\.mode = 'phone'[\s\S]*?consultation\.status = 'waiting'[\s\S]*?order by consultation\.created_at desc, consultation\.id desc[\s\S]*?limit 1[\s\S]*?\) active_phone on true/)
+
+  const writers = Object.fromEntries([
+    "route_registration_inquiry_impl",
+    "assign_registration_track_director_impl",
+    "save_registration_shared_appointment_impl",
+    "cancel_registration_appointment_impl",
+    "complete_registration_level_test_attempt_impl",
+    "resolve_registration_migration_review_impl",
+    "reopen_registration_track_impl",
+  ].map((name) => [name, readFunctionBlock(sql, "dashboard_private", name)]))
+  const writerSql = Object.values(writers).join("\n")
+  assert.equal(
+    (writerSql.match(/insert into public\.ops_registration_consultations\(/g) || []).length,
+    11,
+  )
+  assert.equal(
+    (writerSql.match(/insert into public\.ops_registration_consultations\([\s\S]*?ready_at,\s*ready_source\s*\)/g) || []).length,
+    11,
+  )
+  assert.match(writers.route_registration_inquiry_impl, /v_inquiry_at timestamptz[\s\S]*?detail\.inquiry_at[\s\S]*?v_inquiry_at, 'inquiry'/)
+  assert.match(writers.assign_registration_track_director_impl, /v_track\.stage_entered_at, 'director_resolved'/)
+  assert.match(writers.save_registration_shared_appointment_impl, /pg_catalog\.now\(\), 'visit_reopened'/)
+  assert.equal(
+    (writers.save_registration_shared_appointment_impl.match(/'visit',\s*'scheduled',[\s\S]{0,160}?null,\s*null/g) || []).length,
+    3,
+  )
+  assert.match(writers.cancel_registration_appointment_impl, /pg_catalog\.now\(\),\s*'visit_reopened'/)
+  assert.match(writers.complete_registration_level_test_attempt_impl, /v_attempt\.completed_at,\s*'level_test_completion'/)
+  assert.match(writers.resolve_registration_migration_review_impl, /v_phone_consultation_at timestamptz[\s\S]*?coalesce\(v_phone_consultation_at, pg_catalog\.now\(\)\),\s*'migration'/)
+  assert.match(writers.resolve_registration_migration_review_impl, /'visit',\s*'scheduled',[\s\S]{0,160}?null,\s*null/)
+  assert.match(writers.reopen_registration_track_impl, /pg_catalog\.now\(\),\s*'track_reopened'/)
+
+  const pgTap = await readFile(
+    new URL("registration_intake_workflow_test.sql", supabaseTestsUrl),
+    "utf8",
+  )
+  assert.match(pgTap, /begin;\s*select plan\(17\);/i)
+  assert.equal(
+    (pgTap.match(/^select (?:ok|is|is_empty|has_function|function_privs_are)\(/gim) || []).length,
+    17,
+  )
+  assert.match(pgTap, /select \* from finish\(\);\s*rollback;/i)
+})
+
+test("registration intake creation is one authenticated atomic workflow", async () => {
+  const sql = await readMigration("registration_intake_workflow")
+  const privateImplementation = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "create_registration_case_with_initial_workflow_v1_impl",
+  )
+  const publicWrapper = readFunctionBlock(
+    sql,
+    "public",
+    "create_registration_case_with_initial_workflow_v1",
+  )
+  const signature = [
+    "text", "text", "text", "text", "text", "text", "timestamptz", "text[]",
+    "text", "text", "jsonb", "jsonb", "jsonb", "jsonb", "text",
+  ]
+
+  assert.deepEqual(readFunctionArgumentTypes(privateImplementation), signature)
+  assert.deepEqual(readFunctionArgumentTypes(publicWrapper), signature)
+  assert.match(privateImplementation, /security definer/)
+  assert.match(privateImplementation, /set search_path = ''/)
+  assert.match(publicWrapper, /security invoker/)
+  assert.match(publicWrapper, /set search_path = ''/)
+  assert.match(
+    publicWrapper,
+    /dashboard_private\.create_registration_case_with_initial_workflow_v1_impl\(/,
+  )
+
+  const sqlSignature = signature.join(", ").replaceAll("[]", "\\[\\]")
+  for (const qualifiedName of [
+    "dashboard_private\\.create_registration_case_with_initial_workflow_v1_impl",
+    "public\\.create_registration_case_with_initial_workflow_v1",
+  ]) {
+    assert.match(sql, new RegExp(
+      `revoke execute on function ${qualifiedName}\\(${sqlSignature}\\)\\s+from public, anon;`,
+    ))
+    assert.match(sql, new RegExp(
+      `grant execute on function ${qualifiedName}\\(${sqlSignature}\\)\\s+to authenticated;`,
+    ))
+  }
+
+  for (const errorCode of [
+    "registration_initial_subject_plan_invalid",
+    "registration_initial_appointment_membership_invalid",
+    "registration_initial_appointment_invalid",
+    "registration_director_required",
+    "registration_director_override_invalid",
+  ]) {
+    assert.match(privateImplementation, new RegExp(`'${errorCode}'`))
+  }
+  for (const appointmentVariable of [
+    "v_level_test_appointment",
+    "v_visit_appointment",
+  ]) {
+    assert.match(
+      privateImplementation,
+      new RegExp(
+        `jsonb_typeof\\(${appointmentVariable} -> 'scheduledAt'\\) <> 'string'[\\s\\S]*?` +
+          `jsonb_typeof\\(${appointmentVariable} -> 'place'\\) <> 'string'`,
+      ),
+    )
+  }
+  for (const normalizedInput of [
+    "studentName",
+    "schoolGrade",
+    "schoolName",
+    "parentPhone",
+    "studentPhone",
+    "campus",
+    "inquiryAt",
+    "subjects",
+    "requestNote",
+    "priority",
+    "subjectPlans",
+    "levelTestAppointment",
+    "visitAppointment",
+    "directorOverrides",
+  ]) {
+    assert.match(privateImplementation, new RegExp(`'${normalizedInput}'`))
+  }
+
+  const firstJsonTypeCheck = privateImplementation.indexOf("jsonb_typeof")
+  const firstObjectKeys = privateImplementation.indexOf("jsonb_object_keys")
+  const firstArrayElements = privateImplementation.indexOf("jsonb_array_elements")
+  assert.ok(firstJsonTypeCheck !== -1 && firstJsonTypeCheck < firstObjectKeys)
+  assert.ok(firstJsonTypeCheck < firstArrayElements)
+  const advisoryLock = privateImplementation.indexOf("pg_advisory_xact_lock")
+  const receiptLookup = privateImplementation.indexOf("-- registration_initial_receipt_lookup")
+  const parentInsert = privateImplementation.indexOf("insert into public.ops_tasks")
+  const directorResolution = privateImplementation.indexOf("resolve_registration_default_director")
+  assert.ok(advisoryLock !== -1 && advisoryLock < receiptLookup)
+  assert.ok(receiptLookup < parentInsert)
+  assert.ok(directorResolution !== -1 && directorResolution < parentInsert)
+  assert.match(privateImplementation, /mutation\.mutation_type = 'create_case_with_initial_workflow_v1'[\s\S]*?mutation\.target_fingerprint = v_target_fingerprint/)
+  assert.match(privateImplementation, /insert into dashboard_private\.ops_registration_mutations[\s\S]*?'create_case_with_initial_workflow_v1'/)
+
+  for (const helperName of [
+    "resolve_registration_default_director",
+    "is_active_registration_director",
+    "transition_registration_track_status",
+    "write_registration_track_event",
+    "recompute_registration_parent",
+  ]) {
+    assert.match(privateImplementation, new RegExp(`dashboard_private\\.${helperName}`))
+  }
+  assert.doesNotMatch(
+    privateImplementation,
+    /public\.(?:create_registration_case|route_registration_inquiry|assign_registration_track_director|save_registration_shared_appointment)\s*\(/,
+  )
+
+  const visitEvent = privateImplementation.slice(
+    privateImplementation.indexOf("'visit_scheduled'"),
+  )
+  for (const metadataKey of [
+    "appointmentId",
+    "notificationRevision",
+    "kind",
+    "scheduledAt",
+    "place",
+    "activityId",
+    "activeTrackIds",
+    "canceledTrackIds",
+    "changeKind",
+  ]) {
+    assert.match(visitEvent, new RegExp(`'${metadataKey}'`))
+  }
+  assert.match(visitEvent, /'notificationRevision',\s*1/)
+  assert.match(visitEvent, /'kind',\s*'visit_consultation'/)
+  assert.match(visitEvent, /'canceledTrackIds',\s*'\[\]'::jsonb/)
+  assert.match(visitEvent, /'changeKind',\s*'created'/)
+  assert.match(privateImplementation, /'taskId'[\s\S]*?'commonRevision'[\s\S]*?'subjects'[\s\S]*?'tracks'[\s\S]*?'appointments'[\s\S]*?'notificationTargets'/)
+
+  const runtimePgTap = await readFile(
+    new URL("registration_intake_workflow_runtime_test.sql", supabaseTestsUrl),
+    "utf8",
+  )
+  assert.match(runtimePgTap, /^begin;\s*select no_plan\(\);/i)
+  assert.match(runtimePgTap, /select \* from finish\(\);\s*rollback;\s*$/i)
+  for (const scenario of [
+    "inquiry-only",
+    "level-test-only",
+    "direct-phone-only",
+    "visit-only",
+    "English test and mathematics phone",
+    "two-subject test",
+    "two-subject visit",
+    "membership mismatch",
+    "missing required director",
+    "identical sequential retry",
+    "changed fingerprint",
+    "induced child failure",
+    "notification revision contract",
+  ]) {
+    assert.match(runtimePgTap, new RegExp(scenario, "i"))
+  }
+  for (const readinessSource of [
+    "inquiry",
+    "director_resolved",
+    "visit_reopened",
+    "level_test_completion",
+    "migration",
+    "track_reopened",
+  ]) {
+    assert.match(runtimePgTap, new RegExp(`'${readinessSource}'`))
+  }
+  assert.match(runtimePgTap, /visit participant deselection reopens only the removed subject/i)
+  assert.match(runtimePgTap, /visit cancellation creates visit_reopened phone readiness/i)
+  assert.match(runtimePgTap, /visit conversion cancels readiness only for participating subjects/i)
+
+  const coreSql = await readMigration("registration_subject_track_mutations")
+  const coreMarker = readFunctionBlock(
+    coreSql,
+    "public",
+    "registration_subject_tracks_runtime_version",
+  )
+  assert.match(coreMarker, /select 1/)
+  const intakeMarkerIndex = sql.indexOf(
+    "create function public.registration_intake_workflow_runtime_version()",
+  )
+  assert.notEqual(intakeMarkerIndex, -1)
+  assert.equal(sql.lastIndexOf("create function "), intakeMarkerIndex)
+  assert.match(sql.slice(intakeMarkerIndex), /returns integer[\s\S]*?security invoker[\s\S]*?select 1/)
+  assert.match(sql.trim(), /create function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?alter function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?revoke execute on function public\.registration_intake_workflow_runtime_version\(\) from public, anon;[\s\S]*?grant execute on function public\.registration_intake_workflow_runtime_version\(\) to authenticated;\s*commit;$/)
+})
+
 test("Task 3B case and inquiry routing mutations preserve transactional contracts", async () => {
   const sql = await readMigration("registration_subject_track_mutations")
   const createCase = readFunctionBlock(sql, "dashboard_private", "create_registration_case_impl")
