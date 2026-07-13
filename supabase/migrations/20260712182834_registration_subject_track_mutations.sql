@@ -1,3 +1,5 @@
+begin;
+
 -- Registration subject-track mutation foundation.
 -- This migration remains intentionally unapplied until every public mutation,
 -- runtime adapter, readiness gate, and database verification fixture is complete.
@@ -14613,3 +14615,5 @@ $$;
 alter function public.registration_subject_tracks_runtime_version() owner to postgres;
 revoke execute on function public.registration_subject_tracks_runtime_version() from public, anon;
 grant execute on function public.registration_subject_tracks_runtime_version() to authenticated;
+
+commit;

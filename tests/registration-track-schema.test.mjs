@@ -25,6 +25,22 @@ function readPolicyBlock(sql, name) {
   return sql.slice(start, nextBlank === -1 ? sql.length : nextBlank)
 }
 
+test("registration subject migrations keep lock and temporary-table work in explicit transactions", async () => {
+  for (const suffix of [
+    "registration_subject_tracks_schema",
+    "registration_subject_track_mutations",
+  ]) {
+    const sql = await readMigration(suffix)
+    const trimmed = sql.trim()
+    assert.match(trimmed, /^begin;/i, `${suffix} must open one explicit transaction`)
+    assert.match(trimmed, /commit;$/i, `${suffix} must commit its explicit transaction`)
+    assert.equal((trimmed.match(/^begin;$/gim) || []).length, 1)
+    assert.equal((trimmed.match(/^commit;$/gim) || []).length, 1)
+    assert.ok(trimmed.indexOf("begin;") < trimmed.indexOf("lock table"))
+    assert.ok(trimmed.lastIndexOf("commit;") > trimmed.lastIndexOf("lock table"))
+  }
+})
+
 test("subject-track schema is additive, exposed deliberately, and RLS protected", async () => {
   const sql = await readMigration("registration_subject_tracks_schema")
   const publicTables = [
@@ -1948,7 +1964,7 @@ test("Task 3H2 reopen accepts only terminal nonregistration outcomes and creates
   assert.match(sql, /grant execute on function public\.reopen_registration_track\(uuid, text, text, text\) to authenticated;/)
 })
 
-test("Task 3H3 installs the locked roster gateway and advertises readiness only at the literal tail", async () => {
+test("Task 3H3 installs the locked roster gateway and advertises readiness immediately before commit", async () => {
   const sql = await readMigration("registration_subject_track_mutations")
   const gatewayIndex = sql.indexOf("-- global_roster_gateway_lock")
   assert.notEqual(gatewayIndex, -1)
@@ -2019,7 +2035,7 @@ test("Task 3H3 installs the locked roster gateway and advertises readiness only 
   assert.ok(runtimeIndex > gatewayIndex)
   assert.match(sql.slice(runtimeIndex), /returns integer[\s\S]*?language sql[\s\S]*?security invoker[\s\S]*?select 1/)
   assert.match(sql.slice(runtimeIndex), /revoke execute on function public\.registration_subject_tracks_runtime_version\(\) from public, anon;[\s\S]*?grant execute on function public\.registration_subject_tracks_runtime_version\(\) to authenticated;/)
-  assert.match(sql.trim(), /create function public\.registration_subject_tracks_runtime_version\(\)[\s\S]*?grant execute on function public\.registration_subject_tracks_runtime_version\(\) to authenticated;$/)
+  assert.match(sql.trim(), /create function public\.registration_subject_tracks_runtime_version\(\)[\s\S]*?grant execute on function public\.registration_subject_tracks_runtime_version\(\) to authenticated;\s*commit;$/)
 })
 
 test("Task 3H3 prepares the exact schema pgTAP packet and a network-free concurrency dry run", async () => {

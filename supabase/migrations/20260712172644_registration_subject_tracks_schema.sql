@@ -1,3 +1,5 @@
+begin;
+
 -- registration_legacy_write_lock
 set local lock_timeout = '5s';
 lock table public.ops_tasks in share row exclusive mode;
@@ -2466,3 +2468,5 @@ create trigger prevent_registration_type_reclassification
 before update of type on public.ops_tasks
 for each row
 execute function dashboard_private.prevent_registration_type_reclassification();
+
+commit;
