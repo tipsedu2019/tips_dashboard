@@ -573,6 +573,23 @@ const TRACK_SUMMARY_COLUMNS = [
   "visit_place",
 ].join(",")
 
+const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
+  "id",
+  "task_id",
+  "subject",
+  "pipeline_status",
+  "director_profile_id",
+  "director_assignment_source",
+  "director_assignment_rule_key",
+  "waiting_kind",
+  "level_test_retake_decision",
+  "migration_review_required",
+  "stage_entered_at",
+  "updated_at",
+  "visit_scheduled_at",
+  "visit_place",
+].join(",")
+
 const TASK_SCOPED_CASE_READS = [
   ["ops_registration_subject_tracks", "*,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)"],
   ["ops_registration_appointments", "*"],
@@ -1005,6 +1022,14 @@ function missingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"))
 }
 
+function missingPhoneReadinessColumnError(error: unknown) {
+  if (!missingColumnError(error)) return false
+  const message = error && typeof error === "object" && "message" in error
+    ? text(error.message).toLowerCase()
+    : ""
+  return message.includes("phone_ready_at") || message.includes("phone_ready_source")
+}
+
 function errorText(error: unknown) {
   if (error instanceof Error) return error.message
   if (error && typeof error === "object" && "message" in error) return text(error.message)
@@ -1172,12 +1197,23 @@ export function createRegistrationTrackService(
       if (normalizedTaskIds.length === 0) return { mode: "ready", tracks: [] }
 
       try {
-        const trackRows = await queryRows(
-          client.from("ops_registration_subject_track_summaries")
-            .select(TRACK_SUMMARY_COLUMNS)
-            .in("task_id", normalizedTaskIds),
-          metrics,
-        )
+        let trackRows: Row[]
+        try {
+          trackRows = await queryRows(
+            client.from("ops_registration_subject_track_summaries")
+              .select(TRACK_SUMMARY_COLUMNS)
+              .in("task_id", normalizedTaskIds),
+            metrics,
+          )
+        } catch (error) {
+          if (!missingPhoneReadinessColumnError(error)) throw error
+          trackRows = await queryRows(
+            client.from("ops_registration_subject_track_summaries")
+              .select(PRE_INTAKE_TRACK_SUMMARY_COLUMNS)
+              .in("task_id", normalizedTaskIds),
+            metrics,
+          )
+        }
         const directorIds = [...new Set(trackRows
           .map((row) => nullableText(value(row, "director_profile_id")))
           .filter((id): id is string => Boolean(id)))]

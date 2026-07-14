@@ -10280,6 +10280,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [loadRegistrationCaseForWorkspace, openRegistrationTrack, registrationViewerId, registrationViewerRole, reload, syncTaskDeepLink])
 
   useEffect(() => {
+    if (deleteTarget) return
     const deepLinkedTaskId = searchParams.get("taskId") || ""
     const deepLinkedTrackId = searchParams.get("trackId") || ""
     if (!deepLinkedTaskId || !data || !workspaceDataBelongsToCurrentViewer) return
@@ -10310,7 +10311,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, detailOpen, openEdit, openRegistrationTrack, searchParams, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationTrack, searchParams, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -11412,6 +11413,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const requestRemoveTask = (task: OpsTask) => {
     if (!canDeleteTask(task)) return
     setDetailOpen(false)
+    syncTaskDeepLink(null)
     setFormOpen(false)
     setMessage("")
     setFormCompletionBlockers([])

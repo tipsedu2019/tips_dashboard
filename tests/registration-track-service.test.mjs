@@ -401,6 +401,82 @@ test("track summary loader uses the exact safe projection and skips profile look
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
 });
 
+test("track summary loader falls back to the pre-intake projection when only phone readiness columns are missing", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const missingPhoneReadinessColumn = {
+    code: "42703",
+    message: "column ops_registration_subject_track_summaries.phone_ready_at does not exist",
+  };
+  let invalidations = 0;
+  const harness = createClient({
+    queryHandler(query) {
+      assert.equal(query.table, "ops_registration_subject_track_summaries");
+      if (query.columns.includes("phone_ready_at")) {
+        return { data: null, error: missingPhoneReadinessColumn };
+      }
+      return { data: [{
+        id: "track-1", task_id: "task-1", subject: "영어",
+        pipeline_status: "inquiry", director_profile_id: null,
+        director_assignment_source: "", director_assignment_rule_key: "",
+        waiting_kind: null, level_test_retake_decision: null,
+        migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
+        updated_at: "2026-07-12T02:00:00Z",
+        visit_scheduled_at: null, visit_place: null,
+      }], error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    invalidateRuntimeAfterReadyFailure(error) {
+      invalidations += 1;
+      const integrity = new Error("integrity");
+      integrity.code = "REGISTRATION_RUNTIME_INTEGRITY_ERROR";
+      integrity.cause = error;
+      throw integrity;
+    },
+  }));
+
+  const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
+
+  assert.equal(result.mode, "ready");
+  assert.equal(result.tracks.length, 1);
+  assert.equal(result.tracks[0].id, "track-1");
+  assert.equal(result.tracks[0].phoneReadyAt, null);
+  assert.equal(result.tracks[0].phoneReadySource, null);
+  assert.equal(invalidations, 0);
+  assert.equal(harness.queries.length, 2);
+  assert.match(harness.queries[0].columns, /phone_ready_at,phone_ready_source/);
+  assert.doesNotMatch(harness.queries[1].columns, /phone_ready_at|phone_ready_source/);
+  assert.deepEqual(harness.queries[1].filters, [["in", "task_id", ["task-1"]]]);
+});
+
+test("track summary loader does not fall back for an unrelated missing summary column", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const unrelatedMissingColumn = {
+    code: "42703",
+    message: "column ops_registration_subject_track_summaries.visit_place does not exist",
+  };
+  let invalidations = 0;
+  const harness = createClient({
+    queryHandler: () => ({ data: null, error: unrelatedMissingColumn }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    invalidateRuntimeAfterReadyFailure(error) {
+      invalidations += 1;
+      const integrity = new Error("integrity");
+      integrity.code = "REGISTRATION_RUNTIME_INTEGRITY_ERROR";
+      integrity.cause = error;
+      throw integrity;
+    },
+  }));
+
+  await assert.rejects(
+    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR" && error.cause === unrelatedMissingColumn,
+  );
+  assert.equal(invalidations, 1);
+  assert.equal(harness.queries.length, 1);
+});
+
 test("track summary loader deduplicates directors into one narrow profile lookup", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({

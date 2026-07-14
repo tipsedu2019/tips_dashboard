@@ -218,6 +218,29 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
 	  assert.doesNotMatch(source, /lg:grid-cols-6/);
 	});
 
+test("detail deletion clears the task deep link before opening the shared confirmation dialog", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const start = source.indexOf("const requestRemoveTask =");
+  const end = source.indexOf("const requestRemoveWordRetests =", start);
+  const requestRemoveTaskSource = source.slice(start, end);
+  const deepLinkedTaskIdIndex = source.indexOf('const deepLinkedTaskId = searchParams.get("taskId")');
+  const deepLinkEffectStart = source.lastIndexOf("useEffect(() => {", deepLinkedTaskIdIndex);
+  const deepLinkEffectEnd = source.indexOf("function handleDetailOpenChange", deepLinkEffectStart);
+  const deepLinkEffectSource = source.slice(deepLinkEffectStart, deepLinkEffectEnd);
+
+  assertInOrder(requestRemoveTaskSource, [
+    "setDetailOpen(false)",
+    "syncTaskDeepLink(null)",
+    "setDeleteTarget(task)",
+  ]);
+  assertInOrder(deepLinkEffectSource, [
+    "useEffect(() => {",
+    "if (deleteTarget) return",
+    'const deepLinkedTaskId = searchParams.get("taskId")',
+  ]);
+  assert.match(deepLinkEffectSource, /\[[^\]]*deleteTarget[^\]]*\]\)/s);
+});
+
 test("todo form keeps requester metadata readonly and assignee selectors team-aware", async () => {
   const [workspaceSource, serviceSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
