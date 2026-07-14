@@ -455,6 +455,94 @@ test("runtime pgTAP packet fixes all 150 ordered workflow proofs and rolls fixtu
     observationNumbers.toSorted((left, right) => left - right),
     Array.from({ length: 150 }, (_, index) => index + 1),
   )
+
+  const readObservationBlock = (assertionNumber) => {
+    const markerIndex = observationMarkers.findIndex(
+      (marker) => Number(marker[1]) === assertionNumber,
+    )
+    assert.notEqual(
+      markerIndex,
+      -1,
+      `missing runtime observation ${assertionNumber}`,
+    )
+    return sql.slice(
+      observationMarkers[markerIndex].index,
+      observationMarkers[markerIndex + 1]?.index ?? sql.length,
+    )
+  }
+
+  const runtimeThrows = readFunctionBlock(
+    sql,
+    "pg_temp",
+    "registration_throws",
+  )
+  assert.match(runtimeThrows, /p_sqlstate\s+text\s+default\s+null/)
+  assert.match(runtimeThrows, /sqlstate\s*=\s*p_sqlstate/)
+
+  const studentRosterGuardRuntime = readObservationBlock(64)
+  assert.equal(
+    (studentRosterGuardRuntime.match(/pg_temp\.registration_lives\(/g) || [])
+      .length,
+    2,
+  )
+  assert.match(
+    studentRosterGuardRuntime,
+    /00000000-0000-4000-8000-000000000206/,
+  )
+  assert.match(studentRosterGuardRuntime, /on conflict \(id\) do update/)
+  assert.match(studentRosterGuardRuntime, /registration_roster_write_requires_rpc/)
+  assert.match(studentRosterGuardRuntime, /'42501'/)
+
+  const classRosterGuardRuntime = readObservationBlock(65)
+  assert.equal(
+    (classRosterGuardRuntime.match(/pg_temp\.registration_lives\(/g) || [])
+      .length,
+    2,
+  )
+  assert.match(
+    classRosterGuardRuntime,
+    /00000000-0000-4000-8000-000000000390/,
+  )
+  assert.match(classRosterGuardRuntime, /on conflict \(id\) do update/)
+  assert.match(classRosterGuardRuntime, /registration_roster_write_requires_rpc/)
+  assert.match(classRosterGuardRuntime, /'42501'/)
+
+  const rosterUpdateGuardRuntime = readObservationBlock(66)
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /update public\.students[\s\S]*?set class_ids/,
+  )
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /update public\.classes[\s\S]*?set student_ids/,
+  )
+  assert.equal(
+    (rosterUpdateGuardRuntime.match(/registration_roster_write_requires_rpc/g) || [])
+      .length,
+    2,
+  )
+  assert.equal(
+    (rosterUpdateGuardRuntime.match(/'42501'/g) || []).length,
+    2,
+  )
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /delete from public\.classes[\s\S]*?00000000-0000-4000-8000-000000000390/,
+  )
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /delete from public\.students[\s\S]*?00000000-0000-4000-8000-000000000206/,
+  )
+  assert.equal(
+    (sql.match(/00000000-0000-4000-8000-000000000390/g) || []).length,
+    2,
+    "the temporary class insert fixture must appear only in its insert and cleanup",
+  )
+  assert.equal(
+    (sql.match(/00000000-0000-4000-8000-000000000206/g) || []).length,
+    2,
+    "the temporary student insert fixture must appear only in its insert and cleanup",
+  )
   assert.match(sql, /registration_runtime_observation_missing:/)
   assert.doesNotMatch(sql, /registration_function_mentions/)
   const globalRosterReady = readFunctionBlock(
@@ -572,6 +660,15 @@ function readFunctionBlock(sql, schema, name) {
   const end = sql.indexOf("\n$$;", start)
   assert.notEqual(end, -1, `unterminated ${schema}.${name}`)
   return sql.slice(start, end + 4)
+}
+
+function readTriggerBlock(sql, name) {
+  const marker = `create trigger ${name}`
+  const start = sql.indexOf(marker)
+  assert.notEqual(start, -1, `missing trigger ${name}`)
+  const end = sql.indexOf(";", start)
+  assert.notEqual(end, -1, `unterminated trigger ${name}`)
+  return sql.slice(start, end + 1)
 }
 
 function readFunctionArgumentTypes(block) {
@@ -2979,4 +3076,92 @@ test("registration mutations are invoker-safe, explicit, and authenticated-only"
   assert.match(sql, /revoke all on table public\.student_class_enrollment_history from anon, authenticated;/)
   assert.match(sql, /grant select on table public\.student_class_enrollment_history to authenticated;/)
   assert.doesNotMatch(sql, /grant\s+(?!select\s+on)[^;]*on\s+(?:table\s+)?public\.student_class_enrollment_history[^;]*to\s+(?:anon|authenticated)/i)
+})
+
+test("roster guard fix isolates student and class trigger record fields", async () => {
+  const sql = await readMigration("fix_roster_trigger_record_fields")
+  const trimmed = sql.trim()
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+
+  const studentGuard = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "prevent_direct_student_roster_array_write",
+  )
+  assert.match(studentGuard, /security invoker/)
+  assert.match(studentGuard, /set search_path = ''/)
+  assert.match(studentGuard, /tg_relid\s*<>\s*'public\.students'::regclass/)
+  assert.match(studentGuard, /new\.class_ids/)
+  assert.match(studentGuard, /new\.waitlist_class_ids/)
+  assert.doesNotMatch(studentGuard, /new\.(?:student_ids|waitlist_ids)/)
+
+  const classGuard = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "prevent_direct_class_roster_array_write",
+  )
+  assert.match(classGuard, /security invoker/)
+  assert.match(classGuard, /set search_path = ''/)
+  assert.match(classGuard, /tg_relid\s*<>\s*'public\.classes'::regclass/)
+  assert.match(classGuard, /new\.student_ids/)
+  assert.match(classGuard, /new\.waitlist_ids/)
+  assert.doesNotMatch(classGuard, /new\.(?:class_ids|waitlist_class_ids)/)
+
+  const studentInsertTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_student_roster_insert",
+  )
+  assert.match(studentInsertTrigger, /before insert on public\.students/)
+  assert.match(
+    studentInsertTrigger,
+    /execute function dashboard_private\.prevent_direct_student_roster_array_write\(\)/,
+  )
+
+  const studentUpdateTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_student_roster_array_write",
+  )
+  assert.match(
+    studentUpdateTrigger,
+    /before update of class_ids, waitlist_class_ids on public\.students/,
+  )
+  assert.match(
+    studentUpdateTrigger,
+    /execute function dashboard_private\.prevent_direct_student_roster_array_write\(\)/,
+  )
+
+  const classInsertTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_class_roster_insert",
+  )
+  assert.match(classInsertTrigger, /before insert on public\.classes/)
+  assert.match(
+    classInsertTrigger,
+    /execute function dashboard_private\.prevent_direct_class_roster_array_write\(\)/,
+  )
+
+  const classUpdateTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_class_roster_array_write",
+  )
+  assert.match(
+    classUpdateTrigger,
+    /before update of student_ids, waitlist_ids on public\.classes/,
+  )
+  assert.match(
+    classUpdateTrigger,
+    /execute function dashboard_private\.prevent_direct_class_roster_array_write\(\)/,
+  )
+
+  for (const guardName of [
+    "prevent_direct_student_roster_array_write",
+    "prevent_direct_class_roster_array_write",
+  ]) {
+    assert.match(sql, new RegExp(`alter function dashboard_private\\.${guardName}\\(\\) owner to postgres`))
+    assert.match(sql, new RegExp(`revoke execute on function dashboard_private\\.${guardName}\\(\\)[\\s\\S]*?from public, anon, authenticated`))
+  }
+
+  assert.match(sql, /drop function dashboard_private\.prevent_direct_roster_array_write\(\)/)
 })

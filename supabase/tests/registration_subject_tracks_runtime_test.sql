@@ -507,7 +507,8 @@ select pg_temp.registration_record(
 
 create or replace function pg_temp.registration_throws(
   p_sql text,
-  p_message_pattern text default null
+  p_message_pattern text default null,
+  p_sqlstate text default null
 )
 returns boolean
 language plpgsql
@@ -518,7 +519,8 @@ begin
   return false;
 exception
   when others then
-    return p_message_pattern is null or sqlerrm ~ p_message_pattern;
+    return (p_message_pattern is null or sqlerrm ~ p_message_pattern)
+      and (p_sqlstate is null or sqlstate = p_sqlstate);
 end;
 $$;
 
@@ -1320,30 +1322,94 @@ select pg_temp.registration_record(63, pg_temp.registration_throws(
   'registration_roster_mode_conflict'
 ));
 select pg_temp.registration_set_actor('00000000-0000-4000-8000-000000000101');
-select pg_temp.registration_record(64, pg_temp.registration_throws(
-  $$insert into public.students(
-      id, name, school, grade, parent_contact, status, class_ids, waitlist_class_ids
-    ) values (
-      gen_random_uuid(), '위조학생', '런타임중', '중1', '01099999999', '재원',
-      '["00000000-0000-4000-8000-000000000301"]'::jsonb, '[]'::jsonb
-    )$$,
-  'registration_roster_write_requires_rpc|row-level security|permission denied'
-));
-select pg_temp.registration_record(65, pg_temp.registration_throws(
-  $$insert into public.classes(
-      id, name, subject, status, student_ids, waitlist_ids, textbook_ids
-    ) values (
-      gen_random_uuid(), '위조수업', '영어', '수업 진행 중',
-      '["00000000-0000-4000-8000-000000000201"]'::jsonb, '[]'::jsonb, '[]'::jsonb
-    )$$,
-  'registration_roster_write_requires_rpc|row-level security|permission denied'
-));
-select pg_temp.registration_record(66, pg_temp.registration_throws(
-  $$update public.students
-    set class_ids = '[]'::jsonb
-    where id = '00000000-0000-4000-8000-000000000202'$$,
-  'registration_roster_write_requires_rpc|row-level security|permission denied'
-));
+select pg_temp.registration_record(
+  64,
+  pg_temp.registration_lives(
+    $$insert into public.students(
+        id, name, uid, school, grade, contact, parent_contact, status
+      ) values (
+        '00000000-0000-4000-8000-000000000206', '런타임신규', 'runtime-insert-student',
+        '런타임중', '중1', '01000002006', '01000001006', '재원'
+      )$$
+  )
+  and pg_temp.registration_lives(
+    $$insert into public.students(
+        id, name, uid, school, grade, contact, parent_contact, status
+      )
+      values (
+        '00000000-0000-4000-8000-000000000201', '런타임학생', 'runtime-student',
+        '런타임중', '중1', '01000002001', '01000001001', '재원'
+      )
+      on conflict (id) do update set name = excluded.name$$
+  )
+  and pg_temp.registration_throws(
+    $$insert into public.students(
+        id, name, school, grade, parent_contact, status, class_ids, waitlist_class_ids
+      ) values (
+        gen_random_uuid(), '위조학생', '런타임중', '중1', '01099999999', '재원',
+        '["00000000-0000-4000-8000-000000000301"]'::jsonb, '[]'::jsonb
+      )$$,
+    'registration_roster_write_requires_rpc',
+    '42501'
+  )
+);
+select pg_temp.registration_record(
+  65,
+  pg_temp.registration_lives(
+    $$insert into public.classes(
+        id, name, class_type, subject, grade, teacher, schedule, room,
+        capacity, fee, status, textbook_ids, lessons, schedule_plan
+      ) values (
+        '00000000-0000-4000-8000-000000000390', '런타임 영어 신규', '정규', '영어', '중1',
+        '강부희', '목 18:00', '본관', 12, 100000, '수업 진행 중', '[]'::jsonb,
+        '[]'::jsonb, '{"sessions":[]}'::jsonb
+      )$$
+  )
+  and pg_temp.registration_lives(
+    $$insert into public.classes(
+        id, name, class_type, subject, grade, teacher, schedule, room,
+        capacity, fee, status, textbook_ids, lessons, schedule_plan
+      )
+      values (
+        '00000000-0000-4000-8000-000000000301', '런타임 영어 A', '정규', '영어', '중1',
+        '강부희', '월 18:00', '본관', 12, 100000, '수업 진행 중',
+        '["00000000-0000-4000-8000-000000000401"]'::jsonb, '[]'::jsonb,
+        '{"sessions":[{"date":"2026-07-20","sessionNumber":1,"scheduleState":"active"}]}'::jsonb
+      )
+      on conflict (id) do update set name = excluded.name$$
+  )
+  and pg_temp.registration_throws(
+    $$insert into public.classes(
+        id, name, subject, status, student_ids, waitlist_ids, textbook_ids
+      ) values (
+        gen_random_uuid(), '위조수업', '영어', '수업 진행 중',
+        '["00000000-0000-4000-8000-000000000201"]'::jsonb, '[]'::jsonb, '[]'::jsonb
+      )$$,
+    'registration_roster_write_requires_rpc',
+    '42501'
+  )
+);
+select pg_temp.registration_record(
+  66,
+  pg_temp.registration_throws(
+    $$update public.students
+      set class_ids = '[]'::jsonb
+      where id = '00000000-0000-4000-8000-000000000202'$$,
+    'registration_roster_write_requires_rpc',
+    '42501'
+  )
+  and pg_temp.registration_throws(
+    $$update public.classes
+      set student_ids = student_ids
+      where id = '00000000-0000-4000-8000-000000000301'$$,
+    'registration_roster_write_requires_rpc',
+    '42501'
+  )
+);
+delete from public.classes
+where id = '00000000-0000-4000-8000-000000000390';
+delete from public.students
+where id = '00000000-0000-4000-8000-000000000206';
 select pg_temp.registration_record(67, pg_temp.registration_throws(
   $$insert into public.student_class_enrollment_history(
       student_id, class_id, action, previous_mode, next_mode, memo, changed_by
@@ -5058,22 +5124,22 @@ select ok(
   '63. generic roster expected-mode conflict.'
 );
 
--- assertion 64: nonempty student roster insert denial.
+-- assertion 64: authenticated student insert/upsert success and nonempty roster denial.
 select ok(
   pg_temp.registration_contract(64),
-  '64. nonempty student roster insert denial.'
+  '64. authenticated student insert/upsert success and nonempty roster denial.'
 );
 
--- assertion 65: nonempty class roster insert denial.
+-- assertion 65: authenticated class insert/upsert success and nonempty roster denial.
 select ok(
   pg_temp.registration_contract(65),
-  '65. nonempty class roster insert denial.'
+  '65. authenticated class insert/upsert success and nonempty roster denial.'
 );
 
--- assertion 66: direct authenticated roster-array update denial.
+-- assertion 66: direct authenticated student/class roster-array update denial.
 select ok(
   pg_temp.registration_contract(66),
-  '66. direct authenticated roster-array update denial.'
+  '66. direct authenticated student/class roster-array update denial.'
 );
 
 -- assertion 67: direct enrollment-history insert forgery denial.

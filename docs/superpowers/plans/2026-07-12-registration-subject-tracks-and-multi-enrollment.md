@@ -1881,9 +1881,9 @@ Create `supabase/tests/registration_subject_tracks_runtime_test.sql` as a transa
 61. generic roster RPC admin/staff success with exact committed response.
 62. generic roster RPC assistant denial.
 63. generic roster expected-mode conflict.
-64. nonempty student roster insert denial.
-65. nonempty class roster insert denial.
-66. direct authenticated roster-array update denial.
+64. authenticated student insert/upsert success and nonempty roster denial.
+65. authenticated class insert/upsert success and nonempty roster denial.
+66. direct authenticated student/class roster-array update denial.
 67. direct enrollment-history insert forgery denial.
 68. direct enrollment-history update/delete denial.
 69. authenticated history TRUNCATE privilege absence.
