@@ -92,6 +92,7 @@ import {
   applyRegistrationChecklistChange,
   canEditRegistrationTask,
   canSendRegistrationAdmissionMessage,
+  ensureRegistrationInquiryAt,
   getManualAdmissionCompletionStatus,
   getRegistrationBlockerFocusKey,
   getRegistrationBranchActions,
@@ -103,6 +104,7 @@ import {
   getRegistrationFormState,
   getRegistrationGradeOptions,
   getRegistrationMobileSections,
+  getRegistrationPersistenceErrorMessage,
   getRegistrationPipelinePrefix,
   getRegistrationPrefillPipelineStatus,
   getRegistrationReopenStatus,
@@ -113,9 +115,11 @@ import {
   isValidRegistrationMobilePhone,
   isRegistrationCompletionImmutable,
   normalizeRegistrationPhone,
+  normalizeRegistrationCampus,
   parseRegistrationSubjects,
   prepareRegistrationLevelTestRetry,
   prepareRegistrationPipelineTransition,
+  REGISTRATION_TIME_OPTIONS,
   resolveRegistrationLinkedTextbookDefault,
   serializeRegistrationSubjects,
   shouldShowRegistrationCompletionBlockers,
@@ -9894,7 +9898,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? visibleRegistrationTrackItems.length
     : visibleTasks.length
   const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
-  const showToolbarCreate = !registrationFixtureEnabled && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
+  const showToolbarCreate = (!registrationFixtureEnabled || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
   const hasLoadBlocker = Boolean(data && !data.schemaReady)
   const canOpenCreate = isTodoWorkspace || (!loading && !hasLoadBlocker)
   const createActionDisabled = saving || !canOpenCreate
@@ -10276,8 +10280,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [loadRegistrationCaseForWorkspace, openRegistrationTrack, registrationViewerId, registrationViewerRole, reload, syncTaskDeepLink])
 
   useEffect(() => {
-    const deepLinkedTaskId = searchParams.get("taskId") || ""
-    const deepLinkedTrackId = searchParams.get("trackId") || ""
+    if (deleteTarget) return
+    const currentSearchParams = new URLSearchParams(window.location.search)
+    const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
+    const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
     if (!deepLinkedTaskId || !data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
@@ -10306,7 +10312,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, detailOpen, openEdit, openRegistrationTrack, searchParams, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationTrack, searchParams, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -10729,18 +10735,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const submitForm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const registrationCreateBlockers = form.type === "registration"
-      ? getRegistrationCreateBlockers(form)
+    const submissionForm = !editingTask
+      ? ensureRegistrationInquiryAt(form, new Date().toISOString())
+      : form
+    const registrationCreateBlockers = submissionForm.type === "registration"
+      ? getRegistrationCreateBlockers(submissionForm)
       : []
     if (registrationCreateBlockers.length > 0) {
-      setMessage(getRegistrationCreateErrorMessage(form))
+      setMessage(getRegistrationCreateErrorMessage(submissionForm))
       setFormCompletionBlockers(registrationCreateBlockers)
       focusRegistrationFormSection(registrationCreateBlockers[0])
       return
     }
-    const nextTitle = form.title.trim() || buildFallbackTaskTitle(form)
+    const nextTitle = submissionForm.title.trim() || buildFallbackTaskTitle(submissionForm)
     if (!nextTitle) {
-      setMessage(form.type === "general" ? "할 일을 입력하세요." : "학생명이나 수업명 중 하나를 입력하세요.")
+      setMessage(submissionForm.type === "general" ? "할 일을 입력하세요." : "학생명이나 수업명 중 하나를 입력하세요.")
       setNotice("")
       setStatusUndo(null)
       return
@@ -10762,14 +10771,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
     try {
       const wasEditing = Boolean(editingTask)
-      const formWithRequesterDefaults: OpsTaskInput = form.type === "general"
+      const formWithRequesterDefaults: OpsTaskInput = submissionForm.type === "general"
         ? {
-          ...form,
+          ...submissionForm,
           title: nextTitle,
-          requestedBy: form.requestedBy || editingTask?.requestedBy || currentUserId,
-          requestedTeam: form.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam,
+          requestedBy: submissionForm.requestedBy || editingTask?.requestedBy || currentUserId,
+          requestedTeam: submissionForm.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam,
         }
-        : { ...form, title: nextTitle }
+        : { ...submissionForm, title: nextTitle }
       const inputWithCompletionIntent = applyFormCompletionIntent(formWithRequesterDefaults, formCompletionIntent)
       const prefilledRegistrationPipelineStatus = getRegistrationPrefillPipelineStatus(inputWithCompletionIntent)
       const inputWithRegistrationPrefillStatus = inputWithCompletionIntent.type === "registration"
@@ -10899,7 +10908,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 schoolName: registration.schoolName || "",
                 parentPhone: registration.parentPhone || "",
                 studentPhone: registration.studentPhone || "",
-                campus: createPayload.campus || "",
+                campus: normalizeRegistrationCampus(createPayload.campus),
                 inquiryAt: registration.inquiryAt || "",
                 subjects: parseRegistrationSubjects(createPayload.subject) as RegistrationSubject[],
                 requestNote: registration.requestNote || "",
@@ -10971,7 +10980,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ? `${savedNotice} 최신 상세는 새로고침해 확인하세요.`
           : savedNotice)
     } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."))
+      setMessage(
+        submissionForm.type === "registration" && !editingTask
+          ? getRegistrationPersistenceErrorMessage(error, getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."))
+          : getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."),
+      )
     } finally {
       setSaving(false)
     }
@@ -11401,6 +11414,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const requestRemoveTask = (task: OpsTask) => {
     if (!canDeleteTask(task)) return
     setDetailOpen(false)
+    syncTaskDeepLink(null)
     setFormOpen(false)
     setMessage("")
     setFormCompletionBlockers([])
@@ -13707,22 +13721,21 @@ function TypeSpecificFields({
           active={sectionActive("inquiry")}
           enabled={sectionEnabled("inquiry")}
         >
-          <div className="grid gap-3 md:grid-cols-3">
-            <RegistrationFocusTarget focusKey="studentName">
-              <TextField
-                label={<RegistrationFieldLabel label="학생명" requirement="required" />}
-                value={form.studentName || ""}
-                required
-                autoFocus={!form.studentName && sectionActive("inquiry")}
-                onChange={(value) => updateForm("studentName", value)}
-              />
-            </RegistrationFocusTarget>
+          <div className="grid gap-3 md:grid-cols-2">
             <RegistrationFocusTarget focusKey="subject">
               <RegistrationSubjectField
                 label={<RegistrationFieldLabel label="과목" requirement="required" />}
                 values={registrationSubjects}
                 required
                 onChange={(values) => updateForm("subject", serializeRegistrationSubjects(values))}
+              />
+            </RegistrationFocusTarget>
+            <RegistrationFocusTarget focusKey="studentName">
+              <TextField
+                label={<RegistrationFieldLabel label="학생명" requirement="required" />}
+                value={form.studentName || ""}
+                required
+                onChange={(value) => updateForm("studentName", value)}
               />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="schoolGrade">
@@ -13763,19 +13776,6 @@ function TypeSpecificFields({
               inputMode="tel"
               onChange={(value) => updateRegistration("studentPhone", normalizeRegistrationPhone(value))}
             />
-            <RegistrationFocusTarget focusKey="inquiryAt">
-              <div className="grid gap-1.5 text-sm font-medium">
-                <span><RegistrationFieldLabel label="문의일시" requirement="required" /></span>
-                <DateTimePickerControl
-                  value={dateTimeInputValue(registration.inquiryAt)}
-                  onChange={(value) => updateRegistration("inquiryAt", value)}
-                  dateAriaLabel="문의일 날짜"
-                  timeAriaLabel="문의일 시각"
-                  required
-                  disablePortal
-                />
-              </div>
-            </RegistrationFocusTarget>
           </div>
         </RegistrationFormSection>
 
@@ -13794,6 +13794,7 @@ function TypeSpecificFields({
                   onChange={(value) => updateRegistration("levelTestAt", value)}
                   dateAriaLabel="레벨테스트 예약일 날짜"
                   timeAriaLabel="레벨테스트 예약일 시각"
+                  timeOptions={REGISTRATION_TIME_OPTIONS}
                   disablePortal
                 />
               </div>
@@ -13827,6 +13828,7 @@ function TypeSpecificFields({
                   onChange={(value) => updateRegistration("phoneConsultationAt", value)}
                   dateAriaLabel="전화상담 예약일 날짜"
                   timeAriaLabel="전화상담 예약일 시각"
+                  timeOptions={REGISTRATION_TIME_OPTIONS}
                   disablePortal
                 />
               </div>
@@ -13839,6 +13841,7 @@ function TypeSpecificFields({
                   onChange={(value) => updateRegistration("visitConsultationAt", value)}
                   dateAriaLabel="방문상담 예약일 날짜"
                   timeAriaLabel="방문상담 예약일 시각"
+                  timeOptions={REGISTRATION_TIME_OPTIONS}
                   disablePortal
                 />
               </div>

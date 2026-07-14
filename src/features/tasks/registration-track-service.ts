@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase"
 import {
   executeRegistrationSubjectTrackFixtureAction,
   loadRegistrationSubjectTrackFixtureCase,
+  loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion,
   loadRegistrationSubjectTrackFixtureOptionData,
 } from "./registration-track-fixture-runtime"
 
@@ -15,6 +16,12 @@ import type {
   OpsTeacherOption,
   OpsTextbookOption,
 } from "./ops-task-service"
+import type { RegistrationInitialWorkflowPayload } from "./registration-intake-workflow"
+import {
+  probeRegistrationIntakeWorkflowRuntime as probeRegistrationIntakeWorkflowRuntimeFromDatabase,
+  resetRegistrationIntakeWorkflowRuntimeProbe,
+} from "./registration-intake-runtime-probe"
+import type { RegistrationIntakeRuntimeState } from "./registration-intake-runtime-probe"
 import {
   invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
   probeRegistrationSubjectTrackRuntime,
@@ -23,11 +30,31 @@ import type { RegistrationRuntimeState } from "./registration-runtime-probe"
 
 export { probeRegistrationSubjectTrackRuntime }
 export type { RegistrationRuntimeState }
+function probeRegistrationIntakeWorkflowRuntime(): Promise<RegistrationIntakeRuntimeState> {
+  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() === 1) {
+    return Promise.resolve({ available: true, version: 1 })
+  }
+  return probeRegistrationIntakeWorkflowRuntimeFromDatabase()
+}
+export {
+  probeRegistrationIntakeWorkflowRuntime,
+  resetRegistrationIntakeWorkflowRuntimeProbe,
+}
+export type { RegistrationIntakeRuntimeState }
 
 // registration-track-service-factory:start
 type Row = Record<string, unknown>
 export type RegistrationSubject = "영어" | "수학"
 export type RegistrationWaitingKind = "" | "current_class" | "current_term_opening" | "next_term_opening"
+
+export type RegistrationPhoneReadySource =
+  | "inquiry"
+  | "level_test_completion"
+  | "visit_reopened"
+  | "director_resolved"
+  | "track_reopened"
+  | "migration"
+  | "legacy"
 
 export type OpsRegistrationTrackStatus =
   | "inquiry"
@@ -57,6 +84,8 @@ export type OpsRegistrationTrackSummary = {
   levelTestRetakeDecision: "" | "required" | "not_required"
   migrationReviewRequired: boolean
   stageEnteredAt: string
+  phoneReadyAt: string | null
+  phoneReadySource: RegistrationPhoneReadySource | null
   visitScheduledAt?: string
   visitPlace?: string
 }
@@ -113,6 +142,8 @@ export type OpsRegistrationConsultation = {
   mode: "phone" | "visit"
   status: "waiting" | "scheduled" | "completed" | "canceled"
   directorProfileId: string
+  readyAt: string | null
+  readySource: RegistrationPhoneReadySource | null
   completedAt: string | null
   outcome: "enrollment" | "waiting" | "not_registered" | null
   createdAt: string
@@ -217,6 +248,11 @@ export type RegistrationCaseCreateResponse = {
   commonRevision: number
   subjects: RegistrationSubject[]
   tracks: OpsRegistrationTrackSummary[]
+}
+
+export type RegistrationCaseCreateWithInitialWorkflowResponse = RegistrationCaseCreateResponse & {
+  appointments: OpsRegistrationAppointment[]
+  notificationTargets: Array<{ appointmentId: string; notificationRevision: number }>
 }
 
 export type RegistrationSubjectSyncResponse = {
@@ -393,6 +429,8 @@ export type CreateRegistrationCaseInput = {
   studentPhone: string; campus: string; inquiryAt: string; subjects: RegistrationSubject[]
   requestNote: string; priority: string; requestKey: string
 }
+export type RegistrationCaseCreateWithInitialWorkflowInput =
+  CreateRegistrationCaseInput & RegistrationInitialWorkflowPayload
 export type SyncRegistrationCaseSubjectsInput = { taskId: string; subjects: RegistrationSubject[]; requestKey: string }
 export type UpdateRegistrationCaseCommonInput = {
   taskId: string; studentName: string; schoolGrade: string; schoolName: string
@@ -528,6 +566,25 @@ const TRACK_SUMMARY_COLUMNS = [
   "level_test_retake_decision",
   "migration_review_required",
   "stage_entered_at",
+  "phone_ready_at",
+  "phone_ready_source",
+  "updated_at",
+  "visit_scheduled_at",
+  "visit_place",
+].join(",")
+
+const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
+  "id",
+  "task_id",
+  "subject",
+  "pipeline_status",
+  "director_profile_id",
+  "director_assignment_source",
+  "director_assignment_rule_key",
+  "waiting_kind",
+  "level_test_retake_decision",
+  "migration_review_required",
+  "stage_entered_at",
   "updated_at",
   "visit_scheduled_at",
   "visit_place",
@@ -613,6 +670,19 @@ function retakeDecision(input: unknown): OpsRegistrationTrackSummary["levelTestR
   return (["required", "not_required"].includes(normalized) ? normalized : "") as OpsRegistrationTrackSummary["levelTestRetakeDecision"]
 }
 
+function phoneReadySource(input: unknown): RegistrationPhoneReadySource | null {
+  const normalized = text(input)
+  return ([
+    "inquiry",
+    "level_test_completion",
+    "visit_reopened",
+    "director_resolved",
+    "track_reopened",
+    "migration",
+    "legacy",
+  ].includes(normalized) ? normalized : null) as RegistrationPhoneReadySource | null
+}
+
 function embeddedDirector(row: Row) {
   const raw = value(row, "director")
   return firstRow(raw)
@@ -639,6 +709,8 @@ function mapTrack(row: Row, directorNames = new Map<string, string>(), legacy = 
     levelTestRetakeDecision: retakeDecision(value(row, "level_test_retake_decision", "levelTestRetakeDecision")),
     migrationReviewRequired: bool(value(row, "migration_review_required", "migrationReviewRequired")),
     stageEnteredAt: text(value(row, "stage_entered_at", "stageEnteredAt")),
+    phoneReadyAt: nullableText(value(row, "phone_ready_at", "phoneReadyAt")),
+    phoneReadySource: phoneReadySource(value(row, "phone_ready_source", "phoneReadySource")),
     ...(visitScheduledAt ? { visitScheduledAt, visitPlace } : {}),
   }
 }
@@ -704,6 +776,8 @@ function mapConsultation(row: Row): OpsRegistrationConsultation {
     mode: (text(value(row, "mode")) || "phone") as OpsRegistrationConsultation["mode"],
     status: (text(value(row, "status")) || "waiting") as OpsRegistrationConsultation["status"],
     directorProfileId: text(value(row, "director_profile_id", "directorProfileId")),
+    readyAt: nullableText(value(row, "ready_at", "readyAt")),
+    readySource: phoneReadySource(value(row, "ready_source", "readySource")),
     completedAt: nullableText(value(row, "completed_at", "completedAt")),
     outcome: (["enrollment", "waiting", "not_registered"].includes(outcome || "") ? outcome : null) as OpsRegistrationConsultation["outcome"],
     createdAt: text(value(row, "created_at", "createdAt")),
@@ -948,6 +1022,14 @@ function missingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"))
 }
 
+function missingPhoneReadinessColumnError(error: unknown) {
+  if (!missingColumnError(error)) return false
+  const message = error && typeof error === "object" && "message" in error
+    ? text(error.message).toLowerCase()
+    : ""
+  return message.includes("phone_ready_at") || message.includes("phone_ready_source")
+}
+
 function errorText(error: unknown) {
   if (error instanceof Error) return error.message
   if (error && typeof error === "object" && "message" in error) return text(error.message)
@@ -1083,6 +1165,8 @@ export function createRegistrationTrackService(
       levelTestRetakeDecision: "" as const,
       migrationReviewRequired: false,
       stageEnteredAt: input.stageEnteredAt || "",
+      phoneReadyAt: null,
+      phoneReadySource: null,
     } satisfies OpsRegistrationTrackSummary)))
   }
 
@@ -1113,12 +1197,23 @@ export function createRegistrationTrackService(
       if (normalizedTaskIds.length === 0) return { mode: "ready", tracks: [] }
 
       try {
-        const trackRows = await queryRows(
-          client.from("ops_registration_subject_track_summaries")
-            .select(TRACK_SUMMARY_COLUMNS)
-            .in("task_id", normalizedTaskIds),
-          metrics,
-        )
+        let trackRows: Row[]
+        try {
+          trackRows = await queryRows(
+            client.from("ops_registration_subject_track_summaries")
+              .select(TRACK_SUMMARY_COLUMNS)
+              .in("task_id", normalizedTaskIds),
+            metrics,
+          )
+        } catch (error) {
+          if (!missingPhoneReadinessColumnError(error)) throw error
+          trackRows = await queryRows(
+            client.from("ops_registration_subject_track_summaries")
+              .select(PRE_INTAKE_TRACK_SUMMARY_COLUMNS)
+              .in("task_id", normalizedTaskIds),
+            metrics,
+          )
+        }
         const directorIds = [...new Set(trackRows
           .map((row) => nullableText(value(row, "director_profile_id")))
           .filter((id): id is string => Boolean(id)))]
@@ -1448,6 +1543,36 @@ export function createRegistrationTrackService(
     return {
       ...result,
       tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
+    }
+  }
+
+  async function createRegistrationCaseWithInitialWorkflow(
+    input: RegistrationCaseCreateWithInitialWorkflowInput,
+  ): Promise<RegistrationCaseCreateWithInitialWorkflowResponse> {
+    const result = await callRpc<RegistrationCaseCreateWithInitialWorkflowResponse>(
+      "create_registration_case_with_initial_workflow_v1",
+      {
+        p_student_name: input.studentName,
+        p_school_grade: input.schoolGrade,
+        p_school_name: input.schoolName,
+        p_parent_phone: input.parentPhone,
+        p_student_phone: input.studentPhone,
+        p_campus: input.campus,
+        p_inquiry_at: input.inquiryAt,
+        p_subjects: input.subjects,
+        p_request_note: input.requestNote,
+        p_priority: input.priority,
+        p_subject_plans: input.subjectPlans,
+        p_level_test_appointment: input.levelTestAppointment,
+        p_visit_appointment: input.visitAppointment,
+        p_director_overrides: input.directorOverrides,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+    )
+    return {
+      ...result,
+      tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
+      appointments: rows(value(result as unknown as Row, "appointments")).map(mapAppointment),
     }
   }
 
@@ -1904,6 +2029,7 @@ export function createRegistrationTrackService(
     loadCaseDetail,
     loadWorkspaceOptionData,
     createRegistrationCase,
+    createRegistrationCaseWithInitialWorkflow,
     syncRegistrationCaseSubjects,
     updateRegistrationCaseCommon,
     routeRegistrationInquiry,
@@ -1991,6 +2117,17 @@ export function createRegistrationCase(
   input: Parameters<typeof defaultRegistrationTrackService.createRegistrationCase>[0],
 ): Promise<RegistrationCaseCreateResponse> {
   return defaultRegistrationTrackService.createRegistrationCase(input)
+}
+
+export function createRegistrationCaseWithInitialWorkflow(
+  input: RegistrationCaseCreateWithInitialWorkflowInput,
+): Promise<RegistrationCaseCreateWithInitialWorkflowResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationCaseCreateWithInitialWorkflowResponse>(
+    "createRegistrationCaseWithInitialWorkflow",
+    input as unknown as Record<string, unknown>,
+  )
+  if (fixture !== null) return fixture
+  return defaultRegistrationTrackService.createRegistrationCaseWithInitialWorkflow(input)
 }
 
 export function syncRegistrationCaseSubjects(

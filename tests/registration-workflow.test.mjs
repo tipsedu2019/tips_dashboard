@@ -7,6 +7,7 @@ import {
   canEditRegistrationTask,
   canSendRegistrationAdmissionMessage,
   compareRegistrationTasks,
+  ensureRegistrationInquiryAt,
   getEmptyRegistrationFilters,
   getManualAdmissionCompletionStatus,
   getRegistrationBlockerFocusKey,
@@ -35,6 +36,7 @@ import {
   normalizeRegistrationDateRange,
   parseRegistrationSubjects,
   prepareRegistrationLevelTestRetry,
+  REGISTRATION_TIME_OPTIONS,
   registrationSubjectIncludes,
   serializeRegistrationSubjects,
   shouldEnsureRegistrationStudent,
@@ -120,11 +122,11 @@ test("R06 a registration inquiry requires a student name", () => {
 test("R06b a registration inquiry requires every operator-owned inquiry field in form order", () => {
   assert.deepEqual(
     getRegistrationCreateBlockers({ registration: {} }),
-    ["학생명", "과목", "학년", "학부모 전화", "문의일시"],
+    ["과목", "학생명", "학년", "학부모 전화"],
   );
   assert.equal(
     getRegistrationCreateErrorMessage({ registration: {} }),
-    "학생명을 입력하세요. 과목을 하나 이상 선택하세요. 학년을 선택하세요. 학부모 전화를 입력하세요. 문의일시를 입력하세요.",
+    "과목을 하나 이상 선택하세요. 학생명을 입력하세요. 학년을 선택하세요. 학부모 전화를 입력하세요.",
   );
 });
 
@@ -140,7 +142,59 @@ test("R08 a registration inquiry rejects an invalid parent mobile number", () =>
 
 test("R09 a new registration records the inquiry timestamp by default", () => {
   const now = "2026-07-10T09:30:00+09:00";
-  assert.equal(getRegistrationCreateDefaults(now).registration.inquiryAt, now);
+  const defaults = getRegistrationCreateDefaults(now);
+  assert.equal(defaults.campus, "본관");
+  assert.equal(defaults.registration.inquiryAt, now);
+});
+
+test("R09b create submission fills a missing automatic inquiry timestamp without replacing an existing one", () => {
+  const now = "2026-07-13T14:55:00+09:00";
+  const missing = { type: "registration", registration: { schoolGrade: "고1" } };
+  const stamped = ensureRegistrationInquiryAt(missing, now);
+  assert.equal(stamped.registration.inquiryAt, now);
+  assert.equal(missing.registration.inquiryAt, undefined);
+
+  const existing = {
+    type: "registration",
+    registration: { inquiryAt: "2026-07-13T14:50:00+09:00" },
+  };
+  assert.equal(ensureRegistrationInquiryAt(existing, now), existing);
+});
+
+test("R09c registration appointment choices stay within 09:00 through 21:00", () => {
+  assert.equal(REGISTRATION_TIME_OPTIONS[0], "09:00");
+  assert.equal(REGISTRATION_TIME_OPTIONS.at(-1), "21:00");
+  assert.equal(REGISTRATION_TIME_OPTIONS.length, 73);
+});
+
+test("R09d registration campus accepts only the two operating campuses and defaults an empty value", () => {
+  const normalizeRegistrationCampus = registrationWorkflow.normalizeRegistrationCampus;
+  assert.equal(typeof normalizeRegistrationCampus, "function");
+  assert.equal(normalizeRegistrationCampus(""), "본관");
+  assert.equal(normalizeRegistrationCampus("본관"), "본관");
+  assert.equal(normalizeRegistrationCampus("별관"), "별관");
+  assert.equal(normalizeRegistrationCampus("서관"), "");
+});
+
+test("R09e registration persistence failures use operator-facing guidance", () => {
+  const getRegistrationPersistenceErrorMessage = registrationWorkflow.getRegistrationPersistenceErrorMessage;
+  assert.equal(typeof getRegistrationPersistenceErrorMessage, "function");
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_campus_invalid" }),
+    "캠퍼스 정보를 확인해 주세요.",
+  );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_initial_subject_plan_invalid" }),
+    "과목별 다음 업무를 확인해 주세요.",
+  );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_initial_appointment_membership_invalid" }),
+    "예약에 포함된 과목을 다시 확인해 주세요.",
+  );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_director_required" }),
+    "상담 책임자를 지정해 주세요.",
+  );
 });
 
 test("R10 grade choices cover every school grade without a stale year prefix", () => {

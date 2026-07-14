@@ -100,11 +100,13 @@ test("combined picker keeps partial drafts internal, syncs external resets, and 
     /function handleClear[\s\S]*setDateDraft\(""\)[\s\S]*setTimeDraft\(""\)[\s\S]*onChange\(""\)/,
   );
   assert.match(componentSource, /aria-label="날짜와 시각 지우기"/);
-  assert.match(componentSource, /options=\{FULL_DAY_TIME_OPTIONS\}/);
+  assert.match(source, /type DateTimePickerControlProps = \{[\s\S]*?timeOptions\?: string\[\]/);
+  assert.match(componentSource, /timeOptions = FULL_DAY_TIME_OPTIONS/);
+  assert.match(componentSource, /options=\{timeOptions\}/);
   assert.match(componentSource, /className=\{cn\("grid min-w-0 gap-2/);
 });
 
-test("date and time controls support dialog-local popovers and selected-time scrolling", async () => {
+test("date and time controls keep selected-time scrolling inside the listbox", async () => {
   const source = await readPickerSource();
   const datePickerSource = source.slice(
     source.indexOf("type DatePickerControlProps"),
@@ -121,7 +123,16 @@ test("date and time controls support dialog-local popovers and selected-time scr
   assert.match(timePickerSource, /disablePortal\?: boolean/);
   assert.match(timePickerSource, /getTimePickerOptions\(options, normalizedValue\)/);
   assert.match(timePickerSource, /selectedOptionRef/);
-  assert.match(timePickerSource, /scrollIntoView\(\{ block: "center" \}\)/);
+  assert.match(timePickerSource, /timeListRef/);
+  assert.match(timePickerSource, /scrollTimeOptionWithinList\(timeListRef\.current, selectedOptionRef\.current, "center"\)/);
+  assert.match(timePickerSource, /scrollTimeOptionWithinList\(timeListRef\.current, nextOption, "nearest"\)/);
+  assert.match(
+    timePickerSource,
+    /React\.useEffect\(\(\) => \{[\s\S]*?scrollTimeOptionWithinList[\s\S]*?\}, \[open\]\)/,
+    "opening may center the active option once, but only within the listbox",
+  );
+  assert.doesNotMatch(timePickerSource, /\}, \[activeTime, open\]\)/);
+  assert.doesNotMatch(timePickerSource, /scrollIntoView/);
   assert.match(timePickerSource, /<PopoverContent[\s\S]*disablePortal=\{disablePortal\}/);
 });
 
@@ -196,7 +207,8 @@ test("picker triggers announce current values and time options use one keyboard 
   assert.match(timePickerSource, /handleTimeOptionKeyDown/);
   assert.match(timePickerSource, /onKeyDown=\{\(event\) => handleTimeOptionKeyDown\(event, index\)\}/);
   assert.match(timePickerSource, /selectedOptionRef\.current\?\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(timePickerSource, /selectedOptionRef\.current\?\.scrollIntoView\(\{ block: "center" \}\)/);
+  assert.match(timePickerSource, /scrollTimeOptionWithinList\(timeListRef\.current, selectedOptionRef\.current, "center"\)/);
+  assert.doesNotMatch(timePickerSource, /scrollIntoView/);
   assert.match(timePickerSource, /<PopoverTrigger asChild>/);
   assert.match(timePickerSource, /onChange\(time\)[\s\S]*setOpen\(false\)/);
   assert.doesNotMatch(timePickerSource, /onCloseAutoFocus/);

@@ -185,7 +185,8 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
     "onSortChange={syncTodoSort}",
     'if (todoView === "inbox") return isOpsTaskInUserInbox(task, currentUserContext)',
     'if (todoView === "sent") return isOpsTaskInUserSent(task, currentUserContext)',
-    'const deepLinkedTaskId = searchParams.get("taskId") || ""',
+    "const currentSearchParams = new URLSearchParams(window.location.search)",
+    'const deepLinkedTaskId = currentSearchParams.get("taskId") || ""',
     'const deepLinkedTask = taskById.get(deepLinkedTaskId)',
     'syncTaskDeepLink(null)',
     "setSelectedTask(deepLinkedTask)",
@@ -217,6 +218,30 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
 	  assert.doesNotMatch(source, /md:overflow-x-auto/);
 	  assert.doesNotMatch(source, /lg:grid-cols-6/);
 	});
+
+test("detail deletion clears the task deep link before opening the shared confirmation dialog", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const start = source.indexOf("const requestRemoveTask =");
+  const end = source.indexOf("const requestRemoveWordRetests =", start);
+  const requestRemoveTaskSource = source.slice(start, end);
+  const deepLinkedTaskIdIndex = source.indexOf('const deepLinkedTaskId = currentSearchParams.get("taskId")');
+  const deepLinkEffectStart = source.lastIndexOf("useEffect(() => {", deepLinkedTaskIdIndex);
+  const deepLinkEffectEnd = source.indexOf("function handleDetailOpenChange", deepLinkEffectStart);
+  const deepLinkEffectSource = source.slice(deepLinkEffectStart, deepLinkEffectEnd);
+
+  assertInOrder(requestRemoveTaskSource, [
+    "setDetailOpen(false)",
+    "syncTaskDeepLink(null)",
+    "setDeleteTarget(task)",
+  ]);
+  assertInOrder(deepLinkEffectSource, [
+    "useEffect(() => {",
+    "if (deleteTarget) return",
+    "const currentSearchParams = new URLSearchParams(window.location.search)",
+    'const deepLinkedTaskId = currentSearchParams.get("taskId")',
+  ]);
+  assert.match(deepLinkEffectSource, /\[[^\]]*deleteTarget[^\]]*\]\)/s);
+});
 
 test("todo form keeps requester metadata readonly and assignee selectors team-aware", async () => {
   const [workspaceSource, serviceSource] = await Promise.all([
@@ -806,13 +831,21 @@ test("registration workspace replaces Notion registration management with subjec
     "item.subject",
     "item.directorName",
     "getRegistrationTrackTimeValue(item)",
+    'if (item.status === "consultation_waiting") return item.phoneReadyAt || ""',
     'if (item.status === "visit_consultation_scheduled") return item.visitScheduledAt',
     "formatStageEnteredAt(getRegistrationTrackTimeValue(item))",
+    '전화상담 대기 기준',
+    '전화상담 대기 ·',
   ]);
   assert.doesNotMatch(
     registrationTableSource,
     /formatStageEnteredAt\(item\.stageEnteredAt\)/,
     "visit rows must not relabel stage entry as their appointment time",
+  );
+  assert.doesNotMatch(
+    registrationTableSource,
+    /if \(item\.status === "consultation_waiting"\) return item\.stageEnteredAt/,
+    "phone rows must not synthesize readiness from stage entry",
   );
 
   assertIncludesAll(workspaceSource, [
@@ -832,6 +865,18 @@ test("registration workspace replaces Notion registration management with subjec
     "RegistrationDetailPanel",
     'selectedTaskFresh?.type === "registration" || selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl"',
   ]);
+});
+
+test("fixture registration create keeps production conditions and follows management-role permissions", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const createGate = workspaceSource.slice(
+    workspaceSource.indexOf("const showToolbarCreate"),
+    workspaceSource.indexOf("const hasLoadBlocker"),
+  );
+
+  assert.match(workspaceSource, /const canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/);
+  assert.match(createGate, /\(!registrationFixtureEnabled \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /!isTodoWorkspace && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace \|\| !showEmptyCreate\)/);
 });
 
 test("registration exposes six ordered work tabs with separate level-test and consultation track states", async () => {
@@ -1278,8 +1323,9 @@ test("registration follows the real decision waitlist admission form and manual 
 });
 
 test("registration form keeps one application while early reservation fields stay available", async () => {
-  const [source, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+  const [source, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-workflow.js"),
     readSource("scripts/verify-ops-task-sample-workflow.mjs"),
     readSource("scripts/verify-ops-task-browser-workflow.mjs"),
   ]);
@@ -1290,6 +1336,22 @@ test("registration form keeps one application while early reservation fields sta
   const registrationFormSource = source.slice(
     source.indexOf('if (form.type === "registration") {', source.indexOf("function TypeSpecificFields")),
     source.indexOf('if (form.type === "withdrawal")', source.indexOf("function TypeSpecificFields")),
+  );
+  const emptyFormSource = source.slice(
+    source.indexOf("const EMPTY_FORM"),
+    source.indexOf("function cloneForm"),
+  );
+  const registrationCreateDefaultsSource = registrationWorkflowSource.slice(
+    registrationWorkflowSource.indexOf("export function getRegistrationCreateDefaults"),
+    registrationWorkflowSource.indexOf("export function getRegistrationPrefillPipelineStatus"),
+  );
+  const readyCreateSource = source.slice(
+    source.indexOf('if (runtime.mode === "ready" && runtime.version === 1)'),
+    source.indexOf("registrationCreateRequestRef.current = null", source.indexOf('if (runtime.mode === "ready" && runtime.version === 1)')),
+  );
+  const submitFormSource = source.slice(
+    source.indexOf("const submitForm = async"),
+    source.indexOf("const handleFormKeyDown", source.indexOf("const submitForm = async")),
   );
 
   assertIncludesAll(source, [
@@ -1347,19 +1409,23 @@ test("registration form keeps one application while early reservation fields sta
     "completion timestamps and the legacy result must not be editable registration inputs",
   );
   assert.match(source, /import \{ DateTimePickerControl, DatePickerControl \} from "@\/components\/ui\/date-time-picker"/);
+  assert.match(source, /ensureRegistrationInquiryAt/);
+  assert.match(emptyFormSource, /campus: ""/);
+  assert.match(registrationCreateDefaultsSource, /campus: "본관"/);
+  assert.match(readyCreateSource, /campus: normalizeRegistrationCampus\(createPayload\.campus\)/);
+  assert.match(
+    submitFormSource,
+    /getRegistrationPersistenceErrorMessage\(error,\s*getOpsTaskActionErrorMessage\(error, "저장하지 못했습니다\."\)\)/,
+  );
+  assert.match(source, /REGISTRATION_TIME_OPTIONS/);
   const registrationDateTimeControls = registrationFormSource.match(/<DateTimePickerControl[\s\S]*?\/>/g) || [];
-  assert.equal(registrationDateTimeControls.length, 4);
+  assert.equal(registrationDateTimeControls.length, 3);
   for (const controlSource of registrationDateTimeControls) {
     assert.match(controlSource, /disablePortal/);
-  }
-  assert.match(registrationDateTimeControls[0], /\n\s+required\n/);
-  for (const controlSource of registrationDateTimeControls.slice(1)) {
+    assert.match(controlSource, /timeOptions=\{REGISTRATION_TIME_OPTIONS\}/);
     assert.doesNotMatch(controlSource, /\brequired\b/);
   }
   assertIncludesAll(registrationFormSource, [
-    "dateAriaLabel=\"문의일 날짜\"",
-    "timeAriaLabel=\"문의일 시각\"",
-    "value={dateTimeInputValue(registration.inquiryAt)}",
     "dateAriaLabel=\"레벨테스트 예약일 날짜\"",
     "timeAriaLabel=\"레벨테스트 예약일 시각\"",
     "value={dateTimeInputValue(registration.levelTestAt)}",
@@ -1370,6 +1436,7 @@ test("registration form keeps one application while early reservation fields sta
     "timeAriaLabel=\"방문상담 예약일 시각\"",
     "value={dateTimeInputValue(registration.visitConsultationAt)}",
   ]);
+  assert.doesNotMatch(registrationFormSource, /문의일 날짜|문의일 시각|dateTimeInputValue\(registration\.inquiryAt\)/);
   assert.doesNotMatch(registrationFormSource, /type="datetime-local"/);
   assert.match(
     formDialogSource,
@@ -1381,16 +1448,15 @@ test("registration form keeps one application while early reservation fields sta
   const inquiryStart = registrationFormSource.indexOf('sectionKey="inquiry"');
   const inquiryEnd = registrationFormSource.indexOf('sectionKey="level_test"', inquiryStart);
   const inquirySource = registrationFormSource.slice(inquiryStart, inquiryEnd);
+  assert.match(inquirySource, /className="grid gap-3 md:grid-cols-2"/);
   const orderedInquiryFields = [
-    'focusKey="studentName"',
     '<RegistrationSubjectField',
+    'focusKey="studentName"',
     'focusKey="schoolGrade"',
     'label="학년" requirement="required"',
     'label="학교" requirement="optional"',
     'focusKey="parentPhone"',
     'label="학생 전화" requirement="optional"',
-    'focusKey="inquiryAt"',
-    'label="문의일시" requirement="required"',
   ];
   for (let index = 1; index < orderedInquiryFields.length; index += 1) {
     assert.ok(
@@ -1403,8 +1469,10 @@ test("registration form keeps one application while early reservation fields sta
     'label="과목" requirement="required"',
     'label="학년" requirement="required"',
     'label="학부모 전화" requirement="required"',
-    'label="문의일시" requirement="required"',
   ]);
+  assert.doesNotMatch(inquirySource, /문의일시|focusKey="inquiryAt"|DateTimePickerControl/);
+  assert.doesNotMatch(registrationFormSource, /label="캠퍼스"|updateForm\("campus"/);
+  assert.doesNotMatch(inquirySource, /autoFocus=/);
   assertIncludesAll(source, [
     "aria-describedby={required ? requiredDescriptionId : undefined}",
     "하나 이상 선택해야 하는 필수 항목입니다.",
@@ -1418,8 +1486,12 @@ test("registration form keeps one application while early reservation fields sta
     source,
     /getRegistrationPrefillPipelineStatus\(inputWithCompletionIntent\)/,
   );
+  assert.match(
+    source,
+    /const submissionForm = !editingTask[\s\S]*?ensureRegistrationInquiryAt\(form, new Date\(\)\.toISOString\(\)\)[\s\S]*?getRegistrationCreateBlockers\(submissionForm\)/,
+  );
   assert.match(source, /prepareRegistrationPipelineTransition/);
-  assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(form\)\)/);
+  assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(submissionForm\)\)/);
 });
 
 test("registration subject tracks split combined inquiries and preserve subjects during class sync", async () => {
@@ -1459,7 +1531,7 @@ test("registration required inquiry fields remain invariant after the workflow a
 
   assert.match(
     workspaceSource,
-    /const registrationCreateBlockers = form\.type === "registration"\s*\? getRegistrationCreateBlockers\(form\)\s*:\s*\[\]/,
+    /const registrationCreateBlockers = submissionForm\.type === "registration"\s*\? getRegistrationCreateBlockers\(submissionForm\)\s*:\s*\[\]/,
   );
   assert.match(
     serviceSource,

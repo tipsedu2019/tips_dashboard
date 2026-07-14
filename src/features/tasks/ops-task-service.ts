@@ -1531,6 +1531,8 @@ function createLegacyRegistrationTrackSummaries(tasks: OpsTask[]): OpsRegistrati
       levelTestRetakeDecision: "",
       migrationReviewRequired: false,
       stageEnteredAt: task.registration?.inquiryAt || task.createdAt,
+      phoneReadyAt: null,
+      phoneReadySource: null,
     }))
   })
 }

@@ -455,6 +455,94 @@ test("runtime pgTAP packet fixes all 150 ordered workflow proofs and rolls fixtu
     observationNumbers.toSorted((left, right) => left - right),
     Array.from({ length: 150 }, (_, index) => index + 1),
   )
+
+  const readObservationBlock = (assertionNumber) => {
+    const markerIndex = observationMarkers.findIndex(
+      (marker) => Number(marker[1]) === assertionNumber,
+    )
+    assert.notEqual(
+      markerIndex,
+      -1,
+      `missing runtime observation ${assertionNumber}`,
+    )
+    return sql.slice(
+      observationMarkers[markerIndex].index,
+      observationMarkers[markerIndex + 1]?.index ?? sql.length,
+    )
+  }
+
+  const runtimeThrows = readFunctionBlock(
+    sql,
+    "pg_temp",
+    "registration_throws",
+  )
+  assert.match(runtimeThrows, /p_sqlstate\s+text\s+default\s+null/)
+  assert.match(runtimeThrows, /sqlstate\s*=\s*p_sqlstate/)
+
+  const studentRosterGuardRuntime = readObservationBlock(64)
+  assert.equal(
+    (studentRosterGuardRuntime.match(/pg_temp\.registration_lives\(/g) || [])
+      .length,
+    2,
+  )
+  assert.match(
+    studentRosterGuardRuntime,
+    /00000000-0000-4000-8000-000000000206/,
+  )
+  assert.match(studentRosterGuardRuntime, /on conflict \(id\) do update/)
+  assert.match(studentRosterGuardRuntime, /registration_roster_write_requires_rpc/)
+  assert.match(studentRosterGuardRuntime, /'42501'/)
+
+  const classRosterGuardRuntime = readObservationBlock(65)
+  assert.equal(
+    (classRosterGuardRuntime.match(/pg_temp\.registration_lives\(/g) || [])
+      .length,
+    2,
+  )
+  assert.match(
+    classRosterGuardRuntime,
+    /00000000-0000-4000-8000-000000000390/,
+  )
+  assert.match(classRosterGuardRuntime, /on conflict \(id\) do update/)
+  assert.match(classRosterGuardRuntime, /registration_roster_write_requires_rpc/)
+  assert.match(classRosterGuardRuntime, /'42501'/)
+
+  const rosterUpdateGuardRuntime = readObservationBlock(66)
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /update public\.students[\s\S]*?set class_ids/,
+  )
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /update public\.classes[\s\S]*?set student_ids/,
+  )
+  assert.equal(
+    (rosterUpdateGuardRuntime.match(/registration_roster_write_requires_rpc/g) || [])
+      .length,
+    2,
+  )
+  assert.equal(
+    (rosterUpdateGuardRuntime.match(/'42501'/g) || []).length,
+    2,
+  )
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /delete from public\.classes[\s\S]*?00000000-0000-4000-8000-000000000390/,
+  )
+  assert.match(
+    rosterUpdateGuardRuntime,
+    /delete from public\.students[\s\S]*?00000000-0000-4000-8000-000000000206/,
+  )
+  assert.equal(
+    (sql.match(/00000000-0000-4000-8000-000000000390/g) || []).length,
+    2,
+    "the temporary class insert fixture must appear only in its insert and cleanup",
+  )
+  assert.equal(
+    (sql.match(/00000000-0000-4000-8000-000000000206/g) || []).length,
+    2,
+    "the temporary student insert fixture must appear only in its insert and cleanup",
+  )
   assert.match(sql, /registration_runtime_observation_missing:/)
   assert.doesNotMatch(sql, /registration_function_mentions/)
   const globalRosterReady = readFunctionBlock(
@@ -574,11 +662,567 @@ function readFunctionBlock(sql, schema, name) {
   return sql.slice(start, end + 4)
 }
 
+function readTriggerBlock(sql, name) {
+  const marker = `create trigger ${name}`
+  const start = sql.indexOf(marker)
+  assert.notEqual(start, -1, `missing trigger ${name}`)
+  const end = sql.indexOf(";", start)
+  assert.notEqual(end, -1, `unterminated trigger ${name}`)
+  return sql.slice(start, end + 1)
+}
+
 function readFunctionArgumentTypes(block) {
   const header = block.slice(block.indexOf("(") + 1, block.indexOf(")\nreturns"))
   return [...header.matchAll(/p_[a-z0-9_]+\s+(uuid\[\]|text\[\]|timestamptz|boolean|integer|jsonb|uuid|text)/g)]
     .map((match) => match[1])
 }
+
+test("registration intake migration adds canonical phone-queue readiness", async () => {
+  const sql = await readMigration("registration_intake_workflow")
+  const trimmed = sql.trim()
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.equal((trimmed.match(/^begin;$/gim) || []).length, 1)
+  assert.equal((trimmed.match(/^commit;$/gim) || []).length, 1)
+  assert.match(sql, /alter table public\.ops_registration_consultations[\s\S]*?add column ready_at timestamptz[\s\S]*?add column ready_source text/)
+
+  const sourceConstraintStart = sql.indexOf(
+    "add constraint ops_registration_consultations_ready_source_check",
+  )
+  const modeConstraintStart = sql.indexOf(
+    "add constraint ops_registration_consultations_mode_readiness_check",
+  )
+  assert.notEqual(sourceConstraintStart, -1)
+  assert.ok(modeConstraintStart > sourceConstraintStart)
+  const sourceConstraint = sql.slice(sourceConstraintStart, modeConstraintStart)
+  for (const source of [
+    "inquiry",
+    "level_test_completion",
+    "visit_reopened",
+    "director_resolved",
+    "track_reopened",
+    "migration",
+    "legacy",
+  ]) {
+    assert.match(sourceConstraint, new RegExp(`'${source}'`))
+  }
+  assert.match(sourceConstraint, /not valid/)
+  assert.match(sql.slice(modeConstraintStart), /mode = 'phone'[\s\S]*?ready_at is not null[\s\S]*?ready_source is not null[\s\S]*?mode = 'visit'[\s\S]*?ready_at is null[\s\S]*?ready_source is null[\s\S]*?not valid/)
+
+  const jsonEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_jsonb_object",
+  )
+  const timestampEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_timestamptz",
+  )
+  const uuidEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_uuid",
+  )
+  const dateEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_date",
+  )
+  const booleanEvidenceParser = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "try_registration_event_boolean",
+  )
+  const evidenceParsers = [
+    jsonEvidenceParser,
+    timestampEvidenceParser,
+    uuidEvidenceParser,
+    dateEvidenceParser,
+    booleanEvidenceParser,
+  ]
+  for (const parser of evidenceParsers) {
+    assert.deepEqual(readFunctionArgumentTypes(parser), ["text"])
+    assert.match(parser, /security invoker/)
+    assert.match(parser, /set search_path = ''/)
+    assert.match(parser, /exception\s+when data_exception then\s+return null;/)
+  }
+  assert.match(jsonEvidenceParser, /immutable/)
+  assert.match(timestampEvidenceParser, /stable/)
+  assert.match(uuidEvidenceParser, /immutable/)
+  assert.match(dateEvidenceParser, /stable/)
+  assert.match(booleanEvidenceParser, /immutable/)
+  assert.match(jsonEvidenceParser, /p_value::jsonb/)
+  assert.match(jsonEvidenceParser, /jsonb_typeof\(v_value\) is distinct from 'object'/)
+  assert.match(timestampEvidenceParser, /p_value::timestamptz/)
+  assert.match(uuidEvidenceParser, /p_value::uuid/)
+  assert.match(dateEvidenceParser, /p_value::date/)
+  assert.match(booleanEvidenceParser, /p_value::boolean/)
+  for (const functionName of [
+    "try_registration_event_jsonb_object",
+    "try_registration_event_timestamptz",
+    "try_registration_event_uuid",
+    "try_registration_event_date",
+    "try_registration_event_boolean",
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(
+        `alter function dashboard_private\\.${functionName}\\(text\\)\\s+owner to postgres;`,
+      ),
+    )
+    assert.match(
+      sql,
+      new RegExp(
+        `revoke execute on function dashboard_private\\.${functionName}\\(text\\)\\s+` +
+          `from public, anon, authenticated;`,
+      ),
+    )
+    assert.doesNotMatch(
+      sql,
+      new RegExp(
+        `grant execute on function dashboard_private\\.${functionName}\\(text\\)[^;]*authenticated`,
+      ),
+    )
+  }
+
+  const backfillStart = sql.indexOf("-- registration_phone_readiness_backfill")
+  const indexStart = sql.indexOf(
+    "create index ops_registration_consultations_phone_waiting_ready_idx",
+  )
+  assert.notEqual(backfillStart, -1)
+  assert.ok(indexStart > backfillStart)
+  const backfill = sql.slice(backfillStart, indexStart)
+  assert.equal(
+    (backfill.match(/payload ->> 'version' = '1'/g) || []).length,
+    2,
+  )
+  assert.match(
+    backfill,
+    /dashboard_private\.try_registration_event_jsonb_object\(event\.after_value\)/,
+  )
+  assert.equal(
+    (backfill.match(/dashboard_private\.try_registration_event_timestamptz\(/g) || []).length,
+    3,
+  )
+  const legacyCandidatesStart = backfill.indexOf("legacy_phone_candidates as (")
+  const legacyTimesStart = backfill.indexOf("legacy_phone_times as (")
+  assert.ok(legacyCandidatesStart !== -1 && legacyCandidatesStart < legacyTimesStart)
+  assert.match(
+    backfill.slice(legacyTimesStart, backfill.indexOf("), readiness_candidates as (")),
+    /where candidate\.phone_consultation_at is not null/,
+  )
+  assert.doesNotMatch(backfill, /event\.after_value::jsonb/)
+  assert.doesNotMatch(backfill, /pg_catalog\.ltrim\(event\.after_value\)/)
+  assert.doesNotMatch(
+    backfill,
+    /nullif\(track_event\.payload ->> 'occurredAt',[\s\S]{0,80}?::timestamptz/,
+  )
+  assert.match(backfill, /metadata[\s\S]*?consultationId/)
+  assert.match(backfill, /metadata[\s\S]*?phoneConsultationId/)
+  assert.match(backfill, /attempt\.completed_at[\s\S]*?'level_test_completion'/)
+  for (const [eventType, source] of [
+    ["inquiry_routed", "inquiry"],
+    ["appointment_canceled", "visit_reopened"],
+    ["appointment_subject_deselected", "visit_reopened"],
+    ["track_reopened", "track_reopened"],
+    ["migration_review_resolved", "migration"],
+    ["director_default_resolved", "director_resolved"],
+    ["director_manual_override", "director_resolved"],
+    ["director_phone_queue_repaired", "director_resolved"],
+  ]) {
+    assert.match(backfill, new RegExp(`'${eventType}'[\\s\\S]*?'${source}'`))
+  }
+  assert.match(backfill, /consultation\.created_at[\s\S]*?'legacy'/)
+  const disableReadinessTrigger = backfill.indexOf(
+    "alter table public.ops_registration_consultations\n" +
+      "  disable trigger set_updated_at_ops_registration_consultations;",
+  )
+  const rankedReadinessUpdate = backfill.indexOf(
+    "update public.ops_registration_consultations consultation",
+  )
+  const legacyReadinessUpdate = backfill.indexOf(
+    "update public.ops_registration_consultations consultation",
+    rankedReadinessUpdate + 1,
+  )
+  const enableReadinessTrigger = backfill.indexOf(
+    "alter table public.ops_registration_consultations\n" +
+      "  enable trigger set_updated_at_ops_registration_consultations;",
+  )
+  const firstReadinessValidation = backfill.indexOf(
+    "validate constraint ops_registration_consultations_ready_source_check",
+  )
+  assert.equal(
+    (sql.match(/disable trigger set_updated_at_ops_registration_consultations;/g) || []).length,
+    1,
+  )
+  assert.equal(
+    (sql.match(/enable trigger set_updated_at_ops_registration_consultations;/g) || []).length,
+    1,
+  )
+  assert.ok(disableReadinessTrigger !== -1)
+  assert.ok(disableReadinessTrigger < rankedReadinessUpdate)
+  assert.ok(rankedReadinessUpdate < legacyReadinessUpdate)
+  assert.ok(legacyReadinessUpdate < enableReadinessTrigger)
+  assert.ok(enableReadinessTrigger < firstReadinessValidation)
+  assert.doesNotMatch(
+    backfill.slice(rankedReadinessUpdate, enableReadinessTrigger),
+    /updated_at\s*=/,
+  )
+  assert.match(backfill, /validate constraint ops_registration_consultations_ready_source_check/)
+  assert.match(backfill, /validate constraint ops_registration_consultations_mode_readiness_check/)
+
+  assert.match(sql, /create index ops_registration_consultations_phone_waiting_ready_idx\s+on public\.ops_registration_consultations\(ready_at, track_id\)\s+where mode = 'phone' and status = 'waiting';/)
+  const viewStart = sql.indexOf(
+    "create or replace view public.ops_registration_subject_track_summaries",
+  )
+  const viewEnd = sql.indexOf(";", viewStart)
+  assert.notEqual(viewStart, -1)
+  const view = sql.slice(viewStart, viewEnd + 1)
+  assert.match(view, /with \(security_invoker = true\)/)
+  assert.match(view, /active_visit\.place as visit_place,\s*active_phone\.ready_at as phone_ready_at,\s*active_phone\.ready_source as phone_ready_source/)
+  assert.match(view, /left join lateral \([\s\S]*?consultation\.mode = 'phone'[\s\S]*?consultation\.status = 'waiting'[\s\S]*?order by consultation\.created_at desc, consultation\.id desc[\s\S]*?limit 1[\s\S]*?\) active_phone on true/)
+
+  const writers = Object.fromEntries([
+    "route_registration_inquiry_impl",
+    "assign_registration_track_director_impl",
+    "save_registration_shared_appointment_impl",
+    "cancel_registration_appointment_impl",
+    "complete_registration_level_test_attempt_impl",
+    "resolve_registration_migration_review_impl",
+    "reopen_registration_track_impl",
+  ].map((name) => [name, readFunctionBlock(sql, "dashboard_private", name)]))
+  const writerSql = Object.values(writers).join("\n")
+  assert.equal(
+    (writerSql.match(/insert into public\.ops_registration_consultations\(/g) || []).length,
+    11,
+  )
+  assert.equal(
+    (writerSql.match(/insert into public\.ops_registration_consultations\([\s\S]*?ready_at,\s*ready_source\s*\)/g) || []).length,
+    11,
+  )
+  assert.match(writers.route_registration_inquiry_impl, /v_inquiry_at timestamptz[\s\S]*?detail\.inquiry_at[\s\S]*?v_inquiry_at, 'inquiry'/)
+  assert.match(writers.assign_registration_track_director_impl, /v_track\.stage_entered_at, 'director_resolved'/)
+  assert.match(writers.save_registration_shared_appointment_impl, /pg_catalog\.now\(\), 'visit_reopened'/)
+  assert.equal(
+    (writers.save_registration_shared_appointment_impl.match(/'visit',\s*'scheduled',[\s\S]{0,160}?null,\s*null/g) || []).length,
+    3,
+  )
+  assert.match(writers.cancel_registration_appointment_impl, /pg_catalog\.now\(\),\s*'visit_reopened'/)
+  assert.match(writers.complete_registration_level_test_attempt_impl, /v_attempt\.completed_at,\s*'level_test_completion'/)
+  assert.match(writers.resolve_registration_migration_review_impl, /v_phone_consultation_at timestamptz[\s\S]*?coalesce\(v_phone_consultation_at, pg_catalog\.now\(\)\),\s*'migration'/)
+  assert.match(writers.resolve_registration_migration_review_impl, /'visit',\s*'scheduled',[\s\S]{0,160}?null,\s*null/)
+  const migrationReviewWriter = writers.resolve_registration_migration_review_impl
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_jsonb_object\(\s*event\.before_value\s*\)/,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_jsonb_object\(\s*event\.after_value\s*\)/,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_uuid\(\s*parsed\.after_payload ->> 'trackId'\s*\)/,
+  )
+  assert.equal(
+    (migrationReviewWriter.match(
+      /try_registration_event_uuid\(\s*parsed\.after_payload ->> 'trackId'\s*\)/g,
+    ) || []).length,
+    3,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_uuid\(\s*v_legacy_before ->> 'studentId'\s*\)/,
+  )
+  assert.equal(
+    (migrationReviewWriter.match(
+      /try_registration_event_timestamptz\(\s*v_legacy_after #>>/g,
+    ) || []).length,
+    6,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /try_registration_event_date\(\s*v_legacy_after #>> '\{timestamps,classStartDate\}'/,
+  )
+  assert.equal(
+    (migrationReviewWriter.match(
+      /try_registration_event_boolean\(\s*v_legacy_booleans ->>/g,
+    ) || []).length,
+    4,
+  )
+  assert.match(
+    migrationReviewWriter,
+    /v_consultation_group_present :=[\s\S]*?v_phone_consultation_at is not null/,
+  )
+  assert.doesNotMatch(migrationReviewWriter, /event\.(?:before|after)_value::jsonb/)
+  assert.doesNotMatch(
+    migrationReviewWriter,
+    /v_legacy_before ->> '(?:studentId|classId|textbookId)'[^;]*::uuid/,
+  )
+  assert.doesNotMatch(
+    migrationReviewWriter,
+    /v_legacy_after #>> '\{timestamps,[^}]+\}'[^;]*::(?:timestamptz|date)/,
+  )
+  assert.doesNotMatch(
+    migrationReviewWriter,
+    /v_legacy_booleans ->> '[^']+'[^;]*::boolean/,
+  )
+  assert.match(writers.reopen_registration_track_impl, /pg_catalog\.now\(\),\s*'track_reopened'/)
+
+  const pgTap = await readFile(
+    new URL("registration_intake_workflow_test.sql", supabaseTestsUrl),
+    "utf8",
+  )
+  assert.match(pgTap, /begin;\s*select plan\(17\);/i)
+  assert.equal(
+    (pgTap.match(/^select (?:ok|is|is_empty|has_function|function_privs_are)\(/gim) || []).length,
+    17,
+  )
+  assert.match(pgTap, /select \* from finish\(\);\s*rollback;/i)
+})
+
+test("registration intake creation is one authenticated atomic workflow", async () => {
+  const sql = await readMigration("registration_intake_workflow")
+  const privateImplementation = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "create_registration_case_with_initial_workflow_v1_impl",
+  )
+  const publicWrapper = readFunctionBlock(
+    sql,
+    "public",
+    "create_registration_case_with_initial_workflow_v1",
+  )
+  const signature = [
+    "text", "text", "text", "text", "text", "text", "timestamptz", "text[]",
+    "text", "text", "jsonb", "jsonb", "jsonb", "jsonb", "text",
+  ]
+
+  assert.deepEqual(readFunctionArgumentTypes(privateImplementation), signature)
+  assert.deepEqual(readFunctionArgumentTypes(publicWrapper), signature)
+  assert.match(privateImplementation, /security definer/)
+  assert.match(privateImplementation, /set search_path = ''/)
+  assert.match(publicWrapper, /security invoker/)
+  assert.match(publicWrapper, /set search_path = ''/)
+  assert.match(
+    publicWrapper,
+    /dashboard_private\.create_registration_case_with_initial_workflow_v1_impl\(/,
+  )
+
+  const sqlSignature = signature.join(", ").replaceAll("[]", "\\[\\]")
+  for (const qualifiedName of [
+    "dashboard_private\\.create_registration_case_with_initial_workflow_v1_impl",
+    "public\\.create_registration_case_with_initial_workflow_v1",
+  ]) {
+    assert.match(sql, new RegExp(
+      `revoke execute on function ${qualifiedName}\\(${sqlSignature}\\)\\s+from public, anon;`,
+    ))
+    assert.match(sql, new RegExp(
+      `grant execute on function ${qualifiedName}\\(${sqlSignature}\\)\\s+to authenticated;`,
+    ))
+  }
+
+  for (const errorCode of [
+    "registration_initial_subject_plan_invalid",
+    "registration_initial_appointment_membership_invalid",
+    "registration_initial_appointment_invalid",
+    "registration_director_required",
+    "registration_director_override_invalid",
+  ]) {
+    assert.match(privateImplementation, new RegExp(`'${errorCode}'`))
+  }
+  for (const appointmentVariable of [
+    "v_level_test_appointment",
+    "v_visit_appointment",
+  ]) {
+    assert.match(
+      privateImplementation,
+      new RegExp(
+        `jsonb_typeof\\(${appointmentVariable} -> 'scheduledAt'\\) <> 'string'[\\s\\S]*?` +
+          `jsonb_typeof\\(${appointmentVariable} -> 'place'\\) <> 'string'`,
+      ),
+    )
+  }
+  for (const normalizedInput of [
+    "studentName",
+    "schoolGrade",
+    "schoolName",
+    "parentPhone",
+    "studentPhone",
+    "campus",
+    "inquiryAt",
+    "subjects",
+    "requestNote",
+    "priority",
+    "subjectPlans",
+    "levelTestAppointment",
+    "visitAppointment",
+    "directorOverrides",
+  ]) {
+    assert.match(privateImplementation, new RegExp(`'${normalizedInput}'`))
+  }
+
+  const validationMarkers = {
+    access: privateImplementation.indexOf("if v_actor_id is null"),
+    campus: privateImplementation.indexOf("'registration_campus_invalid'"),
+    subjectStart: Math.min(
+      privateImplementation.indexOf("'registration_subject_invalid'"),
+      privateImplementation.indexOf("'registration_subjects_required'"),
+    ),
+    subjectEnd: Math.max(
+      privateImplementation.lastIndexOf("'registration_subject_invalid'"),
+      privateImplementation.lastIndexOf("'registration_subjects_required'"),
+    ),
+    planStart: privateImplementation.indexOf("'registration_initial_subject_plan_invalid'"),
+    planEnd: privateImplementation.lastIndexOf("'registration_initial_subject_plan_invalid'"),
+    membershipStart: privateImplementation.indexOf(
+      "'registration_initial_appointment_membership_invalid'",
+    ),
+    membershipEnd: privateImplementation.lastIndexOf(
+      "'registration_initial_appointment_membership_invalid'",
+    ),
+    appointmentStart: privateImplementation.indexOf("'registration_initial_appointment_invalid'"),
+    appointmentEnd: privateImplementation.lastIndexOf("'registration_initial_appointment_invalid'"),
+    overrideStart: privateImplementation.indexOf("'registration_director_override_invalid'"),
+    overrideEnd: privateImplementation.lastIndexOf("'registration_director_override_invalid'"),
+    studentName: privateImplementation.indexOf("'registration_student_name_required'"),
+    schoolGrade: privateImplementation.indexOf("'registration_school_grade_required'"),
+    parentPhone: privateImplementation.indexOf("'registration_parent_phone_invalid'"),
+    inquiryAt: privateImplementation.indexOf("'registration_inquiry_at_required'"),
+    priority: privateImplementation.indexOf("'registration_priority_invalid'"),
+    requestKey: privateImplementation.indexOf("if v_request_key is null then"),
+    fingerprint: privateImplementation.indexOf("v_target_fingerprint :="),
+    lock: privateImplementation.indexOf("pg_advisory_xact_lock"),
+  }
+  assert.ok(Object.values(validationMarkers).every((marker) => marker !== -1))
+  assert.ok(validationMarkers.access < validationMarkers.campus)
+  assert.ok(validationMarkers.campus < validationMarkers.subjectStart)
+  assert.ok(validationMarkers.subjectEnd < validationMarkers.planStart)
+  assert.ok(validationMarkers.planEnd < validationMarkers.membershipStart)
+  assert.ok(validationMarkers.membershipEnd < validationMarkers.appointmentStart)
+  assert.ok(validationMarkers.appointmentEnd < validationMarkers.overrideStart)
+  assert.ok(validationMarkers.overrideEnd < validationMarkers.studentName)
+  assert.ok(validationMarkers.studentName < validationMarkers.schoolGrade)
+  assert.ok(validationMarkers.schoolGrade < validationMarkers.parentPhone)
+  assert.ok(validationMarkers.parentPhone < validationMarkers.inquiryAt)
+  assert.ok(validationMarkers.inquiryAt < validationMarkers.priority)
+  assert.ok(validationMarkers.priority < validationMarkers.requestKey)
+  assert.ok(validationMarkers.requestKey < validationMarkers.fingerprint)
+  assert.ok(validationMarkers.fingerprint < validationMarkers.lock)
+
+  const firstJsonTypeCheck = privateImplementation.indexOf("jsonb_typeof")
+  const firstObjectKeys = privateImplementation.indexOf("jsonb_object_keys")
+  const firstArrayElements = privateImplementation.indexOf("jsonb_array_elements")
+  assert.ok(firstJsonTypeCheck !== -1 && firstJsonTypeCheck < firstObjectKeys)
+  assert.ok(firstJsonTypeCheck < firstArrayElements)
+  const advisoryLock = privateImplementation.indexOf("pg_advisory_xact_lock")
+  const receiptLookup = privateImplementation.indexOf("-- registration_initial_receipt_lookup")
+  const parentInsert = privateImplementation.indexOf("insert into public.ops_tasks")
+  const directorResolution = privateImplementation.indexOf("resolve_registration_default_director")
+  assert.ok(advisoryLock !== -1 && advisoryLock < receiptLookup)
+  assert.ok(receiptLookup < parentInsert)
+  assert.ok(directorResolution !== -1 && directorResolution < parentInsert)
+  assert.match(privateImplementation, /mutation\.mutation_type = 'create_case_with_initial_workflow_v1'[\s\S]*?mutation\.target_fingerprint = v_target_fingerprint/)
+  assert.match(privateImplementation, /insert into dashboard_private\.ops_registration_mutations[\s\S]*?'create_case_with_initial_workflow_v1'/)
+
+  for (const helperName of [
+    "resolve_registration_default_director",
+    "is_active_registration_director",
+    "transition_registration_track_status",
+    "write_registration_track_event",
+    "recompute_registration_parent",
+  ]) {
+    assert.match(privateImplementation, new RegExp(`dashboard_private\\.${helperName}`))
+  }
+  assert.doesNotMatch(
+    privateImplementation,
+    /public\.(?:create_registration_case|route_registration_inquiry|assign_registration_track_director|save_registration_shared_appointment)\s*\(/,
+  )
+
+  const visitEvent = privateImplementation.slice(
+    privateImplementation.indexOf("'visit_scheduled'"),
+  )
+  for (const metadataKey of [
+    "appointmentId",
+    "notificationRevision",
+    "kind",
+    "scheduledAt",
+    "place",
+    "activityId",
+    "activeTrackIds",
+    "canceledTrackIds",
+    "changeKind",
+  ]) {
+    assert.match(visitEvent, new RegExp(`'${metadataKey}'`))
+  }
+  assert.match(visitEvent, /'notificationRevision',\s*1/)
+  assert.match(visitEvent, /'kind',\s*'visit_consultation'/)
+  assert.match(visitEvent, /'canceledTrackIds',\s*'\[\]'::jsonb/)
+  assert.match(visitEvent, /'changeKind',\s*'created'/)
+  assert.match(privateImplementation, /'taskId'[\s\S]*?'commonRevision'[\s\S]*?'subjects'[\s\S]*?'tracks'[\s\S]*?'appointments'[\s\S]*?'notificationTargets'/)
+
+  const runtimePgTap = await readFile(
+    new URL("registration_intake_workflow_runtime_test.sql", supabaseTestsUrl),
+    "utf8",
+  )
+  assert.match(runtimePgTap, /^begin;\s*select no_plan\(\);/i)
+  assert.match(runtimePgTap, /select \* from finish\(\);\s*rollback;\s*$/i)
+  for (const scenario of [
+    "inquiry-only",
+    "level-test-only",
+    "direct-phone-only",
+    "visit-only",
+    "English test and mathematics phone",
+    "two-subject test",
+    "two-subject visit",
+    "membership mismatch",
+    "level-test membership beats malformed details",
+    "visit membership beats malformed details",
+    "campus validation beats request key",
+    "priority validation beats request key",
+    "malformed historical event evidence is ignored",
+    "malformed migration-review container fails canonically without mutation",
+    "malformed migration-review scalars use canonical fallback",
+    "missing required director",
+    "identical sequential retry",
+    "changed fingerprint",
+    "induced child failure",
+    "notification revision contract",
+  ]) {
+    assert.match(runtimePgTap, new RegExp(scenario, "i"))
+  }
+  for (const readinessSource of [
+    "inquiry",
+    "director_resolved",
+    "visit_reopened",
+    "level_test_completion",
+    "migration",
+    "track_reopened",
+  ]) {
+    assert.match(runtimePgTap, new RegExp(`'${readinessSource}'`))
+  }
+  assert.match(runtimePgTap, /visit participant deselection reopens only the removed subject/i)
+  assert.match(runtimePgTap, /visit cancellation creates visit_reopened phone readiness/i)
+  assert.match(runtimePgTap, /visit conversion cancels readiness only for participating subjects/i)
+
+  const coreSql = await readMigration("registration_subject_track_mutations")
+  const coreMarker = readFunctionBlock(
+    coreSql,
+    "public",
+    "registration_subject_tracks_runtime_version",
+  )
+  assert.match(coreMarker, /select 1/)
+  const intakeMarkerIndex = sql.indexOf(
+    "create function public.registration_intake_workflow_runtime_version()",
+  )
+  assert.notEqual(intakeMarkerIndex, -1)
+  const createdFunctions = [...sql.matchAll(/^create(?: or replace)? function\s+/gm)]
+  assert.equal(createdFunctions.at(-1)?.index, intakeMarkerIndex)
+  assert.match(sql.slice(intakeMarkerIndex), /returns integer[\s\S]*?security invoker[\s\S]*?select 1/)
+  assert.match(sql.trim(), /create function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?alter function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?revoke execute on function public\.registration_intake_workflow_runtime_version\(\) from public, anon;[\s\S]*?grant execute on function public\.registration_intake_workflow_runtime_version\(\) to authenticated;\s*commit;$/)
+})
 
 test("Task 3B case and inquiry routing mutations preserve transactional contracts", async () => {
   const sql = await readMigration("registration_subject_track_mutations")
@@ -2432,4 +3076,92 @@ test("registration mutations are invoker-safe, explicit, and authenticated-only"
   assert.match(sql, /revoke all on table public\.student_class_enrollment_history from anon, authenticated;/)
   assert.match(sql, /grant select on table public\.student_class_enrollment_history to authenticated;/)
   assert.doesNotMatch(sql, /grant\s+(?!select\s+on)[^;]*on\s+(?:table\s+)?public\.student_class_enrollment_history[^;]*to\s+(?:anon|authenticated)/i)
+})
+
+test("roster guard fix isolates student and class trigger record fields", async () => {
+  const sql = await readMigration("fix_roster_trigger_record_fields")
+  const trimmed = sql.trim()
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+
+  const studentGuard = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "prevent_direct_student_roster_array_write",
+  )
+  assert.match(studentGuard, /security invoker/)
+  assert.match(studentGuard, /set search_path = ''/)
+  assert.match(studentGuard, /tg_relid\s*<>\s*'public\.students'::regclass/)
+  assert.match(studentGuard, /new\.class_ids/)
+  assert.match(studentGuard, /new\.waitlist_class_ids/)
+  assert.doesNotMatch(studentGuard, /new\.(?:student_ids|waitlist_ids)/)
+
+  const classGuard = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "prevent_direct_class_roster_array_write",
+  )
+  assert.match(classGuard, /security invoker/)
+  assert.match(classGuard, /set search_path = ''/)
+  assert.match(classGuard, /tg_relid\s*<>\s*'public\.classes'::regclass/)
+  assert.match(classGuard, /new\.student_ids/)
+  assert.match(classGuard, /new\.waitlist_ids/)
+  assert.doesNotMatch(classGuard, /new\.(?:class_ids|waitlist_class_ids)/)
+
+  const studentInsertTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_student_roster_insert",
+  )
+  assert.match(studentInsertTrigger, /before insert on public\.students/)
+  assert.match(
+    studentInsertTrigger,
+    /execute function dashboard_private\.prevent_direct_student_roster_array_write\(\)/,
+  )
+
+  const studentUpdateTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_student_roster_array_write",
+  )
+  assert.match(
+    studentUpdateTrigger,
+    /before update of class_ids, waitlist_class_ids on public\.students/,
+  )
+  assert.match(
+    studentUpdateTrigger,
+    /execute function dashboard_private\.prevent_direct_student_roster_array_write\(\)/,
+  )
+
+  const classInsertTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_class_roster_insert",
+  )
+  assert.match(classInsertTrigger, /before insert on public\.classes/)
+  assert.match(
+    classInsertTrigger,
+    /execute function dashboard_private\.prevent_direct_class_roster_array_write\(\)/,
+  )
+
+  const classUpdateTrigger = readTriggerBlock(
+    sql,
+    "prevent_direct_class_roster_array_write",
+  )
+  assert.match(
+    classUpdateTrigger,
+    /before update of student_ids, waitlist_ids on public\.classes/,
+  )
+  assert.match(
+    classUpdateTrigger,
+    /execute function dashboard_private\.prevent_direct_class_roster_array_write\(\)/,
+  )
+
+  for (const guardName of [
+    "prevent_direct_student_roster_array_write",
+    "prevent_direct_class_roster_array_write",
+  ]) {
+    assert.match(sql, new RegExp(`alter function dashboard_private\\.${guardName}\\(\\) owner to postgres`))
+    assert.match(sql, new RegExp(`revoke execute on function dashboard_private\\.${guardName}\\(\\)[\\s\\S]*?from public, anon, authenticated`))
+  }
+
+  assert.match(sql, /drop function dashboard_private\.prevent_direct_roster_array_write\(\)/)
 })

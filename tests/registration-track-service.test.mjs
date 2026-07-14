@@ -277,6 +277,8 @@ function detailRows(table) {
         level_test_retake_decision: null,
         migration_review_required: false,
         stage_entered_at: "2026-07-12T01:30:00Z",
+        phone_ready_at: "2026-07-12T01:00:00Z",
+        phone_ready_source: "inquiry",
         director: { id: "director-1", name: "강부희" },
       }],
       error: null,
@@ -342,6 +344,7 @@ function detailRows(table) {
     return { data: [{
       id: "consultation-1", track_id: "track-1", appointment_id: null,
       mode: "phone", status: "waiting", director_profile_id: "director-1",
+      ready_at: "2026-07-12T01:00:00Z", ready_source: "level_test_completion",
       completed_at: null, outcome: null,
       created_at: "2026-07-12T01:00:00Z", updated_at: "2026-07-12T02:00:00Z",
     }], error: null };
@@ -370,6 +373,7 @@ test("track summary loader uses the exact safe projection and skips profile look
         director_assignment_source: "", director_assignment_rule_key: "",
         waiting_kind: null, level_test_retake_decision: null,
         migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
+        phone_ready_at: null, phone_ready_source: null,
         visit_scheduled_at: "2026-07-13T01:00:00Z", visit_place: "상담실",
         updated_at: "2026-07-12T02:00:00Z",
       }], error: null };
@@ -386,14 +390,91 @@ test("track summary loader uses the exact safe projection and skips profile look
     directorName: "", directorAssignmentSource: "", directorAssignmentRuleKey: "",
     waitingKind: "", levelTestRetakeDecision: "", migrationReviewRequired: false,
     stageEnteredAt: "2026-07-12T01:00:00Z",
+    phoneReadyAt: null, phoneReadySource: null,
     visitScheduledAt: "2026-07-13T01:00:00Z", visitPlace: "상담실",
   });
   assert.equal(harness.queries.length, 1);
   assert.equal(harness.queries[0].columns,
-    "id,task_id,subject,pipeline_status,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,updated_at,visit_scheduled_at,visit_place");
+    "id,task_id,subject,pipeline_status,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,phone_ready_at,phone_ready_source,updated_at,visit_scheduled_at,visit_place");
   assert.deepEqual(harness.queries[0].filters, [["in", "task_id", ["task-1"]]]);
   assert.doesNotMatch(harness.queries[0].columns, /schedule_plan|textbook|student_ids|waitlist_ids/);
   assert.doesNotMatch(harness.queries[0].columns, /consultations|appointments|\*/);
+});
+
+test("track summary loader falls back to the pre-intake projection when only phone readiness columns are missing", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const missingPhoneReadinessColumn = {
+    code: "42703",
+    message: "column ops_registration_subject_track_summaries.phone_ready_at does not exist",
+  };
+  let invalidations = 0;
+  const harness = createClient({
+    queryHandler(query) {
+      assert.equal(query.table, "ops_registration_subject_track_summaries");
+      if (query.columns.includes("phone_ready_at")) {
+        return { data: null, error: missingPhoneReadinessColumn };
+      }
+      return { data: [{
+        id: "track-1", task_id: "task-1", subject: "영어",
+        pipeline_status: "inquiry", director_profile_id: null,
+        director_assignment_source: "", director_assignment_rule_key: "",
+        waiting_kind: null, level_test_retake_decision: null,
+        migration_review_required: false, stage_entered_at: "2026-07-12T01:00:00Z",
+        updated_at: "2026-07-12T02:00:00Z",
+        visit_scheduled_at: null, visit_place: null,
+      }], error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    invalidateRuntimeAfterReadyFailure(error) {
+      invalidations += 1;
+      const integrity = new Error("integrity");
+      integrity.code = "REGISTRATION_RUNTIME_INTEGRITY_ERROR";
+      integrity.cause = error;
+      throw integrity;
+    },
+  }));
+
+  const result = await service.loadTrackSummaries(["task-1"], "viewer-1");
+
+  assert.equal(result.mode, "ready");
+  assert.equal(result.tracks.length, 1);
+  assert.equal(result.tracks[0].id, "track-1");
+  assert.equal(result.tracks[0].phoneReadyAt, null);
+  assert.equal(result.tracks[0].phoneReadySource, null);
+  assert.equal(invalidations, 0);
+  assert.equal(harness.queries.length, 2);
+  assert.match(harness.queries[0].columns, /phone_ready_at,phone_ready_source/);
+  assert.doesNotMatch(harness.queries[1].columns, /phone_ready_at|phone_ready_source/);
+  assert.deepEqual(harness.queries[1].filters, [["in", "task_id", ["task-1"]]]);
+});
+
+test("track summary loader does not fall back for an unrelated missing summary column", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const unrelatedMissingColumn = {
+    code: "42703",
+    message: "column ops_registration_subject_track_summaries.visit_place does not exist",
+  };
+  let invalidations = 0;
+  const harness = createClient({
+    queryHandler: () => ({ data: null, error: unrelatedMissingColumn }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    invalidateRuntimeAfterReadyFailure(error) {
+      invalidations += 1;
+      const integrity = new Error("integrity");
+      integrity.code = "REGISTRATION_RUNTIME_INTEGRITY_ERROR";
+      integrity.cause = error;
+      throw integrity;
+    },
+  }));
+
+  await assert.rejects(
+    service.loadTrackSummaries(["task-1"], "viewer-1"),
+    (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR" && error.cause === unrelatedMissingColumn,
+  );
+  assert.equal(invalidations, 1);
+  assert.equal(harness.queries.length, 1);
 });
 
 test("track summary loader deduplicates directors into one narrow profile lookup", async () => {
@@ -443,8 +524,10 @@ test("legacy and maintenance are explicit and legacy summaries remain per subjec
     taskId: "task-1", subjects: ["영어", "수학"], status: "waiting",
     directorName: "강부희", stageEnteredAt: "2026-07-12T01:00:00Z",
   }]);
-  assert.deepEqual(legacy.map((track) => [track.subject, track.legacy]), [
-    ["영어", true], ["수학", true],
+  assert.deepEqual(legacy.map((track) => [
+    track.subject, track.legacy, track.phoneReadyAt, track.phoneReadySource,
+  ]), [
+    ["영어", true, null, null], ["수학", true, null, null],
   ]);
 });
 
@@ -502,11 +585,15 @@ test("detail loader performs nine scoped reads, maps rows, and shares same-viewe
   assert.equal(harness.queries.length, 9);
   assert.equal(detail.commonRevision, 3);
   assert.equal(detail.tracks[0].directorName, "강부희");
+  assert.equal(detail.tracks[0].phoneReadyAt, "2026-07-12T01:00:00Z");
+  assert.equal(detail.tracks[0].phoneReadySource, "inquiry");
   assert.equal(detail.admissionApplicationMessageStatus, "failed_hold");
   assert.equal(detail.admissionApplicationMessageClaimActive, true);
   assert.equal(detail.admissionApplicationAccepted, false);
   assert.equal(detail.levelTests[0].materialLink, "https://drive.test/test");
   assert.equal(detail.consultations[0].appointmentId, null);
+  assert.equal(detail.consultations[0].readyAt, "2026-07-12T01:00:00Z");
+  assert.equal(detail.consultations[0].readySource, "level_test_completion");
   assert.equal(detail.enrollments[0].textbookId, null);
   assert.equal(detail.events[0].eventType, "consultation_completed");
   assert.equal(detail.events[0].trackId, "track-1");
@@ -745,6 +832,269 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.equal(mutationInvalidations, 27, "every successful registration RPC must invalidate parent consumers");
 });
 
+test("consultation completion maps canonical readiness from camel-case RPC rows", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name) {
+      assert.equal(name, "complete_registration_consultation");
+      return {
+        data: {
+          consultation: {
+            id: "consultation-1",
+            trackId: "track-1",
+            appointmentId: null,
+            mode: "phone",
+            status: "completed",
+            directorProfileId: "director-1",
+            readyAt: "2026-07-12T01:00:00Z",
+            readySource: "track_reopened",
+            completedAt: "2026-07-12T03:00:00Z",
+            outcome: "enrollment",
+            createdAt: "2026-07-12T01:30:00Z",
+            updatedAt: "2026-07-12T03:00:00Z",
+          },
+          track: {
+            id: "track-1",
+            taskId: "task-1",
+            subject: "영어",
+            status: "enrollment_decided",
+            directorProfileId: "director-1",
+            directorAssignmentSource: "default",
+            directorAssignmentRuleKey: "english:2026:high1",
+            waitingKind: "",
+            levelTestRetakeDecision: "",
+            migrationReviewRequired: false,
+            stageEnteredAt: "2026-07-12T03:00:00Z",
+            phoneReadyAt: "2026-07-12T01:00:00Z",
+            phoneReadySource: "director_resolved",
+          },
+        },
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const result = await service.completeRegistrationConsultation({
+    consultationId: "consultation-1",
+    outcome: "enrollment",
+    waitingKind: "",
+    classId: "",
+    requestKey: "consultation-key",
+  });
+
+  assert.equal(result.consultation.readyAt, "2026-07-12T01:00:00Z");
+  assert.equal(result.consultation.readySource, "track_reopened");
+  assert.equal(result.track.phoneReadyAt, "2026-07-12T01:00:00Z");
+  assert.equal(result.track.phoneReadySource, "director_resolved");
+});
+
+test("initial workflow create uses the exact atomic payload and maps the complete response", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const notificationTargets = [{ appointmentId: "appointment-visit", notificationRevision: 1 }];
+  const response = {
+    taskId: "task-new",
+    commonRevision: 1,
+    subjects: ["영어", "수학"],
+    tracks: [
+      {
+        id: "track-english",
+        task_id: "task-new",
+        subject: "영어",
+        pipeline_status: "consultation_waiting",
+        director_profile_id: "director-1",
+        director_assignment_source: "default",
+        director_assignment_rule_key: "english:2026:high1",
+        waiting_kind: null,
+        level_test_retake_decision: null,
+        migration_review_required: false,
+        stage_entered_at: "2026-07-12T01:00:00Z",
+        phone_ready_at: "2026-07-12T01:00:00Z",
+        phone_ready_source: "inquiry",
+      },
+      {
+        id: "track-math",
+        taskId: "task-new",
+        subject: "수학",
+        status: "visit_consultation_scheduled",
+        directorProfileId: "director-2",
+        directorAssignmentSource: "manual",
+        directorAssignmentRuleKey: "override",
+        waitingKind: "current_term_opening",
+        levelTestRetakeDecision: "required",
+        migrationReviewRequired: false,
+        stageEnteredAt: "2026-07-12T02:00:00Z",
+        phoneReadyAt: null,
+        phoneReadySource: "future_source",
+      },
+    ],
+    appointments: [
+      {
+        id: "appointment-level",
+        task_id: "task-new",
+        kind: "level_test",
+        scheduled_at: "2026-07-14T01:00:00Z",
+        place: "본관",
+        status: "scheduled",
+        notification_revision: 0,
+        created_at: "2026-07-12T01:00:00Z",
+        updated_at: "2026-07-12T01:00:00Z",
+      },
+      {
+        id: "appointment-visit",
+        taskId: "task-new",
+        kind: "visit_consultation",
+        scheduledAt: "2026-07-15T02:00:00Z",
+        place: "상담실",
+        status: "scheduled",
+        notificationRevision: 1,
+        createdAt: "2026-07-12T01:00:00Z",
+        updatedAt: "2026-07-12T01:00:00Z",
+      },
+    ],
+    notificationTargets,
+  };
+  const harness = createClient({
+    rpcHandler(name) {
+      assert.equal(name, "create_registration_case_with_initial_workflow_v1");
+      return { data: response, error: null };
+    },
+  });
+  let mutationInvalidations = 0;
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    onMutationSuccess: () => { mutationInvalidations += 1; },
+  }));
+  const input = {
+    studentName: "김다미",
+    schoolGrade: "고1",
+    schoolName: "중앙여고",
+    parentPhone: "01012345678",
+    studentPhone: "01087654321",
+    campus: "본관",
+    inquiryAt: "2026-07-12T01:00:00Z",
+    subjects: ["영어", "수학"],
+    requestNote: "상담 요청",
+    priority: "high",
+    subjectPlans: { 영어: "level_test", 수학: "visit" },
+    levelTestAppointment: {
+      scheduledAt: "2026-07-14T01:00:00Z",
+      place: "본관",
+      subjects: ["영어"],
+    },
+    visitAppointment: {
+      scheduledAt: "2026-07-15T02:00:00Z",
+      place: "상담실",
+      subjects: ["수학"],
+    },
+    directorOverrides: { 수학: "director-2" },
+    requestKey: "  intake-request-key  ",
+  };
+
+  const result = await service.createRegistrationCaseWithInitialWorkflow(input);
+  const [rpcName, rpcArgs] = harness.rpcCalls[0];
+
+  assert.equal(rpcName, "create_registration_case_with_initial_workflow_v1");
+  assert.deepEqual(Object.keys(rpcArgs), [
+    "p_student_name",
+    "p_school_grade",
+    "p_school_name",
+    "p_parent_phone",
+    "p_student_phone",
+    "p_campus",
+    "p_inquiry_at",
+    "p_subjects",
+    "p_request_note",
+    "p_priority",
+    "p_subject_plans",
+    "p_level_test_appointment",
+    "p_visit_appointment",
+    "p_director_overrides",
+    "p_request_key",
+  ]);
+  assert.deepEqual({ ...rpcArgs }, {
+    p_student_name: input.studentName,
+    p_school_grade: input.schoolGrade,
+    p_school_name: input.schoolName,
+    p_parent_phone: input.parentPhone,
+    p_student_phone: input.studentPhone,
+    p_campus: input.campus,
+    p_inquiry_at: input.inquiryAt,
+    p_subjects: input.subjects,
+    p_request_note: input.requestNote,
+    p_priority: input.priority,
+    p_subject_plans: input.subjectPlans,
+    p_level_test_appointment: input.levelTestAppointment,
+    p_visit_appointment: input.visitAppointment,
+    p_director_overrides: input.directorOverrides,
+    p_request_key: "intake-request-key",
+  });
+  assert.equal(result.taskId, "task-new");
+  assert.equal(result.commonRevision, 1);
+  assert.deepEqual(Array.from(result.subjects), ["영어", "수학"]);
+  assert.deepEqual(Array.from(result.tracks, (track) => ({ ...track })), [
+    {
+      id: "track-english",
+      taskId: "task-new",
+      subject: "영어",
+      status: "consultation_waiting",
+      legacy: false,
+      directorProfileId: "director-1",
+      directorName: "",
+      directorAssignmentSource: "default",
+      directorAssignmentRuleKey: "english:2026:high1",
+      waitingKind: "",
+      levelTestRetakeDecision: "",
+      migrationReviewRequired: false,
+      stageEnteredAt: "2026-07-12T01:00:00Z",
+      phoneReadyAt: "2026-07-12T01:00:00Z",
+      phoneReadySource: "inquiry",
+    },
+    {
+      id: "track-math",
+      taskId: "task-new",
+      subject: "수학",
+      status: "visit_consultation_scheduled",
+      legacy: false,
+      directorProfileId: "director-2",
+      directorName: "",
+      directorAssignmentSource: "manual",
+      directorAssignmentRuleKey: "override",
+      waitingKind: "current_term_opening",
+      levelTestRetakeDecision: "required",
+      migrationReviewRequired: false,
+      stageEnteredAt: "2026-07-12T02:00:00Z",
+      phoneReadyAt: null,
+      phoneReadySource: null,
+    },
+  ]);
+  assert.deepEqual(Array.from(result.appointments, (appointment) => ({ ...appointment })), [
+    {
+      id: "appointment-level",
+      taskId: "task-new",
+      kind: "level_test",
+      scheduledAt: "2026-07-14T01:00:00Z",
+      place: "본관",
+      status: "scheduled",
+      notificationRevision: 0,
+      createdAt: "2026-07-12T01:00:00Z",
+      updatedAt: "2026-07-12T01:00:00Z",
+    },
+    {
+      id: "appointment-visit",
+      taskId: "task-new",
+      kind: "visit_consultation",
+      scheduledAt: "2026-07-15T02:00:00Z",
+      place: "상담실",
+      status: "scheduled",
+      notificationRevision: 1,
+      createdAt: "2026-07-12T01:00:00Z",
+      updatedAt: "2026-07-12T01:00:00Z",
+    },
+  ]);
+  assert.strictEqual(result.notificationTargets, notificationTargets);
+  assert.equal(mutationInvalidations, 1);
+});
+
 test("receipt keys are required and maintenance blocks every new mutation before RPC", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient();
@@ -752,6 +1102,10 @@ test("receipt keys are required and maintenance blocks every new mutation before
 
   await assert.rejects(
     ready.updateRegistrationCaseCommon({ requestKey: "   " }),
+    /request key/i,
+  );
+  await assert.rejects(
+    ready.createRegistrationCaseWithInitialWorkflow({ requestKey: "   " }),
     /request key/i,
   );
   await assert.rejects(
@@ -903,11 +1257,19 @@ test("public service source exposes typed aliases and excludes server-only or cr
     "RegistrationAdmissionMessageClaimResponse", "RegistrationAdmissionProviderEvidence",
     "RegistrationAppointmentMutationResponse", "RegistrationEnrollmentRowsSaveResponse",
     "RegistrationConsultationCompletionResponse", "RegistrationAdmissionBatchCompletionResponse",
-    "StudentClassRosterModeResponse",
+    "RegistrationPhoneReadySource", "RegistrationCaseCreateWithInitialWorkflowInput",
+    "RegistrationCaseCreateWithInitialWorkflowResponse", "StudentClassRosterModeResponse",
   ]) {
     assert.match(source, new RegExp(`export type ${typeName}`));
   }
   assert.doesNotMatch(source, /FinalizationResponse|finalize_registration_admission_message/);
   assert.doesNotMatch(source, /complete_ops_withdrawal_roster_transition|complete_ops_transfer_roster_transition/);
   assert.match(source, /export \{ probeRegistrationSubjectTrackRuntime \}/);
+  assert.match(source, /export \{\s*probeRegistrationIntakeWorkflowRuntime,\s*resetRegistrationIntakeWorkflowRuntimeProbe,?\s*\}/);
+  assert.match(source, /export type \{ RegistrationIntakeRuntimeState \}/);
+  assert.match(source, /phoneReadyAt: string \| null/);
+  assert.match(source, /phoneReadySource: RegistrationPhoneReadySource \| null/);
+  assert.match(source, /readyAt: string \| null/);
+  assert.match(source, /readySource: RegistrationPhoneReadySource \| null/);
+  assert.match(source, /export function createRegistrationCaseWithInitialWorkflow/);
 });

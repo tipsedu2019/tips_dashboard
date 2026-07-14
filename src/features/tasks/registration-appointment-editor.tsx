@@ -15,6 +15,7 @@ import {
   getRegistrationAppointmentEditMode,
   getRegistrationAppointmentPayloadTrackIds,
 } from "./registration-track-model.js"
+import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow.js"
 import { sendRegistrationVisitNotificationTarget } from "./registration-consultation-notification.js"
 import {
   cancelRegistrationAppointment,
@@ -36,6 +37,7 @@ export type RegistrationAppointmentEditorProps = {
   kind: OpsRegistrationAppointment["kind"]
   taskId: string
   eligibleTracks: OpsRegistrationTrackSummary[]
+  initialTrackId?: string
   appointment: OpsRegistrationAppointment | null
   activities: RegistrationAppointmentActivity[]
   onSaved: (saved: RegistrationAppointmentMutationResponse) => void | Promise<void>
@@ -116,6 +118,7 @@ export function RegistrationAppointmentEditor({
   kind,
   taskId,
   eligibleTracks,
+  initialTrackId = "",
   appointment,
   activities,
   onSaved,
@@ -146,7 +149,11 @@ export function RegistrationAppointmentEditor({
   )
   const initialSelectedTrackIds = appointment
     ? currentActivities.filter((activity) => activity.status === "scheduled").map((activity) => activity.trackId)
-    : selectableTracks.map((track) => track.id)
+    : selectableTracks.some((track) => track.id === initialTrackId)
+      ? [initialTrackId]
+      : selectableTracks[0]?.id
+        ? [selectableTracks[0].id]
+        : []
 
   const [scheduledAt, setScheduledAt] = useState(() => toLocalDateTime(appointment?.scheduledAt))
   const [place, setPlace] = useState(appointment?.place || "")
@@ -476,7 +483,14 @@ export function RegistrationAppointmentEditor({
       <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
         <Label className="grid min-w-0 gap-1.5">
           <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>
-          <DateTimePickerControl value={scheduledAt} onChange={setScheduledAt} required disabled={saving || mutationLocked} disablePortal />
+          <DateTimePickerControl
+            value={scheduledAt}
+            onChange={setScheduledAt}
+            required
+            disabled={saving || mutationLocked}
+            disablePortal
+            timeOptions={REGISTRATION_TIME_OPTIONS}
+          />
         </Label>
         <Label className="grid min-w-0 gap-1.5">
           <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
