@@ -43,7 +43,7 @@ export PATH="$(dirname "$NODE"):$PATH"
 - `src/features/tasks/registration-intake-runtime-probe.ts` — independently cached intake capability probe.
 - `tests/registration-intake-workflow.test.mjs` — pure intake draft and payload tests.
 - `tests/registration-intake-runtime-probe.test.mjs` — missing/version/error/cache probe tests.
-- `supabase/migrations/20260713150000_registration_intake_workflow.sql` — phone readiness, all phone insert writers, atomic create RPC, grants, and readiness marker.
+- `supabase/migrations/20260714073327_registration_intake_workflow.sql` — phone readiness, all phone insert writers, atomic create RPC, grants, and readiness marker.
 - `supabase/tests/registration_intake_workflow_test.sql` — pgTAP schema/signature/privilege packet.
 - `supabase/tests/registration_intake_workflow_runtime_test.sql` — pgTAP atomicity, idempotency, subject split, and readiness packet.
 
@@ -370,7 +370,7 @@ git commit -m "fix: make registration campus explicit and safe"
 
 **Files:**
 
-- Create: `supabase/migrations/20260713150000_registration_intake_workflow.sql`
+- Create: `supabase/migrations/20260714073327_registration_intake_workflow.sql`
 - Modify: `tests/registration-track-schema.test.mjs`
 - Create: `supabase/tests/registration_intake_workflow_test.sql`
 
@@ -458,7 +458,7 @@ Expected: readiness schema assertions pass. Atomic-RPC assertions are intentiona
 
 **Files:**
 
-- Modify: `supabase/migrations/20260713150000_registration_intake_workflow.sql`
+- Modify: `supabase/migrations/20260714073327_registration_intake_workflow.sql`
 - Modify: `tests/registration-track-schema.test.mjs`
 - Create: `supabase/tests/registration_intake_workflow_runtime_test.sql`
 
@@ -539,7 +539,7 @@ Expected: schema source tests pass; SQL tests prove rollback and idempotent repl
 
 ```bash
 git add \
-  supabase/migrations/20260713150000_registration_intake_workflow.sql \
+  supabase/migrations/20260714073327_registration_intake_workflow.sql \
   supabase/tests/registration_intake_workflow_test.sql \
   supabase/tests/registration_intake_workflow_runtime_test.sql \
   tests/registration-track-schema.test.mjs
@@ -990,7 +990,7 @@ OPS_BROWSER_WORKFLOW=1 OPS_BROWSER_BASE_URL=http://127.0.0.1:3000 \
 rg -n "phoneConsultationAt|registration_campus_invalid|TODO|TBD|FIXME" \
   src/features/tasks \
   tests \
-  supabase/migrations/20260713150000_registration_intake_workflow.sql \
+  supabase/migrations/20260714073327_registration_intake_workflow.sql \
   docs/superpowers/specs/2026-07-13-registration-intake-routing-design.md
 git diff --check
 git status --short
