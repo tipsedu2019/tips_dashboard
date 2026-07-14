@@ -277,7 +277,7 @@ export function getTextbookGradeSummary(row: Row) {
   if (schoolLevels.length === 1) {
     const schoolGrades = gradesForSchool(schoolLevels[0]);
     if (schoolGrades.every((grade) => gradeLevels.includes(grade))) {
-      return `${getTextbookGradeLabel(schoolGrades[0])}–${getTextbookGradeLabel(schoolGrades.at(-1))}`;
+      return `${getTextbookGradeLabel(schoolGrades[0])}–${getTextbookGradeLabel(schoolGrades[schoolGrades.length - 1])}`;
     }
   }
   return gradeLevels.map(getTextbookGradeLabel).filter(Boolean).join(" · ");

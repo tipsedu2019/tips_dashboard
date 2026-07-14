@@ -95,19 +95,66 @@ test("class management accepts legacy class detail tab URLs without rendering de
   assert.match(pageSource, /params\.set\("returnTo", requestedClassReturnPath\)/);
 });
 
-test("class management keeps schedule and textbook progress out of the detail dialog", async () => {
+test("class management keeps progress out while allowing direct textbook links in the detail dialog", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
+  const pickerSource = await readFile(new URL("src/features/management/class-textbook-picker.tsx", root), "utf8");
+  const pickerModelSource = await readFile(new URL("src/features/management/class-textbook-picker-model.ts", root), "utf8");
   const detailStart = pageSource.indexOf('data-testid="class-official-detail"');
   const detailEnd = pageSource.indexOf("<DialogFooter", detailStart);
   const detailSource = pageSource.slice(detailStart, detailEnd);
 
   assert.ok(detailStart >= 0 && detailEnd > detailStart);
   assert.match(detailSource, /data-testid="class-detail-basic-section"/);
+  assert.match(detailSource, /renderClassTextbookManagement\(\)/);
+  assert.match(pageSource, /data-testid="class-textbook-management"/);
+  assert.match(pageSource, /payload\.textbook_ids = textbookIds/);
+  assert.match(pageSource, /<ClassTextbookPicker/);
+  assert.match(pageSource, /key=\{`\$\{selectedRow\.id\}:\$\{form\.subject\}:\$\{form\.grade\}`\}/);
+  assert.match(pageSource, /classRecord=\{\{ \.\.\.raw, subject: form\.subject, grade: form\.grade \}\}/);
+  assert.match(hookSource, /available_textbooks:/);
+  assert.match(hookSource, /school_levels:/);
+  assert.match(hookSource, /grade_levels:/);
+  assert.match(hookSource, /sub_subject:/);
+  assert.match(pickerSource, /전체 보기/);
+  assert.match(pickerSource, /교재 추가/);
+  assert.match(pickerSource, /조건에 맞는 교재 없음/);
+  assert.match(pickerSource, /max-h-72 overscroll-contain overflow-y-auto/);
+  assert.match(pickerSource, /aria-label="학교 구분"/);
+  assert.match(pickerSource, /aria-label="세부과목"/);
+  assert.match(pickerModelSource, /getDefaultClassTextbookFilters/);
+  assert.match(pickerModelSource, /filterClassTextbookCandidates/);
   assert.match(detailSource, /data-testid="class-detail-students-section"/);
   assert.doesNotMatch(detailSource, /<TabsContent value="schedule"/);
   assert.doesNotMatch(detailSource, /<TabsContent value="curriculum"/);
   assert.doesNotMatch(detailSource, /\{renderClassSchedulePanel\(\)\}/);
   assert.doesNotMatch(detailSource, /\{renderClassCurriculumPanel\(\)\}/);
+});
+
+test("student class picker shows class subject metadata and keeps its long menu scrollable inside the dialog", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(pageSource, /function relatedMeta\(kind: ManagementKind, record\?: RelatedRecord\)/);
+  assert.match(pageSource, /if \(kind === "students"\)/);
+  assert.match(pageSource, /text\(record\.subject\)/);
+  assert.match(pageSource, /text\(record\.grade\)/);
+  assert.match(pageSource, /text\(record\.schedule\)/);
+  assert.match(pageSource, /<Popover modal open=\{relationPickerOpen\}/);
+  assert.match(pageSource, /max-h-72 overscroll-contain overflow-y-auto/);
+});
+
+test("student class picker defaults by grade and can widen to all grades", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const modelSource = await readFile(new URL("src/features/management/student-class-picker-model.ts", root), "utf8");
+
+  assert.match(pageSource, /getDefaultStudentClassPickerScope/);
+  assert.match(pageSource, /filterStudentClassCandidates/);
+  assert.match(pageSource, /같은 학년/);
+  assert.match(pageSource, /전체 학년/);
+  assert.match(pageSource, /같은 학년 수업 없음/);
+  assert.match(pageSource, /studentGrade: form\.grade/);
+  assert.match(modelSource, /scope === "same-grade"/);
+  assert.doesNotMatch(modelSource, /classRecord\.name[\s\S]*normalizeGrade/);
 });
 
 test("curriculum session summaries preserve per-textbook ranges for official class details", async () => {

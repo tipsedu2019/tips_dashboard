@@ -38,8 +38,15 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
+import { ClassTextbookPicker } from "./class-textbook-picker";
+import type { ClassTextbookRecord } from "./class-textbook-picker-model";
 import { managementService } from "./management-service.js";
 import { pickDefaultPeriodValue } from "./period-preferences";
+import {
+  filterStudentClassCandidates,
+  getDefaultStudentClassPickerScope,
+} from "./student-class-picker-model";
+import type { StudentClassPickerScope } from "./student-class-picker-model";
 
 type ManagementServiceClient = {
   createStudent: (record: Record<string, unknown>) => Promise<unknown>;
@@ -787,6 +794,7 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
   const nextForm = Object.fromEntries(FORM_FIELDS[kind].map((field) => [field.name, valueFor(field.name)]));
   if (kind === "classes") {
     nextForm.classGroupIds = stringifyClassGroupIds(getClassGroupIdsFromRaw(raw));
+    nextForm.textbookIds = JSON.stringify(idList(raw.textbook_ids || raw.textbookIds));
   }
   return nextForm;
 }
@@ -799,6 +807,7 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
   };
 
   delete payload.classGroupIds;
+  delete payload.textbookIds;
   if (payload.parentContact) payload.parent_contact = payload.parentContact;
   if (payload.classroom) payload.room = payload.classroom;
   if (payload.name && kind === "classes") {
@@ -806,6 +815,11 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
     payload.className = payload.name;
   }
   if (payload.fee) payload.tuition = payload.fee;
+  if (kind === "classes") {
+    const textbookIds = parseTextbookIds(formState.textbookIds);
+    payload.textbook_ids = textbookIds;
+    payload.textbookIds = textbookIds;
+  }
 
   return payload;
 }
@@ -868,8 +882,13 @@ function formatSchoolGradeLabel(schoolValue: unknown, gradeValue: unknown) {
   return [school, normalizedGrade].filter(Boolean).join("");
 }
 
-function relatedMeta(record?: RelatedRecord) {
+function relatedMeta(kind: ManagementKind, record?: RelatedRecord) {
   if (!record) return "";
+  if (kind === "students") {
+    return [text(record.subject), text(record.grade), text(record.schedule)]
+      .filter(Boolean)
+      .join(" · ");
+  }
   const schoolGrade = formatSchoolGradeLabel(record.school, record.grade);
   if (schoolGrade) return schoolGrade;
 
@@ -890,6 +909,39 @@ function getStudentGradeValue(record?: RelatedRecord) {
 
 function idList(value: unknown) {
   return Array.isArray(value) ? value.map((item) => text(item)).filter(Boolean) : [];
+}
+
+function parseTextbookIds(value: unknown) {
+  if (Array.isArray(value)) return idList(value);
+  const raw = text(value);
+  if (!raw) return [];
+  try {
+    return idList(JSON.parse(raw));
+  } catch {
+    return raw.split(",").map((item) => text(item)).filter(Boolean);
+  }
+}
+
+function normalizeClassTextbookRecords(value: unknown): ClassTextbookRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const id = text(record.id);
+    const title = text(record.title || record.name);
+    if (!id || !title) return [];
+    return [{
+      id,
+      title,
+      subject: text(record.subject),
+      schoolLevel: text(record.schoolLevel || record.school_level),
+      gradeLevel: text(record.gradeLevel || record.grade_level),
+      schoolLevels: idList(record.schoolLevels || record.school_levels),
+      gradeLevels: idList(record.gradeLevels || record.grade_levels),
+      subSubject: text(record.subSubject || record.sub_subject),
+      publisher: text(record.publisher),
+    }];
+  });
 }
 
 function addIdToList(value: unknown, id: string) {
@@ -1173,6 +1225,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [pendingRelationMode, setPendingRelationMode] = useState<"enrolled" | "waitlist" | null>(null);
   const [pendingClassStudentDetailId, setPendingClassStudentDetailId] = useState("");
   const [relationPickerOpen, setRelationPickerOpen] = useState(false);
+  const [studentClassScope, setStudentClassScope] = useState<StudentClassPickerScope>("all-grades");
   const [detailRowQuery, setDetailRowQuery] = useState("");
   const [relationQuery, setRelationQuery] = useState("");
   const classDetailRouteClearPendingRef = useRef(false);
@@ -1186,6 +1239,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const requestedClassDetailSessionId = kind === "classes" ? text(searchParams.get("sessionId")) : "";
   const requestedClassDetailStudentId = kind === "classes" ? text(searchParams.get("studentId")) : "";
   const requestedClassReturnPath = kind === "classes" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
+
+  useEffect(() => {
+    if (kind !== "students") return;
+    setStudentClassScope(getDefaultStudentClassPickerScope({ grade: form.grade }));
+  }, [form.grade, kind]);
 
   const createLabel = getLabel(kind);
   const isCreate = dialogMode === "create";
@@ -1223,12 +1281,19 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     [relatedRows, selectedRelationIdSet],
   );
   const filteredAvailableRelatedRows = useMemo(() => {
+    if (kind === "students") {
+      return filterStudentClassCandidates(availableRelatedRows, {
+        studentGrade: form.grade,
+        scope: studentClassScope,
+        query: relationQuery,
+      });
+    }
     const query = relationQuery.trim().toLowerCase();
     if (!query) return availableRelatedRows;
     return availableRelatedRows.filter((record) =>
-      `${relatedTitle(record)} ${relatedMeta(record)}`.toLowerCase().includes(query),
+      `${relatedTitle(record)} ${relatedMeta(kind, record)}`.toLowerCase().includes(query),
     );
-  }, [availableRelatedRows, relationQuery]);
+  }, [availableRelatedRows, form.grade, kind, relationQuery, studentClassScope]);
   const detailSearchLabel = kind === "classes" ? "수업명 검색" : kind === "students" ? "학생명 검색" : "교재명 검색";
   const detailSearchMatches = useMemo(() => {
     const query = detailRowQuery.trim().toLowerCase();
@@ -1507,7 +1572,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             <div key={`${modeLabel}-${id}`} className="grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">{resolveRelatedTitle(id)}</div>
-                <div className="mt-0.5 truncate text-xs text-muted-foreground">{relatedMeta(resolveRelatedRecord(id)) || modeLabel}</div>
+                <div className="mt-0.5 truncate text-xs text-muted-foreground">{relatedMeta(kind, resolveRelatedRecord(id)) || modeLabel}</div>
               </div>
               <div className="flex flex-wrap justify-end gap-1">
                 <Button
@@ -1958,6 +2023,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setPendingRelationMode(null);
     setPendingClassStudentDetailId("");
     setRelationPickerOpen(false);
+    setStudentClassScope(
+      kind === "students"
+        ? getDefaultStudentClassPickerScope(row.raw || {})
+        : "all-grades",
+    );
     setDetailRowQuery("");
     setRelationQuery("");
     setOperationError(null);
@@ -2558,13 +2628,76 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     );
   };
 
+  const renderClassTextbookManagement = () => {
+    if (!selectedRow || kind !== "classes") return null;
+    const raw = (selectedRow.raw || {}) as Record<string, unknown>;
+    const catalog = normalizeClassTextbookRecords(raw.available_textbooks || raw.availableTextbooks);
+    const selectedIds = parseTextbookIds(form.textbookIds);
+    const catalogById = new Map(catalog.map((textbook) => [textbook.id, textbook]));
+    const updateSelectedIds = (nextIds: string[]) => {
+      setForm((current) => ({ ...current, textbookIds: JSON.stringify(nextIds) }));
+      setSaveNotice("");
+    };
+
+    return (
+      <section data-testid="class-textbook-management" className="space-y-3 border-t pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold">교재</div>
+            <div className="text-xs text-muted-foreground">이 수업에서 사용하는 교재를 연결합니다.</div>
+          </div>
+          <ClassTextbookPicker
+            key={`${selectedRow.id}:${form.subject}:${form.grade}`}
+            classRecord={{ ...raw, subject: form.subject, grade: form.grade }}
+            textbooks={catalog}
+            selectedIds={selectedIds}
+            disabled={!canMutateRows}
+            onSelectedIdsChange={updateSelectedIds}
+          />
+        </div>
+        {selectedIds.length === 0 ? (
+          <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">연결된 교재 없음</div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {selectedIds.map((id) => {
+              const textbook = catalogById.get(id);
+              return (
+                <div key={id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{textbook?.title || "교재 정보 확인 필요"}</div>
+                    {textbook ? (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {[textbook.subject, textbook.publisher].filter(Boolean).join(" · ")}
+                      </div>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`${textbook?.title || "교재"} 연결 해제`}
+                    disabled={!canMutateRows}
+                    onClick={() => updateSelectedIds(selectedIds.filter((selectedId) => selectedId !== id))}
+                  >
+                    <X className="size-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const renderRelationManagementSection = () => {
     if (!selectedRow || kind === "textbooks") return null;
     const classEnrolledStudentIds = kind === "classes" ? getClassEnrolledStudentIds(selectedRow) : [];
     const classWaitlistStudentIds = kind === "classes" ? getClassWaitlistStudentIds(selectedRow) : [];
     const selectedRelationRecord = targetId ? resolveRelatedRecord(targetId) : undefined;
     const selectedRelationLabel = selectedRelationRecord
-      ? [relatedTitle(selectedRelationRecord), relatedMeta(selectedRelationRecord)].filter(Boolean).join(" · ")
+      ? [relatedTitle(selectedRelationRecord), relatedMeta(kind, selectedRelationRecord)].filter(Boolean).join(" · ")
       : "";
 
     return (
@@ -2575,7 +2708,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(16rem,1fr)_auto_auto]">
           <div data-testid={kind === "classes" ? "class-relation-picker" : undefined} className="grid gap-1.5">
             <Label htmlFor={`${kind}-relation-picker-search`}>{relationLabel} 선택</Label>
-            <Popover open={relationPickerOpen} onOpenChange={setRelationPickerOpen}>
+            <Popover modal open={relationPickerOpen} onOpenChange={setRelationPickerOpen}>
               <PopoverTrigger asChild>
                 <Button
                   type="button"
@@ -2599,9 +2732,37 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                     disabled={!canMutateRows}
                     onChange={(event) => setRelationQuery(event.target.value)}
                   />
-                  <div className="max-h-72 overflow-y-auto">
+                  {kind === "students" ? (
+                    <div className="grid grid-cols-2 rounded-md bg-muted p-1" aria-label="수업 학년 범위">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={studentClassScope === "same-grade" ? "secondary" : "ghost"}
+                        disabled={!form.grade}
+                        onClick={() => setStudentClassScope("same-grade")}
+                      >
+                        같은 학년
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={studentClassScope === "all-grades" ? "secondary" : "ghost"}
+                        onClick={() => setStudentClassScope("all-grades")}
+                      >
+                        전체 학년
+                      </Button>
+                    </div>
+                  ) : null}
+                  <div className="max-h-72 overscroll-contain overflow-y-auto">
                     {filteredAvailableRelatedRows.length === 0 ? (
-                      <div className="px-2 py-3 text-sm text-muted-foreground">추가 가능한 {relationLabel} 없음</div>
+                      kind === "students" && studentClassScope === "same-grade" ? (
+                        <div className="flex items-center justify-between gap-2 px-2 py-3 text-sm text-muted-foreground">
+                          <span>같은 학년 수업 없음</span>
+                          <Button type="button" size="sm" variant="outline" onClick={() => setStudentClassScope("all-grades")}>전체 학년</Button>
+                        </div>
+                      ) : (
+                        <div className="px-2 py-3 text-sm text-muted-foreground">추가 가능한 {relationLabel} 없음</div>
+                      )
                     ) : filteredAvailableRelatedRows.map((record) => {
                       const id = text(record.id);
 
@@ -2621,7 +2782,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                           disabled={!canMutateRows}
                         >
                           <span className="truncate font-medium">{relatedTitle(record)}</span>
-                          {relatedMeta(record) ? <span className="truncate text-xs text-muted-foreground">{relatedMeta(record)}</span> : null}
+                          {relatedMeta(kind, record) ? <span className="truncate text-xs text-muted-foreground">{relatedMeta(kind, record)}</span> : null}
                         </button>
                       );
                     })}
@@ -2727,6 +2888,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                 ])}
                 {renderClassScheduleSlotEditor()}
               </section>
+              {renderClassTextbookManagement()}
               <div id="class-detail-students-section" data-testid="class-detail-students-section" className="space-y-4">
                 {renderRelationManagementSection()}
               </div>

@@ -585,6 +585,17 @@ export function useManagementRecords(kind: ManagementKind) {
             availableClassGroups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
             available_teacher_catalogs: teacherCatalogs,
             availableTeacherCatalogs: teacherCatalogs,
+            available_textbooks: textbooks.map((textbook) => ({
+              id: textValue(textbook.id),
+              title: textValue(textbook.title || textbook.name),
+              subject: textValue(textbook.subject),
+              school_level: textValue(textbook.school_level),
+              grade_level: textValue(textbook.grade_level),
+              school_levels: Array.isArray(textbook.school_levels) ? textbook.school_levels : [],
+              grade_levels: Array.isArray(textbook.grade_levels) ? textbook.grade_levels : [],
+              sub_subject: textValue(textbook.sub_subject),
+              publisher: textValue(textbook.publisher),
+            })).filter((textbook) => textbook.id && textbook.title),
           }),
         );
       }
