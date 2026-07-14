@@ -1,6 +1,6 @@
 "use client"
 
-import { useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type Dispatch, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type SetStateAction, type TouchEvent, type WheelEvent } from "react"
 import { ArrowDown, ArrowUp, Bell, BookOpenCheck, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, MessageSquareText, Pencil, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
 
@@ -1267,6 +1267,33 @@ function getStudentRosterClassIds(student: OpsStudentOption | undefined, classes
     if (classItem.studentIds.includes(student.id)) linkedIds.add(classItem.id)
   })
   return [...linkedIds]
+}
+
+function buildWithdrawalCreatePrefill(
+  studentId: string,
+  students: OpsStudentOption[],
+  classes: OpsClassOption[],
+): Partial<OpsTaskInput> {
+  const student = students.find((item) => item.id === studentId)
+  if (!student) return {}
+
+  const classIds = getStudentRosterClassIds(student, classes)
+  const classItem = classIds.length === 1
+    ? classes.find((item) => item.id === classIds[0])
+    : undefined
+
+  return {
+    title: `${student.label} 퇴원`,
+    studentId: student.id,
+    studentName: student.label,
+    classId: classItem?.id || "",
+    className: classItem?.label || "",
+    subject: classItem?.subject || "",
+    withdrawal: {
+      schoolGrade: student.grade,
+      teacherName: classItem?.teacher || "",
+    },
+  }
 }
 
 function uniqueClassOptions(classes: OpsClassOption[]) {
@@ -8874,6 +8901,8 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 }
 
 function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
+  const router = useRouter()
+  const pathname = usePathname()
   const scopedTaskType = WORKSPACE_TASK_TYPE[workspace]
   const isTodoWorkspace = workspace === "todo"
   const isRegistrationWorkspace = workspace === "registration"
@@ -8881,6 +8910,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const isTransferWorkspace = workspace === "transfer"
   const isWordRetestWorkspace = workspace === "word_retest"
   const searchParams = useSearchParams()
+  const requestedWithdrawalStudentId = isWithdrawalWorkspace && searchParams.get("create") === "withdrawal"
+    ? searchParams.get("studentId") || ""
+    : ""
   const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()
   const currentUserId = user?.id || ""
   const registrationFixtureValue = searchParams.get("fixture")
@@ -9013,6 +9045,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const workspaceDataViewerIdRef = useRef(currentUserId)
   const registrationTrackSelectionRef = useRef("")
   const registrationCreateRequestRef = useRef<{ signature: string; requestKey: string } | null>(null)
+  const withdrawalCreateHandledRef = useRef("")
+  const openCreateRef = useRef<((type: OpsTaskType, initialValues?: Partial<OpsTaskInput>) => void) | null>(null)
   const registrationOptionsLoadedRef = useRef(false)
   const registrationOptionsLoadGenerationRef = useRef(0)
   const registrationOptionsDataRef = useRef<OpsTaskWorkspaceOptionData | null>(null)
@@ -9950,7 +9984,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	        : `${workspaceLabel} 추가`
   const formCloseLabel = "닫기"
 
-  function openCreate(type: OpsTaskType = scopedTaskType) {
+  function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
     if (type === "registration") void ensureRegistrationOptions()
     const defaultAssigneeId = currentUserId || ""
@@ -9967,7 +10001,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const registrationDefaults = type === "registration" ? getRegistrationCreateDefaults(new Date().toISOString()) : {}
     const nextForm = cloneForm({
       ...EMPTY_FORM,
-      type,
       requestedBy: currentUserId,
       requestedTeam: currentUserTaskTeam,
       assigneeId: defaultAssigneeId,
@@ -9975,6 +10008,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       dueAt: defaultDueAt,
       ...registrationDefaults,
       ...wordRetestDefaults,
+      ...initialValues,
+      type,
     })
     registrationDirectorDefaultSessionRef.current += 1
     registrationDirectorDefaultPendingTokenRef.current += 1
@@ -9994,6 +10029,33 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setStatusUndo(null)
     setFormOpen(true)
   }
+
+  openCreateRef.current = openCreate
+
+  useEffect(() => {
+    if (!requestedWithdrawalStudentId || loading || !data || !canOpenCreate || formOpen) return
+    const signature = `${currentUserId}:${requestedWithdrawalStudentId}`
+    if (withdrawalCreateHandledRef.current === signature) return
+
+    withdrawalCreateHandledRef.current = signature
+    openCreateRef.current?.("withdrawal", buildWithdrawalCreatePrefill(requestedWithdrawalStudentId, data.students, data.classes))
+
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("create")
+    params.delete("studentId")
+    const nextQuery = params.toString()
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false })
+  }, [
+    canOpenCreate,
+    currentUserId,
+    data,
+    formOpen,
+    loading,
+    pathname,
+    requestedWithdrawalStudentId,
+    router,
+    searchParams,
+  ])
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
     if (task.type === "registration") void ensureRegistrationOptions()
@@ -13405,13 +13467,16 @@ function TypeSpecificFields({
   }
 
   function selectWithdrawalSubject(subject: string) {
+    const preserveUnscopedWithdrawalStudent = Boolean(form.studentId && !form.classId)
     updateForm("subject", subject)
     if (subject !== form.subject) {
       updateWithdrawal("teacherName", "")
       updateForm("classId", "")
       updateForm("className", "")
-      updateForm("studentId", "")
-      updateForm("studentName", "")
+      if (!preserveUnscopedWithdrawalStudent) {
+        updateForm("studentId", "")
+        updateForm("studentName", "")
+      }
       clearWithdrawalScheduleSelection()
     }
   }
@@ -13420,11 +13485,14 @@ function TypeSpecificFields({
     const teacher = findTeacher(teacherId)
     const option = withdrawalTeacherOptions.find((item) => item.id === teacherId)
     const teacherName = teacher?.label || option?.label || ""
+    const preserveUnscopedWithdrawalStudent = Boolean(form.studentId && !form.classId)
     if (teacherId !== selectedWithdrawalTeacherId) {
       updateForm("classId", "")
       updateForm("className", "")
-      updateForm("studentId", "")
-      updateForm("studentName", "")
+      if (!preserveUnscopedWithdrawalStudent) {
+        updateForm("studentId", "")
+        updateForm("studentName", "")
+      }
       clearWithdrawalScheduleSelection()
     }
     updateWithdrawal("teacherName", teacherName)
@@ -13612,11 +13680,17 @@ function TypeSpecificFields({
       if (textbookId && shouldUsePrimaryTextbook && !wordRetest.textbookName) selectTextbook(textbookId, { fillWordRetest: true })
     }
     if (options.fillWithdrawal) {
+      const withdrawalStudent = findStudent(form.studentId || "")
+      const nextWithdrawalClassContainsStudent = Boolean(
+        withdrawalStudent && getStudentRosterClassIds(withdrawalStudent, classes).includes(classItem.id),
+      )
       updateWithdrawal("schoolGrade", withdrawal.schoolGrade || classItem.grade)
       if (classItem.teacher) updateWithdrawal("teacherName", withdrawal.teacherName || classItem.teacher)
       if (isWithdrawalClassChange) {
-        updateForm("studentId", "")
-        updateForm("studentName", "")
+        if (!nextWithdrawalClassContainsStudent) {
+          updateForm("studentId", "")
+          updateForm("studentName", "")
+        }
         clearWithdrawalScheduleSelection()
       }
     }
@@ -14239,7 +14313,7 @@ function TypeSpecificFields({
           {shouldShowManualField("wordRetestTextbook", form.textbookId, wordRetest.textbookName) && <TextField label="교재명" value={wordRetest.textbookName || ""} onChange={(value) => updateWordRetest("textbookName", value)} />}
           <div className="grid gap-3 md:grid-cols-2">
             <TextField label="출제 개수" value={wordRetest.totalQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("totalQuestionCount", value)} />
-            <TextField label="커트라인(맞은 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
+            <TextField label="커트라인(합격 개수)" value={wordRetest.cutoffQuestionCount || ""} inputMode="numeric" onChange={(value) => updateWordRetest("cutoffQuestionCount", value)} />
           </div>
           <TextField label="메모" value={wordRetest.requestNote || ""} onChange={(value) => updateWordRetest("requestNote", value)} />
         </div>

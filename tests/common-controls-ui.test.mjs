@@ -41,7 +41,7 @@ test("ported option panels stay above high-layer management dialogs", async () =
     readFile(new URL("src/features/management/management-page.tsx", root), "utf8"),
   ]);
 
-  assert.match(managementSource, /DialogContent className="z-\[80\]/);
+  assert.match(managementSource, /<DialogContent[\s\S]*?className="z-\[80\]/);
   assert.match(selectSource, /data-slot="select-content"[\s\S]*relative z-\[90\]/);
   assert.match(popoverSource, /data-slot="popover-content"[\s\S]*z-\[90\]/);
   assert.doesNotMatch(selectSource, /data-slot="select-content"[\s\S]*relative z-50/);

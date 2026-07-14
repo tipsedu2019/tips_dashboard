@@ -3821,7 +3821,7 @@ export function ClassScheduleWorkspace() {
 
   const requestedClassId = text(searchParams.get("classId"));
   const requestedSessionId = text(searchParams.get("sessionId"));
-  const requestedLessonDesignSectionId = isLessonDesignModalRoute ? "" : resolveLessonDesignSectionId(text(searchParams.get("section")));
+  const requestedLessonDesignSectionId = resolveLessonDesignSectionId(text(searchParams.get("section")));
   const lessonDesignDefaultSectionId = isLessonDesignModalRoute ? LESSON_DESIGN_SECTION_IDS.periods : isLessonDesignPage && selectedLessonSessionId ? LESSON_DESIGN_SECTION_IDS.board : "";
   const requestedLessonReturnPath = normalizeAdminReturnPath(searchParams.get("returnTo"));
   const requestedLessonMonthKeys = useMemo(
@@ -4285,10 +4285,7 @@ export function ClassScheduleWorkspace() {
   const lessonDesignRequestedProgressMode =
     requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.board ||
     requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.textbooks;
-  const lessonDesignActiveMode =
-    !isLessonDesignModalRoute && lessonDesignRequestedProgressMode
-      ? "progress"
-      : "schedule";
+  const lessonDesignActiveMode = lessonDesignRequestedProgressMode ? "progress" : "schedule";
   const isLessonDesignProgressMode = lessonDesignActiveMode === "progress";
   const lessonTextbookSubjectFilterLabel =
     lessonTextbookSubjectFilter === "current"

@@ -31,7 +31,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   STUDENT_STATUS_OPTIONS,
-  WITHDRAWN_STUDENT_STATUS,
   normalizeStudentStatus,
 } from "@/lib/student-status";
 import { cn } from "@/lib/utils";
@@ -164,6 +163,13 @@ function normalizeReturnToPath(value: unknown) {
   const path = text(value);
   if (!path || path.startsWith("//") || path.includes("://")) return "";
   return path.startsWith("/admin/") ? path : "";
+}
+
+function buildStudentWithdrawalRequestPath(studentId: string) {
+  const params = new URLSearchParams();
+  params.set("create", "withdrawal");
+  params.set("studentId", studentId);
+  return `/admin/withdrawal?${params.toString()}`;
 }
 
 function getClassReturnPathLabel(path: string) {
@@ -2168,10 +2174,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setSaving(true);
     setOperationError(null);
     try {
-      await Promise.all(rows.map((row) => {
-        if (kind === "students") return service.updateStudent({ ...(row.raw || {}), id: row.id, status: WITHDRAWN_STUDENT_STATUS });
-        return service.deleteTextbook(row.id);
-      }));
+      await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
       await refresh();
     } catch (bulkError) {
       setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
@@ -2215,8 +2218,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       } : undefined,
       onOpenRow: openRow,
       onBulkUpdateRows: canMutateRows ? handleBulkUpdateRows : undefined,
-      onBulkDeleteRows: canMutateRows && kind !== "classes" ? handleBulkDeleteRows : undefined,
+      onBulkDeleteRows: canMutateRows && kind === "textbooks" ? handleBulkDeleteRows : undefined,
       onDeleteRow: kind === "classes" ? undefined : canMutateRows ? (row: ManagementRow) => {
+        if (kind === "students") {
+          router.push(buildStudentWithdrawalRequestPath(row.id));
+          return;
+        }
         setDeleteRequest({ rows: [row] });
       } : undefined,
     };
@@ -2232,7 +2239,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     return base;
   }, [canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, openRow, router]);
 
-  const deleteActionLabel = kind === "students" ? "퇴원 처리" : "삭제";
+  const deleteActionLabel = "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
   const deleteTargetLabel =
     deleteRequestCount === 1

@@ -46,6 +46,20 @@ async function pathExists(pathname) {
   }
 }
 
+test("student management withdrawal handoff opens a prefilled withdrawal request and consumes the deep link", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(source, /function buildWithdrawalCreatePrefill/);
+  assert.match(source, /const requestedWithdrawalStudentId = isWithdrawalWorkspace && searchParams\.get\("create"\) === "withdrawal"/);
+  assert.match(source, /openCreateRef\.current\?\.\("withdrawal", buildWithdrawalCreatePrefill/);
+  assert.match(source, /params\.delete\("create"\)/);
+  assert.match(source, /params\.delete\("studentId"\)/);
+  assert.match(source, /router\.replace\(nextQuery \? `\$\{pathname\}\?\$\{nextQuery\}` : pathname, \{ scroll: false \}\)/);
+  assert.match(source, /const preserveUnscopedWithdrawalStudent = Boolean\(form\.studentId && !form\.classId\)/);
+  assert.match(source, /const nextWithdrawalClassContainsStudent = Boolean/);
+  assert.match(source, /getStudentRosterClassIds\(withdrawalStudent, classes\)\.includes\(classItem\.id\)/);
+});
+
 function assertIncludesAll(source, values) {
   for (const value of values) {
     assert.ok(source.includes(value), value);
@@ -1716,7 +1730,7 @@ test("operation forms use staged fields and linked management selectors", async 
     source.indexOf('if (step === "word_retest_scores")'),
   );
   assert.ok(
-    wordRetestScopeSource.indexOf('label="출제 개수"') < wordRetestScopeSource.indexOf('label="커트라인(맞은 개수)"'),
+    wordRetestScopeSource.indexOf('label="출제 개수"') < wordRetestScopeSource.indexOf('label="커트라인(합격 개수)"'),
     "word retest scope fields should place total question count before cutoff count",
   );
 });
@@ -3000,7 +3014,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'blockers.push("시험범위")',
     "label=\"진행상태\"",
     "출제 개수",
-    "커트라인(맞은 개수)",
+    "커트라인(합격 개수)",
     "커트라인",
     "1차 맞은 개수",
     "2차 맞은 개수",

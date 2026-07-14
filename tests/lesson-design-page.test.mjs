@@ -418,7 +418,14 @@ test("lesson design splits schedule generation from progress generation", async 
   assert.match(source, /const isLessonDesignRouteActive = isLessonDesignPage \|\| searchParams\.get\("lessonDesign"\) === "1"/);
   assert.match(source, /const isLessonDesignModalRoute = searchParams\.get\("lessonDesign"\) === "1" && !isLessonDesignPage/);
   assert.match(source, /const lessonDesignDefaultSectionId = isLessonDesignModalRoute \? LESSON_DESIGN_SECTION_IDS\.periods/);
+  assert.match(
+    source,
+    /const requestedLessonDesignSectionId = resolveLessonDesignSectionId\(text\(searchParams\.get\("section"\)\)\)/,
+  );
+  assert.doesNotMatch(source, /const requestedLessonDesignSectionId = isLessonDesignModalRoute \? ""/);
   assert.match(source, /requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.board \|\|\s*requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS\.textbooks/);
+  assert.match(source, /const lessonDesignActiveMode =\s*lessonDesignRequestedProgressMode\s*\? "progress"\s*: "schedule"/);
+  assert.doesNotMatch(source, /!isLessonDesignModalRoute && lessonDesignRequestedProgressMode/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.periods\)/);
   assert.match(source, /navigateToLessonDesignSection\(LESSON_DESIGN_SECTION_IDS\.board\)/);
   assert.match(source, /currentParams: new URLSearchParams\(searchParams\.toString\(\)\)/);

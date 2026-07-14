@@ -307,9 +307,10 @@ test("student and class tables expose bulk edit and delete actions for selected 
   assert.match(pageSource, /handleBulkUpdateRows/);
   assert.match(pageSource, /handleBulkDeleteRows/);
   assert.match(pageSource, /Promise\.all\(rows\.map/);
-  assert.match(pageSource, /WITHDRAWN_STUDENT_STATUS/);
+  assert.match(pageSource, /buildStudentWithdrawalRequestPath/);
+  assert.match(pageSource, /router\.push\(buildStudentWithdrawalRequestPath\(row\.id\)\)/);
   assert.match(pageSource, /onBulkUpdateRows: canMutateRows \? handleBulkUpdateRows : undefined/);
-  assert.match(pageSource, /onBulkDeleteRows: canMutateRows && kind !== "classes" \? handleBulkDeleteRows : undefined/);
+  assert.match(pageSource, /onBulkDeleteRows: canMutateRows && kind === "textbooks" \? handleBulkDeleteRows : undefined/);
 });
 
 test("management deletes use an in-app confirmation dialog", async () => {
