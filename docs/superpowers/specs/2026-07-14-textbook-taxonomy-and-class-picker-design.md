@@ -5,7 +5,7 @@
 
 ## Goal
 
-Make every textbook consistently classifiable by subject, school level, grade, and sub-subject, while allowing one textbook to cover multiple school levels and grades. Use that taxonomy to make the class-detail textbook picker start with relevant candidates and let operators deliberately widen the search.
+Make every textbook consistently classifiable by subject, school level, grade, and sub-subject, while allowing one textbook to cover multiple school levels and grades. Use that taxonomy to make the class-detail textbook picker start with relevant candidates and let operators deliberately widen the search. Apply the same relevant-first pattern to the student-detail class picker so operators see the student's grade first and can intentionally widen to every grade for exceptions.
 
 ## Existing Problems
 
@@ -13,6 +13,7 @@ Make every textbook consistently classifiable by subject, school level, grade, a
 2. Many existing rows have only a school level or only a grade. The table therefore displays `-` even when the missing value can be derived.
 3. Subject, school level, grade, and sub-subject are not enforced as one required classification contract.
 4. The class-detail textbook picker currently searches only title, subject, and publisher. It does not use the class subject or grade and offers no taxonomy filters.
+5. The student-detail class picker currently shows every unlinked class. It ignores the student's school level and grade, so operators must search through unrelated classes before registering or waitlisting a student.
 
 ## Chosen Model
 
@@ -89,6 +90,21 @@ Above the result list, the picker provides four compact filters: subject, school
 
 Each candidate row displays title plus `과목 · 학교 구분 · 학년 · 세부과목 · 출판사`. Already connected textbooks remain visible in the class detail even when they do not match the current picker filters. Adding or removing a link continues to save through the class's existing `textbook_ids` flow.
 
+## Student Class Picker
+
+Opening `수업 선택` in a student detail starts in a relevant-first scope derived from the student's current grade. Because a grade already determines its school level (`고2` implies `고등`), the picker does not add a duplicate school-level control.
+
+The default scope is `같은 학년`. A 고2 student therefore sees only unlinked 고2 classes. Classes with a different grade or no grade remain available through a single `전체 학년` scope switch. This avoids guessing school affinity from a class name and does not require adding school metadata to classes.
+
+The scope switch sits inside the existing picker, directly above the candidate list. It uses two compact options:
+
+- `같은 학년`: the default when the student has a grade
+- `전체 학년`: shows every unlinked class
+
+When the student has no grade, the picker starts in `전체 학년`; it does not show an empty same-grade result. Text search applies within the active scope. Changing the student's grade while the detail is open immediately recalculates the same-grade candidates. Opening a different student resets the scope to the relevant default instead of preserving the previous student's widened state.
+
+Candidate rows keep the existing class metadata order: `과목 · 학년 · 요일/시간`. Already registered and waitlisted classes remain in their existing sections and are not affected by the picker scope. `등록 추가` and `대기 추가` continue to use the current relation-save flow.
+
 ## Data Flow
 
 1. The textbook service reads array columns and falls back to scalar columns for compatibility.
@@ -97,6 +113,8 @@ Each candidate row displays title plus `과목 · 학교 구분 · 학년 · 세
 4. The management data hook includes complete taxonomy metadata in `available_textbooks` for class details.
 5. The class detail initializes filter state from its current subject and grade whenever a different class opens.
 6. Candidate filtering happens client-side over the already loaded catalog; no additional request is made for each filter change.
+7. The student detail computes its default class scope from the current form grade and filters the already loaded class catalog client-side.
+8. The student class scope resets to `같은 학년` for a graded student and `전체 학년` for an ungraded student whenever a different student opens.
 
 ## Migration and Rollout
 
@@ -150,6 +168,12 @@ The migration is idempotent and does not edit historical migration files. Before
 - a 고3 mathematics class opens with mathematics, high-school, and 고3 filters
 - filter changes widen and narrow candidates without hiding connected textbooks
 - result metadata and long lists remain readable and scrollable in the existing modal
+- a 고2 student initially sees only unlinked 고2 classes
+- `전체 학년` immediately restores classes from other grades and classes without a grade
+- an ungraded student starts in `전체 학년`
+- changing the student grade recalculates the same-grade list without another request
+- opening a different student restores that student's relevant default scope
+- text search filters only the candidates inside the active grade scope
 
 ## Out of Scope
 
@@ -157,3 +181,4 @@ The migration is idempotent and does not edit historical migration files. Before
 - Changing inventory, purchase, receipt, issue, or settlement workflows
 - Removing the legacy scalar taxonomy columns in this release
 - Attempting external catalog or ISBN-based classification
+- Adding school targeting fields to classes or inferring a school from a class name
