@@ -1176,6 +1176,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [detailRowQuery, setDetailRowQuery] = useState("");
   const [relationQuery, setRelationQuery] = useState("");
   const classDetailRouteClearPendingRef = useRef(false);
+  const studentDetailRouteClearPendingRef = useRef(false);
   const requestedClassId = kind === "classes" ? text(searchParams.get("classId")) : "";
   const requestedStudentId = kind === "students" ? text(searchParams.get("studentId")) : "";
   const requestedStudentReturnPath = kind === "students" ? normalizeReturnToPath(searchParams.get("returnTo")) : "";
@@ -1352,12 +1353,18 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   }, [kind, pathname, router, searchParams]);
   const clearStudentDetailRoute = useCallback(() => {
     if (kind !== "students") return;
+    studentDetailRouteClearPendingRef.current = true;
     const params = new URLSearchParams(searchParams.toString());
     params.delete("studentId");
     params.delete("returnTo");
     const nextQuery = params.toString();
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }, [kind, pathname, router, searchParams]);
+  useEffect(() => {
+    if (kind === "students" && !requestedStudentId) {
+      studentDetailRouteClearPendingRef.current = false;
+    }
+  }, [kind, requestedStudentId]);
   const resolveRelatedRecord = (id: string) => relatedRecordsById.get(id);
   const resolveRelatedTitle = (id: string) => {
     const fallbackTitle = getMissingRelatedTitle(kind);
@@ -1999,6 +2006,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   useEffect(() => {
     if (kind !== "students" || loading || !requestedStudentId) {
+      return;
+    }
+
+    if (studentDetailRouteClearPendingRef.current) {
       return;
     }
 

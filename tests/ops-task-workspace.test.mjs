@@ -185,7 +185,8 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
     "onSortChange={syncTodoSort}",
     'if (todoView === "inbox") return isOpsTaskInUserInbox(task, currentUserContext)',
     'if (todoView === "sent") return isOpsTaskInUserSent(task, currentUserContext)',
-    'const deepLinkedTaskId = searchParams.get("taskId") || ""',
+    "const currentSearchParams = new URLSearchParams(window.location.search)",
+    'const deepLinkedTaskId = currentSearchParams.get("taskId") || ""',
     'const deepLinkedTask = taskById.get(deepLinkedTaskId)',
     'syncTaskDeepLink(null)',
     "setSelectedTask(deepLinkedTask)",
@@ -223,7 +224,7 @@ test("detail deletion clears the task deep link before opening the shared confir
   const start = source.indexOf("const requestRemoveTask =");
   const end = source.indexOf("const requestRemoveWordRetests =", start);
   const requestRemoveTaskSource = source.slice(start, end);
-  const deepLinkedTaskIdIndex = source.indexOf('const deepLinkedTaskId = searchParams.get("taskId")');
+  const deepLinkedTaskIdIndex = source.indexOf('const deepLinkedTaskId = currentSearchParams.get("taskId")');
   const deepLinkEffectStart = source.lastIndexOf("useEffect(() => {", deepLinkedTaskIdIndex);
   const deepLinkEffectEnd = source.indexOf("function handleDetailOpenChange", deepLinkEffectStart);
   const deepLinkEffectSource = source.slice(deepLinkEffectStart, deepLinkEffectEnd);
@@ -236,7 +237,8 @@ test("detail deletion clears the task deep link before opening the shared confir
   assertInOrder(deepLinkEffectSource, [
     "useEffect(() => {",
     "if (deleteTarget) return",
-    'const deepLinkedTaskId = searchParams.get("taskId")',
+    "const currentSearchParams = new URLSearchParams(window.location.search)",
+    'const deepLinkedTaskId = currentSearchParams.get("taskId")',
   ]);
   assert.match(deepLinkEffectSource, /\[[^\]]*deleteTarget[^\]]*\]\)/s);
 });

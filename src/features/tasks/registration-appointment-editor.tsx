@@ -37,6 +37,7 @@ export type RegistrationAppointmentEditorProps = {
   kind: OpsRegistrationAppointment["kind"]
   taskId: string
   eligibleTracks: OpsRegistrationTrackSummary[]
+  initialTrackId?: string
   appointment: OpsRegistrationAppointment | null
   activities: RegistrationAppointmentActivity[]
   onSaved: (saved: RegistrationAppointmentMutationResponse) => void | Promise<void>
@@ -117,6 +118,7 @@ export function RegistrationAppointmentEditor({
   kind,
   taskId,
   eligibleTracks,
+  initialTrackId = "",
   appointment,
   activities,
   onSaved,
@@ -147,7 +149,11 @@ export function RegistrationAppointmentEditor({
   )
   const initialSelectedTrackIds = appointment
     ? currentActivities.filter((activity) => activity.status === "scheduled").map((activity) => activity.trackId)
-    : selectableTracks.map((track) => track.id)
+    : selectableTracks.some((track) => track.id === initialTrackId)
+      ? [initialTrackId]
+      : selectableTracks[0]?.id
+        ? [selectableTracks[0].id]
+        : []
 
   const [scheduledAt, setScheduledAt] = useState(() => toLocalDateTime(appointment?.scheduledAt))
   const [place, setPlace] = useState(appointment?.place || "")

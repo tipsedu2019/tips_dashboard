@@ -333,14 +333,30 @@ test("workspace derives tab counts from every track before filtering the selecte
 
 test("registration deep links preserve task and real track ids and clear both on close", async () => {
   const source = await readWorkspaceSource();
+  const deepLinkEffect = sourceBetween(
+    source,
+    "  useEffect(() => {\n    if (deleteTarget) return",
+    "\n  function handleDetailOpenChange",
+  );
+  const closeHandler = sourceBetween(
+    source,
+    "  function handleDetailOpenChange",
+    "\n  function closeForm",
+  );
 
   assert.match(source, /const \[selectedRegistrationTrackId, setSelectedRegistrationTrackId\] = useState/);
   assert.match(source, /searchParams\.set\("trackId", nextTrackId\)/);
   assert.match(source, /searchParams\.delete\("trackId"\)/);
   assert.match(source, /syncTaskDeepLink\(taskId, trackId\)/);
-  assert.match(source, /searchParams\.get\("trackId"\)/);
-  assert.match(source, /setSelectedRegistrationTrackId\(deepLinkedTrackId\)/);
-  assert.match(source, /setSelectedRegistrationTrackId\(null\)/);
+  assert.match(deepLinkEffect, /const currentSearchParams = new URLSearchParams\(window\.location\.search\)/);
+  assert.match(deepLinkEffect, /currentSearchParams\.get\("taskId"\)/);
+  assert.match(deepLinkEffect, /currentSearchParams\.get\("trackId"\)/);
+  assert.doesNotMatch(deepLinkEffect, /searchParams\.get\(/);
+  assert.match(deepLinkEffect, /setSelectedRegistrationTrackId\(deepLinkedTrackId\)/);
+  assert.match(closeHandler, /setDetailOpen\(nextOpen\)/);
+  assert.match(closeHandler, /setSelectedRegistrationTrackId\(null\)/);
+  assert.match(closeHandler, /setRegistrationCaseDetail\(null\)/);
+  assert.match(closeHandler, /syncTaskDeepLink\(null\)/);
   assert.match(source, /if \(isLegacyRegistrationTrackId\(trackId\)\)/);
   assert.match(source, /syncTaskDeepLink\(taskId, null\)/);
   assert.match(source, /deepLinkedTask\.type !== "registration" && deepLinkedTrackId[\s\S]*?syncTaskDeepLink\(deepLinkedTaskId, null\)/);
@@ -374,11 +390,6 @@ test("track editor shows common information once and subject-scoped navigation",
     "function RegistrationCommonInfoSection(",
     "function RegistrationSubjectSyncSection(",
   )
-  const campusSource = sourceBetween(
-    commonInfoSource,
-    '{requiredLabel("캠퍼스", true)}',
-    "</Label>",
-  )
   assert.match(source, /등록 공통 정보/)
   assert.match(source, /detail\.tracks\.map/)
   assert.match(source, /selectedTrackId/)
@@ -400,13 +411,55 @@ test("track editor shows common information once and subject-scoped navigation",
   assert.match(commonInfoSource, /campus: task\.campus \|\| "본관"/)
   assert.match(commonInfoSource, /const valid = Boolean\([\s\S]*?draft\.campus\.trim\(\)[\s\S]*?draft\.inquiryAt/)
   assert.match(commonInfoSource, /inquiryAt: draft\.inquiryAt/)
-  assert.match(campusSource, /<select[\s\S]*?aria-label="캠퍼스"[\s\S]*?value=\{draft\.campus\}/)
-  assert.deepEqual(
-    [...campusSource.matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map((match) => [match[1], match[2]]),
-    [["본관", "본관"], ["별관", "별관"]],
-  )
-  assert.doesNotMatch(campusSource, /<Input/)
+  assert.doesNotMatch(commonInfoSource, /requiredLabel\("캠퍼스"|aria-label="캠퍼스"/)
+  assert.doesNotMatch(commonInfoSource, /requiredLabel\("우선순위"/)
   assert.match(source, /필수/)
+})
+
+test("canonical detail uses one progressively filled registration application", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /function RegistrationApplicationSection/)
+  assert.match(source, /function getRegistrationApplicationSection/)
+  assert.match(source, /aria-label="등록 신청서"/)
+  assert.match(source, /sectionKey="inquiry"[\s\S]*?title="문의 정보"/)
+  assert.match(source, /sectionKey="level_test"[\s\S]*?title="레벨테스트"/)
+  assert.match(source, /sectionKey="consultation"[\s\S]*?title="상담"/)
+  assert.match(source, /sectionKey="placement"[\s\S]*?title="등록·대기 정보"/)
+  assert.match(source, /sectionKey="admission"[\s\S]*?title="입학 처리"/)
+  assert.match(source, /data-registration-current=\{active \? "true" : "false"\}/)
+  assert.doesNotMatch(source, /role="tablist" aria-label="과목별 등록 진행"/)
+})
+
+test("one application keeps both subject states and prior-stage values visible", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /function RegistrationSubjectProgress/)
+  assert.match(source, /aria-label="과목별 진행 현황"/)
+  assert.match(source, /detail\.tracks\.map\(\(track\) =>/)
+  assert.match(source, /STATUS_LABELS\[track\.status\]/)
+  assert.match(source, /function RegistrationLevelTestSummary/)
+  assert.match(source, /detail\.levelTests/)
+  assert.match(source, /detail\.appointments/)
+  assert.match(source, /function RegistrationConsultationSummary/)
+  assert.match(source, /detail\.consultations/)
+  assert.match(source, /function RegistrationPlacementSummary/)
+  assert.match(source, /detail\.enrollments/)
+})
+
+test("overview is read-only and the selected subject owns the only action surface", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const overview = sourceBetween(
+    source,
+    "function RegistrationSubjectProgress(",
+    "function RegistrationLevelTestSummary(",
+  )
+
+  assert.doesNotMatch(overview, /RegistrationTrackDirectorSection|RegistrationTrackStageEditor|RegistrationEnrollmentEditor/)
+  assert.match(source, /data-registration-track-action=\{selectedTrack\.id\}/)
+  assert.match(source, /<RegistrationTrackStageEditor/)
+  assert.match(source, /<RegistrationEnrollmentEditor/)
+  assert.doesNotMatch(source, /전용 입력 화면|현재 상태와 권한/)
 })
 
 test("canonical track detail resolves and persists director defaults only for management roles", async () => {
@@ -491,16 +544,11 @@ test("ordinary tracks expose compact manual director selection and visit reassig
   assert.match(source, /disabled=\{!directorProfileId \|\| !selectedDirectorIsAvailable/)
 })
 
-test("detail renders one chronological subject-badged canonical and legacy history", async () => {
+test("operational detail omits the internal subject event log", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /buildRegistrationSubjectHistory/)
-  assert.match(source, /과목별 진행 이력/)
-  assert.match(source, /history\.map/)
-  assert.match(source, /item\.subjects\.map/)
-  assert.match(source, /item\.occurredAt/)
-  assert.match(source, /item\.description/)
-  assert.match(source, /item\.actorId/)
-  assert.match(source, /actorLabelById/)
+  assert.doesNotMatch(source, /function RegistrationSubjectHistory/)
+  assert.doesNotMatch(source, /<RegistrationSubjectHistory/)
+  assert.doesNotMatch(source, /과목별 진행 이력/)
 })
 
 test("migration review blocks ordinary actions until explicit attribution", async () => {
@@ -555,6 +603,26 @@ test("waiting controls require the retest decision and expose explicit closure",
   assert.match(source, /재응시 없이 등록/)
   assert.match(source, /대기 종료 · 미등록/)
   assert.match(source, /transitionRegistrationWaiting/)
+})
+
+test("terminal subject outcomes can be deliberately reopened from the same application", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /reopenRegistrationTrack/)
+  assert.match(source, /function TerminalStageEditor/)
+  assert.match(source, /문의로 다시 열기/)
+  assert.match(source, /전화상담으로 다시 열기/)
+  assert.match(source, /재개 사유/)
+})
+
+test("new shared appointments start with only the initiating subject selected", async () => {
+  const editor = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+  const workspace = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(editor, /initialTrackId\?: string/)
+  assert.match(editor, /selectableTracks\.some\(\(track\) => track\.id === initialTrackId\)/)
+  assert.doesNotMatch(editor, /:\s*selectableTracks\.map\(\(track\) => track\.id\)/)
+  assert.match(workspace, /initialTrackId=\{selectedTrack\.id\}/)
 })
 
 test("subject removal renders the deployed history-block error inline", async () => {
@@ -731,6 +799,28 @@ test("unified track editor and workspace mount subject rows plus one case-level 
   assert.match(shell, /caseLevelActions=\{/)
   assert.match(shell, /<RegistrationAdmissionPanel/)
   assert.doesNotMatch(shell, /caseLevelActions=\{null\}/)
+})
+
+test("stage and enrollment editors use disjoint React key namespaces", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /<RegistrationTrackStageEditor\s+key=\{`stage:/)
+  assert.match(source, /<RegistrationEnrollmentEditor\s+key=\{`enrollment:/)
+})
+
+test("enrollment stages show the real work surface without a redundant placeholder or director row", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const stageEditor = sourceBetween(
+    source,
+    "function RegistrationTrackStageEditor(",
+    "\ntype ConsultationOutcomeDraft",
+  )
+
+  assert.match(stageEditor, /\["not_registered", "inquiry_closed"\]\.includes\(track\.status\)[\s\S]*?<TerminalStageEditor/)
+  assert.match(stageEditor, /\["enrollment_decided", "enrollment_processing", "registered"\]\.includes\(track\.status\)[\s\S]*?return null/)
+  assert.doesNotMatch(stageEditor, /전용 입력 화면|현재 상태와 권한/)
+  assert.match(source, /const REGISTRATION_DIRECTOR_VISIBLE_STATUSES = new Set/)
+  assert.match(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES\.has\(selectedTrack\.status\)/)
 })
 
 test("committed enrollment and admission actions recover refresh without resubmitting mutations", async () => {

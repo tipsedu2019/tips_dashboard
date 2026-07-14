@@ -268,6 +268,15 @@ test("class detail close ignores stale classId route state until the URL is clea
   assert.match(pageSource, /if \(kind === "classes" && !requestedClassId\) \{[\s\n]*classDetailRouteClearPendingRef\.current = false;[\s\n]*\}/);
 });
 
+test("student detail close ignores stale studentId route state until the URL is cleared", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(pageSource, /const studentDetailRouteClearPendingRef = useRef\(false\)/);
+  assert.match(pageSource, /studentDetailRouteClearPendingRef\.current = true/);
+  assert.match(pageSource, /if \(studentDetailRouteClearPendingRef\.current\) \{[\s\n]*return;[\s\n]*\}/);
+  assert.match(pageSource, /if \(kind === "students" && !requestedStudentId\) \{[\s\n]*studentDetailRouteClearPendingRef\.current = false;[\s\n]*\}/);
+});
+
 test("class management no longer renders schedule detail content", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const recordsSource = await readFile(new URL("src/features/academic/records.js", root), "utf8");

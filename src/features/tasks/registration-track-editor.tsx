@@ -25,13 +25,13 @@ import {
   type RegistrationDirectorCatalogStatus,
 } from "./registration-director-default.js"
 import { RegistrationEnrollmentEditor } from "./registration-enrollment-editor"
-import { buildRegistrationSubjectHistory } from "./registration-track-history.js"
 import { getRegistrationActionPermissions } from "./registration-track-model.js"
 import { isValidRegistrationMobilePhone } from "./registration-workflow"
 import {
   assignRegistrationTrackDirector,
   completeRegistrationConsultation,
   createRegistrationMutationRequestKey,
+  reopenRegistrationTrack,
   resolveRegistrationMigrationReview,
   routeRegistrationInquiry,
   syncRegistrationCaseSubjects,
@@ -468,52 +468,6 @@ function formatRegistrationDateTime(value: string) {
   return Number.isNaN(date.getTime()) ? "미정" : REGISTRATION_HISTORY_DATE_FORMATTER.format(date)
 }
 
-function RegistrationSubjectHistory({
-  detail,
-  profileOptions,
-}: {
-  detail: OpsRegistrationCaseDetail
-  profileOptions: OpsProfileOption[]
-}) {
-  const history = useMemo(() => buildRegistrationSubjectHistory(detail), [detail])
-  const actorLabelById = useMemo(
-    () => new Map(profileOptions.map((profile) => [profile.id, profile.label])),
-    [profileOptions],
-  )
-
-  function timeLabel(value: string) {
-    const date = new Date(value)
-    return Number.isFinite(date.getTime())
-      ? REGISTRATION_HISTORY_DATE_FORMATTER.format(date)
-      : value || "일시 미기록"
-  }
-
-  return (
-    <section className="grid min-w-0 gap-2 rounded-md border p-3" aria-label="과목별 진행 이력">
-      <h3 className="text-sm font-semibold">과목별 진행 이력</h3>
-      {history.length === 0 ? (
-        <p className="text-sm text-muted-foreground">아직 기록된 진행 이력이 없습니다.</p>
-      ) : (
-        <ol className="grid max-h-80 gap-2 overflow-y-auto">
-          {history.map((item) => (
-            <li key={item.id} className="grid min-w-0 gap-1 border-l-2 pl-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                {item.subjects.map((subject) => <Badge key={subject} variant="outline">{subject}</Badge>)}
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
-                {item.actorId ? (
-                  <span className="text-xs text-muted-foreground">{actorLabelById.get(item.actorId) || item.actorId}</span>
-                ) : null}
-                <time className="text-xs text-muted-foreground" dateTime={item.occurredAt}>{timeLabel(item.occurredAt)}</time>
-              </div>
-              {item.description ? <p className="break-words text-xs text-muted-foreground">{item.description}</p> : null}
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  )
-}
-
 export type RegistrationMigrationAssignment = {
   group: "level_test" | "consultation" | "placement"
   trackId: string | null
@@ -564,6 +518,186 @@ const STATUS_LABELS: Record<OpsRegistrationTrackStatus, string> = {
   not_registered: "미등록 완료",
   inquiry_closed: "문의 완료",
 }
+
+type RegistrationApplicationSectionKey = "inquiry" | "level_test" | "consultation" | "placement" | "admission"
+
+const LEVEL_TEST_STATUS_LABELS: Record<OpsRegistrationCaseDetail["levelTests"][number]["status"], string> = {
+  scheduled: "예약",
+  in_progress: "진행",
+  completed: "완료",
+  absent: "미응시",
+  canceled: "취소",
+}
+
+const CONSULTATION_STATUS_LABELS: Record<OpsRegistrationConsultation["status"], string> = {
+  waiting: "대기",
+  scheduled: "예약",
+  completed: "완료",
+  canceled: "취소",
+}
+
+const CONSULTATION_OUTCOME_LABELS: Record<NonNullable<OpsRegistrationConsultation["outcome"]>, string> = {
+  enrollment: "등록",
+  waiting: "대기",
+  not_registered: "미등록",
+}
+
+function getRegistrationApplicationSection(status: OpsRegistrationTrackStatus): RegistrationApplicationSectionKey {
+  if (["level_test_scheduled", "level_test_in_progress"].includes(status)) return "level_test"
+  if (["consultation_waiting", "visit_consultation_scheduled"].includes(status)) return "consultation"
+  if (["enrollment_processing", "registered"].includes(status)) return "admission"
+  if (["waiting", "enrollment_decided", "not_registered", "inquiry_closed"].includes(status)) return "placement"
+  return "inquiry"
+}
+
+function RegistrationApplicationSection({
+  sectionKey,
+  title,
+  active,
+  children,
+}: {
+  sectionKey: RegistrationApplicationSectionKey
+  title: string
+  active: boolean
+  children: ReactNode
+}) {
+  return (
+    <section
+      id={`registration-application-${sectionKey}`}
+      data-registration-current={active ? "true" : "false"}
+      className={[
+        "grid min-w-0 gap-3 border-t py-4 first:border-t-0 first:pt-0",
+        active ? "-mx-3 border-l-2 border-l-primary bg-primary/5 px-3" : "",
+      ].join(" ")}
+    >
+      <h3 className={active ? "text-sm font-semibold text-primary" : "text-sm font-semibold"}>{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function RegistrationSubjectProgress({
+  detail,
+  selectedTrackId,
+  onSelectTrack,
+}: {
+  detail: OpsRegistrationCaseDetail
+  selectedTrackId: string | null
+  onSelectTrack: (trackId: string) => void
+}) {
+  return (
+    <div className="grid min-w-0 gap-2" aria-label="과목별 진행 현황">
+      <span className="text-xs font-medium text-muted-foreground">과목별 진행</span>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {detail.tracks.map((track) => (
+          <Button
+            key={track.id}
+            type="button"
+            variant={track.id === selectedTrackId ? "secondary" : "outline"}
+            className="h-auto min-w-0 justify-between gap-3 px-3 py-2"
+            aria-pressed={track.id === selectedTrackId}
+            onClick={() => onSelectTrack(track.id)}
+          >
+            <span>{track.subject}</span>
+            <span className="truncate text-xs font-normal text-muted-foreground">{STATUS_LABELS[track.status]}</span>
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RegistrationLevelTestSummary({ detail }: { detail: OpsRegistrationCaseDetail }) {
+  return (
+    <div className="grid gap-2">
+      {detail.tracks.map((track) => {
+        const attempt = detail.levelTests
+          .filter((item) => item.trackId === track.id)
+          .reduce<OpsRegistrationCaseDetail["levelTests"][number] | null>((latest, item) => (
+            !latest || item.attemptNumber > latest.attemptNumber ? item : latest
+          ), null)
+        const appointment = attempt
+          ? detail.appointments.find((item) => item.id === attempt.appointmentId) || null
+          : null
+        return (
+          <div key={track.id} className="grid gap-1 rounded-md bg-muted/30 px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
+            <Badge variant="outline" className="w-fit">{track.subject}</Badge>
+            <span className="min-w-0 truncate">
+              {appointment ? `${formatRegistrationDateTime(appointment.scheduledAt)} · ${appointment.place || "장소 미정"}` : "아직 입력 없음"}
+            </span>
+            <span className="text-xs text-muted-foreground">{attempt ? LEVEL_TEST_STATUS_LABELS[attempt.status] : "미진행"}</span>
+            {attempt?.materialLink ? <a className="text-xs text-primary underline-offset-4 hover:underline sm:col-start-2" href={attempt.materialLink} target="_blank" rel="noreferrer">시험지·결과지 열기</a> : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RegistrationConsultationSummary({ detail }: { detail: OpsRegistrationCaseDetail }) {
+  return (
+    <div className="grid gap-2">
+      {detail.tracks.map((track) => {
+        const consultation = detail.consultations
+          .filter((item) => item.trackId === track.id)
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null
+        const appointment = consultation?.appointmentId
+          ? detail.appointments.find((item) => item.id === consultation.appointmentId) || null
+          : null
+        const time = consultation?.mode === "phone"
+          ? consultation.readyAt || consultation.completedAt || ""
+          : appointment?.scheduledAt || consultation?.completedAt || ""
+        const mode = consultation?.mode === "phone" ? "전화상담" : consultation ? "방문상담" : "상담"
+        return (
+          <div key={track.id} className="grid gap-1 rounded-md bg-muted/30 px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
+            <Badge variant="outline" className="w-fit">{track.subject}</Badge>
+            <span className="min-w-0 truncate">
+              {track.directorName ? `${track.directorName} · ` : ""}{consultation ? `${mode} ${formatRegistrationDateTime(time)}` : "아직 입력 없음"}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {consultation ? (consultation.outcome ? CONSULTATION_OUTCOME_LABELS[consultation.outcome] : CONSULTATION_STATUS_LABELS[consultation.status]) : "미진행"}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RegistrationPlacementSummary({
+  detail,
+  classes,
+}: {
+  detail: OpsRegistrationCaseDetail
+  classes: OpsClassOption[]
+}) {
+  return (
+    <div className="grid gap-2">
+      {detail.tracks.map((track) => {
+        const enrollments = detail.enrollments.filter((item) => item.trackId === track.id && item.status !== "canceled")
+        const classNames = enrollments
+          .map((enrollment) => classes.find((item) => item.id === enrollment.classId)?.label || enrollment.classId)
+          .join(", ")
+        const waitingLabel = WAITING_KIND_OPTIONS.find((option) => option.value === track.waitingKind)?.label || ""
+        return (
+          <div key={track.id} className="grid gap-1 rounded-md bg-muted/30 px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
+            <Badge variant="outline" className="w-fit">{track.subject}</Badge>
+            <span className="min-w-0 truncate">{classNames || waitingLabel || "아직 입력 없음"}</span>
+            <span className="text-xs text-muted-foreground">{STATUS_LABELS[track.status]}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const REGISTRATION_DIRECTOR_VISIBLE_STATUSES = new Set<OpsRegistrationTrackStatus>([
+  "inquiry",
+  "level_test_scheduled",
+  "level_test_in_progress",
+  "consultation_waiting",
+  "visit_consultation_scheduled",
+])
 
 const WAITING_KIND_OPTIONS: Array<{ value: Exclude<RegistrationWaitingKind, "">; label: string }> = [
   { value: "current_class", label: "현재 학기 수강반 대기" },
@@ -692,6 +826,7 @@ function RegistrationCommonInfoSection({
   commonRevision,
   identityLocked,
   canEdit,
+  embedded = false,
   onSave,
   onWarning,
 }: {
@@ -699,6 +834,7 @@ function RegistrationCommonInfoSection({
   commonRevision: number
   identityLocked: boolean
   canEdit: boolean
+  embedded?: boolean
   onSave: (draft: CommonDraft, requestKey: string) => Promise<CommonSaveOutcome>
   onWarning: (message: string) => void
 }) {
@@ -761,11 +897,11 @@ function RegistrationCommonInfoSection({
   }
 
   return (
-    <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label="등록 공통 정보">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">등록 공통 정보</h3>
+    <section className={embedded ? "grid min-w-0 gap-3" : "grid min-w-0 gap-3 rounded-md border p-3"} aria-label="등록 공통 정보">
+      {!embedded || identityLocked ? <div className="flex flex-wrap items-center justify-between gap-2">
+        {!embedded ? <h3 className="text-sm font-semibold">등록 공통 정보</h3> : null}
         {identityLocked ? <Badge variant="secondary">학생 연결 보정 필요</Badge> : null}
-      </div>
+      </div> : null}
       <div className="grid min-w-0 gap-3 sm:grid-cols-2">
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("학생명", true)}
@@ -787,27 +923,6 @@ function RegistrationCommonInfoSection({
           {requiredLabel("학생 전화")}
           <Input inputMode="tel" value={draft.studentPhone} onChange={(event) => update("studentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving} />
         </Label>
-        <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("캠퍼스", true)}
-          <select
-            aria-label="캠퍼스"
-            value={draft.campus}
-            onChange={(event) => update("campus", event.target.value)}
-            disabled={!canEdit || saving}
-          >
-            <option value="본관">본관</option>
-            <option value="별관">별관</option>
-          </select>
-        </Label>
-        <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("우선순위")}
-          <select className="h-9 rounded-md border bg-background px-3 text-sm" value={draft.priority} onChange={(event) => update("priority", event.target.value)} disabled={!canEdit || saving}>
-            <option value="normal">보통</option>
-            <option value="high">높음</option>
-            <option value="urgent">긴급</option>
-            <option value="low">낮음</option>
-          </select>
-        </Label>
         <Label className="grid min-w-0 gap-1.5 sm:col-span-2">
           {requiredLabel("요청 사항")}
           <Textarea value={draft.requestNote} onChange={(event) => update("requestNote", event.target.value)} disabled={!canEdit || saving} rows={3} />
@@ -827,11 +942,13 @@ function RegistrationCommonInfoSection({
 function RegistrationSubjectSyncSection({
   detail,
   canManage,
+  embedded = false,
   onReload,
   onWarning,
 }: {
   detail: OpsRegistrationCaseDetail
   canManage: boolean
+  embedded?: boolean
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
 }) {
@@ -874,12 +991,9 @@ function RegistrationSubjectSyncSection({
   }
 
   return (
-    <section className="grid min-w-0 gap-2 rounded-md border p-3" aria-label="문의 과목 편집">
+    <section className={embedded ? "grid min-w-0 gap-2" : "grid min-w-0 gap-2 rounded-md border p-3"} aria-label="문의 과목 편집">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold">문의 과목</h3>
-          <p className="text-xs text-muted-foreground">과목별 진행 이력은 분리해서 유지합니다.</p>
-        </div>
+        <h3 className="text-sm font-semibold">문의 과목</h3>
         {canManage ? (
           <Button type="button" variant="outline" size="sm" onClick={() => void submit()} disabled={saving || subjects.length === 0}>
             과목 저장
@@ -1113,6 +1227,70 @@ function WaitingStageEditor({
   )
 }
 
+function TerminalStageEditor({
+  track,
+  permissions,
+  onReload,
+  onWarning,
+}: {
+  track: OpsRegistrationTrackSummary
+  permissions: ActionPermissions
+  onReload: () => void | Promise<void>
+  onWarning: (message: string) => void
+}) {
+  const [reason, setReason] = useState("")
+  const [saving, setSaving] = useState(false)
+  const submissionKeys = useSubmissionKeys()
+
+  async function reopen(destination: "inquiry" | "consultation_waiting") {
+    if (!permissions.canManage || saving || !reason.trim()) return
+    if (destination === "consultation_waiting" && !track.directorProfileId) {
+      onWarning(`[${track.subject}] 상담 책임자를 먼저 지정하세요.`)
+      return
+    }
+    const kind = `registration-reopen-${destination}`
+    const logicalDraft = JSON.stringify({ trackId: track.id, destination, reason: reason.trim() })
+    const requestKey = submissionKeys.getOrCreate(kind, logicalDraft)
+    setSaving(true)
+    try {
+      await reopenRegistrationTrack({
+        trackId: track.id,
+        destination,
+        reason: reason.trim(),
+        requestKey,
+      })
+      submissionKeys.clear(kind, logicalDraft)
+      await onReload()
+    } catch (error) {
+      onWarning(errorMessage(error, "완료된 과목을 다시 열지 못했습니다."))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="grid min-w-0 gap-3 rounded-md bg-muted/25 p-3" aria-label={`${track.subject} 완료 결과`}>
+      <div>
+        <h3 className="text-sm font-semibold">[{track.subject}] {STATUS_LABELS[track.status]}</h3>
+        <p className="text-xs text-muted-foreground">추가 진행이 필요한 경우 사유를 남기고 다시 엽니다.</p>
+      </div>
+      {permissions.canManage ? (
+        <>
+          <Input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="재개 사유" disabled={saving} />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button type="button" variant="outline" onClick={() => void reopen("inquiry")} disabled={saving || !reason.trim()}>
+              문의로 다시 열기
+            </Button>
+            <Button type="button" onClick={() => void reopen("consultation_waiting")} disabled={saving || !reason.trim() || !track.directorProfileId} title={!track.directorProfileId ? "상담 책임자 지정 필요" : undefined}>
+              전화상담으로 다시 열기
+            </Button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  )
+}
+
 function RegistrationTrackStageEditor({
   track,
   permissions,
@@ -1194,16 +1372,13 @@ function RegistrationTrackStageEditor({
       </section>
     )
   }
-  return (
-    <section className="grid min-w-0 gap-2 rounded-md border p-3" aria-label={`${track.subject} 현재 단계`}>
-      <h3 className="text-sm font-semibold">[{track.subject}] {STATUS_LABELS[track.status]}</h3>
-      <p className="text-sm text-muted-foreground">
-        {permissions.canCompleteConsultation
-          ? "상담 결과 입력 권한이 확인되었습니다."
-          : "이 단계의 전용 입력 화면은 현재 상태와 권한에 맞춰 표시됩니다."}
-      </p>
-    </section>
-  )
+  if (["not_registered", "inquiry_closed"].includes(track.status)) {
+    return <TerminalStageEditor track={track} permissions={permissions} onReload={onReload} onWarning={onWarning} />
+  }
+  if (["enrollment_decided", "enrollment_processing", "registered"].includes(track.status)) {
+    return null
+  }
+  return null
 }
 
 type ConsultationOutcomeDraft = {
@@ -1721,6 +1896,10 @@ export function RegistrationTrackEditor({
       .map((item) => `${item.id}:${item.status}`)
       .join("|")
   const outcomeDialogOpen = consultationOutcomeOpen || localConsultationOutcomeOpen
+  const shouldShowDirector = Boolean(
+    selectedTrack
+    && REGISTRATION_DIRECTOR_VISIBLE_STATUSES.has(selectedTrack.status),
+  )
 
   function setOutcomeDialogOpen(open: boolean) {
     setLocalConsultationOutcomeOpen(open)
@@ -1765,123 +1944,149 @@ export function RegistrationTrackEditor({
     return "saved" as const
   }
 
-  return (
-    <div className="grid min-w-0 gap-4">
-      <RegistrationCommonInfoSection
-        key={`${detail.task.id}:${detail.commonRevision}`}
-        task={detail.task}
-        commonRevision={detail.commonRevision}
-        identityLocked={getRegistrationIdentityEditLock(detail)}
-        canEdit={permissions.canManage}
-        onSave={saveCommon}
-        onWarning={onWarning}
-      />
-      <RegistrationSubjectSyncSection
-        key={`${detail.task.id}:${detail.tracks.map((track) => track.id).join(",")}`}
-        detail={detail}
-        canManage={permissions.canManage}
+  const selectedSection = selectedTrack ? getRegistrationApplicationSection(selectedTrack.status) : "inquiry"
+  const selectedStageEditor = !reviewBlocked && selectedTrack ? (
+    <RegistrationTrackStageEditor
+      key={`stage:${selectedTrack.id}:${selectedTrack.status}:${selectedTrack.waitingKind}`}
+      track={selectedTrack}
+      permissions={permissions}
+      classOptions={classOptions}
+      onReload={onReload}
+      onWarning={onWarning}
+      onOpenLevelTest={() => setAppointmentEditor({
+        kind: "level_test",
+        appointmentId: selectedLevelTest?.appointmentId || null,
+      })}
+      onOpenLevelTestHistory={() => setAppointmentEditor({
+        kind: "level_test",
+        appointmentId: selectedLevelTestHistory?.appointmentId || null,
+      })}
+      onOpenVisit={() => setAppointmentEditor({
+        kind: "visit_consultation",
+        appointmentId: selectedVisitConsultation?.appointmentId || null,
+      })}
+      onOpenOutcome={() => setOutcomeDialogOpen(true)}
+      hasLevelTestHistory={Boolean(selectedLevelTestHistory?.status === "completed")}
+      activeConsultation={activeConsultation}
+      visitAppointment={visitAppointment}
+    />
+  ) : null
+  const selectedEnrollmentEditor = selectedTrack
+    && ["enrollment_decided", "enrollment_processing", "registered"].includes(selectedTrack.status) ? (
+      <RegistrationEnrollmentEditor
+        key={`enrollment:${selectedTrack.id}:${selectedTrack.status}:${detail.enrollments.map((enrollment) => `${enrollment.id}:${enrollment.status}:${enrollment.admissionBatchId || ""}:${enrollment.makeeduRegistered}`).join("|")}`}
+        taskId={detail.task.id}
+        viewerId={viewerId || ""}
+        track={selectedTrack}
+        enrollments={detail.enrollments}
+        admissionBatches={detail.admissionBatches}
+        classes={classOptions}
+        textbooks={textbookOptions}
+        permissions={permissions}
         onReload={onReload}
         onWarning={onWarning}
       />
-      <div role="tablist" aria-label="과목별 등록 진행" className="flex min-w-0 gap-1 overflow-x-auto">
-        {detail.tracks.map((track) => (
-          <Button
-            key={track.id}
-            role="tab"
-            type="button"
-            variant={track.id === selectedTrack?.id ? "default" : "ghost"}
-            aria-selected={track.id === selectedTrack?.id}
-            onClick={() => onSelectTrack(track.id)}
-          >
-            {track.subject} · {STATUS_LABELS[track.status]}
-          </Button>
-        ))}
-      </div>
-      {selectedTrack && !reviewBlocked ? (
-        <RegistrationTrackDirectorSection
-          task={task}
-          detail={detail}
-          track={selectedTrack}
-          permissions={permissions}
-          directorOptions={directorOptions}
-          teacherOptions={teacherOptions}
-          directorCatalogStatus={directorCatalogStatus}
-          onRetryDirectorCatalog={onRetryDirectorCatalog}
-          onOpenVisit={(trackId) => {
-            const visitConsultation = detail.consultations.find((item) => (
-              item.trackId === trackId && item.mode === "visit" && item.status === "scheduled"
-            )) || null
-            onSelectTrack(trackId)
-            setAppointmentEditor({
-              kind: "visit_consultation",
-              appointmentId: visitConsultation?.appointmentId || null,
-            })
-          }}
-          onReload={onReload}
-          onWarning={onWarning}
-        />
-      ) : null}
-      {reviewBlocked ? (
-      <RegistrationMigrationReviewEditor
-          key={`${detail.task.id}:${detail.commonRevision}:${detail.tracks.map((track) => `${track.id}:${track.directorProfileId || ""}`).join(",")}`}
-          task={task}
-          detail={detail}
-          permissions={permissions}
-          directorOptions={directorOptions}
-        teacherOptions={teacherOptions}
-        classOptions={classOptions}
-        onRetryDirectorCatalog={onRetryDirectorCatalog}
-          onResolved={onReload}
-          onWarning={onWarning}
-        />
-      ) : selectedTrack ? (
-        <RegistrationTrackStageEditor
-          key={`${selectedTrack.id}:${selectedTrack.status}:${selectedTrack.waitingKind}`}
-          track={selectedTrack}
-          permissions={permissions}
-          classOptions={classOptions}
-          onReload={onReload}
-          onWarning={onWarning}
-          onOpenLevelTest={() => setAppointmentEditor({
-            kind: "level_test",
-            appointmentId: selectedLevelTest?.appointmentId || null,
-          })}
-          onOpenLevelTestHistory={() => setAppointmentEditor({
-            kind: "level_test",
-            appointmentId: selectedLevelTestHistory?.appointmentId || null,
-          })}
-          onOpenVisit={() => setAppointmentEditor({
-            kind: "visit_consultation",
-            appointmentId: selectedVisitConsultation?.appointmentId || null,
-          })}
-          onOpenOutcome={() => setOutcomeDialogOpen(true)}
-          hasLevelTestHistory={Boolean(selectedLevelTestHistory?.status === "completed")}
-          activeConsultation={activeConsultation}
-          visitAppointment={visitAppointment}
-        />
-      ) : null}
-      {selectedTrack && ["enrollment_decided", "enrollment_processing", "registered"].includes(selectedTrack.status) ? (
-        <RegistrationEnrollmentEditor
-          key={`${selectedTrack.id}:${selectedTrack.status}:${detail.enrollments.map((enrollment) => `${enrollment.id}:${enrollment.status}:${enrollment.admissionBatchId || ""}:${enrollment.makeeduRegistered}`).join("|")}`}
-          taskId={detail.task.id}
-          viewerId={viewerId || ""}
-          track={selectedTrack}
-          enrollments={detail.enrollments}
-          admissionBatches={detail.admissionBatches}
-          classes={classOptions}
-          textbooks={textbookOptions}
-          permissions={permissions}
-          onReload={onReload}
-          onWarning={onWarning}
-        />
-      ) : null}
-      <RegistrationSubjectHistory detail={detail} profileOptions={directorOptions} />
-      {appointmentEditor?.kind === "level_test" ? (
+    ) : null
+
+  return (
+    <div className="grid min-w-0 gap-4">
+      <section className="grid min-w-0 rounded-md border px-3" aria-label="등록 신청서">
+        <RegistrationApplicationSection sectionKey="inquiry" title="문의 정보" active={selectedSection === "inquiry"}>
+          <RegistrationCommonInfoSection
+            key={`${detail.task.id}:${detail.commonRevision}`}
+            task={detail.task}
+            commonRevision={detail.commonRevision}
+            identityLocked={getRegistrationIdentityEditLock(detail)}
+            canEdit={permissions.canManage}
+            embedded
+            onSave={saveCommon}
+            onWarning={onWarning}
+          />
+          <RegistrationSubjectSyncSection
+            key={`${detail.task.id}:${detail.tracks.map((track) => track.id).join(",")}`}
+            detail={detail}
+            canManage={permissions.canManage}
+            embedded
+            onReload={onReload}
+            onWarning={onWarning}
+          />
+          <RegistrationSubjectProgress detail={detail} selectedTrackId={selectedTrack?.id || null} onSelectTrack={onSelectTrack} />
+          {reviewBlocked ? (
+            <RegistrationMigrationReviewEditor
+              key={`${detail.task.id}:${detail.commonRevision}:${detail.tracks.map((track) => `${track.id}:${track.directorProfileId || ""}`).join(",")}`}
+              task={task}
+              detail={detail}
+              permissions={permissions}
+              directorOptions={directorOptions}
+              teacherOptions={teacherOptions}
+              classOptions={classOptions}
+              onRetryDirectorCatalog={onRetryDirectorCatalog}
+              onResolved={onReload}
+              onWarning={onWarning}
+            />
+          ) : selectedTrack && selectedSection === "inquiry" ? (
+            <div data-registration-track-action={selectedTrack.id}>{selectedStageEditor}</div>
+          ) : null}
+        </RegistrationApplicationSection>
+
+        <RegistrationApplicationSection sectionKey="level_test" title="레벨테스트" active={selectedSection === "level_test"}>
+          <RegistrationLevelTestSummary detail={detail} />
+          {selectedTrack && selectedSection === "level_test" ? (
+            <div data-registration-track-action={selectedTrack.id}>{selectedStageEditor}</div>
+          ) : null}
+        </RegistrationApplicationSection>
+
+        <RegistrationApplicationSection sectionKey="consultation" title="상담" active={selectedSection === "consultation"}>
+          <RegistrationConsultationSummary detail={detail} />
+          {selectedTrack && !reviewBlocked && shouldShowDirector ? (
+            <RegistrationTrackDirectorSection
+              task={task}
+              detail={detail}
+              track={selectedTrack}
+              permissions={permissions}
+              directorOptions={directorOptions}
+              teacherOptions={teacherOptions}
+              directorCatalogStatus={directorCatalogStatus}
+              onRetryDirectorCatalog={onRetryDirectorCatalog}
+              onOpenVisit={(trackId) => {
+                const visitConsultation = detail.consultations.find((item) => (
+                  item.trackId === trackId && item.mode === "visit" && item.status === "scheduled"
+                )) || null
+                onSelectTrack(trackId)
+                setAppointmentEditor({
+                  kind: "visit_consultation",
+                  appointmentId: visitConsultation?.appointmentId || null,
+                })
+              }}
+              onReload={onReload}
+              onWarning={onWarning}
+            />
+          ) : null}
+          {selectedTrack && selectedSection === "consultation" ? (
+            <div data-registration-track-action={selectedTrack.id}>{selectedStageEditor}</div>
+          ) : null}
+        </RegistrationApplicationSection>
+
+        <RegistrationApplicationSection sectionKey="placement" title="등록·대기 정보" active={selectedSection === "placement"}>
+          <RegistrationPlacementSummary detail={detail} classes={classOptions} />
+          {selectedTrack && selectedEnrollmentEditor ? (
+            <div data-registration-track-action={selectedTrack.id}>{selectedEnrollmentEditor}</div>
+          ) : selectedTrack && selectedSection === "placement" ? (
+            <div data-registration-track-action={selectedTrack.id}>{selectedStageEditor}</div>
+          ) : null}
+        </RegistrationApplicationSection>
+
+        <RegistrationApplicationSection sectionKey="admission" title="입학 처리" active={selectedSection === "admission"}>
+          {caseLevelActions || <p className="text-sm text-muted-foreground">등록 결정 후 입학 처리 항목이 열립니다.</p>}
+        </RegistrationApplicationSection>
+      </section>
+      {appointmentEditor?.kind === "level_test" && selectedTrack ? (
         <RegistrationAppointmentEditor
           key={`level_test:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}
           kind="level_test"
           taskId={detail.task.id}
           eligibleTracks={detail.tracks}
+          initialTrackId={selectedTrack.id}
           appointment={editorAppointment}
           activities={detail.levelTests}
           onSaved={handleAppointmentSaved}
@@ -1892,12 +2097,13 @@ export function RegistrationTrackEditor({
           notificationToken={notificationToken}
         />
       ) : null}
-      {appointmentEditor?.kind === "visit_consultation" ? (
+      {appointmentEditor?.kind === "visit_consultation" && selectedTrack ? (
         <RegistrationAppointmentEditor
           key={`visit_consultation:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}
           kind="visit_consultation"
           taskId={detail.task.id}
           eligibleTracks={detail.tracks}
+          initialTrackId={selectedTrack.id}
           appointment={editorAppointment}
           activities={detail.consultations.filter((item) => item.mode === "visit")}
           onSaved={handleAppointmentSaved}
@@ -1919,7 +2125,6 @@ export function RegistrationTrackEditor({
           onWarning={onWarning}
         />
       ) : null}
-      {caseLevelActions}
     </div>
   )
 }

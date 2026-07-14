@@ -10281,8 +10281,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   useEffect(() => {
     if (deleteTarget) return
-    const deepLinkedTaskId = searchParams.get("taskId") || ""
-    const deepLinkedTrackId = searchParams.get("trackId") || ""
+    const currentSearchParams = new URLSearchParams(window.location.search)
+    const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
+    const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
     if (!deepLinkedTaskId || !data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
