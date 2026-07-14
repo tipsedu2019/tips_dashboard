@@ -124,10 +124,21 @@ from (
 ) fixture(profile_id, teacher_catalog_id)
 where profile.id = fixture.profile_id;
 
-insert into public.textbooks(id, title, name, subject, publisher, price, tags, lessons, status)
+insert into public.textbooks(
+  id, title, name, subject, school_level, grade_level, school_levels, grade_levels,
+  sub_subject, publisher, price, tags, lessons, status
+)
 values
-  ('00000000-0000-4000-8000-000000000401', '런타임 영어 교재', '런타임 영어 교재', '영어', '런타임', 10000, '{}'::text[], '[]'::jsonb, 'active'),
-  ('00000000-0000-4000-8000-000000000402', '런타임 수학 교재', '런타임 수학 교재', '수학', '런타임', 10000, '{}'::text[], '[]'::jsonb, 'active');
+  (
+    '00000000-0000-4000-8000-000000000401', '런타임 영어 교재', '런타임 영어 교재',
+    'english', 'middle', 'm1', array['middle']::text[], array['m1', 'm2', 'm3']::text[],
+    '기타', '런타임', 10000, '{}'::text[], '[]'::jsonb, 'active'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000402', '런타임 수학 교재', '런타임 수학 교재',
+    'math', 'middle', 'm1', array['middle']::text[], array['m1', 'm2', 'm3']::text[],
+    '기타', '런타임', 10000, '{}'::text[], '[]'::jsonb, 'active'
+  );
 
 insert into public.classes(
   id, name, class_type, subject, grade, teacher, schedule, room,
