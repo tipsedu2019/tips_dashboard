@@ -18,6 +18,13 @@ import {
   validatePurchaseLifecycleDraft,
   validateMonthlyClosingDraft,
 } from "./textbook-ledger.js";
+import {
+  getTextbookGradeSummary,
+  getTextbookSchoolLevelSummary,
+  getTextbookTaxonomySelection,
+  normalizeTextbookSubject,
+  validateTextbookTaxonomy,
+} from "./textbook-taxonomy";
 
 type SupabaseClientLike = NonNullable<typeof sharedSupabase>;
 type Row = Record<string, unknown>;
@@ -311,15 +318,39 @@ export async function upsertTextbookMaster(record: Row, clientInput?: SupabaseCl
     throw new Error("교재명을 입력하세요.");
   }
 
+  const taxonomy = getTextbookTaxonomySelection({
+    ...record,
+    school_levels: record.schoolLevels || record.school_levels,
+    grade_levels: record.gradeLevels || record.grade_levels,
+  });
+  const subject = normalizeTextbookSubject(record.subject);
+  const subSubject = text(record.subSubject || record.sub_subject);
+  const validation = validateTextbookTaxonomy({
+    subject,
+    schoolLevels: taxonomy.schoolLevels,
+    gradeLevels: taxonomy.gradeLevels,
+    subSubject,
+  });
+  if (!validation.valid) {
+    throw new Error(validation.message);
+  }
+  const category = [
+    getTextbookSchoolLevelSummary(taxonomy),
+    getTextbookGradeSummary(taxonomy),
+    subSubject,
+  ].filter(Boolean).join(" ");
+
   const payload = {
     id: text(record.id) || undefined,
     title,
     name: title,
-    subject: text(record.subject),
-    category: text(record.category),
-    school_level: text(record.schoolLevel || record.school_level),
-    grade_level: text(record.gradeLevel || record.grade_level),
-    sub_subject: text(record.subSubject || record.sub_subject),
+    subject,
+    category: category || text(record.category),
+    school_levels: taxonomy.schoolLevels,
+    grade_levels: taxonomy.gradeLevels,
+    school_level: taxonomy.schoolLevels[0],
+    grade_level: taxonomy.gradeLevels[0],
+    sub_subject: subSubject,
     publisher: text(record.publisher),
     isbn13: normalizeBarcodeValue(record.isbn13),
     barcode: normalizeBarcodeValue(record.barcode || record.isbn13),

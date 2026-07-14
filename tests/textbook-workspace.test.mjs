@@ -439,11 +439,12 @@ test("textbook workspace resolves reviewed master and inventory UX issues", asyn
   assert.match(workspaceSource, /DialogTitle>\{masterForm\.id \? "교재 수정" : "교재 신규 등록"\}/);
   assert.match(workspaceSource, /overflow-x-hidden overflow-y-auto p-4 sm:max-w-3xl sm:p-6/);
   assert.match(workspaceSource, /sm:grid-cols-\[minmax\(0,1fr\)_140px_140px\]/);
-  assert.match(workspaceSource, /sm:grid-cols-2 lg:grid-cols-5/);
+  assert.match(workspaceSource, /sm:grid-cols-\[220px_minmax\(0,1fr\)\]/);
   assert.match(workspaceSource, /학교 구분/);
   assert.match(workspaceSource, /세부과목/);
   assert.match(workspaceSource, /전체 학년/);
-  assert.match(workspaceSource, /buildTextbookCategoryValue/);
+  assert.match(workspaceSource, /getTextbookSchoolLevelSummary/);
+  assert.match(workspaceSource, /getTextbookGradeSummary/);
   assert.match(workspaceSource, /configuredPublisherOptions/);
   assert.match(workspaceSource, /masterPublisherOptions/);
   assert.match(workspaceSource, /getPublisherSettingLabel/);
@@ -555,8 +556,9 @@ test("textbook settings manage subject taxonomy for textbook filters", async () 
   assert.match(serviceSource, /textbookSubSubjectSettings/);
   assert.match(serviceSource, /"textbook_sub_subject_settings"/);
   assert.match(serviceSource, /readTable\(client, "textbook_sub_subject_settings", "\*", missingTables\)/);
-  assert.match(serviceSource, /school_level: text\(record\.schoolLevel/);
-  assert.match(serviceSource, /sub_subject: text\(record\.subSubject/);
+  assert.match(serviceSource, /school_levels: taxonomy\.schoolLevels/);
+  assert.match(serviceSource, /grade_levels: taxonomy\.gradeLevels/);
+  assert.match(serviceSource, /sub_subject: subSubject/);
   assert.match(migrationSource, /add column if not exists school_level text/);
   assert.match(migrationSource, /create table if not exists public\.textbook_sub_subject_settings/);
   assert.match(migrationSource, /notify pgrst, 'reload schema'/i);
@@ -616,12 +618,14 @@ test("textbook workspace supports selecting rows for bulk edit and delete", asyn
   assert.doesNotMatch(workspaceSource, /aria-label=\{`\$\{getTextbookTitle\(row\)\} \$\{getPublisherLabel\(row\)\} \$\{rowId\} 선택`\}/);
   assert.match(workspaceSource, /onBulkSelectionChange/);
   assert.match(workspaceSource, /categoryOptions=\{bulkCategoryOptions\}/);
-  assert.match(workspaceSource, /gradeLevelOptions=\{bulkGradeOptions\}/);
-  assert.match(workspaceSource, /schoolLevel: "keep"/);
-  assert.match(workspaceSource, /gradeLevel: "keep"/);
-  assert.match(workspaceSource, /patch\.schoolLevel !== "keep"/);
-  assert.match(workspaceSource, /patch\.gradeLevel !== "keep"/);
-  assert.match(workspaceSource, /buildTextbookCategoryValue\(\{[\s\S]*schoolLevel: nextSchoolLevel[\s\S]*gradeLevel: nextGradeLevel[\s\S]*subSubject: nextSubSubject/);
+  assert.match(workspaceSource, /schoolLevels: null as string\[\] \| null/);
+  assert.match(workspaceSource, /gradeLevels: null as string\[\] \| null/);
+  assert.match(workspaceSource, /patch\.schoolLevels !== null/);
+  assert.match(workspaceSource, /patch\.gradeLevels !== null/);
+  assert.match(workspaceSource, /학교·학년 변경/);
+  assert.match(workspaceSource, /onTaxonomyEnabledChange/);
+  assert.match(workspaceSource, /onSchoolLevelChange/);
+  assert.match(workspaceSource, /onGradeLevelChange/);
   assert.match(workspaceSource, /publisherOptions=\{publisherGroupOptions\}/);
   assert.match(workspaceSource, /SearchCombobox[\s\S]*ariaLabel="일괄 세부과목"/);
   assert.match(serviceSource, /deleteTextbookMasters/);
@@ -2403,7 +2407,7 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
     /const masterTitleValue = text\(masterForm\.title\)/,
     /const masterDuplicatePreviewRows = masterDuplicateRows\.slice\(0, 3\)/,
     /const isNewMasterDuplicate = !masterForm\.id && masterDuplicateRows\.length > 0/,
-    /const masterSubmitDisabled = saving === "master" \|\| !masterTitleValue \|\| isNewMasterDuplicate/,
+    /const masterSubmitDisabled = saving === "master" \|\| !masterTitleValue \|\| !masterTaxonomyValidation\.valid \|\| isNewMasterDuplicate/,
     /if \(isNewMasterDuplicate\)/,
     /setActionErrorMessage\("이미 등록된 교재입니다\. 기존 교재를 열어 수정하세요\."\)/,
     /title: normalizeStoredTextInput\(masterForm\.title\)/,
@@ -2952,4 +2956,33 @@ test("textbook workspace locks 50 destructive confirmation preview safeguards", 
   for (const safeguard of safeguards) {
     assert.match(workspaceSource, safeguard);
   }
+});
+
+test("textbook master saves required multi-value taxonomy", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const serviceSource = await readFile(
+    new URL("src/features/textbooks/textbook-service.ts", root),
+    "utf8",
+  );
+
+  assert.match(serviceSource, /validateTextbookTaxonomy/);
+  assert.match(serviceSource, /school_levels: taxonomy\.schoolLevels/);
+  assert.match(serviceSource, /grade_levels: taxonomy\.gradeLevels/);
+  assert.match(serviceSource, /school_level: taxonomy\.schoolLevels\[0\]/);
+  assert.match(serviceSource, /grade_level: taxonomy\.gradeLevels\[0\]/);
+  assert.match(workspaceSource, /schoolLevels: \[\]/);
+  assert.match(workspaceSource, /gradeLevels: \[\]/);
+  assert.match(workspaceSource, /toggleTextbookSchoolLevel/);
+  assert.match(workspaceSource, /toggleTextbookGradeLevel/);
+  assert.match(workspaceSource, /과목을 선택하세요/);
+  assert.match(workspaceSource, /학교 구분을 하나 이상 선택하세요/);
+  assert.match(workspaceSource, /학년을 하나 이상 선택하세요/);
+  assert.match(workspaceSource, /세부과목을 선택하세요/);
+  assert.doesNotMatch(
+    workspaceSource,
+    /<SelectItem value="none">미지정<\/SelectItem>[\s\S]{0,500}학교 구분/,
+  );
 });

@@ -91,17 +91,24 @@ import { textbookService } from "./textbook-service";
 import {
   TEXTBOOK_GRADE_OPTIONS,
   TEXTBOOK_SCHOOL_LEVEL_OPTIONS,
+  TextbookGradeLevel,
+  TextbookSchoolLevel,
   TextbookSubSubjectSettingRecord,
-  buildTextbookCategoryValue,
   getGradeOptionsForSchoolLevel,
   getSubSubjectOptionsForSubject,
   getTextbookCategoryLabel,
+  getTextbookGradeSummary,
   getTextbookGradeLabel,
   getTextbookGradeLevel,
+  getTextbookSchoolLevelSummary,
   getTextbookSchoolLevel,
   getTextbookSchoolLevelLabel,
   getTextbookSubSubject,
+  getTextbookTaxonomySelection,
   mergeTextbookSubSubjectSettings,
+  toggleTextbookGradeLevel,
+  toggleTextbookSchoolLevel,
+  validateTextbookTaxonomy,
 } from "./textbook-taxonomy";
 
 type Row = Record<string, unknown>;
@@ -298,8 +305,8 @@ const emptyMasterForm = {
   id: "",
   title: "",
   subject: "english",
-  schoolLevel: "",
-  gradeLevel: "",
+  schoolLevels: [] as string[],
+  gradeLevels: [] as string[],
   subSubject: "",
   category: "",
   publisher: "",
@@ -311,8 +318,8 @@ const emptyMasterForm = {
 
 const emptyBulkTextbookPatch = {
   subject: "keep",
-  schoolLevel: "keep",
-  gradeLevel: "keep",
+  schoolLevels: null as string[] | null,
+  gradeLevels: null as string[] | null,
   category: "",
   publisher: "",
   price: "",
@@ -3010,8 +3017,8 @@ export function TextbookOperationsWorkspace() {
     const currentPublisher = text(masterForm.publisher).trim().toLowerCase();
     const currentCategory = (
       [
-        getTextbookSchoolLevelLabel(masterForm.schoolLevel),
-        getTextbookGradeLabel(masterForm.gradeLevel),
+        getTextbookSchoolLevelSummary({ schoolLevels: masterForm.schoolLevels, gradeLevels: masterForm.gradeLevels }),
+        getTextbookGradeSummary({ schoolLevels: masterForm.schoolLevels, gradeLevels: masterForm.gradeLevels }),
         text(masterForm.subSubject),
       ].filter(Boolean).join(" ") || text(masterForm.category)
     ).trim().toLowerCase();
@@ -3027,10 +3034,10 @@ export function TextbookOperationsWorkspace() {
   }, [
     activeInventory,
     masterForm.category,
-    masterForm.gradeLevel,
+    masterForm.gradeLevels,
     masterForm.id,
     masterForm.publisher,
-    masterForm.schoolLevel,
+    masterForm.schoolLevels,
     masterForm.subSubject,
     masterForm.subject,
     masterForm.title,
@@ -3441,14 +3448,13 @@ export function TextbookOperationsWorkspace() {
     return () => window.removeEventListener("keydown", handleSearchShortcut);
   }, [activeTab, operationQuery, query, showsProcessToolbar]);
 
-  const masterGradeOptions = getGradeOptionsForSchoolLevel(masterForm.schoolLevel);
+  const masterGradeOptions = TEXTBOOK_GRADE_OPTIONS.filter((option) =>
+    masterForm.schoolLevels.includes(option.schoolLevel),
+  );
   const masterSubSubjectOptions = getSubSubjectOptionsForSubject(textbookSubSubjectSettings, masterForm.subject);
   const masterTitleValue = text(masterForm.title);
   const masterDuplicatePreviewRows = masterDuplicateRows.slice(0, 3);
   const isNewMasterDuplicate = !masterForm.id && masterDuplicateRows.length > 0;
-  const bulkGradeOptions = getGradeOptionsForSchoolLevel(
-    bulkTextbookPatch.schoolLevel === "keep" || bulkTextbookPatch.schoolLevel === "none" ? "" : bulkTextbookPatch.schoolLevel,
-  );
   const bulkCategoryOptions = [
     ...new Set([
       ...(bulkTextbookPatch.subject === "keep"
@@ -3459,7 +3465,8 @@ export function TextbookOperationsWorkspace() {
   ]
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right, "ko", { numeric: true }));
-  const masterSubmitDisabled = saving === "master" || !masterTitleValue || isNewMasterDuplicate;
+  const masterTaxonomyValidation = validateTextbookTaxonomy(masterForm);
+  const masterSubmitDisabled = saving === "master" || !masterTitleValue || !masterTaxonomyValidation.valid || isNewMasterDuplicate;
   const purchaseSubmitDisabled = schemaDisabled ||
     saving === "purchase" ||
     (purchaseForm.requestStage === "request" && !purchaseRequestTitle) ||
@@ -3671,12 +3678,13 @@ export function TextbookOperationsWorkspace() {
   }
 
   function selectMasterTextbook(row: Row) {
+    const taxonomy = getTextbookTaxonomySelection(row);
     setMasterForm({
       id: getRecordId(row),
       title: getTextbookTitle(row),
       subject: normalizeSubjectValue(row.subject),
-      schoolLevel: getTextbookSchoolLevel(row),
-      gradeLevel: getTextbookGradeLevel(row),
+      schoolLevels: taxonomy.schoolLevels,
+      gradeLevels: taxonomy.gradeLevels,
       subSubject: getTextbookSubSubject(row),
       category: text(row.category),
       publisher: text(row.publisher),
@@ -3691,12 +3699,13 @@ export function TextbookOperationsWorkspace() {
 
   function openMasterFromPurchaseRequest(line: Row) {
     const title = getPurchaseTextbookTitle(line, getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId) || getRequestedTextbookTitle(line)));
+    const taxonomy = getTextbookTaxonomySelection(line);
     setMasterForm({
       ...emptyMasterForm,
       title: title === "-" ? "" : title,
       subject: normalizeSubjectValue(line.subject || emptyMasterForm.subject),
-      schoolLevel: getTextbookSchoolLevel(line),
-      gradeLevel: getTextbookGradeLevel(line),
+      schoolLevels: taxonomy.schoolLevels,
+      gradeLevels: taxonomy.gradeLevels,
       subSubject: getTextbookSubSubject(line),
     });
     setMasterDialogOpen(true);
@@ -4188,21 +4197,52 @@ export function TextbookOperationsWorkspace() {
         return { ...current, subject: value, category: nextCategory };
       }
 
-      if (name === "schoolLevel") {
-        const nextGrade = value === "keep" || value === "none" || getGradeOptionsForSchoolLevel(value).some((option) => option.value === current.gradeLevel)
-          ? current.gradeLevel
-          : "keep";
-        return { ...current, schoolLevel: value, gradeLevel: nextGrade };
-      }
-
       return { ...current, [name]: value };
+    });
+  }
+
+  function setBulkTextbookTaxonomyEnabled(enabled: boolean) {
+    setBulkTextbookPatch((current) => ({
+      ...current,
+      schoolLevels: enabled ? [] : null,
+      gradeLevels: enabled ? [] : null,
+    }));
+  }
+
+  function toggleBulkTextbookSchoolLevel(value: TextbookSchoolLevel, checked: boolean) {
+    setBulkTextbookPatch((current) => {
+      if (current.schoolLevels === null || current.gradeLevels === null) return current;
+      const next = toggleTextbookSchoolLevel(
+        {
+          schoolLevels: current.schoolLevels as TextbookSchoolLevel[],
+          gradeLevels: current.gradeLevels as TextbookGradeLevel[],
+        },
+        value,
+        checked,
+      );
+      return { ...current, ...next };
+    });
+  }
+
+  function toggleBulkTextbookGradeLevel(value: TextbookGradeLevel, checked: boolean) {
+    setBulkTextbookPatch((current) => {
+      if (current.schoolLevels === null || current.gradeLevels === null) return current;
+      const next = toggleTextbookGradeLevel(
+        {
+          schoolLevels: current.schoolLevels as TextbookSchoolLevel[],
+          gradeLevels: current.gradeLevels as TextbookGradeLevel[],
+        },
+        value,
+        checked,
+      );
+      return { ...current, ...next };
     });
   }
 
   function hasBulkTextbookPatchValues() {
     return bulkTextbookPatch.subject !== "keep" ||
-      bulkTextbookPatch.schoolLevel !== "keep" ||
-      bulkTextbookPatch.gradeLevel !== "keep" ||
+      bulkTextbookPatch.schoolLevels !== null ||
+      bulkTextbookPatch.gradeLevels !== null ||
       text(bulkTextbookPatch.category) ||
       text(bulkTextbookPatch.publisher) ||
       text(bulkTextbookPatch.price) ||
@@ -4216,27 +4256,16 @@ export function TextbookOperationsWorkspace() {
     if (text(bulkTextbookPatch.price)) patch.price = text(bulkTextbookPatch.price);
     if (bulkTextbookPatch.status !== "keep") patch.status = bulkTextbookPatch.status;
 
-    const nextSchoolLevel = bulkTextbookPatch.schoolLevel === "keep"
-      ? getTextbookSchoolLevel(row)
-      : bulkTextbookPatch.schoolLevel === "none" ? "" : bulkTextbookPatch.schoolLevel;
-    const nextGradeLevel = bulkTextbookPatch.gradeLevel === "keep"
-      ? getTextbookGradeLevel(row)
-      : bulkTextbookPatch.gradeLevel === "none" ? "" : bulkTextbookPatch.gradeLevel;
     const nextSubSubject = text(bulkTextbookPatch.category) || getTextbookSubSubject(row);
     const taxonomyChanged =
-      bulkTextbookPatch.schoolLevel !== "keep" ||
-      bulkTextbookPatch.gradeLevel !== "keep" ||
+      bulkTextbookPatch.schoolLevels !== null ||
+      bulkTextbookPatch.gradeLevels !== null ||
       Boolean(text(bulkTextbookPatch.category));
 
     if (taxonomyChanged) {
-      if (bulkTextbookPatch.schoolLevel !== "keep") patch.schoolLevel = nextSchoolLevel;
-      if (bulkTextbookPatch.gradeLevel !== "keep") patch.gradeLevel = nextGradeLevel;
+      if (bulkTextbookPatch.schoolLevels !== null) patch.schoolLevels = bulkTextbookPatch.schoolLevels;
+      if (bulkTextbookPatch.gradeLevels !== null) patch.gradeLevels = bulkTextbookPatch.gradeLevels;
       if (text(bulkTextbookPatch.category)) patch.subSubject = nextSubSubject;
-      patch.category = buildTextbookCategoryValue({
-        schoolLevel: nextSchoolLevel,
-        gradeLevel: nextGradeLevel,
-        subSubject: nextSubSubject,
-      }) || nextSubSubject || text(row.category);
     }
 
     return patch;
@@ -4457,6 +4486,10 @@ export function TextbookOperationsWorkspace() {
 
   function submitMaster(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!masterTaxonomyValidation.valid) {
+      setActionErrorMessage(masterTaxonomyValidation.message);
+      return;
+    }
     if (isNewMasterDuplicate) {
       setActionErrorMessage("이미 등록된 교재입니다. 기존 교재를 열어 수정하세요.");
       return;
@@ -4467,7 +4500,11 @@ export function TextbookOperationsWorkspace() {
       publisher: normalizeStoredTextInput(masterForm.publisher),
       isbn13: normalizeBarcodeValue(masterForm.isbn13),
       barcode: normalizeBarcodeValue(masterForm.barcode || masterForm.isbn13),
-      category: buildTextbookCategoryValue(masterForm) || masterForm.category,
+      category: [
+        getTextbookSchoolLevelSummary(masterForm),
+        getTextbookGradeSummary(masterForm),
+        masterForm.subSubject,
+      ].filter(Boolean).join(" ") || masterForm.category,
     };
     const completedMasterTitle = getTextbookTitle(masterPayload);
     void runAction("master", () => textbookService.upsertTextbookMaster(masterPayload), "교재 마스터가 저장되었습니다.").then((ok) => {
@@ -5239,7 +5276,7 @@ export function TextbookOperationsWorkspace() {
                   required
                 />
               </Field>
-              <Field label="과목">
+              <Field label="과목" required>
                 <Select
                   value={masterForm.subject}
                   onValueChange={(value) =>
@@ -5259,6 +5296,9 @@ export function TextbookOperationsWorkspace() {
                     ))}
                   </SelectContent>
                 </Select>
+                {!masterForm.subject ? (
+                  <p className="text-xs text-destructive" role="alert">과목을 선택하세요.</p>
+                ) : null}
               </Field>
               <Field label="상태">
                 <Select
@@ -5300,56 +5340,78 @@ export function TextbookOperationsWorkspace() {
                 </div>
               </div>
             ) : null}
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <Field label="학교 구분">
-                <Select
-                  value={masterForm.schoolLevel || "none"}
-                  onValueChange={(value) =>
-                    setMasterForm((current) => ({
-                      ...current,
-                      schoolLevel: value === "none" ? "" : value,
-                      gradeLevel: value === "none" || getGradeOptionsForSchoolLevel(value).some((option) => option.value === current.gradeLevel)
-                        ? current.gradeLevel
-                        : "",
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full" aria-label="학교 구분 선택"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">미지정</SelectItem>
-                    {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-[220px_minmax(0,1fr)]">
+              <Field label="학교 구분" required>
+                <div className="grid grid-cols-3 gap-2" role="group" aria-label="학교 구분 선택">
+                  {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => (
+                    <Label key={option.value} className="flex h-9 items-center gap-2 rounded-md border px-2 text-sm font-normal">
+                      <Checkbox
+                        checked={masterForm.schoolLevels.includes(option.value)}
+                        onCheckedChange={(checked) => {
+                          setMasterForm((current) => {
+                            const next = toggleTextbookSchoolLevel(
+                              {
+                                schoolLevels: current.schoolLevels as TextbookSchoolLevel[],
+                                gradeLevels: current.gradeLevels as TextbookGradeLevel[],
+                              },
+                              option.value as TextbookSchoolLevel,
+                              checked === true,
+                            );
+                            return { ...current, ...next };
+                          });
+                        }}
+                      />
+                      {option.label}
+                    </Label>
+                  ))}
+                </div>
+                {masterForm.schoolLevels.length === 0 ? (
+                  <p className="text-xs text-destructive" role="alert">학교 구분을 하나 이상 선택하세요.</p>
+                ) : null}
               </Field>
-              <Field label="학년">
-                <Select
-                  value={masterForm.gradeLevel || "none"}
-                  onValueChange={(value) => setMasterForm((current) => ({ ...current, gradeLevel: value === "none" ? "" : value }))}
-                >
-                  <SelectTrigger className="w-full" aria-label="학년 선택"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">미지정</SelectItem>
-                    {masterGradeOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <Field label="학년" required>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" role="group" aria-label="학년 선택">
+                  {masterGradeOptions.map((option) => (
+                    <Label key={option.value} className="flex h-9 items-center gap-2 rounded-md border px-2 text-sm font-normal">
+                      <Checkbox
+                        checked={masterForm.gradeLevels.includes(option.value)}
+                        onCheckedChange={(checked) => {
+                          setMasterForm((current) => {
+                            const next = toggleTextbookGradeLevel(
+                              {
+                                schoolLevels: current.schoolLevels as TextbookSchoolLevel[],
+                                gradeLevels: current.gradeLevels as TextbookGradeLevel[],
+                              },
+                              option.value as TextbookGradeLevel,
+                              checked === true,
+                            );
+                            return { ...current, ...next };
+                          });
+                        }}
+                      />
+                      {option.label}
+                    </Label>
+                  ))}
+                </div>
+                {masterForm.gradeLevels.length === 0 ? (
+                  <p className="text-xs text-destructive" role="alert">학년을 하나 이상 선택하세요.</p>
+                ) : null}
               </Field>
-              <Field label="세부과목">
+            </div>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+              <Field label="세부과목" required>
                 <SearchCombobox
-                  options={[
-                    { value: "none", label: "미지정" },
-                    ...masterSubSubjectOptions.map((option) => ({ value: option, label: option })),
-                  ]}
-                  value={masterForm.subSubject || "none"}
-                  onValueChange={(value) => setMasterForm((current) => ({ ...current, subSubject: value === "none" ? "" : value }))}
+                  options={masterSubSubjectOptions.map((option) => ({ value: option, label: option }))}
+                  value={masterForm.subSubject}
+                  onValueChange={(value) => setMasterForm((current) => ({ ...current, subSubject: value }))}
                   placeholder="세부과목 선택"
                   searchPlaceholder="세부과목 검색"
                   emptyLabel="설정된 세부과목이 없습니다"
                   ariaLabel="세부과목 선택"
                 />
+                {!masterForm.subSubject ? (
+                  <p className="text-xs text-destructive" role="alert">세부과목을 선택하세요.</p>
+                ) : null}
               </Field>
               <Field label="출판사">
                 <SearchCombobox
@@ -6397,10 +6459,12 @@ export function TextbookOperationsWorkspace() {
             selectedCount={selectedTextbookRows.length}
             patch={bulkTextbookPatch}
             categoryOptions={bulkCategoryOptions}
-            gradeLevelOptions={bulkGradeOptions}
             publisherOptions={publisherGroupOptions}
             saving={saving}
             onPatchChange={setBulkTextbookPatchField}
+            onTaxonomyEnabledChange={setBulkTextbookTaxonomyEnabled}
+            onSchoolLevelChange={toggleBulkTextbookSchoolLevel}
+            onGradeLevelChange={toggleBulkTextbookGradeLevel}
             onApply={applyBulkTextbookEdit}
             onSetStatus={applyBulkTextbookStatus}
             onDelete={deleteSelectedTextbooks}
@@ -7857,10 +7921,12 @@ function TextbookBulkActionBar({
   selectedCount,
   patch,
   categoryOptions,
-  gradeLevelOptions,
   publisherOptions,
   saving,
   onPatchChange,
+  onTaxonomyEnabledChange,
+  onSchoolLevelChange,
+  onGradeLevelChange,
   onApply,
   onSetStatus,
   onDelete,
@@ -7869,10 +7935,12 @@ function TextbookBulkActionBar({
   selectedCount: number;
   patch: typeof emptyBulkTextbookPatch;
   categoryOptions: string[];
-  gradeLevelOptions: typeof TEXTBOOK_GRADE_OPTIONS;
   publisherOptions: string[];
   saving: string;
   onPatchChange: (name: keyof typeof emptyBulkTextbookPatch, value: string) => void;
+  onTaxonomyEnabledChange: (enabled: boolean) => void;
+  onSchoolLevelChange: (value: TextbookSchoolLevel, checked: boolean) => void;
+  onGradeLevelChange: (value: TextbookGradeLevel, checked: boolean) => void;
   onApply: () => void;
   onSetStatus: (status: string) => void;
   onDelete: () => void;
@@ -7886,14 +7954,19 @@ function TextbookBulkActionBar({
 
   const hasPatch =
     patch.subject !== "keep" ||
-    patch.schoolLevel !== "keep" ||
-    patch.gradeLevel !== "keep" ||
+    patch.schoolLevels !== null ||
+    patch.gradeLevels !== null ||
     Boolean(text(patch.category)) ||
     Boolean(text(patch.publisher)) ||
     Boolean(text(patch.price)) ||
     patch.status !== "keep";
   const showPatchControls = bulkPatchControlsOpen || hasPatch;
   const patchControlsId = "textbook-bulk-patch-controls";
+  const taxonomyEnabled = patch.schoolLevels !== null && patch.gradeLevels !== null;
+  const taxonomyValid = !taxonomyEnabled || Boolean(patch.schoolLevels?.length && patch.gradeLevels?.length);
+  const bulkGradeOptions = taxonomyEnabled
+    ? TEXTBOOK_GRADE_OPTIONS.filter((option) => patch.schoolLevels?.includes(option.schoolLevel))
+    : [];
 
   return (
     <div
@@ -7955,7 +8028,7 @@ function TextbookBulkActionBar({
         </div>
       </div>
       {showPatchControls ? (
-        <div id={patchControlsId} className="grid min-w-0 gap-2 border-t pt-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(7,minmax(0,1fr))_auto]">
+        <div id={patchControlsId} className="grid min-w-0 gap-2 border-t pt-2 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="과목">
             <Select value={patch.subject} onValueChange={(value) => onPatchChange("subject", value)}>
               <SelectTrigger className="h-9" aria-label="일괄 과목 선택"><SelectValue /></SelectTrigger>
@@ -7967,30 +8040,49 @@ function TextbookBulkActionBar({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="학교">
-            <Select value={patch.schoolLevel} onValueChange={(value) => onPatchChange("schoolLevel", value)}>
-              <SelectTrigger className="h-9" aria-label="일괄 학교 구분 선택"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="keep">학교 유지</SelectItem>
-                <SelectItem value="none">미지정</SelectItem>
-                {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="학년">
-            <Select value={patch.gradeLevel} onValueChange={(value) => onPatchChange("gradeLevel", value)}>
-              <SelectTrigger className="h-9" aria-label="일괄 학년 선택"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="keep">학년 유지</SelectItem>
-                <SelectItem value="none">미지정</SelectItem>
-                {gradeLevelOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+          <div className="grid gap-2 sm:col-span-2 lg:col-span-3">
+            <Label className="flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-normal">
+              <Checkbox
+                checked={taxonomyEnabled}
+                onCheckedChange={(checked) => onTaxonomyEnabledChange(checked === true)}
+              />
+              학교·학년 변경
+            </Label>
+            {taxonomyEnabled ? (
+              <div className="grid gap-2 rounded-md border p-2 sm:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="grid gap-1" role="group" aria-label="일괄 학교 구분 선택">
+                  <span className="text-xs font-medium">학교 구분</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => (
+                      <Label key={option.value} className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-normal">
+                        <Checkbox
+                          checked={patch.schoolLevels?.includes(option.value)}
+                          onCheckedChange={(checked) => onSchoolLevelChange(option.value as TextbookSchoolLevel, checked === true)}
+                        />
+                        {option.label}
+                      </Label>
+                    ))}
+                  </div>
+                  {patch.schoolLevels?.length === 0 ? <p className="text-xs text-destructive">학교 구분을 하나 이상 선택하세요.</p> : null}
+                </div>
+                <div className="grid gap-1" role="group" aria-label="일괄 학년 선택">
+                  <span className="text-xs font-medium">학년</span>
+                  <div className="grid grid-cols-3 gap-1 sm:grid-cols-6">
+                    {bulkGradeOptions.map((option) => (
+                      <Label key={option.value} className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-normal">
+                        <Checkbox
+                          checked={patch.gradeLevels?.includes(option.value)}
+                          onCheckedChange={(checked) => onGradeLevelChange(option.value as TextbookGradeLevel, checked === true)}
+                        />
+                        {option.label}
+                      </Label>
+                    ))}
+                  </div>
+                  {patch.gradeLevels?.length === 0 ? <p className="text-xs text-destructive">학년을 하나 이상 선택하세요.</p> : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
           <Field label="세부과목">
             <SearchCombobox
               options={[
@@ -8030,7 +8122,7 @@ function TextbookBulkActionBar({
             </Select>
           </Field>
           <div className="flex items-end">
-            <Button type="button" size="sm" className="h-9 w-full" title={hasPatch ? "선택 교재에 변경사항 적용" : "변경할 값을 먼저 선택하세요"} disabled={!hasPatch || saving === "textbook-bulk-edit"} onClick={onApply}>
+            <Button type="button" size="sm" className="h-9 w-full" title={hasPatch ? "선택 교재에 변경사항 적용" : "변경할 값을 먼저 선택하세요"} disabled={!hasPatch || !taxonomyValid || saving === "textbook-bulk-edit"} onClick={onApply}>
               <Save className="mr-2 size-4" />
               적용
             </Button>
