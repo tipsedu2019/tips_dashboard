@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make textbook subject, school level, grade, and sub-subject a complete multi-value classification contract, backfill existing books safely, and make the class-detail textbook picker open on the books that fit the class.
+**Goal:** Make textbook subject, school level, grade, and sub-subject a complete multi-value classification contract, backfill existing books safely, make the class-detail textbook picker open on books that fit the class, and make the student-detail class picker open on classes that fit the student's grade.
 
-**Architecture:** `textbook-taxonomy.ts` owns canonical ordering, scalar fallback, multi-value transitions, summaries, and containment checks. A forward-only Supabase migration adds authoritative `school_levels[]` and `grade_levels[]`, normalizes every legacy row, and installs database constraints without changing historical migrations. The textbook workspace consumes the shared model for editing and filtering; the class workspace delegates its picker UI and filter state to focused management components while continuing to persist only the class `textbook_ids` array.
+**Architecture:** `textbook-taxonomy.ts` owns canonical ordering, scalar fallback, multi-value transitions, summaries, and containment checks. A forward-only Supabase migration adds authoritative `school_levels[]` and `grade_levels[]`, normalizes every legacy row, and installs database constraints without changing historical migrations. The textbook workspace consumes the shared model for editing and filtering; the class workspace delegates its textbook picker UI and filter state to focused management components while continuing to persist only the class `textbook_ids` array. A separate pure student-class picker model applies the student's current grade to the already loaded class catalog, while the existing relation picker owns the compact `같은 학년`/`전체 학년` scope control.
 
 **Tech Stack:** Next.js 16.1.1, React 19.2.3, TypeScript 5.9, Supabase/PostgreSQL 17, shadcn/Radix UI, Node.js built-in test runner.
 
@@ -18,6 +18,7 @@
 - `school_levels[]` and `grade_levels[]` are authoritative; scalar `school_level` and `grade_level` remain compatibility projections in canonical order.
 - Existing title, publisher, ISBN, pricing, inventory, purchase, sale, and class-link data must remain unchanged.
 - The class picker defaults from class subject and grade, supports subject/school/grade/sub-subject filters, and never hides already connected books from the class detail.
+- The student class picker defaults to unlinked classes with the same grade, offers one `전체 학년` recovery action, and defaults to all grades when the student has no grade.
 - Reuse the current shadcn/Radix components and existing dense modal/table design; add no explanatory cards or duplicate workflow controls.
 - Preserve the current uncommitted changes in `management-page.tsx` and `use-management-records.ts`; extend the existing class-textbook draft instead of replacing unrelated edits.
 - Do not apply the migration to the linked Supabase project, mutate production data, push, or deploy without separate authorization.
@@ -31,6 +32,7 @@
 - `src/features/textbooks/textbook-operations-workspace.tsx`: master list filters, compact summaries, required editor, and bulk edit integration.
 - `src/features/management/class-textbook-picker-model.ts`: pure class-default and candidate-filtering model.
 - `src/features/management/class-textbook-picker.tsx`: focused class-detail picker UI.
+- `src/features/management/student-class-picker-model.ts`: pure same-grade/all-grade scope defaults and candidate filtering for student details.
 - `src/features/management/management-page.tsx`: class form persistence and connected-book rendering; delegates picker behavior.
 - `src/features/management/use-management-records.ts`: exposes complete textbook taxonomy metadata to class details.
 - `supabase/migrations/*_textbook_taxonomy_arrays.sql`: generated forward-only schema/backfill/constraint migration.
@@ -38,6 +40,7 @@
 - `tests/textbook-taxonomy-schema.test.mjs`: migration source-contract and fixture coverage tests.
 - `tests/textbook-workspace.test.mjs`: textbook master editor/list/service source-contract checks.
 - `tests/class-textbook-picker-model.test.mjs`: executable class default/filter behavior tests.
+- `tests/student-class-picker-model.test.mjs`: executable student grade-scope and query behavior tests.
 - `tests/management-class-student-roster.test.mjs`: class-detail picker integration source contract.
 - `supabase/tests/registration_subject_tracks_runtime_test.sql`: keeps its direct textbook fixture valid under the required taxonomy contract.
 
@@ -861,10 +864,272 @@ Expected: focused tests PASS. Before committing, inspect `git diff --cached --na
 
 ---
 
-### Task 6: Full Regression and Browser Acceptance
+### Task 6: Student Grade-Fit Class Picker
 
 **Files:**
-- Modify only if a regression is found: files changed in Tasks 1-5 and their focused tests.
+- Create: `src/features/management/student-class-picker-model.ts`
+- Create: `tests/student-class-picker-model.test.mjs`
+- Modify: `src/features/management/management-page.tsx:73, 1223-1285, 1653-1673, 1998-2030, 2720-2805`
+- Modify: `tests/management-class-student-roster.test.mjs:100-140`
+
+**Interfaces:**
+- Consumes: the selected student's current `grade`, the already loaded raw class catalog, existing relation query, and the existing enrolled/waitlist exclusion set.
+- Produces: `StudentClassPickerScope`, `getDefaultStudentClassPickerScope(student)`, and `filterStudentClassCandidates(classes, options)`.
+
+- [ ] **Step 1: Write failing executable scope/filter tests**
+
+Create `tests/student-class-picker-model.test.mjs`:
+
+```js
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  filterStudentClassCandidates,
+  getDefaultStudentClassPickerScope,
+} from "../src/features/management/student-class-picker-model.ts";
+
+const classes = [
+  { id: "h2-math", name: "고2 수학", subject: "수학", grade: "고2", schedule: "월 18:00-20:00" },
+  { id: "h2-english", name: "고2 영어", subject: "영어", grade: "고2", schedule: "화 19:00-21:00" },
+  { id: "h3-math", name: "고3 수학", subject: "수학", grade: "고3", schedule: "수 18:00-20:00" },
+  { id: "ungraded", name: "공통 특강", subject: "수학", grade: "", schedule: "토 10:00-12:00" },
+];
+
+test("graded students default to same grade and ungraded students default to all grades", () => {
+  assert.equal(getDefaultStudentClassPickerScope({ grade: "고2" }), "same-grade");
+  assert.equal(getDefaultStudentClassPickerScope({ grade: "" }), "all-grades");
+});
+
+test("same-grade scope includes only the exact student grade", () => {
+  assert.deepEqual(
+    filterStudentClassCandidates(classes, {
+      studentGrade: "고2",
+      scope: "same-grade",
+      query: "",
+    }).map((row) => row.id),
+    ["h2-math", "h2-english"],
+  );
+});
+
+test("all-grade scope restores other and ungraded classes", () => {
+  assert.deepEqual(
+    filterStudentClassCandidates(classes, {
+      studentGrade: "고2",
+      scope: "all-grades",
+      query: "",
+    }).map((row) => row.id),
+    ["h2-math", "h2-english", "h3-math", "ungraded"],
+  );
+});
+
+test("text search applies inside the active grade scope", () => {
+  assert.deepEqual(
+    filterStudentClassCandidates(classes, {
+      studentGrade: "고2",
+      scope: "same-grade",
+      query: "영어",
+    }).map((row) => row.id),
+    ["h2-english"],
+  );
+});
+
+test("a missing student grade safely exposes the catalog", () => {
+  assert.equal(
+    filterStudentClassCandidates(classes, {
+      studentGrade: "",
+      scope: "same-grade",
+      query: "",
+    }).length,
+    classes.length,
+  );
+});
+```
+
+- [ ] **Step 2: Run the model test and verify the missing-module failure**
+
+Run:
+
+```bash
+CODEX_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
+$CODEX_NODE --experimental-strip-types --test tests/student-class-picker-model.test.mjs
+```
+
+Expected: FAIL with module-not-found for `student-class-picker-model.ts`.
+
+- [ ] **Step 3: Implement the pure student class candidate model**
+
+Create `src/features/management/student-class-picker-model.ts` with this public contract:
+
+```ts
+export type StudentClassPickerScope = "same-grade" | "all-grades";
+
+export type StudentClassPickerOptions = {
+  studentGrade: unknown;
+  scope: StudentClassPickerScope;
+  query: unknown;
+};
+
+export function getDefaultStudentClassPickerScope(
+  student: Record<string, unknown>,
+): StudentClassPickerScope;
+
+export function filterStudentClassCandidates<T extends Record<string, unknown>>(
+  classes: T[],
+  options: StudentClassPickerOptions,
+): T[];
+```
+
+Use one internal `normalizeGrade(value)` that trims and removes whitespace, so `고 2` and `고2` compare safely without inferring a grade from the class name. `same-grade` applies exact normalized equality only when `studentGrade` is non-empty. `all-grades` and an empty student grade skip the grade condition. Query matching lowercases and searches only these explicit values:
+
+```ts
+[
+  classRecord.name,
+  classRecord.className,
+  classRecord.class_name,
+  classRecord.subject,
+  classRecord.grade,
+  classRecord.teacher,
+  classRecord.teacher_name,
+  classRecord.schedule,
+].filter(Boolean).join(" ")
+```
+
+Preserve catalog order and never mutate an input record.
+
+- [ ] **Step 4: Wire scope state into the existing student relation picker**
+
+In `management-page.tsx`, import the model functions/type and add:
+
+```ts
+const [studentClassScope, setStudentClassScope] = useState<StudentClassPickerScope>("all-grades");
+```
+
+In `openRow`, derive the initial scope from the newly selected row before loading classes:
+
+```ts
+setStudentClassScope(
+  kind === "students"
+    ? getDefaultStudentClassPickerScope(row.raw || {})
+    : "all-grades",
+);
+```
+
+When the student grade field changes, reset the scope to the relevant default so the list immediately reflects the new grade:
+
+```ts
+if (kind === "students" && fieldName === "grade") {
+  setStudentClassScope(
+    getDefaultStudentClassPickerScope({ grade: next.grade }),
+  );
+}
+```
+
+Do not add a request or alter `service.listClasses()`.
+
+- [ ] **Step 5: Apply the pure model after linked-class exclusion**
+
+Keep `availableRelatedRows` responsible only for excluding already registered/waitlisted IDs. Replace the current query-only branch with:
+
+```ts
+const filteredAvailableRelatedRows = useMemo(() => {
+  if (kind === "students") {
+    return filterStudentClassCandidates(availableRelatedRows, {
+      studentGrade: form.grade,
+      scope: studentClassScope,
+      query: relationQuery,
+    });
+  }
+  const query = relationQuery.trim().toLowerCase();
+  if (!query) return availableRelatedRows;
+  return availableRelatedRows.filter((record) =>
+    `${relatedTitle(record)} ${relatedMeta(kind, record)}`.toLowerCase().includes(query),
+  );
+}, [availableRelatedRows, form.grade, kind, relationQuery, studentClassScope]);
+```
+
+This ordering ensures connected classes remain in their existing sections and never re-enter the candidate list.
+
+- [ ] **Step 6: Add the minimal same-grade/all-grade control inside the picker**
+
+Inside the existing `PopoverContent`, render the scope control only for `kind === "students"`, between the search input and scrollable result list:
+
+```tsx
+<div className="grid grid-cols-2 rounded-md bg-muted p-1" aria-label="수업 학년 범위">
+  <Button
+    type="button"
+    size="sm"
+    variant={studentClassScope === "same-grade" ? "secondary" : "ghost"}
+    disabled={!form.grade}
+    onClick={() => setStudentClassScope("same-grade")}
+  >
+    같은 학년
+  </Button>
+  <Button
+    type="button"
+    size="sm"
+    variant={studentClassScope === "all-grades" ? "secondary" : "ghost"}
+    onClick={() => setStudentClassScope("all-grades")}
+  >
+    전체 학년
+  </Button>
+</div>
+```
+
+Keep the existing trigger, search, candidate row metadata, close-on-select behavior, `등록 추가`, and `대기 추가`. When `same-grade` has no candidates, replace the generic empty state with a compact recovery row containing `같은 학년 수업 없음` and an `전체 학년` button; do not add an explanatory card.
+
+- [ ] **Step 7: Add integration source contracts**
+
+Extend `tests/management-class-student-roster.test.mjs` with:
+
+```js
+test("student class picker defaults by grade and can widen to all grades", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const modelSource = await readFile(new URL("src/features/management/student-class-picker-model.ts", root), "utf8");
+
+  assert.match(pageSource, /getDefaultStudentClassPickerScope/);
+  assert.match(pageSource, /filterStudentClassCandidates/);
+  assert.match(pageSource, /같은 학년/);
+  assert.match(pageSource, /전체 학년/);
+  assert.match(pageSource, /같은 학년 수업 없음/);
+  assert.match(pageSource, /studentGrade: form\.grade/);
+  assert.match(modelSource, /scope === "same-grade"/);
+  assert.doesNotMatch(modelSource, /classRecord\.name[\s\S]*normalizeGrade/);
+});
+```
+
+Keep the executable model assertions as the behavioral contract; the source test only protects integration copy and wiring.
+
+- [ ] **Step 8: Run focused tests and commit the student picker**
+
+Run:
+
+```bash
+CODEX_NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
+$CODEX_NODE --experimental-strip-types --test \
+  tests/student-class-picker-model.test.mjs \
+  tests/management-class-student-roster.test.mjs
+git diff --check -- \
+  src/features/management/student-class-picker-model.ts \
+  src/features/management/management-page.tsx \
+  tests/student-class-picker-model.test.mjs \
+  tests/management-class-student-roster.test.mjs
+git add \
+  src/features/management/student-class-picker-model.ts \
+  src/features/management/management-page.tsx \
+  tests/student-class-picker-model.test.mjs \
+  tests/management-class-student-roster.test.mjs
+git commit -m "feat: filter student class picker by grade"
+```
+
+Expected: both focused suites PASS. Before committing, inspect `git diff --cached --name-only` and `git diff --cached` because `management-page.tsx` and `management-class-student-roster.test.mjs` already contain user-owned uncommitted work; do not discard or rewrite those changes.
+
+---
+
+### Task 7: Full Regression and Browser Acceptance
+
+**Files:**
+- Modify only if a regression is found: files changed in Tasks 1-6 and their focused tests.
 
 **Interfaces:**
 - Consumes: the complete taxonomy schema/model/editor/list and class picker.
@@ -881,6 +1146,7 @@ $CODEX_NODE --experimental-strip-types --test \
   tests/textbook-taxonomy-schema.test.mjs \
   tests/textbook-workspace.test.mjs \
   tests/class-textbook-picker-model.test.mjs \
+  tests/student-class-picker-model.test.mjs \
   tests/management-class-student-roster.test.mjs \
   tests/lesson-design-page.test.mjs \
   tests/registration-track-service.test.mjs
@@ -900,11 +1166,13 @@ $CODEX_PNPM exec eslint \
   src/features/textbooks/textbook-operations-workspace.tsx \
   src/features/management/class-textbook-picker-model.ts \
   src/features/management/class-textbook-picker.tsx \
+  src/features/management/student-class-picker-model.ts \
   src/features/management/management-page.tsx \
   src/features/management/use-management-records.ts \
   tests/textbook-taxonomy-arrays.test.mjs \
   tests/textbook-taxonomy-schema.test.mjs \
-  tests/class-textbook-picker-model.test.mjs
+  tests/class-textbook-picker-model.test.mjs \
+  tests/student-class-picker-model.test.mjs
 ```
 
 Expected: exit code 0.
@@ -956,7 +1224,19 @@ At `/admin/classes?classId=fafa068f-35cb-4823-af6a-8e0a73bc6fe4&tab=basic`:
 7. Save the class, reopen it, and confirm `textbook_ids` persisted.
 8. Confirm long candidate lists scroll inside the popover without moving the dialog unexpectedly.
 
-- [ ] **Step 7: Record the database verification boundary and inspect final diff**
+- [ ] **Step 7: Verify the student class picker in the real UI**
+
+At `/admin/students?studentId=9e27c313-8acc-4397-bb49-91fff409c164`:
+
+1. Open `수업 선택`; confirm a 고2 student starts on `같은 학년` and only unlinked 고2 classes appear.
+2. Search for a visible 고2 class by subject or name; confirm search stays within the same-grade scope.
+3. Select `전체 학년`; confirm other grades and grade-unassigned classes become available.
+4. Select a class and confirm the existing `등록 추가` and `대기 추가` confirmation/save flows still work.
+5. Change the student's grade and confirm the picker resets to the newly selected same-grade scope.
+6. Open a student with no grade and confirm the picker starts on `전체 학년`.
+7. Confirm long class lists scroll inside the picker without moving the student detail modal.
+
+- [ ] **Step 8: Record the database verification boundary and inspect final diff**
 
 Run:
 
@@ -968,9 +1248,9 @@ git log --oneline -6
 
 Expected: implementation commits are present; user-owned unrelated dirty files remain preserved. Record `remote taxonomy migration not applied; production data backfill pending explicit authorization` in the handoff.
 
-- [ ] **Step 8: Commit only regression fixes, if any**
+- [ ] **Step 9: Commit only regression fixes, if any**
 
-If Steps 1-6 required fixes, stage only those files and run:
+If Steps 1-7 required fixes, stage only those files and run:
 
 ```bash
 git commit -m "fix: harden textbook taxonomy workflow"
