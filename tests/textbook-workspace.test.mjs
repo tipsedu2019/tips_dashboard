@@ -515,7 +515,8 @@ test("textbook workspace separates category filters and lets grouped rows collap
   assert.match(workspaceSource, /categoryGroupFilter/);
   assert.match(workspaceSource, /categoryGroupOptions/);
   assert.match(workspaceSource, /onCategoryFilterChange/);
-  assert.match(workspaceSource, /if \(categoryGroupFilter !== "all" && getTextbookSubSubject\(row\) !== categoryGroupFilter\) return false/);
+  assert.match(workspaceSource, /matchesTextbookTaxonomy\(row, \{/);
+  assert.match(workspaceSource, /subSubject: categoryGroupFilter === "all" \? "" : categoryGroupFilter/);
   assert.doesNotMatch(workspaceSource, /구분별/);
   assert.doesNotMatch(workspaceSource, /출판사별/);
   assert.match(workspaceSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS/);
@@ -2121,8 +2122,8 @@ test("textbook workspace adds quality triage, tab totals, and compact empty proc
   assert.match(workspaceSource, /<TableHead className="w-24">학년<\/TableHead>/);
   assert.match(workspaceSource, /const columnSpan = locationColumns\.length \+ 7/);
   assert.match(workspaceSource, /const subjectLabel = getSubjectLabel\(row\.subject\) \|\| "-"/);
-  assert.match(workspaceSource, /const gradeLabel = getTextbookGradeLabel/);
-  assert.match(workspaceSource, /const schoolLevelLabel = getTextbookSchoolLevelLabel/);
+  assert.match(workspaceSource, /const gradeLabel = getTextbookGradeSummary/);
+  assert.match(workspaceSource, /const schoolLevelLabel = getTextbookSchoolLevelSummary/);
   assert.match(workspaceSource, /const subSubjectLabel = getTextbookSubSubject\(row\) \|\| "-"/);
   assert.match(workspaceSource, /title=\{subjectLabel\}>\{subjectLabel\}/);
   assert.match(workspaceSource, /title=\{subSubjectLabel\}>\{subSubjectLabel\}/);
@@ -2984,5 +2985,26 @@ test("textbook master saves required multi-value taxonomy", async () => {
   assert.doesNotMatch(
     workspaceSource,
     /<SelectItem value="none">미지정<\/SelectItem>[\s\S]{0,500}학교 구분/,
+  );
+});
+
+test("textbook master list and filters use taxonomy arrays", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const taxonomySource = await readFile(
+    new URL("src/features/textbooks/textbook-taxonomy.ts", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /getTextbookSchoolLevelSummary/);
+  assert.match(workspaceSource, /getTextbookGradeSummary/);
+  assert.match(workspaceSource, /matchesTextbookTaxonomy/);
+  assert.match(taxonomySource, /초·중·고/);
+  assert.match(taxonomySource, /전 학년/);
+  assert.doesNotMatch(
+    workspaceSource,
+    /getTextbookGradeLabel\(getTextbookGradeLevel\(row\)\) \|\| getTextbookSchoolLevelLabel/,
   );
 });

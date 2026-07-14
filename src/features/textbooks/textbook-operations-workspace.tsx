@@ -102,9 +102,9 @@ import {
   getTextbookGradeLevel,
   getTextbookSchoolLevelSummary,
   getTextbookSchoolLevel,
-  getTextbookSchoolLevelLabel,
   getTextbookSubSubject,
   getTextbookTaxonomySelection,
+  matchesTextbookTaxonomy,
   mergeTextbookSubSubjectSettings,
   toggleTextbookGradeLevel,
   toggleTextbookSchoolLevel,
@@ -640,7 +640,8 @@ function getTextbookIdentityLabel(row: Row) {
     getTextbookTitle(row),
     getKnownPublisherLabel(row),
     getSubjectLabel(row.subject),
-    getTextbookGradeLabel(getTextbookGradeLevel(row)),
+    getTextbookSchoolLevelSummary(row),
+    getTextbookGradeSummary(row),
     getTextbookSubSubject(row),
   ]).join(" · ");
 }
@@ -1188,6 +1189,7 @@ function getTextbookFromLookup(lookup: Map<string, Row>, reference: unknown) {
 }
 
 function buildTextbookSearchIndex(row: Row): TextbookSearchIndex {
+  const taxonomy = getTextbookTaxonomySelection(row);
   const compactTitle = normalizeTextbookLookupValue(getTextbookTitle(row), { compact: true });
   return {
     haystack: [
@@ -1196,8 +1198,9 @@ function buildTextbookSearchIndex(row: Row): TextbookSearchIndex {
       row.subject,
       getSubjectLabel(row.subject),
       getTaxonomyCategoryLabel(row),
-      getTextbookSchoolLevelLabel(getTextbookSchoolLevel(row)),
-      getTextbookGradeLabel(getTextbookGradeLevel(row)),
+      getTextbookSchoolLevelSummary(row),
+      getTextbookGradeSummary(row),
+      ...taxonomy.gradeLevels.map(getTextbookGradeLabel),
       getTextbookSubSubject(row),
       row.category,
       row.publisher,
@@ -2864,10 +2867,12 @@ export function TextbookOperationsWorkspace() {
     const normalizedBarcodeQuery = normalizeBarcodeValue(keyword);
 
     return data.inventory.filter((row) => {
-      if (subjectGroupFilter !== "all" && normalizeSubjectValue(row.subject) !== subjectGroupFilter) return false;
-      if (schoolLevelGroupFilter !== "all" && getTextbookSchoolLevel(row) !== schoolLevelGroupFilter) return false;
-      if (gradeLevelGroupFilter !== "all" && getTextbookGradeLevel(row) !== gradeLevelGroupFilter) return false;
-      if (categoryGroupFilter !== "all" && getTextbookSubSubject(row) !== categoryGroupFilter) return false;
+      if (!matchesTextbookTaxonomy(row, {
+        subject: subjectGroupFilter === "all" ? "" : subjectGroupFilter,
+        schoolLevel: schoolLevelGroupFilter === "all" ? "" : schoolLevelGroupFilter,
+        gradeLevel: gradeLevelGroupFilter === "all" ? "" : gradeLevelGroupFilter,
+        subSubject: categoryGroupFilter === "all" ? "" : categoryGroupFilter,
+      })) return false;
       if (!keyword) {
         return true;
       }
@@ -2882,10 +2887,12 @@ export function TextbookOperationsWorkspace() {
       ) as Record<TextbookQualityFilter, number>;
 
       for (const row of data.inventory) {
-        if (subjectGroupFilter !== "all" && normalizeSubjectValue(row.subject) !== subjectGroupFilter) continue;
-        if (schoolLevelGroupFilter !== "all" && getTextbookSchoolLevel(row) !== schoolLevelGroupFilter) continue;
-        if (gradeLevelGroupFilter !== "all" && getTextbookGradeLevel(row) !== gradeLevelGroupFilter) continue;
-        if (categoryGroupFilter !== "all" && getTextbookSubSubject(row) !== categoryGroupFilter) continue;
+        if (!matchesTextbookTaxonomy(row, {
+          subject: subjectGroupFilter === "all" ? "" : subjectGroupFilter,
+          schoolLevel: schoolLevelGroupFilter === "all" ? "" : schoolLevelGroupFilter,
+          gradeLevel: gradeLevelGroupFilter === "all" ? "" : gradeLevelGroupFilter,
+          subSubject: categoryGroupFilter === "all" ? "" : categoryGroupFilter,
+        })) continue;
 
         if (!isActiveTextbook(row)) {
           counts.inactive += 1;
@@ -7594,8 +7601,8 @@ function getTextbookSelectSubSubject(textbook: Row) {
 }
 
 function buildTextbookSelectMetaRows(textbook: Row) {
-  const schoolLevel = getTextbookSchoolLevelLabel(getTextbookSchoolLevel(textbook));
-  const grade = getTextbookGradeLabel(getTextbookGradeLevel(textbook));
+  const schoolLevel = getTextbookSchoolLevelSummary(textbook);
+  const grade = getTextbookGradeSummary(textbook);
   const subSubject = getTextbookSelectSubSubject(textbook);
   const categoryDetail = compactUniqueLabels([schoolLevel, grade, subSubject]).join(" · ");
 
@@ -7615,7 +7622,12 @@ function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[];
     metaRows: buildTextbookSelectMetaRows(textbook),
     filterValues: {
       subject: buildSearchSelectFilterValues([getSubjectLabel(textbook.subject)]),
-      grade: buildSearchSelectFilterValues([getTextbookGradeLabel(getTextbookGradeLevel(textbook))]),
+      grade: buildSearchSelectFilterValues(
+        getTextbookTaxonomySelection(textbook).gradeLevels.map((gradeLevel) => ({
+          value: gradeLevel,
+          label: getTextbookGradeLabel(gradeLevel),
+        })),
+      ),
       subSubject: buildSearchSelectFilterValues([getTextbookSelectSubSubject(textbook)]),
     },
     searchText: [
@@ -7623,8 +7635,8 @@ function TextbookSelect({ textbooks, value, onValueChange }: { textbooks: Row[];
       textbook.publisher,
       textbook.category,
       getTaxonomyCategoryLabel(textbook),
-      getTextbookSchoolLevelLabel(getTextbookSchoolLevel(textbook)),
-      getTextbookGradeLabel(getTextbookGradeLevel(textbook)),
+      getTextbookSchoolLevelSummary(textbook),
+      getTextbookGradeSummary(textbook),
       getTextbookSelectSubSubject(textbook),
       textbook.isbn13,
       textbook.barcode,
@@ -8789,9 +8801,10 @@ function TextbookTable({
                     const publisherLabel = getKnownPublisherLabel(row);
                     const locationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
                     const amountValue = amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue;
-                    const gradeLabel = getTextbookGradeLabel(getTextbookGradeLevel(row)) || getTextbookSchoolLevelLabel(getTextbookSchoolLevel(row)) || "-";
+                    const schoolLevelLabel = getTextbookSchoolLevelSummary(row) || "-";
+                    const gradeLabel = getTextbookGradeSummary(row) || "-";
                     const subSubjectLabel = getTextbookSubSubject(row) || "-";
-                    const categorySummary = compactUniqueLabels([getSubjectLabel(row.subject), gradeLabel, subSubjectLabel]).join(" · ") || "-";
+                    const categorySummary = compactUniqueLabels([getSubjectLabel(row.subject), schoolLevelLabel, gradeLabel, subSubjectLabel]).join(" · ") || "-";
                     const qualityIssues = getTextbookQualityIssues(row, duplicateTitleKeys);
                     const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
                     const locationSummary = locationColumns
@@ -8989,8 +9002,8 @@ function TextbookTable({
                 const locationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
                 const amountValue = amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue;
                 const subjectLabel = getSubjectLabel(row.subject) || "-";
-                const gradeLabel = getTextbookGradeLabel(getTextbookGradeLevel(row)) || "-";
-                const schoolLevelLabel = getTextbookSchoolLevelLabel(getTextbookSchoolLevel(row)) || "-";
+                const gradeLabel = getTextbookGradeSummary(row) || "-";
+                const schoolLevelLabel = getTextbookSchoolLevelSummary(row) || "-";
                 const subSubjectLabel = getTextbookSubSubject(row) || "-";
                 const qualityIssues = getTextbookQualityIssues(row, duplicateTitleKeys);
                 const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
