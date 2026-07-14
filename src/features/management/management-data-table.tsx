@@ -76,6 +76,10 @@ import {
   type ClassFilterPanelSelect,
 } from "./class-filter-panel";
 import { pickDefaultPeriodValue } from "./period-preferences";
+import {
+  formatClassScheduleDisplayLines,
+  splitClassResourceDisplayValues,
+} from "./class-schedule-slots";
 
 const STORAGE_VERSION = 14;
 
@@ -990,7 +994,10 @@ function renderClassScheduleCell(row: ManagementRow) {
     : Array.isArray((row.raw || {}).schedule_lines)
       ? ((row.raw || {}).schedule_lines as string[])
       : [];
-  const lines = scheduleLines.length > 0 ? scheduleLines : [normalizeScalar((row.raw || {}).schedule)].filter(Boolean);
+  const scheduleValue = scheduleLines.length > 0
+    ? scheduleLines.join("\n")
+    : normalizeScalar((row.raw || {}).schedule);
+  const lines = formatClassScheduleDisplayLines(scheduleValue);
   if (lines.length === 0) {
     return <span className="text-muted-foreground">-</span>;
   }
@@ -1274,6 +1281,20 @@ function renderPlainCell(value: unknown, className = "text-sm text-foreground") 
     return <span className="text-muted-foreground">-</span>;
   }
   return <span className={className}>{normalized}</span>;
+}
+
+function renderClassResourceCell(value: unknown) {
+  const values = splitClassResourceDisplayValues(value);
+  if (values.length === 0) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+  return (
+    <div className="grid gap-1 py-0.5 text-sm text-foreground">
+      {values.map((item, index) => (
+        <span key={`${item}-${index}`} className="leading-5">{item}</span>
+      ))}
+    </div>
+  );
 }
 
 function buildDefaultVisibility(kind: ManagementKind, columnIds: string[]) {
@@ -1715,14 +1736,14 @@ export function ManagementDataTable({
         id: "teacher",
         accessorFn: (row) => normalizeScalar((row.raw || {}).teacher || (row.raw || {}).teacher_name || (row.raw || {}).teacherName),
         header: "선생님",
-        cell: ({ row }) => renderPlainCell(formatDelimitedLabel((row.original.raw || {}).teacher || (row.original.raw || {}).teacher_name || (row.original.raw || {}).teacherName)),
+        cell: ({ row }) => renderClassResourceCell((row.original.raw || {}).teacher || (row.original.raw || {}).teacher_name || (row.original.raw || {}).teacherName),
         filterFn: (row, _, value) => !value || getClassFilterValues(row.original, "teacher").includes(String(value)),
       },
       {
         id: "classroom",
         accessorFn: (row) => normalizeScalar((row.raw || {}).classroom || (row.raw || {}).room),
         header: "강의실",
-        cell: ({ row }) => renderPlainCell(formatDelimitedLabel((row.original.raw || {}).classroom || (row.original.raw || {}).room)),
+        cell: ({ row }) => renderClassResourceCell((row.original.raw || {}).classroom || (row.original.raw || {}).room),
         filterFn: (row, _, value) => !value || getClassFilterValues(row.original, "classroom").includes(String(value)),
       },
       {

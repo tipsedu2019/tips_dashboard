@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,12 @@ import {
   filterClassTextbookCandidates,
   getDefaultClassTextbookFilters,
 } from "./class-textbook-picker-model";
+import { PickerMetaPills } from "./picker-meta-pills";
+import {
+  PICKER_FILTER_TRIGGER_CLASS_NAME,
+  PickerFilterField,
+  PickerFilterSurface,
+} from "./picker-filter-surface";
 
 type ClassTextbookPickerProps = {
   classRecord: Record<string, unknown>;
@@ -87,12 +93,17 @@ export function ClassTextbookPicker({
   return (
     <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" size="sm" variant="outline" disabled={disabled || textbooks.length === 0}>
-          <Plus className="size-4" aria-hidden="true" />
-          교재 추가
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 w-full justify-between px-3 font-normal"
+          disabled={disabled || textbooks.length === 0}
+        >
+          <span className="truncate text-muted-foreground">교재 검색 또는 선택</span>
+          <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(calc(100vw-2rem),36rem)] p-2">
+      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] min-w-[min(calc(100vw-2rem),24rem)] p-2">
         <div className="grid gap-2">
           <div className="flex items-center gap-2">
             <Input
@@ -105,36 +116,44 @@ export function ClassTextbookPicker({
               전체 보기
             </Button>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={filters.subject || "all"} onValueChange={(value) => updateFilter("subject", value === "all" ? "" : value)}>
-              <SelectTrigger className="h-9" aria-label="과목"><SelectValue placeholder="과목" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 과목</SelectItem>
-                {TEXTBOOK_SUBJECT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={filters.schoolLevel || "all"} onValueChange={(value) => updateFilter("schoolLevel", value === "all" ? "" : value)}>
-              <SelectTrigger className="h-9" aria-label="학교 구분"><SelectValue placeholder="학교 구분" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 학교 구분</SelectItem>
-                {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={filters.gradeLevel || "all"} onValueChange={(value) => updateFilter("gradeLevel", value === "all" ? "" : value)}>
-              <SelectTrigger className="h-9" aria-label="학년"><SelectValue placeholder="학년" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 학년</SelectItem>
-                {gradeOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={filters.subSubject || "all"} onValueChange={(value) => updateFilter("subSubject", value === "all" ? "" : value)}>
-              <SelectTrigger className="h-9" aria-label="세부과목"><SelectValue placeholder="세부과목" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 세부과목</SelectItem>
-                {subSubjectOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          <PickerFilterSurface>
+            <PickerFilterField label="과목">
+              <Select value={filters.subject || "all"} onValueChange={(value) => updateFilter("subject", value === "all" ? "" : value)}>
+                <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="과목"><SelectValue placeholder="과목" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 과목</SelectItem>
+                  {TEXTBOOK_SUBJECT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </PickerFilterField>
+            <PickerFilterField label="세부과목">
+              <Select value={filters.subSubject || "all"} onValueChange={(value) => updateFilter("subSubject", value === "all" ? "" : value)}>
+                <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="세부과목"><SelectValue placeholder="세부과목" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 세부과목</SelectItem>
+                  {subSubjectOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </PickerFilterField>
+            <PickerFilterField label="학교 구분">
+              <Select value={filters.schoolLevel || "all"} onValueChange={(value) => updateFilter("schoolLevel", value === "all" ? "" : value)}>
+                <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학교 구분"><SelectValue placeholder="학교 구분" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 학교 구분</SelectItem>
+                  {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </PickerFilterField>
+            <PickerFilterField label="학년">
+              <Select value={filters.gradeLevel || "all"} onValueChange={(value) => updateFilter("gradeLevel", value === "all" ? "" : value)}>
+                <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학년"><SelectValue placeholder="학년" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 학년</SelectItem>
+                  {gradeOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </PickerFilterField>
+          </PickerFilterSurface>
           <div className="max-h-72 overscroll-contain overflow-y-auto">
             {candidates.length === 0 ? (
               <div className="grid justify-items-start gap-2 px-2 py-3 text-sm text-muted-foreground">
@@ -142,25 +161,25 @@ export function ClassTextbookPicker({
                 <Button type="button" size="sm" variant="outline" onClick={showAll}>전체 보기</Button>
               </div>
             ) : candidates.map((textbook) => {
-              const meta = [
-                getTextbookSubjectLabel(textbook.subject),
-                getTextbookSchoolLevelSummary(textbook),
-                getTextbookGradeSummary(textbook),
-                textbook.subSubject,
-                textbook.publisher,
-              ].filter(Boolean).join(" · ");
               return (
                 <button
                   key={textbook.id}
                   type="button"
-                  className="grid w-full gap-0.5 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
+                  className="grid w-full gap-1.5 rounded-md px-2 py-2 text-left text-sm hover:bg-muted"
                   onClick={() => {
                     onSelectedIdsChange(selectedIds.includes(textbook.id) ? selectedIds : [...selectedIds, textbook.id]);
                     setOpen(false);
                   }}
                 >
                   <span className="truncate font-medium">{textbook.title}</span>
-                  {meta ? <span className="truncate text-xs text-muted-foreground">{meta}</span> : null}
+                  <PickerMetaPills
+                    items={[
+                      { key: "subject", value: getTextbookSubjectLabel(textbook.subject), tone: "primary" },
+                      { key: "subSubject", value: textbook.subSubject },
+                      { key: "schoolLevel", value: getTextbookSchoolLevelSummary(textbook) },
+                      { key: "gradeLevel", value: getTextbookGradeSummary(textbook) },
+                    ]}
+                  />
                 </button>
               );
             })}

@@ -31,3 +31,30 @@ test("student select fields use the shared select renderer instead of plain inpu
   assert.match(source, /const options = studentSelectOptions\[fieldName\] \|\| \[\]/);
   assert.match(source, /onValueChange=\{\(nextValue\) => handleEditableFieldChange\(field\.name, nextValue\)\}/);
 });
+
+test("student detail keeps only actionable student fields", async () => {
+  const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const studentDetailFieldsStart = source.indexOf("const STUDENT_DETAIL_FIELD_NAMES");
+  const studentDetailFieldsEnd = source.indexOf("];", studentDetailFieldsStart) + 2;
+  const studentDetailFieldsSource = source.slice(studentDetailFieldsStart, studentDetailFieldsEnd);
+
+  assert.match(source, /\{ name: "uid", label: "메이크에듀 원생고유번호"/);
+  assert.notEqual(studentDetailFieldsStart, -1);
+  assert.doesNotMatch(studentDetailFieldsSource, /"enrollDate"/);
+  assert.match(source, /\{kind !== "students" \? \(\s*<section className="space-y-2">/);
+  assert.match(source, /\{kind !== "students" \? \(\s*<section className="border-y py-3">/);
+  assert.match(source, /\{kind !== "students" \? <div className="text-sm font-semibold">/);
+  assert.match(source, /renderEditableFields\("detail", kind === "students" \? STUDENT_DETAIL_FIELD_NAMES : undefined\)/);
+});
+
+test("student detail uses student-specific labels without redundant badges", async () => {
+  const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(source, /\{ name: "contact", label: "학생 연락처"/);
+  assert.match(source, /kind === "students"\s*\? `\$\{selectedRow\?\.title \|\| ""\} 학생정보`/);
+  assert.match(source, /\{kind !== "students" \? \(\s*<div className="flex flex-wrap items-center gap-2">\s*<Badge>\{selectedRow\.badge\}<\/Badge>/);
+  assert.match(source, /kind === "students" \? "수강 추가" : "등록 추가"/);
+  assert.match(source, /\{modeLabel === "수강" \? "대기 전환" : "수강 전환"\}/);
+  assert.match(source, /\{modeLabel === "수강" \? "수강 해제" : "대기 해제"\}/);
+  assert.match(source, /renderRelationList\("수강 수업", getStudentEnrolledClassIds\(selectedRow\), "수강"\)/);
+});

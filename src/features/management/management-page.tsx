@@ -42,10 +42,29 @@ import type { ClassTextbookRecord } from "./class-textbook-picker-model";
 import { managementService } from "./management-service.js";
 import { pickDefaultPeriodValue } from "./period-preferences";
 import {
+  filterClassStudentCandidates,
   filterStudentClassCandidates,
-  getDefaultStudentClassPickerScope,
+  getClassStudentGradeOptions,
+  getClassStudentSchoolOptions,
+  getDefaultClassStudentPickerFilters,
+  getDefaultStudentClassPickerFilters,
+  getStudentClassGradeOptions,
+  getStudentClassSubjectOptions,
 } from "./student-class-picker-model";
-import type { StudentClassPickerScope } from "./student-class-picker-model";
+import { PickerMetaPills } from "./picker-meta-pills";
+import {
+  PICKER_FILTER_TRIGGER_CLASS_NAME,
+  PickerFilterField,
+  PickerFilterSurface,
+} from "./picker-filter-surface";
+import {
+  formatClassScheduleDisplayLines,
+  formatClassScheduleSlots,
+  parseClassScheduleSlots,
+  stripSharedScheduleDetails,
+  type ClassScheduleSlot,
+} from "./class-schedule-slots";
+import type { ClassStudentPickerFilters, StudentClassPickerFilters } from "./student-class-picker-model";
 
 type ManagementServiceClient = {
   createStudent: (record: Record<string, unknown>) => Promise<unknown>;
@@ -90,14 +109,6 @@ type Field = {
 };
 type ClassGroupOption = { id: string; name: string; subject?: string; isDefault?: boolean };
 type DeleteRequest = { rows: ManagementRow[] };
-type ClassScheduleSlot = {
-  day: string;
-  startTime: string;
-  endTime: string;
-  teacher: string;
-  classroom: string;
-};
-
 const CLASS_STATUS_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 const CLASS_SCHEDULE_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
 const CLASS_ROSTER_GRID_CLASS_NAME = "grid gap-3 px-3 lg:grid-cols-[minmax(9rem,1.1fr)_minmax(7rem,.7fr)_minmax(5rem,.45fr)_minmax(8rem,.85fr)_minmax(8rem,.85fr)_auto] lg:items-center";
@@ -122,16 +133,26 @@ const STUDENT_GRADE_OPTIONS_BY_CATEGORY: Record<(typeof STUDENT_SCHOOL_CATEGORY_
   초등: ["초1", "초2", "초3", "초4", "초5", "초6"],
 };
 const STUDENT_SELECT_FIELD_NAMES = new Set(["status", "school_category", "school", "grade"]);
+const STUDENT_DETAIL_FIELD_NAMES = [
+  "name",
+  "status",
+  "uid",
+  "school_category",
+  "school",
+  "grade",
+  "contact",
+  "parentContact",
+];
 
 const FORM_FIELDS: Record<ManagementKind, Field[]> = {
   students: [
     { name: "name", label: "학생명", placeholder: "김학생", required: true, autoComplete: "off" },
     { name: "status", label: "재원 상태", placeholder: "재원" },
-    { name: "uid", label: "학생 UID", placeholder: "S-001", autoComplete: "off" },
+    { name: "uid", label: "메이크에듀 원생고유번호", placeholder: "S-001", autoComplete: "off" },
     { name: "school_category", label: "학교 구분", placeholder: "학교 구분" },
     { name: "school", label: "학교", placeholder: "학교" },
     { name: "grade", label: "학년", placeholder: "학년" },
-    { name: "contact", label: "연락처", placeholder: "010-0000-0000", inputMode: "tel", autoComplete: "tel" },
+    { name: "contact", label: "학생 연락처", placeholder: "010-0000-0000", inputMode: "tel", autoComplete: "tel" },
     { name: "parentContact", label: "학부모 연락처", placeholder: "010-0000-0000", inputMode: "tel", autoComplete: "tel" },
     { name: "enrollDate", label: "등록일", type: "date" },
   ],
@@ -195,36 +216,6 @@ function splitOptionValues(value: unknown) {
     .split(/[,，/]+/)
     .map((part) => part.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
-}
-
-function uniqueTextValues(values: unknown[]) {
-  const seen = new Set<string>();
-  const nextValues: string[] = [];
-  for (const value of values) {
-    const normalized = text(value);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    nextValues.push(normalized);
-  }
-  return nextValues;
-}
-
-function getClassroomValuesByDay(value: unknown) {
-  const classroomsByDay = new Map<string, string>();
-  const raw = text(value);
-  if (!raw) return classroomsByDay;
-
-  for (const match of raw.matchAll(/([^,，/()]+?)\s*\(([월화수목금토일])\)/g)) {
-    const classroom = text(match[1]);
-    const day = text(match[2]);
-    if (classroom && day) classroomsByDay.set(day, classroom);
-  }
-  return classroomsByDay;
-}
-
-function looksLikeClassroomAlias(value: unknown) {
-  const normalized = text(value).replace(/\s+/g, "");
-  return /(?:본관|별관|강의실|교실|본\d|별\d|강$|실$)/.test(normalized);
 }
 
 function getClassTuitionManwonValue(value: unknown) {
@@ -341,6 +332,76 @@ function ClassTuitionManwonInput({
   );
 }
 
+function ClassCapacityInput({
+  id,
+  name,
+  value,
+  placeholder,
+  required = false,
+  disabled = false,
+  autoFocus = false,
+  onChange,
+}: {
+  id: string;
+  name: string;
+  value: string;
+  placeholder?: string;
+  required?: boolean;
+  disabled?: boolean;
+  autoFocus?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const displayValue = text(value).replace(/\D/g, "");
+  const stepCapacity = (delta: number) => {
+    const nextCapacity = Math.max(0, (Number(displayValue) || 0) + delta);
+    onChange(nextCapacity > 0 ? String(nextCapacity) : "");
+  };
+
+  return (
+    <div className={cn("flex h-10 overflow-hidden rounded-md border bg-background shadow-sm", disabled && "bg-muted/30 opacity-75")}>
+      <Input
+        id={id}
+        name={name}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        autoFocus={autoFocus}
+        data-testid="class-capacity-input"
+        value={displayValue}
+        placeholder={placeholder || "12"}
+        required={required}
+        disabled={disabled}
+        className="h-full min-w-0 flex-1 rounded-none border-0 shadow-none focus-visible:ring-0"
+        onChange={(event) => onChange(event.target.value.replace(/\D/g, ""))}
+      />
+      <div className="grid w-8 shrink-0 border-l">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="정원 1명 올리기"
+          className="h-5 w-8 rounded-none"
+          disabled={disabled}
+          onClick={() => stepCapacity(1)}
+        >
+          <ChevronUp className="size-3" aria-hidden="true" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="정원 1명 내리기"
+          className="h-5 w-8 rounded-none"
+          disabled={disabled || !displayValue}
+          onClick={() => stepCapacity(-1)}
+        >
+          <ChevronDown className="size-3" aria-hidden="true" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function createEmptyClassScheduleSlot(): ClassScheduleSlot {
   return { day: "", startTime: "", endTime: "", teacher: "", classroom: "" };
 }
@@ -354,81 +415,6 @@ function getNextClassScheduleDay(day: string) {
 function createNextClassScheduleSlot(slots: ClassScheduleSlot[]) {
   const source = slots[slots.length - 1] || createEmptyClassScheduleSlot();
   return { ...source, day: getNextClassScheduleDay(source.day) };
-}
-
-function parseClassScheduleSlots(scheduleValue: unknown, teacherValue: unknown, classroomValue: unknown): ClassScheduleSlot[] {
-  const schedule = text(scheduleValue);
-  const teachers = splitOptionValues(teacherValue);
-  const classrooms = splitOptionValues(classroomValue);
-  const classroomsByDay = getClassroomValuesByDay(classroomValue);
-  const slots: ClassScheduleSlot[] = [];
-  const schedulePattern = /([월화수목금토일])\s*(\d{1,2}:\d{2})\s*[-~–]\s*(\d{1,2}:\d{2})(?:\s*\(([^)]*)\))?/g;
-
-  for (const match of schedule.matchAll(schedulePattern)) {
-    const day = text(match[1]);
-    const detailParts = text(match[4]).split(/[,，/]+/).map(text).filter(Boolean);
-    const firstDetail = detailParts[0] || "";
-    const firstDetailIsTeacher = firstDetail && !looksLikeClassroomAlias(firstDetail);
-
-    slots.push({
-      day,
-      startTime: text(match[2]),
-      endTime: text(match[3]),
-      teacher: firstDetailIsTeacher ? firstDetail : teachers[slots.length] || teachers[0] || "",
-      classroom: firstDetailIsTeacher
-        ? detailParts.slice(1).join(", ") || classroomsByDay.get(day) || classrooms[slots.length] || classrooms[0] || ""
-        : detailParts[detailParts.length - 1] || classroomsByDay.get(day) || classrooms[slots.length] || classrooms[0] || "",
-    });
-  }
-
-  if (slots.length > 0) return slots;
-
-  const day = text(schedule.match(/[월화수목금토일]/)?.[0]);
-  const timeMatch = schedule.match(/(\d{1,2}:\d{2})\s*[-~–]\s*(\d{1,2}:\d{2})/);
-  const fallbackSlot = {
-    day,
-    startTime: text(timeMatch?.[1]),
-    endTime: text(timeMatch?.[2]),
-    teacher: teachers[0] || "",
-    classroom: classrooms[0] || "",
-  };
-
-  return Object.values(fallbackSlot).some(Boolean)
-    ? [fallbackSlot]
-    : [createEmptyClassScheduleSlot()];
-}
-
-function formatClassScheduleSlots(slots: ClassScheduleSlot[]) {
-  const normalizedSlots = slots
-    .map((slot) => ({
-      day: text(slot.day),
-      startTime: text(slot.startTime),
-      endTime: text(slot.endTime),
-      teacher: text(slot.teacher),
-      classroom: text(slot.classroom),
-    }))
-    .filter((slot) => Object.values(slot).some(Boolean));
-  const uniqueTeachers = uniqueTextValues(normalizedSlots.map((slot) => slot.teacher));
-  const uniqueClassrooms = uniqueTextValues(normalizedSlots.map((slot) => slot.classroom));
-  const hasSharedScheduleDetails = uniqueTeachers.length <= 1 && uniqueClassrooms.length <= 1;
-
-  const schedule = normalizedSlots.filter((slot) => slot.day || slot.startTime || slot.endTime).map((slot) => {
-    const timeRange = slot.startTime && slot.endTime
-      ? `${slot.startTime}-${slot.endTime}`
-      : [slot.startTime, slot.endTime].filter(Boolean).join("-");
-    const summary = [slot.day, timeRange].filter(Boolean).join(" ");
-    const details = hasSharedScheduleDetails ? "" : [slot.teacher, slot.classroom].filter(Boolean).join(", ");
-    return [summary, details ? `(${details})` : ""].filter(Boolean).join(" ").trim();
-  }).join("\n");
-  const teacher = uniqueTeachers.join(", ");
-  const classroom = uniqueClassrooms.length <= 1
-    ? uniqueClassrooms[0] || ""
-    : normalizedSlots
-        .filter((slot) => slot.classroom)
-        .map((slot) => slot.day ? `${slot.classroom}(${slot.day})` : slot.classroom)
-        .join(", ");
-
-  return { schedule, teacher, classroom };
 }
 
 function getClassSubjectValue(raw: Record<string, unknown> = {}) {
@@ -739,25 +725,6 @@ function getClassTermOption(record: Record<string, unknown>) {
   );
 }
 
-function getClassPeriodLabel(row: ManagementRow) {
-  const raw = (row.raw || {}) as Record<string, unknown>;
-  const rawGroupNames = Array.isArray(raw.class_group_names || raw.classGroupNames)
-    ? (raw.class_group_names || raw.classGroupNames) as unknown[]
-    : [];
-  const groupNames = rawGroupNames.map(text).filter(Boolean);
-  const classGroups = normalizeClassGroupOptions(raw.classGroups || raw.class_groups);
-  const periodNames = groupNames.length > 0 ? groupNames : classGroups.map((group) => group.name).filter(Boolean);
-
-  if (periodNames.length === 1) {
-    return periodNames[0];
-  }
-  if (periodNames.length > 1) {
-    return `${periodNames[0]} 외 ${periodNames.length - 1}개`;
-  }
-
-  return [getClassAcademicYearOption(raw), getClassTermOption(raw)].filter(Boolean).join(" ").trim();
-}
-
 function getLabel(kind: ManagementKind) {
   if (kind === "students") return "학생 등록";
   if (kind === "classes") return "수업 등록";
@@ -891,7 +858,8 @@ function formatSchoolGradeLabel(schoolValue: unknown, gradeValue: unknown) {
 function relatedMeta(kind: ManagementKind, record?: RelatedRecord) {
   if (!record) return "";
   if (kind === "students") {
-    return [text(record.subject), text(record.grade), text(record.schedule)]
+    return getClassCandidateMetaItems(record)
+      .map((item) => text(item.value))
       .filter(Boolean)
       .join(" · ");
   }
@@ -901,6 +869,19 @@ function relatedMeta(kind: ManagementKind, record?: RelatedRecord) {
   return [text(record.subject), text(record.schedule)]
     .filter(Boolean)
     .join(" · ");
+}
+
+function getClassCandidateMetaItems(record?: RelatedRecord) {
+  if (!record) return [];
+  const teacher = text(record.teacher || record.teacher_name || record.teacherName);
+  const classroom = text(record.classroom || record.room || record.class_room);
+  return [
+    { key: "subject", value: text(record.subject), tone: "primary" as const },
+    { key: "grade", value: text(record.grade) },
+    { key: "schedule", value: stripSharedScheduleDetails(record.schedule, teacher, classroom) },
+    { key: "teacher", value: teacher },
+    { key: "classroom", value: classroom },
+  ];
 }
 
 function getStudentSchoolValue(record?: RelatedRecord) {
@@ -1231,7 +1212,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const [pendingRelationMode, setPendingRelationMode] = useState<"enrolled" | "waitlist" | null>(null);
   const [pendingClassStudentDetailId, setPendingClassStudentDetailId] = useState("");
   const [relationPickerOpen, setRelationPickerOpen] = useState(false);
-  const [studentClassScope, setStudentClassScope] = useState<StudentClassPickerScope>("all-grades");
+  const [studentClassFilters, setStudentClassFilters] = useState<StudentClassPickerFilters>({ subject: "", grade: "" });
+  const [classStudentFilters, setClassStudentFilters] = useState<ClassStudentPickerFilters>({ grade: "", school: "" });
   const [detailRowQuery, setDetailRowQuery] = useState("");
   const [relationQuery, setRelationQuery] = useState("");
   const classDetailRouteClearPendingRef = useRef(false);
@@ -1248,13 +1230,24 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   useEffect(() => {
     if (kind !== "students") return;
-    setStudentClassScope(getDefaultStudentClassPickerScope({ grade: form.grade }));
+    setStudentClassFilters((current) => ({ ...current, grade: text(form.grade) }));
+  }, [form.grade, kind]);
+
+  useEffect(() => {
+    if (kind !== "classes") return;
+    setClassStudentFilters({ grade: text(form.grade), school: "" });
   }, [form.grade, kind]);
 
   const createLabel = getLabel(kind);
   const isCreate = dialogMode === "create";
   const isDetail = dialogMode === "detail";
-  const dialogTitle = isCreate ? createLabel : `${selectedRow?.title || ""} 상세 정보`;
+  const dialogTitle = isCreate
+    ? createLabel
+    : kind === "students"
+      ? `${selectedRow?.title || ""} 학생정보`
+      : kind === "classes"
+        ? `${selectedRow?.title || ""} 수업정보`
+        : `${selectedRow?.title || ""} 상세 정보`;
   const relatedRecordsById = useMemo(
     () => {
       const records = new Map<string, RelatedRecord>();
@@ -1286,20 +1279,40 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     }),
     [relatedRows, selectedRelationIdSet],
   );
+  const studentClassSubjectOptions = useMemo(
+    () => kind === "students" ? getStudentClassSubjectOptions(availableRelatedRows) : [],
+    [availableRelatedRows, kind],
+  );
+  const studentClassGradeOptions = useMemo(
+    () => kind === "students" ? getStudentClassGradeOptions(availableRelatedRows, studentClassFilters.subject) : [],
+    [availableRelatedRows, kind, studentClassFilters.subject],
+  );
+  const classStudentGradeOptions = useMemo(
+    () => kind === "classes" ? getClassStudentGradeOptions(availableRelatedRows) : [],
+    [availableRelatedRows, kind],
+  );
+  const classStudentSchoolOptions = useMemo(
+    () => kind === "classes" ? getClassStudentSchoolOptions(availableRelatedRows, classStudentFilters.grade) : [],
+    [availableRelatedRows, classStudentFilters.grade, kind],
+  );
   const filteredAvailableRelatedRows = useMemo(() => {
     if (kind === "students") {
       return filterStudentClassCandidates(availableRelatedRows, {
         studentGrade: form.grade,
-        scope: studentClassScope,
+        scope: "all-grades",
+        subject: studentClassFilters.subject,
+        grade: studentClassFilters.grade,
         query: relationQuery,
       });
     }
-    const query = relationQuery.trim().toLowerCase();
-    if (!query) return availableRelatedRows;
-    return availableRelatedRows.filter((record) =>
-      `${relatedTitle(record)} ${relatedMeta(kind, record)}`.toLowerCase().includes(query),
-    );
-  }, [availableRelatedRows, form.grade, kind, relationQuery, studentClassScope]);
+    if (kind === "classes") {
+      return filterClassStudentCandidates(availableRelatedRows, {
+        ...classStudentFilters,
+        query: relationQuery,
+      });
+    }
+    return availableRelatedRows;
+  }, [availableRelatedRows, classStudentFilters, form.grade, kind, relationQuery, studentClassFilters]);
   const detailSearchLabel = kind === "classes" ? "수업명 검색" : kind === "students" ? "학생명 검색" : "교재명 검색";
   const detailSearchMatches = useMemo(() => {
     const query = detailRowQuery.trim().toLowerCase();
@@ -1567,7 +1580,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                         disabled={saving || !canMutateRows}
                         aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}
                       >
-                        해제
+                        {modeLabel === "수강" ? "수강 해제" : "대기 해제"}
                       </Button>
                     </div>
                   </div>
@@ -1599,7 +1612,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                   onClick={() => handleRelationModeChange(id, modeLabel === "수강" ? "waitlist" : "enrolled")}
                   disabled={saving || !canMutateRows}
                 >
-                  {modeLabel === "수강" ? "대기로" : "등록"}
+                  {modeLabel === "수강" ? "대기 전환" : "수강 전환"}
                 </Button>
                 <Button
                   type="button"
@@ -1610,7 +1623,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                   disabled={saving || !canMutateRows}
                   aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}
                 >
-                  해제
+                  {modeLabel === "수강" ? "수강 해제" : "대기 해제"}
                 </Button>
               </div>
             </div>
@@ -1949,22 +1962,33 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                           </button>
                         );
                       })}
-	                    </div>
-	                  </PopoverContent>
-	                </Popover>
-	              ) : kind === "classes" && field.name === "fee" ? (
-	                <ClassTuitionManwonInput
-	                  id={id}
-	                  name={field.name}
-	                  value={value}
-	                  placeholder={field.placeholder}
-	                  required={field.required}
-	                  disabled={!canMutateRows}
-	                  autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
-	                  onChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
-	                />
-	              ) : field.multiline ? (
-	                <Textarea
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : kind === "classes" && field.name === "capacity" ? (
+                <ClassCapacityInput
+                  id={id}
+                  name={field.name}
+                  value={value}
+                  placeholder={field.placeholder}
+                  required={field.required}
+                  disabled={!canMutateRows}
+                  autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
+                  onChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
+                />
+              ) : kind === "classes" && field.name === "fee" ? (
+                <ClassTuitionManwonInput
+                  id={id}
+                  name={field.name}
+                  value={value}
+                  placeholder={field.placeholder}
+                  required={field.required}
+                  disabled={!canMutateRows}
+                  autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
+                  onChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
+                />
+              ) : field.multiline ? (
+                <Textarea
                   id={id}
                   name={field.name}
                   value={value}
@@ -2029,11 +2053,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     setPendingRelationMode(null);
     setPendingClassStudentDetailId("");
     setRelationPickerOpen(false);
-    setStudentClassScope(
-      kind === "students"
-        ? getDefaultStudentClassPickerScope(row.raw || {})
-        : "all-grades",
-    );
+    setStudentClassFilters(getDefaultStudentClassPickerFilters(kind === "students" ? row.raw || {} : {}));
+    setClassStudentFilters(getDefaultClassStudentPickerFilters(kind === "classes" ? row.raw || {} : {}));
     setDetailRowQuery("");
     setRelationQuery("");
     setOperationError(null);
@@ -2540,13 +2561,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     const registeredCount = getClassEnrolledStudentIds(selectedRow).length;
     const waitlistCount = getClassWaitlistStudentIds(selectedRow).length;
     const capacity = Number(raw.capacity || selectedRow.metrics.capacity || 0);
-    const subject = text(form.subject || raw.subject || selectedRow.badge);
-    const status = text(form.status || selectedRow.status);
-    const grade = text(form.grade || raw.grade);
     const teacher = text(form.teacher || raw.teacher || raw.teacher_name || raw.teacherName) || "담당 미정";
     const classroom = text(form.classroom || raw.classroom || raw.room) || "강의실 미정";
-    const periodLabel = getClassPeriodLabel(selectedRow) || "기간 미정";
-    const scheduleSummary = formatClassScheduleSlots(getClassScheduleSlotsFromForm()).schedule.replace(/\n/g, ", ") || "시간 미정";
+    const scheduleSummary = formatClassScheduleDisplayLines(
+      formatClassScheduleSlots(getClassScheduleSlotsFromForm()).schedule,
+    ).join(", ") || "시간 미정";
     const summaryMetaItems = [
       { label: "요일/시간", value: scheduleSummary },
       { label: "선생님", value: teacher },
@@ -2562,10 +2581,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           <div className="grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  {grade ? <Badge>{grade}</Badge> : null}
-                  {subject ? <Badge>{subject}</Badge> : null}
-                </div>
+                <div className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">{selectedRow.title} 수업정보</div>
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                   {requestedClassReturnPath?.startsWith("/admin/students") ? (
                     <Button
@@ -2592,7 +2608,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                   ) : null}
                 </div>
               </div>
-              <div className="mt-1 truncate text-base font-semibold text-foreground">{selectedRow.title}</div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {summaryMetaItems.map((item) => (
                   <span key={item.label} className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs text-muted-foreground">
@@ -2603,10 +2618,6 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
               </div>
             </div>
             <div className="grid gap-2 lg:justify-self-end lg:min-w-56">
-              <div data-testid="class-summary-period-status" className="flex flex-wrap items-center gap-1.5 lg:justify-end">
-                <Badge variant="secondary">{periodLabel}</Badge>
-                {status ? <Badge variant="secondary">{status}</Badge> : null}
-              </div>
               <button
                 type="button"
                 data-testid="class-summary-roster-jump"
@@ -2648,11 +2659,8 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
     return (
       <section data-testid="class-textbook-management" className="space-y-3 border-t pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <div className="text-sm font-semibold">교재</div>
-            <div className="text-xs text-muted-foreground">이 수업에서 사용하는 교재를 연결합니다.</div>
-          </div>
+        <div data-testid="class-textbook-picker-panel" className="grid gap-1.5 rounded-md border bg-background p-3">
+          <Label>교재 선택</Label>
           <ClassTextbookPicker
             key={`${selectedRow.id}:${form.subject}:${form.grade}`}
             classRecord={{ ...raw, subject: form.subject, grade: form.grade }}
@@ -2662,38 +2670,49 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             onSelectedIdsChange={updateSelectedIds}
           />
         </div>
-        {selectedIds.length === 0 ? (
-          <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">연결된 교재 없음</div>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {selectedIds.map((id) => {
-              const textbook = catalogById.get(id);
-              return (
-                <div key={id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{textbook?.title || "교재 정보 확인 필요"}</div>
-                    {textbook ? (
-                      <div className="truncate text-xs text-muted-foreground">
-                        {[textbook.subject, textbook.publisher].filter(Boolean).join(" · ")}
-                      </div>
-                    ) : null}
-                  </div>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-                    aria-label={`${textbook?.title || "교재"} 연결 해제`}
-                    disabled={!canMutateRows}
-                    onClick={() => updateSelectedIds(selectedIds.filter((selectedId) => selectedId !== id))}
-                  >
-                    <X className="size-4" aria-hidden="true" />
-                  </Button>
-                </div>
-              );
-            })}
+        <div className="overflow-hidden rounded-md border bg-background">
+          <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+            <div className="text-sm font-semibold">연결 교재</div>
+            <Badge variant="secondary">{selectedIds.length}권</Badge>
           </div>
-        )}
+          {selectedIds.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-muted-foreground">연결된 교재 없음</div>
+          ) : (
+            <div className="divide-y">
+              {selectedIds.map((id) => {
+                const textbook = catalogById.get(id);
+                return (
+                  <div key={id} className="flex min-w-0 items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{textbook?.title || "교재 정보 확인 필요"}</div>
+                      {textbook ? (
+                        <PickerMetaPills
+                          className="mt-1"
+                          items={[
+                            { key: "subject", value: textbook.subject, tone: "primary" },
+                            { key: "subSubject", value: textbook.subSubject },
+                            { key: "publisher", value: textbook.publisher },
+                          ]}
+                        />
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                      aria-label={`${textbook?.title || "교재"} 연결 해제`}
+                      disabled={!canMutateRows}
+                      onClick={() => updateSelectedIds(selectedIds.filter((selectedId) => selectedId !== id))}
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </section>
     );
   };
@@ -2740,36 +2759,91 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                     onChange={(event) => setRelationQuery(event.target.value)}
                   />
                   {kind === "students" ? (
-                    <div className="grid grid-cols-2 rounded-md bg-muted p-1" aria-label="수업 학년 범위">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={studentClassScope === "same-grade" ? "secondary" : "ghost"}
-                        disabled={!form.grade}
-                        onClick={() => setStudentClassScope("same-grade")}
-                      >
-                        같은 학년
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={studentClassScope === "all-grades" ? "secondary" : "ghost"}
-                        onClick={() => setStudentClassScope("all-grades")}
-                      >
-                        전체 학년
-                      </Button>
-                    </div>
+                    <PickerFilterSurface>
+                      <PickerFilterField label="과목">
+                        <Select
+                          value={studentClassFilters.subject || "all"}
+                          onValueChange={(value) => setStudentClassFilters((current) => ({
+                            ...current,
+                            subject: value === "all" ? "" : value,
+                          }))}
+                        >
+                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="수업 과목">
+                            <SelectValue placeholder="과목" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">전체 과목</SelectItem>
+                            {studentClassSubjectOptions.map((subject) => (
+                              <SelectItem key={subject} value={subject}>{subject}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </PickerFilterField>
+                      <PickerFilterField label="학년">
+                        <Select
+                          value={studentClassFilters.grade || "all"}
+                          onValueChange={(value) => setStudentClassFilters((current) => ({
+                            ...current,
+                            grade: value === "all" ? "" : value,
+                          }))}
+                        >
+                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="수업 학년">
+                            <SelectValue placeholder="학년" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">전체 학년</SelectItem>
+                            {[...new Set([studentClassFilters.grade, ...studentClassGradeOptions].filter(Boolean))].map((grade) => (
+                              <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </PickerFilterField>
+                    </PickerFilterSurface>
+                  ) : kind === "classes" ? (
+                    <PickerFilterSurface>
+                      <PickerFilterField label="학년">
+                        <Select
+                          value={classStudentFilters.grade || "all"}
+                          onValueChange={(value) => setClassStudentFilters({
+                            grade: value === "all" ? "" : value,
+                            school: "",
+                          })}
+                        >
+                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학생 학년">
+                            <SelectValue placeholder="학년" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">전체 학년</SelectItem>
+                            {[...new Set([classStudentFilters.grade, ...classStudentGradeOptions].filter(Boolean))].map((grade) => (
+                              <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </PickerFilterField>
+                      <PickerFilterField label="학교">
+                        <Select
+                          value={classStudentFilters.school || "all"}
+                          onValueChange={(value) => setClassStudentFilters((current) => ({
+                            ...current,
+                            school: value === "all" ? "" : value,
+                          }))}
+                        >
+                          <SelectTrigger className={PICKER_FILTER_TRIGGER_CLASS_NAME} aria-label="학생 학교">
+                            <SelectValue placeholder="학교" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">전체 학교</SelectItem>
+                            {classStudentSchoolOptions.map((school) => (
+                              <SelectItem key={school} value={school}>{school}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </PickerFilterField>
+                    </PickerFilterSurface>
                   ) : null}
                   <div className="max-h-72 overscroll-contain overflow-y-auto">
                     {filteredAvailableRelatedRows.length === 0 ? (
-                      kind === "students" && studentClassScope === "same-grade" ? (
-                        <div className="flex items-center justify-between gap-2 px-2 py-3 text-sm text-muted-foreground">
-                          <span>같은 학년 수업 없음</span>
-                          <Button type="button" size="sm" variant="outline" onClick={() => setStudentClassScope("all-grades")}>전체 학년</Button>
-                        </div>
-                      ) : (
-                        <div className="px-2 py-3 text-sm text-muted-foreground">추가 가능한 {relationLabel} 없음</div>
-                      )
+                      <div className="px-2 py-3 text-sm text-muted-foreground">조건에 맞는 {relationLabel} 없음</div>
                     ) : filteredAvailableRelatedRows.map((record) => {
                       const id = text(record.id);
 
@@ -2778,7 +2852,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                           key={id}
                           type="button"
                           className={cn(
-                            "grid w-full gap-0.5 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
+                            "grid w-full gap-1.5 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
                             targetId === id && "bg-primary/10 text-primary hover:bg-primary/10",
                           )}
                           onClick={() => {
@@ -2789,7 +2863,11 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                           disabled={!canMutateRows}
                         >
                           <span className="truncate font-medium">{relatedTitle(record)}</span>
-                          {relatedMeta(kind, record) ? <span className="truncate text-xs text-muted-foreground">{relatedMeta(kind, record)}</span> : null}
+                          {kind === "students" ? (
+                            <PickerMetaPills items={getClassCandidateMetaItems(record)} />
+                          ) : relatedMeta(kind, record) ? (
+                            <span className="truncate text-xs text-muted-foreground">{relatedMeta(kind, record)}</span>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -2799,7 +2877,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             </Popover>
           </div>
           <div className="grid content-end">
-            <Button type="button" className="h-10 px-5" onClick={() => requestRelationSave("enrolled")} disabled={!canMutateRows || !targetId || saving}>등록 추가</Button>
+            <Button type="button" className="h-10 px-5" onClick={() => requestRelationSave("enrolled")} disabled={!canMutateRows || !targetId || saving}>{kind === "students" ? "수강 추가" : "등록 추가"}</Button>
           </div>
           <div className="grid content-end">
             <Button type="button" variant="outline" className="h-10 px-5" onClick={() => requestRelationSave("waitlist")} disabled={!canMutateRows || !targetId || saving}>대기 추가</Button>
@@ -2808,12 +2886,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
         <div className={cn("grid gap-3 text-sm", kind === "students" && "sm:grid-cols-2")}>
           {kind === "students" ? (
             <>
-              {renderRelationList("등록 수업", getStudentEnrolledClassIds(selectedRow), "수강")}
+              {renderRelationList("수강 수업", getStudentEnrolledClassIds(selectedRow), "수강")}
               {renderRelationList("대기 수업", getStudentWaitlistClassIds(selectedRow), "대기")}
             </>
           ) : (
             <>
-              {renderRelationList("등록 학생", classEnrolledStudentIds, "수강")}
+              {renderRelationList("수강 학생", classEnrolledStudentIds, "수강")}
               {renderRelationList("대기 학생", classWaitlistStudentIds, "대기")}
             </>
           )}
@@ -2824,7 +2902,9 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
   const relationConfirmRecord = targetId ? resolveRelatedRecord(targetId) : undefined;
   const relationConfirmTargetLabel = relationConfirmRecord ? relatedTitle(relationConfirmRecord, relationLabel) : relationLabel;
-  const relationConfirmActionLabel = pendingRelationMode === "enrolled" ? "등록 추가" : "대기 추가";
+  const relationConfirmActionLabel = pendingRelationMode === "enrolled"
+    ? (kind === "students" ? "수강 추가" : "등록 추가")
+    : "대기 추가";
   const pendingClassStudentDetailRecord = pendingClassStudentDetailId ? resolveRelatedRecord(pendingClassStudentDetailId) : undefined;
   const pendingClassStudentDetailName = pendingClassStudentDetailId
     ? pendingClassStudentDetailRecord
@@ -2908,64 +2988,72 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
             </div>
           ) : isDetail && selectedRow ? (
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge>{selectedRow.badge}</Badge>
-                  <Badge variant="secondary">{selectedRow.status}</Badge>
+              {kind !== "students" || requestedStudentReturnPath ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {kind !== "students" ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge>{selectedRow.badge}</Badge>
+                      <Badge variant="secondary">{selectedRow.status}</Badge>
+                    </div>
+                  ) : null}
+                  {kind === "students" && requestedStudentReturnPath ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      data-testid="student-detail-return-to-class"
+                      className="h-8 rounded-md px-2.5 text-xs"
+                      onClick={() => router.push(requestedStudentReturnPath)}
+                    >
+                      수업 상세
+                    </Button>
+                  ) : null}
                 </div>
-                {kind === "students" && requestedStudentReturnPath ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    data-testid="student-detail-return-to-class"
-                    className="h-8 rounded-md px-2.5 text-xs"
-                    onClick={() => router.push(requestedStudentReturnPath)}
-                  >
-                    수업 상세
-                  </Button>
-                ) : null}
-              </div>
+              ) : null}
 
-              <section className="space-y-2">
-                <Label htmlFor={`${kind}-detail-row-search`}>{detailSearchLabel}</Label>
-                <Input
-                  id={`${kind}-detail-row-search`}
-                  value={detailRowQuery}
-                  placeholder={detailSearchLabel}
-                  onChange={(event) => setDetailRowQuery(event.target.value)}
-                />
-                {detailSearchMatches.length > 0 ? (
-                  <div className="overflow-hidden rounded-lg border bg-background">
-                    {detailSearchMatches.map((row) => (
-                      <button
-                        key={row.id}
-                        type="button"
-                        className="grid w-full gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/60"
-                        onClick={() => void openRow(row)}
-                      >
-                        <span className="truncate text-sm font-medium">{row.title}</span>
-                        <span className="truncate text-xs text-muted-foreground">{row.subtitle || row.metaSummary || "-"}</span>
-                      </button>
+              {kind !== "students" ? (
+                <section className="space-y-2">
+                  <Label htmlFor={`${kind}-detail-row-search`}>{detailSearchLabel}</Label>
+                  <Input
+                    id={`${kind}-detail-row-search`}
+                    value={detailRowQuery}
+                    placeholder={detailSearchLabel}
+                    onChange={(event) => setDetailRowQuery(event.target.value)}
+                  />
+                  {detailSearchMatches.length > 0 ? (
+                    <div className="overflow-hidden rounded-lg border bg-background">
+                      {detailSearchMatches.map((row) => (
+                        <button
+                          key={row.id}
+                          type="button"
+                          className="grid w-full gap-0.5 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/60"
+                          onClick={() => void openRow(row)}
+                        >
+                          <span className="truncate text-sm font-medium">{row.title}</span>
+                          <span className="truncate text-xs text-muted-foreground">{row.subtitle || row.metaSummary || "-"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              {kind !== "students" ? (
+                <section className="border-y py-3">
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    {getDetailMetrics(kind, selectedRow).map((metric) => (
+                      <div key={metric.label} className="px-1 py-1.5">
+                        <div className="text-xs text-muted-foreground">{metric.label}</div>
+                        <div className="mt-1 text-sm font-semibold">{metric.value}</div>
+                      </div>
                     ))}
                   </div>
-                ) : null}
-              </section>
-
-              <section className="border-y py-3">
-                <div className="grid gap-2 sm:grid-cols-4">
-                  {getDetailMetrics(kind, selectedRow).map((metric) => (
-                    <div key={metric.label} className="px-1 py-1.5">
-                      <div className="text-xs text-muted-foreground">{metric.label}</div>
-                      <div className="mt-1 text-sm font-semibold">{metric.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+                </section>
+              ) : null}
 
               <section className="space-y-3">
-                <div className="text-sm font-semibold">{kind === "classes" ? "수업 정보" : kind === "students" ? "학생 정보" : "교재 정보"}</div>
-                {renderEditableFields("detail")}
+                {kind !== "students" ? <div className="text-sm font-semibold">{kind === "classes" ? "수업 정보" : "교재 정보"}</div> : null}
+                {renderEditableFields("detail", kind === "students" ? STUDENT_DETAIL_FIELD_NAMES : undefined)}
               </section>
 
               {renderRelationManagementSection()}

@@ -201,13 +201,13 @@ test("management table exposes resize handles with a clear reset action", async 
   assert.doesNotMatch(resizeHandle, /tabIndex=\{-1\}/);
 });
 
-test("class teacher and classroom cells space comma-delimited values for scanning", async () => {
+test("class teacher and classroom cells render multiple values on separate rows", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
-  assert.match(source, /function formatDelimitedLabel\(value: unknown\)/);
-  assert.match(source, /replace\(\/\\s\*,\\s\*\/g, ", "\)/);
-  assert.match(source, /renderPlainCell\(formatDelimitedLabel\(\(row\.original\.raw \|\| \{\}\)\.teacher/);
-  assert.match(source, /renderPlainCell\(formatDelimitedLabel\(\(row\.original\.raw \|\| \{\}\)\.classroom/);
+  assert.match(source, /function renderClassResourceCell\(value: unknown\)/);
+  assert.match(source, /splitClassResourceDisplayValues\(value\)/);
+  assert.match(source, /renderClassResourceCell\(\(row\.original\.raw \|\| \{\}\)\.teacher/);
+  assert.match(source, /renderClassResourceCell\(\(row\.original\.raw \|\| \{\}\)\.classroom/);
 });
 
 test("class schedule omits repeated teacher and classroom details", async () => {

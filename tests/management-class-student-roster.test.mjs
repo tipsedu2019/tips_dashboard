@@ -117,7 +117,7 @@ test("class management keeps progress out while allowing direct textbook links i
   assert.match(hookSource, /grade_levels:/);
   assert.match(hookSource, /sub_subject:/);
   assert.match(pickerSource, /전체 보기/);
-  assert.match(pickerSource, /교재 추가/);
+  assert.match(pickerSource, /교재 검색 또는 선택/);
   assert.match(pickerSource, /조건에 맞는 교재 없음/);
   assert.match(pickerSource, /max-h-72 overscroll-contain overflow-y-auto/);
   assert.match(pickerSource, /aria-label="학교 구분"/);
@@ -131,30 +131,81 @@ test("class management keeps progress out while allowing direct textbook links i
   assert.doesNotMatch(detailSource, /\{renderClassCurriculumPanel\(\)\}/);
 });
 
+test("management pickers share labeled compact filter surfaces and textbook candidates omit publisher pills", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const pickerSource = await readFile(new URL("src/features/management/class-textbook-picker.tsx", root), "utf8");
+  const filterSource = await readFile(new URL("src/features/management/picker-filter-surface.tsx", root), "utf8").catch(() => "");
+  const candidateStart = pickerSource.indexOf("candidates.map");
+  const candidateSource = pickerSource.slice(candidateStart);
+
+  assert.match(filterSource, /export function PickerFilterSurface/);
+  assert.match(filterSource, /export function PickerFilterField/);
+  assert.match(filterSource, /export const PICKER_FILTER_TRIGGER_CLASS_NAME/);
+  assert.match(pickerSource, /<PickerFilterField label="과목">[\s\S]*<PickerFilterField label="세부과목">[\s\S]*<PickerFilterField label="학교 구분">[\s\S]*<PickerFilterField label="학년">/);
+  assert.match(pageSource, /<PickerFilterField label="과목">[\s\S]*<PickerFilterField label="학년">/);
+  assert.match(pageSource, /<PickerFilterField label="학년">[\s\S]*<PickerFilterField label="학교">/);
+  assert.doesNotMatch(candidateSource, /key: "publisher"/);
+  assert.match(pickerSource, /placeholder="교재명, 출판사 검색"/);
+});
+
 test("student class picker shows class subject metadata and keeps its long menu scrollable inside the dialog", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const pillSource = await readFile(new URL("src/features/management/picker-meta-pills.tsx", root), "utf8").catch(() => "");
 
-  assert.match(pageSource, /function relatedMeta\(kind: ManagementKind, record\?: RelatedRecord\)/);
-  assert.match(pageSource, /if \(kind === "students"\)/);
-  assert.match(pageSource, /text\(record\.subject\)/);
-  assert.match(pageSource, /text\(record\.grade\)/);
-  assert.match(pageSource, /text\(record\.schedule\)/);
+  assert.match(pageSource, /function getClassCandidateMetaItems\(record\?: RelatedRecord\)/);
+  assert.match(pageSource, /key: "subject"/);
+  assert.match(pageSource, /key: "grade"/);
+  assert.match(pageSource, /key: "schedule"/);
+  assert.match(pageSource, /key: "teacher"/);
+  assert.match(pageSource, /key: "classroom"/);
+  assert.match(pageSource, /<PickerMetaPills items=\{getClassCandidateMetaItems\(record\)\}/);
+  assert.match(pillSource, /rounded-full/);
   assert.match(pageSource, /<Popover modal open=\{relationPickerOpen\}/);
   assert.match(pageSource, /max-h-72 overscroll-contain overflow-y-auto/);
 });
 
-test("student class picker defaults by grade and can widen to all grades", async () => {
+test("student class picker narrows by subject first and grade second", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const modelSource = await readFile(new URL("src/features/management/student-class-picker-model.ts", root), "utf8");
 
-  assert.match(pageSource, /getDefaultStudentClassPickerScope/);
+  const subjectIndex = pageSource.indexOf('aria-label="수업 과목"');
+  const gradeIndex = pageSource.indexOf('aria-label="수업 학년"');
+  assert.ok(subjectIndex >= 0 && gradeIndex > subjectIndex);
+  assert.match(pageSource, /getDefaultStudentClassPickerFilters/);
   assert.match(pageSource, /filterStudentClassCandidates/);
-  assert.match(pageSource, /같은 학년/);
+  assert.match(pageSource, /전체 과목/);
   assert.match(pageSource, /전체 학년/);
-  assert.match(pageSource, /같은 학년 수업 없음/);
-  assert.match(pageSource, /studentGrade: form\.grade/);
-  assert.match(modelSource, /scope === "same-grade"/);
-  assert.doesNotMatch(modelSource, /classRecord\.name[\s\S]*normalizeGrade/);
+  assert.match(modelSource, /getStudentClassSubjectOptions/);
+  assert.match(modelSource, /getStudentClassGradeOptions/);
+  assert.match(modelSource, /normalizeGrade\(classRecord\.grade\) !== selectedGrade/);
+});
+
+test("class student picker narrows by grade first and school second", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const gradeIndex = pageSource.indexOf('aria-label="학생 학년"');
+  const schoolIndex = pageSource.indexOf('aria-label="학생 학교"');
+
+  assert.ok(gradeIndex >= 0 && schoolIndex > gradeIndex);
+  assert.match(pageSource, /getDefaultClassStudentPickerFilters/);
+  assert.match(pageSource, /getClassStudentGradeOptions/);
+  assert.match(pageSource, /getClassStudentSchoolOptions/);
+  assert.match(pageSource, /filterClassStudentCandidates/);
+});
+
+test("class textbook picker follows subject-detail then school-grade order and matches the roster selector surface", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const pickerSource = await readFile(new URL("src/features/management/class-textbook-picker.tsx", root), "utf8");
+  const subjectIndex = pickerSource.indexOf('aria-label="과목"');
+  const subSubjectIndex = pickerSource.indexOf('aria-label="세부과목"');
+  const schoolIndex = pickerSource.indexOf('aria-label="학교 구분"');
+  const gradeIndex = pickerSource.indexOf('aria-label="학년"');
+
+  assert.ok(subjectIndex >= 0 && subSubjectIndex > subjectIndex);
+  assert.ok(schoolIndex > subSubjectIndex && gradeIndex > schoolIndex);
+  assert.match(pageSource, /data-testid="class-textbook-picker-panel"/);
+  assert.match(pageSource, /교재 선택/);
+  assert.match(pageSource, /연결 교재/);
+  assert.match(pickerSource, /교재 검색 또는 선택/);
 });
 
 test("curriculum session summaries preserve per-textbook ranges for official class details", async () => {
@@ -424,7 +475,7 @@ test("class student add control uses one picker and confirms direct enrolled or 
   assert.match(pageSource, /requestRelationSave\("waitlist"\)/);
   assert.match(pageSource, /const confirmRelationSave = \(\) =>/);
   assert.match(pageSource, /handleRelationSave\(pendingRelationMode\)/);
-  assert.match(pageSource, />등록 추가<\/Button>/);
+  assert.match(pageSource, /kind === "students" \? "수강 추가" : "등록 추가"/);
   assert.match(pageSource, />대기 추가<\/Button>/);
   assert.doesNotMatch(pageSource, /const \[relationMode, setRelationMode\]/);
   assert.doesNotMatch(pageSource, /aria-pressed=\{relationMode ===/);
@@ -496,6 +547,7 @@ test("class detail summary replaces the visible dialog title and keeps close act
   assert.match(summarySource, /data-testid="class-detail-sticky-close"/);
   assert.match(summarySource, /aria-label="수업 상세 닫기"/);
   assert.match(summarySource, /onClick=\{\(\) => handleDialogOpenChange\(false\)\}/);
+  assert.match(summarySource, /\{selectedRow\.title\} 수업정보/);
   assert.doesNotMatch(detailSource, /<div className="mt-1 truncate text-base font-semibold text-foreground">\{selectedRow\.title\}<\/div>[\s\S]*<div className="mt-0\.5 truncate text-sm text-muted-foreground">/);
 });
 
@@ -517,17 +569,22 @@ test("class management database keeps list filters in the URL for cross-view ret
   assert.match(tableSource, /syncClassListQueryState\(\{ \[filter\.id\]: nextFilterValue \}\)/);
 });
 
-test("class official summary keeps the period visible as core class identity", async () => {
+test("class official summary removes redundant identity and state badges", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const summaryStart = pageSource.indexOf("const renderClassSummaryBar = () =>");
+  const summaryEnd = pageSource.indexOf("  const renderRelationManagementSection", summaryStart);
+  const summarySource = pageSource.slice(summaryStart, summaryEnd);
 
-  assert.match(pageSource, /function getClassPeriodLabel\(row: ManagementRow\)/);
-  assert.match(pageSource, /raw\.class_group_names \|\| raw\.classGroupNames/);
-  assert.match(pageSource, /getClassAcademicYearOption\(raw\), getClassTermOption\(raw\)/);
-  assert.match(pageSource, /const periodLabel = getClassPeriodLabel\(selectedRow\) \|\| "기간 미정"/);
-  assert.match(pageSource, /const scheduleSummary = formatClassScheduleSlots\(getClassScheduleSlotsFromForm\(\)\)\.schedule\.replace\(\/\\n\/g, ", "\) \|\| "시간 미정"/);
-  assert.match(pageSource, /\{grade \? <Badge>\{grade\}<\/Badge> : null\}/);
-  assert.match(pageSource, /data-testid="class-summary-period-status"/);
-  assert.match(pageSource, /<Badge variant="secondary">\{periodLabel\}<\/Badge>/);
+  assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
+  assert.match(pageSource, /const scheduleSummary = formatClassScheduleDisplayLines\([\s\S]*formatClassScheduleSlots\(getClassScheduleSlotsFromForm\(\)\)\.schedule,[\s\S]*\)\.join\(", "\) \|\| "시간 미정"/);
+  assert.doesNotMatch(summarySource, /const periodLabel = getClassPeriodLabel/);
+  assert.doesNotMatch(summarySource, /const subject =/);
+  assert.doesNotMatch(summarySource, /const status =/);
+  assert.doesNotMatch(summarySource, /const grade =/);
+  assert.doesNotMatch(summarySource, /data-testid="class-summary-period-status"/);
+  assert.doesNotMatch(summarySource, /\{grade \? <Badge/);
+  assert.doesNotMatch(summarySource, /\{subject \? <Badge/);
+  assert.doesNotMatch(summarySource, /<Badge variant="secondary">\{periodLabel\}<\/Badge>/);
   assert.match(pageSource, /\{summaryMetaItems\.map\(\(item\) => \(/);
   assert.match(pageSource, /<span key=\{item\.label\} className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs text-muted-foreground">/);
   assert.match(pageSource, /<span className="truncate font-medium text-foreground">\{item\.value\}<\/span>/);
@@ -543,6 +600,15 @@ test("class official summary keeps the period visible as core class identity", a
   assert.doesNotMatch(pageSource, /grid grid-cols-2 gap-2 text-sm/);
   assert.doesNotMatch(pageSource, /data-testid="class-audit-summary"/);
   assert.doesNotMatch(pageSource, /auditInfo\.label/);
+});
+
+test("class database groups matching schedule times and stacks multi-value resources", async () => {
+  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+
+  assert.match(tableSource, /formatClassScheduleDisplayLines/);
+  assert.match(tableSource, /splitClassResourceDisplayValues/);
+  assert.match(tableSource, /function renderClassResourceCell/);
+  assert.match(tableSource, /cell: \(\{ row \}\) => renderClassResourceCell\(/);
 });
 
 test("class official summary roster count jumps to the student roster section", async () => {
@@ -574,15 +640,18 @@ test("class detail basic fields use the requested operator order", async () => {
 
 test("class detail basic section uses structured schedule slots instead of free-text teacher time room fields", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const scheduleSource = await readFile(new URL("src/features/management/class-schedule-slots.ts", root), "utf8");
   const detailStart = pageSource.indexOf('data-testid="class-official-detail"');
   const detailEnd = pageSource.indexOf("<DialogFooter", detailStart);
   const detailSource = pageSource.slice(detailStart, detailEnd);
 
   assert.ok(detailStart >= 0 && detailEnd > detailStart);
   assert.match(pageSource, /\{ name: "schedule", label: "요일\/시간", placeholder: "월 18:00-20:00" \}/);
-  assert.match(pageSource, /type ClassScheduleSlot = \{/);
-  assert.match(pageSource, /function parseClassScheduleSlots/);
-  assert.match(pageSource, /function formatClassScheduleSlots/);
+  assert.match(pageSource, /type ClassScheduleSlot,/);
+  assert.match(pageSource, /from "\.\/class-schedule-slots"/);
+  assert.match(scheduleSource, /export type ClassScheduleSlot = \{/);
+  assert.match(scheduleSource, /export function parseClassScheduleSlots/);
+  assert.match(scheduleSource, /export function formatClassScheduleSlots/);
   assert.match(pageSource, /const renderClassScheduleSlotEditor = \(\) =>/);
   assert.match(pageSource, /data-testid="class-schedule-slot-editor"/);
   assert.match(pageSource, /data-testid="class-schedule-slot-row"/);
@@ -628,6 +697,25 @@ test("class tuition field edits in ten-thousand won units", async () => {
   assert.doesNotMatch(pageSource, /id=\{id\}[\s\S]*name=\{field\.name\}[\s\S]*type=\{field\.type \|\| "text"\}[\s\S]*field\.name === "fee"/);
 });
 
+test("class capacity uses the same compact stepper pattern as tuition", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(pageSource, /function ClassCapacityInput/);
+  assert.match(pageSource, /data-testid="class-capacity-input"/);
+  assert.match(pageSource, /aria-label="정원 1명 올리기"/);
+  assert.match(pageSource, /aria-label="정원 1명 내리기"/);
+  assert.match(pageSource, /kind === "classes" && field\.name === "capacity"/);
+  assert.doesNotMatch(pageSource, /id="classes-detail-capacity"[\s\S]{0,500}type="number"/);
+});
+
+test("class roster uses explicit enrollment labels", async () => {
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+
+  assert.match(pageSource, /renderRelationList\("수강 학생", classEnrolledStudentIds, "수강"\)/);
+  assert.match(pageSource, /\{modeLabel === "수강" \? "수강 해제" : "대기 해제"\}/);
+  assert.doesNotMatch(pageSource, /renderRelationList\("등록 학생", classEnrolledStudentIds/);
+});
+
 test("class schedule add copies the previous row and advances only the day", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
@@ -662,13 +750,13 @@ test("class schedule rows keep all five input columns equal to prevent overlap",
 });
 
 test("class schedule parser does not treat classroom aliases as teachers", async () => {
-  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const scheduleSource = await readFile(new URL("src/features/management/class-schedule-slots.ts", root), "utf8");
 
-  assert.match(pageSource, /function looksLikeClassroomAlias\(value: unknown\)/);
-  assert.match(pageSource, /const firstDetailIsTeacher = firstDetail && !looksLikeClassroomAlias\(firstDetail\)/);
-  assert.match(pageSource, /teacher: firstDetailIsTeacher \? firstDetail : teachers\[slots\.length\] \|\| teachers\[0\] \|\| ""/);
-  assert.match(pageSource, /classroom: firstDetailIsTeacher[\s\S]*: detailParts\[detailParts\.length - 1\] \|\| classroomsByDay\.get\(day\)/);
-  assert.doesNotMatch(pageSource, /const teacher = detailParts\.length > 1 \? detailParts\[0\]/);
+  assert.match(scheduleSource, /function looksLikeClassroomAlias\(value: unknown\)/);
+  assert.match(scheduleSource, /const firstDetailIsTeacher = Boolean\(firstDetail && !looksLikeClassroomAlias\(firstDetail\)\)/);
+  assert.match(scheduleSource, /teacher: firstDetailIsTeacher \? firstDetail : getFallbackValue\(teachers, slotIndex\)/);
+  assert.match(scheduleSource, /classroom: firstDetailIsTeacher[\s\S]*: detailParts\[detailParts\.length - 1\] \|\| classroomsByDay\.get\(day\)/);
+  assert.doesNotMatch(scheduleSource, /const teacher = detailParts\.length > 1 \? detailParts\[0\]/);
 });
 
 test("class schedule classroom choices are narrowed by the selected subject", async () => {
@@ -697,19 +785,17 @@ test("class official summary hides active textbook progress status", async () =>
 
 test("class official summary omits repeated schedule teacher and classroom details", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-  const formatStart = pageSource.indexOf("function formatClassScheduleSlots");
-  const formatEnd = pageSource.indexOf("function getClassSubjectValue", formatStart);
-  const formatSource = pageSource.slice(formatStart, formatEnd);
+  const scheduleSource = await readFile(new URL("src/features/management/class-schedule-slots.ts", root), "utf8");
   const summaryStart = pageSource.indexOf("const renderClassSummaryBar = () =>");
   const summaryEnd = pageSource.indexOf("  const renderRelationManagementSection", summaryStart);
   const summarySource = pageSource.slice(summaryStart, summaryEnd);
 
-  assert.ok(formatStart >= 0 && formatEnd > formatStart);
   assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
-  assert.match(formatSource, /const hasSharedScheduleDetails = uniqueTeachers\.length <= 1 && uniqueClassrooms\.length <= 1/);
-  assert.match(formatSource, /const details = hasSharedScheduleDetails \? "" : \[slot\.teacher, slot\.classroom\]\.filter\(Boolean\)\.join\(", "\)/);
-  assert.match(summarySource, /const scheduleSummary = formatClassScheduleSlots\(getClassScheduleSlotsFromForm\(\)\)\.schedule\.replace\(\/\\n\/g, ", "\) \|\| "시간 미정"/);
-  assert.doesNotMatch(formatSource, /const details = \[slot\.teacher, slot\.classroom\]\.filter\(Boolean\)\.join\(", "\)/);
+  assert.match(scheduleSource, /const hasSharedScheduleDetails = uniqueTeachers\.length <= 1 && uniqueClassrooms\.length <= 1/);
+  assert.match(scheduleSource, /const details = hasSharedScheduleDetails \? "" : \[slot\.teacher, slot\.classroom\]\.filter\(Boolean\)\.join\(", "\)/);
+  assert.match(summarySource, /const scheduleSummary = formatClassScheduleDisplayLines\([\s\S]*formatClassScheduleSlots\(getClassScheduleSlotsFromForm\(\)\)\.schedule,[\s\S]*\)\.join\(", "\) \|\| "시간 미정"/);
+  assert.doesNotMatch(scheduleSource, /const details = \[slot\.teacher, slot\.classroom\]\.filter\(Boolean\)\.join\(", "\)/);
+  assert.match(pageSource, /stripSharedScheduleDetails\(record\.schedule, teacher, classroom\)/);
 });
 
 test("class official summary hides next lesson and current session context", async () => {
