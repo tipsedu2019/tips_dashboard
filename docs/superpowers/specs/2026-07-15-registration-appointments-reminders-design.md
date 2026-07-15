@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-15
 
-**Status:** Approved direction, written-spec review pending
+**Status:** Approved
 
 **Depends on:** [Common Notification Control Plane Design](./2026-07-15-common-notification-control-plane-design.md), [Notification Workflow Adapters Design](./2026-07-15-notification-workflow-adapters-design.md)
 
@@ -78,7 +78,8 @@ The current owner is not the same concept as the actor who performed a mutation.
 - Exact `scheduled_at` timestamp.
 - Nonblank `place`.
 - `status`: `scheduled`, `completed`, or `canceled`.
-- Positive `notification_revision`.
+- Positive `notification_revision`, stored as a PostgreSQL `integer` and exposed as a JSON/TypeScript `number`; no calendar, mutation, or service boundary casts it to a decimal string.
+- Positive `recipient_revision`, stored as a PostgreSQL `bigint` and exposed as a JSON/TypeScript decimal string. It is used only as the common `target_generation`, increments when the normalized distinct reminder-recipient set changes, and never substitutes for numeric `notification_revision`.
 - Creator and database timestamps.
 
 The appointment does not own a combined subject result or one global counselor.
@@ -240,7 +241,7 @@ The projection includes:
 - Appointment kind.
 - Place.
 - Status.
-- Notification revision.
+- Notification revision as an integer/TypeScript `number`, without a text cast.
 - Participating subject badges derived from canonical children.
 - Student display name permitted by the current registration access policy.
 - Deep link to the canonical registration appointment.
@@ -291,9 +292,11 @@ A canonical appointment mutation evaluates the three active scheduled variants i
 - Subject participation change.
 - Cancellation.
 - Completion.
-- Director reassignment as a `registration.director_assigned` source event plus durable target-reconciliation job, not a new reminder event.
+- Director reassignment, represented by exactly one existing version-2 raw registration-track event whose `event_type` is `director_default_resolved`, `director_manual_override`, or `director_default_cleared`; that raw event is mapped once to canonical `registration.director_assigned` and supplies the durable target-reconciliation job's source UUID, but it is not a new reminder event.
 
-The producer uses canonical IDs, persisted appointment `notification_revision`, stable rule IDs, and current rule revisions. It never calls a provider and never accepts browser-supplied title, body, recipient, phone number, or webhook. If a required notification event, fan-out job, or director-change target-reconciliation job cannot be inserted, the canonical mutation rolls back. Once they commit, fan-out/reconciliation execution, delivery creation, rendering, and provider failures do not roll back the appointment or track mutation.
+The producer uses canonical IDs, persisted appointment `notification_revision`, stable rule IDs, and current rule revisions. The common recorder returns only `{event_id, fanout_job_id}`; the registration mutation exposes `fanout_job_id` as an opaque `{job_kind: 'fanout', job_id}` status reference and never queries a common job table. It never calls a provider and never accepts browser-supplied title, body, recipient, phone number, or webhook. If a required notification event, fan-out job, or director-change target-reconciliation job cannot be inserted, the canonical mutation rolls back. Once they commit, fan-out/reconciliation execution, delivery creation, rendering, and provider failures do not roll back the appointment or track mutation.
+
+The director-assignment mutation calls `write_registration_track_event_v2` exactly once for the raw domain event and retains its returned UUID. It must not also call the seven-argument wrapper for the same logical reassignment and must never insert a second raw row named `registration.director_assigned`. The later workflow-adapters migration extends that writer to map this same raw UUID exactly once to canonical event key `registration.director_assigned`; the target-reconciliation job keeps the same raw source UUID as `source_event_id`.
 
 ### Layer 1: immutable notification events
 
@@ -401,7 +404,7 @@ Date-based variants always interpret their value in `Asia/Seoul`; the relative v
 
 Each wall-clock rule states that it is omitted when its computed time is not before the appointment; for example, a D-day 14:00 reminder is not sent for an appointment at or before 14:00. The appointment editor shows a compact read-only list of the reminder occurrences actually scheduled from the current draft, excluding passed and not-before-appointment variants.
 
-Settings are never component-local state. The registration scoped dialog and `/admin/settings/notifications` use the same `NotificationControlPanel`, `get_notification_control_plane_v1`, and `save_notification_control_plane_v1` flow. Save requires every changed rule's expected revision and commits registry validation, template insertion when needed, `active_template_id`, rule revision, append-only audit, and one durable `dashboard_private.notification_rule_reconciliation_jobs` row in one transaction. A conflict saves nothing and returns the current rule/template snapshot while retaining the local draft.
+Settings are never component-local state. The common control-plane plan exclusively owns `/admin/settings/notifications`, all seven scoped launcher mount points, and `NotificationControlPanel` wiring. Registration contributes only its closed server registry rows, Korean preset labels, all-disabled warning state, and registration job references/status; this plan does not add or replace a launcher. The resulting registration scoped dialog and global page both use the common `NotificationControlPanel`, `get_notification_control_plane_v1`, and `save_notification_control_plane_v1` flow. Save requires every changed rule's expected revision and commits registry validation, template insertion when needed, `active_template_id`, rule revision, append-only audit, and one durable `dashboard_private.notification_rule_reconciliation_jobs` row in one transaction. A conflict saves nothing and returns the current rule/template snapshot while retaining the local draft.
 
 Reconciliation processes all future scheduled registration appointments:
 
@@ -411,7 +414,7 @@ Reconciliation processes all future scheduled registration appointments:
 4. Create a new event and fan-out job only when the cell is enabled, applicable, and `now() < scheduled_for < appointment.scheduled_at`; disabled, non-applicable, and already-passed rounds are not backfilled.
 5. Preserve `sending`, `sent`, `delivery_unknown`, `failed`, `skipped`, `disabled`, and existing `canceled` history unchanged.
 
-Settings persistence and appointment reconciliation are separate operator outcomes. The UI reports `설정 저장됨` independently from `예약 알림 재계산 중`, `예약 알림 재계산 완료`, or `예약 알림 재계산 실패 · 다시 시도`. Recalculation failure never reverts saved rules/templates. Retry reruns the durable reconciliation job with the same revisions and occurrence keys; it does not save settings again.
+Settings persistence and appointment reconciliation are separate operator outcomes. The UI reports `설정 저장됨` independently from `예약 알림 재계산 중`, `예약 알림 재계산 완료`, or `예약 알림 재계산 실패 · 다시 시도`. Recalculation failure never reverts saved rules/templates. Registration reads each opaque `{job_kind, job_id}` reference only through `public.get_notification_orchestration_job_status_v1(p_job_kind text, p_job_id uuid) returns jsonb`. A visible retry calls only `public.retry_notification_orchestration_job_v1(p_job_kind text, p_job_id uuid, p_expected_attempt_count integer, p_request_id uuid) returns jsonb`, using the attempt count from the last status response and one idempotent request ID per logical click. The common RPC accepts only `fanout`, `rule_reconciliation`, or `target_reconciliation`, and requeues the same failed row with the same job ID, source event, captured revisions, occurrence keys, target generation, and cursor; it rejects non-failed or stale-attempt requests. Registration never saves settings again, replays the appointment mutation, or updates an orchestration table directly.
 
 ### Layer 4: materialized deliveries and adapters
 
@@ -424,7 +427,7 @@ Canonical statuses are exactly:
 - Ambiguous: `delivery_unknown`.
 - Terminal: `failed`, `skipped`, `disabled`, `canceled`.
 
-`scheduled_for` and `next_attempt_at` are delivery scheduling fields. They are not occurrence identity. The unique delivery dedupe key is the common hash of event ID, stable rule ID, channel, target kind, and target key. The appointment ID, source revision, rule ID, and rule revision remain transitively stable through the immutable event occurrence.
+`scheduled_for` and `next_attempt_at` are delivery scheduling fields. They are not occurrence identity. The unique delivery dedupe key is the common hash of event ID, stable rule ID, channel, target kind, target key, and appointment `recipient_revision` as `target_generation`. The appointment ID, source revision, rule ID, and rule revision remain transitively stable through the immutable event occurrence.
 
 Target keys use canonical resolver output such as `profile:{profileId}` or the `google_chat.management` connection. When one director owns both participating subjects, the resolver creates one per-recipient delivery with both subject badges rather than duplicate messages.
 
@@ -439,7 +442,7 @@ Scheduled registration reminders are internal only.
 
 No student, guardian, SMS, or SOLAPI registration-reminder target is created in this scope.
 
-Visit recipient resolution uses the canonical participating consultation rows and current valid director assignments. A director reassignment does not change appointment time/place or source revision and creates no new reminder event. The track mutation, version-2 `registration.director_assigned` source event, and unique `notification_target_reconciliation_jobs` row commit atomically. Its worker cancels old-recipient future `pending` and `retry_wait` deliveries with `recipient_revoked`, marks pre-send `claimed` deliveries `cancel_requested` with the same reason, and re-fans out the existing future event to the current recipient under the same appointment source revision and current stable rule revision. The resolver stores an immutable target snapshot, so a later profile-name change cannot rewrite historical rendered content. A crash after cancellation resumes the same job and cannot lose or duplicate the new target. Existing delivery history remains auditable.
+Visit recipient resolution uses the canonical participating consultation rows and current valid director assignments. A director reassignment does not change appointment time/place or source revision and creates no new reminder event. When the sorted distinct recipient set actually changes, the appointment row lock protects an exact one-step `recipient_revision` increment. The track mutation writes exactly one version-2 raw source event (`director_default_resolved`, `director_manual_override`, or `director_default_cleared`), captures that row's UUID, and stores it on one unique `notification_target_reconciliation_jobs` row with the new recipient revision and previous/current target-set hashes; it creates one job per reassignment, not one per rule. The later canonical producer maps the same raw row once to `registration.director_assigned` and never creates a duplicate raw event. Its worker cancels old-generation future `pending` and `retry_wait` deliveries with `recipient_revoked`, marks pre-send `claimed` deliveries `cancel_requested` with the same reason, revokes only unread already-projected inbox rows without changing their sent delivery audit, and re-fans out the existing future event to the current target generation under the same appointment source revision and current stable rule revision. The resolver stores an immutable target snapshot, so a later profile-name change cannot rewrite historical rendered content. A crash after cancellation resumes the same job and cannot lose or duplicate the new target; A→B→A creates a new final-A generation rather than reopening the first A delivery. Existing delivery history remains auditable.
 
 ### Materialization lifecycle
 
@@ -490,17 +493,18 @@ The secret is stored only in Vault and the deployment environment. It is never c
 
 ### Runtime and feature flags
 
-The reminder producer, dispatcher, and settings UI require:
+The common panel shell requires the common marker. Registration registry exposure, reminder production/materialization, registration shadow evaluation, registration reminder dispatch, and the director target-reconciliation path require both exact markers:
 
 ```text
 public.common_notification_control_plane_runtime_version() = 1
+public.registration_appointment_reminders_runtime_version() = 1
 ```
 
-If the capability is absent or not 1, the canonical control plane fails closed and does not disable an existing sender. The approved flags keep the common names and default to false:
+The registration marker is created last and returns integer `1` only after `recipient_revision`, the disabled registration rule/applicability registry rows, reminder producer/cancel/preview functions, mutation replacements, and single-source-event director reconciliation are installed. A missing marker or any value other than `1` keeps registration registry rows unavailable for editing and rejects registration shadow/dispatch or visit-target ownership enablement; the common runtime marker and the later workflow-adapters marker are not substitutes. The canonical control plane fails closed and does not disable an existing sender. The approved flags keep the common names and default to false:
 
 - `notification_control_plane_settings_ui_enabled`: enables the common global page and registration-scoped settings dialog.
 - `notification_control_plane_shadow_write_enabled`: evaluates reminder events, rules, templates, and targets but terminates would-be deliveries as `skipped/shadow_mode` without provider calls or new inbox projection.
-- `notification_control_plane_dispatch_registration_enabled`: enables registration core and appointment-reminder canonical dispatch after shadow comparison passes.
+- `notification_control_plane_dispatch_registration_enabled`: enables registration core and appointment-reminder canonical dispatch after shadow comparison passes and both registration prerequisite markers equal `1`.
 - `notification_control_plane_registration_phone_adapter_enabled`: separately transfers phone-queue inbox projection ownership from the legacy registration database path.
 - `notification_control_plane_registration_visit_adapter_enabled`: separately transfers immediate visit-notification ownership from the legacy route.
 - `notification_control_plane_registration_solapi_adapter_enabled`: separately transfers SOLAPI command ownership while preserving its domain state machine.
@@ -553,7 +557,7 @@ If this narrow race occurs, the delivery remains auditable under its old revisio
 
 - Appointment create and edit RPCs lock the parent appointment, participating child rows, and affected tracks in stable order.
 - Appointment producers and registration rule saves acquire the same workflow advisory transaction lock before domain row locks, so a rule-revision reconciliation snapshot cannot miss a concurrently committed appointment.
-- Appointment create/edit commands supply the expected appointment `notification_revision`; director assignment commands instead supply the expected subject-track optimistic version because reassignment does not increment the appointment revision. Either mismatch returns a conflict and no partial write.
+- Appointment create/edit commands supply the expected appointment `notification_revision`; director assignment commands instead supply the expected subject-track optimistic version because reassignment does not increment the appointment revision. Under the appointment row lock, an actual normalized recipient-set change increments `recipient_revision` exactly once and records it as target generation on the same target job. Either mismatch returns a conflict and no partial write.
 - Duplicate submission keys return the original canonical result only when the normalized request fingerprint matches.
 - Reminder events use the stable occurrence key and deliveries use the common dedupe hash, so retries and concurrent fan-out cannot create duplicates.
 - Competing director reassignments validate the expected track version, lock the track, and atomically enqueue target reconciliation from the committed owner; claimed work is marked `cancel_requested` rather than awaited.
@@ -566,7 +570,7 @@ If this narrow race occurs, the delivery remains auditable under its old revisio
 
 Each worker run records a heartbeat and counts for `pending`, `claimed`, `sending`, `retry_wait`, `sent`, `delivery_unknown`, `failed`, `skipped`, `disabled`, and `canceled` deliveries. Logs use delivery/event IDs and sanitized error classes, not student phone numbers, secrets, or full message bodies.
 
-`dashboard_private.notification_audit_logs` exposes deterministic skip counts by reason, including `not_before_appointment`. Schedule-reconciliation jobs expose their rule revisions, status, attempt count, lease, processed appointment count, canceled-delivery count, created-delivery count, skipped-rule counts, last error class, and completion timestamp. Target-reconciliation jobs expose source event, track version, old/current target-set hashes, canceled/created counts, retry state, and last error without profile names or message content.
+`dashboard_private.notification_audit_logs` exposes deterministic skip counts by reason, including `not_before_appointment`. Schedule-reconciliation jobs expose their rule revisions, status, attempt count, lease, processed appointment count, canceled-delivery count, created-delivery count, skipped-rule counts, last error class, and completion timestamp. Target-reconciliation jobs expose source event, track version, target generation, old/current target-set hashes, canceled/created/revoked counts, retry state, and last error without profile names or message content.
 
 Operations alerts fire when:
 
@@ -607,7 +611,7 @@ Operator-facing errors distinguish:
 
 - Invalid or incomplete form input.
 - Appointment or subject-track version conflict.
-- `common_notification_control_plane_runtime_version() != 1` or canonical runtime maintenance.
+- `common_notification_control_plane_runtime_version() != 1`, `registration_appointment_reminders_runtime_version() != 1`, or canonical runtime maintenance.
 - Appointment committed but immediate notification needs retry.
 - Appointment committed but reminder fan-out needs retry.
 - Appointment committed and reminder delivery later failed or became `delivery_unknown`.
@@ -649,6 +653,7 @@ Raw database codes, provider bodies, Vault details, and secrets are never shown 
 - One shared appointment produces one stable calendar item.
 - Multiple same-day same-kind appointments have distinct IDs.
 - Exact timestamps survive projection and timezone conversion.
+- Calendar and service DTOs keep integer `notification_revision` as a TypeScript `number`; only bigint appointment `recipient_revision` crosses their wire boundary as a decimal string.
 - Level tests and visits appear; phone consultations do not.
 - Subject badges come from canonical children.
 - Deep links restore the shared appointment.
@@ -669,8 +674,10 @@ Raw database codes, provider bodies, Vault details, and secrets are never shown 
 - A reminder calculated at or after the appointment creates no event or delivery and records `not_before_appointment` in common notification audit.
 - Rescheduling cancels old-source-revision `pending` and `retry_wait` rows and creates only future new-source-revision occurrences.
 - Cancellation and completion cancel remaining unattempted reminder deliveries while preserving attempted history.
-- Director reassignment cancels the old recipient's unattempted rows and creates future rows for the new recipient without changing appointment source revision.
+- Director reassignment cancels the old recipient's unattempted rows and creates future rows for the new recipient without changing appointment source revision; each distinct recipient-set change increments target generation exactly once.
+- Director reassignment writes exactly one raw version-2 source event, the target job stores that same UUID, and the adapter maps it exactly once to canonical `registration.director_assigned`; wrapper delegation cannot create a duplicate raw row.
 - Director reassignment plus its unique target-reconciliation job commit atomically; a crash after old-target cancellation resumes to exactly one current-target delivery.
+- A→B→A reassignment preserves the first A generation and creates one delivery for the final A generation without reopening a terminal row.
 - Unique keys prevent duplicate events and deliveries under concurrent materialization.
 - Each fixed `rule_variant_key` persists independent enablement, timing, audience, and channel state in a stable rule with optimistic revision.
 - Title/body changes create an independent immutable `notification_templates` version and update the rule's `active_template_id` and revision atomically.
@@ -678,7 +685,7 @@ Raw database codes, provider bodies, Vault details, and secrets are never shown 
 - Appointment event commit enqueues a unique `notification_event_fanout_jobs` row atomically; worker interruption before or during fan-out resumes without lost or duplicate deliveries.
 - Reconciliation cancels only superseded unattempted deliveries, recreates future occurrences with stable rule ID plus new rule revision, and never changes `sending`, `sent`, `delivery_unknown`, or terminal history.
 - Reconciliation creates only enabled/applicable rounds with `now < scheduled_for < appointment`; enabling a past preset does not backfill it.
-- A reconciliation failure leaves saved settings intact, displays a distinct failure state, and succeeds through idempotent retry.
+- A reconciliation failure leaves saved settings intact, displays a distinct failure state from the common status RPC, and succeeds only through the common attempt-checked, request-idempotent retry RPC.
 
 ### Worker and adapter tests
 
@@ -693,7 +700,7 @@ Raw database codes, provider bodies, Vault details, and secrets are never shown 
 - Timeout and ambiguous responses become `delivery_unknown` and never auto-resend.
 - Admin manual reconciliation preserves the same occurrence and delivery; approved retry transitions the same row to `retry_wait` with audit.
 - All ten canonical delivery statuses and their allowed transitions match the common control-plane contract.
-- Runtime probe and the approved settings, shadow, registration, phone, visit, and SOLAPI flags fail closed and prevent dual senders.
+- Both the common and registration-reminder runtime probes, plus the approved settings, shadow, registration, phone, visit, and SOLAPI flags, fail closed and prevent dual senders; a later adapter marker alone cannot open the registration reminder path.
 - Existing visit immediate-notification dedupe and failed-target retry remain unchanged.
 - Existing SOLAPI and phone-assignment adapter state machines remain unchanged.
 - The private endpoint rejects missing or invalid worker credentials and ordinary browser authentication.

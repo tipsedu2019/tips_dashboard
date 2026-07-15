@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-15
 
-**Status:** Approved direction, written-spec review pending
+**Status:** Approved
 
 **Depends on:** [Common Notification Control Plane Design](./2026-07-15-common-notification-control-plane-design.md)
 
@@ -157,7 +157,7 @@ canonical channel key는 네 가지로 고정한다.
 
 - 현재 실제 발송 중인 legacy cell은 checked-in legacy renderer fixture가 만든 compatibility title/body/allowed-variable catalog를 immutable template version 1로 사용하고, Phase 2 shadow의 normalized rendered-content checksum으로 동일성을 검증한다.
 - 휴보강의 실제 미사용 channel별 저장 본문은 inactive template/import metadata로 보존하고 active compatibility content를 바꾸지 않는다.
-- 새로 추가되는 disabled cell은 checked-in system template를 사용한다. Exact title은 `[{workflow_label}] {event_label}`, body는 `{event_label} · {occurred_at}\n{deep_link}`이고 `workflow_label`, `event_label`은 registry constant, `occurred_at`은 envelope timestamp, `deep_link`는 workflow adapter의 same-origin route registry가 만드는 safe base rendering variable다.
+- 새로 추가되는 disabled cell은 checked-in system template를 사용한다. Exact title은 `[{workflow_label}] {event_label}`, body는 `{event_label} · {occurred_at}\n{deep_link}`이다. `workflow_label`, `event_label`은 registry constant이고 `occurred_at`은 envelope timestamp다. 각 workflow adapter의 required `buildRenderContext` callback이 authoritative snapshot에서 허용 변수를 만들고 required `buildDeepLink` callback이 checked-in same-origin route registry에서만 `deep_link`를 만든다. 공통 worker가 두 callback 결과를 schema/allowlist 검증한 뒤 immutable template를 렌더링하며 브라우저 payload의 href/context는 받지 않는다.
 - 등록 reminder의 disabled template는 title `[예약 알림] {student_name} · {appointment_kind}`, body `{appointment_date_time} · {place} · {subjects}`로 seed한다. 각 변수는 등록 문서의 allowlist를 따른다.
 - Migration seed actor는 null profile + `system`이고, 운영자가 저장한 새 version부터 verified profile + `user`를 기록한다. Registry row, default template, allowed-variable entry 중 하나라도 빠지면 migration readiness marker를 만들지 않는다.
 
@@ -361,14 +361,14 @@ Reminder applicability는 appointment kind별 server registry로 고정한다.
 - 예약 reschedule, place/참여 과목 변경, replacement, cancel은 old revision의 pending/retry_wait를 `canceled/source_revision_changed` 처리하고 claimed에는 같은 reason의 cancel request를 남긴다.
 - canceled appointment는 새 cancellation immediate event를 만들지만 future reminder는 만들지 않는다.
 - completed appointment는 남은 pending/retry_wait reminder를 `canceled/source_status_changed` 처리하고 claimed에는 같은 reason의 cancel request를 남긴다.
-- director 변경은 새 reminder event를 만들지 않는다. Track mutation, `registration.director_assigned` source event, unique target-reconciliation job이 함께 commit되고, job이 기존 미래 event의 old personal target unsent delivery를 `recipient_revoked`로 취소한 뒤 current valid director target만 다시 fan-out한다. Director 표시값은 fan-out 시점의 immutable target snapshot에 저장해 이후 profile 이름 변경이 과거 rendered content를 바꾸지 않는다.
+- director 변경은 새 reminder event를 만들지 않는다. Track mutation은 기존 raw event type인 `director_default_resolved`, `director_manual_override`, 또는 `director_default_cleared` 중 정확히 한 source row를 쓰고 그 UUID를 canonical `registration.director_assigned`에 매핑한다. 같은 mutation에서 두 번째 raw `registration.director_assigned` row를 만들지 않는다. 그 one-source canonical event와 unique target-reconciliation job이 함께 commit되고, job이 기존 미래 event의 old personal target unsent delivery를 `recipient_revoked`로 취소한 뒤 current valid director target만 다시 fan-out한다. Director 표시값은 fan-out 시점의 immutable target snapshot에 저장해 이후 profile 이름 변경이 과거 rendered content를 바꾸지 않는다.
 - 등록 종료 시 unsent generic registration delivery는 취소할 수 있지만 sent와 delivery_unknown은 보존한다.
 - SOLAPI sending 이후 timeout/network ambiguity는 delivery_unknown이다. 자동 retry, cancel 후 재발송, 일반 failed로의 축약을 금지한다.
 - provider 미수신 증거가 있거나 admin이 중복 위험을 명시적으로 수락한 경우에만 reconcile과 retry release를 거쳐 같은 occurrence와 delivery를 retry_wait로 전이한다. 새 business event가 없으므로 새 occurrence를 만들지 않는다.
 
 ### 6.7 Cutover order
 
-registration core shadow를 먼저 통과시키되 기존 전화상담 direct inbox projection, visit route, SOLAPI route는 계속 legacy로 둔다. Core flag만 켠 상태에서는 canonical `registration.phone_consultation_ready` delivery를 만들지 않는다. 별도 phone adapter flag를 켜는 release가 기존 DB 함수의 direct `dashboard_notifications` insert/delete를 canonical event/projection으로 교체하여 create·reassign·complete마다 정확히 한 current inbox item만 남긴다. 그 다음 visit immediate를 전환하고, 마지막으로 SOLAPI command handler를 canonical delivery claim/finalize/reconcile에 연결한다. 예약 reminder algorithm은 관련 별도 문서의 배포 gate를 따른다.
+registration core shadow를 먼저 통과시키되 기존 전화상담 direct inbox projection, visit route, SOLAPI route는 계속 legacy로 둔다. Phase 0.5에서 그 legacy inbox path도 브라우저/direct table writer가 아니라 공통 fixed-purpose compatibility materializer와 `commit_legacy_notification_in_app_projection_v1` 뒤로 옮긴다. Materializer는 event/rule/profile/generation/owner/request identity만 받고 adapter callbacks + common renderer가 만든 stored delivery를 사용하며 title/body/href를 RPC 입력으로 받지 않는다. Commit RPC가 legacy claim과 함께 inbox insert, delivery sent, ownership close를 원자적으로 끝낸다. Core flag만 켠 상태에서는 canonical `registration.phone_consultation_ready` delivery를 만들지 않는다. 별도 phone adapter flag를 켜는 release가 legacy-owned compatibility projection을 canonical event/projection으로 교체하여 create·reassign·complete마다 정확히 한 current inbox item만 남긴다. 그 다음 visit immediate를 전환하고, 마지막으로 SOLAPI command handler를 canonical delivery claim/finalize/reconcile에 연결한다. 예약 reminder algorithm은 관련 별도 문서의 배포 gate를 따른다.
 
 ### 6.8 Acceptance tests
 
@@ -573,6 +573,8 @@ makeup_notification_settings의 각 row를 eventKey, audienceKey, channelKey, en
 
 approval_events의 created/status_changed/approver_changed UUID를 occurrenceKey로 사용한다. comment_added는 approval_comments.id를 사용한다. returned 후 submitted는 단순 중복 submitted가 아니라 approval.resubmitted로 normalize한다.
 
+Approval v2 RPC는 authoritative row만 mutation하고 event를 직접 쓰지 않는다. Hardened DB trigger가 source event와 canonical producer의 유일한 owner다. 따라서 한 request/replay당 raw source UUID와 canonical occurrence가 각각 정확히 하나이며 approver 변경도 RPC와 trigger가 이중 생산하지 않는다.
+
 ### 10.2 Adapter contract
 
 | 항목 | 결정 |
@@ -611,7 +613,7 @@ approval_events의 created/status_changed/approver_changed UUID를 occurrenceKey
 
 ### 11.1 Runtime과 feature flag
 
-공통 runtime probe는 common_notification_control_plane_runtime_version() = 1을 요구한다. 1이 아니면 canonical dispatch를 시작하지 않고 legacy path를 유지한다.
+공통 runtime probe는 `common_notification_control_plane_runtime_version() = 1`, `notification_workflow_adapters_runtime_version() = 1`, 최근 3분 이내 성공 worker heartbeat를 요구한다. 어느 하나라도 없으면 canonical dispatch를 시작하지 않고 legacy path를 유지한다. Registration core, phone, visit, reminder ownership은 여기에 더해 `registration_appointment_reminders_runtime_version() = 1`을 요구하며, marker가 없으면 관련 flag enable을 원자적으로 거절한다.
 
 | Flag | 의미 |
 | --- | --- |
@@ -644,14 +646,14 @@ approval_events의 created/status_changed/approver_changed UUID를 occurrenceKey
 - 모든 기존 Google Chat/Web Push caller를 arbitrary 본문·대상 POST에서 source/event ID 기반 fixed-purpose server adapter로 옮긴다.
 - 자유 형식 endpoint를 폐쇄하고 stale browser/이전 bundle 호출이 provider에 도달하지 않는지 확인한다.
 - legacy와 canonical secure path 모두 같은 rule-scoped occurrence dispatch ownership claim을 사용한다.
-- 휴보강 browser notification writer와 등록 전화상담 direct projection을 server/RPC ownership 경계 뒤로 옮긴 뒤 authenticated direct insert를 revoke한다.
+- 휴보강 browser notification writer와 등록 전화상담 direct projection은 공통 fixed-purpose compatibility materializer로 immutable legacy-owned delivery를 만든 뒤 `commit_legacy_notification_in_app_projection_v1`이 stored content로 inbox insert + delivery sent + ownership close를 원자적으로 수행하게 한다. 이 경계 뒤로 옮긴 뒤 authenticated direct insert를 revoke한다.
 - 각 workflow cutover 전 business row, immutable source event, canonical event, fan-out job을 같은 transaction에서 생성하도록 producer를 전환한다.
 - 이 gate 전에는 어떤 dispatch flag도 켜지 않는다.
 
 #### Phase 1 — configuration과 history import
 
-- 등록·전반·퇴원은 submitted/completed → management_team → google_chat → google_chat.management만 enabled seed한다.
-- 등록의 phone-ready track-director inbox와 visit immediate track-director inbox/management Chat rule은 compatibility enabled로 seed하지만 각 specialized ownership flag 전에는 canonical delivery를 만들지 않는다.
+- Generic registration core, 전반, 퇴원은 submitted/completed → management_team → google_chat → google_chat.management만 enabled seed한다.
+- Registration phone-ready track-director inbox와 visit immediate track-director inbox/management Chat rule은 그 generic restriction의 승인된 별도 compatibility exception이다. Rule은 enabled로 seed하지만 각 specialized ownership flag 전에는 legacy owner만 side effect를 만들고 canonical delivery/projection은 만들지 않는다.
 - processing과 phantom applicant/operations UI cell은 import하지 않는다.
 - 휴보강 persisted setting/template와 현재 retained delivery audit을 import한다.
 - 할 일, 영어 단어 재시험, 전자결재 rule은 disabled로 생성한다.
@@ -751,7 +753,7 @@ workflow/channel별로 다음을 집계한다.
 - audience와 channel이 UI, rule, resolver, delivery에서 분리된다.
 - Closed `settings_ui_registry`의 exact event/cell만 일곱 scoped/global 화면에 나타나고 registry 밖 기술 event는 설정 UI에 나타나지 않는다.
 - 모든 registry rule seed가 non-null active template, allowed-variable catalog, deterministic system actor를 가지며 missing catalog entry는 runtime readiness를 차단한다.
-- 등록·전반·퇴원 seed는 실제 submitted/completed 관리팀 Google Chat 동작과 정확히 일치한다.
+- Generic registration core·전반·퇴원 seed는 실제 submitted/completed 관리팀 Google Chat 동작과 정확히 일치하고, registration phone/visit compatibility seed는 specialized legacy owner 뒤에서만 enabled다.
 - phantom applicant/operations channel이 생성되지 않는다.
 - 휴보강 persisted setting/template/history가 보존되고 completed, channel template, occurrence dedupe, team read-state가 승인된 방식으로 정규화된다.
 - 할 일, 영어 단어 재시험, 전자결재는 disabled rule로 시작한다.
