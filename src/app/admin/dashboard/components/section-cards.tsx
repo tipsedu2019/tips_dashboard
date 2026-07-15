@@ -4,7 +4,6 @@ import { type ReactNode, useMemo, useState } from "react"
 import {
   AlertTriangle,
   ChevronDown,
-  SlidersHorizontal,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -15,15 +14,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
 type DashboardSubjectKey = "all" | "english" | "math"
@@ -452,53 +442,7 @@ function getActiveLabel<T extends string>(items: Array<{ key: T; label: string }
   return items.find((item) => item.key === value)?.label ?? value
 }
 
-function getScopedFilterLabel(label: string, value: string, isAll: boolean) {
-  return isAll ? `${label} 전체` : value
-}
-
-function getFilterSummary(
-  subject: DashboardSubjectKey,
-  division: DashboardDivisionKey,
-  subjectLabel: string,
-  divisionLabel: string,
-) {
-  if (subject === "all" && division === "all") return "전체 범위"
-  if (subject === "all") return divisionLabel
-  if (division === "all") return subjectLabel
-  return `${subjectLabel} · ${divisionLabel}`
-}
-
-function FilterRadioGroup<T extends string>({
-  label,
-  value,
-  items,
-  onChange,
-}: {
-  label: string
-  value: T
-  items: Array<{ key: T; label: string }>
-  onChange: (next: T) => void
-}) {
-  return (
-    <DropdownMenuRadioGroup value={value} onValueChange={(next) => onChange(next as T)}>
-      <DropdownMenuLabel className="px-2 pb-1 pt-2 text-xs text-muted-foreground">
-        {label}
-      </DropdownMenuLabel>
-      {items.map((item) => (
-        <DropdownMenuRadioItem
-          key={item.key}
-          value={item.key}
-          aria-label={`${label}: ${item.label}`}
-          className="cursor-pointer"
-        >
-          {item.label}
-        </DropdownMenuRadioItem>
-      ))}
-    </DropdownMenuRadioGroup>
-  )
-}
-
-function DashboardFilterMenu({
+function DashboardVisibleFilters({
   subject,
   division,
   onSubjectChange,
@@ -509,47 +453,27 @@ function DashboardFilterMenu({
   onSubjectChange: (next: DashboardSubjectKey) => void
   onDivisionChange: (next: DashboardDivisionKey) => void
 }) {
-  const subjectLabel = getActiveLabel(SUBJECT_TABS, subject)
-  const divisionLabel = getActiveLabel(DIVISION_TABS, division)
-  const subjectFilterLabel = getScopedFilterLabel("과목", subjectLabel, subject === "all")
-  const divisionFilterLabel = getScopedFilterLabel("부서", divisionLabel, division === "all")
-  const filterSummary = getFilterSummary(subject, division, subjectLabel, divisionLabel)
-  const activeFilterCount = Number(subject !== "all") + Number(division !== "all")
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={`대시보드 필터: ${subjectFilterLabel}, ${divisionFilterLabel}`}
-          className="inline-flex h-9 max-w-full items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium transition-[background-color,border-color,box-shadow,transform] hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:translate-y-px"
-        >
-          <SlidersHorizontal className="size-4 text-muted-foreground" />
-          <span className="truncate">{filterSummary}</span>
-          {activeFilterCount > 0 ? (
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-primary px-1 text-xs font-semibold text-primary-foreground tabular-nums">
-              {activeFilterCount}
-            </span>
-          ) : null}
-          <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={8} className="w-64 rounded-lg p-1.5">
-        <FilterRadioGroup
+    <div className="grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-xs font-semibold text-muted-foreground">과목</span>
+        <SegmentedControl
           label="과목"
           value={subject}
           items={SUBJECT_TABS}
           onChange={onSubjectChange}
         />
-        <DropdownMenuSeparator />
-        <FilterRadioGroup
+      </div>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-xs font-semibold text-muted-foreground">부서</span>
+        <SegmentedControl
           label="부서"
           value={division}
           items={DIVISION_TABS}
           onChange={onDivisionChange}
         />
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </div>
+    </div>
   )
 }
 
@@ -583,7 +507,7 @@ function DashboardHeader({
   return (
     <section aria-label="대시보드 작업 기준" className="min-w-0">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border bg-background px-2.5 py-2">
-        <DashboardFilterMenu
+        <DashboardVisibleFilters
           subject={subject}
           division={division}
           onSubjectChange={onSubjectChange}

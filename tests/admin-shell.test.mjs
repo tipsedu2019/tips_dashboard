@@ -278,13 +278,32 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.match(source, /\{ key: "all", label: "전체" \}/);
   assert.match(source, /초중등부/);
   assert.match(source, /고등부/);
-  assert.match(source, /getScopedFilterLabel/);
-  assert.match(source, /getScopedFilterLabel\("과목"/);
-  assert.match(source, /getScopedFilterLabel\("부서"/);
-  assert.match(source, /getFilterSummary/);
-  assert.match(source, /전체 범위/);
-  assert.match(source, /activeFilterCount/);
-  assert.match(source, /aria-label=\{`\$\{label\}: \$\{item\.label\}`\}/);
+  const visibleFilterBlock = source.slice(
+    source.indexOf("function DashboardVisibleFilters"),
+    source.indexOf("function DashboardHeader"),
+  );
+  const segmentedControlBlock = source.slice(
+    source.indexOf("function SegmentedControl"),
+    source.indexOf("function ListScopeToggle"),
+  );
+
+  for (const value of [
+    ">과목</span>",
+    ">부서</span>",
+    'label="과목"',
+    "items={SUBJECT_TABS}",
+    'label="부서"',
+    "items={DIVISION_TABS}",
+    "grid min-w-0 gap-2",
+    "sm:flex",
+  ]) {
+    assert.ok(visibleFilterBlock.includes(value), value);
+  }
+  assert.match(segmentedControlBlock, /role="group" aria-label=\{label\}/);
+  assert.match(segmentedControlBlock, /aria-pressed=\{isActive\}/);
+  assert.doesNotMatch(source, /DashboardFilterMenu|FilterRadioGroup|전체 범위/);
+  assert.doesNotMatch(source, /DropdownMenuRadioGroup|DropdownMenuContent/);
+  assert.doesNotMatch(source, /activeFilterCount|SlidersHorizontal/);
   assert.match(source, /const statusBadge =/);
   assert.match(source, /운영 상태/);
   assert.doesNotMatch(source, /운영 범위/);
@@ -293,8 +312,6 @@ test("dashboard exposes subject and division tabs with conflict process rows", a
   assert.doesNotMatch(source, /학교 \{formatNumber\(summary\.schoolCount\)\} · 학년/);
   assert.doesNotMatch(source, /학교 \{formatNumber\(summary\.schoolCount\)\}곳/);
   assert.doesNotMatch(source, />필터<\/span>/);
-  assert.match(source, /DropdownMenuContent align="start" sideOffset=\{8\} className="w-64/);
-  assert.match(source, /value=\{item\.key\}[\s\S]*className="cursor-pointer"/);
   assert.match(source, /bg-primary text-primary-foreground/);
   assert.match(source, /AnimatedBar/);
   assert.match(source, /const unit = "명"/);
@@ -428,6 +445,8 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /sm:grid-cols-\[auto_minmax\(0,1fr\)_auto\]/);
   assert.match(source, /!whitespace-normal break-keep bg-background/);
   assert.match(source, /min-w-0 max-w-full text-sm font-semibold leading-5/);
+  assert.match(source, /grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center/);
+  assert.doesNotMatch(source, /DashboardFilterMenu/);
   assert.match(pageSource, /px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6/);
 });
 
