@@ -711,6 +711,12 @@ test("navigation keeps todo queues and separates operation menus", async () => {
   const source = await readSource("src/lib/navigation.ts");
   const todoBlock = source.slice(source.indexOf(`title: "${ko.todo}"`), source.indexOf(`title: "${ko.registration}"`));
   const fullOverviewBlock = source.slice(source.indexOf("const fullOverviewItems"), source.indexOf("const overview: NavGroup"));
+  const assistantOverviewBlock = source.slice(
+    source.indexOf("const assistantOverviewItems"),
+    source.indexOf("const fullOverviewItems"),
+  );
+  const dashboardIndex = fullOverviewBlock.indexOf('title: "대시보드"');
+  const todoIndex = fullOverviewBlock.indexOf(`title: "${ko.todo}"`);
 
   assertIncludesAll(source, [
     `title: "${ko.todo}"`,
@@ -730,6 +736,13 @@ test("navigation keeps todo queues and separates operation menus", async () => {
   assert.doesNotMatch(todoBlock, /url: "\/admin\/registration"/);
   assert.doesNotMatch(todoBlock, /url: "\/admin\/transfer"/);
   assert.doesNotMatch(todoBlock, /url: "\/admin\/withdrawal"/);
+  assert.notEqual(dashboardIndex, -1);
+  assert.ok(dashboardIndex < todoIndex);
+  assert.match(
+    fullOverviewBlock,
+    /const fullOverviewItems: NavItem\[\] = \[\s*\{ title: "대시보드", url: "\/admin\/dashboard"/,
+  );
+  assert.doesNotMatch(assistantOverviewBlock, /title: "대시보드"/);
   assert.ok(fullOverviewBlock.indexOf(`title: "${ko.todo}"`) < fullOverviewBlock.indexOf(`title: "${ko.wordRetest}"`));
   assert.ok(fullOverviewBlock.indexOf(`title: "${ko.wordRetest}"`) < fullOverviewBlock.indexOf(`title: "${ko.registration}"`));
   assert.doesNotMatch(source, new RegExp(`title: "${ko.taskbox}"`));

@@ -320,6 +320,7 @@ export function buildAdminNavGroups({
     { title: "시간표", url: "/admin/timetable", icon: LayoutGrid },
   ]
   const fullOverviewItems: NavItem[] = [
+    { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
     {
       title: "할 일",
       url: "/admin/tasks",
@@ -336,7 +337,6 @@ export function buildAdminNavGroups({
     { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
     { title: "휴보강", url: "/admin/makeup-requests", icon: CalendarClock },
     { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
-    { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
     {
       title: "학사일정",
       url: "/admin/academic-calendar",
