@@ -179,13 +179,22 @@ test("dashboard omits introductory briefing copy and redundant workspace heading
   assert.doesNotMatch(source, /운영 워크스페이스 바로가기/);
 });
 
-test("dashboard does not keep unused sample chart and table assets", async () => {
-  const pageSource = await readSource("src/app/admin/dashboard/page.tsx");
+test("dashboard starts with live metrics and removes the inaccurate todo summary", async () => {
+  const [pageSource, serviceSource] = await Promise.all([
+    readSource("src/app/admin/dashboard/page.tsx"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+  ]);
 
-  assert.match(pageSource, /OpsTaskDashboardSummary/);
   assert.match(pageSource, /SectionCards/);
-  assert.doesNotMatch(pageSource, /ChartAreaInteractive/);
-  assert.doesNotMatch(pageSource, /DataTable/);
+  assert.doesNotMatch(pageSource, /OpsTaskDashboardSummary/);
+  assert.equal(
+    await pathExists("src/features/tasks/ops-task-dashboard-summary.tsx"),
+    false,
+  );
+  assert.doesNotMatch(
+    serviceSource,
+    /OpsTodoDashboardSummaryData|loadOpsTodoDashboardSummaryData/,
+  );
 
   for (const pathname of [
     "src/app/admin/dashboard/components/chart-area-interactive.tsx",

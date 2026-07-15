@@ -3573,26 +3573,22 @@ test("approval workspace supports monthly report templates and approval history"
   assert.ok(navigationSource.includes(`title: "${ko.approvals}"`));
 });
 
-test("dashboard and browser workflow scripts target the new operation surfaces", async () => {
-  const [dashboardSummary, workspaceSource, serviceSource, scriptSource, sampleScriptSource] = await Promise.all([
-    readSource("src/features/tasks/ops-task-dashboard-summary.tsx"),
+test("browser workflow scripts target the operation surfaces", async () => {
+  const [workspaceSource, serviceSource, scriptSource, sampleScriptSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("scripts/verify-ops-task-browser-workflow.mjs"),
     readSource("scripts/verify-ops-task-sample-workflow.mjs"),
   ]);
 
-  assertIncludesAll(dashboardSummary, [
-    "loadOpsTodoDashboardSummaryData",
-    "const openGeneralTasks = openTasks.filter((task) => task.type === \"general\")",
-    "md:grid-cols-3",
-    `label="${ko.inbox}"`,
-    `label="${ko.sent}"`,
-    `label="${ko.completed}"`,
-  ]);
-  assert.doesNotMatch(dashboardSummary, /filter=confirmation/);
-  assert.doesNotMatch(dashboardSummary, /openOperationTasks/);
-  assert.doesNotMatch(dashboardSummary, /loadOpsTaskWorkspaceData/);
+  assert.equal(
+    await pathExists("src/features/tasks/ops-task-dashboard-summary.tsx"),
+    false,
+  );
+  assert.doesNotMatch(
+    serviceSource,
+    /OpsTodoDashboardSummaryData|loadOpsTodoDashboardSummaryData/,
+  );
 
   assertIncludesAll(serviceSource, [
     "type OpsTaskWorkspaceLoadOptions",
@@ -3604,10 +3600,6 @@ test("dashboard and browser workflow scripts target the new operation surfaces",
     "registrationTracks: tracksByTaskId.get(task.id) || []",
     "OPS_REGISTRATION_PARENT_LIST_COLUMNS",
     '"ops_registration_details(task_id,pipeline_status,school_grade,school_name,inquiry_at)"',
-    "export async function loadOpsTodoDashboardSummaryData",
-    '.select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,class_id,textbook_id,student_name,class_name,textbook_title,campus,subject,start_at,due_at,completed_at,memo,created_at,updated_at")',
-    '.eq("type", "general")',
-    'readTable("profiles", "id,name,email,role,login_id", true)',
   ]);
 
 	  assertIncludesAll(workspaceSource, [
