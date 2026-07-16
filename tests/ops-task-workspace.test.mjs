@@ -795,13 +795,14 @@ test("registration keeps the operational pipeline as first-class state", async (
   ]);
 });
 
-test("registration workspace replaces Notion registration management with subject-track tabs and notifications", async () => {
-  const [workspaceSource, serviceSource, migrationSource, trackListSource, trackModelSource] = await Promise.all([
+test("registration workspace replaces Notion registration management with subject-track tabs and canonical controls", async () => {
+  const [workspaceSource, serviceSource, migrationSource, trackListSource, trackModelSource, initialPlanSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("supabase/migrations/20260710052914_registration_operational_fields.sql"),
     readSource("src/features/tasks/registration-track-list.tsx"),
     readSource("src/features/tasks/registration-track-model.js"),
+    readSource("src/features/tasks/registration-initial-plan-control.tsx"),
   ]);
   const combined = `${workspaceSource}\n${serviceSource}\n${migrationSource}\n${trackListSource}\n${trackModelSource}`;
   const registrationTableSource = trackListSource;
@@ -879,13 +880,15 @@ test("registration workspace replaces Notion registration management with subjec
     'label="진행상태"',
     'label="과목"',
     'label="학년"',
-    'label="방문상담실"',
-    'label="수업 시작 일정"',
-    'label="입학신청서 발송"',
-    'label="메이크에듀 등록(수업, 교재)"',
-    'label="청구서 발송"',
-    'label="수납 완료 확인"',
-    'label="등록 완료"',
+    "RegistrationInitialPlanControl",
+    "RegistrationTrackEditor",
+    "RegistrationAdmissionPanel",
+  ]);
+  assertIncludesAll(initialPlanSource, [
+    "과목별 다음 업무",
+    "과목별 상담 책임자",
+    "방문상담 예약일시",
+    "방문상담실",
   ]);
 
   assertIncludesAll(detailDialogSource, [
@@ -979,8 +982,11 @@ test("registration process manual opens from an icon beside the tabs without dup
   );
 });
 
-test("registration uses the operational 시험지·결과지 URL label in form and detail surfaces", async () => {
-  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+test("registration keeps the result URL only in canonical completion and detail surfaces", async () => {
+  const [workspaceSource, appointmentEditorSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-appointment-editor.tsx"),
+  ]);
   const registrationFormSource = workspaceSource.slice(
     workspaceSource.indexOf('if (form.type === "registration") {', workspaceSource.indexOf("function TypeSpecificFields")),
     workspaceSource.indexOf('if (form.type === "withdrawal")', workspaceSource.indexOf("function TypeSpecificFields")),
@@ -990,9 +996,9 @@ test("registration uses the operational 시험지·결과지 URL label in form a
     workspaceSource.indexOf("function WithdrawalDetailPanel"),
   );
 
-  assert.match(registrationFormSource, /label="시험지·결과지 URL"/);
+  assert.doesNotMatch(registrationFormSource, /시험지·결과지 URL|levelTestMaterialLink/);
+  assert.match(appointmentEditorSource, /시험지·결과지 URL/);
   assert.match(registrationDetailSource, /RegistrationExternalLinkInfo label="시험지·결과지 URL"/);
-  assert.doesNotMatch(registrationFormSource, /레벨테스트 자료 Drive 링크/);
 });
 
 test("registration tabs render compact subject-track rows without the retired parent table filters", async () => {
@@ -1349,9 +1355,10 @@ test("registration follows the real decision waitlist admission form and manual 
   );
 });
 
-test("registration form keeps one application while early reservation fields stay available", async () => {
-  const [source, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {
+  const [source, initialPlanSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-initial-plan-control.tsx"),
     readSource("src/features/tasks/registration-workflow.js"),
     readSource("scripts/verify-ops-task-sample-workflow.mjs"),
     readSource("scripts/verify-ops-task-browser-workflow.mjs"),
@@ -1364,17 +1371,13 @@ test("registration form keeps one application while early reservation fields sta
     source.indexOf('if (form.type === "registration") {', source.indexOf("function TypeSpecificFields")),
     source.indexOf('if (form.type === "withdrawal")', source.indexOf("function TypeSpecificFields")),
   );
-  const emptyFormSource = source.slice(
-    source.indexOf("const EMPTY_FORM"),
-    source.indexOf("function cloneForm"),
-  );
   const registrationCreateDefaultsSource = registrationWorkflowSource.slice(
     registrationWorkflowSource.indexOf("export function getRegistrationCreateDefaults"),
     registrationWorkflowSource.indexOf("export function getRegistrationPrefillPipelineStatus"),
   );
   const readyCreateSource = source.slice(
-    source.indexOf('if (runtime.mode === "ready" && runtime.version === 1)'),
-    source.indexOf("registrationCreateRequestRef.current = null", source.indexOf('if (runtime.mode === "ready" && runtime.version === 1)')),
+    source.indexOf('registrationPersistence.mode === "ready_atomic"'),
+    source.indexOf("continue", source.indexOf('registrationPersistence.mode === "ready_atomic"')),
   );
   const submitFormSource = source.slice(
     source.indexOf("const submitForm = async"),
@@ -1382,98 +1385,93 @@ test("registration form keeps one application while early reservation fields sta
   );
 
   assertIncludesAll(source, [
-    "getRegistrationFormStage",
-    "RegistrationFormSection",
-    'data-registration-current={active ? "true" : "false"}',
-    "<fieldset disabled={!enabled}",
-    "registrationOperationsOpen",
-    'aria-label="담당자 및 일시 이력"',
-    "CollapsibleContent",
-    "focusRegistrationFormSection",
-    'scrollIntoView({ block: "start", behavior: "smooth" })',
+    'import { RegistrationInitialPlanControl } from "./registration-initial-plan-control"',
+    "probeRegistrationIntakeWorkflowRuntime",
+    "probeRegistrationSubjectTrackRuntime",
+    "probeRegistrationInitialPersistence",
+    "createRegistrationCaseWithInitialWorkflow",
+    "createRegistrationCase",
+    "createRegistrationCreateAttempt",
+    "registrationCreateAttemptRef",
+    'registrationPersistence.mode === "ready_atomic"',
+    'registrationPersistence.mode === "canonical_inquiry"',
+    'registrationPersistence.mode === "legacy_inquiry"',
+    'registrationPersistence.mode === "blocked_maintenance"',
+    'registrationPersistence.mode === "blocked_mismatch"',
+    'registrationPersistence.mode === "blocked_indeterminate"',
   ]);
-  assert.match(
-    registrationFormSource,
-    /registrationFormState\.enabledSections\.includes\(sectionKey\)/,
-  );
-  assert.doesNotMatch(
-    registrationFormSource,
-    /getRegistrationFormSectionIndex\(sectionKey\) <= activeSectionIndex/,
-  );
-  assert.doesNotMatch(formDialogSource, /지금 입력|이전 단계 완료 후/);
-  assert.match(source, /active \? "-mx-3 border-l-2 border-l-primary bg-primary\/5 px-3"/);
-  assert.match(source, /active \? "text-primary" : !enabled \? "text-muted-foreground" : ""/);
-  assert.doesNotMatch(registrationFormSource, /if \(step === "registration_/);
-  assert.match(
-    source,
-    /const shouldShowFormDetailTabs = isTemplateForm && !isWordRetestForm && form\.type !== "withdrawal" && form\.type !== "transfer" && form\.type !== "registration" && formDetailTabs\.length > 1/,
-  );
-  assert.doesNotMatch(
-    formDialogSource,
-    /\{form\.type === "registration" && \([\s\S]*?<SelectField\s+label="진행상태"/,
-    "registration status should be workflow-controlled rather than a top-level jump selector",
-  );
+  assert.doesNotMatch(formDialogSource, /담당자 및 일시 이력/);
 
   assertIncludesAll(registrationFormSource, [
+    "editingRegistration ? (",
+    '<ReadonlyInfoField label="과목"',
     "<RegistrationSubjectField",
     "values={registrationSubjects}",
     'onChange={(values) => updateForm("subject", serializeRegistrationSubjects(values))}',
-    '<TaskListboxField\n                label="레벨테스트 장소"',
-    '<TaskListboxField\n                label="방문상담실"',
+    "<RegistrationInitialPlanControl",
+    'label="요청 사항"',
   ]);
-  assert.doesNotMatch(registrationFormSource, /<SelectField/);
+  assert.doesNotMatch(registrationFormSource, /phoneConsultationAt|levelTestAt|visitConsultationAt|visitConsultationPlace|levelTestMaterialLink/);
+  assert.doesNotMatch(registrationFormSource, /등록·대기 정보|입학 처리/);
   assert.doesNotMatch(source, /inquiryChannel|\{문의채널\}|문의채널|문의 채널/);
   assert.doesNotMatch(sampleWorkflowSource, /inquiry_channel/);
   assert.doesNotMatch(browserWorkflowSource, /inquiry_channel/);
   assertIncludesAll(browserWorkflowSource, [
     "async function selectListboxOptionIfPresent",
     'await selectListboxOptionIfPresent(page, dialog, "학년", "고1")',
+    "전화상담 예약일시",
+    "시험지·결과지 URL",
+    "과목별 상담 책임자",
+    "방문상담 예약일시",
+    "방문상담실",
+    "canonical reload",
+    'width: 1349, height: 987',
+    "visitFieldOrder",
   ]);
   assert.doesNotMatch(browserWorkflowSource, /fillIfPresent\(dialog, "학년"/);
-  assert.doesNotMatch(
-    registrationFormSource,
-    /updateRegistration\("(?:levelTestCompletedAt|levelTestResult|consultationAt)"/,
-    "completion timestamps and the legacy result must not be editable registration inputs",
-  );
-  assert.match(source, /import \{ DateTimePickerControl, DatePickerControl \} from "@\/components\/ui\/date-time-picker"/);
-  assert.match(source, /ensureRegistrationInquiryAt/);
-  assert.match(emptyFormSource, /campus: ""/);
+  assert.doesNotMatch(source, /ensureRegistrationInquiryAt/);
   assert.match(registrationCreateDefaultsSource, /campus: "본관"/);
-  assert.match(readyCreateSource, /campus: normalizeRegistrationCampus\(createPayload\.campus\)/);
+  assert.match(readyCreateSource, /createRegistrationCaseWithInitialWorkflow\(\{/);
+  assert.match(readyCreateSource, /normalizedInitialWorkflow\.subjectPlans/);
+  assert.match(readyCreateSource, /normalizedInitialWorkflow\.levelTestAppointment/);
+  assert.match(readyCreateSource, /normalizedInitialWorkflow\.visitAppointment/);
+  assert.match(readyCreateSource, /normalizedInitialWorkflow\.directorOverrides/);
+  assert.doesNotMatch(readyCreateSource, /createRegistrationCase\(\{/);
+  assert.doesNotMatch(readyCreateSource, /persistCreatedRegistrationDirectorDefaults/);
+  assert.doesNotMatch(submitFormSource, /directorOverrides:\s*\{\s*\.\.\.registrationResolvedDirectorIds/);
+  assert.doesNotMatch(source, /persistCreatedRegistrationDirectorDefaults/);
   assert.match(
     submitFormSource,
     /getRegistrationPersistenceErrorMessage\(error,\s*getOpsTaskActionErrorMessage\(error, "저장하지 못했습니다\."\)\)/,
   );
-  assert.match(source, /REGISTRATION_TIME_OPTIONS/);
-  const registrationDateTimeControls = registrationFormSource.match(/<DateTimePickerControl[\s\S]*?\/>/g) || [];
-  assert.equal(registrationDateTimeControls.length, 3);
+  const registrationDateTimeControls = initialPlanSource.match(/<DateTimePickerControl[\s\S]*?\/>/g) || [];
+  assert.equal(registrationDateTimeControls.length, 2);
   for (const controlSource of registrationDateTimeControls) {
     assert.match(controlSource, /disablePortal/);
     assert.match(controlSource, /timeOptions=\{REGISTRATION_TIME_OPTIONS\}/);
-    assert.doesNotMatch(controlSource, /\brequired\b/);
   }
-  assertIncludesAll(registrationFormSource, [
+  assertIncludesAll(initialPlanSource, [
+    "과목별 다음 업무",
+    "문의 유지",
+    "바로 전화상담",
+    "레벨테스트",
+    "방문상담",
+    "과목별 상담 책임자",
     "dateAriaLabel=\"레벨테스트 예약일 날짜\"",
     "timeAriaLabel=\"레벨테스트 예약일 시각\"",
-    "value={dateTimeInputValue(registration.levelTestAt)}",
-    "dateAriaLabel=\"전화상담 예약일 날짜\"",
-    "timeAriaLabel=\"전화상담 예약일 시각\"",
-    "value={dateTimeInputValue(registration.phoneConsultationAt)}",
     "dateAriaLabel=\"방문상담 예약일 날짜\"",
     "timeAriaLabel=\"방문상담 예약일 시각\"",
-    "value={dateTimeInputValue(registration.visitConsultationAt)}",
+    "레벨테스트 장소",
+    "방문상담실",
+    "참여 과목",
   ]);
-  assert.doesNotMatch(registrationFormSource, /문의일 날짜|문의일 시각|dateTimeInputValue\(registration\.inquiryAt\)/);
-  assert.doesNotMatch(registrationFormSource, /type="datetime-local"/);
-  assert.match(
-    formDialogSource,
-    /label=\{getDueAtDisplayLabel\(form\.type\)\}[\s\S]{0,160}type="datetime-local"/,
-    "unrelated task due-date inputs should remain native datetime-local controls",
-  );
+  assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink/);
+  assertInOrder(initialPlanSource, ["과목별 상담 책임자", "방문상담 예약일시", "방문상담실"]);
+  assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소", "참여 과목"]);
   assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
   const inquiryStart = registrationFormSource.indexOf('sectionKey="inquiry"');
-  const inquiryEnd = registrationFormSource.indexOf('sectionKey="level_test"', inquiryStart);
+  const inquiryEnd = registrationFormSource.indexOf("<RegistrationInitialPlanControl", inquiryStart);
   const inquirySource = registrationFormSource.slice(inquiryStart, inquiryEnd);
   assert.match(inquirySource, /className="grid gap-3 md:grid-cols-2"/);
   const orderedInquiryFields = [
@@ -1513,12 +1511,44 @@ test("registration form keeps one application while early reservation fields sta
     source,
     /getRegistrationPrefillPipelineStatus\(inputWithCompletionIntent\)/,
   );
-  assert.match(
-    source,
-    /const submissionForm = !editingTask[\s\S]*?ensureRegistrationInquiryAt\(form, new Date\(\)\.toISOString\(\)\)[\s\S]*?getRegistrationCreateBlockers\(submissionForm\)/,
-  );
+  assert.match(source, /const submissionForm = form[\s\S]*?getRegistrationCreateBlockers\(submissionForm\)/);
   assert.match(source, /prepareRegistrationPipelineTransition/);
   assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(submissionForm\)\)/);
+
+  assert.match(source, /type RegistrationCreateAttempt = \{[\s\S]*?fingerprint: string[\s\S]*?requestKey: string[\s\S]*?inquiryAt: string[\s\S]*?normalizedInitialWorkflow:/);
+  assert.match(source, /registrationCreateAttemptRef\.current = createRegistrationCreateAttempt/);
+  assert.match(source, /inquiryAt: createAttempt\.inquiryAt/);
+  assert.match(source, /sanitizeRegistrationInquiryOnlyInput\(registrationReceiptPayload\)/);
+  const inquirySanitizerSource = source.slice(
+    source.indexOf("function sanitizeRegistrationInquiryOnlyInput"),
+    source.indexOf("function getWordRetestStudentPayload"),
+  );
+  assertIncludesAll(inquirySanitizerSource, [
+    'status: "requested"',
+    'completedAt: ""',
+    'secondaryAssigneeId: ""',
+    'classId: ""',
+    'textbookId: ""',
+    "pipelineStatus: REGISTRATION_PIPELINE_STATUSES[0]",
+  ]);
+  assert.match(source, /registrationCreateAttemptRef\.current = null[\s\S]*?Promise\.allSettled/);
+  assert.match(source, /sendRegistrationVisitNotificationTarget\(target/);
+  assert.match(source, /function discardFormAndClose\(\)[\s\S]*?registrationCreateAttemptRef\.current = null/);
+  assert.match(source, /function openCreate\([\s\S]*?registrationCreateAttemptRef\.current = null/);
+
+  const editBranch = submitFormSource.slice(
+    submitFormSource.indexOf("if (editingTask)"),
+    submitFormSource.indexOf("} else {", submitFormSource.indexOf("if (editingTask)")),
+  );
+  assert.match(editBranch, /updateRegistrationCaseCommon/);
+  assert.match(editBranch, /positivelyIdentifiedLegacyRegistrationEdit/);
+  assert.match(editBranch, /registrationTracks!\.every\(\(track\) => track\.legacy\)/);
+  assert.doesNotMatch(editBranch, /registrationTracks\?\.some\(\(track\) => !track\.legacy\)/);
+  assert.match(editBranch, /loadOpsRegistrationCaseDetail\(editingTask\.id, currentUserId, \{ force: true \}\)/);
+  assert.match(editBranch, /registrationTracks: updatedDetail\.tracks/);
+  assert.match(editBranch, /registrationTracks: editingTask\.registrationTracks/);
+  assert.doesNotMatch(editBranch, /updateOpsTask\(editingTask\.id, payload\)/);
+  assert.match(submitFormSource, /sanitizeRegistrationInquiryOnlyInput/);
 });
 
 test("registration subject tracks split combined inquiries and preserve subjects during class sync", async () => {
@@ -1571,74 +1601,28 @@ test("registration required inquiry fields remain invariant after the workflow a
   );
 });
 
-test("registration consumes the shared academic-director default with guarded automatic tracking", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const effectSource = source.slice(
-    source.indexOf("const registrationDirectorDefaultStateRef"),
-    source.indexOf("const scopedTasks", source.indexOf("const registrationDirectorDefaultStateRef")),
-  );
-  const openCreateSource = source.slice(
-    source.indexOf("function openCreate"),
-    source.indexOf("const openEdit", source.indexOf("function openCreate")),
-  );
-  const openEditSource = source.slice(
-    source.indexOf("const openEdit"),
-    source.indexOf("const openFailedWordRetestRetryForm", source.indexOf("const openEdit")),
-  );
-  const manualChangeSource = source.slice(
-    source.indexOf("function handleRegistrationCounselorChange"),
-    source.indexOf("const updateWithdrawal", source.indexOf("function handleRegistrationCounselorChange")),
-  );
+test("registration resolves and edits directors per subject in the canonical initial plan", async () => {
+  const [workspaceSource, initialPlanSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-initial-plan-control.tsx"),
+  ]);
 
-  assertIncludesAll(source, [
-    'from "./registration-director-default.js"',
-    "resolveRegistrationDirectorDefault({",
-    "subjects: parseRegistrationSubjects(form.subject)",
-    "grade: form.registration?.schoolGrade",
-    "inquiryAt: form.registration?.inquiryAt",
-    "getRegistrationDirectorDefaultTransition({",
+  assertIncludesAll(workspaceSource, [
+    'from "./registration-initial-plan-control"',
+    "registrationResolvedDirectorIds",
+    "subjects: [subject]",
+    "<RegistrationInitialPlanControl",
+    "resolvedDirectorIds={registrationResolvedDirectorIds}",
+    "directorOptionsBySubject={registrationDirectorOptionsBySubject}",
   ]);
-  assertIncludesAll(effectSource, [
-    "const registrationDirectorDefaultPendingRef",
-    "if (!formOpen || form.type !== \"registration\") {",
-    "const session = registrationDirectorDefaultSessionRef.current",
-    "const pendingTransition = registrationDirectorDefaultPendingRef.current",
-    "pendingTransition.targetProfileId",
-    "registrationDirectorDefaultStateRef.current = pendingTransition.state",
-    "registrationDirectorDefaultPendingRef.current = null",
-    "const nextPendingTransition =",
-    "registrationDirectorDefaultPendingRef.current = nextPendingTransition",
-    "setForm((current) => {",
-    "if (registrationDirectorDefaultSessionRef.current !== session) return current",
-    "registrationDirectorDefaultPendingRef.current?.token !== token",
-    "secondaryAssigneeId: transition.profileId",
-    "counselor: transition.counselor",
+  assertIncludesAll(initialPlanSource, [
+    "consultationSubjects.map((subject)",
+    "draft.directorOverrides[subject] || resolvedDirectorId",
+    "directorOptionsBySubject[subject]",
+    "[subject]: event.target.value",
+    "`${subject} 상담 책임자`",
   ]);
-  const automaticUpdaterSource = effectSource.slice(
-    effectSource.indexOf("setForm((current) => {"),
-    effectSource.indexOf("\n    })", effectSource.indexOf("setForm((current) => {")) + 7,
-  );
-  assert.doesNotMatch(
-    automaticUpdaterSource,
-    /registrationDirectorDefault(?:State|Pending)Ref\.current\s*=/,
-    "the replayable React state updater must not mutate provenance refs",
-  );
-  assert.match(openCreateSource, /registrationDirectorDefaultStateRef\.current = createRegistrationDirectorDefaultState\(\)/);
-  assert.match(openCreateSource, /registrationDirectorDefaultPendingRef\.current = null/);
-  assert.match(openEditSource, /createRegistrationDirectorDefaultState\(\{[\s\S]*?profileId: nextForm\.secondaryAssigneeId[\s\S]*?counselor: nextForm\.registration\?\.counselor/);
-  assert.match(openEditSource, /registrationDirectorDefaultPendingRef\.current = null/);
-  assertIncludesAll(manualChangeSource, [
-    "markRegistrationDirectorDefaultManual",
-    "registrationDirectorDefaultStateRef.current =",
-    "registrationDirectorDefaultPendingRef.current = null",
-    "setForm((current)",
-    "secondaryAssigneeId: profileId",
-    "counselor: nextCounselor",
-  ]);
-  assert.ok(
-    manualChangeSource.indexOf("markRegistrationDirectorDefaultManual") < manualChangeSource.indexOf("setForm((current)"),
-    "manual tracking must be set before the atomic form update",
-  );
+  assert.doesNotMatch(workspaceSource, /function handleRegistrationCounselorChange/);
 });
 
 test("shared operation form actions sit flush below content instead of floating over fields", async () => {
@@ -1665,7 +1649,7 @@ test("operation class options query the canonical fee schema before legacy tuiti
   assert.doesNotMatch(firstCandidate, /tuition/);
 });
 
-test("operation forms use staged fields and linked management selectors", async () => {
+test("operation forms keep staged linked selectors outside canonical registration intake", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const formDialogSource = source.slice(
     source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
@@ -1673,10 +1657,6 @@ test("operation forms use staged fields and linked management selectors", async 
   );
 
   assertIncludesAll(source, [
-    '"registration_contact"',
-    '"registration_test"',
-    '"registration_start"',
-    '"registration_checks"',
     '"withdrawal_basic"',
     '"withdrawal_reason"',
     '"withdrawal_checks"',
@@ -1692,7 +1672,6 @@ test("operation forms use staged fields and linked management selectors", async 
     'label="담당선생님"',
     'label="장소"',
     'label="메모"',
-    "fillRegistration: true",
     "fillWithdrawal: true",
     "fillTransferFrom: true",
     "fillTransferTo: true",
@@ -3826,22 +3805,19 @@ test("browser workflow scripts target the operation surfaces", async () => {
   ]);
 });
 
-test("registration placement uses one selected-class schedule control with atomic date and session updates", async () => {
+test("registration create omits placement while canonical track editors own enrollment scheduling", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const placementStart = source.indexOf('sectionKey="placement"');
-  const placementEnd = source.indexOf('sectionKey="admission"', placementStart);
-  const placementSource = source.slice(placementStart, placementEnd);
+  const registrationFormStart = source.indexOf('if (form.type === "registration")', source.indexOf("function TypeSpecificFields"));
+  const registrationFormSource = source.slice(registrationFormStart, source.indexOf('if (form.type === "withdrawal")', registrationFormStart));
 
-  assert.match(placementSource, /label="수업 시작 일정"/);
-  assert.match(source, /수업을 먼저 선택하세요/);
-  assert.match(source, /수업 일정을 불러오는 중/);
-  assert.match(source, /수업 일정 설정 필요/);
-  assert.match(source, /updateRegistrationPatch\(\{ classStartDate: selectedSession\.dateKey, classStartSession: selectedSession\.sessionLabel \}\)/);
-  assert.doesNotMatch(placementSource, /label="수업시작일"|label="수업시작회차"|type="date"/);
+  assert.doesNotMatch(registrationFormSource, /수업 시작 일정|classStartDate|classStartSession|fillRegistration/);
+  assertIncludesAll(source, ["RegistrationTrackEditor", "RegistrationAdmissionPanel"]);
 });
 
-test("registration selected-class detail and textbook default guards reject stale responses and preserve intentional empties", async () => {
+test("registration canonical editors own class and textbook changes after create omits placement", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const registrationFormStart = source.indexOf('if (form.type === "registration")', source.indexOf("function TypeSpecificFields"));
+  const registrationFormSource = source.slice(registrationFormStart, source.indexOf('if (form.type === "withdrawal")', registrationFormStart));
 
   assertIncludesAll(source, [
     "loadOpsRegistrationClassDetail",
@@ -3849,16 +3825,9 @@ test("registration selected-class detail and textbook default guards reject stal
     "requestToken !== registrationClassDetailRequestRef.current",
     "detail.id !== selectedClassId",
     "registrationClassDetailResult.viewerId === selectedRegistrationViewerId",
-    "registrationTextbookDefaultPendingClassRef",
-    "registrationTextbookClearedClassRef",
-    "resolveRegistrationLinkedTextbookDefault",
-    "allowDeselect",
-    "선택 안 함 · 이미 보유",
+    "RegistrationAdmissionPanel",
   ]);
-  assert.ok(
-    [...source.matchAll(/textbookBillingIssued: false/g)].length >= 2,
-    "class changes and explicit textbook clears must each discard stale textbook billing state",
-  );
+  assert.doesNotMatch(registrationFormSource, /textbookBillingIssued|registrationTextbookDefaultPendingClassRef|registrationTextbookClearedClassRef/);
 });
 
 test("registration completion keeps textbook optional while validating a nonempty linked textbook", async () => {
@@ -3873,17 +3842,15 @@ test("registration completion keeps textbook optional while validating a nonempt
   assert.match(blockerSource, /if \(hasLinkedRecord\(input\.textbookId\) && !findTextbookOption/);
 });
 
-test("registration admission checklist is chronological and hides legacy automatic work", async () => {
+test("registration admission checklist remains chronological in canonical detail and is absent from create", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const checklistStart = source.indexOf("function getRegistrationOperationsChecklist(");
   const checklistSource = source.slice(
     checklistStart,
     source.indexOf("function getRegistrationOperationsChecklistValue", checklistStart),
   );
-  const placementStart = source.indexOf('sectionKey="placement"');
-  const placementSource = source.slice(placementStart, source.indexOf('sectionKey="admission"', placementStart));
-  const admissionStart = source.indexOf('sectionKey="admission"');
-  const admissionSource = source.slice(admissionStart, source.indexOf('if (form.type === "withdrawal")', admissionStart));
+  const registrationFormStart = source.indexOf('if (form.type === "registration")', source.indexOf("function TypeSpecificFields"));
+  const registrationFormSource = source.slice(registrationFormStart, source.indexOf('if (form.type === "withdrawal")', registrationFormStart));
   const detailStart = source.indexOf("function RegistrationDetailPanel");
   const registrationDetailSource = source.slice(detailStart, source.indexOf("function WithdrawalDetailPanel", detailStart));
   const summaryStart = source.indexOf('if (task.type === "registration" && task.registration)');
@@ -3897,29 +3864,25 @@ test("registration admission checklist is chronological and hides legacy automat
   ];
 
   assertInOrder(checklistSource, orderedLabels);
-  assertInOrder(admissionSource, orderedLabels.map((label) => `label="${label}"`));
   assert.match(checklistSource, /getRegistrationPipelinePrefix\(registration\?\.pipelineStatus\) === "7\."/);
   assert.doesNotMatch(checklistSource, /textbookBillingIssued|textbookReady|timetableRosterUpdated|교재 청구출고표|교재 준비|수업시간표 명단/);
-  assert.doesNotMatch(placementSource, /textbookPreparation|REGISTRATION_TEXTBOOK_PREPARATION_OPTIONS|label="교재 준비"/);
-  assert.doesNotMatch(admissionSource, /AutoSyncStatusField|textbookBillingIssued|교재 청구출고표|교재 준비|수업시간표 명단/);
+  assert.doesNotMatch(registrationFormSource, /입학신청서 발송|메이크에듀 등록|청구서 발송|수납 완료 확인|등록 완료/);
   assert.doesNotMatch(registrationDetailSource, /<Info label="교재 준비"|textbookBillingIssued/);
   assertInOrder(registrationSummarySource, orderedLabels);
   assert.doesNotMatch(registrationSummarySource, /autoItems=|textbookBillingIssued|교재 청구출고표|교재 준비|수업시간표 명단/);
 });
 
-test("registration form checklist updates use the shared downstream cascade and exclude legacy billing actions", async () => {
+test("registration form saves common edits through the canonical common writer", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const actionTypeStart = source.indexOf("type RegistrationChecklistField");
-  const actionTypeSource = source.slice(actionTypeStart, source.indexOf("type WithdrawalChecklistField", actionTypeStart));
-  const directUpdateStart = source.indexOf("const updateAdmissionChecklist = (");
-  const directUpdateSource = source.slice(directUpdateStart, source.indexOf('if (form.type === "registration")', directUpdateStart));
+  const submitStart = source.indexOf("const submitForm = async");
+  const editStart = source.indexOf("if (editingTask)", submitStart);
+  const editSource = source.slice(editStart, source.indexOf("} else {", editStart));
 
-  assert.doesNotMatch(actionTypeSource, /textbookBillingIssued/);
-  assert.match(directUpdateSource, /applyRegistrationChecklistChange/);
-  assert.doesNotMatch(directUpdateSource, /nextRegistration\.textbookBillingIssued/);
+  assert.match(editSource, /updateRegistrationCaseCommon/);
+  assert.doesNotMatch(editSource, /updateOpsTask\(editingTask\.id, payload\)/);
 });
 
-test("pending registration completion edits use the source operational stage without rendering a false completed check", async () => {
+test("pending registration edits do not re-render or mutate downstream completion controls", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const registrationFormStart = source.indexOf('if (form.type === "registration")');
   const registrationFormSource = source.slice(
@@ -3927,10 +3890,6 @@ test("pending registration completion edits use the source operational stage wit
     source.indexOf('if (form.type === "withdrawal")', registrationFormStart),
   );
 
-  assertIncludesAll(registrationFormSource, [
-    "getRegistrationChecklistEditorState",
-    "completionIntentPipelineStatus: formCompletionIntent?.registrationPipelineStatus",
-    "pipelineStatus: registrationChecklistEditorState.availabilityPipelineStatus",
-    "checked={registrationChecklistEditorState.completed}",
-  ]);
+  assertIncludesAll(registrationFormSource, ["문의 정보", "RegistrationInitialPlanControl"]);
+  assert.doesNotMatch(registrationFormSource, /getRegistrationChecklistEditorState|completionIntentPipelineStatus|checked=\{registrationChecklistEditorState\.completed\}/);
 });

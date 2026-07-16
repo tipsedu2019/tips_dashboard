@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase"
 // registration-intake-runtime-probe-factory:start
 export type RegistrationIntakeRuntimeState = {
   available: boolean
-  version: 0 | 1
+  version: number
 }
 
 type RegistrationIntakeRuntimeProbeResult = {
@@ -34,10 +34,11 @@ function errorMessage(error: unknown) {
 
 function isMissingIntakeRuntimeFunction(error: unknown) {
   const code = errorCode(error)
-  if (code === "PGRST202" || code === "42883") return true
-
   const message = errorMessage(error)
-  return message.includes(REGISTRATION_INTAKE_RUNTIME_VERSION_RPC)
+  const identifiesIntakeMarker = message.includes(REGISTRATION_INTAKE_RUNTIME_VERSION_RPC)
+  if ((code === "PGRST202" || code === "42883") && identifiesIntakeMarker) return true
+
+  return identifiesIntakeMarker
     && message.includes("schema cache")
     && message.includes("could not find the function")
 }
@@ -51,9 +52,10 @@ async function detectRegistrationIntakeRuntime(
 
   const readiness = await client.rpc(REGISTRATION_INTAKE_RUNTIME_VERSION_RPC)
   if (!readiness.error) {
-    return readiness.data === 1
-      ? { available: true, version: 1 }
-      : { available: false, version: 0 }
+    if (typeof readiness.data !== "number" || !Number.isFinite(readiness.data)) {
+      throw new Error("registration_intake_runtime_indeterminate")
+    }
+    return { available: true, version: readiness.data }
   }
   if (isMissingIntakeRuntimeFunction(readiness.error)) {
     return { available: false, version: 0 }

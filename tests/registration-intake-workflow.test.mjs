@@ -2,12 +2,15 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  createRegistrationCreateAttempt,
   createRegistrationInitialWorkflowDraft,
   getRegistrationInitialPanelState,
   getRegistrationInitialWorkflowBlockers,
   getRegistrationInitialWorkflowParticipants,
   normalizeRegistrationInitialWorkflow,
+  probeRegistrationInitialPersistence,
   reconcileRegistrationInitialWorkflowDraft,
+  resolveRegistrationInitialPersistenceMode,
   setRegistrationInitialSubjectAction,
 } from "../src/features/tasks/registration-intake-workflow.ts"
 
@@ -128,6 +131,99 @@ test("normalizes ordered payload membership, places, and explicit director overr
     },
     directorOverrides: { 수학: "director-math" },
   })
+})
+
+test("direct phone normalization creates no appointments or legacy scheduling fields", () => {
+  const draft = {
+    ...createRegistrationInitialWorkflowDraft(["영어"]),
+    subjectPlans: { 영어: "direct_phone" },
+    directorOverrides: { 영어: "director-english" },
+  }
+
+  const payload = normalizeRegistrationInitialWorkflow(draft, ["영어"])
+
+  assert.equal(payload.levelTestAppointment, null)
+  assert.equal(payload.visitAppointment, null)
+  assert.equal("phoneConsultationAt" in payload, false)
+  assert.equal("levelTestMaterialLink" in payload, false)
+})
+
+test("resolves every confirmed two-runtime persistence matrix path without guessing", () => {
+  const intakeReady = { available: true, version: 1 }
+  const intakeMissing = { available: false, version: 0 }
+
+  assert.equal(resolveRegistrationInitialPersistenceMode({ mode: "maintenance", version: 0 }, intakeReady), "blocked_maintenance")
+  assert.equal(resolveRegistrationInitialPersistenceMode({ mode: "ready", version: 1 }, intakeReady), "ready_atomic")
+  assert.equal(resolveRegistrationInitialPersistenceMode({ mode: "ready", version: 1 }, intakeMissing), "canonical_inquiry")
+  assert.equal(resolveRegistrationInitialPersistenceMode({ mode: "legacy", version: 0 }, intakeMissing), "legacy_inquiry")
+  assert.equal(resolveRegistrationInitialPersistenceMode({ mode: "legacy", version: 0 }, intakeReady), "blocked_mismatch")
+  assert.equal(resolveRegistrationInitialPersistenceMode({ mode: "ready", version: 1 }, { available: true, version: 2 }), "blocked_mismatch")
+  assert.equal(resolveRegistrationInitialPersistenceMode({ mode: "ready", version: 1 }, { available: false, version: 1 }), "blocked_mismatch")
+})
+
+test("probe rejection and timeout are indeterminate and select no writer", async () => {
+  const rejected = new Error("permission denied")
+  const rejectedResult = await probeRegistrationInitialPersistence({
+    probeSubjectRuntime: async () => { throw rejected },
+    probeIntakeRuntime: async () => ({ available: true, version: 1 }),
+    timeoutMs: 20,
+  })
+  assert.equal(rejectedResult.mode, "blocked_indeterminate")
+  assert.strictEqual(rejectedResult.error, rejected)
+
+  const timeoutResult = await probeRegistrationInitialPersistence({
+    probeSubjectRuntime: () => new Promise(() => {}),
+    probeIntakeRuntime: async () => ({ available: true, version: 1 }),
+    timeoutMs: 5,
+  })
+  assert.equal(timeoutResult.mode, "blocked_indeterminate")
+  assert.match(String(timeoutResult.error), /registration_runtime_probe_timeout/)
+})
+
+test("one logical registration retry freezes its full attempt envelope", () => {
+  const normalizedInitialWorkflow = normalizeRegistrationInitialWorkflow({
+    ...createRegistrationInitialWorkflowDraft(["영어", "수학"]),
+    subjectPlans: { 영어: "direct_phone", 수학: "visit" },
+    visitScheduledAt: "2026-07-20T10:00",
+    visitPlace: "상담실 1",
+    directorOverrides: { 영어: "director-english", 수학: "director-math" },
+  }, ["영어", "수학"])
+  const common = {
+    studentName: " 김다미 ", schoolGrade: "고1", schoolName: "중앙고",
+    parentPhone: "01012345678", studentPhone: "", campus: "본관",
+    inquiryAt: "", subjects: ["수학", "영어"], requestNote: " 방문 요청 ", priority: "high",
+  }
+  let requestSequence = 0
+  let inquirySequence = 0
+  const first = createRegistrationCreateAttempt(null, common, normalizedInitialWorkflow, {
+    createRequestKey: () => `request-${++requestSequence}`,
+    createInquiryAt: () => `2026-07-16T0${++inquirySequence}:00:00Z`,
+  })
+  const retry = createRegistrationCreateAttempt(first, { ...common }, structuredClone(normalizedInitialWorkflow), {
+    createRequestKey: () => `request-${++requestSequence}`,
+    createInquiryAt: () => `2026-07-16T0${++inquirySequence}:00:00Z`,
+  })
+
+  assert.strictEqual(retry, first)
+  assert.equal(retry.requestKey, "request-1")
+  assert.equal(retry.inquiryAt, "2026-07-16T01:00:00Z")
+  assert.deepEqual(retry.normalizedInitialWorkflow, normalizedInitialWorkflow)
+
+  for (const changed of [
+    { common: { ...common, studentName: "김다미2" }, workflow: normalizedInitialWorkflow },
+    { common, workflow: { ...normalizedInitialWorkflow, subjectPlans: { 영어: "inquiry", 수학: "visit" } } },
+    { common, workflow: { ...normalizedInitialWorkflow, visitAppointment: { ...normalizedInitialWorkflow.visitAppointment, scheduledAt: "2026-07-21T10:00" } } },
+    { common, workflow: { ...normalizedInitialWorkflow, visitAppointment: { ...normalizedInitialWorkflow.visitAppointment, place: "상담실 2" } } },
+    { common, workflow: { ...normalizedInitialWorkflow, directorOverrides: { ...normalizedInitialWorkflow.directorOverrides, 수학: "director-math-2" } } },
+  ]) {
+    const rotated = createRegistrationCreateAttempt(first, changed.common, changed.workflow, {
+      createRequestKey: () => `request-${++requestSequence}`,
+      createInquiryAt: () => `2026-07-16T0${++inquirySequence}:00:00Z`,
+    })
+    assert.notEqual(rotated.requestKey, first.requestKey)
+    assert.notEqual(rotated.inquiryAt, first.inquiryAt)
+    assert.notEqual(rotated.fingerprint, first.fingerprint)
+  }
 })
 
 test("normalization rejects missing, extraneous, or invalid subject plans", () => {

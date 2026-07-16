@@ -17,6 +17,16 @@ async function readMigration(suffix) {
   return readFile(new URL(name, migrationsUrl), "utf8")
 }
 
+function assertInOrder(source, values) {
+  let cursor = -1
+  for (const value of values) {
+    const next = source.indexOf(value, cursor + 1)
+    assert.notEqual(next, -1, `missing ordered source contract: ${value}`)
+    assert.ok(next > cursor, `${value} must appear after the previous item`)
+    cursor = next
+  }
+}
+
 function readPolicyBlock(sql, name) {
   const marker = `create policy ${name}`
   const start = sql.indexOf(marker)
@@ -1222,6 +1232,51 @@ test("registration intake creation is one authenticated atomic workflow", async 
   assert.equal(createdFunctions.at(-1)?.index, intakeMarkerIndex)
   assert.match(sql.slice(intakeMarkerIndex), /returns integer[\s\S]*?security invoker[\s\S]*?select 1/)
   assert.match(sql.trim(), /create function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?alter function public\.registration_intake_workflow_runtime_version\(\)[\s\S]*?revoke execute on function public\.registration_intake_workflow_runtime_version\(\) from public, anon;[\s\S]*?grant execute on function public\.registration_intake_workflow_runtime_version\(\) to authenticated;\s*commit;$/)
+})
+
+test("forward intake runtime guard checks both markers before the unchanged atomic delegate", async () => {
+  const sql = await readMigration("registration_intake_runtime_guard")
+  const wrapper = readFunctionBlock(
+    sql,
+    "public",
+    "create_registration_case_with_initial_workflow_v1",
+  )
+  const signature = [
+    "text", "text", "text", "text", "text", "text", "timestamptz", "text[]",
+    "text", "text", "jsonb", "jsonb", "jsonb", "jsonb", "text",
+  ]
+
+  assert.match(sql.trim(), /^begin;[\s\S]*commit;$/i)
+  assert.equal((sql.match(/^begin;$/gim) || []).length, 1)
+  assert.equal((sql.match(/^commit;$/gim) || []).length, 1)
+  assert.match(wrapper, /create or replace function/)
+  assert.deepEqual(readFunctionArgumentTypes(wrapper), signature)
+  assert.match(wrapper, /security invoker/)
+  assert.match(wrapper, /set search_path = ''/)
+  assertInOrder(wrapper, [
+    "registration_subject_tracks_runtime_version()",
+    "registration_intake_workflow_runtime_version()",
+    "dashboard_private.create_registration_case_with_initial_workflow_v1_impl(",
+  ])
+  assert.match(wrapper, /registration_subject_tracks_runtime_(?:missing|mismatch|unauthorized)/)
+  assert.match(wrapper, /registration_intake_workflow_runtime_(?:missing|mismatch|unauthorized)/)
+  assert.match(sql, /revoke execute on function public\.create_registration_case_with_initial_workflow_v1\([\s\S]*?\) from public, anon;/)
+  assert.match(sql, /grant execute on function public\.create_registration_case_with_initial_workflow_v1\([\s\S]*?\) to authenticated;/)
+
+  const pgTap = await readFile(
+    new URL("registration_intake_workflow_runtime_test.sql", supabaseTestsUrl),
+    "utf8",
+  )
+  for (const contract of [
+    "subject runtime wrong version creates no rows",
+    "subject runtime missing creates no rows",
+    "subject runtime unauthorized creates no rows",
+    "intake runtime wrong version creates no rows",
+    "intake runtime missing creates no rows",
+    "intake runtime unauthorized creates no rows",
+  ]) {
+    assert.match(pgTap, new RegExp(contract, "i"))
+  }
 })
 
 test("Task 3B case and inquiry routing mutations preserve transactional contracts", async () => {

@@ -1329,5 +1329,151 @@ select ok(
   'visit conversion cancels readiness only for participating subjects'
 );
 
+-- Forward wrapper guard: every marker fault must fail before task insertion.
+create or replace function pg_temp.registration_intake_guard_rejects(
+  p_student_name text,
+  p_parent_phone text,
+  p_request_key text,
+  p_error_pattern text
+)
+returns boolean
+language plpgsql
+volatile
+as $$
+begin
+  perform pg_temp.registration_intake_create(
+    p_student_name,
+    p_parent_phone,
+    array['영어'],
+    '{"영어":"inquiry"}'::jsonb,
+    null,
+    null,
+    p_request_key
+  );
+  return false;
+exception
+  when others then
+    return sqlerrm ~ p_error_pattern
+      and not exists (
+        select 1
+        from public.ops_registration_details detail
+        where detail.parent_phone = p_parent_phone
+      );
+end;
+$$;
+
+set local role postgres;
+create or replace function public.registration_subject_tracks_runtime_version()
+returns integer
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select 2; $$;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor('10000000-0000-4000-8000-000000007001');
+select ok(
+  pg_temp.registration_intake_guard_rejects(
+    '가드과목오류', '01077000901', 'intake-guard-subject-wrong',
+    'registration_subject_tracks_runtime_mismatch'
+  ),
+  'subject runtime wrong version creates no rows'
+);
+set local role postgres;
+create or replace function public.registration_subject_tracks_runtime_version()
+returns integer
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select 1; $$;
+
+alter function public.registration_subject_tracks_runtime_version()
+  rename to registration_subject_tracks_runtime_version_guard_saved;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor('10000000-0000-4000-8000-000000007001');
+select ok(
+  pg_temp.registration_intake_guard_rejects(
+    '가드과목누락', '01077000902', 'intake-guard-subject-missing',
+    'registration_subject_tracks_runtime_missing'
+  ),
+  'subject runtime missing creates no rows'
+);
+set local role postgres;
+alter function public.registration_subject_tracks_runtime_version_guard_saved()
+  rename to registration_subject_tracks_runtime_version;
+
+revoke execute on function public.registration_subject_tracks_runtime_version()
+  from authenticated;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor('10000000-0000-4000-8000-000000007001');
+select ok(
+  pg_temp.registration_intake_guard_rejects(
+    '가드과목권한', '01077000903', 'intake-guard-subject-unauthorized',
+    'registration_subject_tracks_runtime_unauthorized'
+  ),
+  'subject runtime unauthorized creates no rows'
+);
+set local role postgres;
+grant execute on function public.registration_subject_tracks_runtime_version()
+  to authenticated;
+
+create or replace function public.registration_intake_workflow_runtime_version()
+returns integer
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select 2; $$;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor('10000000-0000-4000-8000-000000007001');
+select ok(
+  pg_temp.registration_intake_guard_rejects(
+    '가드초기오류', '01077000904', 'intake-guard-intake-wrong',
+    'registration_intake_workflow_runtime_mismatch'
+  ),
+  'intake runtime wrong version creates no rows'
+);
+set local role postgres;
+create or replace function public.registration_intake_workflow_runtime_version()
+returns integer
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select 1; $$;
+
+alter function public.registration_intake_workflow_runtime_version()
+  rename to registration_intake_workflow_runtime_version_guard_saved;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor('10000000-0000-4000-8000-000000007001');
+select ok(
+  pg_temp.registration_intake_guard_rejects(
+    '가드초기누락', '01077000905', 'intake-guard-intake-missing',
+    'registration_intake_workflow_runtime_missing'
+  ),
+  'intake runtime missing creates no rows'
+);
+set local role postgres;
+alter function public.registration_intake_workflow_runtime_version_guard_saved()
+  rename to registration_intake_workflow_runtime_version;
+
+revoke execute on function public.registration_intake_workflow_runtime_version()
+  from authenticated;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor('10000000-0000-4000-8000-000000007001');
+select ok(
+  pg_temp.registration_intake_guard_rejects(
+    '가드초기권한', '01077000906', 'intake-guard-intake-unauthorized',
+    'registration_intake_workflow_runtime_unauthorized'
+  ),
+  'intake runtime unauthorized creates no rows'
+);
+set local role postgres;
+grant execute on function public.registration_intake_workflow_runtime_version()
+  to authenticated;
+set local role authenticated;
+select pg_temp.registration_intake_set_actor('10000000-0000-4000-8000-000000007001');
+
 select * from finish();
 rollback;

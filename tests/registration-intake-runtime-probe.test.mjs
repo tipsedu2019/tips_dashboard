@@ -80,21 +80,36 @@ test("exact numeric intake runtime version 1 is available", async () => {
   assert.deepEqual(harness.calls.rpcNames, ["registration_intake_workflow_runtime_version"]);
 });
 
-test("a successful non-1 intake runtime version is unavailable", async () => {
+test("a successful wrong numeric intake runtime version remains observable", async () => {
   const { createRegistrationIntakeRuntimeProbe } = await loadProbeFactory();
   const harness = createClient([{ data: 2, error: null }]);
 
   assert.deepEqual(
     { ...(await createRegistrationIntakeRuntimeProbe(harness.client).probe()) },
-    { available: false, version: 0 },
+    { available: true, version: 2 },
   );
+});
+
+test("a malformed successful intake runtime response is indeterminate", async () => {
+  const { createRegistrationIntakeRuntimeProbe } = await loadProbeFactory();
+
+  for (const data of ["1", null, { version: 1 }, [1]]) {
+    const harness = createClient([{ data, error: null }]);
+    await assert.rejects(
+      createRegistrationIntakeRuntimeProbe(harness.client).probe(),
+      /registration_intake_runtime_indeterminate/,
+    );
+  }
 });
 
 test("PGRST202 reports the intake runtime as unavailable", async () => {
   const { createRegistrationIntakeRuntimeProbe } = await loadProbeFactory();
   const harness = createClient([{
     data: null,
-    error: { code: "PGRST202", message: "missing RPC" },
+    error: {
+      code: "PGRST202",
+      message: "Could not find the function public.registration_intake_workflow_runtime_version in the schema cache",
+    },
   }]);
 
   assert.deepEqual(
@@ -107,12 +122,29 @@ test("PostgreSQL 42883 reports the intake runtime as unavailable", async () => {
   const { createRegistrationIntakeRuntimeProbe } = await loadProbeFactory();
   const harness = createClient([{
     data: null,
-    error: { code: "42883", message: "function does not exist" },
+    error: {
+      code: "42883",
+      message: "function public.registration_intake_workflow_runtime_version() does not exist",
+    },
   }]);
 
   assert.deepEqual(
     { ...(await createRegistrationIntakeRuntimeProbe(harness.client).probe()) },
     { available: false, version: 0 },
+  );
+});
+
+test("an unrelated PostgreSQL 42883 from inside the marker is indeterminate", async () => {
+  const { createRegistrationIntakeRuntimeProbe } = await loadProbeFactory();
+  const unrelated = {
+    code: "42883",
+    message: "function dashboard_private.missing_dependency() does not exist",
+  };
+  const harness = createClient([{ data: null, error: unrelated }]);
+
+  await assert.rejects(
+    createRegistrationIntakeRuntimeProbe(harness.client).probe(),
+    (error) => error === unrelated,
   );
 });
 
@@ -185,7 +217,7 @@ test("reset during an in-flight request protects the fresh request and cache", a
   assert.equal(harness.calls.rpc, 2);
 
   staleReadiness.resolve({ data: 2, error: null });
-  assert.deepEqual({ ...(await stale) }, { available: false, version: 0 });
+  assert.deepEqual({ ...(await stale) }, { available: true, version: 2 });
   assert.strictEqual(runtime.probe(), fresh, "stale finally must not clear the fresh request");
 
   freshReadiness.resolve({ data: 1, error: null });

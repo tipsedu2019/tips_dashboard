@@ -1,4 +1,6 @@
 import type { RegistrationSubject } from "./registration-track-service"
+import type { RegistrationIntakeRuntimeState } from "./registration-intake-runtime-probe"
+import type { RegistrationRuntimeState } from "./registration-runtime-probe"
 
 // registration-intake-workflow-model:start
 export type RegistrationInitialAction =
@@ -31,6 +33,48 @@ export type RegistrationInitialWorkflowPayload = {
   directorOverrides: Partial<Record<RegistrationSubject, string>>
 }
 
+export type RegistrationInitialPersistenceMode =
+  | "ready_atomic"
+  | "canonical_inquiry"
+  | "legacy_inquiry"
+  | "blocked_maintenance"
+  | "blocked_mismatch"
+
+export type RegistrationInitialPersistenceProbeResult =
+  | {
+      mode: RegistrationInitialPersistenceMode
+      subjectRuntime: RegistrationRuntimeState
+      intakeRuntime: RegistrationIntakeRuntimeState
+      error?: never
+    }
+  | {
+      mode: "blocked_indeterminate"
+      subjectRuntime?: never
+      intakeRuntime?: never
+      error: unknown
+    }
+
+export type RegistrationCreateCommonInput = {
+  studentName: string
+  schoolGrade: string
+  schoolName: string
+  parentPhone: string
+  studentPhone: string
+  campus: string
+  inquiryAt: string
+  subjects: RegistrationSubject[]
+  requestNote: string
+  priority: string
+}
+
+export type RegistrationCreateAttempt = {
+  fingerprint: string
+  requestKey: string
+  inquiryAt: string
+  common: RegistrationCreateCommonInput
+  normalizedInitialWorkflow: RegistrationInitialWorkflowPayload
+}
+
 const SUBJECT_ORDER: RegistrationSubject[] = ["영어", "수학"]
 const INITIAL_ACTIONS: RegistrationInitialAction[] = ["inquiry", "level_test", "direct_phone", "visit"]
 
@@ -57,6 +101,96 @@ function hasExactSubjectPlans(
 
 function trimmed(value: string | undefined) {
   return String(value ?? "").trim()
+}
+
+export function resolveRegistrationInitialPersistenceMode(
+  subjectRuntime: RegistrationRuntimeState,
+  intakeRuntime: RegistrationIntakeRuntimeState,
+): RegistrationInitialPersistenceMode {
+  if (subjectRuntime.mode === "maintenance") return "blocked_maintenance"
+
+  const intakeReady = intakeRuntime.available === true && intakeRuntime.version === 1
+  const intakeMissing = intakeRuntime.available === false && intakeRuntime.version === 0
+
+  if (subjectRuntime.mode === "ready" && subjectRuntime.version === 1) {
+    if (intakeReady) return "ready_atomic"
+    if (intakeMissing) return "canonical_inquiry"
+    return "blocked_mismatch"
+  }
+  if (subjectRuntime.mode === "legacy" && subjectRuntime.version === 0) {
+    return intakeMissing ? "legacy_inquiry" : "blocked_mismatch"
+  }
+  return "blocked_mismatch"
+}
+
+export async function probeRegistrationInitialPersistence(input: {
+  probeSubjectRuntime: () => Promise<RegistrationRuntimeState>
+  probeIntakeRuntime: () => Promise<RegistrationIntakeRuntimeState>
+  timeoutMs?: number
+}): Promise<RegistrationInitialPersistenceProbeResult> {
+  const timeoutMs = input.timeoutMs ?? 8_000
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("registration_runtime_probe_timeout")), timeoutMs)
+  })
+
+  try {
+    const [subjectRuntime, intakeRuntime] = await Promise.race([
+      Promise.all([input.probeSubjectRuntime(), input.probeIntakeRuntime()]),
+      timeout,
+    ])
+    return {
+      mode: resolveRegistrationInitialPersistenceMode(subjectRuntime, intakeRuntime),
+      subjectRuntime,
+      intakeRuntime,
+    }
+  } catch (error) {
+    return { mode: "blocked_indeterminate", error }
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+  }
+}
+
+function normalizedCreateCommon(input: RegistrationCreateCommonInput): RegistrationCreateCommonInput {
+  return {
+    studentName: trimmed(input.studentName),
+    schoolGrade: trimmed(input.schoolGrade),
+    schoolName: trimmed(input.schoolName),
+    parentPhone: trimmed(input.parentPhone),
+    studentPhone: trimmed(input.studentPhone),
+    campus: trimmed(input.campus),
+    inquiryAt: trimmed(input.inquiryAt),
+    subjects: orderedSubjects(input.subjects),
+    requestNote: trimmed(input.requestNote),
+    priority: trimmed(input.priority),
+  }
+}
+
+function createAttemptFingerprint(
+  common: RegistrationCreateCommonInput,
+  workflow: RegistrationInitialWorkflowPayload,
+) {
+  return JSON.stringify({ common, workflow })
+}
+
+export function createRegistrationCreateAttempt(
+  current: RegistrationCreateAttempt | null,
+  commonInput: RegistrationCreateCommonInput,
+  normalizedInitialWorkflow: RegistrationInitialWorkflowPayload,
+  factories: { createRequestKey: () => string; createInquiryAt: () => string },
+): RegistrationCreateAttempt {
+  const common = normalizedCreateCommon(commonInput)
+  const fingerprint = createAttemptFingerprint(common, normalizedInitialWorkflow)
+  if (current?.fingerprint === fingerprint) return current
+
+  const inquiryAt = common.inquiryAt || factories.createInquiryAt()
+  return {
+    fingerprint,
+    requestKey: factories.createRequestKey(),
+    inquiryAt,
+    common: { ...common, inquiryAt },
+    normalizedInitialWorkflow: structuredClone(normalizedInitialWorkflow),
+  }
 }
 
 export function createRegistrationInitialWorkflowDraft(

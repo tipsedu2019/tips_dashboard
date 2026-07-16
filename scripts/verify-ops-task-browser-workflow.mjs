@@ -425,7 +425,7 @@ const ROUTES = [
   { path: "/admin/tasks?list=sent", name: "todo-sent", expectedTexts: ["할 일", "보낸함"] },
   { path: "/admin/tasks?list=completed", name: "todo-completed", expectedTexts: ["할 일", "완료"] },
   { path: "/admin/registration", name: "registration", expectedTexts: ["등록", "등록 추가"], interaction: "open-create" },
-  { path: "/admin/registration?fixture=registration-subject-tracks", name: "registration-subject-track-fixture", expectedTexts: ["등록", "윤지호"], interaction: "registration-subject-track-fixture" },
+  { path: "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin", name: "registration-subject-track-fixture", expectedTexts: ["등록", "윤지호"], interaction: "registration-subject-track-fixture" },
   { path: "/admin/transfer", name: "transfer", expectedTexts: ["전반", "전반 신청"], interaction: "open-create" },
   { path: "/admin/withdrawal", name: "withdrawal", expectedTexts: ["퇴원", "퇴원 신청"], interaction: "open-create" },
   { path: "/admin/word-retests", name: "word-retests", expectedTexts: ["영어 단어 재시험", "추가"], interaction: "open-create" },
@@ -449,7 +449,7 @@ function getAuthenticatedRoutes() {
 }
 
 const VIEWPORTS = [
-  { name: "desktop", width: 1440, height: 900 },
+  { name: "desktop", width: 1349, height: 987 },
   { name: "mobile", width: 390, height: 844 },
 ]
 
@@ -1808,8 +1808,11 @@ async function verifyInitialSelectControls(dialog, route) {
 
 async function verifyRegistrationSinglePageDialog(dialog) {
   const dialogText = await dialog.innerText({ timeout: 5000 })
-  for (const expectedLabel of ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리", "필수", "선택"]) {
+  for (const expectedLabel of ["문의 정보", "필수", "선택"]) {
     if (!dialogText.includes(expectedLabel)) throw new Error(`registration dialog is missing ${expectedLabel}.`)
+  }
+  for (const retiredLabel of ["전화상담 예약일시", "시험지·결과지 URL", "등록·대기 정보", "입학 처리", "담당자 및 일시 이력"]) {
+    if (dialogText.includes(retiredLabel)) throw new Error(`registration dialog still renders ${retiredLabel}.`)
   }
   if (/\b1\/4\b/.test(dialogText)) throw new Error("registration dialog still shows the old step progress label.")
   if (await dialog.getByRole("group", { name: /등록 입력 단계/ }).count().catch(() => 0)) {
@@ -1822,26 +1825,6 @@ async function verifyRegistrationSinglePageDialog(dialog) {
   }
   if (!(await dialog.getByLabel("학생명", { exact: true }).isEnabled().catch(() => false))) {
     throw new Error("registration inquiry fields are not enabled.")
-  }
-  for (const earlyField of ["레벨테스트 예약일시", "전화상담 예약일시"]) {
-    const field = dialog.getByLabel(earlyField, { exact: true }).first()
-    if (!(await field.count().catch(() => 0)) || !(await field.isEnabled().catch(() => false))) {
-      throw new Error(`registration early field is not enabled: ${earlyField}.`)
-    }
-  }
-  for (const futureField of ["수업", "수납 완료 확인"]) {
-    const field = dialog.getByLabel(futureField, { exact: true }).first()
-    if (!(await field.count().catch(() => 0)) || !(await field.isDisabled().catch(() => false))) {
-      throw new Error(`registration future field is not locked: ${futureField}.`)
-    }
-  }
-
-  const historyTrigger = dialog.getByLabel("담당자 및 일시 이력", { exact: true })
-  if ((await historyTrigger.getAttribute("aria-expanded")) !== "false") {
-    throw new Error("registration operations history is not collapsed by default.")
-  }
-  if (await dialog.getByLabel("진행상태", { exact: true }).count().catch(() => 0)) {
-    throw new Error("registration operations history content is visible before expansion.")
   }
 }
 
@@ -2182,9 +2165,12 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
     const editDialog = page.getByRole("dialog").filter({ hasText: `${route.expectedTexts[0]} 수정` }).first()
     await editDialog.waitFor({ state: "visible", timeout: 5000 })
     if (route.name === "registration") {
-      await editDialog.getByLabel("담당자 및 일시 이력", { exact: true }).click()
+      if (!(await fillIfPresent(editDialog, "학교", "테스트 수정"))) {
+        throw new Error("Registration common school field was not found during edit.")
+      }
+    } else {
+      await editDialog.getByLabel("제목 직접 지정").fill(editedTitle)
     }
-    await editDialog.getByLabel("제목 직접 지정").fill(editedTitle)
     const updateButton = editDialog.getByRole("button", { name: "저장" }).last()
     await waitUntilEnabled(updateButton, `${route.name} update button`)
     await updateButton.click()
@@ -2193,10 +2179,11 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
     const editedOperationRowLabel = sampleName
     await openOperationSampleDetail(page, editedOperationRowLabel)
 
-    if (!(await clickDeleteInTaskDialog(page, editedTitle))) {
+    const editedDetailText = route.name === "registration" ? sampleName : editedTitle
+    if (!(await clickDeleteInTaskDialog(page, editedDetailText))) {
       throw new Error(`${route.name} detail dialog was not opened for the edited sample.`)
     }
-    await waitForBodyToExclude(page, editedTitle)
+    await waitForBodyToExclude(page, editedDetailText)
   } catch (error) {
     await cleanupQuickAddSample(page, editedTitle)
     await cleanupQuickAddSample(page, sampleName)
@@ -2641,6 +2628,35 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     throw new Error(`registration subject-track fixture is missing visible ${label}.`)
   }
 
+  const createButton = page.getByRole("button", { name: "등록 추가", exact: true }).last()
+  await waitUntilEnabled(createButton, "registration fixture create button")
+  await createButton.click()
+  const createDialog = page.getByRole("dialog").filter({ hasText: "등록 추가" }).first()
+  await createDialog.waitFor({ state: "visible", timeout: 5000 })
+  await createDialog.getByRole("button", { name: "영어", exact: true }).click()
+  await createDialog.getByRole("button", { name: "수학", exact: true }).click()
+  await selectListboxOptionIfPresent(page, createDialog, "학년", "고1")
+  await createDialog.getByLabel("영어 다음 업무", { exact: true }).selectOption("direct_phone")
+  await createDialog.getByLabel("수학 다음 업무", { exact: true }).selectOption("visit")
+  const createText = await createDialog.innerText()
+  for (const expectedLabel of ["과목별 상담 책임자", "방문상담 예약일시", "방문상담실"]) {
+    if (!createText.includes(expectedLabel)) throw new Error(`registration initial plan is missing ${expectedLabel}.`)
+  }
+  const visitFieldOrder = ["과목별 상담 책임자", "방문상담 예약일시", "방문상담실"]
+    .map((label) => createText.indexOf(label))
+  if (!(visitFieldOrder[0] < visitFieldOrder[1] && visitFieldOrder[1] < visitFieldOrder[2])) {
+    throw new Error("registration initial plan does not render owner, visit time, and room in operational order.")
+  }
+  for (const retiredLabel of ["전화상담 예약일시", "시험지·결과지 URL"]) {
+    if (createText.includes(retiredLabel)) throw new Error(`registration initial plan still renders ${retiredLabel}.`)
+  }
+  // A canonical reload must preserve the server receipt without replaying create.
+  await createDialog.getByRole("button", { name: "닫기", exact: true }).click()
+  const discardDialog = page.getByRole("dialog").filter({ hasText: "입력한 내용을 버릴까요?" }).first()
+  if (await discardDialog.isVisible().catch(() => false)) {
+    await discardDialog.getByRole("button", { name: /버리/ }).click()
+  }
+
   const tabs = ["문의", "레벨테스트", "상담", "대기", "등록", "완료"]
   for (const label of tabs) {
     await page.getByRole("tab", { name: new RegExp(`^${label}`) }).first().waitFor({ state: "visible", timeout: 5000 })
@@ -2976,11 +2992,14 @@ async function run() {
   if (!["localhost", "127.0.0.1", "::1"].includes(browserTarget.hostname)) {
     throw new Error("OPS_BROWSER_BASE_URL must use localhost for authenticated workflow verification.")
   }
+  const deterministicFixtureOnly = getAuthenticatedRoutes().every((route) => (
+    route.interaction === "registration-subject-track-fixture"
+  ))
   const authorizedSupabaseUrl = env("SUPABASE_URL", env("NEXT_PUBLIC_SUPABASE_URL", env("VITE_SUPABASE_URL")))
-  if (!authorizedSupabaseUrl) {
+  if (!deterministicFixtureOnly && !authorizedSupabaseUrl) {
     throw new Error("Authenticated browser verification requires an explicit localhost Supabase URL.")
   }
-  assertAuthorizedLocalFixtureDatabase(authorizedSupabaseUrl)
+  if (!deterministicFixtureOnly) assertAuthorizedLocalFixtureDatabase(authorizedSupabaseUrl)
 
   const loginId = env("OPS_BROWSER_LOGIN_ID", env("OPS_BROWSER_EMAIL"))
   const password = env("OPS_BROWSER_PASSWORD")

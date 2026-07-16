@@ -397,7 +397,7 @@ test("fixture runtime restores the previous mounted adapter and never enables un
   assert.equal(executeRegistrationSubjectTrackFixtureAction("noop", {}), null)
 })
 
-test("fixture runtime exposes literal intake version 1 only from the active gated adapter", async () => {
+test("fixture runtime preserves the active adapter's exact numeric intake version", async () => {
   const {
     installRegistrationSubjectTrackFixtureRuntime,
     loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion,
@@ -422,6 +422,15 @@ test("fixture runtime exposes literal intake version 1 only from the active gate
   cleanupA()
   assert.equal(loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(), 1)
   cleanupB()
+  assert.equal(loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(), null)
+
+  const cleanupWrongVersion = installRegistrationSubjectTrackFixtureRuntime(
+    "test",
+    "registration-subject-tracks",
+    { ...adapter, intakeWorkflowRuntimeVersion: 0 },
+  )
+  assert.equal(loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(), 0)
+  cleanupWrongVersion()
   assert.equal(loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(), null)
 })
 
@@ -467,6 +476,25 @@ test("public intake probe and create use the fixture before any database path", 
   )
   assert.deepEqual(fallback.calls.fixtureActions.map(([type]) => type), ["createRegistrationCaseWithInitialWorkflow"])
   assert.equal(fallback.calls.rpc[0][0], "create_registration_case_with_initial_workflow_v1")
+})
+
+test("a wrong fixture intake version remains observable while subject runtime stays ready", async () => {
+  const { service, calls } = await loadServiceBoundary({ fixtureVersion: 2 })
+
+  assert.deepEqual(plain(await service.probeRegistrationSubjectTrackRuntime()), {
+    mode: "ready",
+    version: 1,
+  })
+  assert.deepEqual(plain(await service.probeRegistrationIntakeWorkflowRuntime()), {
+    available: true,
+    version: 2,
+  })
+  assert.equal(calls.databaseProbe, 0)
+  await assert.rejects(
+    service.createRegistrationCaseWithInitialWorkflow(initialWorkflowInput()),
+    /registration_intake_runtime_mismatch/,
+  )
+  assert.equal(calls.rpc.length, 0)
 })
 
 test("a thrown fixture create error propagates and never falls through to Supabase", async () => {
@@ -646,6 +674,48 @@ test("fixture atomic create shares one visit appointment and one notification ta
   assert.deepEqual(plain(result.notificationTargets), [{ appointmentId: detail.appointments[0].id, notificationRevision: 1 }])
   assert.equal(detail.events.filter((event) => event.eventType === "visit_scheduled").length, 2)
   assert.deepEqual(plain(state.externalCallLedger), [])
+})
+
+test("fixture receipt records English direct phone plus Mathematics visit exactly", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const input = initialWorkflowInput({
+    subjects: ["영어", "수학"],
+    subjectPlans: { 영어: "direct_phone", 수학: "visit" },
+    levelTestAppointment: null,
+    visitAppointment: {
+      scheduledAt: "2026-07-20T10:00:00+09:00",
+      place: "상담실 2",
+      subjects: ["수학"],
+    },
+    directorOverrides: {
+      영어: "fixture-profile-english-director",
+      수학: "fixture-profile-math-director",
+    },
+    requestKey: "fixture-direct-phone-visit",
+  })
+  const outcome = reduceRegistrationSubjectTrackFixture(createRegistrationSubjectTrackFixtureState(), {
+    type: "createRegistrationCaseWithInitialWorkflow",
+    requestKey: input.requestKey,
+    payload: input,
+  })
+  const detail = outcome.state.caseDetails[outcome.result.taskId]
+  const english = detail.tracks.find((track) => track.subject === "영어")
+  const math = detail.tracks.find((track) => track.subject === "수학")
+
+  assert.deepEqual(plain([english.directorProfileId, math.directorProfileId]), [
+    "fixture-profile-english-director",
+    "fixture-profile-math-director",
+  ])
+  assert.equal(detail.appointments.length, 1)
+  assert.equal(detail.appointments[0].kind, "visit_consultation")
+  assert.deepEqual(plain(detail.consultations.map((item) => [item.trackId, item.mode, item.appointmentId])), [
+    [english.id, "phone", null],
+    [math.id, "visit", detail.appointments[0].id],
+  ])
+  assert.equal(detail.levelTests.length, 0)
+  assert.equal(detail.consultations.some((item) => "materialLink" in item), false)
+  assert.deepEqual(plain(outcome.receipt.result), plain(outcome.result))
+  assert.equal(outcome.receipt.requestKey, input.requestKey)
 })
 
 test("fixture atomic create replays unchanged, conflicts on changed fingerprints, and rolls back failures", async () => {

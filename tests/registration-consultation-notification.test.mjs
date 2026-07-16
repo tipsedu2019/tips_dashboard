@@ -16,6 +16,10 @@ const notificationModelUrl = new URL(
   "../src/features/tasks/registration-consultation-notification.js",
   import.meta.url,
 );
+const initialPlanUrl = new URL(
+  "../src/features/tasks/registration-initial-plan-control.tsx",
+  import.meta.url,
+);
 const dashboardNotificationServiceUrl = new URL(
   "../src/features/makeup-requests/makeup-request-service.ts",
   import.meta.url,
@@ -41,6 +45,7 @@ async function importOptionalModule(url) {
 
 const routeSource = await readOptionalSource(routeUrl);
 const workspaceSource = await readOptionalSource(workspaceUrl);
+const initialPlanSource = await readOptionalSource(initialPlanUrl);
 const dashboardNotificationServiceSource = await readOptionalSource(dashboardNotificationServiceUrl);
 const notificationModel = await importOptionalModule(notificationModelUrl);
 
@@ -319,7 +324,7 @@ test("canonical task links prefer configured origins and only trust localhost re
   assert.doesNotMatch(routeSource, /new URL\(taskHref, request\.url\)/);
 });
 
-test("canonical visit identity includes place while the legacy phone path never dispatches", () => {
+test("canonical visit identity includes place while create dispatches only server targets", () => {
 
   const message = notificationModel.buildRegistrationVisitCanonicalMessage?.({
     state: "updated",
@@ -330,7 +335,13 @@ test("canonical visit identity includes place while the legacy phone path never 
   });
   assert.match(message || "", /상담실 A/);
   assert.match(message || "", /영어: 강부희/);
-  assert.doesNotMatch(workspaceSource, /consultation-notification/);
+  assert.match(workspaceSource, /sendRegistrationVisitNotificationTarget\(target/);
+  assert.match(workspaceSource, /getConsultationNotificationWarning\(result\.value\)/);
+  assert.match(workspaceSource, /result\.value\?\.ok === false/);
+  assert.match(workspaceSource, /savedWithNotificationDeliveryFailure/);
+  assert.match(workspaceSource, /savedWithNotificationAuditWarning/);
+  assert.match(workspaceSource, /방문상담 알림 전달은 접수됐습니다\. 감사 이력을 확인하세요\./);
+  assert.match(workspaceSource, /방문상담 알림은 전송하지 못했습니다\. 업무는 정상 저장되었습니다\./);
   assert.doesNotMatch(workspaceSource, /notifyRegistrationConsultationReservation/);
 });
 
@@ -473,9 +484,10 @@ test("stage-2 dedicated notifications skip the generic registration Google Chat 
   assert.match(genericNotificationBlock, /return/);
 });
 
-test("counselor selector preserves linked legacy choices and flags free-text legacy data", () => {
-  assert.match(workspaceSource, /teacher\.profileId === form\.secondaryAssigneeId/);
-  assert.match(workspaceSource, /기존 담당[^\n]*원장 계정 다시 선택/);
+test("initial-plan counselor selectors preserve per-subject defaults and explicit choices", () => {
+  assert.match(initialPlanSource, /resolvedDirectorIds\[subject\]/);
+  assert.match(initialPlanSource, /draft\.directorOverrides\[subject\] \|\| resolvedDirectorId/);
+  assert.match(initialPlanSource, /directorOptionsBySubject\[subject\]/);
 });
 
 test("direct pipeline transitions keep the saved state when canonical reload fails", () => {

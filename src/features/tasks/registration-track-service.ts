@@ -24,15 +24,22 @@ import {
 import type { RegistrationIntakeRuntimeState } from "./registration-intake-runtime-probe"
 import {
   invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
-  probeRegistrationSubjectTrackRuntime,
+  probeRegistrationSubjectTrackRuntime as probeRegistrationSubjectTrackRuntimeFromDatabase,
 } from "./registration-runtime-probe"
 import type { RegistrationRuntimeState } from "./registration-runtime-probe"
 
-export { probeRegistrationSubjectTrackRuntime }
 export type { RegistrationRuntimeState }
+function probeRegistrationSubjectTrackRuntime(): Promise<RegistrationRuntimeState> {
+  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() !== null) {
+    return Promise.resolve({ mode: "ready", version: 1 })
+  }
+  return probeRegistrationSubjectTrackRuntimeFromDatabase()
+}
+export { probeRegistrationSubjectTrackRuntime }
 function probeRegistrationIntakeWorkflowRuntime(): Promise<RegistrationIntakeRuntimeState> {
-  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() === 1) {
-    return Promise.resolve({ available: true, version: 1 })
+  const fixtureVersion = loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion()
+  if (fixtureVersion !== null) {
+    return Promise.resolve({ available: true, version: fixtureVersion })
   }
   return probeRegistrationIntakeWorkflowRuntimeFromDatabase()
 }
@@ -546,6 +553,7 @@ export type RegistrationTrackClient = {
 
 export type RegistrationTrackServiceOptions = {
   probeRuntime: () => Promise<RegistrationRuntimeState>
+  probeIntakeRuntime: () => Promise<RegistrationIntakeRuntimeState>
   invalidateRuntimeAfterReadyFailure?: (error: unknown) => never
   performance?: RegistrationPerformanceSink
   recordMeasure?: (measure: RegistrationMeasure) => void
@@ -1048,6 +1056,9 @@ export function createRegistrationTrackService(
   if (!options || typeof options.probeRuntime !== "function") {
     throw new Error("probeRuntime is required.")
   }
+  if (typeof options.probeIntakeRuntime !== "function") {
+    throw new Error("probeIntakeRuntime is required.")
+  }
 
   const summaryCache = new Map<string, RegistrationTrackSummaryLoadResult>()
   const summaryInFlight = new Map<string, Promise<RegistrationTrackSummaryLoadResult>>()
@@ -1500,8 +1511,12 @@ export function createRegistrationTrackService(
     return request
   }
 
-  async function callRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
-    await requireReadyRuntime()
+  async function callRpc<T>(
+    name: string,
+    args: Record<string, unknown>,
+    callOptions: { runtimeChecked?: boolean } = {},
+  ): Promise<T> {
+    if (!callOptions.runtimeChecked) await requireReadyRuntime()
     const { data, error } = await client.rpc(name, args)
     if (error) throw error
     clearCaches()
@@ -1549,6 +1564,11 @@ export function createRegistrationTrackService(
   async function createRegistrationCaseWithInitialWorkflow(
     input: RegistrationCaseCreateWithInitialWorkflowInput,
   ): Promise<RegistrationCaseCreateWithInitialWorkflowResponse> {
+    await requireReadyRuntime()
+    const intakeRuntime = await options.probeIntakeRuntime()
+    if (intakeRuntime.available !== true || intakeRuntime.version !== 1) {
+      throw new Error("registration_intake_runtime_mismatch")
+    }
     const result = await callRpc<RegistrationCaseCreateWithInitialWorkflowResponse>(
       "create_registration_case_with_initial_workflow_v1",
       {
@@ -1568,6 +1588,7 @@ export function createRegistrationTrackService(
         p_director_overrides: input.directorOverrides,
         p_request_key: requireRequestKey(input.requestKey),
       },
+      { runtimeChecked: true },
     )
     return {
       ...result,
@@ -2072,6 +2093,7 @@ const defaultRegistrationTrackService = createRegistrationTrackService(
   supabase as unknown as RegistrationTrackClient,
   {
     probeRuntime: probeRegistrationSubjectTrackRuntime,
+    probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
     invalidateRuntimeAfterReadyFailure: invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
     onMutationSuccess: () => registrationTrackMutationCacheInvalidator?.(),
     performance: typeof performance === "undefined"

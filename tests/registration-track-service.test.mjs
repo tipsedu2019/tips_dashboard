@@ -205,6 +205,7 @@ function createClient({ queryHandler, rpcHandler } = {}) {
 function readyOptions(overrides = {}) {
   return {
     probeRuntime: async () => ({ mode: "ready", version: 1 }),
+    probeIntakeRuntime: async () => ({ available: true, version: 1 }),
     invalidateRuntimeAfterReadyFailure(error) {
       const integrityError = new Error("runtime integrity failure");
       integrityError.code = "REGISTRATION_RUNTIME_INTEGRITY_ERROR";
@@ -214,6 +215,26 @@ function readyOptions(overrides = {}) {
     now: () => 1,
     randomUUID: () => "uuid-from-options",
     ...overrides,
+  };
+}
+
+function initialWorkflowCreateInput() {
+  return {
+    studentName: "김다미",
+    schoolGrade: "고1",
+    schoolName: "중앙고",
+    parentPhone: "01012345678",
+    studentPhone: "",
+    campus: "본관",
+    inquiryAt: "2026-07-16T01:00:00Z",
+    subjects: ["영어"],
+    requestNote: "",
+    priority: "normal",
+    subjectPlans: { 영어: "inquiry" },
+    levelTestAppointment: null,
+    visitAppointment: null,
+    directorOverrides: {},
+    requestKey: "runtime-guard-request",
   };
 }
 
@@ -1093,6 +1114,43 @@ test("initial workflow create uses the exact atomic payload and maps the complet
   ]);
   assert.strictEqual(result.notificationTargets, notificationTargets);
   assert.equal(mutationInvalidations, 1);
+});
+
+test("atomic initial workflow create rechecks both exact runtime markers before the business RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const cases = [
+    {
+      name: "subject version 2",
+      options: { probeRuntime: async () => ({ mode: "ready", version: 2 }) },
+    },
+    {
+      name: "intake version 2",
+      options: { probeIntakeRuntime: async () => ({ available: true, version: 2 }) },
+    },
+    {
+      name: "malformed intake marker",
+      options: { probeIntakeRuntime: async () => ({ available: true, version: "1" }) },
+    },
+    {
+      name: "contradictory intake marker",
+      options: { probeIntakeRuntime: async () => ({ available: false, version: 1 }) },
+    },
+    {
+      name: "rejected intake probe",
+      options: { probeIntakeRuntime: async () => { throw new Error("permission denied") } },
+    },
+  ];
+
+  for (const entry of cases) {
+    const harness = createClient();
+    const service = createRegistrationTrackService(harness.client, readyOptions(entry.options));
+    await assert.rejects(
+      service.createRegistrationCaseWithInitialWorkflow(initialWorkflowCreateInput()),
+      undefined,
+      entry.name,
+    );
+    assert.equal(harness.rpcCalls.length, 0, `${entry.name} must not call the business RPC`);
+  }
 });
 
 test("receipt keys are required and maintenance blocks every new mutation before RPC", async () => {

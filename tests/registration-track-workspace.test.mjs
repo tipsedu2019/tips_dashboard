@@ -644,16 +644,17 @@ test("workspace mounts the unified editor only for a loaded canonical subject tr
   assert.match(source, /caseLevelActions=/)
 })
 
-test("ready-mode creation atomically creates the parent and both selected subject tracks", async () => {
+test("ready-mode creation uses one guarded initial-workflow RPC without a director follow-up", async () => {
   const source = await readWorkspaceSource()
   assert.match(source, /probeRegistrationSubjectTrackRuntime/)
-  assert.match(source, /runtime\.mode === "ready" && runtime\.version === 1/)
-  assert.match(source, /createRegistrationCase\(\{/)
-  assert.match(source, /subjects:\s*parseRegistrationSubjects\(createPayload\.subject\)/)
-  assert.match(source, /registrationCreateRequestRef/)
-  assert.match(source, /persistCreatedRegistrationDirectorDefaults/)
-  assert.match(source, /response\.commonRevision/)
-  assert.match(source, /runtime\.mode === "maintenance"/)
+  assert.match(source, /probeRegistrationIntakeWorkflowRuntime/)
+  assert.match(source, /registrationPersistence\.mode === "ready_atomic"/)
+  assert.match(source, /createRegistrationCaseWithInitialWorkflow\(\{/)
+  assert.match(source, /const subjects = parseRegistrationSubjects\(createPayload\.subject\)/)
+  assert.match(source, /createRegistrationCreateAttempt\([\s\S]*?subjects,/)
+  assert.match(source, /registrationCreateAttemptRef/)
+  assert.doesNotMatch(source, /persistCreatedRegistrationDirectorDefaults/)
+  assert.match(source, /registrationPersistence\.mode === "blocked_maintenance"/)
 })
 
 test("appointment editor uses one schedule and one result control per subject", async () => {
