@@ -144,13 +144,21 @@ Focused tests are not sufficient for a release. Before any Release A, A2, B, C, 
 export NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
 export PATH=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
 "$NODE" --experimental-strip-types --test tests/*.test.mjs
+pnpm dlx supabase@2.109.1 test db --local supabase/tests
 pnpm exec tsc --noEmit
 pnpm run lint
 pnpm run build
 git diff --check
 ~~~
 
-Record actual test counts, browser base URL, served worktree/HEAD, route list, external-host ledger, blocked provider-route ledger, and any skipped authorized database check in the release evidence. A later Task 22 run cannot retroactively make an earlier release safe.
+Immediately before the database command, re-prove the local Supabase API and
+database hosts are loopback and the worktree-owned local stack is running. Do
+not substitute `--linked` or `--db-url` when the local gate is unavailable.
+Record actual test counts, browser base URL, served worktree/HEAD, route list,
+external-host ledger, blocked provider-route ledger, and any skipped authorized
+database check in the release evidence; a skipped database gate blocks that
+release candidate. A later Task 22 run cannot retroactively make an earlier
+release safe.
 
 ---
 
@@ -322,18 +330,32 @@ unchecked. No provider was called. Full details are recorded in
 **Files:**
 
 - Create: src/features/tasks/registration-initial-plan-control.tsx
+- Create: supabase/migrations/20260716100000_registration_intake_runtime_guard.sql
 - Modify: src/features/tasks/registration-intake-workflow.ts
+- Modify: src/features/tasks/registration-intake-runtime-probe.ts
 - Modify: src/features/tasks/registration-track-service.ts
 - Modify: src/features/tasks/registration-track-fixture-runtime.ts
 - Modify: src/features/tasks/ops-task-workspace.tsx
 - Modify: src/features/tasks/registration-track-fixtures.ts
 - Modify: scripts/verify-ops-task-browser-workflow.mjs
 - Test: tests/registration-intake-workflow.test.mjs
+- Test: tests/registration-intake-runtime-probe.test.mjs
+- Test: tests/registration-track-service.test.mjs
+- Test: tests/registration-track-schema.test.mjs
 - Test: tests/registration-track-fixtures.test.mjs
 - Test: tests/ops-task-workspace.test.mjs
 - Test: tests/registration-track-workspace.test.mjs
+- Test: supabase/tests/registration_intake_workflow_runtime_test.sql
 - Verify: tests/registration-workflow.test.mjs
 - Verify: tests/registration-consultation-notification.test.mjs
+
+**2026-07-16 preflight amendment:** the original Task 1 file list omitted the
+probe and database surfaces needed to satisfy its own fail-closed contract.
+The current intake probe collapses every successful non-1 value to version 0,
+and the already-applied intake migration's public create wrapper does not check
+either runtime marker. Preserve the applied migration and close both gaps with
+the forward-only migration and direct probe/service/schema/pgTAP tests listed
+above.
 
 **Interfaces:**
 
@@ -387,12 +409,26 @@ assert.equal("phoneConsultationAt" in payload, false)
 assert.equal("levelTestMaterialLink" in payload, false)
 ~~~
 
+In tests/registration-intake-runtime-probe.test.mjs, replace the obsolete
+successful-non-1-is-version-0 assertion. Require an exact numeric 1 to be ready,
+an exactly missing function to be confirmed version 0, any other numeric value
+to remain observable as that wrong version, and a malformed successful response
+to reject as indeterminate rather than selecting an inquiry-only fallback
+writer. Add service tests proving that
+the atomic create rechecks both runtimes and does not call the business RPC for
+version 2, malformed, rejected, or contradictory states.
+
 Run:
 
 ~~~bash
 "$NODE" --experimental-strip-types --test \
   tests/registration-intake-workflow.test.mjs \
+  tests/registration-intake-runtime-probe.test.mjs \
+  tests/registration-track-service.test.mjs \
+  tests/registration-track-schema.test.mjs \
   tests/ops-task-workspace.test.mjs
+pnpm dlx supabase@2.109.1 test db --local \
+  supabase/tests/registration_intake_workflow_runtime_test.sql
 ~~~
 
 Expected: fail on the legacy phone picker/result URL, incorrect order, non-atomic ready submit, stale request fingerprint, and obsolete workspace assertions. Do not add the two-null appointment assertion to a mixed level-test/visit case, where it would contradict correct behavior.
@@ -467,6 +503,28 @@ const result = await createRegistrationCaseWithInitialWorkflow({
 
 The service boundary inside createRegistrationCaseWithInitialWorkflow rechecks subject-track ready plus the exact intake runtime marker before invoking the RPC, and the database RPC also fails closed if either required marker/version is absent or wrong. UI visibility is not the security or integrity boundary.
 
+Keep the probe state capable of distinguishing exact missing/version 0 from a
+wrong nonzero response; do not coerce version 2 to 0, and reject malformed
+successful responses as indeterminate. Extend the
+service factory with an independently injectable intake-runtime probe so its
+direct contract tests cannot accidentally pass through only the generic
+subject-track gate.
+
+Create the forward migration through
+`pnpm dlx supabase@2.109.1 migration new registration_intake_runtime_guard`,
+then, before applying it anywhere, rename that generated file to the verified
+unoccupied reserved path
+`supabase/migrations/20260716100000_registration_intake_runtime_guard.sql` so it
+sorts before the later notification migrations in this plan. Do not edit
+`20260714073327_registration_intake_workflow.sql`. The new migration replaces
+the public `create_registration_case_with_initial_workflow_v1` wrapper without
+changing its signature or grants and checks that both
+`registration_subject_tracks_runtime_version()` and
+`registration_intake_workflow_runtime_version()` return exactly 1 before it
+delegates to the existing private implementation. Schema and pgTAP tests must
+exercise each marker independently and prove its wrong, missing, and
+unauthorized states create no rows.
+
 Do not perform a second director-default mutation after the create. After the business receipt commits, hand result.notificationTargets to the existing sendRegistrationVisitNotificationTarget path with Promise.allSettled. A notification failure is reported separately and may retry only the notification target/token; it must never rerun the registration create.
 
 - [ ] **Step 4: freeze one retry envelope for one logical submit**
@@ -512,11 +570,16 @@ Run:
 ~~~bash
 "$NODE" --experimental-strip-types --test \
   tests/registration-intake-workflow.test.mjs \
+  tests/registration-intake-runtime-probe.test.mjs \
+  tests/registration-track-service.test.mjs \
+  tests/registration-track-schema.test.mjs \
   tests/registration-track-fixtures.test.mjs \
   tests/ops-task-workspace.test.mjs \
   tests/registration-track-workspace.test.mjs \
   tests/registration-workflow.test.mjs \
   tests/registration-consultation-notification.test.mjs
+pnpm dlx supabase@2.109.1 test db --local \
+  supabase/tests/registration_intake_workflow_runtime_test.sql
 pnpm exec tsc --noEmit
 git diff --check
 ~~~
@@ -547,12 +610,18 @@ Run the full Mandatory gate before every independently releasable train, then th
 git add \
   src/features/tasks/registration-initial-plan-control.tsx \
   src/features/tasks/registration-intake-workflow.ts \
+  src/features/tasks/registration-intake-runtime-probe.ts \
   src/features/tasks/registration-track-service.ts \
   src/features/tasks/registration-track-fixture-runtime.ts \
   src/features/tasks/ops-task-workspace.tsx \
   src/features/tasks/registration-track-fixtures.ts \
+  supabase/migrations/20260716100000_registration_intake_runtime_guard.sql \
+  supabase/tests/registration_intake_workflow_runtime_test.sql \
   scripts/verify-ops-task-browser-workflow.mjs \
   tests/registration-intake-workflow.test.mjs \
+  tests/registration-intake-runtime-probe.test.mjs \
+  tests/registration-track-service.test.mjs \
+  tests/registration-track-schema.test.mjs \
   tests/registration-track-fixtures.test.mjs \
   tests/ops-task-workspace.test.mjs \
   tests/registration-track-workspace.test.mjs
