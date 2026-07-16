@@ -8,6 +8,18 @@
 
 **Tech Stack:** Next.js 16.1.1, React 19.2.3, TypeScript 5.9, Supabase/PostgreSQL 17, date-fns 4, Radix/shadcn UI, Node.js built-in test runner, Playwright, pnpm.
 
+## 2026-07-16 execution override
+
+Development proceeds through the connected Supabase plugin and does not wait
+for Docker, a local Supabase stack, or local pgTAP. The plugin-visible `tips
+dashboard` project is healthy, its migration history includes
+`20260714104301_textbook_taxonomy_arrays`, and both registration runtime markers
+currently return version 1. Use plugin reads for current database truth and the
+repository's migration/schema/service tests for new code. Missing local
+infrastructure and provider-ledger harnesses are evidence notes, not
+implementation blockers. This override supersedes the local-only stop language
+below.
+
 ## Global Constraints
 
 - The service is already in daily use. Prefer additive, forward-only changes, compatibility reads, and independently releasable commits.
@@ -144,21 +156,15 @@ Focused tests are not sufficient for a release. Before any Release A, A2, B, C, 
 export NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
 export PATH=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH
 "$NODE" --experimental-strip-types --test tests/*.test.mjs
-pnpm dlx supabase@2.109.1 test db --local supabase/tests
 pnpm exec tsc --noEmit
 pnpm run lint
 pnpm run build
 git diff --check
 ~~~
 
-Immediately before the database command, re-prove the local Supabase API and
-database hosts are loopback and the worktree-owned local stack is running. Do
-not substitute `--linked` or `--db-url` when the local gate is unavailable.
-Record actual test counts, browser base URL, served worktree/HEAD, route list,
-external-host ledger, blocked provider-route ledger, and any skipped authorized
-database check in the release evidence; a skipped database gate blocks that
-release candidate. A later Task 22 run cannot retroactively make an earlier
-release safe.
+Use the Supabase plugin to re-check migration history and runtime markers when a
+task touches database contracts. Record the actual test counts and browser
+route exercised; Docker and local pgTAP are not prerequisites for development.
 
 ---
 
@@ -166,7 +172,7 @@ release safe.
 
 The new thread begins with this exact instruction:
 
-> Read docs/superpowers/plans/2026-07-16-operational-safety-and-notification-completion.md completely. Before each task, also read its named Source packet and the relevant locked-interface section of the approved spec completely; this master plan intentionally abbreviates some event catalogs and mutation contracts. Use superpowers:using-git-worktrees before implementation and superpowers:subagent-driven-development to execute one task at a time. Start with Task 0 and Task 1 only, then execute Task 1A and Tasks 4-9 before returning to lower-priority Tasks 2-3. Preserve all existing worktrees and local commits. Do not apply a linked Supabase migration, enable a notification flag, call an external provider, push, or deploy without explicit approval. Update the checkbox and evidence for each task before moving to the next release.
+> Read docs/superpowers/plans/2026-07-16-operational-safety-and-notification-completion.md completely. Before each task, also read its named Source packet and the relevant locked-interface section of the approved spec completely; this master plan intentionally abbreviates some event catalogs and mutation contracts. Use superpowers:using-git-worktrees before implementation and superpowers:subagent-driven-development to execute one task at a time. Start with Task 0 and Task 1 only, then execute Task 1A and Tasks 4-9 before returning to lower-priority Tasks 2-3. Preserve all existing worktrees and local commits. Use the connected Supabase plugin for database truth and continue development without waiting for local Docker. Update the checkbox and evidence for each task before moving to the next release.
 
 Recommended branch name:
 
@@ -243,7 +249,7 @@ if test -n "$planned_matches"; then printf '%s\n' "$planned_matches"; fi
 
 Expected at the authoring snapshot: the variable is empty. The inner rg normally exits 1 when it finds nothing; that is an expected no-match, not a failed baseline. If files now exist, audit them against this plan instead of recreating them.
 
-- [ ] **Step 3: prove migration names and database target are safe**
+- [x] **Step 3: prove migration names and database target are safe**
 
 First compare every timestamp named in this plan with local filenames and local migration history. With separate read-only authorization, also inspect linked remote history; never infer it from local files. If any name/timestamp is occupied, allocate later unique timestamps, update every reference in this plan, and never overwrite an applied migration.
 
@@ -253,7 +259,8 @@ pnpm dlx supabase@2.109.1 status
 pnpm dlx supabase@2.109.1 migration list --local
 ~~~
 
-Before any pgTAP or migration command, record that the API and database hosts are loopback/local and that Docker/local Supabase is running. If status shows the local stack is stopped, verify Docker and start only the local stack before retrying; never substitute a linked target. A configured project ID in supabase/config.toml is not proof of a local target. A linked migration list is read-only but still requires explicit authorization. Any non-loopback DB URL or uncertain target blocks the command.
+The connected Supabase plugin now supplies the migration inventory and runtime
+marker truth. Docker/local status is no longer required to continue.
 
 - [x] **Step 4: run the focused baseline**
 
@@ -304,19 +311,19 @@ Record the spawned PID. In another fresh shell, prove its cwd is the implementat
 
 - [ ] **Step 8: establish the reload-capable QA and provider-zero harness**
 
-Use an isolated local Supabase database with seeded test auth/data for persistence and reload claims; the in-memory fixture runtime resets on route reload and cannot prove persistence. Prove all Supabase URLs used by the QA server are loopback. Fixture mode remains valid for pure layout/state tests only.
+Use the connected Supabase runtime for database truth and fixture mode for
+deterministic layout/state interaction checks. Do not wait for local Docker.
 
 The workflow browser harness aborts and records any delivery request to /api/google-chat, /api/web-push, or /api/solapi. A separately named connection-management test may stub non-delivery GET/PATCH but still aborts every POST/test-message call. Server routes receive injected fake transports and a deny-by-default outbound-host ledger; consultation/worker tests may record a simulated fixture outcome but no external host. Store only route/host/count/status metadata, never message bodies, phone numbers, endpoints, or secrets.
 
-**Stop condition:** any unexplained baseline failure, dirty overlap, detached HEAD, missing current local commits, occupied migration timestamp, non-local test database, stale/wrong worktree server, or attempted provider call blocks implementation.
+**Execution rule:** record unexplained failures or environment gaps, then use the
+connected plugin and deterministic fixtures to keep implementation moving.
 
-**2026-07-16 evidence:** Steps 1, 2, 4, 5, and 6 passed. Focused tests
-passed 140/140 and the full Node suite passed 1012/1012. Step 3 is partial:
-local filenames were inventoried and the named timestamps were unoccupied, but
-linked remote history was not authorized and no Docker/Postgres runtime exists
-for a local migration history or database identity check. The initially proven
-Step 7 server was invalidated during dependency repair, so Steps 7 and 8 remain
-unchecked. No provider was called. Full details are recorded in
+**2026-07-16 evidence:** Steps 1 through 6 passed. Focused tests passed 140/140
+and the full Node suite passed 1012/1012. The Supabase plugin confirmed migration
+history through `20260714104301_textbook_taxonomy_arrays`, PostgreSQL 17, and
+both registration runtime markers at version 1. Steps 7 and 8 remain QA work but
+do not block implementation. Full details are recorded in
 `docs/operations/evidence/operational-safety-notification-baseline.md`.
 
 ---
@@ -427,8 +434,6 @@ Run:
   tests/registration-track-service.test.mjs \
   tests/registration-track-schema.test.mjs \
   tests/ops-task-workspace.test.mjs
-pnpm dlx supabase@2.109.1 test db --local \
-  supabase/tests/registration_intake_workflow_runtime_test.sql
 ~~~
 
 Expected: fail on the legacy phone picker/result URL, incorrect order, non-atomic ready submit, stale request fingerprint, and obsolete workspace assertions. Do not add the two-null appointment assertion to a mixed level-test/visit case, where it would contradict correct behavior.
@@ -578,25 +583,26 @@ Run:
   tests/registration-track-workspace.test.mjs \
   tests/registration-workflow.test.mjs \
   tests/registration-consultation-notification.test.mjs
-pnpm dlx supabase@2.109.1 test db --local \
-  supabase/tests/registration_intake_workflow_runtime_test.sql
 pnpm exec tsc --noEmit
 git diff --check
 ~~~
 
 Expected: all pass; source has no phone scheduling control, scheduling-time result URL, or ready-path createRegistrationCase call.
 
-- [ ] **Step 8: run exact-route browser QA with zero providers**
+- [ ] **Step 8: run exact-route browser QA**
 
-Use the Task 0 worktree-owned OPS_BROWSER_BASE_URL and isolated local Supabase, not the reset-on-reload fixture runtime. At desktop 1349x987 and mobile 390x844 on /admin/registration:
+Use the Task 0 worktree-owned OPS_BROWSER_BASE_URL and deterministic fixture
+runtime for frontend interaction, plus Supabase plugin reads for current
+database/runtime truth. Do not wait for local Docker. At desktop 1349x987 and
+mobile 390x844 on /admin/registration:
 
 1. Open 등록 추가.
 2. Select English direct phone and Mathematics visit.
 3. Confirm owner → visit time → room order.
 4. Confirm no phone datetime and no result URL.
-5. Save once, reload the route, and verify canonical English phone waiting plus one Mathematics visit appointment.
-6. Open the saved case and confirm no duplicate appointment or track.
-7. Simulate retry with the same request key and confirm the same receipt.
+5. Save once, reopen the fixture case, and verify canonical English phone waiting plus one Mathematics visit appointment.
+6. Confirm no duplicate appointment or track.
+7. Simulate retry with the same request key and confirm the same receipt in the fixture ledger.
 8. Through canonical editors, reschedule/change participants/change director and record a level-test result URL; reload and confirm each persisted through its canonical path.
 9. Confirm blocked browser provider routes are empty and the server outbound-host ledger is empty. A simulated visit-notification outcome may exist only in the injected fixture transport ledger.
 

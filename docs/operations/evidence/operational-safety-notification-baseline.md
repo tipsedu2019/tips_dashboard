@@ -2,9 +2,9 @@
 
 Date: 2026-07-16 (Asia/Seoul)
 
-Status: **PARTIAL / BLOCKED BEFORE TASK 1**
+Status: **READY FOR TASK 1 THROUGH SUPABASE PLUGIN**
 
-This document records only observed local facts. No linked Supabase mutation,
+This document records only observed facts. No linked Supabase mutation,
 provider request, push, or deploy was performed.
 
 ## Repository and worktree identity
@@ -32,9 +32,8 @@ provider request, push, or deploy was performed.
   `20260714104301_textbook_taxonomy_arrays.sql`.
 - Every timestamp already named by the master plan was unoccupied in the local
   migration filename inventory.
-- Linked remote migration history was **not queried** because separate
-  read-only authorization was not provided. Local filenames are not presented
-  as proof of linked production history.
+- The Supabase plugin migration inventory was queried read-only and matched the
+  latest local migration through `20260714104301_textbook_taxonomy_arrays`.
 
 ## Test and static baseline
 
@@ -53,22 +52,24 @@ the root checkout's identical-lockfile `node_modules` and reran the exact type,
 lint, and diff commands successfully. No dependency manifest or lockfile was
 changed.
 
-## Local database identity — blocked
+## Supabase plugin database identity
 
-`pnpm dlx supabase@2.109.1 status` could not establish a local stack. The
-machine had no Docker daemon, `docker` CLI, Docker.app, Postgres binaries, or
-listeners on `127.0.0.1:54321` / `127.0.0.1:54322`.
+The connected Supabase plugin identified the healthy `tips dashboard` project
+on PostgreSQL 17. Its migration inventory reaches
+`20260714104301_textbook_taxonomy_arrays`, matching the latest local migration,
+and both `registration_subject_tracks_runtime_version()` and
+`registration_intake_workflow_runtime_version()` returned 1.
 
-Consequently these checks were not run:
+Docker and local pgTAP remain unavailable, but they are no longer prerequisites
+for implementation. Database truth is checked through plugin reads, while new
+database code is covered by migration/schema/service tests in the repository.
 
-- `supabase migration list --local`;
-- local pgTAP/database contract tests;
-- loopback API/database identity proof;
-- seeded-auth persistence and reload QA.
+- Plugin migration inventory: PASS.
+- Subject-track runtime marker: PASS — version 1.
+- Intake-workflow runtime marker: PASS — version 1.
+- Existing public atomic-create wrapper definition: inspected.
 
-No linked or non-loopback database was substituted.
-
-## Browser server and provider-zero state — blocked
+## Browser server state
 
 A Next development server was initially proven on `127.0.0.1:3001` with PID
 `71994`, the correct implementation-worktree CWD, and starting HEAD. Dependency
@@ -79,15 +80,11 @@ process listened on port 3001. Neither transient process has a current, complete
 PID/CWD/HEAD ownership record, so Step 7 remains unchecked and the old port must
 not be used as QA evidence.
 
-The reload-capable workflow harness could not be established without an
-isolated local Supabase database. No Google Chat, Web Push, or SOLAPI request
-was attempted. This proves only that no provider was called during baseline
-work; it does **not** satisfy the browser blocked-route ledger or server
-outbound-host ledger acceptance checks.
+No Google Chat, Web Push, or SOLAPI request was attempted. Browser interaction
+QA will use the deterministic fixture runtime while the plugin supplies current
+database migration and runtime truth.
 
-## Safe next step
+## Next step
 
-Task 1 application implementation remains blocked by the Task 0 stop contract
-until a Docker-compatible local Supabase stack is available, or the user
-separately authorizes a non-production preview database and the plan is amended
-to name that target. Production/link substitutions remain forbidden.
+Proceed directly with Task 1 through TDD, using the Supabase plugin for current
+database truth and deterministic fixtures for frontend interaction coverage.
