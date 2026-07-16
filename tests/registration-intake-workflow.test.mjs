@@ -1,17 +1,21 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import test from "node:test"
 
 import {
+  assertRegistrationCreateAttemptPersistenceMode,
   createRegistrationCreateAttempt,
   createRegistrationInitialWorkflowDraft,
   getRegistrationInitialPanelState,
   getRegistrationInitialWorkflowBlockers,
   getRegistrationInitialWorkflowParticipants,
+  markRegistrationLegacyCreateStarted,
   normalizeRegistrationInitialWorkflow,
   probeRegistrationInitialPersistence,
   reconcileRegistrationInitialWorkflowDraft,
   resolveRegistrationInitialPersistenceMode,
   setRegistrationInitialSubjectAction,
+  toRegistrationScheduledAtIso,
 } from "../src/features/tasks/registration-intake-workflow.ts"
 
 test("creates and reconciles one independent plan per selected subject", () => {
@@ -84,6 +88,20 @@ test("clears a shared appointment draft only after its last participant leaves",
   assert.equal(noVisitParticipants.visitPlace, "")
 })
 
+test("subject action transitions retain director overrides only for consultation work", () => {
+  const draft = {
+    ...createRegistrationInitialWorkflowDraft(["영어", "수학"]),
+    subjectPlans: { 영어: "direct_phone", 수학: "visit" },
+    directorOverrides: { 영어: "director-eng", 수학: "director-math" },
+  }
+
+  const levelTest = setRegistrationInitialSubjectAction(draft, "영어", "level_test")
+  assert.deepEqual(levelTest.directorOverrides, { 수학: "director-math" })
+
+  const inquiry = setRegistrationInitialSubjectAction(levelTest, "수학", "inquiry")
+  assert.deepEqual(inquiry.directorOverrides, {})
+})
+
 test("reconciliation clears an appointment only when selection removes its last participant", () => {
   const draft = {
     ...createRegistrationInitialWorkflowDraft(["영어", "수학"]),
@@ -96,12 +114,12 @@ test("reconciliation clears an appointment only when selection removes its last 
   const retained = reconcileRegistrationInitialWorkflowDraft(draft, ["영어"])
   assert.equal(retained.levelTestScheduledAt, "2026-07-14T10:00")
   assert.equal(retained.levelTestPlace, "본관")
-  assert.deepEqual(retained.directorOverrides, { 영어: "director-eng" })
+  assert.deepEqual(retained.directorOverrides, {})
 
   const removed = reconcileRegistrationInitialWorkflowDraft(draft, ["수학"])
   assert.equal(removed.levelTestScheduledAt, "")
   assert.equal(removed.levelTestPlace, "")
-  assert.deepEqual(removed.directorOverrides, { 수학: "director-math" })
+  assert.deepEqual(removed.directorOverrides, {})
 })
 
 test("normalizes ordered payload membership, places, and explicit director overrides", () => {
@@ -112,7 +130,7 @@ test("normalizes ordered payload membership, places, and explicit director overr
     levelTestPlace: "  본관  ",
     visitScheduledAt: "2026-07-15T11:00",
     visitPlace: "  상담실 1  ",
-    directorOverrides: { 수학: "  director-math  ", 영어: "   " },
+    directorOverrides: { 수학: "  director-math  ", 영어: " should-be-filtered " },
     levelTestAppointment: { subjects: ["수학"] },
     visitAppointment: { subjects: ["영어"] },
   }
@@ -120,17 +138,35 @@ test("normalizes ordered payload membership, places, and explicit director overr
   assert.deepEqual(normalizeRegistrationInitialWorkflow(draft, ["수학", "영어"]), {
     subjectPlans: { 영어: "level_test", 수학: "visit" },
     levelTestAppointment: {
-      scheduledAt: "2026-07-14T10:00",
+      scheduledAt: "2026-07-14T01:00:00.000Z",
       place: "본관",
       subjects: ["영어"],
     },
     visitAppointment: {
-      scheduledAt: "2026-07-15T11:00",
+      scheduledAt: "2026-07-15T02:00:00.000Z",
       place: "상담실 1",
       subjects: ["수학"],
     },
     directorOverrides: { 수학: "director-math" },
   })
+})
+
+test("naive appointment values are converted from Asia/Seoul to exact instants independent of host timezone", () => {
+  assert.equal(toRegistrationScheduledAtIso("2026-07-14T10:00"), "2026-07-14T01:00:00.000Z")
+  assert.equal(toRegistrationScheduledAtIso("2026-07-14T10:00:30"), "2026-07-14T01:00:30.000Z")
+  assert.equal(toRegistrationScheduledAtIso("2026-07-14T01:00:00Z"), "2026-07-14T01:00:00.000Z")
+  assert.throws(() => toRegistrationScheduledAtIso("2026-02-30T10:00"), /registration_initial_appointment_datetime_invalid/)
+
+  const moduleUrl = new URL("../src/features/tasks/registration-intake-workflow.ts", import.meta.url).href
+  const script = `import { toRegistrationScheduledAtIso } from ${JSON.stringify(moduleUrl)}; process.stdout.write(toRegistrationScheduledAtIso("2026-07-14T10:00"));`
+  for (const timezone of ["UTC", "America/Los_Angeles", "Asia/Seoul"]) {
+    const child = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script], {
+      env: { ...process.env, TZ: timezone },
+      encoding: "utf8",
+    })
+    assert.equal(child.status, 0, child.stderr)
+    assert.equal(child.stdout, "2026-07-14T01:00:00.000Z")
+  }
 })
 
 test("direct phone normalization creates no appointments or legacy scheduling fields", () => {
@@ -196,10 +232,12 @@ test("one logical registration retry freezes its full attempt envelope", () => {
   let requestSequence = 0
   let inquirySequence = 0
   const first = createRegistrationCreateAttempt(null, common, normalizedInitialWorkflow, {
+    persistenceMode: "ready_atomic",
     createRequestKey: () => `request-${++requestSequence}`,
     createInquiryAt: () => `2026-07-16T0${++inquirySequence}:00:00Z`,
   })
   const retry = createRegistrationCreateAttempt(first, { ...common }, structuredClone(normalizedInitialWorkflow), {
+    persistenceMode: "ready_atomic",
     createRequestKey: () => `request-${++requestSequence}`,
     createInquiryAt: () => `2026-07-16T0${++inquirySequence}:00:00Z`,
   })
@@ -217,6 +255,7 @@ test("one logical registration retry freezes its full attempt envelope", () => {
     { common, workflow: { ...normalizedInitialWorkflow, directorOverrides: { ...normalizedInitialWorkflow.directorOverrides, 수학: "director-math-2" } } },
   ]) {
     const rotated = createRegistrationCreateAttempt(first, changed.common, changed.workflow, {
+      persistenceMode: "ready_atomic",
       createRequestKey: () => `request-${++requestSequence}`,
       createInquiryAt: () => `2026-07-16T0${++inquirySequence}:00:00Z`,
     })
@@ -224,6 +263,79 @@ test("one logical registration retry freezes its full attempt envelope", () => {
     assert.notEqual(rotated.inquiryAt, first.inquiryAt)
     assert.notEqual(rotated.fingerprint, first.fingerprint)
   }
+})
+
+test("one logical retry freezes its writer and fails closed when the runtime mode changes", () => {
+  const workflow = normalizeRegistrationInitialWorkflow({
+    ...createRegistrationInitialWorkflowDraft(["영어"]),
+    subjectPlans: { 영어: "inquiry" },
+  }, ["영어"])
+  const common = {
+    studentName: "김다미", schoolGrade: "고1", schoolName: "중앙고",
+    parentPhone: "01012345678", studentPhone: "", campus: "본관",
+    inquiryAt: "", subjects: ["영어"], requestNote: "", priority: "normal",
+  }
+  let sequence = 0
+  const first = createRegistrationCreateAttempt(null, common, workflow, {
+    persistenceMode: "canonical_inquiry",
+    createRequestKey: () => `request-${++sequence}`,
+    createInquiryAt: () => "2026-07-16T01:00:00Z",
+  })
+  const retry = createRegistrationCreateAttempt(first, common, structuredClone(workflow), {
+    persistenceMode: "canonical_inquiry",
+    createRequestKey: () => `request-${++sequence}`,
+    createInquiryAt: () => "2026-07-16T02:00:00Z",
+  })
+
+  assert.strictEqual(retry, first)
+  assert.equal(retry.persistenceMode, "canonical_inquiry")
+  assert.equal(retry.writer, "canonical")
+  assert.equal(retry.requestKey, "request-1")
+  assert.equal(retry.inquiryAt, "2026-07-16T01:00:00Z")
+  assert.deepEqual(retry.normalizedInitialWorkflow, workflow)
+  assert.throws(
+    () => assertRegistrationCreateAttemptPersistenceMode(retry, "legacy_inquiry"),
+    /registration_persistence_mode_changed/,
+  )
+  assert.throws(
+    () => createRegistrationCreateAttempt(first, common, workflow, {
+      persistenceMode: "ready_atomic",
+      createRequestKey: () => `request-${++sequence}`,
+      createInquiryAt: () => "2026-07-16T03:00:00Z",
+    }),
+    /registration_persistence_mode_changed/,
+  )
+})
+
+test("an ambiguous legacy create can never issue a second insert for the same attempt", () => {
+  const workflow = normalizeRegistrationInitialWorkflow(
+    createRegistrationInitialWorkflowDraft(["영어"]),
+    ["영어"],
+  )
+  const common = {
+    studentName: "김다미", schoolGrade: "고1", schoolName: "",
+    parentPhone: "01012345678", studentPhone: "", campus: "본관",
+    inquiryAt: "", subjects: ["영어"], requestNote: "", priority: "normal",
+  }
+  const first = createRegistrationCreateAttempt(null, common, workflow, {
+    persistenceMode: "legacy_inquiry",
+    createRequestKey: () => "legacy-request",
+    createInquiryAt: () => "2026-07-16T01:00:00Z",
+  })
+  const started = markRegistrationLegacyCreateStarted(first)
+  const retained = createRegistrationCreateAttempt(started, common, structuredClone(workflow), {
+    persistenceMode: "legacy_inquiry",
+    createRequestKey: () => "must-not-rotate",
+    createInquiryAt: () => "must-not-rotate",
+  })
+
+  assert.strictEqual(retained, started)
+  assert.equal(retained.writer, "legacy")
+  assert.equal(retained.legacyCreateStarted, true)
+  assert.throws(
+    () => markRegistrationLegacyCreateStarted(retained),
+    /registration_legacy_create_outcome_unknown/,
+  )
 })
 
 test("normalization rejects missing, extraneous, or invalid subject plans", () => {

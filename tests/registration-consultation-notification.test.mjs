@@ -58,6 +58,65 @@ test("visit notification key is scoped by appointment revision, track, and direc
   }), "registration:visit:appointment-1:revision:2:track:english:director:director-1")
 })
 
+test("notification result partition preserves every failed target and every warning", () => {
+  const partition = notificationModel.partitionRegistrationVisitNotificationResults
+  assert.equal(typeof partition, "function")
+  if (typeof partition !== "function") return
+  const targets = [
+    { appointmentId: "visit-a", notificationRevision: 1 },
+    { appointmentId: "visit-b", notificationRevision: 2 },
+    { appointmentId: "visit-c", notificationRevision: 3 },
+  ]
+  const result = partition(targets, [
+    { status: "fulfilled", value: { ok: true, warning: "감사 로그 확인" } },
+    { status: "fulfilled", value: { ok: false } },
+    { status: "rejected", reason: new Error("network") },
+  ])
+
+  assert.deepEqual(result.failedTargets, targets.slice(1))
+  assert.deepEqual(result.warnings, ["감사 로그 확인"])
+})
+
+test("notification-only retry retains only targets that still fail", async () => {
+  const dispatch = notificationModel.dispatchRegistrationVisitNotificationTargets
+  assert.equal(typeof dispatch, "function")
+  if (typeof dispatch !== "function") return
+  const targets = [
+    { appointmentId: "visit-b", notificationRevision: 2 },
+    { appointmentId: "visit-c", notificationRevision: 3 },
+  ]
+  const calls = []
+  const result = await dispatch(targets, async (target) => {
+    calls.push(target.appointmentId)
+    if (target.appointmentId === "visit-c") throw new Error("still failing")
+    return { ok: true }
+  })
+
+  assert.deepEqual(calls, ["visit-b", "visit-c"])
+  assert.deepEqual(result.failedTargets, [targets[1]])
+  assert.deepEqual(result.warnings, [])
+})
+
+test("notification-only retry reconciliation preserves failures queued while retry is in flight", () => {
+  const reconcile = notificationModel.reconcileRegistrationVisitNotificationRetryTargets
+  assert.equal(typeof reconcile, "function")
+  if (typeof reconcile !== "function") return
+
+  const retryA = { appointmentId: "visit-a", notificationRevision: 1 }
+  const queuedB = { appointmentId: "visit-b", notificationRevision: 2 }
+
+  assert.deepEqual(
+    reconcile([retryA, queuedB], [retryA], []),
+    [queuedB],
+    "a newly queued failure must survive when the retried target succeeds",
+  )
+  assert.deepEqual(
+    reconcile([retryA, queuedB], [retryA], [retryA]),
+    [queuedB, retryA],
+    "a newly queued failure and a still-failing retried target must both remain",
+  )
+})
+
 test("real appointment edits refresh notifications while same-revision retries dedupe", () => {
   const base = { appointmentId: "appointment-1", trackId: "english", directorProfileId: "director-1" }
   const key = notificationModel.getRegistrationVisitNotificationDedupeKey
@@ -336,8 +395,9 @@ test("canonical visit identity includes place while create dispatches only serve
   assert.match(message || "", /상담실 A/);
   assert.match(message || "", /영어: 강부희/);
   assert.match(workspaceSource, /sendRegistrationVisitNotificationTarget\(target/);
-  assert.match(workspaceSource, /getConsultationNotificationWarning\(result\.value\)/);
-  assert.match(workspaceSource, /result\.value\?\.ok === false/);
+  assert.match(workspaceSource, /dispatchRegistrationVisitNotificationTargets/);
+  assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /getConsultationNotificationWarning\(result\.value\)/);
+  assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /result\.value\?\.ok === false/);
   assert.match(workspaceSource, /savedWithNotificationDeliveryFailure/);
   assert.match(workspaceSource, /savedWithNotificationAuditWarning/);
   assert.match(workspaceSource, /방문상담 알림 전달은 접수됐습니다\. 감사 이력을 확인하세요\./);

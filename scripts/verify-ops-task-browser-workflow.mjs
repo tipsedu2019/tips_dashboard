@@ -2587,6 +2587,8 @@ async function verifyRouteInteraction(page, route, options = {}) {
 }
 
 async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
+  const fixtureDebugGlobal = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
+
   async function assertNoHorizontalOverflow(locator, label) {
     const metrics = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
@@ -2628,16 +2630,133 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     throw new Error(`registration subject-track fixture is missing visible ${label}.`)
   }
 
+  async function closeFixtureDialog(dialog) {
+    await page.keyboard.press("Escape").catch(() => {})
+    await dialog.waitFor({ state: "hidden", timeout: 5000 })
+  }
+
+  async function selectFixtureSubject(dialog, subject) {
+    const subjectButton = await firstUsable(
+      dialog.locator('[aria-label="과목별 진행 현황"] button').filter({ hasText: subject }),
+    )
+    if (!(await subjectButton.isVisible().catch(() => false))) {
+      throw new Error(`registration subject-track fixture is missing the ${subject} progress control.`)
+    }
+    await subjectButton.click()
+  }
+
+  async function openFixtureCaseFromList({ studentName, subject, viewLabel }) {
+    const viewTab = page.getByRole("tab", { name: new RegExp(`^${viewLabel}`) }).first()
+    await viewTab.click()
+    const detailButton = await firstUsable(
+      page.getByRole("button", { name: `[${subject}] ${studentName} 상세`, exact: true }),
+    )
+    await waitUntilEnabled(detailButton, `${studentName} ${subject} fixture detail button`)
+    await detailButton.click()
+    const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
+    await dialog.waitFor({ state: "visible", timeout: 5000 })
+    await assertNoHorizontalOverflow(dialog, `${studentName} reopened subject-track fixture`)
+    return dialog
+  }
+
+  async function openCreatedRegistrationCase(studentName, subject = "영어") {
+    return openFixtureCaseFromList({ studentName, subject, viewLabel: "상담" })
+  }
+
+  async function chooseFirstFixtureDate(dialog, ariaLabel) {
+    const trigger = dialog.getByRole("button", { name: new RegExp(`^${ariaLabel}`) }).first()
+    await trigger.click()
+    const dayButton = await firstUsable(
+      dialog.locator('[data-slot="calendar"] button[data-day]:not(:disabled)'),
+    )
+    if (!(await dayButton.isVisible().catch(() => false))) {
+      throw new Error(`${ariaLabel} calendar did not expose a selectable date.`)
+    }
+    await dayButton.click()
+  }
+
+  async function chooseFixtureTime(dialog, ariaLabel, optionLabel) {
+    const trigger = dialog.getByRole("button", { name: new RegExp(`^${ariaLabel}`) }).first()
+    await trigger.click()
+    const option = await firstUsable(dialog.getByRole("option", { name: optionLabel, exact: true }))
+    if (!(await option.isVisible().catch(() => false))) {
+      throw new Error(`${ariaLabel} did not expose ${optionLabel}.`)
+    }
+    await option.click()
+  }
+
+  async function readFixtureDebugSnapshot() {
+    await page.waitForFunction((globalName) => (
+      typeof globalThis[globalName]?.snapshot === "function"
+    ), fixtureDebugGlobal, { timeout: 5000 })
+    return page.evaluate((globalName) => globalThis[globalName].snapshot(), fixtureDebugGlobal)
+  }
+
+  async function replayLastFixtureCreate() {
+    return page.evaluate((globalName) => globalThis[globalName].replayLastCreate(), fixtureDebugGlobal)
+  }
+
+  async function waitForInputValue(locator, expectedValue, label, timeoutMs = 10000) {
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < timeoutMs) {
+      if (await locator.inputValue().catch(() => "") === expectedValue) return
+      await page.waitForTimeout(200)
+    }
+    throw new Error(`${label} did not retain ${expectedValue}.`)
+  }
+
+  const fixtureWidth = await page.evaluate(() => window.innerWidth)
+  const createdStudentName = `Codex 등록검증 ${fixtureWidth}`
+  const providerRoutePatterns = [
+    "**/api/google-chat",
+    "**/api/registration/consultation-notification",
+  ]
+  const interceptedProviderRequests = []
+  const fulfillProviderFixture = async (route) => {
+    interceptedProviderRequests.push({
+      method: route.request().method(),
+      url: route.request().url(),
+    })
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, fixture: true }),
+    })
+  }
+  function assertNoInterceptedProviderRequests(stage) {
+    if (interceptedProviderRequests.length !== 0) {
+      throw new Error(
+        `registration fixture attempted ${interceptedProviderRequests.length} provider request(s) during ${stage}: ${interceptedProviderRequests.map((request) => `${request.method} ${request.url}`).join(" | ")}`,
+      )
+    }
+  }
+  for (const providerRoutePattern of providerRoutePatterns) {
+    await page.route(providerRoutePattern, fulfillProviderFixture)
+  }
+
+  try {
   const createButton = page.getByRole("button", { name: "등록 추가", exact: true }).last()
   await waitUntilEnabled(createButton, "registration fixture create button")
   await createButton.click()
   const createDialog = page.getByRole("dialog").filter({ hasText: "등록 추가" }).first()
   await createDialog.waitFor({ state: "visible", timeout: 5000 })
+  await createDialog.getByLabel(/^학생명/).fill(createdStudentName)
+  await createDialog.getByLabel(/^학부모 전화/).fill("01012345678")
   await createDialog.getByRole("button", { name: "영어", exact: true }).click()
   await createDialog.getByRole("button", { name: "수학", exact: true }).click()
   await selectListboxOptionIfPresent(page, createDialog, "학년", "고1")
   await createDialog.getByLabel("영어 다음 업무", { exact: true }).selectOption("direct_phone")
   await createDialog.getByLabel("수학 다음 업무", { exact: true }).selectOption("visit")
+  const englishDirector = createDialog.getByLabel("영어 상담 책임자", { exact: true })
+  const mathDirector = createDialog.getByLabel("수학 상담 책임자", { exact: true })
+  await englishDirector.selectOption("fixture-profile-english-director")
+  await mathDirector.selectOption("fixture-profile-math-director")
+  if (await englishDirector.inputValue() === await mathDirector.inputValue()) {
+    throw new Error("registration initial plan did not retain different English and Mathematics directors.")
+  }
+  await chooseFirstFixtureDate(createDialog, "방문상담 예약일 날짜")
+  await chooseFixtureTime(createDialog, "방문상담 예약일 시각", "오전 10:00")
+  await createDialog.getByLabel("방문상담실", { exact: true }).fill("상담실 2")
   const createText = await createDialog.innerText()
   for (const expectedLabel of ["과목별 상담 책임자", "방문상담 예약일시", "방문상담실"]) {
     if (!createText.includes(expectedLabel)) throw new Error(`registration initial plan is missing ${expectedLabel}.`)
@@ -2650,12 +2769,80 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   for (const retiredLabel of ["전화상담 예약일시", "시험지·결과지 URL"]) {
     if (createText.includes(retiredLabel)) throw new Error(`registration initial plan still renders ${retiredLabel}.`)
   }
-  // A canonical reload must preserve the server receipt without replaying create.
-  await createDialog.getByRole("button", { name: "닫기", exact: true }).click()
-  const discardDialog = page.getByRole("dialog").filter({ hasText: "입력한 내용을 버릴까요?" }).first()
-  if (await discardDialog.isVisible().catch(() => false)) {
-    await discardDialog.getByRole("button", { name: /버리/ }).click()
+
+  const saveCreateButton = createDialog.getByRole("button", { name: "저장", exact: true }).last()
+  await waitUntilEnabled(saveCreateButton, "registration fixture save button")
+  await saveCreateButton.click()
+  try {
+    await createDialog.waitFor({ state: "hidden", timeout: 15000 })
+  } catch (error) {
+    const alertText = await createDialog.getByRole("alert").allInnerTexts().catch(() => [])
+    throw new Error(`registration fixture create did not close after save: ${alertText.join(" | ")}`, { cause: error })
   }
+
+  await page.waitForFunction((globalName) => Boolean(globalThis[globalName]?.snapshot()?.lastCreate), fixtureDebugGlobal, { timeout: 5000 })
+  const savedSnapshot = await readFixtureDebugSnapshot()
+  const createdDetail = savedSnapshot.lastCreate?.detail
+  const createdResult = savedSnapshot.lastCreate?.result
+  if (!createdDetail || !createdResult?.taskId) throw new Error("registration fixture debug bridge did not capture the saved create receipt.")
+  const createdEnglish = createdDetail.tracks.find((track) => track.subject === "영어")
+  const createdMath = createdDetail.tracks.find((track) => track.subject === "수학")
+  const createdVisit = createdDetail.appointments.find((appointment) => appointment.kind === "visit_consultation")
+  const englishPhoneRows = createdDetail.consultations.filter((item) => item.trackId === createdEnglish?.id && item.mode === "phone" && item.status === "waiting")
+  const mathVisitRows = createdDetail.consultations.filter((item) => item.trackId === createdMath?.id && item.mode === "visit" && item.status === "scheduled")
+  if (createdDetail.tracks.length !== 2 || new Set(createdDetail.tracks.map((track) => track.subject)).size !== 2) {
+    throw new Error("registration fixture create did not persist exactly one English and one Mathematics track.")
+  }
+  if (createdEnglish?.status !== "consultation_waiting" || createdMath?.status !== "visit_consultation_scheduled") {
+    throw new Error("registration fixture create did not persist the canonical mixed consultation statuses.")
+  }
+  if (
+    createdEnglish.directorProfileId !== "fixture-profile-english-director"
+    || createdMath.directorProfileId !== "fixture-profile-math-director"
+    || createdEnglish.directorProfileId === createdMath.directorProfileId
+  ) {
+    throw new Error("registration fixture create did not preserve the independent directors.")
+  }
+  if (createdDetail.appointments.length !== 1 || !createdVisit || englishPhoneRows.length !== 1 || mathVisitRows.length !== 1) {
+    throw new Error("registration fixture create duplicated or omitted its canonical consultation rows.")
+  }
+  if (mathVisitRows[0].appointmentId !== createdVisit.id || englishPhoneRows[0].appointmentId !== null) {
+    throw new Error("registration fixture create linked the mixed consultation rows incorrectly.")
+  }
+  if (savedSnapshot.counts.externalCalls !== 0) {
+    throw new Error(`registration fixture recorded outbound provider calls: ${savedSnapshot.counts.externalCalls}.`)
+  }
+  assertNoInterceptedProviderRequests("atomic create")
+  if (savedSnapshot.counts.notificationReceipts !== 1) {
+    throw new Error(`registration fixture notification receipt count is ${savedSnapshot.counts.notificationReceipts}, expected 1.`)
+  }
+
+  const replay = await replayLastFixtureCreate()
+  if (JSON.stringify(replay.originalResult) !== JSON.stringify(replay.replayResult)) {
+    throw new Error("registration fixture replay returned a different create receipt.")
+  }
+  if (JSON.stringify(replay.originalReceipt) !== JSON.stringify(replay.replayReceipt)) {
+    throw new Error("registration fixture replay returned a different idempotency receipt.")
+  }
+  if (JSON.stringify(replay.beforeCounts) !== JSON.stringify(replay.afterCounts)) {
+    throw new Error(`registration fixture replay changed row counts: ${JSON.stringify({ beforeCounts: replay.beforeCounts, afterCounts: replay.afterCounts })}`)
+  }
+  const replayedSnapshot = await readFixtureDebugSnapshot()
+  if (JSON.stringify(replayedSnapshot.counts) !== JSON.stringify(savedSnapshot.counts)) {
+    throw new Error("registration fixture replay changed the persisted state counts.")
+  }
+
+  let createdDialog = await openCreatedRegistrationCase(createdStudentName)
+  await requireVisibleText(createdDialog, "전화상담은 예약 없이")
+  const createdPhoneStage = createdDialog.locator('section[aria-label="영어 상담 대기"]')
+  if (await createdPhoneStage.getByText("예약 일시", { exact: false }).count() > 0) {
+    throw new Error("created English direct-phone track rendered a reservation time.")
+  }
+  await selectFixtureSubject(createdDialog, "수학")
+  await requireVisibleText(createdDialog, "방문상담 일시")
+  await requireVisibleText(createdDialog, "방문상담 장소")
+  await requireVisibleText(createdDialog, "상담실 2")
+  await closeFixtureDialog(createdDialog)
 
   const tabs = ["문의", "레벨테스트", "상담", "대기", "등록", "완료"]
   for (const label of tabs) {
@@ -2668,7 +2855,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   await page.getByRole("tab", { name: /^등록/ }).first().click()
   await page.getByText("최유진", { exact: true }).first().waitFor({ state: "visible", timeout: 5000 })
 
-  const dualDialog = await openRegistrationSubjectTrackFixtureCase({
+  let dualDialog = await openRegistrationSubjectTrackFixtureCase({
     taskId: "fixture-task-dual-test",
     trackId: "fixture-track-dual-english",
     studentName: "김다미",
@@ -2682,6 +2869,48 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   if (!selectedSubjectText.includes("영어") || !selectedSubjectText.includes("수학")) {
     throw new Error("shared level-test fixture is missing an English or Math participant.")
   }
+  await chooseFixtureTime(sharedAppointment, "시각 선택", "오전 10:30")
+  await sharedAppointment.locator('input[placeholder="본관, 상담실 등"]').fill("본관 202호")
+  await sharedAppointment.getByRole("button", { name: "수학", exact: true }).click()
+  if (await sharedAppointment.locator('button[aria-pressed="true"]').count() !== 1) {
+    throw new Error("shared level-test participant edit did not retain exactly one subject.")
+  }
+  const rescheduleButton = sharedAppointment.getByRole("button", { name: "예약 수정", exact: true })
+  await waitUntilEnabled(rescheduleButton, "registration level-test reschedule button")
+  await rescheduleButton.click()
+  await sharedAppointment.waitFor({ state: "hidden", timeout: 10000 })
+  const mathProgress = dualDialog.locator('[aria-label="과목별 진행 현황"] button').filter({ hasText: "수학" })
+  if (!(await mathProgress.innerText()).includes("문의")) {
+    throw new Error("level-test participant removal did not restore Mathematics to inquiry.")
+  }
+  await closeFixtureDialog(dualDialog)
+
+  dualDialog = await openFixtureCaseFromList({ studentName: "김다미", subject: "영어", viewLabel: "레벨테스트" })
+  await dualDialog.getByRole("button", { name: "예약 및 과목별 결과 관리" }).click()
+  const reloadedAppointment = dualDialog.locator('section[aria-label="레벨테스트 예약"]')
+  if (await reloadedAppointment.locator('button[aria-pressed="true"]').count() !== 1) {
+    throw new Error("canonical reload did not preserve the edited appointment participant set.")
+  }
+  if (await reloadedAppointment.locator('input[placeholder="본관, 상담실 등"]').inputValue() !== "본관 202호") {
+    throw new Error("canonical appointment reload did not preserve the edited place.")
+  }
+  await reloadedAppointment.getByRole("button", { name: /^시각 선택: 오전 10:30$/ }).waitFor({ state: "visible", timeout: 5000 })
+  await reloadedAppointment.getByRole("button", { name: "시험 시작", exact: true }).click()
+  const resultButton = reloadedAppointment.getByRole("button", { name: "결과 완료", exact: true })
+  await resultButton.waitFor({ state: "visible", timeout: 10000 })
+  const levelTestResultUrl = "https://drive.google.com/fixture/browser-result"
+  await reloadedAppointment.getByLabel("시험지·결과지 URL", { exact: true }).first().fill(levelTestResultUrl)
+  await waitUntilEnabled(resultButton, "registration level-test result completion button")
+  await resultButton.click()
+  await requireVisibleText(dualDialog, "전화상담은 예약 없이")
+  await dualDialog.getByDisplayValue(levelTestResultUrl).waitFor({ state: "visible", timeout: 10000 })
+  await closeFixtureDialog(dualDialog)
+
+  dualDialog = await openFixtureCaseFromList({ studentName: "김다미", subject: "영어", viewLabel: "상담" })
+  await requireVisibleText(dualDialog, "전화상담은 예약 없이")
+  await dualDialog.getByRole("button", { name: "레벨테스트 결과 보기", exact: true }).click()
+  await dualDialog.getByDisplayValue(levelTestResultUrl).waitFor({ state: "visible", timeout: 5000 })
+  await closeFixtureDialog(dualDialog)
 
   const splitPhoneDialog = await openRegistrationSubjectTrackFixtureCase({
     taskId: "fixture-task-split-consultation",
@@ -2693,7 +2922,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   if ((await phoneStage.getByText("예약 일시", { exact: false }).count()) > 0) {
     throw new Error("phone consultation fixture rendered a reservation time.")
   }
-  await splitPhoneDialog.getByRole("tab", { name: /^영어 · 방문상담 예약$/ }).click()
+  await selectFixtureSubject(splitPhoneDialog, "영어")
   await requireVisibleText(splitPhoneDialog, "방문상담 일시")
   await requireVisibleText(splitPhoneDialog, "방문상담 장소")
   await requireVisibleText(splitPhoneDialog, "본관 상담실")
@@ -2728,16 +2957,45 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   if ((await migrationDialog.locator('section[aria-label="영어 문의 처리"]').count()) > 0) {
     throw new Error("migration review fixture exposed ordinary stage actions before attribution.")
   }
+  const englishMigrationCard = migrationDialog.getByRole("heading", { name: "영어", exact: true }).locator("xpath=../..")
+  const migrationDirector = englishMigrationCard.getByLabel("상담 책임자", { exact: true })
+  await migrationDirector.selectOption("fixture-profile-english-director")
+  const saveDirectorButton = englishMigrationCard.getByRole("button", { name: "책임자 저장", exact: true })
+  await waitUntilEnabled(saveDirectorButton, "registration migration director save button")
+  await saveDirectorButton.click()
+  await waitForInputValue(
+    migrationDialog.getByRole("heading", { name: "영어", exact: true }).locator("xpath=../..").getByLabel("상담 책임자", { exact: true }),
+    "fixture-profile-english-director",
+    "registration migration director",
+  )
+  await closeFixtureDialog(migrationDialog)
+
+  const reloadedMigrationDialog = await openFixtureCaseFromList({ studentName: "윤지호", subject: "영어", viewLabel: "문의" })
+  await waitForInputValue(
+    reloadedMigrationDialog.getByRole("heading", { name: "영어", exact: true }).locator("xpath=../..").getByLabel("상담 책임자", { exact: true }),
+    "fixture-profile-english-director",
+    "reopened registration migration director",
+  )
+  assertNoInterceptedProviderRequests("full subject-track workflow")
 
   return {
     subjectTrackFixture: true,
+    interceptedProviderRequests: interceptedProviderRequests.length,
     scenarios: [
+      "atomic create, exact replay, and canonical reopen",
+      "appointment reschedule, participant edit, and result URL reload",
+      "director edit and reload",
       "same-day dual level test",
       "split visit and phone consultation",
       "multiple English classes",
       "admission checklist permissions",
       "migration review gate",
     ],
+  }
+  } finally {
+    for (const providerRoutePattern of providerRoutePatterns) {
+      await page.unroute(providerRoutePattern, fulfillProviderFixture)
+    }
   }
 }
 

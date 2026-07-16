@@ -195,6 +195,18 @@ test("R09e registration persistence failures use operator-facing guidance", () =
     getRegistrationPersistenceErrorMessage({ message: "registration_director_required" }),
     "상담 책임자를 지정해 주세요.",
   );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_initial_appointment_datetime_invalid" }),
+    "예약 일시와 장소를 확인해 주세요.",
+  );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_persistence_mode_changed" }),
+    "등록 저장 환경이 변경되었습니다. 창을 닫고 최신 상태에서 다시 등록해 주세요.",
+  );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_legacy_create_outcome_unknown" }),
+    "이전 저장 결과를 확인해야 합니다. 목록을 새로고침해 중복 등록 여부를 확인해 주세요.",
+  );
 });
 
 test("R10 grade choices cover every school grade without a stale year prefix", () => {

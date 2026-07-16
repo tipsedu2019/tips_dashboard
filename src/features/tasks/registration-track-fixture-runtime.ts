@@ -2,6 +2,43 @@ import type { OpsRegistrationClassDetail, OpsTaskWorkspaceData } from "./ops-tas
 import type { OpsRegistrationCaseDetail, OpsRegistrationWorkspaceOptionData } from "./registration-track-service"
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
+export const REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
+
+export type RegistrationSubjectTrackFixtureDebugCounts = {
+  tasks: number
+  cases: number
+  tracks: number
+  appointments: number
+  consultations: number
+  levelTests: number
+  receipts: number
+  notificationReceipts: number
+  externalCalls: number
+}
+
+export type RegistrationSubjectTrackFixtureDebugSnapshot = {
+  counts: RegistrationSubjectTrackFixtureDebugCounts
+  lastCreate: {
+    command: {
+      type: "createRegistrationCaseWithInitialWorkflow"
+      requestKey: string
+      payload: Record<string, unknown>
+    }
+    result: unknown
+    receipt: unknown
+    detail: unknown
+  } | null
+}
+
+export type RegistrationSubjectTrackFixtureDebugReplay = {
+  requestKey: string
+  originalResult: unknown
+  replayResult: unknown
+  originalReceipt: unknown
+  replayReceipt: unknown
+  beforeCounts: RegistrationSubjectTrackFixtureDebugCounts
+  afterCounts: RegistrationSubjectTrackFixtureDebugCounts
+}
 
 export type RegistrationSubjectTrackFixtureAdapter = {
   readonly intakeWorkflowRuntimeVersion: number
@@ -10,12 +47,59 @@ export type RegistrationSubjectTrackFixtureAdapter = {
   loadWorkspaceData: () => Promise<OpsTaskWorkspaceData>
   loadOptionData: () => Promise<OpsRegistrationWorkspaceOptionData>
   loadClassDetails: (classIds: string[]) => Promise<Record<string, OpsRegistrationClassDetail>>
+  debugSnapshot?: () => RegistrationSubjectTrackFixtureDebugSnapshot
+  debugReplayLastCreate?: () => Promise<RegistrationSubjectTrackFixtureDebugReplay>
 }
 
 const activeFixtureAdapters: RegistrationSubjectTrackFixtureAdapter[] = []
+let previousDebugGlobalDescriptor: PropertyDescriptor | undefined
+let debugBridgeInstalled = false
 
 function getActiveFixtureAdapter() {
   return activeFixtureAdapters[activeFixtureAdapters.length - 1] || null
+}
+
+const fixtureDebugBridge = {
+  snapshot() {
+    const adapter = getActiveFixtureAdapter()
+    if (!adapter?.debugSnapshot) throw new Error("registration_subject_track_fixture_debug_unavailable")
+    return adapter.debugSnapshot()
+  },
+  replayLastCreate() {
+    const adapter = getActiveFixtureAdapter()
+    if (!adapter?.debugReplayLastCreate) throw new Error("registration_subject_track_fixture_debug_unavailable")
+    return adapter.debugReplayLastCreate()
+  },
+}
+
+function installFixtureDebugBridge() {
+  if (debugBridgeInstalled) return
+  previousDebugGlobalDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL,
+  )
+  Object.defineProperty(globalThis, REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL, {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: fixtureDebugBridge,
+  })
+  debugBridgeInstalled = true
+}
+
+function uninstallFixtureDebugBridge() {
+  if (!debugBridgeInstalled || activeFixtureAdapters.length > 0) return
+  if (previousDebugGlobalDescriptor) {
+    Object.defineProperty(
+      globalThis,
+      REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL,
+      previousDebugGlobalDescriptor,
+    )
+  } else {
+    Reflect.deleteProperty(globalThis, REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL)
+  }
+  previousDebugGlobalDescriptor = undefined
+  debugBridgeInstalled = false
 }
 
 export function shouldEnableRegistrationSubjectTrackFixture(
@@ -33,9 +117,11 @@ export function installRegistrationSubjectTrackFixtureRuntime(
 ) {
   if (!shouldEnableRegistrationSubjectTrackFixture(nodeEnv, fixtureValue)) return () => undefined
   activeFixtureAdapters.push(adapter)
+  installFixtureDebugBridge()
   return () => {
     const index = activeFixtureAdapters.lastIndexOf(adapter)
     if (index >= 0) activeFixtureAdapters.splice(index, 1)
+    uninstallFixtureDebugBridge()
   }
 }
 

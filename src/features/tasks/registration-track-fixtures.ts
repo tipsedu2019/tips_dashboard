@@ -22,7 +22,11 @@ import type {
   RegistrationPhoneReadySource,
   RegistrationSubject,
 } from "./registration-track-service"
-import type { RegistrationSubjectTrackFixtureAdapter } from "./registration-track-fixture-runtime"
+import type {
+  RegistrationSubjectTrackFixtureAdapter,
+  RegistrationSubjectTrackFixtureDebugCounts,
+  RegistrationSubjectTrackFixtureDebugSnapshot,
+} from "./registration-track-fixture-runtime"
 
 const FIXTURE_NOW = "2026-07-13T09:00:00+09:00"
 const FIXTURE_ACTOR_ID = "fixture-profile-staff"
@@ -116,6 +120,40 @@ export type RegistrationSubjectTrackFixtureRuntime = {
 export function createRegistrationSubjectTrackFixtureAdapter(
   runtime: RegistrationSubjectTrackFixtureRuntime,
 ): RegistrationSubjectTrackFixtureAdapter {
+  let lastCreate: RegistrationSubjectTrackFixtureDebugSnapshot["lastCreate"] = null
+
+  function debugCounts(state: RegistrationSubjectTrackFixtureState): RegistrationSubjectTrackFixtureDebugCounts {
+    const details = Object.values(state.caseDetails)
+    return {
+      tasks: state.workspaceData.tasks.length,
+      cases: details.length,
+      tracks: details.reduce((total, detail) => total + detail.tracks.length, 0),
+      appointments: details.reduce((total, detail) => total + detail.appointments.length, 0),
+      consultations: details.reduce((total, detail) => total + detail.consultations.length, 0),
+      levelTests: details.reduce((total, detail) => total + detail.levelTests.length, 0),
+      receipts: Object.keys(state.receipts).length,
+      notificationReceipts: Object.values(state.receipts).filter((receipt) => (
+        receipt.action === "sendRegistrationVisitNotificationTarget"
+      )).length,
+      externalCalls: state.externalCallLedger.length,
+    }
+  }
+
+  function debugSnapshot(): RegistrationSubjectTrackFixtureDebugSnapshot {
+    const state = runtime.getState()
+    if (!lastCreate) return { counts: debugCounts(state), lastCreate: null }
+    const taskId = String((lastCreate.result as { taskId?: unknown } | null)?.taskId || "")
+    return {
+      counts: debugCounts(state),
+      lastCreate: {
+        command: clone(lastCreate.command),
+        result: clone(lastCreate.result),
+        receipt: clone(state.receipts[lastCreate.command.requestKey] || lastCreate.receipt),
+        detail: taskId && state.caseDetails[taskId] ? clone(state.caseDetails[taskId]) : null,
+      },
+    }
+  }
+
   return {
     intakeWorkflowRuntimeVersion: 1,
     executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => {
@@ -125,6 +163,18 @@ export function createRegistrationSubjectTrackFixtureAdapter(
         payload,
       })
       runtime.replaceState(outcome.state)
+      if (type === "createRegistrationCaseWithInitialWorkflow") {
+        lastCreate = {
+          command: {
+            type,
+            requestKey: String(payload.requestKey || ""),
+            payload: clone(payload),
+          },
+          result: clone(outcome.result),
+          receipt: clone(outcome.receipt),
+          detail: null,
+        }
+      }
       return Promise.resolve(outcome.result as T)
     },
     loadCase: (taskId) => {
@@ -135,6 +185,29 @@ export function createRegistrationSubjectTrackFixtureAdapter(
     loadWorkspaceData: () => Promise.resolve(clone(runtime.getState().workspaceData)),
     loadOptionData: () => Promise.resolve(clone(runtime.getState().optionData)),
     loadClassDetails: (classIds) => Promise.resolve(getRegistrationSubjectTrackFixtureClassDetails(runtime.getState(), classIds)),
+    debugSnapshot,
+    debugReplayLastCreate: () => {
+      if (!lastCreate) return Promise.reject(new Error("registration_subject_track_fixture_debug_create_missing"))
+      const command = clone(lastCreate.command)
+      const originalResult = clone(lastCreate.result)
+      const originalReceipt = clone(lastCreate.receipt)
+      const beforeCounts = debugCounts(runtime.getState())
+      const replay = reduceRegistrationSubjectTrackFixture(runtime.getState(), {
+        type: command.type,
+        requestKey: command.requestKey,
+        payload: command.payload,
+      })
+      runtime.replaceState(replay.state)
+      return Promise.resolve({
+        requestKey: command.requestKey,
+        originalResult,
+        replayResult: clone(replay.result),
+        originalReceipt,
+        replayReceipt: clone(replay.receipt),
+        beforeCounts,
+        afterCounts: debugCounts(runtime.getState()),
+      })
+    },
   }
 }
 

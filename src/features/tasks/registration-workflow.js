@@ -387,8 +387,10 @@ export function getRegistrationPersistenceErrorMessage(error, fallback = "저장
   if (message.includes("registration_campus_invalid")) return "캠퍼스 정보를 확인해 주세요.";
   if (message.includes("registration_initial_subject_plan_invalid")) return "과목별 다음 업무를 확인해 주세요.";
   if (message.includes("registration_initial_appointment_membership_invalid")) return "예약에 포함된 과목을 다시 확인해 주세요.";
-  if (message.includes("registration_initial_appointment_invalid")) return "예약 일시와 장소를 확인해 주세요.";
+  if (message.includes("registration_initial_appointment_invalid") || message.includes("registration_initial_appointment_datetime_invalid")) return "예약 일시와 장소를 확인해 주세요.";
   if (message.includes("registration_director_required") || message.includes("registration_director_override_invalid")) return "상담 책임자를 지정해 주세요.";
+  if (message.includes("registration_persistence_mode_changed")) return "등록 저장 환경이 변경되었습니다. 창을 닫고 최신 상태에서 다시 등록해 주세요.";
+  if (message.includes("registration_legacy_create_outcome_unknown")) return "이전 저장 결과를 확인해야 합니다. 목록을 새로고침해 중복 등록 여부를 확인해 주세요.";
   if (message.includes("idempotency_key_reused")) return "입력 내용이 변경되었습니다. 다시 저장해 주세요.";
   return fallback;
 }

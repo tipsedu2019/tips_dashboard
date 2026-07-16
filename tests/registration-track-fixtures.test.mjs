@@ -29,6 +29,24 @@ async function loadTsModule(url) {
   return sandboxModule.exports
 }
 
+async function loadTsModuleWithContext(url) {
+  const source = await readFile(url, "utf8")
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+  const sandboxModule = { exports: {} }
+  const context = {
+    module: sandboxModule,
+    exports: sandboxModule.exports,
+    structuredClone,
+  }
+  vm.runInNewContext(compiled, context)
+  return { exports: sandboxModule.exports, context }
+}
+
 async function loadFixtureModule() {
   return loadTsModule(fixtureUrl)
 }
@@ -432,6 +450,73 @@ test("fixture runtime preserves the active adapter's exact numeric intake versio
   assert.equal(loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(), 0)
   cleanupWrongVersion()
   assert.equal(loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(), null)
+})
+
+test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup", async () => {
+  const fixture = await loadFixtureModule()
+  const { exports: runtime, context } = await loadTsModuleWithContext(fixtureRuntimeUrl)
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const input = initialWorkflowInput({
+    subjects: ["영어", "수학"],
+    subjectPlans: { 영어: "direct_phone", 수학: "visit" },
+    levelTestAppointment: null,
+    visitAppointment: {
+      scheduledAt: "2026-07-20T10:00:00+09:00",
+      place: "상담실 2",
+      subjects: ["수학"],
+    },
+    directorOverrides: {
+      영어: "fixture-profile-english-director",
+      수학: "fixture-profile-math-director",
+    },
+    requestKey: "fixture-browser-replay",
+  })
+
+  assert.equal(runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL, "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__")
+  const ignored = runtime.installRegistrationSubjectTrackFixtureRuntime(
+    "production",
+    "registration-subject-tracks",
+    adapter,
+  )
+  assert.equal(context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL], undefined)
+  ignored()
+
+  const cleanup = runtime.installRegistrationSubjectTrackFixtureRuntime(
+    "test",
+    "registration-subject-tracks",
+    adapter,
+  )
+  const bridge = context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL]
+  assert.equal(typeof bridge?.snapshot, "function")
+  assert.equal(typeof bridge?.replayLastCreate, "function")
+  assert.equal(plain(bridge.snapshot()).lastCreate, null)
+
+  const originalResult = await adapter.executeAction("createRegistrationCaseWithInitialWorkflow", input)
+  await adapter.executeAction("sendRegistrationVisitNotificationTarget", originalResult.notificationTargets[0])
+  const before = plain(bridge.snapshot())
+  assert.equal(before.lastCreate.command.requestKey, input.requestKey)
+  assert.deepEqual(before.lastCreate.command.payload, plain(input))
+  assert.deepEqual(before.lastCreate.result, plain(originalResult))
+  assert.equal(before.counts.cases, 9)
+  assert.equal(before.counts.tracks, 16)
+  assert.equal(before.counts.appointments, 5)
+  assert.equal(before.counts.externalCalls, 0)
+  assert.equal(before.counts.notificationReceipts, 1)
+
+  const replay = plain(await bridge.replayLastCreate())
+  const after = plain(bridge.snapshot())
+  assert.equal(replay.requestKey, input.requestKey)
+  assert.deepEqual(replay.originalResult, replay.replayResult)
+  assert.deepEqual(replay.beforeCounts, replay.afterCounts)
+  assert.deepEqual(after.counts, before.counts)
+  assert.deepEqual(after.lastCreate.command, before.lastCreate.command)
+
+  cleanup()
+  assert.equal(context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL], undefined)
 })
 
 test("public intake probe and create use the fixture before any database path", async () => {

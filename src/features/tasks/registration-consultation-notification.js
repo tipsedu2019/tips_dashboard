@@ -46,6 +46,53 @@ export function getConsultationNotificationWarning(payload = {}) {
   return text(payload.warning)
 }
 
+function registrationVisitNotificationTargetKey(target = {}) {
+  return `${text(target.appointmentId)}:${String(Number(target.notificationRevision))}`
+}
+
+export function mergeRegistrationVisitNotificationTargets(current = [], incoming = []) {
+  const merged = new Map()
+  for (const target of [...(Array.isArray(current) ? current : []), ...(Array.isArray(incoming) ? incoming : [])]) {
+    merged.set(registrationVisitNotificationTargetKey(target), target)
+  }
+  return Array.from(merged.values())
+}
+
+export function reconcileRegistrationVisitNotificationRetryTargets(current = [], attempted = [], failed = []) {
+  const attemptedKeys = new Set(
+    (Array.isArray(attempted) ? attempted : []).map(registrationVisitNotificationTargetKey),
+  )
+  const untouched = (Array.isArray(current) ? current : []).filter((target) => (
+    !attemptedKeys.has(registrationVisitNotificationTargetKey(target))
+  ))
+  return mergeRegistrationVisitNotificationTargets(untouched, failed)
+}
+
+export function partitionRegistrationVisitNotificationResults(targets = [], results = []) {
+  const failedTargets = []
+  const warnings = []
+  const normalizedTargets = Array.isArray(targets) ? targets : []
+  const normalizedResults = Array.isArray(results) ? results : []
+
+  normalizedTargets.forEach((target, index) => {
+    const result = normalizedResults[index]
+    if (!result || result.status === "rejected" || result.value?.ok === false) {
+      failedTargets.push(target)
+      return
+    }
+    const warning = getConsultationNotificationWarning(result.value)
+    if (warning) warnings.push(warning)
+  })
+
+  return { failedTargets, warnings }
+}
+
+export async function dispatchRegistrationVisitNotificationTargets(targets = [], sendTarget) {
+  const normalizedTargets = Array.isArray(targets) ? targets : []
+  const results = await Promise.allSettled(normalizedTargets.map((target) => sendTarget(target)))
+  return partitionRegistrationVisitNotificationResults(normalizedTargets, results)
+}
+
 export function getRegistrationVisitNotificationDedupeKey(input = {}) {
   return [
     "registration:visit",

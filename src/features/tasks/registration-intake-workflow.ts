@@ -40,6 +40,13 @@ export type RegistrationInitialPersistenceMode =
   | "blocked_maintenance"
   | "blocked_mismatch"
 
+export type RegistrationWritablePersistenceMode =
+  | "ready_atomic"
+  | "canonical_inquiry"
+  | "legacy_inquiry"
+
+export type RegistrationCreateWriter = "atomic" | "canonical" | "legacy"
+
 export type RegistrationInitialPersistenceProbeResult =
   | {
       mode: RegistrationInitialPersistenceMode
@@ -71,6 +78,9 @@ export type RegistrationCreateAttempt = {
   fingerprint: string
   requestKey: string
   inquiryAt: string
+  persistenceMode: RegistrationWritablePersistenceMode
+  writer: RegistrationCreateWriter
+  legacyCreateStarted: boolean
   common: RegistrationCreateCommonInput
   normalizedInitialWorkflow: RegistrationInitialWorkflowPayload
 }
@@ -85,6 +95,10 @@ function orderedSubjects(subjects: RegistrationSubject[]) {
 
 function isRegistrationInitialAction(value: unknown): value is RegistrationInitialAction {
   return INITIAL_ACTIONS.includes(value as RegistrationInitialAction)
+}
+
+function requiresDirector(action: RegistrationInitialAction | undefined) {
+  return action === "direct_phone" || action === "visit"
 }
 
 function hasExactSubjectPlans(
@@ -173,24 +187,97 @@ function createAttemptFingerprint(
   return JSON.stringify({ common, workflow })
 }
 
+function getRegistrationCreateWriter(
+  mode: RegistrationWritablePersistenceMode,
+): RegistrationCreateWriter {
+  if (mode === "ready_atomic") return "atomic"
+  if (mode === "canonical_inquiry") return "canonical"
+  return "legacy"
+}
+
+export function assertRegistrationCreateAttemptPersistenceMode(
+  current: RegistrationCreateAttempt | null,
+  freshMode: RegistrationInitialPersistenceProbeResult["mode"],
+) {
+  if (current && current.persistenceMode !== freshMode) {
+    throw new Error("registration_persistence_mode_changed")
+  }
+}
+
 export function createRegistrationCreateAttempt(
   current: RegistrationCreateAttempt | null,
   commonInput: RegistrationCreateCommonInput,
   normalizedInitialWorkflow: RegistrationInitialWorkflowPayload,
-  factories: { createRequestKey: () => string; createInquiryAt: () => string },
+  factories: {
+    persistenceMode: RegistrationWritablePersistenceMode
+    createRequestKey: () => string
+    createInquiryAt: () => string
+  },
 ): RegistrationCreateAttempt {
   const common = normalizedCreateCommon(commonInput)
   const fingerprint = createAttemptFingerprint(common, normalizedInitialWorkflow)
-  if (current?.fingerprint === fingerprint) return current
+  if (current?.fingerprint === fingerprint) {
+    assertRegistrationCreateAttemptPersistenceMode(current, factories.persistenceMode)
+    return current
+  }
 
   const inquiryAt = common.inquiryAt || factories.createInquiryAt()
   return {
     fingerprint,
     requestKey: factories.createRequestKey(),
     inquiryAt,
+    persistenceMode: factories.persistenceMode,
+    writer: getRegistrationCreateWriter(factories.persistenceMode),
+    legacyCreateStarted: false,
     common: { ...common, inquiryAt },
     normalizedInitialWorkflow: structuredClone(normalizedInitialWorkflow),
   }
+}
+
+export function markRegistrationLegacyCreateStarted(
+  attempt: RegistrationCreateAttempt,
+): RegistrationCreateAttempt {
+  if (attempt.writer !== "legacy") {
+    throw new Error("registration_legacy_create_writer_invalid")
+  }
+  if (attempt.legacyCreateStarted) {
+    throw new Error("registration_legacy_create_outcome_unknown")
+  }
+  return { ...attempt, legacyCreateStarted: true }
+}
+
+export function toRegistrationScheduledAtIso(value: string) {
+  const raw = trimmed(value)
+  const naive = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/)
+  if (naive) {
+    const [, yearText, monthText, dayText, hourText, minuteText, secondText = "0", millisecondText = "0"] = naive
+    const year = Number(yearText)
+    const month = Number(monthText)
+    const day = Number(dayText)
+    const hour = Number(hourText)
+    const minute = Number(minuteText)
+    const second = Number(secondText)
+    const millisecond = Number(millisecondText.padEnd(3, "0"))
+    const wallClock = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond))
+    if (
+      wallClock.getUTCFullYear() !== year
+      || wallClock.getUTCMonth() !== month - 1
+      || wallClock.getUTCDate() !== day
+      || wallClock.getUTCHours() !== hour
+      || wallClock.getUTCMinutes() !== minute
+      || wallClock.getUTCSeconds() !== second
+      || wallClock.getUTCMilliseconds() !== millisecond
+    ) {
+      throw new Error("registration_initial_appointment_datetime_invalid")
+    }
+    return new Date(wallClock.getTime() - (9 * 60 * 60 * 1_000)).toISOString()
+  }
+
+  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) {
+    const instant = new Date(raw)
+    if (!Number.isNaN(instant.getTime())) return instant.toISOString()
+  }
+  throw new Error("registration_initial_appointment_datetime_invalid")
 }
 
 export function createRegistrationInitialWorkflowDraft(
@@ -226,7 +313,11 @@ export function reconcileRegistrationInitialWorkflowDraft(
   for (const subject of orderedSubjects(subjects)) {
     const action = draft.subjectPlans[subject]
     subjectPlans[subject] = isRegistrationInitialAction(action) ? action : "inquiry"
-    if (Object.prototype.hasOwnProperty.call(draft.directorOverrides, subject)) {
+    if (
+      isRegistrationInitialAction(action)
+      && requiresDirector(action)
+      && Object.prototype.hasOwnProperty.call(draft.directorOverrides, subject)
+    ) {
       directorOverrides[subject] = draft.directorOverrides[subject]
     }
   }
@@ -253,6 +344,7 @@ export function setRegistrationInitialSubjectAction(
     subjectPlans: { ...draft.subjectPlans, [subject]: action },
     directorOverrides: { ...draft.directorOverrides },
   }
+  if (!requiresDirector(action)) delete next.directorOverrides[subject]
   if (action !== "level_test" && getRegistrationInitialWorkflowParticipants(next, "level_test").length === 0) {
     next.levelTestScheduledAt = ""
     next.levelTestPlace = ""
@@ -285,9 +377,10 @@ export function normalizeRegistrationInitialWorkflow(
   const subjectPlans: RegistrationInitialWorkflowPayload["subjectPlans"] = {}
   const directorOverrides: RegistrationInitialWorkflowPayload["directorOverrides"] = {}
   for (const subject of orderedSubjects(subjects)) {
-    subjectPlans[subject] = draft.subjectPlans[subject]
+    const action = draft.subjectPlans[subject]
+    subjectPlans[subject] = action
     const directorId = trimmed(draft.directorOverrides[subject])
-    if (directorId) directorOverrides[subject] = directorId
+    if (requiresDirector(action) && directorId) directorOverrides[subject] = directorId
   }
 
   const normalizedDraft = { ...draft, subjectPlans }
@@ -297,12 +390,12 @@ export function normalizeRegistrationInitialWorkflow(
   return {
     subjectPlans,
     levelTestAppointment: levelTestSubjects.length > 0 ? {
-      scheduledAt: draft.levelTestScheduledAt,
+      scheduledAt: toRegistrationScheduledAtIso(draft.levelTestScheduledAt),
       place: trimmed(draft.levelTestPlace),
       subjects: levelTestSubjects,
     } : null,
     visitAppointment: visitSubjects.length > 0 ? {
-      scheduledAt: draft.visitScheduledAt,
+      scheduledAt: toRegistrationScheduledAtIso(draft.visitScheduledAt),
       place: trimmed(draft.visitPlace),
       subjects: visitSubjects,
     } : null,

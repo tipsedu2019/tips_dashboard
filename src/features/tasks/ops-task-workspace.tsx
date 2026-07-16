@@ -141,18 +141,22 @@ import {
 } from "./registration-track-service"
 import { RegistrationInitialPlanControl } from "./registration-initial-plan-control"
 import {
+  assertRegistrationCreateAttemptPersistenceMode,
   createRegistrationCreateAttempt,
   createRegistrationInitialWorkflowDraft,
   getRegistrationInitialWorkflowBlockers,
+  markRegistrationLegacyCreateStarted,
   normalizeRegistrationInitialWorkflow,
   probeRegistrationInitialPersistence,
   reconcileRegistrationInitialWorkflowDraft,
+  type RegistrationCreateAttempt,
   type RegistrationInitialPersistenceProbeResult,
   type RegistrationInitialWorkflowDraft,
-  type RegistrationInitialWorkflowPayload,
 } from "./registration-intake-workflow"
 import {
-  getConsultationNotificationWarning,
+  dispatchRegistrationVisitNotificationTargets,
+  mergeRegistrationVisitNotificationTargets,
+  reconcileRegistrationVisitNotificationRetryTargets,
   sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
 import {
@@ -168,24 +172,7 @@ import type { RegistrationSubjectTrackFixtureState } from "./registration-track-
 
 type RegistrationSubjectTrackFixtureModule = typeof import("./registration-track-fixtures")
 
-type RegistrationCreateAttempt = {
-  fingerprint: string
-  requestKey: string
-  inquiryAt: string
-  common: {
-    studentName: string
-    schoolGrade: string
-    schoolName: string
-    parentPhone: string
-    studentPhone: string
-    campus: string
-    inquiryAt: string
-    subjects: RegistrationSubject[]
-    requestNote: string
-    priority: string
-  }
-  normalizedInitialWorkflow: RegistrationInitialWorkflowPayload
-}
+type RegistrationVisitNotificationTarget = { appointmentId: string; notificationRevision: number }
 
 type WorkspaceKey = "todo" | "registration" | "transfer" | "withdrawal" | "word_retest"
 type ViewKey = "all" | "status" | "assignee" | "calendar"
@@ -9076,9 +9063,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   latestWorkspaceViewerIdRef.current = currentUserId
   const workspaceLoadGenerationRef = useRef(0)
   const workspaceViewerIdRef = useRef(currentUserId)
+  const workspaceViewerGenerationRef = useRef(0)
   const workspaceDataViewerIdRef = useRef(currentUserId)
   const registrationTrackSelectionRef = useRef("")
   const registrationCreateAttemptRef = useRef<RegistrationCreateAttempt | null>(null)
+  const [pendingRegistrationVisitNotificationTargets, setPendingRegistrationVisitNotificationTargets] = useState<RegistrationVisitNotificationTarget[]>([])
+  const [retryingRegistrationVisitNotifications, setRetryingRegistrationVisitNotifications] = useState(false)
+  const registrationVisitNotificationRetryInFlightRef = useRef(false)
+  const registrationVisitNotificationRetryGenerationRef = useRef(0)
   const withdrawalCreateHandledRef = useRef("")
   const openCreateRef = useRef<((type: OpsTaskType, initialValues?: Partial<OpsTaskInput>) => void) | null>(null)
   const registrationOptionsLoadedRef = useRef(false)
@@ -9188,6 +9180,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const viewerChanged = workspaceViewerIdRef.current !== currentUserId
     if (viewerChanged) {
       workspaceViewerIdRef.current = currentUserId
+      workspaceViewerGenerationRef.current += 1
       workspaceDataViewerIdRef.current = ""
       registrationOptionsLoadedRef.current = false
       registrationOptionsLoadGenerationRef.current += 1
@@ -9202,6 +9195,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setRegistrationCaseDetail(null)
       registrationTrackSelectionRef.current = ""
       registrationCreateAttemptRef.current = null
+      registrationVisitNotificationRetryGenerationRef.current += 1
+      registrationVisitNotificationRetryInFlightRef.current = false
+      setPendingRegistrationVisitNotificationTargets([])
+      setRetryingRegistrationVisitNotifications(false)
       setEditingTask(null)
       setFormOpen(false)
       setDetailOpen(false)
@@ -9271,6 +9268,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     workspaceMountedRef.current = true
     return () => {
       workspaceMountedRef.current = false
+      workspaceViewerGenerationRef.current += 1
+      registrationVisitNotificationRetryGenerationRef.current += 1
+      registrationVisitNotificationRetryInFlightRef.current = false
     }
   }, [])
 
@@ -10717,8 +10717,48 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }
 
+  async function retryPendingRegistrationVisitNotifications() {
+    if (registrationVisitNotificationRetryInFlightRef.current || pendingRegistrationVisitNotificationTargets.length === 0) return
+    const retryTargets = [...pendingRegistrationVisitNotificationTargets]
+    const retryViewerId = currentUserId
+    const retryGeneration = registrationVisitNotificationRetryGenerationRef.current + 1
+    registrationVisitNotificationRetryGenerationRef.current = retryGeneration
+    registrationVisitNotificationRetryInFlightRef.current = true
+    setRetryingRegistrationVisitNotifications(true)
+    try {
+      const result = await dispatchRegistrationVisitNotificationTargets(
+        retryTargets,
+        (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, session?.access_token || ""),
+      )
+      if (
+        !workspaceMountedRef.current
+        || latestWorkspaceViewerIdRef.current !== retryViewerId
+        || registrationVisitNotificationRetryGenerationRef.current !== retryGeneration
+      ) return
+      setPendingRegistrationVisitNotificationTargets((current) => (
+        reconcileRegistrationVisitNotificationRetryTargets(current, retryTargets, result.failedTargets)
+      ))
+      if (result.failedTargets.length > 0) {
+        setNotice(`방문상담 알림 ${result.failedTargets.length}건을 아직 전송하지 못했습니다. 같은 저장본으로 다시 시도할 수 있습니다.`)
+      } else if (result.warnings.length > 0) {
+        setNotice("방문상담 알림 전달은 접수됐습니다. 감사 이력을 확인하세요.")
+      } else {
+        setNotice("선택한 방문상담 알림 재시도를 마쳤습니다.")
+      }
+    } finally {
+      if (registrationVisitNotificationRetryGenerationRef.current === retryGeneration) {
+        registrationVisitNotificationRetryInFlightRef.current = false
+        if (workspaceMountedRef.current && latestWorkspaceViewerIdRef.current === retryViewerId) {
+          setRetryingRegistrationVisitNotifications(false)
+        }
+      }
+    }
+  }
+
   const submitForm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const submissionViewerId = currentUserId
+    const submissionViewerGeneration = workspaceViewerGenerationRef.current
     const submissionForm = form
     const registrationCreateBlockers = submissionForm.type === "registration"
       ? getRegistrationCreateBlockers(submissionForm)
@@ -10913,6 +10953,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
             })
             setRegistrationPersistence(registrationPersistence)
+            assertRegistrationCreateAttemptPersistenceMode(
+              registrationCreateAttemptRef.current,
+              registrationPersistence.mode,
+            )
 
             if (registrationPersistence.mode === "blocked_maintenance") {
               throw new Error("등록 데이터 전환 중입니다. 전환이 끝난 뒤 다시 저장하세요.")
@@ -10951,6 +10995,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               },
               normalizedInitialWorkflow,
               {
+                persistenceMode: registrationPersistence.mode,
                 createRequestKey: () => createRegistrationMutationRequestKey("registration-create"),
                 createInquiryAt: () => new Date().toISOString(),
               },
@@ -10964,7 +11009,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               },
             }
 
-            if (registrationPersistence.mode === "ready_atomic") {
+            if (createAttempt.writer === "atomic") {
               const response = await createRegistrationCaseWithInitialWorkflow({
                 ...createAttempt.common,
                 inquiryAt: createAttempt.inquiryAt,
@@ -10975,21 +11020,22 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 requestKey: createAttempt.requestKey,
               })
               registrationCreateAttemptRef.current = null
-              const notificationResults = await Promise.allSettled(
-                response.notificationTargets.map((target) => (
-                  sendRegistrationVisitNotificationTarget(target, session?.access_token || "")
-                )),
+              const notificationResult = await dispatchRegistrationVisitNotificationTargets(
+                response.notificationTargets,
+                (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, session?.access_token || ""),
               )
-              if (notificationResults.some((result) => (
-                result.status === "rejected" || result.value?.ok === false
-              ))) {
+              const notificationStateBelongsToSubmissionViewer = (
+                workspaceMountedRef.current
+                && latestWorkspaceViewerIdRef.current === submissionViewerId
+                && workspaceViewerGenerationRef.current === submissionViewerGeneration
+              )
+              if (notificationStateBelongsToSubmissionViewer && notificationResult.failedTargets.length > 0) {
+                setPendingRegistrationVisitNotificationTargets((current) => (
+                  mergeRegistrationVisitNotificationTargets(current, notificationResult.failedTargets)
+                ))
                 savedWithNotificationDeliveryFailure = true
               }
-              if (notificationResults.some((result) => (
-                result.status === "fulfilled"
-                && result.value?.ok !== false
-                && Boolean(getConsultationNotificationWarning(result.value))
-              ))) {
+              if (notificationStateBelongsToSubmissionViewer && notificationResult.warnings.length > 0) {
                 savedWithNotificationAuditWarning = true
               }
               try {
@@ -11006,7 +11052,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             }
 
             const inquiryOnlyPayload = sanitizeRegistrationInquiryOnlyInput(registrationReceiptPayload)
-            if (registrationPersistence.mode === "canonical_inquiry") {
+            if (createAttempt.writer === "canonical") {
               const response = await createRegistrationCase({
                 ...createAttempt.common,
                 inquiryAt: createAttempt.inquiryAt,
@@ -11025,7 +11071,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               }
               continue
             }
-            if (registrationPersistence.mode === "legacy_inquiry") {
+            if (createAttempt.writer === "legacy") {
+              registrationCreateAttemptRef.current = markRegistrationLegacyCreateStarted(createAttempt)
               const taskId = await createOpsTask(inquiryOnlyPayload)
               registrationCreateAttemptRef.current = null
               savedTasks.push(await loadSavedTaskOrFallback(taskId, inquiryOnlyPayload))
@@ -12114,9 +12161,23 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             </Button>
           </div>
         )}
-        {notice && !detailOpen && (
+        {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && !detailOpen && (
           <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-            <span>{notice}</span>
+            <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
+            {pendingRegistrationVisitNotificationTargets.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void retryPendingRegistrationVisitNotifications()}
+                disabled={retryingRegistrationVisitNotifications}
+                className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
+              >
+                {retryingRegistrationVisitNotifications
+                  ? "방문상담 알림 재시도 중"
+                  : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
+              </Button>
+            )}
             {statusUndo && (
               <Button
                 type="button"
@@ -12750,9 +12811,23 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               선택한 운영 업무의 처리 상태를 확인합니다.
             </DialogDescription>
           </DialogHeader>
-          {notice && (
+          {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && (
             <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-              <span>{notice}</span>
+              <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
+              {pendingRegistrationVisitNotificationTargets.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void retryPendingRegistrationVisitNotifications()}
+                  disabled={retryingRegistrationVisitNotifications}
+                  className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
+                >
+                  {retryingRegistrationVisitNotifications
+                    ? "방문상담 알림 재시도 중"
+                    : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
+                </Button>
+              )}
               {statusUndo && (
                 <Button
                   type="button"

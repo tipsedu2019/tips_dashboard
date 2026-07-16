@@ -1356,9 +1356,10 @@ test("registration follows the real decision waitlist admission form and manual 
 });
 
 test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {
-  const [source, initialPlanSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+  const [source, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-initial-plan-control.tsx"),
+    readSource("src/features/tasks/registration-intake-workflow.ts"),
     readSource("src/features/tasks/registration-workflow.js"),
     readSource("scripts/verify-ops-task-sample-workflow.mjs"),
     readSource("scripts/verify-ops-task-browser-workflow.mjs"),
@@ -1392,10 +1393,14 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "createRegistrationCaseWithInitialWorkflow",
     "createRegistrationCase",
     "createRegistrationCreateAttempt",
+    "assertRegistrationCreateAttemptPersistenceMode",
+    "markRegistrationLegacyCreateStarted",
+    "dispatchRegistrationVisitNotificationTargets",
     "registrationCreateAttemptRef",
     'registrationPersistence.mode === "ready_atomic"',
-    'registrationPersistence.mode === "canonical_inquiry"',
-    'registrationPersistence.mode === "legacy_inquiry"',
+    'createAttempt.writer === "atomic"',
+    'createAttempt.writer === "canonical"',
+    'createAttempt.writer === "legacy"',
     'registrationPersistence.mode === "blocked_maintenance"',
     'registrationPersistence.mode === "blocked_mismatch"',
     'registrationPersistence.mode === "blocked_indeterminate"',
@@ -1515,8 +1520,13 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.match(source, /prepareRegistrationPipelineTransition/);
   assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(submissionForm\)\)/);
 
-  assert.match(source, /type RegistrationCreateAttempt = \{[\s\S]*?fingerprint: string[\s\S]*?requestKey: string[\s\S]*?inquiryAt: string[\s\S]*?normalizedInitialWorkflow:/);
+  assert.match(intakeWorkflowSource, /type RegistrationCreateAttempt = \{[\s\S]*?fingerprint: string[\s\S]*?requestKey: string[\s\S]*?inquiryAt: string[\s\S]*?normalizedInitialWorkflow:/);
   assert.match(source, /registrationCreateAttemptRef\.current = createRegistrationCreateAttempt/);
+  assert.match(source, /persistenceMode: registrationPersistence\.mode/);
+  assert.match(source, /assertRegistrationCreateAttemptPersistenceMode\([\s\S]*?registrationCreateAttemptRef\.current[\s\S]*?registrationPersistence\.mode/);
+  assert.match(source, /if \(createAttempt\.writer === "atomic"\)/);
+  assert.match(source, /if \(createAttempt\.writer === "canonical"\)/);
+  assert.match(source, /if \(createAttempt\.writer === "legacy"\)/);
   assert.match(source, /inquiryAt: createAttempt\.inquiryAt/);
   assert.match(source, /sanitizeRegistrationInquiryOnlyInput\(registrationReceiptPayload\)/);
   const inquirySanitizerSource = source.slice(
@@ -1531,8 +1541,8 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     'textbookId: ""',
     "pipelineStatus: REGISTRATION_PIPELINE_STATUSES[0]",
   ]);
-  assert.match(source, /registrationCreateAttemptRef\.current = null[\s\S]*?Promise\.allSettled/);
-  assert.match(source, /sendRegistrationVisitNotificationTarget\(target/);
+  assert.match(source, /registrationCreateAttemptRef\.current = null[\s\S]*?dispatchRegistrationVisitNotificationTargets/);
+  assert.match(source, /registrationCreateAttemptRef\.current = markRegistrationLegacyCreateStarted\(createAttempt\)[\s\S]*?createOpsTask\(inquiryOnlyPayload\)/);
   assert.match(source, /function discardFormAndClose\(\)[\s\S]*?registrationCreateAttemptRef\.current = null/);
   assert.match(source, /function openCreate\([\s\S]*?registrationCreateAttemptRef\.current = null/);
 
@@ -1550,6 +1560,76 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.doesNotMatch(editBranch, /updateOpsTask\(editingTask\.id, payload\)/);
   assert.match(submitFormSource, /sanitizeRegistrationInquiryOnlyInput/);
 });
+
+test("committed initial visit notifications expose an in-session notification-only retry", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const retryStart = source.indexOf("async function retryPendingRegistrationVisitNotifications")
+  const retryEnd = source.indexOf("\n  }", retryStart) + 4
+  const retrySource = source.slice(retryStart, retryEnd)
+
+  assert.ok(retryStart >= 0, "notification-only retry handler should exist")
+  assertIncludesAll(source, [
+    "pendingRegistrationVisitNotificationTargets",
+    "setPendingRegistrationVisitNotificationTargets",
+    "dispatchRegistrationVisitNotificationTargets",
+    "방문상담 알림 재시도",
+  ])
+  assert.match(
+    source,
+    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && \(/,
+    "the list-level retry alert must remain visible even after another action clears notice",
+  )
+  assert.match(
+    source,
+    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && \([\s\S]*?notice \|\| `방문상담 알림 \$\{pendingRegistrationVisitNotificationTargets\.length\}건/,
+    "the detail-level retry alert must render a fallback message without notice",
+  )
+  assert.doesNotMatch(
+    source,
+    /\{notice && !detailOpen && \([\s\S]*?pendingRegistrationVisitNotificationTargets\.length > 0/,
+  )
+  assert.match(retrySource, /dispatchRegistrationVisitNotificationTargets/)
+  assert.match(
+    retrySource,
+    /setPendingRegistrationVisitNotificationTargets\(\(current\) => \([\s\S]*?reconcileRegistrationVisitNotificationRetryTargets\([\s\S]*?current[\s\S]*?retryTargets[\s\S]*?result\.failedTargets/,
+    "retry completion must reconcile against current targets so concurrent failures survive",
+  )
+  assertIncludesAll(retrySource, [
+    "registrationVisitNotificationRetryGenerationRef.current",
+    "latestWorkspaceViewerIdRef.current !== retryViewerId",
+    "workspaceMountedRef.current",
+  ])
+  assert.doesNotMatch(retrySource, /createRegistrationCaseWithInitialWorkflow|createRegistrationCase\(|createOpsTask\(/)
+
+  const viewerResetSource = source.slice(
+    source.indexOf("if (viewerChanged)"),
+    source.indexOf("const loadOptions", source.indexOf("if (viewerChanged)")),
+  )
+  assertIncludesAll(viewerResetSource, [
+    "workspaceViewerGenerationRef.current += 1",
+    "registrationVisitNotificationRetryGenerationRef.current += 1",
+    "registrationVisitNotificationRetryInFlightRef.current = false",
+    "setPendingRegistrationVisitNotificationTargets([])",
+    "setRetryingRegistrationVisitNotifications(false)",
+  ])
+
+  const atomicStart = source.indexOf('if (createAttempt.writer === "atomic")')
+  const atomicEnd = source.indexOf("continue", atomicStart)
+  const atomicSource = source.slice(atomicStart, atomicEnd)
+  assertInOrder(atomicSource, [
+    "createRegistrationCaseWithInitialWorkflow",
+    "registrationCreateAttemptRef.current = null",
+    "dispatchRegistrationVisitNotificationTargets",
+    "notificationStateBelongsToSubmissionViewer",
+    "setPendingRegistrationVisitNotificationTargets",
+  ])
+  assert.match(
+    atomicSource,
+    /const notificationStateBelongsToSubmissionViewer = \([\s\S]*?workspaceMountedRef\.current[\s\S]*?latestWorkspaceViewerIdRef\.current === submissionViewerId[\s\S]*?workspaceViewerGenerationRef\.current === submissionViewerGeneration/,
+    "a committed create from a stale viewer must not repopulate the current viewer's retry state",
+  )
+  assert.match(source, /const submissionViewerId = currentUserId[\s\S]*?const submissionViewerGeneration = workspaceViewerGenerationRef\.current/)
+})
 
 test("registration subject tracks split combined inquiries and preserve subjects during class sync", async () => {
   const [workspaceSource, serviceSource, trackListSource] = await Promise.all([
