@@ -1808,7 +1808,10 @@ test("operation forms keep staged linked selectors outside canonical registratio
 });
 
 test("withdrawal workspace follows request processing and completed queues", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const [source, googleChatRouteSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/app/api/google-chat/route.ts"),
+  ]);
   const withdrawalDataTableSource = source.slice(
     source.indexOf("function WithdrawalResizableHeaderCell"),
     source.indexOf("function DashboardMetric"),
@@ -1863,7 +1866,11 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   const withdrawalNotificationDialogSource = source.slice(
     source.indexOf("function WithdrawalNotificationSettingsDialog"),
-    source.indexOf("function renderWithdrawalNotificationTemplate"),
+    source.indexOf("function TransferNotificationSettingsDialog"),
+  );
+  const notificationDialogWrappersSource = source.slice(
+    source.indexOf("function TransferNotificationSettingsDialog"),
+    source.indexOf("function RegistrationCustomerMessageDialog"),
   );
 
   assertIncludesAll(source, [
@@ -1935,12 +1942,12 @@ test("withdrawal workspace follows request processing and completed queues", asy
     /!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && \(/,
     "withdrawal toolbar should exclude the generic refresh action",
   );
-  assertIncludesAll(source, [
-    'tableAriaLabel = "퇴원 알림 설정 표"',
-    'aria-label={tableAriaLabel}',
-    "알림 위치",
-    "구글챗 · 관리팀",
-    "웹훅 URL 보기",
+  assertIncludesAll(withdrawalNotificationDialogSource, [
+    'data-testid="task-notification-settings-containment"',
+    "공통 알림 설정 저장 기능이 적용될 때까지 알림 켜기/끄기와 내용 편집은 사용할 수 없습니다.",
+    'data-testid="task-notification-webhook-connection"',
+    'aria-label="구글챗 · 관리팀 웹훅 관리"',
+    'handleOpenWithdrawalWebhookInfo("google_chat_admin")',
     "웹훅 URL 수정",
     "handleOpenWithdrawalWebhookInfo",
     "handleSaveWithdrawalWebhookInfo",
@@ -1948,29 +1955,34 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "webhookUrlInput",
     "/api/google-chat?channel=",
     'method: "PATCH"',
-    "신청 접수",
-    "처리 완료",
-    "openWithdrawalNotificationTemplateEditor",
-    "selectedNotificationTrigger",
-    "withdrawalNotificationTemplates",
-    "DialogTitle>알림 내용 수정",
-    'aria-label={`${trigger.label} 알림 내용 수정`}',
-    'className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl"',
-    'className="grid min-h-0 gap-4 overflow-y-auto pr-1"',
-    '<DialogFooter className="shrink-0">',
+    "웹훅 URL 저장",
+    "onClick={() => onOpenChange(false)}",
+    "닫기",
   ]);
-  assert.match(withdrawalNotificationDialogSource, /mobileListTestId = "withdrawal-notification-mobile-list"/);
-  assert.match(withdrawalNotificationDialogSource, /data-testid=\{mobileListTestId\}/);
-  assert.match(withdrawalNotificationDialogSource, /className="grid gap-2 md:hidden"/);
-  assert.match(withdrawalNotificationDialogSource, /className="hidden overflow-x-auto rounded-md border md:block"/);
-  assert.match(withdrawalNotificationDialogSource, /aria-label=\{`\$\{trigger\.label\} 모바일 \$\{workflowLabel\} 알림 설정`\}/);
-  assert.ok(
-    withdrawalNotificationDialogSource.indexOf("{selectedWebhookInfo || webhookInfoError ? (") <
-      withdrawalNotificationDialogSource.indexOf("data-testid={mobileListTestId}"),
-    "withdrawal webhook detail should appear before the long mobile settings list",
-  );
+  assert.doesNotMatch(withdrawalNotificationDialogSource, /toggleNotificationSetting|aria-pressed/);
+  assert.doesNotMatch(withdrawalNotificationDialogSource, /openWithdrawalNotificationTemplateEditor|selectedNotificationTrigger/);
+  assert.doesNotMatch(withdrawalNotificationDialogSource, /알림 내용 수정|withdrawal-notification-title-template|withdrawal-notification-body-template|<Textarea/);
+  assert.doesNotMatch(withdrawalNotificationDialogSource, /localStorage|sessionStorage|설정 저장됨|알림 설정을 저장/);
   assert.match(withdrawalNotificationDialogSource, /webhookInfoPanelRef/);
   assert.match(withdrawalNotificationDialogSource, /scrollIntoView\(\{ block: "start" \}\)/);
+  assertIncludesAll(notificationDialogWrappersSource, [
+    'workflowLabel="전반"',
+    'workflowLabel="등록"',
+  ]);
+  assertIncludesAll(googleChatRouteSource, [
+    '.from("google_chat_webhook_settings")',
+    ".upsert(",
+    "webhook_url: webhookUrl",
+  ]);
+  assertIncludesAll(source, [
+    "const [withdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>",
+    "const [withdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>",
+    "const [transferNotificationSettings] = useState<WithdrawalNotificationSetting[]>",
+    "const [transferNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>",
+    "const [registrationNotificationSettings] = useState<WithdrawalNotificationSetting[]>",
+    "const [registrationNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>",
+  ]);
+  assert.doesNotMatch(source, /set(?:Withdrawal|Transfer|Registration)Notification(?:Settings|Templates)/);
   assert.doesNotMatch(source, /완료 알림/);
   assertIncludesAll(source, [
     'columnKey: "status"',

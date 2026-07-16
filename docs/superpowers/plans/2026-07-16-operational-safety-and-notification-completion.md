@@ -656,13 +656,15 @@ git commit -m "fix: make registration intake save canonical"
 - Current legacy sender defaults and side-effect ownership are unchanged; this containment commit neither enables nor disables delivery.
 - 휴보강's genuinely persisted settings stay available. Do not incorrectly contain them.
 
-- [ ] **Step 1: write failing containment tests**
+- [x] **Step 1: write failing containment tests**
 
 Require no clickable session-only toggle, editable message field, 저장 claim, or success toast on registration/transfer/withdrawal. Require explicit copy that these controls are unavailable until persistent shared settings are enabled. Require the persisted webhook action and current live sender code to remain present.
 
-- [ ] **Step 2: implement the smallest honest state**
+- [x] **Step 2: implement the smallest honest state**
 
 Keep the settings launcher if operators need the webhook connection, but render a separate read-only notice where fake controls were. Never label a close action 저장. Do not add localStorage or a second temporary persistence model.
+
+Evidence: the focused test packet first failed 95/96 on the missing containment surface, then passed 96/96 after the shared registration/transfer/withdrawal dialog was reduced to honest read-only copy plus the separately persisted Google Chat webhook action. The full Node suite passed 1032/1032; typecheck, lint, build, and diff-check passed. 휴보강's persisted settings regression remained green.
 
 - [ ] **Step 3: run route QA and the mandatory Release A2 gate**
 
