@@ -209,7 +209,7 @@ Before every browser command, also re-export the exact OPS_BROWSER_BASE_URL reco
 - Produces docs/operations/evidence/operational-safety-notification-baseline.md with starting HEAD, origin/main delta, dirty files, worktrees, focused/full pass counts, local and authorized-remote migration inventories, database target proof, worktree server port/PID/CWD/HEAD, and provider-zero test mode.
 - Blocks Task 1 if current failures or overlapping dirty files are unexplained.
 
-- [ ] **Step 1: inspect repository and worktree state**
+- [x] **Step 1: inspect repository and worktree state**
 
 Run:
 
@@ -224,7 +224,7 @@ git worktree list --porcelain
 
 Expected: the branch and exact delta are recorded. Any dirty file overlapping Task 1 is reviewed before editing. No reset, checkout-discard, or worktree deletion is allowed.
 
-- [ ] **Step 2: prove the planned common/calendar/reminder files are still absent**
+- [x] **Step 2: prove the planned common/calendar/reminder files are still absent**
 
 Run:
 
@@ -247,7 +247,7 @@ pnpm dlx supabase@2.109.1 migration list --local
 
 Before any pgTAP or migration command, record that the API and database hosts are loopback/local and that Docker/local Supabase is running. If status shows the local stack is stopped, verify Docker and start only the local stack before retrying; never substitute a linked target. A configured project ID in supabase/config.toml is not proof of a local target. A linked migration list is read-only but still requires explicit authorization. Any non-loopback DB URL or uncertain target blocks the command.
 
-- [ ] **Step 4: run the focused baseline**
+- [x] **Step 4: run the focused baseline**
 
 Run:
 
@@ -262,7 +262,7 @@ Run:
 
 Expected at the authoring snapshot: 140 tests, 140 pass, 0 fail. If the count changed, require zero failures and explain the delta before Task 1.
 
-- [ ] **Step 5: run the full baseline and static checks**
+- [x] **Step 5: run the full baseline and static checks**
 
 Run:
 
@@ -275,7 +275,7 @@ git diff --check
 
 Expected: zero test failures, typecheck/lint pass, and diff check prints nothing. Record the actual full pass count rather than weakening assertions to match an old number.
 
-- [ ] **Step 6: create the isolated implementation worktree**
+- [x] **Step 6: create the isolated implementation worktree**
 
 Use superpowers:using-git-worktrees. Branch from the verified current HEAD, not origin/main. Preserve every listed worktree. Run the focused baseline again inside the new worktree before editing.
 
@@ -301,6 +301,15 @@ Use an isolated local Supabase database with seeded test auth/data for persisten
 The workflow browser harness aborts and records any delivery request to /api/google-chat, /api/web-push, or /api/solapi. A separately named connection-management test may stub non-delivery GET/PATCH but still aborts every POST/test-message call. Server routes receive injected fake transports and a deny-by-default outbound-host ledger; consultation/worker tests may record a simulated fixture outcome but no external host. Store only route/host/count/status metadata, never message bodies, phone numbers, endpoints, or secrets.
 
 **Stop condition:** any unexplained baseline failure, dirty overlap, detached HEAD, missing current local commits, occupied migration timestamp, non-local test database, stale/wrong worktree server, or attempted provider call blocks implementation.
+
+**2026-07-16 evidence:** Steps 1, 2, 4, 5, and 6 passed. Focused tests
+passed 140/140 and the full Node suite passed 1012/1012. Step 3 is partial:
+local filenames were inventoried and the named timestamps were unoccupied, but
+linked remote history was not authorized and no Docker/Postgres runtime exists
+for a local migration history or database identity check. The initially proven
+Step 7 server was invalidated during dependency repair, so Steps 7 and 8 remain
+unchecked. No provider was called. Full details are recorded in
+`docs/operations/evidence/operational-safety-notification-baseline.md`.
 
 ---
 
