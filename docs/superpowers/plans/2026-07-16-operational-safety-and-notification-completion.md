@@ -670,7 +670,7 @@ Evidence: the focused test packet first failed 95/96 on the missing containment 
 
 At desktop/mobile, open each registration/transfer/withdrawal settings surface, confirm no fake setting can be edited, close/reopen it, and verify webhook management remains clear. Run the full mandatory release gate and provider-zero harness.
 
-- [ ] **Step 4: commit**
+- [x] **Step 4: commit**
 
 ~~~bash
 git add \
@@ -678,6 +678,8 @@ git add \
   tests/ops-task-workspace.test.mjs
 git commit -m "fix: contain nonpersistent notification controls"
 ~~~
+
+Evidence: commit `3e13dc8` contains the independently reviewed containment implementation and its local gate report.
 
 **Release A2 gate:** no live control implies persistence before the common settings and active-sender ownership path are ready. This is containment, not completion of the user's saved-settings request; that P0 remains open until the live common panel and matching sender ownership are enabled after authorized rollout.
 

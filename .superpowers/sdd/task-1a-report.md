@@ -2,6 +2,8 @@
 
 Status: containment implementation and independent code review complete; credentialed desktop/mobile route execution remains an evidence follow-up.
 
+Implementation commit: `3e13dc8` (`fix: contain nonpersistent notification controls`).
+
 ## Scope
 
 - Registration, transfer, and withdrawal keep their existing notification-settings launchers.
