@@ -72,7 +72,7 @@ export function splitTeacherList(value) {
 }
 
 export function splitClassroomList(value) {
-  return normalizeList(value).map((item) => normalizeTimetableClassroomName(item));
+  return unique(normalizeList(value).map((item) => normalizeTimetableClassroomName(item)));
 }
 
 export function normalizeTimetableClassroomName(value) {

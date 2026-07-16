@@ -464,6 +464,35 @@ test("normalizes day-specific classroom labels in dashboard operations", () => {
   );
 });
 
+test("deduplicates normalized classroom labels in the math high dashboard bucket", () => {
+  const metrics = buildDashboardMetrics({
+    classes: [
+      {
+        id: "repeated-room-class",
+        name: "고1 공통수학",
+        subject: "수학",
+        grade: "고1",
+        status: "수업 진행 중",
+        schedule: "월 19:00-20:00\n수 19:00-20:00\n금 19:00-20:00",
+        teacher: "김성은",
+        classroom: "별관 5강(월), 별관 5강(수), 본관 2강(금)",
+        student_ids: ["student-1"],
+      },
+    ],
+    students: [{ id: "student-1", name: "A", grade: "고1" }],
+  });
+
+  const bucket = metrics.analyticsByView.math.high;
+  assert.equal(
+    bucket.classBreakdowns.byGrade[0].classSummaries[0].classroomLabel,
+    "별관 5강, 본관 2강",
+  );
+  assert.equal(
+    bucket.classBreakdowns.byClassroom.find((row) => row.label === "별관 5강").enrollmentCount,
+    1,
+  );
+});
+
 test("uses class management grade before enrolled student grades for class breakdowns", () => {
   const metrics = buildDashboardMetrics({
     classes: [
