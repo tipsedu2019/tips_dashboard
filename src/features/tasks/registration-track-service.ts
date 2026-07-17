@@ -35,6 +35,7 @@ import {
   probeRegistrationSubjectTrackRuntime as probeRegistrationSubjectTrackRuntimeFromDatabase,
 } from "./registration-runtime-probe"
 import type { RegistrationRuntimeState } from "./registration-runtime-probe"
+import type { RegistrationNotificationProcessingReadiness } from "./registration-appointment-draft"
 
 export type { RegistrationRuntimeState }
 function probeRegistrationSubjectTrackRuntime(): Promise<RegistrationRuntimeState> {
@@ -305,11 +306,41 @@ export type RegistrationDirectorAssignmentResponse = RegistrationTrackTransition
   commonRevision?: number
 }
 
+export type RegistrationNotificationJobKind =
+  | "fanout"
+  | "rule_reconciliation"
+  | "target_reconciliation"
+
+export type RegistrationNotificationJobReference = {
+  jobKind: RegistrationNotificationJobKind
+  jobId: string
+}
+
+export type RegistrationNotificationJobStatus = RegistrationNotificationJobReference & {
+  workflowKey: "registration"
+  status: "pending" | "claimed" | "succeeded" | "failed"
+  attemptCount: number
+  nextAttemptAt: string | null
+  lastErrorCode: string | null
+  createdAt: string
+  completedAt: string | null
+}
+
+export type RegistrationAppointmentReminderPreview = {
+  ruleId: string
+  ruleRevision: string
+  variantKey: string
+  scheduledFor: string
+  audienceKey: string
+  channelKey: string
+}
+
 export type RegistrationAppointmentMutationResponse = {
   appointmentId: string
   notificationRevision: number
   notificationTargets: Array<{ appointmentId: string; notificationRevision: number }>
   requiresDirectorAssignmentTrackIds: string[]
+  notificationJobs: RegistrationNotificationJobReference[]
 }
 
 export type RegistrationLevelTestMutationResponse = {
@@ -705,6 +736,99 @@ function firstRow(input: unknown): Row | null {
 
 function stringList(input: unknown) {
   return Array.isArray(input) ? input.map(text).filter(Boolean) : []
+}
+
+const REGISTRATION_NOTIFICATION_JOB_KINDS = new Set<RegistrationNotificationJobKind>([
+  "fanout",
+  "rule_reconciliation",
+  "target_reconciliation",
+])
+
+const REGISTRATION_NOTIFICATION_JOB_STATUSES = new Set<RegistrationNotificationJobStatus["status"]>([
+  "pending",
+  "claimed",
+  "succeeded",
+  "failed",
+])
+
+function registrationNotificationJobKind(input: unknown): RegistrationNotificationJobKind {
+  const kind = text(input) as RegistrationNotificationJobKind
+  if (!REGISTRATION_NOTIFICATION_JOB_KINDS.has(kind)) {
+    throw new Error("registration_notification_job_kind_invalid")
+  }
+  return kind
+}
+
+function mapRegistrationNotificationJobReference(row: Row): RegistrationNotificationJobReference {
+  const jobId = text(value(row, "job_id", "jobId"))
+  if (!jobId) throw new Error("registration_notification_job_id_invalid")
+  return {
+    jobKind: registrationNotificationJobKind(value(row, "job_kind", "jobKind")),
+    jobId,
+  }
+}
+
+function registrationNotificationJobRows(row: Row) {
+  return rows(value(row, "notification_jobs", "notificationJobs"))
+}
+
+function mapRegistrationAppointmentMutationResponse(
+  input: unknown,
+): RegistrationAppointmentMutationResponse {
+  const row = firstRow(input)
+  if (!row) throw new Error("registration_appointment_response_invalid")
+  return {
+    appointmentId: text(value(row, "appointment_id", "appointmentId")),
+    notificationRevision: numberValue(value(row, "notification_revision", "notificationRevision")),
+    notificationTargets: rows(value(row, "notification_targets", "notificationTargets")).map((target) => ({
+      appointmentId: text(value(target, "appointment_id", "appointmentId")),
+      notificationRevision: numberValue(value(target, "notification_revision", "notificationRevision")),
+    })),
+    requiresDirectorAssignmentTrackIds: stringList(value(
+      row,
+      "requires_director_assignment_track_ids",
+      "requiresDirectorAssignmentTrackIds",
+    )),
+    notificationJobs: registrationNotificationJobRows(row).map(mapRegistrationNotificationJobReference),
+  }
+}
+
+function mapRegistrationAppointmentReminderPreview(row: Row): RegistrationAppointmentReminderPreview {
+  return {
+    ruleId: text(value(row, "rule_id", "ruleId")),
+    ruleRevision: text(value(row, "rule_revision", "ruleRevision")),
+    variantKey: text(value(row, "variant_key", "variantKey")),
+    scheduledFor: text(value(row, "scheduled_for", "scheduledFor")),
+    audienceKey: text(value(row, "audience_key", "audienceKey")),
+    channelKey: text(value(row, "channel_key", "channelKey")),
+  }
+}
+
+function mapRegistrationNotificationJobStatus(input: unknown): RegistrationNotificationJobStatus {
+  const row = firstRow(input)
+  if (!row) throw new Error("registration_notification_job_status_invalid")
+  const attemptCount = numberValue(value(row, "attempt_count", "attemptCount"))
+  if (!Number.isInteger(attemptCount) || attemptCount < 0) {
+    throw new Error("registration_notification_job_attempt_count_invalid")
+  }
+  const workflowKey = text(value(row, "workflow_key", "workflowKey"))
+  if (workflowKey !== "registration") {
+    throw new Error("registration_notification_job_workflow_mismatch")
+  }
+  const jobStatus = text(value(row, "status")) as RegistrationNotificationJobStatus["status"]
+  if (!REGISTRATION_NOTIFICATION_JOB_STATUSES.has(jobStatus)) {
+    throw new Error("registration_notification_job_status_invalid")
+  }
+  return {
+    ...mapRegistrationNotificationJobReference(row),
+    workflowKey,
+    status: jobStatus,
+    attemptCount,
+    nextAttemptAt: nullableText(value(row, "next_attempt_at", "nextAttemptAt")),
+    lastErrorCode: nullableText(value(row, "last_error_code", "lastErrorCode")),
+    createdAt: text(value(row, "created_at", "createdAt")),
+    completedAt: nullableText(value(row, "completed_at", "completedAt")),
+  }
 }
 
 function subject(input: unknown): RegistrationSubject {
@@ -1647,6 +1771,16 @@ export function createRegistrationTrackService(
     return data as T
   }
 
+  async function callReadRpc(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    await requireReadyRuntime()
+    const { data, error } = await client.rpc(name, args)
+    if (error) throw error
+    return data
+  }
+
   async function createRegistrationCase(input: {
     studentName: string
     schoolGrade: string
@@ -1806,7 +1940,7 @@ export function createRegistrationTrackService(
     expectedNotificationRevision: number | null
     requestKey: string
   }): Promise<RegistrationAppointmentMutationResponse> {
-    return callRpc<RegistrationAppointmentMutationResponse>("save_registration_shared_appointment", {
+    const result = await callRpc<unknown>("save_registration_shared_appointment", {
       p_appointment_id: normalizeUuid(input.appointmentId),
       p_task_id: input.taskId,
       p_kind: input.kind,
@@ -1817,6 +1951,7 @@ export function createRegistrationTrackService(
       p_expected_notification_revision: input.expectedNotificationRevision,
       p_request_key: requireRequestKey(input.requestKey),
     })
+    return mapRegistrationAppointmentMutationResponse(result)
   }
 
   async function cancelRegistrationAppointment(input: {
@@ -1825,12 +1960,68 @@ export function createRegistrationTrackService(
     reason: string
     requestKey: string
   }): Promise<RegistrationAppointmentMutationResponse> {
-    return callRpc<RegistrationAppointmentMutationResponse>("cancel_registration_appointment", {
+    const result = await callRpc<unknown>("cancel_registration_appointment", {
       p_appointment_id: input.appointmentId,
       p_expected_notification_revision: input.expectedNotificationRevision,
       p_reason: input.reason,
       p_request_key: requireRequestKey(input.requestKey),
     })
+    return mapRegistrationAppointmentMutationResponse(result)
+  }
+
+  async function previewRegistrationAppointmentReminders(input: {
+    kind: OpsRegistrationAppointment["kind"]
+    scheduledAt: string
+    trackIds: string[]
+  }): Promise<RegistrationAppointmentReminderPreview[]> {
+    const result = await callReadRpc("preview_registration_appointment_reminders_v1", {
+      p_kind: input.kind,
+      p_scheduled_at: input.scheduledAt,
+      p_track_ids: input.trackIds,
+    })
+    return rows(result).map(mapRegistrationAppointmentReminderPreview)
+  }
+
+  async function getRegistrationNotificationJobStatus(
+    input: RegistrationNotificationJobReference,
+  ): Promise<RegistrationNotificationJobStatus> {
+    const jobKind = registrationNotificationJobKind(input.jobKind)
+    const jobId = text(input.jobId)
+    if (!jobId) throw new Error("registration_notification_job_id_invalid")
+    const result = await callReadRpc("get_notification_orchestration_job_status_v1", {
+      p_job_kind: jobKind,
+      p_job_id: jobId,
+    })
+    const status = mapRegistrationNotificationJobStatus(result)
+    if (status.jobKind !== jobKind || status.jobId !== jobId) {
+      throw new Error("registration_notification_job_identity_mismatch")
+    }
+    return status
+  }
+
+  async function retryRegistrationNotificationJob(input: {
+    jobKind: RegistrationNotificationJobKind
+    jobId: string
+    expectedAttemptCount: number
+    requestId: string
+  }): Promise<RegistrationNotificationJobStatus> {
+    const jobKind = registrationNotificationJobKind(input.jobKind)
+    const jobId = text(input.jobId)
+    if (!jobId) throw new Error("registration_notification_job_id_invalid")
+    if (!Number.isInteger(input.expectedAttemptCount) || input.expectedAttemptCount < 0) {
+      throw new Error("registration_notification_job_attempt_count_invalid")
+    }
+    const result = await callRpc<unknown>("retry_notification_orchestration_job_v1", {
+      p_job_kind: jobKind,
+      p_job_id: jobId,
+      p_expected_attempt_count: input.expectedAttemptCount,
+      p_request_id: requireRequestKey(input.requestId),
+    })
+    const status = mapRegistrationNotificationJobStatus(result)
+    if (status.jobKind !== jobKind || status.jobId !== jobId) {
+      throw new Error("registration_notification_job_identity_mismatch")
+    }
+    return status
   }
 
   async function startRegistrationLevelTestAttempt(input: {
@@ -2176,6 +2367,9 @@ export function createRegistrationTrackService(
     assignRegistrationTrackDirector,
     saveRegistrationSharedAppointment,
     cancelRegistrationAppointment,
+    previewRegistrationAppointmentReminders,
+    getRegistrationNotificationJobStatus,
+    retryRegistrationNotificationJob,
     startRegistrationLevelTestAttempt,
     completeRegistrationLevelTestAttempt,
     closeRegistrationLevelTestTrack,
@@ -2199,6 +2393,38 @@ export function createRegistrationTrackService(
   }
 }
 // registration-track-service-factory:end
+
+function mapRegistrationProcessingHeartbeat<Kind extends "worker" | "watchdog">(
+  input: unknown,
+  kind: Kind,
+): { kind: Kind; phase: unknown; createdAt: unknown } | null {
+  if (!input || typeof input !== "object") return null
+  const row = input as Record<string, unknown>
+  if (row.kind !== kind) return null
+  return { kind, phase: row.phase, createdAt: row.createdAt }
+}
+
+export async function getRegistrationNotificationProcessingReadiness(
+  accessToken: string,
+): Promise<RegistrationNotificationProcessingReadiness> {
+  const token = String(accessToken || "").trim()
+  if (!token) throw new Error("registration_notification_processing_auth_required")
+  const response = await fetch("/api/notifications/operations?view=registration-processing-readiness", {
+    method: "GET",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error("registration_notification_processing_readiness_unavailable")
+  const payload = await response.json() as Record<string, unknown>
+  return {
+    registrationRuntimeMarker: "registration_appointment_reminders_runtime_version",
+    registrationRuntimeVersion: payload.registrationRuntimeVersion,
+    adaptersRuntimeMarker: "notification_workflow_adapters_runtime_version",
+    adaptersRuntimeVersion: payload.adaptersRuntimeVersion,
+    workerHeartbeat: mapRegistrationProcessingHeartbeat(payload.workerHeartbeat, "worker"),
+    watchdogHeartbeat: mapRegistrationProcessingHeartbeat(payload.watchdogHeartbeat, "watchdog"),
+  }
+}
 
 let registrationTrackMutationCacheInvalidator: (() => void) | null = null
 
@@ -2328,6 +2554,31 @@ export function cancelRegistrationAppointment(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationAppointmentMutationResponse>("cancelRegistrationAppointment", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.cancelRegistrationAppointment(input)
+}
+
+export function previewRegistrationAppointmentReminders(
+  input: Parameters<typeof defaultRegistrationTrackService.previewRegistrationAppointmentReminders>[0],
+): Promise<RegistrationAppointmentReminderPreview[]> {
+  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() !== null) return Promise.resolve([])
+  return defaultRegistrationTrackService.previewRegistrationAppointmentReminders(input)
+}
+
+export function getRegistrationNotificationJobStatus(
+  input: Parameters<typeof defaultRegistrationTrackService.getRegistrationNotificationJobStatus>[0],
+): Promise<RegistrationNotificationJobStatus> {
+  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() !== null) {
+    return Promise.reject(new Error("registration_notification_processing_fixture_unavailable"))
+  }
+  return defaultRegistrationTrackService.getRegistrationNotificationJobStatus(input)
+}
+
+export function retryRegistrationNotificationJob(
+  input: Parameters<typeof defaultRegistrationTrackService.retryRegistrationNotificationJob>[0],
+): Promise<RegistrationNotificationJobStatus> {
+  if (loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion() !== null) {
+    return Promise.reject(new Error("registration_notification_processing_fixture_unavailable"))
+  }
+  return defaultRegistrationTrackService.retryRegistrationNotificationJob(input)
 }
 
 export function startRegistrationLevelTestAttempt(

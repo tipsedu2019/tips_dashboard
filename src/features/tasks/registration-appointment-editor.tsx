@@ -1,13 +1,12 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DateTimePickerControl } from "@/components/ui/date-time-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 
 import {
   getEligibleSharedAppointmentTracks,
@@ -18,10 +17,23 @@ import {
 import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow.js"
 import { sendRegistrationVisitNotificationTarget } from "./registration-consultation-notification.js"
 import {
+  buildRegistrationAppointmentConfirmation,
+  compareRegistrationAppointmentDraft,
+  isRegistrationNotificationProcessingReady,
+  rebaseRegistrationAppointmentDraft,
+  type RegistrationAppointmentConflict,
+  type RegistrationAppointmentDraft,
+  type RegistrationNotificationProcessingReadiness,
+} from "./registration-appointment-draft"
+import {
   cancelRegistrationAppointment,
   closeRegistrationLevelTestTrack,
   completeRegistrationLevelTestAttempt,
   createRegistrationMutationRequestKey,
+  getRegistrationNotificationProcessingReadiness,
+  getRegistrationNotificationJobStatus,
+  previewRegistrationAppointmentReminders,
+  retryRegistrationNotificationJob,
   saveRegistrationSharedAppointment,
   startRegistrationLevelTestAttempt,
   type OpsRegistrationAppointment,
@@ -29,6 +41,7 @@ import {
   type OpsRegistrationLevelTest,
   type OpsRegistrationTrackSummary,
   type RegistrationAppointmentMutationResponse,
+  type RegistrationNotificationJobStatus,
 } from "./registration-track-service"
 
 type RegistrationAppointmentActivity = OpsRegistrationLevelTest | OpsRegistrationConsultation
@@ -46,6 +59,7 @@ export type RegistrationAppointmentEditorProps = {
   onClose?: () => void
   onRebook?: (trackId: string) => void
   notificationToken?: string
+  notificationProcessingReadiness?: RegistrationNotificationProcessingReadiness | null
 }
 
 type SubmissionKeys = {
@@ -61,6 +75,17 @@ const ACTIVITY_STATUS_LABELS: Record<RegistrationAppointmentActivity["status"], 
   absent: "미응시",
   canceled: "취소",
 }
+
+type PersistedConflictDraft = {
+  local: RegistrationAppointmentDraft
+  appointmentId: string | null
+  expectedNotificationRevision: number | null
+}
+
+const persistedAppointmentSubmissionKeys = new Map<string, string>()
+const persistedAppointmentConflictDrafts = new Map<string, PersistedConflictDraft>()
+const NOTIFICATION_JOB_POLL_ATTEMPTS = 8
+const NOTIFICATION_JOB_POLL_INTERVAL_MS = 750
 
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message
@@ -88,21 +113,24 @@ function toScheduledAt(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toISOString()
 }
 
-function useSubmissionKeys(): SubmissionKeys {
-  const keysRef = useRef(new Map<string, string>())
+function useSubmissionKeys(scopeKey: string): SubmissionKeys {
   return {
     getOrCreate(kind, logicalDraft) {
-      const logicalKey = `${kind}:${logicalDraft}`
-      const current = keysRef.current.get(logicalKey)
+      const logicalKey = `${scopeKey}:${kind}:${logicalDraft}`
+      const current = persistedAppointmentSubmissionKeys.get(logicalKey)
       if (current) return current
       const next = createRegistrationMutationRequestKey(kind, logicalDraft)
-      keysRef.current.set(logicalKey, next)
+      persistedAppointmentSubmissionKeys.set(logicalKey, next)
       return next
     },
     clear(kind, logicalDraft) {
-      keysRef.current.delete(`${kind}:${logicalDraft}`)
+      persistedAppointmentSubmissionKeys.delete(`${scopeKey}:${kind}:${logicalDraft}`)
     },
   }
+}
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
 function RegistrationActivityStatusBadge({ status }: { status: RegistrationAppointmentActivity["status"] }) {
@@ -127,8 +155,10 @@ export function RegistrationAppointmentEditor({
   onClose,
   onRebook,
   notificationToken = "",
+  notificationProcessingReadiness = null,
 }: RegistrationAppointmentEditorProps) {
-  const submissionKeys = useSubmissionKeys()
+  const conflictScopeKey = `${taskId}:${kind}`
+  const submissionKeys = useSubmissionKeys(conflictScopeKey)
   const trackById = useMemo(() => new Map(eligibleTracks.map((track) => [track.id, track])), [eligibleTracks])
   const matchingActivities = useMemo(() => activities.filter((activity) => (
     kind === "level_test"
@@ -155,17 +185,115 @@ export function RegistrationAppointmentEditor({
         ? [selectableTracks[0].id]
         : []
 
-  const [scheduledAt, setScheduledAt] = useState(() => toLocalDateTime(appointment?.scheduledAt))
-  const [place, setPlace] = useState(appointment?.place || "")
-  const [selectedTrackIds, setSelectedTrackIds] = useState<string[]>(() => Array.from(new Set(initialSelectedTrackIds)))
+  const cachedConflictDraft = persistedAppointmentConflictDrafts.get(conflictScopeKey) || null
+  const initialDraft = cachedConflictDraft?.local || null
+
+  const [scheduledAt, setScheduledAt] = useState(() => toLocalDateTime(initialDraft?.scheduledAt || appointment?.scheduledAt))
+  const [place, setPlace] = useState(initialDraft?.place || appointment?.place || "")
+  const [selectedTrackIds, setSelectedTrackIds] = useState<string[]>(() => Array.from(new Set(
+    initialDraft?.trackIds || initialSelectedTrackIds,
+  )))
+  const [draftReplaceRemaining, setDraftReplaceRemaining] = useState(
+    initialDraft?.replaceRemaining ?? editMode === "replace_remaining",
+  )
+  const [preserveLocalDraft, setPreserveLocalDraft] = useState(Boolean(cachedConflictDraft))
+  const [baseAppointmentId, setBaseAppointmentId] = useState<string | null>(
+    cachedConflictDraft ? cachedConflictDraft.appointmentId : appointment?.id || null,
+  )
+  const [expectedNotificationRevision, setExpectedNotificationRevision] = useState<number | null>(
+    cachedConflictDraft
+      ? cachedConflictDraft.expectedNotificationRevision
+      : appointment?.notificationRevision ?? null,
+  )
+  const [conflict, setConflict] = useState<RegistrationAppointmentConflict | null>(() => (
+    cachedConflictDraft && appointment
+      ? {
+          local: { ...cachedConflictDraft.local, trackIds: [...cachedConflictDraft.local.trackIds] },
+          server: { ...appointment },
+          serverTrackIds: [...initialSelectedTrackIds],
+        }
+      : null
+  ))
+  const [showConflictComparison, setShowConflictComparison] = useState(Boolean(cachedConflictDraft && appointment))
   const [draftLinks, setDraftLinks] = useState<Record<string, string>>({})
   const [closureReasons, setClosureReasons] = useState<Record<string, string>>({})
-  const [cancelReason, setCancelReason] = useState("")
   const [saving, setSaving] = useState(false)
   const [activitySavingId, setActivitySavingId] = useState("")
   const [refreshPending, setRefreshPending] = useState(false)
   const [committedAppointment, setCommittedAppointment] = useState<RegistrationAppointmentMutationResponse | null>(null)
   const [pendingNotificationTargets, setPendingNotificationTargets] = useState<RegistrationAppointmentMutationResponse["notificationTargets"]>([])
+  const [notificationJobStatuses, setNotificationJobStatuses] = useState<RegistrationNotificationJobStatus[]>([])
+  const [notificationProcessingPhase, setNotificationProcessingPhase] = useState<"idle" | "processing" | "succeeded" | "failed">("idle")
+  const [loadedProcessingReadiness, setLoadedProcessingReadiness] = useState<RegistrationNotificationProcessingReadiness | null>(null)
+  const notificationRetryRequestIds = useRef(new Map<string, string>())
+  const notificationPollGeneration = useRef(0)
+  const latestConflictServerKey = useRef("")
+  const [, setProcessingReadinessTick] = useState(0)
+  const effectiveProcessingReadiness = notificationProcessingReadiness ?? loadedProcessingReadiness
+
+  useEffect(() => {
+    if (notificationProcessingReadiness || !notificationToken) return
+    let canceled = false
+    async function refreshProcessingReadiness() {
+      try {
+        const readiness = await getRegistrationNotificationProcessingReadiness(notificationToken)
+        if (!canceled) setLoadedProcessingReadiness(readiness)
+      } catch {
+        if (!canceled) setLoadedProcessingReadiness(null)
+      }
+    }
+    void refreshProcessingReadiness()
+    const intervalId = window.setInterval(() => void refreshProcessingReadiness(), 60_000)
+    return () => {
+      canceled = true
+      window.clearInterval(intervalId)
+    }
+  }, [notificationProcessingReadiness, notificationToken])
+
+  useEffect(() => {
+    const workerCreatedAt = Date.parse(String(effectiveProcessingReadiness?.workerHeartbeat?.createdAt || ""))
+    const watchdogCreatedAt = Date.parse(String(effectiveProcessingReadiness?.watchdogHeartbeat?.createdAt || ""))
+    if (!Number.isFinite(workerCreatedAt) || !Number.isFinite(watchdogCreatedAt)) return
+    const expiresAt = Math.min(workerCreatedAt, watchdogCreatedAt) + 3 * 60 * 1000
+    const timeoutId = window.setTimeout(() => {
+      setProcessingReadinessTick((current) => current + 1)
+    }, Math.max(0, expiresAt - Date.now() + 1))
+    return () => window.clearTimeout(timeoutId)
+  }, [effectiveProcessingReadiness])
+
+  const conflictServerTrackKey = initialSelectedTrackIds.slice().sort().join("\u001f")
+  const conflictServerSnapshotKey = appointment
+    ? JSON.stringify({
+        id: appointment.id,
+        kind: appointment.kind,
+        notificationRevision: appointment.notificationRevision,
+        place: appointment.place,
+        scheduledAt: appointment.scheduledAt,
+        status: appointment.status,
+        trackIds: conflictServerTrackKey,
+      })
+    : ""
+  useEffect(() => {
+    if (!preserveLocalDraft || !appointment) {
+      latestConflictServerKey.current = ""
+      return
+    }
+    if (latestConflictServerKey.current === conflictServerSnapshotKey) return
+    const cached = persistedAppointmentConflictDrafts.get(conflictScopeKey)
+    if (!cached) return
+    latestConflictServerKey.current = conflictServerSnapshotKey
+    setConflict({
+      local: { ...cached.local, trackIds: [...cached.local.trackIds] },
+      server: { ...appointment },
+      serverTrackIds: conflictServerTrackKey ? conflictServerTrackKey.split("\u001f") : [],
+    })
+  }, [
+    appointment,
+    conflictScopeKey,
+    conflictServerSnapshotKey,
+    conflictServerTrackKey,
+    preserveLocalDraft,
+  ])
 
   const effectiveSelectedTrackIds = getRegistrationAppointmentPayloadTrackIds(
     editMode,
@@ -189,33 +317,152 @@ export function RegistrationAppointmentEditor({
       .map((activity) => activity.id))
   }, [appointment, currentActivities, latestLevelTestActivityIds, matchingActivities])
 
-  const normalizedDraft = JSON.stringify({
-    appointmentId: appointment?.id || null,
-    expectedNotificationRevision: appointment?.notificationRevision ?? null,
-    kind,
+  const appointmentDraft: RegistrationAppointmentDraft = {
     scheduledAt: toScheduledAt(scheduledAt),
     place: place.trim(),
-    trackIds: [...effectiveSelectedTrackIds].sort(),
-    replaceRemaining: editMode === "replace_remaining",
+    trackIds: [...(preserveLocalDraft ? selectedTrackIds : effectiveSelectedTrackIds)].sort(),
+    replaceRemaining: draftReplaceRemaining,
+  }
+  const previousAppointmentDraft: RegistrationAppointmentDraft | null = appointment
+    ? {
+        scheduledAt: appointment.scheduledAt,
+        place: appointment.place,
+        trackIds: currentActivities
+          .filter((activity) => activity.status === "scheduled")
+          .map((activity) => activity.trackId)
+          .sort(),
+        replaceRemaining: false,
+      }
+    : null
+  const conflictComparison = conflict
+    ? compareRegistrationAppointmentDraft({
+        ...conflict,
+        local: appointmentDraft,
+      })
+    : null
+  const canApplyConflictDraft = Boolean(
+    conflict
+    && (
+      conflict.server.id !== baseAppointmentId
+      || conflict.server.notificationRevision !== expectedNotificationRevision
+    ),
+  )
+  const processingReady = isRegistrationNotificationProcessingReady(
+    effectiveProcessingReadiness,
+  )
+  const trackLabels = Object.fromEntries(eligibleTracks.map((track) => [track.id, track.subject]))
+  const normalizedDraft = JSON.stringify({
+    appointmentId: baseAppointmentId,
+    expectedNotificationRevision,
+    kind,
+    ...appointmentDraft,
   })
-  const canSave = Boolean(scheduledAt && place.trim() && effectiveSelectedTrackIds.length > 0 && !saving && !mutationLocked)
+  const canSave = Boolean(
+    scheduledAt
+    && place.trim()
+    && appointmentDraft.trackIds.length > 0
+    && !saving
+    && !mutationLocked
+    && !conflict,
+  )
 
-  function resetAuthoritativeDraft() {
-    setScheduledAt(toLocalDateTime(appointment?.scheduledAt))
-    setPlace(appointment?.place || "")
-    setSelectedTrackIds(Array.from(new Set(initialSelectedTrackIds)))
-    setCancelReason("")
+  function persistConflictDraft(local = appointmentDraft) {
+    persistedAppointmentConflictDrafts.set(conflictScopeKey, {
+      local: { ...local, trackIds: [...local.trackIds] },
+      appointmentId: baseAppointmentId,
+      expectedNotificationRevision,
+    })
   }
 
-  async function handleRevisionConflict(kindKey: string, logicalDraft: string) {
-    submissionKeys.clear(kindKey, logicalDraft)
-    resetAuthoritativeDraft()
+  async function handleRevisionConflict() {
+    setPreserveLocalDraft(true)
+    persistConflictDraft()
+    if (appointment) {
+      setConflict({
+        local: { ...appointmentDraft, trackIds: [...appointmentDraft.trackIds] },
+        server: { ...appointment },
+        serverTrackIds: [...(previousAppointmentDraft?.trackIds || [])],
+      })
+      setShowConflictComparison(true)
+    }
     try {
       await onReload?.()
     } catch {
-      // The stale local draft remains discarded even if the parent reload cannot complete.
+      // 로컬 초안과 기존 요청 키를 보존한 채 다시 비교할 수 있다.
     }
-    onWarning("다른 사용자가 예약을 변경했습니다. 최신 내용을 확인하세요")
+    onWarning("다른 사용자가 예약을 변경했습니다. 최신 내용을 확인하세요. 내 초안은 그대로 보존했습니다.")
+  }
+
+  async function compareLatestAppointment() {
+    persistConflictDraft()
+    setShowConflictComparison(true)
+    try {
+      await onReload?.()
+      if (appointment) {
+        setConflict({
+          local: { ...appointmentDraft, trackIds: [...appointmentDraft.trackIds] },
+          server: { ...appointment },
+          serverTrackIds: [...(previousAppointmentDraft?.trackIds || [])],
+        })
+      }
+    } catch {
+      onWarning("최신 예약을 불러오지 못했습니다. 로컬 초안은 그대로 유지됩니다.")
+    }
+  }
+
+  function applyConflictDraftAgain() {
+    if (!conflict || !canApplyConflictDraft) return
+    const rebased = rebaseRegistrationAppointmentDraft({
+      ...conflict,
+      local: appointmentDraft,
+    })
+    submissionKeys.clear("registration-appointment", normalizedDraft)
+    setBaseAppointmentId(rebased.appointmentId)
+    setExpectedNotificationRevision(rebased.expectedNotificationRevision)
+    setScheduledAt(toLocalDateTime(rebased.draft.scheduledAt))
+    setPlace(rebased.draft.place)
+    setSelectedTrackIds([...rebased.draft.trackIds])
+    setDraftReplaceRemaining(rebased.draft.replaceRemaining)
+    setConflict(null)
+    setShowConflictComparison(false)
+    persistedAppointmentConflictDrafts.delete(conflictScopeKey)
+    onWarning("최신 예약 기준에 내 초안을 다시 적용했습니다. 변경 내용을 확인한 뒤 저장하세요.")
+  }
+
+  function continueEditingConflictDraft() {
+    persistConflictDraft()
+    setShowConflictComparison(false)
+  }
+
+  async function reminderRoundCount(draft: RegistrationAppointmentDraft | null) {
+    if (!draft || !draft.scheduledAt || draft.trackIds.length === 0) return 0
+    try {
+      return (await previewRegistrationAppointmentReminders({
+        kind,
+        scheduledAt: draft.scheduledAt,
+        trackIds: draft.trackIds,
+      })).length
+    } catch {
+      return null
+    }
+  }
+
+  async function confirmAppointmentMutation(
+    action: "save" | "cancel",
+    next: RegistrationAppointmentDraft | null,
+  ) {
+    const [previousReminderRoundCount, nextReminderRoundCount] = await Promise.all([
+      reminderRoundCount(previousAppointmentDraft),
+      reminderRoundCount(next),
+    ])
+    return window.confirm(buildRegistrationAppointmentConfirmation({
+      action,
+      previous: previousAppointmentDraft,
+      next,
+      previousReminderRoundCount,
+      nextReminderRoundCount,
+      trackLabels,
+    }))
   }
 
   async function dispatchNotificationTargets(
@@ -237,15 +484,76 @@ export function RegistrationAppointmentEditor({
     return { failedTargets, warnings, failedMessages }
   }
 
-  async function handoffCommittedAppointment(saved: RegistrationAppointmentMutationResponse) {
+  async function handoffCommittedAppointment(
+    saved: RegistrationAppointmentMutationResponse,
+    notificationProcessingCompleted = false,
+  ) {
     try {
       await onSaved(saved)
+      persistedAppointmentConflictDrafts.delete(conflictScopeKey)
+      notificationRetryRequestIds.current.clear()
       setCommittedAppointment(null)
       setRefreshPending(false)
     } catch {
       setRefreshPending(true)
-      onWarning("예약 저장과 알림 처리는 완료되었습니다. 최신 내용 다시 불러오기를 눌러 화면을 갱신하세요.")
+      onWarning(notificationProcessingCompleted
+        ? "예약 저장과 알림 재계산은 완료되었습니다. 최신 내용 다시 불러오기를 눌러 화면을 갱신하세요."
+        : "예약 저장은 완료되었습니다. 알림 재계산 상태는 확정되지 않았으니 최신 내용 다시 불러오기를 눌러 확인하세요.")
     }
+  }
+
+  function processingRuntimeIsStillReady() {
+    return isRegistrationNotificationProcessingReady(
+      effectiveProcessingReadiness,
+      Date.now(),
+    )
+  }
+
+  async function pollRegistrationNotificationJobs(saved: RegistrationAppointmentMutationResponse) {
+    const generation = notificationPollGeneration.current + 1
+    notificationPollGeneration.current = generation
+    for (let attempt = 0; attempt < NOTIFICATION_JOB_POLL_ATTEMPTS; attempt += 1) {
+      if (!processingRuntimeIsStillReady()) {
+        if (notificationPollGeneration.current !== generation) return
+        setNotificationProcessingPhase("idle")
+        setNotificationJobStatuses([])
+        await handoffCommittedAppointment(saved)
+        return
+      }
+      try {
+        const statuses = await Promise.all(saved.notificationJobs.map((job) => (
+          getRegistrationNotificationJobStatus(job)
+        )))
+        if (notificationPollGeneration.current !== generation) return
+        setNotificationJobStatuses(statuses)
+        if (statuses.some((status) => status.status === "failed")) {
+          setNotificationProcessingPhase("failed")
+          return
+        }
+        if (statuses.length > 0 && statuses.every((status) => status.status === "succeeded")) {
+          setNotificationProcessingPhase("succeeded")
+          await delay(NOTIFICATION_JOB_POLL_INTERVAL_MS)
+          if (notificationPollGeneration.current === generation) {
+            await handoffCommittedAppointment(saved, true)
+          }
+          return
+        }
+      } catch {
+        if (notificationPollGeneration.current !== generation) return
+      }
+      await delay(NOTIFICATION_JOB_POLL_INTERVAL_MS)
+    }
+    if (notificationPollGeneration.current === generation) {
+      onWarning("예약 저장은 완료되었습니다. 알림 재계산 상태 확인이 지연되고 있습니다.")
+    }
+  }
+
+  function beginRegistrationNotificationProcessing(saved: RegistrationAppointmentMutationResponse) {
+    if (!processingRuntimeIsStillReady() || saved.notificationJobs.length === 0) return false
+    setNotificationJobStatuses([])
+    setNotificationProcessingPhase("processing")
+    void pollRegistrationNotificationJobs(saved)
+    return true
   }
 
   async function finishAppointmentSave(saved: RegistrationAppointmentMutationResponse) {
@@ -258,6 +566,7 @@ export function RegistrationAppointmentEditor({
       return
     }
     setPendingNotificationTargets([])
+    if (beginRegistrationNotificationProcessing(saved)) return
     await handoffCommittedAppointment(saved)
   }
 
@@ -273,7 +582,46 @@ export function RegistrationAppointmentEditor({
         return
       }
       setPendingNotificationTargets([])
+      if (beginRegistrationNotificationProcessing(committedAppointment)) return
       await handoffCommittedAppointment(committedAppointment)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function retryRegistrationNotificationJobStatus() {
+    if (!committedAppointment || saving) return
+    if (!processingRuntimeIsStillReady()) {
+      setNotificationProcessingPhase("idle")
+      setNotificationJobStatuses([])
+      return
+    }
+    const failedJob = notificationJobStatuses.find((status) => status.status === "failed")
+    if (!failedJob) {
+      setNotificationProcessingPhase("processing")
+      void pollRegistrationNotificationJobs(committedAppointment)
+      return
+    }
+    const retryKey = `${failedJob.jobKind}:${failedJob.jobId}`
+    const requestId = notificationRetryRequestIds.current.get(retryKey) || crypto.randomUUID()
+    notificationRetryRequestIds.current.set(retryKey, requestId)
+    setSaving(true)
+    try {
+      const retried = await retryRegistrationNotificationJob({
+        jobKind: failedJob.jobKind,
+        jobId: failedJob.jobId,
+        expectedAttemptCount: failedJob.attemptCount,
+        requestId,
+      })
+      notificationRetryRequestIds.current.delete(retryKey)
+      setNotificationJobStatuses((current) => current.map((status) => (
+        status.jobKind === retried.jobKind && status.jobId === retried.jobId ? retried : status
+      )))
+      setNotificationProcessingPhase("processing")
+      void pollRegistrationNotificationJobs(committedAppointment)
+    } catch {
+      setNotificationProcessingPhase("failed")
+      onWarning("같은 알림 재계산 작업을 다시 시작하지 못했습니다. 최신 상태를 확인하세요.")
     } finally {
       setSaving(false)
     }
@@ -311,26 +659,30 @@ export function RegistrationAppointmentEditor({
       onWarning("예약 일시, 장소, 적용 과목을 모두 입력하세요.")
       return
     }
+    setSaving(true)
+    if (!(await confirmAppointmentMutation("save", appointmentDraft))) {
+      setSaving(false)
+      return
+    }
     const kindKey = "registration-appointment"
     const requestKey = submissionKeys.getOrCreate(kindKey, normalizedDraft)
-    setSaving(true)
     let saved: RegistrationAppointmentMutationResponse
     try {
       saved = await saveRegistrationSharedAppointment({
-        appointmentId: appointment?.id || null,
-        expectedNotificationRevision: appointment?.notificationRevision ?? null,
+        appointmentId: baseAppointmentId,
+        expectedNotificationRevision,
         taskId,
         kind,
         scheduledAt: toScheduledAt(scheduledAt),
         place: place.trim(),
-        trackIds: effectiveSelectedTrackIds,
+        trackIds: appointmentDraft.trackIds,
         replaceRemaining: editMode === "replace_remaining",
         requestKey,
       })
     } catch (error) {
       const message = errorMessage(error, "예약을 저장하지 못했습니다.")
       if (message.includes("registration_appointment_revision_conflict")) {
-        await handleRevisionConflict(kindKey, normalizedDraft)
+        await handleRevisionConflict()
         setSaving(false)
         return
       }
@@ -339,28 +691,35 @@ export function RegistrationAppointmentEditor({
       return
     }
     submissionKeys.clear(kindKey, normalizedDraft)
+    persistedAppointmentConflictDrafts.delete(conflictScopeKey)
+    setConflict(null)
+    setShowConflictComparison(false)
     await finishAppointmentSave(saved)
     setSaving(false)
   }
 
   async function cancelAppointment() {
-    if (!appointment || !cancelReason.trim() || saving || mutationLocked) return
-    const logicalDraft = `${appointment.id}:${appointment.notificationRevision}:${cancelReason.trim()}`
+    if (!appointment || saving || mutationLocked) return
+    setSaving(true)
+    if (!(await confirmAppointmentMutation("cancel", null))) {
+      setSaving(false)
+      return
+    }
+    const logicalDraft = `${appointment.id}:${expectedNotificationRevision ?? appointment.notificationRevision}:cancel`
     const kindKey = "registration-appointment-cancel"
     const requestKey = submissionKeys.getOrCreate(kindKey, logicalDraft)
-    setSaving(true)
     let saved: RegistrationAppointmentMutationResponse
     try {
       saved = await cancelRegistrationAppointment({
         appointmentId: appointment.id,
-        expectedNotificationRevision: appointment.notificationRevision,
-        reason: cancelReason.trim(),
+        expectedNotificationRevision: expectedNotificationRevision ?? appointment.notificationRevision,
+        reason: "",
         requestKey,
       })
     } catch (error) {
       const message = errorMessage(error, "예약을 취소하지 못했습니다.")
       if (message.includes("registration_appointment_revision_conflict")) {
-        await handleRevisionConflict(kindKey, logicalDraft)
+        await handleRevisionConflict()
         setSaving(false)
         return
       }
@@ -369,6 +728,9 @@ export function RegistrationAppointmentEditor({
       return
     }
     submissionKeys.clear(kindKey, logicalDraft)
+    persistedAppointmentConflictDrafts.delete(conflictScopeKey)
+    setConflict(null)
+    setShowConflictComparison(false)
     await finishAppointmentSave(saved)
     setSaving(false)
   }
@@ -468,14 +830,63 @@ export function RegistrationAppointmentEditor({
         {onClose ? <Button type="button" size="sm" variant="ghost" onClick={onClose} disabled={saving || mutationLocked}>닫기</Button> : null}
       </div>
 
+      {conflict ? (
+        <div role="alert" className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+          <p>다른 사용자가 예약을 먼저 변경했습니다. 내 입력은 그대로 보존되어 있습니다.</p>
+          {showConflictComparison && conflictComparison ? (
+            <dl className="grid gap-2 rounded-md border border-amber-200 bg-white/70 p-2 text-xs sm:grid-cols-3">
+              <div>
+                <dt className="font-semibold">예약 일시</dt>
+                <dd>최신 · {toLocalDateTime(conflictComparison.fields.scheduledAt.server) || "없음"}</dd>
+                <dd>내 초안 · {toLocalDateTime(conflictComparison.fields.scheduledAt.local) || "없음"}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">장소</dt>
+                <dd>최신 · {conflictComparison.fields.place.server || "없음"}</dd>
+                <dd>내 초안 · {conflictComparison.fields.place.local || "없음"}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">적용 과목</dt>
+                <dd>최신 · {conflictComparison.fields.trackIds.server.map((trackId) => trackLabels[trackId] || trackId).join(", ") || "없음"}</dd>
+                <dd>내 초안 · {conflictComparison.fields.trackIds.local.map((trackId) => trackLabels[trackId] || trackId).join(", ") || "없음"}</dd>
+              </div>
+            </dl>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => void compareLatestAppointment()} disabled={saving}>최신 예약 비교</Button>
+            <Button type="button" size="sm" onClick={applyConflictDraftAgain} disabled={saving || !canApplyConflictDraft}>다시 적용</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={continueEditingConflictDraft} disabled={saving}>계속 편집</Button>
+          </div>
+        </div>
+      ) : null}
+
+      {processingReady && committedAppointment && notificationProcessingPhase !== "idle" ? (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-950">
+          <span>
+            {notificationProcessingPhase === "succeeded"
+              ? "예약 저장됨 · 알림 재계산 완료"
+              : notificationProcessingPhase === "failed"
+                ? "알림 재계산 실패 · 다시 시도"
+                : "예약 저장됨 · 알림 재계산 중"}
+          </span>
+          {notificationProcessingPhase !== "succeeded" ? (
+            <Button type="button" size="sm" variant="outline" onClick={() => void retryRegistrationNotificationJobStatus()} disabled={saving}>
+              {notificationProcessingPhase === "failed" ? "다시 시도" : "상태 다시 확인"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
       {pendingNotificationTargets.length > 0 ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           <span>예약은 저장되었습니다. 실패한 방문상담 알림만 다시 보냅니다.</span>
           <Button type="button" size="sm" variant="outline" onClick={() => void retryCommittedNotifications()} disabled={saving}>알림 재시도</Button>
         </div>
-      ) : refreshPending ? (
+      ) : refreshPending || (committedAppointment && !processingReady) ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          <span>저장은 완료되었습니다. 화면만 최신 상태로 갱신하면 됩니다.</span>
+          <span>{refreshPending && notificationProcessingPhase === "succeeded"
+            ? "예약 저장과 알림 재계산은 완료되었습니다. 화면만 최신 상태로 갱신하면 됩니다."
+            : "예약 저장은 완료됐지만 알림 재계산 상태는 아직 확인되지 않았습니다."}</span>
           <Button type="button" size="sm" variant="outline" onClick={() => void retryRefresh()} disabled={saving}>최신 내용 다시 불러오기</Button>
         </div>
       ) : null}
@@ -502,7 +913,7 @@ export function RegistrationAppointmentEditor({
         <legend className="text-sm font-medium">적용 과목 <span className="text-xs font-semibold text-primary">필수</span></legend>
         <div className="flex flex-wrap gap-2">
           {selectableTracks.map((track) => {
-            const selected = effectiveSelectedTrackIds.includes(track.id)
+            const selected = appointmentDraft.trackIds.includes(track.id)
             return (
               <Button
                 key={track.id}
@@ -593,9 +1004,8 @@ export function RegistrationAppointmentEditor({
       ) : null}
 
       {appointment?.status === "scheduled" && currentActivities.some((activity) => activity.status === "scheduled") ? (
-        <div className="grid gap-2 border-t pt-4 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <Textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="예약 취소 사유" disabled={saving || mutationLocked} className="min-h-16" />
-          <Button type="button" variant="ghost" onClick={() => void cancelAppointment()} disabled={saving || mutationLocked || !cancelReason.trim()}>
+        <div className="flex justify-end border-t pt-4">
+          <Button type="button" variant="ghost" onClick={() => void cancelAppointment()} disabled={saving || mutationLocked}>
             예약 취소
           </Button>
         </div>

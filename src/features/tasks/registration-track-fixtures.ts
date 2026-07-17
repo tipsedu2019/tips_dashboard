@@ -1703,6 +1703,7 @@ export function reduceRegistrationSubjectTrackFixture(
               ]
             : [],
           requiresDirectorAssignmentTrackIds,
+          notificationJobs: [],
         }
         break
       }
@@ -1799,6 +1800,7 @@ export function reduceRegistrationSubjectTrackFixture(
           ...requiresDirectorAssignmentTrackIds,
           ...selectedTrackIds.filter((trackId) => !detail.tracks.find((item) => item.id === trackId)?.directorProfileId),
         ])),
+        notificationJobs: [],
       }
       break
     }
@@ -1848,7 +1850,7 @@ export function reduceRegistrationSubjectTrackFixture(
         : detail.consultations.some((item) => item.appointmentId === appointment.id && item.mode === "visit" && item.status === "completed")
       appointment.status = hasActiveChild ? "scheduled" : hasCompletedChild ? "completed" : "canceled"
       syncCase(state, detail)
-      result = { appointmentId: appointment.id, notificationRevision: appointment.notificationRevision, notificationTargets: appointment.kind === "visit_consultation" ? [{ appointmentId: appointment.id, notificationRevision: appointment.notificationRevision }] : [], requiresDirectorAssignmentTrackIds }
+      result = { appointmentId: appointment.id, notificationRevision: appointment.notificationRevision, notificationTargets: appointment.kind === "visit_consultation" ? [{ appointmentId: appointment.id, notificationRevision: appointment.notificationRevision }] : [], requiresDirectorAssignmentTrackIds, notificationJobs: [] }
       break
     }
     case "startRegistrationLevelTestAttempt": {
