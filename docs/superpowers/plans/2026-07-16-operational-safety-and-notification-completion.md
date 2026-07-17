@@ -1523,34 +1523,35 @@ public.mark_dashboard_notification_read_v1(
 
 ---
 
-### Task 10: Add the canonical registration appointment calendar
+### 작업 10: 정규 등록 예약 달력 추가
 
-**Source packet:** Task 4 of docs/superpowers/plans/2026-07-15-registration-appointments-reminders.md.
+**원본 계획:** `docs/superpowers/plans/2026-07-15-registration-appointments-reminders.md`의 작업 4.
 
-**Files:**
+**파일:**
 
-- Create: supabase/migrations/20260716120000_registration_appointment_calendar.sql
-- Create: src/features/tasks/registration-appointment-calendar-model.ts
-- Create: src/features/tasks/registration-appointment-calendar.tsx
-- Modify: src/features/tasks/registration-track-service.ts
-- Modify: src/features/tasks/registration-track-fixture-runtime.ts
-- Modify: src/features/tasks/registration-track-fixtures.ts
-- Modify: src/features/tasks/registration-track-editor.tsx
-- Modify: src/features/tasks/ops-task-workspace.tsx
-- Create: tests/registration-appointment-calendar.test.mjs
-- Modify: tests/ops-task-workspace.test.mjs
-- Extend: supabase/tests/registration_subject_tracks_runtime_test.sql
+- 생성: `supabase/migrations/20260716120000_registration_appointment_calendar.sql`
+- 생성: `src/features/tasks/registration-appointment-calendar-model.ts`
+- 생성: `src/features/tasks/registration-appointment-calendar.tsx`
+- 수정: `src/features/tasks/registration-track-service.ts`
+- 수정: `src/features/tasks/registration-track-fixture-runtime.ts`
+- 수정: `src/features/tasks/registration-track-fixtures.ts`
+- 수정: `src/features/tasks/registration-track-editor.tsx`
+- 수정: `src/features/tasks/ops-task-workspace.tsx`
+- 생성: `tests/registration-appointment-calendar.test.mjs`
+- 수정: `tests/ops-task-workspace.test.mjs`
+- 확장: `supabase/tests/registration_subject_tracks_runtime_test.sql`
 
-**Interfaces:**
+**인터페이스:**
 
-- Security-invoker view public.ops_registration_appointment_calendar, one row per canonical appointment.
-- loadRegistrationAppointmentCalendar({ rangeStart, rangeEnd, statuses }).
-- buildRegistrationAppointmentCalendarItems(rows).
-- RegistrationTrackEditorProps.initialAppointmentId.
+- 정규 예약마다 한 행을 반환하는 `security_invoker` 뷰 `public.ops_registration_appointment_calendar`.
+- `loadRegistrationAppointmentCalendar({ rangeStart, rangeEnd, statuses })`.
+- `buildRegistrationAppointmentCalendarItems(rows)`.
+- `getSeoulRegistrationDateKey(value)`와 `getRegistrationAppointmentCalendarRange(view, anchorDateKey)`.
+- `RegistrationTrackEditorProps.initialAppointmentId`.
 
 ~~~ts
 export type RegistrationAppointmentCalendarItem = {
-  id: string
+  id: `registration-appointment:${string}`
   appointmentId: string
   taskId: string
   studentName: string
@@ -1565,41 +1566,40 @@ export type RegistrationAppointmentCalendarItem = {
 }
 ~~~
 
-- [ ] **Step 1: write failing projection and source-contract tests**
+- [x] **1단계: 투영 및 소스 계약 실패 테스트 작성**
 
-Require stable ID registration-appointment:{appointmentId}, exact timestamp, distinct same-day IDs, one shared item with subject badges, scheduled-only default, and deep link:
+안정 ID `registration-appointment:{appointmentId}`, 원본 ISO 시각 보존, 같은 날의 서로 다른 예약 ID, 공유 예약 한 행과 참여 과목 배지, 기본 `scheduled` 필터, 아래 딥 링크를 계약으로 고정했습니다.
 
 ~~~text
 /admin/registration?taskId={taskId}&appointmentId={appointmentId}&view=calendar
 ~~~
 
-Phone/legacy timestamps are excluded.
+전화상담·이전 자료 시각은 제외하고, 잘못된 종류·상태·정수 리비전·시각·중복 예약은 조용히 숨기지 않고 거절하도록 실패 테스트를 먼저 확인했습니다.
 
-- [ ] **Step 2: add the security-invoker canonical view**
+- [x] **2단계: 보안 호출자 방식의 정규 뷰 추가**
 
-Expose exactly appointment_id, task_id, student_name, kind, scheduled_at, place, status, integer notification_revision, track_ids, and subjects. Aggregate canonical child participants. Do not join or write academic_events.
+`appointment_id`, `task_id`, `student_name`, `kind`, `scheduled_at`, `place`, `status`, 정수형 `notification_revision`, `track_ids`, `subjects` 정확히 10개 열만 노출했습니다. 레벨테스트와 방문상담 하위 기록만 `UNION`으로 중복 제거한 뒤 영어→수학 순으로 함께 집계합니다. `security_invoker = true`, PUBLIC·anon 권한 회수, authenticated 읽기 전용 권한, `(status, scheduled_at, id)` 인덱스를 적용했고 `academic_events`에는 의존하거나 쓰지 않습니다.
 
-- [ ] **Step 3: implement typed projection, fixture loader, and list/calendar mode**
+- [x] **3단계: 타입 투영·fixture 조회·목록/달력 모드 구현**
 
-Desktop supports month/week. Mobile uses a chronological agenda. Default scheduled status can explicitly include completed/canceled. Cards open the canonical editor. No draggable, drop, resize, range-create, direct delete, or bypass of revision checks.
+snake_case 뷰 행을 한 번만 camelCase DTO로 바꾸고 `notification_revision`을 숫자로 보존했습니다. fixture는 매 조회마다 현재 `caseDetails`에서 정규 하위 기록을 다시 계산하며, 같은 날의 공유 2과목 예약과 단일 과목 예약을 구분하고 전화상담·이전 자료·고아 예약을 만들지 않습니다. 데스크톱 월/주 보기와 모바일 시간순 목록을 제공하고 기본값은 예약 상태이며 완료·취소를 명시적으로 포함할 수 있습니다. 카드에는 드래그·놓기·크기 조절·범위 생성·직접 삭제·리비전 우회 동작이 없습니다.
 
-- [ ] **Step 4: preserve deep-link state**
+- [x] **4단계: 딥 링크 상태 보존**
 
-Parse taskId plus appointmentId, select a participating track, open the shared editor, and preserve view=calendar when switching tracks.
+`taskId`와 `appointmentId`를 함께 해석해 참여 트랙을 선택하고 공유 편집기를 한 번만 엽니다. 새로고침으로 정확한 예약을 복원하고, 사용자가 닫은 뒤에는 자동으로 다시 열지 않으며, 과목을 전환해도 `view=calendar`와 예약 문맥을 유지합니다.
 
-- [ ] **Step 5: run focused, pgTAP, and browser tests**
+- [x] **5단계: 집중·pgTAP 소스·브라우저 검증**
 
 ~~~bash
 "$NODE" --experimental-strip-types --test \
   tests/registration-appointment-calendar.test.mjs \
   tests/ops-task-workspace.test.mjs
-pnpm dlx supabase@2.109.1 test db
-pnpm exec tsc --noEmit
+"$NODE" node_modules/typescript/bin/tsc --noEmit
 ~~~
 
-Browser QA covers two same-day appointments, one two-subject shared appointment, exact deep-link reload, desktop month/week, mobile agenda, and no phone item.
+브라우저에서 같은 날 예약 2개, 영어·수학 공유 예약 한 행, 월/주 전환, 정규 딥 링크, 새로고침 복원, 닫은 뒤 재개방 방지, 참여 과목 전환을 확인했습니다. pgTAP 소스는 계획값과 assertion 수 `168/168`이 일치하지만, 마이그레이션이 적용된 승인된 로컬 또는 미리보기 DB가 없어 실제 SQL은 실행하지 않았습니다.
 
-- [ ] **Step 6: commit Release D**
+- [x] **6단계: 릴리스 D 커밋 범위 확정**
 
 ~~~bash
 git add \
@@ -1617,7 +1617,11 @@ git add \
 git commit -m "feat: add canonical registration calendar"
 ~~~
 
-**Release D gate:** one database appointment is one calendar item, regardless of subjects or same-day neighbors, calendar navigation cannot mutate data, exact-route desktop/mobile QA passes on the worktree server, and the full mandatory release gate/provider-zero ledgers pass.
+구현·검증 파일은 코드 커밋 `4f04dc9`(`feat: add canonical registration calendar`)로 확정했습니다. 이 문서 마감은 별도 문서 커밋으로 기록합니다.
+
+**완료 근거:** 전체 Node 테스트 `1231/1231`, TypeScript, 변경 공백 검사, 별도 임시 복사본 프로덕션 빌드의 정적 페이지 `75/75` 생성을 통과했습니다. 전체 ESLint는 오류 `0건`이며 기존 생성 스크립트 경고 `1건`만 남았습니다. 브라우저에서 월/주 보기, 정규 딥 링크, 새로고침·닫기, 과목 전환을 확인했고 독립 검토 P0/P1/P2는 `0/0/0`입니다. pgTAP 소스는 `168/168`이지만 실제 DB에서는 실행하지 않았습니다.
+
+**릴리스 D 결과:** 과목 수나 같은 날의 이웃 예약 수와 관계없이 정규 DB 예약 한 건을 달력 항목 한 건으로 표시하며, 달력 탐색은 데이터를 변경하지 않습니다. 작업 트리 서버의 실제 등록 경로 검증을 통과했고 원격 마이그레이션·데이터·플래그·배포·실제 알림 공급자 호출은 수행하지 않았습니다.
 
 ---
 

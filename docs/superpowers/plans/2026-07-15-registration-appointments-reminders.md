@@ -263,46 +263,47 @@ git commit -m "feat: show automatic registration history"
 
 완료 근거: 구현 커밋 `5667ad4`. 최종 집중 테스트 `87/87`, 전체 Node 테스트 `1213/1213`, TypeScript, 대상·전체 ESLint 오류 0건, 변경 공백 검사, 별도 임시 복사본 프로덕션 빌드의 정적 페이지 `75/75` 생성을 통과했습니다. 브라우저에서 읽기 전용 필터·상세, 원시 영문 상태값 미노출, 가로 넘침 없음을 확인했고 독립 검토 결과 P0/P1/P2는 `0/0/0`입니다. 실제 공급자 호출과 원격 변경은 없었습니다.
 
-### Task 4: Canonical Appointment Calendar and Deep Links
+### 작업 4: 정규 예약 달력과 딥 링크
 
-**Files:**
-- Create: `supabase/migrations/20260715101500_registration_appointment_calendar.sql`
-- Create: `src/features/tasks/registration-appointment-calendar-model.ts`
-- Create: `src/features/tasks/registration-appointment-calendar.tsx`
-- Modify: `src/features/tasks/registration-track-service.ts`
-- Modify: `src/features/tasks/registration-track-fixture-runtime.ts`
-- Modify: `src/features/tasks/registration-track-fixtures.ts`
-- Modify: `src/features/tasks/registration-track-editor.tsx`
-- Modify: `src/features/tasks/ops-task-workspace.tsx`
-- Test: `tests/registration-appointment-calendar.test.mjs`
-- Test: `tests/ops-task-workspace.test.mjs`
-- Test: `supabase/tests/registration_subject_tracks_runtime_test.sql`
+**파일:**
+- 생성: `supabase/migrations/20260716120000_registration_appointment_calendar.sql`
+- 생성: `src/features/tasks/registration-appointment-calendar-model.ts`
+- 생성: `src/features/tasks/registration-appointment-calendar.tsx`
+- 수정: `src/features/tasks/registration-track-service.ts`
+- 수정: `src/features/tasks/registration-track-fixture-runtime.ts`
+- 수정: `src/features/tasks/registration-track-fixtures.ts`
+- 수정: `src/features/tasks/registration-track-editor.tsx`
+- 수정: `src/features/tasks/ops-task-workspace.tsx`
+- 테스트: `tests/registration-appointment-calendar.test.mjs`
+- 테스트: `tests/ops-task-workspace.test.mjs`
+- 테스트: `supabase/tests/registration_subject_tracks_runtime_test.sql`
 
-**Interfaces:**
-- Produces: security-invoker view `public.ops_registration_appointment_calendar` with one row per appointment.
-- Produces: `loadRegistrationAppointmentCalendar({ rangeStart, rangeEnd, statuses })` and `buildRegistrationAppointmentCalendarItems(rows)`.
-- Extends: `RegistrationTrackEditorProps.initialAppointmentId?: string | null`.
+**인터페이스:**
+- 생성: 예약마다 한 행을 반환하는 `security_invoker` 뷰 `public.ops_registration_appointment_calendar`.
+- 제공: `loadRegistrationAppointmentCalendar({ rangeStart, rangeEnd, statuses })`와 `buildRegistrationAppointmentCalendarItems(rows)`.
+- 제공: `getSeoulRegistrationDateKey(value)`와 `getRegistrationAppointmentCalendarRange(view, anchorDateKey)`.
+- 확장: `RegistrationTrackEditorProps.initialAppointmentId?: string | null`.
 
-- [ ] **Step 1: Write failing projection tests**
+- [x] **1단계: 실패하는 투영 테스트 작성**
 
-Test stable ID `registration-appointment:${appointmentId}`, exact ISO timestamp, distinct same-day IDs, canonical subject badges, scheduled-only default, deep link `/admin/registration?taskId=...&appointmentId=...&view=calendar`, and exclusion of phone/legacy timestamps.
+안정 ID `registration-appointment:${appointmentId}`, 원본 ISO 시각, 같은 날의 서로 다른 ID, 정규 과목 배지, 기본 예약 상태 필터, 딥 링크 `/admin/registration?taskId=...&appointmentId=...&view=calendar`, 전화상담·이전 자료 시각 제외를 테스트로 고정했습니다. 잘못된 종류·상태·정수 리비전·시각과 중복 예약은 명시적으로 거절합니다.
 
-Run:
+실행:
 
 ```bash
 NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
 "$NODE" --experimental-strip-types --test tests/registration-appointment-calendar.test.mjs tests/ops-task-workspace.test.mjs
 ```
 
-Expected: FAIL on missing model/view/toggle.
+초기 예상 결과대로 모델·뷰·전환 UI가 없는 상태에서 실패를 확인한 뒤 최소 구현을 추가했습니다.
 
-- [ ] **Step 2: Add the security-invoker canonical view**
+- [x] **2단계: 보안 호출자 방식의 정규 뷰 추가**
 
-Aggregate participants from level-test children and visit-mode consultation children, ordered by track subject, and expose exactly: `appointment_id`, `task_id`, `student_name`, `kind`, `scheduled_at`, `place`, `status`, integer `notification_revision` without a text cast, `track_ids`, `subjects`. Set `security_invoker = true`, grant select to `authenticated`, and rely on underlying registration RLS. Do not join or write `academic_events`.
+레벨테스트와 방문 방식 상담 하위 기록만 집계하고 트랙 과목을 영어→수학 순으로 정렬했습니다. `appointment_id`, `task_id`, `student_name`, `kind`, `scheduled_at`, `place`, `status`, 텍스트 변환 없는 정수형 `notification_revision`, `track_ids`, `subjects` 정확히 10개 열을 노출합니다. `security_invoker = true`, PUBLIC·anon 권한 차단, authenticated 읽기 전용 권한을 적용하고 기존 등록 RLS를 따릅니다. `academic_events`는 조회하거나 쓰지 않습니다.
 
-- [ ] **Step 3: Implement the typed projection and fixture loader**
+- [x] **3단계: 타입 투영과 fixture 조회 구현**
 
-Use:
+사용한 공개 타입:
 
 ```ts
 export type RegistrationAppointmentCalendarItem = {
@@ -316,22 +317,24 @@ export type RegistrationAppointmentCalendarItem = {
 }
 ```
 
-Map the snake_case view once into this camelCase DTO while preserving integer `notification_revision` as a `number`; do not stringify it. Only the separate bigint `recipient_revision`/`target_generation` contract uses a decimal string. Derive fixture rows from `caseDetails`, de-duplicate by appointment ID, and never derive phone entries.
+snake_case 뷰를 이 camelCase DTO로 한 번만 변환하고 정수형 `notification_revision`을 문자열로 바꾸지 않고 `number`로 유지했습니다. 별도의 bigint `recipient_revision`/`target_generation` 계약만 10진 문자열을 사용합니다. fixture 행은 매 조회마다 현재 `caseDetails`에서 계산하고 예약 ID 중복을 만들지 않으며 전화상담 항목을 파생하지 않습니다.
 
-- [ ] **Step 4: Build month/week desktop and agenda mobile UI**
+- [x] **4단계: 데스크톱 월/주 보기와 모바일 시간순 목록 구현**
 
-Add workspace mode `list | calendar` while retaining `flow=` for existing stage tabs. Calendar mode defaults to scheduled, supports explicit completed/canceled filters, and uses date-fns for KST labels. Cards are buttons only; no `draggable`, `onDrop`, range selection, resize, save, or delete handlers.
+기존 단계 탭의 `flow=`를 유지하면서 작업 공간 모드 `list | calendar`를 추가했습니다. 달력은 기본적으로 예약 상태만 표시하고 완료·취소를 명시적으로 포함할 수 있으며, 서울 시간 기준 날짜 키와 반개방 월/주 범위를 사용합니다. 카드는 버튼뿐이며 `draggable`, `onDrop`, 범위 선택, 크기 조절, 저장, 삭제 처리기가 없습니다.
 
-Parse `appointmentId` with `taskId`; locate a participating child, select its track, pass `initialAppointmentId`, and open the shared editor. Preserve `view=calendar` while changing `trackId`.
+`appointmentId`와 `taskId`를 함께 해석하고 참여 하위 기록을 찾아 해당 트랙을 선택한 뒤 `initialAppointmentId`를 전달해 공유 편집기를 한 번만 엽니다. 새로고침은 예약을 복원하고 사용자가 닫으면 다시 열지 않으며, `trackId`를 바꿀 때도 `view=calendar`를 유지합니다.
 
-- [ ] **Step 5: Run focused and pgTAP tests, then commit**
+- [x] **5단계: 집중·pgTAP 소스·브라우저 검증과 커밋 범위 확정**
 
-Run the Step 1 command. Expected: PASS. On an authorized ephemeral database, run the Task 2 pgTAP command and verify anon cannot read while authorized registration viewers see only permitted appointments.
+1단계 명령과 전체 회귀를 실행해 통과를 확인했습니다. pgTAP 소스 계획값과 assertion 수는 `168/168`로 일치하고 anon/PUBLIC 차단 및 authenticated 읽기 전용 계약을 포함합니다. 승인된 임시 DB가 없어 pgTAP SQL 자체는 실행하지 않았습니다.
 
 ```bash
-git add supabase/migrations/20260715101500_registration_appointment_calendar.sql src/features/tasks/registration-appointment-calendar-model.ts src/features/tasks/registration-appointment-calendar.tsx src/features/tasks/registration-track-service.ts src/features/tasks/registration-track-fixture-runtime.ts src/features/tasks/registration-track-fixtures.ts src/features/tasks/registration-track-editor.tsx src/features/tasks/ops-task-workspace.tsx tests/registration-appointment-calendar.test.mjs tests/ops-task-workspace.test.mjs supabase/tests/registration_subject_tracks_runtime_test.sql
+git add supabase/migrations/20260716120000_registration_appointment_calendar.sql src/features/tasks/registration-appointment-calendar-model.ts src/features/tasks/registration-appointment-calendar.tsx src/features/tasks/registration-track-service.ts src/features/tasks/registration-track-fixture-runtime.ts src/features/tasks/registration-track-fixtures.ts src/features/tasks/registration-track-editor.tsx src/features/tasks/ops-task-workspace.tsx tests/registration-appointment-calendar.test.mjs tests/ops-task-workspace.test.mjs supabase/tests/registration_subject_tracks_runtime_test.sql
 git commit -m "feat: add canonical registration calendar"
 ```
+
+완료 근거: 전체 Node 테스트 `1231/1231`, TypeScript, 변경 공백 검사, 별도 임시 복사본 프로덕션 빌드의 정적 페이지 `75/75` 생성을 통과했습니다. 전체 ESLint는 오류 `0건`이며 기존 생성 스크립트 경고 `1건`만 남았습니다. 브라우저에서 월/주 보기, 정규 딥 링크, 새로고침 복원, 닫은 뒤 재개방 방지, 공유 예약 과목 전환을 확인했고 독립 검토 P0/P1/P2는 `0/0/0`입니다. 원격 변경과 실제 공급자 호출은 없었습니다.
 
 ### Task 5: Atomic Reminder Materialization and Reconciliation Producer
 
