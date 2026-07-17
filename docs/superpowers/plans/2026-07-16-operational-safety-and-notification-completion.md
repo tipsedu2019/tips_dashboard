@@ -1430,21 +1430,23 @@ git commit -m "feat: add persistent notification settings"
 
 ---
 
-### Task 9: Make inbox reads per-profile and make Push readiness actionable
+### 작업 9: 알림함 읽음을 사용자별로 분리하고 Push 준비 상태를 실제 행동으로 연결
 
-**Source packet:** inbox/Push portion of Task 7 in docs/superpowers/plans/2026-07-15-common-notification-control-plane.md and the approved dashboard polish spec.
+**기준 문서:** `2026-07-15-common-notification-control-plane.md`의 알림함·Push 범위와 승인된 대시보드 개선 명세.
 
-**Files:**
+**주요 변경 파일:**
 
-- Modify: src/features/makeup-requests/makeup-request-service.ts
-- Modify: src/components/dashboard-notification-popover.tsx
-- Modify: src/lib/dashboard-push-client.ts
-- Modify: src/app/api/push-subscriptions/route.ts
-- Modify: public/sw.js
-- Extend: tests/notification-control-plane-ui.test.mjs
-- Modify: tests/makeup-request-workspace.test.mjs
+- `supabase/migrations/20260716113500_notification_inbox_contract_fix.sql`
+- `src/features/makeup-requests/makeup-request-service.ts`
+- `src/components/dashboard-notification-popover.tsx`
+- `src/lib/dashboard-inbox-state.ts`
+- `src/lib/dashboard-push-client.ts`
+- `src/lib/dashboard-push-readiness.ts`
+- `src/features/notifications/server/notification-push-readiness-route.ts`
+- `src/app/api/push-subscriptions/route.ts`
+- 관련 Node·SQL 계약 테스트
 
-**Locked inbox interfaces:**
+**고정 알림함 API:**
 
 ~~~sql
 public.get_dashboard_notification_inbox_v1(
@@ -1458,33 +1460,17 @@ public.mark_dashboard_notification_read_v1(
 ) returns jsonb
 ~~~
 
-All three use one private visible relation based on auth.uid(). Browser requests never send viewer/profile ID.
+세 API는 모두 `auth.uid()`에 기반한 같은 비공개 가시성 관계를 사용합니다. 브라우저 요청은 사용자·프로필 ID를 보내지 않습니다.
 
-- [ ] **Step 1: write failing receipt, inline-read, and Push-state tests**
+- [x] **1단계: receipt·개별 읽음·Push 상태의 실패 테스트 작성**
 
-Cover:
+  두 프로필의 독립 읽음, 목록·개수·읽음 일치, 안정 커서, 레거시 `read_at` 호환, 링크와 형제 `읽음` 버튼, 항목별 진행·오류·재시도, 취소된 알림 제외, 닫힌 Push 상태 전부, 사용자 클릭 안에서만 권한 요청, 고정 자가진단 본문만 허용하는 계약을 테스트로 고정했습니다.
 
-- two team members can read the same notification independently;
-- list/count/mark parity and stable created_at/id cursor;
-- no client-side content grouping;
-- mark-read inserts only the current profile receipt and never updates shared row read_at;
-- an existing non-null legacy row read_at is used only when no receipt exists; newly projected rows start with read_at null;
-- unread sibling 읽음 button is outside Link;
-- clicking 읽음 keeps URL and popover open;
-- per-ID pending, duplicate-click prevention, returned unread count, and retryable failure;
-- clicking an unread Link starts mark-read first but never prevents or waits on navigation; local unread count changes only if that RPC actually succeeds;
-- revoked notification disappears without deleting sent audit or receipts;
-- Push states checking, unsupported, insecure, server_unconfigured, asset_missing, permission_prompt, permission_denied, subscription_missing, subscription_owner_mismatch, ready, self_test_sent, self_test_expired, and self_test_failed;
-- permission request occurs only inside a user click;
-- self-test accepts no arbitrary target/content/href.
+- [x] **2단계: 알림 목록·개수·읽음을 세 RPC로 통일**
 
-- [ ] **Step 2: move inbox list/count/mark to the three RPCs**
+  공개 서비스에서 `viewerId`와 직접 테이블 접근, 클라이언트 내용 그룹화를 제거했습니다. 읽음 처리는 현재 프로필 receipt만 기록하고 서버가 돌려준 미확인 수를 사용합니다. 오래된 비동기 결과가 새 프로필·목록·개수를 덮지 않도록 프로필, 세대, 스냅샷, 항목별 진행 상태를 함께 검증합니다.
 
-Map receipt-derived effective readAt once, including the historical legacy-row fallback defined in Task 5. Remove viewerId parameters from the public service calls and remove client-side grouping. Trust the server unread count after a mark race. Never backfill/clear compatibility read_at and never write it for a new read.
-
-- [ ] **Step 3: render sibling Link and 읽음 controls**
-
-Each row is:
+- [x] **3단계: 링크와 형제 `읽음` 제어 렌더링**
 
 ~~~tsx
 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start">
@@ -1495,57 +1481,32 @@ Each row is:
 </div>
 ~~~
 
-The button prevents default/propagation, keeps the popover open, and shows an item-local error. Do not nest Button inside Link.
+  `읽음` 버튼은 URL과 팝오버를 유지하고 항목별 오류를 표시합니다. 링크 클릭은 읽음 요청을 동기적으로 시작하지만 이동을 막거나 기다리지 않습니다.
 
-For the Link itself, invoke mark-read synchronously in the click handler before navigation begins, but do not preventDefault, await it, close the popover manually, or block routing on failure. Update the local count only from a successful RPC response; failure leaves the unread state for the destination/reload to reconcile.
+- [x] **4단계: 현재 브라우저 기준 Push 준비 상태 구현**
 
-- [ ] **Step 4: implement actionable current-browser Push readiness**
+  브라우저 API, 보안 연결, 서버 VAPID 설정, `/sw.js`·manifest, 권한, 현재 구독, 현재 프로필 소유권, 고정 자가진단 결과를 순서대로 판정합니다. 프로필 전환은 진행 중 작업을 취소합니다. DELETE가 현재 프로필 행을 실제로 삭제한 경우에만 로컬 구독을 해제하며, 공개키 교체와 명시 해제 모두 같은 소유권 경계를 사용합니다. 확정된 전송·만료 결과는 감사 저장 실패와 분리하고, 만료 구독 정리 실패 원인은 감사 경고보다 우선 보존합니다.
 
-Combine:
+- [x] **5단계: 집중 테스트와 실제 브라우저 검증**
 
-- secure context and browser API support;
-- matching public/private VAPID configuration;
-- /sw.js and manifest HTTP/registration state;
-- browser permission;
-- current subscription;
-- server ownership bound to current auth.uid();
-- latest fixed self-test outcome.
+  - 전체 Node 회귀 `1198/1198` 통과
+  - 알림 전용 테스트 `132/132` 통과
+  - 알림함·Push 최신 집중 테스트 `71/71` 통과
+  - pgTAP 소스 계획·assertion `226/226` 일치
+  - TypeScript, 전체 ESLint, `git diff --check` 통과
+  - 별도 임시 복사본 프로덕션 빌드 통과, 정적 페이지 `75/75` 생성
+  - 독립 UI·SQL·Push 검토 P0/P1/P2 `0/0/0`
+  - 데스크톱과 390px 모바일에서 `scrollWidth = clientWidth`, 가로 넘침 없음
+  - 자동 검증 중 실제 Google Chat·Web Push·SOLAPI 공급자 호출 `0건`
+  - 원격 DB에 새 RPC가 없는 현재 상태와 VAPID 미설정을 로컬 화면에서 한글 실패 상태로 정확히 확인
 
-Refresh on profile change, popover open, focus, and visibilitychange. A shared-browser ownership mismatch must rebind safely or fail with a specific action; it must never trust the prior profile.
+  실제 DB pgTAP과 두 프로필 receipt 영속성은 마이그레이션이 적용된 승인된 로컬 또는 미리보기 DB에서 확인해야 하며, 이번 소스 검증에서 실행한 것으로 보고하지 않습니다. 상세 증거는 `.superpowers/sdd/task-9-report.md`에 기록했습니다.
 
-- [ ] **Step 5: run focused and real browser QA**
+- [x] **6단계: 릴리스 B 구현 커밋**
 
-~~~bash
-pnpm run test:notifications
-"$NODE" --experimental-strip-types --test tests/makeup-request-workspace.test.mjs
-~~~
+  구현 커밋: `f3fbf26` (`feat: make notification reads and push readiness trustworthy`)
 
-Browser QA:
-
-1. Open the bell on /admin/dashboard.
-2. Click one unread sibling button.
-3. Verify URL unchanged, popover open, dot removed, and badge reduced exactly once.
-4. Reload and verify the receipt persists.
-5. Use a second profile fixture to verify independent unread state.
-6. Exercise every Push readiness fixture with zero network sends.
-
-An actual Push success may be claimed only in a separately authorized pass with valid assets/keys/profile binding and one user-confirmed fixed self-test. Otherwise record the exact blocked readiness state. Run the full mandatory release gate before declaring the common foundation/inbox release merge- or deploy-ready.
-
-- [ ] **Step 6: commit Release B**
-
-~~~bash
-git add \
-  src/features/makeup-requests/makeup-request-service.ts \
-  src/components/dashboard-notification-popover.tsx \
-  src/lib/dashboard-push-client.ts \
-  src/app/api/push-subscriptions/route.ts \
-  public/sw.js \
-  tests/notification-control-plane-ui.test.mjs \
-  tests/makeup-request-workspace.test.mjs
-git commit -m "feat: make notification reads and push readiness trustworthy"
-~~~
-
-**Release B gate:** the common settings contract works for all seven workflows in fixture/preview, reads are per-profile, the Push UI reports capability truth without implying delivery success, and the full mandatory release gate passes. The live settings UI flag stays false and Task 1A containment remains until separately authorized workflow ownership rollout.
+**릴리스 B 결과:** 사용자별 읽음 계약, 실제 상태만 표시하는 Push UI, 전체 회귀·빌드·브라우저 검증을 통과했습니다. 원격 마이그레이션·플래그·실제 공급자 발송은 변경하지 않았습니다.
 
 ---
 
