@@ -31,10 +31,26 @@ $$, 'all private notification control-plane relations exist');
 
 select has_table('public', 'dashboard_notification_read_receipts');
 
+-- The migration source packet separately proves that no canonical delivery seed
+-- is written. This runtime packet only requires its own fixed fixture IDs to be
+-- isolated from rows that may already exist in a connected database.
 select is(
-  (select count(*) from dashboard_private.notification_deliveries),
+  (
+    select count(*)
+    from dashboard_private.notification_deliveries
+    where id = any(array[
+      '52000000-0000-4000-8000-000000000101'::uuid,
+      '52000000-0000-4000-8000-000000000102'::uuid,
+      '52000000-0000-4000-8000-000000000103'::uuid,
+      '52000000-0000-4000-8000-000000000104'::uuid,
+      '52000000-0000-4000-8000-000000000105'::uuid,
+      '52000000-0000-4000-8000-000000000106'::uuid,
+      '52000000-0000-4000-8000-000000000107'::uuid,
+      '52000000-0000-4000-8000-000000000108'::uuid
+    ])
+  ),
   0::bigint,
-  'installing the expand migration creates zero deliveries'
+  'reserved delivery fixture IDs do not collide with connected database rows'
 );
 
 -- Required columns are checked as a subset so a later forward migration may
@@ -497,10 +513,39 @@ select is(
   'shared request ledger has one global request-id idempotency identity'
 );
 
+select is(
+  (
+    select count(*)
+    from pg_catalog.pg_constraint constraint_row
+    join pg_catalog.pg_attribute source_column
+      on source_column.attrelid = constraint_row.conrelid
+     and source_column.attnum = constraint_row.conkey[1]
+     and not source_column.attisdropped
+    join pg_catalog.pg_class referenced_table
+      on referenced_table.oid = constraint_row.confrelid
+    join pg_catalog.pg_namespace referenced_schema
+      on referenced_schema.oid = referenced_table.relnamespace
+    join pg_catalog.pg_attribute referenced_column
+      on referenced_column.attrelid = constraint_row.confrelid
+     and referenced_column.attnum = constraint_row.confkey[1]
+     and not referenced_column.attisdropped
+    where constraint_row.conrelid = 'dashboard_private.notification_events'::regclass
+      and constraint_row.contype = 'f'
+      and pg_catalog.array_length(constraint_row.conkey, 1) = 1
+      and pg_catalog.array_length(constraint_row.confkey, 1) = 1
+      and source_column.attname = 'actor_profile_id'
+      and referenced_schema.nspname = 'public'
+      and referenced_table.relname = 'profiles'
+      and referenced_column.attname = 'id'
+      and constraint_row.confdeltype = 'n'
+  ),
+  1::bigint,
+  'notification event actor FK targets public.profiles(id) with ON DELETE SET NULL'
+);
+
 select is_empty($$
   with expected(table_name, definition_pattern) as (
     values
-      ('notification_events', 'foreign key \(actor_profile_id\).*(public\.)?profiles\(id\).*on delete set null'),
       ('notification_deliveries', 'foreign key \(event_id\).*notification_events\(id\)'),
       ('notification_deliveries', 'foreign key \(rule_id\).*notification_rules\(id\)'),
       ('notification_deliveries', 'foreign key \(rule_id, template_id\).*notification_templates\(rule_id, id\)')
@@ -516,7 +561,7 @@ select is_empty($$
       and constraint_row.contype = 'f'
       and pg_catalog.pg_get_constraintdef(constraint_row.oid) ~* expected.definition_pattern
   )
-$$, 'canonical actor, event, rule, and immutable rule-template foreign keys are fixed');
+$$, 'canonical event, rule, and immutable rule-template foreign keys are fixed');
 
 select is_empty($$
   with queue_tables(table_name) as (
