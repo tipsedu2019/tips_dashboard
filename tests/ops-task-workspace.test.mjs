@@ -1583,6 +1583,57 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.match(submitFormSource, /sanitizeRegistrationInquiryOnlyInput/);
 });
 
+test("canonical registration detail mounts one honest read-only timeline beside separate current work", async () => {
+  assert.equal(
+    await pathExists("src/features/tasks/registration-history-timeline.tsx"),
+    true,
+    "the canonical registration timeline component should exist",
+  );
+
+  const [workspaceSource, editorSource, timelineSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-track-editor.tsx"),
+    readSource("src/features/tasks/registration-history-timeline.tsx"),
+  ]);
+  const canonicalDetailStart = workspaceSource.indexOf("registrationCaseDetail && isCanonicalRegistrationTrackDetail");
+  const canonicalDetailSource = workspaceSource.slice(
+    canonicalDetailStart,
+    workspaceSource.indexOf(') : selectedTaskFresh.type === "withdrawal"', canonicalDetailStart),
+  );
+
+  assert.match(editorSource, /import \{ RegistrationHistoryTimeline \} from "\.\/registration-history-timeline"/);
+  assert.match(editorSource, /<RegistrationHistoryTimeline[\s\S]*?detail=\{detail\}[\s\S]*?profiles=/);
+  assert.match(editorSource, /현재 업무/);
+  assert.doesNotMatch(editorSource, /담당자 및 일시 이력/);
+  assert.match(timelineSource, /buildRegistrationSubjectHistory\(detail\)/);
+  assert.match(timelineSource, /과목 전체/);
+  assert.match(timelineSource, /단계 전체/);
+  assert.match(timelineSource, /알 수 없음/);
+  assert.match(timelineSource, /마이그레이션/);
+  assert.match(timelineSource, /시간 확인 불가/);
+  assert.match(timelineSource, /actorKind/);
+  assert.match(timelineSource, /oldScheduledAt/);
+  assert.match(timelineSource, /oldPlace/);
+  assert.match(timelineSource, /예약 시각:/);
+  assert.match(timelineSource, /장소:/);
+  assert.match(timelineSource, /registration_director_defaults: "상담 책임자 자동 배정"/);
+  assert.doesNotMatch(timelineSource, /`시스템 · \$\{item\.systemSource\}`/);
+  assert.doesNotMatch(
+    timelineSource,
+    /if \(item\.actorId\) return profileById\.get\(item\.actorId\)/,
+    "v1 rows with a null actor kind must stay unknown even when an immutable actor id remains",
+  );
+  assert.doesNotMatch(timelineSource, /<Input|<Textarea|onEdit|onDelete|onAssignee|onDueDate|onDueAt/);
+  assert.doesNotMatch(timelineSource, /수정|삭제|담당자 변경|예정일 변경|마감일 변경/);
+  assert.match(canonicalDetailSource, /<RegistrationTrackEditor/);
+  assert.doesNotMatch(canonicalDetailSource, /selectedTaskFresh\.events\.map/);
+  assert.match(
+    workspaceSource,
+    /selectedTaskFresh\.type !== "registration" && selectedTaskFresh\.type !== "word_retest" && !isProcessDetail && \([\s\S]*?selectedTaskFresh\.events\.map/,
+    "the generic event renderer stays inside an outer branch that excludes registration",
+  );
+});
+
 test("committed initial visit notifications expose an in-session notification-only retry", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const retryStart = source.indexOf("async function retryPendingRegistrationVisitNotifications")

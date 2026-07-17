@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 import type { OpsClassOption, OpsProfileOption, OpsTask, OpsTeacherOption, OpsTextbookOption } from "./ops-task-service"
 import { RegistrationAppointmentEditor } from "./registration-appointment-editor"
+import { RegistrationHistoryTimeline } from "./registration-history-timeline"
 import {
   advanceRegistrationAutomaticSavingGeneration,
   resolveRegistrationTrackDirectorDefaults,
@@ -66,6 +67,7 @@ export type RegistrationTrackEditorProps = {
   onWarning: (message: string) => void
   onAppointmentSaved?: (saved: RegistrationAppointmentMutationResponse) => void | Promise<void>
   caseLevelActions?: ReactNode
+  profiles?: OpsProfileOption[]
   directorOptions?: OpsProfileOption[]
   teacherOptions?: OpsTeacherOption[]
   directorCatalogStatus?: RegistrationDirectorCatalogStatus
@@ -1841,6 +1843,7 @@ export function RegistrationTrackEditor({
   onWarning,
   onAppointmentSaved,
   caseLevelActions,
+  profiles = [],
   viewerId,
   viewerRole,
   directorOptions = [],
@@ -2080,6 +2083,26 @@ export function RegistrationTrackEditor({
           {caseLevelActions || <p className="text-sm text-muted-foreground">등록 결정 후 입학 처리 항목이 열립니다.</p>}
         </RegistrationApplicationSection>
       </section>
+      {selectedTrack ? (
+        <section className="grid min-w-0 gap-2 rounded-md border p-3" aria-label="현재 업무">
+          <h3 className="text-sm font-semibold">현재 업무</h3>
+          <dl className="grid gap-2 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-muted-foreground">현재 과목</dt>
+              <dd className="mt-1 font-medium">{selectedTrack.subject}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">현재 단계</dt>
+              <dd className="mt-1 font-medium">{STATUS_LABELS[selectedTrack.status]}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">현재 상담 책임자</dt>
+              <dd className="mt-1 font-medium">{selectedTrack.directorName || "미지정"}</dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+      <RegistrationHistoryTimeline detail={detail} profiles={profiles} />
       {appointmentEditor?.kind === "level_test" && selectedTrack ? (
         <RegistrationAppointmentEditor
           key={`level_test:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}

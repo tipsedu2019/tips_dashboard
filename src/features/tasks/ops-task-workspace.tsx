@@ -12583,6 +12583,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       consultationOutcomeOpen={registrationConsultationOutcomeTrackId === selectedRegistrationTrackId}
                       onConsultationOutcomeOpenChange={(open) => setRegistrationConsultationOutcomeTrackId(open ? selectedRegistrationTrackId : null)}
                       notificationToken={registrationFixtureEnabled ? "" : session?.access_token || ""}
+                      profiles={data?.profiles || EMPTY_PROFILE_OPTIONS}
                       directorOptions={data?.profiles || EMPTY_PROFILE_OPTIONS}
                       teacherOptions={data?.teachers || EMPTY_TEACHER_OPTIONS}
                       directorCatalogStatus={registrationOptionsLoading ? "loading" : registrationOptionsDataRef.current?.directorCatalogStatus || (registrationOptionsError ? "error" : "loading")}

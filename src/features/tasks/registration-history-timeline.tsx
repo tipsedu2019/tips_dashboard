@@ -1,0 +1,237 @@
+"use client"
+
+import { useId, useMemo, useState } from "react"
+
+import { Badge } from "@/components/ui/badge"
+
+import type { OpsProfileOption } from "./ops-task-service"
+import {
+  buildRegistrationSubjectHistory,
+  type RegistrationHistoryStage,
+  type RegistrationSubjectHistoryItem,
+} from "./registration-track-history.js"
+import type { OpsRegistrationCaseDetail, RegistrationSubject } from "./registration-track-service"
+
+export type RegistrationHistoryTimelineProps = {
+  detail: OpsRegistrationCaseDetail
+  profiles: OpsProfileOption[]
+}
+
+const STAGE_LABELS: Record<RegistrationHistoryStage, string> = {
+  inquiry: "문의",
+  responsibility: "상담 책임",
+  level_test: "레벨테스트",
+  consultation: "상담",
+  waiting: "대기",
+  admission: "입학 처리",
+  registration: "등록 완료",
+  closure: "종료",
+  reopening: "다시 열기",
+  migration: "이전 자료",
+}
+
+const STAGE_ORDER = new Map(
+  (Object.keys(STAGE_LABELS) as RegistrationHistoryStage[]).map((stage, index) => [stage, index]),
+)
+
+const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+})
+
+const SYSTEM_SOURCE_LABELS: Record<string, string> = {
+  registration_director_defaults: "상담 책임자 자동 배정",
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+function historyTimeLabel(item: RegistrationSubjectHistoryItem) {
+  if (item.timeKind !== "exact" || !item.occurredAt) return "시간 확인 불가"
+  const occurredAt = new Date(item.occurredAt)
+  return Number.isNaN(occurredAt.getTime())
+    ? "시간 확인 불가"
+    : HISTORY_DATE_FORMATTER.format(occurredAt)
+}
+
+function historyActorLabel(item: RegistrationSubjectHistoryItem, profileById: Map<string, string>) {
+  if (item.actorKind === "migration") return "마이그레이션"
+  if (item.actorKind === "system") {
+    return item.systemSource
+      ? `시스템 · ${SYSTEM_SOURCE_LABELS[item.systemSource] || "자동 처리"}`
+      : "시스템"
+  }
+  if (item.actorKind === "user") {
+    return item.actorId ? profileById.get(item.actorId) || "알 수 없음" : "알 수 없음"
+  }
+  return "알 수 없음"
+}
+
+const APPOINTMENT_CHANGE_LABELS: Record<string, string> = {
+  appointment_updated: "예약 변경",
+  appointment_replaced: "예약 교체",
+  appointment_subject_deselected: "예약 과목 제외",
+  appointment_canceled: "예약 취소",
+}
+
+function historyDetailValue(value: unknown, date = false) {
+  if (typeof value !== "string" || !value) return ""
+  if (!date) return value
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : HISTORY_DATE_FORMATTER.format(parsed)
+}
+
+function appointmentChangeLine(value: unknown) {
+  const change = record(value)
+  const metadata = record(change.metadata)
+  const facts: string[] = []
+  const oldScheduledAt = historyDetailValue(metadata.oldScheduledAt, true)
+  const scheduledAt = historyDetailValue(metadata.scheduledAt, true)
+  const oldPlace = historyDetailValue(metadata.oldPlace)
+  const place = historyDetailValue(metadata.place)
+
+  if (oldScheduledAt && scheduledAt) facts.push(`예약 시각: ${oldScheduledAt} → ${scheduledAt}`)
+  else if (scheduledAt) facts.push(`예약 시각: ${scheduledAt}`)
+  else if (oldScheduledAt) facts.push(`이전 예약 시각: ${oldScheduledAt}`)
+  if (oldPlace && place) facts.push(`장소: ${oldPlace} → ${place}`)
+  else if (place) facts.push(`장소: ${place}`)
+  else if (oldPlace) facts.push(`이전 장소: ${oldPlace}`)
+  const reason = typeof change.reasonLabel === "string" && change.reasonLabel
+    ? change.reasonLabel
+    : typeof change.reason === "string" && change.reason
+      ? change.reason
+      : ""
+  if (reason) facts.push(`사유: ${reason}`)
+
+  const eventType = typeof change.eventType === "string" ? change.eventType : ""
+  const label = APPOINTMENT_CHANGE_LABELS[eventType] || "예약 변경"
+  return facts.length > 0 ? `${label} · ${facts.join(" · ")}` : label
+}
+
+function historyDetailLines(item: RegistrationSubjectHistoryItem) {
+  const metadata = record(item.metadata)
+  const appointmentChanges = Array.isArray(metadata.appointmentChanges) ? metadata.appointmentChanges : []
+  const subjectTransitions = Array.isArray(metadata.subjectTransitions) ? metadata.subjectTransitions : []
+  const lines: string[] = []
+
+  for (const appointmentChange of appointmentChanges) {
+    lines.push(appointmentChangeLine(appointmentChange))
+  }
+  if (subjectTransitions.length > 1) lines.push(`과목별 단계 기록 ${subjectTransitions.length}건`)
+  if (typeof metadata.scheduledAt === "string" && metadata.scheduledAt) {
+    const scheduledAt = new Date(metadata.scheduledAt)
+    lines.push(`예약 시각: ${Number.isNaN(scheduledAt.getTime()) ? metadata.scheduledAt : HISTORY_DATE_FORMATTER.format(scheduledAt)}`)
+  }
+  if (typeof metadata.place === "string" && metadata.place) lines.push(`장소: ${metadata.place}`)
+  if (item.description) lines.push(`기록 요약: ${item.description}`)
+  if (lines.length === 0) lines.push("자동 기록의 세부 정보가 보존되어 있습니다.")
+  return lines
+}
+
+export function RegistrationHistoryTimeline({ detail, profiles }: RegistrationHistoryTimelineProps) {
+  const subjectFilterId = useId()
+  const stageFilterId = useId()
+  const [subjectFilter, setSubjectFilter] = useState<"all" | RegistrationSubject>("all")
+  const [stageFilter, setStageFilter] = useState<"all" | RegistrationHistoryStage>("all")
+  const history = useMemo(() => buildRegistrationSubjectHistory(detail), [detail])
+  const profileById = useMemo(
+    () => new Map(profiles.map((profile) => [profile.id, profile.label])),
+    [profiles],
+  )
+  const stages = useMemo(() => (
+    [...new Set(history.map((item) => item.stage))]
+      .sort((left, right) => (STAGE_ORDER.get(left) || 0) - (STAGE_ORDER.get(right) || 0))
+  ), [history])
+  const availableSubjects = useMemo(
+    () => new Set(history.flatMap((item) => item.subjects)),
+    [history],
+  )
+  const effectiveSubjectFilter = subjectFilter === "all" || availableSubjects.has(subjectFilter)
+    ? subjectFilter
+    : "all"
+  const effectiveStageFilter = stageFilter === "all" || stages.includes(stageFilter)
+    ? stageFilter
+    : "all"
+  const filteredHistory = useMemo(() => history.filter((item) => (
+    (effectiveSubjectFilter === "all" || item.subjects.includes(effectiveSubjectFilter))
+    && (effectiveStageFilter === "all" || item.stage === effectiveStageFilter)
+  )), [effectiveStageFilter, effectiveSubjectFilter, history])
+
+  return (
+    <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label="등록 자동 이력">
+      <div>
+        <h3 className="text-sm font-semibold">자동 이력</h3>
+        <p className="text-xs text-muted-foreground">저장된 주요 단계만 시간과 행위자 기준으로 보여 줍니다.</p>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label htmlFor={subjectFilterId} className="grid gap-1 text-xs font-medium text-muted-foreground">
+          과목
+          <select
+            id={subjectFilterId}
+            className="h-9 rounded-md border bg-background px-3 text-sm text-foreground"
+            value={effectiveSubjectFilter}
+            onChange={(event) => setSubjectFilter(event.target.value as "all" | RegistrationSubject)}
+          >
+            <option value="all">과목 전체</option>
+            <option value="영어">영어</option>
+            <option value="수학">수학</option>
+          </select>
+        </label>
+        <label htmlFor={stageFilterId} className="grid gap-1 text-xs font-medium text-muted-foreground">
+          단계
+          <select
+            id={stageFilterId}
+            className="h-9 rounded-md border bg-background px-3 text-sm text-foreground"
+            value={effectiveStageFilter}
+            onChange={(event) => setStageFilter(event.target.value as "all" | RegistrationHistoryStage)}
+          >
+            <option value="all">단계 전체</option>
+            {stages.map((stage) => <option key={stage} value={stage}>{STAGE_LABELS[stage]}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {filteredHistory.length === 0 ? (
+        <p className="rounded-md bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
+          조건에 맞는 자동 이력이 없습니다.
+        </p>
+      ) : (
+        <ol className="grid gap-2">
+          {filteredHistory.map((item) => {
+            const detailLines = historyDetailLines(item)
+            return (
+              <li key={item.id} className="grid min-w-0 gap-2 rounded-md bg-muted/30 px-3 py-2.5">
+                <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-medium">{item.title}</span>
+                      <Badge variant="outline">{STAGE_LABELS[item.stage]}</Badge>
+                      {item.subjects.map((subject) => <Badge key={subject} variant="secondary">{subject}</Badge>)}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {historyTimeLabel(item)} · {historyActorLabel(item, profileById)}
+                    </p>
+                  </div>
+                </div>
+                <details className="text-xs text-muted-foreground">
+                  <summary className="w-fit cursor-pointer font-medium text-foreground">상세 보기</summary>
+                  <ul className="mt-1.5 grid gap-1 pl-4">
+                    {detailLines.map((line) => <li key={line} className="list-disc break-words">{line}</li>)}
+                  </ul>
+                </details>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </section>
+  )
+}
