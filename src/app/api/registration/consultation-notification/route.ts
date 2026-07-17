@@ -1,6 +1,9 @@
 import { createClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 
+import { isAllowedGoogleChatWebhookUrl } from "@/features/notifications/server/notification-connection-crypto"
+import { readLegacyGoogleChatWebhookUrl } from "@/features/notifications/server/legacy-google-chat-connection"
+
 import {
   REGISTRATION_ADMIN_CHAT_CLAIM_TYPE,
   buildRegistrationVisitCanonicalMessage,
@@ -190,22 +193,27 @@ function isUniqueViolation(error: unknown) {
 }
 
 function isGoogleChatWebhookUrl(value: string) {
-  try {
-    const url = new URL(value)
-    return url.protocol === "https:" && url.hostname === "chat.googleapis.com"
-  } catch {
-    return false
-  }
+  return isAllowedGoogleChatWebhookUrl(value)
 }
 
 async function getAdminWebhookUrl(serviceClient: ServiceClient) {
-  const { data, error } = await serviceClient
-    .from("google_chat_webhook_settings")
-    .select("webhook_url")
-    .eq("channel", "admin")
-    .maybeSingle()
-  if (error) throw error
-  return text((data as Row | null)?.webhook_url) || text(process.env.GOOGLE_CHAT_WEBHOOK_ADMIN)
+  return readLegacyGoogleChatWebhookUrl({
+    legacyEnvironmentUrl: text(process.env.GOOGLE_CHAT_WEBHOOK_ADMIN),
+    async loadRow() {
+      const { data, error } = await serviceClient
+        .from("google_chat_webhook_settings")
+        .select("webhook_url,connection_state")
+        .eq("channel", "admin")
+        .maybeSingle()
+      if (error) throw error
+      const row = data as Row | null
+      return {
+        found: row !== null,
+        connectionState: row ? text(row.connection_state) : null,
+        webhookUrl: row ? text(row.webhook_url) : null,
+      }
+    },
+  })
 }
 
 async function releaseAdminChatClaim(serviceClient: ServiceClient, adminChatDedupeKey: string) {

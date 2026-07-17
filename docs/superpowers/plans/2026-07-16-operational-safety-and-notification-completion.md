@@ -986,13 +986,13 @@ public.set_notification_runtime_flag_v1(
 ) returns jsonb
 ~~~
 
-- [ ] **Step 1: write failing auth, UI-flag, revision, request-ledger, audit, masking, and connection-conflict tests**
-- [ ] **Step 2: implement exact admin/staff read/write boundaries; arbitrary workflow/event/channel keys fail closed**
-- [ ] **Step 3: implement one-transaction explicit settings save with expected revisions and request ID replay**
+- [x] **Step 1: write failing auth, UI-flag, revision, request-ledger, audit, masking, and connection-conflict tests**
+- [x] **Step 2: implement exact admin/staff read/write boundaries; arbitrary workflow/event/channel keys fail closed**
+- [x] **Step 3: implement one-transaction explicit settings save with expected revisions and request ID replay**
 
 The operator save path also rechecks notification_control_plane_settings_ui_enabled in the same transaction. An already-open stale panel cannot save after rollback disables the UI; controlled migration/import uses its separate service-role path rather than bypassing this operator contract.
-- [ ] **Step 4: encrypt Google Chat URLs with versioned AES-256-GCM envelopes; browser responses expose only configured state and masked metadata**
-- [ ] **Step 5: make the controlled backfill dry-run by default and preserve legacy readers until cutover**
+- [x] **Step 4: encrypt Google Chat URLs with versioned AES-256-GCM envelopes; browser responses expose only configured state and masked metadata**
+- [x] **Step 5: make the controlled backfill dry-run by default and preserve legacy readers until cutover**
 - [ ] **Step 6: run pnpm run test:notifications and authorized pgTAP**
 - [ ] **Step 7: commit**
 

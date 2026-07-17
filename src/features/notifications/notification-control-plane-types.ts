@@ -163,6 +163,9 @@ export const NOTIFICATION_CONNECTION_STATES = [
 
 export type NotificationConnectionState = (typeof NOTIFICATION_CONNECTION_STATES)[number]
 
+export const NOTIFICATION_CONNECTION_RESULT_CODE_PATTERN =
+  /^(?:accepted|configuration_error|provider_rejected|transport_error|http_[1-5]\d{2})$/
+
 export const NOTIFICATION_SCHEDULE_KEYS = [
   "previous_day_at",
   "same_day_at",
@@ -898,6 +901,17 @@ function parseConnection(
     )
   } else {
     connectionState = stateValue as NotificationConnectionState
+  }
+  if (
+    lastErrorCode !== null &&
+    !NOTIFICATION_CONNECTION_RESULT_CODE_PATTERN.test(lastErrorCode)
+  ) {
+    addIssue(
+      issues,
+      "invalid_field",
+      `${path}.last_error_code`,
+      "Unknown connection result code.",
+    )
   }
 
   if (

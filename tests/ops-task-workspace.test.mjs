@@ -1971,9 +1971,12 @@ test("withdrawal workspace follows request processing and completed queues", asy
   ]);
   assertIncludesAll(googleChatRouteSource, [
     '.from("google_chat_webhook_settings")',
-    ".upsert(",
-    "webhook_url: webhookUrl",
+    'serviceClient.rpc("replace_google_chat_connection_v1"',
+    "p_actor: input.actorUserId",
+    "p_webhook_url: input.webhookUrl",
+    "p_webhook_url_ciphertext: input.webhookUrlCiphertext",
   ]);
+  assert.doesNotMatch(googleChatRouteSource, /\.upsert\(/);
   assertIncludesAll(source, [
     "const [withdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>",
     "const [withdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>",

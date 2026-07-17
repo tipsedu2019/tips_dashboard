@@ -390,7 +390,7 @@ test("blocks a newly enabled Google Chat rule when its required connection is un
 
 test("blocks a newly enabled Google Chat rule when connection verification has failed", () => {
   const wire = createWireSnapshot()
-  wire.connections[0].last_error_code = "verification_failed"
+  wire.connections[0].last_error_code = "provider_rejected"
   const snapshot = parseSnapshot(wire)
   const draft = createNotificationDraft(snapshot)
   draft.rules["rule-registration-visit-management"].enabled = true

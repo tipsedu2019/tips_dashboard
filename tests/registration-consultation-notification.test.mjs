@@ -444,7 +444,7 @@ test("admin Google Chat rejects missing or invalid sinks and bounds the fetch ti
   assert.match(missingWebhookBlock, /status: 503/);
   assert.doesNotMatch(missingWebhookBlock, /ok: true/);
   assert.match(routeSource, /function isGoogleChatWebhookUrl/);
-  assert.match(routeSource, /hostname === "chat\.googleapis\.com"/);
+  assert.match(routeSource, /isAllowedGoogleChatWebhookUrl/);
   assert.match(routeSource, /if \(!isGoogleChatWebhookUrl\(webhookUrl\)\)/);
   assert.match(routeSource, /new AbortController\(\)/);
   assert.match(routeSource, /setTimeout\([\s\S]{0,160}abort\(\)/);
