@@ -1204,7 +1204,7 @@ public.transfer_notification_dispatch_ownership_v1(
 
 record_notification_event_v1 returns exactly event_id and fanout_job_id. An occurrence replay returns the same pair. Domain mutations pass opaque job references to UI when status is needed and never read private queue tables. Heartbeat accepts only started, succeeded, or failed and a closed numeric count map. Target generation and dispatch owner generation remain distinct decimal-string values and can never be substituted for each other.
 
-- [ ] **Step 1: write failing state-machine, ownership, lease, retry, receipt-projection, and provider-fixture tests**
+- [x] **Step 1: write failing state-machine, ownership, lease, retry, receipt-projection, and provider-fixture tests**
 
 Cover:
 
@@ -1226,11 +1226,11 @@ Cover:
 - heartbeat start and one terminal result with sanitized counts;
 - injected provider fakes only, deny-by-default outbound-host ledger, and zero non-fixture network calls.
 
-- [ ] **Step 2: implement service-role-only producer, claim, apply, projection, ownership, and finalization RPCs**
+- [x] **Step 2: implement service-role-only producer, claim, apply, projection, ownership, and finalization RPCs**
 
 The database rechecks workflow flags, source/rule revisions, target generation, cancel requests, and ownership immediately before a side effect. Shadow work ends skipped/shadow_mode. Dispatch-disabled canonical work ends skipped/legacy_skipped. Neither path contacts a provider or reserves a canonical send owner.
 
-- [ ] **Step 3: implement an injectable common worker**
+- [x] **Step 3: implement an injectable common worker**
 
 Export:
 
@@ -1242,7 +1242,7 @@ export function createNotificationWorker(input: {
 
 The common worker imports no workflow module. It loads immutable rules/templates, calls adapter target/render/deep-link/revalidation callbacks, validates allowlisted same-origin links, and persists the rendered snapshot before delivery. Tests inject all transport functions and assert the external-host ledger remains empty; production providers are impossible to construct in the automated test environment.
 
-- [ ] **Step 4: implement fixed-purpose provider classifiers**
+- [x] **Step 4: implement fixed-purpose provider classifiers**
 
 Google Chat and Web Push providers accept a begun canonical delivery context only. They never accept a browser-authored title, body, href, recipient, team, endpoint, or webhook.
 
@@ -1253,11 +1253,11 @@ Classify:
 - definite permanent rejection as failed with a closed reason;
 - timeout/reset/lost sending lease after dispatch starts as delivery_unknown.
 
-- [ ] **Step 5: implement Push readiness server boundary**
+- [x] **Step 5: implement Push readiness server boundary**
 
 GET returns normalized booleans/codes only for public/private VAPID match, contact, asset availability, subscription ownership, and capability. POST accepts only fixed send_test for the current authenticated profile and current browser endpoint. It uses fixed same-origin content and an injected sender in tests.
 
-- [ ] **Step 6: harden service-worker parsing and click navigation**
+- [x] **Step 6: harden service-worker parsing and click navigation**
 
 Malformed Push JSON must degrade safely. Notification click href must pass a same-origin admin allowlist. Never expose endpoint/auth keys or service-role information.
 
@@ -1270,7 +1270,7 @@ pnpm dlx supabase@2.109.1 test db
 
 Expected: all focused tests and pgTAP pass; provider fake ledger has expected simulated outcomes and network ledger stays empty.
 
-- [ ] **Step 8: commit**
+- [x] **Step 8: commit**
 
 ~~~bash
 git add \
@@ -1289,6 +1289,8 @@ git commit -m "feat: add durable notification worker core"
 ~~~
 
 **Gate:** no provider call can occur without a current source, rule, recipient, flag, claim token, ownership claim, and begun delivery row.
+
+**완료 증거(2026-07-17):** `1117f85` 커밋에 멱등 이벤트·fan-out·재계산·전달 상태기계, canonical/legacy 소유권, 개인별 receipt, 고정 provider 분류, Push 준비 상태·재연결·서비스워커 안전 경계를 기록했습니다. Worker `22/22`, 작업 4~7 알림 집중 `82/82`, 관련 회귀 `178/178`, 전체 Node `1114/1114`, TypeScript, 전체 ESLint, production build와 diff 검사가 통과했고 독립 최종 검토는 P0/P1/P2 0건입니다. 로컬 등록 화면·서비스워커·매니페스트는 HTTP 200이고 인증 없는 Push API는 401입니다. 실제 provider 호출은 0건이며 원격 적용·데이터 변경·플래그 변경·배포는 수행하지 않았습니다. Step 7의 source/집중 검증은 완료했지만 실제 DB pgTAP은 승인된 local/preview 적용 단계의 release gate로 남겨 두었고 실행한 것으로 보고하지 않습니다.
 
 ---
 
