@@ -111,6 +111,14 @@ test("todo navigation exposes direct queues and keeps query links distinct", asy
   assert.match(navMainSource, /router\.prefetch\(target\)/);
 });
 
+test("admin navigation exposes the persistent notification settings workspace", async () => {
+  const navigationSource = await readSource("src/lib/navigation.ts");
+
+  assert.match(navigationSource, /match:\s*"\/admin\/settings\/notifications"/);
+  assert.match(navigationSource, /title:\s*"알림 설정"/);
+  assert.match(navigationSource, /url:\s*"\/admin\/settings\/notifications"/);
+});
+
 test("legacy admin redirect routes do not keep template implementation files", async () => {
   const redirectOnlyRoutes = [
     "src/app/admin/chat",

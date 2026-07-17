@@ -55,6 +55,7 @@ const ADMIN_ID = "30000000-0000-4000-8000-000000000001"
 const STAFF_ID = "30000000-0000-4000-8000-000000000002"
 const RULE_ID = "30000000-0000-4000-8000-000000000101"
 const REQUEST_ID = "30000000-0000-4000-8000-000000000201"
+const OVERRIDE_REQUEST_ID = "30000000-0000-4000-8000-000000000202"
 const BIG_REVISION = "9007199254740997"
 const NEXT_BIG_REVISION = "9007199254740998"
 const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64")
@@ -519,6 +520,42 @@ test("browser service emits only the strict snake_case save wire contract", asyn
   assert.equal(result.reconciliationJob.attemptCount, 0)
 })
 
+test("browser service adds the separate conflict override audit wire only when confirmed", async () => {
+  const { createNotificationControlPlaneService } = await import(serviceModuleUrl)
+  const sentBodies = []
+  const service = createNotificationControlPlaneService({
+    baseUrl: "http://localhost",
+    getAccessToken: async () => "session-token",
+    fetch: async (_url, init) => {
+      sentBodies.push(JSON.parse(init.body))
+      return jsonResponse(createWireSnapshot())
+    },
+  })
+
+  await service.saveControlPlane({
+    workflowKey: "tasks",
+    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    patch: { rules: { [RULE_ID]: { enabled: true } } },
+    requestId: REQUEST_ID,
+    conflictOverride: {
+      requestId: OVERRIDE_REQUEST_ID,
+      conflictingFields: [`rules.${RULE_ID}.enabled`],
+    },
+  })
+  await service.saveControlPlane({
+    workflowKey: "tasks",
+    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    patch: { rules: { [RULE_ID]: { enabled: false } } },
+    requestId: REQUEST_ID,
+  })
+
+  assert.deepEqual(sentBodies[0].conflict_override, {
+    request_id: OVERRIDE_REQUEST_ID,
+    conflicting_fields: [`rules.${RULE_ID}.enabled`],
+  })
+  assert.equal("conflict_override" in sentBodies[1], false)
+})
+
 test("browser service treats a committed no-op save as success without inventing a reconciliation job", async () => {
   const { createNotificationControlPlaneService } = await import(serviceModuleUrl)
   const service = createNotificationControlPlaneService({
@@ -723,6 +760,26 @@ test("control-plane route rejects ordinary users and strict-save payload violati
       request_id: REQUEST_ID,
       table_name: "dashboard_private.notification_rules",
     },
+    {
+      workflow_key: "tasks",
+      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      patch: { rules: { [RULE_ID]: { enabled: true } } },
+      request_id: REQUEST_ID,
+      conflict_override: {
+        request_id: "not-a-uuid",
+        conflicting_fields: [`rules.${RULE_ID}.enabled`],
+      },
+    },
+    {
+      workflow_key: "tasks",
+      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      patch: { rules: { [RULE_ID]: { enabled: true } } },
+      request_id: REQUEST_ID,
+      conflict_override: {
+        request_id: OVERRIDE_REQUEST_ID,
+        conflicting_fields: ["rules.unsafe.webhook_url"],
+      },
+    },
   ]
   for (const body of invalidBodies) {
     const response = await makeHandlers("admin").patch(jsonRequest(
@@ -733,6 +790,87 @@ test("control-plane route rejects ordinary users and strict-save payload violati
     assert.equal(response.status, 400, JSON.stringify(body))
   }
   assert.equal(saveCalls, 0)
+})
+
+test("control-plane route forwards a validated conflict override separately from the save request", async () => {
+  const { createNotificationControlPlaneRouteHandlers } = await import(controlPlaneRouteUrl)
+  const calls = []
+  const handlers = createNotificationControlPlaneRouteHandlers({
+    authenticate: async () => ({ userId: STAFF_ID, role: "staff", client: { id: "caller" } }),
+    getControlPlane: async () => createWireSnapshot(),
+    saveControlPlane: async (input) => {
+      calls.push(input)
+      return createWireSnapshot()
+    },
+  })
+
+  const response = await handlers.patch(jsonRequest(
+    "http://localhost/api/notifications/control-plane",
+    "PATCH",
+    {
+      workflow_key: "tasks",
+      expected_revisions: { [RULE_ID]: BIG_REVISION },
+      patch: { rules: { [RULE_ID]: { enabled: true } } },
+      request_id: REQUEST_ID,
+      conflict_override: {
+        request_id: OVERRIDE_REQUEST_ID,
+        conflicting_fields: [`rules.${RULE_ID}.enabled`],
+      },
+    },
+  ))
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(calls[0].conflictOverride, {
+    requestId: OVERRIDE_REQUEST_ID,
+    conflictingFields: [`rules.${RULE_ID}.enabled`],
+  })
+  assert.equal(calls[0].requestId, REQUEST_ID)
+})
+
+test("Supabase save adapter selects the override RPC and exact audit parameters only for confirmed overwrites", async () => {
+  const { saveNotificationControlPlaneViaRpc } = await import(controlPlaneRouteUrl)
+  const rpcCalls = []
+  const client = {
+    async rpc(name, parameters) {
+      rpcCalls.push([name, parameters])
+      return { data: createWireSnapshot(), error: null }
+    },
+  }
+  const base = {
+    workflowKey: "tasks",
+    expectedRevisions: { [RULE_ID]: BIG_REVISION },
+    patch: { rules: { [RULE_ID]: { enabled: true } } },
+    requestId: REQUEST_ID,
+    client,
+  }
+
+  await saveNotificationControlPlaneViaRpc({
+    ...base,
+    conflictOverride: {
+      requestId: OVERRIDE_REQUEST_ID,
+      conflictingFields: [`rules.${RULE_ID}.enabled`],
+    },
+  })
+  await saveNotificationControlPlaneViaRpc(base)
+
+  assert.deepEqual(rpcCalls[0], [
+    "save_notification_control_plane_with_override_v1",
+    {
+      p_workflow_key: "tasks",
+      p_expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      p_patch: base.patch,
+      p_save_request_id: REQUEST_ID,
+      p_override_request_id: OVERRIDE_REQUEST_ID,
+      p_conflicting_fields: [`rules.${RULE_ID}.enabled`],
+    },
+  ])
+  assert.equal(rpcCalls[1][0], "save_notification_control_plane_v1")
+  assert.deepEqual(rpcCalls[1][1], {
+    p_workflow_key: "tasks",
+    p_expected_revisions: { [RULE_ID]: BIG_REVISION },
+    p_patch: base.patch,
+    p_request_id: REQUEST_ID,
+  })
 })
 
 test("control-plane route forwards one strict save and returns a safe 409 snapshot on conflict", async () => {

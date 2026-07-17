@@ -12,6 +12,10 @@ const WORKFLOW_KEYS = new Set<string>(
 )
 const DECIMAL_REVISION = /^(0|[1-9]\d*)$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const CONFLICT_FIELD = new RegExp(
+  `^rules\\.${UUID.source.slice(1, -1)}\\.(?:enabled|titleTemplate|bodyTemplate|scheduleConfig)$`,
+  "i",
+)
 
 type FetchLike = (
   input: string | URL | Request,
@@ -27,6 +31,11 @@ type RulePatch = Readonly<{
 
 type SavePatch = Readonly<{
   rules: Readonly<Record<string, RulePatch>>
+}>
+
+type ConflictOverride = Readonly<{
+  requestId: string
+  conflictingFields: ReadonlyArray<string>
 }>
 
 type ReconciliationJob = Readonly<{
@@ -164,6 +173,25 @@ function validateExpectedRevisions(input: NotificationRevisionMap) {
   }
 }
 
+function toWireConflictOverride(input: ConflictOverride) {
+  if (
+    !isRecord(input) ||
+    Object.keys(input).sort().join(",") !== "conflictingFields,requestId" ||
+    typeof input.requestId !== "string" ||
+    !UUID.test(input.requestId) ||
+    !Array.isArray(input.conflictingFields) ||
+    input.conflictingFields.length === 0 ||
+    input.conflictingFields.some((field) => typeof field !== "string" || !CONFLICT_FIELD.test(field)) ||
+    new Set(input.conflictingFields).size !== input.conflictingFields.length
+  ) {
+    throw new NotificationControlPlaneHttpError("notification_invalid_request", 400)
+  }
+  return {
+    request_id: input.requestId,
+    conflicting_fields: [...input.conflictingFields],
+  }
+}
+
 async function readJson(response: Response): Promise<unknown> {
   try {
     return await response.json()
@@ -226,12 +254,16 @@ export function createNotificationControlPlaneService(dependencies: {
       expectedRevisions: NotificationRevisionMap
       patch: SavePatch
       requestId: string
+      conflictOverride?: ConflictOverride
     }): Promise<NotificationControlPlaneSaveResult> {
       const workflowKey = requireWorkflowKey(input.workflowKey)
       validateExpectedRevisions(input.expectedRevisions)
       if (!UUID.test(input.requestId)) {
         throw new NotificationControlPlaneHttpError("notification_invalid_request", 400)
       }
+      const conflictOverride = input.conflictOverride
+        ? toWireConflictOverride(input.conflictOverride)
+        : undefined
       const response = await authorizedFetch(
         new URL("/api/notifications/control-plane", dependencies.baseUrl),
         {
@@ -241,6 +273,7 @@ export function createNotificationControlPlaneService(dependencies: {
             expected_revisions: input.expectedRevisions,
             patch: toWirePatch(input.patch),
             request_id: input.requestId,
+            ...(conflictOverride ? { conflict_override: conflictOverride } : {}),
           }),
         },
       )

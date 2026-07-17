@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import {
+  BellRing,
   BookOpen,
   CalendarDays,
   CalendarClock,
@@ -52,6 +53,14 @@ const workspaceMetaEntries: Array<{
   match: string
   meta: AdminWorkspaceMeta
 }> = [
+  {
+    match: "/admin/settings/notifications",
+    meta: {
+      section: "설정",
+      title: "알림 설정",
+      summary: "일곱 업무의 알림 규칙, 문구, 연결 상태를 한곳에서 관리합니다.",
+    },
+  },
   {
     match: "/admin/settings/schools",
     meta: {
@@ -403,6 +412,11 @@ export function buildAdminNavGroups({
             { title: "기간 설정", url: "/admin/settings/class-groups" },
             { title: "교재 설정", url: "/admin/settings/textbook-suppliers" },
           ],
+        },
+        {
+          title: "알림 설정",
+          url: "/admin/settings/notifications",
+          icon: BellRing,
         },
       ],
     })

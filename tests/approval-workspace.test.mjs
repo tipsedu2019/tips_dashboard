@@ -17,6 +17,20 @@ test("monthly approval checklist supports done, pending, and not-applicable stat
   assert.match(workspaceSource, /{ state: "na", label: "해당 없음" }/)
 })
 
+test("operators can open the canonical approvals notification panel only when the server enables it", () => {
+  assert.match(
+    workspaceSource,
+    /import \{ NotificationControlPanel, useNotificationControlPlaneAvailability \} from "@\/features\/notifications\/notification-control-panel"/,
+  )
+  assert.match(workspaceSource, /const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability\(\)/)
+  assert.match(workspaceSource, /const canonicalNotificationEnabled = notificationControlPlaneAvailability\.status === "enabled"/)
+  assert.match(workspaceSource, /\{canApprove && canonicalNotificationEnabled \? \([\s\S]*aria-label="전자결재 알림 설정"/)
+  assert.match(workspaceSource, /<NotificationControlPanel[\s\S]*workflowKey="approvals"[\s\S]*presentation="dialog"[\s\S]*open=\{notificationDialogOpen\}/)
+  assert.doesNotMatch(workspaceSource, /notificationControlPlaneAvailability\.status !== "enabled"/)
+  assert.doesNotMatch(workspaceSource, /!canonicalNotificationEnabled[\s\S]{0,120}<NotificationControlPanel/)
+  assert.doesNotMatch(workspaceSource, /get_notification_runtime_flags_v1|NEXT_PUBLIC_NOTIFICATION_CONTROL_PLANE/)
+})
+
 test("approval progress counts completed and not-applicable items as resolved", () => {
   assert.match(workspaceSource, /const skipped = items\.filter\(\(item\) => checklistState\(item\) === "na"\)\.length/)
   assert.match(workspaceSource, /const resolved = done \+ skipped/)

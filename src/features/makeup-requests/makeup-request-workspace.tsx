@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { NotificationControlPanel, useNotificationControlPlaneAvailability } from "@/features/notifications/notification-control-panel"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
 import {
@@ -1787,6 +1788,9 @@ function hasSlotRoomCollision(
 
 export function MakeupRequestWorkspace() {
   const { user, role, loading: authLoading, session } = useAuth()
+  const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
+  const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
+  const legacyNotificationEnabled = notificationControlPlaneAvailability.status === "disabled"
   const [view, setView] = useState<MakeupRequestView>("mine")
   const [data, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
@@ -1828,6 +1832,7 @@ export function MakeupRequestWorkspace() {
   const currentUserId = user?.id || ""
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
   const isManager = canUserManage(role)
+  const showNotificationSettingsLauncher = legacyNotificationEnabled || (canonicalNotificationEnabled && isManager)
   const editingRequest = useMemo(() => (
     data.requests.find((request) => request.id === editingRequestId) || null
   ), [data.requests, editingRequestId])
@@ -2448,10 +2453,20 @@ export function MakeupRequestWorkspace() {
             })}
           </div>
           <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="outline" size="sm" className="size-8 px-0" onClick={() => setNotificationDialogOpen(true)} aria-label="휴보강 알림 설정" title="휴보강 알림 설정">
-              <Bell className="size-4" aria-hidden="true" />
-              <span className="sr-only">휴보강 알림 설정</span>
-            </Button>
+            {showNotificationSettingsLauncher ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="size-8 px-0"
+                onClick={() => setNotificationDialogOpen(true)}
+                aria-label="휴보강 알림 설정"
+                title="휴보강 알림 설정"
+              >
+                <Bell className="size-4" aria-hidden="true" />
+                <span className="sr-only">휴보강 알림 설정</span>
+              </Button>
+            ) : null}
             <Button type="button" size="sm" onClick={openRequestDialog}>
               <Plus className="size-4" aria-hidden="true" />
               휴보강 신청
@@ -2782,6 +2797,14 @@ export function MakeupRequestWorkspace() {
         </DialogContent>
       </Dialog>
 
+      {canonicalNotificationEnabled ? (
+        <NotificationControlPanel
+          workflowKey="makeup_requests"
+          presentation="dialog"
+          open={notificationDialogOpen}
+          onOpenChange={setNotificationDialogOpen}
+        />
+      ) : legacyNotificationEnabled ? (
       <Dialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
         <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
@@ -3040,7 +3063,9 @@ export function MakeupRequestWorkspace() {
           </div>
         </DialogContent>
       </Dialog>
+      ) : null}
 
+      {legacyNotificationEnabled ? (
       <Dialog open={Boolean(selectedNotificationSetting)} onOpenChange={(open) => {
         if (!open) closeNotificationTemplateEditor()
       }}>
@@ -3109,6 +3134,7 @@ export function MakeupRequestWorkspace() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      ) : null}
 
       <Dialog open={Boolean(approvalRequest)} onOpenChange={(open) => {
         if (!open) closeApprovalDialog()

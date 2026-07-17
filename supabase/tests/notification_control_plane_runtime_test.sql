@@ -1,14 +1,14 @@
 begin;
-select no_plan();
+select plan(222);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
 set local lock_timeout = '5s';
 set constraints all deferred;
 
--- Task 6 owns only the settings/runtime-flag boundary and the atomic
--- connection metadata mutations. Delivery and orchestration worker RPCs are
--- deliberately tested in the Task 7 packet.
+-- Task 6 owns the settings/runtime-flag boundary and atomic connection
+-- metadata mutations. Task 7 adds delivery/orchestration worker RPCs. Task 8
+-- adds the closed settings registry, baseline import, and final runtime marker.
 
 select has_function(
   'public',
@@ -21,6 +21,12 @@ select has_function(
   'save_notification_control_plane_v1',
   array['text', 'jsonb', 'jsonb', 'uuid'],
   'settings save RPC exists'
+);
+select has_function(
+  'public',
+  'save_notification_control_plane_with_override_v1',
+  array['text', 'jsonb', 'jsonb', 'uuid', 'uuid', 'jsonb'],
+  'conflict override save RPC exists'
 );
 select has_function(
   'public',
@@ -82,6 +88,331 @@ select has_function(
   array['text'],
   'server Google Chat readiness validator owns audience-to-connection mapping'
 );
+select has_table(
+  'dashboard_private',
+  'notification_settings_ui_registry',
+  'closed notification settings UI registry exists'
+);
+select has_table(
+  'dashboard_private',
+  'notification_settings_import_metadata',
+  'notification settings baseline import metadata exists'
+);
+select has_function(
+  'dashboard_private',
+  'notification_seed_workflow_settings_v1',
+  array[]::text[],
+  'idempotent settings seed helper exists'
+);
+select has_function(
+  'public',
+  'common_notification_control_plane_runtime_version',
+  array[]::text[],
+  'final common notification runtime marker exists'
+);
+
+select is(
+  (
+    select pg_catalog.count(*)
+    from dashboard_private.notification_settings_ui_registry
+  ),
+  165::bigint,
+  'closed registry contains only the approved Task 8 baseline cells'
+);
+select results_eq(
+  $$
+    select distinct registry.workflow_key, registry.workflow_label, registry.workflow_sort
+    from dashboard_private.notification_settings_ui_registry registry
+    order by registry.workflow_sort
+  $$,
+  $$ values
+    ('tasks'::text, '할 일'::text, 1),
+    ('word_retests'::text, '영어 단어 재시험'::text, 2),
+    ('registration'::text, '등록'::text, 3),
+    ('transfer'::text, '전반'::text, 4),
+    ('withdrawal'::text, '퇴원'::text, 5),
+    ('makeup_requests'::text, '휴보강'::text, 6),
+    ('approvals'::text, '전자결재'::text, 7)
+  $$,
+  'registry preserves the canonical seven-workflow Korean order'
+);
+select is_empty($$
+  select registry.event_key, registry.audience_key, registry.channel_key
+  from dashboard_private.notification_settings_ui_registry registry
+  where registry.workflow_key = 'registration'
+    and not (
+      registry.event_key in (
+        'registration.case_created',
+        'registration.registration_completed',
+        'registration.case_closed'
+      )
+      and registry.audience_key = 'management_team'
+      and registry.channel_key = 'google_chat'
+    )
+$$, 'registration baseline exposes only the three proven management Chat cells');
+select is_empty($$
+  select registry.event_key, registry.audience_key, registry.channel_key
+  from dashboard_private.notification_settings_ui_registry registry
+  where registry.workflow_key in ('transfer', 'withdrawal')
+    and not (
+      registry.event_key in (
+        registry.workflow_key || '.submitted',
+        registry.workflow_key || '.completed'
+      )
+      and registry.audience_key = 'management_team'
+      and registry.channel_key = 'google_chat'
+    )
+$$, 'transfer and withdrawal import only submitted/completed management Chat intent');
+select is_empty($$
+  select registry.workflow_key, registry.event_key
+  from dashboard_private.notification_settings_ui_registry registry
+  join dashboard_private.notification_rules rule_row on rule_row.id = registry.rule_id
+  where registry.workflow_key in ('tasks', 'word_retests', 'approvals')
+    and rule_row.enabled
+$$, 'tasks, word retests, and approvals start with every approved rule disabled');
+select ok(
+  (
+    select pg_catalog.count(*) = 42
+      and pg_catalog.count(*) filter (where metadata.import_state = 'inactive') = 6
+      and pg_catalog.count(*) filter (where metadata.import_state = 'active') = 36
+    from dashboard_private.notification_settings_import_metadata metadata
+    where metadata.source_table = 'public.makeup_notification_settings'
+  ),
+  'makeup baseline records every persisted source row plus inactive import metadata'
+);
+select is_empty($$
+  select
+    metadata.source_key,
+    pg_catalog.jsonb_array_length(metadata.mapped_rule_ids) as actual_rule_count
+  from dashboard_private.notification_settings_import_metadata metadata
+  where metadata.source_table = 'public.makeup_notification_settings'
+    and pg_catalog.jsonb_array_length(metadata.mapped_rule_ids) <> case
+      when metadata.source_snapshot ->> 'channel' = 'dashboard_personal'
+        and metadata.source_snapshot ->> 'trigger_kind' in (
+          'approved',
+          'completed',
+          'canceled'
+        ) then 2
+      when metadata.source_snapshot ->> 'trigger_kind' in ('returned', 'rejected')
+        and metadata.source_snapshot ->> 'channel' in (
+          'dashboard_management',
+          'google_chat_executive',
+          'google_chat_admin'
+        ) then 0
+      else 1
+    end
+$$, 'makeup persisted sources retain the exact source-specific mapped rule cardinality');
+select is_empty($$
+  select
+    metadata.source_key,
+    rule_row.id as rule_id
+  from dashboard_private.notification_settings_import_metadata metadata
+  cross join lateral pg_catalog.jsonb_array_elements_text(
+    metadata.mapped_rule_ids
+  ) mapped_rule(rule_id_text)
+  join dashboard_private.notification_rules rule_row
+    on rule_row.id::text = mapped_rule.rule_id_text
+  join public.makeup_notification_settings legacy_setting
+    on legacy_setting.trigger_kind = metadata.source_snapshot ->> 'trigger_kind'
+   and legacy_setting.channel = metadata.source_snapshot ->> 'channel'
+  where metadata.source_table = 'public.makeup_notification_settings'
+    and rule_row.enabled is distinct from legacy_setting.enabled
+$$, 'makeup imported rule enabled values equal every persisted mapped legacy source');
+select is_empty($$
+  select registry.rule_id
+  from dashboard_private.notification_settings_ui_registry registry
+  left join dashboard_private.notification_rules rule_row
+    on rule_row.id = registry.rule_id
+  left join dashboard_private.notification_templates template_row
+    on template_row.id = rule_row.active_template_id
+  left join public.makeup_notification_settings legacy_renderer
+    on legacy_renderer.trigger_kind = registry.source_trigger_kind
+   and legacy_renderer.channel = 'dashboard_personal'
+  where registry.workflow_key = 'makeup_requests'
+    and (
+      rule_row.id is null
+      or template_row.id is null
+      or template_row.version <> 1
+      or legacy_renderer.trigger_kind is null
+      or template_row.title_template is distinct from legacy_renderer.title_template
+      or template_row.body_template is distinct from legacy_renderer.body_template
+    )
+$$, 'makeup active version-one templates preserve the same-trigger legacy dashboard-personal renderer');
+select is_empty($$
+  select metadata.source_key
+  from dashboard_private.notification_settings_import_metadata metadata
+  where metadata.source_revision is null
+    or metadata.source_checksum !~ '^[0-9a-f]{64}$'
+    or pg_catalog.jsonb_typeof(metadata.mapped_rule_ids) <> 'array'
+    or (
+      metadata.import_state = 'active'
+      and pg_catalog.jsonb_array_length(metadata.mapped_rule_ids) = 0
+    )
+    or (
+      metadata.import_state = 'inactive'
+      and (
+        metadata.inactive_reason <> 'inactive_not_used_by_legacy_sender'
+        or pg_catalog.jsonb_array_length(metadata.mapped_rule_ids) <> 0
+      )
+    )
+$$, 'makeup import stores stable source revisions, checksums, mappings, and inactive reasons');
+select is_empty($$
+  select metadata.source_key, mapped_rule.rule_id_text
+  from dashboard_private.notification_settings_import_metadata metadata
+  cross join lateral pg_catalog.jsonb_array_elements_text(
+    metadata.mapped_rule_ids
+  ) mapped_rule(rule_id_text)
+  left join dashboard_private.notification_settings_ui_registry registry
+    on registry.rule_id::text = mapped_rule.rule_id_text
+  where metadata.source_table = 'public.makeup_notification_settings'
+    and (
+      registry.rule_id is null
+      or not (
+        (
+          metadata.source_snapshot ->> 'channel' = 'dashboard_personal'
+          and registry.channel_key = 'in_app'
+          and registry.audience_key in ('requester_profile', 'approver_profile')
+        )
+        or (
+          metadata.source_snapshot ->> 'channel' = 'dashboard_management'
+          and registry.channel_key = 'in_app'
+          and registry.audience_key = 'management_team'
+        )
+        or (
+          metadata.source_snapshot ->> 'channel' = 'google_chat_executive'
+          and registry.channel_key = 'google_chat'
+          and registry.audience_key = 'executive_team'
+        )
+        or (
+          metadata.source_snapshot ->> 'channel' = 'google_chat_admin'
+          and registry.channel_key = 'google_chat'
+          and registry.audience_key = 'management_team'
+        )
+        or (
+          metadata.source_snapshot ->> 'channel' in (
+            'google_chat_english',
+            'google_chat_math'
+          )
+          and registry.channel_key = 'google_chat'
+          and registry.audience_key = 'subject_team'
+        )
+      )
+    )
+$$, 'legacy source channels map only to their exact approved registry cells');
+select is_empty($$
+  select registry.rule_id
+  from dashboard_private.notification_settings_ui_registry registry
+  join dashboard_private.notification_rules rule_row on rule_row.id = registry.rule_id
+  join dashboard_private.notification_templates template_row
+    on template_row.rule_id = rule_row.id
+   and template_row.version = 1
+  where rule_row.created_by is not null
+    or rule_row.created_actor_kind <> 'system'
+    or template_row.created_by is not null
+    or template_row.created_actor_kind <> 'system'
+    or template_row.id <> dashboard_private.notification_deterministic_uuid_v1(
+      'notification-template-v1',
+      registry.rule_id::text || '|1'
+    )
+$$, 'seed rules and immutable version-one templates use deterministic IDs and system actors');
+
+create temporary table notification_seed_idempotency_results (
+  result_order integer primary key,
+  payload jsonb not null
+) on commit drop;
+insert into notification_seed_idempotency_results(result_order, payload)
+values (1, dashboard_private.notification_seed_workflow_settings_v1());
+insert into notification_seed_idempotency_results(result_order, payload)
+values (2, dashboard_private.notification_seed_workflow_settings_v1());
+select is(
+  (select payload from notification_seed_idempotency_results where result_order = 2),
+  (select payload from notification_seed_idempotency_results where result_order = 1),
+  'notification seed rerun keeps rule/template/import counts and checksums stable'
+);
+select is_empty($$
+  select flag_row.flag_key
+  from dashboard_private.notification_runtime_flags flag_row
+  where flag_row.enabled
+$$, 'all twelve notification runtime flags remain false after settings seed');
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::regprocedure
+    ),
+    'notification_rule_not_in_registry'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::regprocedure
+    ),
+    'notification_settings_ui_registry'
+  ) > 0,
+  'save rejects a notification_rule_not_in_registry before delegating to mutation logic'
+);
+select ok(
+  not pg_catalog.has_table_privilege(
+    'anon',
+    'dashboard_private.notification_settings_ui_registry',
+    'SELECT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated',
+    'dashboard_private.notification_settings_ui_registry',
+    'SELECT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'service_role',
+    'dashboard_private.notification_settings_ui_registry',
+    'SELECT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'anon',
+    'dashboard_private.notification_settings_import_metadata',
+    'SELECT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated',
+    'dashboard_private.notification_settings_import_metadata',
+    'SELECT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'service_role',
+    'dashboard_private.notification_settings_import_metadata',
+    'SELECT'
+  ),
+  'registry and import evidence remain private behind the role-checked RPCs'
+);
+select ok(
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.common_notification_control_plane_runtime_version()',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'service_role',
+    'public.common_notification_control_plane_runtime_version()',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.common_notification_control_plane_runtime_version()',
+    'EXECUTE'
+  )
+  and not exists (
+    select 1
+    from pg_catalog.pg_proc function_row
+    join pg_catalog.pg_namespace namespace_row
+      on namespace_row.oid = function_row.pronamespace
+    where namespace_row.nspname = 'public'
+      and function_row.proname = 'common_notification_control_plane_runtime_version'
+      and function_row.proowner <> (
+        select role_row.oid
+        from pg_catalog.pg_roles role_row
+        where role_row.rolname = 'postgres'
+      )
+  ),
+  'runtime marker is postgres-owned and executable only by authenticated/service role'
+);
 
 select ok(
   pg_catalog.has_function_privilege(
@@ -98,6 +429,24 @@ select ok(
     'EXECUTE'
   ),
   'authenticated can call the role-checked settings saver'
+);
+select ok(
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.save_notification_control_plane_with_override_v1(text,jsonb,jsonb,uuid,uuid,jsonb)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.save_notification_control_plane_with_override_v1(text,jsonb,jsonb,uuid,uuid,jsonb)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'service_role',
+    'public.save_notification_control_plane_with_override_v1(text,jsonb,jsonb,uuid,uuid,jsonb)',
+    'EXECUTE'
+  ),
+  'only authenticated callers can enter the role-checked conflict override save'
 );
 select ok(
   pg_catalog.has_function_privilege(
@@ -145,6 +494,11 @@ select ok(
   and not pg_catalog.has_function_privilege(
     'anon',
     'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.save_notification_control_plane_with_override_v1(text,jsonb,jsonb,uuid,uuid,jsonb)',
     'EXECUTE'
   )
   and not pg_catalog.has_function_privilege(
@@ -422,34 +776,61 @@ select ok(
     pg_catalog.pg_get_functiondef(
       'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
     ),
+    'auth.uid()'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+    ),
+    'current_dashboard_role'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+    ),
+    'notification_settings_ui_registry'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+    ),
+    'save_notification_control_plane_unchecked_v1'
+  ) > 0,
+  'public settings save wrapper authenticates before registry validation and delegates to the private mutation body'
+);
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'dashboard_private.save_notification_control_plane_unchecked_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+    ),
     'notification-control-plane-workflow:'
   ) > pg_catalog.strpos(
     pg_catalog.pg_get_functiondef(
-      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+      'dashboard_private.save_notification_control_plane_unchecked_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
     ),
     'notification-request:'
   )
   and pg_catalog.strpos(
     pg_catalog.pg_get_functiondef(
-      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+      'dashboard_private.save_notification_control_plane_unchecked_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
     ),
     'notification_template_content_valid_v1'
   ) > 0
   and pg_catalog.strpos(
     pg_catalog.pg_get_functiondef(
-      'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+      'dashboard_private.save_notification_control_plane_unchecked_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
     ),
     'notification_google_chat_audience_ready_v1'
   ) > 0
   and pg_catalog.strpos(
     pg_catalog.lower(
       pg_catalog.pg_get_functiondef(
-        'public.save_notification_control_plane_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
+        'dashboard_private.save_notification_control_plane_unchecked_v1(text,jsonb,jsonb,uuid)'::pg_catalog.regprocedure
       )
     ),
     'for share of connection_row'
   ) > 0,
-  'settings save locks by shared workflow contract and locks connection rows before server-authoritative validation'
+  'private settings save body locks by shared workflow contract and locks connection rows before server-authoritative validation'
 );
 
 create or replace function pg_temp.notification_runtime_set_actor(p_actor uuid)
@@ -506,6 +887,128 @@ exception
     return sqlerrm ~ p_message_pattern;
 end;
 $$;
+
+create or replace function pg_temp.notification_runtime_seed_rule_id(
+  p_fixture_key text
+)
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select registry.rule_id
+  from dashboard_private.notification_settings_ui_registry registry
+  where (
+      p_fixture_key = 'task_chat'
+      and registry.workflow_key = 'tasks'
+      and registry.event_key = 'task.created'
+      and registry.audience_key = 'management_team'
+      and registry.channel_key = 'google_chat'
+    )
+    or (
+      p_fixture_key = 'task_due'
+      and registry.workflow_key = 'tasks'
+      and registry.event_key = 'task.due_changed'
+      and registry.audience_key = 'primary_assignee'
+      and registry.channel_key = 'in_app'
+    )
+    or (
+      p_fixture_key = 'task_completed_secondary'
+      and registry.workflow_key = 'tasks'
+      and registry.event_key = 'task.completed'
+      and registry.audience_key = 'secondary_assignee'
+      and registry.channel_key = 'in_app'
+    )
+    or (
+      p_fixture_key = 'registration_chat'
+      and registry.workflow_key = 'registration'
+      and registry.event_key = 'registration.case_created'
+      and registry.audience_key = 'management_team'
+      and registry.channel_key = 'google_chat'
+    )
+  order by registry.rule_id
+  limit 1;
+$$;
+
+create or replace function pg_temp.notification_runtime_expected_revision(
+  p_fixture_key text,
+  p_revision text
+)
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    pg_temp.notification_runtime_seed_rule_id(p_fixture_key)::text,
+    p_revision
+  );
+$$;
+
+create or replace function pg_temp.notification_runtime_rule_patch(
+  p_fixture_key text,
+  p_rule_patch jsonb
+)
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'rules',
+    pg_catalog.jsonb_build_object(
+      pg_temp.notification_runtime_seed_rule_id(p_fixture_key)::text,
+      p_rule_patch
+    )
+  );
+$$;
+
+grant execute on function pg_temp.notification_runtime_seed_rule_id(text)
+  to authenticated;
+grant execute on function pg_temp.notification_runtime_expected_revision(text, text)
+  to authenticated;
+grant execute on function pg_temp.notification_runtime_rule_patch(text, jsonb)
+  to authenticated;
+
+-- Missing either English or math legacy source, or disagreeing enabled values,
+-- must stop the generic subject-team import for operator review.
+savepoint notification_runtime_subject_pair_missing;
+delete from public.makeup_notification_settings
+where trigger_kind = 'submitted'
+  and channel = 'google_chat_math';
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$select dashboard_private.notification_seed_workflow_settings_v1()$sql$,
+    'notification_makeup_subject_settings_review_required'
+  ),
+  'subject import rejects a missing English or math source row'
+);
+rollback to savepoint notification_runtime_subject_pair_missing;
+release savepoint notification_runtime_subject_pair_missing;
+
+savepoint notification_runtime_subject_pair_mismatch;
+update public.makeup_notification_settings
+set enabled = not enabled
+where trigger_kind = 'submitted'
+  and channel = 'google_chat_math';
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$select dashboard_private.notification_seed_workflow_settings_v1()$sql$,
+    'notification_makeup_subject_settings_review_required'
+  ),
+  'subject import rejects disagreeing English and math enabled values'
+);
+rollback to savepoint notification_runtime_subject_pair_mismatch;
+release savepoint notification_runtime_subject_pair_mismatch;
+
+select ok(
+  pg_temp.notification_runtime_seed_rule_id('task_chat') is not null
+  and pg_temp.notification_runtime_seed_rule_id('task_due') is not null
+  and pg_temp.notification_runtime_seed_rule_id('task_completed_secondary') is not null
+  and pg_temp.notification_runtime_seed_rule_id('registration_chat') is not null,
+  'runtime fixtures reuse seeded registry IDs for save and CAS coverage'
+);
 
 create temporary table notification_control_plane_runtime_results (
   result_key text primary key,
@@ -626,48 +1129,6 @@ insert into dashboard_private.notification_rules(
 )
 values
   (
-    '30000000-0000-4000-8000-000000000101',
-    'global',
-    'tasks',
-    'task.created',
-    'google_chat',
-    'management_team',
-    'immediate',
-    'immediate',
-    null,
-    null,
-    false,
-    '30000000-0000-4000-8000-000000000201',
-    1,
-    null,
-    'system',
-    null,
-    'system',
-    now(),
-    now()
-  ),
-  (
-    '30000000-0000-4000-8000-000000000102',
-    'global',
-    'tasks',
-    'task.due_changed',
-    'in_app',
-    'primary_assignee',
-    'immediate',
-    'immediate',
-    null,
-    null,
-    false,
-    '30000000-0000-4000-8000-000000000202',
-    1,
-    null,
-    'system',
-    null,
-    'system',
-    now(),
-    now()
-  ),
-  (
     '30000000-0000-4000-8000-000000000103',
     'global',
     'registration',
@@ -722,27 +1183,6 @@ values
     null,
     false,
     '30000000-0000-4000-8000-000000000205',
-    1,
-    null,
-    'system',
-    null,
-    'system',
-    now(),
-    now()
-  ),
-  (
-    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa106',
-    'global',
-    'tasks',
-    'task.completed',
-    'in_app',
-    'secondary_assignee',
-    'immediate',
-    'immediate',
-    null,
-    null,
-    false,
-    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa206',
     1,
     null,
     'system',
@@ -830,32 +1270,6 @@ insert into dashboard_private.notification_templates(
 )
 values
   (
-    '30000000-0000-4000-8000-000000000201',
-    '30000000-0000-4000-8000-000000000101',
-    1,
-    '새 할 일',
-    '새 할 일이 등록되었습니다.',
-    '[]'::jsonb,
-    1,
-    'runtime-fixture-task-created-v1',
-    null,
-    'system',
-    now()
-  ),
-  (
-    '30000000-0000-4000-8000-000000000202',
-    '30000000-0000-4000-8000-000000000102',
-    1,
-    '할 일 기한 변경',
-    '할 일 기한이 변경되었습니다.',
-    '[]'::jsonb,
-    1,
-    'runtime-fixture-task-due-v1',
-    null,
-    'system',
-    now()
-  ),
-  (
     '30000000-0000-4000-8000-000000000203',
     '30000000-0000-4000-8000-000000000103',
     1,
@@ -890,19 +1304,6 @@ values
     '[]'::jsonb,
     1,
     'runtime-fixture-makeup-subject-v1',
-    null,
-    'system',
-    now()
-  ),
-  (
-    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa206',
-    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa106',
-    1,
-    '별칭 방지 테스트',
-    'UUID 키는 소문자 정규형만 허용합니다.',
-    '[]'::jsonb,
-    1,
-    'runtime-fixture-canonical-uuid-v1',
     null,
     'system',
     now()
@@ -1583,7 +1984,7 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '1'),
         '{"rules":{}}'::jsonb,
         '30000000-0000-4000-8000-000000000301'
       )
@@ -1591,6 +1992,22 @@ select ok(
     'notification_access_denied'
   ),
   'viewer cannot save notification settings'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.save_notification_control_plane_with_override_v1(
+        'tasks',
+        '{"30000000-0000-4000-8000-000000009999":"1"}'::jsonb,
+        '{"rules":{"30000000-0000-4000-8000-000000009999":{"enabled":true}}}'::jsonb,
+        '30000000-0000-4000-8000-000000000340',
+        '30000000-0000-4000-8000-000000000341',
+        '["rules.30000000-0000-4000-8000-000000009999.enabled"]'::jsonb
+      )
+    $sql$,
+    'notification_access_denied'
+  ),
+  'viewer override save is rejected by authorization before registry validation'
 );
 select ok(
   pg_temp.notification_runtime_throws(
@@ -1639,7 +2056,7 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '1'),
         '{"rules":{}}'::jsonb,
         '30000000-0000-4000-8000-000000000302'
       )
@@ -1986,7 +2403,8 @@ select ok(
     from jsonb_array_elements(
       public.get_notification_control_plane_v1('tasks') -> 'rules'
     ) rule(value)
-    where rule.value ->> 'id' = '30000000-0000-4000-8000-000000000101'
+    where rule.value ->> 'id'
+        = pg_temp.notification_runtime_seed_rule_id('task_chat')::text
       and rule.value ->> 'revision' = '1'
       and rule.value -> 'template' ->> 'version' = '1'
   ),
@@ -2023,8 +2441,11 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000101":{"enabled":true,"channel_key":"web_push"}}}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '1'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"enabled":true,"channel_key":"web_push"}'::jsonb
+        ),
         '30000000-0000-4000-8000-000000000321'
       )
     $sql$,
@@ -2042,7 +2463,7 @@ select ok(
         '30000000-0000-4000-8000-000000000322'
       )
     $sql$,
-    'notification_rule_unknown'
+    'notification_rule_not_in_registry'
   ),
   'save rejects arbitrary rule identities'
 );
@@ -2051,12 +2472,37 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa106":"1","AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAA106":"1"}'::jsonb,
-        '{"rules":{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa106":{"enabled":true},"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAA106":{"enabled":true}}}'::jsonb,
+        pg_catalog.jsonb_build_object(
+          pg_temp.notification_runtime_seed_rule_id(
+            'task_completed_secondary'
+          )::text,
+          '1',
+          pg_catalog.upper(
+            pg_temp.notification_runtime_seed_rule_id(
+              'task_completed_secondary'
+            )::text
+          ),
+          '1'
+        ),
+        pg_catalog.jsonb_build_object(
+          'rules',
+          pg_catalog.jsonb_build_object(
+            pg_temp.notification_runtime_seed_rule_id(
+              'task_completed_secondary'
+            )::text,
+            '{"enabled":true}'::jsonb,
+            pg_catalog.upper(
+              pg_temp.notification_runtime_seed_rule_id(
+                'task_completed_secondary'
+              )::text
+            ),
+            '{"enabled":true}'::jsonb
+          )
+        ),
         '30000000-0000-4000-8000-000000000329'
       )
     $sql$,
-    'notification_patch_invalid'
+    'notification_rule_not_in_registry'
   ),
   'lowercase and uppercase aliases of one UUID are rejected as one invalid atomic request'
 );
@@ -2065,8 +2511,11 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000101":{"body_template":"{미등록} 알림"}}}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '1'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"body_template":"{미등록} 알림"}'::jsonb
+        ),
         '30000000-0000-4000-8000-000000000330'
       )
     $sql$,
@@ -2079,8 +2528,11 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'registration',
-        '{"30000000-0000-4000-8000-000000000103":"1"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000103":{"schedule_config":{"anchor_key":"appointment_scheduled_at","lead_minutes":0,"timezone":"Asia/Seoul"}}}}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('registration_chat', '1'),
+        pg_temp.notification_runtime_rule_patch(
+          'registration_chat',
+          '{"schedule_config":{"anchor_key":"appointment_scheduled_at","lead_minutes":0,"timezone":"Asia/Seoul"}}'::jsonb
+        ),
         '30000000-0000-4000-8000-000000000331'
       )
     $sql$,
@@ -2102,8 +2554,11 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000101":{"enabled":true}}}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '1'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"enabled":true}'::jsonb
+        ),
         '30000000-0000-4000-8000-000000000332'
       )
     $sql$,
@@ -2129,12 +2584,14 @@ select ok(
   and (
     select revision = 1 and not enabled
     from dashboard_private.notification_rules
-    where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa106'
+    where id = pg_temp.notification_runtime_seed_rule_id(
+      'task_completed_secondary'
+    )
   )
   and (
     select revision = 1 and not enabled
     from dashboard_private.notification_rules
-    where id = '30000000-0000-4000-8000-000000000103'
+    where id = pg_temp.notification_runtime_seed_rule_id('registration_chat')
   ),
   'canonical UUID, template, schedule, and connection validation failures roll back every receipt and rule mutation'
 );
@@ -2164,7 +2621,7 @@ select is(
   (
     select revision
     from dashboard_private.notification_rules
-    where id = '30000000-0000-4000-8000-000000000101'
+    where id = pg_temp.notification_runtime_seed_rule_id('task_chat')
   ),
   1::bigint,
   'no-op save does not increment a rule revision'
@@ -2174,8 +2631,8 @@ select is(
     select count(*)
     from dashboard_private.notification_templates
     where rule_id in (
-      '30000000-0000-4000-8000-000000000101',
-      '30000000-0000-4000-8000-000000000102'
+      pg_temp.notification_runtime_seed_rule_id('task_chat'),
+      pg_temp.notification_runtime_seed_rule_id('task_due')
     )
   ),
   2::bigint,
@@ -2210,8 +2667,11 @@ select
   'settings-change-first',
   public.save_notification_control_plane_v1(
     'tasks',
-    '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
-    '{"rules":{"30000000-0000-4000-8000-000000000101":{"title_template":"변경된 제목","body_template":"변경된 본문"}}}'::jsonb,
+    pg_temp.notification_runtime_expected_revision('task_chat', '1'),
+    pg_temp.notification_runtime_rule_patch(
+      'task_chat',
+      '{"title_template":"변경된 제목","body_template":"변경된 본문"}'::jsonb
+    ),
     '30000000-0000-4000-8000-000000000324'
   );
 insert into notification_control_plane_runtime_results(result_key, payload)
@@ -2219,8 +2679,11 @@ select
   'settings-change-replay',
   public.save_notification_control_plane_v1(
     'tasks',
-    '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
-    '{"rules":{"30000000-0000-4000-8000-000000000101":{"title_template":"변경된 제목","body_template":"변경된 본문"}}}'::jsonb,
+    pg_temp.notification_runtime_expected_revision('task_chat', '1'),
+    pg_temp.notification_runtime_rule_patch(
+      'task_chat',
+      '{"title_template":"변경된 제목","body_template":"변경된 본문"}'::jsonb
+    ),
     '30000000-0000-4000-8000-000000000324'
   );
 select is(
@@ -2241,8 +2704,11 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000101":{"title_template":"다른 제목"}}}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '1'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"title_template":"다른 제목"}'::jsonb
+        ),
         '30000000-0000-4000-8000-000000000324'
       )
     $sql$,
@@ -2256,7 +2722,7 @@ select is(
   (
     select revision
     from dashboard_private.notification_rules
-    where id = '30000000-0000-4000-8000-000000000101'
+    where id = pg_temp.notification_runtime_seed_rule_id('task_chat')
   ),
   2::bigint,
   'changed save increments its rule revision exactly once across replay'
@@ -2265,7 +2731,7 @@ select is(
   (
     select count(*)
     from dashboard_private.notification_templates
-    where rule_id = '30000000-0000-4000-8000-000000000101'
+    where rule_id = pg_temp.notification_runtime_seed_rule_id('task_chat')
   ),
   2::bigint,
   'changed template content creates exactly one immutable version'
@@ -2274,7 +2740,9 @@ select ok(
   exists (
     select 1
     from dashboard_private.notification_templates template
-    where template.rule_id = '30000000-0000-4000-8000-000000000101'
+    where template.rule_id = pg_temp.notification_runtime_seed_rule_id(
+      'task_chat'
+    )
       and template.version = 2
       and template.title_template = '변경된 제목'
       and template.body_template = '변경된 본문'
@@ -2288,7 +2756,9 @@ select is(
     select count(*)
     from dashboard_private.notification_rule_reconciliation_jobs
     where workflow_key = 'tasks'
-      and rule_revision_map ->> '30000000-0000-4000-8000-000000000101' = '2'
+      and rule_revision_map ->> pg_temp.notification_runtime_seed_rule_id(
+        'task_chat'
+      )::text = '2'
   ),
   1::bigint,
   'changed save enqueues one captured rule-reconciliation job'
@@ -2332,8 +2802,11 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"1"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000101":{"enabled":true}}}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '1'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"enabled":true}'::jsonb
+        ),
         '30000000-0000-4000-8000-000000000325'
       )
     $sql$,
@@ -2346,8 +2819,21 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"2","30000000-0000-4000-8000-000000000102":"99"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000101":{"enabled":true},"30000000-0000-4000-8000-000000000102":{"enabled":true}}}'::jsonb,
+        pg_catalog.jsonb_build_object(
+          pg_temp.notification_runtime_seed_rule_id('task_chat')::text,
+          '2',
+          pg_temp.notification_runtime_seed_rule_id('task_due')::text,
+          '99'
+        ),
+        pg_catalog.jsonb_build_object(
+          'rules',
+          pg_catalog.jsonb_build_object(
+            pg_temp.notification_runtime_seed_rule_id('task_chat')::text,
+            '{"enabled":true}'::jsonb,
+            pg_temp.notification_runtime_seed_rule_id('task_due')::text,
+            '{"enabled":true}'::jsonb
+          )
+        ),
         '30000000-0000-4000-8000-000000000326'
       )
     $sql$,
@@ -2361,22 +2847,22 @@ select ok(
   not (
     select enabled
     from dashboard_private.notification_rules
-    where id = '30000000-0000-4000-8000-000000000101'
+    where id = pg_temp.notification_runtime_seed_rule_id('task_chat')
   )
   and not (
     select enabled
     from dashboard_private.notification_rules
-    where id = '30000000-0000-4000-8000-000000000102'
+    where id = pg_temp.notification_runtime_seed_rule_id('task_due')
   )
   and (
     select revision
     from dashboard_private.notification_rules
-    where id = '30000000-0000-4000-8000-000000000101'
+    where id = pg_temp.notification_runtime_seed_rule_id('task_chat')
   ) = 2
   and (
     select revision
     from dashboard_private.notification_rules
-    where id = '30000000-0000-4000-8000-000000000102'
+    where id = pg_temp.notification_runtime_seed_rule_id('task_due')
   ) = 1,
   'revision conflict rolls back every rule/template/audit/job mutation atomically'
 );
@@ -2401,12 +2887,205 @@ select lives_ok(
   $sql$
     select public.save_notification_control_plane_v1(
       'tasks',
-      '{"30000000-0000-4000-8000-000000000102":"1"}'::jsonb,
-      '{"rules":{"30000000-0000-4000-8000-000000000102":{"enabled":true}}}'::jsonb,
+      pg_temp.notification_runtime_expected_revision('task_due', '1'),
+      pg_temp.notification_runtime_rule_patch(
+        'task_due',
+        '{"enabled":true}'::jsonb
+      ),
       '30000000-0000-4000-8000-000000000327'
     )
   $sql$,
   'staff can commit a valid explicit settings patch'
+);
+
+reset role;
+select pg_temp.notification_runtime_set_actor(
+  '30000000-0000-4000-8000-000000000001'
+);
+set local role authenticated;
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.save_notification_control_plane_with_override_v1(
+        'tasks',
+        pg_temp.notification_runtime_expected_revision('task_chat', '2'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"enabled":true}'::jsonb
+        ),
+        '30000000-0000-4000-8000-000000000335',
+        '30000000-0000-4000-8000-000000000335',
+        pg_catalog.jsonb_build_array(
+          'rules.'
+            || pg_temp.notification_runtime_seed_rule_id('task_chat')::text
+            || '.enabled'
+        )
+      )
+    $sql$,
+    'notification_conflict_override_invalid'
+  ),
+  'override requires distinct save and override request IDs'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.save_notification_control_plane_with_override_v1(
+        'tasks',
+        '{"30000000-0000-4000-8000-000000009999":"1"}'::jsonb,
+        '{"rules":{"30000000-0000-4000-8000-000000009999":{"enabled":true}}}'::jsonb,
+        '30000000-0000-4000-8000-000000000336',
+        '30000000-0000-4000-8000-000000000337',
+        '["rules.30000000-0000-4000-8000-000000009999.enabled"]'::jsonb
+      )
+    $sql$,
+    'notification_rule_not_in_registry'
+  ),
+  'registry-external rule is rejected before the unchecked save implementation'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.save_notification_control_plane_with_override_v1(
+        'tasks',
+        pg_temp.notification_runtime_expected_revision('task_chat', '2'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"channel_key":"google_chat"}'::jsonb
+        ),
+        '30000000-0000-4000-8000-000000000338',
+        '30000000-0000-4000-8000-000000000339',
+        pg_catalog.jsonb_build_array(
+          'rules.'
+            || pg_temp.notification_runtime_seed_rule_id('task_chat')::text
+            || '.channelKey'
+        )
+      )
+    $sql$,
+    'notification_conflict_override_invalid'
+  ),
+  'override rejects conflicting fields outside the safe editable field registry'
+);
+
+insert into notification_control_plane_runtime_results(result_key, payload)
+select
+  'settings-override-first',
+  public.save_notification_control_plane_with_override_v1(
+    'tasks',
+    pg_temp.notification_runtime_expected_revision('task_chat', '2'),
+    pg_temp.notification_runtime_rule_patch(
+      'task_chat',
+      '{"enabled":true}'::jsonb
+    ),
+    '30000000-0000-4000-8000-000000000333',
+    '30000000-0000-4000-8000-000000000334',
+    pg_catalog.jsonb_build_array(
+      'rules.'
+        || pg_temp.notification_runtime_seed_rule_id('task_chat')::text
+        || '.enabled'
+    )
+  );
+insert into notification_control_plane_runtime_results(result_key, payload)
+select
+  'settings-override-replay',
+  public.save_notification_control_plane_with_override_v1(
+    'tasks',
+    pg_temp.notification_runtime_expected_revision('task_chat', '2'),
+    pg_temp.notification_runtime_rule_patch(
+      'task_chat',
+      '{"enabled":true}'::jsonb
+    ),
+    '30000000-0000-4000-8000-000000000333',
+    '30000000-0000-4000-8000-000000000334',
+    pg_catalog.jsonb_build_array(
+      'rules.'
+        || pg_temp.notification_runtime_seed_rule_id('task_chat')::text
+        || '.enabled'
+    )
+  );
+select ok(
+  (
+    select payload
+    from notification_control_plane_runtime_results
+    where result_key = 'settings-override-replay'
+  ) = (
+    select payload
+    from notification_control_plane_runtime_results
+    where result_key = 'settings-override-first'
+  )
+  and (
+    select count(*) = 1
+    from dashboard_private.notification_audit_logs audit
+    where audit.request_id = '30000000-0000-4000-8000-000000000334'
+      and audit.action = 'revision_conflict_overridden'
+      and audit.actor_profile_id = '30000000-0000-4000-8000-000000000001'
+      and audit.before_summary is null
+      and audit.after_summary = pg_catalog.jsonb_build_object(
+        'conflicting_fields',
+        pg_catalog.jsonb_build_array(
+          'rules.'
+            || pg_temp.notification_runtime_seed_rule_id('task_chat')::text
+            || '.enabled'
+        ),
+        'save_request_id',
+        '30000000-0000-4000-8000-000000000333'::uuid
+      )
+  )
+  and (
+    select count(*) = 2
+    from dashboard_private.notification_request_ledger ledger
+    where (
+      ledger.request_id = '30000000-0000-4000-8000-000000000333'
+      and ledger.request_kind = 'notification_settings_save'
+    ) or (
+      ledger.request_id = '30000000-0000-4000-8000-000000000334'
+      and ledger.request_kind = 'notification_revision_conflict_override'
+    )
+  ),
+  'override request replays one response and writes one safe conflict audit'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.save_notification_control_plane_with_override_v1(
+        'tasks',
+        pg_temp.notification_runtime_expected_revision('task_chat', '2'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"enabled":false}'::jsonb
+        ),
+        '30000000-0000-4000-8000-000000000333',
+        '30000000-0000-4000-8000-000000000334',
+        pg_catalog.jsonb_build_array(
+          'rules.'
+            || pg_temp.notification_runtime_seed_rule_id('task_chat')::text
+            || '.enabled'
+        )
+      )
+    $sql$,
+    'idempotency_key_reused'
+  ),
+  'override request ID rejects a changed fingerprint'
+);
+
+reset role;
+select ok(
+  (
+    select enabled and revision = 3
+    from dashboard_private.notification_rules
+    where id = pg_temp.notification_runtime_seed_rule_id('task_chat')
+  )
+  and not exists (
+    select 1
+    from dashboard_private.notification_request_ledger ledger
+    where ledger.request_id in (
+      '30000000-0000-4000-8000-000000000335',
+      '30000000-0000-4000-8000-000000000336',
+      '30000000-0000-4000-8000-000000000337',
+      '30000000-0000-4000-8000-000000000338',
+      '30000000-0000-4000-8000-000000000339'
+    )
+  ),
+  'invalid override attempts leave no rule or request-ledger mutation'
 );
 
 reset role;
@@ -2424,8 +3103,11 @@ select ok(
     $sql$
       select public.save_notification_control_plane_v1(
         'tasks',
-        '{"30000000-0000-4000-8000-000000000101":"2"}'::jsonb,
-        '{"rules":{"30000000-0000-4000-8000-000000000101":{"enabled":true}}}'::jsonb,
+        pg_temp.notification_runtime_expected_revision('task_chat', '2'),
+        pg_temp.notification_runtime_rule_patch(
+          'task_chat',
+          '{"enabled":true}'::jsonb
+        ),
         '30000000-0000-4000-8000-000000000328'
       )
     $sql$,

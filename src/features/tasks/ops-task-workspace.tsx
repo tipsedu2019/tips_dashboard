@@ -26,6 +26,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import { NotificationControlPanel, useNotificationControlPlaneAvailability } from "@/features/notifications/notification-control-panel"
+import type { NotificationWorkflowKey } from "@/features/notifications/notification-control-plane-types"
 import { useAuth } from "@/providers/auth-provider"
 
 import {
@@ -175,6 +177,13 @@ type RegistrationSubjectTrackFixtureModule = typeof import("./registration-track
 type RegistrationVisitNotificationTarget = { appointmentId: string; notificationRevision: number }
 
 type WorkspaceKey = "todo" | "registration" | "transfer" | "withdrawal" | "word_retest"
+const WORKSPACE_NOTIFICATION_WORKFLOW_KEY = {
+  todo: "tasks",
+  word_retest: "word_retests",
+  registration: "registration",
+  transfer: "transfer",
+  withdrawal: "withdrawal",
+} as const satisfies Record<WorkspaceKey, NotificationWorkflowKey>
 type ViewKey = "all" | "status" | "assignee" | "calendar"
 type TodoViewKey = "inbox" | "sent" | "completed"
 type TodoSortKey = "status" | "priority" | "due"
@@ -8627,6 +8636,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? searchParams.get("studentId") || ""
     : ""
   const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()
+  const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
+  const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
+  const legacyNotificationEnabled = notificationControlPlaneAvailability.status === "disabled"
+  const notificationWorkflowKey = WORKSPACE_NOTIFICATION_WORKFLOW_KEY[workspace]
+  const showNotificationSettingsLauncher = (canManageAll || isStaff)
+  const showLegacyNotificationSettingsLauncher = legacyNotificationEnabled || (canonicalNotificationEnabled && showNotificationSettingsLauncher)
   const currentUserId = user?.id || ""
   const registrationFixtureValue = searchParams.get("fixture")
   const registrationFixtureRequested = isRegistrationWorkspace
@@ -8711,6 +8726,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [withdrawalNotificationOpen, setWithdrawalNotificationOpen] = useState(false)
   const [transferNotificationOpen, setTransferNotificationOpen] = useState(false)
   const [registrationNotificationOpen, setRegistrationNotificationOpen] = useState(false)
+  const [canonicalNotificationOpen, setCanonicalNotificationOpen] = useState(false)
   const [registrationProcessManualOpen, setRegistrationProcessManualOpen] = useState(false)
   const [registrationCustomerMessageTask, setRegistrationCustomerMessageTask] = useState<OpsTask | null>(null)
   const [withdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
@@ -11638,13 +11654,28 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 <span className="sr-only">등록 프로세스 &amp; 매뉴얼</span>
               </Button>
             )}
-            {!registrationFixtureEnabled && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace) && (
+            {showNotificationSettingsLauncher && canonicalNotificationEnabled && (isTodoWorkspace || isWordRetestWorkspace) ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setCanonicalNotificationOpen(true)}
+                aria-label={isTodoWorkspace ? "할 일 알림 설정" : "영어 단어 재시험 알림 설정"}
+                title={isTodoWorkspace ? "할 일 알림 설정" : "영어 단어 재시험 알림 설정"}
+                className="size-8 px-0"
+              >
+                <Bell className="size-4" aria-hidden="true" />
+                <span className="sr-only">{isTodoWorkspace ? "할 일 알림 설정" : "영어 단어 재시험 알림 설정"}</span>
+              </Button>
+            ) : null}
+            {!registrationFixtureEnabled && showLegacyNotificationSettingsLauncher && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace) && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  if (isRegistrationWorkspace) setRegistrationNotificationOpen(true)
+                  if (canonicalNotificationEnabled) setCanonicalNotificationOpen(true)
+                  else if (isRegistrationWorkspace) setRegistrationNotificationOpen(true)
                   else if (isTransferWorkspace) setTransferNotificationOpen(true)
                   else setWithdrawalNotificationOpen(true)
                 }}
@@ -12024,7 +12055,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         )}
       </div>
 
-      {isWithdrawalWorkspace && (
+      {canonicalNotificationEnabled ? (
+        <NotificationControlPanel
+          workflowKey={notificationWorkflowKey}
+          presentation="dialog"
+          open={workspaceDataBelongsToCurrentViewer && canonicalNotificationOpen}
+          onOpenChange={setCanonicalNotificationOpen}
+        />
+      ) : null}
+
+      {legacyNotificationEnabled && isWithdrawalWorkspace && (
         <WithdrawalNotificationSettingsDialog
           open={workspaceDataBelongsToCurrentViewer && withdrawalNotificationOpen}
           onOpenChange={setWithdrawalNotificationOpen}
@@ -12033,7 +12073,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         />
       )}
 
-      {isTransferWorkspace && (
+      {legacyNotificationEnabled && isTransferWorkspace && (
         <TransferNotificationSettingsDialog
           open={workspaceDataBelongsToCurrentViewer && transferNotificationOpen}
           onOpenChange={setTransferNotificationOpen}
@@ -12049,7 +12089,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         />
       )}
 
-      {isRegistrationWorkspace && (
+      {legacyNotificationEnabled && isRegistrationWorkspace && (
         <RegistrationNotificationSettingsDialog
           open={workspaceDataBelongsToCurrentViewer && registrationNotificationOpen}
           onOpenChange={setRegistrationNotificationOpen}

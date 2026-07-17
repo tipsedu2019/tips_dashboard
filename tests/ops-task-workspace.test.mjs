@@ -257,6 +257,28 @@ test("detail deletion clears the task deep link before opening the shared confir
   assert.match(deepLinkEffectSource, /\[[^\]]*deleteTarget[^\]]*\]\)/s);
 });
 
+test("all five task surfaces use one server-gated notification control panel with exact workflow keys", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(
+    source,
+    /import \{ NotificationControlPanel, useNotificationControlPlaneAvailability \} from "@\/features\/notifications\/notification-control-panel"/,
+  );
+  assert.match(source, /const WORKSPACE_NOTIFICATION_WORKFLOW_KEY = \{[\s\S]*todo: "tasks",[\s\S]*word_retest: "word_retests",[\s\S]*registration: "registration",[\s\S]*transfer: "transfer",[\s\S]*withdrawal: "withdrawal",[\s\S]*satisfies Record<WorkspaceKey, NotificationWorkflowKey>/);
+  assert.match(source, /const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability\(\)/);
+  assert.match(source, /const canonicalNotificationEnabled = notificationControlPlaneAvailability\.status === "enabled"/);
+  assert.match(source, /const legacyNotificationEnabled = notificationControlPlaneAvailability\.status === "disabled"/);
+  assert.match(source, /const showNotificationSettingsLauncher = \(canManageAll \|\| isStaff\)/);
+  assert.match(source, /const showLegacyNotificationSettingsLauncher = legacyNotificationEnabled \|\| \(canonicalNotificationEnabled && showNotificationSettingsLauncher\)/);
+  assert.doesNotMatch(source, /disabled=\{notificationControlPlaneAvailability\.status === "loading"\}/);
+  assert.match(source, /canonicalNotificationEnabled \? \([\s\S]*<NotificationControlPanel[\s\S]*workflowKey=\{notificationWorkflowKey\}[\s\S]*presentation="dialog"[\s\S]*open=\{workspaceDataBelongsToCurrentViewer && canonicalNotificationOpen\}/);
+  assert.match(source, /legacyNotificationEnabled && isWithdrawalWorkspace/);
+  assert.match(source, /legacyNotificationEnabled && isTransferWorkspace/);
+  assert.match(source, /legacyNotificationEnabled && isRegistrationWorkspace/);
+  assert.doesNotMatch(source, /!canonicalNotificationEnabled && is(?:Withdrawal|Transfer|Registration)Workspace/);
+  assert.doesNotMatch(source, /get_notification_runtime_flags_v1|NEXT_PUBLIC_NOTIFICATION_CONTROL_PLANE/);
+});
+
 test("todo form keeps requester metadata readonly and assignee selectors team-aware", async () => {
   const [workspaceSource, serviceSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),

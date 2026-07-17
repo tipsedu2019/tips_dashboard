@@ -1187,7 +1187,7 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.match(source, /registrationFixtureModule\.createRegistrationSubjectTrackFixtureAdapter/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationTrackList/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationTrackEditor/)
-  assert.match(source, /!registrationFixtureEnabled && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace\)/)
+  assert.match(source, /!registrationFixtureEnabled && showLegacyNotificationSettingsLauncher && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace\)/)
   assert.match(source, /showToolbarCreate = \(!registrationFixtureEnabled \|\| canManageRegistrationWorkflow\)/)
   assert.match(source, /canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/)
   assert.match(source, /resolveRegistrationSubjectTrackFixtureViewer/)

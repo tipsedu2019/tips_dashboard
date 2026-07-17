@@ -20,12 +20,21 @@ const WORKFLOW_KEYS = new Set<string>(
 )
 const DECIMAL_REVISION = /^(0|[1-9]\d*)$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const CONFLICT_FIELD = new RegExp(
+  `^rules\\.${UUID.source.slice(1, -1)}\\.(?:enabled|titleTemplate|bodyTemplate|scheduleConfig)$`,
+  "i",
+)
 const SAFE_CONNECTION_MASK = /^chat\.googleapis\.com\/v1\/spaces\/(?:…|[A-Za-z0-9_.-]{1,8}…[A-Za-z0-9_.-]{1,8})\/messages$/
 
 type AuthContext = Readonly<{
   userId: string
   role: string
   client: unknown
+}>
+
+type ConflictOverride = Readonly<{
+  requestId: string
+  conflictingFields: string[]
 }>
 
 type HandlerDependencies = Readonly<{
@@ -39,6 +48,7 @@ type HandlerDependencies = Readonly<{
     expectedRevisions: NotificationRevisionMap
     patch: { rules: Record<string, Record<string, unknown>> }
     requestId: string
+    conflictOverride?: ConflictOverride
     client: unknown
   }) => Promise<unknown>
 }>
@@ -217,7 +227,10 @@ function validScheduleConfig(input: unknown) {
 function parsePatchBody(input: unknown) {
   if (
     !isRecord(input) ||
-    !exactKeys(input, ["workflow_key", "expected_revisions", "patch", "request_id"])
+    (
+      !exactKeys(input, ["workflow_key", "expected_revisions", "patch", "request_id"]) &&
+      !exactKeys(input, ["workflow_key", "expected_revisions", "patch", "request_id", "conflict_override"])
+    )
   ) return null
   const selectedWorkflow = workflowKey(input.workflow_key)
   const expectedRevisions = safeRevisionMap(input.expected_revisions)
@@ -239,11 +252,33 @@ function parsePatchBody(input: unknown) {
     if ("schedule_config" in candidate && !validScheduleConfig(candidate.schedule_config)) return null
     rules[ruleId] = candidate
   }
+  let conflictOverride: ConflictOverride | undefined
+  if ("conflict_override" in input) {
+    const candidate = input.conflict_override
+    if (
+      !isRecord(candidate) ||
+      !exactKeys(candidate, ["request_id", "conflicting_fields"]) ||
+      typeof candidate.request_id !== "string" ||
+      !UUID.test(candidate.request_id) ||
+      candidate.request_id === input.request_id ||
+      !Array.isArray(candidate.conflicting_fields) ||
+      candidate.conflicting_fields.length === 0 ||
+      candidate.conflicting_fields.some((field) => (
+        typeof field !== "string" || !CONFLICT_FIELD.test(field)
+      )) ||
+      new Set(candidate.conflicting_fields).size !== candidate.conflicting_fields.length
+    ) return null
+    conflictOverride = {
+      requestId: candidate.request_id,
+      conflictingFields: [...candidate.conflicting_fields] as string[],
+    }
+  }
   return {
     workflowKey: selectedWorkflow,
     expectedRevisions,
     patch: { rules },
     requestId: input.request_id,
+    ...(conflictOverride ? { conflictOverride } : {}),
   }
 }
 
@@ -415,6 +450,47 @@ async function rpc(client: unknown, name: string, parameters: Record<string, unk
   return data
 }
 
+export async function saveNotificationControlPlaneViaRpc({
+  workflowKey,
+  expectedRevisions,
+  patch,
+  requestId,
+  conflictOverride,
+  client,
+}: {
+  workflowKey: NotificationWorkflowKey
+  expectedRevisions: NotificationRevisionMap
+  patch: { rules: Record<string, Record<string, unknown>> }
+  requestId: string
+  conflictOverride?: ConflictOverride
+  client: unknown
+}) {
+  if (conflictOverride) {
+    return rpc(
+      client,
+      "save_notification_control_plane_with_override_v1",
+      {
+        p_workflow_key: workflowKey,
+        p_expected_rule_revisions: expectedRevisions,
+        p_patch: patch,
+        p_save_request_id: requestId,
+        p_override_request_id: conflictOverride.requestId,
+        p_conflicting_fields: conflictOverride.conflictingFields,
+      },
+    )
+  }
+  return rpc(
+    client,
+    "save_notification_control_plane_v1",
+    {
+      p_workflow_key: workflowKey,
+      p_expected_revisions: expectedRevisions,
+      p_patch: patch,
+      p_request_id: requestId,
+    },
+  )
+}
+
 export function createProductionNotificationControlPlaneRouteHandlers() {
   return createNotificationControlPlaneRouteHandlers({
     authenticate: (request) => authenticateNotificationRequest(request, { createAuthenticatedClient }),
@@ -423,18 +499,23 @@ export function createProductionNotificationControlPlaneRouteHandlers() {
       "get_notification_control_plane_v1",
       { p_workflow_key: workflowKey },
     ),
-    async saveControlPlane({ workflowKey, expectedRevisions, patch, requestId, client }) {
+    async saveControlPlane({
+      workflowKey,
+      expectedRevisions,
+      patch,
+      requestId,
+      conflictOverride,
+      client,
+    }) {
       try {
-        return await rpc(
+        return await saveNotificationControlPlaneViaRpc({
+          workflowKey,
+          expectedRevisions,
+          patch,
+          requestId,
+          conflictOverride,
           client,
-          "save_notification_control_plane_v1",
-          {
-            p_workflow_key: workflowKey,
-            p_expected_revisions: expectedRevisions,
-            p_patch: patch,
-            p_request_id: requestId,
-          },
-        )
+        })
       } catch (error) {
         const structured = error as StructuredError
         if (structured.code !== "notification_revision_conflict") throw error
