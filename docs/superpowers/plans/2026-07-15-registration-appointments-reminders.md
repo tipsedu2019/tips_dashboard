@@ -203,37 +203,37 @@ git commit -m "feat: record registration history actors explicitly"
 
 완료 근거: 구현 커밋 `e505d3a`. 최종 집중 Node 테스트 `60/60`, TypeScript, 대상 ESLint, 변경 공백 검사를 통과했고 독립 검토 결과 P0/P1/P2는 `0/0/0`입니다. pgTAP 소스 패킷은 `160/160` 항목을 정적으로 검증했으며, 승인된 로컬 또는 미리보기 DB가 없어 SQL 자체는 실행하지 않았습니다.
 
-### Task 3: Honest Read-Only Registration Timeline
+### 작업 3: 정직한 읽기 전용 등록 이력
 
-**Files:**
-- Create: `src/features/tasks/registration-history-timeline.tsx`
-- Modify: `src/features/tasks/registration-track-history.js`
-- Modify: `src/features/tasks/registration-track-history.d.ts`
-- Modify: `src/features/tasks/registration-track-editor.tsx`
-- Modify: `src/features/tasks/ops-task-workspace.tsx`
-- Test: `tests/registration-track-history.test.mjs`
-- Test: `tests/ops-task-workspace.test.mjs`
+**파일:**
+- 생성: `src/features/tasks/registration-history-timeline.tsx`
+- 수정: `src/features/tasks/registration-track-history.js`
+- 수정: `src/features/tasks/registration-track-history.d.ts`
+- 수정: `src/features/tasks/registration-track-editor.tsx`
+- 수정: `src/features/tasks/ops-task-workspace.tsx`
+- 테스트: `tests/registration-track-history.test.mjs`
+- 테스트: `tests/ops-task-workspace.test.mjs`
 
-**Interfaces:**
-- Produces: `buildRegistrationSubjectHistory(detail)` items with `actorKind`, `actorId`, `systemSource`, nullable `occurredAt`, `timeKind: exact | unavailable`, and `origin: canonical | migration`.
-- Produces: `RegistrationHistoryTimeline({ detail, profiles })` with subject/stage filters and no mutation callbacks.
+**인터페이스:**
+- `buildRegistrationSubjectHistory(detail)`은 `actorKind`, `actorId`, `systemSource`, null을 허용하는 `occurredAt`, `timeKind: exact | unavailable`, `origin: canonical | migration`을 포함한 항목을 만듭니다.
+- `RegistrationHistoryTimeline({ detail, profiles })`은 과목·단계 필터만 제공하며 변경 콜백은 받지 않습니다.
 
-- [ ] **Step 1: Write failing history tests**
+- [x] **1단계: 실패하는 이력 진실성 테스트 작성**
 
-Assert shared appointment events group once with both subject badges, ordering is newest first, default entries are milestone-only, notification internals are excluded, v1 null actor labels `알 수 없음`, and fallback rows use `origin: "migration"`, `timeKind: "unavailable"`, and no unrelated `updatedAt` as event truth.
+공유 예약 이벤트가 두 과목 배지를 가진 한 행으로 묶이는지, 최신순인지, 기본 행이 주요 단계만 포함하는지, 알림 내부 이벤트를 제외하는지, version-1의 null 행위자를 `알 수 없음`으로 표시하는지 검증합니다. 이전 자료 행은 `origin: "migration"`, `timeKind: "unavailable"`을 사용하고 관계없는 `updatedAt`을 사건 시각으로 가장하지 않아야 합니다.
 
-Run:
+실행:
 
 ```bash
 NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
 "$NODE" --experimental-strip-types --test tests/registration-track-history.test.mjs tests/ops-task-workspace.test.mjs
 ```
 
-Expected: FAIL because fallback snapshots currently present mutable timestamps and there is no timeline component.
+초기 예상 결과: 변경 가능한 스냅숏 시각을 사용하고 이력 구성요소가 없어 실패합니다.
 
-- [ ] **Step 2: Normalize milestones and fallback honesty**
+- [x] **2단계: 주요 단계와 이전 자료의 정직성 정규화**
 
-Use this closed default-stage mapping:
+다음 닫힌 기본 단계 매핑을 사용합니다.
 
 ```js
 const DEFAULT_STAGE_BY_EVENT = {
@@ -246,20 +246,22 @@ const DEFAULT_STAGE_BY_EVENT = {
 }
 ```
 
-Fine-grained appointment changes become detail metadata under their grouped milestone. Never include `notification_*`, fan-out, delivery, retry, or provider events.
+세부 예약 변경은 묶인 주요 단계의 상세 메타데이터가 됩니다. `notification_*`, 분배, 전달, 재시도, 공급자 이벤트는 절대 포함하지 않습니다.
 
-- [ ] **Step 3: Render the timeline and separate current state**
+- [x] **3단계: 이력 표시와 현재 상태 분리**
 
-Mount the timeline in `RegistrationTrackEditor`, pass profile options for user display, show current owner separately, and expose only subject/stage filter controls plus detail expansion. Remove `담당자 및 일시 이력`; if assignee/due controls remain required, render them under `현재 업무` near action controls. Timeline rows have no inputs, edit, or delete buttons.
+`RegistrationTrackEditor`에 이력을 연결하고 사용자 표시용 프로필 목록을 전달합니다. 현재 담당자는 별도로 보여 주고 이력에는 과목·단계 필터와 상세 펼치기만 둡니다. `담당자 및 일시 이력`을 제거하며, 담당자·처리 예정 시각이 필요하면 작업 버튼 가까운 `현재 업무`에 배치합니다. 이력 행에는 입력·수정·삭제 버튼을 두지 않습니다.
 
-- [ ] **Step 4: Run focused tests and commit**
+- [x] **4단계: 집중 검증과 커밋**
 
-Run the Step 1 command. Expected: PASS.
+1단계 명령을 실행하며 예상 결과는 통과입니다.
 
 ```bash
 git add src/features/tasks/registration-history-timeline.tsx src/features/tasks/registration-track-history.js src/features/tasks/registration-track-history.d.ts src/features/tasks/registration-track-editor.tsx src/features/tasks/ops-task-workspace.tsx tests/registration-track-history.test.mjs tests/ops-task-workspace.test.mjs
 git commit -m "feat: show automatic registration history"
 ```
+
+완료 근거: 구현 커밋 `5667ad4`. 최종 집중 테스트 `87/87`, 전체 Node 테스트 `1213/1213`, TypeScript, 대상·전체 ESLint 오류 0건, 변경 공백 검사, 별도 임시 복사본 프로덕션 빌드의 정적 페이지 `75/75` 생성을 통과했습니다. 브라우저에서 읽기 전용 필터·상세, 원시 영문 상태값 미노출, 가로 넘침 없음을 확인했고 독립 검토 결과 P0/P1/P2는 `0/0/0`입니다. 실제 공급자 호출과 원격 변경은 없었습니다.
 
 ### Task 4: Canonical Appointment Calendar and Deep Links
 
