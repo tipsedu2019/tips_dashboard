@@ -1329,7 +1329,7 @@ type NotificationControlPanelProps = {
 
 Dialog mode locks one workflow. Page mode shows the seven workflows in the canonical order. Both consume the same GET/save API and server-returned registry; neither owns defaults.
 
-- [ ] **Step 1: write failing global/scoped persistence and interaction tests**
+- [x] **Step 1: write failing global/scoped persistence and interaction tests**
 
 Require:
 
@@ -1346,7 +1346,7 @@ Require:
 - registration/transfer/withdrawal/makeup launchers use the same component;
 - no duplicate legacy and canonical settings dialog when the flag is on.
 
-- [ ] **Step 2: implement the shared page/dialog and explicit save**
+- [x] **Step 2: implement the shared page/dialog and explicit save**
 
 Render only server-registry events and cells. Template editing belongs to a rule and immutable template revision. Settings save and delivery recalculation are distinct statuses:
 
@@ -1359,15 +1359,15 @@ Render only server-registry events and cells. Template editing belongs to a rule
 
 A failed recalculation does not roll back a successfully saved setting and retry does not replay the settings mutation.
 
-- [ ] **Step 3: separate Connections from event settings**
+- [x] **Step 3: separate Connections from event settings**
 
 Show masked Google Chat connections in a dedicated area. Staff can inspect state; only admins can replace/verify/disconnect. Saving a webhook never silently sends a test. 테스트 메시지 보내기 is a separately confirmed action and remains unavailable in automated QA.
 
-- [ ] **Step 4: add final common runtime marker last**
+- [x] **Step 4: add final common runtime marker last**
 
 Create public.common_notification_control_plane_runtime_version() returning integer 1 only after common schema, settings RPC, worker RPC, UI contracts, and tests exist. Missing or wrong version fails closed.
 
-- [ ] **Step 5: replace route-local settings surfaces behind the server flag**
+- [x] **Step 5: replace route-local settings surfaces behind the server flag**
 
 Load notification_control_plane_settings_ui_enabled from the authenticated database flag boundary.
 
@@ -1377,7 +1377,7 @@ Load notification_control_plane_settings_ui_enabled from the authenticated datab
 
 Registration, transfer, and withdrawal local settings are not considered operationally fixed until the persistent panel is enabled, reload-tested, and the matching active sender consumes the canonical saved rule under Tasks 14-21. Keep the live UI flag false before that ownership gate. Fixture/preview may enable it to prove save behavior. Do not add a temporary second persistence schema.
 
-- [ ] **Step 6: seed/import settings without enabling new delivery**
+- [x] **Step 6: seed/import settings without enabling new delivery**
 
 This step intentionally moves the approved closed settings registry/import ahead of adapter dispatch so the user's save problem can be solved without waiting for provider cutover. It does not move producer, adapter, ownership, or dispatch responsibility. Put the idempotent registry/import in 20260716112500_notification_workflow_settings_seed.sql and keep every dispatch flag false.
 
@@ -1402,7 +1402,7 @@ pnpm exec tsc --noEmit
 
 At desktop and mobile, change one safe fixture toggle/template in each of the seven panels, save, close, reload, and open both global and scoped surfaces. Expect identical revisions and values. Network ledger remains empty.
 
-- [ ] **Step 8: commit**
+- [x] **Step 8: commit**
 
 ~~~bash
 git add \
@@ -1425,6 +1425,8 @@ git commit -m "feat: add persistent notification settings"
 ~~~
 
 **Gate:** fixture/preview proves save and reload for all seven workflows while every dispatch flag remains false. The Task 1A honest containment remains on the live production surface; do not describe the P0 save request as operationally fixed until Tasks 14-21 make saved rules authoritative for every active sender and the live UI flag is separately authorized.
+
+**완료 증거(2026-07-17):** `ea8e1fc` 커밋에 7개 업무 공통 설정 UI, 서버 플래그·런타임 마커 가용성, 명시적 저장·충돌 감사·재계산·이탈 보호, 연결 분리, 멱등 설정 레지스트리/import를 기록했습니다. 알림 `119/119`, UI/API 관련 `206/206`, 전체 Node `1155/1155`, pgTAP 계획 `222/222`, TypeScript, 전체 ESLint, production build `75/75`, diff 검사가 통과했고 UI·SQL 독립 최종 검토는 각각 P0/P1/P2 0건입니다. 로컬 브라우저는 데스크톱·모바일에서 가로 넘침이 없고 현재 원격 런타임 마커 부재 시 한글 실패-폐쇄 상태를 표시합니다. provider 호출·원격 적용·데이터·플래그 변경은 0건입니다. Step 7의 로컬 source/브라우저 containment 검증은 완료했지만 실제 7개 패널 DB 저장·reload와 pgTAP은 승인된 local/preview 적용 단계의 release gate로 남겼으며 실행한 것으로 보고하지 않습니다.
 
 ---
 
