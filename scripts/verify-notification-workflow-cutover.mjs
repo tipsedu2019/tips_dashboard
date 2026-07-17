@@ -186,6 +186,164 @@ export function compareNotificationShadowIntents(legacyIntents, canonicalIntents
   return { matched: mismatches.length === 0, mismatches }
 }
 
+export function verifyDeterministicNotificationShadowFixture(evidence) {
+  const blockers = []
+  if (!isRecord(evidence)) return { passed: false, blockers: ["shadow_fixture_invalid"] }
+
+  const cycles = Array.isArray(evidence.cycles) ? evidence.cycles : []
+  const owners = cycles.map((cycle) => cycle?.owner)
+  if (
+    owners.length !== NOTIFICATION_CUTOVER_ORDER.length
+    || owners.some((owner, index) => owner !== NOTIFICATION_CUTOVER_ORDER[index])
+  ) blockers.push("shadow_fixture_owner_cycle_incomplete")
+
+  for (const cycle of cycles) {
+    if (!isRecord(cycle) || cycle.complete !== true) {
+      blockers.push("shadow_fixture_cycle_incomplete")
+      continue
+    }
+    if (cycle.legacyTransport !== "injected_recorder" || !Number.isInteger(cycle.recordedLegacyIntents) || cycle.recordedLegacyIntents < 1) {
+      blockers.push("legacy_recorder_invalid")
+    }
+    if (cycle.externalRequests !== 0) blockers.push("fixture_external_request_detected")
+    if (cycle.canonicalInboxProjections !== 0) blockers.push("fixture_inbox_projection_detected")
+    if (cycle.duplicateExternalRequests !== 0) blockers.push("fixture_duplicate_request_detected")
+    if (
+      !Array.isArray(cycle.canonicalRows)
+      || cycle.canonicalRows.length < 1
+      || cycle.canonicalRows.some((row) => (
+        !isRecord(row)
+        || row.status !== "skipped"
+        || row.skipReason !== "shadow_mode"
+        || row.replayable !== false
+      ))
+    ) blockers.push("canonical_shadow_row_invalid")
+    if (
+      Number.isInteger(cycle.enabledRuleWithoutAudienceCount)
+      && cycle.enabledRuleWithoutAudienceCount > 0
+      && cycle.zeroAudienceInvestigated !== true
+    ) blockers.push("enabled_rule_without_audience")
+  }
+
+  return { passed: blockers.length === 0, blockers: [...new Set(blockers)] }
+}
+
+function cloneFixtureState(state) {
+  return structuredClone(state)
+}
+
+function invalidRehearsal(state, error) {
+  return { ok: false, error, state: cloneFixtureState(state) }
+}
+
+function validOwnerRegistry(flags) {
+  return exactFlagRegistry(flags)
+    && NOTIFICATION_CUTOVER_ORDER.every((owner) => typeof flags[OWNER_FLAG[owner]] === "boolean")
+}
+
+export function rehearseNotificationRollback(input) {
+  if (!isRecord(input) || !isRecord(input.state)) throw new Error("rollback_fixture_invalid")
+  const original = cloneFixtureState(input.state)
+  const flags = input.state.flags
+  const revisions = input.state.revisions
+  const affectedOwners = input.affectedOwners
+  const expectedRevisions = input.expectedRevisions
+
+  if (!validOwnerRegistry(flags) || !isRecord(revisions)) return invalidRehearsal(original, "runtime_flag_registry_invalid")
+  if (
+    !Array.isArray(affectedOwners)
+    || affectedOwners.length < 1
+    || new Set(affectedOwners).size !== affectedOwners.length
+    || affectedOwners.some((owner) => !NOTIFICATION_CUTOVER_ORDER.includes(owner))
+  ) return invalidRehearsal(original, "rollback_owner_set_invalid")
+  if (!isRecord(expectedRevisions) || Object.keys(expectedRevisions).sort().join("\u001f") !== [...affectedOwners].sort().join("\u001f")) {
+    return invalidRehearsal(original, "rollback_revision_set_invalid")
+  }
+  for (const owner of affectedOwners) {
+    const flag = OWNER_FLAG[owner]
+    if (!Number.isInteger(revisions[flag]) || revisions[flag] < 0 || expectedRevisions[owner] !== revisions[flag]) {
+      return invalidRehearsal(original, "rollback_revision_stale")
+    }
+  }
+
+  const enabledOwnersBefore = enabledOwners(flags)
+  if (affectedOwners.some((owner) => !enabledOwnersBefore.includes(owner))) {
+    return invalidRehearsal(original, "rollback_owner_not_enabled")
+  }
+  const isAllOwnerRollback = enabledOwnersBefore.every((owner) => affectedOwners.includes(owner))
+  if (input.reenableShadow === true && !isAllOwnerRollback) {
+    return invalidRehearsal(original, "partial_rollback_cannot_enable_shadow")
+  }
+
+  const next = cloneFixtureState(input.state)
+  for (const owner of affectedOwners) {
+    const flag = OWNER_FLAG[owner]
+    next.flags[flag] = false
+    next.revisions[flag] += 1
+  }
+  const settingsFlag = "notification_control_plane_settings_ui_enabled"
+  next.flags[settingsFlag] = false
+  next.revisions[settingsFlag] += 1
+  next.flags.notification_control_plane_shadow_write_enabled = input.reenableShadow === true
+
+  let canceledCount = 0
+  let cancelRequestedCount = 0
+  next.deliveries = (Array.isArray(next.deliveries) ? next.deliveries : []).map((delivery) => {
+    if (!affectedOwners.includes(delivery.owner)) return delivery
+    if (["pending", "retry_wait"].includes(delivery.status)) {
+      canceledCount += 1
+      return { ...delivery, status: "canceled", cancellationReason: "cutover_rollback" }
+    }
+    if (delivery.status === "claimed" && delivery.dispatchStarted !== true && !delivery.providerReference) {
+      cancelRequestedCount += 1
+      return { ...delivery, cancelRequested: true, cancellationReason: "cutover_rollback" }
+    }
+    return delivery
+  })
+
+  return {
+    ok: true,
+    mode: isAllOwnerRollback ? "all_owner" : "partial",
+    state: next,
+    counts: {
+      canceled: canceledCount,
+      cancelRequested: cancelRequestedCount,
+      awaitingClaimClosure: cancelRequestedCount,
+    },
+  }
+}
+
+export function rehearseNotificationOwnershipTransfer(input) {
+  if (!isRecord(input) || !isRecord(input.claim)) throw new Error("ownership_fixture_invalid")
+  const claim = cloneFixtureState(input.claim)
+  const rejected = (error) => ({ ok: false, error, claim: cloneFixtureState(claim) })
+  if (input.claimClosureConfirmed !== true) return rejected("claim_closure_not_confirmed")
+  if (claim.status !== "reserved" || claim.dispatchStarted === true || claim.providerReference) {
+    return rejected("ownership_not_transferable")
+  }
+  if (["sending", "sent", "delivery_unknown"].includes(claim.deliveryStatus)) {
+    return rejected("ownership_not_transferable")
+  }
+  if (!DECIMAL.test(claim.ownerGeneration)) return rejected("owner_generation_invalid")
+  return {
+    ok: true,
+    claim: {
+      ...claim,
+      owner: "legacy",
+      ownerGeneration: (BigInt(claim.ownerGeneration) + 1n).toString(),
+    },
+  }
+}
+
+export function rehearseNotificationShadowAbort(state) {
+  if (!isRecord(state) || !validOwnerRegistry(state.flags)) throw new Error("shadow_abort_fixture_invalid")
+  const next = cloneFixtureState(state)
+  for (const key of NOTIFICATION_RUNTIME_FLAG_KEYS) next.flags[key] = false
+  next.workerStopLatch = true
+  next.shadowAbortReason = "canonical_side_effect_in_shadow"
+  return next
+}
+
 const GLOBAL_FAULTS = new Set([
   "worker_heartbeat_stale",
   "watchdog_heartbeat_stale",
