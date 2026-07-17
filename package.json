@@ -8,6 +8,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint src tests middleware.ts next.config.ts",
+    "test:notifications": "node --test --experimental-strip-types tests/notification-control-plane-*.test.mjs",
     "verify:ops-samples": "node scripts/verify-ops-task-sample-workflow.mjs",
     "verify:ops-samples:cli": "node scripts/verify-ops-task-sample-workflow.mjs --run --cli",
     "verify:ops-browser": "node scripts/verify-ops-task-browser-workflow.mjs",
