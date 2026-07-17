@@ -1,6 +1,39 @@
 const DEFAULT_NOTIFICATION_URL = "/admin/makeup-requests";
 const DEFAULT_NOTIFICATION_ICON = "/favicon-window.png";
 
+function notificationText(value, fallback = "") {
+  return typeof value === "string" && value.trim()
+    ? value.trim().slice(0, 512)
+    : fallback;
+}
+
+function safeAdminPath(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return DEFAULT_NOTIFICATION_URL;
+  }
+
+  try {
+    const parsed = new URL(value, self.location.origin);
+    const allowedPath = parsed.pathname === "/admin" || parsed.pathname.startsWith("/admin/");
+    if (parsed.origin !== self.location.origin || !allowedPath) {
+      return DEFAULT_NOTIFICATION_URL;
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return DEFAULT_NOTIFICATION_URL;
+  }
+}
+
+function readPushPayload(event) {
+  if (!event.data || typeof event.data.json !== "function") return {};
+  try {
+    const payload = event.data.json();
+    return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  } catch {
+    return {};
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });
@@ -10,16 +43,17 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  const payload = event.data?.json?.() || {};
-  const title = payload.title || "TIPS Dashboard";
+  const payload = readPushPayload(event);
+  const title = notificationText(payload.title, "TIPS Dashboard");
+  const targetUrl = safeAdminPath(payload.href || payload.url);
   const options = {
-    body: payload.body || "",
-    icon: payload.icon || DEFAULT_NOTIFICATION_ICON,
-    badge: payload.badge || DEFAULT_NOTIFICATION_ICON,
-    tag: payload.tag || "tips-dashboard",
-    renotify: Boolean(payload.tag),
+    body: notificationText(payload.body),
+    icon: DEFAULT_NOTIFICATION_ICON,
+    badge: DEFAULT_NOTIFICATION_ICON,
+    tag: notificationText(payload.tag, "tips-dashboard"),
+    renotify: Boolean(notificationText(payload.tag)),
     data: {
-      url: payload.href || payload.url || DEFAULT_NOTIFICATION_URL,
+      url: targetUrl,
     },
   };
 
@@ -28,7 +62,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || DEFAULT_NOTIFICATION_URL;
+  const targetUrl = safeAdminPath(event.notification.data?.url);
 
   event.waitUntil((async () => {
     const windowClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });

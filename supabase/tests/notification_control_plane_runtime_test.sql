@@ -3483,5 +3483,1766 @@ update public.profiles
 set role = 'admin'
 where id = '30000000-0000-4000-8000-000000000001';
 
+-- Task 7 durable worker/state-machine fixtures use a separate 7600 UUID range.
+-- They exercise behavior that source-contract tests cannot prove without a DB.
+select has_function(
+  'public',
+  'apply_notification_fanout_batch_v1',
+  array['uuid', 'uuid', 'text', 'uuid', 'bigint', 'bigint', 'text', 'jsonb', 'text', 'boolean'],
+  'fanout applies one immutable rule page through an internal service-only RPC'
+);
+select has_function(
+  'public',
+  'get_notification_render_snapshot_v1',
+  array['uuid', 'uuid', 'bigint'],
+  'target reconciliation reads one credential-free immutable render snapshot'
+);
+select ok(
+  pg_catalog.has_function_privilege(
+    'service_role',
+    'public.apply_notification_fanout_batch_v1(uuid,uuid,text,uuid,bigint,bigint,text,jsonb,text,boolean)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.apply_notification_fanout_batch_v1(uuid,uuid,text,uuid,bigint,bigint,text,jsonb,text,boolean)',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'service_role',
+    'public.get_notification_render_snapshot_v1(uuid,uuid,bigint)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.get_notification_render_snapshot_v1(uuid,uuid,bigint)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'service_role',
+    'dashboard_private.apply_notification_fanout_batch_v1(uuid,uuid,text,uuid,bigint,bigint,text,jsonb,text,boolean)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'service_role',
+    'dashboard_private.get_notification_render_snapshot_v1(uuid,uuid,bigint)',
+    'EXECUTE'
+  ),
+  'public worker wrappers alone expose service-role execution; private implementations stay closed'
+);
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.lower(pg_catalog.pg_get_functiondef(
+      'public.apply_notification_fanout_batch_v1(uuid,uuid,text,uuid,bigint,bigint,text,jsonb,text,boolean)'::pg_catalog.regprocedure
+    )),
+    'set search_path to '''''
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'public.apply_notification_fanout_batch_v1(uuid,uuid,text,uuid,bigint,bigint,text,jsonb,text,boolean)'::pg_catalog.regprocedure
+    ),
+    'auth.role()'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'public.apply_notification_fanout_batch_v1(uuid,uuid,text,uuid,bigint,bigint,text,jsonb,text,boolean)'::pg_catalog.regprocedure
+    ),
+    'dashboard_private.apply_notification_fanout_batch_v1'
+  ) > 0,
+  'public fanout wrapper fixes search_path, rechecks service role, and calls only the private implementation'
+);
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.get_notification_render_snapshot_v1(
+        '76000000-0000-4000-8000-000000000001',
+        '76000000-0000-4000-8000-000000000002',
+        1
+      )
+    $sql$,
+    'permission denied|notification_service_role_required'
+  ),
+  'an authenticated caller cannot cross the internal worker wrapper boundary'
+);
+reset role;
+
+insert into dashboard_private.notification_rules(
+  id, scope_key, workflow_key, event_key, channel_key, audience_key,
+  rule_variant_key, delivery_mode, schedule_key, schedule_config, enabled,
+  active_template_id, revision, created_by, created_actor_kind,
+  updated_by, updated_actor_kind, created_at, updated_at
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000101',
+    'global', 'tasks', 'task.worker_delivery_fixture', 'google_chat',
+    'management_team', 'immediate', 'immediate', null, null, true,
+    '76000000-0000-4000-8000-000000000201', 1,
+    null, 'system', null, 'system', now(), now()
+  ),
+  (
+    '76000000-0000-4000-8000-000000000102',
+    'global', 'tasks', 'task.worker_inbox_fixture', 'in_app',
+    'primary_assignee', 'immediate', 'immediate', null, null, true,
+    '76000000-0000-4000-8000-000000000202', 1,
+    null, 'system', null, 'system', now(), now()
+  );
+
+insert into dashboard_private.notification_templates(
+  id, rule_id, version, title_template, body_template, allowed_variables,
+  payload_schema_version, checksum, created_by, created_actor_kind, created_at
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000201',
+    '76000000-0000-4000-8000-000000000101',
+    1, '작업 알림', '확인할 작업이 있습니다.', '[]'::jsonb, 1,
+    'worker-google-chat-v1', null, 'system', now()
+  ),
+  (
+    '76000000-0000-4000-8000-000000000202',
+    '76000000-0000-4000-8000-000000000102',
+    1, '받은 알림', '개인별 읽음 상태를 확인합니다.', '[]'::jsonb, 1,
+    'worker-in-app-v1', null, 'system', now()
+  );
+
+update dashboard_private.notification_runtime_flags
+set enabled = true,
+    revision = revision + 1,
+    updated_at = pg_catalog.clock_timestamp()
+where flag_key = 'notification_control_plane_dispatch_tasks_enabled';
+update public.google_chat_webhook_settings
+set webhook_url = 'https://chat.googleapis.com/v1/spaces/WORKERFIXTURE/messages?key=fixture-key&token=fixture-token',
+    connection_state = 'legacy_active',
+    webhook_url_ciphertext = null,
+    webhook_url_mask = null,
+    revision = revision + 1,
+    updated_at = pg_catalog.clock_timestamp()
+where channel = 'admin';
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-event-first', dashboard_private.record_notification_event_v1(
+  'global',
+  'tasks',
+  'task.worker_delivery_fixture',
+  'worker_fixture',
+  'event-replay',
+  1,
+  'event-replay-occurrence',
+  null,
+  '2026-07-17 09:00:00+09'::timestamptz,
+  1,
+  '{"fixture":"event-replay"}'::jsonb,
+  null,
+  null
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-event-replay', dashboard_private.record_notification_event_v1(
+  'global',
+  'tasks',
+  'task.worker_delivery_fixture',
+  'worker_fixture',
+  'event-replay',
+  1,
+  'event-replay-occurrence',
+  null,
+  '2026-07-17 09:00:00+09'::timestamptz,
+  1,
+  '{"fixture":"event-replay"}'::jsonb,
+  null,
+  null
+);
+reset role;
+select is(
+  (
+    select payload from notification_control_plane_runtime_results
+    where result_key = 'worker-event-replay'
+  ),
+  (
+    select payload from notification_control_plane_runtime_results
+    where result_key = 'worker-event-first'
+  ),
+  'occurrence replay returns the exact same event and fanout job pair'
+);
+select is(
+  (
+    select count(*)::integer
+    from pg_catalog.jsonb_object_keys((
+      select payload from notification_control_plane_runtime_results
+      where result_key = 'worker-event-first'
+    ))
+  ),
+  2,
+  'producer response contains exactly event_id and fanout_job_id'
+);
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select dashboard_private.record_notification_event_v1(
+        'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+        'event-replay', 1, 'event-replay-occurrence', null,
+        '2026-07-17 09:00:00+09'::timestamptz, 1,
+        '{"fixture":"different-payload"}'::jsonb, null, null
+      )
+    $sql$,
+    'notification_event_replay_mismatch'
+  ),
+  'same occurrence with a changed producer payload is rejected'
+);
+reset role;
+
+insert into dashboard_private.notification_events(
+  id, scope_key, workflow_key, event_key, source_type, source_id,
+  source_revision, occurrence_key, actor_profile_id, occurred_at,
+  payload_schema_version, payload, rule_snapshot
+) values (
+  '76000000-0000-4000-8000-000000000305',
+  'global', 'tasks', 'task.worker_zero_rule_fixture', 'worker_fixture',
+  'zero-rule', 1, 'zero-rule-occurrence', null, now(), 1,
+  '{}'::jsonb, '[]'::jsonb
+);
+insert into dashboard_private.notification_event_fanout_jobs(
+  id, event_id, workflow_key, status, next_attempt_at, created_at, updated_at
+) values (
+  '76000000-0000-4000-8000-000000000306',
+  '76000000-0000-4000-8000-000000000305',
+  'tasks', 'pending', '2000-01-01 00:00:00+00', now(), now()
+);
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-fanout-claim', claim
+from public.claim_notification_fanout_jobs_v1('worker-sql-fixture', 100, 60) claim
+where claim ->> 'event_id' = (
+  select payload ->> 'event_id'
+  from notification_control_plane_runtime_results
+  where result_key = 'worker-event-first'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-render-snapshot', public.get_notification_render_snapshot_v1(
+  ((
+    select payload ->> 'event_id'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-event-first'
+  ))::uuid,
+  '76000000-0000-4000-8000-000000000101',
+  1
+);
+reset role;
+select ok(
+  (
+    select payload ->> 'rule_id' = '76000000-0000-4000-8000-000000000101'
+      and payload ->> 'rule_revision' = '1'
+      and payload ->> 'cursor' is null
+      and payload ->> 'next_cursor' is null
+      and (payload ->> 'last_rule')::boolean
+      and not (payload ? 'event')
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-fanout-claim'
+  )
+  and (
+    select payload::text !~* 'webhook|endpoint|p256dh|fixture-key|fixture-token|target_snapshot'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-render-snapshot'
+  ),
+  'fanout claim is flat and render snapshot contains no delivery credential or target'
+);
+select ok(
+  (
+    select status = 'succeeded'
+      and claim_token is null
+      and completed_at is not null
+      and outcome_summary = '{"delivery_count":0,"done":true}'::jsonb
+    from dashboard_private.notification_event_fanout_jobs
+    where id = '76000000-0000-4000-8000-000000000306'
+  ),
+  'a zero-rule event closes atomically as a successful no-op during claim'
+);
+select is(
+  dashboard_private.notification_target_set_hash_v1(
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'target_kind', 'connection',
+      'target_key', 'connection:google_chat.management',
+      'target_profile_id', null,
+      'connection_key', 'google_chat.management',
+      'target_snapshot', pg_catalog.jsonb_build_object('active', true, 'team', 'management')
+    ))
+  ),
+  '08b309b3dab749a8318c444e0421c6a45ea23f20371179c3c9817cac54a9c5c6',
+  'database target canonicalization matches the TypeScript worker SHA-256 contract'
+);
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.apply_notification_fanout_batch_v1(%L::uuid,%L::uuid,null,%L::uuid,1,1,%L,%L::jsonb,null,true)',
+      (
+        select payload ->> 'job_id' from notification_control_plane_runtime_results
+        where result_key = 'worker-fanout-claim'
+      ),
+      '76000000-0000-4000-8000-000000000999',
+      '76000000-0000-4000-8000-000000000101',
+      '08b309b3dab749a8318c444e0421c6a45ea23f20371179c3c9817cac54a9c5c6',
+      '{"deliveries":[]}'
+    ),
+    'notification_fanout_claim_mismatch'
+  ),
+  'fanout apply rejects a mismatched claim token'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.apply_notification_fanout_batch_v1(%L::uuid,%L::uuid,null,%L::uuid,1,1,%L,%L::jsonb,null,true)',
+      (
+        select payload ->> 'job_id' from notification_control_plane_runtime_results
+        where result_key = 'worker-fanout-claim'
+      ),
+      (
+        select payload ->> 'claim_token' from notification_control_plane_runtime_results
+        where result_key = 'worker-fanout-claim'
+      ),
+      '76000000-0000-4000-8000-000000000101',
+      pg_catalog.repeat('b', 64),
+      '{"deliveries":[{"template_id":"76000000-0000-4000-8000-000000000201","target_kind":"connection","target_key":"connection:google_chat.management","target_profile_id":null,"connection_key":"google_chat.management","target_snapshot":{"active":true,"team":"management"},"rendered_title":"작업 알림","rendered_body":"확인할 작업이 있습니다.","href":"/admin/tasks","scheduled_for":"2026-07-17T00:00:00Z"}]}'
+    ),
+    'notification_target_set_hash_mismatch'
+  ),
+  'fanout apply recomputes and rejects a target hash that does not match normalized deliveries'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-fanout-applied', public.apply_notification_fanout_batch_v1(
+  (
+    select (payload ->> 'job_id')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-fanout-claim'
+  ),
+  (
+    select (payload ->> 'claim_token')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-fanout-claim'
+  ),
+  null,
+  '76000000-0000-4000-8000-000000000101',
+  1,
+  1,
+  '08b309b3dab749a8318c444e0421c6a45ea23f20371179c3c9817cac54a9c5c6',
+  pg_catalog.jsonb_build_object(
+    'deliveries',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'template_id', '76000000-0000-4000-8000-000000000201',
+      'target_kind', 'connection',
+      'target_key', 'connection:google_chat.management',
+      'target_profile_id', null,
+      'connection_key', 'google_chat.management',
+      'target_snapshot', pg_catalog.jsonb_build_object('active', true, 'team', 'management'),
+      'rendered_title', '작업 알림',
+      'rendered_body', '확인할 작업이 있습니다.',
+      'href', '/admin/tasks',
+      'scheduled_for', '2026-07-17T00:00:00Z'
+    ))
+  ),
+  null,
+  true
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.apply_notification_fanout_batch_v1(%L::uuid,%L::uuid,null,%L::uuid,1,1,%L,%L::jsonb,null,true)',
+      (
+        select payload ->> 'job_id' from notification_control_plane_runtime_results
+        where result_key = 'worker-fanout-claim'
+      ),
+      (
+        select payload ->> 'claim_token' from notification_control_plane_runtime_results
+        where result_key = 'worker-fanout-claim'
+      ),
+      '76000000-0000-4000-8000-000000000101',
+      '08b309b3dab749a8318c444e0421c6a45ea23f20371179c3c9817cac54a9c5c6',
+      '{"deliveries":[]}'
+    ),
+    'notification_fanout_cursor_conflict'
+  ),
+  'fanout cursor compare-and-swap rejects a partial-page replay'
+);
+reset role;
+select ok(
+  (
+    select payload = pg_catalog.jsonb_build_object(
+      'outcome', 'applied', 'delivery_count', 1, 'cursor', null, 'done', true
+    )
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-fanout-applied'
+  )
+  and (
+    select cursor ->> 'value' is null
+      and (cursor ->> 'done')::boolean
+      and outcome_summary = '{"delivery_count":1,"done":true}'::jsonb
+    from dashboard_private.notification_event_fanout_jobs
+    where id = (
+      select (payload ->> 'job_id')::uuid
+      from notification_control_plane_runtime_results
+      where result_key = 'worker-fanout-claim'
+    )
+  ),
+  'fanout apply persists only safe counts and advances the one-rule cursor atomically'
+);
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-target-job-a1', pg_catalog.jsonb_build_object(
+  'job_id', dashboard_private.enqueue_notification_target_reconciliation_job_v1(
+    'tasks', 'worker_fixture', 'recipient-cycle', 1,
+    '76000000-0000-4000-8000-000000000311',
+    'recipient_set_changed', 1, null, pg_catalog.repeat('a', 64)
+  )
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-target-job-b', pg_catalog.jsonb_build_object(
+  'job_id', dashboard_private.enqueue_notification_target_reconciliation_job_v1(
+    'tasks', 'worker_fixture', 'recipient-cycle', 2,
+    '76000000-0000-4000-8000-000000000312',
+    'recipient_set_changed', 2, pg_catalog.repeat('a', 64), pg_catalog.repeat('b', 64)
+  )
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-target-job-a2', pg_catalog.jsonb_build_object(
+  'job_id', dashboard_private.enqueue_notification_target_reconciliation_job_v1(
+    'tasks', 'worker_fixture', 'recipient-cycle', 3,
+    '76000000-0000-4000-8000-000000000313',
+    'recipient_set_changed', 3, pg_catalog.repeat('b', 64), pg_catalog.repeat('a', 64)
+  )
+);
+reset role;
+select is(
+  (
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+      'generation', job.target_generation::text,
+      'hash', job.current_target_set_hash
+    ) order by job.target_generation)
+    from dashboard_private.notification_target_reconciliation_jobs job
+    where job.source_type = 'worker_fixture'
+      and job.source_id = 'recipient-cycle'
+  ),
+  pg_catalog.jsonb_build_array(
+    pg_catalog.jsonb_build_object('generation', '1', 'hash', pg_catalog.repeat('a', 64)),
+    pg_catalog.jsonb_build_object('generation', '2', 'hash', pg_catalog.repeat('b', 64)),
+    pg_catalog.jsonb_build_object('generation', '3', 'hash', pg_catalog.repeat('a', 64))
+  ),
+  'A to B to A keeps a monotonic target generation while returning to the same A hash'
+);
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-delivery-claim', claim
+from public.claim_notification_deliveries_v1('worker-sql-fixture', 100, 60) claim
+where claim ->> 'delivery_id' = (
+  select delivery.id::text
+  from dashboard_private.notification_deliveries delivery
+  where delivery.event_id = (
+    select (payload ->> 'event_id')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-event-first'
+  )
+    and delivery.rule_id = '76000000-0000-4000-8000-000000000101'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.begin_notification_delivery_send_v1(%L::uuid,%L::uuid)',
+      (
+        select payload ->> 'delivery_id' from notification_control_plane_runtime_results
+        where result_key = 'worker-delivery-claim'
+      ),
+      '76000000-0000-4000-8000-000000000998'
+    ),
+    'notification_delivery_claim_mismatch'
+  ),
+  'delivery begin rejects a mismatched claim token'
+);
+reset role;
+update dashboard_private.notification_deliveries
+set cancel_requested_at = pg_catalog.clock_timestamp(),
+    cancel_reason = 'recipient_revoked'
+where id = (
+  select (payload ->> 'delivery_id')::uuid
+  from notification_control_plane_runtime_results
+  where result_key = 'worker-delivery-claim'
+);
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-cancel-before-send', public.begin_notification_delivery_send_v1(
+  (
+    select (payload ->> 'delivery_id')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-delivery-claim'
+  ),
+  (
+    select (payload ->> 'claim_token')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-delivery-claim'
+  )
+);
+reset role;
+select ok(
+  (
+    select payload ->> 'status' = 'canceled'
+      and payload ->> 'status_reason' = 'recipient_revoked'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-cancel-before-send'
+  )
+  and (
+    select status = 'canceled'
+      and status_reason = 'recipient_revoked'
+      and attempt_count = 0
+      and last_attempt_started_at is null
+    from dashboard_private.notification_deliveries
+    where id = (
+      select (payload ->> 'delivery_id')::uuid
+      from notification_control_plane_runtime_results
+      where result_key = 'worker-delivery-claim'
+    )
+  ),
+  'cancel-before-send closes without provider dispatch or attempt increment'
+);
+
+insert into dashboard_private.notification_events(
+  id, scope_key, workflow_key, event_key, source_type, source_id,
+  source_revision, occurrence_key, actor_profile_id, occurred_at,
+  payload_schema_version, payload, rule_snapshot
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000401',
+    'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+    'lease-claimed', 1, 'lease-claimed-occurrence', null, now(), 1,
+    '{}'::jsonb,
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'rule_id', '76000000-0000-4000-8000-000000000101',
+      'rule_revision', '1',
+      'template_id', '76000000-0000-4000-8000-000000000201',
+      'channel_key', 'google_chat',
+      'audience_key', 'management_team',
+      'rule_variant_key', 'immediate',
+      'enabled', true
+    ))
+  ),
+  (
+    '76000000-0000-4000-8000-000000000402',
+    'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+    'lease-sending', 1, 'lease-sending-occurrence', null, now(), 1,
+    '{}'::jsonb,
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'rule_id', '76000000-0000-4000-8000-000000000101',
+      'rule_revision', '1',
+      'template_id', '76000000-0000-4000-8000-000000000201',
+      'channel_key', 'google_chat',
+      'audience_key', 'management_team',
+      'rule_variant_key', 'immediate',
+      'enabled', true
+    ))
+  );
+
+insert into dashboard_private.notification_deliveries(
+  id, event_id, rule_id, rule_revision, template_id, channel_key, audience_key,
+  target_generation, target_set_hash, target_kind, target_key,
+  target_profile_id, connection_key, target_snapshot, status, status_reason,
+  dedupe_key, rendered_title, rendered_body, href, scheduled_for,
+  attempt_count, max_attempts, claimed_by, claim_token, lease_expires_at,
+  next_attempt_at, last_attempt_started_at
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000501',
+    '76000000-0000-4000-8000-000000000401',
+    '76000000-0000-4000-8000-000000000101', 1,
+    '76000000-0000-4000-8000-000000000201',
+    'google_chat', 'management_team', 1, pg_catalog.repeat('c', 64),
+    'connection', 'connection:lease-claimed', null, 'google_chat.management',
+    '{"active":true}'::jsonb, 'claimed', null, 'worker-lease-claimed',
+    '임대 회수', 'claimed lease', '/admin/tasks', now() - interval '1 hour',
+    0, 5, 'lost-worker', '76000000-0000-4000-8000-000000000601',
+    now() - interval '1 minute', null, null
+  ),
+  (
+    '76000000-0000-4000-8000-000000000502',
+    '76000000-0000-4000-8000-000000000402',
+    '76000000-0000-4000-8000-000000000101', 1,
+    '76000000-0000-4000-8000-000000000201',
+    'google_chat', 'management_team', 1, pg_catalog.repeat('d', 64),
+    'connection', 'connection:lease-sending', null, 'google_chat.management',
+    '{"active":true}'::jsonb, 'sending', null, 'worker-lease-sending',
+    '임대 회수', 'sending lease', '/admin/tasks', now() - interval '1 hour',
+    1, 5, 'lost-worker', '76000000-0000-4000-8000-000000000602',
+    now() - interval '1 minute', null, now() - interval '2 minutes'
+  );
+
+insert into dashboard_private.notification_dispatch_ownership_claims(
+  id, workflow_key, occurrence_key, rule_id, channel_key, target_key,
+  target_generation, owner_kind, owner_generation, state,
+  dispatch_started_at, dispatch_token
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000701',
+    'tasks', 'lease-claimed-occurrence',
+    '76000000-0000-4000-8000-000000000101', 'google_chat',
+    'connection:lease-claimed', 1, 'canonical', 0, 'reserved', null, null
+  ),
+  (
+    '76000000-0000-4000-8000-000000000702',
+    'tasks', 'lease-sending-occurrence',
+    '76000000-0000-4000-8000-000000000101', 'google_chat',
+    'connection:lease-sending', 1, 'canonical', 0, 'dispatch_started',
+    now() - interval '2 minutes', '76000000-0000-4000-8000-000000000702'
+  );
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.reap_notification_leases_v1(
+        'worker-reaper-null-batch-fixture',
+        null
+      )
+    $sql$,
+    'notification_lease_reap_invalid'
+  ),
+  'lease reaping rejects an explicit null batch size instead of becoming unbounded'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-lease-reap', public.reap_notification_leases_v1('worker-reaper-fixture', 100);
+reset role;
+select ok(
+  (
+    select status = 'pending'
+      and next_attempt_at is not null
+      and attempt_count = 0
+      and claim_token is null
+    from dashboard_private.notification_deliveries
+    where id = '76000000-0000-4000-8000-000000000501'
+  )
+  and (
+    select status = 'delivery_unknown'
+      and status_reason = 'worker_lost_after_send_start'
+      and next_attempt_at is null
+      and attempt_count = 1
+      and claim_token is null
+    from dashboard_private.notification_deliveries
+    where id = '76000000-0000-4000-8000-000000000502'
+  )
+  and (
+    select state = 'closed'
+    from dashboard_private.notification_dispatch_ownership_claims
+    where id = '76000000-0000-4000-8000-000000000702'
+  ),
+  'lease reaping returns claimed work to pending but terminalizes sending as unknown'
+);
+
+update dashboard_private.notification_deliveries
+set status = 'retry_wait',
+    status_reason = 'transient_pre_dispatch_failure',
+    next_attempt_at = now() - interval '1 second',
+    updated_at = pg_catalog.clock_timestamp()
+where id = '76000000-0000-4000-8000-000000000501';
+create temporary table notification_worker_claim_rows(payload jsonb not null) on commit drop;
+grant select, insert on notification_worker_claim_rows to service_role;
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_worker_claim_rows(payload)
+select claim from public.claim_notification_deliveries_v1('worker-retry-fixture', 100, 60) claim;
+reset role;
+select ok(
+  exists (
+    select 1 from notification_worker_claim_rows
+    where payload ->> 'delivery_id' = '76000000-0000-4000-8000-000000000501'
+  )
+  and not exists (
+    select 1 from notification_worker_claim_rows
+    where payload ->> 'delivery_id' = '76000000-0000-4000-8000-000000000502'
+  )
+  and (
+    select status = 'delivery_unknown' and next_attempt_at is null
+    from dashboard_private.notification_deliveries
+    where id = '76000000-0000-4000-8000-000000000502'
+  ),
+  'retry_wait is claimable when due while delivery_unknown is never auto-retried'
+);
+
+insert into public.dashboard_notifications(
+  id, recipient_team, type, title, body, href, metadata, read_at, created_at
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000801',
+    '관리팀', 'notification_control_plane', '공용 알림', '개인별 읽음 확인',
+    '/admin/tasks', '{}'::jsonb, null, now()
+  ),
+  (
+    '76000000-0000-4000-8000-000000000802',
+    '관리팀', 'notification_control_plane', '과거 알림', '호환 read_at 확인',
+    '/admin/tasks', '{}'::jsonb, now() - interval '1 day', now() - interval '2 days'
+  );
+insert into public.dashboard_notifications(
+  id, recipient_profile_id, type, title, body, href, metadata,
+  read_at, revoked_at, revoked_reason, created_at
+) values (
+  '76000000-0000-4000-8000-000000000803',
+  '30000000-0000-4000-8000-000000000001',
+  'notification_control_plane', '회수된 알림', '읽음 처리 경쟁을 확인합니다.',
+  '/admin/tasks', '{}'::jsonb, null, pg_catalog.clock_timestamp(),
+  'recipient_revoked', now()
+);
+select ok(
+  (
+    select
+      pg_catalog.strpos(definition, 'from public.profiles profile') > 0
+      and pg_catalog.strpos(definition, 'for share of profile') >
+        pg_catalog.strpos(definition, 'from public.profiles profile')
+      and pg_catalog.strpos(definition, 'from public.dashboard_notifications notification') >
+        pg_catalog.strpos(definition, 'for share of profile')
+      and pg_catalog.strpos(definition, 'for share of notification') >
+        pg_catalog.strpos(definition, 'from public.dashboard_notifications notification')
+      and pg_catalog.strpos(definition, 'pg_advisory_xact_lock') >
+        pg_catalog.strpos(definition, 'for share of notification')
+      and pg_catalog.strpos(definition, 'insert into public.dashboard_notification_read_receipts') >
+        pg_catalog.strpos(definition, 'pg_advisory_xact_lock')
+      and definition like '%v_revoked_at is not null%'
+      and definition like '%v_recipient_profile_id is null%'
+      and definition like '%v_recipient_team = ''관리팀''%'
+    from (
+      select pg_catalog.lower(pg_catalog.pg_get_functiondef(
+        'public.mark_dashboard_notification_read_v1(uuid)'::pg_catalog.regprocedure
+      )) as definition
+    ) function_source
+  ),
+  'read mutation locks profile then notification and rechecks the same personal/shared visibility before receipt insert'
+);
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.get_dashboard_notification_inbox_v1(null, null, null)
+    $sql$,
+    'notification_inbox_cursor_invalid'
+  ),
+  'inbox rejects an explicit null limit instead of returning an unbounded page'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.mark_dashboard_notification_read_v1(
+        '76000000-0000-4000-8000-000000000803'
+      )
+    $sql$,
+    'notification_not_visible'
+  ),
+  'a revoked row cannot gain a receipt after the locked visibility recheck'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-read-admin', public.mark_dashboard_notification_read_v1(
+  '76000000-0000-4000-8000-000000000801'
+);
+reset role;
+select ok(
+  not exists (
+    select 1
+    from public.dashboard_notification_read_receipts receipt
+    where receipt.notification_id = '76000000-0000-4000-8000-000000000803'
+  )
+  and exists (
+    select 1
+    from dashboard_private.visible_dashboard_notification_rows_v1(
+      '30000000-0000-4000-8000-000000000002'
+    ) visible
+    where visible.id = '76000000-0000-4000-8000-000000000801'
+      and visible.read_at is null
+  )
+  and exists (
+    select 1
+    from dashboard_private.visible_dashboard_notification_rows_v1(
+      '30000000-0000-4000-8000-000000000001'
+    ) visible
+    where visible.id = '76000000-0000-4000-8000-000000000801'
+      and visible.receipt_read_at is not null
+  ),
+  'one management reader does not mark the shared row read for another profile'
+);
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000002');
+set local role authenticated;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-read-staff', public.mark_dashboard_notification_read_v1(
+  '76000000-0000-4000-8000-000000000801'
+);
+reset role;
+select ok(
+  (
+    select count(*) = 2
+    from public.dashboard_notification_read_receipts receipt
+    where receipt.notification_id = '76000000-0000-4000-8000-000000000801'
+  )
+  and (
+    select notification.read_at is null
+    from public.dashboard_notifications notification
+    where notification.id = '76000000-0000-4000-8000-000000000801'
+  )
+  and not exists (
+    select 1
+    from public.dashboard_notification_read_receipts receipt
+    where receipt.notification_id = '76000000-0000-4000-8000-000000000802'
+  )
+  and exists (
+    select 1
+    from dashboard_private.visible_dashboard_notification_rows_v1(
+      '30000000-0000-4000-8000-000000000002'
+    ) visible
+    where visible.id = '76000000-0000-4000-8000-000000000802'
+      and visible.read_at is not null
+  ),
+  'receipts remain per-profile and legacy read_at is only a historical fallback'
+);
+
+insert into dashboard_private.notification_events(
+  id, scope_key, workflow_key, event_key, source_type, source_id,
+  source_revision, occurrence_key, actor_profile_id, occurred_at,
+  payload_schema_version, payload, rule_snapshot
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000403',
+    'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+    'ownership-canonical-first', 1, 'ownership-canonical-first', null,
+    now(), 1, '{}'::jsonb, '[]'::jsonb
+  ),
+  (
+    '76000000-0000-4000-8000-000000000404',
+    'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+    'ownership-legacy-first', 1, 'ownership-legacy-first', null,
+    now(), 1, '{}'::jsonb, '[]'::jsonb
+  );
+insert into dashboard_private.notification_deliveries(
+  id, event_id, rule_id, rule_revision, template_id, channel_key, audience_key,
+  target_generation, target_set_hash, target_kind, target_key,
+  target_profile_id, connection_key, target_snapshot, status, status_reason,
+  dedupe_key, rendered_title, rendered_body, href, scheduled_for,
+  attempt_count, max_attempts, next_attempt_at
+)
+values
+  (
+    '76000000-0000-4000-8000-000000000503',
+    '76000000-0000-4000-8000-000000000403',
+    '76000000-0000-4000-8000-000000000101', 1,
+    '76000000-0000-4000-8000-000000000201',
+    'google_chat', 'management_team', 1, pg_catalog.repeat('e', 64),
+    'connection', 'connection:canonical-first', null, 'google_chat.management',
+    '{"active":true}'::jsonb, 'pending', null, 'worker-canonical-first',
+    '소유권', 'canonical first', '/admin/tasks', now(), 0, 5, now()
+  ),
+  (
+    '76000000-0000-4000-8000-000000000504',
+    '76000000-0000-4000-8000-000000000404',
+    '76000000-0000-4000-8000-000000000101', 1,
+    '76000000-0000-4000-8000-000000000201',
+    'google_chat', 'management_team', 1, pg_catalog.repeat('f', 64),
+    'connection', 'connection:legacy-first', null, 'google_chat.management',
+    '{"active":true}'::jsonb, 'pending', null, 'worker-legacy-first',
+    '소유권', 'legacy first', '/admin/tasks', now(), 0, 5, now()
+  );
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-canonical-reserve', pg_catalog.jsonb_build_object(
+  'claim_id', dashboard_private.reserve_canonical_dispatch_ownership_v1(
+    '76000000-0000-4000-8000-000000000503'
+  )
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-legacy-after-canonical', public.begin_legacy_notification_dispatch_v1(
+  'tasks', 'ownership-canonical-first',
+  '76000000-0000-4000-8000-000000000101', 'google_chat',
+  'connection:canonical-first', 1, 'legacy-worker-fixture', 0,
+  '76000000-0000-4000-8000-000000000901'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-legacy-first', public.begin_legacy_notification_dispatch_v1(
+  'tasks', 'ownership-legacy-first',
+  '76000000-0000-4000-8000-000000000101', 'google_chat',
+  'connection:legacy-first', 1, 'legacy-worker-fixture', 0,
+  '76000000-0000-4000-8000-000000000902'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-canonical-after-legacy', pg_catalog.jsonb_build_object(
+  'claim_id', dashboard_private.reserve_canonical_dispatch_ownership_v1(
+    '76000000-0000-4000-8000-000000000504'
+  )
+);
+reset role;
+select ok(
+  (
+    select not (payload ->> 'acquired')::boolean
+      and payload ->> 'status' = 'legacy_deduped'
+      and payload ->> 'reason' = 'ownership_not_acquired'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-after-canonical'
+  )
+  and (
+    select (payload ->> 'acquired')::boolean
+      and payload ->> 'status' = 'dispatch_started'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-first'
+  )
+  and (
+    select payload ->> 'claim_id' is null
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-canonical-after-legacy'
+  )
+  and (
+    select status = 'skipped' and status_reason = 'legacy_deduped'
+    from dashboard_private.notification_deliveries
+    where id = '76000000-0000-4000-8000-000000000504'
+  )
+  and (
+    select count(*) = 2
+    from dashboard_private.notification_dispatch_ownership_claims ownership
+    where ownership.occurrence_key in (
+      'ownership-canonical-first', 'ownership-legacy-first'
+    )
+  ),
+  'canonical and legacy races converge on exactly one rule-scoped dispatch owner'
+);
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-legacy-finalized', public.finalize_legacy_notification_dispatch_v1(
+  (
+    select (payload ->> 'claim_id')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-first'
+  ),
+  (
+    select (payload ->> 'owner_generation')::bigint
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-first'
+  ),
+  (
+    select (payload ->> 'dispatch_token')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-first'
+  ),
+  'sent',
+  'legacy-provider-reference-1'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-legacy-finalized-replay', public.finalize_legacy_notification_dispatch_v1(
+  (
+    select (payload ->> 'claim_id')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-first'
+  ),
+  (
+    select (payload ->> 'owner_generation')::bigint
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-first'
+  ),
+  (
+    select (payload ->> 'dispatch_token')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-first'
+  ),
+  'sent',
+  'legacy-provider-reference-1'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.finalize_legacy_notification_dispatch_v1(%L::uuid,%L::bigint,%L::uuid,%L,%L)',
+      (
+        select payload ->> 'claim_id'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      (
+        select payload ->> 'owner_generation'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      (
+        select payload ->> 'dispatch_token'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      'failed',
+      'legacy-provider-reference-1'
+    ),
+    'notification_legacy_finalize_replay_mismatch'
+  ),
+  'a closed legacy sent outcome cannot be replayed as failed'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.finalize_legacy_notification_dispatch_v1(%L::uuid,%L::bigint,%L::uuid,%L,%L)',
+      (
+        select payload ->> 'claim_id'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      (
+        select payload ->> 'owner_generation'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      (
+        select payload ->> 'dispatch_token'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      'sent',
+      'changed-provider-reference'
+    ),
+    'notification_legacy_finalize_replay_mismatch'
+  ),
+  'a closed legacy outcome cannot replay with a changed provider reference'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.finalize_legacy_notification_dispatch_v1(%L::uuid,%L::bigint,%L::uuid,null,%L)',
+      (
+        select payload ->> 'claim_id'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      (
+        select payload ->> 'owner_generation'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      (
+        select payload ->> 'dispatch_token'
+        from notification_control_plane_runtime_results
+        where result_key = 'worker-legacy-first'
+      ),
+      'legacy-provider-reference-1'
+    ),
+    'notification_legacy_finalize_invalid'
+  ),
+  'legacy finalize rejects a null outcome at the closed input boundary'
+);
+reset role;
+select ok(
+  (
+    select payload ->> 'outcome' = 'sent'
+      and not (payload ->> 'replayed')::boolean
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-finalized'
+  )
+  and (
+    select payload ->> 'outcome' = 'sent'
+      and (payload ->> 'replayed')::boolean
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-legacy-finalized-replay'
+  )
+  and (
+    select terminal_outcome = 'sent'
+      and provider_reference = 'legacy-provider-reference-1'
+    from dashboard_private.notification_dispatch_ownership_claims
+    where id = (
+      select (payload ->> 'claim_id')::uuid
+      from notification_control_plane_runtime_results
+      where result_key = 'worker-legacy-first'
+    )
+  ),
+  'legacy finalize replays only its first persisted terminal outcome and provider reference'
+);
+
+select has_function(
+  'public',
+  'record_push_connection_test_audit_v1',
+  array['uuid', 'text', 'text'],
+  'Push self-test writes only a normalized service-side audit result'
+);
+select has_function(
+  'public',
+  'rebind_dashboard_push_subscription_v1',
+  array['text', 'text', 'text', 'text'],
+  'an authenticated explicit capability RPC can rebind a browser Push subscription'
+);
+select ok(
+  pg_catalog.has_function_privilege(
+    'service_role',
+    'public.record_push_connection_test_audit_v1(uuid,text,text)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.record_push_connection_test_audit_v1(uuid,text,text)',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.rebind_dashboard_push_subscription_v1(text,text,text,text)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.rebind_dashboard_push_subscription_v1(text,text,text,text)',
+    'EXECUTE'
+  ),
+  'Push test audit is service-only while explicit rebind is authenticated-only'
+);
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+select public.record_push_connection_test_audit_v1(
+  '30000000-0000-4000-8000-000000000001',
+  'sent',
+  'push_self_test_sent'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.record_push_connection_test_audit_v1(
+        '30000000-0000-4000-8000-000000000001',
+        'sent',
+        'push_self_test_failed'
+      )
+    $sql$,
+    'push_connection_test_audit_invalid'
+  ),
+  'Push self-test audit rejects an invalid outcome/code pair'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.record_push_connection_test_audit_v1(
+        '30000000-0000-4000-8000-000000000001',
+        null,
+        'push_self_test_sent'
+      )
+    $sql$,
+    'push_connection_test_audit_invalid'
+  ),
+  'Push self-test audit rejects a null outcome instead of bypassing the closed pair'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.record_push_connection_test_audit_v1(
+        '30000000-0000-4000-8000-000000000001',
+        'sent',
+        null
+      )
+    $sql$,
+    'push_connection_test_audit_invalid'
+  ),
+  'Push self-test audit rejects a null code instead of bypassing the closed pair'
+);
+reset role;
+select ok(
+  (
+    select action = 'push_connection_tested'
+      and actor_profile_id = '30000000-0000-4000-8000-000000000001'
+      and actor_kind = 'user'
+      and before_summary is null
+      and after_summary = '{"outcome":"sent","code":"push_self_test_sent"}'::jsonb
+      and reason_code = 'push_self_test_sent'
+      and coalesce(after_summary::text, '') !~* 'endpoint|p256dh|auth|title|body|href'
+    from dashboard_private.notification_audit_logs
+    where action = 'push_connection_tested'
+      and actor_profile_id = '30000000-0000-4000-8000-000000000001'
+    order by created_at desc
+    limit 1
+  ),
+  'Push self-test audit stores only actor plus normalized outcome and code'
+);
+
+insert into public.dashboard_push_subscriptions(
+  id, profile_id, endpoint, p256dh, auth, user_agent, last_seen_at
+) values (
+  '76100000-0000-4000-8000-000000000801',
+  '30000000-0000-4000-8000-000000000002',
+  'https://fcm.googleapis.com/fcm/send/rebind-fixture-123',
+  'fixtureP256Capability',
+  'fixtureAuthCapability',
+  'Old Fixture Browser',
+  now() - interval '1 day'
+);
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.rebind_dashboard_push_subscription_v1(
+        'https://fcm.googleapis.com/fcm/send/rebind-fixture-123',
+        'wrongP256Capability',
+        'fixtureAuthCapability',
+        'Fixture Browser/1.0'
+      )
+    $sql$,
+    'push_subscription_rebind_capability_mismatch'
+  ),
+  'endpoint knowledge without the exact subscription capability cannot rebind an owner'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-push-rebound', public.rebind_dashboard_push_subscription_v1(
+  'https://fcm.googleapis.com/fcm/send/rebind-fixture-123',
+  'fixtureP256Capability',
+  'fixtureAuthCapability',
+  'Fixture Browser/1.0'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-push-rebound-replay', public.rebind_dashboard_push_subscription_v1(
+  'https://fcm.googleapis.com/fcm/send/rebind-fixture-123',
+  'fixtureP256Capability',
+  'fixtureAuthCapability',
+  'Fixture Browser/1.0'
+);
+reset role;
+select ok(
+  (
+    select payload = '{"ok":true,"status":"rebound"}'::jsonb
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-push-rebound'
+  )
+  and (
+    select payload = '{"ok":true,"status":"current"}'::jsonb
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-push-rebound-replay'
+  )
+  and (
+    select profile_id = '30000000-0000-4000-8000-000000000001'
+      and p256dh = 'fixtureP256Capability'
+      and auth = 'fixtureAuthCapability'
+      and user_agent = 'Fixture Browser/1.0'
+    from public.dashboard_push_subscriptions
+    where id = '76100000-0000-4000-8000-000000000801'
+  )
+  and (
+    select count(*) = 1
+      and pg_catalog.bool_and(
+        coalesce(before_summary::text, '') !~* '30000000-0000-4000-8000-000000000002|fcm|p256|auth|endpoint'
+        and coalesce(after_summary::text, '') !~* '30000000-0000-4000-8000-000000000002|fcm|p256|auth|endpoint'
+      )
+    from dashboard_private.notification_audit_logs
+    where action = 'push_subscription_rebound'
+      and entity_id = '76100000-0000-4000-8000-000000000801'
+  ),
+  'exact capability rebind returns normalized status and never records the prior owner, endpoint, or keys'
+);
+
+-- Manual retry approval reopens the closed canonical ownership generation in
+-- the same transaction. Unknown outcomes still require explicit duplicate-risk
+-- acceptance and are never claimed before that approval.
+insert into dashboard_private.notification_events(
+  id, scope_key, workflow_key, event_key, source_type, source_id,
+  source_revision, occurrence_key, actor_profile_id, occurred_at,
+  payload_schema_version, payload, rule_snapshot
+) values
+  (
+    '76100000-0000-4000-8000-000000000301',
+    'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+    'manual-retry-failed', 1, 'manual-retry-failed-occurrence', null,
+    now(), 1, '{}'::jsonb,
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'rule_id', '76000000-0000-4000-8000-000000000101',
+      'rule_revision', '1',
+      'template_id', '76000000-0000-4000-8000-000000000201',
+      'channel_key', 'google_chat',
+      'audience_key', 'management_team',
+      'rule_variant_key', 'immediate',
+      'enabled', true
+    ))
+  ),
+  (
+    '76100000-0000-4000-8000-000000000302',
+    'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+    'manual-retry-unknown', 1, 'manual-retry-unknown-occurrence', null,
+    now(), 1, '{}'::jsonb,
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'rule_id', '76000000-0000-4000-8000-000000000101',
+      'rule_revision', '1',
+      'template_id', '76000000-0000-4000-8000-000000000201',
+      'channel_key', 'google_chat',
+      'audience_key', 'management_team',
+      'rule_variant_key', 'immediate',
+      'enabled', true
+    ))
+  );
+insert into dashboard_private.notification_deliveries(
+  id, event_id, rule_id, rule_revision, template_id, channel_key, audience_key,
+  target_generation, target_set_hash, target_kind, target_key,
+  target_profile_id, connection_key, target_snapshot, status, status_reason,
+  dedupe_key, rendered_title, rendered_body, href, scheduled_for,
+  attempt_count, max_attempts, next_attempt_at, last_attempt_started_at,
+  provider_response_code, last_error_code, last_error_summary, resolved_at
+) values
+  (
+    '76100000-0000-4000-8000-000000000401',
+    '76100000-0000-4000-8000-000000000301',
+    '76000000-0000-4000-8000-000000000101', 1,
+    '76000000-0000-4000-8000-000000000201',
+    'google_chat', 'management_team', 1, pg_catalog.repeat('1', 64),
+    'connection', 'connection:manual-retry-failed', null,
+    'google_chat.management', '{"active":true}'::jsonb,
+    'failed', 'provider_definite_rejection', 'worker-manual-retry-failed',
+    '수동 재시도', '실패 건 재시도', '/admin/tasks', now() - interval '1 hour',
+    1, 5, null, now() - interval '5 minutes',
+    '400', 'provider_rejected', 'definite rejection', now() - interval '4 minutes'
+  ),
+  (
+    '76100000-0000-4000-8000-000000000402',
+    '76100000-0000-4000-8000-000000000302',
+    '76000000-0000-4000-8000-000000000101', 1,
+    '76000000-0000-4000-8000-000000000201',
+    'google_chat', 'management_team', 1, pg_catalog.repeat('2', 64),
+    'connection', 'connection:manual-retry-unknown', null,
+    'google_chat.management', '{"active":true}'::jsonb,
+    'delivery_unknown', 'provider_ambiguous_response', 'worker-manual-retry-unknown',
+    '수동 재시도', '불명 건 재시도', '/admin/tasks', now() - interval '1 hour',
+    1, 5, null, now() - interval '5 minutes',
+    'timeout', 'provider_timeout', 'ambiguous response', now() - interval '4 minutes'
+  );
+insert into dashboard_private.notification_dispatch_ownership_claims(
+  id, workflow_key, occurrence_key, rule_id, channel_key, target_key,
+  target_generation, owner_kind, owner_generation, state,
+  dispatch_started_at, dispatch_token, provider_reference
+) values
+  (
+    '76100000-0000-4000-8000-000000000501',
+    'tasks', 'manual-retry-failed-occurrence',
+    '76000000-0000-4000-8000-000000000101', 'google_chat',
+    'connection:manual-retry-failed', 1, 'canonical', 0, 'closed',
+    now() - interval '5 minutes',
+    '76100000-0000-4000-8000-000000000601', 'old-failed-reference'
+  ),
+  (
+    '76100000-0000-4000-8000-000000000502',
+    'tasks', 'manual-retry-unknown-occurrence',
+    '76000000-0000-4000-8000-000000000101', 'google_chat',
+    'connection:manual-retry-unknown', 1, 'canonical', 0, 'closed',
+    now() - interval '5 minutes',
+    '76100000-0000-4000-8000-000000000602', 'old-unknown-reference'
+  );
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-manual-retry-failed', public.reconcile_notification_delivery_v1(
+  '76100000-0000-4000-8000-000000000401',
+  'approve_retry',
+  'operator_approved_retry',
+  '76100000-0000-4000-8000-000000000701',
+  false
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.reconcile_notification_delivery_v1(
+        '76100000-0000-4000-8000-000000000402',
+        'approve_retry',
+        'missing_duplicate_confirmation',
+        '76100000-0000-4000-8000-000000000702',
+        false
+      )
+    $sql$,
+    'notification_duplicate_risk_confirmation_required'
+  ),
+  'unknown delivery cannot be approved without duplicate-risk acceptance'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.reconcile_notification_delivery_v1(
+        '76100000-0000-4000-8000-000000000402',
+        'approve_retry',
+        'null_duplicate_confirmation',
+        '76100000-0000-4000-8000-000000000703',
+        null
+      )
+    $sql$,
+    'notification_delivery_reconciliation_invalid'
+  ),
+  'an explicit null duplicate-risk decision is rejected at the input boundary'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.reconcile_notification_delivery_v1(
+        '76100000-0000-4000-8000-000000000402',
+        null,
+        'null_resolution',
+        '76100000-0000-4000-8000-000000000705',
+        true
+      )
+    $sql$,
+    'notification_delivery_reconciliation_invalid'
+  ),
+  'an explicit null reconciliation resolution cannot become an implicit retry'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-manual-retry-unknown', public.reconcile_notification_delivery_v1(
+  '76100000-0000-4000-8000-000000000402',
+  'approve_retry',
+  'operator_accepted_duplicate_risk',
+  '76100000-0000-4000-8000-000000000704',
+  true
+);
+reset role;
+select ok(
+  (
+    select state = 'reserved'
+      and owner_kind = 'canonical'
+      and owner_generation = 1
+      and dispatch_started_at is null
+      and dispatch_token is null
+      and provider_reference is null
+    from dashboard_private.notification_dispatch_ownership_claims
+    where id = '76100000-0000-4000-8000-000000000501'
+  )
+  and (
+    select state = 'reserved'
+      and owner_kind = 'canonical'
+      and owner_generation = 1
+      and dispatch_started_at is null
+      and dispatch_token is null
+      and provider_reference is null
+    from dashboard_private.notification_dispatch_ownership_claims
+    where id = '76100000-0000-4000-8000-000000000502'
+  )
+  and (
+    select count(*) = 0
+    from dashboard_private.notification_request_ledger
+    where request_id in (
+      '76100000-0000-4000-8000-000000000702',
+      '76100000-0000-4000-8000-000000000703',
+      '76100000-0000-4000-8000-000000000705'
+    )
+  ),
+  'approved retries atomically reopen a fresh clean ownership generation and rejected approvals leave no ledger'
+);
+create temporary table notification_worker_manual_retry_claim_rows(payload jsonb not null) on commit drop;
+grant select, insert on notification_worker_manual_retry_claim_rows to service_role;
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_worker_manual_retry_claim_rows(payload)
+select claim
+from public.claim_notification_deliveries_v1('worker-manual-retry-fixture', 100, 60) claim;
+reset role;
+select ok(
+  exists (
+    select 1 from notification_worker_manual_retry_claim_rows
+    where payload ->> 'delivery_id' = '76100000-0000-4000-8000-000000000401'
+  )
+  and exists (
+    select 1 from notification_worker_manual_retry_claim_rows
+    where payload ->> 'delivery_id' = '76100000-0000-4000-8000-000000000402'
+  )
+  and not exists (
+    select 1 from notification_worker_manual_retry_claim_rows
+    where payload ->> 'delivery_id' = '76000000-0000-4000-8000-000000000502'
+  ),
+  'failed and explicitly approved unknown retries are claimable while an unapproved unknown remains terminal'
+);
+
+-- Personal rows remain personal even for managers, including contaminated
+-- legacy rows that also carry the shared management-team marker.
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-admin-private-count-before', public.get_dashboard_notification_unread_count_v1();
+reset role;
+insert into public.dashboard_notifications(
+  id, recipient_profile_id, recipient_team, type, title, body, href,
+  metadata, read_at, created_at
+) values
+  (
+    '76100000-0000-4000-8000-000000000201',
+    '30000000-0000-4000-8000-000000000002',
+    null,
+    'notification_control_plane', 'B 개인 알림', 'B만 볼 수 있습니다.',
+    '/admin/tasks', '{}'::jsonb, null, now()
+  ),
+  (
+    '76100000-0000-4000-8000-000000000202',
+    '30000000-0000-4000-8000-000000000002',
+    '관리팀',
+    'notification_control_plane', 'B 혼합 알림', '개인 수신자가 우선입니다.',
+    '/admin/tasks', '{}'::jsonb, null, now()
+  );
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-admin-private-inbox', public.get_dashboard_notification_inbox_v1(100, null, null);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-admin-private-count', public.get_dashboard_notification_unread_count_v1();
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.mark_dashboard_notification_read_v1(
+        '76100000-0000-4000-8000-000000000202'
+      )
+    $sql$,
+    'notification_not_visible'
+  ),
+  'profile A cannot mark profile B personal notification as read'
+);
+reset role;
+select ok(
+  not exists (
+    select 1
+    from pg_catalog.jsonb_array_elements((
+      select payload -> 'items'
+      from notification_control_plane_runtime_results
+      where result_key = 'worker-admin-private-inbox'
+    )) item(value)
+    where item.value ->> 'id' in (
+      '76100000-0000-4000-8000-000000000201',
+      '76100000-0000-4000-8000-000000000202'
+    )
+  )
+  and not exists (
+    select 1
+    from dashboard_private.visible_dashboard_notification_rows_v1(
+      '30000000-0000-4000-8000-000000000001'
+    ) visible
+    where visible.id in (
+      '76100000-0000-4000-8000-000000000201',
+      '76100000-0000-4000-8000-000000000202'
+    )
+  )
+  and (
+    select after.payload = before.payload
+    from notification_control_plane_runtime_results after
+    join notification_control_plane_runtime_results before
+      on before.result_key = 'worker-admin-private-count-before'
+    where after.result_key = 'worker-admin-private-count'
+  )
+  and (
+    select count(*) = 2
+    from dashboard_private.visible_dashboard_notification_rows_v1(
+      '30000000-0000-4000-8000-000000000002'
+    ) visible
+    where visible.id in (
+      '76100000-0000-4000-8000-000000000201',
+      '76100000-0000-4000-8000-000000000202'
+    )
+  ),
+  'admin list/count/direct visibility cannot expose another profile personal or mixed-team rows'
+);
+
+-- A scheduled rule occurrence keeps its domain schedule distinct from the
+-- occurrence timestamp all the way through the fan-out claim envelope.
+insert into dashboard_private.notification_rule_reconciliation_jobs(
+  id, workflow_key, rule_revision_map, status, next_attempt_at, created_at, updated_at
+) values (
+  '76100000-0000-4000-8000-000000000001',
+  'tasks',
+  pg_catalog.jsonb_build_object('76000000-0000-4000-8000-000000000101', '1'),
+  'pending',
+  '2000-01-01 00:00:00+00',
+  now(),
+  now()
+);
+create temporary table notification_worker_rule_claim_rows(payload jsonb not null) on commit drop;
+grant select, insert on notification_worker_rule_claim_rows to service_role;
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_worker_rule_claim_rows(payload)
+select claim
+from public.claim_notification_rule_reconciliation_jobs_v1(
+  'worker-rule-schedule-fixture', 100, 60
+) claim;
+select ok(
+  pg_temp.notification_runtime_throws(
+    pg_catalog.format(
+      'select public.apply_notification_rule_reconciliation_batch_v1(%L::uuid,%L::uuid,null,%L::jsonb,%L,true)',
+      '76100000-0000-4000-8000-000000000001',
+      (
+        select payload ->> 'claim_token'
+        from notification_worker_rule_claim_rows
+        where payload ->> 'job_id' = '76100000-0000-4000-8000-000000000001'
+      ),
+      '{"sources":[],"occurrences":[]}',
+      'unexpected-cursor'
+    ),
+    'notification_rule_reconciliation_batch_invalid'
+  ),
+  'a terminal rule-reconciliation page rejects a non-null next cursor'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.apply_notification_target_reconciliation_batch_v1(
+        '76100000-0000-4000-8000-000000000099',
+        '76100000-0000-4000-8000-000000000098',
+        null,
+        '{"target_generation":"1","target_set_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","deliveries":[]}'::jsonb,
+        'unexpected-cursor',
+        true
+      )
+    $sql$,
+    'notification_target_reconciliation_batch_invalid'
+  ),
+  'a terminal target-reconciliation page rejects a non-null next cursor'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-scheduled-rule-applied', public.apply_notification_rule_reconciliation_batch_v1(
+  '76100000-0000-4000-8000-000000000001',
+  (
+    select (payload ->> 'claim_token')::uuid
+    from notification_worker_rule_claim_rows
+    where payload ->> 'job_id' = '76100000-0000-4000-8000-000000000001'
+  ),
+  null,
+  pg_catalog.jsonb_build_object(
+    'sources', '[]'::jsonb,
+    'occurrences', pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'event_key', 'task.worker_delivery_fixture',
+      'source_type', 'worker_fixture',
+      'source_id', 'scheduled-reconciliation',
+      'source_revision', '1',
+      'occurrence_key', 'scheduled-reconciliation-occurrence',
+      'occurred_at', '2026-07-17T00:00:00Z',
+      'payload_schema_version', '1',
+      'payload', pg_catalog.jsonb_build_object('fixture', 'scheduled-reconciliation'),
+      'materialized_rule_id', '76000000-0000-4000-8000-000000000101',
+      'materialized_rule_revision', '1',
+      'scheduled_for', '2026-07-20T03:30:00Z'
+    ))
+  ),
+  null,
+  true
+);
+create temporary table notification_worker_scheduled_claim_rows(payload jsonb not null) on commit drop;
+grant select, insert on notification_worker_scheduled_claim_rows to service_role;
+insert into notification_worker_scheduled_claim_rows(payload)
+select claim
+from public.claim_notification_fanout_jobs_v1(
+  'worker-scheduled-fanout-fixture', 100, 60
+) claim;
+reset role;
+select ok(
+  exists (
+    select 1
+    from dashboard_private.notification_event_fanout_jobs job
+    join dashboard_private.notification_events event_row on event_row.id = job.event_id
+    where event_row.occurrence_key = 'scheduled-reconciliation-occurrence'
+      and event_row.occurred_at = '2026-07-17T00:00:00Z'::timestamptz
+      and job.scheduled_for = '2026-07-20T03:30:00Z'::timestamptz
+      and job.scheduled_for_source = 'rule_reconciliation'
+  )
+  and exists (
+    select 1
+    from notification_worker_scheduled_claim_rows
+    where payload ->> 'occurrence_key' = 'scheduled-reconciliation-occurrence'
+      and (payload ->> 'occurred_at')::timestamptz =
+        '2026-07-17T00:00:00Z'::timestamptz
+      and (payload ->> 'scheduled_for')::timestamptz =
+        '2026-07-20T03:30:00Z'::timestamptz
+  )
+  and exists (
+    select 1
+    from dashboard_private.notification_event_fanout_jobs job
+    join dashboard_private.notification_events event_row on event_row.id = job.event_id
+    where event_row.occurrence_key = 'event-replay-occurrence'
+      and job.scheduled_for = event_row.occurred_at
+      and job.scheduled_for_source = 'event'
+  ),
+  'immediate and scheduled fan-out jobs preserve their distinct canonical schedule snapshots'
+);
+
+-- Heartbeats are a two-row state machine: one start and one immutable terminal.
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+select public.record_notification_worker_heartbeat_v1(
+  'worker-heartbeat-fixture',
+  '76100000-0000-4000-8000-000000000101',
+  'started',
+  '{"fanout":0,"rule_reconciliation":0,"target_reconciliation":0,"deliveries":0,"reaped":0}'::jsonb,
+  null
+);
+select public.record_notification_worker_heartbeat_v1(
+  'worker-heartbeat-fixture',
+  '76100000-0000-4000-8000-000000000101',
+  'succeeded',
+  '{"fanout":1,"rule_reconciliation":0,"target_reconciliation":0,"deliveries":0,"reaped":0}'::jsonb,
+  null
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.record_notification_worker_heartbeat_v1(
+        'worker-heartbeat-fixture',
+        '76100000-0000-4000-8000-000000000101',
+        'failed',
+        '{"fanout":1,"rule_reconciliation":0,"target_reconciliation":0,"deliveries":0,"reaped":0}'::jsonb,
+        'late_failure'
+      )
+    $sql$,
+    'notification_worker_heartbeat_conflict'
+  ),
+  'a succeeded worker run rejects a later failed terminal'
+);
+select public.record_notification_worker_heartbeat_v1(
+  'worker-heartbeat-fixture',
+  '76100000-0000-4000-8000-000000000102',
+  'started',
+  '{"fanout":0,"rule_reconciliation":0,"target_reconciliation":0,"deliveries":0,"reaped":0}'::jsonb,
+  null
+);
+select public.record_notification_worker_heartbeat_v1(
+  'worker-heartbeat-fixture',
+  '76100000-0000-4000-8000-000000000102',
+  'failed',
+  '{"fanout":0,"rule_reconciliation":0,"target_reconciliation":0,"deliveries":0,"reaped":0}'::jsonb,
+  'fixture_failure'
+);
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.record_notification_worker_heartbeat_v1(
+        'worker-heartbeat-fixture',
+        '76100000-0000-4000-8000-000000000102',
+        'succeeded',
+        '{"fanout":0,"rule_reconciliation":0,"target_reconciliation":0,"deliveries":0,"reaped":0}'::jsonb,
+        null
+      )
+    $sql$,
+    'notification_worker_heartbeat_conflict'
+  ),
+  'a failed worker run rejects a later succeeded terminal'
+);
+reset role;
+select ok(
+  (
+    select count(*) = 2
+      and count(*) filter (where phase in ('succeeded', 'failed')) = 1
+    from dashboard_private.notification_worker_heartbeats
+    where run_id = '76100000-0000-4000-8000-000000000101'
+  )
+  and (
+    select count(*) = 2
+      and count(*) filter (where phase in ('succeeded', 'failed')) = 1
+    from dashboard_private.notification_worker_heartbeats
+    where run_id = '76100000-0000-4000-8000-000000000102'
+  ),
+  'each worker run stores exactly one start and one terminal heartbeat'
+);
+
 select * from finish();
 rollback;
