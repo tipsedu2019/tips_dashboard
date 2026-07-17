@@ -994,7 +994,7 @@ The operator save path also rechecks notification_control_plane_settings_ui_enab
 - [x] **Step 4: encrypt Google Chat URLs with versioned AES-256-GCM envelopes; browser responses expose only configured state and masked metadata**
 - [x] **Step 5: make the controlled backfill dry-run by default and preserve legacy readers until cutover**
 - [ ] **Step 6: run pnpm run test:notifications and authorized pgTAP**
-- [ ] **Step 7: commit**
+- [x] **Step 7: commit**
 
 ~~~bash
 git add \
@@ -1013,6 +1013,8 @@ git commit -m "feat: add secure notification settings APIs"
 ~~~
 
 **Gate:** a successful save survives route exit/reload; a stale revision returns a conflict without overwriting another operator; no secret appears in response, logs, event payload, delivery summary, or audit summary.
+
+**완료 증거(2026-07-17):** `871b04f` 커밋에 역할 기반 설정 읽기·저장, 원자적 revision/CAS·요청 원장·감사, 12개 런타임 플래그 경계, Google Chat 연결 암호화·검증 예약·안전한 legacy 호환, dry-run 기본 백필을 기록했습니다. 작업 6 API 34/34, 작업 4~6 집중 60/60, 기존 관련 회귀 132/132, 작업 7 RED를 제외한 전체 Node 1092/1092, TypeScript, 전체 ESLint, production build가 통과했습니다. 독립 최종 검토는 P0/P1/P2 0건입니다. 로컬 `/admin/registration`은 HTTP 200으로 계속 실행 중입니다. 원격 마이그레이션·데이터 변경·런타임 플래그 변경·provider 호출·배포는 수행하지 않았고, 실제 DB pgTAP 실행은 승인된 local/preview 적용 단계의 배포 전 검증으로 남겼습니다.
 
 ---
 
