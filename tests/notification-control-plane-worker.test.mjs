@@ -339,8 +339,11 @@ function createDeliveryClaim(overrides = {}) {
     source_revision: BIG_REVISION,
     rule_id: RULE_ID,
     rule_revision: BIG_REVISION,
+    attempt_count: 0,
+    max_attempts: 5,
     target_generation: TARGET_GENERATION,
     scheduled_for: "2026-07-17T01:00:00.000Z",
+    retry_window_ends_at: null,
     channel_key: "google_chat",
     target: {
       target_kind: "profile",
@@ -473,6 +476,14 @@ test("worker migration은 원자 이벤트·SKIP LOCKED·claim token·lease 복�
   assert.match(beginSend, /claim_token/i)
   assert.match(beginSend, /cancel_requested_at/i)
 
+  const upsert = functionBlock(source, "materialize_notification_delivery_v1")
+  assert.match(upsert, /workflow_key\s*=\s*'registration'[\s\S]*event_key\s*=\s*'registration\.appointment_reminder_due'[\s\S]*then\s+3/i)
+
+  const claimDeliveries = functionBlock(source, "claim_notification_deliveries_v1")
+  assert.match(claimDeliveries, /'attempt_count',\s*v_delivery\.attempt_count/i)
+  assert.match(claimDeliveries, /'max_attempts',\s*v_delivery\.max_attempts/i)
+  assert.match(claimDeliveries, /'retry_window_ends_at'[\s\S]*event_row\.payload\s*#>>\s*'\{appointment,scheduled_at\}'/i)
+
   const reaper = functionBlock(source, "reap_notification_leases_v1")
   assert.match(reaper, /'claimed'[\s\S]*?'pending'/i)
   assert.match(reaper, /'sending'[\s\S]*?'delivery_unknown'/i)
@@ -482,6 +493,237 @@ test("worker migration은 원자 이벤트·SKIP LOCKED·claim token·lease 복�
   assert.match(heartbeat, /notification-worker-run:/i)
   assert.match(heartbeat, /phase\s+in\s*\(\s*'succeeded'\s*,\s*'failed'\s*\)/i)
   assert.match(heartbeat, /notification_worker_heartbeat_conflict/i)
+})
+
+test("등록 외부 예약 알림 재시도는 초회 후 1분·다음 5분이며 총 3회 계약을 사용한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const cases = [
+    { attemptCount: 0, expected: "2026-07-17T01:01:00.000Z" },
+    { attemptCount: 1, expected: "2026-07-17T01:05:00.000Z" },
+  ]
+  for (const fixture of cases) {
+    const claim = createDeliveryClaim({
+      workflow_key: "registration",
+      event_key: "registration.appointment_reminder_due",
+      source_type: "registration_appointment",
+      source_id: "71000000-0000-4000-8000-000000000451",
+      source_revision: "7",
+      rule_revision: "1",
+      attempt_count: fixture.attemptCount,
+      max_attempts: 3,
+      retry_window_ends_at: "2026-07-17T02:00:00.000Z",
+    })
+    const harness = createRpcHarness({
+      claim_notification_deliveries_v1: [claim],
+      begin_notification_delivery_send_v1: createBegunGoogleChatContext(),
+    })
+    const worker = createNotificationWorkerRuntime({
+      getAdapter: () => createAdapter({ workflowKey: "registration" }),
+      rpc: harness.rpc,
+      getProvider: () => ({
+        async send() {
+          return {
+            status: "retry_wait",
+            statusReason: "provider_rate_limited",
+            providerMessageId: null,
+            providerResponseCode: "429",
+            errorCode: "provider_rate_limited",
+            errorSummary: "safe",
+            nextAttemptAt: null,
+          }
+        },
+      }),
+      createRunId: () => RUN_ID,
+      now: () => new Date("2026-07-17T01:00:00.000Z"),
+    })
+
+    await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+    const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+    assert.equal(finalize.parameters.p_status, "retry_wait")
+    assert.equal(finalize.parameters.p_next_attempt_at, fixture.expected)
+  }
+})
+
+test("등록 예약 알림의 다음 재시도가 예약 시각 이상이면 즉시 retry_window_closed로 닫는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const claim = createDeliveryClaim({
+    workflow_key: "registration",
+    event_key: "registration.appointment_reminder_due",
+    source_type: "registration_appointment",
+    source_id: "71000000-0000-4000-8000-000000000452",
+    source_revision: "7",
+    rule_revision: "1",
+    attempt_count: 0,
+    max_attempts: 3,
+    retry_window_ends_at: "2026-07-17T01:00:30.000Z",
+  })
+  const harness = createRpcHarness({
+    claim_notification_deliveries_v1: [claim],
+    begin_notification_delivery_send_v1: createBegunGoogleChatContext(),
+  })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: () => createAdapter({ workflowKey: "registration" }),
+    rpc: harness.rpc,
+    getProvider: () => ({
+      async send() {
+        return {
+          status: "retry_wait",
+          statusReason: "provider_rate_limited",
+          providerMessageId: null,
+          providerResponseCode: "429",
+          errorCode: "provider_rate_limited",
+          errorSummary: "safe",
+          nextAttemptAt: null,
+        }
+      },
+    }),
+    createRunId: () => RUN_ID,
+    now: () => new Date("2026-07-17T01:00:00.000Z"),
+  })
+
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+  const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+  assert.equal(finalize.parameters.p_status, "failed")
+  assert.equal(finalize.parameters.p_status_reason, "retry_window_closed")
+  assert.equal(finalize.parameters.p_next_attempt_at, null)
+})
+
+test("규칙 재계산은 변경된 규칙의 delivery만 취소하고 같은 소스의 다른 규칙은 보존한다", async () => {
+  const source = await readFile(workerMigrationUrl, "utf8")
+  const reconcile = functionBlock(source, "apply_notification_rule_reconciliation_batch_v1")
+  const cancellationSection = reconcile.slice(
+    reconcile.indexOf("with canceled as"),
+    reconcile.indexOf("for v_occurrence"),
+  )
+
+  assert.equal(
+    (cancellationSection.match(/v_job\.rule_revision_map\s*\?\s*delivery\.rule_id::text/g) ?? []).length,
+    2,
+    "pending/retry_wait 취소와 claimed 취소 요청 모두 변경 규칙 ID로 제한해야 한다",
+  )
+  assert.equal(
+    (cancellationSection.match(/delivery\.rule_revision\s*<>\s*\(v_job\.rule_revision_map\s*->>\s*delivery\.rule_id::text\)::bigint/g) ?? []).length,
+    2,
+    "같은 규칙의 최신 리비전 delivery는 pending/claimed 모두 보존해야 한다",
+  )
+})
+
+test("fanout 권위 원본 일시 장애는 영구 실패시키지 않고 bounded retry로 돌려놓는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const job = {
+    job_id: "71000000-0000-4000-8000-000000000401",
+    claim_token: "71000000-0000-4000-8000-000000000402",
+    workflow_key: "registration",
+    event_id: EVENT_ID,
+    event_key: "registration.appointment_reminder_due",
+    source_type: "registration_appointment",
+    source_id: "71000000-0000-4000-8000-000000000403",
+    source_revision: "7",
+    occurrence_key: "registration:fixture:transient",
+    occurred_at: "2026-07-17T01:00:00.000Z",
+    scheduled_for: "2026-07-17T01:10:00.000Z",
+    payload_schema_version: 2,
+    payload: { fixture: true },
+    rule_id: RULE_ID,
+    rule_revision: "1",
+    template_id: TEMPLATE_ID,
+    channel_key: "in_app",
+    audience_key: "track_director",
+    rule_variant_key: "same_day_at",
+    title_template: "{학생}",
+    body_template: "{장소}",
+    allowed_variables: [
+      { key: "student_name", token: "학생", pii_class: "student_name" },
+      { key: "place", token: "장소", pii_class: "business_text" },
+    ],
+    template_payload_schema_version: 2,
+    cursor: null,
+    next_cursor: null,
+    last_rule: true,
+    attempt_count: 1,
+  }
+  const harness = createRpcHarness({ claim_notification_fanout_jobs_v1: [job] })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: () => createAdapter({
+      workflowKey: "registration",
+      async resolveTargets() {
+        throw Object.assign(new Error("safe"), { code: "notification_source_unavailable" })
+      },
+    }),
+    rpc: harness.rpc,
+    getProvider: () => null,
+    createRunId: () => RUN_ID,
+    now: () => new Date("2026-07-17T01:00:00.000Z"),
+  })
+
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+  const finish = harness.calls.find((call) => (
+    call.name === "finish_notification_orchestration_job_v1"
+    && call.parameters.p_job_kind === "fanout"
+  ))
+  assert.equal(finish.parameters.p_disposition, "retry")
+  assert.equal(finish.parameters.p_error_code, "notification_source_unavailable")
+  assert.equal(finish.parameters.p_next_attempt_at, "2026-07-17T01:00:10.000Z")
+})
+
+test("reconciliation 영구 오류와 일시 오류는 각 job을 failed/retry로 닫고 뒤 단계 실행을 막지 않는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const harness = createRpcHarness({
+    claim_notification_rule_reconciliation_jobs_v1: [{
+      job_id: "71000000-0000-4000-8000-000000000411",
+      claim_token: "71000000-0000-4000-8000-000000000412",
+      workflow_key: "registration",
+      rule_revision_map: { [RULE_ID]: "2" },
+      cursor: null,
+      attempt_count: 1,
+    }],
+    claim_notification_target_reconciliation_jobs_v1: [{
+      job_id: "71000000-0000-4000-8000-000000000413",
+      claim_token: "71000000-0000-4000-8000-000000000414",
+      workflow_key: "registration",
+      source_type: "registration_appointment",
+      source_id: "71000000-0000-4000-8000-000000000415",
+      source_revision: "7",
+      source_event_id: "71000000-0000-4000-8000-000000000416",
+      reconciliation_kind: "recipient_set_changed",
+      target_generation: "2",
+      previous_target_set_hash: "a".repeat(64),
+      current_target_set_hash: "b".repeat(64),
+      cursor: null,
+      attempt_count: 1,
+    }],
+  })
+  const adapter = createAdapter({
+    workflowKey: "registration",
+    async reconcileScheduledRules() {
+      throw Object.assign(new Error("safe"), { code: "payload_schema_unsupported" })
+    },
+    async reconcileTargets() {
+      throw Object.assign(new Error("safe"), { code: "notification_source_unavailable" })
+    },
+  })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: () => adapter,
+    rpc: harness.rpc,
+    getProvider: () => null,
+    createRunId: () => RUN_ID,
+    now: () => new Date("2026-07-17T01:00:00.000Z"),
+  })
+
+  const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+  assert.equal(result.ruleReconciliation, 1)
+  assert.equal(result.targetReconciliation, 1)
+  assert.ok(harness.calls.some((call) => call.name === "reap_notification_leases_v1"))
+  assert.ok(harness.calls.some((call) => call.name === "claim_notification_deliveries_v1"))
+  const finishes = harness.calls.filter((call) => call.name === "finish_notification_orchestration_job_v1")
+  assert.deepEqual(finishes.map((call) => ({
+    kind: call.parameters.p_job_kind,
+    disposition: call.parameters.p_disposition,
+    errorCode: call.parameters.p_error_code,
+  })), [
+    { kind: "rule_reconciliation", disposition: "failed", errorCode: "payload_schema_unsupported" },
+    { kind: "target_reconciliation", disposition: "retry", errorCode: "notification_source_unavailable" },
+  ])
 })
 
 test("worker migration은 원자 inbox 투영·개인 receipt·legacy 소유권과 서비스 역할 경계를 유지한다", async () => {
@@ -634,6 +876,8 @@ test("worker 공개 factory는 getAdapter 하나만 받고 workflow 구현을 �
     /scheduledFor:\s*requiredString\(job\.scheduled_for\)/,
     "예약 발송 시각이 claim에서 빠지면 occurred_at으로 추측하지 말고 fail-closed해야 한다",
   )
+  assert.match(source, /transientSupabaseRpcError\(error\)/)
+  assert.match(source, /notification_rpc_unavailable/)
 
   const importLines = source.match(/^import[^\n]+(?:\n[^\n]+)*?from\s+["'][^"']+["']/gm)?.join("\n") || ""
   assert.doesNotMatch(
@@ -826,6 +1070,299 @@ test("worker는 adapter나 선택 reconciler가 없으면 다른 workflow를 추
   ])
   assert.equal(providerLookups, 0)
   for (const finish of finishes) assertNoSensitiveValue(finish.parameters)
+})
+
+test("대상 재계산 A→B→A는 live 세대·hash를 apply에 넘겨 superseded로 닫고 렌더·provider를 실행하지 않는다", async () => {
+  const { createNotificationWorkerRuntime, hashNotificationTargets } = await import(workerModuleUrl)
+  const liveTarget = {
+    targetKind: "profile",
+    targetKey: `profile:${PROFILE_ID}`,
+    targetProfileId: PROFILE_ID,
+    connectionKey: null,
+    targetSnapshot: { profile_id: PROFILE_ID },
+  }
+  const liveHash = hashNotificationTargets([liveTarget])
+  const capturedHash = "b".repeat(64)
+  const harness = createRpcHarness({
+    claim_notification_target_reconciliation_jobs_v1: [{
+      job_id: "71000000-0000-4000-8000-000000000090",
+      claim_token: "71000000-0000-4000-8000-000000000091",
+      workflow_key: "registration",
+      source_type: "registration_appointment",
+      source_id: "71000000-0000-4000-8000-000000000092",
+      source_revision: "7",
+      source_event_id: "71000000-0000-4000-8000-000000000093",
+      reconciliation_kind: "recipient_set_changed",
+      target_generation: "2",
+      previous_target_set_hash: liveHash,
+      current_target_set_hash: capturedHash,
+      cursor: null,
+    }],
+    apply_notification_target_reconciliation_batch_v1: {
+      outcome: "superseded",
+      canceled_count: 0,
+      delivery_count: 0,
+      revoked_count: 0,
+    },
+  })
+  let renderCalls = 0
+  let providerLookups = 0
+  const adapter = createAdapter({
+    workflowKey: "registration",
+    async reconcileTargets() {
+      return {
+        sourceRevision: "7",
+        targetGeneration: "3",
+        targetSetHash: liveHash,
+        items: [{
+          eventId: EVENT_ID,
+          rule: {
+            ruleId: RULE_ID,
+            ruleRevision: "21",
+            templateId: TEMPLATE_ID,
+            audienceKey: "track_director",
+            channelKey: "in_app",
+            connectionKey: null,
+            ruleVariantKey: "visit_previous_day_at",
+          },
+          scheduledFor: "2026-07-22T05:00:00.000Z",
+          targetSet: {
+            targetGeneration: "3",
+            targetSetHash: liveHash,
+            targets: [liveTarget],
+          },
+        }],
+        nextCursor: null,
+        done: true,
+      }
+    },
+    async buildRenderContext() {
+      renderCalls += 1
+      return {}
+    },
+    async buildDeepLink() {
+      renderCalls += 1
+      return "/admin/registration"
+    },
+  })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: (workflowKey) => workflowKey === "registration" ? adapter : null,
+    rpc: harness.rpc,
+    getProvider: () => {
+      providerLookups += 1
+      return null
+    },
+    createRunId: () => RUN_ID,
+  })
+
+  const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+  assert.equal(result.targetReconciliation, 1)
+  const apply = harness.calls.find((call) => call.name === "apply_notification_target_reconciliation_batch_v1")
+  assert.deepEqual(apply.parameters.p_batch, {
+    source_revision: "7",
+    target_generation: "3",
+    target_set_hash: liveHash,
+    deliveries: [],
+  })
+  assert.equal(harness.calls.some((call) => call.name === "get_notification_render_snapshot_v1"), false)
+  assert.equal(renderCalls, 0)
+  assert.equal(providerLookups, 0)
+  const finish = harness.calls.find((call) => call.name === "finish_notification_orchestration_job_v1")
+  assert.equal(finish.parameters.p_disposition, "succeeded")
+  assert.equal(finish.parameters.p_outcome_summary.outcome, "superseded")
+})
+
+test("대상 재계산 정상 경로는 같은 source revision의 전체 target을 렌더해 정확한 apply batch만 만든다", async () => {
+  const { createNotificationWorkerRuntime, hashNotificationTargets } = await import(workerModuleUrl)
+  const sourceId = "71000000-0000-4000-8000-000000000192"
+  const jobId = "71000000-0000-4000-8000-000000000190"
+  const claimToken = "71000000-0000-4000-8000-000000000191"
+  const target = {
+    targetKind: "profile",
+    targetKey: `profile:${PROFILE_ID}`,
+    targetProfileId: PROFILE_ID,
+    connectionKey: null,
+    targetSnapshot: { profile_id: PROFILE_ID },
+  }
+  const targetSetHash = hashNotificationTargets([target])
+  const rule = {
+    ruleId: RULE_ID,
+    ruleRevision: BIG_REVISION,
+    templateId: TEMPLATE_ID,
+    audienceKey: "track_director",
+    channelKey: "in_app",
+    connectionKey: null,
+    ruleVariantKey: "same_day_at",
+  }
+  const harness = createRpcHarness({
+    claim_notification_target_reconciliation_jobs_v1: [{
+      job_id: jobId,
+      claim_token: claimToken,
+      workflow_key: "registration",
+      source_type: "registration_appointment",
+      source_id: sourceId,
+      source_revision: BIG_REVISION,
+      source_event_id: "71000000-0000-4000-8000-000000000193",
+      reconciliation_kind: "recipient_set_changed",
+      target_generation: TARGET_GENERATION,
+      previous_target_set_hash: "a".repeat(64),
+      current_target_set_hash: targetSetHash,
+      cursor: null,
+    }],
+    get_notification_render_snapshot_v1: {
+      event: {
+        event_id: EVENT_ID,
+        workflow_key: "registration",
+        event_key: "registration.appointment_reminder_due",
+        source_type: "registration_appointment",
+        source_id: sourceId,
+        source_revision: BIG_REVISION,
+        occurrence_key: "registration:fixture",
+        occurred_at: "2026-07-22T05:00:00.000Z",
+        payload_schema_version: 2,
+        payload: { fixture: true },
+      },
+      rule: {
+        rule_id: RULE_ID,
+        rule_revision: BIG_REVISION,
+        template_id: TEMPLATE_ID,
+        audience_key: "track_director",
+        channel_key: "in_app",
+        connection_key: null,
+        rule_variant_key: "same_day_at",
+      },
+      template: {
+        title_template: "{학생} 예약",
+        body_template: "{장소}",
+        allowed_variables: [
+          { key: "student_name", token: "학생", pii_class: "student_name" },
+          { key: "place", token: "장소", pii_class: "business_text" },
+        ],
+        payload_schema_version: 2,
+      },
+    },
+    apply_notification_target_reconciliation_batch_v1: {
+      outcome: "applied",
+      canceled_count: 1,
+      delivery_count: 1,
+      revoked_count: 0,
+    },
+  })
+  let providerLookups = 0
+  const adapter = createAdapter({
+    workflowKey: "registration",
+    async reconcileTargets() {
+      return {
+        sourceRevision: BIG_REVISION,
+        targetGeneration: TARGET_GENERATION,
+        targetSetHash,
+        items: [{
+          eventId: EVENT_ID,
+          rule,
+          scheduledFor: "2026-07-22T05:00:00.000Z",
+          targetSet: { targetGeneration: TARGET_GENERATION, targetSetHash, targets: [target] },
+        }],
+        nextCursor: null,
+        done: true,
+      }
+    },
+    async buildRenderContext() {
+      return { student_name: "김학생", place: "3층 테스트실" }
+    },
+    async buildDeepLink() {
+      return `/admin/registration?taskId=fixture&appointmentId=${sourceId}&view=calendar`
+    },
+  })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: (workflowKey) => workflowKey === "registration" ? adapter : null,
+    rpc: harness.rpc,
+    getProvider: () => {
+      providerLookups += 1
+      return null
+    },
+    createRunId: () => RUN_ID,
+  })
+
+  const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+  assert.equal(result.targetReconciliation, 1)
+  const apply = harness.calls.find((call) => call.name === "apply_notification_target_reconciliation_batch_v1")
+  assert.deepEqual(apply.parameters, {
+    p_job_id: jobId,
+    p_claim_token: claimToken,
+    p_expected_cursor: null,
+    p_batch: {
+      source_revision: BIG_REVISION,
+      target_generation: TARGET_GENERATION,
+      target_set_hash: targetSetHash,
+      deliveries: [{
+        event_id: EVENT_ID,
+        rule_id: RULE_ID,
+        rule_revision: BIG_REVISION,
+        template_id: TEMPLATE_ID,
+        target_kind: "profile",
+        target_key: `profile:${PROFILE_ID}`,
+        target_profile_id: PROFILE_ID,
+        connection_key: null,
+        target_snapshot: { profile_id: PROFILE_ID },
+        rendered_title: "김학생 예약",
+        rendered_body: "3층 테스트실",
+        href: `/admin/registration?taskId=fixture&appointmentId=${sourceId}&view=calendar`,
+        scheduled_for: "2026-07-22T05:00:00.000Z",
+      }],
+    },
+    p_next_cursor: null,
+    p_done: true,
+  })
+  assert.equal(providerLookups, 0)
+})
+
+test("빈 대상 재계산 batch도 64자리 소문자 hash가 아니면 apply 전에 실패 폐쇄한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const harness = createRpcHarness({
+    claim_notification_target_reconciliation_jobs_v1: [{
+      job_id: "71000000-0000-4000-8000-000000000290",
+      claim_token: "71000000-0000-4000-8000-000000000291",
+      workflow_key: "registration",
+      source_type: "registration_appointment",
+      source_id: "71000000-0000-4000-8000-000000000292",
+      source_revision: "7",
+      source_event_id: "71000000-0000-4000-8000-000000000293",
+      reconciliation_kind: "recipient_set_changed",
+      target_generation: "2",
+      previous_target_set_hash: "a".repeat(64),
+      current_target_set_hash: "b".repeat(64),
+      cursor: null,
+    }],
+  })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: () => createAdapter({
+      workflowKey: "registration",
+      async reconcileTargets() {
+        return {
+          sourceRevision: "7",
+          targetGeneration: "2",
+          targetSetHash: "NOT-A-HASH",
+          items: [],
+          nextCursor: null,
+          done: true,
+        }
+      },
+    }),
+    rpc: harness.rpc,
+    getProvider: () => null,
+    createRunId: () => RUN_ID,
+  })
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+  assert.equal(
+    harness.calls.some((call) => call.name === "apply_notification_target_reconciliation_batch_v1"),
+    false,
+  )
+  const finish = harness.calls.find((call) => (
+    call.name === "finish_notification_orchestration_job_v1"
+    && call.parameters.p_job_kind === "target_reconciliation"
+  ))
+  assert.equal(finish.parameters.p_disposition, "failed")
+  assert.equal(finish.parameters.p_error_code, "payload_schema_unsupported")
 })
 
 test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전달하고 finish에는 안전한 집계만 남긴다", async () => {

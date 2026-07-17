@@ -1,5 +1,5 @@
 begin;
-select plan(168);
+select plan(182);
 
 -- This packet is intentionally self-contained and transaction-scoped. It is run only
 -- against a disposable local/preview database after both registration migrations have
@@ -6783,6 +6783,341 @@ select ok(
   pg_temp.registration_contract(168),
   '168. 달력 뷰는 학사 일정 테이블에 의존하지 않는다.'
 );
+
+-- assertion 169: 예약 알림 런타임 마커는 정확한 버전 1을 공개한다.
+select ok(
+  pg_catalog.to_regprocedure('public.registration_appointment_reminders_runtime_version()')
+    is not null
+    and public.registration_appointment_reminders_runtime_version() = 1,
+  '169. 예약 알림 런타임 마커는 정확한 버전 1을 공개한다.'
+);
+
+-- assertion 170: 정규 예약은 양의 bigint 수신자 세대를 1에서 시작한다.
+select ok(
+  exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    join pg_catalog.pg_class relation on relation.oid = attribute.attrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = 'ops_registration_appointments'
+      and attribute.attname = 'recipient_revision'
+      and attribute.atttypid = 'pg_catalog.int8'::pg_catalog.regtype
+      and attribute.attnotnull
+  ),
+  '170. 정규 예약은 양의 bigint 수신자 세대를 1에서 시작한다.'
+);
+
+-- assertion 171: 예약 알림 규칙은 정확히 아홉 개이며 설치 직후 모두 꺼져 있다.
+select ok(
+  (
+    select pg_catalog.count(*) = 9 and pg_catalog.bool_and(not rule.enabled)
+    from dashboard_private.notification_rules rule
+    where rule.workflow_key = 'registration'
+      and rule.event_key = 'registration.appointment_reminder_due'
+  ),
+  '171. 예약 알림 규칙은 정확히 아홉 개이며 설치 직후 모두 꺼져 있다.'
+);
+
+-- assertion 172: 예약 종류별 적용 가능성은 승인된 네 셀로 닫혀 있다.
+select ok(
+  (
+    select pg_catalog.count(*) = 4
+    from dashboard_private.registration_appointment_reminder_applicability
+  ),
+  '172. 예약 종류별 적용 가능성은 승인된 네 셀로 닫혀 있다.'
+);
+
+-- assertion 173: 아홉 규칙의 KST 시각 설정은 공통 레지스트리 검증을 통과한다.
+select ok(
+  not exists (
+    select 1
+    from dashboard_private.notification_rules rule
+    where rule.workflow_key = 'registration'
+      and rule.event_key = 'registration.appointment_reminder_due'
+      and not dashboard_private.notification_schedule_config_valid_v1(
+        rule.workflow_key,
+        rule.event_key,
+        rule.schedule_key,
+        rule.schedule_config
+      )
+  ),
+  '173. 아홉 규칙의 KST 시각 설정은 공통 레지스트리 검증을 통과한다.'
+);
+
+-- assertion 174: 계산·물질화·취소·미리보기 함수가 모두 같은 마이그레이션에 존재한다.
+select ok(
+  pg_catalog.to_regprocedure(
+    'dashboard_private.calculate_registration_reminder_schedule_v1(text,jsonb,timestamp with time zone)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'dashboard_private.materialize_registration_appointment_reminders_v1(uuid,timestamp with time zone)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'dashboard_private.cancel_registration_appointment_reminders_v1(uuid,text,integer,timestamp with time zone)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'public.preview_registration_appointment_reminders_v1(text,timestamp with time zone,uuid[])'
+  ) is not null,
+  '174. 계산, 물질화, 취소, 미리보기 함수가 모두 존재한다.'
+);
+
+-- assertion 175: 비활성 기본값은 설치 과정에서 예약 reminder event를 만들지 않는다.
+select ok(
+  not exists (
+    select 1
+    from dashboard_private.notification_events event_row
+    where event_row.workflow_key = 'registration'
+      and event_row.event_key = 'registration.appointment_reminder_due'
+  ),
+  '175. 비활성 기본값은 설치 과정에서 예약 reminder event를 만들지 않는다.'
+);
+
+-- assertion 176: 미리보기는 인증 사용자에게만 열리고 익명과 공개에는 닫혀 있다.
+select ok(
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.preview_registration_appointment_reminders_v1(text,timestamp with time zone,uuid[])',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.preview_registration_appointment_reminders_v1(text,timestamp with time zone,uuid[])',
+    'EXECUTE'
+  ),
+  '176. 미리보기는 인증 사용자에게만 열리고 익명과 공개에는 닫혀 있다.'
+);
+
+-- assertion 177: 생산 어댑터용 세 읽기 RPC가 모두 존재한다.
+select ok(
+  pg_catalog.to_regprocedure(
+    'public.list_registration_notification_sources_v1(jsonb,integer)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'public.get_registration_notification_source_snapshot_v1(uuid)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'public.list_registration_notification_target_items_v1(uuid,jsonb,integer)'
+  ) is not null,
+  '177. 생산 어댑터용 세 읽기 RPC가 모두 존재한다.'
+);
+
+-- assertion 178: 생산 어댑터 읽기 RPC는 service_role만 실행할 수 있다.
+select ok(
+  pg_catalog.has_function_privilege(
+    'service_role',
+    'public.list_registration_notification_sources_v1(jsonb,integer)',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'service_role',
+    'public.get_registration_notification_source_snapshot_v1(uuid)',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'service_role',
+    'public.list_registration_notification_target_items_v1(uuid,jsonb,integer)',
+    'EXECUTE'
+  ),
+  '178. 생산 어댑터 읽기 RPC는 service_role만 실행할 수 있다.'
+);
+
+-- assertion 179: 인증 사용자와 익명은 생산 어댑터 원본 읽기 RPC를 실행할 수 없다.
+select ok(
+  not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.list_registration_notification_sources_v1(jsonb,integer)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.list_registration_notification_sources_v1(jsonb,integer)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.get_registration_notification_source_snapshot_v1(uuid)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.list_registration_notification_target_items_v1(uuid,jsonb,integer)',
+    'EXECUTE'
+  ),
+  '179. 인증 사용자와 익명은 생산 어댑터 원본 읽기 RPC를 실행할 수 없다.'
+);
+
+-- assertion 180: 수신자 스냅샷은 참여 트랙과 관리팀 프로필을 안전한 ID 배열로 제공한다.
+select ok(
+  pg_catalog.to_regprocedure(
+    'dashboard_private.registration_appointment_source_snapshot_v1(uuid)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'dashboard_private.registration_appointment_director_targets_v1(uuid)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'dashboard_private.registration_appointment_director_target_hash_v1(uuid)'
+  ) is not null,
+  '180. 수신자 스냅샷은 참여 트랙과 관리팀 프로필을 안전한 ID 배열로 제공한다.'
+);
+
+-- assertion 181: 모든 규칙이 꺼진 수신자 변경은 비어 있는 최종 페이지로 정상 적용된다.
+select results_eq(
+  $$
+    with target_set as (
+      select dashboard_private.notification_target_set_hash_v1(
+        jsonb_build_array(
+          jsonb_build_object(
+            'target_kind', 'profile',
+            'target_key', 'profile:00000000-0000-4000-8000-000000000102',
+            'target_profile_id', '00000000-0000-4000-8000-000000000102'::uuid,
+            'connection_key', null,
+            'target_snapshot', jsonb_build_object(
+              'profile_id', '00000000-0000-4000-8000-000000000102'::uuid
+            )
+          )
+        )
+      ) as hash
+    ), inserted_job as (
+      insert into dashboard_private.notification_target_reconciliation_jobs(
+        id,
+        workflow_key,
+        source_type,
+        source_id,
+        source_revision,
+        source_event_id,
+        reconciliation_kind,
+        target_generation,
+        previous_target_set_hash,
+        current_target_set_hash,
+        status,
+        attempt_count,
+        next_attempt_at,
+        claimed_by,
+        claim_token,
+        lease_expires_at,
+        cursor
+      )
+      select
+        '00000000-0000-4000-8000-000000000f01'::uuid,
+        'registration',
+        'registration_appointment',
+        '00000000-0000-4000-8000-000000000f02',
+        1,
+        '00000000-0000-4000-8000-000000000f03'::uuid,
+        'recipient_set_changed',
+        2,
+        dashboard_private.notification_target_set_hash_v1('[]'::jsonb),
+        target_set.hash,
+        'claimed',
+        1,
+        null,
+        'registration-reminder-pgtap',
+        '00000000-0000-4000-8000-000000000f04'::uuid,
+        now() + interval '5 minutes',
+        '{}'::jsonb
+      from target_set
+      returning id, claim_token, target_generation, current_target_set_hash
+    ), applied as (
+      select public.apply_notification_target_reconciliation_batch_v1(
+        inserted_job.id,
+        inserted_job.claim_token,
+        null,
+        jsonb_build_object(
+          'source_revision', 1,
+          'target_generation', inserted_job.target_generation,
+          'target_set_hash', inserted_job.current_target_set_hash,
+          'deliveries', '[]'::jsonb
+        ),
+        null,
+        true
+      ) as value
+      from inserted_job
+    )
+    select
+      applied.value ->> 'outcome',
+      applied.value ->> 'delivery_count',
+      applied.value ->> 'done'
+    from applied
+  $$,
+  $$ values ('applied'::text, '0'::text, 'true'::text) $$,
+  '181. 모든 규칙이 꺼진 수신자 변경은 빈 최종 페이지로 취소와 회수만 정상 적용한다.'
+);
+
+set local timezone = 'UTC';
+
+-- assertion 182: KST 계산기는 호스트 UTC에서도 자정·14시·월·연·윤년 경계를 보존한다.
+select ok(
+  (
+    select pg_catalog.bool_and(
+      dashboard_private.calculate_registration_reminder_schedule_v1(
+        fixture.schedule_key,
+        fixture.schedule_config,
+        fixture.appointment_at
+      ) = fixture.expected_at
+    )
+    from (
+      values
+        (
+          'previous_day_at'::text,
+          '{"anchor_key":"appointment_scheduled_at","local_time":"14:00","timezone":"Asia/Seoul"}'::jsonb,
+          '2027-01-01 00:00+09'::timestamptz,
+          '2026-12-31 14:00+09'::timestamptz
+        ),
+        (
+          'previous_day_at'::text,
+          '{"anchor_key":"appointment_scheduled_at","local_time":"14:00","timezone":"Asia/Seoul"}'::jsonb,
+          '2028-03-01 00:30+09'::timestamptz,
+          '2028-02-29 14:00+09'::timestamptz
+        ),
+        (
+          'previous_day_at'::text,
+          '{"anchor_key":"appointment_scheduled_at","local_time":"14:00","timezone":"Asia/Seoul"}'::jsonb,
+          '2028-02-29 23:59+09'::timestamptz,
+          '2028-02-28 14:00+09'::timestamptz
+        ),
+        (
+          'same_day_at'::text,
+          '{"anchor_key":"appointment_scheduled_at","local_time":"14:00","timezone":"Asia/Seoul"}'::jsonb,
+          '2026-07-17 13:59+09'::timestamptz,
+          '2026-07-17 14:00+09'::timestamptz
+        ),
+        (
+          'same_day_at'::text,
+          '{"anchor_key":"appointment_scheduled_at","local_time":"14:00","timezone":"Asia/Seoul"}'::jsonb,
+          '2026-07-17 14:00+09'::timestamptz,
+          '2026-07-17 14:00+09'::timestamptz
+        ),
+        (
+          'same_day_at'::text,
+          '{"anchor_key":"appointment_scheduled_at","local_time":"14:00","timezone":"Asia/Seoul"}'::jsonb,
+          '2026-07-17 14:01+09'::timestamptz,
+          '2026-07-17 14:00+09'::timestamptz
+        ),
+        (
+          'offset_before'::text,
+          '{"anchor_key":"appointment_scheduled_at","lead_minutes":60,"timezone":"Asia/Seoul"}'::jsonb,
+          '2026-07-17 00:00+09'::timestamptz,
+          '2026-07-16 23:00+09'::timestamptz
+        ),
+        (
+          'offset_before'::text,
+          '{"anchor_key":"appointment_scheduled_at","lead_minutes":60,"timezone":"Asia/Seoul"}'::jsonb,
+          '2026-07-17 00:30+09'::timestamptz,
+          '2026-07-16 23:30+09'::timestamptz
+        ),
+        (
+          'offset_before'::text,
+          '{"anchor_key":"appointment_scheduled_at","lead_minutes":60,"timezone":"Asia/Seoul"}'::jsonb,
+          '2026-07-17 23:59+09'::timestamptz,
+          '2026-07-17 22:59+09'::timestamptz
+        )
+    ) fixture(schedule_key, schedule_config, appointment_at, expected_at)
+  ),
+  '182. KST 계산기는 호스트 UTC에서도 자정, 14시, 월, 연, 윤년 경계를 보존한다.'
+);
+
+set local timezone = 'Asia/Seoul';
 
 select * from finish();
 rollback;

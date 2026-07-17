@@ -146,6 +146,9 @@ export type TargetReconciliationInput = Readonly<{
 }>
 
 export type TargetReconciliationBatch = Readonly<{
+  sourceRevision: DbBigInt | null
+  targetGeneration: DbBigInt
+  targetSetHash: string
   items: ReadonlyArray<Readonly<{
     eventId: string
     rule: NotificationRuleSnapshot

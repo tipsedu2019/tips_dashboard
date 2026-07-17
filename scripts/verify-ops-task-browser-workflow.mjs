@@ -2709,6 +2709,9 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   const createdStudentName = `Codex 등록검증 ${fixtureWidth}`
   const providerRoutePatterns = [
     "**/api/google-chat",
+    "**/api/web-push",
+    "**/api/solapi",
+    "**/api/solapi/**",
     "**/api/registration/consultation-notification",
   ]
   const interceptedProviderRequests = []
@@ -2811,6 +2814,37 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   }
   if (savedSnapshot.counts.externalCalls !== 0) {
     throw new Error(`registration fixture recorded outbound provider calls: ${savedSnapshot.counts.externalCalls}.`)
+  }
+  if (!Array.isArray(createdResult.notificationJobs) || createdResult.notificationJobs.length !== 0) {
+    throw new Error("registration fixture create must expose the canonical empty notificationJobs set while rules are disabled.")
+  }
+  const notificationTargetHistory = savedSnapshot.notificationTargetHistory
+  const notificationJobs = savedSnapshot.notificationJobs
+  if (!Array.isArray(notificationTargetHistory) || notificationTargetHistory.length !== 3) {
+    throw new Error("registration fixture did not expose the A→B→A notification target history.")
+  }
+  const [targetA, targetB, targetAAgain] = notificationTargetHistory
+  if (
+    targetA.targetGeneration !== "1"
+    || targetB.targetGeneration !== "2"
+    || targetAAgain.targetGeneration !== "3"
+    || JSON.stringify(targetA.targetProfileIds) !== JSON.stringify(targetAAgain.targetProfileIds)
+    || targetA.targetSetHash !== targetAAgain.targetSetHash
+    || targetA.targetSetHash === targetB.targetSetHash
+  ) {
+    throw new Error("registration fixture notification target history is not the deterministic A→B→A sequence.")
+  }
+  const supersededTargetJob = notificationJobs?.find((job) => job.outcome === "superseded")
+  const appliedTargetJob = notificationJobs?.find((job) => job.outcome === "applied")
+  if (
+    supersededTargetJob?.jobKind !== "target_reconciliation"
+    || appliedTargetJob?.jobKind !== "target_reconciliation"
+    || supersededTargetJob.targetGeneration !== "2"
+    || appliedTargetJob.targetGeneration !== "3"
+    || supersededTargetJob.createdOrder >= appliedTargetJob.createdOrder
+    || supersededTargetJob.resolvedOrder <= appliedTargetJob.resolvedOrder
+  ) {
+    throw new Error("registration fixture did not preserve out-of-order target reconciliation supersession.")
   }
   assertNoInterceptedProviderRequests("atomic create")
   if (savedSnapshot.counts.notificationReceipts !== 1) {

@@ -303,11 +303,34 @@ function saveStatusLabel(savePhase: SavePhase, savedAt: string | null) {
   return ""
 }
 
+function notificationRuleVariantLabel(
+  rule: NotificationRuleDto,
+  draft: NotificationDraft,
+) {
+  if (rule.ruleVariantKey === "immediate") return "즉시"
+  const schedule = draft.rules[rule.id]?.scheduleConfig ?? rule.scheduleConfig
+  if (rule.ruleVariantKey === "previous_day_at" && schedule && "localTime" in schedule) {
+    return `예약 전날 ${schedule.localTime}`
+  }
+  if (rule.ruleVariantKey === "same_day_at" && schedule && "localTime" in schedule) {
+    return `예약 당일 ${schedule.localTime}`
+  }
+  if (rule.ruleVariantKey === "offset_before" && schedule && "leadMinutes" in schedule) {
+    if (schedule.leadMinutes === 60) return "예약 1시간 전"
+    if (schedule.leadMinutes > 0 && schedule.leadMinutes % 60 === 0) {
+      return `예약 ${schedule.leadMinutes / 60}시간 전`
+    }
+    return `예약 ${schedule.leadMinutes}분 전`
+  }
+  return "예약 시점 확인 필요"
+}
+
 type RuleToggleProps = {
   rule: NotificationRuleDto
   draft: NotificationDraft
   connections: ReadonlyArray<NotificationConnectionDto>
   saving: boolean
+  surfaceKey: "desktop" | "mobile"
   compact?: boolean
   onChange: (ruleId: string, patch: NotificationRulePatch) => void
   onEditTemplate: (ruleId: string) => void
@@ -318,6 +341,7 @@ function RuleToggle({
   draft,
   connections,
   saving,
+  surfaceKey,
   compact = false,
   onChange,
   onEditTemplate,
@@ -343,6 +367,7 @@ function RuleToggle({
     })
   )
   const preservesExistingRule = rule.enabled && connectionMissing
+  const variantLabel = notificationRuleVariantLabel(rule, draft)
 
   return (
     <div className={cn(
@@ -355,7 +380,7 @@ function RuleToggle({
         </p>
         <p className="text-xs text-muted-foreground">
           {rule.channelLabel ?? rule.channelKey}
-          {rule.ruleVariantKey === "immediate" ? "" : ` · ${rule.ruleVariantKey}`}
+          {rule.ruleVariantKey === "immediate" ? "" : ` · ${variantLabel}`}
         </p>
         {connectionMissing ? (
           <p className="text-xs font-medium text-amber-700">
@@ -367,6 +392,8 @@ function RuleToggle({
       </div>
       <div className={cn("flex items-center gap-2", compact && "justify-between")}>
         <SwitchPrimitive.Root
+          id={`notification-rule-switch-${surfaceKey}-${rule.id}`}
+          data-notification-rule-switch={rule.id}
           aria-label={`${rule.audienceLabel ?? rule.audienceKey} ${rule.channelLabel ?? rule.channelKey}`}
           checked={value.enabled}
           disabled={saving}
@@ -407,6 +434,16 @@ function RulesView({
   onEditTemplate,
 }: RulesViewProps) {
   const groups = React.useMemo(() => groupServerRules(rules), [rules])
+  const appointmentReminderRules = React.useMemo(
+    () => rules.filter((rule) => (
+      rule.workflowKey === "registration" &&
+      rule.eventKey === "registration.appointment_reminder_due"
+    )),
+    [rules],
+  )
+  const allAppointmentRemindersDisabled = appointmentReminderRules.length > 0 &&
+    appointmentReminderRules.every((rule) => !draft.rules[rule.id]?.enabled)
+  const firstAppointmentReminderRule = appointmentReminderRules[0]
   if (groups.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -417,6 +454,32 @@ function RulesView({
 
   return (
     <div data-notification-draft-source="shared">
+      {allAppointmentRemindersDisabled && firstAppointmentReminderRule ? (
+        <div
+          role="status"
+          className="mb-3 flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="text-sm font-semibold">현재 예약 알림이 발송되지 않습니다</p>
+            <p className="text-xs text-amber-800">
+              필요한 시점과 대상을 켠 뒤 변경사항을 저장해 주세요.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={saving}
+            onClick={() => {
+              Array.from(document.querySelectorAll<HTMLElement>(
+                `[data-notification-rule-switch="${firstAppointmentReminderRule.id}"]`,
+              )).find((element) => element.offsetParent !== null)?.focus()
+            }}
+          >
+            첫 예약 알림 설정하기
+          </Button>
+        </div>
+      ) : null}
       <div className="hidden overflow-x-auto rounded-xl border md:block">
         <table className="w-full min-w-[900px] border-collapse text-left text-sm">
           <thead>
@@ -453,7 +516,7 @@ function RulesView({
                   {rule.channelLabel ?? rule.channelKey}
                 </td>
                 <td className="px-3 py-4 text-muted-foreground">
-                  {rule.ruleVariantKey === "immediate" ? "즉시" : rule.ruleVariantKey}
+                  {notificationRuleVariantLabel(rule, draft)}
                 </td>
                 <td className="px-3 py-2">
                   <RuleToggle
@@ -461,6 +524,7 @@ function RulesView({
                     draft={draft}
                     connections={connections}
                     saving={saving}
+                    surfaceKey="desktop"
                     onChange={onChange}
                     onEditTemplate={onEditTemplate}
                   />
@@ -488,6 +552,7 @@ function RulesView({
                   draft={draft}
                   connections={connections}
                   saving={saving}
+                  surfaceKey="mobile"
                   compact
                   onChange={onChange}
                   onEditTemplate={onEditTemplate}
@@ -550,16 +615,20 @@ function TemplateEditor({ rule, draft, saving, onOpenChange, onChange }: Templat
               <Input
                 id={`notification-lead-${rule.id}`}
                 type="number"
-                min={0}
+                min={1}
+                max={10080}
                 value={schedule.leadMinutes}
                 disabled={saving}
                 onChange={(event) => onChange(rule.id, {
                   scheduleConfig: {
                     ...schedule,
-                    leadMinutes: Math.max(0, Number.parseInt(event.target.value || "0", 10)),
+                    leadMinutes: Number.parseInt(event.target.value || "0", 10),
                   },
                 })}
               />
+              <p className="text-xs text-muted-foreground">
+                1분부터 7일 전까지 설정할 수 있습니다.
+              </p>
             </div>
           ) : null}
           {schedule && "localTime" in schedule ? (
@@ -574,6 +643,9 @@ function TemplateEditor({ rule, draft, saving, onOpenChange, onChange }: Templat
                   scheduleConfig: { ...schedule, localTime: event.target.value },
                 })}
               />
+              <p className="text-xs text-muted-foreground">
+                한국 시간(KST) 기준이며, 계산 시각이 예약 시각보다 늦으면 발송하지 않습니다.
+              </p>
             </div>
           ) : null}
           {rule.template.allowedVariables.length > 0 ? (

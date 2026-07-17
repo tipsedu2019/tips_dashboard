@@ -416,7 +416,7 @@ test("Task 3A director and roster foundations preserve exact boundaries", async 
   )
 })
 
-test("runtime pgTAP packet fixes all 168 ordered workflow proofs and rolls fixtures back", async () => {
+test("runtime pgTAP packet fixes all 182 ordered workflow proofs and rolls fixtures back", async () => {
   const [sql, registrationPlan] = await Promise.all([
     readFile(
       new URL("registration_subject_tracks_runtime_test.sql", supabaseTestsUrl),
@@ -426,16 +426,16 @@ test("runtime pgTAP packet fixes all 168 ordered workflow proofs and rolls fixtu
   ])
 
   assert.match(sql, /^begin;\s*$/m)
-  assert.match(sql, /select\s+plan\(168\);/i)
+  assert.match(sql, /select\s+plan\(182\);/i)
   assert.match(sql, /select\s+\*\s+from\s+finish\(\);\s*\nrollback;\s*$/i)
 
   const numberedAssertions = [
     ...sql.matchAll(/^-- assertion (\d+):\s+(.+)$/gm),
   ]
-  assert.equal(numberedAssertions.length, 168)
+  assert.equal(numberedAssertions.length, 182)
   assert.deepEqual(
     numberedAssertions.map((match) => Number(match[1])),
-    Array.from({ length: 168 }, (_, index) => index + 1),
+    Array.from({ length: 182 }, (_, index) => index + 1),
   )
   const plannedAssertionSection = registrationPlan.slice(
     registrationPlan.indexOf("1. atomic RPC creation"),
@@ -446,14 +446,14 @@ test("runtime pgTAP packet fixes all 168 ordered workflow proofs and rolls fixtu
   ]
   assert.equal(plannedAssertions.length, 168)
   assert.deepEqual(
-    numberedAssertions.map((match) => [Number(match[1]), match[2]]),
+    numberedAssertions.slice(0, 168).map((match) => [Number(match[1]), match[2]]),
     plannedAssertions.map((match) => [Number(match[1]), match[2]]),
   )
 
   const tapStatements = [
     ...sql.matchAll(/^select\s+(?:ok|is|isnt|is_empty|isnt_empty|lives_ok|throws_ok|results_eq|set_eq|bag_eq|col_is_null|col_not_null)\s*\(/gim),
   ]
-  assert.equal(tapStatements.length, 168)
+  assert.equal(tapStatements.length, 182)
 
   const observationMarkers = [
     ...sql.matchAll(/^select\s+pg_temp\.registration_record\(\s*(\d+)/gim),
@@ -3372,6 +3372,44 @@ test("registration mutations are invoker-safe, explicit, and authenticated-only"
   assert.match(sql, /revoke all on table public\.student_class_enrollment_history from anon, authenticated;/)
   assert.match(sql, /grant select on table public\.student_class_enrollment_history to authenticated;/)
   assert.doesNotMatch(sql, /grant\s+(?!select\s+on)[^;]*on\s+(?:table\s+)?public\.student_class_enrollment_history[^;]*to\s+(?:anon|authenticated)/i)
+})
+
+test("Task 11 예약 알림 생산자는 컬럼·비활성 규칙·원자적 RPC·service 전용 읽기 계약을 함께 설치한다", async () => {
+  const sql = await readMigration("registration_appointment_reminder_producer")
+
+  assert.match(sql.trim(), /^begin;[\s\S]*commit;$/i)
+  assert.match(sql, /add column if not exists recipient_revision bigint not null default 1/)
+  assert.match(sql, /registration_appointment_reminder_applicability/)
+  assert.match(sql, /registration\.appointment_reminder_due/)
+  assert.match(sql, /count\(\*\)[\s\S]*<> 9/)
+  assert.match(sql, /false as enabled/)
+  assert.match(sql, /calculate_registration_reminder_schedule_v1/)
+  assert.match(sql, /materialize_registration_appointment_reminders_v1/)
+  assert.match(sql, /cancel_registration_appointment_reminders_v1/)
+  assert.match(sql, /preview_registration_appointment_reminders_v1/)
+  assert.match(sql, /record_notification_event_v1/)
+  assert.match(sql, /enqueue_notification_target_reconciliation_job_v1/)
+  assert.match(sql, /notification_target_set_hash_v1/)
+  assert.match(sql, /recipient_revision = recipient_revision \+ 1/)
+  assert.match(sql, /participants/)
+
+  for (const name of [
+    "list_registration_notification_sources_v1",
+    "get_registration_notification_source_snapshot_v1",
+    "list_registration_notification_target_items_v1",
+  ]) {
+    assert.match(sql, new RegExp(`create or replace function public\\.${name}`))
+  }
+  assert.match(sql, /from public, anon, authenticated;[\s\S]*to service_role;/)
+  assert.doesNotMatch(
+    sql,
+    /grant execute on function public\.list_registration_notification_(?:sources|target_items)_v1[^;]*to authenticated;/,
+  )
+  assert.match(sql, /create or replace function public\.registration_appointment_reminders_runtime_version\(\)[\s\S]*select 1/)
+  assert.ok(
+    sql.lastIndexOf("create or replace function public.registration_appointment_reminders_runtime_version()")
+      > sql.lastIndexOf("create or replace function public.list_registration_notification_target_items_v1"),
+  )
 })
 
 test("roster guard fix isolates student and class trigger record fields", async () => {

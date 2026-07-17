@@ -269,6 +269,34 @@ test("concurrency verification consumes the exact appointment RPC response shape
   assert.match(concurrencySource, /fixture\.ids\.appointments\.add\(createdAppointment\.appointmentId\)/)
 })
 
+test("appointment race proves one notification source and job set without provider calls", () => {
+  const start = concurrencySource.indexOf("async function runAppointmentRevisionRace")
+  const end = concurrencySource.indexOf("async function runAttemptAndBatchCancellationRace", start)
+  const race = concurrencySource.slice(start, end)
+
+  assertIncludesAll(race, [
+    'p_kind: "visit_consultation"',
+    "context.fixture.actorIds[0]",
+    "context.fixture.actorIds[1]",
+    "notificationJobs",
+    'job_kind === "target_reconciliation"',
+    'get_registration_notification_source_snapshot_v1',
+    "notification_revision",
+    "recipient_revision",
+    "assertProviderZero",
+  ])
+  assert.match(race, /assertExactlyOneWinner\(edits, "appointment revision"\)/)
+  assert.match(race, /new Set\([^\n]*job_id/)
+  assert.doesNotMatch(concurrencySource, /fetch\s*\(/)
+  assertIncludesAll(concurrencySource, [
+    "providerCallLedger",
+    "providerCalls: context.providerCallLedger.length",
+    '"/api/google-chat"',
+    '"/api/web-push"',
+    '"/api/solapi"',
+  ])
+})
+
 test("withdrawal races use fixed service-only checkpoints without exposing a debug SQL surface", () => {
   assert.match(concurrencySource, /proofScope:\s*"deterministic_internal_checkpoint_race"/)
   assert.match(concurrencySource, /internalLockOrderProven:\s*true/)

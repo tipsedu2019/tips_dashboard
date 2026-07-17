@@ -241,7 +241,8 @@ function isScheduleConfigValid(
         "anchorKey,leadMinutes,timezone" &&
       "leadMinutes" in scheduleConfig &&
       Number.isInteger(scheduleConfig.leadMinutes) &&
-      scheduleConfig.leadMinutes >= 0
+      scheduleConfig.leadMinutes >= 1 &&
+      scheduleConfig.leadMinutes <= 10080
     )
   }
 

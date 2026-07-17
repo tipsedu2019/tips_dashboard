@@ -137,6 +137,28 @@ as $$
   from pg_catalog.jsonb_array_elements(p_deliveries) delivery(value);
 $$;
 
+create or replace function dashboard_private.notification_profile_is_active_v1(
+  p_profile_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p_profile_id is not null and exists (
+    select 1
+    from public.profiles profile
+    join auth.users account on account.id = profile.id
+    where profile.id = p_profile_id
+      and account.deleted_at is null
+      and (account.banned_until is null or account.banned_until <= pg_catalog.now())
+  );
+$$;
+
+revoke all on function dashboard_private.notification_profile_is_active_v1(uuid)
+  from public, anon, authenticated;
+
 create or replace function dashboard_private.materialize_notification_delivery_v1(
   p_event_id uuid,
   p_rule_id uuid,
@@ -205,17 +227,34 @@ begin
     raise exception 'notification_delivery_materialization_invalid' using errcode = '22023';
   end if;
 
-  if p_target_profile_id is not null and not exists (
-    select 1 from public.profiles profile where profile.id = p_target_profile_id
+  if p_target_profile_id is not null
+    and not dashboard_private.notification_profile_is_active_v1(p_target_profile_id)
+  then
+    raise exception 'notification_delivery_recipient_invalid' using errcode = '22023';
+  end if;
+
+  if p_target_kind = 'audience' and (
+    p_target_key <> 'audience:' || v_rule.audience_key
+    or p_target_profile_id is not null
+    or p_connection_key is not null
+    or p_target_snapshot <> pg_catalog.jsonb_build_object(
+      'audience_key', v_rule.audience_key
+    )
   ) then
     raise exception 'notification_delivery_recipient_invalid' using errcode = '22023';
   end if;
 
-  v_state := dashboard_private.notification_initial_delivery_state_v1(
-    v_event.workflow_key,
-    v_event.event_key,
-    v_rule.enabled
-  );
+  v_state := case when p_target_kind = 'audience'
+    then pg_catalog.jsonb_build_object(
+      'status', 'skipped',
+      'status_reason', 'no_recipient'
+    )
+    else dashboard_private.notification_initial_delivery_state_v1(
+      v_event.workflow_key,
+      v_event.event_key,
+      v_rule.enabled
+    )
+  end;
   v_dedupe_key := pg_catalog.md5(
     v_event.id::text || ':' || p_rule_id::text || ':' || v_rule.channel_key || ':' ||
     p_target_kind || ':' || p_target_key || ':' || p_target_generation::text
@@ -267,7 +306,12 @@ begin
     p_rendered_body,
     p_href,
     p_scheduled_for,
-    case when v_rule.channel_key = 'in_app' then 1 else 5 end,
+    case
+      when v_rule.channel_key = 'in_app' then 1
+      when v_event.workflow_key = 'registration'
+        and v_event.event_key = 'registration.appointment_reminder_due' then 3
+      else 5
+    end,
     case when v_state ->> 'status' = 'pending' then pg_catalog.clock_timestamp() else null end
   )
   on conflict (dedupe_key) do nothing
@@ -411,6 +455,9 @@ begin
           when v_source -> 'source_revision' = 'null'::jsonb then null
           else (v_source ->> 'source_revision')::bigint
         end
+        and v_job.rule_revision_map ? delivery.rule_id::text
+        and delivery.rule_revision
+          <> (v_job.rule_revision_map ->> delivery.rule_id::text)::bigint
         and delivery.status in ('pending', 'retry_wait')
       returning delivery.id
     ), requested as (
@@ -427,6 +474,9 @@ begin
           when v_source -> 'source_revision' = 'null'::jsonb then null
           else (v_source ->> 'source_revision')::bigint
         end
+        and v_job.rule_revision_map ? delivery.rule_id::text
+        and delivery.rule_revision
+          <> (v_job.rule_revision_map ->> delivery.rule_id::text)::bigint
         and delivery.status = 'claimed'
       returning delivery.id
     )
@@ -2094,8 +2144,16 @@ begin
         'source_revision', case when event_row.source_revision is null then null else event_row.source_revision::text end,
         'rule_id', v_delivery.rule_id,
         'rule_revision', v_delivery.rule_revision::text,
+        'attempt_count', v_delivery.attempt_count,
+        'max_attempts', v_delivery.max_attempts,
         'target_generation', v_delivery.target_generation::text,
         'scheduled_for', v_delivery.scheduled_for,
+        'retry_window_ends_at', case
+          when event_row.workflow_key = 'registration'
+            and event_row.event_key = 'registration.appointment_reminder_due'
+            then event_row.payload #>> '{appointment,scheduled_at}'
+          else null
+        end,
         'channel_key', v_delivery.channel_key,
         'target', pg_catalog.jsonb_build_object(
           'target_kind', v_delivery.target_kind,
@@ -2658,8 +2716,8 @@ begin
     or v_rule.revision <> v_delivery.rule_revision
     or not v_rule.enabled
     or v_delivery.target_profile_id is null
-    or not exists (
-      select 1 from public.profiles profile where profile.id = v_delivery.target_profile_id
+    or not dashboard_private.notification_profile_is_active_v1(
+      v_delivery.target_profile_id
     )
   then
     update dashboard_private.notification_deliveries delivery

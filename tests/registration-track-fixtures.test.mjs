@@ -195,6 +195,27 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.deepEqual(plain(first.externalCallLedger), [])
   assert.deepEqual(Object.keys(first.receipts), [])
 
+  assert.deepEqual(
+    plain(first.notificationTargetHistory.map((snapshot) => snapshot.targetGeneration)),
+    ["1", "2", "3"],
+  )
+  const [targetA, targetB, targetAAgain] = first.notificationTargetHistory
+  assert.deepEqual(plain(targetA.targetProfileIds), ["fixture-profile-english-director"])
+  assert.deepEqual(plain(targetB.targetProfileIds), ["fixture-profile-math-director"])
+  assert.deepEqual(plain(targetAAgain.targetProfileIds), plain(targetA.targetProfileIds))
+  assert.equal(targetAAgain.targetSetHash, targetA.targetSetHash)
+  assert.notEqual(targetB.targetSetHash, targetA.targetSetHash)
+  assert.match(targetA.targetSetHash, /^[a-f0-9]{64}$/)
+
+  const superseded = first.notificationJobs.find((job) => job.outcome === "superseded")
+  const applied = first.notificationJobs.find((job) => job.outcome === "applied")
+  assert.equal(superseded.jobKind, "target_reconciliation")
+  assert.equal(applied.jobKind, "target_reconciliation")
+  assert.equal(superseded.targetGeneration, "2")
+  assert.equal(applied.targetGeneration, "3")
+  assert.ok(superseded.createdOrder < applied.createdOrder)
+  assert.ok(superseded.resolvedOrder > applied.resolvedOrder, "the older job must resolve after the newer job")
+
   const dual = first.caseDetails["fixture-task-dual-test"]
   assert.equal(dual.tracks.length, 2)
   assert.equal(dual.appointments.length, 1)
@@ -627,7 +648,10 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   const bridge = context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL]
   assert.equal(typeof bridge?.snapshot, "function")
   assert.equal(typeof bridge?.replayLastCreate, "function")
-  assert.equal(plain(bridge.snapshot()).lastCreate, null)
+  const initialSnapshot = plain(bridge.snapshot())
+  assert.equal(initialSnapshot.lastCreate, null)
+  assert.deepEqual(initialSnapshot.notificationTargetHistory, plain(state.notificationTargetHistory))
+  assert.deepEqual(initialSnapshot.notificationJobs, plain(state.notificationJobs))
 
   const originalResult = await adapter.executeAction("createRegistrationCaseWithInitialWorkflow", input)
   await adapter.executeAction("sendRegistrationVisitNotificationTarget", originalResult.notificationTargets[0])
@@ -635,6 +659,7 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.equal(before.lastCreate.command.requestKey, input.requestKey)
   assert.deepEqual(before.lastCreate.command.payload, plain(input))
   assert.deepEqual(before.lastCreate.result, plain(originalResult))
+  assert.deepEqual(before.lastCreate.result.notificationJobs, [])
   assert.equal(before.counts.cases, 10)
   assert.equal(before.counts.tracks, 17)
   assert.equal(before.counts.appointments, 6)

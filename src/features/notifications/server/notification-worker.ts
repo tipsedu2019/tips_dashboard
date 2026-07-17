@@ -98,6 +98,7 @@ const WORKFLOW_KEY_SET = new Set(Object.keys(WORKFLOW_LINK_ROOTS))
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)$/
+const HASH_PATTERN = /^[a-f0-9]{64}$/
 const SAFE_CODE_PATTERN = /^[a-z0-9_]{1,64}$/
 const SAFE_PROVIDER_REFERENCE_PATTERN = /^[A-Za-z0-9._:/-]{1,256}$/
 const TOKEN_PATTERN = /\{([^{}]+)\}/g
@@ -161,6 +162,12 @@ function positiveDecimalString(value: unknown) {
 function requiredString(value: unknown) {
   if (typeof value !== "string" || !value.trim()) workerEnvelopeError()
   return value
+}
+
+function requiredHash(value: unknown) {
+  const normalized = requiredString(value)
+  if (!HASH_PATTERN.test(normalized)) workerEnvelopeError()
+  return normalized
 }
 
 function requiredPositiveInteger(value: unknown) {
@@ -392,9 +399,9 @@ function validateTargetReconciliationClaim(job: JsonRecord) {
   requiredUuid(job.source_event_id)
   if (job.reconciliation_kind !== "recipient_set_changed") workerEnvelopeError()
   positiveDecimalString(job.target_generation)
-  requiredString(job.current_target_set_hash)
+  requiredHash(job.current_target_set_hash)
   if (job.previous_target_set_hash !== null && job.previous_target_set_hash !== undefined) {
-    requiredString(job.previous_target_set_hash)
+    requiredHash(job.previous_target_set_hash)
   }
   const cursor = nullableString(job.cursor)
   if (cursor !== null && cursor.length > 512) workerEnvelopeError()
@@ -411,8 +418,23 @@ function validateDeliveryClaim(claim: JsonRecord) {
   optionalRevision(claim.source_revision)
   requiredUuid(claim.rule_id)
   positiveDecimalString(claim.rule_revision)
+  if (
+    !Number.isInteger(Number(claim.attempt_count))
+    || Number(claim.attempt_count) < 0
+    || !Number.isInteger(Number(claim.max_attempts))
+    || Number(claim.max_attempts) < 1
+    || Number(claim.attempt_count) >= Number(claim.max_attempts)
+  ) workerEnvelopeError()
   decimalString(claim.target_generation)
   requiredString(claim.scheduled_for)
+  if (
+    claim.workflow_key === "registration"
+    && claim.event_key === "registration.appointment_reminder_due"
+    && (
+      typeof claim.retry_window_ends_at !== "string"
+      || !Number.isFinite(Date.parse(claim.retry_window_ends_at))
+    )
+  ) workerEnvelopeError()
   if (!["in_app", "web_push", "google_chat", "customer_message"].includes(requiredString(claim.channel_key))) {
     workerEnvelopeError()
   }
@@ -521,6 +543,47 @@ function validateApplyOutcome(value: JsonRecord, countKeys: ReadonlyArray<string
 
 function orchestrationNextAttemptAt(now: Date) {
   return new Date(now.getTime() + 5_000).toISOString()
+}
+
+function orchestrationTransientRetryAt(now: Date, attemptCount: number) {
+  const exponent = Math.min(Math.max(attemptCount, 0), 5)
+  const seconds = Math.min(300, 5 * (2 ** exponent))
+  return new Date(now.getTime() + seconds * 1_000).toISOString()
+}
+
+function transientOrchestrationError(code: string) {
+  return code === "notification_source_unavailable"
+    || code === "notification_rpc_unavailable"
+}
+
+async function finishOrchestrationError(
+  kind: "fanout" | "rule_reconciliation" | "target_reconciliation",
+  job: JsonRecord,
+  error: unknown,
+  input: NotificationWorkerRuntimeInput,
+) {
+  const normalizedCode = normalizeWorkerErrorCode(error)
+  const attemptCount = Number(job.attempt_count || 0)
+  const shouldRetry = transientOrchestrationError(normalizedCode)
+    && Number.isInteger(attemptCount)
+    && attemptCount >= 0
+    && attemptCount < 5
+  const safeCode = normalizedCode === "render_validation_failed"
+    ? "render_validation_failed"
+    : normalizedCode === "notification_source_unavailable"
+        || normalizedCode === "notification_rpc_unavailable"
+      ? normalizedCode
+      : "payload_schema_unsupported"
+  await input.rpc("finish_notification_orchestration_job_v1", finishParameters(
+    kind,
+    job,
+    shouldRetry ? "retry" : "failed",
+    safeCode,
+    {},
+    shouldRetry
+      ? orchestrationTransientRetryAt((input.now || (() => new Date()))(), attemptCount)
+      : null,
+  ))
 }
 
 function finishParameters(
@@ -657,14 +720,7 @@ async function processFanoutJob(
     ))
   } catch (error) {
     if (normalizeWorkerErrorCode(error) === "worker_envelope_invalid") throw error
-    await input.rpc("finish_notification_orchestration_job_v1", finishParameters(
-      "fanout",
-      job,
-      "failed",
-      normalizeWorkerErrorCode(error) === "render_validation_failed"
-        ? "render_validation_failed"
-        : "payload_schema_unsupported",
-    ))
+    await finishOrchestrationError("fanout", job, error, input)
   }
 }
 
@@ -754,16 +810,34 @@ async function renderTargetReconciliationBatch(
   rpc: NotificationRpc,
 ) {
   const expectedGeneration = decimalString(job.target_generation)
-  const expectedHash = asString(job.current_target_set_hash)
+  const expectedHash = requiredHash(job.current_target_set_hash)
+  const expectedSourceRevision = optionalRevision(job.source_revision)
+  if (!("sourceRevision" in batch)) workerEnvelopeError()
+  const liveSourceRevision = optionalRevision(batch.sourceRevision)
+  const liveGeneration = decimalString(batch.targetGeneration)
+  const liveHash = requiredHash(batch.targetSetHash)
+  for (const item of batch.items) {
+    const itemGeneration = decimalString(item.targetSet.targetGeneration)
+    const itemHash = requiredHash(item.targetSet.targetSetHash)
+    if (hashNotificationTargets(item.targetSet.targets) !== itemHash) renderValidationError()
+    if (itemGeneration !== liveGeneration || itemHash !== liveHash) renderValidationError()
+  }
+
+  if (
+    liveSourceRevision !== expectedSourceRevision
+    || liveGeneration !== expectedGeneration
+    || liveHash !== expectedHash
+  ) {
+    return {
+      source_revision: liveSourceRevision,
+      target_generation: liveGeneration,
+      target_set_hash: liveHash,
+      deliveries: [],
+    }
+  }
+
   const deliveries: JsonRecord[] = []
   for (const item of batch.items) {
-    if (
-      item.targetSet.targetGeneration !== expectedGeneration ||
-      item.targetSet.targetSetHash !== expectedHash ||
-      hashNotificationTargets(item.targetSet.targets) !== expectedHash
-    ) {
-      renderValidationError()
-    }
     const snapshot = asRecord(await rpc(
       "get_notification_render_snapshot_v1",
       {
@@ -778,6 +852,9 @@ async function renderTargetReconciliationBatch(
     if (
       event.eventId !== item.eventId ||
       event.workflowKey !== requiredWorkflowKey(job.workflow_key) ||
+      event.sourceType !== requiredString(job.source_type) ||
+      event.sourceId !== requiredString(job.source_id) ||
+      event.sourceRevision !== optionalRevision(job.source_revision) ||
       storedRule.ruleId !== item.rule.ruleId ||
       storedRule.ruleRevision !== item.rule.ruleRevision ||
       storedRule.templateId !== item.rule.templateId
@@ -828,8 +905,9 @@ async function renderTargetReconciliationBatch(
     }
   }
   return {
-    target_generation: expectedGeneration,
-    target_set_hash: expectedHash,
+    source_revision: liveSourceRevision,
+    target_generation: liveGeneration,
+    target_set_hash: liveHash,
     deliveries,
   }
 }
@@ -855,55 +933,71 @@ async function processReconciliationJob(
     return
   }
 
-  if (kind === "rule_reconciliation") {
-    validateRuleRevisionMap(job.rule_revision_map)
-    const batch = await adapter.reconcileScheduledRules!(ruleReconciliationInput(job, batchSize))
+  try {
+    if (kind === "rule_reconciliation") {
+      validateRuleRevisionMap(job.rule_revision_map)
+      const batch = await adapter.reconcileScheduledRules!(ruleReconciliationInput(job, batchSize))
+      const applyResult = asRecord(await input.rpc(
+        "apply_notification_rule_reconciliation_batch_v1",
+        {
+          p_job_id: asString(job.job_id),
+          p_claim_token: asString(job.claim_token),
+          p_expected_cursor: nullableString(job.cursor),
+          p_batch: ruleBatchForRpc(batch),
+          p_next_cursor: batch.nextCursor,
+          p_done: batch.done,
+        },
+      ))
+      validateApplyOutcome(applyResult, ["processed_count", "canceled_count", "regenerated_count"])
+      await finishReconciliation(kind, job, applyResult, batch.done, {
+        source_count: safeOutcomeCount(applyResult.processed_count ?? batch.sources.length),
+        occurrence_count: safeOutcomeCount(applyResult.regenerated_count ?? batch.occurrences.length),
+        canceled_count: safeOutcomeCount(applyResult.canceled_count),
+      }, input)
+      return
+    }
+
+    validateTargetReconciliationClaim(job)
+    const batch = await adapter.reconcileTargets!(targetReconciliationInput(job, batchSize))
+    const batchForRpc = await renderTargetReconciliationBatch(job, batch, adapter, input.rpc)
     const applyResult = asRecord(await input.rpc(
-      "apply_notification_rule_reconciliation_batch_v1",
+      "apply_notification_target_reconciliation_batch_v1",
       {
         p_job_id: asString(job.job_id),
         p_claim_token: asString(job.claim_token),
         p_expected_cursor: nullableString(job.cursor),
-        p_batch: ruleBatchForRpc(batch),
+        p_batch: batchForRpc,
         p_next_cursor: batch.nextCursor,
         p_done: batch.done,
       },
     ))
-    validateApplyOutcome(applyResult, ["processed_count", "canceled_count", "regenerated_count"])
+    validateApplyOutcome(applyResult, ["canceled_count", "delivery_count", "revoked_count"])
     await finishReconciliation(kind, job, applyResult, batch.done, {
-      source_count: safeOutcomeCount(applyResult.processed_count ?? batch.sources.length),
-      occurrence_count: safeOutcomeCount(applyResult.regenerated_count ?? batch.occurrences.length),
+      delivery_count: safeOutcomeCount(applyResult.delivery_count ?? batchForRpc.deliveries.length),
       canceled_count: safeOutcomeCount(applyResult.canceled_count),
+      revoked_count: safeOutcomeCount(applyResult.revoked_count),
     }, input)
-    return
+  } catch (error) {
+    await finishOrchestrationError(kind, job, error, input)
   }
-
-  validateTargetReconciliationClaim(job)
-  const batch = await adapter.reconcileTargets!(targetReconciliationInput(job, batchSize))
-  const batchForRpc = await renderTargetReconciliationBatch(job, batch, adapter, input.rpc)
-  const applyResult = asRecord(await input.rpc(
-    "apply_notification_target_reconciliation_batch_v1",
-    {
-      p_job_id: asString(job.job_id),
-      p_claim_token: asString(job.claim_token),
-      p_expected_cursor: nullableString(job.cursor),
-      p_batch: batchForRpc,
-      p_next_cursor: batch.nextCursor,
-      p_done: batch.done,
-    },
-  ))
-  validateApplyOutcome(applyResult, ["canceled_count", "delivery_count", "revoked_count"])
-  await finishReconciliation(kind, job, applyResult, batch.done, {
-    delivery_count: safeOutcomeCount(applyResult.delivery_count ?? batchForRpc.deliveries.length),
-    canceled_count: safeOutcomeCount(applyResult.canceled_count),
-    revoked_count: safeOutcomeCount(applyResult.revoked_count),
-  }, input)
 }
 
 function safeRetryAt(now: Date, attemptCount: number) {
   const exponent = Math.min(Math.max(attemptCount, 0), 5)
   const seconds = Math.min(RETRY_MAX_SECONDS, RETRY_MIN_SECONDS * (2 ** exponent))
   return new Date(now.getTime() + seconds * 1_000).toISOString()
+}
+
+function deliveryRetryAt(now: Date, claim: JsonRecord) {
+  if (
+    claim.workflow_key === "registration"
+    && claim.event_key === "registration.appointment_reminder_due"
+  ) {
+    const attemptCount = toCount(claim.attempt_count)
+    const seconds = attemptCount === 0 ? 60 : 300
+    return new Date(now.getTime() + seconds * 1_000).toISOString()
+  }
+  return safeRetryAt(now, toCount(claim.attempt_count))
 }
 
 function normalizeProviderResult(
@@ -973,6 +1067,28 @@ function normalizeProviderResult(
     /^\d{3}$/.test(providerResult.providerResponseCode)
     ? providerResult.providerResponseCode
     : null
+  const nextAttemptAt = mapping.status === "retry_wait"
+    ? deliveryRetryAt(now, claim)
+    : null
+  const retryWindowEndsAt = typeof claim.retry_window_ends_at === "string"
+    ? Date.parse(claim.retry_window_ends_at)
+    : Number.POSITIVE_INFINITY
+  if (
+    mapping.status === "retry_wait"
+    && nextAttemptAt
+    && Number.isFinite(retryWindowEndsAt)
+    && Date.parse(nextAttemptAt) >= retryWindowEndsAt
+  ) {
+    return {
+      status: "failed",
+      statusReason: "retry_window_closed",
+      providerMessageId: null,
+      providerResponseCode,
+      errorCode: "retry_window_closed",
+      errorSummary: "retry window closed before the next attempt",
+      nextAttemptAt: null,
+    }
+  }
   return {
     status: mapping.status,
     statusReason: mapping.reason,
@@ -980,9 +1096,7 @@ function normalizeProviderResult(
     providerResponseCode,
     errorCode: mapping.errorCode,
     errorSummary: mapping.errorSummary,
-    nextAttemptAt: mapping.status === "retry_wait"
-      ? safeRetryAt(now, toCount(claim.attempt_count))
-      : null,
+    nextAttemptAt,
   }
 }
 
@@ -1233,6 +1347,19 @@ function environmentValue(...names: string[]) {
   return ""
 }
 
+function transientSupabaseRpcError(value: unknown) {
+  if (!isPlainRecord(value)) return true
+  const code = typeof value.code === "string" ? value.code.toUpperCase() : ""
+  if (!code) return true
+  return code.startsWith("08")
+    || code === "40001"
+    || code === "40P01"
+    || code === "53300"
+    || code === "57014"
+    || code.startsWith("57P")
+    || /^PGRST00[0-3]$/.test(code)
+}
+
 async function createProductionWorkerRuntime(
   getAdapter: (workflowKey: string) => NotificationWorkflowAdapter | null,
 ) {
@@ -1282,7 +1409,9 @@ async function createProductionWorkerRuntime(
       const { data, error } = await serviceClient.rpc(name, parameters)
       if (error) {
         throw Object.assign(new Error("알림 worker RPC가 실패했습니다."), {
-          code: "notification_rpc_failed",
+          code: transientSupabaseRpcError(error)
+            ? "notification_rpc_unavailable"
+            : "notification_rpc_failed",
         })
       }
       return data

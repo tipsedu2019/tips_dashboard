@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js"
 
 const PLANNED_SCENARIOS = [
   "student identity: two admins materialize one normalized student",
-  "appointment revision: concurrent authoritative edits have one winner",
+  "appointment revision: two admins produce one notification source revision and one job set",
   "batch start versus enrollment row cancellation has one winner",
   "batch start versus generic roster claim on the same student/class has one owner",
   "batch completion versus generic roster update on another class preserves both relationships",
@@ -17,6 +17,12 @@ const PLANNED_SCENARIOS = [
   "consultation ownership reassignment defeats the former director completion",
   "withdrawal versus batch/wait materialization: deterministic checkpoints prove both SQL lock orders",
   "withdrawal final invariant leaves no withdrawn student with a live roster claim",
+]
+
+const PROVIDER_API_PATHS = [
+  "/api/google-chat",
+  "/api/web-push",
+  "/api/solapi",
 ]
 
 const REQUIRED_VALUE_FLAGS = [
@@ -144,6 +150,14 @@ function assertExactlyOneWinner(results, label) {
   assert.equal(fulfilled(results).length, 1, `${label}: expected one committed winner`)
   assert.equal(rejected(results).length, results.length - 1, `${label}: expected all other requests to reject`)
   return fulfilled(results)[0]
+}
+
+function assertProviderZero(context, stage) {
+  assert.equal(
+    context.providerCallLedger.length,
+    0,
+    `${stage}: provider calls must remain zero (${PROVIDER_API_PATHS.join(", ")})`,
+  )
 }
 
 function requestKey(fixture, lane) {
@@ -355,7 +369,9 @@ async function seedRegistrationCase(context, suffix, options = {}) {
   })
   const tracks = []
   for (const subject of subjects) {
-    const directorProfileId = options.directorProfileId || null
+    const directorProfileId = options.directorProfileIdsBySubject?.[subject]
+      || options.directorProfileId
+      || null
     const track = {
       id: randomUUID(),
       task_id: taskId,
@@ -453,11 +469,18 @@ async function runStudentIdentityRace(context) {
 }
 
 async function runAppointmentRevisionRace(context) {
-  const registration = await seedRegistrationCase(context, "appointment", { subjects: ["영어", "수학"] })
+  assertProviderZero(context, "appointment revision race start")
+  const registration = await seedRegistrationCase(context, "appointment", {
+    subjects: ["영어", "수학"],
+    directorProfileIdsBySubject: {
+      영어: context.fixture.actorIds[0],
+      수학: context.fixture.actorIds[1],
+    },
+  })
   const create = await rpc(context.adminClient, "save_registration_shared_appointment", {
     p_appointment_id: null,
     p_task_id: registration.task.id,
-    p_kind: "level_test",
+    p_kind: "visit_consultation",
     p_scheduled_at: "2026-08-01T09:00:00+09:00",
     p_place: "본관 검증실",
     p_track_ids: registration.tracks.map((track) => track.id),
@@ -468,28 +491,62 @@ async function runAppointmentRevisionRace(context) {
   const appointmentId = create.appointmentId
   assert.ok(appointmentId, "appointment create must return its id")
   context.fixture.ids.appointments.add(appointmentId)
-  const attempts = await selectRows(context.serviceRoleSetupClient, "ops_registration_level_tests", "id,track_id,status")
-  for (const attempt of attempts.filter((row) => registration.tracks.some((track) => track.id === row.track_id))) {
-    context.fixture.ids.attempts.add(attempt.id)
+  const createdConsultations = await selectRows(context.serviceRoleSetupClient, "ops_registration_consultations", "id,track_id,status")
+  for (const consultation of createdConsultations.filter((row) => registration.tracks.some((track) => track.id === row.track_id))) {
+    context.fixture.ids.consultations.add(consultation.id)
   }
   const edits = await raceCalls([
     () => rpc(context.adminClient, "save_registration_shared_appointment", {
-      p_appointment_id: appointmentId, p_task_id: registration.task.id, p_kind: "level_test",
+      p_appointment_id: appointmentId, p_task_id: registration.task.id, p_kind: "visit_consultation",
       p_scheduled_at: "2026-08-02T09:00:00+09:00", p_place: "본관 A",
-      p_track_ids: registration.tracks.map((track) => track.id), p_replace_remaining: false,
+      p_track_ids: [registration.tracks[0].id], p_replace_remaining: false,
       p_expected_notification_revision: 1, p_request_key: requestKey(context.fixture, "appointment-edit-a"),
     }),
     () => rpc(context.secondAdminClient, "save_registration_shared_appointment", {
-      p_appointment_id: appointmentId, p_task_id: registration.task.id, p_kind: "level_test",
+      p_appointment_id: appointmentId, p_task_id: registration.task.id, p_kind: "visit_consultation",
       p_scheduled_at: "2026-08-03T09:00:00+09:00", p_place: "본관 B",
-      p_track_ids: registration.tracks.map((track) => track.id), p_replace_remaining: false,
+      p_track_ids: [registration.tracks[1].id], p_replace_remaining: false,
       p_expected_notification_revision: 1, p_request_key: requestKey(context.fixture, "appointment-edit-b"),
     }),
   ])
-  assertExactlyOneWinner(edits, "appointment revision")
+  const winner = assertExactlyOneWinner(edits, "appointment revision")
+  assert.ok(Array.isArray(winner.notificationJobs), "appointment winner must return notificationJobs")
+  const targetReconciliationJobs = winner.notificationJobs.filter((job) => job.job_kind === "target_reconciliation")
+  assert.equal(targetReconciliationJobs.length, 1, "the winning participant edit must enqueue one target reconciliation job")
+  assert.equal(new Set(winner.notificationJobs.map((job) => job.job_id)).size, winner.notificationJobs.length, "the winning job set must not contain duplicates")
+  for (const job of winner.notificationJobs) {
+    assert.ok(job.job_id, "the winning notification job must expose its id")
+    const { data: jobStatus, error: jobStatusError } = await context.adminClient.rpc(
+      "get_notification_orchestration_job_status_v1",
+      { p_job_kind: job.job_kind, p_job_id: job.job_id },
+    )
+    if (jobStatusError) throw new Error(`notification job verification failed: ${jobStatusError.message}`)
+    assert.equal(jobStatus.job_id, job.job_id)
+    assert.equal(jobStatus.job_kind, job.job_kind)
+  }
   const appointment = await readOne(context.serviceRoleSetupClient, "ops_registration_appointments", appointmentId)
   assert.equal(appointment.notification_revision, 2)
-  return { scenarioStatus: "executed", appointmentId }
+  const { data: notificationSource, error: notificationSourceError } = await context.serviceRoleSetupClient.rpc(
+    "get_registration_notification_source_snapshot_v1",
+    { p_appointment_id: appointmentId },
+  )
+  if (notificationSourceError) throw new Error(`notification source verification failed: ${notificationSourceError.message}`)
+  assert.equal(notificationSource.appointment_id, appointmentId)
+  assert.equal(notificationSource.notification_revision, 2)
+  assert.equal(notificationSource.recipient_revision, "2")
+  assert.equal(notificationSource.track_ids.length, 1, "only the committed participant set may remain current")
+  const finalConsultations = await selectRows(context.serviceRoleSetupClient, "ops_registration_consultations", "id,track_id,status")
+  for (const consultation of finalConsultations.filter((row) => registration.tracks.some((track) => track.id === row.track_id))) {
+    context.fixture.ids.consultations.add(consultation.id)
+  }
+  assertProviderZero(context, "appointment revision race")
+  return {
+    scenarioStatus: "executed",
+    appointmentId,
+    notificationSourceRevision: notificationSource.notification_revision,
+    notificationJobIds: winner.notificationJobs.map((job) => job.job_id),
+    providerCalls: context.providerCallLedger.length,
+  }
 }
 
 async function runAttemptAndBatchCancellationRace(context) {
@@ -1242,6 +1299,7 @@ async function runAuthorizedManifest(argv) {
     serviceRoleSetupClient,
     serviceRoleFinalizerClient,
     fixture,
+    providerCallLedger: [],
   }
   let scenarioError = null
   let reports = []
@@ -1258,12 +1316,14 @@ async function runAuthorizedManifest(argv) {
       : cleanupError
   }
   if (scenarioError) throw scenarioError
+  assertProviderZero(context, "authorized concurrency manifest")
   console.log(JSON.stringify({
     ok: true,
     scenarioStatus: "executed",
     actorsReady: actorIds.length,
     namespacePrefix: fixture.namespacePrefix,
     reports,
+    providerCalls: context.providerCallLedger.length,
     limitations: RUNTIME_LIMITATIONS,
     cleaned: true,
   }, null, 2))

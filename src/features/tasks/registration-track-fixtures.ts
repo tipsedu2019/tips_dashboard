@@ -84,6 +84,27 @@ export type RegistrationSubjectTrackFixtureReceipt = {
   result: unknown
 }
 
+export type RegistrationSubjectTrackFixtureNotificationTargetSnapshot = {
+  appointmentId: string
+  sourceRevision: number
+  targetGeneration: string
+  targetProfileIds: string[]
+  targetSetHash: string
+}
+
+export type RegistrationSubjectTrackFixtureNotificationJob = {
+  jobKind: "target_reconciliation"
+  jobId: string
+  appointmentId: string
+  sourceRevision: number
+  targetGeneration: string
+  targetSetHash: string
+  status: "succeeded"
+  outcome: "applied" | "superseded"
+  createdOrder: number
+  resolvedOrder: number
+}
+
 export type RegistrationSubjectTrackFixtureState = {
   workspaceData: OpsTaskWorkspaceData
   optionData: {
@@ -101,6 +122,8 @@ export type RegistrationSubjectTrackFixtureState = {
   viewers: Record<RegistrationSubjectTrackFixtureViewerKey, RegistrationSubjectTrackFixtureViewer>
   samples: Array<{ name: string; taskId: string }>
   receipts: Record<string, RegistrationSubjectTrackFixtureReceipt>
+  notificationTargetHistory: RegistrationSubjectTrackFixtureNotificationTargetSnapshot[]
+  notificationJobs: RegistrationSubjectTrackFixtureNotificationJob[]
   externalCallLedger: never[]
   sequence: number
 }
@@ -144,12 +167,24 @@ export function createRegistrationSubjectTrackFixtureAdapter(
     }
   }
 
-  function debugSnapshot(): RegistrationSubjectTrackFixtureDebugSnapshot {
+  function debugSnapshot(): RegistrationSubjectTrackFixtureDebugSnapshot & {
+    notificationTargetHistory: RegistrationSubjectTrackFixtureNotificationTargetSnapshot[]
+    notificationJobs: RegistrationSubjectTrackFixtureNotificationJob[]
+  } {
     const state = runtime.getState()
-    if (!lastCreate) return { counts: debugCounts(state), lastCreate: null }
+    if (!lastCreate) {
+      return {
+        counts: debugCounts(state),
+        lastCreate: null,
+        notificationTargetHistory: clone(state.notificationTargetHistory),
+        notificationJobs: clone(state.notificationJobs),
+      }
+    }
     const taskId = String((lastCreate.result as { taskId?: unknown } | null)?.taskId || "")
     return {
       counts: debugCounts(state),
+      notificationTargetHistory: clone(state.notificationTargetHistory),
+      notificationJobs: clone(state.notificationJobs),
       lastCreate: {
         command: clone(lastCreate.command),
         result: clone(lastCreate.result),
@@ -221,6 +256,58 @@ export function createRegistrationSubjectTrackFixtureAdapter(
 
 function clone<T>(value: T): T {
   return structuredClone(value)
+}
+
+function fixtureNotificationTargetSetHash(profileIds: string[]) {
+  const canonical = Array.from(new Set(profileIds)).sort().join("|")
+  return Array.from({ length: 8 }, (_, salt) => {
+    let hash = (2166136261 ^ salt) >>> 0
+    for (let index = 0; index < canonical.length; index += 1) {
+      hash = Math.imul(hash ^ canonical.charCodeAt(index), 16777619) >>> 0
+    }
+    return hash.toString(16).padStart(8, "0")
+  }).join("")
+}
+
+function createFixtureNotificationTargetScenario() {
+  const appointmentId = "fixture-appointment-split-visit"
+  const sourceRevision = 1
+  const targetA = ["fixture-profile-english-director"]
+  const targetB = ["fixture-profile-math-director"]
+  const targetAHash = fixtureNotificationTargetSetHash(targetA)
+  const targetBHash = fixtureNotificationTargetSetHash(targetB)
+  const notificationTargetHistory: RegistrationSubjectTrackFixtureNotificationTargetSnapshot[] = [
+    { appointmentId, sourceRevision, targetGeneration: "1", targetProfileIds: targetA, targetSetHash: targetAHash },
+    { appointmentId, sourceRevision, targetGeneration: "2", targetProfileIds: targetB, targetSetHash: targetBHash },
+    { appointmentId, sourceRevision, targetGeneration: "3", targetProfileIds: targetA, targetSetHash: targetAHash },
+  ]
+  const notificationJobs: RegistrationSubjectTrackFixtureNotificationJob[] = [
+    {
+      jobKind: "target_reconciliation",
+      jobId: "fixture-target-reconciliation-generation-2",
+      appointmentId,
+      sourceRevision,
+      targetGeneration: "2",
+      targetSetHash: targetBHash,
+      status: "succeeded",
+      outcome: "superseded",
+      createdOrder: 2,
+      resolvedOrder: 5,
+    },
+    {
+      jobKind: "target_reconciliation",
+      jobId: "fixture-target-reconciliation-generation-3",
+      appointmentId,
+      sourceRevision,
+      targetGeneration: "3",
+      targetSetHash: targetAHash,
+      status: "succeeded",
+      outcome: "applied",
+      createdOrder: 3,
+      resolvedOrder: 4,
+    },
+  ]
+  return { notificationTargetHistory, notificationJobs }
 }
 
 function taskTemplate(input: {
@@ -712,6 +799,7 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     schemaReady: true,
     error: null,
   }
+  const notificationTargetScenario = createFixtureNotificationTargetScenario()
   return {
     workspaceData,
     optionData: {
@@ -744,6 +832,8 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
       { name: "migration review", taskId: "fixture-task-migration-review" },
     ],
     receipts: {},
+    notificationTargetHistory: notificationTargetScenario.notificationTargetHistory,
+    notificationJobs: notificationTargetScenario.notificationJobs,
     externalCallLedger: [],
     sequence: 0,
   }
@@ -1245,7 +1335,7 @@ function projectFixtureInitialParent(detail: OpsRegistrationCaseDetail) {
 function createFixtureRegistrationCaseWithInitialWorkflow(
   state: RegistrationSubjectTrackFixtureState,
   input: RegistrationCaseCreateWithInitialWorkflowInput,
-): RegistrationCaseCreateWithInitialWorkflowResponse {
+): RegistrationCaseCreateWithInitialWorkflowResponse & { notificationJobs: [] } {
   const directors = resolveFixtureInitialDirectors(state, input)
   const taskId = nextId(state, "task")
   const tracks = input.subjects.map((subject) => {
@@ -1471,6 +1561,7 @@ function createFixtureRegistrationCaseWithInitialWorkflow(
     tracks: clone(detail.tracks),
     appointments: clone(detail.appointments),
     notificationTargets,
+    notificationJobs: [],
   }
 }
 
