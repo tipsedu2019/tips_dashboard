@@ -1055,21 +1055,22 @@ test("dashboard header exposes a persistent notification popover", () => {
   assert.match(headerSource, /알림/);
 });
 
-test("dashboard notifications defer full reads while loading a lightweight unread badge", () => {
-  assert.match(serviceSource, /createInFlightRequestStore/);
-  assert.match(serviceSource, /loadDashboardNotifications\(viewerId: string, limit = 20\)/);
-  assert.match(serviceSource, /loadDashboardUnreadNotificationCount\(viewerId: string\)/);
-  assert.match(serviceSource, /count: "exact", head: true/);
-  assert.match(serviceSource, /const loadKey = `\$\{viewerId\}:\$\{limit\}`/);
-  assert.match(serviceSource, /dashboardNotificationLoadInFlight\.run\(\s*loadKey/);
-  assert.match(notificationPopoverSource, /loadDashboardNotifications\(viewerId\)/);
-  assert.match(notificationPopoverSource, /loadDashboardUnreadNotificationCount\(viewerId\)/);
+test("dashboard notifications use the profile-scoped inbox RPCs and lightweight unread count", () => {
+  assert.match(serviceSource, /get_dashboard_notification_inbox_v1/);
+  assert.match(serviceSource, /get_dashboard_notification_unread_count_v1/);
+  assert.match(serviceSource, /mark_dashboard_notification_read_v1/);
+  assert.doesNotMatch(serviceSource, /loadDashboardNotifications\(viewerId:/);
+  assert.doesNotMatch(serviceSource, /loadDashboardUnreadNotificationCount\(viewerId:/);
+  assert.doesNotMatch(serviceSource, /count: "exact", head: true/);
+  assert.match(notificationPopoverSource, /loadDashboardNotifications\(\)/);
+  assert.match(notificationPopoverSource, /loadDashboardUnreadNotificationCount\(\)/);
   assert.match(notificationPopoverSource, /if \(!viewerId\) return/);
+  assert.match(notificationPopoverSource, /inboxGenerationRef/);
   assert.match(notificationPopoverSource, /unreadCountTimer = window\.setTimeout/);
   assert.match(notificationPopoverSource, /if \(open\) \{[\s\S]{0,120}void refresh\(\)/);
 });
 
-test("in-flight read sharing is isolated by viewer and recovers after failure", async () => {
+test("공용 in-flight 요청 저장소는 key별 공유와 실패 후 재시도를 보존한다", async () => {
   const createStore = inFlightRequestModule.createInFlightRequestStore;
   assert.equal(typeof createStore, "function");
   if (typeof createStore !== "function") return;
@@ -1110,8 +1111,11 @@ test("dashboard supports installable web push subscriptions", () => {
   assert.match(pushClientSource, /registration\.pushManager\.subscribe/);
   assert.match(pushClientSource, /applicationServerKey: urlBase64ToUint8Array/);
   assert.match(notificationPopoverSource, /휴대폰 알림/);
-  assert.match(notificationPopoverSource, /subscribeDashboardPush/);
+  assert.match(notificationPopoverSource, /requestDashboardPushPermissionAndBind/);
+  assert.match(notificationPopoverSource, /rebindDashboardPushSubscription/);
+  assert.match(notificationPopoverSource, /sendDashboardPushSelfTest/);
   assert.match(notificationPopoverSource, /unsubscribeDashboardPush/);
+  assert.match(notificationPopoverSource, /selfTestConfirmationOpen/);
 });
 
 test("dashboard push subscriptions are stored behind authenticated RLS", () => {

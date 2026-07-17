@@ -71,6 +71,11 @@ type PushSelfTestResult = Readonly<{
 type NormalizedPushSelfTestResult = Readonly<{
   outcome: "sent" | "expired" | "failed"
   code: "push_self_test_sent" | "push_subscription_expired" | "push_self_test_failed"
+  responseCode:
+    | "push_self_test_sent"
+    | "push_subscription_expired"
+    | "push_subscription_expired_cleanup_unavailable"
+    | "push_self_test_failed"
 }>
 
 type PushReadinessRouteDependencies = Readonly<{
@@ -219,22 +224,43 @@ function normalizeSelfTestResult(result: PushSelfTestResult): NormalizedPushSelf
       : "failed"
 
   if (outcome === "sent") {
-    return { outcome: "sent", code: "push_self_test_sent" }
+    return {
+      outcome: "sent",
+      code: "push_self_test_sent",
+      responseCode: "push_self_test_sent",
+    }
   }
   if (outcome === "expired") {
-    return { outcome: "expired", code: "push_subscription_expired" }
+    return {
+      outcome: "expired",
+      code: "push_subscription_expired",
+      responseCode: result.code === "push_subscription_expired_cleanup_unavailable"
+        ? "push_subscription_expired_cleanup_unavailable"
+        : "push_subscription_expired",
+    }
   }
-  return { outcome: "failed", code: "push_self_test_failed" }
+  return {
+    outcome: "failed",
+    code: "push_self_test_failed",
+    responseCode: "push_self_test_failed",
+  }
 }
 
-function selfTestResponse(result: NormalizedPushSelfTestResult) {
+function selfTestResponse(result: NormalizedPushSelfTestResult, auditRecorded: boolean) {
+  const body = {
+    ok: result.outcome === "sent",
+    state: result.outcome,
+    code: result.responseCode,
+    auditRecorded,
+    ...(auditRecorded ? {} : { warningCode: "push_self_test_audit_unavailable" }),
+  }
   if (result.outcome === "sent") {
-    return json({ ok: true, state: result.outcome, code: result.code })
+    return json(body)
   }
   if (result.outcome === "expired") {
-    return json({ ok: false, state: result.outcome, code: result.code }, 410)
+    return json(body, 410)
   }
-  return json({ ok: false, state: result.outcome, code: result.code }, 502)
+  return json(body, 502)
 }
 
 export function createPushReadinessRouteHandlers(
@@ -301,13 +327,9 @@ export function createPushReadinessRouteHandlers(
             code: normalizedResult.code,
           })
         } catch {
-          return json({
-            ok: false,
-            state: "failed",
-            code: "push_self_test_audit_unavailable",
-          }, 502)
+          return selfTestResponse(normalizedResult, false)
         }
-        return selfTestResponse(normalizedResult)
+        return selfTestResponse(normalizedResult, true)
       } catch (error) {
         return normalizedError(error)
       }
@@ -515,12 +537,18 @@ async function sendProductionSelfTest(input: PushSelfTestInput): Promise<PushSel
   } catch (error) {
     const statusCode = (error as { statusCode?: unknown })?.statusCode
     if (statusCode === 404 || statusCode === 410) {
-      await serviceClient
+      const { error: cleanupError } = await serviceClient
         .from("dashboard_push_subscriptions")
         .delete()
         .eq("profile_id", input.userId)
         .eq("endpoint", endpoint)
-      return { accepted: false, outcome: "expired", code: "push_subscription_expired" }
+      return {
+        accepted: false,
+        outcome: "expired",
+        code: cleanupError
+          ? "push_subscription_expired_cleanup_unavailable"
+          : "push_subscription_expired",
+      }
     }
     return { accepted: false, outcome: "failed", code: "push_self_test_failed" }
   }

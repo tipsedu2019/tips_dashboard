@@ -1,5 +1,5 @@
 begin;
-select plan(222);
+select plan(226);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -4887,6 +4887,20 @@ insert into public.dashboard_notifications(
   '/admin/tasks', '{}'::jsonb, null, pg_catalog.clock_timestamp(),
   'recipient_revoked', now()
 );
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-count-before-internal-claim', public.get_dashboard_notification_unread_count_v1();
+reset role;
+insert into public.dashboard_notifications(
+  id, recipient_team, type, title, body, href, metadata, read_at, created_at
+) values (
+  '76000000-0000-4000-8000-000000000804',
+  '관리팀', 'registration_consultation_admin_chat',
+  '내부 Google Chat claim', '받은 알림에 노출되면 안 됩니다.',
+  '/admin/registration', '{"status":"sending"}'::jsonb, null,
+  pg_catalog.clock_timestamp() + interval '1 hour'
+);
 select ok(
   (
     select
@@ -4899,11 +4913,13 @@ select ok(
         pg_catalog.strpos(definition, 'from public.dashboard_notifications notification')
       and pg_catalog.strpos(definition, 'pg_advisory_xact_lock') >
         pg_catalog.strpos(definition, 'for share of notification')
-      and pg_catalog.strpos(definition, 'insert into public.dashboard_notification_read_receipts') >
+      and pg_catalog.strpos(definition, 'visible_dashboard_notification_rows_v1') >
         pg_catalog.strpos(definition, 'pg_advisory_xact_lock')
-      and definition like '%v_revoked_at is not null%'
-      and definition like '%v_recipient_profile_id is null%'
-      and definition like '%v_recipient_team = ''관리팀''%'
+      and pg_catalog.strpos(definition, 'insert into public.dashboard_notification_read_receipts') >
+        pg_catalog.strpos(definition, 'visible_dashboard_notification_rows_v1')
+      and definition like '%notification_not_found%'
+      and definition not like '%notification_not_visible%'
+      and definition not like '%update public.dashboard_notifications%'
     from (
       select pg_catalog.lower(pg_catalog.pg_get_functiondef(
         'public.mark_dashboard_notification_read_v1(uuid)'::pg_catalog.regprocedure
@@ -4930,15 +4946,61 @@ select ok(
         '76000000-0000-4000-8000-000000000803'
       )
     $sql$,
-    'notification_not_visible'
+    'notification_not_found'
   ),
-  'a revoked row cannot gain a receipt after the locked visibility recheck'
+  'revoked notification collapses to notification_not_found'
 );
+select ok(
+  pg_temp.notification_runtime_throws(
+    $sql$
+      select public.mark_dashboard_notification_read_v1(
+        '76000000-0000-4000-8000-000000000804'
+      )
+    $sql$,
+    'notification_not_found'
+  )
+  and not exists (
+    select 1
+    from public.dashboard_notification_read_receipts receipt
+    where receipt.notification_id = '76000000-0000-4000-8000-000000000804'
+  ),
+  'internal registration Chat claim cannot be marked and creates no receipt'
+);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-inbox-with-internal-claim', public.get_dashboard_notification_inbox_v1(100, null, null);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-count-with-internal-claim', public.get_dashboard_notification_unread_count_v1();
 insert into notification_control_plane_runtime_results(result_key, payload)
 select 'worker-read-admin', public.mark_dashboard_notification_read_v1(
   '76000000-0000-4000-8000-000000000801'
 );
 reset role;
+select ok(
+  not exists (
+    select 1
+    from pg_catalog.jsonb_array_elements((
+      select payload -> 'items'
+      from notification_control_plane_runtime_results
+      where result_key = 'worker-inbox-with-internal-claim'
+    )) item(value)
+    where item.value ->> 'id' = '76000000-0000-4000-8000-000000000804'
+  )
+  and (
+    select after.payload = before.payload
+    from notification_control_plane_runtime_results after
+    join notification_control_plane_runtime_results before
+      on before.result_key = 'worker-count-before-internal-claim'
+    where after.result_key = 'worker-count-with-internal-claim'
+  )
+  and not exists (
+    select 1
+    from dashboard_private.visible_dashboard_notification_rows_v1(
+      '30000000-0000-4000-8000-000000000001'
+    ) visible
+    where visible.id = '76000000-0000-4000-8000-000000000804'
+  ),
+  'internal registration Chat claim is absent from list and count'
+);
 select ok(
   not exists (
     select 1
@@ -4994,7 +5056,89 @@ select ok(
     where visible.id = '76000000-0000-4000-8000-000000000802'
       and visible.read_at is not null
   ),
-  'receipts remain per-profile and legacy read_at is only a historical fallback'
+  'two profiles keep independent receipts and shared read_at stays null'
+);
+
+insert into public.dashboard_notifications(
+  id, recipient_profile_id, type, title, body, href, metadata, read_at, created_at
+) values
+  (
+    '76000000-0000-4000-8000-000000000901',
+    '30000000-0000-4000-8000-000000000001',
+    'notification_control_plane', '커서 1', '동일 시각 첫 번째',
+    '/admin/tasks', '{}'::jsonb, null, '2099-01-01 00:00:00+00'
+  ),
+  (
+    '76000000-0000-4000-8000-000000000902',
+    '30000000-0000-4000-8000-000000000001',
+    'notification_control_plane', '커서 2', '동일 시각 두 번째',
+    '/admin/tasks', '{}'::jsonb, null, '2099-01-01 00:00:00+00'
+  ),
+  (
+    '76000000-0000-4000-8000-000000000903',
+    '30000000-0000-4000-8000-000000000001',
+    'notification_control_plane', '커서 3', '동일 시각 세 번째',
+    '/admin/tasks', '{}'::jsonb, null, '2099-01-01 00:00:00+00'
+  );
+select pg_temp.notification_runtime_set_actor('30000000-0000-4000-8000-000000000001');
+set local role authenticated;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-cursor-page-one', public.get_dashboard_notification_inbox_v1(2, null, null);
+insert into notification_control_plane_runtime_results(result_key, payload)
+select
+  'worker-cursor-page-two',
+  public.get_dashboard_notification_inbox_v1(
+    1,
+    (
+      select (payload -> 'next_cursor' ->> 'created_at')::timestamptz
+      from notification_control_plane_runtime_results
+      where result_key = 'worker-cursor-page-one'
+    ),
+    (
+      select (payload -> 'next_cursor' ->> 'id')::uuid
+      from notification_control_plane_runtime_results
+      where result_key = 'worker-cursor-page-one'
+    )
+  );
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-cursor-count', public.get_dashboard_notification_unread_count_v1();
+reset role;
+select ok(
+  (
+    select pg_catalog.jsonb_array_length(payload -> 'items') = 2
+      and payload -> 'items' -> 0 ->> 'id' = '76000000-0000-4000-8000-000000000903'
+      and payload -> 'items' -> 1 ->> 'id' = '76000000-0000-4000-8000-000000000902'
+      and payload -> 'next_cursor' ->> 'id' = '76000000-0000-4000-8000-000000000902'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-cursor-page-one'
+  )
+  and (
+    select payload -> 'items' -> 0 ->> 'id' = '76000000-0000-4000-8000-000000000901'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-cursor-page-two'
+  ),
+  'inbox cursor remains stable across equal created_at rows'
+);
+select ok(
+  (
+    select pg_catalog.jsonb_typeof(payload -> 'unread_count') = 'string'
+      and payload ->> 'unread_count' ~ '^[0-9]+$'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-cursor-page-one'
+  )
+  and (
+    select pg_catalog.jsonb_typeof(payload -> 'unread_count') = 'string'
+      and payload ->> 'unread_count' ~ '^[0-9]+$'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-cursor-count'
+  )
+  and (
+    select pg_catalog.jsonb_typeof(payload -> 'unread_count') = 'string'
+      and payload ->> 'unread_count' ~ '^[0-9]+$'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-read-admin'
+  ),
+  'inbox list, count, and mark return decimal-string unread counts'
 );
 
 insert into dashboard_private.notification_events(
@@ -5679,9 +5823,9 @@ select ok(
         '76100000-0000-4000-8000-000000000202'
       )
     $sql$,
-    'notification_not_visible'
+    'notification_not_found'
   ),
-  'profile A cannot mark profile B personal notification as read'
+  'non-owner notification collapses to notification_not_found'
 );
 reset role;
 select ok(
@@ -5724,7 +5868,7 @@ select ok(
       '76100000-0000-4000-8000-000000000202'
     )
   ),
-  'admin list/count/direct visibility cannot expose another profile personal or mixed-team rows'
+  'personal and historical management-team visibility stays exact'
 );
 
 -- A scheduled rule occurrence keeps its domain schedule distinct from the

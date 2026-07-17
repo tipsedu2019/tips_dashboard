@@ -514,10 +514,15 @@ test("delivery failure policies distinguish definite from ambiguous outcomes at 
   assert.deepEqual(policy("unexpected"), { releaseClaim: false, claimStatus: "delivery_unknown" });
 });
 
-test("internal admin-chat claims stay out of dashboard lists and unread counts", () => {
-  assert.match(dashboardNotificationServiceSource, /REGISTRATION_ADMIN_CHAT_CLAIM_TYPE/);
-  assert.match(dashboardNotificationServiceSource, /\.neq\("type", REGISTRATION_ADMIN_CHAT_CLAIM_TYPE\)/);
-  assert.match(dashboardNotificationServiceSource, /text\(row\.type\) === REGISTRATION_ADMIN_CHAT_CLAIM_TYPE[\s\S]{0,80}continue/);
+test("internal admin-chat claims are filtered by the server-owned inbox RPC boundary", () => {
+  const inboxReaderSource = dashboardNotificationServiceSource.slice(
+    dashboardNotificationServiceSource.indexOf("export async function loadDashboardNotifications"),
+  );
+  assert.match(inboxReaderSource, /get_dashboard_notification_inbox_v1/);
+  assert.match(inboxReaderSource, /get_dashboard_notification_unread_count_v1/);
+  assert.match(inboxReaderSource, /mark_dashboard_notification_read_v1/);
+  assert.doesNotMatch(inboxReaderSource, /REGISTRATION_ADMIN_CHAT_CLAIM_TYPE/);
+  assert.doesNotMatch(inboxReaderSource, /\.from\("dashboard_notifications"\)/);
 });
 
 test("successful route warnings are returned to the client at runtime", () => {

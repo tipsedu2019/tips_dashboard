@@ -223,14 +223,15 @@ export async function DELETE(request: Request) {
   const endpoint = endpointText(body.endpoint)
   if (!endpoint) return invalidRequest()
 
-  const { error } = await client
+  const { data, error } = await client
     .from("dashboard_push_subscriptions")
     .delete()
     .eq("endpoint", endpoint)
     .eq("profile_id", user.id)
+    .select("id")
 
-  if (error) {
+  if (error || !Array.isArray(data) || data.length > 1) {
     return unavailable()
   }
-  return json({ ok: true })
+  return json({ ok: true, deleted: data.length === 1 })
 }

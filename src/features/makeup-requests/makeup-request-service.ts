@@ -21,8 +21,22 @@ import {
   buildAcademicEventMutationPayload,
   runAcademicEventMutation,
 } from "@/features/operations/academic-event-utils.js"
-import { REGISTRATION_ADMIN_CHAT_CLAIM_TYPE } from "@/features/tasks/registration-consultation-notification.js"
-import { createInFlightRequestStore } from "@/lib/in-flight-request.js"
+import {
+  mapDashboardNotificationInboxWire,
+  mapDashboardNotificationReadWire,
+  mapDashboardNotificationUnreadCountWire,
+  type DashboardNotification,
+  type DashboardNotificationCursor,
+  type DashboardNotificationInbox,
+  type DashboardNotificationReadResult,
+} from "@/lib/dashboard-inbox-state"
+
+export type {
+  DashboardNotification,
+  DashboardNotificationCursor,
+  DashboardNotificationInbox,
+  DashboardNotificationReadResult,
+}
 
 type Row = Record<string, unknown>
 
@@ -162,17 +176,6 @@ export type MakeupRequestWorkspaceData = {
   error?: string
 }
 
-export type DashboardNotification = {
-  id: string
-  title: string
-  body: string
-  href: string
-  type: string
-  dedupeKey: string
-  readAt: string
-  createdAt: string
-}
-
 export type GoogleChatChannel = "executive" | "admin" | "math" | "english"
 
 export type MakeupNotificationTrigger = "submitted" | "approved" | "returned" | "rejected" | "completed" | "canceled" | "refund_requested"
@@ -250,9 +253,6 @@ export const MAKEUP_NOTIFICATION_CHANNEL_LABELS: Record<MakeupNotificationChanne
 const MAKEUP_NOTIFICATION_TRIGGERS = Object.keys(MAKEUP_NOTIFICATION_TRIGGER_LABELS) as ActiveMakeupNotificationTrigger[]
 const MAKEUP_NOTIFICATION_CHANNELS = Object.keys(MAKEUP_NOTIFICATION_CHANNEL_LABELS) as MakeupNotificationChannel[]
 const MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT = 40
-const dashboardNotificationLoadInFlight = createInFlightRequestStore()
-const dashboardNotificationUnreadCountInFlight = createInFlightRequestStore()
-
 export function getMakeupNotificationTriggerLabel(triggerKind: string) {
   if (triggerKind === "completed") return MAKEUP_NOTIFICATION_TRIGGER_LABELS.approved
   return MAKEUP_NOTIFICATION_TRIGGER_LABELS[triggerKind as ActiveMakeupNotificationTrigger] || triggerKind
@@ -1807,98 +1807,39 @@ export async function updateMakeupNotificationTriggerContent(
   if (error) throw error
 }
 
-export function loadDashboardNotifications(viewerId: string, limit = 20): Promise<DashboardNotification[]> {
-  if (!supabase || !text(viewerId)) return Promise.resolve([])
+export async function loadDashboardNotifications(
+  limit = 20,
+  cursor: DashboardNotificationCursor | null = null,
+): Promise<DashboardNotificationInbox> {
+  if (!supabase) return { items: [], unreadCount: 0, nextCursor: null }
 
-  const loadKey = `${viewerId}:${limit}`
-  return dashboardNotificationLoadInFlight.run(
-    loadKey,
-    () => readDashboardNotifications(limit),
-  )
+  const { data, error } = await supabase.rpc("get_dashboard_notification_inbox_v1", {
+    p_limit: limit,
+    p_before_created_at: cursor?.createdAt ?? null,
+    p_before_id: cursor?.id ?? null,
+  })
+  if (error) throw error
+  return mapDashboardNotificationInboxWire(data)
 }
 
-export function loadDashboardUnreadNotificationCount(viewerId: string): Promise<number> {
-  if (!supabase || !text(viewerId)) return Promise.resolve(0)
-  const client = supabase
+export async function loadDashboardUnreadNotificationCount(): Promise<number> {
+  if (!supabase) return 0
 
-  return dashboardNotificationUnreadCountInFlight.run(
-    viewerId,
-    async () => {
-      const { count, error } = await client
-        .from("dashboard_notifications")
-        .select("id", { count: "exact", head: true })
-        .is("read_at", null)
-        .neq("type", REGISTRATION_ADMIN_CHAT_CLAIM_TYPE)
-
-      if (error) {
-        if (isMissingRelationError(error)) return 0
-        throw error
-      }
-
-      return Math.max(0, Number(count || 0))
-    },
-  )
+  const { data, error } = await supabase.rpc("get_dashboard_notification_unread_count_v1")
+  if (error) throw error
+  return mapDashboardNotificationUnreadCountWire(data)
 }
 
-async function readDashboardNotifications(limit: number): Promise<DashboardNotification[]> {
-  if (!supabase) return []
+export async function markDashboardNotificationRead(
+  id: string,
+): Promise<DashboardNotificationReadResult> {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const notificationId = text(id)
+  if (!notificationId) throw new Error("읽음 처리할 알림을 찾을 수 없습니다.")
 
-  const { data, error } = await supabase
-    .from("dashboard_notifications")
-    .select("*")
-    .neq("type", REGISTRATION_ADMIN_CHAT_CLAIM_TYPE)
-    .order("created_at", { ascending: false })
-    .limit(limit * 4)
-
-  if (error) {
-    if (isMissingRelationError(error)) return []
-    throw error
-  }
-
-  const grouped = new Map<string, DashboardNotification>()
-  for (const row of ((data || []) as Row[])) {
-    if (text(row.type) === REGISTRATION_ADMIN_CHAT_CLAIM_TYPE) continue
-    const metadata = parseObject(row.metadata)
-    const notification: DashboardNotification = {
-      id: text(row.id),
-      title: text(row.title),
-      body: text(row.body),
-      href: text(row.href),
-      type: text(row.type),
-      dedupeKey: text(row.dedupe_key) || text(metadata.dedupeKey),
-      readAt: text(row.read_at),
-      createdAt: text(row.created_at),
-    }
-    const groupKey = notification.dedupeKey || [
-      notification.type,
-      notification.title,
-      notification.body,
-      notification.href,
-      text(metadata.requestId),
-    ].join("|")
-    const existing = grouped.get(groupKey)
-    if (!existing) {
-      grouped.set(groupKey, notification)
-      continue
-    }
-    grouped.set(groupKey, {
-      ...existing,
-      readAt: existing.readAt || notification.readAt,
-      createdAt: existing.createdAt >= notification.createdAt ? existing.createdAt : notification.createdAt,
-    })
-  }
-
-  return [...grouped.values()].slice(0, limit)
-}
-
-export async function markDashboardNotificationRead(id: string) {
-  if (!supabase || !id) return
-  const { error } = await supabase
-    .from("dashboard_notifications")
-    .update({ read_at: new Date().toISOString() })
-    .eq("id", id)
-
-  if (error && !isMissingRelationError(error)) {
-    throw error
-  }
+  const { data, error } = await supabase.rpc("mark_dashboard_notification_read_v1", {
+    p_notification_id: notificationId,
+  })
+  if (error) throw error
+  return mapDashboardNotificationReadWire(data)
 }
