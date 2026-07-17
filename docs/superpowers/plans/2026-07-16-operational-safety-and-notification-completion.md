@@ -1625,7 +1625,7 @@ git commit -m "feat: add canonical registration calendar"
 
 ---
 
-### Task 11: Materialize registration reminder rules and events atomically
+### 작업 11: 등록 리마인더 규칙과 이벤트를 원자적으로 물질화
 
 **Source packet:** Task 5 of docs/superpowers/plans/2026-07-15-registration-appointments-reminders.md.
 
@@ -1649,11 +1649,11 @@ git commit -m "feat: add canonical registration calendar"
 - preview_registration_appointment_reminders_v1;
 - public.registration_appointment_reminders_runtime_version() returning 1 as the migration's final object.
 
-- [ ] **Step 1: write failing time, identity, revision, target-generation, and rollback tests**
+- [x] **1단계: 시각·식별자·리비전·대상 세대·롤백 실패 테스트 작성**
 
 Test KST at 00:00, 00:30, 13:59, 14:00, 14:01, and 23:59; month/year/leap boundaries; non-KST host timezone; no past backfill; exactly nine disabled rule rows; duplicate materialization; two same-day appointments; A→B→A recipient generations; one raw director event reused by target reconciliation; registry validation for editable schedules; all-disabled UI copy; and complete rollback if common event/job insertion fails.
 
-- [ ] **Step 2: seed only the fixed disabled cells**
+- [x] **2단계: 고정된 비활성 셀만 시드**
 
 Variants:
 
@@ -1669,13 +1669,13 @@ Applicability uses three stable rule families per variant, producing exactly nin
 
 Every seed is disabled and has an immutable initial template. Installation creates zero reminder deliveries.
 
-- [ ] **Step 3: expose the approved schedule settings in the common panel**
+- [x] **3단계: 승인된 예약 설정을 공통 패널에 노출**
 
 Show the three Korean preset labels 예약 전날 14:00, 예약 당일 14:00, and 예약 1시간 전. While all applicable cells are disabled, show 현재 예약 알림이 발송되지 않습니다 and link/focus the first applicable switch without implying delivery is active.
 
 Admin/staff may edit the KST wall-clock for previous_day_at and same_day_at while preserving those fixed variants, and may edit the lead duration for offset_before. Validate timezone, wall-clock, positive bounded lead, audience/channel applicability, and the shared management Chat row against the server registry. A schedule edit creates a new rule revision; template edit creates an immutable template revision. Add desktop/mobile UI tests for all-disabled, enabled, invalid, save/reload, and conflict states.
 
-- [ ] **Step 4: construct stable occurrence identity**
+- [x] **4단계: 안정적인 발생 식별자 구성**
 
 ~~~text
 registration:registration_appointment:{appointmentId}:source_revision:{notificationRevision}:rule:{ruleId}:rule_revision:{ruleRevision}
@@ -1683,7 +1683,7 @@ registration:registration_appointment:{appointmentId}:source_revision:{notificat
 
 Identity never uses scheduled_for alone. Only now < scheduled_for < appointment.scheduled_at creates a future event/job.
 
-- [ ] **Step 5: wrap canonical appointment mutations under one lock order**
+- [x] **5단계: 정규 예약 변이를 하나의 잠금 순서로 감싸기**
 
 Creation, reschedule, place/participation change, replacement, cancellation, completion, and director reassignment must update canonical data, version-2 process history, required notification event/fan-out job, and target reconciliation job in one transaction.
 
@@ -1695,13 +1695,13 @@ Creation, reschedule, place/participation change, replacement, cancellation, com
 - claimed pre-send work gets cancel_requested;
 - sending, sent, delivery_unknown, and terminal audit history are preserved.
 
-- [ ] **Step 6: add preview and final runtime marker**
+- [x] **6단계: 미리보기와 최종 런타임 마커 추가**
 
 Preview returns only enabled, applicable, future rounds and safe snake_case fields. It exposes no template body or recipient data.
 
 Create registration_appointment_reminders_runtime_version last. Registration settings exposure, shadow production, dispatch, and visit target reconciliation require both common and registration markers; missing/wrong versions fail closed.
 
-- [ ] **Step 7: run Node, UI, pgTAP, and concurrency tests**
+- [x] **7단계: Node·UI·pgTAP 소스·동시성 dry-run 검증**
 
 ~~~bash
 "$NODE" --experimental-strip-types --test \
@@ -1713,7 +1713,7 @@ pnpm dlx supabase@2.109.1 test db
 
 Expected: all disabled by default, zero provider calls, exact idempotency, and no partial commit.
 
-- [ ] **Step 8: commit**
+- [x] **8단계: 코드 커밋**
 
 ~~~bash
 git add \
@@ -1789,7 +1789,7 @@ git commit -m "feat: harden registration appointment editing"
 
 ---
 
-### Task 13: Add and verify the registration common-worker adapter
+### 작업 13: 등록 공통 Worker 어댑터 추가 및 검증
 
 **Source packets:** Tasks 7 and 8 of docs/superpowers/plans/2026-07-15-registration-appointments-reminders.md.
 
@@ -1815,13 +1815,13 @@ export const registrationNotificationAdapter: NotificationWorkflowAdapter = {
 }
 ~~~
 
-- [ ] **Step 1: write failing adapter tests for exact targets, whole-set hash, decimal target generation, current-source/rule/schedule revalidation, paging, and supersession**
-- [ ] **Step 2: implement required buildRenderContext and buildDeepLink callbacks from the same authoritative source snapshot; return only allowed string variables and a same-origin registration deep link**
-- [ ] **Step 3: return exact canceled reasons for stale source/rule/recipient and exact failed reasons for closed retry window, invalid schedule, or unsupported payload**
-- [ ] **Step 4: reconcile scheduled rules from canonical appointments in stable scheduled_at/id order without writing inside the adapter**
-- [ ] **Step 5: reconcile targets from current participants/directors and let common apply compare captured versus live generation/hash**
-- [ ] **Step 6: extend no-provider browser and two-session concurrency fixtures**
-- [ ] **Step 7: run focused, full registration, type, browser, and authorized pgTAP/concurrency gates**
+- [x] **1단계: 정확한 대상·전체 집합 해시·대상 세대·재검증·페이지·세대 대체 실패 테스트 작성**
+- [x] **2단계: 같은 권위 원본에서 렌더 변수와 동일 출처 딥 링크 구현**
+- [x] **3단계: 오래된 원본·규칙·수신자와 닫힌 재시도·잘못된 일정을 정확한 사유로 분리**
+- [x] **4단계: 정규 예약을 안정 순서로 읽는 예약 규칙 재계산 구현**
+- [x] **5단계: 현재 참여자·담당 원장 기반 대상 재계산 구현**
+- [x] **6단계: 공급자 0 브라우저와 두 세션 동시성 fixture 확장**
+- [x] **7단계: 집중·등록 전체·타입·브라우저 dry-run·pgTAP 소스 게이트 실행**
 
 ~~~bash
 "$NODE" --experimental-strip-types --test \
@@ -1832,7 +1832,7 @@ pnpm exec tsc --noEmit
 OPS_BROWSER_WORKFLOW=1 OPS_BROWSER_BASE_URL="$OPS_BROWSER_BASE_URL" pnpm run verify:ops-browser
 ~~~
 
-- [ ] **Step 8: commit Release E**
+- [x] **8단계: 릴리스 E 코드 커밋**
 
 ~~~bash
 git add \
@@ -1848,7 +1848,7 @@ git commit -m "feat: add registration notification adapter"
 
 ---
 
-### Task 14: Register seven exclusive workflow adapters and compose the worker route
+### 작업 14: 7개 배타적 workflow 어댑터 등록과 Worker 경로 구성
 
 **Source packet:** Task 1 of docs/superpowers/plans/2026-07-15-notification-workflow-adapters.md.
 
@@ -1864,12 +1864,12 @@ git commit -m "feat: add registration notification adapter"
 - Create: src/app/api/notifications/worker/route.ts
 - Create: tests/notification-workflow-registry.test.mjs
 
-- [ ] **Step 1: write a failing registry test with exactly seven ordered exclusive owners**
-- [ ] **Step 2: implement deterministic one-rule target sets plus authoritative render-context/deep-link callbacks**
-- [ ] **Step 3: import the registration adapter from Task 13; only it supplies scheduled-rule and target reconciliation**
-- [ ] **Step 4: require a timing-safe Bearer NOTIFICATION_WORKER_SECRET check before any claim**
-- [ ] **Step 5: run the registry/worker tests with no provider network**
-- [ ] **Step 6: commit**
+- [x] **1단계: 정확히 7개 순서·배타 소유자를 고정하는 registry 실패 테스트 작성**
+- [x] **2단계: 결정적 단일 규칙 대상과 권위 렌더·딥 링크 구현**
+- [x] **3단계: 작업 13 등록 어댑터만 예약 규칙·대상 재계산을 소유하도록 등록**
+- [x] **4단계: 작업 claim 전 timing-safe Worker Bearer 검증 구현**
+- [x] **5단계: 공급자 네트워크 없이 registry·Worker 검증 실행**
+- [x] **6단계: 코드 커밋**
 
 ~~~bash
 git add \
