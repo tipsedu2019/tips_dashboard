@@ -124,35 +124,38 @@ git add src/features/tasks/registration-initial-plan-control.tsx src/features/ta
 git commit -m "feat: finish canonical registration intake form"
 ```
 
-### Task 2: Version-2 Registration Events and Service Decoding
+### 작업 2: Version-2 등록 이력과 서비스 해석
 
-**Files:**
-- Create: `supabase/migrations/20260715100000_registration_history_v2.sql`
-- Modify: `src/features/tasks/registration-track-service.ts`
-- Test: `tests/registration-track-schema.test.mjs`
-- Test: `tests/registration-track-service.test.mjs`
-- Test: `supabase/tests/registration_subject_tracks_runtime_test.sql`
+**파일:**
+- 생성: `supabase/migrations/20260716114000_registration_history_v2.sql`
+- 수정: `src/features/tasks/registration-track-service.ts`
+- 수정: `src/features/tasks/registration-track-fixtures.ts`
+- 테스트: `tests/registration-track-schema.test.mjs`
+- 테스트: `tests/registration-track-service.test.mjs`
+- 테스트: `supabase/tests/registration_subject_tracks_runtime_test.sql`
+- 테스트: `supabase/tests/registration_intake_workflow_runtime_test.sql`
 
-**Interfaces:**
-- Produces: `OpsRegistrationTrackEvent.actorKind`, `systemSource`, `reasonCode`; private `write_registration_track_event_v2(p_task_id uuid, p_track_id uuid, p_event_type text, p_source text, p_destination text, p_reason_code text, p_metadata jsonb, p_actor_kind text, p_system_source text) returns uuid` plus the existing seven-argument void wrapper.
-- Preserves: version-1 decoding and every existing public registration mutation signature.
+**인터페이스:**
+- `OpsRegistrationTrackEvent.actorKind`, `systemSource`, `reasonCode`, `payloadVersion`을 제공합니다.
+- 비공개 `write_registration_track_event_v2(p_task_id uuid, p_track_id uuid, p_event_type text, p_source text, p_destination text, p_reason_code text, p_metadata jsonb, p_actor_kind text, p_system_source text) returns uuid`와 기존 7개 인자 void wrapper를 제공합니다.
+- version-1 해석과 기존 공개 등록 mutation 서명은 모두 유지합니다.
 
-- [ ] **Step 1: Write failing v2 parser and migration source-contract tests**
+- [x] **1단계: 실패하는 v2 파서·마이그레이션 소스 계약 테스트 작성**
 
-Use fixtures for `actorKind: "user"`, `"system"`, and `"migration"`; assert a v1 null actor stays null with no inferred kind. Assert the migration keeps the old writer signature and ends with grants only to private callers.
+`actorKind: "user"`, `"system"`, `"migration"` fixture를 사용하고 version-1 null 행위자가 종류 추측 없이 null로 유지되는지 검증합니다. 마이그레이션이 기존 작성기 서명을 유지하고 비공개 호출자만 사용할 수 있도록 끝나는지 검증합니다.
 
-Run:
+실행:
 
 ```bash
 NODE=/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node
 "$NODE" --experimental-strip-types --test tests/registration-track-schema.test.mjs tests/registration-track-service.test.mjs
 ```
 
-Expected: FAIL on missing v2 fields/function.
+예상 결과: v2 필드와 함수가 없으므로 실패합니다.
 
-- [ ] **Step 2: Add the forward-only v2 writer**
+- [x] **2단계: 앞으로 기록되는 이력을 위한 v2 작성기 추가**
 
-The v2 payload must be server-authored as:
+서버가 다음 v2 payload를 작성해야 합니다.
 
 ```sql
 jsonb_build_object(
@@ -166,11 +169,11 @@ jsonb_build_object(
 )
 ```
 
-Reject actor kinds outside the closed set, require `auth.uid()` for user events, require a stable `systemSource` for system events, and force migration actor rows to null profile IDs. Replace the existing seven-argument writer body with a wrapper that calls v2 using `user` for authenticated mutations. Automated and migration code calls v2 explicitly.
+닫힌 집합 밖의 행위자 종류는 거절하고, 사용자 이벤트에는 `auth.uid()`를, 시스템 이벤트에는 안정된 `systemSource`를 요구하며, 마이그레이션 행의 프로필 ID는 null로 고정합니다. 기존 7개 인자 작성기 본문은 인증 mutation에 대해 `user`로 v2를 한 번 호출하는 wrapper로 교체합니다. 자동화와 마이그레이션 코드는 v2를 명시적으로 호출합니다.
 
-- [ ] **Step 3: Decode both payload versions without inference**
+- [x] **3단계: 추측 없이 두 payload 버전 해석**
 
-Add:
+다음을 추가합니다.
 
 ```ts
 actorKind: "user" | "system" | "migration" | null
@@ -179,24 +182,26 @@ reasonCode: string | null
 payloadVersion: 1 | 2 | null
 ```
 
-Map the v2 snake_case payload into the camelCase service DTO directly; map v1 `reason` into `reasonCode` for display compatibility, but leave `actorKind = null` when the v1 actor is null.
+v2 snake_case payload를 camelCase 서비스 DTO로 한 번만 직접 매핑합니다. v1의 `reason`은 표시 호환을 위해 `reasonCode`로 매핑하지만, v1 행위자가 null이면 `actorKind = null`을 유지합니다.
 
-- [ ] **Step 4: Run source-contract and ephemeral SQL tests**
+- [x] **4단계: 소스 계약과 임시 SQL 테스트 실행**
 
-Run the Step 1 command, then on a separately authorized local/preview database:
+1단계 명령을 실행한 뒤, 별도로 승인된 로컬 또는 미리보기 DB에서 다음을 실행합니다.
 
 ```bash
 pnpm dlx supabase@2.109.1 test db
 ```
 
-Expected: Node PASS; pgTAP proves data plus event rollback together and user/system/migration actor validation.
+예상 결과: Node 테스트가 통과하고, pgTAP이 데이터와 이벤트의 동시 롤백 및 사용자·시스템·마이그레이션 행위자 검증을 증명합니다.
 
-- [ ] **Step 5: Commit**
+- [x] **5단계: 커밋**
 
 ```bash
-git add supabase/migrations/20260715100000_registration_history_v2.sql src/features/tasks/registration-track-service.ts tests/registration-track-schema.test.mjs tests/registration-track-service.test.mjs supabase/tests/registration_subject_tracks_runtime_test.sql
+git add supabase/migrations/20260716114000_registration_history_v2.sql src/features/tasks/registration-track-service.ts src/features/tasks/registration-track-fixtures.ts tests/registration-track-schema.test.mjs tests/registration-track-service.test.mjs supabase/tests/registration_subject_tracks_runtime_test.sql supabase/tests/registration_intake_workflow_runtime_test.sql
 git commit -m "feat: record registration history actors explicitly"
 ```
+
+완료 근거: 구현 커밋 `e505d3a`. 최종 집중 Node 테스트 `60/60`, TypeScript, 대상 ESLint, 변경 공백 검사를 통과했고 독립 검토 결과 P0/P1/P2는 `0/0/0`입니다. pgTAP 소스 패킷은 `160/160` 항목을 정적으로 검증했으며, 승인된 로컬 또는 미리보기 DB가 없어 SQL 자체는 실행하지 않았습니다.
 
 ### Task 3: Honest Read-Only Registration Timeline
 

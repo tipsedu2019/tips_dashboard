@@ -685,22 +685,27 @@ Evidence: commit `3e13dc8` contains the independently reviewed containment imple
 
 ---
 
-### Task 2: Record explicit version-2 registration actors and timestamps
+### 작업 2: 등록 version-2 이력의 행위자와 발생 시각을 명시적으로 기록
 
-**Priority:** P1. Required before the read-only timeline.
+**우선순위:** P1. 읽기 전용 타임라인보다 먼저 완료합니다.
 
-**Files:**
+**파일:**
 
-- Create: supabase/migrations/20260716114000_registration_history_v2.sql
-- Modify: src/features/tasks/registration-track-service.ts
-- Test: tests/registration-track-schema.test.mjs
-- Test: tests/registration-track-service.test.mjs
-- Test: supabase/tests/registration_subject_tracks_runtime_test.sql
+- 생성: `supabase/migrations/20260716114000_registration_history_v2.sql`
+- 수정: `src/features/tasks/registration-track-service.ts`
+- 수정: `src/features/tasks/registration-track-fixtures.ts`
+- 테스트: `tests/registration-track-schema.test.mjs`
+- 테스트: `tests/registration-track-service.test.mjs`
+- 테스트: `supabase/tests/registration_subject_tracks_runtime_test.sql`
+- 테스트: `supabase/tests/registration_intake_workflow_runtime_test.sql`
 
-**Interfaces:**
+**인터페이스:**
 
-- Produces OpsRegistrationTrackEvent.actorKind, systemSource, reasonCode, and payloadVersion.
-- Produces private write_registration_track_event_v2(
+- `OpsRegistrationTrackEvent.actorKind`, `systemSource`, `reasonCode`, `payloadVersion`을 제공합니다.
+- 다음 비공개 함수를 추가하고 생성된 원본 이벤트 UUID를 그대로 반환합니다.
+
+~~~sql
+write_registration_track_event_v2(
   p_task_id uuid,
   p_track_id uuid,
   p_event_type text,
@@ -710,16 +715,18 @@ Evidence: commit `3e13dc8` contains the independently reviewed containment imple
   p_metadata jsonb,
   p_actor_kind text,
   p_system_source text
-  ) returning the raw event UUID.
-- Preserves the existing seven-argument version-1 function signature. Its new body delegates exactly once to write_registration_track_event_v2 with actor_kind = user for authenticated callers. Automated/system/migration writers call v2 explicitly rather than passing through v1.
+) returns uuid
+~~~
 
-- [ ] **Step 1: write failing parser and migration source tests**
+- 기존 7개 인자 version-1 함수 서명은 유지합니다. 새 본문은 인증 사용자 호출에 대해 `actor_kind = 'user'`로 version-2 작성기를 정확히 한 번만 호출합니다. 자동화·시스템·마이그레이션 작성기는 기존 wrapper를 통하지 않고 version-2 작성기를 명시적으로 호출합니다.
 
-Assert user, system, and migration actor kinds; stable systemSource; returned raw event UUID; same-transaction rollback; honest historical version-1 null actors; and source proof that no authoritative mutation calls both v1 and v2 for one transition. A historical version-1 null actor must remain null and render 알 수 없음.
+- [x] **1단계: 실패하는 파서·마이그레이션 소스 테스트 작성**
 
-- [ ] **Step 2: add the forward-only event writer**
+사용자·시스템·마이그레이션 행위자 종류, 안정된 `systemSource`, 원본 UUID 반환, 데이터와 이벤트의 동일 트랜잭션 롤백, 과거 version-1 null 행위자의 정직한 유지, 하나의 전이에 version-1과 version-2를 함께 기록하지 않는 소스 계약을 고정합니다. 과거 version-1의 null 행위자는 null로 남아 `알 수 없음`으로 표시되어야 합니다.
 
-Server-author the payload:
+- [x] **2단계: 앞으로 기록되는 이력을 위한 version-2 작성기 추가**
+
+서버가 다음 payload를 작성합니다.
 
 ~~~sql
 jsonb_build_object(
@@ -739,13 +746,13 @@ jsonb_build_object(
 )
 ~~~
 
-Accept only user, system, or migration. Require auth.uid() for user, require a stable source for system, and force migration profile ID null. The seven-argument wrapper performs one v2 call and no separate insert. pgTAP must prove each authoritative mutation adds exactly one process event, including rollback/replay paths.
+허용하는 행위자 종류는 `user`, `system`, `migration`뿐입니다. 사용자는 `auth.uid()`를 요구하고, 시스템은 안정된 출처를 요구하며, 마이그레이션의 프로필 ID는 null로 고정합니다. 7개 인자 wrapper는 version-2 작성기를 한 번만 호출하고 별도 insert를 하지 않습니다. pgTAP은 실제 업무 변이의 `(track, event_type, entity/revision key)`별 정확한 한 번 기록, 같은 요청 재실행 시 추가 기록 없음, 데이터와 이벤트의 동시 롤백을 검증합니다.
 
-- [ ] **Step 3: decode both versions without inference**
+- [x] **3단계: 추측 없이 두 payload 버전 해석**
 
-Map v2 snake_case once. Map the version-1 reason only for display compatibility. Never infer system/migration from a null actor or current owner.
+version-2의 snake_case를 서비스 DTO에서 한 번만 camelCase로 매핑합니다. version-1의 `reason`은 표시 호환을 위해서만 매핑합니다. null 행위자나 현재 담당자에서 시스템·마이그레이션 행위자를 추측하지 않습니다.
 
-- [ ] **Step 4: run Node and authorized ephemeral database tests**
+- [x] **4단계: Node 테스트와 승인된 임시 DB 테스트 실행**
 
 ~~~bash
 "$NODE" --experimental-strip-types --test \
@@ -754,19 +761,23 @@ Map v2 snake_case once. Map the version-1 reason only for display compatibility.
 pnpm dlx supabase@2.109.1 test db
 ~~~
 
-Expected: Node passes; pgTAP proves actor validation, grants, rollback, and compatibility. The pgTAP command runs only against an explicitly authorized local/preview database.
+예상 결과: Node 테스트가 통과하고, pgTAP이 행위자 검증·권한·정확히 한 번 기록·롤백·호환성을 증명합니다. pgTAP 명령은 명시적으로 승인된 로컬 또는 미리보기 DB에서만 실행합니다.
 
-- [ ] **Step 5: commit**
+- [x] **5단계: 커밋**
 
 ~~~bash
 git add \
   supabase/migrations/20260716114000_registration_history_v2.sql \
   src/features/tasks/registration-track-service.ts \
+  src/features/tasks/registration-track-fixtures.ts \
   tests/registration-track-schema.test.mjs \
   tests/registration-track-service.test.mjs \
+  supabase/tests/registration_intake_workflow_runtime_test.sql \
   supabase/tests/registration_subject_tracks_runtime_test.sql
 git commit -m "feat: record registration history actors explicitly"
 ~~~
+
+**완료 근거:** 구현 커밋 `e505d3a`. 최종 집중 Node 테스트 `60/60`, TypeScript, 대상 ESLint, 변경 공백 검사를 통과했고 독립 검토 결과 P0/P1/P2는 `0/0/0`입니다. pgTAP 소스 패킷은 `160/160` 항목과 실제 업무 변이 재실행·데이터 및 이력 동시 롤백 계약을 고정했습니다. 승인된 로컬 또는 미리보기 DB가 없어 SQL 자체는 실행하지 않았으며, 원격 DB에는 적용하지 않았습니다.
 
 ---
 
