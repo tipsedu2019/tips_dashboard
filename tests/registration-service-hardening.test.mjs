@@ -172,29 +172,6 @@ function loadCreatedTaskCleanupWithMocks(mocks) {
   return sandboxModule.exports.deleteCreatedOpsTaskOnFailure;
 }
 
-function loadCommittedEventWriterWithMocks(mocks) {
-  const eventSource = sourceBetween(
-    "async function writeCommittedEvent",
-    "async function writeAutoSyncEventOnce",
-  );
-  const compiled = ts.transpileModule(
-    `${eventSource}\nmodule.exports = { writeCommittedEvent }`,
-    {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2020,
-      },
-    },
-  ).outputText;
-  const sandboxModule = { exports: {} };
-  vm.runInNewContext(compiled, {
-    module: sandboxModule,
-    exports: sandboxModule.exports,
-    ...mocks,
-  });
-  return sandboxModule.exports.writeCommittedEvent;
-}
-
 function loadWaitlistDeleteClassResolverWithMocks(mocks) {
   const resolverSource = sourceBetween(
     "async function resolveRegistrationWaitlistClassForDelete",
@@ -300,7 +277,7 @@ test("registration lookup never falls back to an arbitrary same-name row and rev
   assert.doesNotMatch(syncSource, /: await resolveOpsStudent\(input\)/);
 });
 
-test("ready-mode ops roster changes use atomic RPC gateways and maintenance fails closed", () => {
+test("준비 모드 명단 변경은 원자 RPC를 사용하고 유지보수 상태에서는 실패 폐쇄한다", () => {
   const assignSource = sourceBetween(
     "async function assignOpsStudentToClass",
     "async function assignOpsStudentToWaitlist",
@@ -335,11 +312,15 @@ test("ready-mode ops roster changes use atomic RPC gateways and maintenance fail
   assert.match(removeSource, /applyReadyOpsRosterMode[\s\S]*?"removed"[\s\S]*?previousMode \|\| "removed"/);
   assert.match(updateSource, /completeReadyOpsRosterTransition\(taskId, input\.type\)/);
   assert.match(serviceSource, /function getReadyOpsCompletionInput[\s\S]*?timetableRosterUpdated:\s*false/);
-  assert.match(updateSource, /upsertDetail\(taskId, readyCompletionInput\)/);
+  assert.match(
+    updateSource,
+    /const producerInput = nextStatus === "done"[\s\S]*?getReadyOpsCompletionInput\(\{ \.\.\.input, status: existingTask\.status \}\)/,
+  );
+  assert.match(updateSource, /p_input: buildOpsTaskProducerInput\(producerInput\)/);
   assert.match(statusSource, /completeReadyOpsRosterTransition\(currentTask\.id, currentTask\.type\)/);
   assert.match(statusSource, /currentTask\.type === "registration"[\s\S]*?getOpsRosterRuntimeState\(\)[\s\S]*?runtime\.mode !== "legacy"/);
   assert.match(serviceSource, /stagesReadyOpsRosterCompletion[\s\S]*?completeReadyOpsRosterTransition\(taskId, input\.type\)/);
-  assert.match(serviceSource, /completeReadyOpsRosterTransition\(taskId, input\.type\)[\s\S]*?writeCommittedEvent\(taskId, "created"/);
+  assert.doesNotMatch(serviceSource, /completeReadyOpsRosterTransition\(taskId, input\.type\)[\s\S]{0,300}?write(?:Committed)?Event\(taskId, "created"/);
   assert.match(serviceSource, /p_request_key:\s*`ops-\$\{type\}-completion-\$\{taskId\}`/);
   assert.match(updateSource, /input\.type === "registration"[\s\S]*?getOpsRosterRuntimeState\(\)[\s\S]*?runtime\.mode !== "legacy"/);
   assert.match(updateSource, /과목별 등록 화면에서 변경하세요/);
@@ -928,11 +909,7 @@ test("waitlist deletion never picks the first same-name class without a unique s
   );
 });
 
-test("registration audit append cannot turn a committed save into a retryable failure", () => {
-  const committedEventSource = sourceBetween(
-    "async function writeCommittedEvent",
-    "type ManualCheckFieldDefinition",
-  );
+test("registration 파생 감사 이력은 커밋 뒤 별도 activity RPC로 기록하지 않는다", () => {
   const updateSource = sourceBetween(
     "export async function updateOpsTask",
     "export async function updateOpsTaskStatus",
@@ -942,29 +919,12 @@ test("registration audit append cannot turn a committed save into a retryable fa
     "async function removeRegistrationWaitlistOnDelete",
   );
 
-  assert.match(committedEventSource, /try \{[\s\S]*await writeEvent[\s\S]*catch \(error\)/);
-  assert.match(committedEventSource, /console\.error\("등록 감사 이력 저장 실패"/);
-  assert.match(updateSource, /await writeCommittedEvent\(taskId, "updated"/);
-  assert.match(statusSource, /await writeCommittedEvent\(currentTask\.id, "status_changed"/);
+  assert.doesNotMatch(serviceSource, /async function writeCommittedEvent/);
+  assert.doesNotMatch(updateSource, /writeEvent\(taskId, "updated"/);
+  assert.doesNotMatch(statusSource, /writeEvent\(currentTask\.id, "(?:status_changed|revision_requested)"/);
 });
 
-test("committed registration audit failures resolve after reporting diagnostics", async () => {
-  const diagnostics = [];
-  const writeCommittedEvent = loadCommittedEventWriterWithMocks({
-    writeEvent: async () => {
-      throw new Error("audit unavailable");
-    },
-    console: {
-      error: (...args) => diagnostics.push(args),
-    },
-  });
-
-  await writeCommittedEvent("task-1", "updated", "task", "", "등록: 김하윤");
-  assert.equal(diagnostics.length, 1);
-  assert.equal(diagnostics[0][0], "등록 감사 이력 저장 실패");
-});
-
-test("terminal registration creation keeps the parent open until children and audit exist", () => {
+test("terminal registration creation keeps the parent open until children exist", () => {
   const createSource = sourceBetween(
     "export async function createOpsTask",
     "async function updateRegistrationTaskParent",
@@ -979,50 +939,50 @@ test("terminal registration creation keeps the parent open until children and au
     'status: "in_progress"',
     "const initialParentInput",
     "await upsertDetail",
-    'await writeEvent(taskId, "created"',
     "await updateRegistrationTaskParent(taskId, input, { preserveManagementLinks: true })",
   ]);
   assertInOrder(createSource, [
     "const initialParentInput",
     "await upsertDetail",
-    'await writeEvent(taskId, "created"',
     "await updateRegistrationTaskParent(taskId, input, { preserveManagementLinks: true })",
   ]);
-  assert.match(cleanupSource, /\.delete\(\)\.eq\("id", taskId\)\.select\("id"\)/);
-  assert.match(cleanupSource, /selectOpsRowById\("ops_tasks", taskId\)/);
-  assert.match(cleanupSource, /생성 실패 업무를 정리하지 못했습니다/);
+  assert.doesNotMatch(createSource, /writeEvent\(taskId, "created"/);
+  assert.match(createSource, /\.select\("id,created_at"\)/);
+  assert.match(createSource, /deleteCreatedOpsTaskOnFailure\(taskId, createdAt\)/);
+  assert.match(cleanupSource, /runIdempotentOpsTaskProducerRpc\("cleanup_created_ops_task_v1"/);
+  assert.match(cleanupSource, /p_expected_created_at: expectedCreatedAt/);
+  assert.match(cleanupSource, /producerCleanupDeleted\(response, taskId\)/);
+  assert.doesNotMatch(cleanupSource, /\.from\(|\.delete\(/);
 });
 
-test("zero-row parent cleanup detects an RLS-hidden created task", async () => {
-  let deleteAttempts = 0;
-  const childCleanupTables = [];
-  const query = {
-    delete() {
-      deleteAttempts += 1;
-      return this;
-    },
-    eq() {
-      return this;
-    },
-    async select() {
-      return { data: [], error: null };
-    },
-  };
+test("생성된 등록 업무 정리는 고정 RPC 영수증을 요구한다", async () => {
+  const calls = [];
+  let validReceipt = true;
   const cleanup = loadCreatedTaskCleanupWithMocks({
-    supabase: { from: () => query },
+    supabase: {},
     text: (value) => String(value || "").trim(),
-    didMutateOpsTask: (data) => Array.isArray(data) && data.length > 0,
-    deleteOpsTaskChildRowsOnFailure: async (table) => {
-      childCleanupTables.push(table);
-      return null;
+    runIdempotentOpsTaskProducerRpc: async (name, parameters) => {
+      calls.push({ name, parameters });
+      return { taskId: "task-1", deleted: validReceipt };
     },
-    isMissingRelationError: () => false,
-    isMissingColumnError: () => false,
-    selectOpsRowById: async () => ({ id: "task-1", status: "done" }),
+    producerCleanupDeleted: (response, taskId) => {
+      if (response.deleted !== true || response.taskId !== taskId) {
+        throw new Error("생성 실패 업무 정리 결과를 확인하지 못했습니다.");
+      }
+    },
   });
 
-  const error = await cleanup("task-1");
-  assert.equal(deleteAttempts, 2);
-  assert.equal(childCleanupTables.length, 7);
-  assert.match(error.message, /생성 실패 업무를 정리하지 못했습니다/);
+  const expectedCreatedAt = "2026-07-17T00:00:00.000Z";
+  assert.equal(await cleanup("task-1", expectedCreatedAt), null);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{
+    name: "cleanup_created_ops_task_v1",
+    parameters: {
+      p_task_id: "task-1",
+      p_expected_created_at: expectedCreatedAt,
+    },
+  }]);
+
+  validReceipt = false;
+  const error = await cleanup("task-1", expectedCreatedAt);
+  assert.match(error.message, /생성 실패 업무 정리 결과를 확인하지 못했습니다/);
 });

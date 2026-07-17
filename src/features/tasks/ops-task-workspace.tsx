@@ -59,6 +59,7 @@ import {
   addOpsTaskAttachment,
   addOpsTaskComment,
   createOpsTask,
+  createOpsTransitionTask,
   deleteOpsTask,
   emptyOpsTaskWorkspaceData,
   getCachedOpsTaskWorkspaceData,
@@ -68,6 +69,9 @@ import {
   loadOpsRegistrationClassDetail,
   loadOpsTaskWorkspaceData,
   loadOpsTaskWorkspaceOptionData,
+  reportWordRetestAbsent,
+  reportWordRetestResult,
+  retryWordRetest,
   summarizeOpsTasks,
   updateOpsTask,
   updateOpsTaskStatus,
@@ -137,6 +141,7 @@ import {
   createRegistrationCase,
   createRegistrationCaseWithInitialWorkflow,
   createRegistrationMutationRequestKey,
+  loadRegistrationLegacyNotificationSourceIds,
   probeRegistrationIntakeWorkflowRuntime,
   probeRegistrationSubjectTrackRuntime,
   updateRegistrationCaseCommon,
@@ -195,18 +200,7 @@ type WithdrawalViewKey = "applicant" | "operations" | "closed"
 type RegistrationViewKey = "inquiry" | "level_test" | "consulting" | "waiting" | "enrollment" | "closed"
 type RegistrationWorkspaceMode = "list" | "calendar"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
-type GoogleChatChannel = "executive" | "admin" | "math" | "english"
 type WithdrawalNotificationChannelKey = "applicant" | "operations" | "google_chat_admin"
-type WithdrawalNotificationTriggerKey = "submitted" | "processing" | "completed"
-type WithdrawalNotificationSetting = {
-  triggerKey: WithdrawalNotificationTriggerKey
-  channelKey: WithdrawalNotificationChannelKey
-  enabled: boolean
-}
-type WithdrawalNotificationTemplate = {
-  titleTemplate: string
-  bodyTemplate: string
-}
 type WithdrawalGoogleChatWebhookInfo = {
   channelKey: WithdrawalNotificationChannelKey
   channelLabel: string
@@ -652,131 +646,8 @@ const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChann
   { key: "google_chat_admin", label: "구글챗 · 관리팀" },
 ]
 
-const WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP: Partial<Record<WithdrawalNotificationChannelKey, GoogleChatChannel>> = {
+const WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP: Partial<Record<WithdrawalNotificationChannelKey, "admin">> = {
   google_chat_admin: "admin",
-}
-
-const WITHDRAWAL_NOTIFICATION_TRIGGERS: Array<{ key: WithdrawalNotificationTriggerKey; label: string; detail: string }> = [
-  { key: "submitted", label: "신청 접수", detail: "담당선생님이 퇴원을 신청하면 관리팀에 알림" },
-  { key: "processing", label: "처리 시작", detail: "관리팀이 확인하거나 처리 중으로 이동하면 담당선생님에 알림" },
-  { key: "completed", label: "처리 완료", detail: "관리팀이 완료 처리하면 담당선생님과 관리팀에 알림" },
-]
-
-const REGISTRATION_NOTIFICATION_TRIGGERS: Array<{ key: WithdrawalNotificationTriggerKey; label: string; detail: string }> = [
-  { key: "submitted", label: "문의 접수", detail: "등록 문의가 새로 들어오면 관리팀에 알림" },
-  { key: "processing", label: "등록 진행", detail: "레벨테스트, 상담, 대기, 수납 단계로 이동하면 담당자에게 알림" },
-  { key: "completed", label: "등록 종료", detail: "등록 완료, 미등록, 문의만으로 닫히면 담당자와 관리팀에 알림" },
-]
-
-const WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES = [
-  ...WITHDRAWAL_TABLE_COLUMNS
-    .map((column) => column.label)
-    .filter((label) => label !== "액션"),
-  "신청자",
-  "신청일시",
-  "담당선생님",
-  "관리팀",
-  "프로세스",
-] as const
-
-const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT: Record<string, string> = {
-  상태: "처리 중",
-  과목: "영어",
-  선생님: "정보영",
-  학생: "최소윤",
-  수업: "제주여고2A",
-  퇴원일: "2026-06-29",
-  퇴원회차: "8회차",
-  "진행 수업시수": "16",
-  "4주 기준 수업시수": "16",
-  수업진행률: "100%",
-  "고객 퇴원사유": "타 학원 이동",
-  "선생님 의견": "동일",
-  "미배부 교재": "매3영",
-  신청자: "정보영",
-  신청일시: "2026-07-08 20:27",
-  담당선생님: "정보영",
-  관리팀: "관리팀",
-  프로세스: "처리 완료",
-}
-
-const TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES = [
-  ...TRANSFER_TABLE_COLUMNS
-    .map((column) => column.label)
-    .filter((label) => label !== "액션"),
-  "신청자",
-  "신청일시",
-  "담당선생님",
-  "관리팀",
-  "프로세스",
-] as const
-
-const REGISTRATION_NOTIFICATION_TEMPLATE_VARIABLES = [
-  "진행상태",
-  "과목",
-  "학년",
-  "학교",
-  "학생",
-  "학부모 전화",
-  "문의일시",
-  "레벨테스트",
-  "전화상담",
-  "방문상담",
-  "수업",
-  "수업시작일",
-  "수업시작회차",
-  "요청 사항",
-  "등록 확인",
-  "신청자",
-  "신청일시",
-  "상담 책임자",
-  "관리팀",
-  "프로세스",
-] as const
-
-const DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate> = {
-  submitted: {
-    titleTemplate: "퇴원 신청 접수 · {학생}",
-    bodyTemplate: "{담당선생님} 선생님이 {학생} 학생의 퇴원을 신청했습니다.\n수업: {수업}",
-  },
-  processing: {
-    titleTemplate: "퇴원 처리 시작 · {학생}",
-    bodyTemplate: "{학생} 학생 퇴원 신청이 관리팀 처리 중으로 이동했습니다.\n퇴원일: {퇴원일}",
-  },
-  completed: {
-    titleTemplate: "퇴원 처리 완료 · {학생}",
-    bodyTemplate: "{학생} 학생 퇴원 처리가 완료되었습니다.\n퇴원일: {퇴원일}\n퇴원회차: {퇴원회차}",
-  },
-}
-
-const DEFAULT_TRANSFER_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate> = {
-  submitted: {
-    titleTemplate: "전반 신청 접수 · {학생}",
-    bodyTemplate: "{담당선생님} 선생님이 {학생} 학생의 전반을 신청했습니다.\n전 수업: {전 수업}\n후 수업: {후 수업}",
-  },
-  processing: {
-    titleTemplate: "전반 처리 시작 · {학생}",
-    bodyTemplate: "{학생} 학생 전반 신청이 관리팀 처리 중으로 이동했습니다.\n전 수업 종료일: {전 수업 종료일}",
-  },
-  completed: {
-    titleTemplate: "전반 처리 완료 · {학생}",
-    bodyTemplate: "{학생} 학생 전반 처리가 완료되었습니다.\n전 수업 종료일: {전 수업 종료일}\n후 수업 시작일: {후 수업 시작일}",
-  },
-}
-
-const DEFAULT_REGISTRATION_NOTIFICATION_TEMPLATES: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate> = {
-  submitted: {
-    titleTemplate: "등록 문의 접수 · {학생}",
-    bodyTemplate: "{학생} 학생 등록 문의가 접수되었습니다.\n학년: {학년}\n문의일시: {문의일시}",
-  },
-  processing: {
-    titleTemplate: "등록 진행 · {학생}",
-    bodyTemplate: "{학생} 학생 등록 단계가 {진행상태}(으)로 이동했습니다.\n상담 책임자: {상담 책임자}",
-  },
-  completed: {
-    titleTemplate: "등록 종료 · {학생}",
-    bodyTemplate: "{학생} 학생 등록 프로세스가 {진행상태}(으)로 닫혔습니다.\n수업: {수업}\n등록 확인: {등록 확인}",
-  },
 }
 
 const REGISTRATION_ADMISSION_FORM_URL = "https://bit.ly/3rurm5t"
@@ -813,21 +684,6 @@ function getRegistrationMakeEduAdmissionMessage(studentName: string) {
 🔗 팁스학원 공식 홈페이지: https://tipsedu.co.kr/
 
 목표 달성까지 팁스가 가장 확실한 페이스메이커가 되겠습니다. 감사합니다.`
-}
-
-function buildDefaultWithdrawalNotificationSettings(): WithdrawalNotificationSetting[] {
-  return WITHDRAWAL_NOTIFICATION_TRIGGERS.flatMap((trigger) => (
-    WITHDRAWAL_NOTIFICATION_CHANNELS.map((channel) => ({
-      triggerKey: trigger.key,
-      channelKey: channel.key,
-      enabled: (
-        (trigger.key === "submitted" && channel.key === "operations") ||
-        (trigger.key === "submitted" && channel.key === "google_chat_admin") ||
-        (trigger.key === "processing" && channel.key === "applicant") ||
-        trigger.key === "completed"
-      ),
-    }))
-  ))
 }
 
 const WORKSPACE_TASK_TYPE: Record<WorkspaceKey, OpsTaskType> = {
@@ -2020,11 +1876,15 @@ function getRegistrationOperationsChecklist(
   ]
 }
 
+// 기존 정적 계약과 요약 포맷 호환을 위해 유지한다.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getRegistrationOperationsChecklistValue(registration?: OpsTask["registration"]) {
   const items = getRegistrationOperationsChecklist(registration)
   const completedCount = items.filter((item) => item.checked).length
   const pendingItems = items.filter((item) => !item.checked).map((item) => item.detail)
-  return pendingItems.length > 0 ? `${completedCount}/${items.length} · ${pendingItems.join(", ")}` : `${items.length}/${items.length} · 등록 확인 완료`
+  return pendingItems.length > 0
+    ? `${completedCount}/${items.length} · ${pendingItems.join(", ")}`
+    : `${items.length}/${items.length} · 등록 확인 완료`
 }
 
 function WithdrawalOperationsChecklistChips({
@@ -7198,239 +7058,34 @@ function TransferDataTable({
   )
 }
 
-function getWithdrawalNotificationTriggerForStatus(status: OpsTaskStatus): WithdrawalNotificationTriggerKey | null {
-  if (status === "in_progress") return "processing"
-  if (status === "done") return "completed"
-  return null
-}
-
-function buildWithdrawalNotificationContext(task: OpsTask, triggerKey: WithdrawalNotificationTriggerKey): Record<string, string> {
-  const withdrawal = task.withdrawal || {}
-  const teacherName = withdrawal.teacherName || task.assigneeLabel || ""
-  const triggerLabel = WITHDRAWAL_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === triggerKey)?.label || ""
-  const progress = getWithdrawalProgressLabel(task)
-
-  return {
-    상태: getTaskStatusLabel(task.status),
-    과목: task.subject || "",
-    선생님: teacherName,
-    수업: task.className || "",
-    학생: task.studentName || "",
-    퇴원일: dateInputValue(withdrawal.withdrawalDate) || "",
-    퇴원회차: withdrawal.withdrawalSession || "",
-    "진행 수업시수": withdrawal.completedLessonHours || "",
-    "4주 기준 수업시수": withdrawal.fourWeekLessonHours || "",
-    수업진행률: progress === "-" ? "" : progress,
-    "고객 퇴원사유": withdrawal.customerReason || "",
-    "선생님 의견": withdrawal.teacherOpinion || "",
-    "미배부 교재": withdrawal.undistributedTextbooks || "",
-    신청자: task.requestedByLabel || "",
-    신청일시: dateLabel(task.createdAt),
-    담당선생님: teacherName,
-    관리팀: task.assigneeTeam || task.assigneeLabel || "관리팀",
-    프로세스: triggerLabel,
-  }
-}
-
-function buildTransferNotificationContext(task: OpsTask, triggerKey: WithdrawalNotificationTriggerKey): Record<string, string> {
-  const transfer = task.transfer || {}
-  const teacherName = transfer.fromTeacherName || task.assigneeLabel || ""
-  const triggerLabel = WITHDRAWAL_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === triggerKey)?.label || ""
-
-  return {
-    상태: getTaskStatusLabel(task.status),
-    과목: task.subject || "",
-    "전 선생님": transfer.fromTeacherName || "",
-    "전 수업": transfer.fromClassName || "",
-    학생: task.studentName || "",
-    전반사유: transfer.transferReason || "",
-    "전 미배부 교재": transfer.fromUndistributedTextbooks || "",
-    "전 수업 종료일": dateInputValue(transfer.fromClassEndDate) || "",
-    "전 종료회차": transfer.fromClassEndSession || "",
-    "후 선생님": transfer.toTeacherName || "",
-    "후 수업": transfer.toClassName || task.className || "",
-    "후 수업 시작일": dateInputValue(transfer.toClassStartDate) || "",
-    "후 시작회차": transfer.toClassStartSession || "",
-    "후 미배부 교재": transfer.toUndistributedTextbooks || "",
-    신청자: task.requestedByLabel || "",
-    신청일시: dateLabel(task.createdAt),
-    담당선생님: teacherName,
-    관리팀: task.assigneeTeam || task.assigneeLabel || "관리팀",
-    프로세스: triggerLabel,
-  }
-}
-
-function getRegistrationNotificationTriggerForPipelineStatus(pipelineStatus?: string): WithdrawalNotificationTriggerKey {
-  const status = String(pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "").trim()
-  if (status.startsWith("0.")) return "submitted"
-  if (status.startsWith("7.") || status.startsWith("8.") || status.startsWith("9.")) return "completed"
-  return "processing"
-}
-
-function buildRegistrationNotificationContext(task: OpsTask, triggerKey: WithdrawalNotificationTriggerKey): Record<string, string> {
-  const registration = task.registration || {}
-  const triggerLabel = REGISTRATION_NOTIFICATION_TRIGGERS.find((trigger) => trigger.key === triggerKey)?.label || ""
-  const counselor = registration.counselor || task.assigneeLabel || ""
-
-  return {
-    진행상태: registration.pipelineStatus || REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의",
-    과목: task.subject || "",
-    학년: registration.schoolGrade || "",
-    학교: registration.schoolName || "",
-    학생: task.studentName || "",
-    "학부모 전화": registration.parentPhone || "",
-    문의일시: dateLabel(registration.inquiryAt || ""),
-    "상담 책임자": counselor,
-    레벨테스트: dateLabel(registration.levelTestAt || ""),
-    전화상담: dateLabel(registration.phoneConsultationAt || ""),
-    방문상담: getRegistrationVisitConsultationLabel(task),
-    수업: task.className || "",
-    수업시작일: dateInputValue(registration.classStartDate) || "",
-    수업시작회차: registration.classStartSession || "",
-    "요청 사항": registration.requestNote || "",
-    "등록 확인": getRegistrationOperationsChecklistValue(registration),
-    신청자: task.requestedByLabel || "",
-    신청일시: dateLabel(task.createdAt),
-    관리팀: task.assigneeTeam || task.assigneeLabel || "관리팀",
-    프로세스: triggerLabel,
-  }
-}
-
-async function sendWithdrawalGoogleChatNotification({
-  channel,
-  title,
-  body,
-  sessionToken,
-  task,
-  triggerKey,
-}: {
-  channel: GoogleChatChannel
-  title: string
-  body: string
-  sessionToken: string
-  task: OpsTask
-  triggerKey: WithdrawalNotificationTriggerKey
-}) {
-  const textBody = [title, body].map((value) => value.trim()).filter(Boolean).join("\n")
-  if (!sessionToken || !textBody) return
-
-  const response = await fetch("/api/google-chat", {
+async function dispatchLegacyOpsTaskSource(sourceEventId: string, sessionToken: string) {
+  if (!sourceEventId || !sessionToken) return
+  const response = await fetch("/api/notifications/legacy/ops-task", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${sessionToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      channel,
-      text: textBody,
-      metadata: {
-        taskId: task.id,
-        taskType: task.type,
-        triggerKey,
-      },
-    }),
+    body: JSON.stringify({ sourceEventId }),
   })
-  if (!response.ok) throw new Error(await response.text())
+  if (!response.ok) throw new Error("업무 알림 후처리에 실패했습니다.")
 }
 
-async function notifyWithdrawalWorkflow(
-  triggerKey: WithdrawalNotificationTriggerKey | null,
-  task: OpsTask,
-  withdrawalNotificationSettings: WithdrawalNotificationSetting[],
-  withdrawalNotificationTemplates: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>,
-  sessionToken: string,
-) {
-  if (!triggerKey || task.type !== "withdrawal") return
-
-  const template = withdrawalNotificationTemplates[triggerKey]
-  if (!template) return
-
-  const context = buildWithdrawalNotificationContext(task, triggerKey)
-  const title = renderWithdrawalNotificationTemplate(template.titleTemplate, context)
-  const body = renderWithdrawalNotificationTemplate(template.bodyTemplate, context)
-  const enabledSettings = withdrawalNotificationSettings.filter((setting) => (
-    setting.triggerKey === triggerKey && setting.enabled
-  ))
-
-  await Promise.allSettled(enabledSettings.map((setting) => {
-    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[setting.channelKey]
-    if (!googleChatChannel) return Promise.resolve()
-    return sendWithdrawalGoogleChatNotification({
-      channel: googleChatChannel,
-      title,
-      body,
-      sessionToken,
-      task,
-      triggerKey,
-    })
-  }))
+async function dispatchLegacyOpsTaskSources(sourceEventIds: string[], sessionToken: string) {
+  await Promise.allSettled(
+    Array.from(new Set(sourceEventIds)).map((sourceEventId) => (
+      dispatchLegacyOpsTaskSource(sourceEventId, sessionToken)
+    )),
+  )
 }
 
-async function notifyTransferWorkflow(
-  triggerKey: WithdrawalNotificationTriggerKey | null,
-  task: OpsTask,
-  transferNotificationSettings: WithdrawalNotificationSetting[],
-  transferNotificationTemplates: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>,
-  sessionToken: string,
-) {
-  if (!triggerKey || task.type !== "transfer") return
-
-  const template = transferNotificationTemplates[triggerKey]
-  if (!template) return
-
-  const context = buildTransferNotificationContext(task, triggerKey)
-  const title = renderWithdrawalNotificationTemplate(template.titleTemplate, context, TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES)
-  const body = renderWithdrawalNotificationTemplate(template.bodyTemplate, context, TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES)
-  const enabledSettings = transferNotificationSettings.filter((setting) => (
-    setting.triggerKey === triggerKey && setting.enabled
-  ))
-
-  await Promise.allSettled(enabledSettings.map((setting) => {
-    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[setting.channelKey]
-    if (!googleChatChannel) return Promise.resolve()
-    return sendWithdrawalGoogleChatNotification({
-      channel: googleChatChannel,
-      title,
-      body,
-      sessionToken,
-      task,
-      triggerKey,
-    })
-  }))
-}
-
-async function notifyRegistrationWorkflow(
-  triggerKey: WithdrawalNotificationTriggerKey | null,
-  task: OpsTask,
-  registrationNotificationSettings: WithdrawalNotificationSetting[],
-  registrationNotificationTemplates: Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>,
-  sessionToken: string,
-) {
-  if (!triggerKey || task.type !== "registration") return
-  if (getRegistrationPipelinePrefix(task.registration?.pipelineStatus) === "2.") return
-
-  const template = registrationNotificationTemplates[triggerKey]
-  if (!template) return
-
-  const context = buildRegistrationNotificationContext(task, triggerKey)
-  const title = renderWithdrawalNotificationTemplate(template.titleTemplate, context, REGISTRATION_NOTIFICATION_TEMPLATE_VARIABLES)
-  const body = renderWithdrawalNotificationTemplate(template.bodyTemplate, context, REGISTRATION_NOTIFICATION_TEMPLATE_VARIABLES)
-  const enabledSettings = registrationNotificationSettings.filter((setting) => (
-    setting.triggerKey === triggerKey && setting.enabled
-  ))
-
-  await Promise.allSettled(enabledSettings.map((setting) => {
-    const googleChatChannel = WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP[setting.channelKey]
-    if (!googleChatChannel) return Promise.resolve()
-    return sendWithdrawalGoogleChatNotification({
-      channel: googleChatChannel,
-      title,
-      body,
-      sessionToken,
-      task,
-      triggerKey,
-    })
-  }))
+async function collectRegistrationLegacySourceIds(tasks: OpsTask[]) {
+  const results = await Promise.allSettled(
+    tasks
+      .filter((task) => task.type === "registration")
+      .map((task) => loadRegistrationLegacyNotificationSourceIds(task.id)),
+  )
+  return results.flatMap((result) => result.status === "fulfilled" ? result.value : [])
 }
 
 function WithdrawalNotificationSettingsDialog({
@@ -7900,16 +7555,6 @@ function RegistrationCustomerMessageDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-function renderWithdrawalNotificationTemplate(
-  template: string,
-  context: Record<string, string> = WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT,
-  variables: ReadonlyArray<string> = WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES,
-) {
-  return variables.reduce((result, variable) => (
-    result.split(`{${variable}}`).join(context[variable] || "")
-  ), template)
 }
 
 function DashboardMetric({
@@ -8654,6 +8299,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? searchParams.get("studentId") || ""
     : ""
   const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()
+  const notificationSessionToken = session?.access_token || ""
   const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
   const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
   const legacyNotificationEnabled = notificationControlPlaneAvailability.status === "disabled"
@@ -8749,12 +8395,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [canonicalNotificationOpen, setCanonicalNotificationOpen] = useState(false)
   const [registrationProcessManualOpen, setRegistrationProcessManualOpen] = useState(false)
   const [registrationCustomerMessageTask, setRegistrationCustomerMessageTask] = useState<OpsTask | null>(null)
-  const [withdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
-  const [withdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES)
-  const [transferNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
-  const [transferNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_TRANSFER_NOTIFICATION_TEMPLATES)
-  const [registrationNotificationSettings] = useState<WithdrawalNotificationSetting[]>(() => buildDefaultWithdrawalNotificationSettings())
-  const [registrationNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>(() => DEFAULT_REGISTRATION_NOTIFICATION_TEMPLATES)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
   const [detailOpen, setDetailOpen] = useState(false)
@@ -10495,7 +10135,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     try {
-      const taskId = await createOpsTask({
+      const receipt = await createOpsTask({
         ...EMPTY_FORM,
         type: "general",
         title: parsed.title,
@@ -10507,6 +10147,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         priority: quickPriority,
         memo: quickMemo,
       })
+      const taskId = receipt.taskId
       const createdAt = new Date().toISOString()
       prependTask({
         id: taskId,
@@ -10556,6 +10197,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       if (todoView !== nextTodoView) {
         syncTodoView(nextTodoView)
       }
+      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setQuery("")
       setQuickAddText("")
       const nextTodoLabel = TODO_VIEW_TABS.find((tab) => tab.key === nextTodoView)?.label || "목록"
@@ -10634,6 +10276,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     let savedWithRefreshWarning = false
     let savedWithNotificationDeliveryFailure = false
     let savedWithNotificationAuditWarning = false
+    const legacyOpsTaskSourceEventIds: string[] = []
     const loadSavedTaskOrFallback = async (taskId: string, input: OpsTaskInput, existing?: OpsTask) => {
       try {
         return (await loadOpsTaskById(taskId)) || buildLocalTaskFromInput(taskId, input, existing)
@@ -10695,17 +10338,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         return
       }
       if (isFailedWordRetestRetry && editingTask && payload.type === "word_retest") {
-        const timestamp = new Date().toISOString()
-        const originalWordRetest = editingTask.wordRetest || {}
-        const completedPayload = normalizeFormForSubmit({
-          ...formFromTask(editingTask),
-          status: "done",
-          completedAt: timestamp,
-          wordRetest: {
-            ...originalWordRetest,
-            retestStatus: "done",
-          },
-        })
         const retryPayload = normalizeFormForSubmit({
           ...payload,
           status: "requested",
@@ -10724,10 +10356,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           },
         })
 
-        await updateOpsTask(editingTask.id, completedPayload)
-        const taskId = await createOpsTask(retryPayload)
+        const retryReceipt = await retryWordRetest(editingTask.id, retryPayload)
+        const taskId = retryReceipt.taskId
         const [syncedOriginal, syncedRetry] = await Promise.all([
-          loadSavedTaskOrFallback(editingTask.id, completedPayload, editingTask),
+          loadSavedTaskOrFallback(editingTask.id, {
+            ...formFromTask(editingTask),
+            status: "done",
+            completedAt: new Date().toISOString(),
+            wordRetest: { ...(editingTask.wordRetest || {}), retestStatus: "done" },
+          }, editingTask),
           loadSavedTaskOrFallback(taskId, retryPayload),
         ])
         replaceTaskInState(syncedOriginal)
@@ -10738,6 +10375,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         setConfirmingFormClose(false)
         setWordRetestStudentIds([])
         setQuery("")
+        await dispatchLegacyOpsTaskSources(retryReceipt.sourceEventIds, notificationSessionToken)
         setNotice(savedWithRefreshWarning
           ? "재시험 저장은 완료했습니다. 최신 상세는 새로고침해 확인하세요."
           : "재시험을 추가하고 불합격을 확인했습니다.")
@@ -10790,7 +10428,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             })
           }
         } else {
-          await updateOpsTask(editingTask.id, payload)
+          const receipt = await updateOpsTask(editingTask.id, payload)
+          legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
           savedTasks.push(await loadSavedTaskOrFallback(editingTask.id, payload, editingTask))
         }
       } else {
@@ -10923,13 +10562,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             }
             if (createAttempt.writer === "legacy") {
               registrationCreateAttemptRef.current = markRegistrationLegacyCreateStarted(createAttempt)
-              const taskId = await createOpsTask(inquiryOnlyPayload)
+              const receipt = await createOpsTask(inquiryOnlyPayload)
+              const taskId = receipt.taskId
+              legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
               registrationCreateAttemptRef.current = null
               savedTasks.push(await loadSavedTaskOrFallback(taskId, inquiryOnlyPayload))
               continue
             }
           }
-          const taskId = await createOpsTask(createPayload)
+          const receipt = createPayload.type === "transfer" || createPayload.type === "withdrawal"
+            ? await createOpsTransitionTask(createPayload)
+            : await createOpsTask(createPayload)
+          const taskId = receipt.taskId
+          legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
           savedTasks.push(await loadSavedTaskOrFallback(taskId, createPayload))
         }
       }
@@ -10945,27 +10590,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         savedTasks.forEach((task) => prependTask(task))
         setQuery("")
       }
-      if (payload.type === "withdrawal" && !wasEditing) {
-        savedTasks.forEach((task) => {
-          void notifyWithdrawalWorkflow("submitted", task, withdrawalNotificationSettings, withdrawalNotificationTemplates, session?.access_token || "")
-        })
-      }
-      if (payload.type === "transfer" && !wasEditing) {
-        savedTasks.forEach((task) => {
-          void notifyTransferWorkflow("submitted", task, transferNotificationSettings, transferNotificationTemplates, session?.access_token || "")
-        })
-      }
-      if (payload.type === "registration" && !wasEditing) {
-        savedTasks.forEach((task) => {
-          void notifyRegistrationWorkflow(
-            getRegistrationNotificationTriggerForPipelineStatus(task.registration?.pipelineStatus),
-            task,
-            registrationNotificationSettings,
-            registrationNotificationTemplates,
-            session?.access_token || "",
-          )
-        })
-      }
+      legacyOpsTaskSourceEventIds.push(...await collectRegistrationLegacySourceIds(savedTasks))
+      await dispatchLegacyOpsTaskSources(legacyOpsTaskSourceEventIds, session?.access_token || "")
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
       const savedNotice = wasEditing
         ? `${itemLabel}을 수정했습니다.`
@@ -11026,16 +10652,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     try {
-      await updateOpsTaskStatus(task, status)
+      const receipt = await updateOpsTaskStatus(task, status)
       const shouldRefreshSyncedTask = status === "done" || task.type === "registration" || task.type === "word_retest"
       const syncedTask = shouldRefreshSyncedTask ? await loadOpsTaskById(task.id) : null
       const changedAt = new Date().toISOString()
-      const notificationTask: OpsTask = syncedTask || {
-        ...task,
-        status,
-        completedAt: status === "done" ? changedAt : "",
-        updatedAt: changedAt,
-      }
       if (syncedTask) {
         replaceTaskInState(syncedTask)
       } else {
@@ -11044,21 +10664,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           completedAt: status === "done" ? changedAt : "",
         })
       }
-      if (task.type === "withdrawal") {
-        void notifyWithdrawalWorkflow(getWithdrawalNotificationTriggerForStatus(status), notificationTask, withdrawalNotificationSettings, withdrawalNotificationTemplates, session?.access_token || "")
-      }
-      if (task.type === "transfer") {
-        void notifyTransferWorkflow(getWithdrawalNotificationTriggerForStatus(status), notificationTask, transferNotificationSettings, transferNotificationTemplates, session?.access_token || "")
-      }
-      if (task.type === "registration") {
-        void notifyRegistrationWorkflow(
-          getRegistrationNotificationTriggerForPipelineStatus(notificationTask.registration?.pipelineStatus),
-          notificationTask,
-          registrationNotificationSettings,
-          registrationNotificationTemplates,
-          session?.access_token || "",
-        )
-      }
+      const registrationSourceEventIds = task.type === "registration"
+        ? await loadRegistrationLegacyNotificationSourceIds(task.id).catch(() => [])
+        : []
+      await dispatchLegacyOpsTaskSources([
+        ...receipt.sourceEventIds,
+        ...registrationSourceEventIds,
+      ], notificationSessionToken)
       const canUndoStatusChange = task.type === "general" || status !== "done"
       if (canUndoStatusChange) {
         setStatusUndo({
@@ -11092,9 +10704,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           [field]: checked,
         },
       })
-      await updateOpsTask(task.id, payload)
+      const receipt = await updateOpsTask(task.id, payload)
       const syncedTask = await loadOpsTaskById(task.id)
       replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setNotice("처리 확인을 저장했습니다.")
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "처리 확인을 저장하지 못했습니다."))
@@ -11118,9 +10731,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           [field]: checked,
         },
       })
-      await updateOpsTask(task.id, payload)
+      const receipt = await updateOpsTask(task.id, payload)
       const syncedTask = await loadOpsTaskById(task.id)
       replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setNotice("처리 확인을 저장했습니다.")
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "처리 확인을 저장하지 못했습니다."))
@@ -11136,9 +10750,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setStatusUndo(null)
     try {
       const payload = normalizeFormForSubmit(input)
-      await updateOpsTask(task.id, payload)
+      const receipt = payload.type === "word_retest"
+        && payload.status === "review_requested"
+        && payload.wordRetest?.retestStatus === "done"
+        ? await reportWordRetestResult(task.id, payload.wordRetest)
+        : await updateOpsTask(task.id, payload)
       const syncedTask = await loadOpsTaskById(task.id)
       replaceTaskInState(syncedTask || buildLocalTaskFromInput(task.id, payload, task))
+      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setNotice(successMessage)
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "단어 재시험 진행상태를 바꾸지 못했습니다."))
@@ -11175,7 +10794,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               scoreOutOf100: "",
             },
           })
-          await updateOpsTask(task.id, payload)
+          const receipt = await reportWordRetestAbsent(task.id, "deadline")
+          await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
           const syncedTask = await loadOpsTaskById(task.id)
           return syncedTask || {
             ...task,
@@ -11216,7 +10836,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
 
     void autoMarkPastWordRetestsAbsent()
-  }, [currentUserId, data, invalidatePendingWorkspaceReloads, isWordRetestWorkspace, loading, reload, wordRetestFilterSourceTasks])
+  }, [
+    currentUserId,
+    data,
+    invalidatePendingWorkspaceReloads,
+    isWordRetestWorkspace,
+    loading,
+    notificationSessionToken,
+    reload,
+    wordRetestFilterSourceTasks,
+  ])
 
   const submitWordRetestCompletion = async (task: OpsTask) => {
     const wordRetest = task.wordRetest || {}
@@ -11245,7 +10874,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const saveWordRetestInlineScores = async (task: OpsTask) => {
     const wordRetest = task.wordRetest || {}
-    if (isWordRetestAbsent(wordRetest)) return
+    if (isWordRetestAbsent(wordRetest)
+      || task.status !== "in_progress"
+      || wordRetest.retestStatus !== "in_progress") {
+      setMessage("진행 중인 단어 재시험에서만 점수를 저장할 수 있습니다.")
+      return
+    }
     const draft = wordRetestScoreDrafts[task.id] || getWordRetestScoreDraft(task)
 
     await updateWordRetestFlow(task, {
@@ -11309,7 +10943,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     try {
-      await updateOpsTask(task.id, payload)
+      const receipt = await updateOpsTask(task.id, payload)
       const fallbackNotificationTask = buildLocalTaskFromInput(task.id, payload, task)
       let notificationTask = fallbackNotificationTask
       let refreshWarning = ""
@@ -11324,13 +10958,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         refreshWarning = "최신 상세는 새로고침해 확인하세요."
       }
       replaceTaskInState(notificationTask)
-      void notifyRegistrationWorkflow(
-        getRegistrationNotificationTriggerForPipelineStatus(notificationTask.registration?.pipelineStatus),
-        notificationTask,
-        registrationNotificationSettings,
-        registrationNotificationTemplates,
-        session?.access_token || "",
-      )
+      const registrationSourceEventIds = await loadRegistrationLegacyNotificationSourceIds(task.id).catch(() => [])
+      await dispatchLegacyOpsTaskSources([
+        ...receipt.sourceEventIds,
+        ...registrationSourceEventIds,
+      ], notificationSessionToken)
       setNotice(refreshWarning ? `등록 단계를 변경했습니다. ${refreshWarning}` : "등록 단계를 변경했습니다.")
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "등록 단계를 변경하지 못했습니다."))
@@ -11350,7 +10982,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSaving(true)
     setMessage("")
     try {
-      await updateOpsTaskStatus(currentTask, statusUndo.previousStatus)
+      const receipt = await updateOpsTaskStatus(currentTask, statusUndo.previousStatus)
       const shouldRefreshSyncedTask = currentTask.type === "registration" || currentTask.type === "word_retest"
       const syncedTask = shouldRefreshSyncedTask ? await loadOpsTaskById(statusUndo.taskId) : null
       if (syncedTask) {
@@ -11361,6 +10993,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           completedAt: statusUndo.previousStatus === "done" ? new Date().toISOString() : "",
         })
       }
+      const registrationSourceEventIds = currentTask.type === "registration"
+        ? await loadRegistrationLegacyNotificationSourceIds(currentTask.id).catch(() => [])
+        : []
+      await dispatchLegacyOpsTaskSources([
+        ...receipt.sourceEventIds,
+        ...registrationSourceEventIds,
+      ], notificationSessionToken)
       setStatusUndo(null)
       setNotice("진행상태 변경을 되돌렸습니다.")
     } catch (error) {
@@ -11377,11 +11016,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     try {
-      const comment = await addOpsTaskComment(selectedTask.id, commentBody.trim())
+      const receipt = await addOpsTaskComment(selectedTask.id, commentBody.trim())
+      const comment = receipt.comment
       appendTaskComment(selectedTask.id, {
         ...comment,
         authorLabel: comment.authorLabel || currentUserLabel,
       })
+      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setCommentBody("")
       setNotice("댓글을 추가했습니다.")
     } catch (error) {
@@ -15105,6 +14746,8 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   const textbookLabel = getWordRetestTextbookLabel(task)
   const unitLabel = getWordRetestUnitLabel(task)
   const absent = isWordRetestAbsent(wordRetest)
+  const scoreEditingAllowed = task.status === "in_progress"
+    && wordRetest.retestStatus === "in_progress"
   const resolvedScoreDraft = scoreDraft || getWordRetestScoreDraft(task)
   const scorePreviewWordRetest = { ...wordRetest, ...resolvedScoreDraft }
 
@@ -15185,7 +14828,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
         <WordRetestInlineScoreEditor
           task={task}
           draft={resolvedScoreDraft}
-          disabled={statusActionDisabled || absent || isClosedOpsTask(task)}
+          disabled={statusActionDisabled || absent || isClosedOpsTask(task) || !scoreEditingAllowed}
           onDraftChange={onScoreDraftChange}
           onSave={onScoreSave}
         />

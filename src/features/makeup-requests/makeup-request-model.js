@@ -55,6 +55,16 @@ export const APPROVER_NAMES_BY_GROUP = {
 export const MAKEUP_CALENDAR_NOTE_MARKER = "[[TIPS_MAKEUP]]";
 
 const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+const SEOUL_TIME_ZONE = "Asia/Seoul";
+const SEOUL_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: SEOUL_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 
 function text(value) {
   return String(value || "").trim();
@@ -74,8 +84,20 @@ function toDate(value) {
     return null;
   }
 
-  const date = new Date(raw);
+  const zoneless = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)$/);
+  const date = new Date(zoneless
+    ? `${zoneless[1]}T${zoneless[2]}+09:00`
+    : raw);
   return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function seoulDateTimeParts(value) {
+  const date = toDate(value);
+  if (!date) {
+    return null;
+  }
+  const parts = SEOUL_DATE_TIME_FORMATTER.formatToParts(date);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
 
 export function toDateKey(value) {
@@ -84,30 +106,20 @@ export function toDateKey(value) {
     return raw;
   }
 
-  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (match) {
-    return match[1];
-  }
-
-  const date = toDate(value);
-  if (!date) {
+  const parts = seoulDateTimeParts(value);
+  if (!parts) {
     return "";
   }
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function toTimeLabel(value) {
-  const date = toDate(value);
-  if (!date) {
+  const parts = seoulDateTimeParts(value);
+  if (!parts) {
     const match = text(value).match(/\b(\d{1,2}:\d{2})\b/);
     return match ? match[1].padStart(5, "0") : "";
   }
-
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return `${parts.hour}:${parts.minute}`;
 }
 
 function toDateTimeLabel(value) {
@@ -126,17 +138,13 @@ function minutesFromTimeLabel(value) {
 }
 
 function minutesFromDateTime(value) {
-  const date = toDate(value);
-  if (date) {
-    return date.getHours() * 60 + date.getMinutes();
-  }
-
   return minutesFromTimeLabel(toTimeLabel(value));
 }
 
 function dayLabelFromDate(value) {
-  const date = toDate(value);
-  return date ? DAY_LABELS[date.getDay()] : "";
+  const dateKey = toDateKey(value);
+  if (!dateKey) return "";
+  return DAY_LABELS[new Date(`${dateKey}T00:00:00Z`).getUTCDay()];
 }
 
 function normalizeSubject(value) {
@@ -682,14 +690,10 @@ export function getDefaultMakeupEndAt(startAt, classItem = {}) {
     ? Math.max(minutesFromTimeLabel(firstSlot.end) - minutesFromTimeLabel(firstSlot.start), 30)
     : 120;
   const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-  const offset = -end.getTimezoneOffset();
-  const sign = offset >= 0 ? "+" : "-";
-  const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
-  const minutes = String(Math.abs(offset) % 60).padStart(2, "0");
   const dateKey = toDateKey(end);
   const time = toTimeLabel(end);
 
-  return `${dateKey}T${time}:00${sign}${hours}:${minutes}`;
+  return `${dateKey}T${time}:00+09:00`;
 }
 
 function buildSchedulePlanDefaults(rawPlan = {}, classRecord = {}) {

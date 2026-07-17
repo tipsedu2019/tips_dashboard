@@ -1048,6 +1048,31 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.equal(mutationInvalidations, 27, "every successful registration RPC must invalidate parent consumers");
 });
 
+test("registration core legacy bridge reads only stable source event IDs", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name, args) {
+      assert.equal(name, "list_registration_legacy_source_ids_v1");
+      assert.deepEqual({ ...args }, { p_task_id: "task-1" });
+      return {
+        data: {
+          taskId: "task-1",
+          sourceEventIds: ["event-1", "event-2", "", null],
+          title: "must-not-leak",
+        },
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  assert.deepEqual(
+    Array.from(await service.listRegistrationLegacySourceIds("task-1")),
+    ["event-1", "event-2"],
+  );
+  assert.equal(harness.queries.length, 0);
+});
+
 test("consultation completion maps canonical readiness from camel-case RPC rows", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({

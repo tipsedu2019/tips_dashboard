@@ -8,9 +8,11 @@ import {
   buildRoomOptions,
   canTransitionMakeupRequest,
   getAllowedApproverNames,
+  getDefaultMakeupEndAt,
   getMakeupRequestEffectiveYear,
   isMakeupApproverAllowed,
   resolveMakeupApprovalGroup,
+  toDateKey,
 } from "../src/features/makeup-requests/makeup-request-model.js";
 
 test("makeup request approvers are restricted by subject and division", () => {
@@ -39,6 +41,17 @@ test("makeup approver validation rejects a tampered non-manager selection and pe
 test("makeup effective years use the Seoul calendar boundary", () => {
   assert.equal(getMakeupRequestEffectiveYear("2026-12-31T14:59:59.999Z"), 2026);
   assert.equal(getMakeupRequestEffectiveYear("2026-12-31T15:00:00.000Z"), 2027);
+});
+
+test("makeup date and default end time stay fixed to Seoul in every runtime timezone", () => {
+  assert.equal(toDateKey("2026-07-06T15:30:00.000Z"), "2026-07-07");
+  assert.equal(
+    getDefaultMakeupEndAt(
+      "2026-07-06T19:00:00+09:00",
+      { schedule: "월 18:00-20:00" },
+    ),
+    "2026-07-06T21:00:00+09:00",
+  );
 });
 
 test("makeup request workflow auto-completes on approver approval without a manager handoff", () => {
@@ -257,6 +270,8 @@ test("approved makeup request reflects cancellation and makeup into schedule pla
   assert.equal(reflected.sessionStates["2026-07-06"].makeupDate, "2026-07-08");
   assert.match(reflected.sessionStates["2026-07-06"].makeupMemo, /본관 3강/);
   assert.match(reflected.sessionStates["2026-07-06"].makeupMemo, /별관 7강/);
+  assert.match(reflected.sessionStates["2026-07-06"].makeupMemo, /2026-07-08 19:00-20:00/);
+  assert.match(reflected.sessionStates["2026-07-06"].makeupMemo, /2026-07-09 20:00-21:00/);
   assert.ok(reflected.sessions.some((session) => session.scheduleState === "makeup" && session.date === "2026-07-08"));
   assert.ok(reflected.sessions.some((session) => session.scheduleState === "makeup" && session.date === "2026-07-09"));
   assert.ok(reflected.sessions.some((session) => Array.isArray(session.textbookEntries)));

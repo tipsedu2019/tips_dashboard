@@ -32,6 +32,7 @@ import {
 import {
   invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
   probeRegistrationSubjectTrackRuntime,
+  resetRegistrationSubjectTrackRuntimeProbe,
 } from "./registration-runtime-probe"
 import { loadRegistrationSubjectTrackFixtureClassDetails } from "./registration-track-fixture-runtime"
 
@@ -905,25 +906,15 @@ async function readTaskScopedTable(table: string, taskIds: string[], columns = "
 }
 
 async function writeEvent(taskId: string, eventType: string, fieldName = "", beforeValue = "", afterValue = "") {
-  if (!supabase) return
-  const { error } = await supabase.from("ops_task_events").insert({
-    task_id: taskId,
-    event_type: eventType,
-    field_name: nullable(fieldName),
-    before_value: nullable(beforeValue),
-    after_value: nullable(afterValue),
+  if (!supabase) return ""
+  const response = await runIdempotentOpsTaskProducerRpc("record_ops_task_activity_event_v1", {
+    p_task_id: taskId,
+    p_event_type: eventType,
+    p_field_name: nullable(fieldName),
+    p_before_value: nullable(beforeValue),
+    p_after_value: nullable(afterValue),
   })
-  if (error && !isMissingRelationError(error) && !isMissingColumnError(error)) throw error
-}
-
-async function writeCommittedEvent(taskId: string, eventType: string, fieldName = "", beforeValue = "", afterValue = "") {
-  try {
-    await writeEvent(taskId, eventType, fieldName, beforeValue, afterValue)
-  } catch (error) {
-    // The business mutation already committed. Reporting failure here would invite a
-    // duplicate retry, so surface the audit degradation to diagnostics only.
-    console.error("등록 감사 이력 저장 실패", error)
-  }
+  return producerSourceEventId(response)
 }
 
 async function writeAutoSyncEventOnce(taskId: string, fieldName: string, afterValue: string, beforeValue = "") {
@@ -1949,6 +1940,252 @@ function buildWordRetestRow(taskId: string, detail: OpsWordRetestDetail = {}) {
   }
 }
 
+type OpsTaskProducerResponse = {
+  task?: Row
+  previousTask?: Row
+  comment?: Row
+  event?: Row
+  activityEventId?: unknown
+  taskId?: unknown
+  deleted?: unknown
+  sourceId?: unknown
+  sourceEventId?: unknown
+  sourceEventIds?: unknown
+}
+
+function createOpsTaskRequestId() {
+  if (!globalThis.crypto?.randomUUID) throw new Error("안전한 업무 요청 ID를 만들 수 없습니다.")
+  return globalThis.crypto.randomUUID()
+}
+
+type OpsTaskProducerAttempt = {
+  digest: string
+  requestId: string
+  createdAt: number
+  expectedUpdatedAt?: string
+}
+
+const OPS_TASK_PRODUCER_ATTEMPT_PREFIX = "tips:ops-task-producer-attempt:v1:"
+const OPS_TASK_PRODUCER_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000
+const opsTaskProducerAttempts = new Map<string, OpsTaskProducerAttempt>()
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableJsonValue)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value as Row)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, stableJsonValue(entry)]),
+  )
+}
+
+async function opsTaskProducerDigest(name: string, parameters: Row) {
+  if (!globalThis.crypto?.subtle) throw new Error("안전한 업무 요청 지문을 만들 수 없습니다.")
+  const logicalParameters = { ...parameters }
+  delete logicalParameters.p_expected_updated_at
+  const canonical = JSON.stringify(stableJsonValue({ name, parameters: logicalParameters }))
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+function sweepExpiredOpsTaskProducerAttempts() {
+  const expiredBefore = Date.now() - OPS_TASK_PRODUCER_ATTEMPT_TTL_MS
+  for (const [key, attempt] of opsTaskProducerAttempts) {
+    if (attempt.createdAt < expiredBefore) opsTaskProducerAttempts.delete(key)
+  }
+  if (typeof globalThis.sessionStorage === "undefined") return
+  try {
+    for (let index = globalThis.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = globalThis.sessionStorage.key(index)
+      if (!key?.startsWith(OPS_TASK_PRODUCER_ATTEMPT_PREFIX)) continue
+      const raw = globalThis.sessionStorage.getItem(key)
+      const stored = raw ? JSON.parse(raw) as Partial<OpsTaskProducerAttempt> : null
+      if (typeof stored?.createdAt !== "number" || stored.createdAt < expiredBefore) {
+        globalThis.sessionStorage.removeItem(key)
+      }
+    }
+  } catch {
+    // 저장소를 읽지 못해도 메모리 항목의 만료 정리는 끝났다.
+  }
+}
+
+function readOpsTaskProducerAttempt(key: string) {
+  const memory = opsTaskProducerAttempts.get(key)
+  if (memory) return memory
+  if (typeof globalThis.sessionStorage === "undefined") return null
+  try {
+    const raw = globalThis.sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<OpsTaskProducerAttempt>
+    if (
+      typeof parsed.digest !== "string"
+      || typeof parsed.requestId !== "string"
+      || typeof parsed.createdAt !== "number"
+      || (parsed.expectedUpdatedAt !== undefined && typeof parsed.expectedUpdatedAt !== "string")
+    ) return null
+    const attempt = parsed as OpsTaskProducerAttempt
+    opsTaskProducerAttempts.set(key, attempt)
+    return attempt
+  } catch {
+    return null
+  }
+}
+
+function writeOpsTaskProducerAttempt(key: string, attempt: OpsTaskProducerAttempt) {
+  opsTaskProducerAttempts.set(key, attempt)
+  if (typeof globalThis.sessionStorage === "undefined") return
+  try {
+    globalThis.sessionStorage.setItem(key, JSON.stringify(attempt))
+  } catch {
+    // 메모리 보존으로 동일 탭의 응답 유실 재시도는 계속 보호한다.
+  }
+}
+
+function clearOpsTaskProducerAttempt(key: string, requestId: string) {
+  if (opsTaskProducerAttempts.get(key)?.requestId === requestId) {
+    opsTaskProducerAttempts.delete(key)
+  }
+  if (typeof globalThis.sessionStorage === "undefined") return
+  try {
+    const raw = globalThis.sessionStorage.getItem(key)
+    const stored = raw ? JSON.parse(raw) as Partial<OpsTaskProducerAttempt> : null
+    if (stored?.requestId === requestId) globalThis.sessionStorage.removeItem(key)
+  } catch {
+    // 저장 성공 뒤 메모리 항목은 이미 제거했다.
+  }
+}
+
+async function getOpsTaskProducerAttempt(name: string, parameters: Row) {
+  sweepExpiredOpsTaskProducerAttempts()
+  const digest = await opsTaskProducerDigest(name, parameters)
+  const key = `${OPS_TASK_PRODUCER_ATTEMPT_PREFIX}${digest}`
+  const existing = readOpsTaskProducerAttempt(key)
+  const expectedUpdatedAt = text(parameters.p_expected_updated_at)
+  if (
+    existing?.digest === digest
+    && Date.now() - existing.createdAt <= OPS_TASK_PRODUCER_ATTEMPT_TTL_MS
+    && (!expectedUpdatedAt || Boolean(existing.expectedUpdatedAt))
+  ) return { key, attempt: existing }
+  const attempt = {
+    digest,
+    requestId: createOpsTaskRequestId(),
+    createdAt: Date.now(),
+    ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
+  }
+  writeOpsTaskProducerAttempt(key, attempt)
+  return { key, attempt }
+}
+
+function withoutTaskId(row: Row) {
+  const detail = { ...row }
+  delete detail.task_id
+  return detail
+}
+
+function buildOpsTaskProducerInput(input: OpsTaskInput, options: { completedAtFallback?: string } = {}) {
+  const payload: Row = {
+    task: buildTaskRow(input, options),
+  }
+  if (input.type === "word_retest") payload.word_retest = withoutTaskId(buildWordRetestRow("", input.wordRetest))
+  if (input.type === "transfer") payload.transfer = withoutTaskId(buildTransferRow("", input.transfer))
+  if (input.type === "withdrawal") payload.withdrawal = withoutTaskId(buildWithdrawalRow("", input.withdrawal))
+  return payload
+}
+
+async function runOpsTaskProducerRpc(name: string, parameters: Row) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase.rpc(name, parameters)
+  if (error) throw error
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("업무 저장 결과를 확인하지 못했습니다.")
+  }
+  return data as OpsTaskProducerResponse
+}
+
+async function runIdempotentOpsTaskProducerRpc(name: string, parameters: Row) {
+  const { key, attempt } = await getOpsTaskProducerAttempt(name, parameters)
+  try {
+    const response = await runOpsTaskProducerRpc(name, {
+      ...parameters,
+      ...(attempt.expectedUpdatedAt
+        ? { p_expected_updated_at: attempt.expectedUpdatedAt }
+        : {}),
+      p_request_id: attempt.requestId,
+    })
+    clearOpsTaskProducerAttempt(key, attempt.requestId)
+    return response
+  } catch (error) {
+    const failure = error as { code?: unknown; message?: unknown }
+    const code = text(failure?.code)
+    const message = text(failure?.message)
+    const definitiveConflict = code === "40001" && /(?:stale_write|not_allowed|closed|conflict)/i.test(message)
+    if (["22023", "42501", "23514", "P0002"].includes(code) || definitiveConflict) {
+      clearOpsTaskProducerAttempt(key, attempt.requestId)
+    }
+    throw error
+  }
+}
+
+function producerTaskId(response: OpsTaskProducerResponse) {
+  const taskId = text(response.task?.id)
+  if (!taskId) throw new Error("저장된 업무 ID를 확인하지 못했습니다.")
+  return taskId
+}
+
+function producerSourceEventIds(response: OpsTaskProducerResponse) {
+  if (!Array.isArray(response.sourceEventIds)) return []
+  return response.sourceEventIds.map(text).filter(Boolean)
+}
+
+const OPS_TASK_SOURCE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function producerSourceEventId(response: OpsTaskProducerResponse) {
+  const sourceEventId = text(response.sourceEventId)
+  if (!OPS_TASK_SOURCE_UUID_PATTERN.test(sourceEventId)) {
+    throw new Error("저장된 업무 이력 ID를 확인하지 못했습니다.")
+  }
+  return sourceEventId
+}
+
+function producerCommentSourceId(response: OpsTaskProducerResponse, commentId: string) {
+  const sourceId = text(response.sourceId)
+  if (!OPS_TASK_SOURCE_UUID_PATTERN.test(sourceId) || sourceId !== commentId) {
+    throw new Error("저장된 댓글 ID를 확인하지 못했습니다.")
+  }
+  return sourceId
+}
+
+function producerActivityEventId(response: OpsTaskProducerResponse) {
+  const activityEventId = text(response.activityEventId)
+  if (!OPS_TASK_SOURCE_UUID_PATTERN.test(activityEventId)) {
+    throw new Error("저장된 교재 업무 이력 ID를 확인하지 못했습니다.")
+  }
+  return activityEventId
+}
+
+function producerCleanupDeleted(response: OpsTaskProducerResponse, taskId: string) {
+  if (response.deleted !== true || text(response.taskId) !== taskId) {
+    throw new Error("생성 실패 업무 정리 결과를 확인하지 못했습니다.")
+  }
+}
+
+export type OpsTaskProducerReceipt = Readonly<{
+  taskId: string
+  sourceEventIds: string[]
+  activityEventId?: string
+}>
+
+export type OpsTaskSourceEventReceipt = Readonly<{
+  sourceEventIds: string[]
+  activityEventId?: string
+}>
+
+export type OpsTaskCommentReceipt = Readonly<{
+  comment: OpsTaskComment
+  sourceEventIds: string[]
+}>
+
 function stripMissingMigrationColumns(row: Row, columns: string[]) {
   const next = { ...row }
   columns.forEach((column) => {
@@ -2617,27 +2854,32 @@ async function applyReadyOpsRosterMode(
 }
 
 async function completeReadyOpsRosterTransition(taskId: string, type: OpsTaskType) {
-  if (!supabase || !taskId || !["withdrawal", "transfer"].includes(type)) return false
+  if (!supabase || !taskId || !["withdrawal", "transfer"].includes(type)) return null
   const runtime = await getOpsRosterRuntimeState()
-  if (runtime.mode === "legacy") return false
+  const v2FunctionName = type === "withdrawal"
+    ? "complete_ops_withdrawal_roster_transition_v2"
+    : "complete_ops_transfer_roster_transition_v2"
+  if (runtime.mode !== "legacy") {
+    try {
+      const response = await runIdempotentOpsTaskProducerRpc(v2FunctionName, {
+        p_task_id: taskId,
+      })
+      return producerSourceEventIds(response)
+    } catch (error) {
+      if (!isMissingOpsRosterRpc(error)) throw error
+      resetRegistrationSubjectTrackRuntimeProbe()
+    }
+  }
 
-  const functionName = type === "withdrawal"
+  const legacyFunctionName = type === "withdrawal"
     ? "complete_ops_withdrawal_roster_transition"
     : "complete_ops_transfer_roster_transition"
-  const { data, error } = await supabase.rpc(functionName, {
+  const { data, error } = await supabase.rpc(legacyFunctionName, {
     p_task_id: taskId,
     p_request_key: `ops-${type}-completion-${taskId}`,
   })
-  if (error) {
-    if (isMissingOpsRosterRpc(error)) {
-      invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure(error)
-    }
-    throw error
-  }
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("업무 완료 결과를 다시 불러오세요.")
-  }
-  return true
+  if (error) throw error
+  return producerSourceEventIds(data as OpsTaskProducerResponse)
 }
 
 function getReadyOpsCompletionInput(input: OpsTaskInput): OpsTaskInput {
@@ -2837,7 +3079,7 @@ async function restoreOpsTaskDetailSnapshot(task: OpsTask) {
     if (task.registration) {
       await upsertDetail(task.id, input)
     } else {
-      await deleteOpsTaskChildRows("ops_registration_details", task.id)
+      await deleteOpsTaskDetailRow("ops_registration_details", task.id)
     }
     return
   }
@@ -2846,7 +3088,7 @@ async function restoreOpsTaskDetailSnapshot(task: OpsTask) {
     if (task.withdrawal) {
       await upsertDetail(task.id, input)
     } else {
-      await deleteOpsTaskChildRows("ops_withdrawal_details", task.id)
+      await deleteOpsTaskDetailRow("ops_withdrawal_details", task.id)
     }
     return
   }
@@ -2855,7 +3097,7 @@ async function restoreOpsTaskDetailSnapshot(task: OpsTask) {
     if (task.transfer) {
       await upsertDetail(task.id, input)
     } else {
-      await deleteOpsTaskChildRows("ops_transfer_details", task.id)
+      await deleteOpsTaskDetailRow("ops_transfer_details", task.id)
     }
     return
   }
@@ -2864,7 +3106,7 @@ async function restoreOpsTaskDetailSnapshot(task: OpsTask) {
     if (task.wordRetest) {
       await upsertDetail(task.id, input)
     } else {
-      await deleteOpsTaskChildRows("ops_word_retests", task.id)
+      await deleteOpsTaskDetailRow("ops_word_retests", task.id)
     }
   }
 }
@@ -3006,7 +3248,9 @@ async function prepareRegistrationProjectionRollback(task: OpsTask, input: OpsTa
       await captureRollback(() => restoreOpsTaskLinkSnapshot(task))
       await captureRollback(() => restoreOpsTaskDetailSnapshot(task))
       await captureRollback(() => writeRegistrationProjectionRollbackHistory(rollbackHistory))
-      await captureRollback(() => writeEvent(task.id, "rollback", "등록 저장", "변경 시도", "원래 상태 복원"))
+      await captureRollback(async () => {
+        await writeEvent(task.id, "rollback", "등록 저장", "변경 시도", "원래 상태 복원")
+      })
       if (firstRollbackError) throw firstRollbackError
     },
   }
@@ -3331,7 +3575,7 @@ async function syncRegistrationPipelineStatusForTaskStatus(task: OpsTask, status
   return async () => {
     if (!supabase) return
     if (!previousPipelineStatus) {
-      await deleteOpsTaskChildRows("ops_registration_details", task.id)
+      await deleteOpsTaskDetailRow("ops_registration_details", task.id)
       return
     }
     const { error: rollbackError } = await supabase
@@ -3627,47 +3871,32 @@ async function syncOpsTaskManagementLinks(
   if (input.type === "word_retest") await syncWordRetestManagementLinks(taskId, input)
 }
 
-async function deleteOpsTaskChildRowsOnFailure(tableName: string, taskId: string) {
-  try {
-    await deleteOpsTaskChildRows(tableName, taskId)
-    return null
-  } catch (error) {
-    return error
-  }
-}
+type OpsTaskDetailTable =
+  | "ops_registration_details"
+  | "ops_withdrawal_details"
+  | "ops_transfer_details"
+  | "ops_word_retests"
 
-async function deleteOpsTaskChildRows(tableName: string, taskId: string) {
+async function deleteOpsTaskDetailRow(tableName: OpsTaskDetailTable, taskId: string) {
   if (!supabase || !text(taskId)) return
   const { error } = await supabase.from(tableName).delete().eq("task_id", taskId)
   if (error && !isMissingRelationError(error) && !isMissingColumnError(error)) throw error
 }
 
-async function deleteCreatedOpsTaskOnFailure(taskId: string) {
-  if (!supabase || !text(taskId)) return null
-  const firstDelete = await supabase.from("ops_tasks").delete().eq("id", taskId).select("id")
-  if (!firstDelete.error && didMutateOpsTask(firstDelete.data)) return null
-
-  const childCleanupErrors = await Promise.all([
-    deleteOpsTaskChildRowsOnFailure("ops_task_comments", taskId),
-    deleteOpsTaskChildRowsOnFailure("ops_task_events", taskId),
-    deleteOpsTaskChildRowsOnFailure("ops_task_attachments", taskId),
-    deleteOpsTaskChildRowsOnFailure("ops_registration_details", taskId),
-    deleteOpsTaskChildRowsOnFailure("ops_withdrawal_details", taskId),
-    deleteOpsTaskChildRowsOnFailure("ops_transfer_details", taskId),
-    deleteOpsTaskChildRowsOnFailure("ops_word_retests", taskId),
-  ])
-  const cleanupError = childCleanupErrors.find(Boolean)
-  const retryDelete = await supabase.from("ops_tasks").delete().eq("id", taskId).select("id")
-  if (retryDelete.error && !isMissingRelationError(retryDelete.error) && !isMissingColumnError(retryDelete.error)) return retryDelete.error
-  if (didMutateOpsTask(retryDelete.data)) return cleanupError || null
-
+async function deleteCreatedOpsTaskOnFailure(taskId: string, expectedCreatedAt: string) {
+  if (!supabase || !text(taskId) || !text(expectedCreatedAt)) {
+    return new Error("생성 실패 업무 정리 대상을 확인하지 못했습니다.")
+  }
   try {
-    const remainingTask = await selectOpsRowById("ops_tasks", taskId)
-    if (remainingTask) return new Error("생성 실패 업무를 정리하지 못했습니다. 화면을 새로고침하고 관리자에게 문의하세요.")
+    const response = await runIdempotentOpsTaskProducerRpc("cleanup_created_ops_task_v1", {
+      p_task_id: taskId,
+      p_expected_created_at: expectedCreatedAt,
+    })
+    producerCleanupDeleted(response, taskId)
+    return null
   } catch (error) {
     return error
   }
-  return cleanupError || null
 }
 
 function attachOpsTaskCleanupError(originalError: unknown, cleanupError: unknown) {
@@ -3676,12 +3905,55 @@ function attachOpsTaskCleanupError(originalError: unknown, cleanupError: unknown
   mutableError.cleanupError = cleanupError
 }
 
-export async function createOpsTask(input: OpsTaskInput) {
+export async function createOpsTransitionTask(input: OpsTaskInput): Promise<OpsTaskProducerReceipt> {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  if (!["transfer", "withdrawal"].includes(input.type)) {
+    throw new Error("전반·퇴원 업무만 안전 생성 경로를 사용할 수 있습니다.")
+  }
+  assertManagementSyncReady(input)
+  await assertManagementSyncRecordsReady(input)
+  try {
+    const response = await runIdempotentOpsTaskProducerRpc("create_ops_task_v2", {
+      p_input: buildOpsTaskProducerInput(input),
+    })
+    clearOpsTaskWorkspaceDataCache()
+    return {
+      taskId: producerTaskId(response),
+      sourceEventIds: producerSourceEventIds(response),
+    }
+  } catch (error) {
+    if (!isMissingOpsRosterRpc(error)) throw error
+    resetRegistrationSubjectTrackRuntimeProbe()
+    return createOpsTask(input, { skipTransitionProducer: true })
+  }
+}
+
+export async function createOpsTask(
+  input: OpsTaskInput,
+  options: { skipTransitionProducer?: boolean } = {},
+): Promise<OpsTaskProducerReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
   assertRegistrationInquiryBaseReady(input)
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
+  if ((input.type === "transfer" || input.type === "withdrawal") && !options.skipTransitionProducer) {
+    return createOpsTransitionTask(input)
+  }
+  if (input.type === "general" || input.type === "word_retest" || input.type === "textbook") {
+    const response = await runIdempotentOpsTaskProducerRpc("create_ops_task_v2", {
+      p_input: buildOpsTaskProducerInput(input),
+    })
+    const activityEventId = input.type === "textbook"
+      ? producerActivityEventId(response)
+      : undefined
+    clearOpsTaskWorkspaceDataCache()
+    return {
+      taskId: producerTaskId(response),
+      sourceEventIds: producerSourceEventIds(response),
+      ...(activityEventId ? { activityEventId } : {}),
+    }
+  }
   const stagesReadyOpsRosterCompletion = input.status === "done"
     && ["withdrawal", "transfer"].includes(input.type)
     && (await getOpsRosterRuntimeState()).mode === "ready"
@@ -3696,12 +3968,13 @@ export async function createOpsTask(input: OpsTaskInput) {
     (row) => client
       .from("ops_tasks")
       .insert(row)
-      .select("id")
+      .select("id,created_at")
       .single(),
   )
 
   if (error) throw error
   const taskId = text((data as Row).id)
+  const createdAt = text((data as Row).created_at)
   let rollbackCompletionSync: OpsCompletionRollback | null = null
   let completionSyncApplied = false
   try {
@@ -3709,10 +3982,9 @@ export async function createOpsTask(input: OpsTaskInput) {
     await writeManualCheckEvents(taskId, readyCompletionInput)
     await upsertDetail(taskId, readyCompletionInput)
     if (stagesReadyOpsRosterCompletion) {
-      await completeReadyOpsRosterTransition(taskId, input.type)
-      await writeCommittedEvent(taskId, "created", "type", "", input.type)
+      const sourceEventIds = await completeReadyOpsRosterTransition(taskId, input.type)
       clearOpsTaskWorkspaceDataCache()
-      return taskId
+      return { taskId, sourceEventIds: sourceEventIds || [] }
     }
     const completionMutation = await prepareCreatedOpsCompletionSyncRollback(taskId, input)
     rollbackCompletionSync = completionMutation.rollback
@@ -3720,15 +3992,14 @@ export async function createOpsTask(input: OpsTaskInput) {
     await syncOpsTaskManagementLinks(taskId, input, null, {
       registrationCreatedStudentId: completionMutation.registrationCreatedStudentId,
     })
-    await writeEvent(taskId, "created", "type", "", input.type)
     if (stagesTerminalRegistrationParent) {
       await updateRegistrationTaskParent(taskId, input, { preserveManagementLinks: true })
     }
     clearOpsTaskWorkspaceDataCache()
-    return taskId
+    return { taskId, sourceEventIds: [] }
   } catch (error) {
     await rollbackAppliedCompletionSync(rollbackCompletionSync, completionSyncApplied, error)
-    const cleanupError = await deleteCreatedOpsTaskOnFailure(taskId)
+    const cleanupError = await deleteCreatedOpsTaskOnFailure(taskId, createdAt)
     attachOpsTaskCleanupError(error, cleanupError)
     throw error
   }
@@ -3820,7 +4091,10 @@ async function updateRegistrationOpsTask(taskId: string, input: OpsTaskInput, ex
   }
 }
 
-export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
+export async function updateOpsTask(
+  taskId: string,
+  input: OpsTaskInput,
+): Promise<OpsTaskSourceEventReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
   const nextStatus = input.status || "requested"
@@ -3832,26 +4106,43 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
 
-  if (nextStatus === "done" && ["withdrawal", "transfer"].includes(input.type)) {
-    const runtime = await getOpsRosterRuntimeState()
-    if (runtime.mode === "ready") {
-      const pendingInput = { ...input, status: existingTask.status }
-      const readyCompletionInput = getReadyOpsCompletionInput(input)
-      const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
-        buildTaskRow(pendingInput),
-        (row) => client
-          .from("ops_tasks")
-          .update(row)
-          .eq("id", taskId)
-          .select("id"),
-      )
-      if (error) throw error
-      if (!didMutateOpsTask(data)) throw new Error("업무 데이터를 다시 불러오세요.")
-      await writeManualCheckEvents(taskId, readyCompletionInput, inputFromTask(existingTask))
-      await upsertDetail(taskId, readyCompletionInput)
-      await completeReadyOpsRosterTransition(taskId, input.type)
+  if (input.type === "general" || input.type === "word_retest" || input.type === "textbook") {
+    const response = await runIdempotentOpsTaskProducerRpc("update_ops_task_v2", {
+      p_task_id: taskId,
+      p_input: buildOpsTaskProducerInput(input),
+      p_expected_updated_at: existingTask.updatedAt,
+    })
+    const activityEventId = input.type === "textbook"
+      ? producerActivityEventId(response)
+      : undefined
+    clearOpsTaskWorkspaceDataCache()
+    return {
+      sourceEventIds: producerSourceEventIds(response),
+      ...(activityEventId ? { activityEventId } : {}),
+    }
+  }
+
+  if (input.type === "withdrawal" || input.type === "transfer") {
+    const producerInput = nextStatus === "done"
+      ? getReadyOpsCompletionInput({ ...input, status: existingTask.status })
+      : input
+    try {
+      const response = await runIdempotentOpsTaskProducerRpc("update_ops_task_v2", {
+        p_task_id: taskId,
+        p_input: buildOpsTaskProducerInput(producerInput),
+        p_expected_updated_at: existingTask.updatedAt,
+      })
+      const sourceEventIds = producerSourceEventIds(response)
+      if (nextStatus === "done") {
+        const completionSourceEventIds = await completeReadyOpsRosterTransition(taskId, input.type)
+        clearOpsTaskWorkspaceDataCache()
+        return { sourceEventIds: [...sourceEventIds, ...(completionSourceEventIds || [])] }
+      }
       clearOpsTaskWorkspaceDataCache()
-      return
+      return { sourceEventIds }
+    } catch (error) {
+      if (!isMissingOpsRosterRpc(error)) throw error
+      resetRegistrationSubjectTrackRuntimeProbe()
     }
   }
 
@@ -3861,9 +4152,8 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
       throw new Error("과목별 등록 화면에서 변경하세요.")
     }
     await updateRegistrationOpsTask(taskId, input, existingTask)
-    await writeCommittedEvent(taskId, "updated", "task", "", input.title)
     clearOpsTaskWorkspaceDataCache()
-    return
+    return { sourceEventIds: [] }
   }
 
   if (nextStatus === "done") {
@@ -3894,9 +4184,8 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
       )
       throw error
     }
-    await writeEvent(taskId, "updated", "task", "", input.title)
     clearOpsTaskWorkspaceDataCache()
-    return
+    return { sourceEventIds: [] }
   }
 
   const { data, error } = await writeOpsTaskWithOptionalTeamWorkflowColumns(
@@ -3917,8 +4206,60 @@ export async function updateOpsTask(taskId: string, input: OpsTaskInput) {
   } catch (syncError) {
     throw syncError
   }
-  await writeEvent(taskId, "updated", "task", "", input.title)
   clearOpsTaskWorkspaceDataCache()
+  return { sourceEventIds: [] }
+}
+
+export async function retryWordRetest(
+  previousTaskId: string,
+  input: OpsTaskInput,
+): Promise<OpsTaskProducerReceipt> {
+  if (input.type !== "word_retest") throw new Error("단어 재시험만 다시 만들 수 있습니다.")
+  const response = await runIdempotentOpsTaskProducerRpc("retry_word_retest_v1", {
+    p_previous_task_id: previousTaskId,
+    p_input: buildOpsTaskProducerInput(input),
+  })
+  clearOpsTaskWorkspaceDataCache()
+  return {
+    taskId: producerTaskId(response),
+    sourceEventIds: producerSourceEventIds(response),
+  }
+}
+
+export async function reportWordRetestResult(
+  taskId: string,
+  detail: OpsWordRetestDetail,
+): Promise<OpsTaskSourceEventReceipt> {
+  const response = await runIdempotentOpsTaskProducerRpc("report_word_retest_result_v1", {
+    p_task_id: taskId,
+    p_result: withoutTaskId(buildWordRetestRow("", detail)),
+  })
+  clearOpsTaskWorkspaceDataCache()
+  return { sourceEventIds: producerSourceEventIds(response) }
+}
+
+export async function reportWordRetestAbsent(
+  taskId: string,
+  source: "manual" | "deadline" | "attendance",
+): Promise<OpsTaskSourceEventReceipt> {
+  const response = await runIdempotentOpsTaskProducerRpc("report_word_retest_absent_v1", {
+    p_task_id: taskId,
+    p_source: source,
+  })
+  clearOpsTaskWorkspaceDataCache()
+  return { sourceEventIds: producerSourceEventIds(response) }
+}
+
+export async function requestWordRetestRevision(
+  taskId: string,
+  reason: string,
+): Promise<OpsTaskSourceEventReceipt> {
+  const response = await runIdempotentOpsTaskProducerRpc("request_word_retest_revision_v1", {
+    p_task_id: taskId,
+    p_reason: reason,
+  })
+  clearOpsTaskWorkspaceDataCache()
+  return { sourceEventIds: producerSourceEventIds(response) }
 }
 
 async function updateOpsTaskStatusRow(taskId: string, status: OpsTaskStatus) {
@@ -3985,7 +4326,10 @@ async function updateRegistrationOpsTaskStatus(currentTask: OpsTask, status: Ops
   }
 }
 
-export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) {
+export async function updateOpsTaskStatus(
+  task: OpsTask,
+  status: OpsTaskStatus,
+): Promise<OpsTaskSourceEventReceipt> {
   let rollbackCompletionSync: OpsCompletionRollback | null = null
   let completionSyncApplied = false
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
@@ -3993,24 +4337,53 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
   if (!currentTask) throw new Error("업무 데이터를 다시 불러오세요.")
   assertCompletedOperationStatusTransition(currentTask, status)
 
+  if (currentTask.type === "general" || currentTask.type === "word_retest" || currentTask.type === "textbook") {
+    if (currentTask.type === "word_retest" && currentTask.status === "review_requested" && status === "in_progress") {
+      return requestWordRetestRevision(currentTask.id, "담당 선생님 수정 요청")
+    } else {
+      const response = await runIdempotentOpsTaskProducerRpc("transition_ops_task_status_v2", {
+        p_task_id: currentTask.id,
+        p_status: status,
+        p_expected_updated_at: currentTask.updatedAt,
+      })
+      const activityEventId = currentTask.type === "textbook"
+        ? producerActivityEventId(response)
+        : undefined
+      clearOpsTaskWorkspaceDataCache()
+      return {
+        sourceEventIds: producerSourceEventIds(response),
+        ...(activityEventId ? { activityEventId } : {}),
+      }
+    }
+  }
+
   if (currentTask.type === "registration") {
     const runtime = await getOpsRosterRuntimeState()
     if (runtime.mode !== "legacy") {
       throw new Error("과목별 등록 화면에서 변경하세요.")
     }
     await updateRegistrationOpsTaskStatus(currentTask, status)
-    await writeCommittedEvent(currentTask.id, "status_changed", "status", currentTask.status, status)
-    if (currentTask.status === "review_requested" && status === "in_progress") {
-      await writeCommittedEvent(currentTask.id, "revision_requested", "검토", "검토 요청", "수정 요청")
-    }
     clearOpsTaskWorkspaceDataCache()
-    return
+    return { sourceEventIds: [] }
   }
 
-  if (status === "done" && ["withdrawal", "transfer"].includes(currentTask.type)) {
-    if (await completeReadyOpsRosterTransition(currentTask.id, currentTask.type)) {
+  if (currentTask.type === "withdrawal" || currentTask.type === "transfer") {
+    if (status === "done") {
+      const sourceEventIds = await completeReadyOpsRosterTransition(currentTask.id, currentTask.type)
       clearOpsTaskWorkspaceDataCache()
-      return
+      return { sourceEventIds: sourceEventIds || [] }
+    }
+    try {
+      const response = await runIdempotentOpsTaskProducerRpc("transition_ops_task_status_v2", {
+        p_task_id: currentTask.id,
+        p_status: status,
+        p_expected_updated_at: currentTask.updatedAt,
+      })
+      clearOpsTaskWorkspaceDataCache()
+      return { sourceEventIds: producerSourceEventIds(response) }
+    } catch (error) {
+      if (!isMissingOpsRosterRpc(error)) throw error
+      resetRegistrationSubjectTrackRuntimeProbe()
     }
   }
 
@@ -4041,15 +4414,8 @@ export async function updateOpsTaskStatus(task: OpsTask, status: OpsTaskStatus) 
     if (error) throw error
     throw new Error("업무 데이터를 다시 불러오세요.")
   }
-  if (currentTask.type === "word_retest" && status !== "done") {
-    const nextInput = inputFromTask(currentTask, status)
-    await syncWordRetestManagementLinks(currentTask.id, nextInput)
-  }
-  await writeEvent(currentTask.id, "status_changed", "status", currentTask.status, status)
-  if (currentTask.status === "review_requested" && status === "in_progress") {
-    await writeEvent(currentTask.id, "revision_requested", "검토", "검토 요청", "수정 요청")
-  }
   clearOpsTaskWorkspaceDataCache()
+  return { sourceEventIds: [] }
 }
 
 async function rollbackRegistrationWaitlistRemovalAfterFailure(student: Row, classRow: Row, originalError: unknown) {
@@ -4155,26 +4521,31 @@ export async function deleteOpsTask(taskId: string) {
   clearOpsTaskWorkspaceDataCache()
 }
 
-export async function addOpsTaskComment(taskId: string, body: string) {
+export async function addOpsTaskComment(taskId: string, body: string): Promise<OpsTaskCommentReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  await assertOpsTaskExists(taskId)
-  const { data, error } = await supabase
-    .from("ops_task_comments")
-    .insert({ task_id: taskId, body })
-    .select("id,task_id,author_id,body,created_at")
-    .single()
-  if (error) throwIfMissingOpsTaskReference(error)
+  const task = await loadOpsTaskById(taskId)
+  if (!task) throw new Error("업무 데이터를 다시 불러오세요.")
+  const response = await runIdempotentOpsTaskProducerRpc("add_ops_task_comment_v2", {
+    p_task_id: taskId,
+    p_body: body,
+  })
+  const row = response.comment
+  if (!row) throw new Error("저장된 댓글을 확인하지 못했습니다.")
+  const commentId = text(row.id)
+  producerCommentSourceId(response, commentId)
 
   clearOpsTaskWorkspaceDataCache()
-  const row = data as Row
   return {
-    id: text(row.id),
-    taskId: text(row.task_id),
-    authorId: text(row.author_id),
-    authorLabel: "",
-    body: text(row.body),
-    createdAt: text(row.created_at),
-  } satisfies OpsTaskComment
+    comment: {
+      id: commentId,
+      taskId: text(row.task_id),
+      authorId: text(row.author_id),
+      authorLabel: "",
+      body: text(row.body),
+      createdAt: text(row.created_at),
+    },
+    sourceEventIds: producerSourceEventIds(response),
+  }
 }
 
 export async function addOpsTaskAttachment(taskId: string, fileName: string, driveLink: string, fileKind = "link") {

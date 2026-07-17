@@ -838,8 +838,6 @@ test("registration workspace replaces Notion registration management with subjec
     "REGISTRATION_VIEW_TABS",
     "STATUS_TO_VIEW",
     "getRegistrationTrackViewKey",
-    "REGISTRATION_NOTIFICATION_TEMPLATE_VARIABLES",
-    "DEFAULT_REGISTRATION_NOTIFICATION_TEMPLATES",
     "RegistrationTrackList",
     "buildRegistrationTrackListItems",
     "filterRegistrationTrackListItems",
@@ -848,8 +846,8 @@ test("registration workspace replaces Notion registration management with subjec
     "RegistrationNotificationSettingsDialog",
     "RegistrationDetailPanel",
     "getRegistrationTrackTabCounts",
-    "notifyRegistrationWorkflow",
-    "getRegistrationNotificationTriggerForPipelineStatus",
+    "collectRegistrationLegacySourceIds",
+    "dispatchLegacyOpsTaskSources",
     "textbookPreparation",
     "visitConsultationPlace",
     "timetableRosterUpdated",
@@ -1999,14 +1997,6 @@ test("withdrawal workspace follows request processing and completed queues", asy
     source.indexOf("function getNextTaskStatusAction"),
     source.indexOf("function canEditTaskDetails"),
   );
-  const withdrawalNotificationVariableSource = source.slice(
-    source.indexOf("const WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES"),
-    source.indexOf("const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT"),
-  );
-  const withdrawalNotificationDispatchSource = source.slice(
-    source.indexOf("async function sendWithdrawalGoogleChatNotification"),
-    source.indexOf("function WithdrawalNotificationSettingsDialog"),
-  );
   const withdrawalNotificationDialogSource = source.slice(
     source.indexOf("function WithdrawalNotificationSettingsDialog"),
     source.indexOf("function TransferNotificationSettingsDialog"),
@@ -2023,8 +2013,6 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "WITHDRAWAL_VIEW_TABS",
     "WITHDRAWAL_NOTIFICATION_CHANNELS",
     "WITHDRAWAL_GOOGLE_CHAT_CHANNEL_MAP",
-    "WITHDRAWAL_NOTIFICATION_TRIGGERS",
-    "WITHDRAWAL_NOTIFICATION_TEMPLATE_VARIABLES",
     "WithdrawalNotificationSettingsDialog",
     "WithdrawalGoogleChatWebhookInfo",
     "WITHDRAWAL_PERIOD_FILTERS",
@@ -2120,14 +2108,9 @@ test("withdrawal workspace follows request processing and completed queues", asy
     "p_webhook_url_ciphertext: input.webhookUrlCiphertext",
   ]);
   assert.doesNotMatch(googleChatRouteSource, /\.upsert\(/);
-  assertIncludesAll(source, [
-    "const [withdrawalNotificationSettings] = useState<WithdrawalNotificationSetting[]>",
-    "const [withdrawalNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>",
-    "const [transferNotificationSettings] = useState<WithdrawalNotificationSetting[]>",
-    "const [transferNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>",
-    "const [registrationNotificationSettings] = useState<WithdrawalNotificationSetting[]>",
-    "const [registrationNotificationTemplates] = useState<Record<WithdrawalNotificationTriggerKey, WithdrawalNotificationTemplate>>",
-  ]);
+  assert.doesNotMatch(source, /NotificationSettings\] = useState<WithdrawalNotificationSetting/);
+  assert.doesNotMatch(source, /NotificationTemplates\] = useState<Record<WithdrawalNotificationTriggerKey/);
+  assert.match(source, /async function dispatchLegacyOpsTaskSources/);
   assert.doesNotMatch(source, /set(?:Withdrawal|Transfer|Registration)Notification(?:Settings|Templates)/);
   assert.doesNotMatch(source, /완료 알림/);
   assertIncludesAll(source, [
@@ -2491,50 +2474,17 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assert.doesNotMatch(withdrawalDetailSource, /WithdrawalFlowSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /AutoSyncResultSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /결재/);
-  assert.match(
-    withdrawalNotificationVariableSource,
-    /WITHDRAWAL_TABLE_COLUMNS[\s\S]*\.map\(\(column\) => column\.label\)[\s\S]*\.filter\(\(label\) => label !== "액션"\)/,
-    "notification templates should expose every data table column except the non-data action column",
-  );
-  assertIncludesAll(withdrawalNotificationVariableSource, [
-    '"담당선생님"',
-    '"관리팀"',
-    '"프로세스"',
-  ]);
-  assertIncludesAll(source.slice(source.indexOf("const WITHDRAWAL_NOTIFICATION_TEMPLATE_PREVIEW_CONTEXT"), source.indexOf("const DEFAULT_WITHDRAWAL_NOTIFICATION_TEMPLATES")), [
-    "상태",
-    "과목",
-    "선생님",
-    "수업",
-    "학생",
-    "퇴원일",
-    "퇴원회차",
-    "진행 수업시수",
-    "4주 기준 수업시수",
-    "수업진행률",
-    "고객 퇴원사유",
-    "선생님 의견",
-    "미배부 교재",
-    "신청자",
-    "신청일시",
-  ]);
-  assertIncludesAll(withdrawalNotificationDispatchSource, [
-    "sendWithdrawalGoogleChatNotification",
-    "fetch(\"/api/google-chat\"",
-    "method: \"POST\"",
-    "notifyWithdrawalWorkflow",
-    "withdrawalNotificationSettings",
-    "withdrawalNotificationTemplates",
-  ]);
+  assert.doesNotMatch(source, /notifyWithdrawalWorkflow|sendWithdrawalGoogleChatNotification/);
+  assert.match(source, /async function dispatchLegacyOpsTaskSources/);
   assert.match(
     source,
-    /if \(payload\.type === "withdrawal" && !wasEditing\) \{[\s\S]*notifyWithdrawalWorkflow\("submitted"/,
-    "new withdrawal applications should dispatch the submitted notification",
+    /const receipt = createPayload\.type === "transfer" \|\| createPayload\.type === "withdrawal"[\s\S]*createOpsTransitionTask\(createPayload\)[\s\S]*legacyOpsTaskSourceEventIds\.push\(\.\.\.receipt\.sourceEventIds\)/,
+    "new withdrawal applications should dispatch only the server-issued source event ID",
   );
   assert.match(
     source,
-    /if \(task\.type === "withdrawal"\) \{[\s\S]*notifyWithdrawalWorkflow\(getWithdrawalNotificationTriggerForStatus\(status\)/,
-    "withdrawal status changes should dispatch process notifications",
+    /const receipt = await updateOpsTaskStatus\(task, status\)[\s\S]*dispatchLegacyOpsTaskSources\([\s\S]*receipt\.sourceEventIds/,
+    "withdrawal status changes should dispatch only the server-issued source event IDs",
   );
 });
 
@@ -2665,8 +2615,6 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "TRANSFER_TABLE_COLUMNS",
     "TRANSFER_TABLE_COLUMN_WIDTHS",
     "TRANSFER_TABLE_COLUMN_MIN_WIDTHS",
-    "TRANSFER_NOTIFICATION_TEMPLATE_VARIABLES",
-    "DEFAULT_TRANSFER_NOTIFICATION_TEMPLATES",
     "isTransferWorkspace",
     "transferCounts",
     "TransferDataTable",
@@ -2677,7 +2625,7 @@ test("transfer workspace inherits withdrawal layout while preserving transfer fi
     "getTransferTuitionAdjustment",
     "TransferWorkflowChart",
     "TransferTuitionAdjustmentPanel",
-    "notifyTransferWorkflow",
+    "dispatchLegacyOpsTaskSources",
     "TransferNotificationSettingsDialog",
     "TransferDetailPanel",
   ]);
@@ -3148,7 +3096,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "shouldAutoMarkWordRetestAbsent",
     "autoMarkPastWordRetestsAbsent",
     "const nextTasks = wordRetestFilterSourceTasks.filter((task) =>",
-    "}, [currentUserId, data, invalidatePendingWorkspaceReloads, isWordRetestWorkspace, loading, reload, wordRetestFilterSourceTasks])",
+    "notificationSessionToken,",
     "WORD_RETEST_TABLE_COLUMN_WIDTHS",
     "WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS",
     "select: 40",
@@ -3551,7 +3499,8 @@ test("management sync connects registration transfer withdrawal and word retest 
     "supportingFields",
     "return null",
     "const existingStudent = shouldEnsureStudent ? await resolveOpsRegistrationStudent(input) : null",
-    "const firstDelete = await supabase.from(\"ops_tasks\").delete().eq(\"id\", taskId)",
+    'runIdempotentOpsTaskProducerRpc("cleanup_created_ops_task_v1"',
+    "p_expected_created_at: expectedCreatedAt",
     "export async function deleteOpsTask",
     "MANAGEMENT_INPUT_FIELDS",
     "missingFields.push(\"시험범위\")",
@@ -3643,8 +3592,12 @@ test("completed operational tasks cannot be reopened by status alone", async () 
     "assertCompletedOperationStatusTransition(currentTask, status)",
     "if (error || !didMutateOpsTask(data))",
     "throw new Error(\"업무 데이터를 다시 불러오세요.\")",
-    "await writeEvent(currentTask.id, \"status_changed\", \"status\", currentTask.status, status)",
+    "transition_ops_task_status_v2",
   ]);
+  assert.doesNotMatch(
+    serviceSource,
+    /writeEvent\(currentTask\.id, \"status_changed\", \"status\", currentTask\.status, status\)/,
+  );
 
   assertIncludesAll(migrationSource, [
     "create or replace function public.prevent_completed_operation_reopen()",
@@ -3680,12 +3633,16 @@ test("completed operational task details are locked after management sync", asyn
     serviceSource.indexOf("export async function addOpsTaskAttachment"),
     serviceSource.indexOf("export { getOpsTaskCalendarItems"),
   );
-  for (const source of [commentSource, attachmentSource]) {
-    assertIncludesAll(source, [
-      "await assertOpsTaskExists(taskId)",
-      "if (error) throwIfMissingOpsTaskReference(error)",
-    ]);
-  }
+  assertIncludesAll(commentSource, [
+    "const task = await loadOpsTaskById(taskId)",
+    "if (!task) throw new Error(\"업무 데이터를 다시 불러오세요.\")",
+    "runIdempotentOpsTaskProducerRpc(\"add_ops_task_comment_v2\"",
+    "producerCommentSourceId(response, commentId)",
+  ]);
+  assertIncludesAll(attachmentSource, [
+    "await assertOpsTaskExists(taskId)",
+    "if (error) throwIfMissingOpsTaskReference(error)",
+  ]);
   assert.ok(
     serviceSource.indexOf("assertCompletedOperationEditable(existingTask)") <
       serviceSource.indexOf("assertManagementSyncReady(input)", serviceSource.indexOf("export async function updateOpsTask")),

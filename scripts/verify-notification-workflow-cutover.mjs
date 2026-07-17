@@ -42,7 +42,8 @@ const OWNER_FLAG = Object.freeze({
 })
 
 const DECIMAL = /^(?:0|[1-9]\d*)$/
-const CHECKSUM = /^[0-9a-f]{64}$/
+const TEMPLATE_CHECKSUM = /^(?:[0-9a-f]{32}|[0-9a-f]{64})$/
+const SHA256 = /^[0-9a-f]{64}$/
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -80,8 +81,12 @@ const METRIC_BLOCKERS = Object.freeze([
   ["scopeMismatchCount", "workflow_scope_mismatch"],
   ["zeroAudienceEnabledRuleCount", "enabled_rule_without_audience"],
   ["ownershipAnomalyCount", "ownership_anomaly"],
+  ["ownershipDenialCount", "ownership_denial_anomaly"],
   ["shadowMismatchCount", "shadow_intent_mismatch"],
   ["rollbackFailedCount", "rollback_failed"],
+  ["missedWorkerHeartbeats", "worker_heartbeat_missed", 3],
+  ["scheduleContractFaultCount", "schedule_contract_fault"],
+  ["workerRouteFaultCount", "worker_route_fault"],
 ])
 
 export function verifyNotificationCutoverReadiness(evidence) {
@@ -93,20 +98,32 @@ export function verifyNotificationCutoverReadiness(evidence) {
   if (markers.common !== 1) blockers.push("common_runtime_marker_missing")
   if (markers.adapters !== 1) blockers.push("adapter_runtime_marker_missing")
   if (markers.registration !== 1) blockers.push("registration_runtime_marker_missing")
+  if (markers.registrationHandoffs !== 1) {
+    blockers.push("registration_handoffs_runtime_marker_missing")
+  }
+  if (markers.forwardCompat !== 1) blockers.push("forward_compat_runtime_marker_missing")
   if (evidence?.workerStopLatch !== false) blockers.push("worker_stop_latch_set")
   if (!heartbeatFresh(evidence?.workerHeartbeatAt, evidence?.now)) blockers.push("worker_heartbeat_stale")
   if (!heartbeatFresh(evidence?.watchdogHeartbeatAt, evidence?.now)) blockers.push("watchdog_heartbeat_stale")
 
   const flags = exactFlagRegistry(evidence?.flags) ? evidence.flags : {}
   const owners = enabledOwners(flags)
-  if (!orderedOwnerPrefix(owners)) blockers.push("cutover_order_invalid")
+  const nextOwner = NOTIFICATION_CUTOVER_ORDER.find((owner) => flags[OWNER_FLAG[owner]] !== true) || null
+  const nextOwnerIndex = nextOwner === null ? NOTIFICATION_CUTOVER_ORDER.length : NOTIFICATION_CUTOVER_ORDER.indexOf(nextOwner)
+  const enabledAfterGap = owners.some((owner) => NOTIFICATION_CUTOVER_ORDER.indexOf(owner) > nextOwnerIndex)
+  const rolledBackOwners = Array.isArray(evidence?.rolledBackOwners)
+    ? evidence.rolledBackOwners.filter((owner) => NOTIFICATION_CUTOVER_ORDER.includes(owner))
+    : []
+  if (!orderedOwnerPrefix(owners) && (!enabledAfterGap || !rolledBackOwners.includes(nextOwner))) {
+    blockers.push("cutover_order_invalid")
+  }
   const metrics = isRecord(evidence?.metrics) ? evidence.metrics : {}
-  for (const [field, code] of METRIC_BLOCKERS) {
+  for (const [field, code, threshold = 1] of METRIC_BLOCKERS) {
     if (!Number.isInteger(metrics[field]) || metrics[field] < 0) {
       blockers.push("operations_metrics_invalid")
       break
     }
-    if (metrics[field] > 0) blockers.push(code)
+    if (metrics[field] >= threshold) blockers.push(code)
   }
   if (!Number.isFinite(metrics.pendingLagSeconds) || metrics.pendingLagSeconds < 0) {
     if (!blockers.includes("operations_metrics_invalid")) blockers.push("operations_metrics_invalid")
@@ -117,7 +134,7 @@ export function verifyNotificationCutoverReadiness(evidence) {
   return {
     ready: blockers.length === 0,
     blockers,
-    nextOwner: NOTIFICATION_CUTOVER_ORDER[owners.length] || null,
+    nextOwner,
   }
 }
 
@@ -125,7 +142,10 @@ function normalizeIntent(input) {
   if (!isRecord(input) || !DECIMAL.test(input.targetGeneration)) {
     throw new Error("target_generation_invalid")
   }
-  if (!CHECKSUM.test(input.templateChecksum) || !CHECKSUM.test(input.normalizedRenderedContentHash)) {
+  if (
+    !TEMPLATE_CHECKSUM.test(input.templateChecksum)
+    || !SHA256.test(input.normalizedRenderedContentHash)
+  ) {
     throw new Error("intent_checksum_invalid")
   }
   const keys = ["workflowKey", "eventKey", "occurrenceKey", "audienceKey", "channelKey", "targetKey"]
@@ -378,21 +398,23 @@ export function rehearseNotificationShadowAbort(state) {
 }
 
 const GLOBAL_FAULTS = new Set([
-  "worker_heartbeat_stale",
+  "worker_heartbeat_missed",
   "watchdog_heartbeat_stale",
   "duplicate_external_attempt",
-  "schedule_failure",
+  "schedule_contract_fault",
   "vault_policy_failure",
-  "worker_route_failure",
+  "worker_route_fault",
+  "rollback_failed",
   "cross_workflow_duplicate",
 ])
 const LOCAL_FAULTS = new Set([
   "queue_lag",
-  "delivery_unknown",
-  "scope_mismatch",
-  "zero_audience_rule",
+  "delivery_unknown_detected",
+  "workflow_scope_mismatch",
+  "enabled_rule_without_audience",
   "ownership_anomaly",
-  "shadow_mismatch",
+  "ownership_denial_anomaly",
+  "shadow_intent_mismatch",
 ])
 const SHADOW_ABORT_FAULTS = new Set([
   "canonical_provider_in_shadow",

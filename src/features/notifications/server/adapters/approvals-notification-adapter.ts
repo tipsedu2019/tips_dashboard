@@ -1,6 +1,9 @@
-import { createImmediateNotificationAdapter } from "./immediate-notification-adapter.ts"
+import {
+  createImmediateNotificationAdapter,
+  type ImmediateNotificationAdapterDependencies,
+} from "./immediate-notification-adapter.ts"
 
-export const approvalsNotificationAdapter = createImmediateNotificationAdapter({
+const approvalsNotificationAdapterConfig = Object.freeze({
   workflowKey: "approvals",
   sourceTypes: ["approval_event", "approval_comment"],
   linkRoot: "/admin/approvals",
@@ -25,3 +28,14 @@ export const approvalsNotificationAdapter = createImmediateNotificationAdapter({
   },
   renderFields: {},
 })
+
+export function createApprovalsNotificationAdapter(
+  dependencies?: ImmediateNotificationAdapterDependencies,
+) {
+  return createImmediateNotificationAdapter(
+    approvalsNotificationAdapterConfig,
+    dependencies,
+  )
+}
+
+export const approvalsNotificationAdapter = createApprovalsNotificationAdapter()

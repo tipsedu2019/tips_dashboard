@@ -84,6 +84,40 @@ function makeDependencies(overrides = {}) {
     loadReadyCase: async () => readyCase(),
     getAdmissionState: () => ({ eligible: true, delivered: false, syncNeeded: false, blocked: false, canSend: true }),
     claim: async () => { calls.push("claim"); return {} },
+    beginDelivery: async () => {
+      calls.push("begin-delivery")
+      return {
+        deliveryId: "delivery-1",
+        acquired: true,
+        claimId: "claim-1",
+        ownerGeneration: "0",
+        dispatchToken: "dispatch-1",
+        templateChecksum: "a".repeat(64),
+      }
+    },
+    recordLegacyIntent: async () => {
+      calls.push("record-intent")
+      return { recorded: true }
+    },
+    registerExternalAttempt: async () => {
+      calls.push("register-attempt")
+      return {
+        allowed: true,
+        attempt_id: "a1000000-0000-4000-8000-000000000001",
+      }
+    },
+    completeDelivery: async (_serviceClient, input) => {
+      calls.push(`complete-delivery:${input.result}:${input.outcome}`)
+      return {
+        taskId: "task-1", messageId: "message-1", messageRequestKey: "request-key-1234",
+        applied: true, currentStatus: input.result, claimActive: input.result !== "failed",
+        requiresAdmissionMark: input.result === "accepted", retryRequiresNewMessageKey: input.result === "failed",
+      }
+    },
+    finalizeDelivery: async (_serviceClient, input) => {
+      calls.push(`finalize-delivery:${input.outcome}`)
+      return { status: input.outcome }
+    },
     finalize: async (_serviceClient, input) => {
       calls.push(`finalize:${input.result}`)
       return {
@@ -152,6 +186,7 @@ test("exact legacy mode delegates while ready GET uses child state without provi
 test("ready send claims first, freezes the request key in SOLAPI, finalizes, then marks", async () => {
   const { createRegistrationAdmissionRouteHandlers } = await import(coreUrl)
   let sentBody = null
+  let intentInput = null
   const deps = makeDependencies({
     claim: async () => {
       deps.calls.push("claim")
@@ -166,15 +201,74 @@ test("ready send claims first, freezes the request key in SOLAPI, finalizes, the
       sentBody = JSON.parse(init.body)
       return Response.json({ groupInfo: { groupId: "group-1" }, messageList: { one: { messageId: "provider-1", statusCode: "2000" } } })
     },
+    recordLegacyIntent: async (_serviceClient, input) => {
+      deps.calls.push("record-intent")
+      intentInput = input
+      return { recorded: false }
+    },
   })
   const response = await createRegistrationAdmissionRouteHandlers(deps)
     .post(postRequest({ taskId: "task-1", requestKey: "request-key-1234" }))
   const payload = await response.json()
   assert.equal(response.status, 200)
   assert.equal(payload.currentStatus, "accepted")
-  assert.deepEqual(deps.calls, ["claim", "fetch", "finalize:accepted", "mark"])
+  assert.deepEqual(deps.calls, [
+    "claim",
+    "begin-delivery",
+    "record-intent",
+    "register-attempt",
+    "fetch",
+    "complete-delivery:accepted:sent",
+    "mark",
+  ])
   assert.equal(sentBody.showMessageList, true)
   assert.deepEqual(sentBody.messages[0].customFields, { registrationRequestKey: "request-key-1234" })
+  assert.deepEqual(intentInput, {
+    deliveryId: "delivery-1",
+    legacyTemplateChecksum: "a".repeat(64),
+    normalizedRenderedHash: "b300d79c99d501e3d9b2735265352f45561e2c9053781fad929fcbcc48734165",
+    requestId: "dispatch-1",
+  })
+  assert.doesNotMatch(JSON.stringify(intentInput), /김다미|01012345678/)
+})
+
+test("SOLAPI parity recorder 오류는 외부 시도 등록·provider·업무 종결을 훼손하지 않는다", async () => {
+  const { createRegistrationAdmissionRouteHandlers } = await import(coreUrl)
+  const deps = makeDependencies({
+    claim: async () => {
+      deps.calls.push("claim")
+      return {
+        taskId: "task-1", messageId: "message-1", messageRequestKey: "request-key-1234",
+        claimStatus: "pending", claimActive: true, shouldSend: true,
+        retryRequiresNewMessageKey: false, studentName: "김다미", parentPhone: "01012345678",
+      }
+    },
+    recordLegacyIntent: async () => {
+      deps.calls.push("record-intent")
+      throw new Error("parity recorder unavailable")
+    },
+    fetch: async () => {
+      deps.calls.push("fetch")
+      return Response.json({
+        groupInfo: { groupId: "group-1" },
+        messageList: { one: { messageId: "provider-1", statusCode: "2000" } },
+      })
+    },
+  })
+  const response = await createRegistrationAdmissionRouteHandlers(deps)
+    .post(postRequest({ taskId: "task-1", requestKey: "request-key-1234" }))
+
+  assert.equal(response.status, 200)
+  assert.equal((await response.json()).currentStatus, "accepted")
+  assert.deepEqual(deps.calls, [
+    "claim",
+    "begin-delivery",
+    "record-intent",
+    "register-attempt",
+    "fetch",
+    "complete-delivery:accepted:sent",
+    "mark",
+  ])
 })
 
 test("accepted claim replay repairs the mark without a second provider call", async () => {
@@ -339,7 +433,113 @@ test("a provider 5xx is ambiguous and finalizes unknown instead of failed", asyn
     .post(postRequest({ taskId: "task-1", requestKey: "request-key-1234" }))
   assert.equal(response.status, 502)
   assert.equal((await response.json()).currentStatus, "unknown")
-  assert.deepEqual(deps.calls, ["claim", "fetch", "finalize:unknown"])
+  assert.deepEqual(deps.calls, [
+    "claim",
+    "begin-delivery",
+    "record-intent",
+    "register-attempt",
+    "fetch",
+    "complete-delivery:unknown:delivery_unknown",
+  ])
+})
+
+test("SOLAPI 외부 시도 등록 거부와 RPC 오류는 provider 0회로 미확정 종결한다", async () => {
+  const { createRegistrationAdmissionRouteHandlers } = await import(coreUrl)
+  for (const registration of [
+    async () => ({ allowed: false, reason: "attempt_already_registered" }),
+    async () => { throw new Error("rpc unavailable") },
+  ]) {
+    const deps = makeDependencies({
+      claim: async () => {
+        deps.calls.push("claim")
+        return {
+          taskId: "task-1", messageId: "message-1", messageRequestKey: "request-key-1234",
+          claimStatus: "pending", claimActive: true, shouldSend: true,
+          retryRequiresNewMessageKey: false, studentName: "김다미", parentPhone: "01012345678",
+        }
+      },
+      registerExternalAttempt: async (...args) => {
+        deps.calls.push("register-attempt")
+        return registration(...args)
+      },
+    })
+    const response = await createRegistrationAdmissionRouteHandlers(deps)
+      .post(postRequest({ taskId: "task-1", requestKey: "request-key-1234" }))
+
+    assert.equal(response.status, 502)
+    assert.equal((await response.json()).currentStatus, "unknown")
+    assert.deepEqual(deps.calls, [
+      "claim",
+      "begin-delivery",
+      "record-intent",
+      "register-attempt",
+      "complete-delivery:unknown:delivery_unknown",
+    ])
+  }
+})
+
+test("an unresolved deterministic dispatch replay becomes unknown without a second provider call", async () => {
+  const { createRegistrationAdmissionRouteHandlers } = await import(coreUrl)
+  const deps = makeDependencies({
+    claim: async () => {
+      deps.calls.push("claim")
+      return {
+        taskId: "task-1", messageId: "message-1", messageRequestKey: "request-key-1234",
+        claimStatus: "pending", claimActive: true, shouldSend: true,
+        retryRequiresNewMessageKey: false, studentName: "김다미", parentPhone: "01012345678", commonRevision: 1,
+      }
+    },
+    beginDelivery: async () => {
+      deps.calls.push("begin-delivery")
+      return {
+        deliveryId: "delivery-1",
+        acquired: false,
+        requiresUnknownFinalization: true,
+        claimId: "claim-1",
+        ownerGeneration: "0",
+        dispatchToken: "dispatch-1",
+      }
+    },
+  })
+  const response = await createRegistrationAdmissionRouteHandlers(deps)
+    .post(postRequest({ taskId: "task-1", requestKey: "request-key-1234" }))
+  assert.equal(response.status, 502)
+  assert.equal((await response.json()).currentStatus, "unknown")
+  assert.deepEqual(deps.calls, [
+    "claim",
+    "begin-delivery",
+    "complete-delivery:unknown:delivery_unknown",
+  ])
+})
+
+test("pending business-claim replay still reaches deterministic delivery begin", async () => {
+  const { createRegistrationAdmissionRouteHandlers } = await import(coreUrl)
+  const deps = makeDependencies({
+    claim: async () => {
+      deps.calls.push("claim")
+      return {
+        taskId: "task-1", messageId: "message-1", messageRequestKey: "request-key-1234",
+        claimStatus: "pending", claimActive: true, shouldSend: true,
+        retryRequiresNewMessageKey: false, studentName: "김다미", parentPhone: "01012345678",
+        replayed: true,
+      }
+    },
+    beginDelivery: async () => {
+      deps.calls.push("begin-delivery")
+      return {
+        deliveryId: "delivery-1", acquired: false, requiresUnknownFinalization: true,
+        claimId: "claim-1", ownerGeneration: "0", dispatchToken: "dispatch-1",
+      }
+    },
+  })
+  const response = await createRegistrationAdmissionRouteHandlers(deps)
+    .post(postRequest({ taskId: "task-1", requestKey: "request-key-1234" }))
+  assert.equal(response.status, 502)
+  assert.deepEqual(deps.calls, [
+    "claim",
+    "begin-delivery",
+    "complete-delivery:unknown:delivery_unknown",
+  ])
 })
 
 test("successful lookup without an exact request-key match finalizes unknown", async () => {

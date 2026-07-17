@@ -235,6 +235,210 @@ function isMissingTableError(error: { code?: string; message?: string } | null) 
   return error?.code === "42P01" || /approval_(requests|templates|events|comments)/i.test(error?.message || "")
 }
 
+const APPROVAL_MUTATION_ATTEMPT_STORAGE_PREFIX = "tips.approval.mutation-attempt.v1"
+const APPROVAL_MUTATION_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000
+
+type ApprovalMutationAttemptKind = "create" | "update" | "transition" | "delete" | "comment"
+type ApprovalMutationAttempt = {
+  version: 1
+  salt: string
+  fingerprint: string
+  requestId: string
+  createRequestId: string
+  transitionRequestId: string
+  createdAt: number
+  createdApprovalId?: string
+  createdUpdatedAt?: string
+  expectedUpdatedAt?: string
+  initialStatus?: ApprovalStatus
+  postMutationUpdatedAt?: string
+}
+
+const approvalMutationAttempts = new Map<ApprovalMutationAttemptKind, ApprovalMutationAttempt>()
+const approvalStatusValues = new Set<ApprovalStatus>([
+  "draft",
+  "submitted",
+  "reviewing",
+  "approved",
+  "returned",
+  "canceled",
+])
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function approvalMutationStorage() {
+  if (typeof window === "undefined") return null
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+function approvalMutationStorageKey(kind: ApprovalMutationAttemptKind) {
+  return `${APPROVAL_MUTATION_ATTEMPT_STORAGE_PREFIX}:${kind}`
+}
+
+function canonicalMutationValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalMutationValue)
+  if (value && typeof value === "object") {
+    return Object.keys(value as Row)
+      .sort()
+      .reduce<Row>((result, key) => {
+        result[key] = canonicalMutationValue((value as Row)[key])
+        return result
+      }, {})
+  }
+  return value === undefined ? null : value
+}
+
+async function approvalMutationFingerprint(salt: string, payload: unknown) {
+  const canonicalPayload = JSON.stringify(canonicalMutationValue(payload))
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${salt}:${canonicalPayload}`),
+  )
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+function parseApprovalMutationAttempt(value: string | null): ApprovalMutationAttempt | null {
+  if (!value) return null
+  try {
+    const row = JSON.parse(value) as Record<string, unknown>
+    if (row.version !== 1
+      || !isUuid(row.salt)
+      || typeof row.fingerprint !== "string"
+      || !/^[0-9a-f]{64}$/i.test(row.fingerprint)
+      || !isUuid(row.requestId)
+      || !isUuid(row.createRequestId)
+      || !isUuid(row.transitionRequestId)
+      || typeof row.createdAt !== "number"
+      || !Number.isFinite(row.createdAt)
+      || row.createdAt <= 0
+    ) return null
+
+    const attempt: ApprovalMutationAttempt = {
+      version: 1,
+      salt: row.salt,
+      fingerprint: row.fingerprint,
+      requestId: row.requestId,
+      createRequestId: row.createRequestId,
+      transitionRequestId: row.transitionRequestId,
+      createdAt: row.createdAt,
+    }
+    if (isUuid(row.createdApprovalId)) attempt.createdApprovalId = row.createdApprovalId
+    if (typeof row.createdUpdatedAt === "string" && row.createdUpdatedAt) {
+      attempt.createdUpdatedAt = row.createdUpdatedAt
+    }
+    if (typeof row.expectedUpdatedAt === "string" && row.expectedUpdatedAt) {
+      attempt.expectedUpdatedAt = row.expectedUpdatedAt
+    }
+    if (typeof row.initialStatus === "string" && approvalStatusValues.has(row.initialStatus as ApprovalStatus)) {
+      attempt.initialStatus = row.initialStatus as ApprovalStatus
+    }
+    if (typeof row.postMutationUpdatedAt === "string" && row.postMutationUpdatedAt) {
+      attempt.postMutationUpdatedAt = row.postMutationUpdatedAt
+    }
+    return attempt
+  } catch {
+    return null
+  }
+}
+
+function persistApprovalMutationAttempt(
+  kind: ApprovalMutationAttemptKind,
+  attempt: ApprovalMutationAttempt,
+) {
+  approvalMutationAttempts.set(kind, attempt)
+  const storage = approvalMutationStorage()
+  if (!storage) return
+  try {
+    storage.setItem(approvalMutationStorageKey(kind), JSON.stringify(attempt))
+  } catch {
+    // 메모리 보존으로 현재 탭의 논리 재시도는 계속 지원한다.
+  }
+}
+
+async function loadApprovalMutationAttempt(
+  kind: ApprovalMutationAttemptKind,
+  payload: unknown,
+) {
+  const storage = approvalMutationStorage()
+  let persisted: ApprovalMutationAttempt | null = null
+  if (storage) {
+    try {
+      persisted = parseApprovalMutationAttempt(storage.getItem(approvalMutationStorageKey(kind)))
+    } catch {
+      // 저장소를 읽지 못해도 현재 탭의 메모리 재시도는 계속 지원한다.
+    }
+  }
+  const stored = approvalMutationAttempts.get(kind)
+    || persisted
+  const storedAge = stored ? Date.now() - stored.createdAt : Number.POSITIVE_INFINITY
+  if (stored && storedAge >= 0 && storedAge <= APPROVAL_MUTATION_ATTEMPT_TTL_MS) {
+    const fingerprint = await approvalMutationFingerprint(stored.salt, payload)
+    if (fingerprint === stored.fingerprint) {
+      approvalMutationAttempts.set(kind, stored)
+      return stored
+    }
+  }
+
+  const salt = crypto.randomUUID()
+  const attempt: ApprovalMutationAttempt = {
+    version: 1,
+    salt,
+    fingerprint: await approvalMutationFingerprint(salt, payload),
+    requestId: crypto.randomUUID(),
+    createRequestId: crypto.randomUUID(),
+    transitionRequestId: crypto.randomUUID(),
+    createdAt: Date.now(),
+  }
+  persistApprovalMutationAttempt(kind, attempt)
+  return attempt
+}
+
+function updateApprovalMutationAttempt(
+  kind: ApprovalMutationAttemptKind,
+  attempt: ApprovalMutationAttempt,
+  patch: Partial<ApprovalMutationAttempt>,
+) {
+  const next = { ...attempt, ...patch }
+  persistApprovalMutationAttempt(kind, next)
+  return next
+}
+
+function clearApprovalMutationAttempt(
+  kind: ApprovalMutationAttemptKind,
+  attempt: ApprovalMutationAttempt,
+) {
+  const current = approvalMutationAttempts.get(kind)
+  if (current && current.fingerprint !== attempt.fingerprint) return
+  approvalMutationAttempts.delete(kind)
+  const storage = approvalMutationStorage()
+  if (!storage) return
+  try {
+    const stored = parseApprovalMutationAttempt(storage.getItem(approvalMutationStorageKey(kind)))
+    if (!stored || stored.fingerprint === attempt.fingerprint) {
+      storage.removeItem(approvalMutationStorageKey(kind))
+    }
+  } catch {
+    // 저장 성공 뒤 메모리 항목은 이미 제거했다.
+  }
+}
+
+function isDefinitiveApprovalMutationError(error: unknown) {
+  if (!error || typeof error !== "object") return false
+  const code = text((error as Row).code)
+  return code === "22023"
+    || code === "40001"
+    || code === "42501"
+    || code === "P0002"
+    || code.startsWith("23")
+}
+
 export async function loadApprovalWorkspaceData(): Promise<ApprovalWorkspaceData> {
   if (!supabase) {
     return { schemaReady: false, requests: [], profiles: [], templates: [], error: "Supabase 연결 설정이 필요합니다." }
@@ -334,10 +538,48 @@ export async function loadApprovalWorkspaceData(): Promise<ApprovalWorkspaceData
 
 export async function createMonthlyReportApproval(input: ApprovalInput, requesterId: string, status: ApprovalStatus = "submitted") {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  void requesterId
   const body = text(input.body)
-  const { error } = await supabase.from("approval_requests").insert(buildApprovalRequestPayload(input, requesterId, status, body, "insert"))
+  const payload = buildApprovalRequestPayload(input, body)
+  let attempt = await loadApprovalMutationAttempt("create", {
+    operation: "create",
+    payload,
+    status,
+  })
+  let createdApprovalId = attempt.createdApprovalId
+  let createdUpdatedAt = attempt.createdUpdatedAt
 
-  if (error) throw error
+  if (!createdApprovalId || !createdUpdatedAt) {
+    const { data, error } = await supabase.rpc("create_approval_request_v2", {
+      p_input: payload,
+      p_status: "draft",
+      p_request_id: attempt.createRequestId,
+    })
+
+    if (error) {
+      if (isDefinitiveApprovalMutationError(error)) {
+        clearApprovalMutationAttempt("create", attempt)
+      }
+      throw error
+    }
+    const created = approvalRequestRowFromRpc(data)
+    createdApprovalId = text(created.id)
+    createdUpdatedAt = text(created.updated_at)
+    attempt = updateApprovalMutationAttempt("create", attempt, {
+      createdApprovalId,
+      createdUpdatedAt,
+    })
+  }
+
+  if (status !== "draft") {
+    await transitionApprovalRequest(
+      createdApprovalId,
+      status,
+      createdUpdatedAt,
+      attempt.transitionRequestId,
+    )
+  }
+  clearApprovalMutationAttempt("create", attempt)
 }
 
 export async function updateMonthlyReportApproval(id: string, input: ApprovalInput, status: ApprovalStatus) {
@@ -345,20 +587,76 @@ export async function updateMonthlyReportApproval(id: string, input: ApprovalInp
   const requestId = text(id)
   if (!requestId) throw new Error("수정할 문서를 찾을 수 없습니다.")
   const body = text(input.body)
-  const patch = buildApprovalRequestPayload(input, "", status, body, "update")
-  const { error } = await supabase.from("approval_requests").update(patch).eq("id", requestId)
+  const payload = buildApprovalRequestPayload(input, body)
+  let attempt = await loadApprovalMutationAttempt("update", {
+    operation: "update",
+    approvalId: requestId,
+    payload,
+    status,
+  })
+  if (!attempt.expectedUpdatedAt || !attempt.initialStatus) {
+    const current = await loadApprovalMutationSnapshot(requestId)
+    const initialStatus = text(current.status) as ApprovalStatus
+    if (!approvalStatusValues.has(initialStatus)) {
+      throw new Error("전자결재 상태를 확인하지 못했습니다.")
+    }
+    attempt = updateApprovalMutationAttempt("update", attempt, {
+      expectedUpdatedAt: text(current.updated_at),
+      initialStatus,
+    })
+  }
 
-  if (error) throw error
+  const expectedUpdatedAt = attempt.expectedUpdatedAt
+  const initialStatus = attempt.initialStatus
+  if (!expectedUpdatedAt || !initialStatus) {
+    throw new Error("전자결재 수정 기준을 확인하지 못했습니다.")
+  }
+
+  let postMutationUpdatedAt = attempt.postMutationUpdatedAt
+  if (!postMutationUpdatedAt) {
+    const { data, error } = await supabase.rpc("update_approval_request_v2", {
+      p_approval_id: requestId,
+      p_input: payload,
+      p_status: initialStatus,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_request_id: attempt.requestId,
+    })
+
+    if (error) {
+      if (isDefinitiveApprovalMutationError(error)) {
+        clearApprovalMutationAttempt("update", attempt)
+      }
+      throw error
+    }
+    const updated = approvalRequestRowFromRpc(data)
+    postMutationUpdatedAt = text(updated.updated_at)
+    attempt = updateApprovalMutationAttempt("update", attempt, {
+      postMutationUpdatedAt,
+    })
+  }
+
+  if (status !== initialStatus) {
+    try {
+      await transitionApprovalRequest(
+        requestId,
+        status,
+        postMutationUpdatedAt,
+        attempt.transitionRequestId,
+      )
+    } catch (error) {
+      if (isDefinitiveApprovalMutationError(error)) {
+        clearApprovalMutationAttempt("update", attempt)
+      }
+      throw error
+    }
+  }
+  clearApprovalMutationAttempt("update", attempt)
 }
 
-function buildApprovalRequestPayload(input: ApprovalInput, requesterId: string, status: ApprovalStatus, body: string, mode: "insert" | "update"): Row {
+function buildApprovalRequestPayload(input: ApprovalInput, body: string): Row {
   const title = text(input.title) || `${input.reportMonth || "이번 달"} 월간 보고서`
-  const nextStatus: ApprovalStatus = ["draft", "submitted", "reviewing", "approved", "returned", "canceled"].includes(status)
-    ? status
-    : "submitted"
-  const payload: Row = {
+  return {
     request_type: "monthly_report",
-    status: nextStatus,
     title,
     approver_id: text(input.approverId) || null,
     subject: text(input.subject) || "general",
@@ -372,60 +670,142 @@ function buildApprovalRequestPayload(input: ApprovalInput, requesterId: string, 
     attachment_links: text(input.attachmentLinks) || null,
     memo: text(input.memo) || null,
   }
+}
 
-  if (mode === "insert") payload.requester_id = requesterId || null
-  if (nextStatus === "submitted") {
-    payload.submitted_at = new Date().toISOString()
-    payload.decided_at = null
+function approvalRequestRowFromRpc(data: unknown): Row {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("전자결재 저장 결과를 확인하지 못했습니다.")
   }
-  if (nextStatus === "draft") {
-    payload.submitted_at = null
-    payload.decided_at = null
+  const request = (data as Row).request
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new Error("전자결재 저장 결과를 확인하지 못했습니다.")
   }
-  if (nextStatus === "reviewing") payload.decided_at = null
+  const row = request as Row
+  if (!text(row.id) || !text(row.status) || !text(row.updated_at)) {
+    throw new Error("전자결재 저장 결과가 올바르지 않습니다.")
+  }
+  return row
+}
 
-  return payload
+async function loadApprovalMutationSnapshot(id: string): Promise<Row> {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase
+    .from("approval_requests")
+    .select("id,status,updated_at")
+    .eq("id", id)
+    .single()
+  if (error) throw error
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("수정할 문서를 찾을 수 없습니다.")
+  }
+  const row = data as Row
+  if (!text(row.id) || !text(row.status) || !text(row.updated_at)) {
+    throw new Error("수정할 문서를 찾을 수 없습니다.")
+  }
+  return row
+}
+
+async function transitionApprovalRequest(
+  id: string,
+  status: ApprovalStatus,
+  expectedUpdatedAt: unknown,
+  requestId: string,
+) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase.rpc("transition_approval_request_v2", {
+    p_approval_id: id,
+    p_status: status,
+    p_expected_updated_at: text(expectedUpdatedAt),
+    p_request_id: requestId,
+  })
+  if (error) throw error
+  return approvalRequestRowFromRpc(data)
 }
 
 export async function updateApprovalStatus(id: string, status: ApprovalStatus) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const patch: Row = { status }
-  if (status === "submitted") {
-    patch.submitted_at = new Date().toISOString()
-    patch.decided_at = null
+  const requestId = text(id)
+  if (!requestId) throw new Error("수정할 문서를 찾을 수 없습니다.")
+  let attempt = await loadApprovalMutationAttempt("transition", {
+    operation: "transition",
+    approvalId: requestId,
+    status,
+  })
+  if (!attempt.expectedUpdatedAt) {
+    const current = await loadApprovalMutationSnapshot(requestId)
+    attempt = updateApprovalMutationAttempt("transition", attempt, {
+      expectedUpdatedAt: text(current.updated_at),
+    })
   }
-  if (status === "reviewing") {
-    patch.decided_at = null
+  try {
+    await transitionApprovalRequest(
+      requestId,
+      status,
+      attempt.expectedUpdatedAt,
+      attempt.requestId,
+    )
+  } catch (error) {
+    if (isDefinitiveApprovalMutationError(error)) {
+      clearApprovalMutationAttempt("transition", attempt)
+    }
+    throw error
   }
-  if (status === "approved" || status === "returned" || status === "canceled") {
-    patch.decided_at = new Date().toISOString()
-  }
-  const { error } = await supabase.from("approval_requests").update(patch).eq("id", id)
-  if (error) throw error
+  clearApprovalMutationAttempt("transition", attempt)
 }
 
 export async function deleteApprovalRequest(id: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const requestId = text(id)
   if (!requestId) throw new Error("삭제할 문서를 찾을 수 없습니다.")
+  const attempt = await loadApprovalMutationAttempt("delete", {
+    operation: "delete",
+    approvalId: requestId,
+  })
 
-  const { data, error } = await supabase.from("approval_requests").delete().eq("id", requestId).select("id")
-  if (error) throw error
-  if (!Array.isArray(data) || data.length === 0) {
+  const { data, error } = await supabase.rpc("delete_approval_request_v2", {
+    p_approval_id: requestId,
+    p_request_id: attempt.requestId,
+  })
+  if (error) {
+    if (isDefinitiveApprovalMutationError(error)) {
+      clearApprovalMutationAttempt("delete", attempt)
+    }
+    throw error
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("삭제할 문서를 찾을 수 없습니다.")
   }
+  const receipt = data as Row
+  if (receipt.deleted !== true || text(receipt.approval_id) !== requestId) {
+    throw new Error("전자결재 삭제 결과를 확인하지 못했습니다.")
+  }
+  clearApprovalMutationAttempt("delete", attempt)
 }
 
 export async function addApprovalComment(approvalId: string, authorId: string, body: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  void authorId
   const nextBody = text(body)
   if (!nextBody) throw new Error("댓글을 입력하세요.")
-  const { error } = await supabase.from("approval_comments").insert({
-    approval_id: approvalId,
-    author_id: authorId,
+  const requestId = text(approvalId)
+  if (!requestId) throw new Error("댓글을 남길 문서를 찾을 수 없습니다.")
+  const attempt = await loadApprovalMutationAttempt("comment", {
+    operation: "comment",
+    approvalId: requestId,
     body: nextBody,
   })
-  if (error) throw error
+  const { error } = await supabase.rpc("add_approval_comment_v2", {
+    p_approval_id: requestId,
+    p_body: nextBody,
+    p_request_id: attempt.requestId,
+  })
+  if (error) {
+    if (isDefinitiveApprovalMutationError(error)) {
+      clearApprovalMutationAttempt("comment", attempt)
+    }
+    throw error
+  }
+  clearApprovalMutationAttempt("comment", attempt)
 }
 
 export async function saveApprovalTemplate(input: ApprovalInput, userId: string, name: string) {

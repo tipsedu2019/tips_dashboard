@@ -34,7 +34,9 @@ const slotsMigrationSource = readFileSync("supabase/migrations/20260706105512_ma
 const notificationMigrationSource = readFileSync("supabase/migrations/20260706123000_makeup_notification_controls.sql", "utf8");
 const pushMigrationSource = readOptionalSource("supabase/migrations/20260707143000_dashboard_push_subscriptions.sql");
 const flowTypesMigrationSource = readOptionalSource("supabase/migrations/20260707152220_makeup_request_flow_types.sql");
-const notificationRetentionMigrationSource = readOptionalSource("supabase/migrations/20260707152233_makeup_notification_delivery_retention.sql");
+const notificationMakeupAdapterMigrationSource = readOptionalSource("supabase/migrations/20260716192000_notification_makeup_adapter.sql");
+const notificationMakeupLegacyRouteSource = readOptionalSource("src/app/api/notifications/legacy/makeup/route.ts");
+const makeupApprovalRouteSource = readOptionalSource("src/app/api/makeup-requests/approve/route.ts");
 const refundFlowMigrationSource = readOptionalSource("supabase/migrations/20260708025405_makeup_request_refund_flow.sql");
 const manifestSource = readOptionalSource("public/manifest.webmanifest");
 const serviceWorkerSource = readOptionalSource("public/sw.js");
@@ -92,7 +94,7 @@ function loadMakeupPayloadValidation() {
   const managerRoleSource = sourceBetween(
     serviceSource,
     "function isMakeupManagerRole",
-    "function buildRequestHref",
+    "function getLatestMakeupRequestEvent",
   );
   const payloadSource = sourceBetween(
     serviceSource,
@@ -404,20 +406,20 @@ test("makeup approval completes makeup-bearing requests and keeps cancel-only re
   assert.match(serviceSource, /approveMakeupRequest/);
   assert.match(serviceSource, /const nextStatus = isRefundApprovalRequest\(request\) \? "refund_pending" : hasMakeupPart\(request\) \? "completed" : "makeup_pending"/);
   assert.match(serviceSource, /if \(!isRefundApproval && hasMakeupPart\(request\)\)/);
-  assert.match(serviceSource, /status: nextStatus/);
+  assert.match(serviceSource, /fetch\("\/api\/makeup-requests\/approve"/);
+  assert.match(serviceSource, /expectedStatus: request\.status/);
+  assert.match(serviceSource, /mutationRequestId: crypto\.randomUUID\(\)/);
+  assert.match(makeupApprovalRouteSource, /p_command: "approve"/);
   assert.match(workspaceSource, /approvalRequest/);
   assert.match(workspaceSource, /approvalNote/);
   assert.match(workspaceSource, /DialogTitle>승인 메모/);
   assert.match(workspaceSource, /htmlFor="makeup-approval-note"/);
   assert.match(workspaceSource, /approveMakeupRequest\(approvalRequest\.id, currentUserId, approvalNote\)/);
   assert.match(serviceSource, /export async function approveMakeupRequest\(requestId: string, actorId: string, note = ""\)/);
-  assert.match(serviceSource, /const approvalNote = text\(note\)/);
-  assert.match(serviceSource, /final_note: nullable\(approvalNote\)/);
-  assert.match(serviceSource, /cancel_academic_event_id: nullable\(cancelAcademicEventId\)/);
-  assert.match(serviceSource, /makeup_academic_event_id: nullable\(makeupAcademicEventId\)/);
-  assert.doesNotMatch(serviceSource, /cancel_academic_event_id: cancelAcademicEventId/);
-  assert.doesNotMatch(serviceSource, /makeup_academic_event_id: makeupAcademicEventId/);
-  assert.match(serviceSource, /recordMakeupRequestEvent\(requestId, "approved", \{ actorId, beforeValue: request\.status, afterValue: nextStatus, note: approvalNote \}\)/);
+  assert.match(makeupApprovalRouteSource, /final_note: note/);
+  assert.match(makeupApprovalRouteSource, /cancel_academic_event_id: cancelAcademicEventId/);
+  assert.match(makeupApprovalRouteSource, /makeup_academic_event_id: makeupAcademicEventIds\[0\]/);
+  assert.doesNotMatch(serviceSource, /recordMakeupRequestEvent/);
   assert.doesNotMatch(serviceSource, /const finalNote = buildAutoCompletionNote\(request\)/);
   assert.doesNotMatch(serviceSource, /final_note: nullable\(finalNote\)/);
   assert.doesNotMatch(serviceSource, /recordMakeupRequestEvent\(requestId, "approved", \{ actorId, beforeValue: request\.status, afterValue: "completed", note: finalNote \}\)/);
@@ -510,12 +512,12 @@ test("makeup dialogs provide sr-only descriptions without adding visual helper c
 test("makeup pending requests can continue to makeup scheduling or refund tracking", () => {
   assert.match(serviceSource, /export async function requestMakeupRefund\(requestId: string, actorId: string, note: string\)/);
   assert.match(serviceSource, /canTransitionMakeupRequest\(request\.status, "approval_pending"/);
-  assert.match(serviceSource, /status: "approval_pending"/);
-  assert.match(serviceSource, /recordMakeupRequestEvent\(requestId, "refund_requested", \{ actorId, beforeValue: request\.status, afterValue: "approval_pending"/);
+  assert.match(serviceSource, /p_command: "refund_requested"/);
+  assert.match(serviceSource, /p_patch: \{ note: refundReason \}/);
   assert.match(serviceSource, /function isRefundApprovalRequest\(request: MakeupRequest\)/);
   assert.match(serviceSource, /const nextStatus = isRefundApprovalRequest\(request\) \? "refund_pending" : hasMakeupPart\(request\) \? "completed" : "makeup_pending"/);
   assert.match(serviceSource, /export async function completeMakeupRefund\(requestId: string, actorId: string, note = ""\)/);
-  assert.match(serviceSource, /recordMakeupRequestEvent\(requestId, "refund_completed"/);
+  assert.match(serviceSource, /p_command: "refund_completed"/);
   assert.match(workspaceSource, /onSchedulePendingMakeup/);
   assert.match(workspaceSource, /onRequestRefund/);
   assert.match(workspaceSource, /onCompleteRefund/);
@@ -770,15 +772,13 @@ test("makeup notification controls can preview and edit per-process content temp
   assert.match(serviceSource, /function getDefaultMakeupNotificationTitleTemplate/);
   assert.match(serviceSource, /function getDefaultMakeupNotificationBodyTemplate/);
   assert.match(serviceSource, /function renderMakeupNotificationTemplate/);
-  assert.match(serviceSource, /function getNotificationTriggerTemplateSetting/);
   assert.match(serviceSource, /export async function updateMakeupNotificationTriggerContent/);
   assert.match(serviceSource, /MAKEUP_NOTIFICATION_CHANNELS\.map\(\(channel\) => \(\{/);
   assert.match(serviceSource, /title_template: titleTemplate/);
   assert.match(serviceSource, /body_template: bodyTemplate/);
-  assert.match(serviceSource, /renderMakeupNotificationTemplate\(templateSetting\?\.titleTemplate/);
-  assert.match(serviceSource, /renderMakeupNotificationTemplate\(templateSetting\?\.bodyTemplate/);
-  assert.match(serviceSource, /function appendLocalMakeupRequestEvent/);
-  assert.match(serviceSource, /function getMakeupApprovalNote/);
+  assert.match(notificationMakeupAdapterMigrationSource, /notification_makeup_render_template_v1/);
+  assert.match(notificationMakeupAdapterMigrationSource, /'\{보강 강의실\}'/);
+  assert.match(notificationMakeupAdapterMigrationSource, /'\{승인 메모\}'/);
   assert.match(workspaceSource, /updateMakeupNotificationTriggerContent/);
   assert.match(workspaceSource, /selectedNotificationSetting/);
   assert.match(workspaceSource, /notificationTemplateInput/);
@@ -826,11 +826,9 @@ test("makeup notification controls can preview and edit per-process content temp
   ]) {
     assert.match(tableColumnSource, new RegExp(`label: "${variable}"`));
   }
-  assert.match(serviceSource, /const roomSummary = buildMakeupNotificationRoomSummary\(request\)/);
-  assert.match(serviceSource, /"보강 강의실": roomSummary/);
-  assert.match(serviceSource, /"승인 메모": getMakeupApprovalNote\(request\)/);
-  assert.match(serviceSource, /"승인취소 메모": getMakeupNotificationEventNote\(request, \["approval_canceled", "completed_canceled"\]\)/);
-  assert.doesNotMatch(serviceSource, /"승인 메모": request\.finalNote \|\| "-"/);
+  assert.match(notificationMakeupAdapterMigrationSource, /'makeup_room_spaced', request\.makeup_classroom/);
+  assert.match(notificationMakeupAdapterMigrationSource, /'approval_note', coalesce\([\s\S]*history\.event_type = 'approved'/);
+  assert.match(notificationMakeupAdapterMigrationSource, /'canceled_note'/);
   assert.match(workspaceSource, /function getMakeupApprovalNoteValue/);
   assert.match(workspaceSource, /case "finalNote":[\s\S]*getMakeupApprovalNoteValue\(request\)/);
   assert.doesNotMatch(workspaceSource, /case "finalNote":[\s\S]*return request\.finalNote \|\| "-"/);
@@ -984,43 +982,42 @@ test("makeup workspace opens row details and uses cards on narrow viewports", ()
   assert.match(workspaceSource, /getRequestEvent\(request, \["approval_canceled", "completed_canceled"\]\)\?\.note/);
 });
 
-test("makeup service writes notifications and sends google chat without blocking state changes", () => {
-  assert.match(serviceSource, /dashboard_notifications/);
-  assert.match(serviceSource, /sendGoogleChatNotification/);
-  assert.match(serviceSource, /function buildRequestUrl/);
-  assert.match(serviceSource, /NEXT_PUBLIC_SITE_URL/);
-  assert.match(serviceSource, /NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN/);
-  assert.match(serviceSource, /function formatGoogleChatLink/);
-  assert.match(serviceSource, /<\$\{url\}\|휴보강 바로 열기>/);
-  assert.match(serviceSource, /const requestUrl = buildRequestUrl\(request\.id\)/);
-  assert.match(serviceSource, /const chatMessageBody = \[chatContent\.title, chatContent\.body, formatGoogleChatLink\(requestUrl\)\]/);
-  assert.match(serviceSource, /sendGoogleChatNotification\(chatChannel, chatMessageBody/);
-  assert.match(serviceSource, /GOOGLE_CHAT_WEBHOOK_EXECUTIVE/);
-  assert.match(serviceSource, /GOOGLE_CHAT_WEBHOOK_ADMIN/);
-  assert.match(serviceSource, /google_chat_executive/);
-  assert.match(serviceSource, /cancelCompletedMakeupRequest/);
-  assert.match(serviceSource, /deleteAcademicEventById/);
+test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리하고 보관 이력을 읽기 전용으로 유지한다", () => {
+  const pruneOverrideSource = sourceBetween(
+    notificationMakeupAdapterMigrationSource,
+    "create or replace function public.prune_makeup_notification_deliveries",
+    "create or replace function dashboard_private.notification_makeup_event_key_v1",
+  );
+
+  assert.match(serviceSource, /create_makeup_request_v2/);
+  assert.match(serviceSource, /transition_makeup_request_v2/);
+  assert.match(serviceSource, /delete_makeup_request_v2/);
+  assert.match(serviceSource, /dispatchLegacyMakeupNotification/);
+  assert.match(serviceSource, /await dispatchLegacyMakeupNotification\(sourceEventId\)/);
+  assert.match(serviceSource, /keepalive: true/);
+  assert.match(notificationMakeupLegacyRouteSource, /createGoogleChatProvider/);
+  assert.match(notificationMakeupLegacyRouteSource, /createWebPushProvider/);
+  assert.match(notificationMakeupLegacyRouteSource, /prepare_makeup_legacy_web_push_v1/);
+  assert.match(notificationMakeupLegacyRouteSource, /readLegacyGoogleChatWebhookUrl/);
   assert.match(serviceSource, /makeup_notification_settings/);
   assert.match(serviceSource, /makeup_notification_deliveries/);
   assert.match(serviceSource, /const MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT = 40/);
   assert.match(serviceSource, /async function readNotificationDeliveryRows/);
   assert.match(serviceSource, /\.from\("makeup_notification_deliveries"\)[\s\S]*\.order\("created_at", \{ ascending: false \}\)[\s\S]*\.limit\(MAKEUP_NOTIFICATION_DELIVERY_DISPLAY_LIMIT\)/);
   assert.doesNotMatch(serviceSource, /readTable\("makeup_notification_deliveries", "\*", true\)/);
-  assert.doesNotMatch(serviceSource, /\.sort\(\(left, right\) => right\.createdAt\.localeCompare\(left\.createdAt\)\)\s*\.slice\(0, 40\)/);
-  assert.match(notificationRetentionMigrationSource, /create or replace function public\.prune_makeup_notification_deliveries/);
-  assert.match(notificationRetentionMigrationSource, /row_number\(\) over \(order by created_at desc, id desc\)/);
-  assert.match(notificationRetentionMigrationSource, /where row_number > 500/);
-  assert.match(notificationRetentionMigrationSource, /after insert on public\.makeup_notification_deliveries/);
-  assert.match(serviceSource, /dedupe_key/);
-  assert.match(serviceSource, /buildNotificationDedupeKey/);
-  assert.match(serviceSource, /recordNotificationDelivery/);
-  assert.match(serviceSource, /const addPersonalRecipient = \(profileId: string\) => \{\s*if \(!profileId\) return\s*personalRecipients\.add\(profileId\)\s*\}/);
-  assert.doesNotMatch(serviceSource, /managementProfileIds\.includes\(profileId\)/);
-  assert.match(serviceSource, /await Promise\.all\(\[[\s\S]*channel: "dashboard_personal"[\s\S]*channel: "dashboard_management"[\s\S]*\]\)/);
-  assert.match(serviceSource, /for \(const chatChannel of chatTargets\) \{[\s\S]*status: "disabled"[\s\S]*continue/);
-  assert.match(serviceSource, /applyMakeupRequestToSchedulePlan/);
-  assert.match(serviceSource, /runAcademicEventMutation/);
-  assert.match(serviceSource, /buildMakeupCalendarDrafts/);
+  assert.match(pruneOverrideSource, /notification_refresh_makeup_retention_snapshot_v1/);
+  assert.doesNotMatch(pruneOverrideSource, /delete\s+from\s+public\.makeup_notification_deliveries/i);
+  assert.doesNotMatch(serviceSource, /recordNotificationDelivery|createDashboardNotification|sendGoogleChatNotification|sendDashboardWebPushNotification/);
+  assert.doesNotMatch(serviceSource, /fetch\("\/api\/(?:google-chat|web-push)"/);
+  assert.doesNotMatch(serviceSource, /applyMakeupRequestToSchedulePlan|buildMakeupCalendarDrafts|calendar_events/);
+  assert.match(makeupApprovalRouteSource, /applyMakeupRequestToSchedulePlan/);
+  assert.match(makeupApprovalRouteSource, /prepareAcademicEvent/);
+  assert.match(makeupApprovalRouteSource, /calendar_events: calendarEvents/);
+  assert.match(notificationMakeupAdapterMigrationSource, /notification_apply_makeup_calendar_effects_v1/);
+  assert.match(notificationMakeupAdapterMigrationSource, /notification_revert_makeup_calendar_effects_v1/);
+  assert.doesNotMatch(serviceSource, /\.from\("classes"\)/);
+  assert.doesNotMatch(serviceSource, /\.from\("academic_events"\)\.(?:upsert|delete)/);
+  assert.match(makeupApprovalRouteSource, /buildMakeupCalendarDrafts/);
   assert.match(serviceSource, /requestKind: MakeupRequestKind/);
   assert.match(serviceSource, /request_kind: input\.requestKind/);
   assert.match(serviceSource, /const hasCancel = hasCancelPart\(input\)/);
@@ -1028,26 +1025,48 @@ test("makeup service writes notifications and sends google chat without blocking
   assert.match(serviceSource, /if \(hasCancel && !text\(input\.cancelDate\)\)/);
   assert.match(serviceSource, /if \(hasMakeup && input\.makeupSlots\.some\(\(slot\) => !text\(slot\.classroom\)\)\)/);
   assert.match(serviceSource, /const nextStatus = isRefundApprovalRequest\(request\) \? "refund_pending" : hasMakeupPart\(request\) \? "completed" : "makeup_pending"/);
-  assert.match(serviceSource, /requestMakeupRefund/);
-  assert.match(serviceSource, /refund_pending/);
-  assert.match(serviceSource, /completed_by: nextStatus === "completed" \? actorId : null/);
-  assert.match(serviceSource, /const calendarDrafts = buildMakeupCalendarDrafts\(request\)/);
-  assert.doesNotMatch(serviceSource, /const \[cancelDraft, \.\.\.makeupDrafts\] = buildMakeupCalendarDrafts\(request\)/);
-  assert.match(serviceSource, /const resubmittedAt = new Date\(\)\.toISOString\(\)/);
-  assert.match(serviceSource, /const \{ request: resubmittedRequest \} = await loadSingleMakeupRequest\(requestId, data\)/);
-  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*request: resubmittedRequest[\s\S]*eventType: "resubmitted"/);
-  assert.match(serviceSource, /const revisionRequestedAt = new Date\(\)\.toISOString\(\)/);
-  assert.match(serviceSource, /const returnedReason = text\(note\)/);
-  assert.match(serviceSource, /returnedReason \}/);
-  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*eventType: "revision_requested"/);
-  assert.match(serviceSource, /const rejectedAt = new Date\(\)\.toISOString\(\)/);
-  assert.match(serviceSource, /const rejectedReason = text\(note\)/);
-  assert.match(serviceSource, /rejectedReason \}/);
-  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*eventType: "rejected"/);
-  assert.match(serviceSource, /const canceledAt = new Date\(\)\.toISOString\(\)/);
-  assert.doesNotMatch(serviceSource, /final_note: nullable\(note \|\| request\.finalNote\)/);
-  assert.match(serviceSource, /canceledAt/);
-  assert.match(serviceSource, /appendLocalMakeupRequestEvent\(\{[\s\S]*eventType: "approval_canceled"/);
+  for (const command of [
+    "revision_requested",
+    "reject",
+    "refund_requested",
+    "refund_completed",
+    "resubmit",
+    "approval_canceled",
+  ]) {
+    assert.match(serviceSource, new RegExp(`p_command: "${command}"`));
+  }
+  assert.match(makeupApprovalRouteSource, /const calendarDrafts = buildMakeupCalendarDrafts\(requestRow\)/);
+  assert.match(makeupApprovalRouteSource, /buildRoomAvailability/);
+  assert.match(makeupApprovalRouteSource, /actor_profile_id: actor\.user\.id/);
+  assert.match(notificationMakeupAdapterMigrationSource, /makeup_approval_server_required/);
+  assert.match(notificationMakeupAdapterMigrationSource, /to authenticated, service_role/);
+  assert.doesNotMatch(serviceSource, /appendLocalMakeupRequestEvent|recordMakeupRequestEvent|notifyMakeupRequest/);
+});
+test("휴보강 알림 딥링크는 신청 ID 상세를 열고 닫을 때 URL 상태를 정리한다", () => {
+  assert.match(workspaceSource, /useSearchParams\(\)/);
+  assert.match(workspaceSource, /searchParams\.get\("requestId"\)/);
+  assert.match(workspaceSource, /data\.requests\.find\(\(request\) => request\.id === requestedRequestId\)/);
+  assert.match(workspaceSource, /setSelectedDetailRequest\(requestedRequest\)/);
+  assert.match(workspaceSource, /consumedDeepLinkRequestIdRef\.current = ""/);
+  assert.match(workspaceSource, /const closeDetailRequest = useCallback\(\(\) => \{[\s\S]*setSelectedDetailRequest\(null\)[\s\S]*clearRequestDeepLink\(\)/);
+  assert.match(workspaceSource, /nextSearchParams\.delete\("requestId"\)/);
+  assert.match(workspaceSource, /onOpenChange=\{\(open\) => \{[\s\S]*closeDetailRequest\(\)/);
+  assert.match(notificationMakeupAdapterMigrationSource, /\/admin\/makeup-requests\?requestId=/);
+});
+test("휴보강 업무 저장은 고정 RPC를 사용하고 알림 후처리 실패와 분리된다", () => {
+  assert.match(serviceSource, /create_makeup_request_v2/);
+  assert.match(serviceSource, /transition_makeup_request_v2/);
+  assert.match(serviceSource, /delete_makeup_request_v2/);
+  assert.match(serviceSource, /dispatchLegacyMakeupNotification/);
+  assert.match(serviceSource, /JSON\.stringify\(\{ sourceEventId \}\)/);
+  assert.doesNotMatch(serviceSource, /fetch\("\/api\/google-chat"/);
+  assert.doesNotMatch(serviceSource, /fetch\("\/api\/web-push"/);
+  assert.match(notificationMakeupLegacyRouteSource, /Object\.keys\(body\)/);
+  assert.doesNotMatch(notificationMakeupLegacyRouteSource, /begin_legacy_notification_dispatch_v1/);
+  assert.match(notificationMakeupAdapterMigrationSource, /begin_legacy_notification_dispatch_v1/);
+  assert.match(notificationMakeupLegacyRouteSource, /finalize_makeup_legacy_google_chat_v1/);
+  assert.match(notificationMakeupAdapterMigrationSource, /notification_makeup_operator_edit_conflict/);
+  assert.match(notificationMakeupAdapterMigrationSource, /on conflict \(legacy_delivery_id\) do nothing/);
 });
 
 test("dashboard header exposes a persistent notification popover", () => {
@@ -1134,16 +1153,15 @@ test("dashboard push subscriptions are stored behind authenticated RLS", () => {
   assert.match(pushSubscriptionsRouteSource, /export async function DELETE/);
 });
 
-test("makeup dashboard notifications fan out to web push without blocking workflow", () => {
-  assert.match(webPushRouteSource, /import webpush from "web-push"/);
-  assert.match(webPushRouteSource, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(webPushRouteSource, /WEB_PUSH_PRIVATE_KEY/);
-  assert.match(webPushRouteSource, /setVapidDetails/);
-  assert.match(webPushRouteSource, /sendNotification/);
-  assert.match(webPushRouteSource, /statusCode === 404 \|\| statusCode === 410/);
-  assert.match(serviceSource, /sendDashboardWebPushNotification/);
-  assert.match(serviceSource, /fetch\("\/api\/web-push"/);
-  assert.match(serviceSource, /void sendDashboardWebPushNotification/);
+test("휴보강 저장 경로는 폐쇄된 브라우저 웹푸시 provider를 직접 호출하지 않는다", () => {
+  assert.match(webPushRouteSource, /notification_payload_forbidden/);
+  assert.match(webPushRouteSource, /NOTIFICATION_CONTRACT_VERSION = "2"/);
+  assert.match(webPushRouteSource, /contractJson\(\{[\s\S]*notification_payload_forbidden[\s\S]*\}, 422\)/);
+  assert.doesNotMatch(webPushRouteSource, /web-push|WEB_PUSH_PRIVATE_KEY|setVapidDetails|sendNotification/);
+  assert.doesNotMatch(serviceSource, /sendDashboardWebPushNotification/);
+  assert.doesNotMatch(serviceSource, /fetch\("\/api\/web-push"/);
+  assert.match(serviceSource, /\/api\/notifications\/legacy\/makeup/);
+  assert.doesNotMatch(notificationMakeupLegacyRouteSource, /\/api\/web-push/);
 });
 
 test("google chat route keeps webhook URLs server-side", () => {

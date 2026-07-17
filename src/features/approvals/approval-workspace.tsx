@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
 import { Bell, Check, ClipboardCheck, FileCheck2, Paperclip, Pencil, RefreshCw, RotateCcw, Save, Send, Trash2, X } from "lucide-react"
+import { useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -454,6 +455,7 @@ function approvalLineOptions(
 
 export function ApprovalWorkspace() {
   const { user, canManageAll, isStaff, isAdmin } = useAuth()
+  const searchParams = useSearchParams()
   const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
   const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
   const [data, setData] = useState<ApprovalWorkspaceData>({ schemaReady: true, requests: [], profiles: [], templates: [] })
@@ -473,6 +475,7 @@ export function ApprovalWorkspace() {
   const [editingRequestId, setEditingRequestId] = useState("")
   const [editingRequestStatus, setEditingRequestStatus] = useState<ApprovalStatus>("draft")
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false)
+  const [deepLinkedApprovalId, setDeepLinkedApprovalId] = useState("")
   const canApprove = canManageAll || isStaff
   const canDeleteClosedApprovals = isAdmin
   const userId = user?.id || ""
@@ -494,6 +497,35 @@ export function ApprovalWorkspace() {
     void reload()
   }, [reload])
 
+  useEffect(() => {
+    if (loading) return
+    const approvalId = searchParams.get("approvalId") || ""
+    if (!approvalId || deepLinkedApprovalId === approvalId) return
+    const request = data.requests.find((item) => item.id === approvalId)
+    if (!request) return
+    if (request.requesterId === userId) setView("mine")
+    else if (request.approverId === userId && !isClosedApproval(request.status)) setView("review")
+    else if (request.status === "approved") setView("done")
+    else if (request.status === "returned") setView("returned")
+    else setView("open")
+    setDeepLinkedApprovalId(approvalId)
+    const nextSearchParams = new URLSearchParams(window.location.search)
+    nextSearchParams.delete("approvalId")
+    const queryString = nextSearchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }, [data.requests, deepLinkedApprovalId, loading, searchParams, userId])
+
+  useEffect(() => {
+    if (!deepLinkedApprovalId) return
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`approval-${deepLinkedApprovalId}`)?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [deepLinkedApprovalId, view])
+
   const approvalCounts = useMemo(() => {
     const requests = data.requests
     return {
@@ -507,12 +539,21 @@ export function ApprovalWorkspace() {
 
   const visibleRequests = useMemo(() => {
     const requests = data.requests
-    if (view === "mine") return requests.filter((request) => request.requesterId === userId)
-    if (view === "review") return requests.filter((request) => request.approverId === userId && !isClosedApproval(request.status))
-    if (view === "open") return requests.filter((request) => !isClosedApproval(request.status))
-    if (view === "done") return requests.filter((request) => request.status === "approved")
-    return requests.filter((request) => request.status === "returned")
-  }, [data.requests, userId, view])
+    const filtered = view === "mine"
+      ? requests.filter((request) => request.requesterId === userId)
+      : view === "review"
+        ? requests.filter((request) => request.approverId === userId && !isClosedApproval(request.status))
+        : view === "open"
+          ? requests.filter((request) => !isClosedApproval(request.status))
+          : view === "done"
+            ? requests.filter((request) => request.status === "approved")
+            : requests.filter((request) => request.status === "returned")
+    const deepLinkedRequest = requests.find((request) => request.id === deepLinkedApprovalId)
+    if (!deepLinkedRequest || filtered.some((request) => request.id === deepLinkedRequest.id)) {
+      return filtered
+    }
+    return [deepLinkedRequest, ...filtered]
+  }, [data.requests, deepLinkedApprovalId, userId, view])
 
   const approverOptions = useMemo(
     () => data.profiles.filter((profile) => ["admin", "staff", "super_admin", "manager"].includes(profile.role) && profile.id !== userId),
@@ -1099,6 +1140,7 @@ export function ApprovalWorkspace() {
                 userId={userId}
                 saving={saving}
                 canDelete={canDeleteApprovalRequest(request)}
+                highlighted={request.id === deepLinkedApprovalId}
                 onEdit={editApproval}
                 onStatusChange={changeStatus}
                 onAddComment={addComment}
@@ -1166,6 +1208,7 @@ function ApprovalRequestRow({
   userId,
   saving,
   canDelete,
+  highlighted,
   onEdit,
   onStatusChange,
   onAddComment,
@@ -1176,6 +1219,7 @@ function ApprovalRequestRow({
   userId: string
   saving: boolean
   canDelete: boolean
+  highlighted: boolean
   onEdit: (request: ApprovalRequest) => void
   onStatusChange: (request: ApprovalRequest, status: ApprovalStatus) => void
   onAddComment: (request: ApprovalRequest, body: string) => void
@@ -1196,7 +1240,10 @@ function ApprovalRequestRow({
   }
 
   return (
-    <article className="grid gap-3 p-4">
+    <article
+      id={`approval-${request.id}`}
+      className={`grid gap-3 p-4 ${highlighted ? "bg-primary/5 ring-1 ring-inset ring-primary/30" : ""}`}
+    >
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -1257,7 +1304,7 @@ function ApprovalRequestRow({
         </div>
       </div>
 
-      <details className="rounded-md border p-3">
+      <details className="rounded-md border p-3" open={highlighted || undefined}>
         <summary className="cursor-pointer text-sm font-semibold">내용</summary>
         <div className="mt-3 grid gap-3">
           <pre className="whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-sm font-sans">{request.body || request.classSummary || "-"}</pre>

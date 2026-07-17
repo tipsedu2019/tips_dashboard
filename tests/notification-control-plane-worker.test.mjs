@@ -7,8 +7,16 @@ const workerMigrationUrl = new URL(
   "../supabase/migrations/20260716112000_notification_control_plane_worker_rpc.sql",
   import.meta.url,
 )
+const workerForwardMigrationUrl = new URL(
+  "../supabase/migrations/20260716195900_notification_control_plane_forward_compat.sql",
+  import.meta.url,
+)
 const adapterModuleUrl = new URL(
   "../src/features/notifications/server/notification-workflow-adapter.ts",
+  import.meta.url,
+)
+const approvalAdapterModuleUrl = new URL(
+  "../src/features/notifications/server/adapters/approvals-notification-adapter.ts",
   import.meta.url,
 )
 const workerModuleUrl = new URL(
@@ -313,7 +321,11 @@ function createRpcHarness(responders = {}) {
     record_notification_worker_heartbeat_v1: null,
     finish_notification_orchestration_job_v1: { ok: true },
     finalize_notification_delivery_v1: { ok: true },
-    commit_notification_in_app_delivery_v1: { ok: true },
+    prepare_notification_immediate_delivery_v1: createBegunGoogleChatContext(),
+    register_notification_external_attempt_v1: {
+      allowed: true,
+      attempt_id: "70000000-0000-4000-8000-000000000011",
+    },
   }
   return {
     calls,
@@ -436,8 +448,84 @@ test("worker migration은 잠긴 25개 RPC 서명을 정확히 구현하고 이�
   assert.doesNotMatch(source, /notification_worker_secret|pg_cron|cron\.schedule|notification-worker\/run/i)
 })
 
+test("이미 적용된 worker migration은 보존하고 공통 안전성 변경은 순방향 migration으로 적용한다", async () => {
+  const [historical, forward] = await Promise.all([
+    readFile(workerMigrationUrl, "utf8"),
+    readFile(workerForwardMigrationUrl, "utf8"),
+  ])
+  assert.doesNotMatch(forward, /^\+/m)
+
+  const historicalMaterialize = functionBlock(historical, "materialize_notification_delivery_v1")
+  const historicalFanout = functionBlock(historical, "apply_notification_fanout_batch_v1")
+  const historicalBeginLegacy = functionBlock(historical, "begin_legacy_notification_dispatch_v1")
+  assert.doesNotMatch(historicalMaterialize, /v_rule_snapshot\s+jsonb/i)
+  assert.match(historicalFanout, /'outcome',\s*'superseded'/i)
+  assert.doesNotMatch(historicalBeginLegacy, /idempotent_dispatch_replay/i)
+
+  const materialize = functionBlock(forward, "materialize_notification_delivery_v1")
+  assert.match(materialize, /jsonb_array_elements\(v_event\.rule_snapshot\)/i)
+  assert.match(materialize, /v_rule_snapshot\s*->>\s*'enabled'/i)
+  assert.doesNotMatch(materialize, /v_rule\.revision\s*<>\s*p_rule_revision/i)
+  assert.doesNotMatch(materialize, /v_rule\.active_template_id\s*<>\s*p_template_id/i)
+  assert.doesNotMatch(
+    materialize,
+    /case when v_state\s*->>\s*'status'\s*=\s*'pending' then pg_catalog\.clock_timestamp\(\)/i,
+  )
+  assert.match(materialize, /else 5\s+end,\s+null\s*\)\s*on conflict/i)
+
+  const fanout = functionBlock(forward, "apply_notification_fanout_batch_v1")
+  assert.doesNotMatch(
+    fanout,
+    /rule\.revision\s*=\s*p_rule_revision[\s\S]*?'outcome',\s*'superseded'/i,
+  )
+
+  const beginLegacy = functionBlock(forward, "begin_legacy_notification_dispatch_v1")
+  assert.match(beginLegacy, /p_channel_key = 'web_push' and rule\.channel_key = 'in_app'/i)
+  assert.match(beginLegacy, /v_claim\.state in \('dispatch_started', 'closed'\)/i)
+  assert.match(beginLegacy, /idempotent_dispatch_replay/i)
+  assert.match(
+    beginLegacy,
+    /'dispatch_token',\s*v_claim\.dispatch_token[\s\S]*?'dispatch_already_started'/i,
+  )
+
+  const reaper = functionBlock(forward, "reap_notification_leases_v1")
+  assert.match(
+    reaper,
+    /delivery\.status = 'claimed'[\s\S]*?set status = 'pending', status_reason = null,\s*next_attempt_at = null/i,
+  )
+  assert.match(
+    reaper,
+    /delivery\.channel_key = 'customer_message'[\s\S]*?complete_registration_admission_delivery_v1\(/i,
+  )
+  assert.match(
+    reaper,
+    /complete_registration_admission_delivery_v1\([\s\S]*?'unknown'[\s\S]*?'delivery_unknown'[\s\S]*?'solapi_worker_lost_after_send_start'/i,
+  )
+  assert.match(
+    reaper,
+    /delivery\.status = 'sending'[\s\S]*?delivery\.channel_key <> 'customer_message'/i,
+  )
+  assert.match(
+    reaper,
+    /delivery\.status = 'claimed'[\s\S]*?delivery\.channel_key = 'customer_message'[\s\S]*?set status = 'pending'/i,
+  )
+  assert.match(reaper, /pg_try_advisory_xact_lock[\s\S]*?registration-admission-message:/i)
+  assert.match(reaper, /join public\.ops_registration_messages message[\s\S]*?message\.id::text = event_row\.source_id/i)
+  assert.match(reaper, /message\.template_key = 'admission_application'/i)
+  assert.match(reaper, /message\.status = 'pending'[\s\S]*?message\.claim_active/i)
+  assert.match(reaper, /ownership\.owner_kind = 'canonical'[\s\S]*?ownership\.state = 'reserved'/i)
+  assert.doesNotMatch(reaper, /event_row\.source_id::uuid/i)
+  assert.doesNotMatch(
+    reaper,
+    /for v_candidate in[\s\S]*?for update[\s\S]*?complete_registration_admission_delivery_v1\(/i,
+  )
+})
+
 test("worker migration은 원자 이벤트·SKIP LOCKED·claim token·lease 복구·begin-send 시도 증가를 고정한다", async () => {
-  const source = await readFile(workerMigrationUrl, "utf8")
+  const [source, forward] = await Promise.all([
+    readFile(workerMigrationUrl, "utf8"),
+    readFile(workerForwardMigrationUrl, "utf8"),
+  ])
   const trimmed = source.trim()
 
   assert.match(trimmed, /^begin;\s*/i)
@@ -476,8 +564,19 @@ test("worker migration은 원자 이벤트·SKIP LOCKED·claim token·lease 복�
   assert.match(beginSend, /claim_token/i)
   assert.match(beginSend, /cancel_requested_at/i)
 
-  const upsert = functionBlock(source, "materialize_notification_delivery_v1")
+  const upsert = functionBlock(forward, "materialize_notification_delivery_v1")
   assert.match(upsert, /workflow_key\s*=\s*'registration'[\s\S]*event_key\s*=\s*'registration\.appointment_reminder_due'[\s\S]*then\s+3/i)
+  assert.match(upsert, /jsonb_array_elements\(v_event\.rule_snapshot\)/i)
+  assert.match(upsert, /v_rule_snapshot\s*->>\s*'enabled'/i)
+  assert.doesNotMatch(upsert, /v_rule\.revision\s*<>\s*p_rule_revision/i)
+  assert.doesNotMatch(upsert, /v_rule\.active_template_id\s*<>\s*p_template_id/i)
+
+  const applyFanout = functionBlock(forward, "apply_notification_fanout_batch_v1")
+  assert.doesNotMatch(
+    applyFanout,
+    /rule\.revision\s*=\s*p_rule_revision[\s\S]*?'outcome',\s*'superseded'/i,
+    "이미 기록된 이벤트의 규칙 스냅샷은 이후 설정 변경으로 무효화되면 안 된다",
+  )
 
   const claimDeliveries = functionBlock(source, "claim_notification_deliveries_v1")
   assert.match(claimDeliveries, /'attempt_count',\s*v_delivery\.attempt_count/i)
@@ -1610,6 +1709,68 @@ test("worker는 adapter 선검증 취소를 begin-send보다 먼저 확정하고
   assertNoSensitiveValue(finalize.parameters)
 })
 
+test("전자결재의 비활성 수신자 재검증은 실제 승인 adapter 경로에서 provider를 0회 호출한다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const { createApprovalsNotificationAdapter } = await import(approvalAdapterModuleUrl)
+  const sourceId = "70000000-0000-4000-8000-000000000071"
+  let authoritativeInput = null
+  let providerLookups = 0
+  const adapter = createApprovalsNotificationAdapter({
+    async revalidateAuthoritativeSource(input) {
+      authoritativeInput = clone(input)
+      return { ok: false, status: "canceled", reason: "recipient_revoked" }
+    },
+  })
+  const claim = createDeliveryClaim({
+    workflow_key: "approvals",
+    event_key: "approval.submitted",
+    source_type: "approval_event",
+    source_id: sourceId,
+    source_revision: null,
+    target_generation: "0",
+    channel_key: "web_push",
+    target: {
+      target_kind: "profile",
+      target_key: `profile:${PROFILE_ID}`,
+      target_profile_id: PROFILE_ID,
+      connection_key: null,
+      target_snapshot: { profile_id: PROFILE_ID },
+    },
+  })
+  const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim] })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: (workflowKey) => workflowKey === "approvals" ? adapter : null,
+    rpc: harness.rpc,
+    getProvider: () => {
+      providerLookups += 1
+      return {
+        async send() {
+          throw new Error("비활성 전자결재 수신자에게 provider를 호출하면 안 됩니다.")
+        },
+      }
+    },
+    createRunId: () => RUN_ID,
+  })
+
+  const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+
+  assert.equal(result.deliveries, 1)
+  assert.equal(authoritativeInput.workflowKey, "approvals")
+  assert.equal(authoritativeInput.eventKey, "approval.submitted")
+  assert.equal(authoritativeInput.sourceType, "approval_event")
+  assert.equal(authoritativeInput.sourceId, sourceId)
+  assert.equal(authoritativeInput.sourceRevision, null)
+  assert.equal(authoritativeInput.targetGeneration, "0")
+  assert.equal(providerLookups, 0)
+  assert.equal(harness.calls.some((call) => call.name === "begin_notification_delivery_send_v1"), false)
+  const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+  assert.equal(finalize.parameters.p_status, "canceled")
+  assert.equal(finalize.parameters.p_status_reason, "recipient_revoked")
+  assert.equal(finalize.parameters.p_provider_message_id, null)
+  assert.equal(finalize.parameters.p_provider_response_code, null)
+  assertNoSensitiveValue(finalize.parameters)
+})
+
 test("worker는 begin-send가 돌려준 canonical context 하나만 provider에 넘기고 unknown을 자동 재시도하지 않는다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   const begunContext = createBegunGoogleChatContext()
@@ -1617,9 +1778,16 @@ test("worker는 begin-send가 돌려준 canonical context 하나만 provider에 
   let providerInput = null
   const harness = createRpcHarness({
     claim_notification_deliveries_v1: [createDeliveryClaim()],
-    begin_notification_delivery_send_v1: async () => {
-      timeline.push("begin")
+    prepare_notification_immediate_delivery_v1: async () => {
+      timeline.push("prepare")
       return begunContext
+    },
+    register_notification_external_attempt_v1: async () => {
+      timeline.push("register")
+      return {
+        allowed: true,
+        attempt_id: "70000000-0000-4000-8000-000000000011",
+      }
     },
     finalize_notification_delivery_v1: async () => {
       timeline.push("finalize")
@@ -1650,10 +1818,45 @@ test("worker는 begin-send가 돌려준 canonical context 하나만 provider에 
   const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
 
   assert.equal(result.deliveries, 1)
-  assert.deepEqual(timeline, ["begin", "provider", "finalize"])
+  assert.deepEqual(timeline, ["prepare", "register", "provider", "finalize"])
   assert.deepEqual(providerInput, begunContext)
-  const begin = harness.calls.find((call) => call.name === "begin_notification_delivery_send_v1")
-  assert.deepEqual(begin.parameters, { p_delivery_id: DELIVERY_ID, p_claim_token: CLAIM_TOKEN })
+  const prepare = harness.calls.find((call) => (
+    call.name === "prepare_notification_immediate_delivery_v1"
+  ))
+  assert.deepEqual(prepare.parameters, {
+    p_workflow_key: "tasks",
+    p_event_id: EVENT_ID,
+    p_delivery_id: DELIVERY_ID,
+    p_claim_token: CLAIM_TOKEN,
+    p_event_key: "task.created",
+    p_source_type: "ops_task",
+    p_source_id: "task-42",
+    p_source_revision: BIG_REVISION,
+    p_rule_id: RULE_ID,
+    p_rule_revision: BIG_REVISION,
+    p_target_generation: TARGET_GENERATION,
+    p_scheduled_for: "2026-07-17T01:00:00.000Z",
+    p_target: {
+      target_kind: "profile",
+      target_key: `profile:${PROFILE_ID}`,
+      target_profile_id: PROFILE_ID,
+      connection_key: "google_chat.management",
+      target_snapshot: { role: "staff", active: true },
+    },
+  })
+  assert.equal(harness.calls.some((call) => call.name === "begin_notification_delivery_send_v1"), false)
+  assert.equal(harness.calls.some((call) => call.name === "commit_notification_in_app_delivery_v1"), false)
+  const attempt = harness.calls.find((call) => (
+    call.name === "register_notification_external_attempt_v1"
+  ))
+  assert.deepEqual(attempt.parameters, {
+    p_delivery_id: DELIVERY_ID,
+    p_claim_id: null,
+    p_owner_generation: null,
+    p_claim_token: CLAIM_TOKEN,
+    p_dispatch_token: DISPATCH_TOKEN,
+    p_request_id: DISPATCH_TOKEN,
+  })
   const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
   assert.equal(finalize.parameters.p_status, "delivery_unknown")
   assert.equal(finalize.parameters.p_status_reason, "provider_timeout_after_dispatch")
@@ -1665,7 +1868,7 @@ test("worker는 begin-send가 돌려준 canonical context 하나만 provider에 
   assertNoSensitiveValue(finalize.parameters)
 })
 
-test("worker는 in-app을 begin/provider/finalize로 쪼개지 않고 단일 원자 commit RPC로 처리한다", async () => {
+test("worker는 in-app 재검증과 투영을 단일 원자 prepare RPC로 처리한다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   let providerLookups = 0
   const harness = createRpcHarness({
@@ -1679,7 +1882,7 @@ test("worker는 in-app을 begin/provider/finalize로 쪼개지 않고 단일 원
         target_snapshot: { role: "staff", active: true },
       },
     })],
-    commit_notification_in_app_delivery_v1: {
+    prepare_notification_immediate_delivery_v1: {
       delivery_id: DELIVERY_ID,
       notification_id: "72000000-0000-4000-8000-000000000001",
       push_children_created: 2,
@@ -1699,9 +1902,149 @@ test("worker는 in-app을 begin/provider/finalize로 쪼개지 않고 단일 원
 
   assert.equal(providerLookups, 0)
   assert.equal(harness.calls.some((call) => call.name === "begin_notification_delivery_send_v1"), false)
+  assert.equal(harness.calls.some((call) => call.name === "commit_notification_in_app_delivery_v1"), false)
   assert.equal(harness.calls.some((call) => call.name === "finalize_notification_delivery_v1"), false)
-  const commit = harness.calls.find((call) => call.name === "commit_notification_in_app_delivery_v1")
-  assert.deepEqual(commit.parameters, { p_delivery_id: DELIVERY_ID, p_claim_token: CLAIM_TOKEN })
+  assert.equal(harness.calls.some((call) => call.name === "register_notification_external_attempt_v1"), false)
+  const prepare = harness.calls.find((call) => (
+    call.name === "prepare_notification_immediate_delivery_v1"
+  ))
+  assert.equal(prepare.parameters.p_delivery_id, DELIVERY_ID)
+  assert.equal(prepare.parameters.p_claim_token, CLAIM_TOKEN)
+})
+
+test("worker는 외부 시도 등록 거부 또는 응답 불명확 시 provider를 0회 호출하고 unknown으로 닫는다", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  for (const fixture of [
+    { name: "denied", responder: { allowed: false, reason: "attempt_already_registered" } },
+    { name: "rpc_error", responder: () => { throw new Error("registrar response lost") } },
+  ]) {
+    let providerCalls = 0
+    const harness = createRpcHarness({
+      claim_notification_deliveries_v1: [createDeliveryClaim()],
+      register_notification_external_attempt_v1: fixture.responder,
+    })
+    const worker = createNotificationWorkerRuntime({
+      getAdapter: () => createAdapter(),
+      rpc: harness.rpc,
+      getProvider: () => ({
+        async send() {
+          providerCalls += 1
+          throw new Error("외부 시도 등록 실패 뒤 provider를 호출하면 안 됩니다.")
+        },
+      }),
+      createRunId: () => RUN_ID,
+    })
+
+    await worker.runBatch({ workerId: `worker-${fixture.name}`, batchSize: 1, leaseSeconds: 30 })
+    assert.equal(providerCalls, 0)
+    const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+    assert.equal(finalize.parameters.p_status, "delivery_unknown")
+    assert.equal(finalize.parameters.p_status_reason, "provider_ambiguous_response")
+    assert.equal(finalize.parameters.p_next_attempt_at, null)
+    assertNoSensitiveValue(finalize.parameters)
+  }
+})
+
+test("forward 외부 시도 등록기는 dispatch identity를 검증하고 중복을 감사한 뒤 fail-closed한다", async () => {
+  const forward = await readFile(workerForwardMigrationUrl, "utf8")
+  const register = functionBlock(forward, "register_notification_external_attempt_v1")
+
+  assert.match(register, /auth\.role\(\)[\s\S]*service_role/i)
+  assert.match(register, /p_request_id\s*<>\s*p_dispatch_token/i)
+  assert.match(register, /status\s*<>\s*'sending'/i)
+  assert.match(register, /state\s*<>\s*'dispatch_started'/i)
+  assert.match(register, /dispatch_token\s*<>\s*p_dispatch_token/i)
+  assert.match(
+    register,
+    /v_entity_id\s*:=\s*v_claim\.id::text[\s\S]*notification_sha256_hex_v1\(p_dispatch_token::text\)/i,
+  )
+  assert.doesNotMatch(register, /v_entity_id\s*:=\s*v_claim\.id::text\s*\|\|\s*':'\s*\|\|\s*v_claim\.owner_generation::text/i)
+  assert.match(register, /external_attempt_registered/i)
+  assert.match(register, /duplicate_external_attempt/i)
+  assert.match(register, /'allowed',\s*false/i)
+  assert.doesNotMatch(register, /webhook_url|endpoint|rendered_title|rendered_body|phone|recipient/i)
+})
+
+test("forward prepare RPC는 가변 원본·수신자·delivery를 잠근 같은 트랜잭션에서 재검증 후 commit 또는 begin한다", async () => {
+  const forward = await readFile(workerForwardMigrationUrl, "utf8")
+  const prepare = functionBlock(forward, "prepare_notification_immediate_delivery_v1")
+
+  assert.match(prepare, /auth\.role\(\)[\s\S]*service_role/i)
+  assert.match(prepare, /notification_runtime_flags[\s\S]*for\s+share/i)
+  assert.match(prepare, /ops_tasks[\s\S]*for\s+share/i)
+  assert.match(prepare, /makeup_requests[\s\S]*for\s+share/i)
+  assert.match(prepare, /approval_requests[\s\S]*for\s+share/i)
+  assert.match(prepare, /ops_registration_appointments[\s\S]*for\s+share/i)
+  assert.match(prepare, /ops_registration_consultations[\s\S]*for\s+share/i)
+  assert.match(prepare, /auth\.users[\s\S]*for\s+share/i)
+  assert.match(prepare, /profiles[\s\S]*for\s+share/i)
+  assert.match(prepare, /teacher_catalogs[\s\S]*for\s+share/i)
+  assert.match(prepare, /is_active_registration_director/i)
+  assert.match(prepare, /notification_deliveries[\s\S]*for\s+update/i)
+  assert.match(prepare, /revalidate_immediate_notification_delivery_v1/i)
+  assert.match(prepare, /commit_notification_in_app_delivery_v1/i)
+  assert.match(prepare, /begin_notification_delivery_send_v1/i)
+
+  const sourceLock = prepare.indexOf("from public.ops_tasks")
+  const deliveryLock = prepare.indexOf("select delivery.* into v_delivery")
+  const sideEffect = Math.min(
+    prepare.indexOf("commit_notification_in_app_delivery_v1"),
+    prepare.indexOf("begin_notification_delivery_send_v1"),
+  )
+  assert.ok(sourceLock >= 0 && sourceLock < deliveryLock && deliveryLock < sideEffect)
+  const flagLock = prepare.indexOf("from dashboard_private.notification_runtime_flags")
+  const ownerLock = prepare.lastIndexOf("from dashboard_private.notification_cutover_owners")
+  assert.ok(flagLock >= 0 && flagLock < ownerLock, "활성화와 같은 flag→owner 순서로 잠가야 한다")
+
+  const appointmentBranch = prepare.slice(
+    prepare.indexOf("elsif p_source_type = 'registration_appointment'"),
+    prepare.indexOf("elsif p_source_type = 'ops_registration_message'"),
+  )
+  const appointmentOrder = [
+    "from public.ops_tasks",
+    "from public.ops_registration_details",
+    "from public.ops_registration_subject_tracks",
+    "select appointment.* into v_appointment",
+    "from public.ops_registration_level_tests",
+    "from public.ops_registration_consultations",
+  ].map((needle) => appointmentBranch.indexOf(needle))
+  assert.ok(appointmentOrder.every((index) => index >= 0))
+  assert.deepEqual([...appointmentOrder].sort((left, right) => left - right), appointmentOrder)
+})
+
+test("forward prepare RPC는 등록 예약 알림의 revision·수신자·현재 예약시각을 원자 재확인한다", async () => {
+  const forward = await readFile(workerForwardMigrationUrl, "utf8")
+  const prepare = functionBlock(forward, "prepare_notification_immediate_delivery_v1")
+
+  assert.match(prepare, /registration\.appointment_reminder_due/i)
+  assert.match(prepare, /appointment\.status\s*<>\s*'scheduled'/i)
+  assert.match(prepare, /appointment\.notification_revision\s*<>\s*p_source_revision/i)
+  assert.match(prepare, /appointment\.recipient_revision\s*<>\s*p_target_generation/i)
+  assert.match(
+    prepare,
+    /kind\s*=\s*'visit_consultation'[\s\S]*audience_key\s*=\s*'management_team'[\s\S]*channel_key\s*=\s*'google_chat'/i,
+  )
+  assert.match(prepare, /calculate_registration_reminder_schedule_v1/i)
+  assert.match(prepare, /clock_timestamp\(\)\s*<\s*v_appointment\.scheduled_at/i)
+  const reminderBranch = prepare.slice(
+    prepare.indexOf("if p_workflow_key = 'registration'"),
+    prepare.indexOf("else\n    v_revalidation := public.revalidate_immediate_notification_delivery_v1"),
+  )
+  assert.doesNotMatch(reminderBranch, /v_event\.payload\s*->>\s*'notification_revision'/i)
+  assert.doesNotMatch(reminderBranch, /v_event\.payload\s*->>\s*'recipient_revision'/i)
+})
+
+test("forward prepare RPC의 원자 재검증 실패 응답은 provider context 없이 delivery를 종결한다", async () => {
+  const forward = await readFile(workerForwardMigrationUrl, "utf8")
+  const prepare = functionBlock(forward, "prepare_notification_immediate_delivery_v1")
+  const invalidBranch = prepare.slice(
+    prepare.indexOf("if coalesce((v_revalidation ->> 'ok')::boolean, false) is not true"),
+    prepare.indexOf("if v_delivery.channel_key = 'in_app'"),
+  )
+
+  assert.match(invalidBranch, /finalize_notification_delivery_v1/i)
+  assert.match(invalidBranch, /'prepared',\s*false/i)
+  assert.doesNotMatch(invalidBranch, /webhook_url|subscription|customer_endpoint|rendered_body/i)
 })
 
 test("worker 실패 heartbeat는 started와 failed 한 쌍만 남기고 오류 원문·payload·비밀정보를 버린다", async () => {
@@ -1825,6 +2168,63 @@ test("Google Chat provider는 주입 fetch만 쓰고 확정 성공·429·영구 
   assert.equal(ledger.length, callsBeforeMissing, "연결이 없으면 fixture transport도 호출하면 안 된다")
 })
 
+test("Google Chat 5xx는 수락 여부가 불명하므로 unknown으로 닫히고 다음 worker에서 자동 재발송하지 않는다", async () => {
+  const { createGoogleChatProvider } = await import(googleChatProviderModuleUrl)
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const secondClaimToken = "70000000-0000-4000-8000-000000000021"
+  const secondDispatchToken = "70000000-0000-4000-8000-000000000022"
+  let deliveryStatus = "pending"
+  let claimIndex = 0
+  let externalCalls = 0
+  const claimTokens = [CLAIM_TOKEN, secondClaimToken]
+  const dispatchTokens = [DISPATCH_TOKEN, secondDispatchToken]
+  const harness = createRpcHarness({
+    claim_notification_deliveries_v1: () => {
+      if (!["pending", "retry_wait"].includes(deliveryStatus)) return []
+      deliveryStatus = "claimed"
+      return [createDeliveryClaim({ claim_token: claimTokens[claimIndex] })]
+    },
+    prepare_notification_immediate_delivery_v1: (parameters) => createBegunGoogleChatContext({
+      claim_token: parameters.p_claim_token,
+      dispatch_token: dispatchTokens[claimIndex],
+    }),
+    register_notification_external_attempt_v1: () => ({
+      allowed: true,
+      attempt_id: "70000000-0000-4000-8000-000000000023",
+    }),
+    finalize_notification_delivery_v1: (parameters) => {
+      deliveryStatus = parameters.p_status
+      if (deliveryStatus === "retry_wait") claimIndex += 1
+      return { ok: true }
+    },
+  })
+  const provider = createGoogleChatProvider({
+    fetch: async () => {
+      externalCalls += 1
+      return new Response("ambiguous upstream failure", { status: 500 })
+    },
+  })
+  const worker = createNotificationWorkerRuntime({
+    getAdapter: () => createAdapter(),
+    rpc: harness.rpc,
+    getProvider: (channelKey) => channelKey === "google_chat" ? provider : null,
+    createRunId: () => RUN_ID,
+    now: () => new Date("2026-07-17T01:00:00.000Z"),
+  })
+
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+  await worker.runBatch({ workerId: "worker-fixture", batchSize: 1, leaseSeconds: 30 })
+
+  assert.equal(externalCalls, 1, "5xx 응답 뒤 새 dispatch token으로 자동 재발송하면 안 된다")
+  assert.equal(deliveryStatus, "delivery_unknown")
+  const finalizations = harness.calls.filter((call) => call.name === "finalize_notification_delivery_v1")
+  assert.equal(finalizations.length, 1)
+  assert.equal(finalizations[0].parameters.p_status, "delivery_unknown")
+  assert.equal(finalizations[0].parameters.p_status_reason, "provider_ambiguous_response")
+  assert.equal(finalizations[0].parameters.p_provider_response_code, "500")
+  assert.equal(finalizations[0].parameters.p_next_attempt_at, null)
+})
+
 test("Web Push provider는 begun context 한 개와 주입 sender만 사용하고 endpoint·auth·응답 원문을 결과에서 제거한다", async () => {
   const { createWebPushProvider } = await import(webPushProviderModuleUrl)
   const calls = []
@@ -1878,6 +2278,24 @@ test("Web Push provider는 begun context 한 개와 주입 sender만 사용하�
   )
   assert.equal(calls.length, callsBeforeMissing)
   assert.equal(unexpectedNetworkCalls, 0)
+})
+
+test("Web Push 5xx는 수락 여부가 불명하므로 재시도 대기 없이 unknown으로 닫힌다", async () => {
+  const { createWebPushProvider } = await import(webPushProviderModuleUrl)
+  let externalCalls = 0
+  const provider = createWebPushProvider({
+    sendNotification: async () => {
+      externalCalls += 1
+      return { statusCode: 503, body: "ambiguous upstream failure" }
+    },
+  })
+
+  const outcome = await provider.send(createBegunWebPushContext())
+
+  assertProviderResult(outcome, "delivery_unknown", "provider_ambiguous_response")
+  assert.equal(outcome.providerResponseCode, "503")
+  assert.equal(outcome.nextAttemptAt, null)
+  assert.equal(externalCalls, 1)
 })
 
 test("Web Push provider는 사설망·비표준 포트·미허용 Push 호스트를 전송 전에 거절한다", async () => {

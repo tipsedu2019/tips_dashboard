@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto"
+import { createHash, createHmac, randomBytes } from "node:crypto"
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 
@@ -96,6 +96,17 @@ function createSolapiAuthorization(apiKey: string, apiSecret: string) {
   const salt = randomBytes(16).toString("hex")
   const signature = createHmac("sha256", apiSecret).update(date + salt).digest("hex")
   return `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`
+}
+
+function deterministicDeliveryRequestId(messageId: string, messageRequestKey: string) {
+  const bytes = createHash("sha256")
+    .update(["registration-solapi-delivery-v1", messageId, messageRequestKey].join("\u001f"))
+    .digest()
+    .subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x50
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString("hex")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 function throwQueryError(error: unknown) {
@@ -214,6 +225,66 @@ const handlers = createRegistrationAdmissionRouteHandlers({
     p_task_id: input.taskId,
     p_message_request_key: input.messageRequestKey,
   }),
+  beginDelivery: (serviceClient: Client, input: { messageId: string; messageRequestKey: string }) => callRpc(
+    serviceClient,
+    "begin_registration_admission_delivery_v1",
+    {
+      p_message_id: input.messageId,
+      p_request_id: deterministicDeliveryRequestId(input.messageId, input.messageRequestKey),
+    },
+  ),
+  recordLegacyIntent: (serviceClient: Client, input: {
+    deliveryId: string
+    legacyTemplateChecksum: string
+    normalizedRenderedHash: string
+    requestId: string
+  }) => callRpc(serviceClient, "record_legacy_notification_delivery_intent_v1", {
+    p_delivery_id: input.deliveryId,
+    p_legacy_template_checksum: input.legacyTemplateChecksum,
+    p_normalized_rendered_hash: input.normalizedRenderedHash,
+    p_request_id: input.requestId,
+  }),
+  registerExternalAttempt: (serviceClient: Client, input: {
+    deliveryId: string
+    claimId: string
+    ownerGeneration: string
+    claimToken: string | null
+    dispatchToken: string
+  }) => callRpc(serviceClient, "register_notification_external_attempt_v1", {
+    p_delivery_id: input.claimToken ? input.deliveryId : null,
+    p_claim_id: input.claimId,
+    p_owner_generation: input.ownerGeneration,
+    p_claim_token: input.claimToken,
+    p_dispatch_token: input.dispatchToken,
+    p_request_id: input.dispatchToken,
+  }),
+  completeDelivery: (serviceClient: Client, input: {
+    messageId: string
+    deliveryId: string
+    claimId: string
+    ownerGeneration: string
+    claimToken: string | null
+    dispatchToken: string
+    result: "accepted" | "failed" | "unknown"
+    providerResult: Row
+    outcome: "sent" | "failed" | "delivery_unknown"
+    providerReference: string
+  }) => callRpc<AdmissionFinalizationResponse>(
+    serviceClient,
+    "complete_registration_admission_delivery_v1",
+    {
+      p_message_id: input.messageId,
+      p_delivery_id: input.deliveryId,
+      p_claim_id: input.claimId,
+      p_owner_generation: input.ownerGeneration,
+      p_claim_token: input.claimToken,
+      p_dispatch_token: input.dispatchToken,
+      p_result: input.result,
+      p_provider_result: input.providerResult,
+      p_outcome: input.outcome,
+      p_provider_reference: input.providerReference.slice(0, 512),
+    },
+  ),
   finalize: finalizeAdmissionMessage,
   reconcile: (client: Client, input: {
     messageId: string

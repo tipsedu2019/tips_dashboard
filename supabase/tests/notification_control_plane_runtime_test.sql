@@ -1,5 +1,5 @@
 begin;
-select plan(226);
+select plan(227);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -4578,6 +4578,97 @@ select ok(
   'fanout apply persists only safe counts and advances the one-rule cursor atomically'
 );
 
+insert into dashboard_private.notification_events(
+  id, scope_key, workflow_key, event_key, source_type, source_id,
+  source_revision, occurrence_key, actor_profile_id, occurred_at,
+  payload_schema_version, payload, rule_snapshot
+) values (
+  '76000000-0000-4000-8000-000000000307',
+  'global', 'tasks', 'task.worker_delivery_fixture', 'worker_fixture',
+  'historical-rule-snapshot', 1, 'historical-rule-snapshot-occurrence', null,
+  '2026-07-17 09:05:00+09'::timestamptz, 1, '{}'::jsonb,
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'rule_id', '76000000-0000-4000-8000-000000000101',
+    'rule_revision', '1',
+    'template_id', '76000000-0000-4000-8000-000000000201',
+    'channel_key', 'google_chat',
+    'audience_key', 'management_team',
+    'rule_variant_key', 'immediate',
+    'enabled', true
+  ))
+);
+insert into dashboard_private.notification_event_fanout_jobs(
+  id, event_id, workflow_key, status, next_attempt_at, created_at, updated_at
+) values (
+  '76000000-0000-4000-8000-000000000308',
+  '76000000-0000-4000-8000-000000000307',
+  'tasks', 'pending', '2000-01-01 00:00:00+00', now(), now()
+);
+update dashboard_private.notification_rules
+set revision = 2,
+    updated_at = pg_catalog.clock_timestamp()
+where id = '76000000-0000-4000-8000-000000000101';
+
+select pg_temp.notification_runtime_set_service_role();
+set local role service_role;
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-historical-fanout-claim', claim
+from public.claim_notification_fanout_jobs_v1('worker-historical-fixture', 100, 60) claim
+where claim ->> 'event_id' = '76000000-0000-4000-8000-000000000307';
+insert into notification_control_plane_runtime_results(result_key, payload)
+select 'worker-historical-fanout-applied', public.apply_notification_fanout_batch_v1(
+  '76000000-0000-4000-8000-000000000308',
+  (
+    select (payload ->> 'claim_token')::uuid
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-historical-fanout-claim'
+  ),
+  null,
+  '76000000-0000-4000-8000-000000000101',
+  1,
+  1,
+  '08b309b3dab749a8318c444e0421c6a45ea23f20371179c3c9817cac54a9c5c6',
+  pg_catalog.jsonb_build_object(
+    'deliveries',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'template_id', '76000000-0000-4000-8000-000000000201',
+      'target_kind', 'connection',
+      'target_key', 'connection:google_chat.management',
+      'target_profile_id', null,
+      'connection_key', 'google_chat.management',
+      'target_snapshot', pg_catalog.jsonb_build_object('active', true, 'team', 'management'),
+      'rendered_title', '과거 규칙 스냅샷 알림',
+      'rendered_body', '이벤트 뒤 설정이 바뀌어도 당시 스냅샷으로 처리합니다.',
+      'href', '/admin/tasks',
+      'scheduled_for', '2026-07-17T00:05:00Z'
+    ))
+  ),
+  null,
+  true
+);
+reset role;
+update dashboard_private.notification_rules
+set revision = 1,
+    updated_at = pg_catalog.clock_timestamp()
+where id = '76000000-0000-4000-8000-000000000101';
+select ok(
+  (
+    select payload ->> 'outcome' = 'applied'
+      and payload ->> 'delivery_count' = '1'
+    from notification_control_plane_runtime_results
+    where result_key = 'worker-historical-fanout-applied'
+  )
+  and exists (
+    select 1
+    from dashboard_private.notification_deliveries delivery
+    where delivery.event_id = '76000000-0000-4000-8000-000000000307'
+      and delivery.rule_revision = 1
+      and delivery.template_id = '76000000-0000-4000-8000-000000000201'
+      and delivery.rendered_title = '과거 규칙 스냅샷 알림'
+  ),
+  '이벤트 뒤 현재 규칙 revision이 바뀌어도 고정 rule/template 스냅샷으로 전달을 만든다'
+);
+
 select pg_temp.notification_runtime_set_service_role();
 set local role service_role;
 insert into notification_control_plane_runtime_results(result_key, payload)
@@ -4810,7 +4901,7 @@ reset role;
 select ok(
   (
     select status = 'pending'
-      and next_attempt_at is not null
+      and next_attempt_at is null
       and attempt_count = 0
       and claim_token is null
     from dashboard_private.notification_deliveries

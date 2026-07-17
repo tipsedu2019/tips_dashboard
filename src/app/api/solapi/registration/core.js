@@ -1,7 +1,11 @@
+import { requireRegisteredNotificationExternalAttempt } from "../../../../features/notifications/server/external-attempt-gate.js"
+import { recordLegacyNotificationDeliveryIntent } from "../../../../features/notifications/server/legacy-delivery-intent.js"
+
 const SOLAPI_SEND_URL = "https://api.solapi.com/messages/v4/send-many/detail"
 const SOLAPI_LIST_URL = "https://api.solapi.com/messages/v4/list"
 const ADMISSION_TEMPLATE_KEY = "admission_application"
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000
+const TEMPLATE_CHECKSUM = /^(?:[a-f0-9]{32}|[a-f0-9]{64})$/
 
 function text(value) {
   return String(value || "").trim()
@@ -254,18 +258,119 @@ async function sendAdmission(deps, context, body) {
   }
 
   if (!context.serviceClient) return response({ ok: false, error: "Missing service role" }, 500)
+  const delivery = await deps.beginDelivery(context.serviceClient, {
+    messageId: claim.messageId,
+    messageRequestKey: claim.messageRequestKey,
+  })
+  if (!delivery?.acquired) {
+    // A deterministic begin replay means the previous request crossed the
+    // durable dispatch-start boundary but did not persist a business outcome.
+    // Never call SOLAPI again: close both ledgers as ambiguous so an operator
+    // can reconcile provider evidence explicitly.
+    if (delivery?.requiresUnknownFinalization) {
+      const finalized = await deps.completeDelivery(context.serviceClient, {
+        messageId: claim.messageId,
+        deliveryId: delivery.deliveryId,
+        claimId: delivery.claimId,
+        ownerGeneration: delivery.ownerGeneration,
+        claimToken: delivery.claimToken || null,
+        dispatchToken: delivery.dispatchToken,
+        result: "unknown",
+        providerResult: {
+          errorMessage: "SOLAPI dispatch began previously without a durable terminal outcome",
+        },
+        outcome: "delivery_unknown",
+        providerReference: "solapi_unresolved_dispatch_replay",
+      })
+      return response(authoritativeMessagePayload(finalized), 502)
+    }
+    return response({
+      ok: true,
+      code: "SOLAPI_DELIVERY_OWNED",
+      taskId: claim.taskId,
+      messageId: claim.messageId,
+      messageRequestKey: claim.messageRequestKey,
+      currentStatus: claim.claimStatus || "pending",
+      claimActive: Boolean(claim.claimActive),
+    }, 202)
+  }
+
+  const legacyTemplateChecksum = text(delivery.templateChecksum)
+  if (!TEMPLATE_CHECKSUM.test(legacyTemplateChecksum)) {
+    const finalized = await deps.completeDelivery(context.serviceClient, {
+      messageId: claim.messageId,
+      deliveryId: delivery.deliveryId,
+      claimId: delivery.claimId,
+      ownerGeneration: delivery.ownerGeneration,
+      claimToken: delivery.claimToken || null,
+      dispatchToken: delivery.dispatchToken,
+      result: "failed",
+      providerResult: { errorMessage: "Legacy notification template checksum is invalid" },
+      outcome: "failed",
+      providerReference: "legacy_template_checksum_invalid",
+    })
+    return response({
+      ...authoritativeMessagePayload(finalized),
+      code: "SOLAPI_DELIVERY_PLAN_INVALID",
+    }, 500)
+  }
+
   const configuration = deps.getConfiguration()
   if (!configuration.configured) {
-    const finalized = await deps.finalize(context.serviceClient, {
+    const finalized = await deps.completeDelivery(context.serviceClient, {
       messageId: claim.messageId,
+      deliveryId: delivery.deliveryId,
+      claimId: delivery.claimId,
+      ownerGeneration: delivery.ownerGeneration,
+      claimToken: delivery.claimToken || null,
+      dispatchToken: delivery.dispatchToken,
       result: "failed",
       providerResult: { errorMessage: "SOLAPI is not configured" },
+      outcome: "failed",
+      providerReference: "solapi_not_configured",
     })
     return response({
       ...authoritativeMessagePayload(finalized),
       code: "SOLAPI_NOT_CONFIGURED",
       missing: configuration.missing,
     }, 503)
+  }
+
+  if (delivery.deliveryId) {
+    await recordLegacyNotificationDeliveryIntent({
+      deliveryId: delivery.deliveryId,
+      requestId: delivery.dispatchToken,
+      legacyTemplateChecksum,
+      title: "입학신청서 안내",
+      body: `${text(claim.studentName)} 학생 입학신청서 안내`,
+      href: `/admin/registration?taskId=${text(claim.taskId)}`,
+      record: (intent) => deps.recordLegacyIntent(context.serviceClient, intent),
+    })
+  }
+
+  const attempt = await requireRegisteredNotificationExternalAttempt({
+    register: () => deps.registerExternalAttempt(context.serviceClient, {
+      deliveryId: delivery.deliveryId,
+      claimId: delivery.claimId,
+      ownerGeneration: delivery.ownerGeneration,
+      claimToken: delivery.claimToken || null,
+      dispatchToken: delivery.dispatchToken,
+    }),
+    finalizeUnknown: (reason) => deps.completeDelivery(context.serviceClient, {
+      messageId: claim.messageId,
+      deliveryId: delivery.deliveryId,
+      claimId: delivery.claimId,
+      ownerGeneration: delivery.ownerGeneration,
+      claimToken: delivery.claimToken || null,
+      dispatchToken: delivery.dispatchToken,
+      result: "unknown",
+      providerResult: { errorMessage: reason },
+      outcome: "delivery_unknown",
+      providerReference: reason,
+    }),
+  })
+  if (!attempt.allowed) {
+    return response(authoritativeMessagePayload(attempt.finalization), 502)
   }
 
   let providerResponse
@@ -294,10 +399,18 @@ async function sendAdmission(deps, context, body) {
       }),
     })
   } catch (error) {
-    const finalized = await deps.finalize(context.serviceClient, {
+    const providerReference = text(error?.message) || "solapi_provider_exception"
+    const finalized = await deps.completeDelivery(context.serviceClient, {
       messageId: claim.messageId,
+      deliveryId: delivery.deliveryId,
+      claimId: delivery.claimId,
+      ownerGeneration: delivery.ownerGeneration,
+      claimToken: delivery.claimToken || null,
+      dispatchToken: delivery.dispatchToken,
       result: "unknown",
-      providerResult: { errorMessage: text(error?.message) || "SOLAPI request outcome is unknown" },
+      providerResult: { errorMessage: providerReference },
+      outcome: "delivery_unknown",
+      providerReference,
     })
     return response(authoritativeMessagePayload(finalized), 502)
   }
@@ -309,10 +422,29 @@ async function sendAdmission(deps, context, body) {
     payload = {}
   }
   const parsed = parseSolapiSendResult(payload, providerResponse.status)
-  const finalized = await deps.finalize(context.serviceClient, {
+  const deliveryOutcome = parsed.result === "accepted"
+    ? "sent"
+    : parsed.result === "failed"
+      ? "failed"
+      : "delivery_unknown"
+  const providerReference = text(
+    parsed.providerResult.providerMessageId
+    || parsed.providerResult.providerGroupId
+    || parsed.providerResult.providerStatusCode
+    || parsed.providerResult.errorMessage
+    || deliveryOutcome,
+  )
+  const finalized = await deps.completeDelivery(context.serviceClient, {
     messageId: claim.messageId,
+    deliveryId: delivery.deliveryId,
+    claimId: delivery.claimId,
+    ownerGeneration: delivery.ownerGeneration,
+    claimToken: delivery.claimToken || null,
+    dispatchToken: delivery.dispatchToken,
     result: parsed.result,
     providerResult: parsed.providerResult,
+    outcome: deliveryOutcome,
+    providerReference,
   })
   let syncWarning = null
   if (finalized.currentStatus === "accepted" && finalized.claimActive) {

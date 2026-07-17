@@ -2153,6 +2153,17 @@ export function createRegistrationTrackService(
     })
   }
 
+  async function listRegistrationLegacySourceIds(taskId: string): Promise<string[]> {
+    const normalizedTaskId = text(taskId)
+    if (!normalizedTaskId) throw new Error("registration_task_id_invalid")
+    const result = await callReadRpc("list_registration_legacy_source_ids_v1", {
+      p_task_id: normalizedTaskId,
+    })
+    const row = firstRow(result)
+    if (!row) throw new Error("registration_legacy_source_response_invalid")
+    return stringList(value(row, "source_event_ids", "sourceEventIds"))
+  }
+
   async function reconcileRegistrationAdmissionMessage(input: {
     messageId: string
     resolution: "accepted" | "failed"
@@ -2377,6 +2388,7 @@ export function createRegistrationTrackService(
     transitionRegistrationWaiting,
     routeRegistrationEnrollmentDecision,
     saveRegistrationEnrollmentRows,
+    listRegistrationLegacySourceIds,
     claimRegistrationAdmissionMessage,
     reconcileRegistrationAdmissionMessage,
     releaseRegistrationAdmissionMessageRetry,
@@ -2641,6 +2653,10 @@ export function claimRegistrationAdmissionMessage(
   input: Parameters<typeof defaultRegistrationTrackService.claimRegistrationAdmissionMessage>[0],
 ): Promise<RegistrationAdmissionMessageClaimResponse> {
   return defaultRegistrationTrackService.claimRegistrationAdmissionMessage(input)
+}
+
+export function loadRegistrationLegacyNotificationSourceIds(taskId: string): Promise<string[]> {
+  return defaultRegistrationTrackService.listRegistrationLegacySourceIds(taskId)
 }
 
 export function reconcileRegistrationAdmissionMessage(

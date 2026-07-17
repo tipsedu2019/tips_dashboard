@@ -1,45 +1,54 @@
-import { createClient } from "@supabase/supabase-js"
+import { createHash } from "node:crypto"
+
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
 
-import { isAllowedGoogleChatWebhookUrl } from "@/features/notifications/server/notification-connection-crypto"
 import { readLegacyGoogleChatWebhookUrl } from "@/features/notifications/server/legacy-google-chat-connection"
-
-import {
-  REGISTRATION_ADMIN_CHAT_CLAIM_TYPE,
-  buildRegistrationVisitCanonicalMessage,
-  getAdminChatClaimConflictDecision,
-  getAdminChatDeliveryFailurePolicy,
-  getRegistrationVisitAdminChatKey,
-  getRegistrationVisitChangeState,
-  getRegistrationVisitNotificationDedupeKey,
-  getRegistrationVisitRevisionParticipantTrackIds,
-  getRegistrationVisitTrackHref,
-} from "@/features/tasks/registration-consultation-notification"
+import { requireRegisteredNotificationExternalAttempt } from "@/features/notifications/server/external-attempt-gate"
+import { recordLegacyNotificationDeliveryIntent } from "@/features/notifications/server/legacy-delivery-intent"
+import { createGoogleChatProvider } from "@/features/notifications/server/providers/google-chat-provider"
 
 export const runtime = "nodejs"
 
-type Row = Record<string, unknown>
-type CanonicalTrackEvent = {
-  trackId: string
-  subject: string
-  reason: string
-  changeKind: string
-  metadata: Row
-  isOldReplacement: boolean
-}
+type JsonRecord = Record<string, unknown>
+type LegacyVisitDispatchItem = Readonly<{
+  eventId: string
+  eventKey: string
+  occurrenceKey: string
+  ruleId: string
+  ruleRevision: string
+  templateId: string
+  templateChecksum: string
+  channelKey: "in_app" | "google_chat"
+  audienceKey: "track_director" | "management_team"
+  targetGeneration: string
+  targetKind: "profile" | "connection"
+  targetKey: string
+  targetProfileId: string | null
+  connectionKey: string | null
+  targetSnapshot: JsonRecord
+  renderedTitle: string
+  renderedBody: string
+  href: string
+  scheduledFor: string
+}>
+type VisitDispatchPlan = Readonly<{
+  appointmentId: string
+  notificationRevision: number
+  recipientRevision: string
+  notifiedTrackIds: string[]
+  items: LegacyVisitDispatchItem[]
+}>
 
-const GOOGLE_CHAT_TIMEOUT_MS = 8_000
-const DEFAULT_TASK_ORIGIN = "https://tipsedu.co.kr"
-const VISIT_NOTIFICATION_CHANGE_KINDS = new Set([
-  "created",
-  "appointment_updated",
-  "appointment_subject_deselected",
-  "appointment_canceled",
-  "appointment_replaced",
-])
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const TEMPLATE_CHECKSUM = /^(?:[a-f0-9]{32}|[a-f0-9]{64})$/
 
 function text(value: unknown) {
-  return String(value || "").trim()
+  return typeof value === "string" ? value.trim() : ""
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function numberValue(value: unknown) {
@@ -47,166 +56,173 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function parseJsonRecord(value: unknown): Row | null {
-  if (value && typeof value === "object" && !Array.isArray(value)) return value as Row
-  if (typeof value !== "string") return null
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Row : null
-  } catch {
-    return null
-  }
-}
-
-function getSupabaseUrl() {
+function supabaseUrl() {
   return text(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL)
 }
 
-function getAuthenticatedClient(token: string) {
-  const supabaseUrl = getSupabaseUrl()
-  const anonKey = text(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY)
-  if (!supabaseUrl || !anonKey || !token) return null
-  return createClient(supabaseUrl, anonKey, {
+function authenticatedClient(token: string) {
+  const url = supabaseUrl()
+  const key = text(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY)
+  if (!url || !key || !token) return null
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
     global: { headers: { Authorization: `Bearer ${token}` } },
   })
 }
 
-function getServiceClient() {
-  const supabaseUrl = getSupabaseUrl()
-  const serviceRoleKey = text(process.env.SUPABASE_SERVICE_ROLE_KEY)
-  if (!supabaseUrl || !serviceRoleKey) return null
-  return createClient(supabaseUrl, serviceRoleKey)
+function serviceClient() {
+  const url = supabaseUrl()
+  const key = text(process.env.SUPABASE_SERVICE_ROLE_KEY)
+  if (!url || !key) return null
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
 }
 
-type ServiceClient = NonNullable<ReturnType<typeof getServiceClient>>
+async function rpc(client: SupabaseClient, name: string, parameters: JsonRecord = {}) {
+  const { data, error } = await client.rpc(name, parameters)
+  if (error) throw error
+  return data
+}
 
 async function getAuthenticatedContext(request: Request) {
   const authorization = text(request.headers.get("authorization"))
   const token = authorization.replace(/^Bearer\s+/i, "")
-  const client = getAuthenticatedClient(token)
-  const serviceClient = getServiceClient()
-  if (!client || !token) return { user: null, role: "", client: null, serviceClient }
-
+  const client = authenticatedClient(token)
+  const serverClient = serviceClient()
+  if (!client || !token) return { userId: "", role: "", client: null, serverClient }
   const { data, error } = await client.auth.getUser(token)
-  const user = data.user || null
-  if (!user?.id || error) return { user: null, role: "", client: null, serviceClient }
-
-  let role = ""
-  if (serviceClient) {
-    const { data: profile } = await serviceClient
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle()
-    role = text((profile as Row | null)?.role)
-  }
-  return { user, role, client, serviceClient }
-}
-
-async function probeRegistrationNotificationRuntime(
-  client: NonNullable<ReturnType<typeof getAuthenticatedClient>>,
-) {
-  const { data, error } = await client.rpc("registration_subject_tracks_runtime_version")
-  if (error || data !== 1) return { mode: "maintenance" as const, version: 0 as const }
-  return { mode: "ready" as const, version: 1 as const }
-}
-
-function formatReservationDate(value: string) {
-  const timestamp = Date.parse(value)
-  if (!Number.isFinite(timestamp)) return value
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Seoul",
-  }).format(new Date(timestamp))
-}
-
-function isLocalHostname(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
-}
-
-function configuredTaskOrigin(value: unknown) {
-  const candidate = text(value)
-  if (!candidate) return ""
-  try {
-    const url = new URL(candidate)
-    if (url.protocol === "https:") return url.origin
-    if (url.protocol === "http:" && isLocalHostname(url.hostname)) return url.origin
-    return ""
-  } catch {
-    return ""
-  }
-}
-
-function getTrustedTaskOrigin(request: Request) {
-  for (const configuredOrigin of [process.env.NEXT_PUBLIC_SITE_URL, process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN]) {
-    const origin = configuredTaskOrigin(configuredOrigin)
-    if (origin) return origin
-  }
-  try {
-    const requestUrl = new URL(request.url)
-    if (["http:", "https:"].includes(requestUrl.protocol) && isLocalHostname(requestUrl.hostname)) return requestUrl.origin
-  } catch {
-    // Fall through to the fixed public origin.
-  }
-  return DEFAULT_TASK_ORIGIN
-}
-
-function eventMatchesAppointmentRevision(
-  metadata: Row,
-  appointmentId: string,
-  notificationRevision: number,
-) {
-  const directMatch = text(metadata.appointmentId) === appointmentId
-    && numberValue(metadata.notificationRevision) === notificationRevision
-  const oldReplacementMatch = text(metadata.oldAppointmentId) === appointmentId
-    && numberValue(metadata.oldNotificationRevision) === notificationRevision
-  const newReplacementMatch = text(metadata.newAppointmentId) === appointmentId
-    && numberValue(metadata.notificationRevision) === notificationRevision
-  return { matches: directMatch || oldReplacementMatch || newReplacementMatch, isOldReplacement: oldReplacementMatch }
-}
-
-function parseCanonicalTrackEvent(
-  row: Row,
-  appointmentId: string,
-  notificationRevision: number,
-): CanonicalTrackEvent | null {
-  const payload = parseJsonRecord(row.after_value)
-  if (!payload || numberValue(payload.version) !== 1) return null
-  const metadata = parseJsonRecord(payload.metadata) || {}
-  const match = eventMatchesAppointmentRevision(metadata, appointmentId, notificationRevision)
-  const trackId = text(payload.trackId)
-  const changeKind = text(metadata.changeKind)
-  if (!match.matches || !trackId || !VISIT_NOTIFICATION_CHANGE_KINDS.has(changeKind)) return null
+  const userId = data.user?.id || ""
+  if (error || !userId) return { userId: "", role: "", client: null, serverClient }
+  const { data: profile, error: profileError } = serverClient
+    ? await serverClient.from("profiles").select("role").eq("id", userId).maybeSingle()
+    : { data: null, error: null }
   return {
-    trackId,
-    subject: text(payload.subject),
-    reason: text(payload.reason),
-    changeKind,
-    metadata,
-    isOldReplacement: match.isOldReplacement,
+    userId,
+    role: profileError ? "" : text((profile as JsonRecord | null)?.role),
+    client,
+    serverClient,
   }
 }
 
-function isUniqueViolation(error: unknown) {
-  return text((error as Row | null)?.code) === "23505"
+async function probeRegistrationNotificationRuntime(client: SupabaseClient) {
+  const subjectRuntime = await rpc(client, "registration_subject_tracks_runtime_version")
+  if (subjectRuntime !== 1) return { mode: "maintenance" as const }
+  const handoffRuntime = await rpc(client, "registration_notification_handoffs_runtime_version")
+  return { mode: handoffRuntime === 1 ? "ready" as const : "maintenance" as const }
 }
 
-function isGoogleChatWebhookUrl(value: string) {
-  return isAllowedGoogleChatWebhookUrl(value)
+function deterministicRequestId(scope: string, ...parts: string[]) {
+  const bytes = createHash("sha256")
+    .update([scope, ...parts].join("\u001f"))
+    .digest()
+    .subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x50
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString("hex")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-async function getAdminWebhookUrl(serviceClient: ServiceClient) {
+function parsePlan(value: unknown): VisitDispatchPlan {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new Error("registration_visit_legacy_dispatch_plan_invalid")
+  }
+  const appointmentId = text(value.appointmentId)
+  const notificationRevision = numberValue(value.notificationRevision)
+  const recipientRevision = text(value.recipientRevision)
+  const notifiedTrackIds = Array.isArray(value.notifiedTrackIds)
+    ? value.notifiedTrackIds.map(text).filter(Boolean)
+    : []
+  if (!UUID.test(appointmentId) || !Number.isInteger(notificationRevision) || notificationRevision < 1) {
+    throw new Error("registration_visit_legacy_dispatch_plan_invalid")
+  }
+  const items = value.items.map((raw) => {
+    if (!isRecord(raw)) throw new Error("registration_visit_legacy_dispatch_plan_invalid")
+    const item = {
+      eventId: text(raw.eventId),
+      eventKey: text(raw.eventKey),
+      occurrenceKey: text(raw.occurrenceKey),
+      ruleId: text(raw.ruleId),
+      ruleRevision: text(raw.ruleRevision),
+      templateId: text(raw.templateId),
+      templateChecksum: text(raw.templateChecksum),
+      channelKey: text(raw.channelKey),
+      audienceKey: text(raw.audienceKey),
+      targetGeneration: text(raw.targetGeneration),
+      targetKind: text(raw.targetKind),
+      targetKey: text(raw.targetKey),
+      targetProfileId: text(raw.targetProfileId) || null,
+      connectionKey: text(raw.connectionKey) || null,
+      targetSnapshot: isRecord(raw.targetSnapshot) ? raw.targetSnapshot : {},
+      renderedTitle: text(raw.renderedTitle),
+      renderedBody: text(raw.renderedBody),
+      href: text(raw.href),
+      scheduledFor: text(raw.scheduledFor),
+    }
+    if (
+      !UUID.test(item.eventId)
+      || !UUID.test(item.ruleId)
+      || !UUID.test(item.templateId)
+      || !TEMPLATE_CHECKSUM.test(item.templateChecksum)
+      || !item.eventKey.startsWith("registration.visit_")
+      || !item.occurrenceKey
+      || !["in_app", "google_chat"].includes(item.channelKey)
+      || !["track_director", "management_team"].includes(item.audienceKey)
+      || !["profile", "connection"].includes(item.targetKind)
+      || !item.targetKey
+      || item.targetGeneration !== recipientRevision
+      || !item.renderedTitle
+      || !item.renderedBody
+      || !item.href.startsWith("/admin/registration")
+    ) throw new Error("registration_visit_legacy_dispatch_plan_invalid")
+    return item as LegacyVisitDispatchItem
+  })
+  return { appointmentId, notificationRevision, recipientRevision, notifiedTrackIds, items }
+}
+
+async function dispatchInApp(
+  client: SupabaseClient,
+  actorProfileId: string,
+  plan: VisitDispatchPlan,
+  item: LegacyVisitDispatchItem,
+) {
+  if (!item.targetProfileId) throw new Error("registration_visit_profile_missing")
+  const requestId = deterministicRequestId(
+    "registration-visit-in-app-v1",
+    plan.appointmentId,
+    plan.notificationRevision.toString(),
+    item.ruleId,
+    item.targetKey,
+    item.targetGeneration,
+  )
+  const committed = await rpc(client, "commit_registration_visit_legacy_in_app_v1", {
+    p_appointment_id: plan.appointmentId,
+    p_rule_id: item.ruleId,
+    p_profile_id: item.targetProfileId,
+    p_target_generation: item.targetGeneration,
+    p_actor_profile_id: actorProfileId,
+    p_request_id: requestId,
+  })
+  if (!isRecord(committed) || !UUID.test(text(committed.deliveryId))
+    || typeof committed.acquired !== "boolean") {
+    throw new Error("registration_visit_projection_invalid")
+  }
+  if (!committed.acquired) return "deduped" as const
+  if (committed.committed !== true) throw new Error("registration_visit_projection_not_committed")
+  return "sent" as const
+}
+
+async function readAdminWebhook(client: SupabaseClient) {
   return readLegacyGoogleChatWebhookUrl({
     legacyEnvironmentUrl: text(process.env.GOOGLE_CHAT_WEBHOOK_ADMIN),
     async loadRow() {
-      const { data, error } = await serviceClient
+      const { data, error } = await client
         .from("google_chat_webhook_settings")
         .select("webhook_url,connection_state")
         .eq("channel", "admin")
         .maybeSingle()
       if (error) throw error
-      const row = data as Row | null
+      const row = data as { webhook_url?: unknown; connection_state?: unknown } | null
       return {
         found: row !== null,
         connectionState: row ? text(row.connection_state) : null,
@@ -216,387 +232,233 @@ async function getAdminWebhookUrl(serviceClient: ServiceClient) {
   })
 }
 
-async function releaseAdminChatClaim(serviceClient: ServiceClient, adminChatDedupeKey: string) {
-  const { error } = await serviceClient
-    .from("dashboard_notifications")
-    .delete()
-    .eq("dedupe_key", adminChatDedupeKey)
-  return error ? text(error.message) || "Admin Google Chat claim release failed" : ""
+async function finalizeGoogleChat(
+  client: SupabaseClient,
+  deliveryId: string,
+  begun: JsonRecord,
+  outcome: "sent" | "failed" | "delivery_unknown",
+  providerReference: string,
+) {
+  await rpc(client, "finalize_registration_visit_legacy_google_chat_v1", {
+    p_delivery_id: deliveryId,
+    p_claim_id: text(begun.claim_id),
+    p_owner_generation: text(begun.owner_generation),
+    p_dispatch_token: text(begun.dispatch_token),
+    p_outcome: outcome,
+    p_provider_reference: providerReference.slice(0, 512),
+  })
 }
 
-async function updateAdminChatClaimStatus(
-  serviceClient: ServiceClient,
-  adminChatDedupeKey: string,
-  status: string,
-  metadata: Row,
+function isInterruptedDispatchReplay(value: JsonRecord, expectedRequestId: string) {
+  return value.acquired === false
+    && text(value.status) === "dispatch_already_started"
+    && text(value.reason) === "idempotent_dispatch_replay"
+    && text(value.request_id) === expectedRequestId
+    && UUID.test(text(value.claim_id))
+    && /^\d+$/.test(text(value.owner_generation))
+    && UUID.test(text(value.dispatch_token))
+}
+
+function hasInterruptedDispatchReplayStatus(value: JsonRecord) {
+  return value.acquired === false
+    && text(value.status) === "dispatch_already_started"
+    && text(value.reason) === "idempotent_dispatch_replay"
+}
+
+async function dispatchGoogleChat(
+  client: SupabaseClient,
+  actorProfileId: string,
+  plan: VisitDispatchPlan,
+  item: LegacyVisitDispatchItem,
 ) {
-  const { error } = await serviceClient
-    .from("dashboard_notifications")
-    .update({
-      title: status === "delivery_unknown"
-        ? "방문상담 Google Chat 전달 여부 확인 필요"
-        : "방문상담 Google Chat 상태 확인 필요",
-      metadata: { ...metadata, status },
+  const materialized = await rpc(client, "materialize_registration_visit_legacy_google_chat_v1", {
+    p_appointment_id: plan.appointmentId,
+    p_rule_id: item.ruleId,
+    p_target_generation: item.targetGeneration,
+    p_actor_profile_id: actorProfileId,
+  })
+  const deliveryId = isRecord(materialized) ? text(materialized.deliveryId) : ""
+  if (!UUID.test(deliveryId)) throw new Error("registration_visit_projection_invalid")
+  if (isRecord(materialized) && materialized.canonicalOwned === true) return "deduped" as const
+
+  // The fixed-purpose wrapper re-reads the event/target and delegates to
+  // begin_legacy_notification_dispatch_v1. Only a definite failed target may
+  // be explicitly re-armed; sent and delivery_unknown remain terminal.
+  const requestId = deterministicRequestId(
+    "registration-visit-google-chat-v1",
+    plan.appointmentId,
+    plan.notificationRevision.toString(),
+    item.ruleId,
+    item.targetKey,
+    item.targetGeneration,
+  )
+  const begun = await rpc(client, "begin_registration_visit_legacy_google_chat_v1", {
+    p_appointment_id: plan.appointmentId,
+    p_rule_id: item.ruleId,
+    p_target_generation: item.targetGeneration,
+    p_actor_profile_id: actorProfileId,
+    p_request_id: requestId,
+  })
+  if (!isRecord(begun) || typeof begun.acquired !== "boolean") {
+    throw new Error("registration_visit_ownership_invalid")
+  }
+  if (isInterruptedDispatchReplay(begun, requestId)) {
+    await finalizeGoogleChat(
+      client,
+      deliveryId,
+      begun,
+      "delivery_unknown",
+      "legacy_dispatch_recovered_after_interruption",
+    )
+    return "delivery_unknown" as const
+  }
+  if (!begun.acquired) {
+    if (hasInterruptedDispatchReplayStatus(begun)) {
+      throw new Error("registration_visit_ownership_invalid")
+    }
+    return "deduped" as const
+  }
+
+  try {
+    const provider = createGoogleChatProvider({
+      fetch(input, init) {
+        return fetch(input, { ...init, signal: AbortSignal.timeout(10_000) })
+      },
     })
-    .eq("dedupe_key", adminChatDedupeKey)
-  return error ? text(error.message) || "Admin Google Chat claim update failed" : ""
-}
+    const webhookUrl = await readAdminWebhook(client)
+    await recordLegacyNotificationDeliveryIntent({
+      deliveryId,
+      requestId: text(begun.dispatch_token),
+      legacyTemplateChecksum: item.templateChecksum,
+      title: item.renderedTitle,
+      body: item.renderedBody,
+      href: item.href,
+      record: (intent) => rpc(client, "record_legacy_notification_delivery_intent_v1", {
+        p_delivery_id: intent.deliveryId,
+        p_legacy_template_checksum: intent.legacyTemplateChecksum,
+        p_normalized_rendered_hash: intent.normalizedRenderedHash,
+        p_request_id: intent.requestId,
+      }),
+    })
+    const attempt = await requireRegisteredNotificationExternalAttempt({
+      register: () => rpc(client, "register_notification_external_attempt_v1", {
+        p_delivery_id: null,
+        p_claim_id: text(begun.claim_id),
+        p_owner_generation: text(begun.owner_generation),
+        p_claim_token: null,
+        p_dispatch_token: text(begun.dispatch_token),
+        p_request_id: text(begun.dispatch_token),
+      }),
+      finalizeUnknown: (reason: string) => finalizeGoogleChat(
+        client,
+        deliveryId,
+        begun,
+        "delivery_unknown",
+        reason,
+      ),
+    })
+    if (!attempt.allowed) return "delivery_unknown" as const
 
-function responsePayload(
-  appointmentId: string,
-  notificationRevision: number,
-  notifiedTrackIds: string[],
-  warning = "",
-) {
-  return {
-    ok: true,
-    warning,
-    appointmentId,
-    notificationRevision,
-    notifiedTrackIds,
+    const result = await provider.send({
+      delivery_id: deliveryId,
+      claim_token: text(begun.claim_id),
+      dispatch_token: text(begun.dispatch_token),
+      status: "sending",
+      channel_key: "google_chat",
+      connection_key: "google_chat.management",
+      webhook_url: webhookUrl,
+      rendered_title: item.renderedTitle,
+      rendered_body: item.renderedBody,
+      href: item.href,
+    })
+    const outcome = result.status === "sent"
+      ? "sent"
+      : result.status === "delivery_unknown"
+        ? "delivery_unknown"
+        : "failed"
+    const providerReference = outcome === "sent"
+      ? result.providerMessageId || result.providerResponseCode || outcome
+      : result.errorCode || result.providerResponseCode || outcome
+    await finalizeGoogleChat(client, deliveryId, begun, outcome, providerReference)
+    return outcome
+  } catch (error) {
+    const providerReference = text((error as { code?: unknown })?.code) || "provider_exception"
+    await finalizeGoogleChat(client, deliveryId, begun, "delivery_unknown", providerReference)
+    return "delivery_unknown" as const
   }
 }
 
 export async function POST(request: Request) {
-  const { user, role, client, serviceClient } = await getAuthenticatedContext(request)
-  if (!user?.id) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
-  if (!serviceClient) return NextResponse.json({ ok: false, error: "Missing service role" }, { status: 500 })
+  const { userId, role, client, serverClient } = await getAuthenticatedContext(request)
+  if (!userId || !client) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
   if (!(role === "admin" || role === "staff")) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 })
   }
-  if (!client) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
+  if (!serverClient) {
+    return NextResponse.json({ ok: false, error: "알림 저장소를 사용할 수 없습니다." }, { status: 503 })
+  }
 
-  const runtimeState = await probeRegistrationNotificationRuntime(client).catch(() => ({
-    mode: "maintenance" as const,
-    version: 0 as const,
-  }))
-  if (runtimeState.mode !== "ready" || runtimeState.version !== 1) {
+  let runtimeState: { mode: "ready" | "maintenance" }
+  try {
+    runtimeState = await probeRegistrationNotificationRuntime(client)
+  } catch {
+    runtimeState = { mode: "maintenance" }
+  }
+  if (runtimeState.mode !== "ready") {
     return NextResponse.json({
       ok: false,
       code: "REGISTRATION_MIGRATION_IN_PROGRESS",
-      error: "데이터 전환 중입니다. 잠시 후 다시 시도해 주세요.",
+      error: "등록 알림 데이터 전환 중입니다. 잠시 후 다시 시도해 주세요.",
     }, { status: 503 })
   }
 
-  const body = await request.json().catch(() => ({}))
+  const body = await request.json().catch(() => null)
+  if (!isRecord(body) || Object.keys(body).length !== 1 || Object.keys(body)[0] !== "appointmentId") {
+    return NextResponse.json({ ok: false, error: "Invalid request" }, { status: 400 })
+  }
   const appointmentId = text(body.appointmentId)
-  if (!appointmentId) {
-    return NextResponse.json({ ok: false, error: "appointmentId is required" }, { status: 400 })
+  if (!UUID.test(appointmentId)) {
+    return NextResponse.json({ ok: false, error: "Invalid request" }, { status: 400 })
   }
 
-  const { data: appointment, error: appointmentError } = await serviceClient
-    .from("ops_registration_appointments")
-    .select("id,task_id,kind,scheduled_at,place,status,notification_revision")
-    .eq("id", appointmentId)
-    .maybeSingle()
-  if (appointmentError) return NextResponse.json({ ok: false, error: appointmentError.message }, { status: 500 })
-  if (!appointment) return NextResponse.json({ ok: false, error: "Visit appointment not found" }, { status: 404 })
-  if (text(appointment.kind) !== "visit_consultation") {
-    return NextResponse.json({ ok: false, error: "Appointment is not a visit consultation" }, { status: 409 })
-  }
-
-  const taskId = text(appointment.task_id)
-  const notificationRevision = numberValue(appointment.notification_revision)
-  if (!taskId || notificationRevision < 1) {
-    return NextResponse.json({ ok: false, error: "Appointment revision is invalid" }, { status: 409 })
-  }
-
-  const { data: task, error: taskError } = await serviceClient
-    .from("ops_tasks")
-    .select("id,title,type,student_name")
-    .eq("id", taskId)
-    .maybeSingle()
-  if (taskError) return NextResponse.json({ ok: false, error: taskError.message }, { status: 500 })
-  if (!task || text(task.type) !== "registration") {
-    return NextResponse.json({ ok: false, error: "Registration task mismatch" }, { status: 409 })
-  }
-
-  const { data: consultationRows, error: consultationError } = await serviceClient
-    .from("ops_registration_consultations")
-    .select("id,track_id,appointment_id,mode,status,director_profile_id")
-    .eq("appointment_id", appointmentId)
-    .eq("mode", "visit")
-  if (consultationError) return NextResponse.json({ ok: false, error: consultationError.message }, { status: 500 })
-  const consultations = (consultationRows || []) as Row[]
-  if (consultations.length === 0) {
-    return NextResponse.json({ ok: false, error: "Visit consultation rows not found" }, { status: 409 })
-  }
-
-  const trackIds = Array.from(new Set(consultations.map((row) => text(row.track_id)).filter(Boolean)))
-  const { data: trackRows, error: trackError } = await serviceClient
-    .from("ops_registration_subject_tracks")
-    .select("id,task_id,subject,director_profile_id")
-    .in("id", trackIds)
-  if (trackError) return NextResponse.json({ ok: false, error: trackError.message }, { status: 500 })
-  const tracks = (trackRows || []) as Row[]
-  if (tracks.length !== trackIds.length || tracks.some((track) => text(track.task_id) !== taskId)) {
-    return NextResponse.json({ ok: false, error: "Visit consultation crosses registration tasks" }, { status: 409 })
-  }
-
-  const directorIds = Array.from(new Set(consultations.map((row) => text(row.director_profile_id)).filter(Boolean)))
-  if (directorIds.length === 0 || consultations.some((row) => !text(row.director_profile_id))) {
-    return NextResponse.json({ ok: false, error: "Visit consultation director is missing" }, { status: 409 })
-  }
-  const { data: profileRows, error: profileError } = await serviceClient
-    .from("profiles")
-    .select("id,name,email,login_id,role")
-    .in("id", directorIds)
-  if (profileError) return NextResponse.json({ ok: false, error: profileError.message }, { status: 500 })
-  const profiles = (profileRows || []) as Row[]
-  if (profiles.length !== directorIds.length || profiles.some((profile) => text(profile.role) !== "admin")) {
-    return NextResponse.json({ ok: false, error: "Visit consultation director is invalid" }, { status: 409 })
-  }
-
-  const { data: eventRows, error: eventError } = await serviceClient
-    .from("ops_task_events")
-    .select("id,field_name,after_value,created_at")
-    .eq("task_id", taskId)
-    .eq("event_type", "registration_track_event")
-  if (eventError) return NextResponse.json({ ok: false, error: eventError.message }, { status: 500 })
-  const canonicalEvents = ((eventRows || []) as Row[])
-    .map((row) => parseCanonicalTrackEvent(row, appointmentId, notificationRevision))
-    .filter((event): event is CanonicalTrackEvent => Boolean(event))
-  if (canonicalEvents.length === 0) {
-    return NextResponse.json({ ok: false, error: "Appointment revision event mismatch" }, { status: 409 })
-  }
-
-  const appointmentStatus = text(appointment.status)
-  const hasCancellationRevision = canonicalEvents.some((event) => (
-    event.isOldReplacement || ["appointment_canceled", "appointment_subject_deselected"].includes(event.changeKind)
-  ))
-  if (appointmentStatus !== "scheduled" && !hasCancellationRevision) {
-    return NextResponse.json({ ok: false, error: "Appointment terminal event mismatch" }, { status: 409 })
-  }
-
-  const revisionParticipantTrackIds = new Set(
-    getRegistrationVisitRevisionParticipantTrackIds(canonicalEvents),
-  )
-  const notifiedTrackIds = trackIds.filter((trackId) => revisionParticipantTrackIds.has(trackId))
-  if (notifiedTrackIds.length === 0) {
-    return NextResponse.json({ ok: false, error: "Appointment revision changed no attached tracks" }, { status: 409 })
-  }
-
-  const trackById = new Map(tracks.map((track) => [text(track.id), track]))
-  const profileById = new Map(profiles.map((profile) => [text(profile.id), profile]))
-  const consultationByTrackId = new Map(consultations.map((consultation) => [text(consultation.track_id), consultation]))
-  const eventByTrackId = new Map(canonicalEvents.map((event) => [event.trackId, event]))
-  const subjectDirectorPairs = notifiedTrackIds.map((trackId) => {
-    const track = trackById.get(trackId) || {}
-    const consultation = consultationByTrackId.get(trackId) || {}
-    const director = profileById.get(text(consultation.director_profile_id)) || {}
-    return {
-      trackId,
-      subject: text(track.subject),
-      directorProfileId: text(consultation.director_profile_id),
-      directorName: text(director.name) || text(director.email) || text(director.login_id) || "상담 책임자",
-    }
-  })
-  const scheduledAt = formatReservationDate(text(appointment.scheduled_at))
-  const place = text(appointment.place)
-  const oldReplacement = canonicalEvents.some((event) => event.isOldReplacement)
-  const summaryChangeKind = oldReplacement
-    ? "appointment_replaced"
-    : appointmentStatus === "canceled"
-      ? "appointment_canceled"
-      : canonicalEvents.some((event) => event.changeKind === "created")
-        ? "created"
-        : "appointment_updated"
-  const summaryState = getRegistrationVisitChangeState({ changeKind: summaryChangeKind, isOldAppointment: oldReplacement })
-  const reason = canonicalEvents.map((event) => event.reason).find(Boolean) || ""
-  const firstTrackId = notifiedTrackIds[0]
-  const taskHref = getRegistrationVisitTrackHref(taskId, firstTrackId)
-  const taskUrl = new URL(taskHref, getTrustedTaskOrigin(request)).toString()
-  const adminMessage = buildRegistrationVisitCanonicalMessage({
-    state: summaryState,
-    studentName: text(task.student_name) || text(task.title),
-    scheduledAt,
-    place,
-    subjectDirectorPairs,
-    reason,
-    taskUrl,
-  })
-
-  for (const trackId of notifiedTrackIds) {
-    const pair = subjectDirectorPairs.find((item) => item.trackId === trackId)
-    const event = eventByTrackId.get(trackId) || canonicalEvents[0]
-    if (!pair || !event) {
-      return NextResponse.json({ ok: false, error: "Canonical visit participant is missing" }, { status: 409 })
-    }
-    const state = getRegistrationVisitChangeState({
-      changeKind: event.changeKind,
-      isOldAppointment: event.isOldReplacement,
-    })
-    const href = getRegistrationVisitTrackHref(taskId, trackId)
-    const bodyText = buildRegistrationVisitCanonicalMessage({
-      state,
-      studentName: text(task.student_name) || text(task.title),
-      scheduledAt,
-      place,
-      subjectDirectorPairs,
-      reason: event.reason || reason,
-      taskUrl: new URL(href, getTrustedTaskOrigin(request)).toString(),
-    })
-    const title = state === "canceled" || state === "replaced"
-      ? `[${pair.subject}] 방문상담 예약이 ${state === "replaced" ? "교체" : "취소"}되었습니다.`
-      : `[${pair.subject}] 방문상담 예약이 ${state === "scheduled" ? "배정" : "변경"}되었습니다.`
-    const dedupeKey = getRegistrationVisitNotificationDedupeKey({
-      appointmentId,
-      notificationRevision,
-      trackId,
-      directorProfileId: pair.directorProfileId,
-    })
-    const { error: notificationError } = await serviceClient
-      .from("dashboard_notifications")
-      .upsert({
-        recipient_profile_id: pair.directorProfileId,
-        actor_profile_id: user.id,
-        type: "registration_consultation",
-        title,
-        body: bodyText,
-        href,
-        dedupe_key: dedupeKey,
-        metadata: { appointmentId, notificationRevision, taskId, trackId, state },
-      }, { onConflict: "dedupe_key", ignoreDuplicates: true })
-    if (notificationError) {
-      return NextResponse.json({ ok: false, error: notificationError.message }, { status: 500 })
-    }
-  }
-
-  const adminChatDedupeKey = getRegistrationVisitAdminChatKey(appointmentId, notificationRevision)
-  const { data: existingChatEvents, error: eventLookupError } = await serviceClient
-    .from("ops_task_events")
-    .select("id")
-    .eq("task_id", taskId)
-    .eq("event_type", "notification_sent")
-    .eq("field_name", "admin_google_chat")
-    .eq("after_value", adminChatDedupeKey)
-    .limit(1)
-  if (eventLookupError) return NextResponse.json({ ok: false, error: eventLookupError.message }, { status: 500 })
-  if ((existingChatEvents || []).length > 0) {
-    return NextResponse.json(responsePayload(appointmentId, notificationRevision, notifiedTrackIds))
-  }
-
-  const { error: adminChatClaimError } = await serviceClient
-    .from("dashboard_notifications")
-    .insert({
-      recipient_team: "관리팀",
-      actor_profile_id: user.id,
-      type: REGISTRATION_ADMIN_CHAT_CLAIM_TYPE,
-      title: "방문상담 Google Chat 발송 중",
-      body: adminMessage,
-      href: taskHref,
-      dedupe_key: adminChatDedupeKey,
-      metadata: { appointmentId, notificationRevision, taskId, channel: "admin", status: "sending" },
-    })
-  if (adminChatClaimError) {
-    if (isUniqueViolation(adminChatClaimError)) {
-      const { data: existingClaim, error: existingClaimError } = await serviceClient
-        .from("dashboard_notifications")
-        .select("metadata")
-        .eq("dedupe_key", adminChatDedupeKey)
-        .maybeSingle()
-      if (existingClaimError) return NextResponse.json({ ok: false, error: existingClaimError.message }, { status: 500 })
-      const existingMetadata = ((existingClaim as Row | null)?.metadata || {}) as Row
-      const conflictDecision = getAdminChatClaimConflictDecision(text(existingMetadata.status))
-      if (conflictDecision.ok) {
-        return NextResponse.json(responsePayload(appointmentId, notificationRevision, notifiedTrackIds))
+  try {
+    const plan = parsePlan(await rpc(serverClient, "get_registration_visit_legacy_dispatch_plan_v1", {
+      p_appointment_id: appointmentId,
+      p_actor_profile_id: userId,
+    }))
+    const outcomes: string[] = []
+    for (const item of plan.items) {
+      try {
+        outcomes.push(item.channelKey === "in_app"
+          ? await dispatchInApp(serverClient, userId, plan, item)
+          : await dispatchGoogleChat(serverClient, userId, plan, item))
+      } catch (error) {
+        console.warn("방문상담 알림 후처리에 실패했습니다.", error)
+        outcomes.push("failed")
       }
-      return NextResponse.json({ ok: false, error: conflictDecision.error }, { status: conflictDecision.status })
     }
-    return NextResponse.json({ ok: false, error: adminChatClaimError.message }, { status: 500 })
-  }
-
-  let webhookUrl = ""
-  try {
-    webhookUrl = await getAdminWebhookUrl(serviceClient)
+    const sent = outcomes.filter((outcome) => outcome === "sent").length
+    const deduped = outcomes.filter((outcome) => outcome === "deduped").length
+    const deliveryUnknown = outcomes.filter((outcome) => outcome === "delivery_unknown").length
+    const failed = outcomes.filter((outcome) => outcome === "failed").length
+    const payload = {
+      ok: failed === 0,
+      appointmentId: plan.appointmentId,
+      notificationRevision: plan.notificationRevision,
+      notifiedTrackIds: plan.notifiedTrackIds,
+      sent,
+      deduped,
+      failed,
+      warning: deliveryUnknown > 0
+        ? "Google Chat 전달 여부를 알 수 없어 자동 재전송하지 않았습니다. 전달 상태를 확인해 주세요."
+        : "",
+    }
+    if (failed > 0) return NextResponse.json(payload, { status: 502 })
+    const status = plan.items.length > 0 && deduped === plan.items.length ? 202 : 200
+    return NextResponse.json(payload, { status })
   } catch (error) {
-    const releaseError = await releaseAdminChatClaim(serviceClient, adminChatDedupeKey)
-    if (releaseError) return NextResponse.json({ ok: false, error: `Webhook lookup failed; claim release failed: ${releaseError}` }, { status: 500 })
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Webhook lookup failed" }, { status: 500 })
+    const code = text((error as { code?: unknown })?.code)
+    const status = code === "42501" ? 403 : code === "P0002" ? 404 : 503
+    return NextResponse.json({ ok: false, error: "방문상담 알림 후처리를 완료하지 못했습니다." }, { status })
   }
-  if (!webhookUrl) {
-    const releaseError = await releaseAdminChatClaim(serviceClient, adminChatDedupeKey)
-    if (releaseError) return NextResponse.json({ ok: false, error: `Admin Google Chat webhook is not configured; claim release failed: ${releaseError}` }, { status: 500 })
-    return NextResponse.json({ ok: false, error: "Admin Google Chat webhook is not configured" }, { status: 503 })
-  }
-  if (!isGoogleChatWebhookUrl(webhookUrl)) {
-    const releaseError = await releaseAdminChatClaim(serviceClient, adminChatDedupeKey)
-    if (releaseError) return NextResponse.json({ ok: false, error: `Invalid Admin Google Chat webhook URL; claim release failed: ${releaseError}` }, { status: 500 })
-    return NextResponse.json({ ok: false, error: "Invalid Admin Google Chat webhook URL" }, { status: 502 })
-  }
-
-  const controller = new AbortController()
-  const responseTimeout = setTimeout(() => controller.abort(), GOOGLE_CHAT_TIMEOUT_MS)
-  let response: Response
-  try {
-    response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: adminMessage }),
-      signal: controller.signal,
-    })
-  } catch (error) {
-    const timedOut = controller.signal.aborted
-    const failureKind = timedOut ? "timeout" : "network"
-    const deliveryPolicy = getAdminChatDeliveryFailurePolicy(failureKind)
-    const claimUpdateError = await updateAdminChatClaimStatus(serviceClient, adminChatDedupeKey, deliveryPolicy.claimStatus, {
-      appointmentId,
-      notificationRevision,
-      taskId,
-      channel: "admin",
-      status: "delivery_unknown",
-      failureKind,
-      failedAt: new Date().toISOString(),
-    })
-    const deliveryError = timedOut
-      ? "Admin Google Chat request timed out; 전달 여부를 관리팀에서 확인하세요."
-      : `${error instanceof Error ? error.message : "Admin Google Chat request failed"}; 전달 여부를 관리팀에서 확인하세요.`
-    return NextResponse.json({ ok: false, error: claimUpdateError ? `${deliveryError} Claim status update failed: ${claimUpdateError}` : deliveryError }, { status: timedOut ? 504 : 502 })
-  } finally {
-    clearTimeout(responseTimeout)
-  }
-
-  if (!response.ok) {
-    const errorMessage = await response.text().catch(() => "Admin Google Chat request failed")
-    const deliveryPolicy = getAdminChatDeliveryFailurePolicy("http_non_ok")
-    const releaseError = deliveryPolicy.releaseClaim
-      ? await releaseAdminChatClaim(serviceClient, adminChatDedupeKey)
-      : ""
-    if (releaseError) return NextResponse.json({ ok: false, error: `${errorMessage}; claim release failed: ${releaseError}` }, { status: 500 })
-    return NextResponse.json({ ok: false, error: errorMessage }, { status: 502 })
-  }
-
-  const deliveryWarnings: string[] = []
-  const { error: claimUpdateError } = await serviceClient
-    .from("dashboard_notifications")
-    .update({
-      title: "방문상담 Google Chat 발송 완료",
-      metadata: { appointmentId, notificationRevision, taskId, channel: "admin", status: "sent", sentAt: new Date().toISOString() },
-    })
-    .eq("dedupe_key", adminChatDedupeKey)
-  if (claimUpdateError) {
-    console.error("방문상담 Google Chat claim 완료 기록 실패", claimUpdateError)
-    deliveryWarnings.push("Google Chat claim 완료 기록을 확인하세요.")
-  }
-
-  const { error: eventInsertError } = await serviceClient
-    .from("ops_task_events")
-    .insert({
-      task_id: taskId,
-      actor_id: user.id,
-      event_type: "notification_sent",
-      field_name: "admin_google_chat",
-      after_value: adminChatDedupeKey,
-    })
-  if (eventInsertError) {
-    console.error("방문상담 Google Chat 감사 이력 저장 실패", eventInsertError)
-    deliveryWarnings.push("Google Chat 감사 이력을 확인하세요.")
-  }
-
-  return NextResponse.json(responsePayload(
-    appointmentId,
-    notificationRevision,
-    notifiedTrackIds,
-    deliveryWarnings.join(" "),
-  ))
 }

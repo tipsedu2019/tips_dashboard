@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react"
 import { ArrowDown, ArrowUp, Bell, Check, ChevronRight, ChevronsUpDown, Filter, MessageSquare, Pencil, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
+import { useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -1788,6 +1789,7 @@ function hasSlotRoomCollision(
 
 export function MakeupRequestWorkspace() {
   const { user, role, loading: authLoading, session } = useAuth()
+  const searchParams = useSearchParams()
   const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
   const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
   const legacyNotificationEnabled = notificationControlPlaneAvailability.status === "disabled"
@@ -1828,6 +1830,7 @@ export function MakeupRequestWorkspace() {
   const webhookInfoPanelRef = useRef<HTMLDivElement | null>(null)
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
+  const consumedDeepLinkRequestIdRef = useRef("")
 
   const currentUserId = user?.id || ""
   const selectedClass = useMemo(() => findSelectedClass(data, input), [data, input])
@@ -1870,6 +1873,30 @@ export function MakeupRequestWorkspace() {
       void refresh()
     }
   }, [authLoading, refresh])
+
+  useEffect(() => {
+    if (loading) return
+    const requestedRequestId = searchParams.get("requestId") || searchParams.get("request") || ""
+    if (!requestedRequestId || consumedDeepLinkRequestIdRef.current === requestedRequestId) return
+    const requestedRequest = data.requests.find((request) => request.id === requestedRequestId)
+    consumedDeepLinkRequestIdRef.current = requestedRequestId
+    if (requestedRequest) setSelectedDetailRequest(requestedRequest)
+  }, [data.requests, loading, searchParams])
+
+  const clearRequestDeepLink = useCallback(() => {
+    consumedDeepLinkRequestIdRef.current = ""
+    if (typeof window === "undefined") return
+    const nextSearchParams = new URLSearchParams(window.location.search)
+    nextSearchParams.delete("requestId")
+    nextSearchParams.delete("request")
+    const queryString = nextSearchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }, [])
+
+  const closeDetailRequest = useCallback(() => {
+    setSelectedDetailRequest(null)
+    clearRequestDeepLink()
+  }, [clearRequestDeepLink])
 
   const allowedApproverNames = useMemo(() => (
     selectedClass ? getAllowedApproverNames(selectedClass, approverEffectiveYear) : []
@@ -2135,7 +2162,7 @@ export function MakeupRequestWorkspace() {
     }
   }, [currentUserId, data.teachers, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision])
 
-  const runAction = useCallback(async (action: () => Promise<void>, successMessage: string) => {
+  const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
     setSaving(true)
     setError("")
     setMessage("")
@@ -2171,9 +2198,9 @@ export function MakeupRequestWorkspace() {
     if (approved) {
       setApprovalRequest(null)
       setApprovalNote("")
-      setSelectedDetailRequest(null)
+      closeDetailRequest()
     }
-  }, [approvalNote, approvalRequest, currentUserId, runAction])
+  }, [approvalNote, approvalRequest, closeDetailRequest, currentUserId, runAction])
 
   const handleOpenActionNoteRequest = useCallback((request: MakeupRequest, kind: MakeupActionNoteKind) => {
     setActionNoteRequest({ request, kind })
@@ -2210,9 +2237,9 @@ export function MakeupRequestWorkspace() {
     if (handled) {
       setActionNoteRequest(null)
       setActionNote("")
-      setSelectedDetailRequest(null)
+      closeDetailRequest()
     }
-  }, [actionNote, actionNoteConfig.label, actionNoteConfig.required, actionNoteConfig.successMessage, actionNoteRequest, currentUserId, runAction])
+  }, [actionNote, actionNoteConfig.label, actionNoteConfig.required, actionNoteConfig.successMessage, actionNoteRequest, closeDetailRequest, currentUserId, runAction])
 
   const closeFinalCancelDialog = useCallback(() => {
     if (saving) return
@@ -2229,8 +2256,9 @@ export function MakeupRequestWorkspace() {
     if (canceled) {
       setFinalCancelRequest(null)
       setFinalCancelNote("")
+      closeDetailRequest()
     }
-  }, [currentUserId, finalCancelNote, finalCancelRequest, runAction])
+  }, [closeDetailRequest, currentUserId, finalCancelNote, finalCancelRequest, runAction])
 
   const handleToggleNotificationSetting = useCallback(async (setting: MakeupNotificationSetting) => {
     if (!isManager) {
@@ -2400,7 +2428,7 @@ export function MakeupRequestWorkspace() {
 
   const handleSchedulePendingMakeup = useCallback((request: MakeupRequest) => {
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
-    setSelectedDetailRequest(null)
+    closeDetailRequest()
     setEditingRequestId(request.id)
     setView("mine")
     if (requestClass) {
@@ -2417,7 +2445,7 @@ export function MakeupRequestWorkspace() {
       approverTeacherCatalogId: request.approverTeacherCatalogId,
     })
     setRequestDialogOpen(true)
-  }, [data.classes])
+  }, [closeDetailRequest, data.classes])
 
   return (
     <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
@@ -2756,7 +2784,9 @@ export function MakeupRequestWorkspace() {
       </div>
 
       <Dialog open={Boolean(detailRequest)} onOpenChange={(open) => {
-        if (!open) setSelectedDetailRequest(null)
+        if (!open) {
+          closeDetailRequest()
+        }
       }}>
         <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-h-[92vh] sm:max-w-3xl">
           <DialogHeader>
@@ -2773,12 +2803,12 @@ export function MakeupRequestWorkspace() {
               canManage={isManager}
               saving={saving}
               onEditForRevision={(request) => {
-                setSelectedDetailRequest(null)
+                closeDetailRequest()
                 handleEditForRevision(request)
               }}
               onSchedulePendingMakeup={handleSchedulePendingMakeup}
               onApprove={(request) => {
-                setSelectedDetailRequest(null)
+                closeDetailRequest()
                 setApprovalRequest(request)
                 setApprovalNote("")
               }}
@@ -2787,7 +2817,7 @@ export function MakeupRequestWorkspace() {
               onRequestRefund={(request) => handleOpenActionNoteRequest(request, "refund")}
               onCompleteRefund={(request) => handleOpenActionNoteRequest(request, "refundComplete")}
               onFinalCancel={(request) => {
-                setSelectedDetailRequest(null)
+                closeDetailRequest()
                 setFinalCancelRequest(request)
                 setFinalCancelNote("")
               }}

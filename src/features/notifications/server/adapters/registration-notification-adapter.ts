@@ -14,6 +14,8 @@ import type {
   TargetReconciliationBatch,
   TargetReconciliationInput,
 } from "../notification-workflow-adapter.ts"
+import type { ImmediateNotificationAdapterDependencies } from "./immediate-notification-adapter.ts"
+import { immediateNotificationProductionDependencies } from "./immediate-notification-source-reader.ts"
 
 type RegistrationAppointmentKind = "level_test" | "visit_consultation"
 type RegistrationAppointmentStatus = "scheduled" | "completed" | "canceled"
@@ -77,6 +79,42 @@ type JsonRecord = Record<string, unknown>
 
 const EVENT_KEY = "registration.appointment_reminder_due"
 const SOURCE_TYPE = "registration_appointment"
+const IMMEDIATE_CORE_EVENTS = new Set([
+  "registration.case_created",
+  "registration.inquiry_routed",
+  "registration.director_assigned",
+  "registration.phone_consultation_ready",
+  "registration.level_test_scheduled",
+  "registration.level_test_rescheduled",
+  "registration.level_test_started",
+  "registration.level_test_completed",
+  "registration.level_test_absent",
+  "registration.level_test_canceled",
+  "registration.consultation_completed",
+  "registration.waiting_transitioned",
+  "registration.enrollment_decided",
+  "registration.admission_started",
+  "registration.admission_advanced",
+  "registration.admission_canceled",
+  "registration.registration_completed",
+  "registration.case_closed",
+  "registration.track_reopened",
+])
+const IMMEDIATE_VISIT_EVENTS = new Set([
+  "registration.visit_scheduled",
+  "registration.visit_rescheduled",
+  "registration.visit_replaced",
+  "registration.visit_subject_deselected",
+  "registration.visit_canceled",
+])
+const IMMEDIATE_MESSAGE_EVENTS = new Set([
+  "registration.admission_message_requested",
+  "registration.admission_message_accepted",
+  "registration.admission_message_failed",
+  "registration.admission_message_unknown",
+  "registration.admission_message_reconciled",
+  "registration.admission_message_retry_released",
+])
 const SEOUL_OFFSET_MILLISECONDS = 9 * 60 * 60 * 1_000
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const POSITIVE_DECIMAL_PATTERN = /^[1-9]\d*$/
@@ -339,6 +377,135 @@ function validateResolveEnvelope(input: NotificationResolveInput | NotificationR
   }
 }
 
+function isImmediateEvent(eventKey: string) {
+  return IMMEDIATE_CORE_EVENTS.has(eventKey)
+    || IMMEDIATE_VISIT_EVENTS.has(eventKey)
+    || IMMEDIATE_MESSAGE_EVENTS.has(eventKey)
+}
+
+function immediateSourceType(eventKey: string) {
+  if (IMMEDIATE_VISIT_EVENTS.has(eventKey)) return "registration_appointment"
+  if (IMMEDIATE_MESSAGE_EVENTS.has(eventKey)) return "ops_registration_message"
+  return "ops_task_event"
+}
+
+function immediatePayload(input: NotificationResolveInput | NotificationRenderInput) {
+  if (
+    input.workflowKey !== "registration"
+    || !isImmediateEvent(input.eventKey)
+    || input.sourceType !== immediateSourceType(input.eventKey)
+    || !UUID_PATTERN.test(input.eventId)
+    || !UUID_PATTERN.test(input.sourceId)
+    || !isRecord(input.payload)
+    || !Number.isFinite(Date.parse(input.scheduledFor))
+  ) adapterError("payload_schema_unsupported")
+
+  const expectedSchemaVersion = (
+    input.eventKey === "registration.case_created"
+    || input.eventKey === "registration.registration_completed"
+    || input.eventKey === "registration.case_closed"
+  ) ? 1 : 2
+  if (input.payloadSchemaVersion !== expectedSchemaVersion) {
+    adapterError("payload_schema_unsupported")
+  }
+  if (IMMEDIATE_VISIT_EVENTS.has(input.eventKey)) {
+    const sourceRevision = positiveDecimal(input.sourceRevision)
+    if (
+      requiredUuid(input.payload.appointment_id) !== input.sourceId.toLowerCase()
+      || positiveDecimal(input.payload.notification_revision) !== sourceRevision
+    ) adapterError("payload_schema_unsupported")
+  } else if (input.sourceRevision !== null) {
+    adapterError("payload_schema_unsupported")
+  }
+  if (IMMEDIATE_MESSAGE_EVENTS.has(input.eventKey)) {
+    if (requiredUuid(input.payload.message_id) !== input.sourceId.toLowerCase()) {
+      adapterError("payload_schema_unsupported")
+    }
+    requiredString(input.payload.message_request_key)
+  }
+  requiredUuid(input.payload.task_id)
+  return input.payload
+}
+
+function immediateTargetSet(input: NotificationResolveInput) {
+  const payload = immediatePayload(input)
+  const rule = input.rule
+  let generation = IMMEDIATE_VISIT_EVENTS.has(input.eventKey)
+    ? positiveDecimal(payload.recipient_revision)
+    : "0"
+  let targets: NotificationTarget[]
+  if (rule.channelKey === "google_chat" && rule.audienceKey === "management_team") {
+    if (rule.connectionKey && rule.connectionKey !== "google_chat.management") {
+      adapterError("payload_schema_unsupported")
+    }
+    targets = [managementConnectionTarget()]
+  } else if (rule.channelKey === "in_app" && rule.audienceKey === "track_director") {
+    generation = positiveDecimal(payload.recipient_revision)
+    const profileIds = Array.isArray(payload.director_profile_ids)
+      ? payload.director_profile_ids
+      : [payload.director_profile_id]
+    targets = profileTargets(profileIds.filter((value): value is string => typeof value === "string"))
+  } else if (rule.channelKey === "in_app" && rule.audienceKey === "management_team") {
+    const profileIds = Array.isArray(payload.management_profile_ids)
+      ? payload.management_profile_ids
+      : []
+    targets = profileTargets(profileIds.filter((value): value is string => typeof value === "string"))
+  } else if (
+    rule.channelKey === "customer_message"
+    && rule.audienceKey === "applicant_guardian"
+    && input.eventKey === "registration.admission_message_requested"
+  ) {
+    const messageId = requiredUuid(payload.message_id)
+    const requestKeyHash = createHash("md5").update(requiredString(payload.message_request_key), "utf8").digest("hex")
+    targets = [freezeTarget({
+      targetKind: "customer_endpoint",
+      targetKey: `registration-message:${messageId}`,
+      targetProfileId: null,
+      connectionKey: null,
+      targetSnapshot: { message_id: messageId, request_key_hash: requestKeyHash },
+    })]
+  } else {
+    adapterError("payload_schema_unsupported")
+  }
+  if (!/^(?:0|[1-9]\d*)$/.test(generation)) adapterError("payload_schema_unsupported")
+  const frozenTargets = Object.freeze([...targets].sort((left, right) => (
+    left.targetKey.localeCompare(right.targetKey)
+  )))
+  return Object.freeze({
+    targetGeneration: generation,
+    targetSetHash: hashTargets(frozenTargets),
+    targets: frozenTargets,
+  })
+}
+
+function immediateRenderContext(input: NotificationRenderInput): NotificationRenderContext {
+  const payload = immediatePayload(input)
+  const context: Record<string, string> = {}
+  for (const key of [
+    "student_name", "grade", "inquiry_at", "status", "class_name",
+    "registration_checked", "subject", "subjects", "scheduled_at", "place",
+  ]) {
+    const value = payload[key]
+    if (typeof value === "string" && value.trim()) context[key] = value.trim()
+    else if (typeof value === "boolean" || typeof value === "number") context[key] = String(value)
+  }
+  return Object.freeze(context)
+}
+
+function immediateDeepLink(input: NotificationRenderInput) {
+  const payload = immediatePayload(input)
+  const query = new URLSearchParams()
+  query.set("taskId", requiredUuid(payload.task_id))
+  if (IMMEDIATE_VISIT_EVENTS.has(input.eventKey)) {
+    query.set("appointmentId", requiredUuid(payload.appointment_id))
+    query.set("view", "calendar")
+  } else if (input.eventKey === "registration.phone_consultation_ready") {
+    const trackId = nullableUuid(payload.track_id)
+    if (trackId) query.set("trackId", trackId)
+  }
+  return `/admin/registration?${query.toString()}`
+}
+
 function exactStringList(value: unknown, expected: ReadonlyArray<string>) {
   return Array.isArray(value)
     && value.length === expected.length
@@ -595,6 +762,7 @@ function requiredRuleRevisionMap(value: Readonly<Record<string, string>>) {
 
 export function createRegistrationNotificationAdapter(
   dependencies: RegistrationNotificationAdapterDependencies,
+  immediateDependencies: ImmediateNotificationAdapterDependencies = immediateNotificationProductionDependencies,
 ): NotificationWorkflowAdapter {
   if (
     !dependencies
@@ -610,6 +778,7 @@ export function createRegistrationNotificationAdapter(
     workflowKey: "registration",
 
     async resolveTargets(input) {
+      if (isImmediateEvent(input.eventKey)) return immediateTargetSet(input)
       validateResolveEnvelope(input)
       const rawSource = await dependencies.getSourceSnapshot(input.sourceId)
       if (!rawSource) adapterError("payload_schema_unsupported")
@@ -620,6 +789,7 @@ export function createRegistrationNotificationAdapter(
     },
 
     async buildRenderContext(input): Promise<NotificationRenderContext> {
+      if (isImmediateEvent(input.eventKey)) return immediateRenderContext(input)
       validateResolveEnvelope(input)
       const rawSource = await dependencies.getSourceSnapshot(input.sourceId)
       if (!rawSource) adapterError("payload_schema_unsupported")
@@ -637,6 +807,7 @@ export function createRegistrationNotificationAdapter(
     },
 
     async buildDeepLink(input) {
+      if (isImmediateEvent(input.eventKey)) return immediateDeepLink(input)
       validateResolveEnvelope(input)
       const rawSource = await dependencies.getSourceSnapshot(input.sourceId)
       if (!rawSource) adapterError("payload_schema_unsupported")
@@ -650,6 +821,28 @@ export function createRegistrationNotificationAdapter(
     },
 
     async revalidateBeforeSend(input): Promise<NotificationRevalidationResult> {
+      if (isImmediateEvent(input.eventKey)) {
+        if (
+          input.sourceType !== immediateSourceType(input.eventKey)
+          || !UUID_PATTERN.test(input.sourceId)
+          || !UUID_PATTERN.test(input.eventId)
+          || !UUID_PATTERN.test(input.deliveryId)
+          || !POSITIVE_DECIMAL_PATTERN.test(input.ruleRevision)
+          || !/^\d+$/.test(input.targetGeneration)
+          || !Number.isFinite(Date.parse(input.scheduledFor))
+        ) return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+        if (IMMEDIATE_VISIT_EVENTS.has(input.eventKey)) {
+          if (input.sourceRevision === null || !POSITIVE_DECIMAL_PATTERN.test(input.sourceRevision)) {
+            return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+          }
+        } else if (input.sourceRevision !== null) {
+          return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
+        }
+        return immediateDependencies.revalidateAuthoritativeSource({
+          workflowKey: "registration",
+          ...input,
+        })
+      }
       if (
         input.eventKey !== EVENT_KEY
         || input.sourceType !== SOURCE_TYPE

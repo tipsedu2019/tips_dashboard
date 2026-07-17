@@ -2,25 +2,18 @@
 
 import { supabase } from "@/lib/supabase"
 import {
-  applyMakeupRequestToSchedulePlan,
-  buildMakeupCalendarDrafts,
   buildRoomAvailability,
   canTransitionMakeupRequest,
-  extractMakeupCalendarMeta,
   getMakeupRequestEffectiveYear,
   getMakeupRequestKind,
   hasCancelPart,
   hasMakeupPart,
   isMakeupApproverAllowed,
-  MAKEUP_REQUEST_STATUS_LABELS,
   normalizeMakeupSlots,
   resolveMakeupApprovalGroup,
   type MakeupRequestKind,
 } from "./makeup-request-model.js"
-import {
-  buildAcademicEventMutationPayload,
-  runAcademicEventMutation,
-} from "@/features/operations/academic-event-utils.js"
+import { runIdempotentMakeupCreate } from "./makeup-create-attempt.js"
 import {
   mapDashboardNotificationInboxWire,
   mapDashboardNotificationReadWire,
@@ -211,13 +204,6 @@ export type MakeupNotificationDelivery = {
   body: string
   error: string
   createdAt: string
-}
-
-const GOOGLE_CHAT_CHANNEL_ENV: Record<GoogleChatChannel, string> = {
-  executive: "GOOGLE_CHAT_WEBHOOK_EXECUTIVE",
-  admin: "GOOGLE_CHAT_WEBHOOK_ADMIN",
-  math: "GOOGLE_CHAT_WEBHOOK_MATH",
-  english: "GOOGLE_CHAT_WEBHOOK_ENGLISH",
 }
 
 const EMPTY_WORKSPACE_DATA: MakeupRequestWorkspaceData = {
@@ -588,89 +574,10 @@ function isMakeupManagerRole(role: string) {
   return ["admin", "staff", "super_admin", "manager"].includes(text(role))
 }
 
-function buildRequestHref(requestId: string) {
-  return `/admin/makeup-requests${requestId ? `?request=${encodeURIComponent(requestId)}` : ""}`
-}
-
-function buildRequestUrl(requestId: string) {
-  const href = buildRequestHref(requestId)
-  const origin = text(process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_AUTH_REDIRECT_ORIGIN).replace(/\/+$/, "")
-  if (origin) return `${origin}${href}`
-  if (typeof window !== "undefined" && window.location.origin) return `${window.location.origin.replace(/\/+$/, "")}${href}`
-  return href
-}
-
-function formatGoogleChatLink(url: string) {
-  return url ? `<${url}|휴보강 바로 열기>` : ""
-}
-
-function buildNotificationDedupeKey(requestId: string, triggerKind: string, channel: string, target = "") {
-  return [requestId, triggerKind, channel, target].map(text).join(":")
-}
-
-function getNotificationSetting(settings: MakeupNotificationSetting[], triggerKind: MakeupNotificationTrigger, channel: MakeupNotificationChannel) {
-  return settings.find((item) => item.triggerKind === triggerKind && item.channel === channel)
-}
-
-function getNotificationTriggerTemplateSetting(settings: MakeupNotificationSetting[], triggerKind: MakeupNotificationTrigger) {
-  const triggerSettings = settings.filter((item) => item.triggerKind === triggerKind)
-  return MAKEUP_NOTIFICATION_CHANNELS
-    .map((channel) => triggerSettings.find((item) => item.channel === channel))
-    .find(Boolean) || null
-}
-
-function isNotificationChannelEnabled(settings: MakeupNotificationSetting[], triggerKind: MakeupNotificationTrigger, channel: MakeupNotificationChannel) {
-  const setting = getNotificationSetting(settings, triggerKind, channel)
-  return setting ? setting.enabled : true
-}
-
-function formatNotificationDateTime(value: string) {
-  if (!value) return ""
-  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
-  return match ? `${match[1]} ${match[2]}` : value
-}
-
-function buildMakeupNotificationRoomSummary(request: MakeupRequest) {
-  return request.makeupSlots.length > 0
-    ? request.makeupSlots.map((slot) => text(slot.classroom || request.makeupClassroom)).filter(Boolean).join(", ")
-    : request.makeupClassroom
-}
-
-function buildMakeupNotificationTimeSummary(request: MakeupRequest) {
-  const slots = request.makeupSlots.length > 0
-    ? request.makeupSlots
-    : [{ startAt: request.makeupStartAt, endAt: request.makeupEndAt }]
-  return slots
-    .map((slot) => {
-      const startAt = formatNotificationDateTime(text(slot.startAt))
-      const endAt = formatNotificationDateTime(text(slot.endAt))
-      if (startAt && endAt) return `${startAt} - ${endAt}`
-      return startAt || endAt
-    })
-    .filter(Boolean)
-    .join(", ")
-}
-
-function getMakeupNotificationStatusLabel(status: MakeupRequestStatus) {
-  return MAKEUP_REQUEST_STATUS_LABELS[status] || status
-}
-
 function getLatestMakeupRequestEvent(request: MakeupRequest, eventTypes: string[]) {
   return [...(request.events || [])]
     .filter((event) => eventTypes.includes(event.eventType))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] || null
-}
-
-function getMakeupNotificationEvent(request: MakeupRequest, eventTypes: string[]) {
-  return getLatestMakeupRequestEvent(request, eventTypes)
-}
-
-function getMakeupNotificationEventDateTime(request: MakeupRequest, eventTypes: string[], fallback = "") {
-  return formatNotificationDateTime(fallback || getMakeupNotificationEvent(request, eventTypes)?.createdAt || "") || "-"
-}
-
-function getMakeupNotificationEventNote(request: MakeupRequest, eventTypes: string[]) {
-  return getMakeupNotificationEvent(request, eventTypes)?.note || "-"
 }
 
 function isRefundApprovalRequest(request: MakeupRequest) {
@@ -684,496 +591,54 @@ function isRefundApprovalRequest(request: MakeupRequest) {
   return true
 }
 
-function isSystemMakeupScheduleNote(value: string) {
-  return /^보강\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}-\d{2}:\d{2}/.test(text(value))
+type MakeupMutationWire = {
+  request?: unknown
+  sourceEventId?: unknown
 }
 
-function getMakeupApprovalNote(request: MakeupRequest) {
-  const approvalNote = getMakeupNotificationEvent(request, ["approved"])?.note || ""
-  const cancelNote = getMakeupNotificationEvent(request, ["approval_canceled", "completed_canceled"])?.note || ""
-  const note = text(approvalNote || request.finalNote)
-  if (!note || isSystemMakeupScheduleNote(note) || (cancelNote && note === cancelNote)) return "-"
-  return note
-}
-
-function appendLocalMakeupRequestEvent(input: {
-  request: MakeupRequest
-  eventType: string
-  actorId: string
-  beforeValue?: string
-  afterValue?: string
-  note?: string
-  createdAt: string
-}) {
-  const event: MakeupRequestEvent = {
-    id: `local-${input.eventType}-${input.createdAt}`,
-    requestId: input.request.id,
-    actorId: input.actorId,
-    actorLabel: "시스템",
-    eventType: input.eventType,
-    fieldName: "",
-    beforeValue: text(input.beforeValue),
-    afterValue: text(input.afterValue),
-    note: text(input.note),
-    createdAt: input.createdAt,
-  }
-  return {
-    ...input.request,
-    events: [event, ...input.request.events],
-  }
-}
-
-function buildMakeupNotificationTemplateContext(
-  request: MakeupRequest,
-  triggerKind: MakeupNotificationTrigger,
-  fallbackTitle: string,
-  fallbackBody: string,
-) {
-  const roomSummary = buildMakeupNotificationRoomSummary(request)
-  return {
-    프로세스: getMakeupNotificationTriggerLabel(triggerKind),
-    상태: getMakeupNotificationStatusLabel(request.status),
-    수업: request.className,
-    과목: request.subject,
-    선생님: request.teacherLabel,
-    사유: request.reason,
-    휴강일: request.cancelDate,
-    보강일시: buildMakeupNotificationTimeSummary(request),
-    "보강 강의실": roomSummary,
-    보강강의실: roomSummary,
-    신청자: request.requesterLabel,
-    상신일시: getMakeupNotificationEventDateTime(request, ["submitted", "resubmitted"], request.createdAt),
-    보완요청일시: getMakeupNotificationEventDateTime(request, ["revision_requested"]),
-    "보완 사유": request.returnedReason || "-",
-    승인일시: getMakeupNotificationEventDateTime(request, ["approved"], request.approvedAt),
-    "승인 메모": getMakeupApprovalNote(request),
-    반려일시: getMakeupNotificationEventDateTime(request, ["rejected"]),
-    "반려 사유": request.rejectedReason || "-",
-    승인취소일시: getMakeupNotificationEventDateTime(request, ["approval_canceled", "completed_canceled"], request.canceledAt),
-    "승인취소 메모": getMakeupNotificationEventNote(request, ["approval_canceled", "completed_canceled"]),
-    결재자: request.approverLabel,
-    제목: fallbackTitle,
-    본문: fallbackBody,
-  }
-}
-
-function renderMakeupNotificationContent(
-  settings: MakeupNotificationSetting[],
-  triggerKind: MakeupNotificationTrigger,
-  channel: MakeupNotificationChannel,
-  request: MakeupRequest,
-  fallbackTitle: string,
-  fallbackBody: string,
-) {
-  void channel
-  const templateSetting = getNotificationTriggerTemplateSetting(settings, triggerKind)
-  const context = buildMakeupNotificationTemplateContext(request, triggerKind, fallbackTitle, fallbackBody)
-  return {
-    title: renderMakeupNotificationTemplate(templateSetting?.titleTemplate || fallbackTitle, context),
-    body: renderMakeupNotificationTemplate(templateSetting?.bodyTemplate || fallbackBody, context),
-  }
-}
-
-async function recordMakeupRequestEvent(requestId: string, eventType: string, options: Partial<MakeupRequestEvent> = {}) {
-  if (!supabase || !requestId) return
-
-  const row: Row = {
-    request_id: requestId,
-    event_type: eventType,
-    field_name: nullable(options.fieldName),
-    before_value: nullable(options.beforeValue),
-    after_value: nullable(options.afterValue),
-    note: nullable(options.note),
-  }
-  if (text(options.actorId)) {
-    row.actor_id = text(options.actorId)
-  }
-
-  const { error } = await supabase.from("makeup_request_events").insert(row)
-  if (error && !isMissingRelationError(error)) {
-    throw error
-  }
-}
-
-async function loadMakeupNotificationSettings() {
-  if (!supabase) return buildDefaultNotificationSettings()
-
-  try {
-    const rows = await readTable("makeup_notification_settings", "*", true)
-    const mapped = rows.map(mapNotificationSetting)
-    return mergeNotificationSettings(mapped)
-  } catch (error) {
-    if (isMissingRelationError(error) || isPermissionError(error)) return buildDefaultNotificationSettings()
-    throw error
-  }
-}
-
-async function recordNotificationDelivery(input: {
-  requestId: string
-  triggerKind: MakeupNotificationTrigger
-  channel: MakeupNotificationChannel
-  targetType: string
-  targetLabel?: string
-  recipientProfileId?: string
-  recipientTeam?: string
-  googleChatChannel?: GoogleChatChannel
-  status: "sent" | "skipped" | "failed" | "disabled" | "deduped"
-  dedupeKey?: string
-  title: string
-  body: string
-  error?: string
-  actorProfileId?: string
-  metadata?: Row
-}) {
-  if (!supabase) return
-
-  const { error } = await supabase.from("makeup_notification_deliveries").insert({
-    request_id: nullable(input.requestId),
-    trigger_kind: input.triggerKind,
-    channel: input.channel,
-    target_type: input.targetType,
-    target_label: text(input.targetLabel),
-    recipient_profile_id: nullable(input.recipientProfileId),
-    recipient_team: nullable(input.recipientTeam),
-    google_chat_channel: nullable(input.googleChatChannel),
-    status: input.status,
-    dedupe_key: nullable(input.dedupeKey),
-    title: text(input.title),
-    body: text(input.body),
-    error: nullable(input.error),
-    actor_profile_id: nullable(input.actorProfileId),
-    metadata: input.metadata || {},
-  })
-
-  if (error && !isMissingRelationError(error)) {
-    throw error
-  }
-}
-
-export async function createDashboardNotification(input: {
-  recipientProfileId?: string
-  recipientTeam?: string
-  actorProfileId?: string
-  type?: string
-  title: string
-  body?: string
-  href?: string
-  dedupeKey?: string
-  metadata?: Row
-}) {
-  if (!supabase) return
-
-  const row = {
-    recipient_profile_id: nullable(input.recipientProfileId),
-    recipient_team: nullable(input.recipientTeam),
-    actor_profile_id: nullable(input.actorProfileId),
-    type: text(input.type) || "makeup_request",
-    title: text(input.title),
-    body: nullable(input.body),
-    href: nullable(input.href),
-    dedupe_key: nullable(input.dedupeKey),
-    metadata: {
-      ...(input.metadata || {}),
-      dedupeKey: text(input.dedupeKey),
-    },
-  }
-
-  const result = input.dedupeKey
-    ? await supabase.from("dashboard_notifications").upsert(row, { onConflict: "dedupe_key", ignoreDuplicates: true })
-    : await supabase.from("dashboard_notifications").insert(row)
-  const error = result.error
-
-  if (error && !isMissingRelationError(error)) {
-    throw error
-  }
-}
-
-async function sendDashboardWebPushNotification(input: {
-  recipientProfileId?: string
-  recipientTeam?: string
-  title: string
-  body: string
-  href: string
-  metadata?: Row
-}) {
-  if (!supabase) return
-
+async function dispatchLegacyMakeupNotification(sourceEventId: string) {
+  if (!supabase || !sourceEventId) return
   try {
     const { data } = await supabase.auth.getSession()
     const accessToken = data.session?.access_token
     if (!accessToken) return
-
-    await fetch("/api/web-push", {
+    const response = await fetch("/api/notifications/legacy/makeup", {
       method: "POST",
+      keepalive: true,
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ sourceEventId }),
     })
+    if (!response.ok && response.status !== 202) {
+      console.warn("휴보강 저장은 완료됐지만 알림 후처리를 완료하지 못했습니다.")
+    }
   } catch (error) {
-    console.warn("Dashboard web push notification skipped", error)
+    console.warn("휴보강 저장은 완료됐지만 알림 후처리를 완료하지 못했습니다.", error)
   }
 }
 
-async function createMonitoredDashboardNotification(input: {
-  requestId: string
-  triggerKind: MakeupNotificationTrigger
-  channel: MakeupNotificationChannel
-  recipientProfileId?: string
-  recipientTeam?: string
-  actorProfileId?: string
-  title: string
-  body: string
-  href: string
-  targetLabel: string
-  settings: MakeupNotificationSetting[]
-}) {
-  const target = text(input.recipientProfileId || input.recipientTeam)
-  const dedupeKey = buildNotificationDedupeKey(input.requestId, input.triggerKind, input.channel, target)
-  if (!isNotificationChannelEnabled(input.settings, input.triggerKind, input.channel)) {
-    await recordNotificationDelivery({
-      ...input,
-      targetType: input.recipientProfileId ? "profile" : "team",
-      status: "disabled",
-      dedupeKey,
-    })
-    return
+async function runMakeupMutationRpc(
+  name: "create_makeup_request_v2" | "transition_makeup_request_v2" | "delete_makeup_request_v2",
+  parameters: Row,
+  workspaceData: MakeupRequestWorkspaceData,
+) {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data: raw, error } = await supabase.rpc(name, parameters)
+  if (error) throw error
+  const wire = parseObject(raw) as MakeupMutationWire
+  const requestRow = parseObject(wire.request)
+  const requestId = text(requestRow.id)
+  const sourceEventId = text(wire.sourceEventId)
+  if (!requestId || !sourceEventId) {
+    throw new Error("휴보강 저장 결과가 올바르지 않습니다.")
   }
-
-  if (supabase) {
-    const { data } = await supabase
-      .from("dashboard_notifications")
-      .select("id")
-      .eq("dedupe_key", dedupeKey)
-      .maybeSingle()
-    if (data) {
-      await recordNotificationDelivery({
-        ...input,
-        targetType: input.recipientProfileId ? "profile" : "team",
-        status: "deduped",
-        dedupeKey,
-      })
-      return
-    }
-  }
-
-  await createDashboardNotification({
-    recipientProfileId: input.recipientProfileId,
-    recipientTeam: input.recipientTeam,
-    actorProfileId: input.actorProfileId,
-    title: input.title,
-    body: input.body,
-    href: input.href,
-    dedupeKey,
-    metadata: { requestId: input.requestId, triggerKind: input.triggerKind, channel: input.channel },
-  })
-  void sendDashboardWebPushNotification({
-    recipientProfileId: input.recipientProfileId,
-    recipientTeam: input.recipientTeam,
-    title: input.title,
-    body: input.body,
-    href: input.href,
-    metadata: { requestId: input.requestId, triggerKind: input.triggerKind, channel: input.channel, dedupeKey },
-  })
-  await recordNotificationDelivery({
-    ...input,
-    targetType: input.recipientProfileId ? "profile" : "team",
-    status: "sent",
-    dedupeKey,
-  })
-}
-
-export async function sendGoogleChatNotification(channel: GoogleChatChannel, textBody: string, metadata: Row = {}) {
-  if (!GOOGLE_CHAT_CHANNEL_ENV[channel]) {
-    return { ok: false, skipped: true, error: "알 수 없는 구글챗 채널입니다." }
-  }
-
-  if (!supabase) {
-    return { ok: false, skipped: true, error: "Supabase 연결 설정이 필요합니다." }
-  }
-
-  try {
-    const { data } = await supabase.auth.getSession()
-    const accessToken = data.session?.access_token
-    if (!accessToken) {
-      return { ok: false, skipped: true, error: "로그인 세션을 찾을 수 없습니다." }
-    }
-
-    const response = await fetch("/api/google-chat", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        channel,
-        text: textBody,
-        metadata,
-      }),
-    })
-
-    if (!response.ok) {
-      return { ok: false, skipped: false, error: await response.text() }
-    }
-
-    return { ok: true, skipped: false, error: "" }
-  } catch (error) {
-    return {
-      ok: false,
-      skipped: false,
-      error: error instanceof Error ? error.message : "구글챗 알림 발송에 실패했습니다.",
-    }
-  }
-}
-
-async function notifyMakeupRequest(request: MakeupRequest, kind: MakeupNotificationTrigger, profiles: MakeupProfileOption[], actorProfileId = "") {
-  const href = buildRequestHref(request.id)
-  const requestUrl = buildRequestUrl(request.id)
-  const fallbackTitle = getDefaultMakeupNotificationTitleTemplate(kind)
-  const fallbackBody = renderMakeupNotificationTemplate(getDefaultMakeupNotificationBodyTemplate(), buildMakeupNotificationTemplateContext(request, kind, fallbackTitle, ""))
-  const settings = await loadMakeupNotificationSettings()
-  const personalContent = renderMakeupNotificationContent(settings, kind, "dashboard_personal", request, fallbackTitle, fallbackBody)
-  const managementContent = renderMakeupNotificationContent(settings, kind, "dashboard_management", request, fallbackTitle, fallbackBody)
-  const personalRecipients = new Set<string>()
-  const addPersonalRecipient = (profileId: string) => {
-    if (!profileId) return
-    personalRecipients.add(profileId)
-  }
-
-  if (kind === "submitted" || kind === "refund_requested") {
-    addPersonalRecipient(request.approverProfileId)
-  } else if (kind === "approved" || kind === "canceled") {
-    addPersonalRecipient(request.requesterId)
-    addPersonalRecipient(request.approverProfileId)
-  } else if (kind === "completed") {
-    addPersonalRecipient(request.requesterId)
-    addPersonalRecipient(request.approverProfileId)
-  } else if (request.requesterId) {
-    addPersonalRecipient(request.requesterId)
-  }
-
-  const shouldNotifyManagement = kind === "submitted" || kind === "approved" || kind === "completed" || kind === "canceled" || kind === "refund_requested"
-  await Promise.all([
-    ...[...personalRecipients].map((recipientProfileId) => createMonitoredDashboardNotification({
-      requestId: request.id,
-      triggerKind: kind,
-      channel: "dashboard_personal",
-      recipientProfileId,
-      actorProfileId,
-      title: personalContent.title,
-      body: personalContent.body,
-      href,
-      targetLabel: profiles.find((profile) => profile.id === recipientProfileId)?.label || "개인",
-      settings,
-    })),
-    shouldNotifyManagement
-      ? createMonitoredDashboardNotification({
-          requestId: request.id,
-          triggerKind: kind,
-          channel: "dashboard_management",
-          recipientTeam: "관리팀",
-          actorProfileId,
-          title: managementContent.title,
-          body: managementContent.body,
-          href,
-          targetLabel: "관리팀",
-          settings,
-        })
-      : Promise.resolve(),
-  ])
-
-  const subjectChannel: GoogleChatChannel =
-    request.approvalGroup === "english" ? "english" : request.approvalGroup.startsWith("math") ? "math" : "admin"
-  const chatTargets = new Set<GoogleChatChannel>(
-    kind === "submitted" || kind === "refund_requested"
-      ? ["executive", "admin", subjectChannel]
-      : kind === "approved"
-        ? ["executive", "admin", subjectChannel]
-        : kind === "completed" || kind === "canceled"
-          ? ["executive", "admin", subjectChannel]
-          : kind === "returned" || kind === "rejected"
-            ? [subjectChannel]
-            : [],
-  )
-  for (const chatChannel of chatTargets) {
-    const notificationChannel = `google_chat_${chatChannel}` as MakeupNotificationChannel
-    const chatContent = renderMakeupNotificationContent(settings, kind, notificationChannel, request, fallbackTitle, fallbackBody)
-    const dedupeKey = buildNotificationDedupeKey(request.id, kind, notificationChannel, chatChannel)
-    if (!isNotificationChannelEnabled(settings, kind, notificationChannel)) {
-      await recordNotificationDelivery({
-        requestId: request.id,
-        triggerKind: kind,
-        channel: notificationChannel,
-        targetType: "google_chat",
-        targetLabel: MAKEUP_NOTIFICATION_CHANNEL_LABELS[notificationChannel],
-        googleChatChannel: chatChannel,
-        status: "disabled",
-        dedupeKey,
-        title: chatContent.title,
-        body: chatContent.body,
-        actorProfileId,
-        metadata: { webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel] },
-      })
-      continue
-    }
-
-    if (supabase) {
-      const { data } = await supabase
-        .from("makeup_notification_deliveries")
-        .select("id")
-        .eq("dedupe_key", dedupeKey)
-        .eq("status", "sent")
-        .maybeSingle()
-      if (data) {
-        await recordNotificationDelivery({
-          requestId: request.id,
-          triggerKind: kind,
-          channel: notificationChannel,
-          targetType: "google_chat",
-          targetLabel: MAKEUP_NOTIFICATION_CHANNEL_LABELS[notificationChannel],
-          googleChatChannel: chatChannel,
-          status: "deduped",
-          dedupeKey,
-          title: chatContent.title,
-          body: chatContent.body,
-          actorProfileId,
-          metadata: { webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel] },
-        })
-        continue
-      }
-    }
-
-    const chatMessageBody = [chatContent.title, chatContent.body, formatGoogleChatLink(requestUrl)].filter(Boolean).join("\n")
-    const result = await sendGoogleChatNotification(chatChannel, chatMessageBody, {
-      requestId: request.id,
-      requestUrl,
-      status: request.status,
-      triggerKind: kind,
-      webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel],
-    })
-    await recordNotificationDelivery({
-      requestId: request.id,
-      triggerKind: kind,
-      channel: notificationChannel,
-      targetType: "google_chat",
-      targetLabel: MAKEUP_NOTIFICATION_CHANNEL_LABELS[notificationChannel],
-      googleChatChannel: chatChannel,
-      status: result.ok ? "sent" : result.skipped ? "skipped" : "failed",
-      dedupeKey,
-      title: chatContent.title,
-      body: chatContent.body,
-      error: result.error,
-      actorProfileId,
-      metadata: { webhookEnv: GOOGLE_CHAT_CHANNEL_ENV[chatChannel] },
-    })
-    if (!result.ok && !result.skipped) {
-      await recordMakeupRequestEvent(request.id, "google_chat_failed", {
-        actorId: actorProfileId,
-        note: `${chatChannel}: ${result.error}`,
-      })
-    }
-  }
+  const profilesById = new Map(workspaceData.profiles.map((profile) => [profile.id, profile]))
+  const teachersById = new Map(workspaceData.teachers.map((teacher) => [teacher.id, teacher]))
+  const request = mapRequest(requestRow, profilesById, teachersById)
+  await dispatchLegacyMakeupNotification(sourceEventId)
+  return { request, sourceEventId }
 }
 
 export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWorkspaceData> {
@@ -1324,20 +789,17 @@ export async function createMakeupRequest(input: MakeupRequestInput, requesterId
     effectiveYear: getMakeupRequestEffectiveYear(),
     allowApproverOverride: isMakeupManagerRole(requester?.role || ""),
   })
-  const { data: inserted, error } = await supabase
-    .from("makeup_requests")
-    .insert(payload)
-    .select("*")
-    .single()
-
-  if (error) throw error
-
-  const profilesById = new Map(data.profiles.map((profile) => [profile.id, profile]))
-  const teachersById = new Map(data.teachers.map((teacher) => [teacher.id, teacher]))
-  const request = mapRequest(inserted as Row, profilesById, teachersById)
-  await recordMakeupRequestEvent(request.id, "submitted", { actorId: requesterId, afterValue: "approval_pending" })
-  await notifyMakeupRequest(request, "submitted", data.profiles, requesterId)
-  return request
+  const createInput: Row = { ...payload }
+  delete createInput.status
+  const result = await runIdempotentMakeupCreate({
+    actorId: requesterId,
+    payload: createInput,
+    invoke: (requestId: string) => runMakeupMutationRpc("create_makeup_request_v2", {
+      p_input: createInput,
+      p_request_id: requestId,
+    }, data),
+  })
+  return result.request
 }
 
 async function loadSingleMakeupRequest(requestId: string, data?: MakeupRequestWorkspaceData) {
@@ -1375,84 +837,35 @@ export async function approveMakeupRequest(requestId: string, actorId: string, n
     assertRoomAvailableForCompletion(request, data)
   }
 
-  let schedulePlanBefore = request.schedulePlanBefore || {}
-  let schedulePlanAfter = request.schedulePlanAfter || {}
-  let cancelAcademicEventId = request.cancelAcademicEventId
-  let makeupAcademicEventId = request.makeupAcademicEventId
-  let makeupAcademicEventIds = request.makeupAcademicEventIds
-  if (!isRefundApproval) {
-    const classItem = data.classes.find((item) => item.id === request.classId)
-    if (!classItem) {
-      throw new Error("수업 정보를 찾을 수 없습니다.")
-    }
-
-    schedulePlanBefore = classItem.schedulePlan || {}
-    schedulePlanAfter = applyMakeupRequestToSchedulePlan(schedulePlanBefore, classItem, request)
-    const { error: classUpdateError } = await supabase
-      .from("classes")
-      .update({ schedule_plan: schedulePlanAfter })
-      .eq("id", request.classId)
-
-    if (classUpdateError) throw classUpdateError
-
-    const calendarDrafts = buildMakeupCalendarDrafts(request)
-    const nextMakeupAcademicEventIds = []
-    cancelAcademicEventId = ""
-    makeupAcademicEventId = ""
-    for (const draft of calendarDrafts) {
-      const eventId = await upsertAcademicEventDraft(draft)
-      const meta = extractMakeupCalendarMeta(text(draft.note))
-      if (meta?.kind === "cancel") {
-        cancelAcademicEventId = eventId
-      } else if (meta?.kind === "makeup") {
-        nextMakeupAcademicEventIds.push(eventId)
-      }
-    }
-    makeupAcademicEventId = nextMakeupAcademicEventIds[0] || ""
-    makeupAcademicEventIds = nextMakeupAcademicEventIds
-  }
-
-  const approvedAt = new Date().toISOString()
-  const approvalNote = text(note)
-
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      status: nextStatus,
-      approved_by: actorId,
-      approved_at: approvedAt,
-      completed_by: nextStatus === "completed" ? actorId : null,
-      completed_at: nextStatus === "completed" ? approvedAt : null,
-      final_note: nullable(approvalNote),
-      returned_reason: null,
-      rejected_reason: null,
-      schedule_plan_before: schedulePlanBefore,
-      schedule_plan_after: schedulePlanAfter,
-      cancel_academic_event_id: nullable(cancelAcademicEventId),
-      makeup_academic_event_id: nullable(makeupAcademicEventId),
-      makeup_academic_event_ids: makeupAcademicEventIds,
-    })
-    .eq("id", requestId)
-
-  if (error) throw error
-  await recordMakeupRequestEvent(requestId, "approved", { actorId, beforeValue: request.status, afterValue: nextStatus, note: approvalNote })
-  await notifyMakeupRequest(appendLocalMakeupRequestEvent({
-    request: {
-      ...request,
-      status: nextStatus,
-      approvedBy: actorId,
-      approvedAt,
-      completedBy: nextStatus === "completed" ? actorId : "",
-      completedAt: nextStatus === "completed" ? approvedAt : "",
-      finalNote: approvalNote,
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData.session?.access_token
+  if (!accessToken) throw new Error("로그인 정보를 확인해 주세요.")
+  const response = await fetch("/api/makeup-requests/approve", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
     },
-    eventType: "approved",
-    actorId,
-    beforeValue: request.status,
-    afterValue: nextStatus,
-    note: approvalNote,
-    createdAt: approvedAt,
-  }), "approved", data.profiles, actorId)
+    body: JSON.stringify({
+      requestId,
+      note: text(note),
+      expectedStatus: request.status,
+      mutationRequestId: crypto.randomUUID(),
+    }),
+  })
+  const raw = await response.json().catch(() => null)
+  const wire = parseObject(raw) as MakeupMutationWire & { error?: unknown }
+  if (!response.ok) throw new Error(text(wire.error) || "휴보강 승인을 완료하지 못했습니다.")
+  const requestRow = parseObject(wire.request)
+  const sourceEventId = text(wire.sourceEventId)
+  if (!text(requestRow.id) || !sourceEventId) {
+    throw new Error("휴보강 승인 결과가 올바르지 않습니다.")
+  }
+  const profilesById = new Map(data.profiles.map((profile) => [profile.id, profile]))
+  const teachersById = new Map(data.teachers.map((teacher) => [teacher.id, teacher]))
+  const approvedRequest = mapRequest(requestRow, profilesById, teachersById)
+  await dispatchLegacyMakeupNotification(sourceEventId)
+  return approvedRequest
 }
 
 export async function requestMakeupRequestRevision(requestId: string, actorId: string, note: string) {
@@ -1463,27 +876,15 @@ export async function requestMakeupRequestRevision(requestId: string, actorId: s
     throw new Error("보완 요청 권한이 없습니다.")
   }
 
-  const revisionRequestedAt = new Date().toISOString()
   const returnedReason = text(note)
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      status: "revision_requested",
-      returned_reason: returnedReason,
-    })
-    .eq("id", requestId)
-
-  if (error) throw error
-  await recordMakeupRequestEvent(requestId, "revision_requested", { actorId, beforeValue: request.status, afterValue: "revision_requested", note: returnedReason })
-  await notifyMakeupRequest(appendLocalMakeupRequestEvent({
-    request: { ...request, status: "revision_requested", returnedReason },
-    eventType: "revision_requested",
-    actorId,
-    beforeValue: request.status,
-    afterValue: "revision_requested",
-    note: returnedReason,
-    createdAt: revisionRequestedAt,
-  }), "returned", data.profiles, actorId)
+  const result = await runMakeupMutationRpc("transition_makeup_request_v2", {
+    p_makeup_request_id: requestId,
+    p_command: "revision_requested",
+    p_patch: { note: returnedReason },
+    p_expected_status: request.status,
+    p_request_id: crypto.randomUUID(),
+  }, data)
+  return result.request
 }
 
 export async function rejectMakeupRequest(requestId: string, actorId: string, note: string) {
@@ -1494,27 +895,15 @@ export async function rejectMakeupRequest(requestId: string, actorId: string, no
     throw new Error("반려 권한이 없습니다.")
   }
 
-  const rejectedAt = new Date().toISOString()
   const rejectedReason = text(note)
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      status: "rejected",
-      rejected_reason: rejectedReason,
-    })
-    .eq("id", requestId)
-
-  if (error) throw error
-  await recordMakeupRequestEvent(requestId, "rejected", { actorId, beforeValue: request.status, afterValue: "rejected", note: rejectedReason })
-  await notifyMakeupRequest(appendLocalMakeupRequestEvent({
-    request: { ...request, status: "rejected", rejectedReason },
-    eventType: "rejected",
-    actorId,
-    beforeValue: request.status,
-    afterValue: "rejected",
-    note: rejectedReason,
-    createdAt: rejectedAt,
-  }), "rejected", data.profiles, actorId)
+  const result = await runMakeupMutationRpc("transition_makeup_request_v2", {
+    p_makeup_request_id: requestId,
+    p_command: "reject",
+    p_patch: { note: rejectedReason },
+    p_expected_status: request.status,
+    p_request_id: crypto.randomUUID(),
+  }, data)
+  return result.request
 }
 
 export async function requestMakeupRefund(requestId: string, actorId: string, note: string) {
@@ -1528,33 +917,15 @@ export async function requestMakeupRefund(requestId: string, actorId: string, no
     throw new Error("환불 신청할 수 없는 상태입니다.")
   }
 
-  const refundRequestedAt = new Date().toISOString()
   const refundReason = text(note)
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      status: "approval_pending",
-      approved_by: null,
-      approved_at: null,
-      completed_by: null,
-      completed_at: null,
-      final_note: null,
-      returned_reason: null,
-      rejected_reason: null,
-    })
-    .eq("id", requestId)
-
-  if (error) throw error
-  await recordMakeupRequestEvent(requestId, "refund_requested", { actorId, beforeValue: request.status, afterValue: "approval_pending", note: refundReason })
-  await notifyMakeupRequest(appendLocalMakeupRequestEvent({
-    request: { ...request, status: "approval_pending", approvedBy: "", approvedAt: "", completedBy: "", completedAt: "", finalNote: "" },
-    eventType: "refund_requested",
-    actorId,
-    beforeValue: request.status,
-    afterValue: "approval_pending",
-    note: refundReason,
-    createdAt: refundRequestedAt,
-  }), "refund_requested", workspaceData.profiles, actorId)
+  const result = await runMakeupMutationRpc("transition_makeup_request_v2", {
+    p_makeup_request_id: requestId,
+    p_command: "refund_requested",
+    p_patch: { note: refundReason },
+    p_expected_status: request.status,
+    p_request_id: crypto.randomUUID(),
+  }, workspaceData)
+  return result.request
 }
 
 export async function completeMakeupRefund(requestId: string, actorId: string, note = "") {
@@ -1567,29 +938,15 @@ export async function completeMakeupRefund(requestId: string, actorId: string, n
     throw new Error("환불 완료 권한이 없습니다.")
   }
 
-  const completedAt = new Date().toISOString()
   const completedNote = text(note)
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      status: "completed",
-      completed_by: actorId,
-      completed_at: completedAt,
-      final_note: nullable(completedNote || request.finalNote),
-    })
-    .eq("id", requestId)
-
-  if (error) throw error
-  await recordMakeupRequestEvent(requestId, "refund_completed", { actorId, beforeValue: request.status, afterValue: "completed", note: completedNote })
-  await notifyMakeupRequest(appendLocalMakeupRequestEvent({
-    request: { ...request, status: "completed", completedBy: actorId, completedAt, finalNote: completedNote || request.finalNote },
-    eventType: "refund_completed",
-    actorId,
-    beforeValue: request.status,
-    afterValue: "completed",
-    note: completedNote,
-    createdAt: completedAt,
-  }), "completed", workspaceData.profiles, actorId)
+  const result = await runMakeupMutationRpc("transition_makeup_request_v2", {
+    p_makeup_request_id: requestId,
+    p_command: "refund_completed",
+    p_patch: { note: completedNote },
+    p_expected_status: request.status,
+    p_request_id: crypto.randomUUID(),
+  }, workspaceData)
+  return result.request
 }
 
 export async function resubmitMakeupRequest(requestId: string, input: MakeupRequestInput, actorId: string) {
@@ -1605,32 +962,17 @@ export async function resubmitMakeupRequest(requestId: string, input: MakeupRequ
     effectiveYear: getMakeupRequestEffectiveYear(request.createdAt),
     allowApproverOverride: isMakeupManagerRole(actor?.role || ""),
   })
-  const resubmittedAt = new Date().toISOString()
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      ...payload,
-      status: "approval_pending",
-      returned_reason: null,
-      rejected_reason: null,
-      approved_by: null,
-      approved_at: null,
-      completed_by: null,
-      completed_at: null,
-    })
-    .eq("id", requestId)
-
-  if (error) throw error
-  await recordMakeupRequestEvent(requestId, "resubmitted", { actorId, beforeValue: request.status, afterValue: "approval_pending" })
-  const { request: resubmittedRequest } = await loadSingleMakeupRequest(requestId, data)
-  await notifyMakeupRequest(appendLocalMakeupRequestEvent({
-    request: resubmittedRequest,
-    eventType: "resubmitted",
-    actorId,
-    beforeValue: request.status,
-    afterValue: "approval_pending",
-    createdAt: resubmittedAt,
-  }), "submitted", data.profiles, actorId)
+  const transitionPatch: Row = { ...payload }
+  delete transitionPatch.status
+  delete transitionPatch.requester_id
+  const result = await runMakeupMutationRpc("transition_makeup_request_v2", {
+    p_makeup_request_id: requestId,
+    p_command: "resubmit",
+    p_patch: transitionPatch,
+    p_expected_status: request.status,
+    p_request_id: crypto.randomUUID(),
+  }, data)
+  return result.request
 }
 
 function assertRoomAvailableForCompletion(request: MakeupRequest, data: MakeupRequestWorkspaceData) {
@@ -1657,34 +999,6 @@ function assertRoomAvailableForCompletion(request: MakeupRequest, data: MakeupRe
   }
 }
 
-async function upsertAcademicEventDraft(draft: Row) {
-  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const client = supabase
-  const mutation = buildAcademicEventMutationPayload(draft, [])
-  if (!mutation.isValid || !mutation.payload) {
-    throw new Error(Object.values(mutation.errors).join(" ") || "캘린더 일정 payload가 올바르지 않습니다.")
-  }
-
-  const payload = {
-    id: text((mutation.payload as Row).id) || crypto.randomUUID(),
-    ...(mutation.payload as Row),
-  }
-  const { error } = await runAcademicEventMutation(payload, (row: Row) =>
-    client.from("academic_events").upsert(row, { onConflict: "id" }),
-  )
-  if (error) throw error
-  return text(payload.id)
-}
-
-async function deleteAcademicEventById(eventId: string) {
-  if (!supabase || !text(eventId)) return
-  const { error } = await supabase
-    .from("academic_events")
-    .delete()
-    .eq("id", eventId)
-  if (error && !isMissingRelationError(error)) throw error
-}
-
 export async function cancelCompletedMakeupRequest(requestId: string, actorId: string, note = "") {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const workspaceData = await loadMakeupRequestWorkspaceData()
@@ -1698,49 +1012,15 @@ export async function cancelCompletedMakeupRequest(requestId: string, actorId: s
     throw new Error("복구할 수업 정보를 찾을 수 없습니다.")
   }
 
-  const { error: classUpdateError } = await supabase
-    .from("classes")
-    .update({ schedule_plan: request.schedulePlanBefore || {} })
-    .eq("id", request.classId)
-  if (classUpdateError) throw classUpdateError
-
-  const eventIds = [
-    request.cancelAcademicEventId,
-    request.makeupAcademicEventId,
-    ...request.makeupAcademicEventIds,
-  ].map(text).filter(Boolean)
-  for (const eventId of [...new Set(eventIds)]) {
-    await deleteAcademicEventById(eventId)
-  }
-
-  const canceledAt = new Date().toISOString()
   const cancelNote = text(note)
-  const { error } = await supabase
-    .from("makeup_requests")
-    .update({
-      status: "canceled",
-      canceled_by: actorId,
-      canceled_at: canceledAt,
-    })
-    .eq("id", requestId)
-
-  if (error) throw error
-
-  await recordMakeupRequestEvent(requestId, "approval_canceled", { actorId, beforeValue: request.status, afterValue: "canceled", note: cancelNote })
-  await notifyMakeupRequest(appendLocalMakeupRequestEvent({
-    request: {
-      ...request,
-      status: "canceled",
-      canceledBy: actorId,
-      canceledAt,
-    },
-    eventType: "approval_canceled",
-    actorId,
-    beforeValue: request.status,
-    afterValue: "canceled",
-    note: cancelNote,
-    createdAt: canceledAt,
-  }), "canceled", workspaceData.profiles, actorId)
+  const result = await runMakeupMutationRpc("transition_makeup_request_v2", {
+    p_makeup_request_id: requestId,
+    p_command: "approval_canceled",
+    p_patch: { note: cancelNote },
+    p_expected_status: request.status,
+    p_request_id: crypto.randomUUID(),
+  }, workspaceData)
+  return result.request
 }
 
 export async function deleteMakeupRequest(requestId: string, actorId: string) {
@@ -1758,11 +1038,11 @@ export async function deleteMakeupRequest(requestId: string, actorId: string) {
     throw new Error("승인/반려된 휴보강 이력만 삭제할 수 있습니다.")
   }
 
-  const { data, error } = await supabase.from("makeup_requests").delete().eq("id", id).select("id")
-  if (error) throw error
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new Error("삭제할 휴보강 신청서를 찾을 수 없습니다.")
-  }
+  const result = await runMakeupMutationRpc("delete_makeup_request_v2", {
+    p_makeup_request_id: id,
+    p_request_id: crypto.randomUUID(),
+  }, workspaceData)
+  return result.request
 }
 
 export async function toggleMakeupNotificationSetting(
@@ -1772,15 +1052,21 @@ export async function toggleMakeupNotificationSetting(
   actorId: string,
 ) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const channels: MakeupNotificationChannel[] =
+    channel === "google_chat_english" || channel === "google_chat_math"
+      ? ["google_chat_english", "google_chat_math"]
+      : [channel]
+  const updatedAt = new Date().toISOString()
+  const rows = channels.map((targetChannel) => ({
+    trigger_kind: triggerKind,
+    channel: targetChannel,
+    enabled,
+    updated_by: nullable(actorId),
+    updated_at: updatedAt,
+  }))
   const { error } = await supabase
     .from("makeup_notification_settings")
-    .upsert({
-      trigger_kind: triggerKind,
-      channel,
-      enabled,
-      updated_by: nullable(actorId),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "trigger_kind,channel" })
+    .upsert(rows, { onConflict: "trigger_kind,channel" })
   if (error) throw error
 }
 

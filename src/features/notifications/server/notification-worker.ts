@@ -1157,28 +1157,35 @@ async function processDelivery(
     return
   }
 
-  if (claim.channel_key === "in_app") {
-    await input.rpc("commit_notification_in_app_delivery_v1", {
-      p_delivery_id: asString(claim.delivery_id),
-      p_claim_token: asString(claim.claim_token),
-    })
-    return
-  }
-
-  const begun = asRecord(await input.rpc("begin_notification_delivery_send_v1", {
+  const begun = asRecord(await input.rpc("prepare_notification_immediate_delivery_v1", {
+    p_workflow_key: asString(claim.workflow_key),
+    p_event_id: asString(claim.event_id),
     p_delivery_id: asString(claim.delivery_id),
     p_claim_token: asString(claim.claim_token),
+    p_event_key: asString(claim.event_key),
+    p_source_type: asString(claim.source_type),
+    p_source_id: asString(claim.source_id),
+    p_source_revision: nullableString(claim.source_revision),
+    p_rule_id: asString(claim.rule_id),
+    p_rule_revision: decimalString(claim.rule_revision),
+    p_target_generation: decimalString(claim.target_generation),
+    p_scheduled_for: asString(claim.scheduled_for),
+    p_target: claim.target as JsonRecord,
   }))
   const begunStatus = requiredString(begun.status)
   if (begunStatus !== "sending") {
     if (
-      !["failed", "canceled", "skipped"].includes(begunStatus) ||
-      typeof begun.status_reason !== "string" || !begun.status_reason
+      !["sent", "failed", "canceled", "skipped"].includes(begunStatus) ||
+      (begunStatus !== "sent" && (
+        typeof begun.status_reason !== "string" || !begun.status_reason
+      ))
     ) {
       workerEnvelopeError()
     }
+    if (claim.channel_key !== "in_app" && begunStatus === "sent") workerEnvelopeError()
     return
   }
+  if (claim.channel_key === "in_app") workerEnvelopeError()
   if (
     requiredUuid(begun.delivery_id) !== claim.delivery_id ||
     requiredUuid(begun.claim_token) !== claim.claim_token ||
@@ -1200,6 +1207,33 @@ async function processDelivery(
       providerResponseCode: null,
       errorCode: "connection_missing",
       errorSummary: "provider connection unavailable",
+      nextAttemptAt: null,
+    })
+    return
+  }
+
+  try {
+    const attempt = asRecord(await input.rpc("register_notification_external_attempt_v1", {
+      p_delivery_id: asString(claim.delivery_id),
+      p_claim_id: null,
+      p_owner_generation: null,
+      p_claim_token: asString(claim.claim_token),
+      p_dispatch_token: asString(begun.dispatch_token),
+      p_request_id: asString(begun.dispatch_token),
+    }))
+    if (attempt.allowed !== true || !UUID_PATTERN.test(asString(attempt.attempt_id))) {
+      throw Object.assign(new Error("외부 발송 시도 등록이 거부되었습니다."), {
+        code: "external_attempt_registration_denied",
+      })
+    }
+  } catch {
+    await finalizeDelivery(claim, "delivery_unknown", "provider_ambiguous_response", input.rpc, {
+      status: "delivery_unknown",
+      statusReason: "provider_ambiguous_response",
+      providerMessageId: null,
+      providerResponseCode: null,
+      errorCode: "external_attempt_registration_unknown",
+      errorSummary: "external attempt registration result unavailable",
       nextAttemptAt: null,
     })
     return

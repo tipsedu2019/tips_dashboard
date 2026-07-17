@@ -107,7 +107,7 @@ test("approval submit requires month approver and body", () => {
 
 test("approval list keeps long bodies inside the detail disclosure", () => {
   assert.match(workspaceSource, /request\.classSummary &&/)
-  assert.match(workspaceSource, /<details className="rounded-md border p-3">/)
+  assert.match(workspaceSource, /<details className="rounded-md border p-3" open=\{highlighted \|\| undefined\}>/)
   assert.match(workspaceSource, /request\.body \|\| request\.classSummary \|\| "-"/)
   assert.doesNotMatch(workspaceSource, /line-clamp-3/)
 })
@@ -134,16 +134,16 @@ test("saved approval drafts can be reopened, edited, and submitted", () => {
   assert.match(workspaceSource, /onEdit=\{editApproval\}/)
   assert.match(workspaceSource, />\s*편집\s*<\/Button>/)
   assert.match(serviceSource, /export async function updateMonthlyReportApproval/)
-  assert.match(serviceSource, /\.from\("approval_requests"\)\.update\(patch\)\.eq\("id", requestId\)/)
+  assert.match(serviceSource, /\.rpc\("update_approval_request_v2"/)
+  assert.match(serviceSource, /\.rpc\("transition_approval_request_v2"/)
   assert.match(serviceSource, /function buildApprovalRequestPayload/)
 })
 
 test("resubmitted approvals clear stale decision timestamps", () => {
-  assert.match(serviceSource, /if \(nextStatus === "submitted"\) \{\s*payload\.submitted_at = new Date\(\)\.toISOString\(\)\s*payload\.decided_at = null\s*\}/)
-  assert.match(serviceSource, /if \(nextStatus === "draft"\) \{\s*payload\.submitted_at = null\s*payload\.decided_at = null\s*\}/)
-  assert.match(serviceSource, /if \(nextStatus === "reviewing"\) payload\.decided_at = null/)
-  assert.match(serviceSource, /if \(status === "submitted"\) \{\s*patch\.submitted_at = new Date\(\)\.toISOString\(\)\s*patch\.decided_at = null\s*\}/)
-  assert.match(serviceSource, /if \(status === "reviewing"\) \{\s*patch\.decided_at = null\s*\}/)
+  assert.match(serviceSource, /\.rpc\("transition_approval_request_v2"/)
+  assert.match(serviceSource, /p_expected_updated_at: text\(expectedUpdatedAt\)/)
+  assert.doesNotMatch(serviceSource, /submitted_at\s*:/)
+  assert.doesNotMatch(serviceSource, /decided_at\s*:/)
 })
 
 test("approval trigger functions pin search_path for Supabase advisors", async () => {
@@ -159,7 +159,21 @@ test("approval views separate authored documents from documents waiting for my a
   assert.match(workspaceSource, /{ key: "open", label: "진행" }/)
   assert.match(workspaceSource, /mine: requests\.filter\(\(request\) => request\.requesterId === userId\)\.length/)
   assert.match(workspaceSource, /review: requests\.filter\(\(request\) => request\.approverId === userId && !isClosedApproval\(request\.status\)\)\.length/)
-  assert.match(workspaceSource, /if \(view === "review"\) return requests\.filter\(\(request\) => request\.approverId === userId && !isClosedApproval\(request\.status\)\)/)
+  assert.match(workspaceSource, /view === "review"[\s\S]*requests\.filter\(\(request\) => request\.approverId === userId && !isClosedApproval\(request\.status\)\)/)
+})
+
+test("approval notification deep link selects, reveals, and scrolls to the requested document", () => {
+  assert.match(workspaceSource, /import \{ useSearchParams \} from "next\/navigation"/)
+  assert.match(workspaceSource, /const approvalId = searchParams\.get\("approvalId"\) \|\| ""/)
+  assert.match(workspaceSource, /const request = data\.requests\.find\(\(item\) => item\.id === approvalId\)/)
+  assert.match(workspaceSource, /setDeepLinkedApprovalId\(approvalId\)/)
+  assert.match(workspaceSource, /nextSearchParams\.delete\("approvalId"\)/)
+  assert.match(workspaceSource, /document\.getElementById\(`approval-\$\{deepLinkedApprovalId\}`\)\?\.scrollIntoView/)
+  assert.match(workspaceSource, /const deepLinkedRequest = requests\.find\(\(request\) => request\.id === deepLinkedApprovalId\)/)
+  assert.match(workspaceSource, /return \[deepLinkedRequest, \.\.\.filtered\]/)
+  assert.match(workspaceSource, /id=\{`approval-\$\{request\.id\}`\}/)
+  assert.match(workspaceSource, /highlighted=\{request\.id === deepLinkedApprovalId\}/)
+  assert.match(workspaceSource, /open=\{highlighted \|\| undefined\}/)
 })
 
 test("approval workspace loads independent datasets in parallel", () => {
@@ -176,7 +190,7 @@ test("approval workspace lets only operators delete closed documents", () => {
   assert.match(workspaceSource, /onDelete=\{deleteApproval\}/)
   assert.match(workspaceSource, /Trash2/)
   assert.match(serviceSource, /export async function deleteApprovalRequest\(id: string\)/)
-  assert.match(serviceSource, /\.from\("approval_requests"\)\.delete\(\)\.eq\("id", requestId\)\.select\("id"\)/)
+  assert.match(serviceSource, /\.rpc\("delete_approval_request_v2"/)
   assert.match(migrationSource, /grant select, insert, update, delete on public\.approval_requests to authenticated/)
   assert.match(migrationSource, /create policy approval_requests_delete_operator_closed/)
   assert.match(migrationSource, /for delete\s+to authenticated[\s\S]*p\.role = 'admin'/)

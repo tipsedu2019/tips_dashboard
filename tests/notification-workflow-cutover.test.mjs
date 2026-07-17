@@ -4,6 +4,23 @@ import test from "node:test"
 
 const verifierUrl = new URL("../scripts/verify-notification-workflow-cutover.mjs", import.meta.url)
 const documentUrl = new URL("../docs/operations/notification-workflow-cutover.md", import.meta.url)
+const forwardCompatUrl = new URL(
+  "../supabase/migrations/20260716195500_notification_worker_schedule.sql",
+  import.meta.url,
+)
+
+test("shadow build 연속성 검사는 bridge 잠금 뒤 현재 시각을 다시 잡는다", async () => {
+  const migration = await readFile(forwardCompatUrl, "utf8")
+  const helperStart = migration.indexOf(
+    "create or replace function dashboard_private.notification_current_contract_build_revision_hash_v1",
+  )
+  const helperEnd = migration.indexOf("create or replace function", helperStart + 1)
+  const helper = migration.slice(helperStart, helperEnd)
+  const lockIndex = helper.indexOf("for update")
+  const nowIndex = helper.indexOf("v_now := pg_catalog.clock_timestamp()")
+  const receiptIndex = helper.indexOf("notification_contract_deployment_receipts", nowIndex)
+  assert.ok(helperStart >= 0 && lockIndex >= 0 && nowIndex > lockIndex && receiptIndex > nowIndex)
+})
 
 function healthyEvidence(overrides = {}) {
   const now = "2026-07-17T12:00:00.000Z"
@@ -23,7 +40,13 @@ function healthyEvidence(overrides = {}) {
       "notification_control_plane_dispatch_makeup_requests_enabled",
       "notification_control_plane_dispatch_approvals_enabled",
     ].map((key) => [key, false])),
-    markers: { common: 1, adapters: 1, registration: 1 },
+    markers: {
+      common: 1,
+      adapters: 1,
+      registration: 1,
+      registrationHandoffs: 1,
+      forwardCompat: 1,
+    },
     workerStopLatch: false,
     workerHeartbeatAt: "2026-07-17T11:58:30.000Z",
     watchdogHeartbeatAt: "2026-07-17T11:58:45.000Z",
@@ -36,8 +59,12 @@ function healthyEvidence(overrides = {}) {
       scopeMismatchCount: 0,
       zeroAudienceEnabledRuleCount: 0,
       ownershipAnomalyCount: 0,
+      ownershipDenialCount: 0,
       shadowMismatchCount: 0,
       rollbackFailedCount: 0,
+      missedWorkerHeartbeats: 0,
+      scheduleContractFaultCount: 0,
+      workerRouteFaultCount: 0,
     },
     ...overrides,
   }
@@ -101,7 +128,13 @@ test("readiness fails closed on stale heartbeats, latch, flags, markers, and sto
   const stale = verifier.verifyNotificationCutoverReadiness(healthyEvidence({
     workerStopLatch: true,
     workerHeartbeatAt: "2026-07-17T11:50:00.000Z",
-    markers: { common: 1, adapters: 0, registration: 1 },
+    markers: {
+      common: 1,
+      adapters: 0,
+      registration: 1,
+      registrationHandoffs: 0,
+      forwardCompat: 0,
+    },
     flags: { notification_control_plane_settings_ui_enabled: false },
     metrics: { ...healthyEvidence().metrics, newDeliveryUnknown: 1 },
   }))
@@ -109,6 +142,8 @@ test("readiness fails closed on stale heartbeats, latch, flags, markers, and sto
   assert.deepEqual(stale.blockers, [
     "runtime_flag_registry_invalid",
     "adapter_runtime_marker_missing",
+    "registration_handoffs_runtime_marker_missing",
+    "forward_compat_runtime_marker_missing",
     "worker_stop_latch_set",
     "worker_heartbeat_stale",
     "delivery_unknown_detected",
@@ -276,7 +311,7 @@ test("fault classification chooses shadow abort, all-owner rollback, or one part
     scope: "all",
     raiseStopLatch: true,
   })
-  assert.deepEqual(verifier.classifyNotificationCutoverFault({ phase: "cutover", code: "worker_heartbeat_stale", owner: "tasks" }), {
+  assert.deepEqual(verifier.classifyNotificationCutoverFault({ phase: "cutover", code: "worker_heartbeat_missed", owner: "tasks" }), {
     action: "rollback_all_owners",
     scope: "all",
     raiseStopLatch: true,
@@ -301,7 +336,10 @@ test("verifier is read-only and Korean runbook preserves authorization and reten
     "부분 롤백",
     "전체 소유자 롤백",
     "전달 결과 불명",
-    "주입 recorder",
+    "자기비교",
+    "자연 발생 운영 비교",
+    "no_active_rule",
+    "합성 이벤트·전달·소유권 생성을 하지 않는다",
     "원자 롤백",
   ]) assert.match(document, new RegExp(phrase))
 })
