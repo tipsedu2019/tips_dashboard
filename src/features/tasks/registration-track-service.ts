@@ -1,7 +1,15 @@
 import { supabase } from "@/lib/supabase"
 
 import {
+  buildRegistrationAppointmentCalendarItems,
+  type RegistrationAppointmentCalendarItem,
+  type RegistrationAppointmentCalendarLoadInput,
+  type RegistrationAppointmentCalendarRow,
+  type RegistrationAppointmentCalendarStatus,
+} from "./registration-appointment-calendar-model"
+import {
   executeRegistrationSubjectTrackFixtureAction,
+  loadRegistrationSubjectTrackFixtureAppointmentCalendarRows,
   loadRegistrationSubjectTrackFixtureCase,
   loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion,
   loadRegistrationSubjectTrackFixtureOptionData,
@@ -544,6 +552,8 @@ type QueryResult = { data: unknown; error: unknown }
 type QueryBuilder = PromiseLike<QueryResult> & {
   select: (columns: string, options?: Record<string, unknown>) => QueryBuilder
   eq: (column: string, value: unknown) => QueryBuilder
+  gte: (column: string, value: unknown) => QueryBuilder
+  lt: (column: string, value: unknown) => QueryBuilder
   in: (column: string, values: unknown[]) => QueryBuilder
   order: (column: string, options?: Record<string, unknown>) => QueryBuilder
   limit: (count: number) => QueryBuilder
@@ -617,6 +627,23 @@ const TRACK_SCOPED_CASE_READS = [
 const PARENT_DETAIL_COLUMNS = "*,ops_registration_details(*),ops_task_comments(*),ops_task_attachments(*)"
 const EVENT_COLUMNS = "id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at"
 const MESSAGE_COLUMNS = "id,status,claim_active,template_key,request_key,updated_at"
+const REGISTRATION_APPOINTMENT_CALENDAR_COLUMNS = [
+  "appointment_id",
+  "task_id",
+  "student_name",
+  "kind",
+  "scheduled_at",
+  "place",
+  "status",
+  "notification_revision",
+  "track_ids",
+  "subjects",
+].join(",")
+const REGISTRATION_APPOINTMENT_CALENDAR_STATUSES = [
+  "scheduled",
+  "completed",
+  "canceled",
+] as const
 
 function value(row: Row | null | undefined, snake: string, camel = "") {
   if (!row) return undefined
@@ -641,6 +668,29 @@ function bool(input: unknown) {
 function numberValue(input: unknown) {
   const parsed = Number(input)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function normalizeRegistrationAppointmentCalendarInput(
+  input: RegistrationAppointmentCalendarLoadInput,
+) {
+  const rangeStart = text(input?.rangeStart)
+  const rangeEnd = text(input?.rangeEnd)
+  const startTime = Date.parse(rangeStart)
+  const endTime = Date.parse(rangeEnd)
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime >= endTime) {
+    throw new Error("registration_calendar_range_invalid")
+  }
+
+  const requestedStatuses = input.statuses === undefined ? ["scheduled"] : input.statuses
+  if (!Array.isArray(requestedStatuses)) throw new Error("registration_calendar_status_invalid")
+  const requested = new Set<unknown>(requestedStatuses)
+  if ([...requested].some((status) => !REGISTRATION_APPOINTMENT_CALENDAR_STATUSES.includes(
+    status as RegistrationAppointmentCalendarStatus,
+  ))) {
+    throw new Error("registration_calendar_status_invalid")
+  }
+  const statuses = REGISTRATION_APPOINTMENT_CALENDAR_STATUSES.filter((status) => requested.has(status))
+  return { rangeStart, rangeEnd, statuses }
 }
 
 function rows(input: unknown): Row[] {
@@ -1194,6 +1244,33 @@ export function createRegistrationTrackService(
       throw new Error("레거시 등록 흐름에서는 새 등록 작업을 실행할 수 없습니다.")
     }
     return runtime
+  }
+
+  function loadRegistrationAppointmentCalendarRows(
+    input: RegistrationAppointmentCalendarLoadInput,
+  ): Promise<RegistrationAppointmentCalendarRow[]> {
+    const { rangeStart, rangeEnd, statuses } = normalizeRegistrationAppointmentCalendarInput(input)
+    if (statuses.length === 0) return Promise.resolve([])
+
+    return measure("registration:appointment-calendar", false, async (metrics) => {
+      await requireReadyRuntime()
+      try {
+        const calendarRows = await queryRows(
+          client.from("ops_registration_appointment_calendar")
+            .select(REGISTRATION_APPOINTMENT_CALENDAR_COLUMNS)
+            .gte("scheduled_at", rangeStart)
+            .lt("scheduled_at", rangeEnd)
+            .in("status", statuses)
+            .order("scheduled_at", { ascending: true })
+            .order("appointment_id", { ascending: true }),
+          metrics,
+        )
+        return calendarRows as RegistrationAppointmentCalendarRow[]
+      } catch (error) {
+        if (missingSchemaError(error)) return invalidateReadyRuntime(error)
+        throw error
+      }
+    })
   }
 
   function createLegacyTrackSummaries(inputs: Array<{
@@ -2087,6 +2164,7 @@ export function createRegistrationTrackService(
     probeRuntime,
     clearCaches,
     createLegacyTrackSummaries,
+    loadRegistrationAppointmentCalendarRows,
     loadTrackSummaries,
     loadCaseDetail,
     loadWorkspaceOptionData,
@@ -2166,6 +2244,17 @@ export function loadRegistrationCaseDetail(
   const fixture = loadRegistrationSubjectTrackFixtureCase(taskId)
   if (fixture) return fixture
   return defaultRegistrationTrackService.loadCaseDetail(taskId, viewerId, options)
+}
+
+export async function loadRegistrationAppointmentCalendar(
+  input: RegistrationAppointmentCalendarLoadInput,
+): Promise<RegistrationAppointmentCalendarItem[]> {
+  const fixtureRows = loadRegistrationSubjectTrackFixtureAppointmentCalendarRows(input)
+  const calendarRows = fixtureRows
+    ? await fixtureRows
+    : await defaultRegistrationTrackService.loadRegistrationAppointmentCalendarRows(input)
+  const buildOptions = input.statuses === undefined ? undefined : { statuses: input.statuses }
+  return buildRegistrationAppointmentCalendarItems(calendarRows, buildOptions)
 }
 
 export function loadOpsRegistrationWorkspaceOptionData(

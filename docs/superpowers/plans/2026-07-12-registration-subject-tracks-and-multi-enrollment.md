@@ -1978,6 +1978,14 @@ Create `supabase/tests/registration_subject_tracks_runtime_test.sql` as a transa
 158. 비어 있거나 불안정한 시스템 출처는 이력 없이 거절된다.
 159. 호출자 트랜잭션 실패는 실제 변경 필드와 version-2 이력 행도 함께 롤백한다.
 160. 핵심 authoritative mutation family는 tuple당 version-2 이력 하나를 유지하고 same-key replay로 늘어나지 않는다.
+161. 달력 뷰는 보안 호출자 모드와 정확한 열 계약을 유지한다.
+162. 상태·시각·ID 조회 인덱스는 달력 범위 조회 순서를 지원한다.
+163. 인증 사용자만 달력 뷰를 읽고 쓰기 권한은 갖지 않는다.
+164. 정규 하위 기록이 있는 예약은 정확히 한 행으로 집계된다.
+165. 레벨테스트와 방문상담 예약만 달력에 포함된다.
+166. 참여 트랙과 과목은 영어 다음 수학 순서로 안정 집계된다.
+167. 알림 리비전은 정수형과 원본 값을 그대로 유지한다.
+168. 달력 뷰는 학사 일정 테이블에 의존하지 않는다.
 
 Every fixture rolls back at file end.
 

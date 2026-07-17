@@ -331,7 +331,7 @@ test("workspace derives tab counts from every track before filtering the selecte
   assert.match(source, /shouldHideEmptySurface = !loading && visibleWorkspaceItemCount === 0/);
 });
 
-test("registration deep links preserve task and real track ids and clear both on close", async () => {
+test("registration deep links preserve task, track, and appointment ids and clear them on close", async () => {
   const source = await readWorkspaceSource();
   const deepLinkEffect = sourceBetween(
     source,
@@ -347,6 +347,8 @@ test("registration deep links preserve task and real track ids and clear both on
   assert.match(source, /const \[selectedRegistrationTrackId, setSelectedRegistrationTrackId\] = useState/);
   assert.match(source, /searchParams\.set\("trackId", nextTrackId\)/);
   assert.match(source, /searchParams\.delete\("trackId"\)/);
+  assert.match(source, /searchParams\.set\("appointmentId", nextAppointmentId\)/);
+  assert.match(source, /searchParams\.delete\("appointmentId"\)/);
   assert.match(source, /syncTaskDeepLink\(taskId, trackId\)/);
   assert.match(deepLinkEffect, /const currentSearchParams = new URLSearchParams\(window\.location\.search\)/);
   assert.match(deepLinkEffect, /currentSearchParams\.get\("taskId"\)/);
@@ -359,7 +361,7 @@ test("registration deep links preserve task and real track ids and clear both on
   assert.match(closeHandler, /syncTaskDeepLink\(null\)/);
   assert.match(source, /if \(isLegacyRegistrationTrackId\(trackId\)\)/);
   assert.match(source, /syncTaskDeepLink\(taskId, null\)/);
-  assert.match(source, /deepLinkedTask\.type !== "registration" && deepLinkedTrackId[\s\S]*?syncTaskDeepLink\(deepLinkedTaskId, null\)/);
+  assert.match(source, /deepLinkedTask\.type !== "registration" && \(deepLinkedTrackId \|\| deepLinkedAppointmentId\)[\s\S]*?syncTaskDeepLink\(deepLinkedTaskId, null\)/);
 });
 
 test("consultation completion hint reloads exact detail and rechecks strict ownership", async () => {

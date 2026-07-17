@@ -416,7 +416,7 @@ test("Task 3A director and roster foundations preserve exact boundaries", async 
   )
 })
 
-test("runtime pgTAP packet fixes all 160 ordered workflow proofs and rolls fixtures back", async () => {
+test("runtime pgTAP packet fixes all 168 ordered workflow proofs and rolls fixtures back", async () => {
   const [sql, registrationPlan] = await Promise.all([
     readFile(
       new URL("registration_subject_tracks_runtime_test.sql", supabaseTestsUrl),
@@ -426,16 +426,16 @@ test("runtime pgTAP packet fixes all 160 ordered workflow proofs and rolls fixtu
   ])
 
   assert.match(sql, /^begin;\s*$/m)
-  assert.match(sql, /select\s+plan\(160\);/i)
+  assert.match(sql, /select\s+plan\(168\);/i)
   assert.match(sql, /select\s+\*\s+from\s+finish\(\);\s*\nrollback;\s*$/i)
 
   const numberedAssertions = [
     ...sql.matchAll(/^-- assertion (\d+):\s+(.+)$/gm),
   ]
-  assert.equal(numberedAssertions.length, 160)
+  assert.equal(numberedAssertions.length, 168)
   assert.deepEqual(
     numberedAssertions.map((match) => Number(match[1])),
-    Array.from({ length: 160 }, (_, index) => index + 1),
+    Array.from({ length: 168 }, (_, index) => index + 1),
   )
   const plannedAssertionSection = registrationPlan.slice(
     registrationPlan.indexOf("1. atomic RPC creation"),
@@ -444,7 +444,7 @@ test("runtime pgTAP packet fixes all 160 ordered workflow proofs and rolls fixtu
   const plannedAssertions = [
     ...plannedAssertionSection.matchAll(/^(\d+)\. (.+)$/gm),
   ]
-  assert.equal(plannedAssertions.length, 160)
+  assert.equal(plannedAssertions.length, 168)
   assert.deepEqual(
     numberedAssertions.map((match) => [Number(match[1]), match[2]]),
     plannedAssertions.map((match) => [Number(match[1]), match[2]]),
@@ -453,17 +453,17 @@ test("runtime pgTAP packet fixes all 160 ordered workflow proofs and rolls fixtu
   const tapStatements = [
     ...sql.matchAll(/^select\s+(?:ok|is|isnt|is_empty|isnt_empty|lives_ok|throws_ok|results_eq|set_eq|bag_eq|col_is_null|col_not_null)\s*\(/gim),
   ]
-  assert.equal(tapStatements.length, 160)
+  assert.equal(tapStatements.length, 168)
 
   const observationMarkers = [
     ...sql.matchAll(/^select\s+pg_temp\.registration_record\(\s*(\d+)/gim),
   ]
-  assert.equal(observationMarkers.length, 160)
+  assert.equal(observationMarkers.length, 168)
   const observationNumbers = observationMarkers.map((match) => Number(match[1]))
-  assert.equal(new Set(observationNumbers).size, 160)
+  assert.equal(new Set(observationNumbers).size, 168)
   assert.deepEqual(
     observationNumbers.toSorted((left, right) => left - right),
-    Array.from({ length: 160 }, (_, index) => index + 1),
+    Array.from({ length: 168 }, (_, index) => index + 1),
   )
 
   const readObservationBlock = (assertionNumber) => {

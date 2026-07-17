@@ -1023,6 +1023,76 @@ test("registration keeps the result URL only in canonical completion and detail 
   assert.match(registrationDetailSource, /RegistrationExternalLinkInfo label="시험지·결과지 URL"/);
 });
 
+test("등록 예약 달력은 목록 흐름과 분리되고 정확한 예약 딥링크를 한 번만 연다", async () => {
+  const [workspaceSource, editorSource, calendarSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-track-editor.tsx"),
+    readSource("src/features/tasks/registration-appointment-calendar.tsx"),
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    'type RegistrationWorkspaceMode = "list" | "calendar"',
+    "RegistrationAppointmentCalendar",
+    "registrationMode",
+    "syncRegistrationMode",
+    'currentSearchParams.get("appointmentId")',
+    "openRegistrationAppointment",
+    "selectedRegistrationAppointmentId",
+    "openRegistrationCalendarItem",
+    "item.href",
+    "initialAppointmentId={selectedRegistrationAppointmentId}",
+    "onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}",
+    'routeParams.set("view", "calendar")',
+    'role="group" aria-label="등록 화면 보기"',
+  ]);
+  assert.match(
+    workspaceSource,
+    /registrationMode === "calendar"[\s\S]*?<RegistrationAppointmentCalendar/,
+  );
+  assert.match(
+    workspaceSource,
+    /const participantTrackIds = getRegistrationAppointmentParticipantTrackIds\(detail, appointmentId\)/,
+  );
+  assert.match(
+    workspaceSource,
+    /syncTaskDeepLink\(taskId, trackId, selectedRegistrationAppointmentId\)/,
+    "과목을 바꿔도 달력 예약 ID가 유지돼야 합니다.",
+  );
+  assert.match(
+    workspaceSource,
+    /catch(?: \(error\))? \{[\s\S]*?selectionKey[\s\S]*?setMessage\("등록 예약 상세를 불러오지 못했습니다\. 달력을 다시 불러오세요\."\)/,
+    "예약 상세 실패는 내부 오류 문자열을 사용자에게 그대로 노출하면 안 됩니다.",
+  );
+
+  assertIncludesAll(editorSource, [
+    "initialAppointmentId?: string | null",
+    "onAppointmentOpenChange?: (appointmentId: string | null) => void",
+    "initialAppointmentAppliedRef",
+    "initialAppointmentId",
+    "onAppointmentOpenChange?.(null)",
+  ]);
+  assert.match(editorSource, /if \(initialAppointmentAppliedRef\.current === initialKey\) return/);
+
+  assertIncludesAll(calendarSource, [
+    'type CalendarView = "month" | "week"',
+    'aria-label="등록 예약 달력 보기"',
+    'data-testid="registration-appointment-month"',
+    'data-testid="registration-appointment-week"',
+    'data-testid="registration-appointment-mobile-agenda"',
+    'role="group"',
+    'aria-label="등록 예약 달력 보기"',
+    "getSeoulRegistrationDateKey(item.scheduledAt)",
+    "Asia/Seoul",
+    "loadRegistrationAppointmentCalendar",
+    'scheduled: "예약"',
+    'completed: "완료"',
+    'canceled: "취소"',
+  ]);
+  assert.match(calendarSource, /STATUS_LABELS\[item\.status\]/);
+  assert.doesNotMatch(calendarSource, /!compact \? <Badge[\s\S]*?STATUS_LABELS\[item\.status\]/);
+  assert.doesNotMatch(calendarSource, /\bdraggable\b|onDrop|onDrag|resize|range-create|onDelete/);
+});
+
 test("registration tabs render compact subject-track rows without the retired parent table filters", async () => {
   const [workspaceSource, tableSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),

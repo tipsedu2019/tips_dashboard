@@ -265,6 +265,14 @@ function createClient({ queryHandler, rpcHandler } = {}) {
         query.filters.push(["eq", column, value]);
         return fluent;
       },
+      gte(column, value) {
+        query.filters.push(["gte", column, value]);
+        return fluent;
+      },
+      lt(column, value) {
+        query.filters.push(["lt", column, value]);
+        return fluent;
+      },
       in(column, values) {
         query.filters.push(["in", column, [...values]]);
         return fluent;
@@ -337,6 +345,93 @@ function initialWorkflowCreateInput() {
     requestKey: "runtime-guard-request",
   };
 }
+
+test("calendar raw loader uses the canonical half-open scheduled query without caching", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const row = {
+    appointment_id: "appointment-calendar-1",
+    task_id: "task-calendar-1",
+    student_name: "김다미",
+    kind: "level_test",
+    scheduled_at: "2026-07-15T10:00:00+09:00",
+    place: "본관 201호",
+    status: "scheduled",
+    notification_revision: 2,
+    track_ids: ["track-calendar-english", "track-calendar-math"],
+    subjects: ["영어", "수학"],
+  };
+  const harness = createClient({
+    queryHandler(query) {
+      assert.equal(query.table, "ops_registration_appointment_calendar");
+      return { data: [row], error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const input = {
+    rangeStart: "2026-07-01T00:00:00+09:00",
+    rangeEnd: "2026-08-01T00:00:00+09:00",
+  };
+
+  const first = await service.loadRegistrationAppointmentCalendarRows(input);
+  const second = await service.loadRegistrationAppointmentCalendarRows(input);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(first)), [row]);
+  assert.deepEqual(JSON.parse(JSON.stringify(second)), [row]);
+  assert.equal(harness.queries.length, 2, "calendar range results must not use a cross-viewer cache");
+  for (const query of harness.queries) {
+    assert.equal(
+      query.columns,
+      "appointment_id,task_id,student_name,kind,scheduled_at,place,status,notification_revision,track_ids,subjects",
+    );
+    assert.deepEqual(query.filters, [
+      ["gte", "scheduled_at", input.rangeStart],
+      ["lt", "scheduled_at", input.rangeEnd],
+      ["in", "status", ["scheduled"]],
+    ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(query.order)), [
+      ["scheduled_at", { ascending: true }],
+      ["appointment_id", { ascending: true }],
+    ]);
+  }
+});
+
+test("calendar raw loader normalizes explicit statuses and skips an explicit empty selection", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient();
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const range = {
+    rangeStart: "2026-07-01T00:00:00+09:00",
+    rangeEnd: "2026-08-01T00:00:00+09:00",
+  };
+
+  await service.loadRegistrationAppointmentCalendarRows({
+    ...range,
+    statuses: ["canceled", "completed", "canceled"],
+  });
+  const empty = await service.loadRegistrationAppointmentCalendarRows({ ...range, statuses: [] });
+
+  assert.deepEqual(harness.queries[0].filters.at(-1), ["in", "status", ["completed", "canceled"]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(empty)), []);
+  assert.equal(harness.queries.length, 1, "an explicit empty status selection must not query PostgREST");
+});
+
+test("calendar raw loader rejects invalid ranges and unsupported statuses before querying", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient();
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  for (const input of [
+    { rangeStart: "invalid", rangeEnd: "2026-08-01T00:00:00+09:00" },
+    { rangeStart: "2026-08-01T00:00:00+09:00", rangeEnd: "2026-08-01T00:00:00+09:00" },
+    { rangeStart: "2026-07-01T00:00:00+09:00", rangeEnd: "2026-08-01T00:00:00+09:00", statuses: ["waiting"] },
+  ]) {
+    await assert.rejects(
+      Promise.resolve().then(() => service.loadRegistrationAppointmentCalendarRows(input)),
+      /registration_calendar_(range|status)_invalid/,
+    );
+  }
+  assert.equal(harness.queries.length, 0);
+});
 
 function detailRows(table) {
   if (table === "ops_tasks") {

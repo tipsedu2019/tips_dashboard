@@ -76,6 +76,8 @@ export type RegistrationTrackEditorProps = {
   textbookOptions?: OpsTextbookOption[]
   consultationOutcomeOpen?: boolean
   onConsultationOutcomeOpenChange?: (open: boolean) => void
+  initialAppointmentId?: string | null
+  onAppointmentOpenChange?: (appointmentId: string | null) => void
   notificationToken?: string
 }
 
@@ -1854,12 +1856,15 @@ export function RegistrationTrackEditor({
   textbookOptions = [],
   consultationOutcomeOpen = false,
   onConsultationOutcomeOpenChange,
+  initialAppointmentId = null,
+  onAppointmentOpenChange,
   notificationToken = "",
 }: RegistrationTrackEditorProps) {
   const [appointmentEditor, setAppointmentEditor] = useState<{
     kind: "level_test" | "visit_consultation"
     appointmentId: string | null
   } | null>(null)
+  const initialAppointmentAppliedRef = useRef("")
   const [localConsultationOutcomeOpen, setLocalConsultationOutcomeOpen] = useState(false)
   const selectedTrack = detail.tracks.find((track) => track.id === selectedTrackId) || detail.tracks[0] || null
   const reviewBlocked = detail.tracks.some((track) => track.migrationReviewRequired)
@@ -1889,6 +1894,29 @@ export function RegistrationTrackEditor({
   const editorAppointment = appointmentEditor?.appointmentId
     ? detail.appointments.find((item) => item.id === appointmentEditor.appointmentId) || null
     : null
+
+  useEffect(() => {
+    if (!initialAppointmentId) {
+      initialAppointmentAppliedRef.current = ""
+      return
+    }
+    const initialKey = `${detail.task.id}:${initialAppointmentId}`
+    if (initialAppointmentAppliedRef.current === initialKey) return
+    const initialAppointment = detail.appointments.find((item) => item.id === initialAppointmentId) || null
+    if (!initialAppointment || !selectedTrack) return
+    const participantTrackIds = initialAppointment.kind === "level_test"
+      ? detail.levelTests.filter((item) => item.appointmentId === initialAppointment.id).map((item) => item.trackId)
+      : detail.consultations.filter((item) => item.appointmentId === initialAppointment.id && item.mode === "visit").map((item) => item.trackId)
+    if (!participantTrackIds.includes(selectedTrack.id)) return
+    const openFrame = window.requestAnimationFrame(() => {
+      initialAppointmentAppliedRef.current = initialKey
+      setAppointmentEditor({
+        kind: initialAppointment.kind,
+        appointmentId: initialAppointment.id,
+      })
+    })
+    return () => window.cancelAnimationFrame(openFrame)
+  }, [detail.appointments, detail.consultations, detail.levelTests, detail.task.id, initialAppointmentId, selectedTrack])
   const appointmentActivitySignature = appointmentEditor?.kind === "level_test"
     ? detail.levelTests
       .filter((item) => !editorAppointment || item.appointmentId === editorAppointment.id)
@@ -1913,9 +1941,15 @@ export function RegistrationTrackEditor({
     await onAppointmentSaved?.(saved)
     await onReload()
     setAppointmentEditor(null)
+    onAppointmentOpenChange?.(null)
     if (saved.requiresDirectorAssignmentTrackIds.length > 0) {
       onWarning("상담 책임자가 없는 과목을 먼저 지정하세요.")
     }
+  }
+
+  function closeAppointmentEditor() {
+    setAppointmentEditor(null)
+    onAppointmentOpenChange?.(null)
   }
 
   async function saveCommon(draft: CommonDraft, requestKey: string) {
@@ -2115,8 +2149,11 @@ export function RegistrationTrackEditor({
           onSaved={handleAppointmentSaved}
           onWarning={onWarning}
           onReload={onReload}
-          onClose={() => setAppointmentEditor(null)}
-          onRebook={() => setAppointmentEditor({ kind: "level_test", appointmentId: null })}
+          onClose={closeAppointmentEditor}
+          onRebook={() => {
+            onAppointmentOpenChange?.(null)
+            setAppointmentEditor({ kind: "level_test", appointmentId: null })
+          }}
           notificationToken={notificationToken}
         />
       ) : null}
@@ -2132,7 +2169,7 @@ export function RegistrationTrackEditor({
           onSaved={handleAppointmentSaved}
           onWarning={onWarning}
           onReload={onReload}
-          onClose={() => setAppointmentEditor(null)}
+          onClose={closeAppointmentEditor}
           notificationToken={notificationToken}
         />
       ) : null}

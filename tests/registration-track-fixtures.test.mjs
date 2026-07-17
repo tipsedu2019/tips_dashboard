@@ -57,6 +57,7 @@ async function loadFixtureRuntimeModule() {
 
 async function loadServiceBoundary({
   fixtureVersion = null,
+  fixtureCalendarRows = null,
   executeFixtureAction = () => null,
   databaseIntakeState = { available: false, version: 0 },
   rpcResult = { data: {}, error: null },
@@ -68,7 +69,7 @@ async function loadServiceBoundary({
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText
-  const calls = { databaseProbe: 0, fixtureActions: [], rpc: [] }
+  const calls = { calendarBuilds: [], databaseProbe: 0, fixtureActions: [], rpc: [] }
   const sandboxModule = { exports: {} }
   const fixtureRuntime = {
     executeRegistrationSubjectTrackFixtureAction(type, payload) {
@@ -76,6 +77,7 @@ async function loadServiceBoundary({
       return executeFixtureAction(type, payload)
     },
     loadRegistrationSubjectTrackFixtureCase: () => null,
+    loadRegistrationSubjectTrackFixtureAppointmentCalendarRows: () => fixtureCalendarRows,
     loadRegistrationSubjectTrackFixtureOptionData: () => null,
     loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion: () => fixtureVersion,
   }
@@ -95,6 +97,17 @@ async function loadServiceBoundary({
     structuredClone,
     require(specifier) {
       if (specifier === "@/lib/supabase") return { supabase }
+      if (specifier === "./registration-appointment-calendar-model") {
+        return {
+          buildRegistrationAppointmentCalendarItems(rows, options) {
+            calls.calendarBuilds.push([rows, options])
+            return rows.map((row) => ({
+              id: `registration-appointment:${row.appointment_id}`,
+              appointmentId: row.appointment_id,
+            }))
+          },
+        }
+      }
       if (specifier === "./registration-track-fixture-runtime") return fixtureRuntime
       if (specifier === "./registration-intake-runtime-probe") {
         return {
@@ -170,6 +183,7 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.deepEqual(plain(first), plain(second))
   assert.deepEqual(plain(first.samples.map((sample) => sample.name)), [
     "same-day dual level test",
+    "same-day single level test neighbor",
     "split visit and phone consultation",
     "independent consultation and level-test stages",
     "partial registration with later batch",
@@ -223,6 +237,126 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.equal(sibling.tracks.some((track) => track.status === "enrollment_processing"), true)
   assert.equal(sibling.admissionBatches.some((batch) => batch.status === "draft"), true)
   assert.equal(first.caseDetails["fixture-task-migration-review"].tracks.every((track) => track.migrationReviewRequired), true)
+})
+
+test("fixture calendar adapter derives one live row per canonical appointment", async () => {
+  const {
+    createRegistrationSubjectTrackFixtureAdapter,
+    createRegistrationSubjectTrackFixtureState,
+  } = await loadFixtureModule()
+  let state = createRegistrationSubjectTrackFixtureState()
+  const dualDetail = state.caseDetails["fixture-task-dual-test"]
+  dualDetail.appointments.push({
+    ...dualDetail.appointments[0],
+    id: "fixture-appointment-orphan",
+  })
+  const adapter = createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (nextState) => { state = nextState },
+  })
+
+  assert.equal(typeof adapter.loadAppointmentCalendarRows, "function")
+  const rows = await adapter.loadAppointmentCalendarRows({
+    rangeStart: "2026-07-01T00:00:00+09:00",
+    rangeEnd: "2026-08-01T00:00:00+09:00",
+  })
+  const plainRows = plain(rows)
+  const sameDayRows = plainRows.filter((row) => row.scheduled_at.startsWith("2026-07-15T"))
+
+  assert.equal(sameDayRows.length, 2)
+  assert.equal(new Set(sameDayRows.map((row) => row.appointment_id)).size, 2)
+  assert.deepEqual(
+    plainRows.find((row) => row.appointment_id === "fixture-appointment-dual-test"),
+    {
+      appointment_id: "fixture-appointment-dual-test",
+      task_id: "fixture-task-dual-test",
+      student_name: "김다미",
+      kind: "level_test",
+      scheduled_at: "2026-07-15T10:00:00+09:00",
+      place: "본관 201호",
+      status: "scheduled",
+      notification_revision: 1,
+      track_ids: ["fixture-track-dual-english", "fixture-track-dual-math"],
+      subjects: ["영어", "수학"],
+    },
+  )
+  assert.deepEqual(
+    sameDayRows.find((row) => row.appointment_id === "fixture-appointment-calendar-neighbor")?.subjects,
+    ["영어"],
+  )
+  const splitRows = plainRows.filter((row) => row.task_id === "fixture-task-split-consultation")
+  assert.equal(splitRows.length, 1, "the phone child must not become a calendar row")
+  assert.deepEqual(splitRows[0].subjects, ["영어"])
+  assert.equal(plainRows.some((row) => row.task_id === "fixture-task-migration-review"), false)
+  assert.equal(plainRows.some((row) => row.appointment_id === "fixture-appointment-orphan"), false)
+})
+
+test("fixture calendar adapter applies half-open ranges, explicit statuses, and current state on every call", async () => {
+  const {
+    createRegistrationSubjectTrackFixtureAdapter,
+    createRegistrationSubjectTrackFixtureState,
+  } = await loadFixtureModule()
+  let state = createRegistrationSubjectTrackFixtureState()
+  const adapter = createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (nextState) => { state = nextState },
+  })
+  const exactRange = {
+    rangeStart: "2026-07-15T10:00:00+09:00",
+    rangeEnd: "2026-07-15T11:00:00+09:00",
+  }
+
+  assert.deepEqual(
+    plain((await adapter.loadAppointmentCalendarRows(exactRange)).map((row) => row.appointment_id)),
+    ["fixture-appointment-dual-test"],
+  )
+  assert.deepEqual(plain(await adapter.loadAppointmentCalendarRows({ ...exactRange, statuses: [] })), [])
+
+  await adapter.executeAction("cancelRegistrationAppointment", {
+    appointmentId: "fixture-appointment-dual-test",
+    expectedNotificationRevision: 1,
+    reason: "fixture calendar live refresh",
+    requestKey: "fixture-calendar-cancel",
+  })
+
+  assert.deepEqual(plain(await adapter.loadAppointmentCalendarRows(exactRange)), [])
+  const canceled = await adapter.loadAppointmentCalendarRows({ ...exactRange, statuses: ["canceled"] })
+  assert.deepEqual(plain(canceled.map((row) => [row.appointment_id, row.status, row.notification_revision])), [
+    ["fixture-appointment-dual-test", "canceled", 2],
+  ])
+})
+
+test("public calendar service maps active fixture rows before any database query", async () => {
+  const fixtureRows = Promise.resolve([{
+    appointment_id: "fixture-calendar-public",
+    task_id: "fixture-task-public",
+    student_name: "테스트 학생",
+    kind: "level_test",
+    scheduled_at: "2026-07-15T09:00:00+09:00",
+    place: "본관",
+    status: "completed",
+    notification_revision: 3,
+    track_ids: ["fixture-track-public"],
+    subjects: ["영어"],
+  }])
+  const { service, calls } = await loadServiceBoundary({ fixtureCalendarRows: fixtureRows })
+  const input = {
+    rangeStart: "2026-07-01T00:00:00+09:00",
+    rangeEnd: "2026-08-01T00:00:00+09:00",
+    statuses: ["completed"],
+  }
+
+  const items = await service.loadRegistrationAppointmentCalendar(input)
+
+  assert.deepEqual(plain(items), [{
+    id: "registration-appointment:fixture-calendar-public",
+    appointmentId: "fixture-calendar-public",
+  }])
+  assert.equal(calls.calendarBuilds.length, 1)
+  assert.strictEqual(calls.calendarBuilds[0][0], await fixtureRows)
+  assert.deepEqual(plain(calls.calendarBuilds[0][1]), { statuses: ["completed"] })
+  assert.equal(calls.databaseProbe, 0)
+  assert.deepEqual(calls.rpc, [])
 })
 
 test("fixture samples expose canonical phone readiness and clear it for visit rows", async () => {
@@ -501,9 +635,9 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.equal(before.lastCreate.command.requestKey, input.requestKey)
   assert.deepEqual(before.lastCreate.command.payload, plain(input))
   assert.deepEqual(before.lastCreate.result, plain(originalResult))
-  assert.equal(before.counts.cases, 9)
-  assert.equal(before.counts.tracks, 16)
-  assert.equal(before.counts.appointments, 5)
+  assert.equal(before.counts.cases, 10)
+  assert.equal(before.counts.tracks, 17)
+  assert.equal(before.counts.appointments, 6)
   assert.equal(before.counts.externalCalls, 0)
   assert.equal(before.counts.notificationReceipts, 1)
 

@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, Bell, BookOpenCheck, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, MessageSquareText, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Bell, BookOpenCheck, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, List, MessageSquareText, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -129,6 +129,8 @@ import {
   filterRegistrationTrackListItems,
   type RegistrationTrackListAction,
 } from "./registration-track-list"
+import { RegistrationAppointmentCalendar } from "./registration-appointment-calendar"
+import type { RegistrationAppointmentCalendarItem } from "./registration-appointment-calendar-model"
 import { RegistrationTrackEditor } from "./registration-track-editor"
 import { RegistrationAdmissionPanel } from "./registration-enrollment-editor"
 import {
@@ -191,6 +193,7 @@ type TodoDueFilterKey = "all" | "overdue" | "today" | "upcoming" | "unscheduled"
 type TodoSelectFilterKey = "all" | string
 type WithdrawalViewKey = "applicant" | "operations" | "closed"
 type RegistrationViewKey = "inquiry" | "level_test" | "consulting" | "waiting" | "enrollment" | "closed"
+type RegistrationWorkspaceMode = "list" | "calendar"
 type WithdrawalPeriodFilter = "all" | "today" | "week" | "month" | "custom"
 type GoogleChatChannel = "executive" | "admin" | "math" | "english"
 type WithdrawalNotificationChannelKey = "applicant" | "operations" | "google_chat_admin"
@@ -627,6 +630,21 @@ const REGISTRATION_SUBJECT_OPTIONS = [
   { value: "영어", label: "영어" },
   { value: "수학", label: "수학" },
 ] as const
+
+function getRegistrationAppointmentParticipantTrackIds(
+  detail: OpsRegistrationCaseDetail,
+  appointmentId: string,
+) {
+  const appointment = detail.appointments.find((item) => item.id === appointmentId) || null
+  if (!appointment) return []
+  const participantIds = new Set(appointment.kind === "level_test"
+    ? detail.levelTests.filter((item) => item.appointmentId === appointmentId).map((item) => item.trackId)
+    : detail.consultations.filter((item) => item.appointmentId === appointmentId && item.mode === "visit").map((item) => item.trackId))
+  return detail.tracks
+    .filter((track) => participantIds.has(track.id))
+    .sort((left, right) => (left.subject === "영어" ? 0 : 1) - (right.subject === "영어" ? 0 : 1) || left.id.localeCompare(right.id))
+    .map((track) => track.id)
+}
 
 const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChannelKey; label: string }> = [
   { key: "applicant", label: "담당선생님" },
@@ -8648,7 +8666,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, registrationFixtureValue)
   const [registrationFixtureModule, setRegistrationFixtureModule] = useState<RegistrationSubjectTrackFixtureModule | null>(null)
   const registrationFixtureStateRef = useRef<RegistrationSubjectTrackFixtureState | null>(null)
-  const [, setRegistrationFixtureRevision] = useState(0)
+  const [registrationFixtureRevision, setRegistrationFixtureRevision] = useState(0)
   useEffect(() => {
     if (!registrationFixtureRequested) {
       registrationFixtureStateRef.current = null
@@ -8704,6 +8722,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [todoView, setTodoView] = useState<TodoViewKey>("inbox")
   const [withdrawalView, setWithdrawalView] = useState<WithdrawalViewKey>("applicant")
   const [registrationView, setRegistrationView] = useState<RegistrationViewKey>("inquiry")
+  const [registrationMode, setRegistrationMode] = useState<RegistrationWorkspaceMode>("list")
+  const [registrationCalendarRefreshToken, setRegistrationCalendarRefreshToken] = useState(0)
   const [todoSort, setTodoSort] = useState<TodoSortKey>("due")
   const [requestedByFilter, setRequestedByFilter] = useState<TodoSelectFilterKey>("all")
   const [requestedTeamFilter, setRequestedTeamFilter] = useState<TodoSelectFilterKey>("all")
@@ -8741,6 +8761,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [editingTask, setEditingTask] = useState<OpsTask | null>(null)
   const [selectedTask, setSelectedTask] = useState<OpsTask | null>(null)
   const [selectedRegistrationTrackId, setSelectedRegistrationTrackId] = useState<string | null>(null)
+  const [selectedRegistrationAppointmentId, setSelectedRegistrationAppointmentId] = useState<string | null>(null)
   const selectedRegistrationTrackIdRef = useRef<string | null>(selectedRegistrationTrackId)
   selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
   const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationCaseDetail | null>(null)
@@ -8859,11 +8880,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       },
       replaceState: replaceRegistrationFixtureState,
     })
-    return installRegistrationSubjectTrackFixtureRuntime(
+    const uninstallFixtureRuntime = installRegistrationSubjectTrackFixtureRuntime(
       process.env.NODE_ENV,
       registrationFixtureValue,
       adapter,
     )
+    setRegistrationFixtureRevision((current) => current + 1)
+    return uninstallFixtureRuntime
   }, [registrationFixtureEnabled, registrationFixtureModule, registrationFixtureValue, replaceRegistrationFixtureState])
 
   const reload = useCallback(async (force = false, showPending = true) => {
@@ -8894,6 +8917,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setForm(resetForm)
       setSelectedTask(null)
       setSelectedRegistrationTrackId(null)
+      setSelectedRegistrationAppointmentId(null)
       setRegistrationCaseDetail(null)
       registrationTrackSelectionRef.current = ""
       registrationCreateAttemptRef.current = null
@@ -9049,6 +9073,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setTodoView(nextTodoRouteState.list)
       setTodoSort(nextTodoRouteState.sort || (nextTodoRouteState.status ? "status" : "due"))
     } else if (isRegistrationWorkspace) {
+      setRegistrationMode(nextView === "calendar" ? "calendar" : "list")
       if (isRegistrationViewKey(nextWorkflowFlow)) setRegistrationView(nextWorkflowFlow)
     } else if (isWithdrawalWorkspace || isTransferWorkspace) {
       if (isWithdrawalViewKey(nextWorkflowFlow)) setWithdrawalView(nextWorkflowFlow)
@@ -9115,20 +9140,40 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const syncRegistrationView = (nextView: RegistrationViewKey) => {
+    setRegistrationMode("list")
     setRegistrationView(nextView)
     setTaskFocus("none")
     setDetailOpen(false)
     setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(null)
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
     const searchParams = new URLSearchParams(window.location.search)
     searchParams.set("flow", nextView)
     searchParams.delete("taskId")
     searchParams.delete("trackId")
+    searchParams.delete("appointmentId")
     searchParams.delete("view")
     searchParams.delete("list")
     searchParams.delete("focus")
     const queryString = searchParams.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+  }
+
+  const syncRegistrationMode = (nextMode: RegistrationWorkspaceMode) => {
+    setRegistrationMode(nextMode)
+    setDetailOpen(false)
+    setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(null)
+    setRegistrationCaseDetail(null)
+    registrationTrackSelectionRef.current = ""
+    const routeParams = new URLSearchParams(window.location.search)
+    if (nextMode === "calendar") routeParams.set("view", "calendar")
+    else routeParams.delete("view")
+    routeParams.delete("taskId")
+    routeParams.delete("trackId")
+    routeParams.delete("appointmentId")
+    const queryString = routeParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
@@ -9224,7 +9269,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
-  const syncTaskDeepLink = useCallback((nextTaskId: string | null, nextTrackId: string | null = null) => {
+  const syncTaskDeepLink = useCallback((
+    nextTaskId: string | null,
+    nextTrackId: string | null = null,
+    nextAppointmentId: string | null = null,
+  ) => {
     const searchParams = new URLSearchParams(window.location.search)
     if (nextTaskId) {
       searchParams.set("taskId", nextTaskId)
@@ -9235,6 +9284,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       searchParams.set("trackId", nextTrackId)
     } else {
       searchParams.delete("trackId")
+    }
+    if (nextTaskId && nextAppointmentId) {
+      searchParams.set("appointmentId", nextAppointmentId)
+    } else {
+      searchParams.delete("appointmentId")
     }
     const queryString = searchParams.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
@@ -9798,6 +9852,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRegistrationCaseDetail(null)
     setSelectedTask(task)
     setSelectedRegistrationTrackId(nextTrackId)
+    setSelectedRegistrationAppointmentId(null)
     setDetailOpen(true)
     syncTaskDeepLink(task.id, nextTrackId)
     setMessage("")
@@ -9813,6 +9868,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const openRegistrationCustomerMessage = useCallback((task: OpsTask) => {
     setDetailOpen(false)
     setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(null)
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
     syncTaskDeepLink(null)
@@ -9875,14 +9931,91 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice(`[${selection.track?.subject || "과목"}] 과목별 상세를 확인하세요.`)
   }, [openEdit, openRegistrationTrack])
 
+  const openRegistrationAppointment = useCallback(async (
+    taskId: string,
+    appointmentId: string,
+    preferredTrackId: string | null = null,
+  ) => {
+    const task = taskById.get(taskId)
+    if (!task || task.type !== "registration") {
+      setMessage("선택한 등록 예약을 찾을 수 없습니다. 달력을 다시 불러오세요.")
+      return null
+    }
+
+    const selectionKey = `appointment:${taskId}:${appointmentId}`
+    registrationTrackSelectionRef.current = selectionKey
+    setRegistrationMode("calendar")
+    setSelectedTask(task)
+    setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(appointmentId)
+    setRegistrationCaseDetail(null)
+    setDetailOpen(true)
+    syncTaskDeepLink(taskId, null, appointmentId)
+    setMessage("")
+
+    try {
+      const [detail] = await Promise.all([
+        loadRegistrationCaseForWorkspace(taskId),
+        canManageRegistrationWorkflow ? ensureRegistrationOptions() : Promise.resolve(),
+      ])
+      if (registrationTrackSelectionRef.current !== selectionKey) return null
+      const appointment = detail.appointments.find((item) => item.id === appointmentId) || null
+      const participantTrackIds = getRegistrationAppointmentParticipantTrackIds(detail, appointmentId)
+      if (!appointment || participantTrackIds.length === 0) {
+        setSelectedRegistrationAppointmentId(null)
+        setRegistrationCaseDetail(null)
+        setDetailOpen(false)
+        registrationTrackSelectionRef.current = ""
+        syncTaskDeepLink(null)
+        setMessage("예약 정보가 변경되었습니다. 등록 달력을 다시 확인하세요.")
+        return null
+      }
+      const nextTrackId = preferredTrackId && participantTrackIds.includes(preferredTrackId)
+        ? preferredTrackId
+        : participantTrackIds[0]
+      const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      registrationTrackSelectionRef.current = `${taskId}:${nextTrackId}`
+      setRegistrationCaseDetail(detail)
+      setSelectedTask(exactTask)
+      setSelectedRegistrationTrackId(nextTrackId)
+      setSelectedRegistrationAppointmentId(appointmentId)
+      setDetailOpen(true)
+      syncTaskDeepLink(taskId, nextTrackId, appointmentId)
+      return { task: exactTask, detail, appointment, trackId: nextTrackId }
+    } catch {
+      if (registrationTrackSelectionRef.current === selectionKey) {
+        setMessage("등록 예약 상세를 불러오지 못했습니다. 달력을 다시 불러오세요.")
+      }
+      return null
+    }
+  }, [canManageRegistrationWorkflow, ensureRegistrationOptions, loadRegistrationCaseForWorkspace, syncTaskDeepLink, taskById])
+
+  const openRegistrationCalendarItem = useCallback((item: RegistrationAppointmentCalendarItem) => {
+    const canonicalUrl = new URL(item.href, window.location.origin)
+    const currentSearchParams = new URLSearchParams(window.location.search)
+    for (const key of ["fixture", "fixtureRole", "flow"] as const) {
+      const value = currentSearchParams.get(key)
+      if (value) canonicalUrl.searchParams.set(key, value)
+    }
+    window.history.replaceState(null, "", `${canonicalUrl.pathname}?${canonicalUrl.searchParams.toString()}`)
+    void openRegistrationAppointment(item.taskId, item.appointmentId, item.trackIds[0] || null)
+  }, [openRegistrationAppointment])
+
   const handleSelectRegistrationTrack = useCallback((trackId: string) => {
     const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
     if (!taskId || !trackId) return
     registrationTrackSelectionRef.current = `${taskId}:${trackId}`
     setSelectedRegistrationTrackId(trackId)
     setRegistrationConsultationOutcomeTrackId(null)
-    syncTaskDeepLink(taskId, trackId)
+    syncTaskDeepLink(taskId, trackId, selectedRegistrationAppointmentId)
     setMessage("")
+  }, [registrationCaseDetail?.task.id, selectedRegistrationAppointmentId, selectedTask?.id, syncTaskDeepLink])
+
+  const handleRegistrationAppointmentOpenChange = useCallback((appointmentId: string | null) => {
+    const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
+    const trackId = selectedRegistrationTrackIdRef.current
+    setSelectedRegistrationAppointmentId(appointmentId)
+    if (taskId) syncTaskDeepLink(taskId, trackId, appointmentId)
   }, [registrationCaseDetail?.task.id, selectedTask?.id, syncTaskDeepLink])
 
   const reloadRegistrationCaseDetail = useCallback(async (preferredTrackId?: string) => {
@@ -9901,14 +10034,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setRegistrationCaseDetail(detail)
       setSelectedTask({ ...detail.task, registrationTracks: detail.tracks })
       setSelectedRegistrationTrackId(nextTrack?.id || null)
-      syncTaskDeepLink(taskId, nextTrack?.id || null)
+      syncTaskDeepLink(taskId, nextTrack?.id || null, selectedRegistrationAppointmentId)
     } catch (error) {
       if (registrationTrackSelectionRef.current === selectionKey) {
         setMessage(getOpsTaskActionErrorMessage(error, "등록 상세를 다시 불러오지 못했습니다."))
       }
       throw error
     }
-  }, [loadRegistrationCaseForWorkspace, registrationCaseDetail?.task.id, registrationViewerId, reload, selectedTask?.id, syncTaskDeepLink])
+  }, [loadRegistrationCaseForWorkspace, registrationCaseDetail?.task.id, registrationViewerId, reload, selectedRegistrationAppointmentId, selectedTask?.id, syncTaskDeepLink])
 
   const postRegistrationAdmissionAction = useCallback(async (payload: Record<string, unknown>) => {
     if (registrationFixtureEnabled) {
@@ -9998,17 +10131,29 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const currentSearchParams = new URLSearchParams(window.location.search)
     const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
     const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
+    const deepLinkedAppointmentId = currentSearchParams.get("appointmentId") || ""
     if (!deepLinkedTaskId || !data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
       syncTaskDeepLink(null)
       return
     }
-    if (deepLinkedTask.type !== "registration" && deepLinkedTrackId) {
+    if (deepLinkedTask.type !== "registration" && (deepLinkedTrackId || deepLinkedAppointmentId)) {
       syncTaskDeepLink(deepLinkedTaskId, null)
     }
     if (deepLinkedTask.type === "word_retest") {
       openEdit(deepLinkedTask)
+      return
+    }
+    if (deepLinkedTask.type === "registration" && deepLinkedAppointmentId) {
+      if (registrationTrackSelectionRef.current === `appointment:${deepLinkedTaskId}:${deepLinkedAppointmentId}`) return
+      if (
+        selectedRegistrationAppointmentId === deepLinkedAppointmentId
+        && selectedTask?.id === deepLinkedTaskId
+        && registrationCaseDetail?.task.id === deepLinkedTaskId
+        && detailOpen
+      ) return
+      void openRegistrationAppointment(deepLinkedTaskId, deepLinkedAppointmentId, deepLinkedTrackId || null)
       return
     }
     if (deepLinkedTask.type === "registration" && deepLinkedTrackId) {
@@ -10017,21 +10162,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         && selectedTask?.id === deepLinkedTaskId
         && detailOpen
       ) return
+      setSelectedRegistrationAppointmentId(null)
       setSelectedRegistrationTrackId(deepLinkedTrackId)
       void openRegistrationTrack(deepLinkedTaskId, deepLinkedTrackId)
       return
     }
     setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(null)
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationTrack, searchParams, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationAppointment, openRegistrationTrack, registrationCaseDetail?.task.id, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
     if (!nextOpen) {
       setSelectedRegistrationTrackId(null)
+      setSelectedRegistrationAppointmentId(null)
       setRegistrationCaseDetail(null)
       setRegistrationConsultationOutcomeTrackId(null)
       registrationTrackSelectionRef.current = ""
@@ -11491,6 +11639,34 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       )}
 
       <div className={workspaceSurfaceClassName}>
+        {isRegistrationWorkspace ? (
+          <div role="group" aria-label="등록 화면 보기" className="inline-flex w-fit rounded-md border bg-background p-1">
+            <button
+              type="button"
+              aria-pressed={registrationMode === "list"}
+              onClick={() => syncRegistrationMode("list")}
+              className={[
+                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium",
+                registrationMode === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+              ].join(" ")}
+            >
+              <List className="size-4" />
+              목록
+            </button>
+            <button
+              type="button"
+              aria-pressed={registrationMode === "calendar"}
+              onClick={() => syncRegistrationMode("calendar")}
+              className={[
+                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium",
+                registrationMode === "calendar" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+              ].join(" ")}
+            >
+              <CalendarDays className="size-4" />
+              달력
+            </button>
+          </div>
+        ) : null}
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
 	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
@@ -11915,18 +12091,25 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	        {loading ? (
           <TaskListSkeleton showType={!isTodoWorkspace} />
 	        ) : shouldHideEmptySurface ? null : isRegistrationWorkspace ? (
-	          <RegistrationTrackList
-	            key={registrationView}
-	            items={visibleRegistrationTrackItems}
-	            viewerId={registrationViewerId}
-	            viewerRole={registrationViewerRole}
-	            loading={loading}
-	            disabled={saving}
-	            onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}
-	            onEdit={(taskId, trackId) => void editRegistrationTrack(taskId, trackId)}
-	            onAction={(taskId, trackId, action) => void handleRegistrationTrackAction(taskId, trackId, action)}
-	            emptyLabel={emptyTaskLabel}
-	          />
+            registrationMode === "calendar" ? (
+              <RegistrationAppointmentCalendar
+                refreshToken={`${registrationFixtureRevision}:${registrationCalendarRefreshToken}`}
+                onOpenAppointment={openRegistrationCalendarItem}
+              />
+            ) : (
+	            <RegistrationTrackList
+	              key={registrationView}
+	              items={visibleRegistrationTrackItems}
+	              viewerId={registrationViewerId}
+	              viewerRole={registrationViewerRole}
+	              loading={loading}
+	              disabled={saving}
+	              onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}
+	              onEdit={(taskId, trackId) => void editRegistrationTrack(taskId, trackId)}
+	              onAction={(taskId, trackId, action) => void handleRegistrationTrackAction(taskId, trackId, action)}
+	              emptyLabel={emptyTaskLabel}
+	            />
+            )
 	        ) : isWithdrawalWorkspace ? (
 	          <WithdrawalDataTable
 	            tasks={visibleTasks}
@@ -12575,9 +12758,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       task={selectedTaskFresh}
                       detail={registrationCaseDetail}
                       selectedTrackId={selectedRegistrationTrackId}
+                      initialAppointmentId={selectedRegistrationAppointmentId}
                       viewerId={registrationViewerId}
                       viewerRole={registrationViewerRole}
                       onSelectTrack={handleSelectRegistrationTrack}
+                      onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
+                      onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}
                       onReload={reloadRegistrationCaseDetail}
                       onWarning={setMessage}
                       consultationOutcomeOpen={registrationConsultationOutcomeTrackId === selectedRegistrationTrackId}

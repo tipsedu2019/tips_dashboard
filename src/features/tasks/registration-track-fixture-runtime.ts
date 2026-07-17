@@ -1,4 +1,8 @@
 import type { OpsRegistrationClassDetail, OpsTaskWorkspaceData } from "./ops-task-service"
+import type {
+  RegistrationAppointmentCalendarLoadInput,
+  RegistrationAppointmentCalendarRow,
+} from "./registration-appointment-calendar-model"
 import type { OpsRegistrationCaseDetail, OpsRegistrationWorkspaceOptionData } from "./registration-track-service"
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
@@ -43,6 +47,9 @@ export type RegistrationSubjectTrackFixtureDebugReplay = {
 export type RegistrationSubjectTrackFixtureAdapter = {
   readonly intakeWorkflowRuntimeVersion: number
   executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => Promise<T>
+  loadAppointmentCalendarRows: (
+    input: RegistrationAppointmentCalendarLoadInput,
+  ) => Promise<RegistrationAppointmentCalendarRow[]>
   loadCase: (taskId: string) => Promise<OpsRegistrationCaseDetail>
   loadWorkspaceData: () => Promise<OpsTaskWorkspaceData>
   loadOptionData: () => Promise<OpsRegistrationWorkspaceOptionData>
@@ -138,6 +145,12 @@ export function loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(): numbe
 
 export function loadRegistrationSubjectTrackFixtureCase(taskId: string): Promise<OpsRegistrationCaseDetail> | null {
   return getActiveFixtureAdapter()?.loadCase(taskId) || null
+}
+
+export function loadRegistrationSubjectTrackFixtureAppointmentCalendarRows(
+  input: RegistrationAppointmentCalendarLoadInput,
+): Promise<RegistrationAppointmentCalendarRow[]> | null {
+  return getActiveFixtureAdapter()?.loadAppointmentCalendarRows(input) || null
 }
 
 export function loadRegistrationSubjectTrackFixtureWorkspaceData(): Promise<OpsTaskWorkspaceData> | null {

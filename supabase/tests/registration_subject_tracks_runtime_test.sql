@@ -1,5 +1,5 @@
 begin;
-select plan(160);
+select plan(168);
 
 -- This packet is intentionally self-contained and transaction-scoped. It is run only
 -- against a disposable local/preview database after both registration migrations have
@@ -488,6 +488,192 @@ begin
       and not has_column_privilege(
         'authenticated', 'public.ops_registration_messages', 'error_message', 'SELECT'
       )
+    when 161 then exists (
+      select 1
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'public'
+        and relation.relname = 'ops_registration_appointment_calendar'
+        and relation.relkind = 'v'
+        and coalesce(relation.reloptions, array[]::text[])
+          @> array['security_invoker=true']
+        and (
+          select array_agg(attribute.attname order by attribute.attnum)
+          from pg_attribute attribute
+          where attribute.attrelid = relation.oid
+            and attribute.attnum > 0
+            and not attribute.attisdropped
+        ) = array[
+          'appointment_id', 'task_id', 'student_name', 'kind', 'scheduled_at',
+          'place', 'status', 'notification_revision', 'track_ids', 'subjects'
+        ]::name[]
+    )
+    when 162 then exists (
+      select 1
+      from pg_class index_relation
+      join pg_namespace namespace on namespace.oid = index_relation.relnamespace
+      join pg_index index_definition on index_definition.indexrelid = index_relation.oid
+      where namespace.nspname = 'public'
+        and index_relation.relname = 'ops_registration_appointments_status_scheduled_id_idx'
+        and pg_get_indexdef(index_definition.indexrelid)
+          ~ '\(status, scheduled_at, id\)$'
+    )
+    when 163 then has_table_privilege(
+        'authenticated', 'public.ops_registration_appointment_calendar', 'SELECT'
+      )
+      and not has_table_privilege(
+        'authenticated', 'public.ops_registration_appointment_calendar', 'INSERT'
+      )
+      and not has_table_privilege(
+        'authenticated', 'public.ops_registration_appointment_calendar', 'UPDATE'
+      )
+      and not has_table_privilege(
+        'authenticated', 'public.ops_registration_appointment_calendar', 'DELETE'
+      )
+      and not has_table_privilege(
+        'authenticated', 'public.ops_registration_appointment_calendar', 'TRUNCATE'
+      )
+      and not has_table_privilege(
+        'authenticated', 'public.ops_registration_appointment_calendar', 'REFERENCES'
+      )
+      and not has_table_privilege(
+        'authenticated', 'public.ops_registration_appointment_calendar', 'TRIGGER'
+      )
+      and not has_table_privilege(
+        'anon', 'public.ops_registration_appointment_calendar', 'SELECT'
+      )
+      and not exists (
+        select 1
+        from pg_class relation
+        cross join lateral aclexplode(
+          coalesce(relation.relacl, acldefault('r', relation.relowner))
+        ) privilege
+        where relation.oid = 'public.ops_registration_appointment_calendar'::regclass
+          and privilege.grantee = 0
+      )
+    when 164 then (
+      select count(*)
+      from public.ops_registration_appointment_calendar calendar
+    ) = (
+      select count(distinct participant.appointment_id)
+      from (
+        select level_test.appointment_id
+        from public.ops_registration_level_tests level_test
+        join public.ops_registration_appointments appointment
+          on appointment.id = level_test.appointment_id
+         and appointment.kind = 'level_test'
+        union
+        select consultation.appointment_id
+        from public.ops_registration_consultations consultation
+        join public.ops_registration_appointments appointment
+          on appointment.id = consultation.appointment_id
+         and appointment.kind = 'visit_consultation'
+        where consultation.mode = 'visit'
+          and consultation.appointment_id is not null
+      ) participant
+    ) and not exists (
+      select calendar.appointment_id
+      from public.ops_registration_appointment_calendar calendar
+      group by calendar.appointment_id
+      having count(*) <> 1
+    )
+    when 165 then not exists (
+      select 1
+      from public.ops_registration_appointment_calendar calendar
+      where not (
+        (
+          calendar.kind = 'level_test'
+          and exists (
+            select 1
+            from public.ops_registration_level_tests level_test
+            where level_test.appointment_id = calendar.appointment_id
+          )
+        )
+        or (
+          calendar.kind = 'visit_consultation'
+          and exists (
+            select 1
+            from public.ops_registration_consultations consultation
+            where consultation.appointment_id = calendar.appointment_id
+              and consultation.mode = 'visit'
+          )
+        )
+      )
+    )
+    when 166 then not exists (
+      with canonical_participants as (
+        select level_test.appointment_id, track.id as track_id, track.subject
+        from public.ops_registration_level_tests level_test
+        join public.ops_registration_appointments appointment
+          on appointment.id = level_test.appointment_id
+         and appointment.kind = 'level_test'
+        join public.ops_registration_subject_tracks track
+          on track.id = level_test.track_id
+        union
+        select consultation.appointment_id, track.id as track_id, track.subject
+        from public.ops_registration_consultations consultation
+        join public.ops_registration_appointments appointment
+          on appointment.id = consultation.appointment_id
+         and appointment.kind = 'visit_consultation'
+        join public.ops_registration_subject_tracks track
+          on track.id = consultation.track_id
+        where consultation.mode = 'visit'
+          and consultation.appointment_id is not null
+      ), expected as (
+        select
+          participant.appointment_id,
+          array_agg(
+            participant.track_id
+            order by
+              case participant.subject when '영어' then 0 when '수학' then 1 else 2 end,
+              participant.track_id
+          ) as track_ids,
+          array_agg(
+            participant.subject
+            order by
+              case participant.subject when '영어' then 0 when '수학' then 1 else 2 end,
+              participant.track_id
+          ) as subjects
+        from canonical_participants participant
+        group by participant.appointment_id
+      )
+      select 1
+      from public.ops_registration_appointment_calendar calendar
+      join expected on expected.appointment_id = calendar.appointment_id
+      where calendar.track_ids is distinct from expected.track_ids
+         or calendar.subjects is distinct from expected.subjects
+         or cardinality(calendar.track_ids) <> cardinality(calendar.subjects)
+    )
+    when 167 then exists (
+      select 1
+      from pg_attribute attribute
+      where attribute.attrelid = 'public.ops_registration_appointment_calendar'::regclass
+        and attribute.attname = 'notification_revision'
+        and attribute.atttypid = 'integer'::regtype
+        and attribute.attnum > 0
+        and not attribute.attisdropped
+    ) and not exists (
+      select 1
+      from public.ops_registration_appointment_calendar calendar
+      join public.ops_registration_appointments appointment
+        on appointment.id = calendar.appointment_id
+      where calendar.notification_revision is distinct from appointment.notification_revision
+    )
+    when 168 then not exists (
+      select 1
+      from pg_rewrite rewrite
+      join pg_class calendar_view on calendar_view.oid = rewrite.ev_class
+      join pg_namespace calendar_namespace on calendar_namespace.oid = calendar_view.relnamespace
+      join pg_depend dependency
+        on dependency.classid = 'pg_rewrite'::regclass
+       and dependency.objid = rewrite.oid
+      join pg_class referenced_relation on referenced_relation.oid = dependency.refobjid
+      join pg_namespace referenced_namespace on referenced_namespace.oid = referenced_relation.relnamespace
+      where calendar_namespace.nspname = 'public'
+        and calendar_view.relname = 'ops_registration_appointment_calendar'
+        and referenced_namespace.nspname = 'public'
+        and referenced_relation.relname = 'academic_events'
+    )
     else pg_temp.registration_missing_observation(p_number)
   end;
 end;
@@ -5448,6 +5634,148 @@ select pg_temp.registration_record(160,
   )
 );
 
+select pg_temp.registration_record(161,
+  (
+    select coalesce(view_relation.reloptions, '{}'::text[]) @> array['security_invoker=true']::text[]
+    from pg_catalog.pg_class view_relation
+    join pg_catalog.pg_namespace view_schema on view_schema.oid = view_relation.relnamespace
+    where view_schema.nspname = 'public'
+      and view_relation.relname = 'ops_registration_appointment_calendar'
+      and view_relation.relkind = 'v'
+  )
+  and (
+    select pg_catalog.array_agg(column_info.column_name order by column_info.ordinal_position) = array[
+      'appointment_id', 'task_id', 'student_name', 'kind', 'scheduled_at',
+      'place', 'status', 'notification_revision', 'track_ids', 'subjects'
+    ]::text[]
+    from information_schema.columns column_info
+    where column_info.table_schema = 'public'
+      and column_info.table_name = 'ops_registration_appointment_calendar'
+  )
+);
+
+select pg_temp.registration_record(162,
+  exists (
+    select 1
+    from pg_catalog.pg_indexes index_info
+    where index_info.schemaname = 'public'
+      and index_info.tablename = 'ops_registration_appointments'
+      and index_info.indexname = 'ops_registration_appointments_status_scheduled_id_idx'
+      and pg_catalog.regexp_replace(index_info.indexdef, '[[:space:]]+', ' ', 'g')
+        like '%(status, scheduled_at, id)%'
+  )
+);
+
+select pg_temp.registration_record(163,
+  pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.ops_registration_appointment_calendar',
+    'SELECT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.ops_registration_appointment_calendar',
+    'INSERT'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.ops_registration_appointment_calendar',
+    'UPDATE'
+  )
+  and not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.ops_registration_appointment_calendar',
+    'DELETE'
+  )
+  and not pg_catalog.has_table_privilege(
+    'anon',
+    'public.ops_registration_appointment_calendar',
+    'SELECT'
+  )
+  and not exists (
+    select 1
+    from information_schema.table_privileges table_privilege
+    where table_privilege.table_schema = 'public'
+      and table_privilege.table_name = 'ops_registration_appointment_calendar'
+      and table_privilege.grantee = 'PUBLIC'
+  )
+);
+
+select pg_temp.registration_record(164,
+  exists (select 1 from public.ops_registration_appointment_calendar)
+  and not exists (
+    select calendar_row.appointment_id
+    from public.ops_registration_appointment_calendar calendar_row
+    group by calendar_row.appointment_id
+    having pg_catalog.count(*) <> 1
+  )
+);
+
+select pg_temp.registration_record(165,
+  not exists (
+    select 1
+    from public.ops_registration_appointment_calendar calendar_row
+    where calendar_row.kind not in ('level_test', 'visit_consultation')
+      or not (
+        exists (
+          select 1
+          from public.ops_registration_level_tests level_test
+          where level_test.appointment_id = calendar_row.appointment_id
+        )
+        or exists (
+          select 1
+          from public.ops_registration_consultations consultation
+          where consultation.appointment_id = calendar_row.appointment_id
+            and consultation.mode = 'visit'
+        )
+      )
+  )
+);
+
+select pg_temp.registration_record(166,
+  not exists (
+    select 1
+    from public.ops_registration_appointment_calendar calendar_row
+    where pg_catalog.cardinality(calendar_row.track_ids) <> pg_catalog.cardinality(calendar_row.subjects)
+      or calendar_row.subjects is distinct from (
+        select pg_catalog.array_agg(subject_value order by
+          case subject_value when '영어' then 0 when '수학' then 1 else 2 end,
+          subject_value
+        )
+        from pg_catalog.unnest(calendar_row.subjects) subject_value
+      )
+      or exists (
+        select 1
+        from pg_catalog.unnest(calendar_row.track_ids, calendar_row.subjects)
+          participant(track_id, subject)
+        join public.ops_registration_subject_tracks track on track.id = participant.track_id
+        where track.subject is distinct from participant.subject
+      )
+  )
+);
+
+select pg_temp.registration_record(167,
+  (
+    select column_info.data_type = 'integer'
+    from information_schema.columns column_info
+    where column_info.table_schema = 'public'
+      and column_info.table_name = 'ops_registration_appointment_calendar'
+      and column_info.column_name = 'notification_revision'
+  )
+  and not exists (
+    select 1
+    from public.ops_registration_appointment_calendar calendar_row
+    join public.ops_registration_appointments appointment
+      on appointment.id = calendar_row.appointment_id
+    where calendar_row.notification_revision is distinct from appointment.notification_revision
+  )
+);
+
+select pg_temp.registration_record(168,
+  pg_catalog.pg_get_viewdef('public.ops_registration_appointment_calendar'::pg_catalog.regclass, true)
+    not ilike '%academic_events%'
+);
+
 -- assertion 1: atomic RPC creation with exactly two subject tracks.
 select ok(
   pg_temp.registration_contract(1),
@@ -6406,6 +6734,54 @@ select ok(
 select ok(
   pg_temp.registration_contract(160),
   '160. 핵심 authoritative mutation family는 tuple당 version-2 이력 하나를 유지하고 same-key replay로 늘어나지 않는다.'
+);
+
+-- assertion 161: 달력 뷰는 보안 호출자 모드와 정확한 열 계약을 유지한다.
+select ok(
+  pg_temp.registration_contract(161),
+  '161. 달력 뷰는 보안 호출자 모드와 정확한 열 10개를 유지한다.'
+);
+
+-- assertion 162: 상태·시각·ID 조회 인덱스는 달력 범위 조회 순서를 지원한다.
+select ok(
+  pg_temp.registration_contract(162),
+  '162. 달력 조회 인덱스는 상태, 예약 시각, ID 순서를 유지한다.'
+);
+
+-- assertion 163: 인증 사용자만 달력 뷰를 읽고 쓰기 권한은 갖지 않는다.
+select ok(
+  pg_temp.registration_contract(163),
+  '163. 인증 사용자만 달력 뷰를 읽고 익명 및 공개 권한은 차단된다.'
+);
+
+-- assertion 164: 정규 하위 기록이 있는 예약은 정확히 한 행으로 집계된다.
+select ok(
+  pg_temp.registration_contract(164),
+  '164. 정규 하위 기록이 있는 예약은 달력에서 정확히 한 행이다.'
+);
+
+-- assertion 165: 레벨테스트와 방문상담 예약만 달력에 포함된다.
+select ok(
+  pg_temp.registration_contract(165),
+  '165. 달력에는 레벨테스트와 방문상담 정규 예약만 포함된다.'
+);
+
+-- assertion 166: 참여 트랙과 과목은 영어 다음 수학 순서로 안정 집계된다.
+select ok(
+  pg_temp.registration_contract(166),
+  '166. 참여 트랙과 과목은 영어 다음 수학 순서로 함께 집계된다.'
+);
+
+-- assertion 167: 알림 리비전은 정수형과 원본 값을 그대로 유지한다.
+select ok(
+  pg_temp.registration_contract(167),
+  '167. 달력 알림 리비전은 정수형과 원본 값을 그대로 유지한다.'
+);
+
+-- assertion 168: 달력 뷰는 학사 일정 테이블에 의존하지 않는다.
+select ok(
+  pg_temp.registration_contract(168),
+  '168. 달력 뷰는 학사 일정 테이블에 의존하지 않는다.'
 );
 
 select * from finish();

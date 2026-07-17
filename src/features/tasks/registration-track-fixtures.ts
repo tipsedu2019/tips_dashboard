@@ -8,6 +8,11 @@ import type {
   OpsTextbookOption,
 } from "./ops-task-service"
 import type {
+  RegistrationAppointmentCalendarLoadInput,
+  RegistrationAppointmentCalendarRow,
+  RegistrationAppointmentCalendarStatus,
+} from "./registration-appointment-calendar-model"
+import type {
   OpsRegistrationAdmissionBatch,
   OpsRegistrationAppointment,
   OpsRegistrationCaseDetail,
@@ -177,6 +182,9 @@ export function createRegistrationSubjectTrackFixtureAdapter(
       }
       return Promise.resolve(outcome.result as T)
     },
+    loadAppointmentCalendarRows: (input) => Promise.resolve(
+      getRegistrationSubjectTrackFixtureAppointmentCalendarRows(runtime.getState(), input),
+    ),
     loadCase: (taskId) => {
       const detail = getRegistrationSubjectTrackFixtureCase(runtime.getState(), taskId)
       if (!detail) return Promise.reject(new Error("registration_subject_track_fixture_case_not_found"))
@@ -426,6 +434,43 @@ function buildFixtureCases() {
     materialLink: null,
   }))
 
+  const calendarNeighborTaskId = "fixture-task-calendar-neighbor"
+  const calendarNeighborTracks = [
+    track({
+      id: "fixture-track-calendar-neighbor-english",
+      taskId: calendarNeighborTaskId,
+      subject: "영어",
+      status: "level_test_scheduled",
+    }),
+  ]
+  const calendarNeighborTask = taskTemplate({
+    id: calendarNeighborTaskId,
+    studentName: "오하늘",
+    subject: "영어",
+    tracks: calendarNeighborTracks,
+  })
+  const calendarNeighborAppointment: OpsRegistrationAppointment = {
+    id: "fixture-appointment-calendar-neighbor",
+    taskId: calendarNeighborTaskId,
+    kind: "level_test",
+    scheduledAt: "2026-07-15T11:00:00+09:00",
+    place: "본관 202호",
+    status: "scheduled",
+    notificationRevision: 1,
+    createdAt: FIXTURE_NOW,
+    updatedAt: FIXTURE_NOW,
+  }
+  const calendarNeighborAttempt: OpsRegistrationLevelTest = {
+    id: "fixture-attempt-calendar-neighbor-english",
+    trackId: calendarNeighborTracks[0].id,
+    appointmentId: calendarNeighborAppointment.id,
+    attemptNumber: 1,
+    status: "scheduled",
+    startedAt: null,
+    completedAt: null,
+    materialLink: null,
+  }
+
   const splitTaskId = "fixture-task-split-consultation"
   const splitTracks = [
     track({ id: "fixture-track-split-english", taskId: splitTaskId, subject: "영어", status: "visit_consultation_scheduled" }),
@@ -615,6 +660,12 @@ function buildFixtureCases() {
 
   return {
     [dualTaskId]: caseDetail({ task: dualTask, tracks: dualTracks, appointments: [dualAppointment], levelTests: dualAttempts }),
+    [calendarNeighborTaskId]: caseDetail({
+      task: calendarNeighborTask,
+      tracks: calendarNeighborTracks,
+      appointments: [calendarNeighborAppointment],
+      levelTests: [calendarNeighborAttempt],
+    }),
     [splitTaskId]: caseDetail({ task: splitTask, tracks: splitTracks, appointments: [visitAppointment], consultations: splitConsultations }),
     [crossStageTaskId]: caseDetail({ task: crossStageTask, tracks: crossStageTracks, appointments: [crossStageAppointment], levelTests: [crossStageAttempt], consultations: [crossStageConsultation] }),
     [partialTaskId]: caseDetail({ task: partialTask, tracks: partialTracks, admissionBatches: [completedAdmission, openAdmission], enrollments: partialEnrollments }),
@@ -683,6 +734,7 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     },
     samples: [
       { name: "same-day dual level test", taskId: "fixture-task-dual-test" },
+      { name: "same-day single level test neighbor", taskId: "fixture-task-calendar-neighbor" },
       { name: "split visit and phone consultation", taskId: "fixture-task-split-consultation" },
       { name: "independent consultation and level-test stages", taskId: "fixture-task-cross-stage" },
       { name: "partial registration with later batch", taskId: "fixture-task-partial-registration" },
@@ -721,6 +773,93 @@ export function getRegistrationSubjectTrackFixtureClassDetails(
     if (detail) result[classId] = clone(detail)
   }
   return result
+}
+
+function normalizeFixtureAppointmentCalendarInput(
+  input: RegistrationAppointmentCalendarLoadInput,
+) {
+  const rangeStart = String(input?.rangeStart || "").trim()
+  const rangeEnd = String(input?.rangeEnd || "").trim()
+  const startTime = Date.parse(rangeStart)
+  const endTime = Date.parse(rangeEnd)
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime >= endTime) {
+    throw new Error("registration_calendar_range_invalid")
+  }
+
+  const allowedStatuses: RegistrationAppointmentCalendarStatus[] = ["scheduled", "completed", "canceled"]
+  const requestedStatuses = input.statuses === undefined ? ["scheduled"] : input.statuses
+  if (!Array.isArray(requestedStatuses)) throw new Error("registration_calendar_status_invalid")
+  const requested = new Set<unknown>(requestedStatuses)
+  if ([...requested].some((status) => !allowedStatuses.includes(status as RegistrationAppointmentCalendarStatus))) {
+    throw new Error("registration_calendar_status_invalid")
+  }
+  return {
+    endTime,
+    startTime,
+    statuses: new Set(allowedStatuses.filter((status) => requested.has(status))),
+  }
+}
+
+export function getRegistrationSubjectTrackFixtureAppointmentCalendarRows(
+  state: RegistrationSubjectTrackFixtureState,
+  input: RegistrationAppointmentCalendarLoadInput,
+): RegistrationAppointmentCalendarRow[] {
+  const { endTime, startTime, statuses } = normalizeFixtureAppointmentCalendarInput(input)
+  if (statuses.size === 0) return []
+
+  const rowsByAppointmentId = new Map<string, RegistrationAppointmentCalendarRow>()
+  for (const detail of Object.values(state.caseDetails)) {
+    const tracksById = new Map(detail.tracks.map((trackItem) => [trackItem.id, trackItem]))
+    for (const appointment of detail.appointments) {
+      const scheduledTime = Date.parse(appointment.scheduledAt)
+      if (
+        !Number.isFinite(scheduledTime)
+        || scheduledTime < startTime
+        || scheduledTime >= endTime
+        || !statuses.has(appointment.status)
+      ) continue
+
+      const participatingTrackIds = appointment.kind === "level_test"
+        ? detail.levelTests
+          .filter((attempt) => attempt.appointmentId === appointment.id)
+          .map((attempt) => attempt.trackId)
+        : detail.consultations
+          .filter((consultation) => (
+            consultation.mode === "visit"
+            && consultation.appointmentId === appointment.id
+          ))
+          .map((consultation) => consultation.trackId)
+      const participants = [...new Set(participatingTrackIds)]
+        .map((trackId) => tracksById.get(trackId) || null)
+        .filter((trackItem): trackItem is OpsRegistrationTrackSummary => Boolean(trackItem))
+        .sort((left, right) => (
+          REGISTRATION_SUBJECT_ORDER.indexOf(left.subject) - REGISTRATION_SUBJECT_ORDER.indexOf(right.subject)
+          || left.id.localeCompare(right.id)
+        ))
+
+      if (participants.length === 0) continue
+
+      if (!rowsByAppointmentId.has(appointment.id)) {
+        rowsByAppointmentId.set(appointment.id, {
+          appointment_id: appointment.id,
+          task_id: appointment.taskId,
+          student_name: detail.task.studentName,
+          kind: appointment.kind,
+          scheduled_at: appointment.scheduledAt,
+          place: appointment.place,
+          status: appointment.status,
+          notification_revision: appointment.notificationRevision,
+          track_ids: participants.map((trackItem) => trackItem.id),
+          subjects: participants.map((trackItem) => trackItem.subject),
+        })
+      }
+    }
+  }
+
+  return [...rowsByAppointmentId.values()].sort((left, right) => (
+    Date.parse(left.scheduled_at) - Date.parse(right.scheduled_at)
+    || left.appointment_id.localeCompare(right.appointment_id)
+  ))
 }
 
 function findCaseByTrackId(state: RegistrationSubjectTrackFixtureState, trackId: string) {
