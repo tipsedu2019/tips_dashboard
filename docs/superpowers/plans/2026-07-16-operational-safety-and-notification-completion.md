@@ -899,8 +899,8 @@ git commit -m "test: define notification control plane contracts"
 - public.dashboard_notification_read_receipts
 - additive compatibility columns on existing inbox/connection rows
 
-- [ ] **Step 1: write failing schema/grant/RLS/idempotency/source-drift tests**
-- [ ] **Step 2: add forward-only tables, constraints, unique occurrence keys, indexes, deferred relationships, and all twelve false runtime flags**
+- [x] **Step 1: write failing schema/grant/RLS/idempotency/source-drift tests**
+- [x] **Step 2: add forward-only tables, constraints, unique occurrence keys, indexes, deferred relationships, and all twelve false runtime flags**
 
 ~~~text
 notification_control_plane_settings_ui_enabled
@@ -918,22 +918,22 @@ notification_control_plane_dispatch_approvals_enabled
 ~~~
 
 The schema test requires this exact set, exact count, server-authoritative database storage, and false defaults.
-- [ ] **Step 3: keep dashboard_private usage required by existing registration wrappers but revoke direct canonical-table access from anon/authenticated**
-- [ ] **Step 4: preserve every currently required legacy writer grant until its fixed-purpose bridge lands in Task 20**
+- [x] **Step 3: keep dashboard_private usage required by existing registration wrappers but revoke direct canonical-table access from anon/authenticated**
+- [x] **Step 4: preserve every currently required legacy writer grant until its fixed-purpose bridge lands in Task 20**
 
 The expand migration must not revoke authenticated/public writer access still used by dashboard_notifications, Google Chat compatibility, makeup, phone-consultation, or other legacy domain event paths. Source and pgTAP tests snapshot grants before/after and prove unchanged legacy behavior. Only new private canonical tables and the new receipt mutation boundary are closed here.
 
-- [ ] **Step 5: add receipts with historical read compatibility**
+- [x] **Step 5: add receipts with historical read compatibility**
 
 Add primary key (notification_id, profile_id), own-select RLS, and no direct browser write. The shared visible relation uses a receipt first, otherwise an existing non-null dashboard_notifications.read_at only as historical effective read. Never backfill, clear, or newly update legacy row read_at. New canonical and fixed-purpose legacy projections explicitly insert read_at = null.
 
-- [ ] **Step 6: detect optional live-only legacy tables without assuming they exist**
+- [x] **Step 6: detect optional live-only legacy tables without assuming they exist**
 
 Use to_regclass for ops_task_notification_deliveries and ops_task_automation_runs. If present, register them as read-only legacy import sources; if absent, migration and tests still succeed. Do not destructively backfill either table. Cover both present and absent pgTAP fixtures because linked-live drift may differ from local schema.
 
-- [ ] **Step 7: prove no historical inbox, push subscription, webhook, makeup history, registration claim, SOLAPI, or optional legacy row is deleted/backfilled destructively**
-- [ ] **Step 8: run source tests and authorized local/preview pgTAP**
-- [ ] **Step 9: commit**
+- [x] **Step 7: prove no historical inbox, push subscription, webhook, makeup history, registration claim, SOLAPI, or optional legacy row is deleted/backfilled destructively**
+- [x] **Step 8: run source tests and authorized local/preview pgTAP**
+- [x] **Step 9: commit**
 
 ~~~bash
 git add \
@@ -944,6 +944,8 @@ git commit -m "feat: add notification control plane schema"
 ~~~
 
 **Gate:** all canonical tables are private, all runtime flags are false, installing the migration creates zero deliveries, historical read_at semantics remain intact, optional live-only tables are handled both ways, and no required legacy writer grant closes early.
+
+**완료 증거(2026-07-17):** `d7a285f` 커밋에 private canonical 네 계층, 세 내구성 큐, 요청 원장, heartbeat, 12개 false 플래그, 발송 소유권, 개인별 receipt와 호환 확장을 기록했습니다. 최초 RED는 마이그레이션 부재로 7개 중 6개가 실패했고, 최종 source 8/8, 알림 집중 26/26, 다음 작업의 의도된 RED를 제외한 전체 회귀 1058/1058, TypeScript, 대상 ESLint, cached diff 검사가 통과했습니다. Supabase 플러그인으로 migration 번호·optional live table·기존 schema/RPC 권한을 읽기 전용 검증했으며 최종 독립 검토는 P0/P1/P2 잔여 문제 없이 통과했습니다. 원격 적용·데이터 변경·provider 호출·배포는 수행하지 않았습니다. 승인된 local/preview DB에서의 실제 pgTAP 실행은 적용 단계의 release gate로 남겼으며 실행한 것으로 보고하지 않습니다.
 
 ---
 
