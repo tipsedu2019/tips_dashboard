@@ -856,12 +856,12 @@ git commit -m "feat: show automatic registration history"
 - Pure draft/dirty-patch/rebase/validation functions shared by page and dialog.
 - web_push remains derived from in_app and is never an independent rule toggle.
 
-- [ ] **Step 1: copy the exact locked unions and DTOs from the approved common spec**
-- [ ] **Step 2: add failing tests for seven-workflow order, impossible cells, explicit save, revision conflicts, dirty navigation, and decimal-string bigint handling**
-- [ ] **Step 3: implement pure model functions with no Supabase, React, provider, or workflow import**
-- [ ] **Step 4: add test:notifications to package.json**
-- [ ] **Step 5: run pnpm run test:notifications and pnpm exec tsc --noEmit**
-- [ ] **Step 6: commit**
+- [x] **Step 1: copy the exact locked unions and DTOs from the approved common spec**
+- [x] **Step 2: add failing tests for seven-workflow order, impossible cells, explicit save, revision conflicts, dirty navigation, and decimal-string bigint handling**
+- [x] **Step 3: implement pure model functions with no Supabase, React, provider, or workflow import**
+- [x] **Step 4: add test:notifications to package.json**
+- [x] **Step 5: run pnpm run test:notifications and pnpm exec tsc --noEmit**
+- [x] **Step 6: commit**
 
 ~~~bash
 git add \
@@ -873,6 +873,8 @@ git commit -m "test: define notification control plane contracts"
 ~~~
 
 **Gate:** no UI or sender uses component-owned defaults as canonical settings.
+
+**완료 증거(2026-07-17):** `787cd10` 커밋에 닫힌 7개 업무·79개 이벤트·12개 대상·4개 채널, 실패-폐쇄 DTO decoder, 순수 draft/patch/validation/rebase 모델과 테스트를 기록했습니다. 최초 RED는 새 모듈의 `ERR_MODULE_NOT_FOUND`였고 최종 집중 테스트 18/18, 다음 작업의 의도된 RED 파일을 제외한 전체 회귀 1050/1050, TypeScript, 대상 ESLint, diff 검사가 모두 통과했습니다. 독립 검토에서 찾은 연결 조합, 연결 검증 오류, 예약 임의 필드, 동적 과목 연결, 중복 식별자 문제를 모두 회귀 테스트와 함께 보강했으며 최종 P0/P1/P2 잔여 문제는 없습니다. Supabase 쓰기, 외부 발송, 마이그레이션 적용, 배포는 수행하지 않았습니다.
 
 ---
 

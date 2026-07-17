@@ -1,22 +1,22 @@
-# Task 1A implementation report
+# 작업 1A 구현 결과 보고서
 
-Status: containment implementation and independent code review complete; credentialed desktop/mobile route execution remains an evidence follow-up.
+상태: 영구 저장되지 않는 알림 제어 격리와 독립 코드 검토를 완료했습니다. 인증된 데스크톱·모바일 경로 실행은 추가 증거 항목으로 남아 있습니다.
 
-Implementation commit: `3e13dc8` (`fix: contain nonpersistent notification controls`).
+구현 커밋: `3e13dc8` (`fix: contain nonpersistent notification controls`)
 
-## Scope
+## 적용 범위
 
-- Registration, transfer, and withdrawal keep their existing notification-settings launchers.
-- Their shared dialog no longer renders session-only channel toggles, template editors, generic save claims, or fake success state.
-- The dialog shows an explicit read-only notice that persistent common settings are not available yet.
-- The real Google Chat connection GET/PATCH action remains separately available. Its save button is labeled `웹훅 URL 저장`, and the dialog exit is labeled `닫기`.
-- Existing legacy sender defaults, templates, create/status side effects, and ownership are unchanged.
-- Makeup-request settings code and database-backed editors were not modified.
-- No push, deploy, migration, runtime flag change, remote write, provider delivery, or webhook mutation was performed.
+- 등록·전반·퇴원 화면의 기존 `알림 설정` 진입 버튼은 유지했습니다.
+- 공통 대화상자에서 세션에만 남던 채널 스위치, 템플릿 편집기, 실제 저장처럼 보이는 버튼과 성공 상태를 제거했습니다.
+- 영구 저장 가능한 공통 설정이 아직 준비되지 않았다는 읽기 전용 안내를 표시합니다.
+- DB에 실제 저장되는 Google Chat 연결 GET/PATCH 기능은 별도 영역으로 유지했습니다. 저장 버튼은 `웹훅 URL 저장`, 대화상자 종료 버튼은 `닫기`로 명확히 구분했습니다.
+- 기존 레거시 발송 기본값, 템플릿, 생성·상태 변경 후행 동작과 소유권은 바꾸지 않았습니다.
+- 실제 DB 저장이 연결된 휴보강 알림 설정 코드는 수정하지 않았습니다.
+- 푸시, 배포, 마이그레이션 적용, 런타임 플래그 변경, 원격 쓰기, 외부 발송, 웹훅 변경은 수행하지 않았습니다.
 
-## TDD evidence
+## TDD 증거
 
-The focused containment command was run after changing the source contract test and before application code:
+소스 계약 테스트를 먼저 바꾼 뒤 애플리케이션 코드를 수정하기 전에 다음 명령으로 RED를 확인했습니다.
 
 ```bash
 node --experimental-strip-types --test \
@@ -24,20 +24,19 @@ node --experimental-strip-types --test \
   tests/makeup-request-workspace.test.mjs
 ```
 
-RED result: 96 tests, 95 passed, 1 failed on the missing honest containment surface.
+- RED: 96개 중 95개 통과, 1개 실패. 읽기 전용 격리 화면이 아직 없음을 정확히 잡았습니다.
+- GREEN: 96/96 통과. 같은 명령이 DB 저장형 휴보강 행렬과 템플릿 편집기가 그대로 남아 있음도 확인합니다.
 
-GREEN result: 96 tests, 96 passed, 0 failed. The same command also proves that the persisted makeup-request matrix and template editor remain present.
+## 필수 로컬 게이트
 
-## Mandatory local gate
+- 전체 Node 테스트: 1032/1032 통과
+- `pnpm exec tsc --noEmit`: 통과
+- `pnpm run lint`: 오류 없이 통과. 대용량 파일에 대한 기존 Babel 최적화 생략 안내만 출력됨
+- `pnpm run build`: 통과, 정적 페이지 72개 생성
+- `git diff --check`: 통과
 
-- Full Node suite: 1032 tests, 1032 passed, 0 failed.
-- `pnpm exec tsc --noEmit`: passed.
-- `pnpm run lint`: passed with no lint errors; only Babel large-file deoptimization notes were emitted.
-- `pnpm run build`: passed; 72 static pages generated.
-- `git diff --check`: passed.
+독립 읽기 전용 검토는 P0/P1 문제 없이 통과했습니다. 검토자가 다시 실행한 운영 화면 테스트 63/63, 휴보강 테스트 33/33, 등록 알림 테스트 36/36, 대상 ESLint, diff 검사가 모두 통과했습니다.
 
-Independent read-only review returned PASS with no P0/P1 findings. Its fresh packet passed 63/63 ops tests, 33/33 makeup tests, 36/36 registration-notification tests, targeted ESLint, and diff-check.
+## 실행 증거
 
-## Runtime evidence
-
-The source contract verifies all three wrappers, the read-only containment copy, absence of editable session-only controls, the separated Google Chat connection action, and the API upsert into `google_chat_webhook_settings`. The existing browser harness still lacks an authenticated storage state and a local Playwright package, so the desktop/mobile clicks were not executed in this environment. This is recorded as missing runtime evidence rather than an implementation stop.
+소스 계약은 세 화면 wrapper, 읽기 전용 안내, 세션 전용 편집 제어의 부재, 별도 Google Chat 연결 동작, `google_chat_webhook_settings` 실제 upsert를 확인합니다. 현재 환경에는 인증 저장 상태와 로컬 Playwright 패키지가 없어 데스크톱·모바일 실제 클릭은 실행하지 못했습니다. 이는 구현 중단 조건이 아니라 남은 실행 증거로 기록합니다.

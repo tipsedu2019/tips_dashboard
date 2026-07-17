@@ -1,19 +1,19 @@
-# Task 1 implementation report
+# 작업 1 구현 결과 보고서
 
-Status: implementation and review hardening complete; Release A remains blocked only on executing the required credentialed real-browser proof and the authored pgTAP packet against an authorized PostgreSQL runtime.
+상태: 구현과 독립 검토 보강을 완료했습니다. 다만 릴리스 A의 최종 승인에는 인증된 실제 브라우저 실행 증거와, 작성된 pgTAP 묶음을 승인된 PostgreSQL 환경에서 실행한 결과가 추가로 필요합니다.
 
-## Branch and commit boundary
+## 브랜치와 커밋 경계
 
-- Worktree: `/Users/hyunjun/Documents/Codex/tips_dashboard/.worktrees/operational-safety-notification-completion`
-- Branch: `codex/operational-safety-notification-completion`
-- Implementation base: `c76ca3085008a35de554a0f3adcc27454011fd67`
-- Initial Task 1 commit: `3020a1f` (`fix: make registration intake save canonical`).
-- Review-hardening commit: the commit containing this updated report. Its final SHA is recorded in the parent handoff because a commit cannot embed its own hash.
-- No push, deploy, production flag change, remote migration apply, remote account creation, or external provider delivery was performed.
+- 작업 트리: `/Users/hyunjun/Documents/Codex/tips_dashboard/.worktrees/operational-safety-notification-completion`
+- 브랜치: `codex/operational-safety-notification-completion`
+- 구현 기준 커밋: `c76ca3085008a35de554a0f3adcc27454011fd67`
+- 작업 1 최초 커밋: `3020a1f` (`fix: make registration intake save canonical`)
+- 검토 보강 커밋: `439dfd1` (`fix: harden registration intake retries and verification`)
+- 푸시, 배포, 운영 플래그 변경, 원격 마이그레이션 적용, 원격 계정 생성, 외부 발송은 수행하지 않았습니다.
 
-## RED evidence
+## RED 증거
 
-The requested five-file RED command was run before production changes:
+프로덕션 코드를 바꾸기 전에 다음 5개 파일 집중 테스트를 실행했습니다.
 
 ```bash
 "$NODE" --experimental-strip-types --test \
@@ -24,23 +24,23 @@ The requested five-file RED command was run before production changes:
   tests/ops-task-workspace.test.mjs
 ```
 
-Result: 128 tests, 120 passed, 8 failed as expected. The failures covered the obsolete phone/result scheduling surface, incorrect visit-field order, non-atomic ready save, incomplete retry identity, and obsolete workspace/source assertions.
+결과: 128개 중 120개 통과, 8개 의도된 실패. 실패 항목은 폐기 대상인 전화 예약·결과지 입력 화면, 잘못된 방문상담 필드 순서, 비원자적 준비 상태 저장, 불완전한 재시도 식별자, 오래된 화면·소스 단언을 정확히 잡았습니다.
 
-## Implementation summary
+## 구현 내용
 
-- `registration-initial-plan-control.tsx` now renders per-subject next-action choices first, conditional per-subject owners, exactly two possible appointment datetime controls, and the locked owner/time/place/subject ordering. It exposes no phone datetime or scheduling-time result URL.
-- `registration-intake-workflow.ts` implements the exact two-runtime persistence matrix, fail-closed indeterminate states, stale-field sanitization, normalization, and a single frozen fingerprint/request-key/inquiry-time/workflow attempt envelope. Timezone-free appointment controls are interpreted explicitly as Asia/Seoul and converted to an exact ISO instant before persistence.
-- `registration-intake-runtime-probe.ts` preserves wrong numeric versions, accepts only exact version 1 as ready, maps only the exact missing-function case to version 0, and rejects malformed or unrelated errors as indeterminate.
-- `registration-track-service.ts` independently rechecks subject-track ready v1 and intake ready v1 immediately before the atomic RPC. No business RPC runs after missing, wrong, malformed, rejected, or contradictory probe outcomes.
-- `registration-track-fixture-runtime.ts` preserves exact fixture versions, including zero and wrong nonzero versions, and exposes a development/test-only debug bridge while the fixture adapter is mounted. `registration-track-fixtures.ts` records the last atomic create, returns canonical counts/details, and replays the exact payload/request key so the browser verifier can prove receipt stability and zero duplicate rows without exposing the bridge in production.
-- `ops-task-workspace.tsx` removes legacy downstream registration fields, uses only the atomic initial-workflow writer in ready mode, limits confirmed fallbacks to inquiry-safe payloads, closes canonical common-edit identity/reload behavior, and separates post-commit notification failures from business-create replay. The retained attempt freezes the writer, runtime mode, request key, fingerprint, inquiry time, and workflow. Runtime drift fails closed, while a legacy ambiguous outcome refuses a second insert. Failed notification targets remain visible and can be retried independently without replaying registration creation. Accepted notifications with audit warnings use neutral audit language rather than claiming the notification was not sent.
-- `20260716100000_registration_intake_runtime_guard.sql` replaces only the public wrapper, retains its signature/grants, checks both markers for exact version 1, then delegates to the private implementation. It was generated with `pnpm dlx supabase@2.109.1 migration new registration_intake_runtime_guard` and renamed to the reserved timestamp before any apply.
-- `registration_intake_workflow_runtime_test.sql` covers independently wrong, missing, and unauthorized subject/intake markers and asserts zero created rows.
-- The fixture debug bridge and browser verifier now perform the deterministic mixed English direct-phone/Mathematics visit save, inspect canonical rows, replay the exact request key and assert an unchanged receipt/row count, reopen the created case, mutate and reload the canonical appointment/result/owner fields, and run the same route at both required viewports. Both Google Chat and immediate visit-notification endpoints are intercepted; any provider request fails the verifier, and the fixture external-call ledger must remain zero.
+- `registration-initial-plan-control.tsx`는 과목별 다음 행동을 먼저 보여주고, 필요한 과목에만 상담 책임자를 표시하며, 레벨테스트와 방문상담 두 종류의 예약 일시만 허용합니다. 전화상담 일시와 예약 단계 결과지 URL은 제거했습니다.
+- `registration-intake-workflow.ts`는 두 런타임 조합별 저장 행렬, 불명확 상태 차단, 오래된 필드 제거, 정규화, 고정된 지문·요청 키·문의 시각·업무 시도 묶음을 구현했습니다. 시간대가 없는 예약 값은 서울 시간으로 해석해 정확한 ISO 시각으로 변환합니다.
+- `registration-intake-runtime-probe.ts`는 잘못된 숫자 버전을 그대로 보존하고, 정확한 버전 1만 준비 상태로 인정합니다. 정확한 함수 없음만 버전 0으로 처리하며, 형식 오류나 무관한 오류는 불명확 상태로 차단합니다.
+- `registration-track-service.ts`는 원자적 RPC 호출 직전에 과목 트랙 런타임과 접수 런타임 버전 1을 각각 다시 확인합니다. 누락·오류·형식 불일치·모순 상태에서는 업무 RPC를 호출하지 않습니다.
+- `registration-track-fixture-runtime.ts`와 `registration-track-fixtures.ts`는 정확한 런타임 버전, 마지막 원자적 생성 결과, canonical 행 수와 상세, 동일 요청 키 재실행 결과를 보존합니다. 브라우저 검증기는 이를 이용해 저장 안정성과 중복 0건을 확인할 수 있습니다.
+- `ops-task-workspace.tsx`는 오래된 등록 후속 필드를 제거하고, 준비 상태에서는 원자적 초기 업무 저장만 사용합니다. 문의 전용 fallback은 안전한 필드만 저장합니다. 업무 저장 재시도와 저장 후 알림 재시도를 분리해, 알림 실패가 등록 생성을 다시 실행하지 못하게 했습니다.
+- `20260716100000_registration_intake_runtime_guard.sql`은 공개 wrapper의 서명과 권한을 유지하면서 두 런타임 마커가 정확히 1인지 확인한 뒤 비공개 구현에 위임합니다. 이 마이그레이션은 생성만 했으며 어디에도 적용하지 않았습니다.
+- `registration_intake_workflow_runtime_test.sql`은 과목·접수 마커의 잘못된 버전, 누락, 권한 거부를 각각 검사하고 생성 행이 0개임을 단언합니다.
+- fixture 디버그 경계와 브라우저 검증기는 영어 바로 전화상담·수학 방문상담 혼합 저장, canonical 행 조회, 동일 요청 키 재실행, 재열기, canonical 예약·결과·담당자 수정과 새로고침, 데스크톱·모바일 뷰포트를 모두 다룹니다. Google Chat과 즉시 방문 알림 요청이 발생하면 즉시 실패하도록 차단했습니다.
 
-## GREEN evidence
+## GREEN 증거
 
-Focused Task 1 command from Step 7:
+작업 1 집중 검증 명령:
 
 ```bash
 "$NODE" --experimental-strip-types --test \
@@ -55,27 +55,23 @@ Focused Task 1 command from Step 7:
   tests/registration-consultation-notification.test.mjs
 ```
 
-Initial result: 341 tests, 341 passed, 0 failed.
+최초 결과는 341/341 통과였습니다. 독립 검토 뒤 `tests/registration-browser-verifier-contract.test.mjs`를 추가해 다시 실행한 최종 결과는 351/351 통과였습니다.
 
-After independent review, the focused command was expanded with `tests/registration-browser-verifier-contract.test.mjs` and rerun.
+필수 로컬 게이트:
 
-Final result: 351 tests, 351 passed, 0 failed.
+- 전체 Node 테스트: 1032/1032 통과
+- `pnpm exec tsc --noEmit`: 통과
+- `pnpm run lint`: 오류·경고 없이 통과
+- `pnpm run build`: 통과, 정적 페이지 72개 생성 및 등록/API 경로 컴파일 확인
+- `node --check scripts/verify-ops-task-browser-workflow.mjs`: 통과
+- `git diff --check`: 통과
+- 정적 마이그레이션·스키마 계약: 전체 Node 테스트 안에서 통과
 
-Mandatory local gate:
+## 브라우저·데이터베이스 실행 증거
 
-- Full Node suite: 1032 tests, 1032 passed, 0 failed.
-- `pnpm exec tsc --noEmit`: passed.
-- `pnpm run lint`: passed with 0 errors and 0 warnings.
-- `pnpm run build`: passed; 72 static pages generated and the registration/API routes compiled.
-- `node --check scripts/verify-ops-task-browser-workflow.mjs`: passed.
-- `git diff --check`: passed.
-- Static migration/schema contracts were included in the passing Node suites.
-
-## Browser and database runtime evidence
-
-- Deterministic route: `http://127.0.0.1:3001/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin`
-- The worktree server answered the exact route with HTTP 200. The verifier source fixes desktop at 1349x987 and mobile at 390x844.
-- Attempted command:
+- 결정론적 경로: `http://127.0.0.1:3001/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin`
+- 작업 트리 서버는 해당 경로에 HTTP 200으로 응답했습니다. 검증기 소스는 데스크톱 1349x987, 모바일 390x844를 고정합니다.
+- 실제 시도 명령:
 
 ```bash
 OPS_BROWSER_WORKFLOW=1 \
@@ -85,14 +81,19 @@ OPS_BROWSER_SUPABASE_STORAGE=0 \
 node scripts/verify-ops-task-browser-workflow.mjs
 ```
 
-- The harness stopped before browser interaction because no `OPS_BROWSER_STORAGE_STATE`, temporary-user authorization, or login credentials were available. A direct local import also reports that the Playwright package is unavailable. No remote temp user or dependency was created.
-- The verifier now scripts the complete save, reopen, canonical-row duplicate check, same-request-key receipt replay, canonical editor mutation/reload sequence, and provider-zero assertions. Its source contract and fixture behavior are covered by the passing Node suites, but the actual browser clicks and browser/server provider ledgers remain unexecuted in this environment.
-- The pgTAP file was authored but not executed because no authorized local/preview PostgreSQL runtime was available. No remote database was used as a substitute and the migration was not applied.
+- 인증 저장 상태, 임시 사용자 생성 권한, 로그인 정보가 없어 브라우저 조작 전에 중단됐습니다. 로컬에는 Playwright 패키지도 없습니다. 원격 임시 사용자나 의존성은 만들지 않았습니다.
+- 검증기 자체에는 전체 저장·재열기·동일 요청 재실행·canonical 수정·새로고침·외부 발송 0건 단언이 들어 있고 소스 계약은 테스트로 통과했습니다. 실제 클릭과 브라우저·서버 발송 원장은 아직 실행 증거가 없습니다.
+- pgTAP 파일은 작성했지만 승인된 로컬 또는 미리보기 PostgreSQL 환경이 없어 실행하지 않았습니다. 원격 DB로 대신 실행하지 않았고 마이그레이션도 적용하지 않았습니다.
 
-## Self-review and remaining concerns
+## 검토에서 보강한 사항과 남은 릴리스 증거
 
-- Fixed during initial review: unrelated SQLSTATE 42883 errors can no longer masquerade as a missing intake marker; generated `inquiryAt` is part of the frozen attempt; default owners are not falsely persisted as manual overrides; canonical identity and post-edit track reload fail closed; hidden registration defaults no longer mutate silently; accepted delivery plus audit-warning responses cannot prompt a duplicate resend.
-- Fixed during independent hardening review: local KST appointment values no longer depend on the database/session timezone; ambiguous retries cannot switch writer/runtime/key; a legacy ambiguous create cannot insert again; hidden manual director overrides are removed when a subject changes away from direct-phone/visit; post-commit notification retries target only failed recipients and never repeat the business create; the browser verifier now executes the full save/reopen/replay/edit/reload path and fails on either provider route.
-- Fixed during final concurrency review: notification-only retry completion reconciles against the current target set, so a new failure queued while retry is in flight cannot be dropped. Retry state is invalidated on viewer changes and unmount, and neither a stale retry nor a previously committed create's late notification result can repopulate another user's session.
-- Release A is not independently releasable until a credentialed browser run proves save/reload/replay/canonical-editor persistence at both viewports and produces empty provider ledgers.
-- The six pgTAP fault cases must run against an explicitly authorized local or preview database before release. Keep the forward migration unapplied until that gate is available.
+- KST 예약 값이 DB·세션 시간대에 좌우되지 않도록 수정했습니다.
+- 불명확 재시도가 writer·런타임·요청 키를 바꾸지 못하도록 고정했습니다.
+- 레거시 생성 결과가 불명확할 때 두 번째 insert를 거절합니다.
+- 과목이 전화·방문 경로에서 빠질 때 숨은 상담 책임자 수동 지정도 제거합니다.
+- 저장 후 알림 재시도는 실패한 수신자만 대상으로 하며 업무 생성을 반복하지 않습니다.
+- 브라우저 검증기는 저장·재열기·재실행·수정·새로고침 전 과정을 수행하고 두 외부 발송 경로 중 하나라도 호출되면 실패합니다.
+- 실행 중 새로운 알림 실패가 추가돼도 기존 재시도 완료가 그 실패를 지우지 못하게 했습니다.
+- 사용자가 바뀌거나 화면이 해제되면 재시도 상태를 무효화하고, 이전 사용자의 늦은 결과가 새 사용자 화면에 들어오지 못하게 했습니다.
+- 릴리스 A 최종 승인 전에는 인증된 브라우저로 두 뷰포트의 저장·새로고침·동일 요청 재실행·canonical 수정과 외부 발송 0건을 확인해야 합니다.
+- 여섯 pgTAP 장애 사례도 승인된 로컬 또는 미리보기 DB에서 통과해야 합니다. 그 전까지 forward 마이그레이션은 적용하지 않습니다.
