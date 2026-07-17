@@ -77,6 +77,7 @@ function rollbackState(enabledOwners = ["tasks", "word_retests"]) {
       { id: "unknown", owner: "word_retests", status: "delivery_unknown", providerReference: "unknown-ref" },
       { id: "other-owner", owner: "tasks", status: "pending" },
     ],
+    cancelRequests: [],
     workerStopLatch: false,
   }
 }
@@ -162,6 +163,26 @@ test("deterministic preview cycles every owner with recorder-only legacy and ter
   })
 })
 
+test("every simulated rollout and rollback point has exactly one side-effect owner", async () => {
+  const verifier = await import(verifierUrl.href)
+  for (let index = 0; index <= verifier.NOTIFICATION_CUTOVER_ORDER.length; index += 1) {
+    assert.deepEqual(verifier.verifyExclusiveNotificationOwnership({
+      canonicalOwners: verifier.NOTIFICATION_CUTOVER_ORDER.slice(0, index),
+      legacyOwners: verifier.NOTIFICATION_CUTOVER_ORDER.slice(index),
+    }), { passed: true, blockers: [] })
+  }
+  assert.deepEqual(verifier.verifyExclusiveNotificationOwnership({
+    canonicalOwners: ["tasks", "approvals"],
+    legacyOwners: verifier.NOTIFICATION_CUTOVER_ORDER.filter((owner) => owner !== "tasks" && owner !== "approvals"),
+  }), { passed: true, blockers: [] })
+  const duplicate = verifier.verifyExclusiveNotificationOwnership({
+    canonicalOwners: ["tasks"],
+    legacyOwners: verifier.NOTIFICATION_CUTOVER_ORDER,
+  })
+  assert.equal(duplicate.passed, false)
+  assert.deepEqual(duplicate.blockers, ["ownership_duplicate:tasks"])
+})
+
 test("partial rollback disables one owner and preserves canonical owners plus terminal delivery evidence", async () => {
   const verifier = await import(verifierUrl.href)
   const result = verifier.rehearseNotificationRollback({
@@ -176,6 +197,7 @@ test("partial rollback disables one owner and preserves canonical owners plus te
   assert.equal(result.state.flags.notification_control_plane_dispatch_word_retests_enabled, false)
   assert.equal(result.state.flags.notification_control_plane_shadow_write_enabled, false)
   assert.deepEqual(result.counts, { canceled: 2, cancelRequested: 1, awaitingClaimClosure: 1 })
+  assert.deepEqual(result.state.cancelRequests, [{ deliveryId: "claimed", reason: "cutover_rollback" }])
   assert.deepEqual(result.state.deliveries.map((item) => item.status), [
     "canceled", "canceled", "claimed", "sending", "sent", "failed", "delivery_unknown", "pending",
   ])

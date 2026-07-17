@@ -241,6 +241,31 @@ function validOwnerRegistry(flags) {
     && NOTIFICATION_CUTOVER_ORDER.every((owner) => typeof flags[OWNER_FLAG[owner]] === "boolean")
 }
 
+function validRevisionRegistry(revisions) {
+  if (!isRecord(revisions)) return false
+  const keys = Object.keys(revisions).sort()
+  const expected = [...NOTIFICATION_RUNTIME_FLAG_KEYS].sort()
+  return keys.length === expected.length
+    && keys.every((key, index) => key === expected[index])
+    && Object.values(revisions).every((revision) => Number.isInteger(revision) && revision >= 0)
+}
+
+export function verifyExclusiveNotificationOwnership(input) {
+  if (!isRecord(input) || !Array.isArray(input.canonicalOwners) || !Array.isArray(input.legacyOwners)) {
+    return { passed: false, blockers: ["ownership_fixture_invalid"] }
+  }
+  const blockers = []
+  const known = new Set(NOTIFICATION_CUTOVER_ORDER)
+  const combined = [...input.canonicalOwners, ...input.legacyOwners]
+  if (combined.some((owner) => !known.has(owner))) blockers.push("ownership_unknown")
+  for (const owner of NOTIFICATION_CUTOVER_ORDER) {
+    const count = combined.filter((candidate) => candidate === owner).length
+    if (count === 0) blockers.push(`ownership_missing:${owner}`)
+    if (count > 1) blockers.push(`ownership_duplicate:${owner}`)
+  }
+  return { passed: blockers.length === 0, blockers }
+}
+
 export function rehearseNotificationRollback(input) {
   if (!isRecord(input) || !isRecord(input.state)) throw new Error("rollback_fixture_invalid")
   const original = cloneFixtureState(input.state)
@@ -249,7 +274,9 @@ export function rehearseNotificationRollback(input) {
   const affectedOwners = input.affectedOwners
   const expectedRevisions = input.expectedRevisions
 
-  if (!validOwnerRegistry(flags) || !isRecord(revisions)) return invalidRehearsal(original, "runtime_flag_registry_invalid")
+  if (!validOwnerRegistry(flags) || !validRevisionRegistry(revisions)) {
+    return invalidRehearsal(original, "runtime_flag_registry_invalid")
+  }
   if (
     !Array.isArray(affectedOwners)
     || affectedOwners.length < 1
@@ -284,10 +311,14 @@ export function rehearseNotificationRollback(input) {
   const settingsFlag = "notification_control_plane_settings_ui_enabled"
   next.flags[settingsFlag] = false
   next.revisions[settingsFlag] += 1
-  next.flags.notification_control_plane_shadow_write_enabled = input.reenableShadow === true
+  const shadowFlag = "notification_control_plane_shadow_write_enabled"
+  const nextShadowEnabled = input.reenableShadow === true
+  if (next.flags[shadowFlag] !== nextShadowEnabled) next.revisions[shadowFlag] += 1
+  next.flags[shadowFlag] = nextShadowEnabled
 
   let canceledCount = 0
   let cancelRequestedCount = 0
+  const cancelRequests = Array.isArray(next.cancelRequests) ? [...next.cancelRequests] : []
   next.deliveries = (Array.isArray(next.deliveries) ? next.deliveries : []).map((delivery) => {
     if (!affectedOwners.includes(delivery.owner)) return delivery
     if (["pending", "retry_wait"].includes(delivery.status)) {
@@ -296,10 +327,12 @@ export function rehearseNotificationRollback(input) {
     }
     if (delivery.status === "claimed" && delivery.dispatchStarted !== true && !delivery.providerReference) {
       cancelRequestedCount += 1
+      cancelRequests.push({ deliveryId: delivery.id, reason: "cutover_rollback" })
       return { ...delivery, cancelRequested: true, cancellationReason: "cutover_rollback" }
     }
     return delivery
   })
+  next.cancelRequests = cancelRequests
 
   return {
     ok: true,
