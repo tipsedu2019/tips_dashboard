@@ -1728,11 +1728,11 @@ git commit -m "feat: materialize registration appointment reminders"
 
 ---
 
-### Task 12: Harden appointment conflicts, confirmations, and reminder processing status
+### 작업 12: 예약 충돌·확인·리마인더 처리 상태 강화
 
-**Source packet:** Task 6 of docs/superpowers/plans/2026-07-15-registration-appointments-reminders.md.
+**원본 계획:** `docs/superpowers/plans/2026-07-15-registration-appointments-reminders.md`의 작업 6.
 
-**Files:**
+**파일:**
 
 - Create: src/features/tasks/registration-appointment-draft.ts
 - Modify: src/features/tasks/registration-appointment-editor.tsx
@@ -1741,7 +1741,7 @@ git commit -m "feat: materialize registration appointment reminders"
 - Create: tests/registration-appointment-draft.test.mjs
 - Modify: tests/registration-consultation-notification.test.mjs
 
-**Interfaces:**
+**인터페이스:**
 
 - compareRegistrationAppointmentDraft.
 - rebaseRegistrationAppointmentDraft.
@@ -1750,25 +1750,25 @@ git commit -m "feat: materialize registration appointment reminders"
 - getRegistrationNotificationJobStatus.
 - retryRegistrationNotificationJob.
 
-- [ ] **Step 1: write failing conflict and status tests**
+- [x] **1단계: 충돌과 처리 상태 실패 테스트 작성**
 
-Require a 409 to retain local date/place/subjects, explicit latest comparison, reviewed rebase, old/new confirmation, future-round counts, cancellation confirmation without a mandatory invented reason, opaque common job references, and retry of the same failed job rather than replaying save/cancel.
+409 충돌 시 로컬 일시·장소·과목을 보존하고, 최신 값 비교와 검토된 재기반을 구분했습니다. 이전/이후 확인, 미래 회차 수, 임의 사유를 강제하지 않는 취소 확인, 불투명한 공통 작업 참조, 저장·취소 재실행이 아닌 동일 실패 작업 재시도를 테스트로 고정했습니다.
 
-- [ ] **Step 2: preserve immutable local/server drafts and remove invented cancellation input**
+- [x] **2단계: 로컬·서버 초안 분리 보존과 임의 취소 사유 제거**
 
-Expose 최신 예약 비교, 다시 적용, and 계속 편집. A new request key is generated only after a logical local change or reviewed rebase. Remove the cancellation-reason textarea from this flow and pass reason: "" to the unchanged RPC until a forward-compatible RPC revision normalizes nullable reason internally. Do not require an operator to invent text merely to cancel.
+`최신 예약 비교`, `다시 적용`, `계속 편집`을 제공했습니다. 새 요청 키는 논리적인 로컬 변경 또는 검토 후 재기반 때만 만듭니다. 취소 사유 입력란을 제거하고, 향후 RPC가 nullable 사유를 정규화할 때까지 기존 RPC에는 `reason: ""`를 전달합니다.
 
-- [ ] **Step 3: separate canonical save from notification recalculation**
+- [x] **3단계: 정규 저장과 알림 재계산 분리**
 
-After save, show 예약 저장됨 · 알림 재계산 중. Poll only get_notification_orchestration_job_status_v1. A failed job retries only through retry_notification_orchestration_job_v1 with expected attempt count and stable request ID. Registration UI never inserts/requeues private jobs or replays the appointment RPC.
+저장 후 `예약 저장됨 · 알림 재계산 중`을 표시하고 `get_notification_orchestration_job_status_v1`만 조회합니다. 실패 작업은 예상 시도 횟수와 안정 요청 ID를 사용해 `retry_notification_orchestration_job_v1`로만 재시도합니다. 등록 화면은 비공개 작업을 직접 삽입·재대기시키거나 예약 RPC를 다시 실행하지 않습니다.
 
-Do not expose this processing/polling UI merely because the registration reminder marker exists. It additionally requires notification_workflow_adapters_runtime_version() = 1 plus successful worker and watchdog heartbeats within three minutes. Before that executable runtime exists, keep reminder controls/status hidden behind the existing safe feature gate; a production operator must never see 재계산 중 for a queue that has no runnable worker.
+등록 리마인더 마커만으로 처리 화면을 열지 않습니다. `notification_workflow_adapters_runtime_version() = 1`과 3분 이내 Worker·감시자 성공 heartbeat가 모두 필요합니다. 실행 런타임이 없으면 실패 폐쇄하여 상태를 숨기며, 실행할 Worker가 없는 큐를 운영자에게 `재계산 중`으로 보여 주지 않습니다.
 
-- [ ] **Step 4: keep settings ownership in the common panel**
+- [x] **4단계: 설정 소유권을 공통 패널에 유지**
 
-Appointment editor shows preview/processing status only. It does not mount a second NotificationControlPanel or own settings defaults.
+예약 편집기는 미리보기와 처리 상태만 보여 줍니다. 두 번째 `NotificationControlPanel`을 탑재하거나 설정 기본값을 소유하지 않습니다.
 
-- [ ] **Step 5: run focused tests and commit**
+- [x] **5단계: 집중 검증과 커밋**
 
 ~~~bash
 "$NODE" --experimental-strip-types --test \
@@ -1784,6 +1784,8 @@ git add \
   tests/registration-consultation-notification.test.mjs
 git commit -m "feat: harden registration appointment editing"
 ~~~
+
+구현은 코드 커밋 `2d45756`로 확정했습니다. 집중 Node `49/49`, TypeScript, 대상 ESLint, 변경 공백 검사를 통과했고 독립 검토 P0/P1/P2는 `0/0/0`입니다. 운영 준비 상태는 고정 인증 API를 통해서만 읽으며 작업 20 런타임 전에는 안전하게 숨겨집니다.
 
 ---
 
