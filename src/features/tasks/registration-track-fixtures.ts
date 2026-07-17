@@ -1033,13 +1033,27 @@ function resolveFixtureInitialDirectors(
 
 function createFixtureTrackEvent(
   state: RegistrationSubjectTrackFixtureState,
-  input: Omit<OpsRegistrationTrackEvent, "id" | "actorId" | "occurredAt" | "legacyText">,
+  input: Omit<
+    OpsRegistrationTrackEvent,
+    | "id"
+    | "actorId"
+    | "actorKind"
+    | "systemSource"
+    | "reasonCode"
+    | "payloadVersion"
+    | "occurredAt"
+    | "legacyText"
+  >,
 ): OpsRegistrationTrackEvent {
   return {
     ...input,
     id: nextId(state, "event"),
     metadata: clone(input.metadata),
     actorId: FIXTURE_ACTOR_ID,
+    actorKind: "user",
+    systemSource: null,
+    reasonCode: input.reason,
+    payloadVersion: 2,
     occurredAt: FIXTURE_NOW,
     legacyText: null,
   }

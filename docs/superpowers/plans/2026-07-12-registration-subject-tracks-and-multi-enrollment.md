@@ -1816,7 +1816,7 @@ rollback;
 
 - [ ] **Step 8: Prepare executable runtime and two-session verification fixtures**
 
-Create `supabase/tests/registration_subject_tracks_runtime_test.sql` as a transactional pgTAP file with fixed UUID fixtures for auth users/profiles, students, English/math classes, textbooks, registration cases, and legacy review cases. It uses `set local role authenticated` plus request JWT claims for a management admin, assigned admin director, sibling admin director, staff, assistant, ordinary teacher, and a narrowly isolated service-role finalizer lane, and declares `select plan(150)`. Its assertions are fixed in this exact order:
+Create `supabase/tests/registration_subject_tracks_runtime_test.sql` as a transactional pgTAP file with fixed UUID fixtures for auth users/profiles, students, English/math classes, textbooks, registration cases, and legacy review cases. It uses `set local role authenticated` plus request JWT claims for a management admin, assigned admin director, sibling admin director, staff, assistant, ordinary teacher, and a narrowly isolated service-role finalizer lane, and declares `select plan(160)`. Its assertions are fixed in this exact order:
 
 1. atomic RPC creation with exactly two subject tracks.
 2. empty-subject create denial.
@@ -1968,6 +1968,16 @@ Create `supabase/tests/registration_subject_tracks_runtime_test.sql` as a transa
 148. registration cancellation counts only roster-active enrolled rows; released history is read-only and does not block re-enrollment.
 149. canceled selected rows remain linked to their canceled admission batch and preserve audit reconstruction.
 150. message-table column grants expose only workflow-safe state columns to authenticated readers, not recipient/provider/error payload.
+151. version-2 작성기와 기존 wrapper 실행 권한은 비공개 경계에만 남는다.
+152. 기존 wrapper는 정확히 한 개의 version-2 사용자 이력을 기록한다.
+153. 사용자 version-2 작성기는 원본 UUID와 행위자 및 발생 시각을 정확히 기록한다.
+154. 시스템 version-2 이력은 안정된 출처를 기록하고 사용자 행위자를 남기지 않는다.
+155. 마이그레이션 version-2 이력은 명시적 종류와 null 사용자 행위자를 기록한다.
+156. null 또는 미지원 행위자 종류는 이력 없이 거절된다.
+157. 인증 사용자 없는 사용자 이력은 이력 없이 거절된다.
+158. 비어 있거나 불안정한 시스템 출처는 이력 없이 거절된다.
+159. 호출자 트랜잭션 실패는 실제 변경 필드와 version-2 이력 행도 함께 롤백한다.
+160. 핵심 authoritative mutation family는 tuple당 version-2 이력 하나를 유지하고 same-key replay로 늘어나지 않는다.
 
 Every fixture rolls back at file end.
 
@@ -3861,7 +3871,7 @@ node scripts/verify-registration-subject-track-concurrency.mjs
 git diff --check -- supabase/migrations supabase/tests scripts/verify-registration-subject-track-concurrency.mjs
 ```
 
-Expected: the migration/function/RLS/grant/backfill source contract passes, the concurrency script's dry run is network-free, and diff check emits no output. In `.superpowers/sdd/progress.md`, list the two generated migration filenames, both prepared pgTAP files and their 12 + 150 planned assertions, the gated concurrency script, the missing local database runtime, and the exact future commands `pnpm dlx supabase@2.109.1 test db` plus the script's authorized preview/local `--run` invocation with distinct assigned-admin `--admin-token` and sibling-admin `--second-admin-token`. Do not apply either migration to the production project.
+Expected: the migration/function/RLS/grant/backfill source contract passes, the concurrency script's dry run is network-free, and diff check emits no output. In `.superpowers/sdd/progress.md`, list the two generated migration filenames, both prepared pgTAP files and their 12 + 160 planned assertions, the gated concurrency script, the missing local database runtime, and the exact future commands `pnpm dlx supabase@2.109.1 test db` plus the script's authorized preview/local `--run` invocation with distinct assigned-admin `--admin-token` and sibling-admin `--second-admin-token`. Do not apply either migration to the production project.
 
 - [ ] **Step 6: Run static checks and production build**
 

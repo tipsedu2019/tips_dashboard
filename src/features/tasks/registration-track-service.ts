@@ -179,6 +179,10 @@ export type OpsRegistrationTrackEvent = {
   reason: string | null
   metadata: Record<string, unknown>
   actorId: string | null
+  actorKind: "user" | "system" | "migration" | null
+  systemSource: string | null
+  reasonCode: string | null
+  payloadVersion: 1 | 2 | null
   occurredAt: string
   legacyText: string | null
 }
@@ -821,17 +825,42 @@ function parseJsonRecord(input: unknown): Record<string, unknown> | null {
 
 function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
   const payload = parseJsonRecord(value(row, "after_value", "afterValue"))
-  const canonical = payload && numberValue(payload.version) === 1 ? payload : null
+  const rawPayloadVersion = payload ? numberValue(payload.version) : 0
+  const payloadVersion = rawPayloadVersion === 1 || rawPayloadVersion === 2
+    ? rawPayloadVersion
+    : null
+  const versionOne = payloadVersion === 1 ? payload : null
+  const versionTwo = payloadVersion === 2 ? payload : null
+  const canonical = versionTwo || versionOne
   const rawSubject = canonical ? nullableText(canonical.subject) : null
+  const rawActorKind = versionTwo ? text(versionTwo.actor_kind) : ""
+  const actorKind = rawActorKind === "user"
+    || rawActorKind === "system"
+    || rawActorKind === "migration"
+    ? rawActorKind
+    : null
+  const reasonCode = versionTwo
+    ? nullableText(versionTwo.reason_code)
+    : versionOne
+      ? nullableText(versionOne.reason)
+      : null
   return {
     id: text(value(row, "id")),
     taskId: text(value(row, "task_id", "taskId")),
-    trackId: canonical ? nullableText(canonical.trackId) : null,
-    eventType: canonical ? text(canonical.eventType) || text(value(row, "event_type", "eventType")) : text(value(row, "event_type", "eventType")),
+    trackId: versionTwo
+      ? nullableText(versionTwo.track_id)
+      : versionOne
+        ? nullableText(versionOne.trackId)
+        : null,
+    eventType: versionTwo
+      ? text(versionTwo.event_type) || text(value(row, "event_type", "eventType"))
+      : versionOne
+        ? text(versionOne.eventType) || text(value(row, "event_type", "eventType"))
+        : text(value(row, "event_type", "eventType")),
     subject: rawSubject === "영어" || rawSubject === "수학" ? rawSubject : null,
     source: canonical ? nullableText(canonical.source) : null,
     destination: canonical ? nullableText(canonical.destination) : null,
-    reason: canonical ? nullableText(canonical.reason) : null,
+    reason: reasonCode,
     metadata: canonical
       ? parseJsonRecord(canonical.metadata) || {}
       : {
@@ -839,8 +868,20 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
           beforeValue: nullableText(value(row, "before_value", "beforeValue")),
           afterValue: nullableText(value(row, "after_value", "afterValue")),
         },
-    actorId: canonical ? nullableText(canonical.actorId) : nullableText(value(row, "actor_id", "actorId")),
-    occurredAt: canonical ? text(canonical.occurredAt) || text(value(row, "created_at", "createdAt")) : text(value(row, "created_at", "createdAt")),
+    actorId: versionTwo
+      ? nullableText(versionTwo.actor_profile_id)
+      : versionOne
+        ? nullableText(versionOne.actorId)
+        : nullableText(value(row, "actor_id", "actorId")),
+    actorKind,
+    systemSource: versionTwo ? nullableText(versionTwo.system_source) : null,
+    reasonCode,
+    payloadVersion,
+    occurredAt: versionTwo
+      ? text(versionTwo.occurred_at) || text(value(row, "created_at", "createdAt"))
+      : versionOne
+        ? text(versionOne.occurredAt) || text(value(row, "created_at", "createdAt"))
+        : text(value(row, "created_at", "createdAt")),
     legacyText: canonical ? null : nullableText(value(row, "after_value", "afterValue")),
   }
 }

@@ -369,7 +369,7 @@ select ok(
   'visit-only atomic intake creates one scheduled visit with null readiness'
 );
 
--- Canonical revision-1 event consumed by the notification API.
+-- 알림 API가 소비하는 canonical version-2 이력이다.
 select ok(
   exists (
     select 1
@@ -379,9 +379,9 @@ select ok(
     cross join lateral (select event.after_value::jsonb as payload) canonical
     where fixture.case_key = 'visit_only'
       and event.event_type = 'registration_track_event'
-      and canonical.payload ->> 'version' = '1'
-      and canonical.payload ->> 'eventType' = 'visit_scheduled'
-      and canonical.payload ->> 'trackId' = pg_temp.registration_intake_track(
+      and canonical.payload ->> 'version' = '2'
+      and canonical.payload ->> 'event_type' = 'visit_scheduled'
+      and canonical.payload ->> 'track_id' = pg_temp.registration_intake_track(
         'visit_only', '영어'
       )::text
       and canonical.payload #>> '{metadata,appointmentId}' = (
@@ -489,8 +489,8 @@ select ok(
 select ok(
   (
     select pg_catalog.count(*) = 2
-      and pg_catalog.count(distinct canonical.payload ->> 'trackId') = 2
-      and pg_catalog.bool_and(canonical.payload ->> 'version' = '1')
+      and pg_catalog.count(distinct canonical.payload ->> 'track_id') = 2
+      and pg_catalog.bool_and(canonical.payload ->> 'version' = '2')
       and pg_catalog.bool_and(
         pg_catalog.jsonb_array_length(
           canonical.payload #> '{metadata,activeTrackIds}'
@@ -502,8 +502,8 @@ select ok(
     cross join lateral (select event.after_value::jsonb as payload) canonical
     where fixture.case_key = 'shared_visit'
       and event.event_type = 'registration_track_event'
-      and canonical.payload ->> 'eventType' = 'visit_scheduled'
-      and canonical.payload ->> 'trackId' in (
+      and canonical.payload ->> 'event_type' = 'visit_scheduled'
+      and canonical.payload ->> 'track_id' in (
         select track.value ->> 'id'
         from pg_catalog.jsonb_array_elements(fixture.payload -> 'tracks') track(value)
       )
@@ -524,7 +524,7 @@ select ok(
         select 1
         from public.ops_registration_consultations consultation
         where consultation.id::text = canonical.payload #>> '{metadata,activityId}'
-          and consultation.track_id::text = canonical.payload ->> 'trackId'
+          and consultation.track_id::text = canonical.payload ->> 'track_id'
           and consultation.appointment_id::text =
             canonical.payload #>> '{metadata,appointmentId}'
           and consultation.mode = 'visit'

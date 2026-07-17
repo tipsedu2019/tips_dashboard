@@ -416,7 +416,7 @@ test("Task 3A director and roster foundations preserve exact boundaries", async 
   )
 })
 
-test("runtime pgTAP packet fixes all 150 ordered workflow proofs and rolls fixtures back", async () => {
+test("runtime pgTAP packet fixes all 160 ordered workflow proofs and rolls fixtures back", async () => {
   const [sql, registrationPlan] = await Promise.all([
     readFile(
       new URL("registration_subject_tracks_runtime_test.sql", supabaseTestsUrl),
@@ -426,16 +426,16 @@ test("runtime pgTAP packet fixes all 150 ordered workflow proofs and rolls fixtu
   ])
 
   assert.match(sql, /^begin;\s*$/m)
-  assert.match(sql, /select\s+plan\(150\);/i)
+  assert.match(sql, /select\s+plan\(160\);/i)
   assert.match(sql, /select\s+\*\s+from\s+finish\(\);\s*\nrollback;\s*$/i)
 
   const numberedAssertions = [
     ...sql.matchAll(/^-- assertion (\d+):\s+(.+)$/gm),
   ]
-  assert.equal(numberedAssertions.length, 150)
+  assert.equal(numberedAssertions.length, 160)
   assert.deepEqual(
     numberedAssertions.map((match) => Number(match[1])),
-    Array.from({ length: 150 }, (_, index) => index + 1),
+    Array.from({ length: 160 }, (_, index) => index + 1),
   )
   const plannedAssertionSection = registrationPlan.slice(
     registrationPlan.indexOf("1. atomic RPC creation"),
@@ -444,7 +444,7 @@ test("runtime pgTAP packet fixes all 150 ordered workflow proofs and rolls fixtu
   const plannedAssertions = [
     ...plannedAssertionSection.matchAll(/^(\d+)\. (.+)$/gm),
   ]
-  assert.equal(plannedAssertions.length, 150)
+  assert.equal(plannedAssertions.length, 160)
   assert.deepEqual(
     numberedAssertions.map((match) => [Number(match[1]), match[2]]),
     plannedAssertions.map((match) => [Number(match[1]), match[2]]),
@@ -453,17 +453,17 @@ test("runtime pgTAP packet fixes all 150 ordered workflow proofs and rolls fixtu
   const tapStatements = [
     ...sql.matchAll(/^select\s+(?:ok|is|isnt|is_empty|isnt_empty|lives_ok|throws_ok|results_eq|set_eq|bag_eq|col_is_null|col_not_null)\s*\(/gim),
   ]
-  assert.equal(tapStatements.length, 150)
+  assert.equal(tapStatements.length, 160)
 
   const observationMarkers = [
     ...sql.matchAll(/^select\s+pg_temp\.registration_record\(\s*(\d+)/gim),
   ]
-  assert.equal(observationMarkers.length, 150)
+  assert.equal(observationMarkers.length, 160)
   const observationNumbers = observationMarkers.map((match) => Number(match[1]))
-  assert.equal(new Set(observationNumbers).size, 150)
+  assert.equal(new Set(observationNumbers).size, 160)
   assert.deepEqual(
     observationNumbers.toSorted((left, right) => left - right),
-    Array.from({ length: 150 }, (_, index) => index + 1),
+    Array.from({ length: 160 }, (_, index) => index + 1),
   )
 
   const readObservationBlock = (assertionNumber) => {
@@ -650,11 +650,84 @@ test("runtime pgTAP packet fixes all 150 ordered workflow proofs and rolls fixtu
     /\b(?:insert|update|delete)\s+(?:into\s+|from\s+)?public\.(?!ops_registration_messages\b)/i,
   )
 
+  const historyV2RollbackProbe = readFunctionBlock(
+    sql,
+    "pg_temp",
+    "registration_history_v2_rollback_probe",
+  )
+  assert.match(
+    historyV2RollbackProbe,
+    /update public\.ops_registration_subject_tracks[\s\S]*?set[\s\S]*?subject\s*=/,
+  )
+  assert.match(
+    historyV2RollbackProbe,
+    /dashboard_private\.write_registration_track_event_v2\s*\(/,
+  )
+  assert.match(
+    historyV2RollbackProbe,
+    /raise exception 'registration_history_v2_forced_rollback'/,
+  )
+  assert.match(
+    historyV2RollbackProbe,
+    /v_mutation_observed[\s\S]*?v_after_subject\s*=\s*v_before_subject[\s\S]*?v_after\s*=\s*v_before/,
+  )
+
+  const authoritativeHistoryReplayStart = sql.indexOf(
+    "-- 160: 기존 real mutation fixture",
+  )
+  const authoritativeHistoryReplayEnd = sql.indexOf("-- assertion 1:")
+  assert.notEqual(authoritativeHistoryReplayStart, -1)
+  assert.notEqual(authoritativeHistoryReplayEnd, -1)
+  const authoritativeHistoryReplay = sql.slice(
+    authoritativeHistoryReplayStart,
+    authoritativeHistoryReplayEnd,
+  )
+  for (const fixtureName of [
+    "registration_runtime_tracks",
+    "registration_runtime_director_tracks",
+    "registration_runtime_appointment_tracks",
+    "registration_runtime_attempts",
+    "registration_runtime_paid_track",
+    "registration_runtime_paid_batch",
+    "registration_runtime_cancel_tracks",
+  ]) {
+    assert.match(authoritativeHistoryReplay, new RegExp(fixtureName))
+  }
+  for (const eventType of [
+    "inquiry_routed",
+    "director_manual_override",
+    "level_test_scheduled",
+    "level_test_started",
+    "level_test_completed",
+    "consultation_completed",
+    "waiting_transitioned",
+    "admission_batch_started",
+    "admission_batch_advanced",
+    "admission_batch_completed",
+    "admission_batch_canceled",
+  ]) {
+    assert.match(authoritativeHistoryReplay, new RegExp(`'${eventType}'`))
+  }
+  assert.match(
+    authoritativeHistoryReplay,
+    /registration_runtime_history_v2_event_counts_before/,
+  )
+  assert.match(
+    authoritativeHistoryReplay,
+    /registration_runtime_history_v2_replay_results/,
+  )
+  assert.match(
+    authoritativeHistoryReplay,
+    /actual_count\s*=\s*expected_count[\s\S]*?after_count\s*=\s*before_count/,
+  )
+
   assert.match(numberedAssertions[0][2], /atomic RPC creation/i)
   assert.match(numberedAssertions[41][2], /default-director resolver/i)
   assert.match(numberedAssertions[117][2], /authenticated admin\/staff direct execution.*finalizer.*denied/i)
   assert.match(numberedAssertions[118][2], /service-role finalizer/i)
   assert.match(numberedAssertions[149][2], /message-table column grants/i)
+  assert.match(numberedAssertions[158][2], /필드와 version-2 이력 행도 함께 롤백/)
+  assert.match(numberedAssertions[159][2], /authoritative mutation.*same-key replay/i)
 })
 
 function readFunctionBlock(sql, schema, name) {
@@ -686,6 +759,170 @@ function readFunctionArgumentTypes(block) {
   return [...header.matchAll(/p_[a-z0-9_]+\s+(uuid\[\]|text\[\]|timestamptz|boolean|integer|jsonb|uuid|text)/g)]
     .map((match) => match[1])
 }
+
+test("version-2 registration writer authors explicit actors and returns its raw event UUID", async () => {
+  const sql = await readMigration("registration_history_v2")
+  const trimmed = sql.trim()
+  const writer = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "write_registration_track_event_v2",
+  )
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.deepEqual(readFunctionArgumentTypes(writer), [
+    "uuid",
+    "uuid",
+    "text",
+    "text",
+    "text",
+    "text",
+    "jsonb",
+    "text",
+    "text",
+  ])
+  assert.match(writer, /returns uuid/)
+  assert.match(writer, /language plpgsql[\s\S]*?security definer[\s\S]*?set search_path = ''/)
+
+  assert.match(
+    writer,
+    /p_actor_kind is null[\s\S]*?or p_actor_kind not in \('user', 'system', 'migration'\)/,
+  )
+  assert.match(writer, /p_actor_kind = 'user'[\s\S]*?auth\.uid\(\)[\s\S]*?is null/)
+  assert.match(writer, /p_actor_kind = 'system'[\s\S]*?nullif\((?:pg_catalog\.)?btrim\(p_system_source\), ''\) is null/)
+  assert.match(
+    writer,
+    /'actor_profile_id',\s*case when p_actor_kind = 'user' then (?:\(select\s+auth\.uid\(\)\)|auth\.uid\(\)) else null end/,
+  )
+
+  for (const key of [
+    "version",
+    "event_type",
+    "actor_profile_id",
+    "actor_kind",
+    "system_source",
+    "track_id",
+    "subject",
+    "source",
+    "destination",
+    "reason_code",
+    "metadata",
+    "occurred_at",
+  ]) {
+    assert.match(writer, new RegExp(`'${key}'`), `missing server-authored ${key}`)
+  }
+  assert.match(writer, /'version',\s*2/)
+  assert.match(writer, /'system_source',\s*nullif\((?:pg_catalog\.)?btrim\(p_system_source\), ''\)/)
+  assert.match(writer, /'reason_code',\s*nullif\((?:pg_catalog\.)?btrim\(p_reason_code\), ''\)/)
+  assert.match(writer, /'metadata',\s*coalesce\(p_metadata, '\{\}'::jsonb\)/)
+
+  assert.equal(
+    (writer.match(/insert into public\.ops_task_events\s*\(/g) || []).length,
+    1,
+    "one v2 call must write exactly one raw event",
+  )
+  const returnedIdVariable = writer.match(/returning id into (v_[a-z0-9_]+)/)?.[1]
+  assert.ok(returnedIdVariable, "the inserted raw event UUID must be captured")
+  assert.match(writer, new RegExp(`return ${returnedIdVariable};`))
+  assert.doesNotMatch(writer, /\b(?:commit|rollback)\b|\bdblink\b|\bpg_background\b/i)
+
+  assert.match(
+    sql,
+    /revoke (?:all|execute) on function dashboard_private\.write_registration_track_event_v2\(uuid, uuid, text, text, text, text, jsonb, text, text\)\s+from public, anon, authenticated;/,
+  )
+  assert.doesNotMatch(
+    sql,
+    /grant execute on function dashboard_private\.write_registration_track_event_v2\([^;]+\)\s+to (?:public|anon|authenticated);/i,
+  )
+})
+
+test("version-1 registration writer delegates once and no authoritative mutation double-writes v1 and v2", async () => {
+  const [historyV2, trackMutations, intakeWorkflow] = await Promise.all([
+    readMigration("registration_history_v2"),
+    readMigration("registration_subject_track_mutations"),
+    readMigration("registration_intake_workflow"),
+  ])
+  const wrapper = readFunctionBlock(
+    historyV2,
+    "dashboard_private",
+    "write_registration_track_event",
+  )
+
+  assert.match(wrapper, /returns void/)
+  assert.equal(
+    (wrapper.match(/dashboard_private\.write_registration_track_event_v2\s*\(/g) || []).length,
+    1,
+    "the seven-argument writer must delegate exactly once",
+  )
+  assert.match(
+    wrapper,
+    /write_registration_track_event_v2\([\s\S]*?p_task_id,[\s\S]*?p_track_id,[\s\S]*?p_event_type,[\s\S]*?p_source,[\s\S]*?p_destination,[\s\S]*?p_reason,[\s\S]*?p_metadata,[\s\S]*?'user',[\s\S]*?null[\s\S]*?\);/,
+  )
+  assert.doesNotMatch(wrapper, /insert into|public\.ops_task_events/)
+
+  for (const [sourceName, source] of [
+    ["registration history v2", historyV2],
+    ["registration subject-track mutations", trackMutations],
+    ["registration intake workflow", intakeWorkflow],
+  ]) {
+    const functionBlocks = [
+      ...source.matchAll(
+        /create(?: or replace)? function\s+([^\s(]+)\([\s\S]*?\n\$\$;/gi,
+      ),
+    ]
+    assert.ok(functionBlocks.length > 0, `missing function blocks in ${sourceName}`)
+
+    for (const match of functionBlocks) {
+      const functionName = match[1]
+      if (functionName === "dashboard_private.write_registration_track_event") continue
+      const block = match[0]
+      const callsV1 = /dashboard_private\.write_registration_track_event\s*\(/.test(block)
+      const callsV2 = /dashboard_private\.write_registration_track_event_v2\s*\(/.test(block)
+      assert.equal(
+        callsV1 && callsV2,
+        false,
+        `${functionName} must not write both event versions for one authoritative mutation`,
+      )
+
+      const directTrackEventInserts = [
+        ...block.matchAll(/insert into public\.ops_task_events\s*\([\s\S]*?\);/gi),
+      ].filter((insertMatch) => /'registration_track_event'/.test(insertMatch[0]))
+      if (
+        sourceName === "registration subject-track mutations"
+        && functionName === "dashboard_private.write_registration_track_event"
+      ) {
+        continue
+      }
+      for (const insertMatch of directTrackEventInserts) {
+        assert.equal(
+          functionName,
+          "dashboard_private.write_registration_track_event_v2",
+          `${functionName} must use the seven-argument wrapper or v2 writer instead of inserting registration_track_event directly`,
+        )
+        assert.match(
+          insertMatch[0],
+          /'version',\s*2/,
+          `${functionName} must never insert a version-1 registration_track_event after the v2 migration`,
+        )
+      }
+    }
+  }
+})
+
+test("subject synchronization recognizes the v2 event_type key without losing v1 history compatibility", async () => {
+  const sql = await readMigration("registration_history_v2")
+  const subjectSync = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "sync_registration_case_subjects_impl",
+  )
+
+  assert.match(
+    subjectSync,
+    /coalesce\(\s*event\.after_value::jsonb ->> 'event_type',\s*event\.after_value::jsonb ->> 'eventType'\s*\) = 'director_default_resolved'/,
+  )
+})
 
 test("registration intake migration adds canonical phone-queue readiness", async () => {
   const sql = await readMigration("registration_intake_workflow")
@@ -1179,6 +1416,10 @@ test("registration intake creation is one authenticated atomic workflow", async 
   )
   assert.match(runtimePgTap, /^begin;\s*select no_plan\(\);/i)
   assert.match(runtimePgTap, /select \* from finish\(\);\s*rollback;\s*$/i)
+  assert.match(runtimePgTap, /canonical\.payload ->> 'version' = '2'/)
+  assert.match(runtimePgTap, /canonical\.payload ->> 'event_type' = 'visit_scheduled'/)
+  assert.match(runtimePgTap, /canonical\.payload ->> 'track_id'/)
+  assert.doesNotMatch(runtimePgTap, /canonical\.payload ->> '(?:eventType|trackId)'/)
   for (const scenario of [
     "inquiry-only",
     "level-test-only",

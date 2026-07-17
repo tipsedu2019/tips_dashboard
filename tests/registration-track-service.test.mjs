@@ -26,7 +26,7 @@ async function loadFactory(extraGlobals = {}) {
 
   const factorySource = source.slice(start + startMarker.length, end);
   const compiled = ts.transpileModule(
-    `${factorySource}\nmodule.exports = { createRegistrationTrackService, createRegistrationMutationRequestKey, buildRegistrationMigrationLegacySnapshot };`,
+    `${factorySource}\nmodule.exports = { createRegistrationTrackService, createRegistrationMutationRequestKey, buildRegistrationMigrationLegacySnapshot, mapTrackEvent };`,
     {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
@@ -44,6 +44,106 @@ async function loadFactory(extraGlobals = {}) {
   });
   return sandboxModule.exports;
 }
+
+test("version-2 event parser preserves explicit user, system, and migration actors", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  const actorFixtures = [
+    {
+      actorKind: "user",
+      actorProfileId: "profile-user",
+      systemSource: null,
+    },
+    {
+      actorKind: "system",
+      actorProfileId: null,
+      systemSource: "registration_reminder_materializer",
+    },
+    {
+      actorKind: "migration",
+      actorProfileId: null,
+      systemSource: "registration_history_v2_backfill",
+    },
+  ];
+
+  const mapped = actorFixtures.map((fixture, index) => mapTrackEvent({
+    id: `event-v2-${index + 1}`,
+    task_id: "task-1",
+    actor_id: fixture.actorProfileId,
+    event_type: "registration_track_event",
+    field_name: "registration_track:track-1",
+    before_value: null,
+    after_value: JSON.stringify({
+      version: 2,
+      event_type: "consultation_completed",
+      actor_profile_id: fixture.actorProfileId,
+      actor_kind: fixture.actorKind,
+      system_source: fixture.systemSource,
+      track_id: "track-1",
+      subject: "영어",
+      source: "consultation_waiting",
+      destination: "enrollment_decided",
+      reason_code: "consultation_approved",
+      metadata: { consultationId: "consultation-1" },
+      occurred_at: "2026-07-16T01:02:03Z",
+    }),
+    created_at: "2026-07-16T01:02:04Z",
+  }));
+
+  assert.deepEqual(
+    mapped.map((event) => ({
+      payloadVersion: event.payloadVersion,
+      eventType: event.eventType,
+      actorId: event.actorId,
+      actorKind: event.actorKind,
+      systemSource: event.systemSource,
+      reasonCode: event.reasonCode,
+      trackId: event.trackId,
+      occurredAt: event.occurredAt,
+    })),
+    actorFixtures.map((fixture) => ({
+      payloadVersion: 2,
+      eventType: "consultation_completed",
+      actorId: fixture.actorProfileId,
+      actorKind: fixture.actorKind,
+      systemSource: fixture.systemSource,
+      reasonCode: "consultation_approved",
+      trackId: "track-1",
+      occurredAt: "2026-07-16T01:02:03Z",
+    })),
+  );
+  assert.deepEqual({ ...mapped[0].metadata }, { consultationId: "consultation-1" });
+});
+
+test("historical version-1 null actor stays unknown without current-owner inference", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  const event = mapTrackEvent({
+    id: "event-v1-unknown",
+    task_id: "task-1",
+    actor_id: "current-owner-must-not-be-inferred",
+    event_type: "registration_track_event",
+    field_name: "registration_track:track-1",
+    before_value: null,
+    after_value: JSON.stringify({
+      version: 1,
+      eventType: "waiting_transitioned",
+      actorId: null,
+      trackId: "track-1",
+      subject: "수학",
+      source: "consultation_waiting",
+      destination: "waiting",
+      reason: "guardian_requested_delay",
+      metadata: {},
+      occurredAt: "2026-07-15T09:00:00Z",
+    }),
+    created_at: "2026-07-15T09:00:01Z",
+  });
+
+  assert.equal(event.payloadVersion, 1);
+  assert.equal(event.actorId, null);
+  assert.equal(event.actorKind, null);
+  assert.equal(event.systemSource, null);
+  assert.equal(event.reasonCode, "guardian_requested_delay");
+});
 
 test("migration legacy snapshot follows H2 evidence and ignores unrelated detail text", async () => {
   const { buildRegistrationMigrationLegacySnapshot } = await loadFactory();

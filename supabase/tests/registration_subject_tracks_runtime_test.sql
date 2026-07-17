@@ -1,5 +1,5 @@
 begin;
-select plan(150);
+select plan(160);
 
 -- This packet is intentionally self-contained and transaction-scoped. It is run only
 -- against a disposable local/preview database after both registration migrations have
@@ -3693,7 +3693,10 @@ select
     from public.ops_task_events event
     where event.task_id = batch.task_id
       and event.event_type = 'registration_track_event'
-      and event.after_value::jsonb ->> 'eventType' = 'admission_batch_advanced'
+      and coalesce(
+        event.after_value::jsonb ->> 'event_type',
+        event.after_value::jsonb ->> 'eventType'
+      ) = 'admission_batch_advanced'
       and event.after_value::jsonb #>> '{metadata,action}' = 'invoice_sent'
   ) as event_count
 from public.ops_registration_admission_batches batch
@@ -3719,7 +3722,10 @@ select
     from public.ops_task_events event
     where event.task_id = batch.task_id
       and event.event_type = 'registration_track_event'
-      and event.after_value::jsonb ->> 'eventType' = 'admission_batch_advanced'
+      and coalesce(
+        event.after_value::jsonb ->> 'event_type',
+        event.after_value::jsonb ->> 'eventType'
+      ) = 'admission_batch_advanced'
       and event.after_value::jsonb #>> '{metadata,action}' = 'payment_confirmed'
   ) as event_count
 from public.ops_registration_admission_batches batch
@@ -3745,7 +3751,10 @@ select pg_temp.registration_record(133,
         from public.ops_task_events event
         where event.task_id = batch.task_id
           and event.event_type = 'registration_track_event'
-          and event.after_value::jsonb ->> 'eventType' = 'admission_batch_advanced'
+          and coalesce(
+            event.after_value::jsonb ->> 'event_type',
+            event.after_value::jsonb ->> 'eventType'
+          ) = 'admission_batch_advanced'
           and event.after_value::jsonb #>> '{metadata,action}' = 'invoice_sent'
       )
     from registration_runtime_133_invoice_snapshot snapshot
@@ -3760,7 +3769,10 @@ select pg_temp.registration_record(133,
         from public.ops_task_events event
         where event.task_id = batch.task_id
           and event.event_type = 'registration_track_event'
-          and event.after_value::jsonb ->> 'eventType' = 'admission_batch_advanced'
+          and coalesce(
+            event.after_value::jsonb ->> 'event_type',
+            event.after_value::jsonb ->> 'eventType'
+          ) = 'admission_batch_advanced'
           and event.after_value::jsonb #>> '{metadata,action}' = 'payment_confirmed'
       )
     from registration_runtime_133_payment_snapshot snapshot
@@ -4115,7 +4127,10 @@ select pg_temp.registration_record(149,
     from public.ops_task_events event
     where event.task_id = '00000000-0000-4000-8000-000000000681'
       and event.event_type = 'registration_track_event'
-      and event.after_value::jsonb ->> 'eventType' = 'admission_batch_canceled'
+      and coalesce(
+        event.after_value::jsonb ->> 'event_type',
+        event.after_value::jsonb ->> 'eventType'
+      ) = 'admission_batch_canceled'
       and event.after_value::jsonb #>> '{metadata,batchId}' = (
         select payload #>> '{batch,id}' from registration_runtime_135_cancel_batch
       )
@@ -4756,6 +4771,682 @@ select pg_temp.registration_record(15, pg_temp.registration_contract(15));
 
 -- Assertion 150 remains the packet's explicit column-privilege invariant query.
 select pg_temp.registration_record(150, pg_temp.registration_contract(150));
+
+-- ---------------------------------------------------------------------------
+-- 151-160: version-2 등록 이력 행위자, 권한, rollback, authoritative replay 증명.
+-- ---------------------------------------------------------------------------
+set local role authenticated;
+select pg_temp.registration_set_actor('00000000-0000-4000-8000-000000000101');
+
+create temporary table registration_runtime_history_v2_case on commit drop as
+select public.create_registration_case(
+  '런타임이력V2', '중1', '런타임중', '01000007551', null,
+  '본관', '2026-07-17 09:00+09'::timestamptz,
+  array['영어']::text[], 'history v2 runtime', 'normal',
+  'runtime-history-v2-create'
+) as payload;
+
+create temporary table registration_runtime_history_v2_track on commit drop as
+select
+  (fixture.payload ->> 'taskId')::uuid as task_id,
+  track.id as track_id
+from registration_runtime_history_v2_case fixture
+join public.ops_registration_subject_tracks track
+  on track.task_id = (fixture.payload ->> 'taskId')::uuid
+where track.subject = '영어';
+
+select pg_temp.registration_record(151,
+  to_regprocedure(
+    'dashboard_private.write_registration_track_event_v2(uuid,uuid,text,text,text,text,jsonb,text,text)'
+  ) is not null
+  and to_regprocedure(
+    'dashboard_private.write_registration_track_event(uuid,uuid,text,text,text,text,jsonb)'
+  ) is not null
+  and not has_function_privilege(
+    'anon',
+    'dashboard_private.write_registration_track_event_v2(uuid,uuid,text,text,text,text,jsonb,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'dashboard_private.write_registration_track_event_v2(uuid,uuid,text,text,text,text,jsonb,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'dashboard_private.write_registration_track_event(uuid,uuid,text,text,text,text,jsonb)',
+    'EXECUTE'
+  )
+);
+
+set local role postgres;
+
+create temporary table registration_runtime_history_v2_wrapper_before on commit drop as
+select count(*) as event_count
+from public.ops_task_events event
+cross join registration_runtime_history_v2_track fixture
+where event.task_id = fixture.task_id
+  and event.event_type = 'registration_track_event'
+  and event.after_value::jsonb ->> 'event_type' = 'history_v2_wrapper_probe';
+
+select dashboard_private.write_registration_track_event(
+  fixture.task_id,
+  fixture.track_id,
+  'history_v2_wrapper_probe',
+  'inquiry',
+  'inquiry',
+  'wrapper_probe',
+  '{"probe":"wrapper"}'::jsonb
+)
+from registration_runtime_history_v2_track fixture;
+
+select pg_temp.registration_record(152,
+  (
+    select count(*) = before.event_count + 1
+      and bool_and(event.after_value::jsonb ->> 'version' = '2')
+      and bool_and(event.after_value::jsonb ->> 'actor_kind' = 'user')
+      and bool_and((event.after_value::jsonb ->> 'actor_profile_id')::uuid = event.actor_id)
+      and bool_and(event.actor_id = '00000000-0000-4000-8000-000000000101'::uuid)
+    from public.ops_task_events event
+    cross join registration_runtime_history_v2_track fixture
+    cross join registration_runtime_history_v2_wrapper_before before
+    where event.task_id = fixture.task_id
+      and event.event_type = 'registration_track_event'
+      and event.after_value::jsonb ->> 'event_type' = 'history_v2_wrapper_probe'
+    group by before.event_count
+  )
+);
+
+create temporary table registration_runtime_history_v2_user_event on commit drop as
+select dashboard_private.write_registration_track_event_v2(
+  fixture.task_id,
+  fixture.track_id,
+  'history_v2_user_probe',
+  'inquiry',
+  'inquiry',
+  'user_probe',
+  '{"probe":"user"}'::jsonb,
+  'user',
+  null
+) as event_id
+from registration_runtime_history_v2_track fixture;
+
+select pg_temp.registration_record(153,
+  (
+    select count(*) = 1
+      and bool_and(event.id = written.event_id)
+      and bool_and(event.actor_id = '00000000-0000-4000-8000-000000000101'::uuid)
+      and bool_and(event.after_value::jsonb ->> 'actor_kind' = 'user')
+      and bool_and(
+        (event.after_value::jsonb ->> 'actor_profile_id')::uuid = event.actor_id
+      )
+      and bool_and(
+        (event.after_value::jsonb ->> 'occurred_at')::timestamptz = event.created_at
+      )
+      and bool_and(event.after_value::jsonb #>> '{metadata,probe}' = 'user')
+    from registration_runtime_history_v2_user_event written
+    join public.ops_task_events event on event.id = written.event_id
+  )
+);
+
+create temporary table registration_runtime_history_v2_system_event on commit drop as
+select dashboard_private.write_registration_track_event_v2(
+  fixture.task_id,
+  fixture.track_id,
+  'history_v2_system_probe',
+  'inquiry',
+  'inquiry',
+  'system_probe',
+  '{"probe":"system"}'::jsonb,
+  'system',
+  'registration_history_v2_runtime'
+) as event_id
+from registration_runtime_history_v2_track fixture;
+
+select pg_temp.registration_record(154,
+  (
+    select count(*) = 1
+      and bool_and(event.actor_id is null)
+      and bool_and(event.after_value::jsonb ->> 'actor_profile_id' is null)
+      and bool_and(event.after_value::jsonb ->> 'actor_kind' = 'system')
+      and bool_and(
+        event.after_value::jsonb ->> 'system_source' = 'registration_history_v2_runtime'
+      )
+    from registration_runtime_history_v2_system_event written
+    join public.ops_task_events event on event.id = written.event_id
+  )
+);
+
+create temporary table registration_runtime_history_v2_migration_event on commit drop as
+select dashboard_private.write_registration_track_event_v2(
+  fixture.task_id,
+  fixture.track_id,
+  'history_v2_migration_probe',
+  'migration_review',
+  'inquiry',
+  'migration_probe',
+  '{"probe":"migration"}'::jsonb,
+  'migration',
+  'registration_history_v2_migration'
+) as event_id
+from registration_runtime_history_v2_track fixture;
+
+select pg_temp.registration_record(155,
+  (
+    select count(*) = 1
+      and bool_and(event.actor_id is null)
+      and bool_and(event.after_value::jsonb ->> 'actor_profile_id' is null)
+      and bool_and(event.after_value::jsonb ->> 'actor_kind' = 'migration')
+      and bool_and(
+        event.after_value::jsonb ->> 'system_source' = 'registration_history_v2_migration'
+      )
+    from registration_runtime_history_v2_migration_event written
+    join public.ops_task_events event on event.id = written.event_id
+  )
+);
+
+create temporary table registration_runtime_history_v2_invalid_before on commit drop as
+select count(*) as event_count
+from public.ops_task_events event
+cross join registration_runtime_history_v2_track fixture
+where event.task_id = fixture.task_id
+  and event.event_type = 'registration_track_event'
+  and event.after_value::jsonb ->> 'event_type' in (
+    'history_v2_null_actor_probe',
+    'history_v2_unknown_actor_probe'
+  );
+
+select pg_temp.registration_record(156,
+  pg_temp.registration_throws(
+    format(
+      $$select dashboard_private.write_registration_track_event_v2(
+        %L::uuid, %L::uuid, 'history_v2_null_actor_probe', null, null,
+        null, '{}'::jsonb, null::text, null::text
+      )$$,
+      (select task_id from registration_runtime_history_v2_track),
+      (select track_id from registration_runtime_history_v2_track)
+    ),
+    'registration_event_actor_kind_invalid',
+    '22023'
+  )
+  and pg_temp.registration_throws(
+    format(
+      $$select dashboard_private.write_registration_track_event_v2(
+        %L::uuid, %L::uuid, 'history_v2_unknown_actor_probe', null, null,
+        null, '{}'::jsonb, 'robot', null::text
+      )$$,
+      (select task_id from registration_runtime_history_v2_track),
+      (select track_id from registration_runtime_history_v2_track)
+    ),
+    'registration_event_actor_kind_invalid',
+    '22023'
+  )
+  and (
+    select count(*)
+    from public.ops_task_events event
+    cross join registration_runtime_history_v2_track fixture
+    where event.task_id = fixture.task_id
+      and event.event_type = 'registration_track_event'
+      and event.after_value::jsonb ->> 'event_type' in (
+        'history_v2_null_actor_probe',
+        'history_v2_unknown_actor_probe'
+      )
+  ) = (
+    select before.event_count
+    from registration_runtime_history_v2_invalid_before before
+  )
+);
+
+select pg_temp.registration_set_actor(null);
+select pg_temp.registration_record(157,
+  pg_temp.registration_throws(
+    format(
+      $$select dashboard_private.write_registration_track_event_v2(
+        %L::uuid, %L::uuid, 'history_v2_missing_user_probe', null, null,
+        null, '{}'::jsonb, 'user', null::text
+      )$$,
+      (select task_id from registration_runtime_history_v2_track),
+      (select track_id from registration_runtime_history_v2_track)
+    ),
+    'registration_event_user_actor_required',
+    '42501'
+  )
+  and not exists (
+    select 1
+    from public.ops_task_events event
+    cross join registration_runtime_history_v2_track fixture
+    where event.task_id = fixture.task_id
+      and event.event_type = 'registration_track_event'
+      and event.after_value::jsonb ->> 'event_type' = 'history_v2_missing_user_probe'
+  )
+);
+select pg_temp.registration_set_actor('00000000-0000-4000-8000-000000000101');
+
+select pg_temp.registration_record(158,
+  pg_temp.registration_throws(
+    format(
+      $$select dashboard_private.write_registration_track_event_v2(
+        %L::uuid, %L::uuid, 'history_v2_missing_source_probe', null, null,
+        null, '{}'::jsonb, 'system', ' '
+      )$$,
+      (select task_id from registration_runtime_history_v2_track),
+      (select track_id from registration_runtime_history_v2_track)
+    ),
+    'registration_event_system_source_required',
+    '22023'
+  )
+  and pg_temp.registration_throws(
+    format(
+      $$select dashboard_private.write_registration_track_event_v2(
+        %L::uuid, %L::uuid, 'history_v2_unstable_source_probe', null, null,
+        null, '{}'::jsonb, 'system', 'Unstable source'
+      )$$,
+      (select task_id from registration_runtime_history_v2_track),
+      (select track_id from registration_runtime_history_v2_track)
+    ),
+    'registration_event_system_source_invalid',
+    '22023'
+  )
+  and not exists (
+    select 1
+    from public.ops_task_events event
+    cross join registration_runtime_history_v2_track fixture
+    where event.task_id = fixture.task_id
+      and event.event_type = 'registration_track_event'
+      and event.after_value::jsonb ->> 'event_type' in (
+        'history_v2_missing_source_probe',
+        'history_v2_unstable_source_probe'
+      )
+  )
+);
+
+create or replace function pg_temp.registration_history_v2_rollback_probe(
+  p_task_id uuid,
+  p_track_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_before bigint;
+  v_after bigint;
+  v_before_subject text;
+  v_after_subject text;
+  v_changed_subject text;
+  v_mutation_observed boolean := false;
+begin
+  select track.subject
+  into v_before_subject
+  from public.ops_registration_subject_tracks track
+  where track.id = p_track_id
+    and track.task_id = p_task_id;
+  if not found then
+    return false;
+  end if;
+  v_changed_subject := case v_before_subject when '영어' then '수학' else '영어' end;
+
+  select count(*)
+  into v_before
+  from public.ops_task_events event
+  where event.task_id = p_task_id
+    and event.event_type = 'registration_track_event'
+    and event.after_value::jsonb ->> 'event_type' = 'history_v2_rollback_probe';
+
+  begin
+    update public.ops_registration_subject_tracks track
+    set subject = v_changed_subject,
+        updated_at = pg_catalog.now()
+    where track.id = p_track_id
+      and track.task_id = p_task_id;
+    if not found then
+      return false;
+    end if;
+
+    perform dashboard_private.write_registration_track_event_v2(
+      p_task_id,
+      p_track_id,
+      'history_v2_rollback_probe',
+      v_before_subject,
+      v_changed_subject,
+      null,
+      pg_catalog.jsonb_build_object(
+        'beforeSubject', v_before_subject,
+        'changedSubject', v_changed_subject
+      ),
+      'system',
+      'registration_history_v2_rollback'
+    );
+
+    select
+      exists (
+        select 1
+        from public.ops_registration_subject_tracks track
+        where track.id = p_track_id
+          and track.task_id = p_task_id
+          and track.subject = v_changed_subject
+      )
+      and exists (
+        select 1
+        from public.ops_task_events event
+        where event.task_id = p_task_id
+          and event.event_type = 'registration_track_event'
+          and event.after_value::jsonb ->> 'version' = '2'
+          and event.after_value::jsonb ->> 'event_type' = 'history_v2_rollback_probe'
+          and event.after_value::jsonb ->> 'track_id' = p_track_id::text
+          and event.after_value::jsonb ->> 'subject' = v_changed_subject
+          and event.after_value::jsonb #>> '{metadata,beforeSubject}' = v_before_subject
+          and event.after_value::jsonb #>> '{metadata,changedSubject}' = v_changed_subject
+      )
+    into v_mutation_observed;
+    raise exception 'registration_history_v2_forced_rollback';
+  exception
+    when others then
+      if sqlerrm <> 'registration_history_v2_forced_rollback' then
+        return false;
+      end if;
+  end;
+
+  select track.subject
+  into v_after_subject
+  from public.ops_registration_subject_tracks track
+  where track.id = p_track_id
+    and track.task_id = p_task_id;
+
+  select count(*)
+  into v_after
+  from public.ops_task_events event
+  where event.task_id = p_task_id
+    and event.event_type = 'registration_track_event'
+    and event.after_value::jsonb ->> 'event_type' = 'history_v2_rollback_probe';
+
+  return v_mutation_observed
+    and v_after_subject = v_before_subject
+    and v_after = v_before;
+end;
+$$;
+
+select pg_temp.registration_record(159,
+  pg_temp.registration_history_v2_rollback_probe(
+    (select task_id from registration_runtime_history_v2_track),
+    (select track_id from registration_runtime_history_v2_track)
+  )
+);
+
+-- 160: 기존 real mutation fixture가 만든 authoritative v2 이력을 tuple로 고정하고,
+-- 같은 actor/request key 재실행이 어느 family에도 두 번째 이력을 만들지 않음을 증명한다.
+create or replace function pg_temp.registration_history_v2_entity_revision_key(
+  p_event_type text,
+  p_payload jsonb
+)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case p_event_type
+    when 'inquiry_routed' then
+      'consultation:' || coalesce(p_payload #>> '{metadata,consultationId}', 'null')
+    when 'director_manual_override' then
+      'director:' || coalesce(p_payload #>> '{metadata,directorProfileId}', 'null')
+    when 'level_test_scheduled' then
+      'appointment:' || coalesce(p_payload #>> '{metadata,appointmentId}', 'null')
+        || ':revision:' || coalesce(p_payload #>> '{metadata,notificationRevision}', 'null')
+    when 'level_test_started' then
+      'attempt:' || coalesce(p_payload #>> '{metadata,attemptId}', 'null')
+        || ':revision:' || coalesce(p_payload #>> '{metadata,notificationRevision}', 'null')
+    when 'level_test_completed' then
+      'attempt:' || coalesce(p_payload #>> '{metadata,attemptId}', 'null')
+        || ':revision:' || coalesce(p_payload #>> '{metadata,notificationRevision}', 'null')
+    when 'consultation_completed' then
+      'consultation:' || coalesce(p_payload #>> '{metadata,consultationId}', 'null')
+        || ':destination:' || coalesce(p_payload ->> 'destination', 'null')
+    when 'waiting_transitioned' then
+      'action:' || coalesce(p_payload #>> '{metadata,action}', 'null')
+    when 'admission_batch_started' then
+      'batch:' || coalesce(p_payload #>> '{metadata,batchId}', 'null')
+        || ':revision:' || coalesce(p_payload #>> '{metadata,revisionNumber}', 'null')
+    when 'admission_batch_advanced' then
+      'batch:' || coalesce(p_payload #>> '{metadata,batchId}', 'null')
+        || ':action:' || coalesce(p_payload #>> '{metadata,action}', 'null')
+    when 'admission_batch_completed' then
+      'batch:' || coalesce(p_payload #>> '{metadata,batchId}', 'null')
+    when 'admission_batch_canceled' then
+      'batch:' || coalesce(p_payload #>> '{metadata,batchId}', 'null')
+        || ':historical:' || coalesce(
+          p_payload #>> '{metadata,restoredHistoricalEnrollment}', 'null'
+        )
+    else 'unsupported'
+  end;
+$$;
+
+create or replace function pg_temp.registration_history_v2_event_count(
+  p_track_id uuid,
+  p_event_type text,
+  p_entity_revision_key text
+)
+returns bigint
+language sql
+stable
+set search_path = ''
+as $$
+  select pg_catalog.count(*)
+  from public.ops_task_events event
+  cross join lateral (
+    select event.after_value::jsonb as payload
+  ) canonical
+  where event.event_type = 'registration_track_event'
+    and canonical.payload ->> 'version' = '2'
+    and canonical.payload ->> 'track_id' = p_track_id::text
+    and canonical.payload ->> 'event_type' = p_event_type
+    and canonical.payload ->> 'actor_kind' = 'user'
+    and canonical.payload ->> 'actor_profile_id' = event.actor_id::text
+    and pg_temp.registration_history_v2_entity_revision_key(
+      p_event_type,
+      canonical.payload
+    ) = p_entity_revision_key;
+$$;
+
+create temporary table registration_runtime_history_v2_expected_events (
+  family text not null,
+  track_id uuid not null,
+  event_type text not null,
+  entity_revision_key text not null,
+  expected_count bigint not null
+) on commit drop;
+
+insert into registration_runtime_history_v2_expected_events
+select '문의 라우팅', tracks.english_track_id, 'inquiry_routed',
+  'consultation:' || consultations.english_phone_id::text, 1
+from registration_runtime_tracks tracks
+cross join registration_runtime_consultations consultations;
+insert into registration_runtime_history_v2_expected_events
+select '담당자 배정', tracks.track_b, 'director_manual_override',
+  'director:00000000-0000-4000-8000-000000000103', 1
+from registration_runtime_director_tracks tracks;
+insert into registration_runtime_history_v2_expected_events
+select '공유 예약 영어', tracks.english_track_id, 'level_test_scheduled',
+  'appointment:' || (appointment.payload ->> 'appointmentId') || ':revision:1', 1
+from registration_runtime_appointment_tracks tracks
+cross join registration_runtime_appointment appointment;
+insert into registration_runtime_history_v2_expected_events
+select '공유 예약 수학', tracks.math_track_id, 'level_test_scheduled',
+  'appointment:' || (appointment.payload ->> 'appointmentId') || ':revision:1', 1
+from registration_runtime_appointment_tracks tracks
+cross join registration_runtime_appointment appointment;
+insert into registration_runtime_history_v2_expected_events
+select '레벨테스트 시작', tracks.english_track_id, 'level_test_started',
+  'attempt:' || attempts.english_attempt_id::text || ':revision:1', 1
+from registration_runtime_appointment_tracks tracks
+cross join registration_runtime_attempts attempts;
+insert into registration_runtime_history_v2_expected_events
+select '레벨테스트 완료', tracks.english_track_id, 'level_test_completed',
+  'attempt:' || attempts.english_attempt_id::text || ':revision:1', 1
+from registration_runtime_appointment_tracks tracks
+cross join registration_runtime_attempts attempts;
+insert into registration_runtime_history_v2_expected_events
+select '상담 등록결정', track.track_id, 'consultation_completed',
+  'consultation:' || consultation.id::text || ':destination:enrollment_decided', 1
+from registration_runtime_paid_track track
+join public.ops_registration_consultations consultation
+  on consultation.track_id = track.track_id
+ and consultation.mode = 'phone';
+insert into registration_runtime_history_v2_expected_events
+select '대기 전환', track.track_id, 'waiting_transitioned',
+  'action:record_retest_required', 1
+from registration_runtime_wait_track track;
+insert into registration_runtime_history_v2_expected_events
+select '입학 batch 시작', track.track_id, 'admission_batch_started',
+  'batch:' || (batch.payload #>> '{batch,id}') || ':revision:1', 1
+from registration_runtime_paid_track track
+cross join registration_runtime_paid_batch batch;
+insert into registration_runtime_history_v2_expected_events
+select '입학 batch 청구', track.track_id, 'admission_batch_advanced',
+  'batch:' || (batch.payload #>> '{batch,id}') || ':action:invoice_sent', 1
+from registration_runtime_paid_track track
+cross join registration_runtime_paid_batch batch;
+insert into registration_runtime_history_v2_expected_events
+select '입학 batch 수납', track.track_id, 'admission_batch_advanced',
+  'batch:' || (batch.payload #>> '{batch,id}') || ':action:payment_confirmed', 1
+from registration_runtime_paid_track track
+cross join registration_runtime_paid_batch batch;
+insert into registration_runtime_history_v2_expected_events
+select '입학 batch 완료', track.track_id, 'admission_batch_completed',
+  'batch:' || (batch.payload #>> '{batch,id}'), 1
+from registration_runtime_paid_track track
+cross join registration_runtime_paid_batch batch;
+insert into registration_runtime_history_v2_expected_events
+select '입학 batch 취소-기존등록', tracks.mixed_english_track_id,
+  'admission_batch_canceled',
+  'batch:00000000-0000-4000-8000-000000000872:historical:true', 1
+from registration_runtime_cancel_tracks tracks;
+insert into registration_runtime_history_v2_expected_events
+select '입학 batch 취소-대기복귀', tracks.mixed_math_track_id,
+  'admission_batch_canceled',
+  'batch:00000000-0000-4000-8000-000000000872:historical:false', 1
+from registration_runtime_cancel_tracks tracks;
+
+create temporary table registration_runtime_history_v2_event_counts_before on commit drop as
+select expected.*,
+  pg_temp.registration_history_v2_event_count(
+    expected.track_id,
+    expected.event_type,
+    expected.entity_revision_key
+  ) as actual_count
+from registration_runtime_history_v2_expected_events expected;
+
+create temporary table registration_runtime_history_v2_replay_results (
+  family text primary key,
+  replayed boolean not null
+) on commit drop;
+
+select pg_temp.registration_set_actor('00000000-0000-4000-8000-000000000101');
+insert into registration_runtime_history_v2_replay_results
+select '문의 라우팅', pg_temp.registration_lives(format(
+  $$select public.route_registration_inquiry(%L::uuid, 'consultation_waiting', null, null, 'runtime-route-english-phone')$$,
+  tracks.english_track_id
+)) from registration_runtime_tracks tracks;
+insert into registration_runtime_history_v2_replay_results
+select '담당자 배정', pg_temp.registration_lives(format(
+  $$select public.assign_registration_track_director(%L::uuid, '00000000-0000-4000-8000-000000000103', 'manual', null, 1, 'runtime-manual-director')$$,
+  tracks.track_b
+)) from registration_runtime_director_tracks tracks;
+insert into registration_runtime_history_v2_replay_results
+select '공유 예약', pg_temp.registration_lives(format(
+  $$select public.save_registration_shared_appointment(null, %L::uuid, 'level_test', '2026-07-20 10:00+09'::timestamptz, '본관 1강의실', array[%L::uuid,%L::uuid,%L::uuid], false, null, 'runtime-dual-level-test')$$,
+  tracks.task_id, tracks.english_track_id, tracks.math_track_id, tracks.english_track_id
+)) from registration_runtime_appointment_tracks tracks;
+insert into registration_runtime_history_v2_replay_results
+select '레벨테스트 시작', pg_temp.registration_lives(format(
+  $$select public.start_registration_level_test_attempt(%L::uuid, 'runtime-start-english')$$,
+  attempts.english_attempt_id
+)) from registration_runtime_attempts attempts;
+insert into registration_runtime_history_v2_replay_results
+select '레벨테스트 완료', pg_temp.registration_lives(format(
+  $$select public.complete_registration_level_test_attempt(%L::uuid, 'completed', 'https://drive.invalid/runtime/english-result', 'runtime-complete-english')$$,
+  attempts.english_attempt_id
+)) from registration_runtime_attempts attempts;
+
+select pg_temp.registration_set_actor('00000000-0000-4000-8000-000000000102');
+insert into registration_runtime_history_v2_replay_results
+select '상담 등록결정', pg_temp.registration_lives(format(
+  $$select public.complete_registration_consultation(%L::uuid, 'enrollment', null, null, 'runtime-paid-consultation')$$,
+  consultation.id
+))
+from registration_runtime_paid_track track
+join public.ops_registration_consultations consultation
+  on consultation.track_id = track.track_id
+ and consultation.mode = 'phone';
+
+select pg_temp.registration_set_actor('00000000-0000-4000-8000-000000000101');
+insert into registration_runtime_history_v2_replay_results
+select '대기 전환', pg_temp.registration_lives(format(
+  $$select public.transition_registration_waiting(%L::uuid, 'record_retest_required', null, null, 'required', 'retest required', 'runtime-retest-required')$$,
+  track.track_id
+)) from registration_runtime_wait_track track;
+insert into registration_runtime_history_v2_replay_results
+select '입학 batch 시작', pg_temp.registration_lives(format(
+  $$select public.start_registration_admission_batch(%L::uuid, %L::uuid[], %L::uuid[], 'runtime-paid-batch')$$,
+  track.task_id,
+  array[track.track_id]::text,
+  (select array_agg(row_id.id order by row_id.class_id)::text from registration_runtime_paid_row_ids row_id)
+)) from registration_runtime_paid_track track;
+insert into registration_runtime_history_v2_replay_results
+select '입학 batch 청구', pg_temp.registration_lives(format(
+  $$select public.advance_registration_admission_batch(%L::uuid, 'invoice_sent', 'runtime-paid-invoice')$$,
+  (batch.payload #>> '{batch,id}')::uuid
+)) from registration_runtime_paid_batch batch;
+insert into registration_runtime_history_v2_replay_results
+select '입학 batch 수납', pg_temp.registration_lives(format(
+  $$select public.advance_registration_admission_batch(%L::uuid, 'payment_confirmed', 'runtime-paid-payment')$$,
+  (batch.payload #>> '{batch,id}')::uuid
+)) from registration_runtime_paid_batch batch;
+insert into registration_runtime_history_v2_replay_results
+select '입학 batch 완료', pg_temp.registration_lives(format(
+  $$select public.complete_registration_admission_batch(%L::uuid, 'runtime-paid-complete')$$,
+  (batch.payload #>> '{batch,id}')::uuid
+)) from registration_runtime_paid_batch batch;
+insert into registration_runtime_history_v2_replay_results
+select '입학 batch 취소', pg_temp.registration_lives(format(
+  $$select public.cancel_registration_admission_batch(
+    '00000000-0000-4000-8000-000000000872'::uuid,
+    jsonb_build_array(jsonb_build_object(
+      'trackId', %L::uuid,
+      'destination', 'waiting',
+      'waitingKind', 'current_class',
+      'classId', '00000000-0000-4000-8000-000000000303'
+    )),
+    'mixed batch canceled',
+    'runtime-mixed-batch-cancel'
+  )$$,
+  tracks.mixed_math_track_id
+)) from registration_runtime_cancel_tracks tracks;
+
+create temporary table registration_runtime_history_v2_event_counts_after on commit drop as
+select before.family,
+  before.actual_count as before_count,
+  pg_temp.registration_history_v2_event_count(
+    before.track_id,
+    before.event_type,
+    before.entity_revision_key
+  ) as after_count
+from registration_runtime_history_v2_event_counts_before before;
+
+select pg_temp.registration_record(160,
+  (
+    select count(*) = 14 and bool_and(actual_count = expected_count)
+    from registration_runtime_history_v2_event_counts_before
+  )
+  and (
+    select count(*) = 12 and bool_and(replayed)
+    from registration_runtime_history_v2_replay_results
+  )
+  and (
+    select count(*) = 14 and bool_and(after_count = before_count)
+    from registration_runtime_history_v2_event_counts_after
+  )
+);
 
 -- assertion 1: atomic RPC creation with exactly two subject tracks.
 select ok(
@@ -5655,6 +6346,66 @@ select ok(
 select ok(
   pg_temp.registration_contract(150),
   '150. message-table column grants expose only workflow-safe state columns to authenticated readers, not recipient/provider/error payload.'
+);
+
+-- assertion 151: version-2 작성기와 기존 wrapper 실행 권한은 비공개 경계에만 남는다.
+select ok(
+  pg_temp.registration_contract(151),
+  '151. version-2 작성기와 기존 wrapper 실행 권한은 비공개 경계에만 남는다.'
+);
+
+-- assertion 152: 기존 wrapper는 정확히 한 개의 version-2 사용자 이력을 기록한다.
+select ok(
+  pg_temp.registration_contract(152),
+  '152. 기존 wrapper는 정확히 한 개의 version-2 사용자 이력을 기록한다.'
+);
+
+-- assertion 153: 사용자 version-2 작성기는 원본 UUID와 행위자 및 발생 시각을 정확히 기록한다.
+select ok(
+  pg_temp.registration_contract(153),
+  '153. 사용자 version-2 작성기는 원본 UUID와 행위자 및 발생 시각을 정확히 기록한다.'
+);
+
+-- assertion 154: 시스템 version-2 이력은 안정된 출처를 기록하고 사용자 행위자를 남기지 않는다.
+select ok(
+  pg_temp.registration_contract(154),
+  '154. 시스템 version-2 이력은 안정된 출처를 기록하고 사용자 행위자를 남기지 않는다.'
+);
+
+-- assertion 155: 마이그레이션 version-2 이력은 명시적 종류와 null 사용자 행위자를 기록한다.
+select ok(
+  pg_temp.registration_contract(155),
+  '155. 마이그레이션 version-2 이력은 명시적 종류와 null 사용자 행위자를 기록한다.'
+);
+
+-- assertion 156: null 또는 미지원 행위자 종류는 이력 없이 거절된다.
+select ok(
+  pg_temp.registration_contract(156),
+  '156. null 또는 미지원 행위자 종류는 이력 없이 거절된다.'
+);
+
+-- assertion 157: 인증 사용자 없는 사용자 이력은 이력 없이 거절된다.
+select ok(
+  pg_temp.registration_contract(157),
+  '157. 인증 사용자 없는 사용자 이력은 이력 없이 거절된다.'
+);
+
+-- assertion 158: 비어 있거나 불안정한 시스템 출처는 이력 없이 거절된다.
+select ok(
+  pg_temp.registration_contract(158),
+  '158. 비어 있거나 불안정한 시스템 출처는 이력 없이 거절된다.'
+);
+
+-- assertion 159: 호출자 트랜잭션 실패는 실제 변경 필드와 version-2 이력 행도 함께 롤백한다.
+select ok(
+  pg_temp.registration_contract(159),
+  '159. 호출자 트랜잭션 실패는 실제 변경 필드와 version-2 이력 행도 함께 롤백한다.'
+);
+
+-- assertion 160: 핵심 authoritative mutation family는 tuple당 version-2 이력 하나를 유지하고 same-key replay로 늘어나지 않는다.
+select ok(
+  pg_temp.registration_contract(160),
+  '160. 핵심 authoritative mutation family는 tuple당 version-2 이력 하나를 유지하고 same-key replay로 늘어나지 않는다.'
 );
 
 select * from finish();
