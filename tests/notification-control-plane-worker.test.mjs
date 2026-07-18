@@ -11,6 +11,10 @@ const workerForwardMigrationUrl = new URL(
   "../supabase/migrations/20260716195900_notification_control_plane_forward_compat.sql",
   import.meta.url,
 )
+const registrationProviderClaimMigrationUrl = new URL(
+  "../supabase/migrations/20260716195800_notification_registration_provider_claim.sql",
+  import.meta.url,
+)
 const adapterModuleUrl = new URL(
   "../src/features/notifications/server/notification-workflow-adapter.ts",
   import.meta.url,
@@ -2388,12 +2392,14 @@ test("canonical production worker만 두 외부 provider에 408 unknown 종결 �
 })
 
 test("audience fallback은 strict shape에서만 no_recipient로 건너뛰고 worker claim 대상이 아니다", async () => {
-  const [forward, worker] = await Promise.all([
+  const [forward, initialWorker, finalProviderClaim] = await Promise.all([
     readFile(workerForwardMigrationUrl, "utf8"),
     readFile(workerMigrationUrl, "utf8"),
+    readFile(registrationProviderClaimMigrationUrl, "utf8"),
   ])
   const materialize = functionBlock(forward, "materialize_notification_delivery_v1")
-  const claim = functionBlock(worker, "claim_notification_deliveries_v1")
+  const initialClaim = functionBlock(initialWorker, "claim_notification_deliveries_v1")
+  const finalClaim = functionBlock(finalProviderClaim, "claim_notification_deliveries_v1")
 
   assert.match(materialize, /pg_catalog\.jsonb_typeof\(p_target_snapshot\)\s*<>\s*'object'/i)
   assert.match(
@@ -2404,8 +2410,11 @@ test("audience fallback은 strict shape에서만 no_recipient로 건너뛰고 wo
     materialize,
     /when\s+p_target_kind\s*=\s*'audience'\s+then\s+pg_catalog\.jsonb_build_object\([\s\S]*?'status',\s*'skipped'[\s\S]*?'status_reason',\s*'no_recipient'/i,
   )
-  assert.match(claim, /where\s+delivery\.status\s+in\s*\('pending',\s*'retry_wait'\)/i)
-  assert.doesNotMatch(claim, /'skipped'/i)
+  for (const claim of [initialClaim, finalClaim]) {
+    assert.match(claim, /where\s+delivery\.status\s+in\s*\('pending',\s*'retry_wait'\)/i)
+    assert.doesNotMatch(claim, /'skipped'/i)
+  }
+  assert.match(finalClaim, /delivery\.channel_key\s*<>\s*'customer_message'/i)
 })
 
 test("Web Push 425는 legacy와 canonical 모두 명시적 사전 거절로 재시도 대기에 남긴다", async () => {

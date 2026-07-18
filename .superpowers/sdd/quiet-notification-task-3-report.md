@@ -24,7 +24,7 @@
 - canonical policy의 408은 `delivery_unknown/provider_ambiguous_response`이며 `nextAttemptAt`은 `null`입니다.
 - migration과 legacy route 파일은 수정하지 않았습니다.
 - audience fallback은 순방향 SQL materializer에서 strict shape를 검증한 뒤
-  `skipped/no_recipient`로 저장되고, worker claim SQL은 `pending/retry_wait`만 선택함을 계약 테스트로 고정했습니다.
+  `skipped/no_recipient`로 저장되고, 초기 및 최종 worker claim SQL 모두 `pending/retry_wait`만 선택함을 계약 테스트로 고정했습니다.
 
 ## 검증 명령
 
