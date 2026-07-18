@@ -373,6 +373,7 @@ declare
   v_task public.ops_tasks%rowtype;
   v_track public.ops_registration_subject_tracks%rowtype;
   v_detail public.ops_registration_details%rowtype;
+  v_registration_source record;
   v_occurred_at timestamptz := pg_catalog.clock_timestamp();
   v_event_id uuid;
   v_event_key text;
@@ -413,7 +414,7 @@ begin
   end if;
 
   select task, track, detail
-  into v_task, v_track, v_detail
+  into v_registration_source
   from public.ops_tasks task
   join public.ops_registration_subject_tracks track
     on track.task_id = task.id
@@ -425,6 +426,9 @@ begin
   if not found then
     raise exception 'registration_track_not_found' using errcode = 'P0002';
   end if;
+  v_task := v_registration_source.task;
+  v_track := v_registration_source.track;
+  v_detail := v_registration_source.detail;
 
   insert into public.ops_task_events(
     task_id, actor_id, event_type, field_name,
@@ -726,6 +730,7 @@ declare
   v_rule_id uuid;
   v_rule_revision bigint;
   v_template dashboard_private.notification_templates%rowtype;
+  v_rule_selection record;
   v_consultation public.ops_registration_consultations%rowtype;
   v_target_generation bigint;
   v_target_set_hash text;
@@ -756,10 +761,10 @@ begin
     raise exception 'registration_phone_consultation_not_found' using errcode = 'P0002';
   end if;
   select
-    (snapshot.item ->> 'rule_id')::uuid,
-    (snapshot.item ->> 'rule_revision')::bigint,
-    template
-  into v_rule_id, v_rule_revision, v_template
+    (snapshot.item ->> 'rule_id')::uuid as rule_id,
+    (snapshot.item ->> 'rule_revision')::bigint as rule_revision,
+    template as template
+  into v_rule_selection
   from pg_catalog.jsonb_array_elements(v_event.rule_snapshot) snapshot(item)
   join dashboard_private.notification_templates template
     on template.id = (snapshot.item ->> 'template_id')::uuid
@@ -771,6 +776,9 @@ begin
   if not found then
     raise exception 'registration_phone_rule_not_found' using errcode = 'P0002';
   end if;
+  v_rule_id := v_rule_selection.rule_id;
+  v_rule_revision := v_rule_selection.rule_revision;
+  v_template := v_rule_selection.template;
 
   v_target_generation := v_consultation.recipient_revision;
   v_target_set_hash := dashboard_private.notification_target_set_hash_v1(
@@ -2558,6 +2566,7 @@ declare
   v_rule_id uuid;
   v_rule_revision bigint;
   v_template dashboard_private.notification_templates%rowtype;
+  v_rule_selection record;
   v_existing_ledger dashboard_private.notification_request_ledger%rowtype;
   v_target_key text;
   v_target_set_hash text;
@@ -2595,10 +2604,10 @@ begin
       using errcode = 'P0002';
   end if;
   select
-    (snapshot.item ->> 'rule_id')::uuid,
-    (snapshot.item ->> 'rule_revision')::bigint,
-    template
-  into v_rule_id, v_rule_revision, v_template
+    (snapshot.item ->> 'rule_id')::uuid as rule_id,
+    (snapshot.item ->> 'rule_revision')::bigint as rule_revision,
+    template as template
+  into v_rule_selection
   from pg_catalog.jsonb_array_elements(v_event.rule_snapshot) snapshot(item)
   join dashboard_private.notification_templates template
     on template.id = (snapshot.item ->> 'template_id')::uuid
@@ -2611,6 +2620,9 @@ begin
     raise exception 'registration_admission_notification_rule_not_found'
       using errcode = 'P0002';
   end if;
+  v_rule_id := v_rule_selection.rule_id;
+  v_rule_revision := v_rule_selection.rule_revision;
+  v_template := v_rule_selection.template;
 
   v_target_key := 'registration-message:' || v_message.id::text;
   v_target_set_hash := dashboard_private.notification_target_set_hash_v1(

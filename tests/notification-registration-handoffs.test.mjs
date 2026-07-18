@@ -55,6 +55,45 @@ test("version-2 writer keeps one raw row and maps the director row once", async 
   assert.doesNotMatch(wrapper, /insert into public\.ops_task_events|record_notification_event_v1/)
 })
 
+test("registration writer loads joined rowtypes through one record target", async () => {
+  const sql = await source(migrationUrl)
+  const writer = functionBlock(sql, "dashboard_private.write_registration_track_event_v2")
+  assert.match(writer, /v_registration_source record;/)
+  assert.match(writer, /into v_registration_source/)
+  assert.doesNotMatch(writer, /into v_task,\s*v_track,\s*v_detail/)
+  assert.match(
+    writer,
+    /if not found then\s+raise exception 'registration_track_not_found'[^;]+;\s+end if;\s+v_task := v_registration_source\.task;\s+v_track := v_registration_source\.track;\s+v_detail := v_registration_source\.detail;/,
+  )
+})
+
+test("phone projection loads its rule and template through one record target", async () => {
+  const sql = await source(migrationUrl)
+  const projection = functionBlock(
+    sql,
+    "dashboard_private.materialize_registration_phone_legacy_v1",
+  )
+  assert.match(projection, /v_rule_selection record;/)
+  assert.match(projection, /into v_rule_selection/)
+  assert.doesNotMatch(projection, /into v_rule_id,\s*v_rule_revision,\s*v_template/)
+  assert.match(
+    projection,
+    /if not found then\s+raise exception 'registration_phone_rule_not_found'[^;]+;\s+end if;\s+v_rule_id := v_rule_selection\.rule_id;\s+v_rule_revision := v_rule_selection\.rule_revision;\s+v_template := v_rule_selection\.template;/,
+  )
+})
+
+test("admission delivery loads its rule and template through one record target", async () => {
+  const sql = await source(migrationUrl)
+  const delivery = functionBlock(sql, "public.begin_registration_admission_delivery_v1")
+  assert.match(delivery, /v_rule_selection record;/)
+  assert.match(delivery, /into v_rule_selection/)
+  assert.doesNotMatch(delivery, /into v_rule_id,\s*v_rule_revision,\s*v_template/)
+  assert.match(
+    delivery,
+    /if not found then\s+raise exception 'registration_admission_notification_rule_not_found'\s+using errcode = 'P0002';\s+end if;\s+v_rule_id := v_rule_selection\.rule_id;\s+v_rule_revision := v_rule_selection\.rule_revision;\s+v_template := v_rule_selection\.template;/,
+  )
+})
+
 test("registration event catalog is explicit and excludes coarse processing and reminders", async () => {
   const sql = await source(migrationUrl)
   for (const eventKey of [
