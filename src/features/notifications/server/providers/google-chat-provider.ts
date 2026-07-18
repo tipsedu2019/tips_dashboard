@@ -10,6 +10,8 @@ export type NotificationProviderResult = Readonly<{
   nextAttemptAt: string | null
 }>
 
+export type Http408Disposition = "retry_wait" | "delivery_unknown"
+
 export type GoogleChatBegunDeliveryContext = Readonly<{
   delivery_id: string
   claim_token: string
@@ -58,6 +60,10 @@ function nextRetryAt() {
   return new Date(Date.now() + 60_000).toISOString()
 }
 
+function normalizeHttp408Disposition(value: unknown): Http408Disposition {
+  return value === "delivery_unknown" ? "delivery_unknown" : "retry_wait"
+}
+
 function safeProviderMessageId(value: unknown) {
   if (typeof value !== "string" || !SAFE_PROVIDER_ID.test(value)) return null
   return value
@@ -92,8 +98,12 @@ function classifyTransportError(error: unknown): NotificationProviderResult {
   })
 }
 
-export function createGoogleChatProvider(input: { fetch: FetchTransport }) {
+export function createGoogleChatProvider(input: {
+  fetch: FetchTransport
+  http408Disposition?: Http408Disposition
+}) {
   const transport = input.fetch
+  const http408Disposition = normalizeHttp408Disposition(input.http408Disposition)
 
   return {
     async send(context: GoogleChatBegunDeliveryContext): Promise<NotificationProviderResult> {
@@ -151,6 +161,14 @@ export function createGoogleChatProvider(input: { fetch: FetchTransport }) {
         })
       }
       if (response.status === 408) {
+        if (http408Disposition === "retry_wait") {
+          return result("retry_wait", "transient_pre_dispatch_failure", {
+            providerResponseCode: responseCode,
+            errorCode: "transient_pre_dispatch_failure",
+            errorSummary: "provider temporarily rejected the request",
+            nextAttemptAt: nextRetryAt(),
+          })
+        }
         return result("delivery_unknown", "provider_ambiguous_response", {
           providerResponseCode: responseCode,
           errorCode: "provider_transport_error",

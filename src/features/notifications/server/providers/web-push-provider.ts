@@ -1,4 +1,4 @@
-import type { NotificationProviderResult } from "./google-chat-provider.ts"
+import type { Http408Disposition, NotificationProviderResult } from "./google-chat-provider.ts"
 import { isAllowedWebPushEndpoint } from "../web-push-endpoint.ts"
 
 export type WebPushSubscription = Readonly<{
@@ -76,7 +76,14 @@ function nextRetryAt() {
   return new Date(Date.now() + 60_000).toISOString()
 }
 
-function classifyFailure(error: unknown): NotificationProviderResult {
+function normalizeHttp408Disposition(value: unknown): Http408Disposition {
+  return value === "delivery_unknown" ? "delivery_unknown" : "retry_wait"
+}
+
+function classifyFailure(
+  error: unknown,
+  http408Disposition: Http408Disposition,
+): NotificationProviderResult {
   const statusCode = readStatusCode(error)
   const responseCode = statusCode === null ? null : String(statusCode)
   if (statusCode === 429) {
@@ -95,6 +102,14 @@ function classifyFailure(error: unknown): NotificationProviderResult {
     })
   }
   if (statusCode === 408) {
+    if (http408Disposition === "retry_wait") {
+      return result("retry_wait", "transient_pre_dispatch_failure", {
+        providerResponseCode: responseCode,
+        errorCode: "transient_pre_dispatch_failure",
+        errorSummary: "provider temporarily rejected the request",
+        nextAttemptAt: nextRetryAt(),
+      })
+    }
     return result("delivery_unknown", "provider_ambiguous_response", {
       providerResponseCode: responseCode,
       errorCode: "provider_transport_error",
@@ -135,8 +150,12 @@ function classifyFailure(error: unknown): NotificationProviderResult {
   })
 }
 
-export function createWebPushProvider(input: { sendNotification: SendNotification }) {
+export function createWebPushProvider(input: {
+  sendNotification: SendNotification
+  http408Disposition?: Http408Disposition
+}) {
   const sendNotification = input.sendNotification
+  const http408Disposition = normalizeHttp408Disposition(input.http408Disposition)
 
   return {
     async send(context: WebPushBegunDeliveryContext): Promise<NotificationProviderResult> {
@@ -165,9 +184,9 @@ export function createWebPushProvider(input: { sendNotification: SendNotificatio
         if (statusCode >= 200 && statusCode < 300) {
           return result("sent", null, { providerResponseCode: String(statusCode) })
         }
-        return classifyFailure({ statusCode })
+        return classifyFailure({ statusCode }, http408Disposition)
       } catch (error) {
-        return classifyFailure(error)
+        return classifyFailure(error, http408Disposition)
       }
     },
   }

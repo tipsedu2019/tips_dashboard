@@ -1420,6 +1420,7 @@ async function createProductionWorkerRuntime(
   })
   const googleChatProvider = createGoogleChatProvider({
     fetch: globalThis.fetch.bind(globalThis),
+    http408Disposition: "delivery_unknown",
   })
   const publicVapidKey = environmentValue(
     "NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY",
@@ -1433,6 +1434,7 @@ async function createProductionWorkerRuntime(
         webPush.setVapidDetails(vapidContact, publicVapidKey, privateVapidKey)
         return createWebPushProvider({
           sendNotification: (subscription, payload) => webPush.sendNotification(subscription, payload),
+          http408Disposition: "delivery_unknown",
         })
       })()
     : null
