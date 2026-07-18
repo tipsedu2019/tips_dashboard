@@ -15,6 +15,7 @@
 - 408 기본 결과는 `retry_wait/transient_pre_dispatch_failure`이며 다음 시도 시각을 가집니다.
 - 425는 legacy와 canonical 모두 `retry_wait/transient_pre_dispatch_failure`로 유지됩니다.
 - 정책값이 타입을 우회해 들어오더라도 `delivery_unknown`만 명시적으로 허용하고 나머지는 legacy 기본값으로 정규화합니다.
+- 독립 리뷰의 비차단 권고를 반영해 비정상 정책값도 두 provider에서 `retry_wait`으로 닫히는 자동 회귀를 추가했고 45/45를 다시 통과했습니다.
 
 ## canonical 격리 증거
 

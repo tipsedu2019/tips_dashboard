@@ -2234,11 +2234,17 @@ test("Google Chat 408은 legacy 기본값에서는 재시도하고 canonical 명
     fetch: async () => new Response("request timeout", { status: 408 }),
     http408Disposition: "delivery_unknown",
   })
+  const invalidPolicyProvider = createGoogleChatProvider({
+    fetch: async () => new Response("request timeout", { status: 408 }),
+    http408Disposition: "invalid_policy_value",
+  })
 
-  const legacyOutcome = await legacyProvider.send(createBegunGoogleChatContext())
-  assertProviderResult(legacyOutcome, "retry_wait", "transient_pre_dispatch_failure")
-  assert.equal(legacyOutcome.providerResponseCode, "408")
-  assert.ok(legacyOutcome.nextAttemptAt)
+  for (const provider of [legacyProvider, invalidPolicyProvider]) {
+    const legacyOutcome = await provider.send(createBegunGoogleChatContext())
+    assertProviderResult(legacyOutcome, "retry_wait", "transient_pre_dispatch_failure")
+    assert.equal(legacyOutcome.providerResponseCode, "408")
+    assert.ok(legacyOutcome.nextAttemptAt)
+  }
 
   const canonicalOutcome = await canonicalProvider.send(createBegunGoogleChatContext())
   assertProviderResult(canonicalOutcome, "delivery_unknown", "provider_ambiguous_response")
@@ -2347,11 +2353,17 @@ test("Web Push 408은 legacy 기본값에서는 재시도하고 canonical 명시
     sendNotification: async () => ({ statusCode: 408 }),
     http408Disposition: "delivery_unknown",
   })
+  const invalidPolicyProvider = createWebPushProvider({
+    sendNotification: async () => ({ statusCode: 408 }),
+    http408Disposition: "invalid_policy_value",
+  })
 
-  const legacyOutcome = await legacyProvider.send(createBegunWebPushContext())
-  assertProviderResult(legacyOutcome, "retry_wait", "transient_pre_dispatch_failure")
-  assert.equal(legacyOutcome.providerResponseCode, "408")
-  assert.ok(legacyOutcome.nextAttemptAt)
+  for (const provider of [legacyProvider, invalidPolicyProvider]) {
+    const legacyOutcome = await provider.send(createBegunWebPushContext())
+    assertProviderResult(legacyOutcome, "retry_wait", "transient_pre_dispatch_failure")
+    assert.equal(legacyOutcome.providerResponseCode, "408")
+    assert.ok(legacyOutcome.nextAttemptAt)
+  }
 
   const canonicalOutcome = await canonicalProvider.send(createBegunWebPushContext())
   assertProviderResult(canonicalOutcome, "delivery_unknown", "provider_ambiguous_response")
