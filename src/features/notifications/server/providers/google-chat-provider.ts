@@ -150,7 +150,14 @@ export function createGoogleChatProvider(input: { fetch: FetchTransport }) {
           errorSummary: "provider result unavailable",
         })
       }
-      if (response.status === 408 || response.status === 425) {
+      if (response.status === 408) {
+        return result("delivery_unknown", "provider_ambiguous_response", {
+          providerResponseCode: responseCode,
+          errorCode: "provider_transport_error",
+          errorSummary: "provider result unavailable",
+        })
+      }
+      if (response.status === 425) {
         return result("retry_wait", "transient_pre_dispatch_failure", {
           providerResponseCode: responseCode,
           errorCode: "transient_pre_dispatch_failure",

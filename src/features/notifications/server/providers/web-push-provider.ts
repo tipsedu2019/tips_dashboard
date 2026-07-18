@@ -94,7 +94,14 @@ function classifyFailure(error: unknown): NotificationProviderResult {
       errorSummary: "provider result unavailable",
     })
   }
-  if (statusCode === 408 || statusCode === 425) {
+  if (statusCode === 408) {
+    return result("delivery_unknown", "provider_ambiguous_response", {
+      providerResponseCode: responseCode,
+      errorCode: "provider_transport_error",
+      errorSummary: "provider result unavailable",
+    })
+  }
+  if (statusCode === 425) {
     return result("retry_wait", "transient_pre_dispatch_failure", {
       providerResponseCode: responseCode,
       errorCode: "transient_pre_dispatch_failure",
