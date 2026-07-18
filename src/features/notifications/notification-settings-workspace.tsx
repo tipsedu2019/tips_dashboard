@@ -32,7 +32,7 @@ export function NotificationSettingsWorkspace({
 
   if (availability.status === "disabled") {
     return (
-      <Card className="mx-auto max-w-2xl">
+      <Card className="mx-auto w-full max-w-2xl">
         <CardHeader>
           <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-muted">
             <BellRing className="size-5" />
@@ -51,7 +51,7 @@ export function NotificationSettingsWorkspace({
 
   if (availability.status === "unavailable") {
     return (
-      <Card className="mx-auto max-w-2xl">
+      <Card className="mx-auto w-full max-w-2xl">
         <CardHeader>
           <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-muted">
             <BellRing className="size-5" />

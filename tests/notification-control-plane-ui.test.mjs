@@ -444,6 +444,17 @@ test("전역 페이지는 redirect 없이 쿼리 탭과 한글 비활성·확인
   assert.match(workspaceSource, /initialSection/)
 })
 
+test("알림 설정 준비 상태 카드는 좁은 고유 폭으로 축소되지 않고 사용 가능한 너비를 채운다", async () => {
+  const source = await readOptionalSource(
+    "src/features/notifications/notification-settings-workspace.tsx",
+  )
+
+  assert.equal(
+    source.match(/<Card className="mx-auto w-full max-w-2xl">/g)?.length,
+    2,
+  )
+})
+
 test("대시보드 알림함은 viewer ID 없이 서버의 세 RPC 결과만 사용한다", async () => {
   const [popoverSource, serviceSource] = await Promise.all([
     readOptionalSource("src/components/dashboard-notification-popover.tsx"),
