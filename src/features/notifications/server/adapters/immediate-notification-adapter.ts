@@ -94,6 +94,16 @@ function connectionKeyFor(input: NotificationResolveInput) {
   return expected
 }
 
+function audienceTarget(audienceKey: string): NotificationTarget {
+  return {
+    targetKind: "audience",
+    targetKey: `audience:${audienceKey}`,
+    targetProfileId: null,
+    connectionKey: null,
+    targetSnapshot: Object.freeze({ audience_key: audienceKey }),
+  }
+}
+
 function resolveImmediateTargets(
   config: ImmediateNotificationAdapterConfig,
   input: NotificationResolveInput,
@@ -105,6 +115,9 @@ function resolveImmediateTargets(
     || !config.sourceTypes.includes(input.sourceType)
     || !isRecord(input.payload)
   ) {
+    throw new Error("notification_payload_schema_unsupported")
+  }
+  if (!Object.hasOwn(config.audienceProfileFields, input.rule.audienceKey)) {
     throw new Error("notification_payload_schema_unsupported")
   }
 
@@ -131,6 +144,10 @@ function resolveImmediateTargets(
     }))
   } else {
     throw new Error("notification_payload_schema_unsupported")
+  }
+
+  if (targets.length === 0) {
+    targets = [audienceTarget(input.rule.audienceKey)]
   }
 
   targets.sort((left, right) => left.targetKey.localeCompare(right.targetKey))

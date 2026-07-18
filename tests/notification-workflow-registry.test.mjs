@@ -569,7 +569,7 @@ test("six immediate adapters resolve only their exact profile and Chat audiences
   for (const [subject, expected] of [
     ["math_high", "connection:google_chat.math"],
     ["english", "connection:google_chat.english"],
-    ["unknown", null],
+    ["unknown", "audience:subject_team"],
   ]) {
     const targets = await makeup.resolveTargets(resolveInput({
       workflowKey: "makeup_requests",
@@ -577,8 +577,55 @@ test("six immediate adapters resolve only their exact profile and Chat audiences
       payload: { ...payload, approval_group: subject },
       rule: { ...resolveInput().rule, audienceKey: "subject_team", channelKey: "google_chat" },
     }))
-    assert.deepEqual(targets.targets.map((target) => target.targetKey), expected ? [expected] : [])
+    assert.deepEqual(targets.targets.map((target) => target.targetKey), [expected])
   }
+})
+
+test("immediate adapters preserve no-recipient evidence with one canonical audience target", async () => {
+  const registry = await import(registryUrl.href)
+  const tasks = registry.getNotificationWorkflowAdapter("tasks")
+  const noProfiles = await tasks.resolveTargets(resolveInput({
+    payload: {
+      task_id: "00000000-0000-4000-8000-000000000060",
+      management_profile_ids: ["not-a-profile-id"],
+    },
+  }))
+  const audienceTarget = {
+    targetKind: "audience",
+    targetKey: "audience:management_team",
+    targetProfileId: null,
+    connectionKey: null,
+    targetSnapshot: { audience_key: "management_team" },
+  }
+  assert.deepEqual(noProfiles.targets, [audienceTarget])
+  assert.equal(noProfiles.targetSetHash, (await tasks.resolveTargets(resolveInput({
+    payload: {
+      task_id: "00000000-0000-4000-8000-000000000060",
+      management_profile_ids: ["not-a-profile-id"],
+    },
+  }))).targetSetHash)
+
+  const makeup = registry.getNotificationWorkflowAdapter("makeup_requests")
+  const unknownSubject = await makeup.resolveTargets(resolveInput({
+    workflowKey: "makeup_requests",
+    sourceType: "makeup_request_event",
+    payload: {
+      makeup_request_id: "00000000-0000-4000-8000-000000000061",
+      approval_group: "unknown",
+    },
+    rule: {
+      ...resolveInput().rule,
+      audienceKey: "subject_team",
+      channelKey: "google_chat",
+    },
+  }))
+  assert.deepEqual(unknownSubject.targets, [{
+    targetKind: "audience",
+    targetKey: "audience:subject_team",
+    targetProfileId: null,
+    connectionKey: null,
+    targetSnapshot: { audience_key: "subject_team" },
+  }])
 })
 
 test("휴보강 과목 Chat은 권위 approval_group 세 값만 허용하고 audience와 connection 불일치를 닫는다", async () => {
@@ -599,7 +646,13 @@ test("휴보강 과목 Chat은 권위 approval_group 세 값만 허용하고 aud
     })
     if (subject === "unknown") {
       const targets = await adapter.resolveTargets(request)
-      assert.deepEqual(targets.targets, [], subject)
+      assert.deepEqual(targets.targets, [{
+        targetKind: "audience",
+        targetKey: "audience:subject_team",
+        targetProfileId: null,
+        connectionKey: null,
+        targetSnapshot: { audience_key: "subject_team" },
+      }], subject)
     } else {
       await assert.rejects(adapter.resolveTargets(request), /notification_payload_schema_unsupported/, subject)
     }
@@ -615,6 +668,21 @@ test("휴보강 과목 Chat은 권위 approval_group 세 값만 허용하고 aud
         audienceKey: "management_team",
         channelKey: "google_chat",
         connectionKey: "google_chat.executive",
+      },
+    })),
+    /notification_payload_schema_unsupported/,
+  )
+  await assert.rejects(
+    adapter.resolveTargets(resolveInput({
+      workflowKey: "makeup_requests",
+      eventKey: "makeup.submitted",
+      sourceType: "makeup_request_event",
+      payload: { makeup_request_id: PROFILE_A, approval_group: "english" },
+      rule: {
+        ...resolveInput().rule,
+        audienceKey: "unknown_audience",
+        channelKey: "in_app",
+        connectionKey: null,
       },
     })),
     /notification_payload_schema_unsupported/,
