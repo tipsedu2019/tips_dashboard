@@ -18,6 +18,7 @@ import {
   mapDashboardNotificationInboxWire,
   mapDashboardNotificationReadWire,
   mapDashboardNotificationUnreadCountWire,
+  normalizeDashboardNotificationRpcError,
   type DashboardNotification,
   type DashboardNotificationCursor,
   type DashboardNotificationInbox,
@@ -1104,7 +1105,9 @@ export async function loadDashboardNotifications(
     p_before_created_at: cursor?.createdAt ?? null,
     p_before_id: cursor?.id ?? null,
   })
-  if (error) throw error
+  if (error) {
+    throw normalizeDashboardNotificationRpcError(error, "get_dashboard_notification_inbox_v1")
+  }
   return mapDashboardNotificationInboxWire(data)
 }
 
@@ -1112,7 +1115,12 @@ export async function loadDashboardUnreadNotificationCount(): Promise<number> {
   if (!supabase) return 0
 
   const { data, error } = await supabase.rpc("get_dashboard_notification_unread_count_v1")
-  if (error) throw error
+  if (error) {
+    throw normalizeDashboardNotificationRpcError(
+      error,
+      "get_dashboard_notification_unread_count_v1",
+    )
+  }
   return mapDashboardNotificationUnreadCountWire(data)
 }
 
@@ -1126,6 +1134,8 @@ export async function markDashboardNotificationRead(
   const { data, error } = await supabase.rpc("mark_dashboard_notification_read_v1", {
     p_notification_id: notificationId,
   })
-  if (error) throw error
+  if (error) {
+    throw normalizeDashboardNotificationRpcError(error, "mark_dashboard_notification_read_v1")
+  }
   return mapDashboardNotificationReadWire(data)
 }

@@ -4,6 +4,7 @@ import test from "node:test"
 
 const helperUrl = new URL("../src/lib/dashboard-inbox-state.ts", import.meta.url)
 const serviceUrl = new URL("../src/features/makeup-requests/makeup-request-service.ts", import.meta.url)
+const popoverUrl = new URL("../src/components/dashboard-notification-popover.tsx", import.meta.url)
 
 let inboxState = {}
 try {
@@ -50,6 +51,100 @@ test("브라우저 알림 서비스는 viewer ID나 직접 테이블 접근 없�
   assert.doesNotMatch(inboxBlock, /\.from\(["']dashboard_notifications["']\)/)
   assert.doesNotMatch(inboxBlock, /new Map|groupKey|dedupeKey/)
   assert.doesNotMatch(inboxBlock, /\.update\(\{\s*read_at:/)
+})
+
+test("배포 전 DB의 정확한 알림함 RPC 부재만 호환 상태로 분류한다", () => {
+  const classify = inboxState.isDashboardNotificationInboxRpcUnavailable
+  const normalize = inboxState.normalizeDashboardNotificationRpcError
+  const isUnavailable = inboxState.isDashboardNotificationInboxUnavailableError
+  assert.equal(typeof classify, "function")
+  assert.equal(typeof normalize, "function")
+  assert.equal(typeof isUnavailable, "function")
+  if (
+    typeof classify !== "function"
+    || typeof normalize !== "function"
+    || typeof isUnavailable !== "function"
+  ) return
+
+  assert.equal(classify({
+    code: "PGRST202",
+    message: "Could not find the function public.get_dashboard_notification_unread_count_v1 without parameters in the schema cache",
+  }, "get_dashboard_notification_unread_count_v1"), true)
+  assert.equal(classify({
+    code: "42883",
+    message: "function public.get_dashboard_notification_inbox_v1(integer) does not exist",
+  }, "get_dashboard_notification_inbox_v1"), true)
+  assert.equal(classify({
+    message: "Could not find the function public.get_dashboard_notification_unread_count_v1 in the schema cache",
+  }, "get_dashboard_notification_unread_count_v1"), true)
+
+  assert.equal(classify({
+    code: "42501",
+    message: "permission denied for function get_dashboard_notification_unread_count_v1",
+  }, "get_dashboard_notification_unread_count_v1"), false)
+  assert.equal(classify({
+    code: "PGRST202",
+    message: "Could not find the function public.unrelated_rpc in the schema cache",
+  }, "get_dashboard_notification_unread_count_v1"), false)
+  assert.equal(classify({ message: "Failed to fetch" }, "get_dashboard_notification_inbox_v1"), false)
+  assert.equal(classify({ code: "PGRST202" }, "unrelated_rpc"), false)
+
+  const unavailable = normalize({
+    code: "PGRST202",
+    message: "Could not find the function public.mark_dashboard_notification_read_v1 in the schema cache",
+  }, "mark_dashboard_notification_read_v1")
+  assert.equal(unavailable instanceof Error, true)
+  assert.equal(isUnavailable(unavailable), true)
+  assert.equal(unavailable.message, "알림함 기능이 아직 준비되지 않았습니다. 잠시 후 다시 확인해 주세요.")
+
+  const denied = normalize({
+    code: "42501",
+    message: "permission denied for function get_dashboard_notification_unread_count_v1",
+  }, "get_dashboard_notification_unread_count_v1")
+  assert.equal(denied instanceof Error, true)
+  assert.equal(isUnavailable(denied), false)
+  assert.match(denied.message, /42501/)
+  assert.match(denied.message, /permission denied/)
+})
+
+test("알림함 목록·배지·읽음은 이전 DB 오류를 한글 준비 상태로 표시하고 다른 오류는 보존한다", async () => {
+  const [source, popoverSource] = await Promise.all([
+    readFile(serviceUrl, "utf8"),
+    readFile(popoverUrl, "utf8"),
+  ])
+  const inboxBlock = source.slice(source.indexOf("function loadDashboardNotifications"))
+
+  for (const rpcName of [
+    "get_dashboard_notification_inbox_v1",
+    "get_dashboard_notification_unread_count_v1",
+    "mark_dashboard_notification_read_v1",
+  ]) {
+    assert.match(
+      inboxBlock,
+      new RegExp(`normalizeDashboardNotificationRpcError\\(\\s*error,\\s*"${rpcName}",?\\s*\\)`),
+    )
+  }
+  assert.match(popoverSource, /isDashboardNotificationInboxUnavailableError/)
+  assert.match(popoverSource, /DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE/)
+  const unreadBlock = popoverSource.slice(
+    popoverSource.indexOf("const refreshUnreadCount"),
+    popoverSource.indexOf("const refreshPushState"),
+  )
+  assert.match(unreadBlock, /if \(isDashboardNotificationInboxUnavailableError\(error\)\)[\s\S]*return[\s\S]*console\.error\("대시보드 읽지 않은 알림 수 조회 실패"/)
+  const unreadCatch = unreadBlock.slice(unreadBlock.indexOf("} catch (error)"))
+  assert.match(
+    unreadCatch,
+    /const current = inboxStateRef\.current[\s\S]*current\.profileId !== viewerId[\s\S]*viewerIdRef\.current !== viewerId[\s\S]*\) return[\s\S]*if \(isDashboardNotificationInboxUnavailableError\(error\)\)/,
+  )
+
+  const synchronizeBlock = popoverSource.slice(
+    popoverSource.indexOf("const synchronizeUnreadCount"),
+    popoverSource.indexOf("const startMarkRead"),
+  )
+  assert.match(
+    synchronizeBlock,
+    /if \(next === current\) return[\s\S]*setNotificationError\(DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE\)/,
+  )
 })
 
 test("엄격한 inbox wire mapper는 snake_case를 한 번만 매핑한다", () => {

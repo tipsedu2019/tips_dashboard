@@ -25,6 +25,7 @@ import {
   type DashboardNotification,
 } from "@/features/makeup-requests/makeup-request-service"
 import {
+  DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE,
   beginDashboardInboxLinkClick,
   beginDashboardInboxUnreadCountSync,
   completeDashboardInboxMark,
@@ -32,6 +33,7 @@ import {
   createDashboardInboxState,
   failDashboardInboxMark,
   failDashboardInboxUnreadCountSync,
+  isDashboardNotificationInboxUnavailableError,
   type DashboardInboxState,
 } from "@/lib/dashboard-inbox-state"
 import {
@@ -178,6 +180,10 @@ export function DashboardNotificationPopover() {
         || inboxGenerationRef.current !== generation
         || viewerIdRef.current !== viewerId
       ) return
+      if (isDashboardNotificationInboxUnavailableError(error)) {
+        setNotificationError(DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE)
+        return
+      }
       console.error("대시보드 알림 조회 실패", error)
       setNotificationError("알림을 불러오지 못했습니다. 다시 시도하세요.")
     } finally {
@@ -206,12 +212,26 @@ export function DashboardNotificationPopover() {
       const current = inboxStateRef.current
       if (
         current.profileId !== viewerId
+        || viewerIdRef.current !== viewerId
         || current.generation !== generation
         || current.markVersion !== markVersion
         || inboxSnapshotVersionRef.current !== snapshotVersion
       ) return
       commitInboxState({ ...current, unreadCount: count })
     } catch (error) {
+      const current = inboxStateRef.current
+      if (
+        current.profileId !== viewerId
+        || viewerIdRef.current !== viewerId
+        || current.generation !== generation
+        || current.markVersion !== markVersion
+        || inboxSnapshotVersionRef.current !== snapshotVersion
+      ) return
+      if (isDashboardNotificationInboxUnavailableError(error)) {
+        commitInboxState({ ...current, unreadCount: 0 })
+        setNotificationError(DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE)
+        return
+      }
       console.error("대시보드 읽지 않은 알림 수 조회 실패", error)
     }
   }, [commitInboxState, viewerId])
@@ -279,10 +299,14 @@ export function DashboardNotificationPopover() {
       const current = inboxStateRef.current
       const next = completeDashboardInboxUnreadCountSync(current, started.request, count)
       if (next !== current) commitInboxState(next)
-    }).catch(() => {
+    }).catch((error) => {
       const current = inboxStateRef.current
       const next = failDashboardInboxUnreadCountSync(current, started.request)
-      if (next !== current) commitInboxState(next)
+      if (next === current) return
+      commitInboxState(next)
+      if (isDashboardNotificationInboxUnavailableError(error)) {
+        setNotificationError(DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE)
+      }
     })
   }, [commitInboxState])
 
@@ -298,12 +322,14 @@ export function DashboardNotificationPopover() {
       if (next === current) return
       commitInboxState(next)
       synchronizeUnreadCount()
-    }).catch(() => {
+    }).catch((error) => {
       const current = inboxStateRef.current
       const next = failDashboardInboxMark(
         current,
         started.request,
-        "알림을 읽음 처리하지 못했습니다. 다시 시도하세요.",
+        isDashboardNotificationInboxUnavailableError(error)
+          ? DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE
+          : "알림을 읽음 처리하지 못했습니다. 다시 시도하세요.",
       )
       if (next === current) return
       commitInboxState(next)
@@ -464,6 +490,8 @@ export function DashboardNotificationPopover() {
         <div className="max-h-96 overflow-y-auto">
           {loading && notifications.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
+          ) : notificationError && notifications.length === 0 ? (
+            null
           ) : notifications.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">새 알림이 없습니다.</div>
           ) : notifications.map((notification) => {

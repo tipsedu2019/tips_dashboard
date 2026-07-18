@@ -28,6 +28,22 @@ export type DashboardNotificationReadResult = Readonly<{
 
 type WireRecord = Record<string, unknown>
 
+export type DashboardNotificationInboxRpcName =
+  | "get_dashboard_notification_inbox_v1"
+  | "get_dashboard_notification_unread_count_v1"
+  | "mark_dashboard_notification_read_v1"
+
+export const DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE =
+  "알림함 기능이 아직 준비되지 않았습니다. 잠시 후 다시 확인해 주세요."
+
+const DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_CODE =
+  "dashboard_notification_inbox_unavailable"
+const DASHBOARD_NOTIFICATION_INBOX_RPC_NAMES = new Set<string>([
+  "get_dashboard_notification_inbox_v1",
+  "get_dashboard_notification_unread_count_v1",
+  "mark_dashboard_notification_read_v1",
+])
+
 const INBOX_KEYS = ["items", "next_cursor", "unread_count"] as const
 const INBOX_ITEM_KEYS = [
   "actor_profile_id",
@@ -46,6 +62,65 @@ const CURSOR_KEYS = ["created_at", "id"] as const
 const UNREAD_COUNT_KEYS = ["unread_count"] as const
 const READ_RESULT_KEYS = ["newly_read", "notification_id", "read_at", "unread_count"] as const
 const DECIMAL_COUNT_PATTERN = /^(0|[1-9]\d*)$/
+
+function errorField(error: unknown, key: "code" | "details" | "hint" | "message") {
+  if (!error || typeof error !== "object") return ""
+  const value = (error as Record<string, unknown>)[key]
+  return typeof value === "string" ? value.trim() : ""
+}
+
+export function isDashboardNotificationInboxRpcUnavailable(
+  error: unknown,
+  rpcName: string,
+) {
+  if (!DASHBOARD_NOTIFICATION_INBOX_RPC_NAMES.has(rpcName)) return false
+
+  const code = errorField(error, "code").toUpperCase()
+  const message = errorField(error, "message").toLowerCase()
+  const identifiesRpc = message.includes(rpcName.toLowerCase())
+  if (code === "PGRST202") return !message || identifiesRpc
+  if (!identifiesRpc) return false
+
+  if (code === "42883") return message.includes("does not exist")
+  return (
+    message.includes("could not find the function")
+    && message.includes("schema cache")
+  )
+}
+
+class DashboardNotificationInboxUnavailableError extends Error {
+  readonly code = DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_CODE
+
+  constructor() {
+    super(DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_MESSAGE)
+    this.name = "DashboardNotificationInboxUnavailableError"
+  }
+}
+
+export function isDashboardNotificationInboxUnavailableError(error: unknown) {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && (error as Record<string, unknown>).code === DASHBOARD_NOTIFICATION_INBOX_UNAVAILABLE_CODE,
+  )
+}
+
+export function normalizeDashboardNotificationRpcError(
+  error: unknown,
+  rpcName: DashboardNotificationInboxRpcName,
+): Error {
+  if (isDashboardNotificationInboxRpcUnavailable(error, rpcName)) {
+    return new DashboardNotificationInboxUnavailableError()
+  }
+  if (error instanceof Error) return error
+
+  const code = errorField(error, "code")
+  const message = errorField(error, "message")
+    || errorField(error, "details")
+    || errorField(error, "hint")
+    || "알 수 없는 Supabase 오류"
+  return new Error(`${rpcName}${code ? ` [${code}]` : ""}: ${message}`)
+}
 
 function wireInvalid(): never {
   throw new Error("dashboard_notification_wire_invalid")
