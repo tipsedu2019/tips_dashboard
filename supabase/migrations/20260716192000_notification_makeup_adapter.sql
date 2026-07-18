@@ -1003,13 +1003,21 @@ begin
       and (
         (legacy_delivery.channel = 'dashboard_personal'
           and rule.channel_key = 'in_app'
-          and rule.audience_key = case
-            when legacy_delivery.recipient_profile_id = request_row.approver_profile_id
-              then 'approver_profile'
-            when legacy_delivery.recipient_profile_id = request_row.requester_id
-              then 'requester_profile'
-            else null
-          end)
+          and (
+            (legacy_delivery.trigger_kind in ('submitted', 'refund_requested')
+              and rule.audience_key = 'approver_profile'
+              and legacy_delivery.recipient_profile_id = request_row.approver_profile_id)
+            or (legacy_delivery.trigger_kind in ('returned', 'rejected')
+              and rule.audience_key = 'requester_profile'
+              and legacy_delivery.recipient_profile_id = request_row.requester_id)
+            or (legacy_delivery.trigger_kind in ('approved', 'completed', 'canceled')
+              and (
+                (rule.audience_key = 'approver_profile'
+                  and legacy_delivery.recipient_profile_id = request_row.approver_profile_id)
+                or (rule.audience_key = 'requester_profile'
+                  and legacy_delivery.recipient_profile_id = request_row.requester_id)
+              ))
+          ))
         or (legacy_delivery.channel = 'dashboard_management'
           and rule.channel_key = 'in_app'
           and rule.audience_key = 'management_team')
@@ -1023,7 +1031,15 @@ begin
           and rule.channel_key = 'google_chat'
           and rule.audience_key = 'subject_team')
       )
-    order by rule.id
+    order by
+      case
+        when legacy_delivery.channel = 'dashboard_personal'
+          and rule.audience_key = 'approver_profile' then 0
+        when legacy_delivery.channel = 'dashboard_personal'
+          and rule.audience_key = 'requester_profile' then 1
+        else 2
+      end,
+      rule.id
     limit 1;
     if not found then
       raise exception 'notification_makeup_legacy_rule_missing'
