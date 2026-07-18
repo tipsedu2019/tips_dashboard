@@ -117,7 +117,7 @@ function resolveImmediateTargets(
   ) {
     throw new Error("notification_payload_schema_unsupported")
   }
-  if (!Object.hasOwn(config.audienceProfileFields, input.rule.audienceKey)) {
+  if (!Object.prototype.hasOwnProperty.call(config.audienceProfileFields, input.rule.audienceKey)) {
     throw new Error("notification_payload_schema_unsupported")
   }
 

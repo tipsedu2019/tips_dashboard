@@ -28,3 +28,7 @@
 - 프로필 중복 제거, targetKey 정렬, canonical hash 계산은 유지했다.
 - 설정에 없는 audience는 schema 오류로 거부해 잘못된 audience/connection 조합이 fallback으로 넓어지지 않게 했다.
 - 테스트는 순수 어댑터/레지스트리 fixture만 사용했으며 네트워크, DB, provider 호출은 수행하지 않았다.
+
+## 후속 정적 검사 보완
+
+전체 TypeScript 검사에서 현재 컴파일 대상이 `Object.hasOwn`을 제공하지 않는 호환성 오류 1건을 발견했다. 동일한 own-property fail-closed 검사를 `Object.prototype.hasOwnProperty.call`로 교체했고, `tsc --noEmit`과 레지스트리 테스트 11/11을 다시 통과했다.
