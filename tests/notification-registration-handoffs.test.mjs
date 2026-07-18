@@ -368,7 +368,7 @@ test("SOLAPI provider evidence recovery는 canonical delivery와 legacy ownershi
   assert.match(helper, /source_type = 'ops_registration_message'/)
   assert.match(helper, /source_id = p_message_id::text/)
   assert.match(helper, /delivery\.channel_key = 'customer_message'/)
-  assert.match(helper, /v_message\.status is distinct from case p_outcome[\s\S]*when 'sent' then 'accepted'[\s\S]*when 'failed' then 'failed'[\s\S]*else 'unknown'/)
+  assert.match(helper, /v_message\.status is distinct from \(case p_outcome[\s\S]*when 'sent' then 'accepted'[\s\S]*when 'failed' then 'failed'[\s\S]*else 'unknown'/)
   assert.match(helper, /for update of delivery/)
   assert.match(helper, /notification_dispatch_ownership_claims/)
   assert.match(helper, /set status = v_target_status[\s\S]*claimed_by = null[\s\S]*lease_expires_at = null/)
@@ -407,6 +407,18 @@ test("SOLAPI provider evidence recovery는 canonical delivery와 legacy ownershi
   const complete = functionBlock(sql, "public.complete_registration_admission_delivery_v1")
   assert.match(complete, /registration-admission-message:/)
   assert.doesNotMatch(complete, /reconcile_registration_admission_delivery_state_v1/)
+})
+
+test("admission delivery reconciliation parenthesizes the outcome-to-business-status CASE", async () => {
+  const sql = await source(migrationUrl)
+  const helper = functionBlock(
+    sql,
+    "dashboard_private.reconcile_registration_admission_delivery_state_v1",
+  )
+  assert.match(
+    helper,
+    /if v_message\.status is distinct from \(\s*case p_outcome\s*when 'sent' then 'accepted'\s*when 'failed' then 'failed'\s*else 'unknown'\s*end\s*\) then/,
+  )
 })
 
 test("customer_message delivery는 일반 수동 reconciliation으로 우회할 수 없다", async () => {

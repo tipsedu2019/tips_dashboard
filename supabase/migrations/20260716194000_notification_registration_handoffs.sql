@@ -1919,11 +1919,11 @@ begin
   if not found then
     raise exception 'registration_message_not_found' using errcode = 'P0002';
   end if;
-  if v_message.status is distinct from case p_outcome
+  if v_message.status is distinct from (case p_outcome
     when 'sent' then 'accepted'
     when 'failed' then 'failed'
     else 'unknown'
-  end then
+  end) then
     raise exception 'registration_admission_delivery_business_conflict'
       using errcode = '40001';
   end if;
