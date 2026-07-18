@@ -368,28 +368,33 @@ function RuleToggle({
   )
   const preservesExistingRule = rule.enabled && connectionMissing
   const variantLabel = notificationRuleVariantLabel(rule, draft)
+  const connectionMessage = connectionMissing
+    ? preservesExistingRule
+      ? "연결 필요 · 기존 설정과 이력은 유지됩니다."
+      : "연결 필요 · 저장 전에 연결해 주세요."
+    : null
 
   return (
     <div className={cn(
-      "rounded-lg border bg-background p-3",
-      compact ? "space-y-2" : "flex min-w-52 items-center justify-between gap-3",
+      compact ? "space-y-2 rounded-lg border bg-background p-3" :
+        "flex min-w-[11rem] items-center justify-end gap-2",
     )}>
-      <div className="min-w-0 space-y-1">
-        <p className="truncate text-sm font-medium">
-          {rule.audienceLabel ?? rule.audienceKey}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {rule.channelLabel ?? rule.channelKey}
-          {rule.ruleVariantKey === "immediate" ? "" : ` · ${variantLabel}`}
-        </p>
-        {connectionMissing ? (
-          <p className="text-xs font-medium text-amber-700">
-            {preservesExistingRule
-              ? "연결 필요 · 기존 설정과 이력은 유지됩니다."
-              : "연결 필요 · 저장 전에 연결해 주세요."}
+      {compact ? (
+        <div className="min-w-0 space-y-1">
+          <p className="truncate text-sm font-medium">
+            {rule.audienceLabel ?? rule.audienceKey}
           </p>
-        ) : null}
-      </div>
+          <p className="text-xs text-muted-foreground">
+            {rule.channelLabel ?? rule.channelKey}
+            {rule.ruleVariantKey === "immediate" ? "" : ` · ${variantLabel}`}
+          </p>
+          {connectionMessage ? (
+            <p className="text-xs font-medium text-amber-700">{connectionMessage}</p>
+          ) : null}
+        </div>
+      ) : connectionMessage ? (
+        <p className="mr-auto text-xs font-medium text-amber-700">{connectionMessage}</p>
+      ) : null}
       <div className={cn("flex items-center gap-2", compact && "justify-between")}>
         <SwitchPrimitive.Root
           id={`notification-rule-switch-${surfaceKey}-${rule.id}`}
@@ -398,9 +403,9 @@ function RuleToggle({
           checked={value.enabled}
           disabled={saving}
           onCheckedChange={(enabled) => onChange(rule.id, { enabled })}
-          className="data-[state=checked]:bg-primary relative h-5 w-9 shrink-0 rounded-full bg-input transition-colors disabled:opacity-50"
+          className="data-[state=checked]:bg-primary relative h-6 w-11 shrink-0 rounded-full bg-input transition-colors disabled:opacity-50"
         >
-          <SwitchPrimitive.Thumb className="data-[state=checked]:translate-x-4 block size-4 translate-x-0.5 rounded-full bg-background shadow transition-transform" />
+          <SwitchPrimitive.Thumb className="data-[state=checked]:translate-x-5 block size-5 translate-x-0.5 rounded-full bg-background shadow transition-transform" />
         </SwitchPrimitive.Root>
         <Button
           type="button"
@@ -480,15 +485,15 @@ function RulesView({
           </Button>
         </div>
       ) : null}
-      <div className="hidden overflow-x-auto rounded-xl border md:block">
-        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+      <div className="hidden overflow-x-auto rounded-lg border border-border/70 bg-background md:block">
+        <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm">
           <thead>
-            <tr className="border-b bg-muted/50 text-xs text-muted-foreground">
-              <th scope="col" className="w-[24%] px-4 py-3 font-medium">이벤트</th>
-              <th scope="col" className="w-[16%] px-3 py-3 font-medium">대상</th>
-              <th scope="col" className="w-[15%] px-3 py-3 font-medium">채널</th>
-              <th scope="col" className="w-[13%] px-3 py-3 font-medium">시점</th>
-              <th scope="col" className="px-3 py-3 font-medium">설정</th>
+            <tr className="h-9 border-b bg-muted/40 text-xs text-muted-foreground">
+              <th scope="col" className="w-[24%] px-4 py-2 font-medium">이벤트</th>
+              <th scope="col" className="w-[16%] px-3 py-2 font-medium">대상</th>
+              <th scope="col" className="w-[15%] px-3 py-2 font-medium">채널</th>
+              <th scope="col" className="w-[13%] px-3 py-2 font-medium">시점</th>
+              <th scope="col" className="px-3 py-2 font-medium">설정</th>
             </tr>
           </thead>
           <tbody>
@@ -498,7 +503,7 @@ function RulesView({
                   <th
                     scope="rowgroup"
                     rowSpan={group.rules.length}
-                    className="border-r bg-muted/15 px-4 py-4 font-normal"
+                    className="border-r bg-muted/15 px-4 py-3 font-normal"
                   >
                     {group.groupLabel ? (
                       <p className="text-xs font-medium text-muted-foreground">{group.groupLabel}</p>
@@ -509,13 +514,13 @@ function RulesView({
                     ) : null}
                   </th>
                 ) : null}
-                <td className="px-3 py-4 font-medium">
+                <td className="px-3 py-3 font-medium">
                   {rule.audienceLabel ?? rule.audienceKey}
                 </td>
-                <td className="px-3 py-4 text-muted-foreground">
+                <td className="px-3 py-3 text-muted-foreground">
                   {rule.channelLabel ?? rule.channelKey}
                 </td>
-                <td className="px-3 py-4 text-muted-foreground">
+                <td className="px-3 py-3 text-muted-foreground">
                   {notificationRuleVariantLabel(rule, draft)}
                 </td>
                 <td className="px-3 py-2">
@@ -694,7 +699,7 @@ function ConnectionsView({
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-base font-semibold">연결 (Connections)</h2>
+        <h2 className="text-base font-semibold">연결</h2>
         <p className="text-sm text-muted-foreground">
           저장된 주소는 마스킹해서 표시합니다. 주소 저장만으로 테스트 메시지를 보내지 않습니다.
         </p>
@@ -1243,13 +1248,17 @@ export function NotificationControlPanel({
   ) : (
     <div className="space-y-4">
       {presentation === "page" ? (
-        <nav aria-label="알림 업무 선택" className="flex gap-2 overflow-x-auto pb-1">
+        <nav
+          aria-label="알림 업무 선택"
+          className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/35 p-1 sm:grid-cols-4 xl:grid-cols-7 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {NOTIFICATION_WORKFLOW_OPTIONS.map((option) => (
             <Button
               key={option.key}
               type="button"
               size="sm"
-              variant={activeWorkflow === option.key ? "default" : "outline"}
+              variant={activeWorkflow === option.key ? "default" : "ghost"}
+              className="h-9 w-full px-3"
               aria-pressed={activeWorkflow === option.key}
               onClick={() => {
                 if (activeWorkflow === option.key) return
@@ -1307,11 +1316,16 @@ export function NotificationControlPanel({
         value={activeSection}
         onValueChange={(value) => setActiveSection(value as NotificationControlPanelSection)}
       >
-        <TabsList className="max-w-full overflow-x-auto">
-          <TabsTrigger value="rules">규칙 및 템플릿</TabsTrigger>
-          <TabsTrigger value="deliveries">최근 전달</TabsTrigger>
+        <TabsList
+          className={cn(
+            "grid h-auto w-full rounded-lg border bg-muted/35 p-1",
+            presentation === "page" ? "grid-cols-3" : "grid-cols-2",
+          )}
+        >
+          <TabsTrigger value="rules" className="h-9">규칙 및 템플릿</TabsTrigger>
+          <TabsTrigger value="deliveries" className="h-9">최근 전달</TabsTrigger>
           {presentation === "page" ? (
-            <TabsTrigger value="connections">연결 (Connections)</TabsTrigger>
+            <TabsTrigger value="connections" className="h-9">연결</TabsTrigger>
           ) : null}
         </TabsList>
         <TabsContent value="rules" className="mt-3">
@@ -1365,7 +1379,11 @@ export function NotificationControlPanel({
         </div>
       ) : null}
 
-      <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur">
+      <div
+        className="sticky bottom-3 z-20 -mx-1 flex flex-col gap-2 rounded-lg border bg-background/95 px-3 py-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:items-center sm:justify-between"
+        role="region"
+        aria-label="알림 설정 저장"
+      >
         <div className="min-h-5 text-sm text-muted-foreground" aria-live="polite">
           {statusText ? (
             <span className="inline-flex items-center gap-1.5">
@@ -1392,6 +1410,7 @@ export function NotificationControlPanel({
         </div>
         <Button
           type="button"
+          className="h-9 w-full sm:w-auto"
           disabled={!dirty || saving || conflict !== null}
           onClick={() => void handleSave()}
         >

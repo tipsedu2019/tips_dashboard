@@ -8,7 +8,6 @@ import {
   NotificationControlPanel,
   useNotificationControlPlaneAvailability,
 } from "./notification-control-panel"
-import { NOTIFICATION_WORKFLOW_OPTIONS } from "./notification-control-plane-types"
 
 const WORKFLOW_ORDER_TEXT =
   "할 일 · 영어 단어 재시험 · 등록 · 전반 · 퇴원 · 휴보강 · 전자결재"
@@ -66,18 +65,10 @@ export function NotificationSettingsWorkspace({
   }
 
   return (
-    <div className="space-y-5">
-      <header>
-        <h1 className="text-xl font-semibold">알림 설정</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {NOTIFICATION_WORKFLOW_OPTIONS.length}개 업무의 규칙, 문구, 연결 상태를 한곳에서 관리합니다.
-        </p>
-      </header>
-      <NotificationControlPanel
-        workflowKey="tasks"
-        presentation="page"
-        initialSection={initialSection}
-      />
-    </div>
+    <NotificationControlPanel
+      workflowKey="tasks"
+      presentation="page"
+      initialSection={initialSection}
+    />
   )
 }
