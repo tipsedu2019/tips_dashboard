@@ -922,7 +922,7 @@ begin
   where task.id = v_source.task_id
     and task.type in ('general', 'word_retest', 'transfer', 'withdrawal');
   if not found or pg_catalog.split_part(v_source.event_type, '.', 1) <>
-    case v_task.type when 'general' then 'task' else v_task.type end
+    (case v_task.type when 'general' then 'task' else v_task.type end)
   then
     raise exception 'ops_task_notification_source_mismatch' using errcode = '22023';
   end if;
