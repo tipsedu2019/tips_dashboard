@@ -154,7 +154,9 @@ begin
       else null
     end,
     pg_catalog.coalesce(pg_catalog.max(
-      pg_catalog.extract(epoch from (receipt_rows.observed_at - receipt_rows.previous_at))
+      (pg_catalog.date_part(
+        'epoch', (receipt_rows.observed_at - receipt_rows.previous_at)
+      ))::numeric
     ), 0),
     pg_catalog.coalesce(pg_catalog.sum(receipt_rows.pre_bridge_server_instances), 0),
     pg_catalog.coalesce(pg_catalog.sum(receipt_rows.total_server_instances), 0),

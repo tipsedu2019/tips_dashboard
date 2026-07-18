@@ -920,7 +920,7 @@ begin
   -- 시작 시각을 쓰면 이미 닫힌 evidence 구간에 사후 영수증이 역기록될 수 있다.
   v_now := pg_catalog.clock_timestamp();
   v_current_bucket := pg_catalog.floor(
-    pg_catalog.extract(epoch from v_now) / 300
+    (pg_catalog.date_part('epoch', v_now))::numeric / 300
   )::bigint;
   if p_observation_bucket not in (v_current_bucket, v_current_bucket - 1) then
     raise exception 'notification_contract_deployment_receipt_invalid' using errcode = '22023';
@@ -1102,7 +1102,9 @@ begin
       else null
     end,
     pg_catalog.coalesce(pg_catalog.max(
-      pg_catalog.extract(epoch from (receipt_rows.observed_at - receipt_rows.previous_at))
+      (pg_catalog.date_part(
+        'epoch', (receipt_rows.observed_at - receipt_rows.previous_at)
+      ))::numeric
     ), 0),
     pg_catalog.coalesce(pg_catalog.sum(receipt_rows.pre_bridge_server_instances), 0),
     pg_catalog.coalesce(pg_catalog.sum(receipt_rows.total_server_instances), 0),
@@ -1185,7 +1187,9 @@ begin
     'windowStart', p_window_start,
     'windowEnd', p_window_end,
     'bridgeInstalledAt', v_installed_at,
-    'continuousHours', pg_catalog.extract(epoch from (p_window_end - p_window_start)) / 3600,
+    'continuousHours', (
+      pg_catalog.date_part('epoch', (p_window_end - p_window_start))
+    )::numeric / 3600,
     'fullOperatingDayCovered', v_full_day_covered,
     'fullOperatingDayStart', v_full_day_start,
     'untranslatableOldContractTraffic', v_untranslatable,

@@ -10,6 +10,7 @@ const webPushUrl = new URL("../src/app/api/web-push/route.ts", import.meta.url)
 const workerUrl = new URL("../src/app/api/notifications/worker/route.ts", import.meta.url)
 const telemetryUrl = new URL("../supabase/migrations/20260716194500_notification_legacy_contract_telemetry.sql", import.meta.url)
 const closureUrl = new URL("../supabase/migrations/20260716195000_notification_workflow_legacy_closure.sql", import.meta.url)
+const workerScheduleUrl = new URL("../supabase/migrations/20260716195500_notification_worker_schedule.sql", import.meta.url)
 const forwardCompatUrl = new URL("../supabase/migrations/20260716195900_notification_control_plane_forward_compat.sql", import.meta.url)
 const contractVersionUrl = new URL("../src/app/api/notifications/contract-version/route.ts", import.meta.url)
 const deploymentReceiptWriterUrl = new URL("../scripts/record-notification-deployment-receipt.mjs", import.meta.url)
@@ -116,6 +117,37 @@ test("계약 증거표는 service_role 직접 DML을 막고 고정 SECURITY DEFI
   assert.doesNotMatch(source, /registration_appointment'[\s\S]{0,100}legacy\/ops-task/)
   assert.match(source, /'closed', v_closed_at is not null/)
   assert.doesNotMatch(source, /\btitle\b|\bbody\b|recipient|webhook_url|payload_json|endpoint|secret/)
+})
+
+test("관찰·폐쇄·worker 마이그레이션의 epoch 계산은 PostgreSQL 17 호환 date_part만 사용한다", async () => {
+  const migrations = [
+    ["194500 관찰", telemetryUrl, 3],
+    ["195000 폐쇄", closureUrl, 1],
+    ["195500 worker", workerScheduleUrl, 6],
+  ]
+
+  for (const [label, url, expectedEpochCalculationCount] of migrations) {
+    const source = await readFile(url, "utf8")
+    assert.doesNotMatch(
+      source,
+      /\bpg_catalog\.extract\s*\(/i,
+      `${label} 마이그레이션은 특수 문법 EXTRACT를 함수처럼 스키마 한정하면 안 됩니다.`,
+    )
+
+    const epochCalculations = source.match(
+      /\bpg_catalog\.date_part\s*\(\s*'epoch'\s*,/gi,
+    ) ?? []
+    assert.equal(
+      epochCalculations.length,
+      expectedEpochCalculationCount,
+      `${label} 마이그레이션의 모든 epoch 계산은 pg_catalog.date_part('epoch', expression)여야 합니다.`,
+    )
+    assert.doesNotMatch(
+      source,
+      /(?<!pg_catalog\.)\bdate_part\s*\(\s*'epoch'\s*,/i,
+      `${label} 마이그레이션의 date_part는 pg_catalog로 한정해야 합니다.`,
+    )
+  }
 })
 
 test("194500 관찰 번들은 휴보강 delivery intent RPC를 먼저 제공하고 195900이 같은 계약을 안전하게 교체한다", async () => {

@@ -269,7 +269,9 @@ begin
       else null
     end,
     pg_catalog.coalesce(pg_catalog.max(
-      pg_catalog.extract(epoch from (receipt_rows.observed_at - receipt_rows.previous_at))
+      (pg_catalog.date_part(
+        'epoch', (receipt_rows.observed_at - receipt_rows.previous_at)
+      ))::numeric
     ), 0),
     pg_catalog.coalesce(pg_catalog.bool_and(
       receipt_rows.contract_version = 2
@@ -1859,9 +1861,9 @@ begin
       delivery.channel_key,
       delivery.status,
       pg_catalog.count(*)::integer as count,
-      pg_catalog.greatest(0, pg_catalog.floor(pg_catalog.extract(epoch from (
+      pg_catalog.greatest(0, pg_catalog.floor((pg_catalog.date_part('epoch', (
         v_now - pg_catalog.min(coalesce(delivery.next_attempt_at, delivery.scheduled_for))
-      ))))::integer as oldest_pending_age_seconds
+      )))::numeric))::integer as oldest_pending_age_seconds
     from dashboard_private.notification_deliveries delivery
     join dashboard_private.notification_events event_row on event_row.id = delivery.event_id
     where delivery.status in ('pending', 'claimed', 'sending', 'retry_wait')
@@ -1905,9 +1907,9 @@ begin
 
   select coalesce(pg_catalog.greatest(
     0,
-    pg_catalog.floor(pg_catalog.extract(epoch from (
+    pg_catalog.floor((pg_catalog.date_part('epoch', (
       v_now - pg_catalog.min(coalesce(delivery.next_attempt_at, delivery.scheduled_for))
-    )))
+    )))::numeric)
   ), 0)::bigint into v_pending_lag
   from dashboard_private.notification_deliveries delivery
   join dashboard_private.notification_events event_row on event_row.id = delivery.event_id
@@ -1920,7 +1922,9 @@ begin
   if v_worker_heartbeat is not null then
     v_worker_missed := pg_catalog.greatest(
       0,
-      pg_catalog.floor(pg_catalog.extract(epoch from (v_now - v_worker_heartbeat)) / 60)::integer
+      pg_catalog.floor((
+        pg_catalog.date_part('epoch', (v_now - v_worker_heartbeat))
+      )::numeric / 60)::integer
     );
   end if;
 
@@ -2063,13 +2067,13 @@ begin
     'worker_heartbeat_at', v_worker_heartbeat,
     'watchdog_heartbeat_at', v_watchdog_heartbeat,
     'worker_heartbeat_age_seconds', case when v_worker_heartbeat is null then null else
-      pg_catalog.greatest(0, pg_catalog.floor(pg_catalog.extract(epoch from (
+      pg_catalog.greatest(0, pg_catalog.floor((pg_catalog.date_part('epoch', (
         v_now - v_worker_heartbeat
-      ))))::integer end,
+      )))::numeric))::integer end,
     'watchdog_heartbeat_age_seconds', case when v_watchdog_heartbeat is null then null else
-      pg_catalog.greatest(0, pg_catalog.floor(pg_catalog.extract(epoch from (
+      pg_catalog.greatest(0, pg_catalog.floor((pg_catalog.date_part('epoch', (
         v_now - v_watchdog_heartbeat
-      ))))::integer end,
+      )))::numeric))::integer end,
     'worker_stop_latch', v_latch.stopped,
     'worker_stop_latch_revision', v_latch.revision::text,
     'queue', v_queue,
