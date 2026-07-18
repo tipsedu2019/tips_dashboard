@@ -98,6 +98,23 @@ test("보관 delivery는 실제 원본 이벤트 occurrence와 안전 스냅샷 
   assert.doesNotMatch(sql, /fetch\s*\(|http_post|net\.http/i)
 })
 
+test("보관 delivery import는 event_key 컬럼과 로컬 변수를 명확히 구분한다", async () => {
+  const sql = await optionalSource(migrationUrl)
+  const importer = functionBlock(
+    sql,
+    "dashboard_private.notification_import_makeup_retained_state_v1",
+    "dashboard_private.notification_makeup_payload_v1",
+  )
+
+  assert.match(importer, /\bv_event_key text;/)
+  assert.match(importer, /v_event_key := dashboard_private\.notification_makeup_event_key_v1\(/)
+  assert.match(importer, /if v_event_key is null then/)
+  assert.equal((importer.match(/rule\.event_key = v_event_key/g) ?? []).length, 2)
+  assert.match(importer, /'makeup_requests',\s+v_event_key,\s+'makeup_request_event'/)
+  assert.match(importer, /canonical_event\.event_key = v_event_key/)
+  assert.doesNotMatch(importer, /\bevent_key text;/)
+})
+
 test("500건 보관 경계는 삭제하지 않고 singleton과 append-only 관측을 함께 남긴다", async () => {
   const sql = await optionalSource(migrationUrl)
   const prune = functionBlock(sql, "public.prune_makeup_notification_deliveries")

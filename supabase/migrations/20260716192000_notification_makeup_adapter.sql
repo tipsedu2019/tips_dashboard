@@ -916,7 +916,7 @@ declare
   delivery_id uuid;
   claim_id uuid;
   notification_id uuid;
-  event_key text;
+  v_event_key text;
   event_rule_snapshot jsonb;
   legacy_snapshot jsonb;
   source_checksum text;
@@ -943,10 +943,10 @@ begin
     where receipt.legacy_delivery_id is null
     order by delivery.created_at, delivery.id
   loop
-    event_key := dashboard_private.notification_makeup_event_key_v1(
+    v_event_key := dashboard_private.notification_makeup_event_key_v1(
       legacy_delivery.trigger_kind
     );
-    if event_key is null then
+    if v_event_key is null then
       raise exception 'notification_makeup_legacy_trigger_unsupported'
         using errcode = '55000', detail = legacy_delivery.id::text;
     end if;
@@ -999,7 +999,7 @@ begin
     select rule.* into rule_row
     from dashboard_private.notification_rules rule
     where rule.workflow_key = 'makeup_requests'
-      and rule.event_key = event_key
+      and rule.event_key = v_event_key
       and (
         (legacy_delivery.channel = 'dashboard_personal'
           and rule.channel_key = 'in_app'
@@ -1049,7 +1049,7 @@ begin
       from dashboard_private.notification_rules rule
       where rule.scope_key = 'global'
         and rule.workflow_key = 'makeup_requests'
-        and rule.event_key = event_key
+        and rule.event_key = v_event_key
     ) snapshot;
     if pg_catalog.jsonb_array_length(event_rule_snapshot) = 0 then
       raise exception 'notification_makeup_legacy_event_rules_missing'
@@ -1076,7 +1076,7 @@ begin
       event_id,
       'global',
       'makeup_requests',
-      event_key,
+      v_event_key,
       'makeup_request_event',
       source_event.id::text,
       null,
@@ -1101,7 +1101,7 @@ begin
       from dashboard_private.notification_events canonical_event
       where canonical_event.id = event_id
         and canonical_event.workflow_key = 'makeup_requests'
-        and canonical_event.event_key = event_key
+        and canonical_event.event_key = v_event_key
         and canonical_event.source_type = 'makeup_request_event'
         and canonical_event.source_id = source_event.id::text
         and canonical_event.occurrence_key = source_event.id::text
