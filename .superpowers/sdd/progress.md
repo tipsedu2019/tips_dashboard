@@ -25,6 +25,7 @@
 
 실행하지 않은 운영 작업: 실제 PostgreSQL pgTAP, 원격 마이그레이션, 플래그 변경, 일정 설치, 24시간·7일 관찰, 소유자 전환, 실제 Google Chat·Web Push·SOLAPI 발송, 원격 저장소 전송과 배포. 이 항목들은 현재 로컬 구현 완료 범위에 포함되지 않습니다.
 
-작업 23: 완료. Google Chat·Web Push의 HTTP 408을 자동 재시도하지 않는 `delivery_unknown`으로 종결하고 425의 bounded retry를 보존했습니다. 독립 리뷰를 통과했습니다.
+작업 23: 완료. 새 canonical worker의 Google Chat·Web Push HTTP 408을 자동 재시도하지 않는 `delivery_unknown`으로 종결하고 425의 bounded retry를 보존했습니다.
 작업 24: 완료. 즉시형 규칙의 수신자 0명과 과목 Chat `unknown`을 `audience` 증거로 남겨 `skipped/no_recipient`로 기록할 수 있게 했습니다. TypeScript 호환성 보완과 독립 재리뷰까지 통과했습니다.
-작업 25: 조용한 종단간 검증 완료. Supabase 운영 쓰기·실제 공급자 호출 없이 174개 규칙, 7개 업무, 취소·재시도·중복·대상 계약을 확인했습니다. 알림 회귀 `335/335`, 전체 Node `1497/1497`, TypeScript, ESLint, 브라우저 7/7, 순수 preview 10/10 두 번을 통과했고 실제 발송은 계속 꺼져 있습니다.
+작업 25: 조용한 종단간 검증 완료. Supabase 운영 쓰기·실제 공급자 호출 없이 174개 규칙, 7개 업무, 취소·재시도·중복·대상 계약을 확인했습니다. 알림 회귀 `337/337`, 전체 Node `1499/1499`, TypeScript, ESLint, 브라우저 7/7, 순수 preview 10/10 두 번을 통과했고 새 시스템 실제 발송은 계속 꺼져 있습니다.
+작업 26: 완료. 최종 리뷰에서 발견한 공용 provider 경계를 바로잡아 legacy route의 408 기본 동작을 기존 `retry_wait`으로 보존하고, canonical production worker만 명시 정책으로 `delivery_unknown`을 사용하게 했습니다. audience의 `skipped/no_recipient`와 worker claim 제외도 한 계약 테스트로 연결했습니다.

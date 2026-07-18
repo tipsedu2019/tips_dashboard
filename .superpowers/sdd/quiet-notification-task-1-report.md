@@ -2,7 +2,7 @@
 
 ## 결과
 
-Google Chat과 Web Push에서 POST 이후 HTTP 408을 받으면 자동 재시도하지 않고 `delivery_unknown`으로 종결하도록 보완했다. HTTP 425는 기존대로 명시적 사전 거절로 분류해 `retry_wait`을 유지한다.
+처음에는 Google Chat과 Web Push의 HTTP 408을 공용 provider에서 `delivery_unknown`으로 종결하도록 보완했다. 최종 검토에서 이 기본값이 기존 legacy 경로까지 바꿀 수 있음을 발견했고, 작업 3에서 legacy 기본값은 기존 `retry_wait`으로 복원한 뒤 canonical production worker만 명시적으로 `delivery_unknown`을 사용하도록 격리했다. HTTP 425는 모든 경로에서 기존 `retry_wait`을 유지한다.
 
 ## TDD 검증
 
@@ -21,9 +21,10 @@ Google Chat과 Web Push에서 POST 이후 HTTP 408을 받으면 자동 재시도
 
 - 실제 네트워크, DB, 공급자 호출은 하지 않았으며 주입된 fixture transport만 사용했다.
 - 429, 425, 5xx 및 다른 상태 코드의 기존 분류는 변경하지 않았다.
-- 408 결과는 `nextAttemptAt=null`이므로 worker의 자동 재발송 대상이 되지 않는다.
+- 최종 canonical 408 결과는 `nextAttemptAt=null`이므로 worker의 자동 재발송 대상이 되지 않는다. legacy provider 호출의 생략 기본값은 수정 전과 같은 `retry_wait`이다.
 - `.pnpm-store/`는 변경하거나 스테이징하지 않았다.
 
 ## 커밋
 
 - 구현 및 테스트: `a11bd088fc9ad1bd2bc9a052d768d2d2061b6d8c` (`fix: stop retrying ambiguous 408 notifications`)
+- legacy 보존 격리 후속: `6cd74956766dcac879604e3da4cf1e0a5e3d9510` (`fix: isolate canonical HTTP 408 notification policy`)
