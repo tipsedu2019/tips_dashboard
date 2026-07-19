@@ -256,6 +256,15 @@ test("case list renders application-scoped desktop and mobile rows", async () =>
   assert.match(source, /break-words \[overflow-wrap:anywhere\]/);
 });
 
+test("desktop application rows provide one table cell for each column while mobile cards stay shared", async () => {
+  const source = await readListSource();
+  const desktopSource = sourceBetween(source, 'data-testid="registration-case-desktop-list"', "{hasMore ? (");
+
+  assert.match(desktopSource, /<RegistrationCaseListRow item=\{item\}[\s\S]*?cellRole="cell"/);
+  assert.match(source, /role=\{cellRole\}/);
+  assert.equal((source.match(/role=\{cellRole\}/g) || []).length, 3);
+});
+
 test("registration summaries wrap long operational values instead of clipping them", async () => {
   const editorSource = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8");
   const enrollmentSource = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8");

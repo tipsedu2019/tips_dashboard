@@ -111,9 +111,12 @@ export function filterRegistrationCaseListItems(
 ): RegistrationCaseListViewItem[] {
   const normalizedQuery = normalizeRegistrationCaseSearchText(query)
   const matched = items.flatMap((item) => {
-    const matchingTracks = getRegistrationCaseMatchedTracks(item, viewKey)
+    const sourceMatchedTracks = getRegistrationCaseMatchedTracks(item, viewKey)
+    const matchingTracks = viewKey === "consulting"
+      ? [...sourceMatchedTracks].sort(compareConsultationTracks)
+      : sourceMatchedTracks
     if (matchingTracks.length === 0 || !matchesRegistrationCaseSearch(item, matchingTracks, normalizedQuery)) return []
-    const representativeTrack = getRepresentativeTrack(matchingTracks, viewKey)
+    const representativeTrack = matchingTracks[0]
     return [{
       ...item,
       viewKey,
@@ -136,14 +139,6 @@ export function getRegistrationCaseTrackTimeValue(
   if (track.status === "consultation_waiting") return track.phoneReadyAt || ""
   if (track.status === "visit_consultation_scheduled") return track.visitScheduledAt
   return track.stageEnteredAt
-}
-
-function getRepresentativeTrack(
-  matchingTracks: RegistrationCaseListTrackItem[],
-  viewKey: RegistrationTrackViewKey,
-): RegistrationCaseListTrackItem {
-  if (viewKey !== "consulting") return matchingTracks[0]
-  return [...matchingTracks].sort(compareConsultationTracks)[0]
 }
 
 function compareConsultationCaseItems(

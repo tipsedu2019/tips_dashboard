@@ -155,7 +155,7 @@ test("consultation puts phone work before visits and sorts valid readiness times
   assert.deepEqual(source.map((item) => item.id), ["visit", "late", "early", "invalid", "missing"])
 })
 
-test("the representative is the first sorted matching track while matching tracks keep source order", () => {
+test("consultation matching tracks use phone-first display order without mutating source items", () => {
   const items = buildRegistrationCaseListItems([
     registrationCase({
       id: "case-1",
@@ -167,8 +167,9 @@ test("the representative is the first sorted matching track while matching track
   ])
 
   const [result] = filterRegistrationCaseListItems(items, "consulting")
-  assert.deepEqual(result.matchingTracks.map((item) => item.trackId), ["visit", "phone"])
+  assert.deepEqual(result.matchingTracks.map((item) => item.trackId), ["phone", "visit"])
   assert.equal(result.representativeTrack.trackId, "phone")
+  assert.deepEqual(items[0].tracks.map((item) => item.trackId), ["visit", "phone"])
 })
 
 test("consultation sort ties use task IDs and do not mutate input", () => {

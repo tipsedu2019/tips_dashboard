@@ -99,9 +99,14 @@ function RegistrationCaseTracks({ item }: { item: RegistrationCaseListViewItem }
   )
 }
 
-function RegistrationCaseMatchingTracks({ item }: { item: RegistrationCaseListViewItem }) {
+type RegistrationCaseRowProps = Omit<RegistrationCaseListProps, "items" | "loading" | "emptyLabel"> & {
+  item: RegistrationCaseListViewItem
+  cellRole?: "cell"
+}
+
+function RegistrationCaseMatchingTracks({ item, cellRole }: Pick<RegistrationCaseRowProps, "item" | "cellRole">) {
   return (
-    <div className="grid min-w-0 gap-1.5 text-xs">
+    <div role={cellRole} className="grid min-w-0 gap-1.5 text-xs">
       {item.matchingTracks.map((track) => (
         <div key={track.trackId} className="min-w-0 break-words [overflow-wrap:anywhere]">
           <span className="font-medium">{track.subject}</span>
@@ -123,7 +128,8 @@ function RegistrationCaseActions({
   onOpen,
   onEdit,
   onAction,
-}: Omit<RegistrationCaseListProps, "items" | "loading" | "emptyLabel"> & { item: RegistrationCaseListViewItem }) {
+  cellRole,
+}: RegistrationCaseRowProps) {
   const representativePermissions = getRegistrationSummaryActionPermissions({
     viewerId,
     viewerRole,
@@ -132,7 +138,7 @@ function RegistrationCaseActions({
   const managementActionLabel = TRACK_MANAGEMENT_LABELS[item.viewKey]
 
   return (
-    <div className="flex min-w-0 flex-wrap justify-end gap-1.5">
+    <div role={cellRole} className="flex min-w-0 flex-wrap justify-end gap-1.5">
       {representativePermissions.canManage ? (
         <Button
           type="button"
@@ -190,14 +196,15 @@ export function RegistrationCaseListRow({
   onOpen,
   onEdit,
   onAction,
-}: Omit<RegistrationCaseListProps, "items" | "loading" | "emptyLabel"> & { item: RegistrationCaseListViewItem }) {
+  cellRole,
+}: RegistrationCaseRowProps) {
   return (
     <>
-      <div className="min-w-0">
+      <div role={cellRole} className="min-w-0">
         <div className="min-w-0 break-words font-medium [overflow-wrap:anywhere]">{item.studentName}</div>
         <div className="mt-1"><RegistrationCaseTracks item={item} /></div>
       </div>
-      <RegistrationCaseMatchingTracks item={item} />
+      <RegistrationCaseMatchingTracks item={item} cellRole={cellRole} />
       <RegistrationCaseActions
         item={item}
         viewerId={viewerId}
@@ -206,6 +213,7 @@ export function RegistrationCaseListRow({
         onOpen={onOpen}
         onEdit={onEdit}
         onAction={onAction}
+        cellRole={cellRole}
       />
     </>
   )
@@ -252,7 +260,7 @@ export function RegistrationCaseList({
             </div>
             {visibleItems.map((item) => (
               <div key={item.taskId} className="grid min-w-0 grid-cols-[minmax(0,1.1fr)_minmax(12rem,1fr)_minmax(13rem,1.2fr)] items-center border-b p-3 text-sm last:border-b-0 hover:bg-muted/30" role="row">
-                <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} onOpen={onOpen} onEdit={onEdit} onAction={onAction} />
+                <RegistrationCaseListRow item={item} viewerId={viewerId} viewerRole={viewerRole} disabled={disabled} onOpen={onOpen} onEdit={onEdit} onAction={onAction} cellRole="cell" />
               </div>
             ))}
           </div>
