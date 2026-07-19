@@ -1540,11 +1540,51 @@ test("remaining subject-owned mutation controls expose their subject in accessib
   assert.match(appointment, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 문의 종료`\}/)
 })
 
-test("ops task workspace owns the registration application aggregate without adding the close guard", async () => {
+test("ops task workspace uses the registration application aggregate in the host close guard", async () => {
   const workspace = await readWorkspaceSource()
 
   assert.match(workspace, /const \[registrationApplicationDirty, setRegistrationApplicationDirty\] = useState\(false\)/)
   assert.match(workspace, /onDirtyChange=\{setRegistrationApplicationDirty\}/)
   assert.match(workspace, /data-registration-application-dirty=\{registrationApplicationDirty \? "true" : "false"\}/)
-  assert.doesNotMatch(workspace, /if \(registrationApplicationDirty\)[\s\S]{0,200}(confirm|preventDefault)/)
+  assert.match(workspace, /registrationApplicationHost\.kind === "detail" && registrationApplicationDirty/)
+  assert.match(workspace, /setConfirmingFormClose\(true\)/)
+})
+
+test("registration create and canonical detail share one explicit application host", async () => {
+  const [workspace, application] = await Promise.all([
+    readWorkspaceSource(),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.match(workspace, /type RegistrationApplicationHostState\s*=/)
+  for (const kind of ["closed", "create", "loading_detail", "detail", "refresh_failed"]) {
+    assert.match(workspace, new RegExp(`kind: "${kind}"`))
+  }
+  assert.equal((workspace.match(/data-registration-application-host/g) || []).length, 1)
+  assert.match(workspace, /data-registration-application-mode=\{registrationApplicationHost\.kind\}/)
+  assert.match(workspace, /registrationApplicationHost\.kind === "create"[\s\S]*?<RegistrationApplicationCreate/)
+  assert.match(workspace, /registrationApplicationHost\.kind === "detail"[\s\S]*?<RegistrationApplication/)
+  assert.match(workspace, /registrationApplicationHost\.kind === "loading_detail"[\s\S]*?등록 신청서를 불러오는 중입니다/)
+  assert.match(workspace, /registrationApplicationHost\.kind === "refresh_failed"[\s\S]*?최신 내용 다시 불러오기/)
+  assert.match(application, /onDirtyChange\?: \(dirty: boolean\) => void/)
+  assert.match(workspace, /onDirtyChange=\{setRegistrationApplicationDirty\}/)
+})
+
+test("registration host owns dirty close protection and clears every application deep link", async () => {
+  const workspace = await readWorkspaceSource()
+  const closeSource = sourceBetween(
+    workspace,
+    "  function requestRegistrationApplicationClose()",
+    "\n  function closeForm()",
+  )
+
+  assert.match(closeSource, /registrationApplicationHost\.kind === "create" && isFormDirty/)
+  assert.match(closeSource, /registrationApplicationHost\.kind === "detail" && registrationApplicationDirty/)
+  assert.match(closeSource, /setConfirmingFormClose\(true\)/)
+  assert.match(closeSource, /closeRegistrationApplicationHost\(\)/)
+  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setRegistrationApplicationHost\(\{ kind: "closed" \}\)/)
+  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setSelectedRegistrationTrackId\(null\)/)
+  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setSelectedRegistrationAppointmentId\(null\)/)
+  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setRegistrationCaseDetail\(null\)/)
+  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?syncTaskDeepLink\(null\)/)
 })

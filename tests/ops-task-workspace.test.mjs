@@ -619,12 +619,16 @@ test("team workflow migration adds review request and explicit team fields", asy
   ]);
 });
 
-test("common registration create owns one shell close while other forms keep dialog and footer controls", async () => {
+test("common registration host owns one shell close while other forms keep dialog and footer controls", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const dialogSource = await readSource("src/components/ui/dialog.tsx");
   const formDialogSource = workspaceSource.slice(
     workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
     workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
+  );
+  const registrationHostSource = workspaceSource.slice(
+    workspaceSource.indexOf("data-registration-application-host"),
+    workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && bulkDeleteTargets.length"),
   );
 
   assertIncludesAll(workspaceSource, [
@@ -648,6 +652,9 @@ test("common registration create owns one shell close while other forms keep dia
     formDialogSource,
     /\{!registrationCreateApplicationRendered && \(\s*<Button type="button" variant="outline" onClick=\{closeForm\}/,
   );
+  assert.match(registrationHostSource, /showCloseButton=\{false\}/);
+  assert.match(registrationHostSource, /closeAction=\{\([\s\S]*?requestRegistrationApplicationClose/);
+  assert.match(registrationHostSource, /registrationApplicationHost\.kind === "detail"[\s\S]*?closeAction=\{registrationDetailCloseAction\}/);
 
   assert.doesNotMatch(formDialogSource, /\bshowCloseButtonText\b/);
   assert.doesNotMatch(workspaceSource, /function blurActiveElementBeforeDialog/);
@@ -1538,8 +1545,8 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     registrationWorkflowSource.indexOf("export function getRegistrationPrefillPipelineStatus"),
   );
   const readyCreateSource = source.slice(
-    source.indexOf('registrationPersistence.mode === "ready_atomic"'),
-    source.indexOf("continue", source.indexOf('registrationPersistence.mode === "ready_atomic"')),
+    source.indexOf('if (createAttempt.writer === "atomic")'),
+    source.indexOf("const inquiryOnlyPayload", source.indexOf('if (createAttempt.writer === "atomic")')),
   );
   const submitFormSource = source.slice(
     source.indexOf("const submitForm = async"),
@@ -4178,11 +4185,79 @@ test("registration create blocker focus uses normalized section IDs and exact fo
   assert.match(initialPlan, /data-registration-focus=\{`counselor:\$\{subject\}`\}/);
 });
 
-test("registration dirty aggregation stays inside the application until the host close guard task", async () => {
+test("registration dirty aggregation drives the application host close guard", async () => {
   const workspace = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const application = await readSource("src/features/tasks/registration-track-editor.tsx");
 
   assert.match(application, /onDirtyChange\?: \(dirty: boolean\) => void/);
   assert.match(application, /dirtyKeysRef/);
-  assert.doesNotMatch(workspace, /registrationApplicationDirty[\s\S]{0,500}window\.confirm/);
+  assert.match(workspace, /registrationApplicationHost\.kind === "detail" && registrationApplicationDirty/);
+  assert.match(workspace, /setConfirmingFormClose\(true\)/);
+});
+
+test("canonical registration writers rehydrate their committed receipt in the same host", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const atomicStart = source.indexOf('if (createAttempt.writer === "atomic")');
+  const atomicEnd = source.indexOf("const inquiryOnlyPayload", atomicStart);
+  const atomic = source.slice(atomicStart, atomicEnd);
+  const canonicalStart = source.indexOf('if (createAttempt.writer === "canonical")');
+  const canonicalEnd = source.indexOf('if (createAttempt.writer === "legacy")', canonicalStart);
+  const canonical = source.slice(canonicalStart, canonicalEnd);
+
+  assert.match(source, /type RegistrationCommittedReceipt = \{[\s\S]*?taskId: string[\s\S]*?tracks:/);
+  assert.match(source, /const rehydrateCommittedRegistrationCase = useCallback/);
+  assert.match(source, /setRegistrationApplicationHost\(\{[\s\S]*?kind: "loading_detail"/);
+  assert.match(source, /loadRegistrationCaseForWorkspace\(committed\.taskId, true\)/);
+  assert.match(source, /const focusTrackId = detail\.tracks\.find\(/);
+  assert.match(source, /committed\.tracks\.some\(\(created\) => created\.id === track\.id\)/);
+  assert.match(source, /setRegistrationApplicationHost\(\{[\s\S]*?kind: "detail"[\s\S]*?taskId: detail\.task\.id/);
+  assert.match(source, /syncTaskDeepLink\(detail\.task\.id, focusTrackId\)/);
+  const rehydrateStart = source.indexOf("const rehydrateCommittedRegistrationCase = useCallback");
+  const rehydrateEnd = source.indexOf("\n  const openDetail", rehydrateStart);
+  const rehydrate = source.slice(rehydrateStart, rehydrateEnd);
+  assert.doesNotMatch(rehydrate, /setFormOpen\(false\)/);
+
+  for (const branch of [atomic, canonical]) {
+    assert.match(branch, /registrationCreateAttemptRef\.current = null/);
+    assert.match(branch, /const committed: RegistrationCommittedReceipt = \{/);
+    assert.match(branch, /await rehydrateCommittedRegistrationCase\(committed\)/);
+    assert.doesNotMatch(branch, /setFormOpen\(false\)/);
+    assert.doesNotMatch(branch, /savedTasks\.push/);
+  }
+  assert.match(atomic, /dispatchRegistrationVisitNotificationTargets\(\s*response\.notificationTargets/);
+  assert.match(atomic, /try \{[\s\S]*?dispatchRegistrationVisitNotificationTargets[\s\S]*?\} catch \{[\s\S]*?setPendingRegistrationVisitNotificationTargets/);
+  assert.match(atomic, /\} catch \{[\s\S]*?await rehydrateCommittedRegistrationCase\(committed\)/);
+  assert.doesNotMatch(canonical, /notificationTargets|dispatchRegistrationVisitNotificationTargets/);
+});
+
+test("post-commit refresh failure is load-only and remains in the registration host", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const helperStart = source.indexOf("const rehydrateCommittedRegistrationCase = useCallback");
+  const helperEnd = source.indexOf("\n  const openDetail", helperStart);
+  const helper = source.slice(helperStart, helperEnd);
+  const retryStart = source.indexOf("function retryCommittedRegistrationCaseRefresh");
+  const retryEnd = source.indexOf("\n  const postRegistrationAdmissionAction", retryStart);
+  const retry = source.slice(retryStart, retryEnd);
+
+  assert.match(helper, /kind: "refresh_failed"/);
+  assert.match(helper, /저장은 완료됐지만 최신 내용을 불러오지 못했습니다/);
+  assert.match(retry, /loadRegistrationCaseForWorkspace/);
+  assert.doesNotMatch(retry, /createRegistrationCaseWithInitialWorkflow|createRegistrationCase\(|createOpsTask\(|requestKey/);
+  assert.match(source, /registrationApplicationHost\.kind === "refresh_failed"[\s\S]*?최신 내용 다시 불러오기/);
+  assert.match(source, /registrationApplicationHost\.kind === "refresh_failed"[\s\S]*?requestRegistrationApplicationClose/);
+});
+
+test("generic form and detail dialogs exclude canonical registration application modes", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const genericFormStart = source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen");
+  const genericDetailStart = source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen");
+  const hostStart = source.indexOf("data-registration-application-host");
+  const genericForm = source.slice(genericFormStart, genericDetailStart);
+  const genericDetail = source.slice(genericDetailStart, hostStart);
+
+  assert.match(source, /\{registrationApplicationHost\.kind === "closed" \? \(\s*<Dialog open=\{workspaceDataBelongsToCurrentViewer && formOpen\}/);
+  assert.match(source, /\{registrationApplicationHost\.kind === "closed" \? \(\s*<Dialog open=\{workspaceDataBelongsToCurrentViewer && detailOpen\}/);
+  assert.doesNotMatch(genericForm, /data-registration-application-host/);
+  assert.doesNotMatch(genericDetail, /data-registration-application-host/);
+  assert.equal((source.match(/data-registration-application-host/g) || []).length, 1);
 });
