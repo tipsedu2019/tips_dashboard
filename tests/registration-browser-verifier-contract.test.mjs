@@ -99,6 +99,18 @@ test("credentialed registration fixture verifier executes the whole case workflo
   assert.match(verifier, /assertRegistrationFixtureSafetySnapshot/)
 })
 
+test("registration fixture verifier targets the one canonical application host and verifies its student", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+
+  assert.match(verifier, /async function getCanonicalRegistrationApplicationHost/)
+  assert.match(verifier, /locator\("\[data-registration-application-host\]"\)/)
+  assert.match(verifier, /canonical registration application host count/)
+  assert.match(verifier, /getByRole\("heading", \{ name: studentName, exact: true \}\)/)
+  assert.doesNotMatch(verifier, /name: `등록: \$\{studentName\}`/)
+  assert.doesNotMatch(verifier, /name: "등록: 김예린"/)
+})
+
 test("registration fixture verifier preserves sibling drafts and performs accessibility checks", async () => {
   const source = await readFile(verifierUrl, "utf8")
   const verifier = registrationVerifier(source)

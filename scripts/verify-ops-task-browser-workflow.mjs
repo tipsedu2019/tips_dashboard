@@ -2656,6 +2656,25 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
 
   await recordFixtureSafetySnapshot("initial fixture snapshot")
 
+  async function getCanonicalRegistrationApplicationHost(studentName) {
+    await page.waitForFunction(() => (
+      document.querySelectorAll('[data-registration-application-host]').length > 0
+    ), { timeout: 5000 })
+    const applicationHost = page.locator("[data-registration-application-host]")
+    const hostCount = await applicationHost.count()
+    if (hostCount !== 1) {
+      throw new Error(`canonical registration application host count is ${hostCount}, expected 1.`)
+    }
+    await applicationHost.waitFor({ state: "visible", timeout: 5000 })
+    const studentHeading = applicationHost.getByRole("heading", { name: studentName, exact: true })
+    const studentHeadingCount = await studentHeading.count()
+    if (studentHeadingCount !== 1) {
+      throw new Error(`canonical registration application host has ${studentHeadingCount} ${studentName} headings, expected 1.`)
+    }
+    await studentHeading.waitFor({ state: "visible", timeout: 5000 })
+    return applicationHost
+  }
+
   async function openRegistrationSubjectTrackFixtureCase({
     taskId,
     trackId,
@@ -2673,8 +2692,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     if (appointmentId) search.set("appointmentId", appointmentId)
     if (view) search.set("view", view)
     await navigateRegistrationFixture("open subject-track case", joinUrl(baseUrl, `/admin/registration?${search.toString()}`))
-    const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
-    await dialog.waitFor({ state: "visible", timeout: 5000 })
+    const dialog = await getCanonicalRegistrationApplicationHost(studentName)
     await assertNoHorizontalOverflow(dialog, `${studentName} subject-track fixture`)
     return dialog
   }
@@ -2701,8 +2719,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       && url.searchParams.get("appointmentId") === appointmentId
       && url.searchParams.get("view") === "calendar"
     ), { timeout: 5000 })
-    const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
-    await dialog.waitFor({ state: "visible", timeout: 5000 })
+    const dialog = await getCanonicalRegistrationApplicationHost(studentName)
     const focus = dialog.locator(`[data-registration-appointment-focus="${appointmentId}"]`)
     await focus.waitFor({ state: "visible", timeout: 5000 })
     const focusSection = await focus.evaluate((element) => (
@@ -2761,8 +2778,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     }))
     await waitUntilEnabled(detailButton, `${studentName} ${subject} fixture detail button`)
     await detailButton.click()
-    const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
-    await dialog.waitFor({ state: "visible", timeout: 5000 })
+    const dialog = await getCanonicalRegistrationApplicationHost(studentName)
     await assertNoHorizontalOverflow(dialog, `${studentName} reopened subject-track fixture`)
     if (subject) await selectFixtureSubject(dialog, subject)
     return dialog
@@ -3310,8 +3326,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await closeFixtureDialog(allTerminalDialog)
 
   await navigateRegistrationFixture("reload sibling draft", joinUrl(baseUrl, "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin&taskId=fixture-task-cross-stage&trackId=fixture-track-cross-english"))
-  const siblingDraftDialog = page.getByRole("dialog", { name: "등록: 김예린" }).first()
-  await siblingDraftDialog.waitFor({ state: "visible", timeout: 5000 })
+  const siblingDraftDialog = await getCanonicalRegistrationApplicationHost("김예린")
   const unsavedInquiryRequestNote = "문의 메모 초안은 형제 과목 저장 뒤에도 유지"
   const siblingRequestNote = siblingDraftDialog.getByLabel("요청 사항", { exact: true })
   await siblingRequestNote.fill(unsavedInquiryRequestNote)
