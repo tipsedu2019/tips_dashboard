@@ -1574,17 +1574,17 @@ test("registration host owns dirty close protection and clears every application
   const workspace = await readWorkspaceSource()
   const closeSource = sourceBetween(
     workspace,
-    "  function requestRegistrationApplicationClose()",
-    "\n  function closeForm()",
+    "  const requestRegistrationApplicationClose = useCallback(() =>",
+    "\n\n  useEffect(() => {\n    if (deleteTarget) return",
   )
 
   assert.match(closeSource, /registrationApplicationHost\.kind === "create" && isFormDirty/)
   assert.match(closeSource, /registrationApplicationHost\.kind === "detail" && registrationApplicationDirty/)
   assert.match(closeSource, /setConfirmingFormClose\(true\)/)
   assert.match(closeSource, /closeRegistrationApplicationHost\(\)/)
-  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setRegistrationApplicationHost\(\{ kind: "closed" \}\)/)
-  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setSelectedRegistrationTrackId\(null\)/)
-  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setSelectedRegistrationAppointmentId\(null\)/)
-  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?setRegistrationCaseDetail\(null\)/)
-  assert.match(workspace, /function closeRegistrationApplicationHost\(\)[\s\S]*?syncTaskDeepLink\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setRegistrationApplicationHost\(\{ kind: "closed" \}\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setSelectedRegistrationTrackId\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setSelectedRegistrationAppointmentId\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setRegistrationCaseDetail\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?syncTaskDeepLink\(null\)/)
 })

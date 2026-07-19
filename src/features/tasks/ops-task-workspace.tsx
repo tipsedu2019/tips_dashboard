@@ -166,6 +166,7 @@ import {
 } from "./registration-intake-workflow"
 import {
   dispatchRegistrationVisitNotificationTargets,
+  isRegistrationSubmissionOwnershipCurrent,
   mergeRegistrationVisitNotificationTargets,
   reconcileRegistrationVisitNotificationRetryTargets,
   sendRegistrationVisitNotificationTarget,
@@ -665,6 +666,20 @@ function getRegistrationAppointmentParticipantTrackIds(
     .filter((track) => participantIds.has(track.id))
     .sort((left, right) => (left.subject === "영어" ? 0 : 1) - (right.subject === "영어" ? 0 : 1) || left.id.localeCompare(right.id))
     .map((track) => track.id)
+}
+
+function resolveRegistrationAppointmentFocus(
+  detail: OpsRegistrationCaseDetail,
+  appointmentId: string,
+  preferredTrackId: string | null,
+) {
+  const appointment = detail.appointments.find((item) => item.id === appointmentId) || null
+  const participantTrackIds = getRegistrationAppointmentParticipantTrackIds(detail, appointmentId)
+  if (!appointment || participantTrackIds.length === 0) return null
+  const focusTrackId = preferredTrackId && participantTrackIds.includes(preferredTrackId)
+    ? preferredTrackId
+    : participantTrackIds[0]
+  return { appointment, focusTrackId }
 }
 
 const WITHDRAWAL_NOTIFICATION_CHANNELS: Array<{ key: WithdrawalNotificationChannelKey; label: string }> = [
@@ -8421,6 +8436,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationTrackSelectionRef = useRef("")
   const registrationCreateAttemptRef = useRef<RegistrationCreateAttempt | null>(null)
   const registrationCommittedReceiptRef = useRef<RegistrationCommittedReceipt | null>(null)
+  const registrationCloseDeepLinkRestoreRef = useRef<{
+    taskId: string
+    focusTrackId: string | null
+    appointmentId: string | null
+  } | null>(null)
   const [pendingRegistrationVisitNotificationTargets, setPendingRegistrationVisitNotificationTargets] = useState<RegistrationVisitNotificationTarget[]>([])
   const [retryingRegistrationVisitNotifications, setRetryingRegistrationVisitNotifications] = useState(false)
   const registrationVisitNotificationRetryInFlightRef = useRef(false)
@@ -8582,6 +8602,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setRegistrationCaseDetail(null)
       registrationTrackSelectionRef.current = ""
       registrationCreateAttemptRef.current = null
+      registrationCommittedReceiptRef.current = null
+      registrationCloseDeepLinkRestoreRef.current = null
       registrationVisitNotificationRetryGenerationRef.current += 1
       registrationVisitNotificationRetryInFlightRef.current = false
       setPendingRegistrationVisitNotificationTargets([])
@@ -9768,9 +9790,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         canManageRegistrationWorkflow ? ensureRegistrationOptions() : Promise.resolve(),
       ])
       if (registrationTrackSelectionRef.current !== selectionKey) return null
-      const appointment = detail.appointments.find((item) => item.id === appointmentId) || null
-      const participantTrackIds = getRegistrationAppointmentParticipantTrackIds(detail, appointmentId)
-      if (!appointment || participantTrackIds.length === 0) {
+      const appointmentFocus = resolveRegistrationAppointmentFocus(detail, appointmentId, preferredTrackId)
+      if (!appointmentFocus) {
         setSelectedRegistrationAppointmentId(null)
         setRegistrationCaseDetail(null)
         setRegistrationApplicationHost({ kind: "closed" })
@@ -9779,9 +9800,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         setMessage("예약 정보가 변경되었습니다. 등록 달력을 다시 확인하세요.")
         return null
       }
-      const nextTrackId = preferredTrackId && participantTrackIds.includes(preferredTrackId)
-        ? preferredTrackId
-        : participantTrackIds[0]
+      const { appointment, focusTrackId: nextTrackId } = appointmentFocus
       const exactTask = { ...detail.task, registrationTracks: detail.tracks }
       setRegistrationDetailLoadError("")
       registrationTrackSelectionRef.current = `${taskId}:${nextTrackId}`
@@ -9890,12 +9909,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     try {
       const detail = await loadRegistrationCaseForWorkspace(taskId, true)
       if (registrationTrackSelectionRef.current !== selectionKey) return
-      const appointmentTrackIds = appointmentId
-        ? getRegistrationAppointmentParticipantTrackIds(detail, appointmentId)
-        : []
-      const nextTrackId = detail.tracks.some((track) => track.id === focusTrackId)
-        ? focusTrackId
-        : appointmentTrackIds[0] || detail.tracks[0]?.id || null
+      const appointmentFocus = appointmentId
+        ? resolveRegistrationAppointmentFocus(detail, appointmentId, focusTrackId)
+        : null
+      if (appointmentId && !appointmentFocus) {
+        closeRegistrationApplicationHost()
+        setMessage("예약 정보가 변경되었습니다. 등록 달력을 다시 확인하세요.")
+        return
+      }
+      const nextTrackId = appointmentFocus?.focusTrackId
+        || (detail.tracks.some((track) => track.id === focusTrackId) ? focusTrackId : detail.tracks[0]?.id || null)
       const exactTask = { ...detail.task, registrationTracks: detail.tracks }
       setRegistrationCaseDetail(detail)
       setSelectedTask(exactTask)
@@ -10003,13 +10026,58 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }, [loadRegistrationCaseForWorkspace, openRegistrationTrack, registrationViewerId, registrationViewerRole, reload, syncTaskDeepLink])
 
+  const closeRegistrationApplicationHost = useCallback(() => {
+    setRegistrationApplicationHost({ kind: "closed" })
+    setFormOpen(false)
+    setDetailOpen(false)
+    setSelectedTask(null)
+    setSelectedRegistrationTrackId(null)
+    setSelectedRegistrationAppointmentId(null)
+    setRegistrationCaseDetail(null)
+    setRegistrationDetailLoadError("")
+    setRegistrationApplicationDirty(false)
+    setFormCompletionIntent(null)
+    registrationTrackSelectionRef.current = ""
+    registrationCreateAttemptRef.current = null
+    registrationCommittedReceiptRef.current = null
+    registrationCloseDeepLinkRestoreRef.current = null
+    syncTaskDeepLink(null)
+  }, [syncTaskDeepLink])
+
+  const requestRegistrationApplicationClose = useCallback(() => {
+    if (saving && registrationApplicationHost.kind === "create") return
+    const hasUnsavedInput = (registrationApplicationHost.kind === "create" && isFormDirty)
+      || (registrationApplicationHost.kind === "detail" && registrationApplicationDirty)
+    if (hasUnsavedInput) {
+      formCloseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      setConfirmingFormClose(true)
+      return
+    }
+    setMessage("")
+    setFormCompletionBlockers([])
+    closeRegistrationApplicationHost()
+  }, [closeRegistrationApplicationHost, isFormDirty, registrationApplicationDirty, registrationApplicationHost.kind, saving])
+
   useEffect(() => {
     if (deleteTarget) return
     const currentSearchParams = new URLSearchParams(window.location.search)
     const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
     const deepLinkedTrackId = currentSearchParams.get("trackId") || ""
     const deepLinkedAppointmentId = currentSearchParams.get("appointmentId") || ""
-    if (!deepLinkedTaskId || !data || !workspaceDataBelongsToCurrentViewer) return
+    if (!deepLinkedTaskId) {
+      if (!["loading_detail", "detail", "refresh_failed"].includes(registrationApplicationHost.kind)) return
+      if (!("taskId" in registrationApplicationHost)) return
+      if (registrationApplicationHost.kind === "detail" && registrationApplicationDirty) {
+        registrationCloseDeepLinkRestoreRef.current = {
+          taskId: registrationApplicationHost.taskId,
+          focusTrackId: registrationApplicationHost.focusTrackId,
+          appointmentId: registrationApplicationHost.appointmentId,
+        }
+      }
+      requestRegistrationApplicationClose()
+      return
+    }
+    if (!data || !workspaceDataBelongsToCurrentViewer) return
     const deepLinkedTask = taskById.get(deepLinkedTaskId)
     if (!deepLinkedTask) {
       syncTaskDeepLink(null)
@@ -10068,7 +10136,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationAppointment, openRegistrationTrack, registrationApplicationHost, registrationCaseDetail?.task.id, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationAppointment, openRegistrationTrack, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -10080,36 +10148,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       registrationTrackSelectionRef.current = ""
       syncTaskDeepLink(null)
     }
-  }
-
-  function closeRegistrationApplicationHost() {
-    setRegistrationApplicationHost({ kind: "closed" })
-    setFormOpen(false)
-    setDetailOpen(false)
-    setSelectedRegistrationTrackId(null)
-    setSelectedRegistrationAppointmentId(null)
-    setRegistrationCaseDetail(null)
-    setRegistrationDetailLoadError("")
-    setRegistrationApplicationDirty(false)
-    setFormCompletionIntent(null)
-    registrationTrackSelectionRef.current = ""
-    registrationCreateAttemptRef.current = null
-    registrationCommittedReceiptRef.current = null
-    syncTaskDeepLink(null)
-  }
-
-  function requestRegistrationApplicationClose() {
-    if (saving) return
-    const hasUnsavedInput = (registrationApplicationHost.kind === "create" && isFormDirty)
-      || (registrationApplicationHost.kind === "detail" && registrationApplicationDirty)
-    if (hasUnsavedInput) {
-      formCloseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      setConfirmingFormClose(true)
-      return
-    }
-    setMessage("")
-    setFormCompletionBlockers([])
-    closeRegistrationApplicationHost()
   }
 
   function closeForm() {
@@ -10145,7 +10183,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   function cancelFormCloseConfirmation() {
+    const restoreDeepLink = registrationCloseDeepLinkRestoreRef.current
+    registrationCloseDeepLinkRestoreRef.current = null
     setConfirmingFormClose(false)
+    if (restoreDeepLink) {
+      syncTaskDeepLink(restoreDeepLink.taskId, restoreDeepLink.focusTrackId, restoreDeepLink.appointmentId)
+    }
     window.requestAnimationFrame(() => formCloseReturnFocusRef.current?.focus())
   }
 
@@ -10548,6 +10591,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     event.preventDefault()
     const submissionViewerId = currentUserId
     const submissionViewerGeneration = workspaceViewerGenerationRef.current
+    const submissionRegistrationNotificationSessionToken = registrationNotificationSessionToken
+    const registrationSubmissionStillOwnsWorkspace = () => isRegistrationSubmissionOwnershipCurrent({
+      mounted: workspaceMountedRef.current,
+      submissionViewerId,
+      submissionViewerGeneration,
+      currentViewerId: latestWorkspaceViewerIdRef.current,
+      currentViewerGeneration: workspaceViewerGenerationRef.current,
+    })
     const submissionForm = form
     const registrationCreateBlockers = submissionForm.type === "registration"
       ? getRegistrationCreateBlockers(submissionForm)
@@ -10738,6 +10789,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               probeSubjectRuntime: probeRegistrationSubjectTrackRuntime,
               probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
             })
+            if (!registrationSubmissionStillOwnsWorkspace()) return
             setRegistrationPersistence(registrationPersistence)
             assertRegistrationCreateAttemptPersistenceMode(
               registrationCreateAttemptRef.current,
@@ -10805,32 +10857,31 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 directorOverrides: createAttempt.normalizedInitialWorkflow.directorOverrides,
                 requestKey: createAttempt.requestKey,
               })
-              registrationCreateAttemptRef.current = null
+              if (registrationCreateAttemptRef.current === createAttempt) {
+                registrationCreateAttemptRef.current = null
+              }
               const committed: RegistrationCommittedReceipt = {
                 taskId: response.taskId,
                 tracks: response.tracks,
               }
-              const notificationStateBelongsToSubmissionViewer = (
-                workspaceMountedRef.current
-                && latestWorkspaceViewerIdRef.current === submissionViewerId
-                && workspaceViewerGenerationRef.current === submissionViewerGeneration
-              )
               try {
                 const notificationResult = await dispatchRegistrationVisitNotificationTargets(
                   response.notificationTargets,
-                  (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken),
+                  (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, submissionRegistrationNotificationSessionToken),
                 )
-                if (notificationStateBelongsToSubmissionViewer && notificationResult.failedTargets.length > 0) {
+                if (!registrationSubmissionStillOwnsWorkspace()) return
+                if (notificationResult.failedTargets.length > 0) {
                   setPendingRegistrationVisitNotificationTargets((current) => (
                     mergeRegistrationVisitNotificationTargets(current, notificationResult.failedTargets)
                   ))
                   savedWithNotificationDeliveryFailure = true
                 }
-                if (notificationStateBelongsToSubmissionViewer && notificationResult.warnings.length > 0) {
+                if (notificationResult.warnings.length > 0) {
                   savedWithNotificationAuditWarning = true
                 }
               } catch {
-                if (notificationStateBelongsToSubmissionViewer && response.notificationTargets.length > 0) {
+                if (!registrationSubmissionStillOwnsWorkspace()) return
+                if (response.notificationTargets.length > 0) {
                   setPendingRegistrationVisitNotificationTargets((current) => (
                     mergeRegistrationVisitNotificationTargets(current, response.notificationTargets)
                   ))
@@ -10849,6 +10900,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                     ? "등록을 추가했습니다. 방문상담 알림은 전송하지 못했습니다. 업무는 정상 저장되었습니다."
                     : "등록을 추가했습니다.")
               await rehydrateCommittedRegistrationCase(committed)
+              if (!registrationSubmissionStillOwnsWorkspace()) return
               return
             }
 
@@ -10859,17 +10911,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 inquiryAt: createAttempt.inquiryAt,
                 requestKey: createAttempt.requestKey,
               })
-              registrationCreateAttemptRef.current = null
+              if (registrationCreateAttemptRef.current === createAttempt) {
+                registrationCreateAttemptRef.current = null
+              }
               const committed: RegistrationCommittedReceipt = {
                 taskId: response.taskId,
                 tracks: response.tracks,
               }
+              if (!registrationSubmissionStillOwnsWorkspace()) return
               setFormCompletionBlockers([])
               setFormCompletionIntent(null)
               setConfirmingFormClose(false)
               setQuery("")
               setNotice("등록을 추가했습니다.")
               await rehydrateCommittedRegistrationCase(committed)
+              if (!registrationSubmissionStillOwnsWorkspace()) return
               return
             }
             if (createAttempt.writer === "legacy") {
@@ -10920,13 +10976,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ? `${savedNotice} 최신 상세는 새로고침해 확인하세요.`
           : savedNotice)
     } catch (error) {
+      if (!registrationSubmissionStillOwnsWorkspace()) return
       setMessage(
         submissionForm.type === "registration" && !editingTask
           ? getRegistrationPersistenceErrorMessage(error, getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."))
           : getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."),
       )
     } finally {
-      setSaving(false)
+      if (registrationSubmissionStillOwnsWorkspace()) setSaving(false)
     }
   }
 
@@ -12020,7 +12077,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             </Button>
           </div>
         )}
-        {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && !detailOpen && (
+        {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && !detailOpen && registrationApplicationHost.kind === "closed" && (
           <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
             <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
             {pendingRegistrationVisitNotificationTargets.length > 0 && (
@@ -12052,7 +12109,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             )}
           </div>
         )}
-        {message && !formOpen && !detailOpen && <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">{message}</div>}
+        {message && !formOpen && !detailOpen && registrationApplicationHost.kind === "closed" && <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">{message}</div>}
 
 	        {loading ? (
           isRegistrationWorkspace ? (
@@ -13024,6 +13081,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         >
           {registrationApplicationHost.kind === "create" ? (
             <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
+              <DialogTitle className="sr-only">등록 신청서</DialogTitle>
+              <DialogDescription className="sr-only">새 등록 신청서 내용을 입력합니다.</DialogDescription>
               {registrationOptionsLoading ? (
                 <div role="status" aria-live="polite" className="rounded-md border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
                   상담 책임자·수업·교재 선택 정보를 불러오는 중입니다.
@@ -13131,6 +13190,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             </div>
           ) : registrationApplicationHost.kind === "detail" && registrationCaseDetail && selectedTaskFresh?.type === "registration" ? (
             <div data-registration-application-dirty={registrationApplicationDirty ? "true" : "false"} className="grid gap-4">
+              <DialogTitle className="sr-only">등록 신청서</DialogTitle>
+              <DialogDescription className="sr-only">저장된 등록 신청서 내용을 확인하고 수정합니다.</DialogDescription>
               {(notice || pendingRegistrationVisitNotificationTargets.length > 0) ? (
                 <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
                   <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>

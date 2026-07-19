@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
+import * as registrationNotificationModel from "../src/features/tasks/registration-consultation-notification.js";
 
 const root = new URL("../", import.meta.url);
 
@@ -1794,7 +1795,7 @@ test("committed initial visit notifications expose an in-session notification-on
   ])
   assert.match(
     source,
-    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && \(/,
+    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/,
     "the list-level retry alert must remain visible even after another action clears notice",
   )
   assert.match(
@@ -1832,22 +1833,170 @@ test("committed initial visit notifications expose an in-session notification-on
   ])
 
   const atomicStart = source.indexOf('if (createAttempt.writer === "atomic")')
-  const atomicEnd = source.indexOf("continue", atomicStart)
+  const atomicEnd = source.indexOf("const inquiryOnlyPayload", atomicStart)
   const atomicSource = source.slice(atomicStart, atomicEnd)
   assertInOrder(atomicSource, [
     "createRegistrationCaseWithInitialWorkflow",
+    "registrationCreateAttemptRef.current === createAttempt",
     "registrationCreateAttemptRef.current = null",
     "dispatchRegistrationVisitNotificationTargets",
-    "notificationStateBelongsToSubmissionViewer",
+    "registrationSubmissionStillOwnsWorkspace",
     "setPendingRegistrationVisitNotificationTargets",
   ])
   assert.match(
-    atomicSource,
-    /const notificationStateBelongsToSubmissionViewer = \([\s\S]*?workspaceMountedRef\.current[\s\S]*?latestWorkspaceViewerIdRef\.current === submissionViewerId[\s\S]*?workspaceViewerGenerationRef\.current === submissionViewerGeneration/,
-    "a committed create from a stale viewer must not repopulate the current viewer's retry state",
+    source,
+    /const registrationSubmissionStillOwnsWorkspace = \(\) => isRegistrationSubmissionOwnershipCurrent\(\{[\s\S]*?mounted: workspaceMountedRef\.current[\s\S]*?currentViewerId: latestWorkspaceViewerIdRef\.current[\s\S]*?currentViewerGeneration: workspaceViewerGenerationRef\.current/,
+    "post-commit ownership must be evaluated from live refs rather than cached before an await",
   )
+  assert.doesNotMatch(atomicSource, /const notificationStateBelongsToSubmissionViewer/)
   assert.match(source, /const submissionViewerId = currentUserId[\s\S]*?const submissionViewerGeneration = workspaceViewerGenerationRef\.current/)
 })
+
+test("post-commit registration work rejects a viewer generation change during notification delay", async () => {
+  const isCurrent = registrationNotificationModel.isRegistrationSubmissionOwnershipCurrent;
+  assert.equal(typeof isCurrent, "function", "production must expose the ownership predicate consumed by the workspace");
+
+  const snapshot = { viewerId: "viewer-a", generation: 7 };
+  const live = { mounted: true, viewerId: "viewer-a", generation: 7 };
+  assert.equal(isCurrent({
+    mounted: live.mounted,
+    submissionViewerId: snapshot.viewerId,
+    submissionViewerGeneration: snapshot.generation,
+    currentViewerId: live.viewerId,
+    currentViewerGeneration: live.generation,
+  }), true, "the unchanged submission still owns its workspace generation");
+  let releaseNotification;
+  const notificationDelay = new Promise((resolve) => {
+    releaseNotification = resolve;
+  });
+  const ownsAfterNotification = (async () => {
+    await notificationDelay;
+    return isCurrent({
+      mounted: live.mounted,
+      submissionViewerId: snapshot.viewerId,
+      submissionViewerGeneration: snapshot.generation,
+      currentViewerId: live.viewerId,
+      currentViewerGeneration: live.generation,
+    });
+  })();
+
+  live.generation += 1;
+  releaseNotification();
+  assert.equal(await ownsAfterNotification, false, "a delayed completion cannot own a newer viewer generation");
+  assert.equal(isCurrent({
+    mounted: true,
+    submissionViewerId: snapshot.viewerId,
+    submissionViewerGeneration: snapshot.generation,
+    currentViewerId: "viewer-b",
+    currentViewerGeneration: snapshot.generation,
+  }), false, "matching generations cannot cross viewer identities");
+
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const submitStart = source.indexOf("const submitForm = async");
+  const submitEnd = source.indexOf("\n  const handleFormKeyDown", submitStart);
+  const submit = source.slice(submitStart, submitEnd);
+  const atomicStart = submit.indexOf('if (createAttempt.writer === "atomic")');
+  const atomicEnd = submit.indexOf("const inquiryOnlyPayload", atomicStart);
+  const atomic = submit.slice(atomicStart, atomicEnd);
+  const canonicalStart = submit.indexOf('if (createAttempt.writer === "canonical")');
+  const canonicalEnd = submit.indexOf('if (createAttempt.writer === "legacy")', canonicalStart);
+  const canonical = submit.slice(canonicalStart, canonicalEnd);
+
+  assert.match(submit, /const submissionRegistrationNotificationSessionToken = registrationNotificationSessionToken/);
+  assert.match(submit, /await probeRegistrationInitialPersistence\([\s\S]*?if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return[\s\S]*?setRegistrationPersistence/);
+  const dispatchAt = atomic.indexOf("await dispatchRegistrationVisitNotificationTargets");
+  const postDispatchGuardAt = atomic.indexOf("if (!registrationSubmissionStillOwnsWorkspace()) return", dispatchAt);
+  const retryStateAt = atomic.indexOf("setPendingRegistrationVisitNotificationTargets", dispatchAt);
+  const atomicRehydrateAt = atomic.indexOf("await rehydrateCommittedRegistrationCase(committed)");
+  assert.ok(dispatchAt >= 0 && postDispatchGuardAt > dispatchAt, "atomic notification completion must re-check live ownership");
+  assert.equal(atomic.indexOf("if (!registrationSubmissionStillOwnsWorkspace()) return"), postDispatchGuardAt, "atomic delivery must not be skipped when ownership changes after commit");
+  assert.ok(retryStateAt > postDispatchGuardAt, "stale notifications must not write retry state");
+  assert.ok(atomicRehydrateAt > postDispatchGuardAt, "stale notifications must not rehydrate an old case");
+  assert.match(atomic, /\} catch \{\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return[\s\S]*?setPendingRegistrationVisitNotificationTargets/);
+  assert.match(atomic, /sendRegistrationVisitNotificationTarget\(target, submissionRegistrationNotificationSessionToken\)/);
+  assert.match(atomic, /await rehydrateCommittedRegistrationCase\(committed\)\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return/);
+  assert.match(canonical, /await createRegistrationCase\([\s\S]*?if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return[\s\S]*?await rehydrateCommittedRegistrationCase\(committed\)\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return/);
+  assert.match(submit, /\} catch \(error\) \{\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return\s*setMessage/);
+  assert.match(submit, /\} finally \{\s*if \(registrationSubmissionStillOwnsWorkspace\(\)\) setSaving\(false\)\s*\}/);
+});
+
+test("registration browser-back closure clears canonical state and restores the link when dirty close is canceled", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const deepLinkStart = source.indexOf("useEffect(() => {\n    if (deleteTarget) return");
+  const deepLinkEnd = source.indexOf("\n  function handleDetailOpenChange", deepLinkStart);
+  const deepLink = source.slice(deepLinkStart, deepLinkEnd);
+  const closeStart = source.indexOf("const closeRegistrationApplicationHost = useCallback");
+  const closeEnd = source.indexOf("\n  const requestRegistrationApplicationClose", closeStart);
+  const close = source.slice(closeStart, closeEnd);
+  const cancelStart = source.indexOf("function cancelFormCloseConfirmation");
+  const cancelEnd = source.indexOf("\n  function handleFormOpenChange", cancelStart);
+  const cancel = source.slice(cancelStart, cancelEnd);
+
+  assert.doesNotMatch(deepLink, /if \(!deepLinkedTaskId \|\| !data/);
+  assert.match(deepLink, /if \(!deepLinkedTaskId\) \{[\s\S]*?\["loading_detail", "detail", "refresh_failed"\]\.includes\(registrationApplicationHost\.kind\)/);
+  assert.match(deepLink, /registrationCloseDeepLinkRestoreRef\.current = \{[\s\S]*?taskId: registrationApplicationHost\.taskId[\s\S]*?focusTrackId: registrationApplicationHost\.focusTrackId[\s\S]*?appointmentId: registrationApplicationHost\.appointmentId/);
+  assert.match(deepLink, /requestRegistrationApplicationClose\(\)/);
+  assertIncludesAll(close, [
+    "setSelectedTask(null)",
+    "setSelectedRegistrationTrackId(null)",
+    "setSelectedRegistrationAppointmentId(null)",
+    "setRegistrationCaseDetail(null)",
+    'registrationTrackSelectionRef.current = ""',
+    "registrationCommittedReceiptRef.current = null",
+  ]);
+  assert.match(cancel, /registrationCloseDeepLinkRestoreRef\.current[\s\S]*?syncTaskDeepLink\(restoreDeepLink\.taskId, restoreDeepLink\.focusTrackId, restoreDeepLink\.appointmentId\)/);
+});
+
+test("committed loading can close while create submission remains protected", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const requestStart = source.indexOf("const requestRegistrationApplicationClose = useCallback");
+  const requestEnd = source.indexOf("\n  useEffect(() => {\n    if (deleteTarget) return", requestStart);
+  const requestClose = source.slice(requestStart, requestEnd);
+
+  assert.match(requestClose, /if \(saving && registrationApplicationHost\.kind === "create"\) return/);
+  assert.doesNotMatch(requestClose, /if \(saving\) return/);
+  assert.match(requestClose, /closeRegistrationApplicationHost\(\)/);
+});
+
+test("registration host create and detail modes have accessible Radix titles without duplicate visible headings", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const hostStart = source.indexOf("data-registration-application-host");
+  const hostEnd = source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && bulkDeleteTargets.length", hostStart);
+  const host = source.slice(hostStart, hostEnd);
+
+  assert.match(host, /registrationApplicationHost\.kind === "create"[\s\S]*?<DialogTitle className="sr-only">등록 신청서<\/DialogTitle>[\s\S]*?<RegistrationApplicationCreate/);
+  assert.match(host, /registrationApplicationHost\.kind === "detail"[\s\S]*?<DialogTitle className="sr-only">등록 신청서<\/DialogTitle>[\s\S]*?<RegistrationApplication/);
+  assert.equal((host.match(/<DialogTitle className="sr-only">등록 신청서<\/DialogTitle>/g) || []).length, 2);
+});
+
+test("appointment refresh retry reuses canonical appointment validation and clears stale links", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const resolverStart = source.indexOf("function resolveRegistrationAppointmentFocus");
+  const resolverEnd = source.indexOf("\nconst WITHDRAWAL_NOTIFICATION_CHANNELS", resolverStart);
+  const resolver = source.slice(resolverStart, resolverEnd);
+  const openStart = source.indexOf("const openRegistrationAppointment = useCallback");
+  const openEnd = source.indexOf("\n  const openRegistrationCalendarItem", openStart);
+  const openAppointment = source.slice(openStart, openEnd);
+  const retryStart = source.indexOf("async function retryCommittedRegistrationCaseRefresh");
+  const retryEnd = source.indexOf("\n  const postRegistrationAdmissionAction", retryStart);
+  const retry = source.slice(retryStart, retryEnd);
+
+  assert.match(resolver, /detail\.appointments\.find/);
+  assert.match(resolver, /getRegistrationAppointmentParticipantTrackIds/);
+  assert.match(resolver, /preferredTrackId && participantTrackIds\.includes\(preferredTrackId\)/);
+  assert.match(openAppointment, /resolveRegistrationAppointmentFocus\(detail, appointmentId, preferredTrackId\)/);
+  assert.match(retry, /resolveRegistrationAppointmentFocus\(detail, appointmentId, focusTrackId\)/);
+  assert.match(retry, /if \(appointmentId && !appointmentFocus\) \{[\s\S]*?closeRegistrationApplicationHost\(\)[\s\S]*?예약 정보가 변경되었습니다\. 등록 달력을 다시 확인하세요\.[\s\S]*?return/);
+  assert.doesNotMatch(retry, /appointmentTrackIds\[0\] \|\| detail\.tracks\[0\]/);
+});
+
+test("canonical registration host owns notification and error live regions without list duplicates", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.match(source, /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/);
+  assert.match(source, /\{message && !formOpen && !detailOpen && registrationApplicationHost\.kind === "closed" && <div role="alert"/);
+  assert.match(source, /registrationApplicationHost\.kind === "detail"[\s\S]*?pendingRegistrationVisitNotificationTargets\.length > 0[\s\S]*?retryPendingRegistrationVisitNotifications/);
+});
 
 test("registration application rows retain every subject during class sync", async () => {
   const [workspaceSource, serviceSource, caseListSource] = await Promise.all([
@@ -4218,6 +4367,7 @@ test("canonical registration writers rehydrate their committed receipt in the sa
   assert.doesNotMatch(rehydrate, /setFormOpen\(false\)/);
 
   for (const branch of [atomic, canonical]) {
+    assert.match(branch, /if \(registrationCreateAttemptRef\.current === createAttempt\) \{\s*registrationCreateAttemptRef\.current = null\s*\}/);
     assert.match(branch, /registrationCreateAttemptRef\.current = null/);
     assert.match(branch, /const committed: RegistrationCommittedReceipt = \{/);
     assert.match(branch, /await rehydrateCommittedRegistrationCase\(committed\)/);

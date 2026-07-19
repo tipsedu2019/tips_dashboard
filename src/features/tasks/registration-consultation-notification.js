@@ -68,6 +68,21 @@ export function reconcileRegistrationVisitNotificationRetryTargets(current = [],
   return mergeRegistrationVisitNotificationTargets(untouched, failed)
 }
 
+export function isRegistrationSubmissionOwnershipCurrent({
+  mounted = false,
+  submissionViewerId = "",
+  submissionViewerGeneration = -1,
+  currentViewerId = "",
+  currentViewerGeneration = -2,
+} = {}) {
+  return Boolean(
+    mounted
+    && text(submissionViewerId)
+    && submissionViewerId === currentViewerId
+    && submissionViewerGeneration === currentViewerGeneration,
+  )
+}
+
 export function partitionRegistrationVisitNotificationResults(targets = [], results = []) {
   const failedTargets = []
   const warnings = []
