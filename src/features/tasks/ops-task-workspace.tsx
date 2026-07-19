@@ -150,7 +150,7 @@ import {
   type OpsRegistrationCaseDetail,
   type RegistrationSubject,
 } from "./registration-track-service"
-import { RegistrationInitialPlanControl } from "./registration-initial-plan-control"
+import { RegistrationApplicationCreate } from "./registration-application-create"
 import {
   assertRegistrationCreateAttemptPersistenceMode,
   createRegistrationCreateAttempt,
@@ -10648,7 +10648,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const sectionKey = getRegistrationFormSectionForBlocker(blocker)
     const focusKey = getRegistrationBlockerFocusKey(blocker)
     window.requestAnimationFrame(() => {
-      const section = document.getElementById(`registration-form-${sectionKey}`)
+      const section = document.getElementById(`registration-application-${sectionKey}`)
       if (!section) return
       section.scrollIntoView({ block: "start", behavior: "smooth" })
       const focusTarget = focusKey
@@ -12242,6 +12242,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   registrationResolvedDirectorIds={registrationResolvedDirectorIds}
                   registrationDirectorOptionsBySubject={registrationDirectorOptionsBySubject}
                   onRegistrationInitialWorkflowChange={setRegistrationInitialWorkflowDraft}
+                  registrationCloseAction={(
+                    <Button type="button" variant="ghost" size="icon" onClick={closeForm} aria-label={formCloseLabel}>
+                      <X className="size-4" />
+                    </Button>
+                  )}
+                  registrationDisabled={saving}
                   editingRegistration={Boolean(editingTask)}
                   updateWithdrawal={updateWithdrawal}
                   updateTransfer={updateTransfer}
@@ -12772,6 +12778,8 @@ function TypeSpecificFields({
   registrationResolvedDirectorIds,
   registrationDirectorOptionsBySubject,
   onRegistrationInitialWorkflowChange,
+  registrationCloseAction,
+  registrationDisabled,
   editingRegistration,
   updateWithdrawal,
   updateTransfer,
@@ -12794,6 +12802,8 @@ function TypeSpecificFields({
   registrationResolvedDirectorIds?: Partial<Record<RegistrationSubject, string>>
   registrationDirectorOptionsBySubject?: Record<RegistrationSubject, Array<{ value: string; label: string }>>
   onRegistrationInitialWorkflowChange?: (draft: RegistrationInitialWorkflowDraft) => void
+  registrationCloseAction?: ReactNode
+  registrationDisabled?: boolean
   editingRegistration?: boolean
   updateWithdrawal: (key: keyof NonNullable<OpsTaskInput["withdrawal"]>, value: string | boolean) => void
   updateTransfer: (key: keyof NonNullable<OpsTaskInput["transfer"]>, value: string | boolean) => void
@@ -13331,6 +13341,31 @@ function TypeSpecificFields({
   if (form.type === "registration") {
     const registrationSubjects = parseRegistrationSubjects(form.subject) as RegistrationSubject[]
 
+    if (
+      !editingRegistration
+      && registrationPersistence
+      && registrationInitialWorkflowDraft
+      && registrationResolvedDirectorIds
+      && registrationDirectorOptionsBySubject
+      && onRegistrationInitialWorkflowChange
+      && registrationCloseAction
+    ) {
+      return (
+        <RegistrationApplicationCreate
+          form={form}
+          draft={registrationInitialWorkflowDraft}
+          persistence={registrationPersistence}
+          resolvedDirectorIds={registrationResolvedDirectorIds}
+          directorOptionsBySubject={registrationDirectorOptionsBySubject}
+          disabled={Boolean(registrationDisabled)}
+          closeAction={registrationCloseAction}
+          onFormPatch={updateFormPatch}
+          onRegistrationFieldChange={updateRegistration}
+          onDraftChange={onRegistrationInitialWorkflowChange}
+        />
+      )
+    }
+
     return (
       <div className="grid min-w-0">
         <RegistrationFormSection
@@ -13406,36 +13441,6 @@ function TypeSpecificFields({
           />
         </RegistrationFormSection>
 
-        {!editingRegistration
-          && registrationPersistence?.mode === "ready_atomic"
-          && registrationInitialWorkflowDraft
-          && registrationResolvedDirectorIds
-          && registrationDirectorOptionsBySubject
-          && onRegistrationInitialWorkflowChange && (
-            <RegistrationInitialPlanControl
-              subjects={registrationSubjects}
-              draft={registrationInitialWorkflowDraft}
-              resolvedDirectorIds={registrationResolvedDirectorIds}
-              directorOptionsBySubject={registrationDirectorOptionsBySubject}
-              disabled={false}
-              onChange={onRegistrationInitialWorkflowChange}
-            />
-          )}
-        {!editingRegistration && registrationPersistence?.mode === "canonical_inquiry" && (
-          <p role="note" className="border-t pt-3 text-sm text-muted-foreground">초기 일정 기능 준비 전에는 문의 정보만 저장합니다.</p>
-        )}
-        {!editingRegistration && registrationPersistence?.mode === "legacy_inquiry" && (
-          <p role="note" className="border-t pt-3 text-sm text-muted-foreground">기존 등록 환경에서는 문의 정보만 저장합니다.</p>
-        )}
-        {!editingRegistration && registrationPersistence?.mode === "blocked_maintenance" && (
-          <p role="alert" className="border-t pt-3 text-sm text-destructive">등록 데이터 전환 중입니다. 전환이 끝난 뒤 다시 저장하세요.</p>
-        )}
-        {!editingRegistration && registrationPersistence?.mode === "blocked_mismatch" && (
-          <p role="alert" className="border-t pt-3 text-sm text-destructive">등록 런타임 버전이 일치하지 않아 저장할 수 없습니다.</p>
-        )}
-        {!editingRegistration && registrationPersistence?.mode === "blocked_indeterminate" && (
-          <p role="alert" className="border-t pt-3 text-sm text-destructive">등록 저장 환경을 확인하고 있습니다. 잠시 후 다시 시도하세요.</p>
-        )}
       </div>
     )
   }

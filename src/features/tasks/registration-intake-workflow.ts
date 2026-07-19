@@ -334,6 +334,40 @@ export function reconcileRegistrationInitialWorkflowDraft(
   return next
 }
 
+export function reconcileRegistrationInitialWorkflowCapabilities(
+  draft: RegistrationInitialWorkflowDraft,
+  allowedInitialActions: readonly RegistrationInitialAction[],
+): RegistrationInitialWorkflowDraft {
+  const allowed = new Set(allowedInitialActions)
+  const subjectPlans = { ...draft.subjectPlans }
+  const directorOverrides = { ...draft.directorOverrides }
+  let changed = false
+
+  for (const subject of SUBJECT_ORDER) {
+    const action = subjectPlans[subject]
+    if (!action || allowed.has(action)) continue
+    subjectPlans[subject] = "inquiry"
+    if (Object.prototype.hasOwnProperty.call(directorOverrides, subject)) {
+      delete directorOverrides[subject]
+    }
+    changed = true
+  }
+
+  const next = { ...draft, subjectPlans, directorOverrides }
+  if (getRegistrationInitialWorkflowParticipants(next, "level_test").length === 0) {
+    if (next.levelTestScheduledAt || next.levelTestPlace) changed = true
+    next.levelTestScheduledAt = ""
+    next.levelTestPlace = ""
+  }
+  if (getRegistrationInitialWorkflowParticipants(next, "visit").length === 0) {
+    if (next.visitScheduledAt || next.visitPlace) changed = true
+    next.visitScheduledAt = ""
+    next.visitPlace = ""
+  }
+
+  return changed ? next : draft
+}
+
 export function setRegistrationInitialSubjectAction(
   draft: RegistrationInitialWorkflowDraft,
   subject: RegistrationSubject,

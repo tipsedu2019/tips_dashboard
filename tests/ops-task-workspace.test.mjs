@@ -887,14 +887,14 @@ test("registration workspace replaces Notion registration management with one ap
     'label="진행상태"',
     'label="과목"',
     'label="학년"',
-    "RegistrationInitialPlanControl",
+    "RegistrationApplicationCreate",
     "RegistrationTrackEditor",
     "RegistrationAdmissionPanel",
   ]);
   assertIncludesAll(initialPlanSource, [
     "과목별 다음 업무",
-    "과목별 상담 책임자",
-    "방문상담 예약일시",
+    "상담 책임자",
+    "방문상담일시",
     "방문상담실",
   ]);
 
@@ -1509,8 +1509,9 @@ test("registration follows the real decision waitlist admission form and manual 
 });
 
 test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {
-  const [source, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+  const [source, createSource, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-application-create.tsx"),
     readSource("src/features/tasks/registration-initial-plan-control.tsx"),
     readSource("src/features/tasks/registration-intake-workflow.ts"),
     readSource("src/features/tasks/registration-workflow.js"),
@@ -1539,7 +1540,7 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   );
 
   assertIncludesAll(source, [
-    'import { RegistrationInitialPlanControl } from "./registration-initial-plan-control"',
+    'import { RegistrationApplicationCreate } from "./registration-application-create"',
     "probeRegistrationIntakeWorkflowRuntime",
     "probeRegistrationSubjectTrackRuntime",
     "probeRegistrationInitialPersistence",
@@ -1561,16 +1562,14 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.doesNotMatch(formDialogSource, /담당자 및 일시 이력/);
 
   assertIncludesAll(registrationFormSource, [
-    "editingRegistration ? (",
-    '<ReadonlyInfoField label="과목"',
-    "<RegistrationSubjectField",
-    "values={registrationSubjects}",
-    'onChange={(values) => updateForm("subject", serializeRegistrationSubjects(values))}',
-    "<RegistrationInitialPlanControl",
-    'label="요청 사항"',
+    "<RegistrationApplicationCreate",
+    "form={form}",
+    "draft={registrationInitialWorkflowDraft}",
+    "onFormPatch={updateFormPatch}",
+    "onDraftChange={onRegistrationInitialWorkflowChange}",
   ]);
   assert.doesNotMatch(registrationFormSource, /phoneConsultationAt|levelTestAt|visitConsultationAt|visitConsultationPlace|levelTestMaterialLink/);
-  assert.doesNotMatch(registrationFormSource, /등록·대기 정보|입학 처리/);
+  assertIncludesAll(createSource, ["RegistrationApplicationPlacementSection", "RegistrationApplicationAdmissionSection"]);
   assert.doesNotMatch(source, /inquiryChannel|\{문의채널\}|문의채널|문의 채널/);
   assert.doesNotMatch(sampleWorkflowSource, /inquiry_channel/);
   assert.doesNotMatch(browserWorkflowSource, /inquiry_channel/);
@@ -1579,7 +1578,7 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     'await selectListboxOptionIfPresent(page, dialog, "학년", "고1")',
     "전화상담 예약일시",
     "시험지·결과지 URL",
-    "과목별 상담 책임자",
+    "상담 책임자",
     "방문상담 예약일시",
     "방문상담실",
     "canonical reload",
@@ -1614,32 +1613,32 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "바로 전화상담",
     "레벨테스트",
     "방문상담",
-    "과목별 상담 책임자",
+    "상담 책임자",
     "dateAriaLabel=\"레벨테스트 예약일 날짜\"",
     "timeAriaLabel=\"레벨테스트 예약일 시각\"",
-    "dateAriaLabel=\"방문상담 예약일 날짜\"",
-    "timeAriaLabel=\"방문상담 예약일 시각\"",
+    "dateAriaLabel=\"방문상담일 날짜\"",
+    "timeAriaLabel=\"방문상담일 시각\"",
     "레벨테스트 장소",
     "방문상담실",
     "참여 과목",
   ]);
   assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink/);
-  assertInOrder(initialPlanSource, ["과목별 상담 책임자", "방문상담 예약일시", "방문상담실"]);
+  assertInOrder(initialPlanSource, ["상담 책임자", "전화상담 대기 기준일시", "방문상담일시", "방문상담실", "상담 결과"]);
   assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소", "참여 과목"]);
   assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
-  const inquiryStart = registrationFormSource.indexOf('sectionKey="inquiry"');
-  const inquiryEnd = registrationFormSource.indexOf("<RegistrationInitialPlanControl", inquiryStart);
-  const inquirySource = registrationFormSource.slice(inquiryStart, inquiryEnd);
+  const inquiryStart = createSource.indexOf("commonInfoContent");
+  const inquiryEnd = createSource.indexOf("subjectSyncContent", inquiryStart);
+  const inquirySource = createSource.slice(inquiryStart, inquiryEnd);
   assert.match(inquirySource, /className="grid gap-3 md:grid-cols-2"/);
   const orderedInquiryFields = [
-    '<RegistrationSubjectField',
-    'focusKey="studentName"',
-    'focusKey="schoolGrade"',
-    'label="학년" requirement="required"',
-    'label="학교" requirement="optional"',
-    'focusKey="parentPhone"',
-    'label="학생 전화" requirement="optional"',
+    'data-registration-focus="subject"',
+    'data-registration-focus="studentName"',
+    'data-registration-focus="schoolGrade"',
+    '<span>학년</span>',
+    '<span>학교</span>',
+    'data-registration-focus="parentPhone"',
+    '<span>학생 전화</span>',
   ];
   for (let index = 1; index < orderedInquiryFields.length; index += 1) {
     assert.ok(
@@ -1648,13 +1647,13 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     );
   }
   assertIncludesAll(inquirySource, [
-    'label="학생명" requirement="required"',
-    'label="과목" requirement="required"',
-    'label="학년" requirement="required"',
-    'label="학부모 전화" requirement="required"',
+    "<span>학생명</span>",
+    '<legend className="text-sm font-medium">과목</legend>',
+    "<span>학년</span>",
+    "<span>학부모 전화</span>",
   ]);
   assert.doesNotMatch(inquirySource, /문의일시|focusKey="inquiryAt"|DateTimePickerControl/);
-  assert.doesNotMatch(registrationFormSource, /label="캠퍼스"|updateForm\("campus"/);
+  assert.doesNotMatch(createSource, /label="캠퍼스"|updateForm\("campus"/);
   assert.doesNotMatch(inquirySource, /autoFocus=/);
   assertIncludesAll(source, [
     "aria-describedby={required ? requiredDescriptionId : undefined}",
@@ -1886,21 +1885,24 @@ test("registration required inquiry fields remain invariant after the workflow a
 });
 
 test("registration resolves and edits directors per subject in the canonical initial plan", async () => {
-  const [workspaceSource, initialPlanSource] = await Promise.all([
+  const [workspaceSource, createSource, initialPlanSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-application-create.tsx"),
     readSource("src/features/tasks/registration-initial-plan-control.tsx"),
   ]);
 
   assertIncludesAll(workspaceSource, [
-    'from "./registration-initial-plan-control"',
+    'from "./registration-application-create"',
     "registrationResolvedDirectorIds",
     "subjects: [subject]",
-    "<RegistrationInitialPlanControl",
-    "resolvedDirectorIds={registrationResolvedDirectorIds}",
-    "directorOptionsBySubject={registrationDirectorOptionsBySubject}",
+    "<RegistrationApplicationCreate",
+  ]);
+  assertIncludesAll(createSource, [
+    "resolvedDirectorIds,",
+    "directorOptionsBySubject,",
   ]);
   assertIncludesAll(initialPlanSource, [
-    "consultationSubjects.map((subject)",
+    "orderedSubjects.map((subject)",
     "draft.directorOverrides[subject] || resolvedDirectorId",
     "directorOptionsBySubject[subject]",
     "[subject]: event.target.value",
@@ -4062,12 +4064,13 @@ test("browser workflow scripts target the operation surfaces", async () => {
   ]);
 });
 
-test("registration create omits placement while canonical track editors own enrollment scheduling", async () => {
+test("registration create shows locked placement while canonical track editors own enrollment scheduling", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const registrationFormStart = source.indexOf('if (form.type === "registration")', source.indexOf("function TypeSpecificFields"));
-  const registrationFormSource = source.slice(registrationFormStart, source.indexOf('if (form.type === "withdrawal")', registrationFormStart));
+  const create = await readSource("src/features/tasks/registration-application-create.tsx");
 
-  assert.doesNotMatch(registrationFormSource, /수업 시작 일정|classStartDate|classStartSession|fillRegistration/);
+  assert.match(create, /RegistrationApplicationPlacementSection/);
+  assert.match(create, /수업 시작 일정/);
+  assert.doesNotMatch(create, /classStartDate|classStartSession|fillRegistration/);
   assertIncludesAll(source, ["RegistrationTrackEditor", "RegistrationAdmissionPanel"]);
 });
 
@@ -4099,15 +4102,14 @@ test("registration completion keeps textbook optional while validating a nonempt
   assert.match(blockerSource, /if \(hasLinkedRecord\(input\.textbookId\) && !findTextbookOption/);
 });
 
-test("registration admission checklist remains chronological in canonical detail and is absent from create", async () => {
+test("registration admission checklist remains chronological and visible but locked in create", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const create = await readSource("src/features/tasks/registration-application-create.tsx");
   const checklistStart = source.indexOf("function getRegistrationOperationsChecklist(");
   const checklistSource = source.slice(
     checklistStart,
     source.indexOf("function getRegistrationOperationsChecklistValue", checklistStart),
   );
-  const registrationFormStart = source.indexOf('if (form.type === "registration")', source.indexOf("function TypeSpecificFields"));
-  const registrationFormSource = source.slice(registrationFormStart, source.indexOf('if (form.type === "withdrawal")', registrationFormStart));
   const detailStart = source.indexOf("function RegistrationDetailPanel");
   const registrationDetailSource = source.slice(detailStart, source.indexOf("function WithdrawalDetailPanel", detailStart));
   const summaryStart = source.indexOf('if (task.type === "registration" && task.registration)');
@@ -4123,7 +4125,8 @@ test("registration admission checklist remains chronological in canonical detail
   assertInOrder(checklistSource, orderedLabels);
   assert.match(checklistSource, /getRegistrationPipelinePrefix\(registration\?\.pipelineStatus\) === "7\."/);
   assert.doesNotMatch(checklistSource, /textbookBillingIssued|textbookReady|timetableRosterUpdated|교재 청구출고표|교재 준비|수업시간표 명단/);
-  assert.doesNotMatch(registrationFormSource, /입학신청서 발송|메이크에듀 등록|청구서 발송|수납 완료 확인|등록 완료/);
+  assertInOrder(create, orderedLabels);
+  assert.match(create, /RegistrationApplicationAdmissionSection/);
   assert.doesNotMatch(registrationDetailSource, /<Info label="교재 준비"|textbookBillingIssued/);
   assertInOrder(registrationSummarySource, orderedLabels);
   assert.doesNotMatch(registrationSummarySource, /autoItems=|textbookBillingIssued|교재 청구출고표|교재 준비|수업시간표 명단/);
@@ -4140,13 +4143,8 @@ test("registration form saves common edits through the canonical common writer",
 });
 
 test("pending registration edits do not re-render or mutate downstream completion controls", async () => {
-  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const registrationFormStart = source.indexOf('if (form.type === "registration")');
-  const registrationFormSource = source.slice(
-    registrationFormStart,
-    source.indexOf('if (form.type === "withdrawal")', registrationFormStart),
-  );
+  const create = await readSource("src/features/tasks/registration-application-create.tsx");
 
-  assertIncludesAll(registrationFormSource, ["문의 정보", "RegistrationInitialPlanControl"]);
-  assert.doesNotMatch(registrationFormSource, /getRegistrationChecklistEditorState|completionIntentPipelineStatus|checked=\{registrationChecklistEditorState\.completed\}/);
+  assertIncludesAll(create, ["RegistrationApplicationInquirySection", "RegistrationInitialRouteFields"]);
+  assert.doesNotMatch(create, /getRegistrationChecklistEditorState|completionIntentPipelineStatus|checked=\{registrationChecklistEditorState\.completed\}/);
 });

@@ -50,6 +50,54 @@ test("registration application shell renders all six sections once in fixed orde
   assert.doesNotMatch(shell, /이전|다음|stage tabs|StageTabs/)
 })
 
+test("registration create mounts the shared cumulative application with visible locked future fields", async () => {
+  const create = await readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8")
+  const initialPlan = await readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8")
+  const levelTest = await readFile(new URL("../src/features/tasks/registration-application-level-test-section.tsx", import.meta.url), "utf8")
+  const consultation = await readFile(new URL("../src/features/tasks/registration-application-consultation-section.tsx", import.meta.url), "utf8")
+  const placement = await readFile(new URL("../src/features/tasks/registration-application-placement-section.tsx", import.meta.url), "utf8")
+  const admission = await readFile(new URL("../src/features/tasks/registration-application-admission-section.tsx", import.meta.url), "utf8")
+  const workspace = await readWorkspaceSource()
+
+  assert.match(create, /import \{ RegistrationApplicationShell \} from "\.\/registration-application-shell"/)
+  assert.match(create, /import \{ RegistrationApplicationInquirySection \} from "\.\/registration-application-inquiry-section"/)
+  assert.match(create, /getRegistrationCreateSectionStates/)
+  assert.match(create, /RegistrationInitialRouteFields/)
+  assert.match(create, /RegistrationInitialLevelTestFields/)
+  assert.match(create, /RegistrationInitialConsultationFields/)
+  assert.match(create, /allowedInitialActions=\{persistence\.mode === "ready_atomic"/)
+  assert.match(create, /persistence\.mode === "ready_atomic"[\s\S]*?\["inquiry", "direct_phone", "level_test", "visit"\][\s\S]*?\["inquiry"\]/)
+  assert.match(create, /useEffect\([\s\S]*?reconcileRegistrationInitialWorkflowCapabilities/)
+  assert.doesNotMatch(create, /<form\b/)
+  assert.doesNotMatch(create, /useState\(|createRegistrationInitialWorkflowDraft/)
+
+  const inquiryFields = ["과목", "학생명", "학년", "학교", "학부모 전화", "학생 전화", "요청 사항"]
+  let inquiryCursor = -1
+  for (const field of inquiryFields) {
+    const next = create.indexOf(field, inquiryCursor + 1)
+    assert.ok(next > inquiryCursor, `${field} follows the approved inquiry order`)
+    inquiryCursor = next
+  }
+  assert.match(create, /mode="create"/)
+  assert.match(create, /inquiryAt=\{null\}/)
+  assert.match(create, /저장 시 자동 기록|RegistrationApplicationInquirySection/)
+  assert.doesNotMatch(create + workspace, /문의 채널|문의채널|inquiryChannel/)
+
+  assert.match(initialPlan, /export function RegistrationInitialRouteFields/)
+  assert.match(initialPlan, /allowedInitialActions/)
+  assert.match(initialPlan, /PLAN_OPTIONS\.filter/)
+  assert.match(levelTest + initialPlan, /레벨테스트 예약일시/)
+  assert.match(levelTest + initialPlan, /레벨테스트 장소/)
+  assert.match(consultation + initialPlan, /상담 책임자[\s\S]*전화상담 대기 기준일시[\s\S]*방문상담일시[\s\S]*방문상담실[\s\S]*상담 결과/)
+  assert.match(placement + create, /대기 종류/)
+  assert.match(placement + create, /수업 시작 일정/)
+  for (const label of ["입학신청서 발송", "메이크에듀 등록(수업, 교재)", "청구서 발송", "수납 완료 확인", "등록 완료"]) {
+    assert.ok((admission + create).includes(label), label)
+  }
+  assert.match(create, /첫 저장 후 자동 기록됩니다/)
+  assert.doesNotMatch(create, /onSaveHistory|이력 추가|이력 수정|이력 삭제/)
+})
+
 async function loadCaseListModel() {
   return import("../src/features/tasks/registration-case-list-model.ts");
 }

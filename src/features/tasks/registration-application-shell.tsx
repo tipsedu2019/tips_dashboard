@@ -59,6 +59,7 @@ function RegistrationApplicationSection({
 
   return (
     <section
+      id={`registration-application-${section}`}
       data-registration-application-section={section}
       className="grid gap-3 border-t pt-5"
     >

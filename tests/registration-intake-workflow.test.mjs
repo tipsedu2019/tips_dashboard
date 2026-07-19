@@ -12,11 +12,77 @@ import {
   markRegistrationLegacyCreateStarted,
   normalizeRegistrationInitialWorkflow,
   probeRegistrationInitialPersistence,
+  reconcileRegistrationInitialWorkflowCapabilities,
   reconcileRegistrationInitialWorkflowDraft,
   resolveRegistrationInitialPersistenceMode,
   setRegistrationInitialSubjectAction,
   toRegistrationScheduledAtIso,
 } from "../src/features/tasks/registration-intake-workflow.ts"
+
+test("ready-atomic capability preserves all four initial routes", () => {
+  const allowed = ["inquiry", "direct_phone", "level_test", "visit"]
+
+  for (const action of allowed) {
+    const draft = {
+      ...createRegistrationInitialWorkflowDraft(["영어"]),
+      subjectPlans: { 영어: action },
+      levelTestScheduledAt: action === "level_test" ? "2026-07-20T10:00" : "",
+      levelTestPlace: action === "level_test" ? "본관" : "",
+      visitScheduledAt: action === "visit" ? "2026-07-21T11:00" : "",
+      visitPlace: action === "visit" ? "상담실 1" : "",
+      directorOverrides: action === "direct_phone" || action === "visit"
+        ? { 영어: "director-english" }
+        : {},
+    }
+
+    assert.deepEqual(
+      reconcileRegistrationInitialWorkflowCapabilities(draft, allowed),
+      draft,
+      action,
+    )
+  }
+})
+
+test("inquiry-only capability removes stale routes, appointments, and director overrides", () => {
+  const staleDrafts = [
+    {
+      ...createRegistrationInitialWorkflowDraft(["영어", "수학"]),
+      subjectPlans: { 영어: "direct_phone", 수학: "inquiry" },
+      directorOverrides: { 영어: "director-english" },
+    },
+    {
+      ...createRegistrationInitialWorkflowDraft(["영어", "수학"]),
+      subjectPlans: { 영어: "level_test", 수학: "inquiry" },
+      levelTestScheduledAt: "2026-07-20T10:00",
+      levelTestPlace: "본관",
+    },
+    {
+      ...createRegistrationInitialWorkflowDraft(["영어", "수학"]),
+      subjectPlans: { 영어: "visit", 수학: "inquiry" },
+      visitScheduledAt: "2026-07-21T11:00",
+      visitPlace: "상담실 1",
+      directorOverrides: { 영어: "director-english" },
+    },
+  ]
+
+  for (const draft of staleDrafts) {
+    const reconciled = reconcileRegistrationInitialWorkflowCapabilities(draft, ["inquiry"])
+    assert.deepEqual(reconciled, {
+      subjectPlans: { 영어: "inquiry", 수학: "inquiry" },
+      levelTestScheduledAt: "",
+      levelTestPlace: "",
+      visitScheduledAt: "",
+      visitPlace: "",
+      directorOverrides: {},
+    })
+    assert.deepEqual(normalizeRegistrationInitialWorkflow(reconciled, ["영어", "수학"]), {
+      subjectPlans: { 영어: "inquiry", 수학: "inquiry" },
+      levelTestAppointment: null,
+      visitAppointment: null,
+      directorOverrides: {},
+    })
+  }
+})
 
 test("creates and reconciles one independent plan per selected subject", () => {
   const created = createRegistrationInitialWorkflowDraft(["수학", "영어", "수학"])

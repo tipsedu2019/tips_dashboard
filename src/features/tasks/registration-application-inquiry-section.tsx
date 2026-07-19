@@ -15,7 +15,6 @@ export function RegistrationApplicationInquirySection({
   mode,
   inquiryAt,
   editable,
-  lockReason,
   commonInfoContent,
   subjectSyncContent,
   exceptionContent,
@@ -27,11 +26,6 @@ export function RegistrationApplicationInquirySection({
 
   return (
     <div className="grid gap-4" aria-disabled={!editable}>
-      <div className="grid gap-1 text-sm">
-        <span className="text-muted-foreground">문의 일시</span>
-        <output>{inquiryAtLabel}</output>
-      </div>
-
       <div className="grid gap-3">
         {commonInfoContent}
         {onSaveCommonInfo ? (
@@ -43,12 +37,16 @@ export function RegistrationApplicationInquirySection({
         ) : null}
       </div>
 
+      <div className="grid gap-1 text-sm">
+        <span className="text-muted-foreground">문의일시</span>
+        <output>{inquiryAtLabel}</output>
+      </div>
+
       <div className="grid gap-3 border-t pt-4">
         {subjectSyncContent}
       </div>
 
       {exceptionContent ? <div className="grid gap-3 border-t pt-4">{exceptionContent}</div> : null}
-      {!editable && lockReason ? <p className="text-xs text-muted-foreground">{lockReason}</p> : null}
     </div>
   )
 }
