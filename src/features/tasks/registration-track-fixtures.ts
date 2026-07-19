@@ -72,6 +72,11 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
 ] as const
 
 export type RegistrationSubjectTrackFixtureAction = typeof REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS[number]
+export const REGISTRATION_SUBJECT_TRACK_FIXTURE_PROVIDER_DISPATCH_ACTIONS = [
+  "sendRegistrationVisitNotificationTarget",
+  "sendRegistrationAdmissionMessage",
+] as const satisfies readonly RegistrationSubjectTrackFixtureAction[]
+export type RegistrationSubjectTrackFixtureProviderDispatchAction = typeof REGISTRATION_SUBJECT_TRACK_FIXTURE_PROVIDER_DISPATCH_ACTIONS[number]
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_DELAY_MAX_MS = 5_000
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_ERROR_VALUE = "forced_failure"
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_ERROR_MESSAGE = "registration_fixture_forced_failure"
@@ -161,6 +166,12 @@ export type RegistrationSubjectTrackFixtureNotificationJob = {
   resolvedOrder: number
 }
 
+export type RegistrationSubjectTrackFixtureProviderDispatchAttempt = {
+  action: RegistrationSubjectTrackFixtureProviderDispatchAction
+  requestKey: string
+  payloadFingerprint: string
+}
+
 export type RegistrationSubjectTrackFixtureState = {
   workspaceData: OpsTaskWorkspaceData
   optionData: {
@@ -180,7 +191,7 @@ export type RegistrationSubjectTrackFixtureState = {
   receipts: Record<string, RegistrationSubjectTrackFixtureReceipt>
   notificationTargetHistory: RegistrationSubjectTrackFixtureNotificationTargetSnapshot[]
   notificationJobs: RegistrationSubjectTrackFixtureNotificationJob[]
-  externalCallLedger: never[]
+  externalCallLedger: RegistrationSubjectTrackFixtureProviderDispatchAttempt[]
   sequence: number
 }
 
@@ -1890,6 +1901,15 @@ export function reduceRegistrationSubjectTrackFixture(
   }
 
   const state = clone(current)
+  if (REGISTRATION_SUBJECT_TRACK_FIXTURE_PROVIDER_DISPATCH_ACTIONS.includes(
+    type as RegistrationSubjectTrackFixtureProviderDispatchAction,
+  )) {
+    state.externalCallLedger.push({
+      action: type as RegistrationSubjectTrackFixtureProviderDispatchAction,
+      requestKey: key,
+      payloadFingerprint,
+    })
+  }
   let result: unknown
 
   switch (type) {

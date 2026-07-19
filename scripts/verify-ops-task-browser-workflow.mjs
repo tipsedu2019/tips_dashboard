@@ -2838,6 +2838,28 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     }
   }
 
+  async function assertAppointmentPlanAccessibleNames(applicationHost) {
+    const missing = await applicationHost.locator('[data-registration-appointment-plan-action]').evaluateAll((actions) => actions
+      .filter((action) => action.getBoundingClientRect().width > 0)
+      .map((action) => {
+        const participantSubjects = (action.getAttribute("data-registration-appointment-subjects") || "")
+          .split("|")
+          .map((subject) => subject.trim())
+          .filter(Boolean)
+        const label = action.getAttribute("aria-label") || action.textContent?.trim() || ""
+        return {
+          label,
+          missingSubjects: participantSubjects.length > 0
+            ? participantSubjects.filter((subject) => !label.includes(subject))
+            : ["participant subjects"],
+        }
+      })
+      .filter(({ missingSubjects }) => missingSubjects.length > 0))
+    if (missing.length > 0) {
+      throw new Error(`participant-qualified accessible name is missing actual participant subject(s) from ${missing.length} visible appointment plan action(s): ${missing.map((item) => `${item.label} (${item.missingSubjects.join(", ")})`).join(" | ")}.`)
+    }
+  }
+
   async function assertAppointmentAccessibleNames(applicationHost) {
     const missing = await applicationHost.locator('[data-registration-appointment-shared-controls]').evaluateAll((owners) => owners.flatMap((owner) => {
       const participantSubjects = (owner.getAttribute("data-registration-appointment-subjects") || "")
@@ -3074,7 +3096,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     throw new Error("registration fixture create linked the mixed phone and level-test rows incorrectly.")
   }
   if (savedSnapshot.counts.externalCalls !== 0) {
-    throw new Error(`registration fixture recorded outbound provider calls: ${savedSnapshot.counts.externalCalls}.`)
+    throw new Error(`registration fixture recorded provider dispatch attempts: ${savedSnapshot.counts.externalCalls}.`)
   }
   if (!Array.isArray(createdResult.notificationJobs) || createdResult.notificationJobs.length !== 0) {
     throw new Error("registration fixture create must expose the canonical empty notificationJobs set while rules are disabled.")
@@ -3137,6 +3159,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await requireVisibleText(createdDialog, "레벨테스트 예약")
   await requireVisibleText(createdDialog, "시험실 2")
   await assertSubjectQualifiedAccessibleNames(createdDialog)
+  await assertAppointmentPlanAccessibleNames(createdDialog)
   await assertAppointmentAccessibleNames(createdDialog)
   await assertMobileActionDomOrder(createdDialog)
   await assertNonColorWorkflowState(createdDialog, "current")
@@ -3414,9 +3437,9 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   const finalFixtureSafetySnapshot = fixtureSafetySnapshots.at(-1)
   const fixtureSafetyAggregate = fixtureSafetySnapshots.reduce((totals, snapshot) => ({
     notificationReceipts: totals.notificationReceipts + snapshot.counts.notificationReceipts,
-    externalCalls: totals.externalCalls + snapshot.counts.externalCalls,
-  }), { notificationReceipts: 0, externalCalls: 0 })
-  if (!finalFixtureSafetySnapshot || fixtureSafetySnapshots.length < 2 || finalFixtureSafetySnapshot.counts.notificationReceipts !== 0 || finalFixtureSafetySnapshot.counts.externalCalls !== 0 || fixtureSafetyAggregate.notificationReceipts !== 0 || fixtureSafetyAggregate.externalCalls !== 0) {
+    providerDispatchAttempts: totals.providerDispatchAttempts + snapshot.counts.externalCalls,
+  }), { notificationReceipts: 0, providerDispatchAttempts: 0 })
+  if (!finalFixtureSafetySnapshot || fixtureSafetySnapshots.length < 2 || finalFixtureSafetySnapshot.counts.notificationReceipts !== 0 || finalFixtureSafetySnapshot.counts.externalCalls !== 0 || fixtureSafetyAggregate.notificationReceipts !== 0 || fixtureSafetyAggregate.providerDispatchAttempts !== 0) {
     throw new Error("fixture safety snapshot ledger did not retain a zero-provider final aggregate.")
   }
   assertNoInterceptedProviderRequests("full subject-track workflow")
@@ -3515,7 +3538,7 @@ function assertRegistrationFixtureSafetySnapshot(snapshot, safety, stage) {
     throw new Error(`registration fixture notification receipt count is ${snapshot?.counts?.notificationReceipts}, expected 0 during ${stage}.`)
   }
   if (snapshot?.counts?.externalCalls !== 0) {
-    throw new Error(`registration fixture recorded outbound provider calls: ${snapshot?.counts?.externalCalls} during ${stage}.`)
+    throw new Error(`registration fixture recorded provider dispatch attempts: ${snapshot?.counts?.externalCalls} during ${stage}.`)
   }
   if (safety.interceptedProviderRequests.length !== 0) {
     throw new Error(`registration fixture intercepted ${safety.interceptedProviderRequests.length} provider request(s) during ${stage}.`)

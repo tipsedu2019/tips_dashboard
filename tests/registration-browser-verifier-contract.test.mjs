@@ -168,7 +168,30 @@ test("registration fixture verifier snapshots every destructive navigation throu
   assert.match(verifier, /fixtureSafetySnapshots\.at\(-1\)/)
   assert.match(verifier, /fixtureSafetySnapshots\.reduce/)
   assert.match(verifier, /fixtureSafetyAggregate\.notificationReceipts/)
-  assert.match(verifier, /fixtureSafetyAggregate\.externalCalls/)
+  assert.match(verifier, /providerDispatchAttempts:\s*totals\.providerDispatchAttempts\s*\+\s*snapshot\.counts\.externalCalls/)
+  assert.match(verifier, /fixtureSafetyAggregate\.providerDispatchAttempts/)
+})
+
+test("registration fixture verifier checks every visible appointment plan action for its participant subjects", async () => {
+  const [verifierSource, trackEditorSource] = await Promise.all([
+    readFile(verifierUrl, "utf8"),
+    readFile(registrationTrackEditorUrl, "utf8"),
+  ])
+  const verifier = registrationVerifier(verifierSource)
+  const helperStart = verifier.indexOf("async function assertAppointmentPlanAccessibleNames")
+  const helperEnd = verifier.indexOf("async function assertAppointmentAccessibleNames", helperStart)
+
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, "appointment plan accessible-name verifier is missing")
+  const helper = verifier.slice(helperStart, helperEnd)
+  assert.match(helper, /\[data-registration-appointment-plan-action\]/)
+  assert.match(helper, /data-registration-appointment-subjects/)
+  assert.match(helper, /getAttribute\("aria-label"\)/)
+  assert.match(helper, /participantSubjects\.filter\(\(subject\) => !label\.includes\(subject\)\)/)
+  assert.match(verifier, /await assertAppointmentPlanAccessibleNames\(createdDialog\)/)
+
+  assert.match(trackEditorSource, /data-registration-appointment-plan-action=""/)
+  assert.match(trackEditorSource, /data-registration-appointment-subjects=\{plan\.participantSubjects\.join\("\|"\)\}/)
+  assert.match(trackEditorSource, /aria-label=\{`\$\{participantSubjectLabel\} \$\{label\}`\}/)
 })
 
 test("registration primary-action markers own the data controls they commit", async () => {
@@ -203,7 +226,7 @@ test("registration primary-action markers own the data controls they commit", as
   assert.match(appointmentSource, /data-registration-action-owner/)
   assert.match(appointmentSource, /data-registration-appointment-shared-controls/)
   assert.match(appointmentSource, /data-registration-appointment-subjects=\{appointmentParticipantSubjects\.join\("\|"\)\}/)
-  assert.doesNotMatch(trackEditorSource, /data-registration-appointment-subjects/)
+  assert.doesNotMatch(trackEditorSource, /data-registration-appointment-shared-controls/)
   assert.match(actionsSource, /data-registration-action-owner/)
   assert.match(enrollmentSource, /enrollment-row-save/)
   assert.match(enrollmentSource, /enrollment-row-add/)

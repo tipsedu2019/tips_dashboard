@@ -1354,7 +1354,7 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.equal(before.counts.cases, 11)
   assert.equal(before.counts.tracks, 19)
   assert.equal(before.counts.appointments, 6)
-  assert.equal(before.counts.externalCalls, 0)
+  assert.equal(before.counts.externalCalls, 1)
   assert.equal(before.counts.notificationReceipts, 1)
 
   const replay = plain(await bridge.replayLastCreate())
@@ -2197,6 +2197,63 @@ test("every fixture UI mutation is declared and produces an idempotency receipt"
     "reconcileRegistrationAdmissionMessage",
     "releaseRegistrationAdmissionMessageRetry",
   ])
+})
+
+test("provider dispatch attempt ledger enumerates every provider-producing fixture action independently from receipts", async () => {
+  const {
+    REGISTRATION_SUBJECT_TRACK_FIXTURE_PROVIDER_DISPATCH_ACTIONS,
+    createRegistrationSubjectTrackFixtureAdapter,
+    createRegistrationSubjectTrackFixtureState,
+    reduceRegistrationSubjectTrackFixture,
+  } = await loadFixtureModule()
+  const providerDispatchActions = [
+    "sendRegistrationVisitNotificationTarget",
+    "sendRegistrationAdmissionMessage",
+  ]
+  assert.deepEqual(
+    plain(REGISTRATION_SUBJECT_TRACK_FIXTURE_PROVIDER_DISPATCH_ACTIONS || []),
+    providerDispatchActions,
+  )
+
+  const providerCommands = [
+    {
+      type: "sendRegistrationVisitNotificationTarget",
+      requestKey: "fixture-provider-attempt-visit",
+      payload: { appointmentId: "fixture-appointment-provider-attempt" },
+    },
+    {
+      type: "sendRegistrationAdmissionMessage",
+      requestKey: "fixture-provider-attempt-admission",
+      payload: { taskId: "fixture-task-multiple-classes" },
+    },
+  ]
+  const receiptOnlyCommand = {
+    type: "checkRegistrationAdmissionMessage",
+    requestKey: "fixture-provider-status-check",
+    payload: { taskId: "fixture-task-multiple-classes" },
+  }
+  let state = createRegistrationSubjectTrackFixtureState()
+  for (const command of [...providerCommands, receiptOnlyCommand]) {
+    state = reduceRegistrationSubjectTrackFixture(state, command).state
+  }
+
+  assert.deepEqual(
+    plain(state.externalCallLedger.map(({ action, requestKey }) => ({ action, requestKey }))),
+    providerCommands.map(({ type: action, requestKey }) => ({ action, requestKey })),
+  )
+  assert.equal(Object.keys(state.receipts).length, 3)
+  assert.equal(state.externalCallLedger.length, providerDispatchActions.length)
+  assert.ok(state.externalCallLedger.every(({ payloadFingerprint }) => payloadFingerprint.length > 0))
+
+  const replay = reduceRegistrationSubjectTrackFixture(state, providerCommands[1])
+  assert.equal(replay.state, state)
+  assert.equal(replay.state.externalCallLedger.length, providerDispatchActions.length)
+
+  const adapter = createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  assert.equal(adapter.debugSnapshot().counts.externalCalls, providerDispatchActions.length)
 })
 
 test("workspace mounts the real list/editor and exposes create only to fixture management roles", async () => {
