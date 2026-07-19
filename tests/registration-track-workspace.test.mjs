@@ -1175,15 +1175,17 @@ test("committed enrollment and admission actions recover refresh without resubmi
   assert.match(enrollmentBlock, /await onReload\(\)[\s\S]*setRefreshPending\(false\)[\s\S]*catch[\s\S]*setRefreshPending\(true\)/)
   assert.doesNotMatch(enrollmentBlock, /setRefreshPending\(true\)\s*\n\s*await reloadCommitted/)
   assert.match(admissionBlock, /async function retryAdmissionReload/)
-  assert.match(admissionBlock, /await onReload\(\)[\s\S]*setRefreshPending\(false\)[\s\S]*catch[\s\S]*setRefreshPending\(true\)/)
+  assert.match(admissionBlock, /const setPending = owner === "message" \? setMessageRefreshPending : setBatchRefreshPending[\s\S]*await onReload\(\)[\s\S]*setPending\(false\)[\s\S]*catch[\s\S]*setPending\(true\)/)
   assert.match(source, /onClick=\{\(\) => void retryEnrollmentReload\(\)\}/)
-  assert.match(source, /onClick=\{\(\) => void retryAdmissionReload\(\)\}/)
+  assert.match(source, /onClick=\{\(\) => void retryAdmissionReload\("message"\)\}/)
+  assert.match(source, /onClick=\{\(\) => void retryAdmissionReload\("batch"\)\}/)
 })
 
 test("registered add-class starts empty and cannot submit an empty draft list", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /track\.status === "enrollment_decided"[\s\S]*createRegistrationEnrollmentDraft/)
-  assert.match(source, /disabled=\{saving \|\| refreshPending \|\| draftRows\.length === 0 \|\| blockers\.length > 0\}/)
+  assert.match(source, /disabled=\{saving \|\| refreshPending \|\| draftRows\.length === 0\}/)
+  assert.match(source, /if \(blockers\.length > 0\)[\s\S]*?\.focus\(\)/)
   assert.match(source, /row\.id === null && draftRows\.length === 1 && track\.status === "enrollment_decided"/)
 })
 
@@ -1262,7 +1264,7 @@ test("every enrollment decision and cancellation handler locks after a committed
   const startBlock = sourceBetween(source, "async function startBatch", "async function setMakeedu")
   assert.match(routeBlock, /refreshPending/)
   assert.match(cancelBlock, /refreshPending/)
-  assert.match(startBlock, /busyAction \|\| refreshPending/)
+  assert.match(startBlock, /busyAction \|\| batchRefreshPending/)
   assert.match(source, /disabled=\{!decisionDestination \|\| !decisionReason\.trim\(\) \|\| saving \|\| refreshPending\}/)
   assert.match(source, /disabled=\{!cancelReason\.trim\(\) \|\| saving \|\| refreshPending/)
 })
@@ -1272,4 +1274,120 @@ test("an unrelated subject open batch does not hide enrollment decision routing"
   const decisionSection = sourceBetween(source, "{track.status === \"enrollment_decided\" && permissions.canManage", "immutableHistory.length > 0")
   assert.match(decisionSection, /!trackHasOpenBatch/)
   assert.doesNotMatch(decisionSection, /!openBatch/)
+})
+
+test("registration application owns the exact stable dirty-key aggregates", async () => {
+  const source = await readRegistrationApplicationSource()
+  const editor = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(editor, /useRef<Set<RegistrationApplicationDirtyKey>>\(new Set\(\)\)/)
+  assert.match(editor, /updateRegistrationApplicationDirtyKeys/)
+  assert.match(editor, /onDirtyChangeRef\.current\?\.\(next\.size > 0\)/)
+  for (const key of [
+    "inquiry:common",
+    "inquiry:subjects",
+    "level_test:track-${trackId}",
+    "consultation:track-${context.track.id}",
+    "placement:enrollments-${track.id}",
+    "admission:message",
+    "admission:batch-${scope.batchId}",
+  ]) assert.ok(source.includes(key), `missing dirty owner ${key}`)
+  assert.match(editor, /setDirty\(`\$\{section\}:track-\$\{track\.id\}`/)
+  assert.match(editor, /appointmentEditor\.kind === "level_test" \? "level_test" : "consultation"/)
+})
+
+test("every local registration editor reports dirty state through its owner", async () => {
+  const actions = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+  const appointment = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+  const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  const inquiry = await readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8")
+
+  assert.ok((actions.match(/onDirtyChange\?: \(dirty: boolean\) => void/g) || []).length >= 7)
+  assert.match(appointment, /onDirtyChange\?: \(dirty: boolean\) => void/)
+  assert.match(appointment, /onTrackDirtyChange\?: \(trackId: string, dirty: boolean\) => void/)
+  assert.match(enrollment, /RegistrationEnrollmentEditorProps[\s\S]*?onDirtyChange\?: \(dirty: boolean\) => void/)
+  assert.match(enrollment, /RegistrationAdmissionPanelProps[\s\S]*?onDirtyChange\?: \(scope: AdmissionDirtyScope, dirty: boolean\) => void/)
+  assert.match(inquiry, /onDirtyChange\?: \(scope: "common" \| "subjects", dirty: boolean\) => void/)
+})
+
+test("sibling canonical reloads preserve editor drafts and dirty membership", async () => {
+  const editor = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const actions = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+
+  assert.doesNotMatch(editor, /key=\{`stage:\$\{track\.id\}:\$\{track\.status\}:\$\{track\.waitingKind\}`\}/)
+  assert.doesNotMatch(editor, /detail\.enrollments\.map\(\(enrollment\)/)
+  assert.doesNotMatch(editor, /appointmentActivitySignature/)
+  assert.match(actions, /useOwnedDirtyState/)
+  assert.match(editor, /key=\{`consultation:\$\{context\.activeConsultation\.id\}:\$\{context\.activeConsultation\.updatedAt\}`\}/)
+})
+
+test("inline consultation completion exposes the locked Task 6 interface and recovery copy", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+  const outcome = sourceBetween(source, "export type RegistrationConsultationOutcomeEditorProps", "export function RegistrationMigrationReviewEditor")
+
+  assert.match(outcome, /subject: RegistrationSubject/)
+  assert.match(outcome, /active: boolean/)
+  assert.match(outcome, /onDirtyChange\?: \(dirty: boolean\) => void/)
+  assert.match(source, /const COMMITTED_REFRESH_ERROR = "저장은 완료됐지만 최신 내용을 불러오지 못했습니다"/)
+  assert.match(outcome, /\{COMMITTED_REFRESH_ERROR\}/)
+  assert.match(outcome, /최신 내용 다시 불러오기/)
+  assert.doesNotMatch(outcome, /Dialog|DialogContent|onOpenChange/)
+})
+
+test("section validation is local, Korean, and focuses its first invalid control", async () => {
+  const actions = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+  const appointment = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+  const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+
+  for (const source of [actions, appointment, enrollment]) {
+    assert.match(source, /role="alert"/)
+    assert.match(source, /\.focus\(\)/)
+  }
+  assert.match(actions, /입력하세요|선택하세요/)
+  assert.match(appointment, /예약 일시, 장소, 적용 과목을 모두 입력하세요/)
+  assert.match(enrollment, /수업 정보를 확인하세요/)
+})
+
+test("subject-owned controls name their subject and keep mobile primary actions after inputs", async () => {
+  const actions = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+  const appointment = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+  const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  const consultation = sourceBetween(actions, "export type RegistrationConsultationOutcomeEditorProps", "export function RegistrationMigrationReviewEditor")
+  const enrollmentRows = sourceBetween(enrollment, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
+
+  assert.match(consultation, /aria-label=\{`\$\{subject\} 상담 결과 저장`\}/)
+  assert.match(appointment, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 시험지·결과지 URL`\}/)
+  assert.match(enrollmentRows, /aria-label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/)
+  assert.ok(consultation.indexOf("waitingKind") < consultation.indexOf("상담 결과 저장"))
+  assert.ok(enrollmentRows.indexOf("draftRows.map") < enrollmentRows.indexOf("수업 정보 저장"))
+})
+
+test("catalog failures lock only their selectors and retain a local retry", async () => {
+  const actions = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+  const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(actions, /const directorSelectorLocked =/)
+  assert.match(actions, /disabled=\{directorSelectorLocked \|\| savingManual \|\| automaticSaving\}/)
+  assert.match(actions, /담당자 정보 다시 불러오기/)
+  assert.match(enrollment, /classDetailById\[row\.classId\] === null/)
+  assert.match(enrollment, /수업 일정 다시 불러오기/)
+})
+
+test("committed refresh failures clear only their dirty owner and lock mutation replay", async () => {
+  const source = await readRegistrationApplicationSource()
+  const appointment = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+  const enrollment = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+
+  for (const editor of [source, appointment, enrollment]) {
+    assert.match(editor, /저장은 완료됐지만 최신 내용을 불러오지 못했습니다/)
+    assert.match(editor, /onDirtyChange\?\.\(false\)/)
+    assert.match(editor, /최신 내용 다시 불러오기/)
+  }
+  assert.match(appointment, /trackRefreshPendingIds/)
+  assert.match(appointment, /reloadAfterCommittedMutation\(trackId: string\)/)
+  assert.match(appointment, /onTrackDirtyChangeRef\.current\?\.\(trackId, false\)/)
+  assert.match(enrollment, /messageRefreshPending/)
+  assert.match(enrollment, /batchRefreshPending/)
+  assert.match(enrollment, /afterCommitted\(owner: "message" \| "batch"\)/)
+  assert.doesNotMatch(sourceBetween(source, "async function retryRefresh()", "return ("), /completeRegistrationConsultation/)
 })

@@ -9,6 +9,7 @@ export type RegistrationApplicationInquirySectionProps = {
   subjectSyncContent: ReactNode
   exceptionContent?: ReactNode
   onSaveCommonInfo?: () => void
+  onDirtyChange?: (scope: "common" | "subjects", dirty: boolean) => void
 }
 
 export function RegistrationApplicationInquirySection({

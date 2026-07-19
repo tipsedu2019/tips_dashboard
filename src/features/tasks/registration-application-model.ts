@@ -300,8 +300,23 @@ export function updateRegistrationApplicationDirtyKeys(
   key: RegistrationApplicationDirtyKey,
   dirty: boolean,
 ): Set<RegistrationApplicationDirtyKey> {
+  if (current.has(key) === dirty && current instanceof Set) return current
   const next = new Set(current)
   if (dirty) next.add(key)
   else next.delete(key)
   return next
+}
+
+export function reconcileRegistrationEditorDraft<T>(input: {
+  currentDraft: T
+  previousCanonicalKey: string
+  nextCanonicalKey: string
+  nextCanonicalDraft: T
+}): { draft: T; canonicalKey: string } {
+  return {
+    draft: input.previousCanonicalKey === input.nextCanonicalKey
+      ? input.currentDraft
+      : input.nextCanonicalDraft,
+    canonicalKey: input.nextCanonicalKey,
+  }
 }

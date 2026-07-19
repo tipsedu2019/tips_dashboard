@@ -4177,3 +4177,12 @@ test("registration create blocker focus uses normalized section IDs and exact fo
   assert.match(workflow, /counselor:\$\{subjectCounselor\[1\]\}/);
   assert.match(initialPlan, /data-registration-focus=\{`counselor:\$\{subject\}`\}/);
 });
+
+test("registration dirty aggregation stays inside the application until the host close guard task", async () => {
+  const workspace = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const application = await readSource("src/features/tasks/registration-track-editor.tsx");
+
+  assert.match(application, /onDirtyChange\?: \(dirty: boolean\) => void/);
+  assert.match(application, /dirtyKeysRef/);
+  assert.doesNotMatch(workspace, /registrationApplicationDirty[\s\S]{0,500}window\.confirm/);
+});

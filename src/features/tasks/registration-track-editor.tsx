@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,8 @@ import {
   getRegistrationApplicationCaseEditableSections,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
+  updateRegistrationApplicationDirtyKeys,
+  type RegistrationApplicationDirtyKey,
   type RegistrationApplicationSectionKey,
 } from "./registration-application-model"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
@@ -239,6 +241,7 @@ function RegistrationTrackSectionFrame({
   return (
     <article
       id={`registration-${section}-${context.track.id}`}
+      aria-current={sectionState.current ? "step" : undefined}
       data-registration-track-id={context.track.id}
       data-registration-focus-track={focused ? context.track.id : undefined}
       className={[
@@ -249,7 +252,7 @@ function RegistrationTrackSectionFrame({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-sm font-semibold">{context.track.subject}</h4>
         <Badge variant={sectionState.current ? "default" : "outline"}>
-          {REGISTRATION_TRACK_STATUS_LABELS[context.track.status]}
+          {sectionState.current ? "현재 · " : ""}{REGISTRATION_TRACK_STATUS_LABELS[context.track.status]}
         </Badge>
       </div>
       <RegistrationTrackSectionValues
@@ -289,15 +292,39 @@ export function RegistrationApplication({
   admissionActions,
   initialAppointmentId = null,
   onAppointmentOpenChange,
+  onDirtyChange,
   notificationToken = "",
   closeAction,
 }: RegistrationApplicationProps) {
   const [appointmentEditor, setAppointmentEditor] = useState<AppointmentEditorState | null>(null)
+  const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
+  const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
+  const onDirtyChangeRef = useRef(onDirtyChange)
   const appointmentEditorRef = useRef<HTMLDivElement | null>(null)
   const initialAppointmentAppliedRef = useRef("")
   const canManageCase = viewerRole === "admin" || viewerRole === "staff"
   const reviewTrack = detail.tracks.find((track) => track.migrationReviewRequired) || null
   const reviewBlocked = Boolean(reviewTrack)
+
+  useEffect(() => {
+    onDirtyChangeRef.current = onDirtyChange
+  }, [onDirtyChange])
+  useEffect(() => {
+    dirtyKeysRef.current = new Set()
+    dirtyProducersRef.current = new Map()
+    onDirtyChangeRef.current?.(false)
+  }, [detail.task.id])
+  const setDirty = useCallback((key: RegistrationApplicationDirtyKey, dirty: boolean, producer: string = key) => {
+    const producers = new Set(dirtyProducersRef.current.get(key) || [])
+    if (dirty) producers.add(producer)
+    else producers.delete(producer)
+    if (producers.size > 0) dirtyProducersRef.current.set(key, producers)
+    else dirtyProducersRef.current.delete(key)
+    const next = updateRegistrationApplicationDirtyKeys(dirtyKeysRef.current, key, producers.size > 0)
+    if (next === dirtyKeysRef.current) return
+    dirtyKeysRef.current = next
+    onDirtyChangeRef.current?.(next.size > 0)
+  }, [])
 
   const permissionsByTrackId = useMemo(() => new Map(detail.tracks.map((track) => {
     const activeConsultation = detail.consultations.find((item) => (
@@ -442,7 +469,11 @@ export function RegistrationApplication({
       }
       throw error
     }
-    await onReload()
+    try {
+      await onReload()
+    } catch {
+      return "committed_refresh_pending" as const
+    }
     return "saved" as const
   }
 
@@ -480,6 +511,7 @@ export function RegistrationApplication({
           textbookOptions={textbookOptions}
           onReload={onReload}
           onWarning={onWarning}
+          onDirtyChange={(dirty) => setDirty(`placement:enrollments-${track.id}`, dirty)}
         />
       )
     }
@@ -487,7 +519,7 @@ export function RegistrationApplication({
     if (section === "admission") return null
     return (
       <RegistrationTrackStageEditor
-        key={`stage:${track.id}:${track.status}:${track.waitingKind}`}
+        key={`stage:${track.id}:${track.stageEnteredAt}`}
         track={track}
         currentClassWaitClassId={getRegistrationCurrentClassWaitClassId({ trackId: track.id, waitingKind: track.waitingKind, enrollments: detail.enrollments })}
         permissions={permissions}
@@ -498,6 +530,7 @@ export function RegistrationApplication({
         onOpenVisit={() => openAppointment(context, "visit_consultation", null)}
         activeConsultation={activeConsultation}
         visitAppointment={visitAppointment}
+        onDirtyChange={(dirty) => setDirty(`${section}:track-${track.id}`, dirty)}
       />
     )
   }
@@ -529,6 +562,7 @@ export function RegistrationApplication({
             }}
             onReload={onReload}
             onWarning={onWarning}
+            onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `director:${context.track.id}`)}
           />
         ) : null}
         {renderTrackActions(context, section)}
@@ -536,11 +570,14 @@ export function RegistrationApplication({
           && context.activeConsultation
           && context.permissions.canCompleteConsultation ? (
             <RegistrationConsultationOutcomeEditor
-              track={context.track}
+              key={`consultation:${context.activeConsultation.id}:${context.activeConsultation.updatedAt}`}
+              subject={context.track.subject}
               consultation={context.activeConsultation}
+              active
               classOptions={classOptions}
               onReload={onReload}
               onWarning={onWarning}
+              onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.activeConsultation?.id || context.track.id}`)}
             />
           ) : null}
       </RegistrationTrackSectionFrame>
@@ -584,10 +621,6 @@ export function RegistrationApplication({
   const appointmentParticipantIds = editorAppointment
     ? appointmentActivities.filter((item) => item.appointmentId === editorAppointment.id).map((item) => item.trackId)
     : appointmentEditor?.initialTrackId ? [appointmentEditor.initialTrackId] : []
-  const appointmentActivitySignature = appointmentActivities
-    .filter((item) => !editorAppointment || item.appointmentId === editorAppointment.id)
-    .map((item) => `${item.id}:${item.status}`)
-    .join("|")
   const appointmentEditorContent = appointmentEditor ? (
     <div ref={appointmentEditorRef} className="grid scroll-m-4 gap-2">
       <div className="flex flex-wrap gap-1" aria-label="예약 적용 과목">
@@ -596,7 +629,7 @@ export function RegistrationApplication({
         ))}
       </div>
       <RegistrationAppointmentEditor
-        key={`${appointmentEditor.kind}:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}
+        key={`${appointmentEditor.kind}:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}`}
         kind={appointmentEditor.kind}
         taskId={detail.task.id}
         eligibleTracks={detail.tracks}
@@ -614,6 +647,8 @@ export function RegistrationApplication({
           setAppointmentEditor({ kind: "level_test", appointmentId: null, initialTrackId: trackId })
         } : undefined}
         notificationToken={notificationToken}
+        onDirtyChange={(dirty) => setDirty(`${appointmentEditor.kind === "level_test" ? "level_test" : "consultation"}:appointment-${editorAppointment?.id || "new"}`, dirty)}
+        onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
       />
     </div>
   ) : null
@@ -635,16 +670,19 @@ export function RegistrationApplication({
           inquiryAt={formatDateTime(detail.task.registration?.inquiryAt || detail.task.createdAt)}
           editable={sectionStates.inquiry.editable}
           lockReason={sectionStates.inquiry.lockReason}
+          onDirtyChange={(scope, dirty) => setDirty(`inquiry:${scope}`, dirty)}
           commonInfoContent={(
             <RegistrationCommonInfoSection
-              key={`${detail.task.id}:${detail.commonRevision}`}
+              key={detail.task.id}
               task={detail.task}
               commonRevision={detail.commonRevision}
               identityLocked={getRegistrationIdentityEditLock(detail)}
               canEdit={canManageCase}
               embedded
               onSave={saveCommon}
+              onReload={onReload}
               onWarning={onWarning}
+              onDirtyChange={(dirty) => setDirty("inquiry:common", dirty)}
             />
           )}
           subjectSyncContent={(
@@ -655,6 +693,7 @@ export function RegistrationApplication({
               embedded
               onReload={onReload}
               onWarning={onWarning}
+              onDirtyChange={(dirty) => setDirty("inquiry:subjects", dirty)}
             />
           )}
           exceptionContent={(
@@ -673,6 +712,7 @@ export function RegistrationApplication({
                   onRetryDirectorCatalog={onRetryDirectorCatalog}
                   onResolved={onReload}
                   onWarning={onWarning}
+                  onDirtyChange={(dirty) => setDirty(`inquiry:track-${reviewTrack.id}`, dirty)}
                 />
               ) : null}
               {renderTrackFrames("inquiry")}
@@ -735,6 +775,9 @@ export function RegistrationApplication({
                 {...admissionActions}
                 onReload={onReload}
                 onWarning={onWarning}
+                onDirtyChange={(scope, dirty) => setDirty(scope.kind === "message_evidence"
+                  ? "admission:message"
+                  : `admission:batch-${scope.batchId}`, dirty)}
               />
             </div>
           )}

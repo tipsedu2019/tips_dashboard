@@ -100,6 +100,48 @@ function useAdmissionRecoveryAvailable(updatedAt: string | null) {
   return getRegistrationAdmissionRecoveryDelayMs(updatedAt, recoveryClock) === 0
 }
 
+function useOwnedDirtyState(dirty: boolean, onDirtyChange?: (dirty: boolean) => void) {
+  const reportedRef = useRef(false)
+  const callbackRef = useRef(onDirtyChange)
+  useEffect(() => {
+    callbackRef.current = onDirtyChange
+  }, [onDirtyChange])
+  useEffect(() => {
+    if (reportedRef.current === dirty) return
+    reportedRef.current = dirty
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+  useEffect(() => () => {
+    if (reportedRef.current) callbackRef.current?.(false)
+  }, [])
+}
+
+function useScopedDirtyState(
+  scope: AdmissionDirtyScope,
+  dirty: boolean,
+  onDirtyChange?: (scope: AdmissionDirtyScope, dirty: boolean) => void,
+) {
+  const previousRef = useRef<{ scope: AdmissionDirtyScope; dirty: boolean }>({ scope, dirty: false })
+  const callbackRef = useRef(onDirtyChange)
+  useEffect(() => {
+    callbackRef.current = onDirtyChange
+  }, [onDirtyChange])
+  useEffect(() => {
+    const previous = previousRef.current
+    if (JSON.stringify(previous.scope) !== JSON.stringify(scope) && previous.dirty) {
+      onDirtyChange?.(previous.scope, false)
+      previous.dirty = false
+    }
+    if (previous.dirty !== dirty || JSON.stringify(previous.scope) !== JSON.stringify(scope)) {
+      if (dirty) onDirtyChange?.(scope, true)
+      previousRef.current = { scope, dirty }
+    }
+  }, [dirty, onDirtyChange, scope])
+  useEffect(() => () => {
+    if (previousRef.current.dirty) callbackRef.current?.(previousRef.current.scope, false)
+  }, [])
+}
+
 function toDraft(enrollment: OpsRegistrationEnrollment): RegistrationEnrollmentDraft {
   return restoreRegistrationEnrollmentDraft({
     ...enrollment,
@@ -135,6 +177,7 @@ export type RegistrationEnrollmentEditorProps = {
   permissions: RegistrationManagementPermissions
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 export function RegistrationEnrollmentEditor({
@@ -148,6 +191,7 @@ export function RegistrationEnrollmentEditor({
   permissions,
   onReload,
   onWarning,
+  onDirtyChange,
 }: RegistrationEnrollmentEditorProps) {
   const trackEnrollments = useMemo(
     () => enrollments.filter((enrollment) => enrollment.trackId === track.id),
@@ -175,6 +219,9 @@ export function RegistrationEnrollmentEditor({
   const [decisionWaitingKind, setDecisionWaitingKind] = useState<RegistrationWaitingKind>("")
   const [decisionClassId, setDecisionClassId] = useState("")
   const [decisionReason, setDecisionReason] = useState("")
+  const [validationError, setValidationError] = useState("")
+  const sectionRef = useRef<HTMLElement | null>(null)
+  const initialDraftRowsRef = useRef(JSON.stringify(draftRows))
   const submissionKeys = useSubmissionKeys()
   const subjectClasses = useMemo(
     () => classes.filter((classItem) => classItem.subject.trim() === track.subject),
@@ -197,6 +244,10 @@ export function RegistrationEnrollmentEditor({
     enrollment: selectedCancelEnrollment,
     enrollments: trackEnrollments,
   })
+  const editorDirty = JSON.stringify(draftRows) !== initialDraftRowsRef.current
+    || Boolean(cancelEnrollmentId || cancelReason || cancelDestination || cancelWaitingKind || cancelClassId)
+    || Boolean(decisionDestination || decisionWaitingKind || decisionClassId || decisionReason)
+  useOwnedDirtyState(!refreshPending && editorDirty, onDirtyChange)
 
   useEffect(() => {
     const missingClassIds = selectedClassIds.filter((classId) => !(classId in classDetailById))
@@ -314,13 +365,15 @@ export function RegistrationEnrollmentEditor({
     setClassDetailRetryToken((current) => current + 1)
   }
 
-  async function reloadCommitted(message: string) {
+  async function reloadCommitted() {
+    onDirtyChange?.(false)
+    setRefreshPending(true)
     try {
       await onReload()
       setRefreshPending(false)
     } catch {
       setRefreshPending(true)
-      onWarning(message)
+      onWarning("저장은 완료됐지만 최신 내용을 불러오지 못했습니다")
     }
   }
 
@@ -337,7 +390,13 @@ export function RegistrationEnrollmentEditor({
   async function saveRows() {
     if (!canEditRows || saving) return
     if (blockers.length > 0) {
-      onWarning(blockers[0]?.message || "수업 정보를 확인하세요.")
+      const message = blockers[0]?.message || "수업 정보를 확인하세요."
+      setValidationError(message)
+      onWarning(message)
+      const rowId = blockers[0]?.rowId
+      window.requestAnimationFrame(() => sectionRef.current
+        ?.querySelector<HTMLElement>(`[data-enrollment-row="${rowId}"] select`)
+        ?.focus())
       return
     }
     const rows = serializeRegistrationEnrollmentRows(draftRows)
@@ -349,8 +408,9 @@ export function RegistrationEnrollmentEditor({
       const saved = await saveRegistrationEnrollmentRows({ trackId: track.id, rows, requestKey })
       const merged = mergeSavedRegistrationEnrollmentRows(draftRows, saved.rows)
       setDraftRows(merged)
+      initialDraftRowsRef.current = JSON.stringify(merged)
       submissionKeys.clear("enrollment-rows", logicalId)
-      await reloadCommitted("수업 정보는 저장됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      await reloadCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "수업 정보를 저장하지 못했습니다."))
     } finally {
@@ -375,7 +435,7 @@ export function RegistrationEnrollmentEditor({
         requestKey,
       })
       submissionKeys.clear("enrollment-decision", logicalId)
-      await reloadCommitted("단계 변경은 완료됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      await reloadCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "등록 결정을 변경하지 못했습니다."))
     } finally {
@@ -403,7 +463,7 @@ export function RegistrationEnrollmentEditor({
         requestKey,
       })
       submissionKeys.clear("cancel-enrollment", logicalId)
-      await reloadCommitted("수강 취소는 완료됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      await reloadCommitted()
     } catch (error) {
       onWarning(errorMessage(error, "수강을 취소하지 못했습니다."))
     } finally {
@@ -414,7 +474,7 @@ export function RegistrationEnrollmentEditor({
   const immutableHistory = trackEnrollments.filter((enrollment) => !isMutableDraft(enrollment))
 
   return (
-    <section className="grid gap-3" aria-label={`${track.subject} 수강 수업`}>
+    <section ref={sectionRef} className="grid gap-3" aria-label={`${track.subject} 수강 수업`}>
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">{track.subject} 수강 수업</h3>
         <Badge variant="outline">{draftRows.length}개 수업</Badge>
@@ -431,10 +491,10 @@ export function RegistrationEnrollmentEditor({
           .filter((textbook): textbook is OpsTextbookOption => Boolean(textbook))
         const rowBlockers = blockers.filter((blocker) => blocker.rowId === row.clientKey)
         return (
-          <article key={row.clientKey} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.25fr)_auto] sm:items-end">
+          <article key={row.clientKey} data-enrollment-row={row.clientKey} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.25fr)_auto] sm:items-end">
             <Label className="grid gap-1.5">
               <span>수업 {index + 1}</span>
-              <select className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm" value={row.classId} onChange={(event) => selectClass(row.clientKey, event.target.value)} disabled={!canEditRows || saving}>
+              <select aria-label={`${track.subject} 수업 ${index + 1} 선택`} className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm" value={row.classId} onChange={(event) => { setValidationError(""); selectClass(row.clientKey, event.target.value) }} disabled={!canEditRows || saving}>
                 <option value="">수업 선택</option>
                 {subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}
               </select>
@@ -443,6 +503,7 @@ export function RegistrationEnrollmentEditor({
               <span>교재</span>
               <select
                 className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm"
+                aria-label={`${track.subject} 수업 ${index + 1} 교재 선택`}
                 value={row.textbookId}
                 onChange={(event) => updateRow(row.clientKey, {
                   textbookId: event.target.value,
@@ -458,6 +519,7 @@ export function RegistrationEnrollmentEditor({
               <span>수업 시작 일정</span>
               <select
                 className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm"
+                aria-label={`${track.subject} 수업 ${index + 1} 시작 일정 선택`}
                 value={row.classStartSessionKey}
                 onChange={(event) => {
                   const session = sessions.find((item) => item.value === event.target.value)
@@ -467,7 +529,7 @@ export function RegistrationEnrollmentEditor({
                     classStartSession: session?.sessionLabel || "",
                   })
                 }}
-                disabled={!canEditRows || saving || !row.classId || loadingClassIds.has(row.classId)}
+                disabled={!canEditRows || saving || !row.classId || loadingClassIds.has(row.classId) || classDetailById[row.classId] === null}
               >
                 <option value="">{loadingClassIds.has(row.classId) ? "일정 불러오는 중" : "수업일·회차 선택"}</option>
                 {sessions.map((session) => <option key={session.value} value={session.value}>{session.dateKey} · {session.sessionLabel}{session.state === "makeup" ? " · 보강" : ""}</option>)}
@@ -494,12 +556,15 @@ export function RegistrationEnrollmentEditor({
               <Trash2 className="size-4" aria-hidden="true" />
               {row.id === null ? "삭제" : "수강 취소"}
             </Button>
-            {rowBlockers.length > 0 ? <p className="text-xs text-destructive sm:col-span-4">{rowBlockers.map((blocker) => blocker.message).join(" · ")}</p> : null}
+            {rowBlockers.length > 0 ? <p role="alert" className="text-xs text-destructive sm:col-span-4">{rowBlockers.map((blocker) => blocker.message).join(" · ")}</p> : null}
             {row.classId && classDetailById[row.classId] === null && !loadingClassIds.has(row.classId) ? (
-              <Button type="button" variant="outline" size="sm" className="w-fit sm:col-span-4" onClick={() => retryClassDetail(row.classId)}>
-                <RefreshCw className="size-4" aria-hidden="true" />
-                수업 일정 다시 불러오기
-              </Button>
+              <div role="alert" className="grid gap-2 text-xs text-destructive sm:col-span-4">
+                <span>선택한 수업 일정을 불러오지 못했습니다.</span>
+                <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => retryClassDetail(row.classId)} disabled={refreshPending}>
+                  <RefreshCw className="size-4" aria-hidden="true" />
+                  수업 일정 다시 불러오기
+                </Button>
+              </div>
             ) : null}
           </article>
         )
@@ -507,21 +572,25 @@ export function RegistrationEnrollmentEditor({
 
       {canEditRows ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-          <Button type="button" variant="outline" onClick={addRow} disabled={saving}>
+          <Button type="button" aria-label={`${track.subject} 수업 추가`} variant="outline" onClick={addRow} disabled={saving}>
             <Plus className="size-4" aria-hidden="true" />
             수업 추가
           </Button>
-          <Button type="button" onClick={() => void saveRows()} disabled={saving || refreshPending || draftRows.length === 0 || blockers.length > 0}>
+          <Button type="button" aria-label={`${track.subject} 수업 정보 저장`} onClick={() => void saveRows()} disabled={saving || refreshPending || draftRows.length === 0}>
             {saving ? "저장 중" : "수업 정보 저장"}
           </Button>
         </div>
       ) : null}
+      {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
 
       {refreshPending ? (
-        <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload()}>
-          <RefreshCw className="size-4" aria-hidden="true" />
-          최신 내용 다시 불러오기
-        </Button>
+        <div role="alert" className="grid gap-2 text-sm text-amber-900">
+          <span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span>
+          <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload()}>
+            <RefreshCw className="size-4" aria-hidden="true" />
+            최신 내용 다시 불러오기
+          </Button>
+        </div>
       ) : null}
 
       {track.status === "enrollment_decided" && permissions.canManage && !trackHasOpenBatch && !refreshPending ? (
@@ -529,8 +598,8 @@ export function RegistrationEnrollmentEditor({
           <summary className="cursor-pointer text-sm font-medium">등록 대신 다른 단계로 이동</summary>
           <div className="mt-3 grid gap-3">
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant={decisionDestination === "waiting" ? "default" : "outline"} onClick={() => setDecisionDestination("waiting")}>대기로 전환</Button>
-              <Button type="button" size="sm" variant={decisionDestination === "not_registered" ? "destructive" : "outline"} onClick={() => setDecisionDestination("not_registered")}>미등록 완료</Button>
+              <Button type="button" aria-label={`${track.subject} 대기로 전환`} size="sm" variant={decisionDestination === "waiting" ? "default" : "outline"} onClick={() => setDecisionDestination("waiting")}>대기로 전환</Button>
+              <Button type="button" aria-label={`${track.subject} 미등록 완료`} size="sm" variant={decisionDestination === "not_registered" ? "destructive" : "outline"} onClick={() => setDecisionDestination("not_registered")}>미등록 완료</Button>
             </div>
             {decisionDestination === "waiting" ? (
               <div className="grid gap-2 sm:grid-cols-2">
@@ -546,8 +615,8 @@ export function RegistrationEnrollmentEditor({
                 ) : null}
               </div>
             ) : null}
-            <Textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} placeholder="변경 사유" />
-            <Button type="button" variant={decisionDestination === "not_registered" ? "destructive" : "default"} onClick={() => void routeDecision()} disabled={!decisionDestination || !decisionReason.trim() || saving || refreshPending}>단계 변경</Button>
+            <Textarea aria-label={`${track.subject} 단계 변경 사유`} value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} placeholder="변경 사유" />
+            <Button type="button" aria-label={`${track.subject} 단계 변경`} variant={decisionDestination === "not_registered" ? "destructive" : "default"} onClick={() => void routeDecision()} disabled={!decisionDestination || !decisionReason.trim() || saving || refreshPending}>단계 변경</Button>
           </div>
         </details>
       ) : null}
@@ -559,6 +628,7 @@ export function RegistrationEnrollmentEditor({
             {immutableHistory.map((enrollment) => {
               const classLabel = classes.find((classItem) => classItem.id === enrollment.classId)?.label || enrollment.classId
               const canCancel = permissions.canManage
+                && !refreshPending
                 && !trackHasOpenBatch
                 && (enrollment.status === "planned" || (enrollment.status === "enrolled" && enrollment.rosterActive))
               return (
@@ -567,7 +637,7 @@ export function RegistrationEnrollmentEditor({
                     <div className="font-medium">{classLabel}</div>
                     <div className="text-xs text-muted-foreground">{enrollmentHistoryLabel(enrollment)}{enrollment.classStartDate ? ` · ${enrollment.classStartDate} ${enrollment.classStartSession || ""}` : ""}</div>
                   </div>
-                  {canCancel ? <Button type="button" variant="outline" size="sm" onClick={() => setCancelEnrollmentId(enrollment.id)}>수강 취소</Button> : null}
+                  {canCancel ? <Button type="button" aria-label={`${track.subject} ${classLabel} 수강 취소`} variant="outline" size="sm" onClick={() => setCancelEnrollmentId(enrollment.id)}>수강 취소</Button> : null}
                 </div>
               )
             })}
@@ -579,9 +649,9 @@ export function RegistrationEnrollmentEditor({
       {permissions.canManage && cancelEnrollmentId ? (
         <section className="grid gap-3 rounded-md border border-destructive/30 p-3">
           <h4 className="text-sm font-semibold">수강 취소</h4>
-          <Textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="취소 사유" />
+          <Textarea aria-label={`${track.subject} 수강 취소 사유`} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="취소 사유" disabled={refreshPending} />
           {selectedEnrollmentCancellation.requiresDestination ? (
-            <select aria-label={`${track.subject} 수강 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestination} onChange={(event) => setCancelDestination(event.target.value as typeof cancelDestination)}>
+            <select aria-label={`${track.subject} 수강 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestination} onChange={(event) => setCancelDestination(event.target.value as typeof cancelDestination)} disabled={refreshPending}>
               <option value="">취소 후 단계 선택</option>
               <option value="enrollment_decided">등록 결정으로 이동</option>
               <option value="waiting">대기로 이동</option>
@@ -590,12 +660,12 @@ export function RegistrationEnrollmentEditor({
           ) : null}
           {selectedEnrollmentCancellation.requiresDestination && cancelDestination === "waiting" ? (
             <div className="grid gap-2 sm:grid-cols-2">
-              <select aria-label={`${track.subject} 수강 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKind} onChange={(event) => setCancelWaitingKind(event.target.value as RegistrationWaitingKind)}>
+              <select aria-label={`${track.subject} 수강 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKind} onChange={(event) => setCancelWaitingKind(event.target.value as RegistrationWaitingKind)} disabled={refreshPending}>
                 <option value="">대기 종류 선택</option>
                 {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               {cancelWaitingKind === "current_class" ? (
-                <select aria-label={`${track.subject} 수강 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassId} onChange={(event) => setCancelClassId(event.target.value)}>
+                <select aria-label={`${track.subject} 수강 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassId} onChange={(event) => setCancelClassId(event.target.value)} disabled={refreshPending}>
                   <option value="">대기 수업 선택</option>
                   {subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}
                 </select>
@@ -609,14 +679,16 @@ export function RegistrationEnrollmentEditor({
               setCancelWaitingKind("")
               setCancelClassId("")
               setCancelReason("")
-            }} disabled={saving}>닫기</Button>
-            <Button type="button" variant="destructive" onClick={() => void cancelPersistedEnrollment()} disabled={!cancelReason.trim() || saving || refreshPending || (selectedEnrollmentCancellation.requiresDestination && !cancelDestination)}>수강 취소 확인</Button>
+            }} disabled={saving || refreshPending}>닫기</Button>
+            <Button type="button" aria-label={`${track.subject} 수강 취소 확인`} variant="destructive" onClick={() => void cancelPersistedEnrollment()} disabled={!cancelReason.trim() || saving || refreshPending || (selectedEnrollmentCancellation.requiresDestination && !cancelDestination)}>수강 취소 확인</Button>
           </div>
         </section>
       ) : null}
     </section>
   )
 }
+
+export type AdmissionDirtyScope = { kind: "message_evidence" } | { kind: "batch"; batchId: string }
 
 export type RegistrationAdmissionPanelProps = {
   taskId: string
@@ -647,6 +719,7 @@ export type RegistrationAdmissionPanelProps = {
   }) => Promise<void>
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
+  onDirtyChange?: (scope: AdmissionDirtyScope, dirty: boolean) => void
 }
 
 export function RegistrationAdmissionPanel({
@@ -667,11 +740,13 @@ export function RegistrationAdmissionPanel({
   onReleaseAdmissionMessageRetry,
   onReload,
   onWarning,
+  onDirtyChange,
 }: RegistrationAdmissionPanelProps) {
   const submissionKeys = useSubmissionKeys()
   const [selectedEnrollmentIds, setSelectedEnrollmentIds] = useState<Set<string>>(() => new Set())
   const [busyAction, setBusyAction] = useState("")
-  const [refreshPending, setRefreshPending] = useState(false)
+  const [messageRefreshPending, setMessageRefreshPending] = useState(false)
+  const [batchRefreshPending, setBatchRefreshPending] = useState(false)
   const [evidenceText, setEvidenceText] = useState("{}")
   const [messageReason, setMessageReason] = useState("")
   const [cancelBatchOpen, setCancelBatchOpen] = useState(false)
@@ -679,6 +754,8 @@ export function RegistrationAdmissionPanel({
   const [cancelDestinations, setCancelDestinations] = useState<Record<string, "" | "waiting" | "not_registered">>({})
   const [cancelWaitingKinds, setCancelWaitingKinds] = useState<Record<string, RegistrationWaitingKind>>({})
   const [cancelClassIds, setCancelClassIds] = useState<Record<string, string>>({})
+  const [validationError, setValidationError] = useState("")
+  const admissionSectionRef = useRef<HTMLElement | null>(null)
   const trackById = useMemo(() => new Map(tracks.map((track) => [track.id, track])), [tracks])
   const classById = useMemo(() => new Map(classes.map((classItem) => [classItem.id, classItem])), [classes])
   const openBatch = batches.find((batch) => !["completed", "canceled"].includes(batch.status)) || null
@@ -716,23 +793,33 @@ export function RegistrationAdmissionPanel({
     batch: openBatch,
   })
   const messageRecoveryAvailable = useAdmissionRecoveryAvailable(admissionApplicationMessageUpdatedAt)
+  const messageDirty = !messageRefreshPending && (evidenceText !== "{}" || Boolean(messageReason))
+  const batchScope: AdmissionDirtyScope = { kind: "batch", batchId: openBatch?.id || "new" }
+  const batchDirty = !batchRefreshPending && (openBatch
+    ? Boolean(cancelBatchOpen || cancelBatchReason || Object.keys(cancelDestinations).length || Object.keys(cancelWaitingKinds).length || Object.keys(cancelClassIds).length)
+    : selectedEnrollmentIds.size > 0)
+  useScopedDirtyState({ kind: "message_evidence" }, messageDirty, onDirtyChange)
+  useScopedDirtyState(batchScope, batchDirty, onDirtyChange)
 
-  async function afterCommitted(message: string) {
+  async function afterCommitted(owner: "message" | "batch") {
+    const setPending = owner === "message" ? setMessageRefreshPending : setBatchRefreshPending
+    setPending(true)
     try {
       await onReload()
-      setRefreshPending(false)
+      setPending(false)
     } catch {
-      setRefreshPending(true)
-      onWarning(message)
+      setPending(true)
+      onWarning("저장은 완료됐지만 최신 내용을 불러오지 못했습니다")
     }
   }
 
-  async function retryAdmissionReload() {
+  async function retryAdmissionReload(owner: "message" | "batch") {
+    const setPending = owner === "message" ? setMessageRefreshPending : setBatchRefreshPending
     try {
       await onReload()
-      setRefreshPending(false)
+      setPending(false)
     } catch {
-      setRefreshPending(true)
+      setPending(true)
       onWarning("최신 입학 처리 내용을 다시 불러오지 못했습니다.")
     }
   }
@@ -742,13 +829,16 @@ export function RegistrationAdmissionPanel({
     mutation: (requestKey: string) => Promise<void>,
     entityId: string,
   ) {
-    if (busyAction || refreshPending) return
+    if (busyAction || messageRefreshPending) return
     const requestKey = submissionKeys.getOrCreate(action, entityId)
     setBusyAction(action)
     try {
       await mutation(requestKey)
       submissionKeys.clear(action, entityId)
-      await afterCommitted("입학신청서 상태는 변경됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      setEvidenceText("{}")
+      setMessageReason("")
+      onDirtyChange?.({ kind: "message_evidence" }, false)
+      await afterCommitted("message")
     } catch (error) {
       onWarning(errorMessage(error, "입학신청서 상태를 변경하지 못했습니다."))
     } finally {
@@ -766,9 +856,21 @@ export function RegistrationAdmissionPanel({
     }
   }
 
+  function requireMessageEvidence(retryCopy = false) {
+    const providerEvidence = parsedEvidence()
+    if (providerEvidence && messageReason.trim()) return providerEvidence
+    const message = retryCopy ? "제공사 증빙과 재발송 사유를 입력하세요." : "제공사 증빙과 확인 사유를 입력하세요."
+    setValidationError(message)
+    onWarning(message)
+    window.requestAnimationFrame(() => admissionSectionRef.current
+      ?.querySelector<HTMLElement>(!providerEvidence ? "[aria-label='입학신청서 제공사 확인 증빙']" : "[aria-label='입학신청서 확인 사유']")
+      ?.focus())
+    return null
+  }
+
   async function startBatch() {
     const enrollmentIds = activeSelectedEnrollmentIds
-    if (busyAction || refreshPending || !permissions.canManage || !admissionNoticeSent || selectedTrackIds.length === 0 || enrollmentIds.length === 0) return
+    if (busyAction || batchRefreshPending || !permissions.canManage || !admissionNoticeSent || selectedTrackIds.length === 0 || enrollmentIds.length === 0) return
     if (!selectedEnrollmentsHaveCompleteSchedules) {
       onWarning("입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.")
       return
@@ -779,7 +881,9 @@ export function RegistrationAdmissionPanel({
     try {
       await startRegistrationAdmissionBatch({ taskId, trackIds: selectedTrackIds, enrollmentIds, requestKey })
       submissionKeys.clear("batch-start", entityId)
-      await afterCommitted("입학 처리는 시작됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      setSelectedEnrollmentIds(new Set())
+      onDirtyChange?.(batchScope, false)
+      await afterCommitted("batch")
     } catch (error) {
       onWarning(errorMessage(error, "입학 처리를 시작하지 못했습니다."))
     } finally {
@@ -788,14 +892,14 @@ export function RegistrationAdmissionPanel({
   }
 
   async function setMakeedu(enrollment: OpsRegistrationEnrollment) {
-    if (busyAction || refreshPending) return
+    if (busyAction || batchRefreshPending) return
     const logicalId = `${enrollment.id}:${!enrollment.makeeduRegistered}`
     const requestKey = submissionKeys.getOrCreate("batch-makeedu", logicalId)
     setBusyAction(`makeedu:${enrollment.id}`)
     try {
       await setRegistrationEnrollmentMakeedu({ enrollmentId: enrollment.id, registered: !enrollment.makeeduRegistered, requestKey })
       submissionKeys.clear("batch-makeedu", logicalId)
-      await afterCommitted("메이크에듀 상태는 저장됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      await afterCommitted("batch")
     } catch (error) {
       onWarning(errorMessage(error, "메이크에듀 등록 상태를 변경하지 못했습니다."))
     } finally {
@@ -804,14 +908,14 @@ export function RegistrationAdmissionPanel({
   }
 
   async function advanceBatch(action: "invoice_sent" | "payment_confirmed") {
-    if (!openBatch || busyAction || refreshPending) return
+    if (!openBatch || busyAction || batchRefreshPending) return
     const kind = action === "invoice_sent" ? "batch-invoice" : "batch-payment"
     const requestKey = submissionKeys.getOrCreate(kind, openBatch.id)
     setBusyAction(kind)
     try {
       await advanceRegistrationAdmissionBatch({ batchId: openBatch.id, action, requestKey })
       submissionKeys.clear(kind, openBatch.id)
-      await afterCommitted("입학 처리 상태는 저장됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      await afterCommitted("batch")
     } catch (error) {
       onWarning(errorMessage(error, "입학 처리 상태를 변경하지 못했습니다."))
     } finally {
@@ -820,13 +924,13 @@ export function RegistrationAdmissionPanel({
   }
 
   async function completeBatch() {
-    if (!openBatch || busyAction || refreshPending) return
+    if (!openBatch || busyAction || batchRefreshPending) return
     const requestKey = submissionKeys.getOrCreate("batch-complete", openBatch.id)
     setBusyAction("batch-complete")
     try {
       await completeRegistrationAdmissionBatch({ batchId: openBatch.id, requestKey })
       submissionKeys.clear("batch-complete", openBatch.id)
-      await afterCommitted("등록은 완료됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      await afterCommitted("batch")
     } catch (error) {
       onWarning(errorMessage(error, "등록을 완료하지 못했습니다."))
     } finally {
@@ -842,7 +946,12 @@ export function RegistrationAdmissionPanel({
   })
 
   async function cancelBatch() {
-    if (!openBatch || !cancelBatchReason.trim() || busyAction || refreshPending || openBatch.status === "paid") return
+    if (!openBatch || busyAction || batchRefreshPending || openBatch.status === "paid") return
+    if (!cancelBatchReason.trim()) {
+      setValidationError("입학 처리 취소 사유를 입력하세요.")
+      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[aria-label='입학 처리 취소 사유']")?.focus())
+      return
+    }
     const resolutions = firstAdmissionTrackIds.map((trackId) => ({
       trackId,
       destination: cancelDestinations[trackId] || "",
@@ -851,16 +960,34 @@ export function RegistrationAdmissionPanel({
         ? cancelClassIds[trackId] || null
         : null,
     }))
-    if (resolutions.some((item) => !item.destination)) return
-    if (resolutions.some((item) => item.destination === "waiting" && !item.waitingKind)) return
-    if (resolutions.some((item) => item.waitingKind === "current_class" && !item.classId)) return
+    if (resolutions.some((item) => !item.destination)) {
+      setValidationError("취소 후 단계를 과목별로 선택하세요.")
+      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("select")?.focus())
+      return
+    }
+    if (resolutions.some((item) => item.destination === "waiting" && !item.waitingKind)) {
+      setValidationError("대기 종류를 과목별로 선택하세요.")
+      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("select")?.focus())
+      return
+    }
+    if (resolutions.some((item) => item.waitingKind === "current_class" && !item.classId)) {
+      setValidationError("대기 수업을 과목별로 선택하세요.")
+      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("select")?.focus())
+      return
+    }
     const entityId = `${openBatch.id}:${cancelBatchReason.trim()}:${JSON.stringify(resolutions)}`
     const requestKey = submissionKeys.getOrCreate("batch-cancel", entityId)
     setBusyAction("batch-cancel")
     try {
       await cancelRegistrationAdmissionBatch({ batchId: openBatch.id, resolutions, reason: cancelBatchReason.trim(), requestKey })
       submissionKeys.clear("batch-cancel", entityId)
-      await afterCommitted("입학 처리 취소는 완료됐지만 최신 내용을 다시 불러오지 못했습니다.")
+      setCancelBatchOpen(false)
+      setCancelDestinations({})
+      setCancelWaitingKinds({})
+      setCancelClassIds({})
+      setCancelBatchReason("")
+      onDirtyChange?.(batchScope, false)
+      await afterCommitted("batch")
     } catch (error) {
       onWarning(errorMessage(error, "입학 처리를 취소하지 못했습니다."))
     } finally {
@@ -877,7 +1004,7 @@ export function RegistrationAdmissionPanel({
   }[admissionApplicationMessageStatus]
 
   return (
-    <section className="grid gap-3 rounded-md border p-3" aria-label="입학 처리">
+    <section ref={admissionSectionRef} className="grid gap-3 rounded-md border p-3" aria-label="입학 처리">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">입학 처리</h3>
         <Badge variant={openBatch ? "default" : "outline"}>{openBatch ? `${openBatch.revisionNumber}차 처리` : "대상 선택"}</Badge>
@@ -888,42 +1015,45 @@ export function RegistrationAdmissionPanel({
           <span className="font-medium">1. 입학신청서 발송</span>
           <span className="text-xs text-muted-foreground">{messageStatusLabel}</span>
         </div>
+        {messageRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("message")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
         {permissions.canManage && applicationState.canSend ? (
-          <Button type="button" size="sm" className="w-fit" onClick={() => void runMessageAction("admission-send", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), taskId)} disabled={Boolean(busyAction)}>입학신청서 발송</Button>
+          <Button type="button" size="sm" className="w-fit" onClick={() => void runMessageAction("admission-send", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>입학신청서 발송</Button>
         ) : null}
         {permissions.canManage && applicationState.syncNeeded ? (
-          <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-sync", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), admissionApplicationMessageId || taskId)} disabled={Boolean(busyAction)}>상태 동기화</Button>
+          <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-sync", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), admissionApplicationMessageId || taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>상태 동기화</Button>
         ) : null}
         {permissions.canManage && admissionApplicationMessageStatus === "pending" && admissionApplicationMessageId ? (
           <>
-            <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-check", () => onCheckAdmissionMessage({ messageId: admissionApplicationMessageId }), admissionApplicationMessageId)} disabled={Boolean(busyAction) || !messageRecoveryAvailable}>발송 상태 확인</Button>
+            <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-check", () => onCheckAdmissionMessage({ messageId: admissionApplicationMessageId }), admissionApplicationMessageId)} disabled={Boolean(busyAction) || messageRefreshPending || !messageRecoveryAvailable}>발송 상태 확인</Button>
             {!messageRecoveryAvailable ? <p className="text-xs text-muted-foreground">발송 후 15분이 지나면 확인할 수 있습니다.</p> : null}
           </>
         ) : null}
         {permissions.canManage && ["unknown", "failed_hold"].includes(admissionApplicationMessageStatus) && admissionApplicationMessageId ? (
           <div className="grid gap-2">
-            <Textarea value={evidenceText} onChange={(event) => setEvidenceText(event.target.value)} placeholder="제공사 확인 증빙 JSON" className="font-mono text-xs" />
-            <Input value={messageReason} onChange={(event) => setMessageReason(event.target.value)} placeholder="확인 사유" />
+            <Textarea aria-label="입학신청서 제공사 확인 증빙" value={evidenceText} onChange={(event) => setEvidenceText(event.target.value)} placeholder="제공사 확인 증빙 JSON" className="font-mono text-xs" disabled={messageRefreshPending} />
+            <Input aria-label="입학신청서 확인 사유" value={messageReason} onChange={(event) => setMessageReason(event.target.value)} placeholder="확인 사유" disabled={messageRefreshPending} />
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => {
-                const providerEvidence = parsedEvidence()
-                if (!providerEvidence || !messageReason.trim()) return onWarning("제공사 증빙과 확인 사유를 입력하세요.")
+              <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending} onClick={() => {
+                const providerEvidence = requireMessageEvidence()
+                if (!providerEvidence) return
                 void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "accepted", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:accepted:${evidenceText}:${messageReason.trim()}`)
               }}>접수 확인</Button>
-              {admissionApplicationMessageStatus === "unknown" ? <Button type="button" size="sm" variant="destructive" onClick={() => {
-                const providerEvidence = parsedEvidence()
-                if (!providerEvidence || !messageReason.trim()) return onWarning("제공사 증빙과 확인 사유를 입력하세요.")
+              {admissionApplicationMessageStatus === "unknown" ? <Button type="button" size="sm" variant="destructive" disabled={messageRefreshPending} onClick={() => {
+                const providerEvidence = requireMessageEvidence()
+                if (!providerEvidence) return
                 void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "failed", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:failed:${evidenceText}:${messageReason.trim()}`)
               }}>미접수 기록</Button> : null}
-              {admissionApplicationMessageStatus === "failed_hold" ? <Button type="button" size="sm" variant="outline" disabled={!messageRecoveryAvailable} onClick={() => {
-                const providerEvidence = parsedEvidence()
-                if (!providerEvidence || !messageReason.trim()) return onWarning("제공사 증빙과 재발송 사유를 입력하세요.")
+              {admissionApplicationMessageStatus === "failed_hold" ? <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending || !messageRecoveryAvailable} onClick={() => {
+                const providerEvidence = requireMessageEvidence(true)
+                if (!providerEvidence) return
                 void runMessageAction("admission-release", (requestKey) => onReleaseAdmissionMessageRetry({ messageId: admissionApplicationMessageId, providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:${evidenceText}:${messageReason.trim()}`)
               }}>재발송 허용</Button> : null}
             </div>
           </div>
         ) : null}
       </div>
+
+      {batchRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
 
       {!openBatch ? (
         <div className="grid gap-2">
@@ -932,19 +1062,19 @@ export function RegistrationAdmissionPanel({
             const classItem = classById.get(enrollment.classId)
             return (
               <label key={enrollment.id} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-                {permissions.canManage ? <input type="checkbox" checked={selectedEnrollmentIds.has(enrollment.id)} onChange={(event) => setSelectedEnrollmentIds((current) => {
+                {permissions.canManage ? <input type="checkbox" aria-label={`${track?.subject || "과목"} ${classItem?.label || enrollment.classId} 입학 처리 선택`} checked={selectedEnrollmentIds.has(enrollment.id)} onChange={(event) => setSelectedEnrollmentIds((current) => {
                   const next = new Set(current)
                   if (event.target.checked) next.add(enrollment.id)
                   else next.delete(enrollment.id)
                   return next
-                })} disabled={Boolean(busyAction)} /> : null}
+                })} disabled={Boolean(busyAction) || batchRefreshPending} /> : null}
                 <Badge variant="outline">{track?.subject || "과목"}</Badge>
                 <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{classItem?.label || enrollment.classId}</span>
               </label>
             )
           }) : <p className="text-sm text-muted-foreground">입학 처리할 저장된 수업이 없습니다.</p>}
           {permissions.canManage && unbatchedPlannedEnrollments.length > 0 ? (
-            <Button type="button" onClick={() => void startBatch()} disabled={!admissionNoticeSent || activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || refreshPending}>입학 처리 시작</Button>
+            <Button type="button" onClick={() => void startBatch()} disabled={!admissionNoticeSent || activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
           ) : null}
           {!admissionNoticeSent && unbatchedPlannedEnrollments.length > 0 ? <p className="text-xs text-muted-foreground">입학신청서 발송을 먼저 완료하세요.</p> : null}
           {admissionNoticeSent && activeSelectedEnrollmentIds.length > 0 && !selectedEnrollmentsHaveCompleteSchedules ? <p className="text-xs text-muted-foreground">입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.</p> : null}
@@ -959,15 +1089,15 @@ export function RegistrationAdmissionPanel({
               <div key={enrollment.id} className="grid gap-2 rounded-md border px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
                 <Badge variant="outline">{track?.subject || "과목"}</Badge>
                 <span className="truncate">{classItem?.label || enrollment.classId}</span>
-                {permissions.canManage ? <Button type="button" size="sm" variant={enrollment.makeeduRegistered ? "default" : "outline"} onClick={() => void setMakeedu(enrollment)} disabled={Boolean(busyAction) || openBatch.status !== "draft"}>{enrollment.makeeduRegistered ? "등록됨" : "메이크에듀 등록"}</Button> : <span>{enrollment.makeeduRegistered ? "등록됨" : "대기"}</span>}
+                {permissions.canManage ? <Button type="button" aria-label={`${track?.subject || "과목"} ${enrollment.makeeduRegistered ? "메이크에듀 등록됨" : "메이크에듀 등록"}`} size="sm" variant={enrollment.makeeduRegistered ? "default" : "outline"} onClick={() => void setMakeedu(enrollment)} disabled={batchRefreshPending || Boolean(busyAction) || openBatch.status !== "draft"}>{enrollment.makeeduRegistered ? "등록됨" : "메이크에듀 등록"}</Button> : <span>{enrollment.makeeduRegistered ? "등록됨" : "대기"}</span>}
               </div>
             )
           })}
           {permissions.canManage ? (
             <>
-              <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={!checklist.makeedu || checklist.invoice || Boolean(busyAction)}>3. 청구서 발송</Button>
-              <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={!checklist.invoice || checklist.payment || Boolean(busyAction)}>4. 수납 완료 확인</Button>
-              <Button type="button" onClick={() => void completeBatch()} disabled={!checklist.payment || checklist.complete || Boolean(busyAction)}>5. 등록 완료</Button>
+              <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={batchRefreshPending || !checklist.makeedu || checklist.invoice || Boolean(busyAction)}>3. 청구서 발송</Button>
+              <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={batchRefreshPending || !checklist.invoice || checklist.payment || Boolean(busyAction)}>4. 수납 완료 확인</Button>
+              <Button type="button" onClick={() => void completeBatch()} disabled={batchRefreshPending || !checklist.payment || checklist.complete || Boolean(busyAction)}>5. 등록 완료</Button>
             </>
           ) : (
             <dl aria-label="읽기 전용 입학 처리 상태" className="grid gap-2 rounded-md bg-muted/30 p-3 text-sm">
@@ -988,7 +1118,7 @@ export function RegistrationAdmissionPanel({
               setCancelClassIds({})
               setCancelBatchReason("")
               setCancelBatchOpen(true)
-            }} disabled={Boolean(busyAction)}>입학 처리 취소</Button>
+            }} disabled={batchRefreshPending || Boolean(busyAction)}>입학 처리 취소</Button>
           ) : null}
           {permissions.canManage && cancelBatchOpen ? (
             <div className="grid gap-3 rounded-md border border-destructive/30 p-3">
@@ -1002,18 +1132,18 @@ export function RegistrationAdmissionPanel({
                     <span className="text-sm font-medium">{track?.subject || "과목"}</span>
                     {isFirstAdmission ? (
                       <>
-                        <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestinations[trackId] || ""} onChange={(event) => setCancelDestinations((current) => ({ ...current, [trackId]: event.target.value as "" | "waiting" | "not_registered" }))}>
+                        <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestinations[trackId] || ""} onChange={(event) => setCancelDestinations((current) => ({ ...current, [trackId]: event.target.value as "" | "waiting" | "not_registered" }))} disabled={batchRefreshPending}>
                           <option value="">취소 후 단계 선택</option>
                           <option value="not_registered">미등록 완료</option>
                           <option value="waiting">대기로 이동</option>
                         </select>
                         {cancelDestinations[trackId] === "waiting" ? (
                           <div className="grid gap-2">
-                            <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKinds[trackId] || ""} onChange={(event) => setCancelWaitingKinds((current) => ({ ...current, [trackId]: event.target.value as RegistrationWaitingKind }))}>
+                            <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKinds[trackId] || ""} onChange={(event) => setCancelWaitingKinds((current) => ({ ...current, [trackId]: event.target.value as RegistrationWaitingKind }))} disabled={batchRefreshPending}>
                               <option value="">대기 종류 선택</option>
                               {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </select>
-                            {cancelWaitingKinds[trackId] === "current_class" ? <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassIds[trackId] || ""} onChange={(event) => setCancelClassIds((current) => ({ ...current, [trackId]: event.target.value }))}><option value="">대기 수업 선택</option>{subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}</select> : null}
+                            {cancelWaitingKinds[trackId] === "current_class" ? <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassIds[trackId] || ""} onChange={(event) => setCancelClassIds((current) => ({ ...current, [trackId]: event.target.value }))} disabled={batchRefreshPending}><option value="">대기 수업 선택</option>{subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}</select> : null}
                           </div>
                         ) : <span />}
                       </>
@@ -1021,12 +1151,14 @@ export function RegistrationAdmissionPanel({
                   </div>
                 )
               })}
-              <Textarea value={cancelBatchReason} onChange={(event) => setCancelBatchReason(event.target.value)} placeholder="입학 처리 취소 사유" />
-              <Button type="button" variant="destructive" onClick={() => void cancelBatch()} disabled={!cancelBatchReason.trim() || Boolean(busyAction)}>입학 처리 취소 확인</Button>
+              <Textarea aria-label="입학 처리 취소 사유" value={cancelBatchReason} onChange={(event) => setCancelBatchReason(event.target.value)} placeholder="입학 처리 취소 사유" disabled={batchRefreshPending} />
+              <Button type="button" variant="destructive" onClick={() => void cancelBatch()} disabled={batchRefreshPending || Boolean(busyAction)}>입학 처리 취소 확인</Button>
             </div>
           ) : null}
         </div>
       )}
+
+      {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
 
       {batches.some((batch) => ["completed", "canceled"].includes(batch.status)) ? (
         <details className="rounded-md border p-3">
@@ -1042,7 +1174,6 @@ export function RegistrationAdmissionPanel({
         </details>
       ) : null}
 
-      {refreshPending ? <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload()}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button> : null}
     </section>
   )
 }

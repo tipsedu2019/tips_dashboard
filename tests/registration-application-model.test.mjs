@@ -13,6 +13,7 @@ const {
   getRegistrationApplicationTrackState,
   getRegistrationCreateSectionStates,
   isRegistrationApplicationSectionContentDisabled,
+  reconcileRegistrationEditorDraft,
   updateRegistrationApplicationDirtyKeys,
 } = application
 
@@ -300,10 +301,45 @@ test("detail history keeps filters interactive while mutation and create-history
 
 test("dirty state adds and removes one key without clearing another subject or section", () => {
   const first = updateRegistrationApplicationDirtyKeys(new Set(), "inquiry:common", true)
-  const second = updateRegistrationApplicationDirtyKeys(first, "level_test:영어", true)
+  const second = updateRegistrationApplicationDirtyKeys(first, "level_test:track-track123", true)
   const third = updateRegistrationApplicationDirtyKeys(second, "inquiry:common", false)
 
   assert.deepEqual([...first], ["inquiry:common"])
-  assert.deepEqual([...second], ["inquiry:common", "level_test:영어"])
-  assert.deepEqual([...third], ["level_test:영어"])
+  assert.deepEqual([...second], ["inquiry:common", "level_test:track-track123"])
+  assert.deepEqual([...third], ["level_test:track-track123"])
+})
+
+test("dirty membership no-ops retain the same set identity", () => {
+  const dirty = new Set(["inquiry:common"])
+
+  assert.equal(updateRegistrationApplicationDirtyKeys(dirty, "inquiry:common", true), dirty)
+  assert.equal(updateRegistrationApplicationDirtyKeys(dirty, "consultation:track-track123", false), dirty)
+})
+
+test("an inquiry draft survives a consultation reload until its own canonical revision changes", () => {
+  const editedInquiry = { requestNote: "저장하지 않은 문의 메모" }
+  let dirtyKeys = updateRegistrationApplicationDirtyKeys(new Set(), "inquiry:common", true)
+  dirtyKeys = updateRegistrationApplicationDirtyKeys(dirtyKeys, "consultation:track-track123", true)
+
+  const afterConsultationReload = reconcileRegistrationEditorDraft({
+    currentDraft: editedInquiry,
+    previousCanonicalKey: "case-1:common-3",
+    nextCanonicalKey: "case-1:common-3",
+    nextCanonicalDraft: { requestNote: "서버 문의 메모" },
+  })
+  dirtyKeys = updateRegistrationApplicationDirtyKeys(dirtyKeys, "consultation:track-track123", false)
+
+  assert.equal(afterConsultationReload.draft, editedInquiry)
+  assert.deepEqual([...dirtyKeys], ["inquiry:common"])
+
+  const afterInquirySave = reconcileRegistrationEditorDraft({
+    currentDraft: afterConsultationReload.draft,
+    previousCanonicalKey: afterConsultationReload.canonicalKey,
+    nextCanonicalKey: "case-1:common-4",
+    nextCanonicalDraft: { requestNote: "저장된 문의 메모" },
+  })
+  dirtyKeys = updateRegistrationApplicationDirtyKeys(dirtyKeys, "inquiry:common", false)
+
+  assert.deepEqual(afterInquirySave.draft, { requestNote: "저장된 문의 메모" })
+  assert.equal(dirtyKeys.size, 0)
 })

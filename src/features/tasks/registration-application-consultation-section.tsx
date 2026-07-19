@@ -12,7 +12,7 @@ export function RegistrationApplicationConsultationSection({
   emptyState,
 }: RegistrationApplicationConsultationSectionProps) {
   return (
-    <div className="grid gap-3" aria-disabled={!editable}>
+    <div className="grid gap-3" aria-disabled={!editable} data-section-state={editable ? "수정 가능" : "잠김"}>
       {children || emptyState || <p className="text-sm text-muted-foreground">상담 업무가 아직 없습니다.</p>}
     </div>
   )

@@ -12,7 +12,7 @@ export function RegistrationApplicationPlacementSection({
   emptyState,
 }: RegistrationApplicationPlacementSectionProps) {
   return (
-    <div className="grid gap-3" aria-disabled={!editable}>
+    <div className="grid gap-3" aria-disabled={!editable} data-section-state={editable ? "수정 가능" : "잠김"}>
       {fields || emptyState || <p className="text-sm text-muted-foreground">등록 결정 후 입력할 수 있습니다.</p>}
     </div>
   )
