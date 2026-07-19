@@ -138,8 +138,7 @@ import {
 } from "./registration-case-list-model"
 import { RegistrationAppointmentCalendar } from "./registration-appointment-calendar"
 import type { RegistrationAppointmentCalendarItem } from "./registration-appointment-calendar-model"
-import { RegistrationTrackEditor } from "./registration-track-editor"
-import { RegistrationAdmissionPanel } from "./registration-enrollment-editor"
+import { RegistrationApplication } from "./registration-track-editor"
 import {
   createRegistrationCase,
   createRegistrationCaseWithInitialWorkflow,
@@ -8369,7 +8368,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
   const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationCaseDetail | null>(null)
   const [registrationDetailLoadError, setRegistrationDetailLoadError] = useState("")
-  const [registrationConsultationOutcomeTrackId, setRegistrationConsultationOutcomeTrackId] = useState<string | null>(null)
   const [form, setForm] = useState<OpsTaskInput>(() => cloneForm())
   const [registrationInitialWorkflowDraft, setRegistrationInitialWorkflowDraft] = useState<RegistrationInitialWorkflowDraft>(() => (
     createRegistrationInitialWorkflowDraft([])
@@ -9661,7 +9659,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (!taskId || !trackId) return
     registrationTrackSelectionRef.current = `${taskId}:${trackId}`
     setSelectedRegistrationTrackId(trackId)
-    setRegistrationConsultationOutcomeTrackId(null)
     syncTaskDeepLink(taskId, trackId, selectedRegistrationAppointmentId)
     setMessage("")
   }, [registrationCaseDetail?.task.id, selectedRegistrationAppointmentId, selectedTask?.id, syncTaskDeepLink])
@@ -9769,7 +9766,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setRegistrationCaseDetail(detail)
       setSelectedTask({ ...detail.task, registrationTracks: detail.tracks })
       setDetailOpen(true)
-      setRegistrationConsultationOutcomeTrackId(trackId)
       syncTaskDeepLink(taskId, trackId)
     } catch (error) {
       if (registrationTrackSelectionRef.current === actionSelectionKey) {
@@ -9836,7 +9832,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setSelectedRegistrationAppointmentId(null)
       setRegistrationCaseDetail(null)
       setRegistrationDetailLoadError("")
-      setRegistrationConsultationOutcomeTrackId(null)
       registrationTrackSelectionRef.current = ""
       syncTaskDeepLink(null)
     }
@@ -11168,6 +11163,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       || (selectedRegistrationTrackId && !isLegacyRegistrationTrackId(selectedRegistrationTrackId))
     ),
   )
+  const canonicalRegistrationApplicationRendered = Boolean(
+    registrationCaseDetail && isCanonicalRegistrationTrackDetail,
+  )
+  const registrationDetailCloseAction = (
+    <Button type="button" variant="ghost" size="icon" onClick={() => handleDetailOpenChange(false)} aria-label="닫기">
+      <X className="size-4" />
+    </Button>
+  )
   const deleteTargetRemovesCompletedOperation = deleteTarget ? deleteTarget.type !== "general" && isClosedOpsTask(deleteTarget) : false
   const nextAction = selectedTaskFresh && !isCanonicalRegistrationTrackDetail ? getNextTaskStatusAction(selectedTaskFresh) : null
   const selectedRegistrationAction = selectedTaskFresh && !isCanonicalRegistrationTrackDetail ? getNextRegistrationPipelineAction(selectedTaskFresh) : null
@@ -12373,16 +12376,22 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       </Dialog>
 
       <Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen} onOpenChange={handleDetailOpenChange}>
-        <DialogContent className={[
-          "max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
-          selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl" : selectedTaskFresh?.type === "registration" || selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl" : "sm:max-w-5xl",
-        ].join(" ")}>
-          <DialogHeader>
-            <DialogTitle>{selectedTaskFresh?.title || "상세"}</DialogTitle>
-            <DialogDescription className="sr-only">
-              선택한 운영 업무의 처리 상태를 확인합니다.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent
+          showCloseButton={!canonicalRegistrationApplicationRendered}
+          closeButtonLabel="닫기"
+          className={[
+            "max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
+            selectedTaskFresh?.type === "general" ? "sm:max-w-2xl" : selectedTaskFresh?.type === "word_retest" ? "sm:max-w-3xl" : selectedTaskFresh?.type === "registration" || selectedTaskFresh?.type === "withdrawal" || selectedTaskFresh?.type === "transfer" ? "sm:max-w-3xl" : "sm:max-w-5xl",
+          ].join(" ")}
+        >
+          {!canonicalRegistrationApplicationRendered ? (
+            <DialogHeader>
+              <DialogTitle>{selectedTaskFresh?.title || "상세"}</DialogTitle>
+              <DialogDescription className="sr-only">
+                선택한 운영 업무의 처리 상태를 확인합니다.
+              </DialogDescription>
+            </DialogHeader>
+          ) : null}
           {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && (
             <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
               <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
@@ -12429,20 +12438,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   <WordRetestDetailPanel task={selectedTaskFresh} />
                 ) : selectedTaskFresh.type === "registration" ? (
                   registrationCaseDetail && isCanonicalRegistrationTrackDetail ? (
-                    <RegistrationTrackEditor
+                    <RegistrationApplication
                       task={selectedTaskFresh}
                       detail={registrationCaseDetail}
-                      selectedTrackId={selectedRegistrationTrackId}
+                      focusTrackId={selectedRegistrationTrackId}
                       initialAppointmentId={selectedRegistrationAppointmentId}
                       viewerId={registrationViewerId}
                       viewerRole={registrationViewerRole}
-                      onSelectTrack={handleSelectRegistrationTrack}
+                      onFocusTrack={handleSelectRegistrationTrack}
                       onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
                       onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}
                       onReload={reloadRegistrationCaseDetail}
                       onWarning={setMessage}
-                      consultationOutcomeOpen={registrationConsultationOutcomeTrackId === selectedRegistrationTrackId}
-                      onConsultationOutcomeOpenChange={(open) => setRegistrationConsultationOutcomeTrackId(open ? selectedRegistrationTrackId : null)}
                       notificationToken={registrationNotificationSessionToken}
                       profiles={data?.profiles || EMPTY_PROFILE_OPTIONS}
                       directorOptions={data?.profiles || EMPTY_PROFILE_OPTIONS}
@@ -12451,34 +12458,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       onRetryDirectorCatalog={retryRegistrationOptions}
                       classOptions={data?.classes || EMPTY_CLASS_OPTIONS}
                       textbookOptions={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
-                      caseLevelActions={(
-                        registrationCaseDetail.tracks.some((track) => ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status))
-                        || registrationCaseDetail.admissionBatches.length > 0
-                        || Boolean(registrationCaseDetail.admissionApplicationMessageId)
-                        || Boolean(registrationCaseDetail.admissionApplicationMessageStatus)
-                        || registrationCaseDetail.admissionApplicationMessageClaimActive
-                        || Boolean(registrationCaseDetail.task.registration?.admissionNoticeSent)
-                      ) ? (
-                        <RegistrationAdmissionPanel
-                          taskId={registrationCaseDetail.task.id}
-                          tracks={registrationCaseDetail.tracks}
-                          enrollments={registrationCaseDetail.enrollments}
-                          batches={registrationCaseDetail.admissionBatches}
-                          classes={data?.classes || EMPTY_CLASS_OPTIONS}
-                          admissionNoticeSent={Boolean(registrationCaseDetail.task.registration?.admissionNoticeSent)}
-                          admissionApplicationMessageId={registrationCaseDetail.admissionApplicationMessageId}
-                          admissionApplicationMessageStatus={registrationCaseDetail.admissionApplicationMessageStatus}
-                          admissionApplicationMessageClaimActive={registrationCaseDetail.admissionApplicationMessageClaimActive}
-                          admissionApplicationMessageUpdatedAt={registrationCaseDetail.admissionApplicationMessageUpdatedAt}
-                          permissions={{ canManage: canManageRegistrationWorkflow, readOnly: !canManageRegistrationWorkflow }}
-                          onSendAdmissionMessage={({ taskId, requestKey }) => postRegistrationAdmissionAction({ taskId, requestKey })}
-                          onCheckAdmissionMessage={({ messageId }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "check", messageId })}
-                          onReconcileAdmissionMessage={({ messageId, resolution, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "reconcile", messageId, resolution, providerEvidence, reason, requestKey })}
-                          onReleaseAdmissionMessageRetry={({ messageId, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "release", messageId, providerEvidence, reason, requestKey })}
-                          onReload={reloadRegistrationCaseDetail}
-                          onWarning={setMessage}
-                        />
-                      ) : null}
+                      closeAction={registrationDetailCloseAction}
+                      admissionActions={{
+                        onSendAdmissionMessage: ({ taskId, requestKey }) => postRegistrationAdmissionAction({ taskId, requestKey }),
+                        onCheckAdmissionMessage: ({ messageId }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "check", messageId }),
+                        onReconcileAdmissionMessage: ({ messageId, resolution, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "reconcile", messageId, resolution, providerEvidence, reason, requestKey }),
+                        onReleaseAdmissionMessageRetry: ({ messageId, providerEvidence, reason, requestKey }) => postRegistrationAdmissionAction({ taskId: registrationCaseDetail.task.id, action: "release", messageId, providerEvidence, reason, requestKey }),
+                      }}
                     />
                   ) : isCanonicalRegistrationTrackDetail ? (
                     registrationDetailLoadError ? (

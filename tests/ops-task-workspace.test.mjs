@@ -895,8 +895,8 @@ test("registration workspace replaces Notion registration management with one ap
     'label="과목"',
     'label="학년"',
     "RegistrationApplicationCreate",
-    "RegistrationTrackEditor",
-    "RegistrationAdmissionPanel",
+    "RegistrationApplication",
+    "admissionActions",
   ]);
   assertIncludesAll(initialPlanSource, [
     "과목별 다음 업무",
@@ -1720,7 +1720,7 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.match(submitFormSource, /sanitizeRegistrationInquiryOnlyInput/);
 });
 
-test("canonical registration detail mounts one honest read-only timeline beside separate current work", async () => {
+test("canonical registration application mounts one honest read-only timeline in section six", async () => {
   assert.equal(
     await pathExists("src/features/tasks/registration-history-timeline.tsx"),
     true,
@@ -1740,7 +1740,8 @@ test("canonical registration detail mounts one honest read-only timeline beside 
 
   assert.match(editorSource, /import \{ RegistrationHistoryTimeline \} from "\.\/registration-history-timeline"/);
   assert.match(editorSource, /<RegistrationHistoryTimeline[\s\S]*?detail=\{detail\}[\s\S]*?profiles=/);
-  assert.match(editorSource, /현재 업무/);
+  assert.match(editorSource, /history=\{<RegistrationHistoryTimeline/);
+  assert.doesNotMatch(editorSource, /현재 업무/);
   assert.doesNotMatch(editorSource, /담당자 및 일시 이력/);
   assert.match(timelineSource, /buildRegistrationSubjectHistory\(detail\)/);
   assert.match(timelineSource, /과목 전체/);
@@ -1762,7 +1763,7 @@ test("canonical registration detail mounts one honest read-only timeline beside 
   );
   assert.doesNotMatch(timelineSource, /<Input|<Textarea|onEdit|onDelete|onAssignee|onDueDate|onDueAt/);
   assert.doesNotMatch(timelineSource, /수정|삭제|담당자 변경|예정일 변경|마감일 변경/);
-  assert.match(canonicalDetailSource, /<RegistrationTrackEditor/);
+  assert.match(canonicalDetailSource, /<RegistrationApplication/);
   assert.doesNotMatch(canonicalDetailSource, /selectedTaskFresh\.events\.map/);
   assert.match(
     workspaceSource,
@@ -4079,7 +4080,7 @@ test("registration create shows locked placement while canonical track editors o
   assert.match(create, /수업 시작 일정/);
   assert.match(create, /focusKey="classStartDate"/);
   assert.doesNotMatch(create, /classStartSession|fillRegistration/);
-  assertIncludesAll(source, ["RegistrationTrackEditor", "RegistrationAdmissionPanel"]);
+  assertIncludesAll(source, ["RegistrationApplication", "admissionActions"]);
 });
 
 test("registration canonical editors own class and textbook changes after create omits placement", async () => {
@@ -4093,7 +4094,7 @@ test("registration canonical editors own class and textbook changes after create
     "requestToken !== registrationClassDetailRequestRef.current",
     "detail.id !== selectedClassId",
     "registrationClassDetailResult.viewerId === selectedRegistrationViewerId",
-    "RegistrationAdmissionPanel",
+    "admissionActions",
   ]);
   assert.doesNotMatch(registrationFormSource, /textbookBillingIssued|registrationTextbookDefaultPendingClassRef|registrationTextbookClearedClassRef/);
 });

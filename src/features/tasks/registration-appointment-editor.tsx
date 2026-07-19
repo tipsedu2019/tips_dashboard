@@ -58,6 +58,7 @@ export type RegistrationAppointmentEditorProps = {
   onReload?: () => void | Promise<void>
   onClose?: () => void
   onRebook?: (trackId: string) => void
+  embedded?: boolean
   notificationToken?: string
   notificationProcessingReadiness?: RegistrationNotificationProcessingReadiness | null
 }
@@ -154,6 +155,7 @@ export function RegistrationAppointmentEditor({
   onReload,
   onClose,
   onRebook,
+  embedded = false,
   notificationToken = "",
   notificationProcessingReadiness = null,
 }: RegistrationAppointmentEditorProps) {
@@ -821,7 +823,12 @@ export function RegistrationAppointmentEditor({
   }
 
   return (
-    <section className="grid min-w-0 gap-4 rounded-md border bg-background p-3" aria-label={kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}>
+    <section
+      className={embedded
+        ? "grid min-w-0 gap-4"
+        : "grid min-w-0 gap-4 rounded-md border bg-background p-3"}
+      aria-label={kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold">{kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}</h3>

@@ -18,6 +18,14 @@ async function readWorkspaceSource() {
   );
 }
 
+async function readRegistrationApplicationSource() {
+  const [actions, application] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+  ])
+  return `${actions}\n${application}`
+}
+
 function sourceBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start + startMarker.length);
@@ -396,7 +404,7 @@ test("desktop application rows provide one table cell for each column while mobi
 });
 
 test("registration summaries wrap long operational values instead of clipping them", async () => {
-  const editorSource = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8");
+  const editorSource = await readRegistrationApplicationSource();
   const enrollmentSource = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8");
   const summarySource = sourceBetween(editorSource, "function RegistrationLevelTestSummary", "const REGISTRATION_DIRECTOR_VISIBLE_STATUSES");
 
@@ -407,17 +415,17 @@ test("registration summaries wrap long operational values instead of clipping th
 });
 
 test("selected visit consultation card shows the canonical appointment time and place", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.match(source, /visitAppointment/)
-  assert.match(source, /selectedVisitConsultation\?\.appointmentId/)
-  assert.match(source, /방문상담 일시/)
-  assert.match(source, /방문상담 장소/)
-  assert.match(source, /visitAppointment\.scheduledAt/)
-  assert.match(source, /visitAppointment\.place/)
+  assert.match(source, /visitConsultation\?\.appointmentId/)
+  assert.match(source, /방문상담일시/)
+  assert.match(source, /방문상담실/)
+  assert.match(source, /visitAppointment\?\.scheduledAt/)
+  assert.match(source, /visitAppointment\?\.place/)
 })
 
 test("selected phone consultation card shows active readiness without a stage fallback", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   const phoneCard = sourceBetween(
     source,
     'if (track.status === "consultation_waiting")',
@@ -535,12 +543,12 @@ test("consultation completion hint reloads exact detail and rechecks strict owne
   assert.match(source, /if \(registrationTrackSelectionRef\.current !== actionSelectionKey\) return/);
   assert.match(source, /track\?\.status === "consultation_waiting"/);
   assert.match(source, /track\?\.status === "visit_consultation_scheduled"/);
-  assert.match(source, /setRegistrationConsultationOutcomeTrackId\(trackId\)/)
-  assert.match(source, /consultationOutcomeOpen=\{registrationConsultationOutcomeTrackId === selectedRegistrationTrackId\}/)
+  assert.match(source, /setSelectedRegistrationTrackId\(trackId\)/)
+  assert.match(source, /focusTrackId=\{selectedRegistrationTrackId\}/)
 });
 
 test("track editor shows common information once and subject-scoped navigation", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   const commonInfoSource = sourceBetween(
     source,
     "function RegistrationCommonInfoSection(",
@@ -573,22 +581,22 @@ test("track editor shows common information once and subject-scoped navigation",
 })
 
 test("canonical detail uses one progressively filled registration application", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
 
-  assert.match(source, /function RegistrationApplicationSection/)
-  assert.match(source, /function getRegistrationApplicationSection/)
-  assert.match(source, /aria-label="등록 신청서"/)
-  assert.match(source, /sectionKey="inquiry"[\s\S]*?title="문의 정보"/)
-  assert.match(source, /sectionKey="level_test"[\s\S]*?title="레벨테스트"/)
-  assert.match(source, /sectionKey="consultation"[\s\S]*?title="상담"/)
-  assert.match(source, /sectionKey="placement"[\s\S]*?title="등록·대기 정보"/)
-  assert.match(source, /sectionKey="admission"[\s\S]*?title="입학 처리"/)
-  assert.match(source, /data-registration-current=\{active \? "true" : "false"\}/)
+  assert.match(source, /import \{ RegistrationApplicationShell \} from "\.\/registration-application-shell"/)
+  assert.match(source, /<RegistrationApplicationShell/)
+  assert.match(source, /mode="detail"/)
+  assert.match(source, /inquiry=\{/)
+  assert.match(source, /levelTest=\{/)
+  assert.match(source, /consultation=\{/)
+  assert.match(source, /placement=\{/)
+  assert.match(source, /admission=\{/)
+  assert.match(source, /history=\{<RegistrationHistoryTimeline/)
   assert.doesNotMatch(source, /role="tablist" aria-label="과목별 등록 진행"/)
 })
 
 test("one application keeps both subject states and prior-stage values visible", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
 
   assert.match(source, /function RegistrationSubjectProgress/)
   assert.match(source, /aria-label="과목별 진행 현황"/)
@@ -603,23 +611,135 @@ test("one application keeps both subject states and prior-stage values visible",
   assert.match(source, /detail\.enrollments/)
 })
 
-test("overview is read-only and the selected subject owns the only action surface", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const overview = sourceBetween(
-    source,
-    "function RegistrationSubjectProgress(",
-    "function RegistrationLevelTestSummary(",
-  )
+test("two tracks at different statuses expose both current sections and actions in one saved application", async () => {
+  const [source, actions, applicationModel] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
+    import("../src/features/tasks/registration-application-model.ts"),
+  ])
+  const makeTrack = (id, subject, status) => ({
+    id,
+    taskId: "registration-case",
+    subject,
+    status,
+    legacy: false,
+    directorProfileId: "director-1",
+    directorName: "담당 원장",
+    directorAssignmentSource: "default",
+    directorAssignmentRuleKey: "fixture",
+    waitingKind: "",
+    levelTestRetakeDecision: "",
+    migrationReviewRequired: false,
+    stageEnteredAt: "2026-07-20T00:00:00Z",
+    phoneReadyAt: null,
+    phoneReadySource: null,
+  })
+  const states = [
+    applicationModel.getRegistrationApplicationTrackState({
+      track: makeTrack("english-track", "영어", "level_test_scheduled"),
+      canManage: true,
+      canCompleteConsultation: false,
+    }),
+    applicationModel.getRegistrationApplicationTrackState({
+      track: makeTrack("math-track", "수학", "consultation_waiting"),
+      canManage: true,
+      canCompleteConsultation: true,
+    }),
+  ]
 
-  assert.doesNotMatch(overview, /RegistrationTrackDirectorSection|RegistrationTrackStageEditor|RegistrationEnrollmentEditor/)
-  assert.match(source, /data-registration-track-action=\{selectedTrack\.id\}/)
-  assert.match(source, /<RegistrationTrackStageEditor/)
-  assert.match(source, /<RegistrationEnrollmentEditor/)
-  assert.doesNotMatch(source, /전용 입력 화면|현재 상태와 권한/)
+  assert.deepEqual(states.map((state) => state.currentSection), ["level_test", "consultation"])
+  assert.deepEqual(states[0].sections.level_test.actions, ["start_level_test", "record_level_test_result", "cancel_level_test"])
+  assert.ok(states[1].sections.consultation.actions.includes("complete_phone_consultation"))
+  assert.match(source, /detail\.tracks\.map\(\(track\) => getRegistrationApplicationTrackState/)
+  assert.match(source, /trackContexts\.map/)
+  assert.match(source, /<RegistrationApplicationShell/)
+  assert.doesNotMatch(source, /focusTrackId === context\.track\.id\) \? \(\s*<RegistrationConsultationOutcomeEditor/)
+  assert.match(actions, /export function RegistrationTrackStageEditor/)
+  assert.match(actions, /export function RegistrationEnrollmentTrackEditor/)
+  assert.doesNotMatch(source, /selectedStageEditor|현재 업무/)
+})
+
+test("terminal subjects do not gate common edits and progressed subjects cannot be removed by sync", async () => {
+  const [application, actions] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
+  ])
+  const saveCommon = sourceBetween(application, "async function saveCommon", "function openAppointment")
+  const syncSection = sourceBetween(actions, "export function RegistrationSubjectSyncSection", "function SubjectClassSelect")
+
+  assert.match(application, /<RegistrationCommonInfoSection[\s\S]*?canEdit=\{canManageCase\}/)
+  assert.doesNotMatch(saveCommon, /syncRegistrationCaseSubjects|subjects:/)
+  assert.match(syncSection, /track\.status === "inquiry" && !track\.migrationReviewRequired/)
+  assert.match(syncSection, /subjects\.includes\(subject\) && !removableSubjects\.has\(subject\)/)
+  assert.match(syncSection, /syncRegistrationCaseSubjects/)
+})
+
+test("two decided subjects share one admission send action and expose two badges", async () => {
+  const [application, enrollment] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
+  ])
+  const decidedTracks = [
+    { id: "english-track", subject: "영어", status: "enrollment_decided" },
+    { id: "math-track", subject: "수학", status: "enrollment_decided" },
+  ]
+  const badges = decidedTracks.filter((track) => track.status === "enrollment_decided").map((track) => track.subject)
+
+  assert.deepEqual(badges, ["영어", "수학"])
+  assert.equal((application.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
+  assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: detail\.tracks,[\s\S]*?enrollments: detail\.enrollments/)
+  assert.match(application, /admissionApplicationState\.canSend/)
+  assert.match(application, /detail\.tracks\.filter\(\(track\) => track\.status === "enrollment_decided"\)\.map/)
+  assert.equal((enrollment.match(/>입학신청서 발송<\/Button>/g) || []).length, 1)
+})
+
+test("saved and create applications share one six-section shell with inline owning editors", async () => {
+  const [detail, create, actions, appointment, workspace] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8"),
+    readWorkspaceSource(),
+  ])
+
+  for (const consumer of [detail, create]) {
+    assert.match(consumer, /import \{ RegistrationApplicationShell \} from "\.\/registration-application-shell"/)
+    assert.match(consumer, /import \{ RegistrationApplicationInquirySection \} from "\.\/registration-application-inquiry-section"/)
+    assert.match(consumer, /RegistrationApplicationLevelTestSection/)
+    assert.match(consumer, /RegistrationApplicationConsultationSection/)
+    assert.match(consumer, /RegistrationApplicationPlacementSection/)
+    assert.match(consumer, /RegistrationApplicationAdmissionSection/)
+  }
+  assert.match(detail, /closeAction=\{closeAction\}/)
+  assert.match(workspace, /showCloseButton=\{!canonicalRegistrationApplicationRendered\}/)
+  assert.match(workspace, /closeAction=\{registrationDetailCloseAction\}/)
+  assert.match(appointment, /embedded\?: boolean/)
+  assert.match(appointment, /embedded\s*\?/)
+  const outcome = sourceBetween(
+    actions,
+    "export function RegistrationConsultationOutcomeEditor",
+    "export function RegistrationMigrationReviewEditor",
+  )
+  assert.doesNotMatch(outcome, /<Dialog|<DialogContent/)
+  assert.doesNotMatch(detail + create + actions, /<Dialog[\s>]|<DialogContent/)
+})
+
+test("saved application keeps exception actions in their owning sections", async () => {
+  const source = await readRegistrationApplicationSource()
+  const inquiry = sourceBetween(source, "inquiry={(\n", "levelTest={(\n")
+  const placement = sourceBetween(source, "placement={(\n", "admission={(\n")
+  const admission = sourceBetween(source, "admission={(\n", "history={")
+
+  assert.match(inquiry, /RegistrationMigrationReviewEditor/)
+  assert.match(inquiry, /renderTrackFrames\("inquiry"\)/)
+  assert.match(placement, /renderTrackFrames\("placement"\)/)
+  assert.match(source, /section === "placement"[\s\S]*?<RegistrationEnrollmentTrackEditor/)
+  assert.match(admission, /RegistrationAdmissionPanel/)
+  assert.match(admission, /cancelRegistrationAdmissionBatch|admissionActions/)
 })
 
 test("canonical track detail resolves and persists director defaults only for management roles", async () => {
-  const editor = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const editor = await readRegistrationApplicationSource()
   const workspace = await readWorkspaceSource()
 
   assert.match(editor, /resolveRegistrationTrackDirectorDefaults/)
@@ -662,11 +782,11 @@ test("canonical track detail resolves and persists director defaults only for ma
 })
 
 test("common information conflicts clear their stable key only after a successful latest-data reload", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   const commonSection = sourceBetween(source, "function RegistrationCommonInfoSection", "function RegistrationSubjectSyncSection")
   const saveCommon = sourceBetween(source, "async function saveCommon", "return (")
 
-  assert.match(commonSection, /type CommonSaveOutcome|Promise<CommonSaveOutcome>/)
+  assert.match(commonSection, /type RegistrationCommonSaveOutcome|Promise<RegistrationCommonSaveOutcome>/)
   assert.match(commonSection, /const outcome = await onSave\(draft, requestKey\)[\s\S]*?submissionKeys\.clear/)
   assert.match(commonSection, /outcome === "conflict_reloaded"[\s\S]*?최신 정보로 다시 불러왔습니다/)
   assert.doesNotMatch(commonSection, /message\.includes\("registration_common_revision_conflict"\)[\s\S]*?submissionKeys\.clear/)
@@ -676,7 +796,7 @@ test("common information conflicts clear their stable key only after a successfu
 })
 
 test("ordinary tracks expose compact manual director selection and visit reassignment guidance", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   const manualSave = sourceBetween(source, "async function saveManualDirector", "async function retryAutomaticRefresh")
   assert.match(source, /RegistrationTrackDirectorSection/)
   assert.match(source, /상담 책임자/)
@@ -686,8 +806,8 @@ test("ordinary tracks expose compact manual director selection and visit reassig
   assert.match(source, /방문상담 예약 수정에서 담당 원장을 다시 확인하세요/)
   assert.match(source, /setVisitCorrectionRequest\(\{ id, trackId: resolution\.trackId \}\)/)
   assert.match(source, /onOpenVisit\(visitCorrectionRequest\.trackId\)/)
-  assert.match(source, /item\.trackId === trackId && item\.mode === "visit"/)
-  assert.match(source, /onSelectTrack\(trackId\)/)
+  assert.match(source, /target\.visitConsultation\?\.appointmentId/)
+  assert.match(source, /onFocusTrack\(context\.track\.id\)/)
   assert.match(source, /requestKeysRef\.current\.delete\(logicalKey\)/)
   assert.match(source, /visitCorrectionTrackId/)
   assert.match(source, /preferredTrackId:\s*visitCorrectionTrackId/)
@@ -701,22 +821,22 @@ test("ordinary tracks expose compact manual director selection and visit reassig
 })
 
 test("operational detail omits the internal subject event log", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.doesNotMatch(source, /function RegistrationSubjectHistory/)
   assert.doesNotMatch(source, /<RegistrationSubjectHistory/)
   assert.doesNotMatch(source, /과목별 진행 이력/)
 })
 
 test("대기 상세는 저장된 현재반 claim을 수업 선택값으로 다시 연다", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.match(source, /getRegistrationCurrentClassWaitClassId/)
-  assert.match(source, /currentClassWaitClassId=\{selectedCurrentClassWaitClassId\}/)
+  assert.match(source, /currentClassWaitClassId=\{getRegistrationCurrentClassWaitClassId/)
   assert.match(source, /useState\(currentClassWaitClassId\)/)
-  assert.match(source, /selectedTrack\.waitingKind[^\n]*detail\.enrollments/)
+  assert.match(source, /track\.waitingKind, enrollments: detail\.enrollments/)
 })
 
 test("migration review blocks ordinary actions until explicit attribution", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.match(source, /과목 분리 확인 필요/)
   assert.match(source, /RegistrationMigrationReviewEditor/)
   assert.match(source, /migrationReviewRequired/)
@@ -753,7 +873,7 @@ test("migration resolution keeps typed inputs separate and sends one canonical J
 })
 
 test("inquiry decisions are subject-scoped and never fake a phone reservation", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.match(source, /레벨테스트 예약/)
   assert.match(source, /바로 상담/)
   assert.match(source, /문의만 완료/)
@@ -762,7 +882,7 @@ test("inquiry decisions are subject-scoped and never fake a phone reservation", 
 })
 
 test("waiting controls require the retest decision and expose explicit closure", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.match(source, /레벨테스트 재응시 필요/)
   assert.match(source, /재응시 없이 등록/)
   assert.match(source, /대기 종료 · 미등록/)
@@ -770,7 +890,7 @@ test("waiting controls require the retest decision and expose explicit closure",
 })
 
 test("terminal subject outcomes can be deliberately reopened from the same application", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
 
   assert.match(source, /reopenRegistrationTrack/)
   assert.match(source, /function TerminalStageEditor/)
@@ -781,31 +901,31 @@ test("terminal subject outcomes can be deliberately reopened from the same appli
 
 test("new shared appointments start with only the initiating subject selected", async () => {
   const editor = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
-  const workspace = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const workspace = await readRegistrationApplicationSource()
 
   assert.match(editor, /initialTrackId\?: string/)
   assert.match(editor, /selectableTracks\.some\(\(track\) => track\.id === initialTrackId\)/)
   assert.doesNotMatch(editor, /:\s*selectableTracks\.map\(\(track\) => track\.id\)/)
-  assert.match(workspace, /initialTrackId=\{selectedTrack\.id\}/)
+  assert.match(workspace, /initialTrackId=\{appointmentEditor\.initialTrackId\}/)
 })
 
 test("subject removal renders the deployed history-block error inline", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.match(source, /registration_subject_removal_blocked/)
   assert.doesNotMatch(source, /registration_subject_has_history/)
 })
 
 test("workspace mounts the unified editor only for a loaded canonical subject track", async () => {
   const source = await readWorkspaceSource()
-  assert.match(source, /import \{ RegistrationTrackEditor \} from "\.\/registration-track-editor"/)
+  assert.match(source, /import \{ RegistrationApplication \} from "\.\/registration-track-editor"/)
   assert.match(source, /const \[registrationCaseDetail, setRegistrationCaseDetail\] = useState/)
   assert.match(source, /setRegistrationCaseDetail\(detail\)/)
   assert.match(source, /registrationCaseDetail && isCanonicalRegistrationTrackDetail/)
-  assert.match(source, /<RegistrationTrackEditor/)
+  assert.match(source, /<RegistrationApplication/)
   assert.match(source, /detail=\{registrationCaseDetail\}/)
-  assert.match(source, /selectedTrackId=\{selectedRegistrationTrackId\}/)
-  assert.match(source, /onSelectTrack=\{handleSelectRegistrationTrack\}/)
-  assert.match(source, /caseLevelActions=/)
+  assert.match(source, /focusTrackId=\{selectedRegistrationTrackId\}/)
+  assert.match(source, /onFocusTrack=\{handleSelectRegistrationTrack\}/)
+  assert.match(source, /admissionActions=/)
 })
 
 test("ready-mode creation uses one guarded initial-workflow RPC without a director follow-up", async () => {
@@ -862,17 +982,18 @@ test("committed appointment and result mutations cannot be resubmitted when refr
 })
 
 test("track editor opens one shared editor for level tests and visit consultations", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   assert.match(source, /RegistrationAppointmentEditor/)
-  assert.match(source, /kind="level_test"/)
-  assert.match(source, /kind="visit_consultation"/)
+  assert.match(source, /openAppointment\(context, "level_test"/)
+  assert.match(source, /openAppointment\(context, "visit_consultation"/)
+  assert.equal((source.match(/<RegistrationAppointmentEditor/g) || []).length, 1)
   assert.match(source, /방문상담 예약/)
 })
 
-test("phone and visit consultation completion share the subject outcome dialog", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const dialogSource = sourceBetween(source, "export function RegistrationConsultationOutcomeDialog", "export function RegistrationMigrationReviewEditor")
-  assert.match(source, /RegistrationConsultationOutcomeDialog/)
+test("phone and visit consultation completion share one inline subject outcome editor", async () => {
+  const source = await readRegistrationApplicationSource()
+  const outcomeSource = sourceBetween(source, "export function RegistrationConsultationOutcomeEditor", "export function RegistrationMigrationReviewEditor")
+  assert.match(source, /RegistrationConsultationOutcomeEditor/)
   assert.match(source, /completeRegistrationConsultation/)
   assert.match(source, /consultationId: consultation\.id/)
   assert.match(source, />등록</)
@@ -884,22 +1005,21 @@ test("phone and visit consultation completion share the subject outcome dialog",
   assert.match(source, /현재 학기 개강반 대기/)
   assert.match(source, /다음 학기 개강반 대기/)
   assert.doesNotMatch(source, /상담 완료일시/)
-  assert.match(dialogSource, /if \(!nextOpen && \(saving \|\| refreshPending\)\) return/)
-  assert.match(dialogSource, /aria-pressed=\{draft\.outcome === "enrollment"\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(dialogSource, /aria-pressed=\{draft\.outcome === "waiting"\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(dialogSource, /aria-pressed=\{draft\.outcome === "not_registered"\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(dialogSource, /value=\{draft\.waitingKind\}[\s\S]*?disabled=\{saving\}/)
-  assert.match(dialogSource, /SubjectClassSelect[\s\S]*?disabled=\{saving\}/)
-  assert.match(dialogSource, /saving \? "저장 중" : "상담 결과 저장"/)
-  assert.match(dialogSource, /DialogContent className="max-h-\[calc\(100dvh-1rem\)\] overflow-y-auto sm:max-w-lg"/)
+  assert.match(outcomeSource, /aria-pressed=\{draft\.outcome === "enrollment"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /aria-pressed=\{draft\.outcome === "waiting"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /aria-pressed=\{draft\.outcome === "not_registered"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /value=\{draft\.waitingKind\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /SubjectClassSelect[\s\S]*?disabled=\{saving\}/)
+  assert.match(outcomeSource, /saving \? "저장 중" : "상담 결과 저장"/)
+  assert.doesNotMatch(outcomeSource, /<Dialog|<DialogContent/)
 })
 
 test("registration stage selects have subject-specific accessible names", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   const subjectSelectSource = sourceBetween(source, "function SubjectClassSelect(", "function InquiryStageEditor(")
   const inquirySource = sourceBetween(source, "function InquiryStageEditor(", "function WaitingStageEditor(")
   const waitingSource = sourceBetween(source, "function WaitingStageEditor(", "function RegistrationTrackStageEditor(")
-  const migrationSource = sourceBetween(source, "export function RegistrationMigrationReviewEditor", "export function RegistrationTrackEditor")
+  const migrationSource = source.slice(source.indexOf("export function RegistrationMigrationReviewEditor"))
 
   assert.match(subjectSelectSource, /aria-label=\{`\$\{subject\} 수업 선택`\}/)
   assert.match(subjectSelectSource, /className="h-9 w-full min-w-0/)
@@ -909,8 +1029,8 @@ test("registration stage selects have subject-specific accessible names", async 
 })
 
 test("appointment editor opens before history and scrolls into view", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const editorSource = source.slice(source.indexOf("export function RegistrationTrackEditor"))
+  const source = await readRegistrationApplicationSource()
+  const editorSource = source.slice(source.indexOf("export function RegistrationApplication"))
   assert.match(source, /const appointmentEditorRef = useRef<HTMLDivElement \| null>\(null\)/)
   assert.match(source, /appointmentEditorRef\.current\?\.scrollIntoView\(\{ block: "nearest", behavior: "smooth" \}\)/)
   assert.ok(
@@ -920,12 +1040,12 @@ test("appointment editor opens before history and scrolls into view", async () =
 })
 
 test("phone completion does not call the visit reservation notification helper", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const dialogBlock = sourceBetween(source, "export function RegistrationConsultationOutcomeDialog", "export function RegistrationMigrationReviewEditor")
-  assert.match(dialogBlock, /completeRegistrationConsultation/)
-  assert.match(dialogBlock, /onReload/)
-  assert.doesNotMatch(dialogBlock, /sendRegistrationVisitNotificationTarget/)
-  assert.doesNotMatch(dialogBlock, /consultation-notification/)
+  const source = await readRegistrationApplicationSource()
+  const outcomeBlock = sourceBetween(source, "export function RegistrationConsultationOutcomeEditor", "export function RegistrationMigrationReviewEditor")
+  assert.match(outcomeBlock, /completeRegistrationConsultation/)
+  assert.match(outcomeBlock, /onReload/)
+  assert.doesNotMatch(outcomeBlock, /sendRegistrationVisitNotificationTarget/)
+  assert.doesNotMatch(outcomeBlock, /consultation-notification/)
 })
 
 test("enrollment editor supports stable repeated subject rows and exact class detail hydration", async () => {
@@ -1002,38 +1122,38 @@ test("case admission message states stay actionable independently of the selecte
 })
 
 test("unified track editor and workspace mount subject rows plus one case-level admission panel", async () => {
-  const trackEditor = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  assert.match(trackEditor, /RegistrationEnrollmentEditor/)
-  assert.match(trackEditor, /track=\{selectedTrack\}/)
+  const trackEditor = await readRegistrationApplicationSource()
+  assert.match(trackEditor, /RegistrationEnrollmentTrackEditor/)
+  assert.match(trackEditor, /track=\{track\}/)
   assert.match(trackEditor, /enrollments=\{detail\.enrollments/)
+  assert.equal((trackEditor.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
 
   const shell = await readWorkspaceSource()
-  assert.match(shell, /import \{ RegistrationAdmissionPanel \}/)
-  assert.match(shell, /caseLevelActions=\{/)
-  assert.match(shell, /<RegistrationAdmissionPanel/)
-  assert.doesNotMatch(shell, /caseLevelActions=\{null\}/)
+  assert.match(shell, /<RegistrationApplication/)
+  assert.match(shell, /admissionActions=\{/)
+  assert.doesNotMatch(shell, /<RegistrationAdmissionPanel/)
 })
 
 test("stage and enrollment editors use disjoint React key namespaces", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
 
   assert.match(source, /<RegistrationTrackStageEditor\s+key=\{`stage:/)
   assert.match(source, /<RegistrationEnrollmentEditor\s+key=\{`enrollment:/)
 })
 
 test("enrollment stages show the real work surface without a redundant placeholder or director row", async () => {
-  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const source = await readRegistrationApplicationSource()
   const stageEditor = sourceBetween(
     source,
-    "function RegistrationTrackStageEditor(",
+    "export function RegistrationTrackStageEditor(",
     "\ntype ConsultationOutcomeDraft",
   )
 
   assert.match(stageEditor, /\["not_registered", "inquiry_closed"\]\.includes\(track\.status\)[\s\S]*?<TerminalStageEditor/)
   assert.match(stageEditor, /\["enrollment_decided", "enrollment_processing", "registered"\]\.includes\(track\.status\)[\s\S]*?return null/)
   assert.doesNotMatch(stageEditor, /전용 입력 화면|현재 상태와 권한/)
-  assert.match(source, /const REGISTRATION_DIRECTOR_VISIBLE_STATUSES = new Set/)
-  assert.match(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES\.has\(selectedTrack\.status\)/)
+  assert.match(source, /export const REGISTRATION_DIRECTOR_VISIBLE_STATUSES = new Set/)
+  assert.match(source, /REGISTRATION_DIRECTOR_VISIBLE_STATUSES\.has\(context\.track\.status\)/)
 })
 
 test("committed enrollment and admission actions recover refresh without resubmitting mutations", async () => {
