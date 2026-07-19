@@ -31,7 +31,7 @@ test("registration application shell renders all six sections once in fixed orde
   const shell = await readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8")
   const inquiry = await readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8")
 
-  const titles = ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입력 처리", "담당자 및 일시 이력"]
+  const titles = ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리", "자동 이력"]
   let previous = -1
   for (const title of titles) {
     const index = shell.indexOf(title)
@@ -41,6 +41,9 @@ test("registration application shell renders all six sections once in fixed orde
   }
   assert.match(shell, /aria-disabled/)
   assert.match(shell, /editable/)
+  assert.match(shell, /<fieldset[\s\S]*disabled=\{!state\.editable\}/)
+  assert.match(shell, /closeAction: ReactNode/)
+  assert.match(shell, /\{props\.closeAction\}/)
   assert.match(inquiry, /inquiryAt/)
   assert.match(inquiry, /저장 시 자동 기록/)
   assert.match(inquiry, /exceptionContent/)

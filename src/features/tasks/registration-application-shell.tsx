@@ -10,6 +10,7 @@ import {
 export type RegistrationApplicationShellProps = {
   mode: "create" | "detail"
   studentName: string
+  closeAction: ReactNode
   tracks: Array<{
     key: string
     subject: RegistrationSubject
@@ -41,8 +42,8 @@ const SECTION_TITLES: Record<RegistrationApplicationSectionKey, string> = {
   level_test: "레벨테스트",
   consultation: "상담",
   placement: "등록·대기 정보",
-  admission: "입력 처리",
-  history: "담당자 및 일시 이력",
+  admission: "입학 처리",
+  history: "자동 이력",
 }
 
 function RegistrationApplicationSection({
@@ -74,7 +75,9 @@ function RegistrationApplicationSection({
         {state.lockReason ? (
           <p id={lockReasonId} className="text-xs text-muted-foreground">{state.lockReason}</p>
         ) : null}
-        {children}
+        <fieldset disabled={!state.editable} className="m-0 min-w-0 border-0 p-0">
+          {children}
+        </fieldset>
       </div>
     </section>
   )
@@ -85,12 +88,15 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
     <div data-registration-application-mode={props.mode} className="grid gap-5">
       <header className="flex min-w-0 items-center justify-between gap-3">
         <h2 className="min-w-0 truncate text-base font-semibold">{props.studentName}</h2>
-        <div className="flex flex-wrap justify-end gap-1" aria-label="과목별 등록 상태">
-          {props.tracks.map((track) => (
-            <span key={track.key} className="rounded-full border px-2 py-0.5 text-xs">
-              {track.subject} · {track.statusLabel}
-            </span>
-          ))}
+        <div className="flex items-center justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-1" aria-label="과목별 등록 상태">
+            {props.tracks.map((track) => (
+              <span key={track.key} className="rounded-full border px-2 py-0.5 text-xs">
+                {track.subject} · {track.statusLabel}
+              </span>
+            ))}
+          </div>
+          {props.closeAction}
         </div>
       </header>
 
