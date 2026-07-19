@@ -204,17 +204,6 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function consultationItem(trackId, stageEnteredAt, phoneReadyAt, mode = "phone") {
-  return {
-    key: `case:${trackId}`,
-    taskId: "case",
-    trackId,
-    status: mode === "phone" ? "consultation_waiting" : "visit_consultation_scheduled",
-    stageEnteredAt,
-    phoneReadyAt,
-  }
-}
-
 test("case list renders one keyed application row in each responsive surface", async () => {
   const source = await readListSource();
 
@@ -368,7 +357,6 @@ test("phone consultation applications are oldest-first without reordering other 
 
 test("case list renders application-scoped desktop and mobile rows", async () => {
   const source = await readListSource();
-  const rowSource = sourceBetween(source, "export function RegistrationCaseListRow", "export function RegistrationCaseList");
 
   assert.match(source, /export function RegistrationCaseList/);
   assert.match(source, /data-testid="registration-case-desktop-list"/);
