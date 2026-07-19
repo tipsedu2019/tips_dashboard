@@ -98,6 +98,7 @@ export function RegistrationApplicationCreate({
   onDraftChange,
 }: RegistrationApplicationCreateProps) {
   const catalogState = getRegistrationCreateCatalogState({ status: catalogStatus, error: catalogError })
+  const catalogFailed = catalogState.status === "error" || catalogState.status === "partial"
   const registration = form.registration || {}
   const subjects = parseRegistrationSubjects(form.subject) as RegistrationSubject[]
   const stableAllowedInitialActions = persistence.mode === "ready_atomic"
@@ -170,8 +171,8 @@ export function RegistrationApplicationCreate({
         consultation: (
           <div
             data-registration-catalog-status={catalogState.status}
-            data-registration-state={catalogState.status === "error" ? "failed" : "locked"}
-            role={catalogState.status === "error" ? "alert" : "status"}
+            data-registration-state={catalogFailed ? "failed" : "locked"}
+            role={catalogFailed ? "alert" : "status"}
             aria-live="polite"
             className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
           >

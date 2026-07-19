@@ -38,7 +38,19 @@ export type RegistrationApplicationSectionState = {
   lockReason: string
 }
 
-export type RegistrationCreateCatalogStatus = "ready" | "loading" | "error"
+export type RegistrationCreateCatalogStatus = "ready" | "loading" | "partial" | "error"
+
+export function resolveRegistrationCreateCatalogStatus(input: {
+  loading: boolean
+  error: string
+  directorCatalogStatus: "authoritative" | "partial" | "error" | null | undefined
+}): RegistrationCreateCatalogStatus {
+  if (input.loading) return "loading"
+  if (input.error || input.directorCatalogStatus === "error") return "error"
+  if (input.directorCatalogStatus === "authoritative") return "ready"
+  if (input.directorCatalogStatus === "partial") return "partial"
+  return "loading"
+}
 
 /** Keep inquiry writable while the optional consultation catalog resolves. */
 export function getRegistrationCreateCatalogState(input: {
@@ -63,6 +75,16 @@ export function getRegistrationCreateCatalogState(input: {
       showLocalStatus: true,
       showLocalRetry: true,
       lockReason: input.error || "선택 정보를 불러오지 못했습니다.",
+    }
+  }
+  if (input.status === "partial") {
+    return {
+      status: input.status,
+      inquiryEditable: true,
+      catalogControlsDisabled: true,
+      showLocalStatus: true,
+      showLocalRetry: true,
+      lockReason: "상담 책임자 선택 정보를 일부만 불러왔습니다. 다시 불러오세요.",
     }
   }
   return {

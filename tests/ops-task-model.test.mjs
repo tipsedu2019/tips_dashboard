@@ -7,6 +7,9 @@ import {
   groupOpsTasksByAssignee,
   groupOpsTasksByStatus,
   getOpsTaskCalendarItems,
+  getOpsTaskHistoryMutation,
+  getRegistrationDirtyBackPlan,
+  getRegistrationDirtyCloseDecision,
   hasOpsTaskCalendarDate,
   hasOpsTaskOverdueCalendarDate,
   isClosedOpsTask,
@@ -21,6 +24,59 @@ import {
   sortOpsTasksByWorkflowStatus,
   summarizeOpsTasks,
 } from "../src/features/tasks/ops-task-model.js";
+
+test("task history pushes one list-to-detail entry and replaces internal URL changes without duplicates", () => {
+  assert.equal(getOpsTaskHistoryMutation({
+    currentUrl: "/admin/registration?view=calendar",
+    nextUrl: "/admin/registration?view=calendar&taskId=task-1&appointmentId=appointment-1",
+    intent: "push",
+  }), "push");
+  assert.equal(getOpsTaskHistoryMutation({
+    currentUrl: "/admin/registration?taskId=task-1",
+    nextUrl: "/admin/registration?taskId=task-1&trackId=track-1",
+    intent: "push",
+  }), "replace", "canonical focus must not add a second detail entry");
+  assert.equal(getOpsTaskHistoryMutation({
+    currentUrl: "/admin/registration?taskId=task-1&trackId=track-1",
+    nextUrl: "/admin/registration?taskId=task-1&trackId=track-1",
+    intent: "push",
+  }), "none");
+  assert.equal(getOpsTaskHistoryMutation({
+    currentUrl: "/admin/registration",
+    nextUrl: "/admin/registration?taskId=task-1&trackId=track-1&appointmentId=appointment-1",
+    intent: "replace",
+  }), "replace", "cancel restoration must replace the list URL instead of pushing");
+});
+
+test("dirty registration Back preserves the exact detail link until cancel or discard", () => {
+  const exactDetail = {
+    taskId: "task-1",
+    focusTrackId: "track-1",
+    appointmentId: "appointment-1",
+  };
+  const back = getRegistrationDirtyBackPlan({
+    urlHasTask: false,
+    hostKind: "detail",
+    dirty: true,
+    ...exactDetail,
+  });
+
+  assert.deepEqual(back, { requestClose: true, restoreDeepLink: exactDetail });
+  assert.deepEqual(getRegistrationDirtyCloseDecision("cancel", back.restoreDeepLink), {
+    close: false,
+    restoreDeepLink: exactDetail,
+  });
+  assert.deepEqual(getRegistrationDirtyCloseDecision("discard", back.restoreDeepLink), {
+    close: true,
+    restoreDeepLink: null,
+  });
+  assert.deepEqual(getRegistrationDirtyBackPlan({
+    urlHasTask: false,
+    hostKind: "detail",
+    dirty: false,
+    ...exactDetail,
+  }), { requestClose: true, restoreDeepLink: null });
+});
 
 test("ops task types keep the Notion migration scope narrow", () => {
   const labels = OPS_TASK_TYPES.map((item) => item.label);

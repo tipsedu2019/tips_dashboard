@@ -38,6 +38,9 @@ import {
   groupOpsTasksByAssignee,
   groupOpsTasksByStatus,
   getOpsTaskCalendarItems,
+  getOpsTaskHistoryMutation,
+  getRegistrationDirtyBackPlan,
+  getRegistrationDirtyCloseDecision,
   getTaskPriorityLabel,
   getTaskStatusLabel,
   getTaskTypeLabel,
@@ -151,6 +154,7 @@ import {
   type RegistrationSubject,
 } from "./registration-track-service"
 import { RegistrationApplicationCreate } from "./registration-application-create"
+import { resolveRegistrationCreateCatalogStatus } from "./registration-application-model"
 import {
   assertRegistrationCreateAttemptPersistenceMode,
   createRegistrationCreateAttempt,
@@ -8379,6 +8383,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [registrationView, setRegistrationView] = useState<RegistrationViewKey>("inquiry")
   const [registrationMode, setRegistrationMode] = useState<RegistrationWorkspaceMode>("list")
   const [registrationCalendarRefreshToken, setRegistrationCalendarRefreshToken] = useState(0)
+  const [taskHistoryRevision, setTaskHistoryRevision] = useState(0)
   const [todoSort, setTodoSort] = useState<TodoSortKey>("due")
   const [requestedByFilter, setRequestedByFilter] = useState<TodoSelectFilterKey>("all")
   const [requestedTeamFilter, setRequestedTeamFilter] = useState<TodoSelectFilterKey>("all")
@@ -8988,10 +8993,25 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
   }
 
+  const writeTaskHistoryUrl = useCallback((
+    nextUrl: string,
+    historyIntent: "push" | "replace" = "replace",
+  ) => {
+    const currentUrl = `${window.location.pathname}${window.location.search}`
+    const mutation = getOpsTaskHistoryMutation({ currentUrl, nextUrl, intent: historyIntent })
+    if (mutation === "none") return
+    if (mutation === "push") {
+      window.history.pushState(window.history.state, "", nextUrl)
+      return
+    }
+    window.history.replaceState(window.history.state, "", nextUrl)
+  }, [])
+
   const syncTaskDeepLink = useCallback((
     nextTaskId: string | null,
     nextTrackId: string | null = null,
     nextAppointmentId: string | null = null,
+    historyIntent: "push" | "replace" = "replace",
   ) => {
     const searchParams = new URLSearchParams(window.location.search)
     if (nextTaskId) {
@@ -9010,7 +9030,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       searchParams.delete("appointmentId")
     }
     const queryString = searchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+    writeTaskHistoryUrl(
+      `${window.location.pathname}${queryString ? `?${queryString}` : ""}`,
+      historyIntent,
+    )
+  }, [writeTaskHistoryUrl])
+
+  useEffect(() => {
+    const handlePopState = () => setTaskHistoryRevision((current) => current + 1)
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
   }, [])
 
   const workspaceDataBelongsToCurrentViewer = workspaceDataViewerIdRef.current === currentUserId
@@ -9060,13 +9089,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
     return { 영어: optionsFor("영어"), 수학: optionsFor("수학") }
   }, [profiles, teachers])
-  const registrationCreateCatalogStatus = registrationOptionsLoading
-    ? "loading" as const
-    : registrationOptionsError
-      ? "error" as const
-      : registrationOptionsDataRef.current?.directorCatalogStatus === "authoritative"
-        ? "ready" as const
-        : "loading" as const
+  const registrationCreateCatalogStatus = resolveRegistrationCreateCatalogStatus({
+    loading: registrationOptionsLoading,
+    error: registrationOptionsError,
+    directorCatalogStatus: registrationOptionsDataRef.current?.directorCatalogStatus,
+  })
   const optionIndexes = useMemo(() => buildOpsTaskOptionIndexes(students, classes, textbooks, teachers), [students, classes, textbooks, teachers])
 
   useEffect(() => {
@@ -9426,6 +9453,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const formRequestedTeamLabel = form.requestedTeam || editingTask?.requestedTeam || currentUserTaskTeam || "미지정"
   const isFormDirty = (formOpen || registrationApplicationHost.kind === "create")
     && serializeOpsTaskInput(form) !== formBaselineRef.current
+  const hasUnsavedWorkspaceInput = isFormDirty
+    || (registrationApplicationHost.kind === "detail" && registrationApplicationDirty)
+
+  useEffect(() => {
+    if (!hasUnsavedWorkspaceInput) return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [hasUnsavedWorkspaceInput])
   const isEditingLockedCompletedTask = Boolean(editingTask && isClosedOpsTask(editingTask) && !formCompletionIntent)
   const canSubmitCurrentForm = canSubmitOpsTaskForm(form, Boolean(editingTask))
   const formDialogTitle = editingTask
@@ -9677,7 +9716,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRegistrationDetailLoadError("")
     setRegistrationApplicationHost({ kind: "closed" })
     setDetailOpen(true)
-    syncTaskDeepLink(task.id, nextTrackId)
+    syncTaskDeepLink(task.id, nextTrackId, null, "push")
     setMessage("")
     setFormCompletionBlockers([])
     setFormCompletionIntent(null)
@@ -9730,7 +9769,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       focusTrackId: trackId,
       appointmentId: null,
     })
-    syncTaskDeepLink(taskId, trackId)
+    syncTaskDeepLink(taskId, trackId, null, "push")
     setMessage("")
     setNotice("")
     try {
@@ -9819,7 +9858,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       focusTrackId: preferredTrackId,
       appointmentId,
     })
-    syncTaskDeepLink(taskId, null, appointmentId)
+    syncTaskDeepLink(taskId, null, appointmentId, "push")
     setMessage("")
     setNotice("")
 
@@ -9877,9 +9916,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const value = currentSearchParams.get(key)
       if (value) canonicalUrl.searchParams.set(key, value)
     }
-    window.history.replaceState(null, "", `${canonicalUrl.pathname}?${canonicalUrl.searchParams.toString()}`)
+    const queryString = canonicalUrl.searchParams.toString()
+    writeTaskHistoryUrl(`${canonicalUrl.pathname}${queryString ? `?${queryString}` : ""}`, "push")
     void openRegistrationAppointment(item.taskId, item.appointmentId, item.trackIds[0] || null)
-  }, [openRegistrationAppointment])
+  }, [openRegistrationAppointment, writeTaskHistoryUrl])
 
   const handleSelectRegistrationTrack = useCallback((trackId: string) => {
     const taskId = registrationCaseDetail?.task.id || selectedTask?.id || ""
@@ -10106,7 +10146,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (!deepLinkedTaskId) {
       if (!["loading_detail", "detail", "refresh_failed"].includes(registrationApplicationHost.kind)) return
       if (!("taskId" in registrationApplicationHost)) return
-      if (registrationApplicationHost.kind === "detail" && registrationApplicationDirty) {
+      const dirtyBackPlan = getRegistrationDirtyBackPlan({
+        urlHasTask: false,
+        hostKind: registrationApplicationHost.kind,
+        dirty: registrationApplicationDirty,
+        taskId: registrationApplicationHost.taskId,
+        focusTrackId: registrationApplicationHost.focusTrackId,
+        appointmentId: registrationApplicationHost.appointmentId,
+      })
+      if (!dirtyBackPlan.requestClose) return
+      if (dirtyBackPlan.restoreDeepLink) {
         registrationCloseDeepLinkRestoreRef.current = {
           taskId: registrationApplicationHost.taskId,
           focusTrackId: registrationApplicationHost.focusTrackId,
@@ -10175,7 +10224,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationAppointment, openRegistrationTrack, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, detailOpen, openEdit, openRegistrationAppointment, openRegistrationTrack, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask?.id, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -10208,11 +10257,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   function discardFormAndClose() {
+    const closeDecision = getRegistrationDirtyCloseDecision(
+      "discard",
+      registrationCloseDeepLinkRestoreRef.current,
+    )
+    registrationCloseDeepLinkRestoreRef.current = closeDecision.restoreDeepLink
     formCloseReturnFocusRef.current = null
     setConfirmingFormClose(false)
     setMessage("")
     setFormCompletionBlockers([])
-    if (registrationApplicationHost.kind !== "closed") {
+    if (closeDecision.close && registrationApplicationHost.kind !== "closed") {
       closeRegistrationApplicationHost()
     } else {
       setFormOpen(false)
@@ -10223,9 +10277,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   function cancelFormCloseConfirmation() {
     const restoreDeepLink = registrationCloseDeepLinkRestoreRef.current
+    const closeDecision = getRegistrationDirtyCloseDecision("cancel", restoreDeepLink)
     registrationCloseDeepLinkRestoreRef.current = null
     setConfirmingFormClose(false)
-    if (restoreDeepLink) {
+    if (closeDecision.restoreDeepLink && restoreDeepLink) {
       syncTaskDeepLink(restoreDeepLink.taskId, restoreDeepLink.focusTrackId, restoreDeepLink.appointmentId)
     }
     window.requestAnimationFrame(() => formCloseReturnFocusRef.current?.focus())
@@ -10973,6 +11028,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               const taskId = receipt.taskId
               legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
               registrationCreateAttemptRef.current = null
+              setRegistrationApplicationHost({ kind: "closed" })
+              setRegistrationInitialWorkflowDraft(createRegistrationInitialWorkflowDraft([]))
+              setRegistrationApplicationDirty(false)
+              setFormOpen(false)
               savedTasks.push(await loadSavedTaskOrFallback(taskId, inquiryOnlyPayload))
               continue
             }

@@ -413,3 +413,83 @@ export function groupOpsTasksByAssignee(tasks = []) {
     left.label.localeCompare(right.label, "ko", { numeric: true })
   ));
 }
+
+/** @param {string} [value] */
+function normalizeTaskHistoryUrl(value = "") {
+  const url = new URL(String(value || "/"), "https://ops-task.local");
+  return {
+    pathAndQuery: `${url.pathname}${url.search}`,
+    taskId: text(url.searchParams.get("taskId")),
+  };
+}
+
+/**
+ * @param {{ currentUrl?: string, nextUrl?: string, intent?: "push" | "replace" }} [input]
+ * @returns {"none" | "push" | "replace"}
+ */
+export function getOpsTaskHistoryMutation({
+  currentUrl = "",
+  nextUrl = "",
+  intent = "replace",
+} = {}) {
+  const current = normalizeTaskHistoryUrl(currentUrl);
+  const next = normalizeTaskHistoryUrl(nextUrl);
+  if (current.pathAndQuery === next.pathAndQuery) return "none";
+  if (intent === "push" && !current.taskId && next.taskId) return "push";
+  return "replace";
+}
+
+/**
+ * @param {{
+ *   urlHasTask?: boolean,
+ *   hostKind?: string,
+ *   dirty?: boolean,
+ *   taskId?: string,
+ *   focusTrackId?: string | null,
+ *   appointmentId?: string | null,
+ * }} [input]
+ * @returns {{
+ *   requestClose: boolean,
+ *   restoreDeepLink: { taskId: string, focusTrackId: string | null, appointmentId: string | null } | null,
+ * }}
+ */
+export function getRegistrationDirtyBackPlan({
+  urlHasTask = false,
+  hostKind = "",
+  dirty = false,
+  taskId = "",
+  focusTrackId = null,
+  appointmentId = null,
+} = {}) {
+  if (
+    urlHasTask
+    || !["loading_detail", "detail", "refresh_failed"].includes(hostKind)
+    || !text(taskId)
+  ) {
+    return { requestClose: false, restoreDeepLink: null };
+  }
+  return {
+    requestClose: true,
+    restoreDeepLink: hostKind === "detail" && dirty
+      ? { taskId, focusTrackId, appointmentId }
+      : null,
+  };
+}
+
+/**
+ * @param {"cancel" | "discard"} [decision]
+ * @param {{ taskId: string, focusTrackId: string | null, appointmentId: string | null } | null} [restoreDeepLink]
+ * @returns {{
+ *   close: boolean,
+ *   restoreDeepLink: { taskId: string, focusTrackId: string | null, appointmentId: string | null } | null,
+ * }}
+ */
+export function getRegistrationDirtyCloseDecision(decision = "discard", restoreDeepLink = null) {
+  if (decision === "cancel") {
+    return {
+      close: false,
+      restoreDeepLink: restoreDeepLink ? { ...restoreDeepLink } : null,
+    };
+  }
+  return { close: true, restoreDeepLink: null };
+}

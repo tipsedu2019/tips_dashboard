@@ -12,6 +12,7 @@ const {
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   getRegistrationCreateCatalogState,
+  resolveRegistrationCreateCatalogStatus,
   getRegistrationCreateSectionStates,
   getRegistrationCommonConflictRows,
   getRegistrationEnrollmentDirtyKey,
@@ -184,6 +185,14 @@ test("create catalog state keeps inquiry writable while locking only catalog-own
     showLocalRetry: false,
     lockReason: "상담 책임자 선택 정보를 불러오는 중입니다",
   })
+  assert.deepEqual(getRegistrationCreateCatalogState({ status: "partial", error: "" }), {
+    status: "partial",
+    inquiryEditable: true,
+    catalogControlsDisabled: true,
+    showLocalStatus: true,
+    showLocalRetry: true,
+    lockReason: "상담 책임자 선택 정보를 일부만 불러왔습니다. 다시 불러오세요.",
+  })
   assert.deepEqual(getRegistrationCreateCatalogState({ status: "error", error: "선택 정보 일시 실패" }), {
     status: "error",
     inquiryEditable: true,
@@ -192,6 +201,14 @@ test("create catalog state keeps inquiry writable while locking only catalog-own
     showLocalRetry: true,
     lockReason: "선택 정보 일시 실패",
   })
+})
+
+test("workspace option results distinguish authoritative loading partial and failure catalog states", () => {
+  assert.equal(resolveRegistrationCreateCatalogStatus({ loading: true, error: "", directorCatalogStatus: "authoritative" }), "loading")
+  assert.equal(resolveRegistrationCreateCatalogStatus({ loading: false, error: "", directorCatalogStatus: "authoritative" }), "ready")
+  assert.equal(resolveRegistrationCreateCatalogStatus({ loading: false, error: "", directorCatalogStatus: "partial" }), "partial")
+  assert.equal(resolveRegistrationCreateCatalogStatus({ loading: false, error: "permission denied", directorCatalogStatus: "error" }), "error")
+  assert.equal(resolveRegistrationCreateCatalogStatus({ loading: false, error: "", directorCatalogStatus: null }), "loading")
 })
 
 test("mixed tracks aggregate current emphasis without unlocking the sibling", () => {
