@@ -619,7 +619,7 @@ test("team workflow migration adds review request and explicit team fields", asy
   ]);
 });
 
-test("operation form close keeps the header icon-only and asks before discarding visible input", async () => {
+test("common registration create owns one shell close while other forms keep dialog and footer controls", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const dialogSource = await readSource("src/components/ui/dialog.tsx");
   const formDialogSource = workspaceSource.slice(
@@ -641,7 +641,13 @@ test("operation form close keeps the header icon-only and asks before discarding
     "closeButtonLabel={formCloseLabel}",
     "onCloseButtonClick={closeForm}",
     "showCloseButton={!registrationCreateApplicationRendered}",
+    "registrationCloseAction={(",
+    "aria-label={formCloseLabel}",
   ]);
+  assert.match(
+    formDialogSource,
+    /\{!registrationCreateApplicationRendered && \(\s*<Button type="button" variant="outline" onClick=\{closeForm\}/,
+  );
 
   assert.doesNotMatch(formDialogSource, /\bshowCloseButtonText\b/);
   assert.doesNotMatch(workspaceSource, /function blurActiveElementBeforeDialog/);

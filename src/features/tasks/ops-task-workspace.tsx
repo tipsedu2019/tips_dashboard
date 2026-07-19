@@ -12330,9 +12330,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   )}
                 </div>
               )}
-              <Button type="button" variant="outline" onClick={closeForm} className="w-full sm:w-auto">
-                {formCloseLabel}
-              </Button>
+              {!registrationCreateApplicationRendered && (
+                <Button type="button" variant="outline" onClick={closeForm} className="w-full sm:w-auto">
+                  {formCloseLabel}
+                </Button>
+              )}
               {!isEditingLockedCompletedTask && (
                 <Button type="submit" disabled={saving || (!canSubmitCurrentForm && form.type !== "registration")} className="w-full sm:w-auto">
                   {saving ? "저장 중" : getFormCompletionIntentSubmitLabel(formCompletionIntent, form.type, Boolean(editingTask))}
