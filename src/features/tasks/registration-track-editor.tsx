@@ -12,6 +12,7 @@ import { RegistrationApplicationLevelTestSection } from "./registration-applicat
 import {
   getRegistrationApplicationAppointmentActionPlans,
   getRegistrationApplicationCaseEditableSections,
+  getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   updateRegistrationApplicationDirtyKeys,
@@ -39,6 +40,7 @@ import {
   type RegistrationTrackActionPermissions,
 } from "./registration-application-track-actions"
 import { RegistrationAppointmentEditor } from "./registration-appointment-editor"
+import { clearRegistrationEnrollmentDrafts } from "./registration-enrollment-editor"
 import {
   RegistrationAdmissionPanel,
   type RegistrationAdmissionPanelProps,
@@ -309,6 +311,9 @@ export function RegistrationApplication({
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
   }, [onDirtyChange])
+  useEffect(() => () => {
+    clearRegistrationEnrollmentDrafts(detail.task.id)
+  }, [detail.task.id])
   useEffect(() => {
     dirtyKeysRef.current = new Set()
     dirtyProducersRef.current = new Map()
@@ -511,7 +516,7 @@ export function RegistrationApplication({
           textbookOptions={textbookOptions}
           onReload={onReload}
           onWarning={onWarning}
-          onDirtyChange={(dirty) => setDirty(`placement:enrollments-${track.id}`, dirty)}
+          onDirtyChange={(scope, dirty) => setDirty(getRegistrationEnrollmentDirtyKey(track.id, scope), dirty)}
         />
       )
     }
@@ -701,7 +706,7 @@ export function RegistrationApplication({
               <RegistrationSubjectProgress detail={detail} selectedTrackId={focusTrackId} onSelectTrack={onFocusTrack} />
               {reviewTrack ? (
                 <RegistrationMigrationReviewEditor
-                  key={`${detail.task.id}:${detail.commonRevision}`}
+                  key={detail.task.id}
                   task={task}
                   detail={detail}
                   track={reviewTrack}

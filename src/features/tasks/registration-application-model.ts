@@ -27,6 +27,11 @@ export type RegistrationApplicationSectionKey =
 export type RegistrationApplicationDirtyKey =
   `${RegistrationApplicationSectionKey}:${string}`
 
+export type RegistrationEnrollmentDirtyScope =
+  | { kind: "rows" }
+  | { kind: "decision" }
+  | { kind: "cancellation"; enrollmentId: string }
+
 export type RegistrationApplicationSectionState = {
   current: boolean
   editable: boolean
@@ -319,4 +324,28 @@ export function reconcileRegistrationEditorDraft<T>(input: {
       : input.nextCanonicalDraft,
     canonicalKey: input.nextCanonicalKey,
   }
+}
+
+export function getRegistrationCommonConflictRows<T extends Record<string, string>>(input: {
+  attempted: T
+  latest: T
+  labels: Partial<Record<keyof T, string>>
+}): Array<{ field: keyof T & string; label: string; attempted: string; latest: string }> {
+  return (Object.keys(input.labels) as Array<keyof T & string>)
+    .filter((field) => input.attempted[field] !== input.latest[field])
+    .map((field) => ({
+      field,
+      label: input.labels[field] || field,
+      attempted: input.attempted[field],
+      latest: input.latest[field],
+    }))
+}
+
+export function getRegistrationEnrollmentDirtyKey(
+  trackId: string,
+  scope: RegistrationEnrollmentDirtyScope,
+): RegistrationApplicationDirtyKey {
+  if (scope.kind === "rows") return `placement:enrollments-${trackId}`
+  if (scope.kind === "decision") return `placement:decision-${trackId}`
+  return `placement:cancellation-${trackId}-${scope.enrollmentId}`
 }

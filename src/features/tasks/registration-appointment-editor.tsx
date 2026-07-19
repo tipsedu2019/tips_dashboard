@@ -380,7 +380,7 @@ export function RegistrationAppointmentEditor({
       const linkDirty = "materialLink" in activity
         && (draftLinks[activity.id] ?? activity.materialLink ?? "") !== (activity.materialLink ?? "")
       const reasonDirty = Boolean(closureReasons[activity.trackId])
-      if (!trackRefreshPendingIds.has(activity.trackId) && (linkDirty || reasonDirty)) dirtyTrackIds.add(activity.trackId)
+      if (linkDirty || reasonDirty) dirtyTrackIds.add(activity.trackId)
     }
     for (const trackId of new Set([...reportedTrackDirtyRef.current, ...dirtyTrackIds])) {
       const wasDirty = reportedTrackDirtyRef.current.has(trackId)
@@ -688,7 +688,6 @@ export function RegistrationAppointmentEditor({
 
   async function reloadAfterCommittedMutation(trackId: string) {
     setTrackRefreshPendingIds((current) => new Set(current).add(trackId))
-    onTrackDirtyChangeRef.current?.(trackId, false)
     try {
       await onReload?.()
       setTrackRefreshPendingIds((current) => {
@@ -933,7 +932,7 @@ export function RegistrationAppointmentEditor({
           <h3 className="text-sm font-semibold">{kind === "level_test" ? "레벨테스트 예약" : "방문상담 예약"}</h3>
           <p className="text-xs text-muted-foreground">같은 일정은 한 번만 정하고, 과목별 진행 결과는 각각 기록합니다.</p>
         </div>
-        {onClose ? <Button type="button" size="sm" variant="ghost" onClick={onClose} disabled={saving || mutationLocked}>닫기</Button> : null}
+        {onClose ? <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 편집 닫기`} onClick={onClose} disabled={saving || mutationLocked}>닫기</Button> : null}
       </div>
 
       {conflict ? (
@@ -959,9 +958,9 @@ export function RegistrationAppointmentEditor({
             </dl>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => void compareLatestAppointment()} disabled={saving}>최신 예약 비교</Button>
-            <Button type="button" size="sm" onClick={applyConflictDraftAgain} disabled={saving || !canApplyConflictDraft}>다시 적용</Button>
-            <Button type="button" size="sm" variant="ghost" onClick={continueEditingConflictDraft} disabled={saving}>계속 편집</Button>
+            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 예약 비교`} onClick={() => void compareLatestAppointment()} disabled={saving}>최신 예약 비교</Button>
+            <Button type="button" size="sm" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 다시 적용`} onClick={applyConflictDraftAgain} disabled={saving || !canApplyConflictDraft}>다시 적용</Button>
+            <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 계속 편집`} onClick={continueEditingConflictDraft} disabled={saving}>계속 편집</Button>
           </div>
         </div>
       ) : null}
@@ -977,7 +976,7 @@ export function RegistrationAppointmentEditor({
                 : "예약 저장됨 · 알림 재계산 중"}
           </span>
           {notificationProcessingPhase !== "succeeded" ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => void retryRegistrationNotificationJobStatus()} disabled={saving}>
+            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재계산 다시 시도`} onClick={() => void retryRegistrationNotificationJobStatus()} disabled={saving}>
               {notificationProcessingPhase === "failed" ? "다시 시도" : "상태 다시 확인"}
             </Button>
           ) : null}
@@ -987,14 +986,14 @@ export function RegistrationAppointmentEditor({
       {pendingNotificationTargets.length > 0 ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           <span>예약은 저장되었습니다. 실패한 방문상담 알림만 다시 보냅니다.</span>
-          <Button type="button" size="sm" variant="outline" onClick={() => void retryCommittedNotifications()} disabled={saving}>알림 재시도</Button>
+          <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재시도`} onClick={() => void retryCommittedNotifications()} disabled={saving}>알림 재시도</Button>
         </div>
       ) : refreshPending || (committedAppointment && !processingReady) ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           <span>{refreshPending
             ? "저장은 완료됐지만 최신 내용을 불러오지 못했습니다"
             : "예약 저장은 완료됐지만 알림 재계산 상태는 아직 확인되지 않았습니다."}</span>
-          <Button type="button" size="sm" variant="outline" onClick={() => void retryRefresh()} disabled={saving}>최신 내용 다시 불러오기</Button>
+          <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 내용 다시 불러오기`} onClick={() => void retryRefresh()} disabled={saving}>최신 내용 다시 불러오기</Button>
         </div>
       ) : null}
 
@@ -1073,7 +1072,7 @@ export function RegistrationAppointmentEditor({
                 {trackRefreshPending ? (
                   <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
                     <span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span>
-                    <Button type="button" size="sm" variant="outline" onClick={() => void retryTrackRefresh(activity.trackId)} disabled={Boolean(trackRefreshRetryingId)}>최신 내용 다시 불러오기</Button>
+                    <Button type="button" size="sm" variant="outline" aria-label={`${track?.subject || "과목"} 최신 내용 다시 불러오기`} onClick={() => void retryTrackRefresh(activity.trackId)} disabled={Boolean(trackRefreshRetryingId)}>최신 내용 다시 불러오기</Button>
                   </div>
                 ) : null}
                 <Label className="grid gap-1.5">
@@ -1112,8 +1111,8 @@ export function RegistrationAppointmentEditor({
                       placeholder="문의 종료 사유"
                       disabled={trackRefreshPending || Boolean(activitySavingId)}
                     />
-                    <Button type="button" size="sm" variant="outline" onClick={() => onRebook?.(activity.trackId)} disabled={trackRefreshPending || Boolean(activitySavingId)}>다시 예약</Button>
-                    <Button type="button" size="sm" variant="ghost" onClick={() => void closeInquiry(activity)} disabled={trackRefreshPending || Boolean(activitySavingId) || !(closureReasons[activity.trackId] || "").trim()}>문의 종료</Button>
+                    <Button type="button" aria-label={`${track?.subject || "과목"} 다시 예약`} size="sm" variant="outline" onClick={() => onRebook?.(activity.trackId)} disabled={trackRefreshPending || Boolean(activitySavingId)}>다시 예약</Button>
+                    <Button type="button" aria-label={`${track?.subject || "과목"} 문의 종료`} size="sm" variant="ghost" onClick={() => void closeInquiry(activity)} disabled={trackRefreshPending || Boolean(activitySavingId) || !(closureReasons[activity.trackId] || "").trim()}>문의 종료</Button>
                   </div>
                 ) : null}
               </section>
@@ -1124,7 +1123,7 @@ export function RegistrationAppointmentEditor({
 
       {appointment?.status === "scheduled" && currentActivities.some((activity) => activity.status === "scheduled") ? (
         <div className="flex justify-end border-t pt-4">
-          <Button type="button" variant="ghost" onClick={() => void cancelAppointment()} disabled={saving || mutationLocked}>
+          <Button type="button" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 취소`} variant="ghost" onClick={() => void cancelAppointment()} disabled={saving || mutationLocked}>
             예약 취소
           </Button>
         </div>

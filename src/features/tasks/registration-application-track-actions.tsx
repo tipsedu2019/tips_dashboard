@@ -9,14 +9,14 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
 import type { OpsClassOption, OpsProfileOption, OpsTask, OpsTeacherOption, OpsTextbookOption } from "./ops-task-service"
-import { reconcileRegistrationEditorDraft } from "./registration-application-model"
+import { getRegistrationCommonConflictRows, reconcileRegistrationEditorDraft } from "./registration-application-model"
 import {
   advanceRegistrationAutomaticSavingGeneration,
   resolveRegistrationTrackDirectorDefaults,
   shouldSettleRegistrationAutomaticSavingGeneration,
   type RegistrationDirectorCatalogStatus,
 } from "./registration-director-default.js"
-import { RegistrationEnrollmentEditor } from "./registration-enrollment-editor"
+import { RegistrationEnrollmentEditor, type RegistrationEnrollmentDirtyScope } from "./registration-enrollment-editor"
 import { isValidRegistrationMobilePhone } from "./registration-workflow"
 import {
   assignRegistrationTrackDirector,
@@ -70,16 +70,18 @@ function RegistrationRefreshRecovery({
   pending,
   retrying,
   onRetry,
+  ownerLabel = "",
 }: {
   pending: boolean
   retrying: boolean
   onRetry: () => void
+  ownerLabel?: string
 }) {
   if (!pending) return null
   return (
     <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
       <span>{COMMITTED_REFRESH_ERROR}</span>
-      <Button type="button" size="sm" variant="outline" onClick={onRetry} disabled={retrying}>최신 내용 다시 불러오기</Button>
+      <Button type="button" size="sm" variant="outline" aria-label={`${ownerLabel ? `${ownerLabel} ` : ""}최신 내용 다시 불러오기`} onClick={onRetry} disabled={retrying}>최신 내용 다시 불러오기</Button>
     </div>
   )
 }
@@ -130,6 +132,7 @@ export function RegistrationTrackDirectorSection({
     ? directorDraft.value
     : serverDirectorProfileId
   const [savingManual, setSavingManual] = useState(false)
+  const [manualDirectorConflictAttempt, setManualDirectorConflictAttempt] = useState<{ profileId: string; label: string } | null>(null)
   const [automaticError, setAutomaticError] = useState("")
   const [automaticRefreshError, setAutomaticRefreshError] = useState("")
   const [automaticRefreshTrackId, setAutomaticRefreshTrackId] = useState("")
@@ -328,13 +331,17 @@ export function RegistrationTrackDirectorSection({
     || directorCatalogStatus === "partial"
     || Boolean(automaticRefreshError)
   useOwnedDirtyState(
-    !directorSelectorLocked && directorProfileId !== serverDirectorProfileId,
+    Boolean(manualDirectorConflictAttempt) || (!directorSelectorLocked && directorProfileId !== serverDirectorProfileId),
     onDirtyChange,
   )
 
   async function saveManualDirector() {
     if (!canEdit || !directorProfileId || !selectedDirectorIsAvailable || savingManual || automaticSaving || automaticRefreshError) return
     const logicalKey = `registration-director-manual:${track.id}:${directorProfileId}:${detail.commonRevision}`
+    const attemptedDirector = {
+      profileId: directorProfileId,
+      label: availableDirectors.find((profile) => profile.id === directorProfileId)?.label || directorProfileId,
+    }
     let requestKey = requestKeysRef.current.get(logicalKey)
     if (!requestKey) {
       requestKey = createRegistrationMutationRequestKey("registration-director-manual", track.id)
@@ -355,6 +362,7 @@ export function RegistrationTrackDirectorSection({
       onDirtyChange?.(false)
       await onReload(track.id)
       requestKeysRef.current.delete(logicalKey)
+      setManualDirectorConflictAttempt(null)
     } catch (error) {
       const message = errorMessage(error, "상담 책임자를 저장하지 못했습니다.")
       if (committed) {
@@ -362,9 +370,11 @@ export function RegistrationTrackDirectorSection({
         setAutomaticRefreshTrackId(track.id)
         onWarning(COMMITTED_REFRESH_ERROR)
       } else if (message.includes("registration_common_revision_conflict")) {
+        requestKeysRef.current.delete(logicalKey)
         try {
           await onReload(track.id)
-          onWarning("다른 사용자의 변경을 반영했습니다. 담당 원장을 다시 확인하세요.")
+          setManualDirectorConflictAttempt(attemptedDirector)
+          onWarning("다른 사용자가 상담 책임자를 변경했습니다. 내 선택과 최신 저장 담당자를 비교하세요.")
         } catch {
           setAutomaticRefreshError("다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다.")
           setAutomaticRefreshTrackId(track.id)
@@ -420,7 +430,25 @@ export function RegistrationTrackDirectorSection({
 
   return (
     <section className="flex min-w-0 flex-wrap items-end gap-2 rounded-md border px-3 py-2" aria-label={`${track.subject} 상담 책임자`}>
-      <RegistrationRefreshRecovery pending={Boolean(automaticRefreshError)} retrying={automaticRefreshing} onRetry={() => void retryAutomaticRefresh()} />
+      <RegistrationRefreshRecovery pending={Boolean(automaticRefreshError)} retrying={automaticRefreshing} onRetry={() => void retryAutomaticRefresh()} ownerLabel={track.subject} />
+      {manualDirectorConflictAttempt ? (
+        <div role="alert" className="grid w-full gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div><div className="text-xs font-medium">내가 선택한 담당자</div><div>{manualDirectorConflictAttempt.label}</div></div>
+            <div><div className="text-xs font-medium">최신 저장 담당자</div><div>{track.directorName || "미지정"}</div></div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" size="sm" variant="outline" aria-label={`${track.subject} 최신 담당자 사용`} onClick={() => {
+              setDirectorDraft({ trackId: track.id, baselineProfileId: serverDirectorProfileId, value: serverDirectorProfileId })
+              setManualDirectorConflictAttempt(null)
+            }}>최신 담당자 사용</Button>
+            <Button type="button" size="sm" aria-label={`${track.subject} 내 담당자 선택 다시 적용`} onClick={() => {
+              setDirectorDraft({ trackId: track.id, baselineProfileId: serverDirectorProfileId, value: manualDirectorConflictAttempt.profileId })
+              setManualDirectorConflictAttempt(null)
+            }}>내 선택 다시 적용</Button>
+          </div>
+        </div>
+      ) : null}
       <Label className="grid min-w-[13rem] flex-1 gap-1 text-xs text-muted-foreground">
         상담 책임자
         {canEdit ? (
@@ -428,12 +456,15 @@ export function RegistrationTrackDirectorSection({
             className="h-9 rounded-md border bg-background px-3 text-sm text-foreground"
             aria-label={`${track.subject} 상담 책임자 선택`}
             value={directorProfileId}
-            onChange={(event) => setDirectorDraft({
-              trackId: track.id,
-              baselineProfileId: serverDirectorProfileId,
-              value: event.target.value,
-            })}
-            disabled={directorSelectorLocked || savingManual || automaticSaving}
+            onChange={(event) => {
+              setManualDirectorConflictAttempt(null)
+              setDirectorDraft({
+                trackId: track.id,
+                baselineProfileId: serverDirectorProfileId,
+                value: event.target.value,
+              })
+            }}
+            disabled={Boolean(manualDirectorConflictAttempt) || directorSelectorLocked || savingManual || automaticSaving}
           >
             <option value="">원장 선택</option>
             {currentOptionMissing ? <option value={track.directorProfileId || ""}>{track.directorName || "현재 담당 원장"}</option> : null}
@@ -450,7 +481,7 @@ export function RegistrationTrackDirectorSection({
           size="sm"
           onClick={() => void saveManualDirector()}
           aria-label={`${track.subject} 상담 책임자 저장`}
-          disabled={!directorProfileId || !selectedDirectorIsAvailable || directorSelectorLocked || directorProfileId === (track.directorProfileId || "") || savingManual || automaticSaving}
+          disabled={Boolean(manualDirectorConflictAttempt) || !directorProfileId || !selectedDirectorIsAvailable || directorSelectorLocked || directorProfileId === (track.directorProfileId || "") || savingManual || automaticSaving}
         >
           담당 저장
         </Button>
@@ -462,13 +493,13 @@ export function RegistrationTrackDirectorSection({
       {automaticError ? (
         <div className="flex flex-wrap items-center gap-2">
           <span role="alert" className="text-xs text-destructive">{automaticError}</span>
-          <Button type="button" variant="ghost" size="sm" onClick={() => void retryAutomaticDefaults()} disabled={catalogRefreshing || Boolean(automaticRefreshError)}>
+          <Button type="button" variant="ghost" size="sm" aria-label={`${track.subject} ${catalogRefreshRequired ? "담당자 정보 다시 불러오기" : "자동 배정 다시 시도"}`} onClick={() => void retryAutomaticDefaults()} disabled={catalogRefreshing || Boolean(automaticRefreshError)}>
             {catalogRefreshRequired ? "담당자 정보 다시 불러오기" : "자동 배정 다시 시도"}
           </Button>
         </div>
       ) : null}
       {catalogNeedsRetry && !automaticError ? (
-        <Button type="button" variant="ghost" size="sm" onClick={() => void onRetryDirectorCatalog?.()} disabled={!onRetryDirectorCatalog || Boolean(automaticRefreshError)}>
+        <Button type="button" variant="ghost" size="sm" aria-label={`${track.subject} 담당자 정보 다시 불러오기`} onClick={() => void onRetryDirectorCatalog?.()} disabled={!onRetryDirectorCatalog || Boolean(automaticRefreshError)}>
           담당자 정보 다시 불러오기
         </Button>
       ) : null}
@@ -585,6 +616,7 @@ export function RegistrationSubjectProgress({
             variant={track.id === selectedTrackId ? "secondary" : "outline"}
             className="h-auto min-w-0 justify-between gap-3 px-3 py-2"
             aria-pressed={track.id === selectedTrackId}
+            aria-label={`${track.subject} 진행 현황 선택`}
             onClick={() => onSelectTrack(track.id)}
           >
             <span>{track.subject}</span>
@@ -808,6 +840,18 @@ export type RegistrationCommonDraft = {
   priority: string
 }
 
+const REGISTRATION_COMMON_FIELD_LABELS: Record<keyof RegistrationCommonDraft, string> = {
+  studentName: "학생명",
+  schoolGrade: "학년",
+  schoolName: "학교",
+  parentPhone: "학부모 전화",
+  studentPhone: "학생 전화",
+  campus: "캠퍼스",
+  inquiryAt: "문의 일시",
+  requestNote: "요청 사항",
+  priority: "우선순위",
+}
+
 export type RegistrationCommonSaveOutcome = "saved" | "conflict_reloaded" | "committed_refresh_pending"
 
 export function RegistrationCommonInfoSection({
@@ -851,8 +895,9 @@ export function RegistrationCommonInfoSection({
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const [validationError, setValidationError] = useState("")
+  const [conflictAttempt, setConflictAttempt] = useState<RegistrationCommonDraft | null>(null)
   const sectionRef = useRef<HTMLElement | null>(null)
-  const dirty = JSON.stringify(draft) !== JSON.stringify(canonicalDraft)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(canonicalDraft) || Boolean(conflictAttempt)
   useOwnedDirtyState(dirty && !refreshPending, onDirtyChange)
   useEffect(() => {
     setDraft((current) => {
@@ -873,9 +918,17 @@ export function RegistrationCommonInfoSection({
     && draft.campus.trim()
     && draft.inquiryAt,
   )
+  const conflictRows = conflictAttempt
+    ? getRegistrationCommonConflictRows({
+        attempted: conflictAttempt,
+        latest: canonicalDraft,
+        labels: REGISTRATION_COMMON_FIELD_LABELS,
+      })
+    : []
 
   function update<K extends keyof RegistrationCommonDraft>(field: K, value: RegistrationCommonDraft[K]) {
     setValidationError("")
+    setConflictAttempt(null)
     setDraft((current) => ({ ...current, [field]: value }))
   }
 
@@ -908,16 +961,21 @@ export function RegistrationCommonInfoSection({
       priority: draft.priority,
     })
     const requestKey = submissionKeys.getOrCreate(kind, commonPayloadKey)
+    const attemptedDraft = { ...draft }
     setSaving(true)
     try {
       const outcome = await onSave(draft, requestKey)
       submissionKeys.clear(kind, commonPayloadKey)
       if (outcome === "conflict_reloaded") {
+        setConflictAttempt(attemptedDraft)
         onWarning("다른 사용자가 공통 정보를 변경했습니다. 최신 정보로 다시 불러왔습니다.")
       } else if (outcome === "committed_refresh_pending") {
+        setConflictAttempt(null)
         onDirtyChange?.(false)
         setRefreshPending(true)
         onWarning(COMMITTED_REFRESH_ERROR)
+      } else {
+        setConflictAttempt(null)
       }
     } catch (error) {
       const message = errorMessage(error, "공통 정보를 저장하지 못했습니다.")
@@ -943,6 +1001,35 @@ export function RegistrationCommonInfoSection({
   return (
     <section ref={sectionRef} className={embedded ? "grid min-w-0 gap-3" : "grid min-w-0 gap-3 rounded-md border p-3"} aria-label="등록 공통 정보">
       <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} />
+      {conflictAttempt ? (
+        <div role="alert" className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <div>
+            <div className="font-semibold">다른 사용자가 공통 정보를 먼저 저장했습니다.</div>
+            <p className="text-xs">내가 입력한 값과 최신 저장 값을 확인한 뒤 사용할 내용을 선택하세요.</p>
+          </div>
+          {conflictRows.length > 0 ? (
+            <div className="grid gap-2">
+              {conflictRows.map((row) => (
+                <dl key={row.field} className="grid gap-1 rounded-md border border-amber-200 bg-background p-2 sm:grid-cols-2">
+                  <div><dt className="text-xs font-medium">{row.label} · 내가 입력한 값</dt><dd className="break-words">{row.attempted || "입력 없음"}</dd></div>
+                  <div><dt className="text-xs font-medium">{row.label} · 최신 저장 값</dt><dd className="break-words">{row.latest || "입력 없음"}</dd></div>
+                </dl>
+              ))}
+            </div>
+          ) : <p className="text-xs">표시할 값 차이가 없습니다. 최신 값을 사용하세요.</p>}
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" size="sm" variant="outline" onClick={() => {
+              setDraft({ ...canonicalDraft })
+              setConflictAttempt(null)
+            }}>최신 값 사용</Button>
+            <Button type="button" size="sm" onClick={() => {
+              setDraft({ ...conflictAttempt })
+              setConflictAttempt(null)
+              focusFirstInvalid(sectionRef.current, "[data-common-field]")
+            }}>내 입력 다시 적용</Button>
+          </div>
+        </div>
+      ) : null}
       {!embedded || identityLocked ? <div className="flex flex-wrap items-center justify-between gap-2">
         {!embedded ? <h3 className="text-sm font-semibold">등록 공통 정보</h3> : null}
         {identityLocked ? <Badge variant="secondary">학생 연결 보정 필요</Badge> : null}
@@ -1216,7 +1303,7 @@ function InquiryStageEditor({
         <h3 className="text-sm font-semibold">[{track.subject}] 문의 다음 단계</h3>
         <p className="text-xs text-muted-foreground">과목별로 다음 업무를 선택합니다.</p>
       </div>
-      <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} />
+      <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} ownerLabel={track.subject} />
       {permissions.canManage && !refreshPending ? (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -1348,7 +1435,7 @@ function WaitingStageEditor({
         <h3 className="text-sm font-semibold">[{track.subject}] 대기 관리</h3>
         <p className="text-xs text-muted-foreground">등록 전환 시 레벨테스트 재응시 여부를 반드시 결정합니다.</p>
       </div>
-      <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} />
+      <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} ownerLabel={track.subject} />
       {permissions.canManage && !refreshPending ? (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -1357,25 +1444,26 @@ function WaitingStageEditor({
             </select>
             {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classId} onChange={setClassId} classOptions={classOptions} disabled={saving} /> : null}
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => void transition("change_waiting_kind")} disabled={saving}>
+          <Button type="button" aria-label={`${track.subject} 대기 종류 저장`} variant="outline" size="sm" onClick={() => void transition("change_waiting_kind")} disabled={saving}>
             대기 상태 변경
           </Button>
           <div className="grid gap-2 sm:grid-cols-2">
             <Button
               type="button"
+              aria-label={`${track.subject} ${track.levelTestRetakeDecision === "required" ? "레벨테스트 예약" : "레벨테스트 재응시 필요"}`}
               variant="outline"
               onClick={() => track.levelTestRetakeDecision === "required" ? onOpenLevelTest() : void transition("record_retest_required")}
               disabled={saving}
             >
               {track.levelTestRetakeDecision === "required" ? "레벨테스트 예약" : "레벨테스트 재응시 필요"}
             </Button>
-            <Button type="button" onClick={() => void transition("move_to_enrollment")} disabled={saving}>
+            <Button type="button" aria-label={`${track.subject} 등록 전환`} onClick={() => void transition("move_to_enrollment")} disabled={saving}>
               재응시 없이 등록
             </Button>
           </div>
           <div className="grid gap-2 border-t pt-3 sm:grid-cols-[1fr_auto]">
             <Input aria-label={`${track.subject} 대기 종료 사유`} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="미등록 종료 사유" disabled={saving} />
-            <Button type="button" variant="ghost" onClick={() => void transition("close_not_registered")} disabled={saving || !reason.trim()}>
+            <Button type="button" aria-label={`${track.subject} 대기 종료 미등록`} variant="ghost" onClick={() => void transition("close_not_registered")} disabled={saving || !reason.trim()}>
               대기 종료 · 미등록
             </Button>
           </div>
@@ -1463,7 +1551,7 @@ function TerminalStageEditor({
         <h3 className="text-sm font-semibold">[{track.subject}] {STATUS_LABELS[track.status]}</h3>
         <p className="text-xs text-muted-foreground">추가 진행이 필요한 경우 사유를 남기고 다시 엽니다.</p>
       </div>
-      <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} />
+      <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} ownerLabel={track.subject} />
       {permissions.canManage && !refreshPending ? (
         <>
           <Input ref={reasonRef} aria-label={`${track.subject} 재개 사유`} value={reason} onChange={(event) => { setReason(event.target.value); setValidationError("") }} placeholder="재개 사유" disabled={saving} />
@@ -1525,7 +1613,7 @@ export function RegistrationTrackStageEditor({
         </dl>
         {permissions.canManage ? (
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onOpenVisit}>방문상담 예약</Button>
+            <Button type="button" aria-label={`${track.subject} 방문상담 예약`} variant="outline" onClick={onOpenVisit}>방문상담 예약</Button>
           </div>
         ) : null}
       </section>
@@ -1579,12 +1667,11 @@ export function RegistrationEnrollmentTrackEditor({
   textbookOptions: OpsTextbookOption[]
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
-  onDirtyChange?: (dirty: boolean) => void
+  onDirtyChange?: (scope: RegistrationEnrollmentDirtyScope, dirty: boolean) => void
 }) {
-  const trackEnrollments = detail.enrollments.filter((enrollment) => enrollment.trackId === track.id)
   return (
     <RegistrationEnrollmentEditor
-      key={`enrollment:${track.id}:${track.stageEnteredAt}:${trackEnrollments.map((enrollment) => `${enrollment.id}:${enrollment.updatedAt}`).join("|")}`}
+      key={`enrollment:${track.id}`}
       taskId={detail.task.id}
       viewerId={viewerId}
       track={track}
@@ -1712,7 +1799,7 @@ export function RegistrationConsultationOutcomeEditor({
       {refreshPending ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
           <span>{COMMITTED_REFRESH_ERROR}</span>
-          <Button type="button" size="sm" variant="outline" onClick={() => void retryRefresh()} disabled={saving}>최신 내용 다시 불러오기</Button>
+          <Button type="button" size="sm" variant="outline" aria-label={`${subject} 최신 내용 다시 불러오기`} onClick={() => void retryRefresh()} disabled={saving}>최신 내용 다시 불러오기</Button>
         </div>
       ) : (
         <>
@@ -1752,6 +1839,14 @@ export function RegistrationConsultationOutcomeEditor({
 
 type ReviewTargetState = RegistrationMigrationTrackState["targetStatus"] | ""
 
+type RegistrationMigrationConflictAttempt = {
+  assignments: Record<string, string>
+  targetStates: Record<string, ReviewTargetState>
+  waitingKinds: Record<string, RegistrationWaitingKind>
+  classIds: Record<string, string>
+  summaryLines: string[]
+}
+
 export function RegistrationMigrationReviewEditor({
   detail,
   track,
@@ -1782,12 +1877,15 @@ export function RegistrationMigrationReviewEditor({
   ]
   const groups = MIGRATION_GROUPS.filter((group) => detail.migrationLegacy?.groups[group.presence])
   const requiresExplicitAssignments = reviewTracks.length > 1
+  const reviewSubjectLabel = reviewTracks.map((item) => item.subject).join("·") || "과목"
   const [assignments, setAssignments] = useState<Record<string, string>>({})
   const [targetStates, setTargetStates] = useState<Record<string, ReviewTargetState>>({})
   const [waitingKinds, setWaitingKinds] = useState<Record<string, RegistrationWaitingKind>>({})
   const [classIds, setClassIds] = useState<Record<string, string>>({})
   const [directorIds, setDirectorIds] = useState<Record<string, string>>(() => Object.fromEntries(reviewTracks.map((track) => [track.id, track.directorProfileId || ""])))
   const [savingDirectorId, setSavingDirectorId] = useState("")
+  const [directorConflictAttempt, setDirectorConflictAttempt] = useState<{ trackId: string; profileId: string; label: string } | null>(null)
+  const [migrationConflictAttempt, setMigrationConflictAttempt] = useState<RegistrationMigrationConflictAttempt | null>(null)
   const [catalogRefreshRequired, setCatalogRefreshRequired] = useState(false)
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -1805,6 +1903,8 @@ export function RegistrationMigrationReviewEditor({
       || Object.keys(waitingKinds).length > 0
       || Object.keys(classIds).length > 0
       || JSON.stringify(directorIds) !== JSON.stringify(directorBaseline)
+      || Boolean(directorConflictAttempt)
+      || Boolean(migrationConflictAttempt)
     ),
     onDirtyChange,
   )
@@ -1837,6 +1937,8 @@ export function RegistrationMigrationReviewEditor({
   }
 
   const canResolve = permissions.canManage
+    && !directorConflictAttempt
+    && !migrationConflictAttempt
     && !detail.migrationLegacy?.snapshotMissing
     && (!requiresExplicitAssignments || groups.every((group) => Boolean(assignments[group.key])))
     && reviewTracks.every(targetIsValid)
@@ -1849,7 +1951,14 @@ export function RegistrationMigrationReviewEditor({
       || !directorProfileId
       || !availableDirectors.some((profile) => profile.id === directorProfileId)
       || savingDirectorId
+      || directorConflictAttempt
+      || migrationConflictAttempt
     ) return
+    const attemptedDirector = {
+      trackId: track.id,
+      profileId: directorProfileId,
+      label: availableDirectors.find((profile) => profile.id === directorProfileId)?.label || directorProfileId,
+    }
     const kind = "migration-director"
     const migrationDirectorEntityKey = JSON.stringify({
       trackId: track.id,
@@ -1868,6 +1977,7 @@ export function RegistrationMigrationReviewEditor({
         requestKey,
       })
       submissionKeys.clear(kind, migrationDirectorEntityKey)
+      setDirectorConflictAttempt(null)
       onDirtyChange?.(false)
       setRefreshPending(true)
       try {
@@ -1882,7 +1992,8 @@ export function RegistrationMigrationReviewEditor({
         submissionKeys.clear(kind, migrationDirectorEntityKey)
         try {
           await onResolved()
-          onWarning("다른 사용자의 변경을 반영했습니다. 상담 책임자와 과목 분리 상태를 다시 확인하세요.")
+          setDirectorConflictAttempt(attemptedDirector)
+          onWarning("다른 사용자가 상담 책임자를 변경했습니다. 내 선택과 최신 저장 담당자를 비교하세요.")
         } catch {
           onWarning("다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다.")
         }
@@ -1953,6 +2064,29 @@ export function RegistrationMigrationReviewEditor({
       trackStates,
     })
     const requestKey = submissionKeys.getOrCreate(kind, migrationReviewEntityKey)
+    const attemptedReview: RegistrationMigrationConflictAttempt = {
+      assignments: { ...assignments },
+      targetStates: { ...targetStates },
+      waitingKinds: { ...waitingKinds },
+      classIds: { ...classIds },
+      summaryLines: [
+        ...groups.map((group) => {
+          const targetId = requiresExplicitAssignments ? assignments[group.key] : reviewTracks[0]?.id
+          const targetLabel = targetId === "common"
+            ? "공통 이력"
+            : reviewTracks.find((item) => item.id === targetId)?.subject || "선택 안 함"
+          return `${group.label}: ${targetLabel}`
+        }),
+        ...reviewTracks.map((item) => {
+          const target = targetStates[item.id]
+          if (!target) return `${item.subject}: 단계 선택 안 함`
+          if (target !== "waiting") return `${item.subject}: ${STATUS_LABELS[target]}`
+          const waitingKind = WAITING_KIND_OPTIONS.find((option) => option.value === waitingKinds[item.id])?.label || "대기 종류 선택 안 함"
+          const classLabel = classOptions.find((option) => option.id === classIds[item.id])?.label
+          return `${item.subject}: ${STATUS_LABELS[target]} · ${waitingKind}${classLabel ? ` · ${classLabel}` : ""}`
+        }),
+      ],
+    }
 
     setSaving(true)
     try {
@@ -1963,6 +2097,7 @@ export function RegistrationMigrationReviewEditor({
         requestKey,
       })
       submissionKeys.clear(kind, migrationReviewEntityKey)
+      setMigrationConflictAttempt(null)
       onDirtyChange?.(false)
       setRefreshPending(true)
       try {
@@ -1977,7 +2112,8 @@ export function RegistrationMigrationReviewEditor({
         submissionKeys.clear(kind, migrationReviewEntityKey)
         try {
           await onResolved()
-          onWarning("다른 사용자의 변경을 반영했습니다. 과목 분리 상태를 다시 확인하세요.")
+          setMigrationConflictAttempt(attemptedReview)
+          onWarning("다른 사용자가 등록 정보를 변경했습니다. 내 분리안과 최신 저장 상태를 비교하세요.")
         } catch {
           onWarning("다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다.")
         }
@@ -1996,6 +2132,44 @@ export function RegistrationMigrationReviewEditor({
         <p className="text-xs text-amber-900/75">기존 공통 기록을 한 과목에만 귀속하거나 공통 이력으로 남겨야 다음 업무를 진행할 수 있습니다.</p>
       </div>
       <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryResolutionRefresh()} />
+
+      {migrationConflictAttempt ? (
+        <div role="alert" className="grid gap-3 rounded-md border border-amber-300 bg-background p-3 text-sm text-amber-950">
+          <p className="font-semibold">다른 사용자가 등록 정보를 먼저 저장했습니다.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-xs font-medium">내가 선택한 분리안</div>
+              <ul className="mt-1 grid gap-1 text-xs">
+                {migrationConflictAttempt.summaryLines.map((line, index) => <li key={`attempt-${index}`}>{line}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div className="text-xs font-medium">최신 저장 상태</div>
+              <ul className="mt-1 grid gap-1 text-xs">
+                <li>공통 정보 버전: {detail.commonRevision}</li>
+                {reviewTracks.map((item) => <li key={`latest-track-${item.id}`}>{item.subject}: {STATUS_LABELS[item.status]} · {item.directorName || "담당자 미지정"}</li>)}
+              </ul>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" size="sm" variant="outline" aria-label={`${reviewSubjectLabel} 최신 과목 분리 상태 사용`} onClick={() => {
+              setAssignments({})
+              setTargetStates({})
+              setWaitingKinds({})
+              setClassIds({})
+              setDirectorIds(directorBaseline)
+              setMigrationConflictAttempt(null)
+            }}>최신 상태 사용</Button>
+            <Button type="button" size="sm" aria-label={`${reviewSubjectLabel} 내 과목 분리안 다시 적용`} onClick={() => {
+              setAssignments({ ...migrationConflictAttempt.assignments })
+              setTargetStates({ ...migrationConflictAttempt.targetStates })
+              setWaitingKinds({ ...migrationConflictAttempt.waitingKinds })
+              setClassIds({ ...migrationConflictAttempt.classIds })
+              setMigrationConflictAttempt(null)
+            }}>내 분리안 다시 적용</Button>
+          </div>
+        </div>
+      ) : null}
 
       {detail.migrationLegacy?.snapshotMissing ? (
         <p role="alert" className="rounded-md border border-destructive/30 bg-background px-3 py-2 text-sm text-destructive">
@@ -2019,7 +2193,7 @@ export function RegistrationMigrationReviewEditor({
             className="h-9 rounded-md border bg-background px-3 text-sm"
             value={assignments[group.key] || ""}
             onChange={(event) => setAssignments((current) => ({ ...current, [group.key]: event.target.value }))}
-                  disabled={refreshPending || !permissions.canManage || saving}
+            disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || saving}
           >
             <option value="">귀속 대상 선택</option>
             {reviewTracks.map((track) => <option key={track.id} value={track.id}>{track.subject}</option>)}
@@ -2038,6 +2212,24 @@ export function RegistrationMigrationReviewEditor({
               <Badge variant="outline">검토 필요</Badge>
             </div>
             <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]">
+              {directorConflictAttempt?.trackId === track.id ? (
+                <div role="alert" className="grid gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm sm:col-span-2">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div><div className="text-xs font-medium">내가 선택한 담당자</div><div>{directorConflictAttempt.label}</div></div>
+                    <div><div className="text-xs font-medium">최신 저장 담당자</div><div>{track.directorName || "미지정"}</div></div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" size="sm" variant="outline" aria-label={`${track.subject} 최신 담당자 사용`} onClick={() => {
+                      setDirectorIds((current) => ({ ...current, [track.id]: track.directorProfileId || "" }))
+                      setDirectorConflictAttempt(null)
+                    }}>최신 담당자 사용</Button>
+                    <Button type="button" size="sm" aria-label={`${track.subject} 내 담당자 선택 다시 적용`} onClick={() => {
+                      setDirectorIds((current) => ({ ...current, [track.id]: directorConflictAttempt.profileId }))
+                      setDirectorConflictAttempt(null)
+                    }}>내 선택 다시 적용</Button>
+                  </div>
+                </div>
+              ) : null}
               <Label className="grid gap-1.5">
                 상담 책임자
                 <select
@@ -2045,7 +2237,7 @@ export function RegistrationMigrationReviewEditor({
                   className="h-9 rounded-md border bg-background px-3 text-sm"
                   value={directorIds[track.id] || ""}
                   onChange={(event) => setDirectorIds((current) => ({ ...current, [track.id]: event.target.value }))}
-                  disabled={refreshPending || !permissions.canManage || saving || savingDirectorId === track.id}
+                  disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || saving || savingDirectorId === track.id}
                 >
                   <option value="">원장 선택</option>
                   {directorIds[track.id] && !availableDirectors.some((profile) => profile.id === directorIds[track.id]) ? (
@@ -2054,7 +2246,7 @@ export function RegistrationMigrationReviewEditor({
                   {availableDirectors.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
                 </select>
               </Label>
-              <Button type="button" aria-label={`${track.subject} 상담 책임자 저장`} variant="outline" size="sm" className="self-end" onClick={() => void saveDirector(track)} disabled={refreshPending || !permissions.canManage || !availableDirectors.some((profile) => profile.id === directorIds[track.id]) || saving || Boolean(savingDirectorId)}>
+              <Button type="button" aria-label={`${track.subject} 상담 책임자 저장`} variant="outline" size="sm" className="self-end" onClick={() => void saveDirector(track)} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || !availableDirectors.some((profile) => profile.id === directorIds[track.id]) || saving || Boolean(savingDirectorId)}>
                 책임자 저장
               </Button>
             </div>
@@ -2065,7 +2257,7 @@ export function RegistrationMigrationReviewEditor({
                 className="h-9 rounded-md border bg-background px-3 text-sm"
                 value={target}
                 onChange={(event) => setTargetStates((current) => ({ ...current, [track.id]: event.target.value as ReviewTargetState }))}
-                disabled={refreshPending || !permissions.canManage || saving}
+                disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || saving}
               >
                 <option value="">단계 선택</option>
                 <option value="inquiry">문의</option>
@@ -2084,11 +2276,11 @@ export function RegistrationMigrationReviewEditor({
             {target === "visit_consultation_scheduled" && !hasVisitReservation ? <p className="text-xs text-amber-900">방문상담 예약 정보가 불완전해 새 예약이 필요합니다.</p> : null}
             {target === "waiting" ? (
               <div className="grid gap-2 sm:grid-cols-2">
-                <select aria-label={`${track.subject} 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKinds((current) => ({ ...current, [track.id]: event.target.value as RegistrationWaitingKind }))} disabled={refreshPending || saving}>
+                <select aria-label={`${track.subject} 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKinds((current) => ({ ...current, [track.id]: event.target.value as RegistrationWaitingKind }))} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || saving}>
                   <option value="">대기 종류 선택</option>
                   {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
-                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => setClassIds((current) => ({ ...current, [track.id]: value }))} classOptions={classOptions} disabled={refreshPending || saving} /> : null}
+                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => setClassIds((current) => ({ ...current, [track.id]: value }))} classOptions={classOptions} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || saving} /> : null}
               </div>
             ) : null}
           </div>
@@ -2098,11 +2290,11 @@ export function RegistrationMigrationReviewEditor({
       {permissions.canManage ? (
         <div className="flex flex-wrap justify-end gap-2">
           {catalogRefreshRequired ? (
-            <Button type="button" variant="outline" onClick={() => void retryDirectorCatalog()} disabled={refreshPending || !onRetryDirectorCatalog || catalogRefreshing}>
+            <Button type="button" variant="outline" aria-label={`${reviewSubjectLabel} 담당자 정보 다시 불러오기`} onClick={() => void retryDirectorCatalog()} disabled={refreshPending || !onRetryDirectorCatalog || catalogRefreshing}>
               담당자 정보 다시 불러오기
             </Button>
           ) : null}
-          <Button type="button" onClick={() => void resolveReview()} disabled={refreshPending || !canResolve || saving || Boolean(savingDirectorId)}>
+          <Button type="button" aria-label={`${reviewSubjectLabel} 과목 분리 확인 저장`} onClick={() => void resolveReview()} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !canResolve || saving || Boolean(savingDirectorId)}>
             과목 분리 확인 저장
           </Button>
         </div>

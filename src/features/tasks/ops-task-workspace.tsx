@@ -8364,6 +8364,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [selectedTask, setSelectedTask] = useState<OpsTask | null>(null)
   const [selectedRegistrationTrackId, setSelectedRegistrationTrackId] = useState<string | null>(null)
   const [selectedRegistrationAppointmentId, setSelectedRegistrationAppointmentId] = useState<string | null>(null)
+  const [registrationApplicationDirty, setRegistrationApplicationDirty] = useState(false)
   const selectedRegistrationTrackIdRef = useRef<string | null>(selectedRegistrationTrackId)
   selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
   const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationCaseDetail | null>(null)
@@ -12430,7 +12431,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             </div>
           )}
           {selectedTaskFresh && (
-            <div className={selectedTaskFresh.type === "registration" || selectedTaskFresh.type === "withdrawal" || selectedTaskFresh.type === "transfer" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}>
+            <div
+              data-registration-application-dirty={registrationApplicationDirty ? "true" : "false"}
+              className={selectedTaskFresh.type === "registration" || selectedTaskFresh.type === "withdrawal" || selectedTaskFresh.type === "transfer" ? "grid gap-4" : selectedTaskFresh.type === "general" || selectedTaskFresh.type === "word_retest" ? "grid gap-4" : "grid gap-4 lg:grid-cols-[1.15fr_0.85fr]"}
+            >
               <div className={isProcessDetail || isRegistrationDetail ? "flex flex-col gap-3" : "flex flex-col gap-3 rounded-lg border p-4"}>
                 {selectedTaskFresh.type === "general" ? (
                   <GeneralTaskDetailPanel task={selectedTaskFresh} />
@@ -12450,6 +12454,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}
                       onReload={reloadRegistrationCaseDetail}
                       onWarning={setMessage}
+                      onDirtyChange={setRegistrationApplicationDirty}
                       notificationToken={registrationNotificationSessionToken}
                       profiles={data?.profiles || EMPTY_PROFILE_OPTIONS}
                       directorOptions={data?.profiles || EMPTY_PROFILE_OPTIONS}

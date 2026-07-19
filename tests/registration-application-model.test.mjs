@@ -12,6 +12,8 @@ const {
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   getRegistrationCreateSectionStates,
+  getRegistrationCommonConflictRows,
+  getRegistrationEnrollmentDirtyKey,
   isRegistrationApplicationSectionContentDisabled,
   reconcileRegistrationEditorDraft,
   updateRegistrationApplicationDirtyKeys,
@@ -342,4 +344,32 @@ test("an inquiry draft survives a consultation reload until its own canonical re
 
   assert.deepEqual(afterInquirySave.draft, { requestNote: "저장된 문의 메모" })
   assert.equal(dirtyKeys.size, 0)
+})
+
+test("common revision conflicts retain attempted values beside canonical latest values", () => {
+  const rows = getRegistrationCommonConflictRows({
+    attempted: { studentName: "김학생", schoolGrade: "중2", requestNote: "내가 입력한 요청" },
+    latest: { studentName: "김학생", schoolGrade: "중3", requestNote: "다른 담당자의 최신 요청" },
+    labels: { studentName: "학생명", schoolGrade: "학년", requestNote: "요청 사항" },
+  })
+
+  assert.deepEqual(rows, [
+    { field: "schoolGrade", label: "학년", attempted: "중2", latest: "중3" },
+    { field: "requestNote", label: "요청 사항", attempted: "내가 입력한 요청", latest: "다른 담당자의 최신 요청" },
+  ])
+})
+
+test("enrollment row, decision, and cancellation drafts keep independent stable owners", () => {
+  const rowsKey = getRegistrationEnrollmentDirtyKey("track123", { kind: "rows" })
+  const decisionKey = getRegistrationEnrollmentDirtyKey("track123", { kind: "decision" })
+  const cancellationKey = getRegistrationEnrollmentDirtyKey("track123", { kind: "cancellation", enrollmentId: "enrollment456" })
+  let dirty = updateRegistrationApplicationDirtyKeys(new Set(), rowsKey, true)
+  dirty = updateRegistrationApplicationDirtyKeys(dirty, decisionKey, true)
+  dirty = updateRegistrationApplicationDirtyKeys(dirty, cancellationKey, true)
+  dirty = updateRegistrationApplicationDirtyKeys(dirty, decisionKey, false)
+
+  assert.equal(rowsKey, "placement:enrollments-track123")
+  assert.equal(decisionKey, "placement:decision-track123")
+  assert.equal(cancellationKey, "placement:cancellation-track123-enrollment456")
+  assert.deepEqual([...dirty], [rowsKey, cancellationKey])
 })
