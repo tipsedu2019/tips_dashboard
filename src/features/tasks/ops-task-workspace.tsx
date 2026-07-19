@@ -8451,6 +8451,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     focusTrackId: string | null
     appointmentId: string | null
   } | null>(null)
+  const pushedTaskDetailHistoryUrlRef = useRef("")
+  const registrationCloseHistoryRestoreRef = useRef<"forward" | "replace">("replace")
   const [pendingRegistrationVisitNotificationTargets, setPendingRegistrationVisitNotificationTargets] = useState<RegistrationVisitNotificationTarget[]>([])
   const [retryingRegistrationVisitNotifications, setRetryingRegistrationVisitNotifications] = useState(false)
   const registrationVisitNotificationRetryInFlightRef = useRef(false)
@@ -8998,13 +9000,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     historyIntent: "push" | "replace" = "replace",
   ) => {
     const currentUrl = `${window.location.pathname}${window.location.search}`
+    const currentWasPushedDetail = pushedTaskDetailHistoryUrlRef.current === currentUrl
     const mutation = getOpsTaskHistoryMutation({ currentUrl, nextUrl, intent: historyIntent })
     if (mutation === "none") return
     if (mutation === "push") {
       window.history.pushState(window.history.state, "", nextUrl)
+      pushedTaskDetailHistoryUrlRef.current = nextUrl
       return
     }
     window.history.replaceState(window.history.state, "", nextUrl)
+    if (currentWasPushedDetail) {
+      const nextSearchParams = new URL(nextUrl, window.location.origin).searchParams
+      pushedTaskDetailHistoryUrlRef.current = nextSearchParams.get("taskId") ? nextUrl : ""
+    }
   }, [])
 
   const syncTaskDeepLink = useCallback((
@@ -10095,7 +10103,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         focusTrackId: trackId,
         appointmentId: null,
       })
-      syncTaskDeepLink(taskId, trackId)
+      syncTaskDeepLink(taskId, trackId, null, "push")
     } catch (error) {
       if (registrationTrackSelectionRef.current === actionSelectionKey) {
         setMessage(getOpsTaskActionErrorMessage(error, "상담 상세를 확인하지 못했습니다."))
@@ -10161,6 +10169,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           focusTrackId: registrationApplicationHost.focusTrackId,
           appointmentId: registrationApplicationHost.appointmentId,
         }
+        const pushedDetailUrl = pushedTaskDetailHistoryUrlRef.current
+          ? new URL(pushedTaskDetailHistoryUrlRef.current, window.location.origin)
+          : null
+        registrationCloseHistoryRestoreRef.current = pushedDetailUrl
+          && pushedDetailUrl.pathname === window.location.pathname
+          && pushedDetailUrl.searchParams.get("taskId") === registrationApplicationHost.taskId
+          && (pushedDetailUrl.searchParams.get("trackId") || null) === registrationApplicationHost.focusTrackId
+          && (pushedDetailUrl.searchParams.get("appointmentId") || null) === registrationApplicationHost.appointmentId
+          ? "forward"
+          : "replace"
       }
       requestRegistrationApplicationClose()
       return
@@ -10262,6 +10280,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       registrationCloseDeepLinkRestoreRef.current,
     )
     registrationCloseDeepLinkRestoreRef.current = closeDecision.restoreDeepLink
+    registrationCloseHistoryRestoreRef.current = "replace"
     formCloseReturnFocusRef.current = null
     setConfirmingFormClose(false)
     setMessage("")
@@ -10277,10 +10296,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   function cancelFormCloseConfirmation() {
     const restoreDeepLink = registrationCloseDeepLinkRestoreRef.current
-    const closeDecision = getRegistrationDirtyCloseDecision("cancel", restoreDeepLink)
+    const closeDecision = getRegistrationDirtyCloseDecision("cancel", restoreDeepLink, {
+      canRestoreForward: registrationCloseHistoryRestoreRef.current === "forward",
+    })
+    const historyRestore = closeDecision.historyRestore
     registrationCloseDeepLinkRestoreRef.current = null
+    registrationCloseHistoryRestoreRef.current = "replace"
     setConfirmingFormClose(false)
-    if (closeDecision.restoreDeepLink && restoreDeepLink) {
+    if (historyRestore === "forward") {
+      window.history.forward()
+    } else if (historyRestore === "replace" && closeDecision.restoreDeepLink && restoreDeepLink) {
       syncTaskDeepLink(restoreDeepLink.taskId, restoreDeepLink.focusTrackId, restoreDeepLink.appointmentId)
     }
     window.requestAnimationFrame(() => formCloseReturnFocusRef.current?.focus())

@@ -500,11 +500,11 @@ test("registration deep links preserve task, track, and appointment ids and clea
   assert.match(source, /searchParams\.delete\("trackId"\)/);
   assert.match(source, /searchParams\.set\("appointmentId", nextAppointmentId\)/);
   assert.match(source, /searchParams\.delete\("appointmentId"\)/);
-  assert.match(source, /syncTaskDeepLink\(taskId, trackId\)/);
+  assert.match(source, /syncTaskDeepLink\(taskId, trackId, null, "push"\)/);
   assert.match(deepLinkEffect, /const currentSearchParams = new URLSearchParams\(window\.location\.search\)/);
   assert.match(deepLinkEffect, /currentSearchParams\.get\("taskId"\)/);
   assert.match(deepLinkEffect, /currentSearchParams\.get\("trackId"\)/);
-  assert.doesNotMatch(deepLinkEffect, /searchParams\.get\(/);
+  assert.doesNotMatch(deepLinkEffect, /(^|[^.\w])searchParams\.get\(/m);
   assert.match(deepLinkEffect, /setSelectedRegistrationTrackId\(deepLinkedTrackId\)/);
   assert.match(closeHandler, /setDetailOpen\(nextOpen\)/);
   assert.match(closeHandler, /setSelectedRegistrationTrackId\(null\)/);

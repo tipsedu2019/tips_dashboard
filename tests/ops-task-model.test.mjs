@@ -62,13 +62,24 @@ test("dirty registration Back preserves the exact detail link until cancel or di
   });
 
   assert.deepEqual(back, { requestClose: true, restoreDeepLink: exactDetail });
-  assert.deepEqual(getRegistrationDirtyCloseDecision("cancel", back.restoreDeepLink), {
+  assert.deepEqual(getRegistrationDirtyCloseDecision("cancel", back.restoreDeepLink, {
+    canRestoreForward: true,
+  }), {
     close: false,
     restoreDeepLink: exactDetail,
+    historyRestore: "forward",
+  });
+  assert.deepEqual(getRegistrationDirtyCloseDecision("cancel", back.restoreDeepLink, {
+    canRestoreForward: false,
+  }), {
+    close: false,
+    restoreDeepLink: exactDetail,
+    historyRestore: "replace",
   });
   assert.deepEqual(getRegistrationDirtyCloseDecision("discard", back.restoreDeepLink), {
     close: true,
     restoreDeepLink: null,
+    historyRestore: "none",
   });
   assert.deepEqual(getRegistrationDirtyBackPlan({
     urlHasTask: false,

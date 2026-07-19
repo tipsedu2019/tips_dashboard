@@ -479,17 +479,26 @@ export function getRegistrationDirtyBackPlan({
 /**
  * @param {"cancel" | "discard"} [decision]
  * @param {{ taskId: string, focusTrackId: string | null, appointmentId: string | null } | null} [restoreDeepLink]
+ * @param {{ canRestoreForward?: boolean }} [options]
  * @returns {{
  *   close: boolean,
  *   restoreDeepLink: { taskId: string, focusTrackId: string | null, appointmentId: string | null } | null,
+ *   historyRestore: "none" | "forward" | "replace",
  * }}
  */
-export function getRegistrationDirtyCloseDecision(decision = "discard", restoreDeepLink = null) {
+export function getRegistrationDirtyCloseDecision(
+  decision = "discard",
+  restoreDeepLink = null,
+  { canRestoreForward = false } = {},
+) {
   if (decision === "cancel") {
     return {
       close: false,
       restoreDeepLink: restoreDeepLink ? { ...restoreDeepLink } : null,
+      historyRestore: restoreDeepLink
+        ? canRestoreForward ? "forward" : "replace"
+        : "none",
     };
   }
-  return { close: true, restoreDeepLink: null };
+  return { close: true, restoreDeepLink: null, historyRestore: "none" };
 }

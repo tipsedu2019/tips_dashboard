@@ -1953,12 +1953,17 @@ test("registration browser-back closure clears canonical state and restores the 
   const cancelStart = source.indexOf("function cancelFormCloseConfirmation");
   const cancelEnd = source.indexOf("\n  function handleFormOpenChange", cancelStart);
   const cancel = source.slice(cancelStart, cancelEnd);
+  const quickActionStart = source.indexOf("const handleRegistrationTrackAction = useCallback");
+  const quickActionEnd = source.indexOf("\n  const closeRegistrationApplicationHost", quickActionStart);
+  const quickAction = source.slice(quickActionStart, quickActionEnd);
 
   assert.match(source, /getOpsTaskHistoryMutation/);
   assert.match(source, /window\.history\.pushState/);
   assert.match(source, /window\.history\.replaceState/);
+  assert.match(source, /window\.history\.forward\(\)/);
   assert.match(source, /addEventListener\("popstate"/);
   assert.match(source, /addEventListener\("beforeunload"/);
+  assert.match(quickAction, /syncTaskDeepLink\(taskId, trackId, null, "push"\)/);
   assert.doesNotMatch(deepLink, /if \(!deepLinkedTaskId \|\| !data/);
   assert.match(deepLink, /if \(!deepLinkedTaskId\) \{[\s\S]*?\["loading_detail", "detail", "refresh_failed"\]\.includes\(registrationApplicationHost\.kind\)/);
   assert.match(deepLink, /registrationCloseDeepLinkRestoreRef\.current = \{[\s\S]*?taskId: registrationApplicationHost\.taskId[\s\S]*?focusTrackId: registrationApplicationHost\.focusTrackId[\s\S]*?appointmentId: registrationApplicationHost\.appointmentId/);
@@ -1971,7 +1976,8 @@ test("registration browser-back closure clears canonical state and restores the 
     'registrationTrackSelectionRef.current = ""',
     "registrationCommittedReceiptRef.current = null",
   ]);
-  assert.match(cancel, /registrationCloseDeepLinkRestoreRef\.current[\s\S]*?syncTaskDeepLink\(restoreDeepLink\.taskId, restoreDeepLink\.focusTrackId, restoreDeepLink\.appointmentId\)/);
+  assert.match(cancel, /historyRestore === "forward"[\s\S]*?window\.history\.forward\(\)/);
+  assert.match(cancel, /historyRestore === "replace"[\s\S]*?syncTaskDeepLink\(restoreDeepLink\.taskId, restoreDeepLink\.focusTrackId, restoreDeepLink\.appointmentId\)/);
   assert.doesNotMatch(cancel, /setRegistrationApplicationDirty\(false\)|closeRegistrationApplicationHost\(\)/);
 });
 
