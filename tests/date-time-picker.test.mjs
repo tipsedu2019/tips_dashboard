@@ -79,7 +79,7 @@ test("time validity spans the full day while standalone candidates keep their ex
   assert.deepEqual(optionsWithLegacyTime, [...optionsWithLegacyTime].sort());
 });
 
-test("combined picker keeps partial drafts internal, syncs external resets, and exposes clear", async () => {
+test("combined picker keeps partial drafts internal, syncs external resets, and exposes a default or supplied clear name", async () => {
   const source = await readPickerSource();
   const componentStart = source.indexOf("export function DateTimePickerControl");
   const componentSource = source.slice(componentStart);
@@ -99,8 +99,9 @@ test("combined picker keeps partial drafts internal, syncs external resets, and 
     componentSource,
     /function handleClear[\s\S]*setDateDraft\(""\)[\s\S]*setTimeDraft\(""\)[\s\S]*onChange\(""\)/,
   );
-  assert.match(componentSource, /aria-label="날짜와 시각 지우기"/);
-  assert.match(source, /type DateTimePickerControlProps = \{[\s\S]*?timeOptions\?: string\[\]/);
+  assert.match(source, /type DateTimePickerControlProps = \{[\s\S]*?clearAriaLabel\?: string[\s\S]*?timeOptions\?: string\[\]/);
+  assert.match(componentSource, /clearAriaLabel = "날짜와 시각 지우기"/);
+  assert.match(componentSource, /aria-label=\{clearAriaLabel\}/);
   assert.match(componentSource, /timeOptions = FULL_DAY_TIME_OPTIONS/);
   assert.match(componentSource, /options=\{timeOptions\}/);
   assert.match(componentSource, /className=\{cn\("grid min-w-0 gap-2/);

@@ -380,6 +380,7 @@ type DateTimePickerControlProps = {
   onChange: (value: string) => void
   dateAriaLabel?: string
   timeAriaLabel?: string
+  clearAriaLabel?: string
   datePlaceholder?: string
   timePlaceholder?: string
   disabled?: boolean
@@ -394,6 +395,7 @@ export function DateTimePickerControl({
   onChange,
   dateAriaLabel = "날짜 선택",
   timeAriaLabel = "시각 선택",
+  clearAriaLabel = "날짜와 시각 지우기",
   datePlaceholder = "날짜 선택",
   timePlaceholder = "시각 선택",
   disabled = false,
@@ -466,7 +468,7 @@ export function DateTimePickerControl({
             variant="ghost"
             size="icon"
             disabled={disabled}
-            aria-label="날짜와 시각 지우기"
+            aria-label={clearAriaLabel}
             className="size-9 shrink-0"
             onClick={handleClear}
           >

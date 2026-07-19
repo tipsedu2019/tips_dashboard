@@ -180,6 +180,7 @@ test("registration primary-action markers own the data controls they commit", as
   assert.match(verifier, /lastOwnedField/)
   assert.match(verifier, /data-registration-appointment-subjects/)
   assert.match(verifier, /data-registration-appointment-shared-controls/)
+  assert.match(verifier, /owner\.querySelectorAll\('input, select, button'\)/)
   assert.doesNotMatch(mobileActionVerifier, /action\.matches\(':disabled'\)/)
   assert.match(mobileActionVerifier, /querySelectorAll\('input, select, textarea'\)/)
   assert.match(mobileActionVerifier, /owner has no visible data field/)
@@ -208,6 +209,7 @@ test("shared appointment browser selectors track the subject-qualified rendered 
 
   for (const renderedControl of [
     "appointmentParticipantSubjectLabel} 예약 시각",
+    "appointmentParticipantSubjectLabel} 예약 날짜와 시각 지우기",
     "appointmentParticipantSubjectLabel} 예약 적용: ${track.subject}",
     "appointmentParticipantSubjectLabel} 예약 저장",
     'track?.subject || "과목"} 시험 시작',

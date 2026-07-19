@@ -1019,6 +1019,7 @@ export function RegistrationAppointmentEditor({
               onChange={(value) => { setValidationError(""); setScheduledAt(value) }}
               dateAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜`}
               timeAriaLabel={`${appointmentParticipantSubjectLabel} 예약 시각`}
+              clearAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜와 시각 지우기`}
               required
               disabled={saving || mutationLocked}
               disablePortal
