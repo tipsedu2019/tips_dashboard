@@ -49,7 +49,8 @@ test("registration application shell renders all six sections once in fixed orde
   }
   assert.match(shell, /aria-disabled/)
   assert.match(shell, /editable/)
-  assert.match(shell, /<fieldset[\s\S]*disabled=\{!state\.editable\}/)
+  assert.match(shell, /isRegistrationApplicationSectionContentDisabled/)
+  assert.match(shell, /<fieldset[\s\S]*disabled=\{contentDisabled\}/)
   assert.match(shell, /closeAction: ReactNode/)
   assert.match(shell, /\{props\.closeAction\}/)
   assert.match(inquiry, /inquiryAt/)
@@ -687,6 +688,7 @@ test("two decided subjects share one admission send action and expose two badges
 
   assert.deepEqual(badges, ["영어", "수학"])
   assert.equal((application.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
+  assert.match(application, /getRegistrationApplicationCaseEditableSections\(\{[\s\S]*?admissionBatches: detail\.admissionBatches/)
   assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: detail\.tracks,[\s\S]*?enrollments: detail\.enrollments/)
   assert.match(application, /admissionApplicationState\.canSend/)
   assert.match(application, /detail\.tracks\.filter\(\(track\) => track\.status === "enrollment_decided"\)\.map/)
@@ -983,16 +985,23 @@ test("committed appointment and result mutations cannot be resubmitted when refr
 
 test("track editor opens one shared editor for level tests and visit consultations", async () => {
   const source = await readRegistrationApplicationSource()
+  const stageSource = sourceBetween(source, "export function RegistrationTrackStageEditor", "type ConsultationOutcomeDraft")
   assert.match(source, /RegistrationAppointmentEditor/)
+  assert.match(source, /getRegistrationApplicationAppointmentActionPlans\(\{/)
+  assert.match(source, /appointmentActionPlans\.filter\(\(plan\) => plan\.kind === kind\)/)
+  assert.match(source, /plans\.map\(\(plan\) =>/)
+  assert.match(source, /openAppointment\(owner, kind, plan\.appointmentId\)/)
   assert.match(source, /openAppointment\(context, "level_test"/)
   assert.match(source, /openAppointment\(context, "visit_consultation"/)
   assert.equal((source.match(/<RegistrationAppointmentEditor/g) || []).length, 1)
+  assert.doesNotMatch(stageSource, /예약 및 과목별 결과 관리|레벨테스트 결과 보기|방문상담 예약 수정/)
   assert.match(source, /방문상담 예약/)
 })
 
 test("phone and visit consultation completion share one inline subject outcome editor", async () => {
   const source = await readRegistrationApplicationSource()
   const outcomeSource = sourceBetween(source, "export function RegistrationConsultationOutcomeEditor", "export function RegistrationMigrationReviewEditor")
+  const stageSource = sourceBetween(source, "export function RegistrationTrackStageEditor", "type ConsultationOutcomeDraft")
   assert.match(source, /RegistrationConsultationOutcomeEditor/)
   assert.match(source, /completeRegistrationConsultation/)
   assert.match(source, /consultationId: consultation\.id/)
@@ -1012,6 +1021,8 @@ test("phone and visit consultation completion share one inline subject outcome e
   assert.match(outcomeSource, /SubjectClassSelect[\s\S]*?disabled=\{saving\}/)
   assert.match(outcomeSource, /saving \? "저장 중" : "상담 결과 저장"/)
   assert.doesNotMatch(outcomeSource, /<Dialog|<DialogContent/)
+  assert.doesNotMatch(stageSource, /onOpenOutcome|전화상담 완료|방문상담 완료/)
+  assert.doesNotMatch(source, /onOpenOutcome=\{/)
 })
 
 test("registration stage selects have subject-specific accessible names", async () => {

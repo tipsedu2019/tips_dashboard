@@ -7,9 +7,12 @@ const trackModel = await import("../src/features/tasks/registration-track-model.
 const {
   REGISTRATION_ACTION_SECTION,
   REGISTRATION_APPLICATION_SECTION_ORDER,
+  getRegistrationApplicationAppointmentActionPlans,
+  getRegistrationApplicationCaseEditableSections,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   getRegistrationCreateSectionStates,
+  isRegistrationApplicationSectionContentDisabled,
   updateRegistrationApplicationDirtyKeys,
 } = application
 
@@ -167,6 +170,132 @@ test("mixed tracks aggregate current emphasis without unlocking the sibling", ()
   assert.equal(aggregate.level_test.current, true)
   assert.equal(aggregate.level_test.editable, false)
   assert.equal(mathematics.sections.level_test.editable, false)
+})
+
+test("authorized destination actions unlock their owning sections without moving authority", () => {
+  assert.equal(typeof getRegistrationApplicationTrackState, "function")
+  const inquiry = getRegistrationApplicationTrackState({
+    track: makeTrack("inquiry"),
+    canManage: true,
+    canCompleteConsultation: false,
+  })
+  const waiting = getRegistrationApplicationTrackState({
+    track: makeTrack("waiting"),
+    canManage: true,
+    canCompleteConsultation: false,
+  })
+
+  assert.equal(inquiry.currentSection, "inquiry")
+  assert.equal(inquiry.sections.level_test.editable, true)
+  assert.equal(inquiry.sections.consultation.editable, true)
+  assert.equal(inquiry.sections.placement.editable, true)
+  assert.deepEqual(inquiry.sections.level_test.actions, ["schedule_level_test"])
+  assert.deepEqual(inquiry.sections.consultation.actions, ["route_consultation"])
+  assert.deepEqual(inquiry.sections.placement.actions, ["route_waiting"])
+  assert.equal(waiting.sections.level_test.editable, true)
+  assert.deepEqual(waiting.sections.level_test.actions, ["schedule_level_test"])
+  assert.equal(inquiry.sections.history.editable, false)
+  assert.deepEqual(inquiry.sections.history.actions, [])
+})
+
+test("destination action editability never unlocks a non-authorized sibling", () => {
+  const authorized = getRegistrationApplicationTrackState({
+    track: makeTrack("inquiry", "영어"),
+    canManage: true,
+    canCompleteConsultation: false,
+  })
+  const sibling = getRegistrationApplicationTrackState({
+    track: makeTrack("inquiry", "수학"),
+    canManage: false,
+    canCompleteConsultation: false,
+  })
+  const aggregate = getRegistrationApplicationSectionStates({ tracks: [authorized, sibling] })
+
+  assert.equal(aggregate.level_test.editable, true)
+  assert.equal(authorized.sections.level_test.editable, true)
+  assert.equal(sibling.sections.level_test.editable, false)
+  assert.ok(sibling.sections.level_test.lockReason)
+})
+
+test("shared appointment actions group participants once per appointment id", () => {
+  assert.equal(typeof getRegistrationApplicationAppointmentActionPlans, "function")
+  const tracks = [makeTrack("level_test_scheduled", "영어"), makeTrack("level_test_scheduled", "수학")]
+  const [english, mathematics] = tracks
+  const plans = getRegistrationApplicationAppointmentActionPlans({
+    tracks,
+    appointments: [
+      { id: "level-shared", kind: "level_test", status: "scheduled" },
+      { id: "level-other", kind: "level_test", status: "completed" },
+      { id: "visit-shared", kind: "visit_consultation", status: "scheduled" },
+    ],
+    levelTests: [
+      { appointmentId: "level-shared", trackId: english.id, status: "scheduled" },
+      { appointmentId: "level-shared", trackId: mathematics.id, status: "scheduled" },
+      { appointmentId: "level-other", trackId: english.id, status: "completed" },
+    ],
+    consultations: [
+      { appointmentId: "visit-shared", trackId: english.id, mode: "visit", status: "scheduled" },
+      { appointmentId: "visit-shared", trackId: mathematics.id, mode: "visit", status: "scheduled" },
+    ],
+    actionableTrackIds: [mathematics.id],
+  })
+
+  assert.equal(plans.length, 3)
+  assert.deepEqual(plans.map((plan) => plan.appointmentId), ["level-shared", "level-other", "visit-shared"])
+  assert.deepEqual(plans[0].participantTrackIds, [english.id, mathematics.id])
+  assert.deepEqual(plans[0].participantSubjects, ["영어", "수학"])
+  assert.equal(plans[0].ownerTrackId, mathematics.id)
+  assert.deepEqual(plans[1].participantTrackIds, [english.id])
+  assert.deepEqual(plans[2].participantSubjects, ["영어", "수학"])
+})
+
+test("an open admission batch enables the case section for registered add-class work", () => {
+  assert.equal(typeof getRegistrationApplicationCaseEditableSections, "function")
+  const registered = getRegistrationApplicationTrackState({
+    track: makeTrack("registered"),
+    canManage: true,
+    canCompleteConsultation: false,
+  })
+  const caseEditableSections = getRegistrationApplicationCaseEditableSections({
+    canManage: true,
+    admissionMessageEditable: false,
+    admissionBatches: [{ status: "draft" }],
+  })
+  const aggregate = getRegistrationApplicationSectionStates({
+    tracks: [registered],
+    caseEditableSections,
+  })
+
+  assert.equal(registered.currentSection, "placement")
+  assert.equal(registered.sections.admission.editable, false)
+  assert.ok(caseEditableSections.includes("admission"))
+  assert.equal(aggregate.admission.editable, true)
+  assert.deepEqual(
+    getRegistrationApplicationCaseEditableSections({
+      canManage: true,
+      admissionMessageEditable: false,
+      admissionBatches: [{ status: "completed" }, { status: "canceled" }],
+    }),
+    ["inquiry"],
+  )
+})
+
+test("an authorized shared appointment plan keeps its owning section operable", () => {
+  const sections = getRegistrationApplicationCaseEditableSections({
+    canManage: true,
+    admissionMessageEditable: false,
+    admissionBatches: [],
+    appointmentActionSections: ["level_test", "consultation"],
+  })
+
+  assert.deepEqual(sections, ["inquiry", "level_test", "consultation"])
+})
+
+test("detail history keeps filters interactive while mutation and create-history controls stay locked", () => {
+  assert.equal(typeof isRegistrationApplicationSectionContentDisabled, "function")
+  assert.equal(isRegistrationApplicationSectionContentDisabled({ mode: "detail", section: "history", editable: false }), false)
+  assert.equal(isRegistrationApplicationSectionContentDisabled({ mode: "create", section: "history", editable: false }), true)
+  assert.equal(isRegistrationApplicationSectionContentDisabled({ mode: "detail", section: "admission", editable: false }), true)
 })
 
 test("dirty state adds and removes one key without clearing another subject or section", () => {

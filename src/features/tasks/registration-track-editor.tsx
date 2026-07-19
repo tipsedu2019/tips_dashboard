@@ -3,12 +3,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import { RegistrationApplicationInquirySection } from "./registration-application-inquiry-section"
 import { RegistrationApplicationLevelTestSection } from "./registration-application-level-test-section"
 import {
+  getRegistrationApplicationAppointmentActionPlans,
+  getRegistrationApplicationCaseEditableSections,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   type RegistrationApplicationSectionKey,
@@ -349,12 +352,29 @@ export function RegistrationApplication({
     || admissionApplicationState.syncNeeded
     || admissionMessageRecoveryAvailable
   )
+  const appointmentActionPlans = getRegistrationApplicationAppointmentActionPlans({
+    tracks: detail.tracks,
+    appointments: detail.appointments,
+    levelTests: detail.levelTests,
+    consultations: detail.consultations,
+    actionableTrackIds: detail.tracks
+      .filter((track) => permissionsByTrackId.get(track.id)?.canManage)
+      .map((track) => track.id),
+  })
+  const appointmentActionSections = appointmentActionPlans.flatMap((plan) => (
+    permissionsByTrackId.get(plan.ownerTrackId)?.canManage
+      ? [plan.kind === "level_test" ? "level_test" as const : "consultation" as const]
+      : []
+  ))
+  const caseEditableSections = getRegistrationApplicationCaseEditableSections({
+    canManage: canManageCase,
+    admissionMessageEditable: admissionEditable,
+    admissionBatches: detail.admissionBatches,
+    appointmentActionSections,
+  })
   const sectionStates = getRegistrationApplicationSectionStates({
     tracks: trackStates,
-    caseEditableSections: [
-      ...(canManageCase ? ["inquiry" as const] : []),
-      ...(admissionEditable ? ["admission" as const] : []),
-    ],
+    caseEditableSections,
   })
   const focusedState = trackStates.find((state) => state.trackId === focusTrackId) || null
 
@@ -447,7 +467,7 @@ export function RegistrationApplication({
   }
 
   function renderTrackActions(context: TrackContext, section: RegistrationApplicationSectionKey) {
-    const { track, permissions, activeConsultation, currentLevelTest, latestLevelTest, visitConsultation, visitAppointment } = context
+    const { track, permissions, activeConsultation, visitAppointment } = context
     if (reviewBlocked) return null
     if (section === "placement" && ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status)) {
       return (
@@ -474,11 +494,8 @@ export function RegistrationApplication({
         classOptions={classOptions}
         onReload={onReload}
         onWarning={onWarning}
-        onOpenLevelTest={() => openAppointment(context, "level_test", currentLevelTest?.appointmentId || null)}
-        onOpenLevelTestHistory={() => openAppointment(context, "level_test", latestLevelTest?.appointmentId || null)}
-        onOpenVisit={() => openAppointment(context, "visit_consultation", visitConsultation?.appointmentId || null)}
-        onOpenOutcome={() => onFocusTrack(track.id)}
-        hasLevelTestHistory={Boolean(latestLevelTest?.status === "completed")}
+        onOpenLevelTest={() => openAppointment(context, "level_test", null)}
+        onOpenVisit={() => openAppointment(context, "visit_consultation", null)}
         activeConsultation={activeConsultation}
         visitAppointment={visitAppointment}
       />
@@ -528,6 +545,34 @@ export function RegistrationApplication({
           ) : null}
       </RegistrationTrackSectionFrame>
     ))
+  }
+
+  function renderAppointmentActionPlans(kind: OpsRegistrationAppointment["kind"]) {
+    const plans = appointmentActionPlans.filter((plan) => plan.kind === kind)
+    if (plans.length === 0) return null
+    return (
+      <div className="grid gap-2" aria-label={kind === "level_test" ? "레벨테스트 예약 목록" : "방문상담 예약 목록"}>
+        {plans.map((plan) => {
+          const owner = trackContexts.find((context) => context.track.id === plan.ownerTrackId)
+          if (!owner) return null
+          const label = kind === "level_test"
+            ? plan.status === "completed" ? "레벨테스트 결과 보기" : "예약 및 과목별 결과 관리"
+            : "방문상담 예약 수정"
+          return (
+            <div key={plan.appointmentId} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
+              <div className="flex flex-wrap gap-1" aria-label={`${label} 적용 과목`}>
+                {plan.participantSubjects.map((subject) => (
+                  <Badge key={subject} variant="secondary">{subject}</Badge>
+                ))}
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => openAppointment(owner, kind, plan.appointmentId)}>
+                {label}
+              </Button>
+            </div>
+          )
+        })}
+      </div>
+    )
   }
 
   const editorAppointment = appointmentEditor?.appointmentId
@@ -639,6 +684,7 @@ export function RegistrationApplication({
         <RegistrationApplicationLevelTestSection editable={sectionStates.level_test.editable}>
           <RegistrationLevelTestSummary detail={detail} />
           {renderTrackFrames("level_test")}
+          {renderAppointmentActionPlans("level_test")}
           {appointmentEditor?.kind === "level_test" ? appointmentEditorContent : null}
         </RegistrationApplicationLevelTestSection>
       )}
@@ -646,6 +692,7 @@ export function RegistrationApplication({
         <RegistrationApplicationConsultationSection editable={sectionStates.consultation.editable}>
           <RegistrationConsultationSummary detail={detail} />
           {renderTrackFrames("consultation")}
+          {renderAppointmentActionPlans("visit_consultation")}
           {appointmentEditor?.kind === "visit_consultation" ? appointmentEditorContent : null}
         </RegistrationApplicationConsultationSection>
       )}

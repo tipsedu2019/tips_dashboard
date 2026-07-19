@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import type { RegistrationSubject } from "./registration-track-service"
 import {
   REGISTRATION_APPLICATION_SECTION_ORDER,
+  isRegistrationApplicationSectionContentDisabled,
   type RegistrationApplicationSectionKey,
   type RegistrationApplicationSectionState,
 } from "./registration-application-model"
@@ -47,15 +48,22 @@ const SECTION_TITLES: Record<RegistrationApplicationSectionKey, string> = {
 }
 
 function RegistrationApplicationSection({
+  mode,
   section,
   state,
   children,
 }: {
+  mode: "create" | "detail"
   section: RegistrationApplicationSectionKey
   state: RegistrationApplicationSectionState
   children: ReactNode
 }) {
   const lockReasonId = `registration-application-${section}-lock-reason`
+  const contentDisabled = isRegistrationApplicationSectionContentDisabled({
+    mode,
+    section,
+    editable: state.editable,
+  })
 
   return (
     <section
@@ -65,7 +73,7 @@ function RegistrationApplicationSection({
     >
       <div
         role="group"
-        aria-disabled={!state.editable}
+        aria-disabled={contentDisabled}
         aria-describedby={state.lockReason ? lockReasonId : undefined}
         className="grid gap-3"
       >
@@ -76,7 +84,7 @@ function RegistrationApplicationSection({
         {state.lockReason ? (
           <p id={lockReasonId} className="text-xs text-muted-foreground">{state.lockReason}</p>
         ) : null}
-        <fieldset disabled={!state.editable} className="m-0 min-w-0 border-0 p-0">
+        <fieldset disabled={contentDisabled} className="m-0 min-w-0 border-0 p-0">
           {children}
         </fieldset>
       </div>
@@ -104,7 +112,7 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
       {REGISTRATION_APPLICATION_SECTION_ORDER.map((section) => {
         const contentKey = SECTION_CONTENT_KEY[section]
         return (
-          <RegistrationApplicationSection key={section} section={section} state={props.sectionStates[section]}>
+          <RegistrationApplicationSection key={section} mode={props.mode} section={section} state={props.sectionStates[section]}>
             {props[contentKey]}
           </RegistrationApplicationSection>
         )

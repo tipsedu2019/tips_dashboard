@@ -4,6 +4,10 @@ import {
 } from "./registration-track-model.js"
 import type { RegistrationInitialWorkflowDraft } from "./registration-intake-workflow"
 import type {
+  OpsRegistrationAdmissionBatch,
+  OpsRegistrationAppointment,
+  OpsRegistrationConsultation,
+  OpsRegistrationLevelTest,
   OpsRegistrationTrackSummary,
   RegistrationSubject,
 } from "./registration-track-service"
@@ -93,9 +97,13 @@ function getTrackLockReason(input: {
   currentSection: RegistrationApplicationSectionKey
   canManage: boolean
   canCompleteConsultation: boolean
+  hasAllowedAction: boolean
 }) {
   if (input.section === "history") return "자동으로 기록되는 읽기 전용 이력입니다"
-  if (input.section !== input.currentSection) return "현재 진행 단계가 아닙니다"
+  if (input.section !== input.currentSection) {
+    if (!input.hasAllowedAction) return "현재 진행 단계가 아닙니다"
+    return input.canManage ? "" : "이 작업을 수정할 권한이 없습니다"
+  }
   if (input.canManage) return ""
   if (input.section === "consultation" && input.canCompleteConsultation) return ""
   return "이 작업을 수정할 권한이 없습니다"
@@ -141,6 +149,7 @@ export function getRegistrationApplicationTrackState(input: {
       currentSection,
       canManage: input.canManage,
       canCompleteConsultation: input.canCompleteConsultation,
+      hasAllowedAction: actionsBySection[section].length > 0,
     })
     sections[section] = {
       current: section === currentSection,
@@ -156,6 +165,77 @@ export function getRegistrationApplicationTrackState(input: {
     currentSection,
     sections,
   }
+}
+
+export type RegistrationApplicationAppointmentActionPlan = {
+  appointmentId: string
+  kind: OpsRegistrationAppointment["kind"]
+  status: OpsRegistrationAppointment["status"]
+  ownerTrackId: string
+  participantTrackIds: string[]
+  participantSubjects: RegistrationSubject[]
+}
+
+export function getRegistrationApplicationAppointmentActionPlans(input: {
+  tracks: readonly Pick<OpsRegistrationTrackSummary, "id" | "subject">[]
+  appointments: readonly Pick<OpsRegistrationAppointment, "id" | "kind" | "status">[]
+  levelTests: readonly Pick<OpsRegistrationLevelTest, "appointmentId" | "trackId" | "status">[]
+  consultations: readonly Pick<OpsRegistrationConsultation, "appointmentId" | "trackId" | "mode" | "status">[]
+  actionableTrackIds?: readonly string[]
+}): RegistrationApplicationAppointmentActionPlan[] {
+  const actionableTrackIds = new Set(input.actionableTrackIds || [])
+  return input.appointments.flatMap((appointment) => {
+    if (appointment.status === "canceled") return []
+    const participantIds = new Set(appointment.kind === "level_test"
+      ? input.levelTests
+        .filter((activity) => activity.appointmentId === appointment.id && activity.status !== "canceled")
+        .map((activity) => activity.trackId)
+      : input.consultations
+        .filter((activity) => (
+          activity.appointmentId === appointment.id
+          && activity.mode === "visit"
+          && activity.status === "scheduled"
+        ))
+        .map((activity) => activity.trackId))
+    const participants = input.tracks.filter((track) => participantIds.has(track.id))
+    if (participants.length === 0) return []
+    const owner = participants.find((track) => actionableTrackIds.has(track.id)) || participants[0]
+    return [{
+      appointmentId: appointment.id,
+      kind: appointment.kind,
+      status: appointment.status,
+      ownerTrackId: owner.id,
+      participantTrackIds: participants.map((track) => track.id),
+      participantSubjects: participants.map((track) => track.subject),
+    }]
+  })
+}
+
+export function getRegistrationApplicationCaseEditableSections(input: {
+  canManage: boolean
+  admissionMessageEditable: boolean
+  admissionBatches: readonly Pick<OpsRegistrationAdmissionBatch, "status">[]
+  appointmentActionSections?: readonly RegistrationApplicationSectionKey[]
+}): RegistrationApplicationSectionKey[] {
+  if (!input.canManage) return []
+  const hasOpenAdmissionBatchAction = input.admissionBatches.some((batch) => (
+    ["draft", "invoiced", "paid"].includes(batch.status)
+  ))
+  const editableSections = new Set<RegistrationApplicationSectionKey>([
+    "inquiry",
+    ...(input.appointmentActionSections || []).filter((section) => section === "level_test" || section === "consultation"),
+  ])
+  if (input.admissionMessageEditable || hasOpenAdmissionBatchAction) editableSections.add("admission")
+  return REGISTRATION_APPLICATION_SECTION_ORDER.filter((section) => editableSections.has(section))
+}
+
+export function isRegistrationApplicationSectionContentDisabled(input: {
+  mode: "create" | "detail"
+  section: RegistrationApplicationSectionKey
+  editable: boolean
+}) {
+  if (input.mode === "detail" && input.section === "history") return false
+  return !input.editable
 }
 
 export function getRegistrationCreateSectionStates(input: {

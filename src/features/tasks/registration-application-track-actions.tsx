@@ -1245,10 +1245,7 @@ export function RegistrationTrackStageEditor({
   onReload,
   onWarning,
   onOpenLevelTest,
-  onOpenLevelTestHistory,
   onOpenVisit,
-  onOpenOutcome,
-  hasLevelTestHistory,
   activeConsultation,
   visitAppointment,
 }: {
@@ -1259,10 +1256,7 @@ export function RegistrationTrackStageEditor({
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
   onOpenLevelTest: () => void
-  onOpenLevelTestHistory: () => void
   onOpenVisit: () => void
-  onOpenOutcome: () => void
-  hasLevelTestHistory: boolean
   activeConsultation: OpsRegistrationConsultation | null
   visitAppointment: OpsRegistrationAppointment | null
 }) {
@@ -1284,9 +1278,7 @@ export function RegistrationTrackStageEditor({
         </dl>
         {permissions.canManage ? (
           <div className="flex flex-wrap justify-end gap-2">
-            {hasLevelTestHistory ? <Button type="button" variant="ghost" onClick={onOpenLevelTestHistory}>레벨테스트 결과 보기</Button> : null}
             <Button type="button" variant="outline" onClick={onOpenVisit}>방문상담 예약</Button>
-            {permissions.canCompleteConsultation ? <Button type="button" onClick={onOpenOutcome}>전화상담 완료</Button> : null}
           </div>
         ) : null}
       </section>
@@ -1296,7 +1288,6 @@ export function RegistrationTrackStageEditor({
     return (
       <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 레벨테스트 관리`}>
         <h3 className="text-sm font-semibold">[{track.subject}] {STATUS_LABELS[track.status]}</h3>
-        {permissions.canManage ? <Button type="button" variant="outline" onClick={onOpenLevelTest}>예약 및 과목별 결과 관리</Button> : null}
       </section>
     )
   }
@@ -1309,13 +1300,6 @@ export function RegistrationTrackStageEditor({
             <div><dt className="text-xs text-muted-foreground">방문상담 일시</dt><dd className="mt-1 font-medium">{formatRegistrationDateTime(visitAppointment.scheduledAt)}</dd></div>
             <div><dt className="text-xs text-muted-foreground">방문상담 장소</dt><dd className="mt-1 font-medium">{visitAppointment.place || "미정"}</dd></div>
           </dl>
-        ) : null}
-        {permissions.canManage ? (
-          <div className="flex flex-wrap gap-2">
-            {hasLevelTestHistory ? <Button type="button" variant="ghost" onClick={onOpenLevelTestHistory}>레벨테스트 결과 보기</Button> : null}
-            <Button type="button" variant="outline" onClick={onOpenVisit}>방문상담 예약 수정</Button>
-            {permissions.canCompleteConsultation ? <Button type="button" onClick={onOpenOutcome}>방문상담 완료</Button> : null}
-          </div>
         ) : null}
       </section>
     )
