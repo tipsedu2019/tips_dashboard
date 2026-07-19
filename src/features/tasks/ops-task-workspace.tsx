@@ -1,8 +1,8 @@
 "use client"
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, Bell, BookOpenCheck, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, List, MessageSquareText, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
+import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from "react"
+import { ArrowDown, ArrowUp, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, Copy, FileText, Filter, Inbox, List, MessageSquareText, Plus, RefreshCw, Search, Send, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -112,7 +112,6 @@ import {
   getRegistrationReopenStatus,
   getRegistrationTaskStatusForPipeline,
   getRegistrationTransitionBlockers,
-  getRegistrationWorkflowStages,
   isValidRegistrationMobilePhone,
   isRegistrationCompletionImmutable,
   normalizeRegistrationPhone,
@@ -2885,47 +2884,6 @@ function isRegistrationViewKey(value: string): value is RegistrationViewKey {
 
 function isLegacyRegistrationTrackId(trackId: string) {
   return trackId.startsWith("legacy:")
-}
-
-function RegistrationProcessManualDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const stages = getRegistrationWorkflowStages()
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="z-[80] max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-h-[90vh] sm:max-w-4xl" closeButtonLabel="닫기">
-        <DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-4 pt-4">
-          <DialogTitle>등록 프로세스 &amp; 매뉴얼</DialogTitle>
-          <DialogDescription>
-            상단 탭 순서에 맞춘 단계별 처리, 입력, 자동화와 완료 기준입니다.
-          </DialogDescription>
-        </DialogHeader>
-        <ol className="grid gap-3 md:grid-cols-2" aria-label="등록 프로세스 6단계">
-          {stages.map((stage, index) => (
-            <li key={stage.key} className="grid content-start gap-3 rounded-lg border bg-muted/15 p-4">
-              <div className="flex items-start gap-2">
-                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">{index + 1}</span>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold">{stage.label}</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{stage.summary}</p>
-                </div>
-              </div>
-              <ul className="grid gap-1.5 text-xs leading-5 text-muted-foreground">
-                {stage.details.map((detail) => (
-                  <li key={detail} className="pl-3 before:-ml-3 before:mr-1.5 before:text-primary before:content-['•']">{detail}</li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ol>
-      </DialogContent>
-    </Dialog>
-  )
 }
 
 function matchesSearch(task: OpsTask, query: string) {
@@ -8308,15 +8266,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const showLegacyNotificationSettingsLauncher = legacyNotificationEnabled || (canonicalNotificationEnabled && showNotificationSettingsLauncher)
   const currentUserId = user?.id || ""
   const registrationFixtureValue = searchParams.get("fixture")
+  const registrationFixtureActionType = searchParams.get("fixtureActionType")
+  const registrationFixtureActionDelayMs = searchParams.get("fixtureActionDelayMs")
+  const registrationFixtureActionError = searchParams.get("fixtureActionError")
   const registrationFixtureRequested = isRegistrationWorkspace
     && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, registrationFixtureValue)
+  const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken
   const [registrationFixtureModule, setRegistrationFixtureModule] = useState<RegistrationSubjectTrackFixtureModule | null>(null)
   const registrationFixtureStateRef = useRef<RegistrationSubjectTrackFixtureState | null>(null)
   const [registrationFixtureRevision, setRegistrationFixtureRevision] = useState(0)
+  const [registrationFixtureRuntimeReady, setRegistrationFixtureRuntimeReady] = useState(false)
   useEffect(() => {
     if (!registrationFixtureRequested) {
       registrationFixtureStateRef.current = null
       setRegistrationFixtureModule(null)
+      setRegistrationFixtureRuntimeReady(false)
       return
     }
     let disposed = false
@@ -8329,13 +8293,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     return () => {
       disposed = true
       registrationFixtureStateRef.current = null
+      setRegistrationFixtureRuntimeReady(false)
     }
   }, [registrationFixtureRequested])
-  const registrationFixtureEnabled = Boolean(
+  const registrationFixturePrepared = Boolean(
     registrationFixtureRequested
     && registrationFixtureModule
     && registrationFixtureStateRef.current,
   )
+  const registrationFixtureEnabled = registrationFixturePrepared && registrationFixtureRuntimeReady
   const registrationFixtureViewer = registrationFixtureEnabled
     ? registrationFixtureModule?.resolveRegistrationSubjectTrackFixtureViewer(
         registrationFixtureStateRef.current!,
@@ -8361,7 +8327,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? null
     : getCachedOpsTaskWorkspaceData(workspaceLoadOptions)
   const [data, setData] = useState<OpsTaskWorkspaceData | null>(() => initialWorkspaceData)
-  const [loading, setLoading] = useState(() => !initialWorkspaceData)
+  const [workspaceLoading, setLoading] = useState(() => !initialWorkspaceData)
+  const registrationFixtureTransitioning = registrationFixtureRequested !== registrationFixtureRuntimeReady
+  const loading = workspaceLoading || registrationFixtureTransitioning
   const [registrationOptionsLoading, setRegistrationOptionsLoading] = useState(false)
   const [registrationOptionsError, setRegistrationOptionsError] = useState("")
   const [view, setView] = useState<ViewKey>("all")
@@ -8393,7 +8361,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [transferNotificationOpen, setTransferNotificationOpen] = useState(false)
   const [registrationNotificationOpen, setRegistrationNotificationOpen] = useState(false)
   const [canonicalNotificationOpen, setCanonicalNotificationOpen] = useState(false)
-  const [registrationProcessManualOpen, setRegistrationProcessManualOpen] = useState(false)
   const [registrationCustomerMessageTask, setRegistrationCustomerMessageTask] = useState<OpsTask | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [formDetailStep, setFormDetailStep] = useState<FormDetailStepKey>("registration_contact")
@@ -8405,6 +8372,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const selectedRegistrationTrackIdRef = useRef<string | null>(selectedRegistrationTrackId)
   selectedRegistrationTrackIdRef.current = selectedRegistrationTrackId
   const [registrationCaseDetail, setRegistrationCaseDetail] = useState<OpsRegistrationCaseDetail | null>(null)
+  const [registrationDetailLoadError, setRegistrationDetailLoadError] = useState("")
   const [registrationConsultationOutcomeTrackId, setRegistrationConsultationOutcomeTrackId] = useState<string | null>(null)
   const [form, setForm] = useState<OpsTaskInput>(() => cloneForm())
   const [registrationInitialWorkflowDraft, setRegistrationInitialWorkflowDraft] = useState<RegistrationInitialWorkflowDraft>(() => (
@@ -8434,6 +8402,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [retryingRegistrationVisitNotifications, setRetryingRegistrationVisitNotifications] = useState(false)
   const registrationVisitNotificationRetryInFlightRef = useRef(false)
   const registrationVisitNotificationRetryGenerationRef = useRef(0)
+  useEffect(() => {
+    if (registrationFixtureRequested) return
+    registrationVisitNotificationRetryGenerationRef.current += 1
+    registrationVisitNotificationRetryInFlightRef.current = false
+    setPendingRegistrationVisitNotificationTargets([])
+    setRetryingRegistrationVisitNotifications(false)
+  }, [registrationFixtureRequested])
   const withdrawalCreateHandledRef = useRef("")
   const openCreateRef = useRef<((type: OpsTaskType, initialValues?: Partial<OpsTaskInput>) => void) | null>(null)
   const registrationOptionsLoadedRef = useRef(false)
@@ -8511,8 +8486,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setRegistrationFixtureRevision((current) => current + 1)
   }, [])
 
-  useEffect(() => {
-    if (!registrationFixtureEnabled || !registrationFixtureModule || !registrationFixtureStateRef.current) return
+  useLayoutEffect(() => {
+    setRegistrationFixtureRuntimeReady(false)
+    if (!registrationFixturePrepared || !registrationFixtureModule || !registrationFixtureStateRef.current) return
     const adapter = registrationFixtureModule.createRegistrationSubjectTrackFixtureAdapter({
       getState: () => {
         if (!registrationFixtureStateRef.current) throw new Error("registration_subject_track_fixture_not_ready")
@@ -8520,14 +8496,36 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       },
       replaceState: replaceRegistrationFixtureState,
     })
+    const registrationFixtureActionBehavior = registrationFixtureModule
+      .parseRegistrationSubjectTrackFixtureQueryActionBehavior({
+        enabled: registrationFixturePrepared,
+        type: registrationFixtureActionType,
+        delayMs: registrationFixtureActionDelayMs,
+        error: registrationFixtureActionError,
+      })
+    if (registrationFixtureActionBehavior) adapter.debugSetNextActionBehavior?.(registrationFixtureActionBehavior)
     const uninstallFixtureRuntime = installRegistrationSubjectTrackFixtureRuntime(
       process.env.NODE_ENV,
       registrationFixtureValue,
       adapter,
     )
+    setRegistrationFixtureRuntimeReady(true)
     setRegistrationFixtureRevision((current) => current + 1)
-    return uninstallFixtureRuntime
-  }, [registrationFixtureEnabled, registrationFixtureModule, registrationFixtureValue, replaceRegistrationFixtureState])
+    return () => {
+      setRegistrationFixtureRuntimeReady(false)
+      setData(null)
+      setLoading(true)
+      uninstallFixtureRuntime()
+    }
+  }, [
+    registrationFixtureActionDelayMs,
+    registrationFixtureActionError,
+    registrationFixtureActionType,
+    registrationFixturePrepared,
+    registrationFixtureModule,
+    registrationFixtureValue,
+    replaceRegistrationFixtureState,
+  ])
 
   const reload = useCallback(async (force = false, showPending = true) => {
     if (latestWorkspaceViewerIdRef.current !== currentUserId) return
@@ -8579,7 +8577,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setWithdrawalNotificationOpen(false)
       setTransferNotificationOpen(false)
       setRegistrationNotificationOpen(false)
-      setRegistrationProcessManualOpen(false)
       setStatusUndo(null)
       setCommentBody("")
       setAttachmentName("")
@@ -8788,6 +8785,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSelectedRegistrationAppointmentId(null)
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
+    setNotice("")
     const searchParams = new URLSearchParams(window.location.search)
     searchParams.set("flow", nextView)
     searchParams.delete("taskId")
@@ -8807,6 +8805,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSelectedRegistrationAppointmentId(null)
     setRegistrationCaseDetail(null)
     registrationTrackSelectionRef.current = ""
+    setNotice("")
     const routeParams = new URLSearchParams(window.location.search)
     if (nextMode === "calendar") routeParams.set("view", "calendar")
     else routeParams.delete("view")
@@ -9098,8 +9097,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     [registrationTrackItems],
   )
   const visibleRegistrationTrackItems = useMemo(
-    () => filterRegistrationTrackListItems(registrationTrackItems, registrationView),
-    [registrationTrackItems, registrationView],
+    () => filterRegistrationTrackListItems(registrationTrackItems, registrationView, deferredQuery),
+    [deferredQuery, registrationTrackItems, registrationView],
   )
   const wordRetestRoleContext = useMemo(
     () => (canManageAll || isStaff ? {} : currentUserContext),
@@ -9166,7 +9165,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     wordRetestFilterOptions.teacher,
     wordRetestTeacherFilter,
   ])
-  const hasQuery = !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && query.trim().length > 0
+  const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query.trim().length > 0
 
   const visibleTasks = useMemo(() => {
     const todoTaskSource = scopedTasks
@@ -9297,13 +9296,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     : isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace
       ? scopedTasks.length > 0
       : scopedTasks.some((task) => showClosed || isOpenTask(task))
-  const showSearch = !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
+  const showSearch = isRegistrationWorkspace
+    ? registrationMode === "list"
+    : !isWithdrawalWorkspace && !isTransferWorkspace && (hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
   const emptyActionLabel = getWorkspaceCreateActionLabel(workspace, workspaceLabel)
   const emptyTaskLabel = isTodoWorkspace
     ? getTodoEmptyLabel(todoView, isFilteredEmpty)
     : isFilteredEmpty
       ? "조건에 맞는 항목 없음"
       : `${workspaceLabel} 없음`
+  const registrationEmptyLabel = hasQuery
+    ? "현재 단계에서 검색 결과가 없습니다."
+    : `${REGISTRATION_VIEW_TABS.find((tab) => tab.key === registrationView)?.label || "현재"} 단계에 등록 업무가 없습니다.`
   const emptyCalendarLabel = isFilteredEmpty ? "조건에 맞는 일정 없음" : "일정 없음"
   const shouldHideEmptySurface = !loading && visibleWorkspaceItemCount === 0 && (hasLoadBlocker || Boolean(message && !formOpen && !detailOpen))
 	  const formDetailTabs = useMemo(() => getFormDetailTabs(form.type), [form.type])
@@ -9336,6 +9340,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	        ? "할 일 추가"
 	        : `${workspaceLabel} 추가`
   const formCloseLabel = "닫기"
+  const formActionBarClassName = "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"
 
   function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
@@ -9493,6 +9498,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSelectedTask(task)
     setSelectedRegistrationTrackId(nextTrackId)
     setSelectedRegistrationAppointmentId(null)
+    setRegistrationDetailLoadError("")
     setDetailOpen(true)
     syncTaskDeepLink(task.id, nextTrackId)
     setMessage("")
@@ -9549,13 +9555,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         return null
       }
       const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      setRegistrationDetailLoadError("")
       setRegistrationCaseDetail(detail)
       setSelectedTask(exactTask)
       setDetailOpen(true)
       return { task: exactTask, track, detail }
-    } catch (error) {
+    } catch {
       if (registrationTrackSelectionRef.current === selectionKey) {
-        setMessage(getOpsTaskActionErrorMessage(error, "선택한 과목 상세를 불러오지 못했습니다."))
+        setRegistrationDetailLoadError("선택한 과목 상세를 불러오지 못했습니다.")
       }
       return null
     }
@@ -9568,7 +9575,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       openEdit(selection.task)
       return
     }
-    setNotice(`[${selection.track?.subject || "과목"}] 과목별 상세를 확인하세요.`)
   }, [openEdit, openRegistrationTrack])
 
   const openRegistrationAppointment = useCallback(async (
@@ -9589,9 +9595,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSelectedRegistrationTrackId(null)
     setSelectedRegistrationAppointmentId(appointmentId)
     setRegistrationCaseDetail(null)
+    setRegistrationDetailLoadError("")
     setDetailOpen(true)
     syncTaskDeepLink(taskId, null, appointmentId)
     setMessage("")
+    setNotice("")
 
     try {
       const [detail] = await Promise.all([
@@ -9614,6 +9622,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ? preferredTrackId
         : participantTrackIds[0]
       const exactTask = { ...detail.task, registrationTracks: detail.tracks }
+      setRegistrationDetailLoadError("")
       registrationTrackSelectionRef.current = `${taskId}:${nextTrackId}`
       setRegistrationCaseDetail(detail)
       setSelectedTask(exactTask)
@@ -9624,7 +9633,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return { task: exactTask, detail, appointment, trackId: nextTrackId }
     } catch {
       if (registrationTrackSelectionRef.current === selectionKey) {
-        setMessage("등록 예약 상세를 불러오지 못했습니다. 달력을 다시 불러오세요.")
+        setRegistrationDetailLoadError("등록 예약 상세를 불러오지 못했습니다.")
       }
       return null
     }
@@ -9696,7 +9705,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       await fixture
       return
     }
-    const sessionToken = session?.access_token || ""
+    const sessionToken = registrationNotificationSessionToken
     if (!sessionToken) throw new Error("인증 정보를 다시 확인하세요.")
     const response = await fetch("/api/solapi/registration", {
       method: "POST",
@@ -9709,7 +9718,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const result = await response.json().catch(() => ({})) as { error?: string; warning?: string }
     if (!response.ok) throw new Error(result.error || "입학신청서 상태를 변경하지 못했습니다.")
     if (result.warning) setNotice(result.warning)
-  }, [registrationFixtureEnabled, session?.access_token])
+  }, [registrationFixtureEnabled, registrationNotificationSessionToken])
 
   const handleRegistrationTrackAction = useCallback(async (
     taskId: string,
@@ -9756,7 +9765,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setDetailOpen(true)
       setRegistrationConsultationOutcomeTrackId(trackId)
       syncTaskDeepLink(taskId, trackId)
-      setNotice(`[${track.subject}] 상담 결과 입력을 계속 진행하세요.`)
     } catch (error) {
       if (registrationTrackSelectionRef.current === actionSelectionKey) {
         setMessage(getOpsTaskActionErrorMessage(error, "상담 상세를 확인하지 못했습니다."))
@@ -9821,6 +9829,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setSelectedRegistrationTrackId(null)
       setSelectedRegistrationAppointmentId(null)
       setRegistrationCaseDetail(null)
+      setRegistrationDetailLoadError("")
       setRegistrationConsultationOutcomeTrackId(null)
       registrationTrackSelectionRef.current = ""
       syncTaskDeepLink(null)
@@ -9834,6 +9843,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setConfirmingFormClose(true)
       return
     }
+    setMessage("")
+    setFormCompletionBlockers([])
     setFormOpen(false)
     setFormCompletionIntent(null)
     registrationCreateAttemptRef.current = null
@@ -9842,6 +9853,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   function discardFormAndClose() {
     formCloseReturnFocusRef.current = null
     setConfirmingFormClose(false)
+    setMessage("")
+    setFormCompletionBlockers([])
     setFormOpen(false)
     setFormCompletionIntent(null)
     registrationCreateAttemptRef.current = null
@@ -10220,7 +10233,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     try {
       const result = await dispatchRegistrationVisitNotificationTargets(
         retryTargets,
-        (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, session?.access_token || ""),
+        (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken),
       )
       if (
         !workspaceMountedRef.current
@@ -10511,7 +10524,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               registrationCreateAttemptRef.current = null
               const notificationResult = await dispatchRegistrationVisitNotificationTargets(
                 response.notificationTargets,
-                (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, session?.access_token || ""),
+                (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken),
               )
               const notificationStateBelongsToSubmissionViewer = (
                 workspaceMountedRef.current
@@ -10591,7 +10604,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         setQuery("")
       }
       legacyOpsTaskSourceEventIds.push(...await collectRegistrationLegacySourceIds(savedTasks))
-      await dispatchLegacyOpsTaskSources(legacyOpsTaskSourceEventIds, session?.access_token || "")
+      await dispatchLegacyOpsTaskSources(legacyOpsTaskSourceEventIds, registrationNotificationSessionToken)
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
       const savedNotice = wasEditing
         ? `${itemLabel}을 수정했습니다.`
@@ -10670,7 +10683,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       await dispatchLegacyOpsTaskSources([
         ...receipt.sourceEventIds,
         ...registrationSourceEventIds,
-      ], notificationSessionToken)
+      ], registrationNotificationSessionToken)
       const canUndoStatusChange = task.type === "general" || status !== "done"
       if (canUndoStatusChange) {
         setStatusUndo({
@@ -10962,7 +10975,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       await dispatchLegacyOpsTaskSources([
         ...receipt.sourceEventIds,
         ...registrationSourceEventIds,
-      ], notificationSessionToken)
+      ], registrationNotificationSessionToken)
       setNotice(refreshWarning ? `등록 단계를 변경했습니다. ${refreshWarning}` : "등록 단계를 변경했습니다.")
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "등록 단계를 변경하지 못했습니다."))
@@ -10999,7 +11012,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       await dispatchLegacyOpsTaskSources([
         ...receipt.sourceEventIds,
         ...registrationSourceEventIds,
-      ], notificationSessionToken)
+      ], registrationNotificationSessionToken)
       setStatusUndo(null)
       setNotice("진행상태 변경을 되돌렸습니다.")
     } catch (error) {
@@ -11144,8 +11157,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const isRegistrationDetail = selectedTaskFresh?.type === "registration"
   const isCanonicalRegistrationTrackDetail = Boolean(
     isRegistrationDetail
-    && selectedRegistrationTrackId
-    && !isLegacyRegistrationTrackId(selectedRegistrationTrackId),
+    && (
+      selectedRegistrationAppointmentId
+      || (selectedRegistrationTrackId && !isLegacyRegistrationTrackId(selectedRegistrationTrackId))
+    ),
   )
   const deleteTargetRemovesCompletedOperation = deleteTarget ? deleteTarget.type !== "general" && isClosedOpsTask(deleteTarget) : false
   const nextAction = selectedTaskFresh && !isCanonicalRegistrationTrackDetail ? getNextTaskStatusAction(selectedTaskFresh) : null
@@ -11309,7 +11324,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
-	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
+	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : isRegistrationWorkspace ? "w-full !flex-nowrap !overflow-x-auto lg:flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
 	              ? WORD_RETEST_ROLE_TABS.map((tab) => {
 	                const roleCount = wordRetestRoleCounts[tab.key]
@@ -11456,21 +11471,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 {showClosed ? "완료 숨김" : "완료 보기"}
               </Button>
             )}
-            {isRegistrationWorkspace && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setRegistrationProcessManualOpen(true)}
-                aria-label="등록 프로세스 & 매뉴얼"
-                title="등록 프로세스 & 매뉴얼"
-                aria-haspopup="dialog"
-                className="size-8 px-0"
-              >
-                <BookOpenCheck className="size-4" aria-hidden="true" />
-                <span className="sr-only">등록 프로세스 &amp; 매뉴얼</span>
-              </Button>
-            )}
             {showNotificationSettingsLauncher && canonicalNotificationEnabled && (isTodoWorkspace || isWordRetestWorkspace) ? (
               <Button
                 type="button"
@@ -11485,7 +11485,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 <span className="sr-only">{isTodoWorkspace ? "할 일 알림 설정" : "영어 단어 재시험 알림 설정"}</span>
               </Button>
             ) : null}
-            {!registrationFixtureEnabled && showLegacyNotificationSettingsLauncher && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace) && (
+            {!registrationFixtureRequested && showLegacyNotificationSettingsLauncher && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace) && (
               <Button
                 type="button"
                 variant="outline"
@@ -11502,6 +11502,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               >
                 <Bell className="size-4" aria-hidden="true" />
                 <span className="sr-only">{isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}</span>
+              </Button>
+            )}
+            {isRegistrationWorkspace && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setRegistrationCalendarRefreshToken((current) => current + 1)
+                  void reload(true)
+                }}
+                disabled={loading}
+                aria-label="새로고침"
+                title="등록 목록과 달력 새로고침"
+                className="size-8 px-0"
+              >
+                <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} aria-hidden="true" />
+                <span className="sr-only">새로고침</span>
               </Button>
             )}
             {!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (
@@ -11730,7 +11748,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         {message && !formOpen && !detailOpen && <div role="alert" className="rounded-md border border-destructive/30 px-3 py-2 text-sm whitespace-pre-line text-destructive">{message}</div>}
 
 	        {loading ? (
-          <TaskListSkeleton showType={!isTodoWorkspace} />
+          isRegistrationWorkspace ? (
+            <div role="status" aria-live="polite" className="grid min-h-32 place-items-center rounded-md border bg-background px-4 py-10 text-sm text-muted-foreground">
+              등록 업무를 불러오는 중입니다.
+            </div>
+          ) : (
+            <TaskListSkeleton showType={!isTodoWorkspace} />
+          )
 	        ) : shouldHideEmptySurface ? null : isRegistrationWorkspace ? (
             registrationMode === "calendar" ? (
               <RegistrationAppointmentCalendar
@@ -11748,7 +11772,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}
 	              onEdit={(taskId, trackId) => void editRegistrationTrack(taskId, trackId)}
 	              onAction={(taskId, trackId, action) => void handleRegistrationTrackAction(taskId, trackId, action)}
-	              emptyLabel={emptyTaskLabel}
+	              emptyLabel={registrationEmptyLabel}
 	            />
             )
 	        ) : isWithdrawalWorkspace ? (
@@ -11906,19 +11930,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         />
       )}
 
-      {isRegistrationWorkspace && (
-        <RegistrationProcessManualDialog
-          open={workspaceDataBelongsToCurrentViewer && registrationProcessManualOpen}
-          onOpenChange={setRegistrationProcessManualOpen}
-        />
-      )}
-
       {legacyNotificationEnabled && isRegistrationWorkspace && (
         <RegistrationNotificationSettingsDialog
           open={workspaceDataBelongsToCurrentViewer && registrationNotificationOpen}
           onOpenChange={setRegistrationNotificationOpen}
           isManager={canManageAll || isStaff}
-          sessionToken={session?.access_token || ""}
+          sessionToken={registrationNotificationSessionToken}
         />
       )}
 
@@ -11928,7 +11945,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           if (!nextOpen) setRegistrationCustomerMessageTask(null)
         }}
         task={registrationCustomerMessageTask}
-        sessionToken={session?.access_token || ""}
+        sessionToken={registrationNotificationSessionToken}
         canSend={canManageRegistrationWorkflow}
         onSent={handleRegistrationCustomerMessageSent}
         onManualSent={completeManualRegistrationAdmissionMessage}
@@ -11936,8 +11953,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
       <Dialog open={workspaceDataBelongsToCurrentViewer && formOpen} onOpenChange={handleFormOpenChange}>
         <DialogContent className={[
-          "z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
-          form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : form.type === "registration" ? "sm:max-w-4xl" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
+          "z-[80] max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh]",
+          form.type === "registration" ? "scroll-pb-24 sm:max-w-4xl" : "scroll-pb-24",
+          form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : form.type === "registration" ? "" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
         ].join(" ")}
           closeButtonLabel={formCloseLabel}
           onCloseButtonClick={closeForm}
@@ -12253,7 +12271,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 )}
               </section>
             )}
-            <div className="-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
+            <div className={formActionBarClassName}>
               {!isEditingLockedCompletedTask && formCompletionBlockers.length > 0 && formCompletionIntent?.kind !== "word_retest_retry" && (
                 (() => {
                   const firstBlocker = formCompletionBlockers[0]
@@ -12278,10 +12296,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       variant="outline"
                       onClick={() => setFormDetailStep(previousFormDetailStep.key)}
                       aria-label="이전 단계"
-                      className="min-w-0 flex-1 sm:flex-none"
+                      className={`min-w-0 flex-1 sm:flex-none ${form.type === "registration" ? "h-auto min-h-9 whitespace-normal" : ""}`}
                     >
                       <ChevronLeft className="size-4" />
-                      <span className="truncate">{previousFormStepLabel}</span>
+                      <span className={form.type === "registration" ? "break-words text-center leading-tight" : "truncate"}>{previousFormStepLabel}</span>
                     </Button>
                   )}
                   {nextFormDetailStep && (
@@ -12290,9 +12308,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       variant="outline"
                       onClick={() => setFormDetailStep(nextFormDetailStep.key)}
                       aria-label="다음 단계"
-                      className="min-w-0 flex-1 sm:flex-none"
+                      className={`min-w-0 flex-1 sm:flex-none ${form.type === "registration" ? "h-auto min-h-9 whitespace-normal" : ""}`}
                     >
-                      <span className="truncate">{nextFormStepLabel}</span>
+                      <span className={form.type === "registration" ? "break-words text-center leading-tight" : "truncate"}>{nextFormStepLabel}</span>
                       <ChevronRight className="size-4" />
                     </Button>
                   )}
@@ -12409,7 +12427,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       onWarning={setMessage}
                       consultationOutcomeOpen={registrationConsultationOutcomeTrackId === selectedRegistrationTrackId}
                       onConsultationOutcomeOpenChange={(open) => setRegistrationConsultationOutcomeTrackId(open ? selectedRegistrationTrackId : null)}
-                      notificationToken={registrationFixtureEnabled ? "" : session?.access_token || ""}
+                      notificationToken={registrationNotificationSessionToken}
                       profiles={data?.profiles || EMPTY_PROFILE_OPTIONS}
                       directorOptions={data?.profiles || EMPTY_PROFILE_OPTIONS}
                       teacherOptions={data?.teachers || EMPTY_TEACHER_OPTIONS}
@@ -12447,9 +12465,31 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       ) : null}
                     />
                   ) : isCanonicalRegistrationTrackDetail ? (
-                    <div role="status" aria-live="polite" className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">
-                      과목별 등록 상세를 불러오는 중입니다.
-                    </div>
+                    registrationDetailLoadError ? (
+                      <div role="alert" className="grid justify-items-center gap-3 rounded-md border border-destructive/30 px-3 py-10 text-center text-sm text-destructive">
+                        <p>{registrationDetailLoadError}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          aria-label="등록 상세 다시 시도"
+                          onClick={() => {
+                            if (selectedTaskFresh && selectedRegistrationTrackId) {
+                              void openRegistrationTrack(selectedTaskFresh.id, selectedRegistrationTrackId)
+                            } else if (selectedTaskFresh && selectedRegistrationAppointmentId) {
+                              void openRegistrationAppointment(selectedTaskFresh.id, selectedRegistrationAppointmentId)
+                            }
+                          }}
+                          disabled={saving}
+                        >
+                          다시 시도
+                        </Button>
+                      </div>
+                    ) : (
+                      <div role="status" aria-live="polite" className="rounded-md border px-3 py-10 text-center text-sm text-muted-foreground">
+                        과목별 등록 상세를 불러오는 중입니다.
+                      </div>
+                    )
                   ) : (
                     <RegistrationDetailPanel task={selectedTaskFresh} selectedTrackId={selectedRegistrationTrackId} />
                   )

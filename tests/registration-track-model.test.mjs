@@ -19,6 +19,7 @@ import {
   getRegistrationLevelTestAppointmentStatus,
   getRegistrationSummaryActionPermissions,
   getRegistrationActionPermissions,
+  getRegistrationCurrentClassWaitClassId,
   getRegistrationTrackNextStatus,
   getRegistrationTrackTabCounts,
   getRegistrationTrackTransitionBlockers,
@@ -27,6 +28,30 @@ import {
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
 } from "../src/features/tasks/registration-track-model.js"
+
+test("현재반 대기 수업은 활성 waitlisted claim에서만 복원한다", () => {
+  const enrollments = [
+    { trackId: "track-eng", classId: "class-old", status: "canceled", rosterActive: false },
+    { trackId: "track-eng", classId: "class-eng-a", status: "waitlisted", rosterActive: true },
+    { trackId: "track-math", classId: "class-math-a", status: "waitlisted", rosterActive: true },
+  ]
+
+  assert.equal(getRegistrationCurrentClassWaitClassId({
+    trackId: "track-eng",
+    waitingKind: "current_class",
+    enrollments,
+  }), "class-eng-a")
+  assert.equal(getRegistrationCurrentClassWaitClassId({
+    trackId: "track-eng",
+    waitingKind: "current_term_opening",
+    enrollments,
+  }), "")
+  assert.equal(getRegistrationCurrentClassWaitClassId({
+    trackId: "track-eng",
+    waitingKind: "next_term_opening",
+    enrollments,
+  }), "")
+})
 
 test("new enrollment rows keep stable keys and selecting a class defaults its linked textbook", () => {
   const first = createRegistrationEnrollmentDraft({ clientKey: "draft-1" })

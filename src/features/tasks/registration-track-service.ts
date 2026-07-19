@@ -2736,6 +2736,8 @@ export function resolveRegistrationMigrationReview(
 export function reopenRegistrationTrack(
   input: Parameters<typeof defaultRegistrationTrackService.reopenRegistrationTrack>[0],
 ): Promise<RegistrationTrackTransitionResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationTrackTransitionResponse>("reopenRegistrationTrack", input)
+  if (fixture) return fixture
   return defaultRegistrationTrackService.reopenRegistrationTrack(input)
 }
 

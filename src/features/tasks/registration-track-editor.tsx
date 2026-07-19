@@ -26,7 +26,7 @@ import {
   type RegistrationDirectorCatalogStatus,
 } from "./registration-director-default.js"
 import { RegistrationEnrollmentEditor } from "./registration-enrollment-editor"
-import { getRegistrationActionPermissions } from "./registration-track-model.js"
+import { getRegistrationActionPermissions, getRegistrationCurrentClassWaitClassId } from "./registration-track-model.js"
 import { isValidRegistrationMobilePhone } from "./registration-workflow"
 import {
   assignRegistrationTrackDirector,
@@ -626,7 +626,7 @@ function RegistrationLevelTestSummary({ detail }: { detail: OpsRegistrationCaseD
         return (
           <div key={track.id} className="grid gap-1 rounded-md bg-muted/30 px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
             <Badge variant="outline" className="w-fit">{track.subject}</Badge>
-            <span className="min-w-0 truncate">
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">
               {appointment ? `${formatRegistrationDateTime(appointment.scheduledAt)} · ${appointment.place || "장소 미정"}` : "아직 입력 없음"}
             </span>
             <span className="text-xs text-muted-foreground">{attempt ? LEVEL_TEST_STATUS_LABELS[attempt.status] : "미진행"}</span>
@@ -655,7 +655,7 @@ function RegistrationConsultationSummary({ detail }: { detail: OpsRegistrationCa
         return (
           <div key={track.id} className="grid gap-1 rounded-md bg-muted/30 px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
             <Badge variant="outline" className="w-fit">{track.subject}</Badge>
-            <span className="min-w-0 truncate">
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">
               {track.directorName ? `${track.directorName} · ` : ""}{consultation ? `${mode} ${formatRegistrationDateTime(time)}` : "아직 입력 없음"}
             </span>
             <span className="text-xs text-muted-foreground">
@@ -686,7 +686,7 @@ function RegistrationPlacementSummary({
         return (
           <div key={track.id} className="grid gap-1 rounded-md bg-muted/30 px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
             <Badge variant="outline" className="w-fit">{track.subject}</Badge>
-            <span className="min-w-0 truncate">{classNames || waitingLabel || "아직 입력 없음"}</span>
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{classNames || waitingLabel || "아직 입력 없음"}</span>
             <span className="text-xs text-muted-foreground">{STATUS_LABELS[track.status]}</span>
           </div>
         )
@@ -1038,7 +1038,7 @@ function SubjectClassSelect({
 }) {
   const matchingClasses = classOptions.filter((option) => option.subject === subject)
   return (
-    <select className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
+    <select aria-label={`${subject} 수업 선택`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
       <option value="">수업 선택</option>
       {matchingClasses.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
     </select>
@@ -1106,7 +1106,7 @@ function InquiryStageEditor({
       {permissions.canManage ? (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
-            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKind(event.target.value as RegistrationWaitingKind)} disabled={saving}>
+            <select aria-label={`${track.subject} 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKind(event.target.value as RegistrationWaitingKind)} disabled={saving}>
               {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             {waitingKind === "current_class" ? (
@@ -1135,6 +1135,7 @@ function InquiryStageEditor({
 
 function WaitingStageEditor({
   track,
+  currentClassWaitClassId,
   permissions,
   classOptions,
   onReload,
@@ -1142,6 +1143,7 @@ function WaitingStageEditor({
   onOpenLevelTest,
 }: {
   track: OpsRegistrationTrackSummary
+  currentClassWaitClassId: string
   permissions: ActionPermissions
   classOptions: OpsClassOption[]
   onReload: () => void | Promise<void>
@@ -1149,7 +1151,7 @@ function WaitingStageEditor({
   onOpenLevelTest: () => void
 }) {
   const [waitingKind, setWaitingKind] = useState<RegistrationWaitingKind>(track.waitingKind || "current_term_opening")
-  const [classId, setClassId] = useState("")
+  const [classId, setClassId] = useState(currentClassWaitClassId)
   const [reason, setReason] = useState("")
   const [saving, setSaving] = useState(false)
   const submissionKeys = useSubmissionKeys()
@@ -1198,7 +1200,7 @@ function WaitingStageEditor({
       {permissions.canManage ? (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
-            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKind(event.target.value as RegistrationWaitingKind)} disabled={saving}>
+            <select aria-label={`${track.subject} 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKind(event.target.value as RegistrationWaitingKind)} disabled={saving}>
               {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classId} onChange={setClassId} classOptions={classOptions} disabled={saving} /> : null}
@@ -1297,6 +1299,7 @@ function TerminalStageEditor({
 
 function RegistrationTrackStageEditor({
   track,
+  currentClassWaitClassId,
   permissions,
   classOptions,
   onReload,
@@ -1310,6 +1313,7 @@ function RegistrationTrackStageEditor({
   visitAppointment,
 }: {
   track: OpsRegistrationTrackSummary
+  currentClassWaitClassId: string
   permissions: ActionPermissions
   classOptions: OpsClassOption[]
   onReload: () => void | Promise<void>
@@ -1326,7 +1330,7 @@ function RegistrationTrackStageEditor({
     return <InquiryStageEditor track={track} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} />
   }
   if (track.status === "waiting") {
-    return <WaitingStageEditor track={track} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} />
+    return <WaitingStageEditor track={track} currentClassWaitClassId={currentClassWaitClassId} permissions={permissions} classOptions={classOptions} onReload={onReload} onWarning={onWarning} onOpenLevelTest={onOpenLevelTest} />
   }
   if (track.status === "consultation_waiting") {
     return (
@@ -1472,10 +1476,10 @@ export function RegistrationConsultationOutcomeDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => {
-      if (!nextOpen && refreshPending) return
+      if (!nextOpen && (saving || refreshPending)) return
       onOpenChange(nextOpen)
     }}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>[{subject}] {consultation.mode === "phone" ? "전화상담" : "방문상담"} 결과</DialogTitle>
           <DialogDescription>완료 일시는 저장 시 자동 기록됩니다. 과목별 다음 단계를 선택하세요.</DialogDescription>
@@ -1490,24 +1494,24 @@ export function RegistrationConsultationOutcomeDialog({
           <div className="grid gap-4">
             <fieldset className="grid gap-2">
               <legend className="text-sm font-medium">상담 결과</legend>
-              <div className="grid grid-cols-3 gap-2">
-                <Button type="button" variant={draft.outcome === "enrollment" ? "default" : "outline"} onClick={() => setDraft((current) => ({ ...current, outcome: "enrollment" }))}>등록</Button>
-                <Button type="button" variant={draft.outcome === "waiting" ? "default" : "outline"} onClick={() => setDraft((current) => ({ ...current, outcome: "waiting" }))}>대기</Button>
-                <Button type="button" variant={draft.outcome === "not_registered" ? "default" : "outline"} onClick={() => setDraft((current) => ({ ...current, outcome: "not_registered" }))}>미등록 완료</Button>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <Button type="button" variant={draft.outcome === "enrollment" ? "default" : "outline"} aria-pressed={draft.outcome === "enrollment"} disabled={saving} onClick={() => setDraft((current) => ({ ...current, outcome: "enrollment" }))}>등록</Button>
+                <Button type="button" variant={draft.outcome === "waiting" ? "default" : "outline"} aria-pressed={draft.outcome === "waiting"} disabled={saving} onClick={() => setDraft((current) => ({ ...current, outcome: "waiting" }))}>대기</Button>
+                <Button type="button" className="col-span-2 sm:col-span-1" variant={draft.outcome === "not_registered" ? "default" : "outline"} aria-pressed={draft.outcome === "not_registered"} disabled={saving} onClick={() => setDraft((current) => ({ ...current, outcome: "not_registered" }))}>미등록 완료</Button>
               </div>
             </fieldset>
             {draft.outcome === "waiting" ? (
               <div className="grid gap-2">
                 <Label className="grid gap-1.5">
                   대기 종류
-                  <select className="h-9 rounded-md border bg-background px-3 text-sm" value={draft.waitingKind} onChange={(event) => setDraft((current) => ({ ...current, waitingKind: event.target.value as RegistrationWaitingKind, classId: "" }))}>
+                  <select className="h-9 rounded-md border bg-background px-3 text-sm" value={draft.waitingKind} onChange={(event) => setDraft((current) => ({ ...current, waitingKind: event.target.value as RegistrationWaitingKind, classId: "" }))} disabled={saving}>
                     {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </Label>
                 {draft.waitingKind === "current_class" ? (
                   <Label className="grid gap-1.5">
                     대기 수업
-                    <SubjectClassSelect subject={subject} value={draft.classId} onChange={(classId) => setDraft((current) => ({ ...current, classId }))} classOptions={classOptions} />
+                    <SubjectClassSelect subject={subject} value={draft.classId} onChange={(classId) => setDraft((current) => ({ ...current, classId }))} classOptions={classOptions} disabled={saving} />
                   </Label>
                 ) : null}
               </div>
@@ -1518,7 +1522,7 @@ export function RegistrationConsultationOutcomeDialog({
         {!refreshPending ? (
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>취소</Button>
-            <Button type="button" onClick={() => void submit()} disabled={saving || !waitingIsValid}>상담 결과 저장</Button>
+            <Button type="button" onClick={() => void submit()} disabled={saving || !waitingIsValid}>{saving ? "저장 중" : "상담 결과 저장"}</Button>
           </DialogFooter>
         ) : null}
       </DialogContent>
@@ -1809,7 +1813,7 @@ export function RegistrationMigrationReviewEditor({
             {target === "visit_consultation_scheduled" && !hasVisitReservation ? <p className="text-xs text-amber-900">방문상담 예약 정보가 불완전해 새 예약이 필요합니다.</p> : null}
             {target === "waiting" ? (
               <div className="grid gap-2 sm:grid-cols-2">
-                <select className="h-9 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKinds((current) => ({ ...current, [track.id]: event.target.value as RegistrationWaitingKind }))} disabled={saving}>
+                <select aria-label={`${track.subject} 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKinds((current) => ({ ...current, [track.id]: event.target.value as RegistrationWaitingKind }))} disabled={saving}>
                   <option value="">대기 종류 선택</option>
                   {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
@@ -1864,6 +1868,7 @@ export function RegistrationTrackEditor({
     kind: "level_test" | "visit_consultation"
     appointmentId: string | null
   } | null>(null)
+  const appointmentEditorRef = useRef<HTMLDivElement | null>(null)
   const initialAppointmentAppliedRef = useRef("")
   const [localConsultationOutcomeOpen, setLocalConsultationOutcomeOpen] = useState(false)
   const selectedTrack = detail.tracks.find((track) => track.id === selectedTrackId) || detail.tracks[0] || null
@@ -1917,6 +1922,14 @@ export function RegistrationTrackEditor({
     })
     return () => window.cancelAnimationFrame(openFrame)
   }, [detail.appointments, detail.consultations, detail.levelTests, detail.task.id, initialAppointmentId, selectedTrack])
+
+  useEffect(() => {
+    if (!appointmentEditor) return
+    const scrollFrame = window.requestAnimationFrame(() => {
+      appointmentEditorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    })
+    return () => window.cancelAnimationFrame(scrollFrame)
+  }, [appointmentEditor])
   const appointmentActivitySignature = appointmentEditor?.kind === "level_test"
     ? detail.levelTests
       .filter((item) => !editorAppointment || item.appointmentId === editorAppointment.id)
@@ -1982,10 +1995,14 @@ export function RegistrationTrackEditor({
   }
 
   const selectedSection = selectedTrack ? getRegistrationApplicationSection(selectedTrack.status) : "inquiry"
+  const selectedCurrentClassWaitClassId = selectedTrack
+    ? getRegistrationCurrentClassWaitClassId({ trackId: selectedTrack.id, waitingKind: selectedTrack.waitingKind, enrollments: detail.enrollments })
+    : ""
   const selectedStageEditor = !reviewBlocked && selectedTrack ? (
     <RegistrationTrackStageEditor
-      key={`stage:${selectedTrack.id}:${selectedTrack.status}:${selectedTrack.waitingKind}`}
+      key={`stage:${selectedTrack.id}:${selectedTrack.status}:${selectedTrack.waitingKind}:${selectedCurrentClassWaitClassId}`}
       track={selectedTrack}
+      currentClassWaitClassId={selectedCurrentClassWaitClassId}
       permissions={permissions}
       classOptions={classOptions}
       onReload={onReload}
@@ -2136,43 +2153,46 @@ export function RegistrationTrackEditor({
           </dl>
         </section>
       ) : null}
+      {appointmentEditor && selectedTrack ? (
+        <div ref={appointmentEditorRef} className="scroll-m-4">
+          {appointmentEditor.kind === "level_test" ? (
+            <RegistrationAppointmentEditor
+              key={`level_test:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}
+              kind="level_test"
+              taskId={detail.task.id}
+              eligibleTracks={detail.tracks}
+              initialTrackId={selectedTrack.id}
+              appointment={editorAppointment}
+              activities={detail.levelTests}
+              onSaved={handleAppointmentSaved}
+              onWarning={onWarning}
+              onReload={onReload}
+              onClose={closeAppointmentEditor}
+              onRebook={() => {
+                onAppointmentOpenChange?.(null)
+                setAppointmentEditor({ kind: "level_test", appointmentId: null })
+              }}
+              notificationToken={notificationToken}
+            />
+          ) : (
+            <RegistrationAppointmentEditor
+              key={`visit_consultation:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}
+              kind="visit_consultation"
+              taskId={detail.task.id}
+              eligibleTracks={detail.tracks}
+              initialTrackId={selectedTrack.id}
+              appointment={editorAppointment}
+              activities={detail.consultations.filter((item) => item.mode === "visit")}
+              onSaved={handleAppointmentSaved}
+              onWarning={onWarning}
+              onReload={onReload}
+              onClose={closeAppointmentEditor}
+              notificationToken={notificationToken}
+            />
+          )}
+        </div>
+      ) : null}
       <RegistrationHistoryTimeline detail={detail} profiles={profiles} />
-      {appointmentEditor?.kind === "level_test" && selectedTrack ? (
-        <RegistrationAppointmentEditor
-          key={`level_test:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}
-          kind="level_test"
-          taskId={detail.task.id}
-          eligibleTracks={detail.tracks}
-          initialTrackId={selectedTrack.id}
-          appointment={editorAppointment}
-          activities={detail.levelTests}
-          onSaved={handleAppointmentSaved}
-          onWarning={onWarning}
-          onReload={onReload}
-          onClose={closeAppointmentEditor}
-          onRebook={() => {
-            onAppointmentOpenChange?.(null)
-            setAppointmentEditor({ kind: "level_test", appointmentId: null })
-          }}
-          notificationToken={notificationToken}
-        />
-      ) : null}
-      {appointmentEditor?.kind === "visit_consultation" && selectedTrack ? (
-        <RegistrationAppointmentEditor
-          key={`visit_consultation:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}:${appointmentActivitySignature}`}
-          kind="visit_consultation"
-          taskId={detail.task.id}
-          eligibleTracks={detail.tracks}
-          initialTrackId={selectedTrack.id}
-          appointment={editorAppointment}
-          activities={detail.consultations.filter((item) => item.mode === "visit")}
-          onSaved={handleAppointmentSaved}
-          onWarning={onWarning}
-          onReload={onReload}
-          onClose={closeAppointmentEditor}
-          notificationToken={notificationToken}
-        />
-      ) : null}
       {selectedTrack && activeConsultation ? (
         <RegistrationConsultationOutcomeDialog
           key={`${activeConsultation.id}:${activeConsultation.status}`}

@@ -246,6 +246,20 @@ function createEnrollmentClientKey() {
   return `enrollment-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+export function getRegistrationCurrentClassWaitClassId({
+  trackId = "",
+  waitingKind = "",
+  enrollments = [],
+} = {}) {
+  if (enrollmentText(waitingKind) !== "current_class") return ""
+  const normalizedTrackId = enrollmentText(trackId)
+  return enrollmentText(enrollments.find((item) => (
+    enrollmentText(item?.trackId) === normalizedTrackId
+    && enrollmentText(item?.status) === "waitlisted"
+    && item?.rosterActive === true
+  ))?.classId)
+}
+
 export function createRegistrationEnrollmentDraft({
   id = null,
   clientKey,

@@ -25,6 +25,8 @@ async function loadTsModule(url) {
     module: sandboxModule,
     exports: sandboxModule.exports,
     structuredClone,
+    setTimeout,
+    clearTimeout,
   })
   return sandboxModule.exports
 }
@@ -42,6 +44,8 @@ async function loadTsModuleWithContext(url) {
     module: sandboxModule,
     exports: sandboxModule.exports,
     structuredClone,
+    setTimeout,
+    clearTimeout,
   }
   vm.runInNewContext(compiled, context)
   return { exports: sandboxModule.exports, context }
@@ -173,6 +177,46 @@ test("fixture gate is exact and production always ignores the query", async () =
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("staging", "registration-subject-tracks"), false)
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("development", "registration-subject-tracks-extra"), false)
   assert.equal(shouldEnableRegistrationSubjectTrackFixture("development", ""), false)
+})
+
+test("fixture query action behavior only accepts an exact safe one-shot control", async () => {
+  const fixture = await loadFixtureModule()
+  const parse = fixture.parseRegistrationSubjectTrackFixtureQueryActionBehavior
+
+  assert.equal(typeof parse, "function")
+  assert.deepEqual(plain(parse({
+    enabled: true,
+    type: "createRegistrationCaseWithInitialWorkflow",
+    delayMs: "800",
+    error: null,
+  })), {
+    type: "createRegistrationCaseWithInitialWorkflow",
+    delayMs: 800,
+    error: "",
+  })
+  assert.deepEqual(plain(parse({
+    enabled: true,
+    type: "createRegistrationCaseWithInitialWorkflow",
+    delayMs: "999999",
+    error: "forced_failure",
+  })), {
+    type: "createRegistrationCaseWithInitialWorkflow",
+    delayMs: 5000,
+    error: "registration_fixture_forced_failure",
+  })
+
+  for (const input of [
+    { enabled: false, type: "createRegistrationCaseWithInitialWorkflow", delayMs: "800", error: null },
+    { enabled: true, type: "sendGoogleChatWebhook", delayMs: "800", error: null },
+    { enabled: true, type: "createRegistrationCaseWithInitialWorkflow-extra", delayMs: "800", error: null },
+    { enabled: true, type: "createRegistrationCaseWithInitialWorkflow", delayMs: "8e2", error: null },
+    { enabled: true, type: "createRegistrationCaseWithInitialWorkflow", delayMs: "-1", error: null },
+    { enabled: true, type: "createRegistrationCaseWithInitialWorkflow", delayMs: "0", error: null },
+    { enabled: true, type: "createRegistrationCaseWithInitialWorkflow", delayMs: "800", error: "arbitrary_error" },
+    { enabled: true, type: "createRegistrationCaseWithInitialWorkflow", delayMs: null, error: null },
+  ]) {
+    assert.equal(parse(input), null)
+  }
 })
 
 test("fixture reset is deterministic and contains the approved workflow samples", async () => {
@@ -380,6 +424,35 @@ test("public calendar service maps active fixture rows before any database query
   assert.deepEqual(calls.rpc, [])
 })
 
+test("public reopen service uses the active fixture before any Supabase RPC", async () => {
+  const fixtureResult = Promise.resolve({
+    taskId: "fixture-task-enrollment-decided",
+    trackId: "fixture-track-enrollment-decided-english",
+    subject: "영어",
+    status: "inquiry",
+    directorProfileId: "fixture-profile-english-director",
+    consultationId: null,
+    stageEnteredAt: "2026-07-13T09:00:00+09:00",
+  })
+  const { service, calls } = await loadServiceBoundary({
+    fixtureVersion: 1,
+    executeFixtureAction(type) {
+      assert.equal(type, "reopenRegistrationTrack")
+      return fixtureResult
+    },
+  })
+  const input = {
+    trackId: "fixture-track-enrollment-decided-english",
+    destination: "inquiry",
+    reason: "추가 상담 필요",
+    requestKey: "fixture-reopen-service",
+  }
+
+  assert.deepEqual(plain(await service.reopenRegistrationTrack(input)), plain(await fixtureResult))
+  assert.deepEqual(calls.fixtureActions.map(([type]) => type), ["reopenRegistrationTrack"])
+  assert.deepEqual(calls.rpc, [])
+})
+
 test("fixture samples expose canonical phone readiness and clear it for visit rows", async () => {
   const { createRegistrationSubjectTrackFixtureState } = await loadFixtureModule()
   const state = createRegistrationSubjectTrackFixtureState()
@@ -495,6 +568,411 @@ test("fixture phone writers project their canonical source and visit scheduling 
   assert.deepEqual([phone.readyAt, phone.readySource], ["2026-07-13T09:00:00+09:00", "migration"])
 })
 
+test("fixture visit appointment projection follows create, update, and cancellation", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const created = reduceRegistrationSubjectTrackFixture(createRegistrationSubjectTrackFixtureState(), {
+    type: "createRegistrationCaseWithInitialWorkflow",
+    requestKey: "fixture-visit-projection-create",
+    payload: initialWorkflowInput({
+      subjectPlans: { 영어: "direct_phone", 수학: "visit" },
+      levelTestAppointment: null,
+      visitAppointment: {
+        scheduledAt: "2026-07-22T15:30:00+09:00",
+        place: "3상담실",
+        subjects: ["수학"],
+      },
+    }),
+  })
+  const taskId = created.result.taskId
+  const appointment = created.state.caseDetails[taskId].appointments.find((item) => item.kind === "visit_consultation")
+  const mathTrack = created.state.caseDetails[taskId].tracks.find((item) => item.subject === "수학")
+  const workspaceMathTrack = created.state.workspaceData.tasks
+    .find((item) => item.id === taskId)
+    .registrationTracks.find((item) => item.subject === "수학")
+  assert.deepEqual(
+    [mathTrack.visitScheduledAt, mathTrack.visitPlace],
+    ["2026-07-22T15:30:00+09:00", "3상담실"],
+  )
+  assert.deepEqual(
+    [workspaceMathTrack.visitScheduledAt, workspaceMathTrack.visitPlace],
+    ["2026-07-22T15:30:00+09:00", "3상담실"],
+  )
+
+  const updated = reduceRegistrationSubjectTrackFixture(created.state, {
+    type: "saveRegistrationSharedAppointment",
+    requestKey: "fixture-visit-projection-update",
+    payload: {
+      taskId,
+      appointmentId: appointment.id,
+      expectedNotificationRevision: appointment.notificationRevision,
+      kind: "visit_consultation",
+      scheduledAt: "2026-07-23T16:40:00+09:00",
+      place: "4상담실",
+      trackIds: [mathTrack.id],
+      replaceRemaining: false,
+    },
+  })
+  const updatedMathTrack = updated.state.caseDetails[taskId].tracks.find((item) => item.id === mathTrack.id)
+  assert.deepEqual(
+    [updatedMathTrack.visitScheduledAt, updatedMathTrack.visitPlace],
+    ["2026-07-23T16:40:00+09:00", "4상담실"],
+  )
+
+  const canceled = reduceRegistrationSubjectTrackFixture(updated.state, {
+    type: "cancelRegistrationAppointment",
+    requestKey: "fixture-visit-projection-cancel",
+    payload: {
+      appointmentId: appointment.id,
+      expectedNotificationRevision: updated.result.notificationRevision,
+      reason: "예약 취소",
+    },
+  })
+  const canceledMathTrack = canceled.state.caseDetails[taskId].tracks.find((item) => item.id === mathTrack.id)
+  assert.deepEqual([canceledMathTrack.visitScheduledAt, canceledMathTrack.visitPlace], [undefined, undefined])
+})
+
+test("fixture visit appointment projection removes completed stale values", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const state = createRegistrationSubjectTrackFixtureState()
+  const split = state.caseDetails["fixture-task-split-consultation"]
+  const visitTrack = split.tracks.find((item) => item.id === "fixture-track-split-english")
+  const visitConsultation = split.consultations.find((item) => item.id === "fixture-consultation-split-english")
+  assert.deepEqual(
+    [visitTrack.visitScheduledAt, visitTrack.visitPlace],
+    ["2026-07-16T14:00:00+09:00", "본관 상담실"],
+  )
+
+  const completed = reduceRegistrationSubjectTrackFixture(state, {
+    type: "completeRegistrationConsultation",
+    requestKey: "fixture-visit-projection-complete",
+    payload: {
+      consultationId: visitConsultation.id,
+      outcome: "waiting",
+      waitingKind: "next_term_opening",
+      classId: "",
+    },
+  })
+  const completedTrack = completed.state.caseDetails[split.task.id].tracks.find((item) => item.id === visitTrack.id)
+  assert.deepEqual([completedTrack.visitScheduledAt, completedTrack.visitPlace], [undefined, undefined])
+})
+
+test("fixture 상담 결과는 현재반 대기 claim만 enrollment로 materialize한다", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const initial = createRegistrationSubjectTrackFixtureState()
+  const split = initial.caseDetails["fixture-task-split-consultation"]
+  const visitConsultation = split.consultations.find((item) => item.id === "fixture-consultation-split-english")
+
+  const currentClass = reduceRegistrationSubjectTrackFixture(initial, {
+    type: "completeRegistrationConsultation",
+    requestKey: "fixture-current-class-wait",
+    payload: {
+      consultationId: visitConsultation.id,
+      outcome: "waiting",
+      waitingKind: "current_class",
+      classId: "fixture-class-eng-a",
+    },
+  })
+  const currentDetail = currentClass.state.caseDetails[split.task.id]
+  const claim = currentDetail.enrollments.find((item) => item.trackId === visitConsultation.trackId && item.rosterActive)
+  assert.deepEqual(plain({
+    classId: claim?.classId,
+    status: claim?.status,
+    rosterActive: claim?.rosterActive,
+    studentId: claim?.studentId,
+  }), {
+    classId: "fixture-class-eng-a",
+    status: "waitlisted",
+    rosterActive: true,
+    studentId: split.task.studentId,
+  })
+
+  const kept = reduceRegistrationSubjectTrackFixture(currentClass.state, {
+    type: "transitionRegistrationWaiting",
+    requestKey: "fixture-current-class-wait-kept",
+    payload: {
+      trackId: visitConsultation.trackId,
+      action: "change_waiting_kind",
+      waitingKind: "current_class",
+      classId: "fixture-class-eng-a",
+      retakeDecision: "",
+      reason: "",
+    },
+  })
+  assert.equal(kept.state.caseDetails[split.task.id].enrollments.filter((item) => item.rosterActive).length, 1)
+
+  const changed = reduceRegistrationSubjectTrackFixture(kept.state, {
+    type: "transitionRegistrationWaiting",
+    requestKey: "fixture-current-class-wait-cleared",
+    payload: {
+      trackId: visitConsultation.trackId,
+      action: "change_waiting_kind",
+      waitingKind: "current_term_opening",
+      classId: "fixture-class-eng-a",
+      retakeDecision: "",
+      reason: "",
+    },
+  })
+  const changedDetail = changed.state.caseDetails[split.task.id]
+  assert.equal(changedDetail.enrollments.some((item) => item.rosterActive), false)
+  assert.equal(changedDetail.enrollments.find((item) => item.id === claim.id)?.status, "canceled")
+
+  const enrollmentInitial = createRegistrationSubjectTrackFixtureState()
+  const enrollmentSplit = enrollmentInitial.caseDetails["fixture-task-split-consultation"]
+  const enrollmentConsultation = enrollmentSplit.consultations.find((item) => item.id === "fixture-consultation-split-english")
+  const waitingBeforeEnrollment = reduceRegistrationSubjectTrackFixture(enrollmentInitial, {
+    type: "completeRegistrationConsultation",
+    requestKey: "fixture-current-class-before-enrollment",
+    payload: {
+      consultationId: enrollmentConsultation.id,
+      outcome: "waiting",
+      waitingKind: "current_class",
+      classId: "fixture-class-eng-a",
+    },
+  })
+  const movedToEnrollment = reduceRegistrationSubjectTrackFixture(waitingBeforeEnrollment.state, {
+    type: "transitionRegistrationWaiting",
+    requestKey: "fixture-current-class-to-enrollment",
+    payload: {
+      trackId: enrollmentConsultation.trackId,
+      action: "move_to_enrollment",
+      waitingKind: "",
+      classId: "",
+      retakeDecision: "not_required",
+      reason: "",
+    },
+  })
+  const enrollmentTrack = movedToEnrollment.state.caseDetails[enrollmentSplit.task.id].tracks.find((item) => item.id === enrollmentConsultation.trackId)
+  assert.deepEqual(plain({
+    status: enrollmentTrack.status,
+    waitingKind: enrollmentTrack.waitingKind,
+    activeClaims: movedToEnrollment.state.caseDetails[enrollmentSplit.task.id].enrollments.filter((item) => item.rosterActive).length,
+  }), { status: "enrollment_decided", waitingKind: "", activeClaims: 0 })
+
+  const otherInitial = createRegistrationSubjectTrackFixtureState()
+  const otherSplit = otherInitial.caseDetails["fixture-task-split-consultation"]
+  const otherConsultation = otherSplit.consultations.find((item) => item.id === "fixture-consultation-split-english")
+  const nextTerm = reduceRegistrationSubjectTrackFixture(otherInitial, {
+    type: "completeRegistrationConsultation",
+    requestKey: "fixture-next-term-wait",
+    payload: {
+      consultationId: otherConsultation.id,
+      outcome: "waiting",
+      waitingKind: "next_term_opening",
+      classId: "fixture-class-eng-a",
+    },
+  })
+  assert.equal(nextTerm.state.caseDetails[otherSplit.task.id].enrollments.some((item) => item.rosterActive), false)
+})
+
+test("fixture 등록 결정 이탈은 계획 수업을 취소하고 현재반 대기 claim만 남긴다", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const outcome = reduceRegistrationSubjectTrackFixture(createRegistrationSubjectTrackFixtureState(), {
+    type: "routeRegistrationEnrollmentDecision",
+    requestKey: "fixture-enrollment-decision-to-current-class",
+    payload: {
+      trackId: "fixture-track-multiple-english",
+      destination: "waiting",
+      waitingKind: "current_class",
+      classId: "fixture-class-eng-special",
+    },
+  })
+  const detail = outcome.state.caseDetails["fixture-task-multiple-classes"]
+  const originalRows = detail.enrollments.filter((item) => [
+    "fixture-enrollment-multiple-a",
+    "fixture-enrollment-multiple-special",
+  ].includes(item.id))
+  const activeClaims = detail.enrollments.filter((item) => item.trackId === "fixture-track-multiple-english" && item.rosterActive)
+
+  assert.deepEqual(plain(originalRows.map((item) => ({ id: item.id, status: item.status, rosterActive: item.rosterActive }))), [
+    { id: "fixture-enrollment-multiple-a", status: "canceled", rosterActive: false },
+    { id: "fixture-enrollment-multiple-special", status: "canceled", rosterActive: false },
+  ])
+  assert.deepEqual(plain(activeClaims.map((item) => ({ classId: item.classId, status: item.status }))), [
+    { classId: "fixture-class-eng-special", status: "waitlisted" },
+  ])
+})
+
+test("fixture 수강 취소의 현재반 대기는 취소 수업과 별도 waitlisted claim을 만든다", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const outcome = reduceRegistrationSubjectTrackFixture(createRegistrationSubjectTrackFixtureState(), {
+    type: "cancelRegistrationEnrollment",
+    requestKey: "fixture-cancel-enrollment-to-current-class",
+    payload: {
+      enrollmentId: "fixture-enrollment-partial-english",
+      destination: "waiting",
+      waitingKind: "current_class",
+      classId: "fixture-class-eng-special",
+      reason: "현재 반 대기로 전환",
+    },
+  })
+  const detail = outcome.state.caseDetails["fixture-task-partial-registration"]
+  const canceled = detail.enrollments.find((item) => item.id === "fixture-enrollment-partial-english")
+  const activeClaims = detail.enrollments.filter((item) => item.trackId === "fixture-track-partial-english" && item.rosterActive)
+
+  assert.deepEqual(plain({ status: canceled.status, rosterActive: canceled.rosterActive }), {
+    status: "canceled",
+    rosterActive: false,
+  })
+  assert.deepEqual(plain(activeClaims.map((item) => ({ classId: item.classId, status: item.status }))), [
+    { classId: "fixture-class-eng-special", status: "waitlisted" },
+  ])
+})
+
+test("fixture 입학 처리 취소는 배치 수업을 이력으로 취소하고 현재반 대기 claim을 만든다", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const outcome = reduceRegistrationSubjectTrackFixture(createRegistrationSubjectTrackFixtureState(), {
+    type: "cancelRegistrationAdmissionBatch",
+    requestKey: "fixture-cancel-admission-to-current-class",
+    payload: {
+      batchId: "fixture-batch-partial-2",
+      reason: "입학 처리 취소 후 현재 반 대기",
+      resolutions: [{
+        trackId: "fixture-track-partial-math",
+        destination: "waiting",
+        waitingKind: "current_class",
+        classId: "fixture-class-math-a",
+      }],
+    },
+  })
+  const detail = outcome.state.caseDetails["fixture-task-partial-registration"]
+  const canceled = detail.enrollments.find((item) => item.id === "fixture-enrollment-partial-math")
+  const activeClaims = detail.enrollments.filter((item) => item.trackId === "fixture-track-partial-math" && item.rosterActive)
+
+  assert.deepEqual(plain({
+    batchStatus: detail.admissionBatches.find((item) => item.id === "fixture-batch-partial-2").status,
+    enrollmentStatus: canceled.status,
+    rosterActive: canceled.rosterActive,
+    admissionBatchId: canceled.admissionBatchId,
+  }), {
+    batchStatus: "canceled",
+    enrollmentStatus: "canceled",
+    rosterActive: false,
+    admissionBatchId: "fixture-batch-partial-2",
+  })
+  assert.deepEqual(plain(activeClaims.map((item) => ({ classId: item.classId, status: item.status }))), [
+    { classId: "fixture-class-math-a", status: "waitlisted" },
+  ])
+})
+
+test("fixture 마이그레이션 현재반 대기는 과목별 classId를 waitlisted claim으로 복원한다", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const outcome = reduceRegistrationSubjectTrackFixture(createRegistrationSubjectTrackFixtureState(), {
+    type: "resolveRegistrationMigrationReview",
+    requestKey: "fixture-migration-to-current-class",
+    payload: {
+      taskId: "fixture-task-migration-review",
+      trackStates: [
+        {
+          trackId: "fixture-track-review-english",
+          targetStatus: "waiting",
+          waitingKind: "current_class",
+          classId: "fixture-class-eng-a",
+        },
+        {
+          trackId: "fixture-track-review-math",
+          targetStatus: "waiting",
+          waitingKind: "next_term_opening",
+          classId: "fixture-class-math-a",
+        },
+      ],
+    },
+  })
+  const detail = outcome.state.caseDetails["fixture-task-migration-review"]
+  const activeClaims = detail.enrollments.filter((item) => item.rosterActive)
+
+  assert.deepEqual(plain(activeClaims.map((item) => ({ trackId: item.trackId, classId: item.classId, status: item.status }))), [
+    {
+      trackId: "fixture-track-review-english",
+      classId: "fixture-class-eng-a",
+      status: "waitlisted",
+    },
+  ])
+})
+
+test("fixture reopens terminal tracks without database or provider work and records an exact receipt", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const initial = createRegistrationSubjectTrackFixtureState()
+  const terminal = reduceRegistrationSubjectTrackFixture(initial, {
+    type: "routeRegistrationEnrollmentDecision",
+    requestKey: "fixture-reopen-terminal",
+    payload: {
+      trackId: "fixture-track-enrollment-decided-english",
+      destination: "not_registered",
+      waitingKind: "",
+    },
+  })
+  const reopened = reduceRegistrationSubjectTrackFixture(terminal.state, {
+    type: "reopenRegistrationTrack",
+    requestKey: "fixture-reopen-consultation",
+    payload: {
+      trackId: "fixture-track-enrollment-decided-english",
+      destination: "consultation_waiting",
+      reason: "학부모 재상담 요청",
+    },
+  })
+  const detail = reopened.state.caseDetails["fixture-task-enrollment-decided"]
+  const selected = detail.tracks.find((item) => item.id === "fixture-track-enrollment-decided-english")
+  const consultation = detail.consultations.find((item) => item.id === reopened.result.consultationId)
+  const event = detail.events.find((item) => item.eventType === "track_reopened")
+
+  assert.deepEqual(plain({
+    status: selected.status,
+    waitingKind: selected.waitingKind,
+    retake: selected.levelTestRetakeDecision,
+    migrationReviewRequired: selected.migrationReviewRequired,
+    stageEnteredAt: selected.stageEnteredAt,
+  }), {
+    status: "consultation_waiting",
+    waitingKind: "",
+    retake: "",
+    migrationReviewRequired: false,
+    stageEnteredAt: "2026-07-13T09:00:00+09:00",
+  })
+  assert.deepEqual(plain({
+    mode: consultation.mode,
+    status: consultation.status,
+    directorProfileId: consultation.directorProfileId,
+    readyAt: consultation.readyAt,
+    readySource: consultation.readySource,
+  }), {
+    mode: "phone",
+    status: "waiting",
+    directorProfileId: "fixture-profile-english-director",
+    readyAt: "2026-07-13T09:00:00+09:00",
+    readySource: "track_reopened",
+  })
+  assert.deepEqual(plain({
+    source: event.source,
+    destination: event.destination,
+    reason: event.reason,
+    metadata: event.metadata,
+    actorId: event.actorId,
+    occurredAt: event.occurredAt,
+  }), {
+    source: "not_registered",
+    destination: "consultation_waiting",
+    reason: "학부모 재상담 요청",
+    metadata: { consultationId: consultation.id },
+    actorId: "fixture-profile-staff",
+    occurredAt: "2026-07-13T09:00:00+09:00",
+  })
+  assert.deepEqual(plain(reopened.state.externalCallLedger), [])
+
+  const replay = reduceRegistrationSubjectTrackFixture(reopened.state, {
+    type: "reopenRegistrationTrack",
+    requestKey: "fixture-reopen-consultation",
+    payload: {
+      trackId: "fixture-track-enrollment-decided-english",
+      destination: "consultation_waiting",
+      reason: "학부모 재상담 요청",
+    },
+  })
+  assert.deepEqual(plain(replay.result), plain(reopened.result))
+  assert.equal(replay.state.caseDetails["fixture-task-enrollment-decided"].consultations.length, detail.consultations.length)
+  assert.equal(replay.state.caseDetails["fixture-task-enrollment-decided"].events.length, detail.events.length)
+  assert.equal(replay.state.externalCallLedger.length, 0)
+})
+
 test("fixture roles cover assigned sibling directors, staff, and read-only assistant", async () => {
   const {
     createRegistrationSubjectTrackFixtureState,
@@ -607,6 +1085,45 @@ test("fixture runtime preserves the active adapter's exact numeric intake versio
   assert.equal(loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(), null)
 })
 
+test("fixture runtime fails closed while the exact fixture URL is waiting for its adapter", async () => {
+  const { exports: runtime, context } = await loadTsModuleWithContext(fixtureRuntimeUrl)
+  context.process = { env: { NODE_ENV: "test" } }
+  context.URLSearchParams = URLSearchParams
+  context.window = { location: { search: "?fixture=registration-subject-tracks" } }
+
+  const pendingAction = runtime.executeRegistrationSubjectTrackFixtureAction("noop", {})
+  assert.equal(typeof pendingAction?.then, "function")
+  await assert.rejects(
+    pendingAction,
+    /registration_subject_track_fixture_runtime_not_ready/,
+  )
+})
+
+test("browser fixture runtime ignores a stale adapter after the exact fixture URL is removed", async () => {
+  const { exports: runtime, context } = await loadTsModuleWithContext(fixtureRuntimeUrl)
+  context.process = { env: { NODE_ENV: "test" } }
+  context.URLSearchParams = URLSearchParams
+  context.window = { location: { search: "?fixture=registration-subject-tracks" } }
+  const adapter = {
+    intakeWorkflowRuntimeVersion: 1,
+    executeAction: async () => "fixture",
+    loadCase: async () => ({}),
+    loadWorkspaceData: async () => ({}),
+    loadOptionData: async () => ({}),
+    loadClassDetails: async () => ({}),
+  }
+  const cleanup = runtime.installRegistrationSubjectTrackFixtureRuntime(
+    "test",
+    "registration-subject-tracks",
+    adapter,
+  )
+
+  assert.equal(await runtime.executeRegistrationSubjectTrackFixtureAction("noop", {}), "fixture")
+  context.window.location.search = ""
+  assert.equal(runtime.executeRegistrationSubjectTrackFixtureAction("noop", {}), null)
+  cleanup()
+})
+
 test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup", async () => {
   const fixture = await loadFixtureModule()
   const { exports: runtime, context } = await loadTsModuleWithContext(fixtureRuntimeUrl)
@@ -648,6 +1165,7 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   const bridge = context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL]
   assert.equal(typeof bridge?.snapshot, "function")
   assert.equal(typeof bridge?.replayLastCreate, "function")
+  assert.equal(typeof bridge?.setNextActionBehavior, "function")
   const initialSnapshot = plain(bridge.snapshot())
   assert.equal(initialSnapshot.lastCreate, null)
   assert.deepEqual(initialSnapshot.notificationTargetHistory, plain(state.notificationTargetHistory))
@@ -676,6 +1194,56 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
 
   cleanup()
   assert.equal(context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL], undefined)
+})
+
+test("fixture debug behavior injects one slow or failed action before mutation", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const failedInput = {
+    trackId: "fixture-track-enrollment-decided-english",
+    destination: "not_registered",
+    waitingKind: "",
+    requestKey: "fixture-debug-failed-action",
+  }
+  const beforeFailure = plain(state)
+
+  adapter.debugSetNextActionBehavior({
+    type: "routeRegistrationEnrollmentDecision",
+    error: "registration_fixture_forced_failure",
+  })
+  await assert.rejects(
+    adapter.executeAction("routeRegistrationEnrollmentDecision", failedInput),
+    /registration_fixture_forced_failure/,
+  )
+  assert.deepEqual(plain(state), beforeFailure)
+
+  await adapter.executeAction("routeRegistrationEnrollmentDecision", failedInput)
+  assert.equal(state.caseDetails["fixture-task-enrollment-decided"].tracks[0].status, "not_registered")
+
+  let settled = false
+  adapter.debugSetNextActionBehavior({
+    type: "reopenRegistrationTrack",
+    delayMs: 30,
+  })
+  const delayed = adapter.executeAction("reopenRegistrationTrack", {
+    trackId: "fixture-track-enrollment-decided-english",
+    destination: "inquiry",
+    reason: "지연 응답 검증",
+    requestKey: "fixture-debug-delayed-action",
+  }).then((result) => {
+    settled = true
+    return result
+  })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(settled, false)
+  await delayed
+  assert.equal(settled, true)
+  assert.equal(state.caseDetails["fixture-task-enrollment-decided"].tracks[0].status, "inquiry")
+  assert.equal(state.externalCallLedger.length, 0)
 })
 
 test("public intake probe and create use the fixture before any database path", async () => {
@@ -1327,6 +1895,7 @@ test("every fixture UI mutation is declared and produces an idempotency receipt"
     "cancelRegistrationAdmissionBatch",
     "completeRegistrationAdmissionBatch",
     "resolveRegistrationMigrationReview",
+    "reopenRegistrationTrack",
     "sendRegistrationVisitNotificationTarget",
     "sendRegistrationAdmissionMessage",
     "checkRegistrationAdmissionMessage",
@@ -1344,9 +1913,14 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.match(source, /installRegistrationSubjectTrackFixtureRuntime/)
   assert.match(source, /const initialWorkspaceData = registrationFixtureRequested\s*\? null/)
   assert.match(source, /registrationFixtureModule\.createRegistrationSubjectTrackFixtureAdapter/)
+  assert.match(source, /searchParams\.get\("fixtureActionType"\)/)
+  assert.match(source, /searchParams\.get\("fixtureActionDelayMs"\)/)
+  assert.match(source, /searchParams\.get\("fixtureActionError"\)/)
+  assert.match(source, /parseRegistrationSubjectTrackFixtureQueryActionBehavior\(\{[\s\S]*?enabled: registrationFixturePrepared/)
+  assert.match(source, /if \(registrationFixtureActionBehavior\) adapter\.debugSetNextActionBehavior\?\.\(registrationFixtureActionBehavior\)/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationTrackList/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationTrackEditor/)
-  assert.match(source, /!registrationFixtureEnabled && showLegacyNotificationSettingsLauncher && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace\)/)
+  assert.match(source, /!registrationFixtureRequested && showLegacyNotificationSettingsLauncher && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace\)/)
   assert.match(source, /showToolbarCreate = \(!registrationFixtureEnabled \|\| canManageRegistrationWorkflow\)/)
   assert.match(source, /canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/)
   assert.match(source, /resolveRegistrationSubjectTrackFixtureViewer/)

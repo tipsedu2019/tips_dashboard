@@ -68,8 +68,23 @@ export function buildRegistrationTrackListItems(tasks: OpsTask[]) {
 export function filterRegistrationTrackListItems(
   items: RegistrationTrackListItem[],
   viewKey: RegistrationTrackViewKey,
+  query = "",
 ) {
-  const filtered = items.filter((item) => item.viewKey === viewKey)
+  const normalizedQuery = normalizeRegistrationTrackSearchText(query)
+  const filtered = items.filter((item) => (
+    item.viewKey === viewKey
+    && (!normalizedQuery || [
+      item.studentName,
+      item.subject,
+      item.directorName,
+      item.visitPlace,
+      item.task.registration?.schoolGrade,
+      item.task.registration?.schoolName,
+      item.task.registration?.parentPhone,
+      item.task.registration?.studentPhone,
+      item.task.registration?.requestNote,
+    ].some((value) => normalizeRegistrationTrackSearchText(value).includes(normalizedQuery)))
+  ))
   if (viewKey !== "consulting") return filtered
 
   const phoneQueue = filtered
@@ -78,6 +93,10 @@ export function filterRegistrationTrackListItems(
   const scheduledVisits = filtered.filter((item) => item.status !== "consultation_waiting")
 
   return [...sortedPhoneQueue, ...scheduledVisits]
+}
+
+function normalizeRegistrationTrackSearchText(value: unknown) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "")
 }
 
 export function sortRegistrationConsultationItems<T extends Pick<RegistrationTrackListItem, "key" | "phoneReadyAt">>(items: T[]) {
@@ -169,12 +188,12 @@ function RegistrationTrackStatusBadge({ status }: { status: OpsRegistrationTrack
 function RegistrationTrackIdentity({ item }: { item: RegistrationTrackListItem }) {
   return (
     <div className="min-w-0">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate font-medium">{item.studentName}</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="min-w-0 break-words font-medium [overflow-wrap:anywhere]">{item.studentName}</span>
         <Badge variant="outline">{item.subject}</Badge>
         <RegistrationTrackStatusBadge status={item.status} />
       </div>
-      <p className="truncate text-xs text-muted-foreground">
+      <p className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
         {((item.task as OpsTaskWithRegistrationTracks).registrationTracks?.length || 0) > 1
           ? "같은 문의의 과목별 진행"
           : "단일 과목 문의"}
@@ -222,33 +241,34 @@ function RegistrationTrackActions({
 
   return (
     <div className="flex min-w-0 flex-wrap justify-end gap-1.5">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        aria-label={`[${item.subject}] ${item.studentName} 상세`}
-        onClick={() => onOpen(item.taskId, item.trackId)}
-        disabled={disabled}
-      >
-        상세
-      </Button>
       {permissions.canManage ? (
         <Button
           type="button"
           variant="outline"
           size="sm"
-          aria-label={`[${item.subject}] ${managementActionLabel}`}
+          aria-label={`[${item.subject}] ${item.studentName} ${managementActionLabel}`}
           onClick={() => onEdit(item.taskId, item.trackId)}
           disabled={disabled}
         >
           {managementActionLabel}
         </Button>
-      ) : null}
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label={`[${item.subject}] ${item.studentName} 상세`}
+          onClick={() => onOpen(item.taskId, item.trackId)}
+          disabled={disabled}
+        >
+          상세
+        </Button>
+      )}
       {permissions.canOpenConsultationCompletion ? (
         <Button
           type="button"
           size="sm"
-          aria-label={`[${item.subject}] ${consultationActionLabel}`}
+          aria-label={`[${item.subject}] ${item.studentName} ${consultationActionLabel}`}
           onClick={() => {
             // This summary hint must be followed by a strict detail permission check before mutation.
             onAction(item.taskId, item.trackId, "complete_consultation")
@@ -299,7 +319,7 @@ export function RegistrationTrackList({
         <>
       <div
         data-testid="registration-track-mobile-list"
-        className="grid min-w-0 gap-2 p-2 md:hidden"
+        className="grid min-w-0 gap-2 p-2 lg:hidden"
         role="list"
         aria-label="과목별 등록 모바일 목록"
       >
@@ -314,12 +334,12 @@ export function RegistrationTrackList({
             <dl className="grid min-w-0 grid-cols-2 gap-3 border-t pt-2 text-xs">
               <div className="min-w-0">
                 <dt className="text-muted-foreground">상담 책임자</dt>
-                <dd className="mt-0.5 truncate font-medium">{item.directorName || "미지정"}</dd>
+                <dd className="mt-0.5 break-words font-medium [overflow-wrap:anywhere]">{item.directorName || "미지정"}</dd>
               </div>
               <div className="min-w-0">
                 <dt className="text-muted-foreground">{item.status === "consultation_waiting" ? "전화상담 대기 기준" : item.status === "visit_consultation_scheduled" ? "방문상담 일시" : "현재 단계 진입"}</dt>
-                <dd className="mt-0.5 truncate font-medium">{getRegistrationTrackTimeLabel(item)}</dd>
-                {item.status === "visit_consultation_scheduled" ? <dd className="mt-0.5 truncate text-muted-foreground">방문상담 장소 · {getRegistrationTrackPlaceLabel(item)}</dd> : null}
+                <dd className="mt-0.5 break-words font-medium [overflow-wrap:anywhere]">{getRegistrationTrackTimeLabel(item)}</dd>
+                {item.status === "visit_consultation_scheduled" ? <dd className="mt-0.5 break-words text-muted-foreground [overflow-wrap:anywhere]">방문상담 장소 · {getRegistrationTrackPlaceLabel(item)}</dd> : null}
               </div>
             </dl>
             <div className="min-w-0 border-t pt-2">
@@ -339,7 +359,7 @@ export function RegistrationTrackList({
 
       <div
         data-testid="registration-track-desktop-list"
-        className="hidden w-full min-w-0 overflow-hidden md:block"
+        className="hidden w-full min-w-0 overflow-hidden lg:block"
         role="table"
         aria-label="과목별 등록 데이터테이블"
       >
@@ -361,12 +381,12 @@ export function RegistrationTrackList({
             <div className="min-w-0 px-3 py-2" role="cell">
               <RegistrationTrackIdentity item={item} />
             </div>
-            <div className="min-w-0 truncate px-3 py-2" role="cell">
+            <div className="min-w-0 break-words px-3 py-2 [overflow-wrap:anywhere]" role="cell">
               {item.directorName || "미지정"}
             </div>
-            <div className="min-w-0 truncate px-3 py-2 text-xs text-muted-foreground" role="cell">
+            <div className="min-w-0 break-words px-3 py-2 text-xs text-muted-foreground [overflow-wrap:anywhere]" role="cell">
               <span className="block">{item.status === "consultation_waiting" ? "전화상담 대기 · " : item.status === "visit_consultation_scheduled" ? "방문상담 일시 · " : ""}{getRegistrationTrackTimeLabel(item)}</span>
-              {item.status === "visit_consultation_scheduled" ? <span className="block truncate">방문상담 장소 · {getRegistrationTrackPlaceLabel(item)}</span> : null}
+              {item.status === "visit_consultation_scheduled" ? <span className="block break-words [overflow-wrap:anywhere]">방문상담 장소 · {getRegistrationTrackPlaceLabel(item)}</span> : null}
             </div>
             <div className="min-w-0 px-3 py-2" role="cell">
               <RegistrationTrackActions

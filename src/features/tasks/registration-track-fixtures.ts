@@ -29,6 +29,7 @@ import type {
 } from "./registration-track-service"
 import type {
   RegistrationSubjectTrackFixtureAdapter,
+  RegistrationSubjectTrackFixtureDebugActionBehavior,
   RegistrationSubjectTrackFixtureDebugCounts,
   RegistrationSubjectTrackFixtureDebugSnapshot,
 } from "./registration-track-fixture-runtime"
@@ -61,6 +62,7 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
   "cancelRegistrationAdmissionBatch",
   "completeRegistrationAdmissionBatch",
   "resolveRegistrationMigrationReview",
+  "reopenRegistrationTrack",
   "sendRegistrationVisitNotificationTarget",
   "sendRegistrationAdmissionMessage",
   "checkRegistrationAdmissionMessage",
@@ -69,6 +71,32 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
 ] as const
 
 export type RegistrationSubjectTrackFixtureAction = typeof REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS[number]
+export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_DELAY_MAX_MS = 5_000
+export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_ERROR_VALUE = "forced_failure"
+export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_ERROR_MESSAGE = "registration_fixture_forced_failure"
+
+export function parseRegistrationSubjectTrackFixtureQueryActionBehavior(input: {
+  enabled: boolean
+  type: string | null | undefined
+  delayMs: string | null | undefined
+  error: string | null | undefined
+}): Required<RegistrationSubjectTrackFixtureDebugActionBehavior> | null {
+  if (!input.enabled) return null
+  const type = String(input.type || "")
+  if (!REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS.includes(type as RegistrationSubjectTrackFixtureAction)) return null
+
+  const rawDelayMs = String(input.delayMs || "")
+  if (rawDelayMs && !/^\d+$/.test(rawDelayMs)) return null
+  const delayMs = rawDelayMs
+    ? Math.min(REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_DELAY_MAX_MS, Number(rawDelayMs))
+    : 0
+  const rawError = String(input.error || "")
+  if (rawError && rawError !== REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_ERROR_VALUE) return null
+  const error = rawError ? REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_ERROR_MESSAGE : ""
+  if (delayMs <= 0 && !error) return null
+  return { type, delayMs, error }
+}
+
 export type RegistrationSubjectTrackFixtureViewerKey = "english_admin" | "math_admin" | "staff" | "assistant"
 
 export type RegistrationSubjectTrackFixtureViewer = {
@@ -149,6 +177,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
   runtime: RegistrationSubjectTrackFixtureRuntime,
 ): RegistrationSubjectTrackFixtureAdapter {
   let lastCreate: RegistrationSubjectTrackFixtureDebugSnapshot["lastCreate"] = null
+  let nextActionBehavior: Required<RegistrationSubjectTrackFixtureDebugActionBehavior> | null = null
 
   function debugCounts(state: RegistrationSubjectTrackFixtureState): RegistrationSubjectTrackFixtureDebugCounts {
     const details = Object.values(state.caseDetails)
@@ -197,25 +226,46 @@ export function createRegistrationSubjectTrackFixtureAdapter(
   return {
     intakeWorkflowRuntimeVersion: 1,
     executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => {
-      const outcome = reduceRegistrationSubjectTrackFixture(runtime.getState(), {
-        type,
-        requestKey: String(payload.requestKey || ""),
-        payload,
-      })
-      runtime.replaceState(outcome.state)
-      if (type === "createRegistrationCaseWithInitialWorkflow") {
-        lastCreate = {
-          command: {
-            type,
-            requestKey: String(payload.requestKey || ""),
-            payload: clone(payload),
-          },
-          result: clone(outcome.result),
-          receipt: clone(outcome.receipt),
-          detail: null,
+      const behavior = nextActionBehavior?.type === type ? nextActionBehavior : null
+      if (behavior) nextActionBehavior = null
+      const executeNow = () => {
+        const outcome = reduceRegistrationSubjectTrackFixture(runtime.getState(), {
+          type,
+          requestKey: String(payload.requestKey || ""),
+          payload,
+        })
+        runtime.replaceState(outcome.state)
+        if (type === "createRegistrationCaseWithInitialWorkflow") {
+          lastCreate = {
+            command: {
+              type,
+              requestKey: String(payload.requestKey || ""),
+              payload: clone(payload),
+            },
+            result: clone(outcome.result),
+            receipt: clone(outcome.receipt),
+            detail: null,
+          }
         }
+        return outcome.result as T
       }
-      return Promise.resolve(outcome.result as T)
+      if (behavior?.delayMs) {
+        return new Promise<T>((resolve, reject) => {
+          setTimeout(() => {
+            if (behavior.error) {
+              reject(new Error(behavior.error))
+              return
+            }
+            try {
+              resolve(executeNow())
+            } catch (error) {
+              reject(error)
+            }
+          }, behavior.delayMs)
+        })
+      }
+      if (behavior?.error) return Promise.reject(new Error(behavior.error))
+      return Promise.resolve(executeNow())
     },
     loadAppointmentCalendarRows: (input) => Promise.resolve(
       getRegistrationSubjectTrackFixtureAppointmentCalendarRows(runtime.getState(), input),
@@ -229,6 +279,15 @@ export function createRegistrationSubjectTrackFixtureAdapter(
     loadOptionData: () => Promise.resolve(clone(runtime.getState().optionData)),
     loadClassDetails: (classIds) => Promise.resolve(getRegistrationSubjectTrackFixtureClassDetails(runtime.getState(), classIds)),
     debugSnapshot,
+    debugSetNextActionBehavior: (behavior) => {
+      const type = String(behavior?.type || "").trim()
+      const delayMs = Math.min(30_000, Math.max(0, Math.trunc(Number(behavior?.delayMs) || 0)))
+      const error = String(behavior?.error || "").trim().slice(0, 160)
+      if (!REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS.includes(type as RegistrationSubjectTrackFixtureAction)) {
+        throw new Error("registration_subject_track_fixture_debug_action_invalid")
+      }
+      nextActionBehavior = { type, delayMs, error }
+    },
     debugReplayLastCreate: () => {
       if (!lastCreate) return Promise.reject(new Error("registration_subject_track_fixture_debug_create_missing"))
       const command = clone(lastCreate.command)
@@ -787,6 +846,7 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
   const caseDetails = buildFixtureCases()
   for (const detail of Object.values(caseDetails)) {
     projectFixturePhoneReadiness(detail)
+    projectFixtureVisitSchedule(detail)
     detail.task.registrationTracks = detail.tracks
   }
   const workspaceData: OpsTaskWorkspaceData = {
@@ -1002,8 +1062,40 @@ function projectFixturePhoneReadiness(detail: OpsRegistrationCaseDetail) {
   }
 }
 
+function projectFixtureVisitSchedule(detail: OpsRegistrationCaseDetail) {
+  for (const selected of detail.tracks) {
+    const activeVisit = detail.consultations
+      .filter((item) => (
+        item.trackId === selected.id
+        && item.mode === "visit"
+        && item.status === "scheduled"
+      ))
+      .map((consultation) => ({
+        consultation,
+        appointment: detail.appointments.find((item) => (
+          item.id === consultation.appointmentId
+          && item.kind === "visit_consultation"
+          && item.status === "scheduled"
+        )) || null,
+      }))
+      .filter((item) => item.appointment)
+      .sort((left, right) => (
+        right.consultation.createdAt.localeCompare(left.consultation.createdAt)
+        || right.consultation.id.localeCompare(left.consultation.id)
+      ))[0]?.appointment || null
+
+    delete selected.visitScheduledAt
+    delete selected.visitPlace
+    if (activeVisit) {
+      selected.visitScheduledAt = activeVisit.scheduledAt
+      selected.visitPlace = activeVisit.place
+    }
+  }
+}
+
 function syncCase(state: RegistrationSubjectTrackFixtureState, detail: OpsRegistrationCaseDetail) {
   projectFixturePhoneReadiness(detail)
+  projectFixtureVisitSchedule(detail)
   detail.task.registrationTracks = detail.tracks
   detail.task.subject = detail.tracks.map((item) => item.subject).join(", ")
   detail.task.updatedAt = FIXTURE_NOW
@@ -1017,6 +1109,52 @@ function syncCase(state: RegistrationSubjectTrackFixtureState, detail: OpsRegist
 function nextId(state: RegistrationSubjectTrackFixtureState, kind: string) {
   state.sequence += 1
   return `fixture-${kind}-${String(state.sequence).padStart(3, "0")}`
+}
+
+function reconcileFixtureCurrentClassWait(
+  state: RegistrationSubjectTrackFixtureState,
+  detail: OpsRegistrationCaseDetail,
+  selected: OpsRegistrationTrackSummary,
+  waitingKind: string,
+  classId: string,
+) {
+  const activeClaims = detail.enrollments.filter((item) => (
+    item.trackId === selected.id
+    && item.status === "waitlisted"
+    && item.rosterActive
+  ))
+  const targetClassId = waitingKind === "current_class"
+    ? classId.trim() || activeClaims[0]?.classId || ""
+    : ""
+  if (waitingKind === "current_class") {
+    if (!targetClassId) throw new Error("registration_current_class_required")
+    const classItem = state.optionData.classes.find((item) => item.id === targetClassId)
+    if (!classItem) throw new Error("registration_class_not_found")
+    if (classItem.subject !== selected.subject) throw new Error("registration_class_subject_mismatch")
+  }
+
+  for (const claim of activeClaims) {
+    if (targetClassId && claim.classId === targetClassId) continue
+    claim.status = "canceled"
+    claim.rosterActive = false
+    claim.updatedAt = FIXTURE_NOW
+  }
+  if (!targetClassId || activeClaims.some((item) => item.classId === targetClassId && item.rosterActive)) return
+
+  detail.enrollments.push({
+    ...enrollment({
+      id: nextId(state, "enrollment"),
+      trackId: selected.id,
+      studentId: detail.task.studentId || null,
+      classId: targetClassId,
+      status: "waitlisted",
+      rosterActive: true,
+      sortOrder: 0,
+    }),
+    classStartDate: null,
+    classStartSessionKey: null,
+    classStartSession: null,
+  })
 }
 
 function asText(payload: Record<string, unknown>, key: string) {
@@ -1643,6 +1781,7 @@ export function reduceRegistrationSubjectTrackFixture(
       const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
       selected.status = payload.destination as OpsRegistrationTrackStatus
       selected.waitingKind = (payload.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || ""
+      reconcileFixtureCurrentClassWait(state, detail, selected, selected.waitingKind, asText(payload, "classId"))
       selected.stageEnteredAt = FIXTURE_NOW
       if (selected.status === "consultation_waiting") {
         detail.consultations.push({
@@ -1997,6 +2136,7 @@ export function reduceRegistrationSubjectTrackFixture(
       consultation.updatedAt = FIXTURE_NOW
       selected.status = payload.outcome === "enrollment" ? "enrollment_decided" : payload.outcome === "waiting" ? "waiting" : "not_registered"
       selected.waitingKind = payload.outcome === "waiting" ? (payload.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || "current_term_opening" : ""
+      reconcileFixtureCurrentClassWait(state, detail, selected, selected.waitingKind, asText(payload, "classId"))
       selected.stageEnteredAt = FIXTURE_NOW
       syncCase(state, detail)
       result = { consultation, track: selected }
@@ -2006,13 +2146,22 @@ export function reduceRegistrationSubjectTrackFixture(
       const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
       const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
       const action = asText(payload, "action")
-      if (action === "change_waiting_kind") selected.waitingKind = (payload.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || ""
+      if (action === "change_waiting_kind") {
+        selected.waitingKind = (payload.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || ""
+      }
       if (action === "record_retest_required") {
         selected.levelTestRetakeDecision = (payload.retakeDecision as OpsRegistrationTrackSummary["levelTestRetakeDecision"]) || "required"
         if (selected.levelTestRetakeDecision === "required") selected.status = "inquiry"
       }
-      if (action === "move_to_enrollment") selected.status = "enrollment_decided"
-      if (action === "close_not_registered") selected.status = "not_registered"
+      if (action === "move_to_enrollment") {
+        selected.status = "enrollment_decided"
+        selected.waitingKind = ""
+      }
+      if (action === "close_not_registered") {
+        selected.status = "not_registered"
+        selected.waitingKind = ""
+      }
+      reconcileFixtureCurrentClassWait(state, detail, selected, selected.waitingKind, asText(payload, "classId"))
       selected.stageEnteredAt = FIXTURE_NOW
       syncCase(state, detail)
       result = transitionResult(selected)
@@ -2021,8 +2170,15 @@ export function reduceRegistrationSubjectTrackFixture(
     case "routeRegistrationEnrollmentDecision": {
       const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
       const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
+      detail.enrollments.forEach((item) => {
+        if (item.trackId !== selected.id || item.admissionBatchId || item.status !== "planned") return
+        item.status = "canceled"
+        item.rosterActive = false
+        item.updatedAt = FIXTURE_NOW
+      })
       selected.status = payload.destination as OpsRegistrationTrackStatus
       selected.waitingKind = selected.status === "waiting" ? (payload.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || "" : ""
+      reconcileFixtureCurrentClassWait(state, detail, selected, selected.waitingKind, asText(payload, "classId"))
       selected.stageEnteredAt = FIXTURE_NOW
       syncCase(state, detail)
       result = transitionResult(selected)
@@ -2057,6 +2213,7 @@ export function reduceRegistrationSubjectTrackFixture(
       selectedEnrollment.updatedAt = FIXTURE_NOW
       if (payload.destination) selectedTrack.status = payload.destination as OpsRegistrationTrackStatus
       selectedTrack.waitingKind = selectedTrack.status === "waiting" ? (payload.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || "" : ""
+      reconcileFixtureCurrentClassWait(state, detail, selectedTrack, selectedTrack.waitingKind, asText(payload, "classId"))
       syncCase(state, detail)
       result = { applied: true, enrollment: selectedEnrollment, track: selectedTrack }
       break
@@ -2101,12 +2258,19 @@ export function reduceRegistrationSubjectTrackFixture(
       selectedBatch.status = "canceled"
       selectedBatch.updatedAt = FIXTURE_NOW
       const selectedEnrollments = detail.enrollments.filter((item) => item.admissionBatchId === selectedBatch.id)
-      selectedEnrollments.forEach((item) => { item.admissionBatchId = null; item.updatedAt = FIXTURE_NOW })
+      selectedEnrollments.forEach((item) => {
+        item.status = "canceled"
+        item.rosterActive = false
+        item.updatedAt = FIXTURE_NOW
+      })
       for (const resolution of (payload.resolutions as Array<Record<string, unknown>> || [])) {
         const selectedTrack = detail.tracks.find((item) => item.id === resolution.trackId)
         if (!selectedTrack) continue
         selectedTrack.status = resolution.destination as OpsRegistrationTrackStatus
-        selectedTrack.waitingKind = (resolution.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || ""
+        selectedTrack.waitingKind = selectedTrack.status === "waiting"
+          ? (resolution.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || ""
+          : ""
+        reconcileFixtureCurrentClassWait(state, detail, selectedTrack, selectedTrack.waitingKind, asText(resolution, "classId"))
       }
       syncCase(state, detail)
       result = { applied: true, batch: selectedBatch, enrollments: selectedEnrollments }
@@ -2142,6 +2306,13 @@ export function reduceRegistrationSubjectTrackFixture(
         item.waitingKind = item.status === "waiting"
           ? (nextState?.waitingKind as OpsRegistrationTrackSummary["waitingKind"]) || ""
           : ""
+        reconcileFixtureCurrentClassWait(
+          state,
+          detail,
+          item,
+          item.waitingKind,
+          nextState ? asText(nextState, "classId") : "",
+        )
         item.stageEnteredAt = FIXTURE_NOW
         if (
           item.status === "consultation_waiting"
@@ -2167,6 +2338,72 @@ export function reduceRegistrationSubjectTrackFixture(
       detail.migrationLegacy = null
       syncCase(state, detail)
       result = { taskId, tracks: detail.tracks }
+      break
+    }
+    case "reopenRegistrationTrack": {
+      const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
+      const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
+      const destination = asText(payload, "destination")
+      const reason = asText(payload, "reason").trim()
+      if (!reason) throw new Error("registration_reopen_reason_required")
+      if (!(["inquiry", "consultation_waiting"] as string[]).includes(destination)) {
+        throw new Error("registration_reopen_destination_invalid")
+      }
+      if (!["not_registered", "inquiry_closed"].includes(selected.status) || selected.migrationReviewRequired) {
+        throw new Error("registration_invalid_source_state")
+      }
+      const hasOpenAdmissionBatch = detail.enrollments.some((item) => {
+        if (item.trackId !== selected.id || !item.admissionBatchId) return false
+        const admissionBatch = detail.admissionBatches.find((batchItem) => batchItem.id === item.admissionBatchId)
+        return Boolean(admissionBatch && !["completed", "canceled"].includes(admissionBatch.status))
+      })
+      if (hasOpenAdmissionBatch) throw new Error("registration_open_admission_batch")
+
+      const source = selected.status
+      let consultationId: string | null = null
+      if (destination === "consultation_waiting") {
+        if (!selected.directorProfileId) throw new Error("registration_director_refresh_required")
+        if (detail.consultations.some((item) => item.trackId === selected.id && ["waiting", "scheduled"].includes(item.status))) {
+          throw new Error("registration_active_consultation_conflict")
+        }
+        consultationId = nextId(state, "consultation")
+        detail.consultations.push({
+          id: consultationId,
+          trackId: selected.id,
+          appointmentId: null,
+          mode: "phone",
+          status: "waiting",
+          directorProfileId: selected.directorProfileId,
+          readyAt: FIXTURE_NOW,
+          readySource: "track_reopened",
+          completedAt: null,
+          outcome: null,
+          createdAt: FIXTURE_NOW,
+          updatedAt: FIXTURE_NOW,
+        })
+      }
+
+      selected.status = destination as OpsRegistrationTrackStatus
+      selected.waitingKind = ""
+      selected.levelTestRetakeDecision = ""
+      selected.migrationReviewRequired = false
+      selected.stageEnteredAt = FIXTURE_NOW
+      detail.events.push(createFixtureTrackEvent(state, {
+        taskId: detail.task.id,
+        trackId: selected.id,
+        eventType: "track_reopened",
+        subject: selected.subject,
+        source,
+        destination,
+        reason,
+        metadata: { consultationId },
+      }))
+      syncCase(state, detail)
+      result = {
+        ...transitionResult(selected),
+        directorProfileId: selected.directorProfileId,
+        consultationId,
+      }
       break
     }
     case "sendRegistrationVisitNotificationTarget": {

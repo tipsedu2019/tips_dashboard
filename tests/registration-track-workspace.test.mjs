@@ -178,6 +178,52 @@ test("same parent tracks can appear in different tabs", async () => {
   );
 });
 
+test("registration search narrows the selected tab by student, phone, subject, director, and place", async () => {
+  const {
+    buildRegistrationTrackListItems,
+    filterRegistrationTrackListItems,
+  } = await loadListAdapter();
+  const tasks = fixtureTasks();
+  tasks[0].registration = {
+    parentPhone: "010-1234-5678",
+    studentPhone: "010-8765-4321",
+  };
+  tasks.push({
+    ...tasks[0],
+    id: "case-visit",
+    studentName: "박방문",
+    registration: {
+      parentPhone: "010-9999-0000",
+      studentPhone: "",
+    },
+    registrationTracks: [{
+      ...tasks[0].registrationTracks[0],
+      id: "math-visit",
+      subject: "수학",
+      status: "visit_consultation_scheduled",
+      directorName: "이상담",
+      visitScheduledAt: "2026-07-20T09:00:00Z",
+      visitPlace: "별관 상담실",
+    }],
+  });
+  const items = buildRegistrationTrackListItems(tasks);
+
+  for (const query of ["김다미", "1234-5678", "영어", "강부희"]) {
+    assert.deepEqual(
+      plain(filterRegistrationTrackListItems(items, "consulting", query).map((item) => item.trackId)),
+      ["eng"],
+      `${query} should find only the matching consultation track`,
+    );
+  }
+  for (const query of ["박방문", "9999-0000", "수학", "이상담", "별관 상담실"]) {
+    assert.deepEqual(
+      plain(filterRegistrationTrackListItems(items, "consulting", query).map((item) => item.trackId)),
+      ["math-visit"],
+      `${query} should find only the matching visit track`,
+    );
+  }
+});
+
 test("phone consultation queue is oldest-first without reordering other tabs", async () => {
   const {
     buildRegistrationTrackListItems,
@@ -234,6 +280,7 @@ test("phone consultation queue is oldest-first without reordering other tabs", a
 
 test("track list renders compact subject-scoped desktop and mobile rows", async () => {
   const source = await readListSource();
+  const identitySource = sourceBetween(source, "function RegistrationTrackIdentity", "function formatStageEnteredAt");
 
   assert.match(source, /export function RegistrationTrackList/);
   assert.match(source, /data-testid="registration-track-desktop-list"/);
@@ -262,6 +309,24 @@ test("track list renders compact subject-scoped desktop and mobile rows", async 
   assert.match(source, /전화상담 대기 ·/);
   assert.match(source, /방문상담 일시/);
   assert.match(source, /방문상담 장소/);
+  assert.match(source, /className="grid min-w-0 gap-2 p-2 lg:hidden"/);
+  assert.match(source, /className="hidden w-full min-w-0 overflow-hidden lg:block"/);
+  assert.doesNotMatch(source, /md:hidden|md:block/);
+  assert.match(identitySource, /flex-wrap/);
+  assert.match(identitySource, /\[overflow-wrap:anywhere\]/);
+  assert.doesNotMatch(identitySource, /truncate/);
+  assert.match(source, /break-words \[overflow-wrap:anywhere\]/);
+});
+
+test("registration summaries wrap long operational values instead of clipping them", async () => {
+  const editorSource = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8");
+  const enrollmentSource = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8");
+  const summarySource = sourceBetween(editorSource, "function RegistrationLevelTestSummary", "const REGISTRATION_DIRECTOR_VISIBLE_STATUSES");
+
+  assert.doesNotMatch(summarySource, /min-w-0 truncate/);
+  assert.match(summarySource, /break-words \[overflow-wrap:anywhere\]/);
+  assert.doesNotMatch(enrollmentSource, /className="min-w-0 flex-1 truncate">\{classItem\?\.label/);
+  assert.match(enrollmentSource, /className="min-w-0 flex-1 break-words \[overflow-wrap:anywhere\]"/);
 });
 
 test("selected visit consultation card shows the canonical appointment time and place", async () => {
@@ -305,10 +370,17 @@ test("list permissions are summary hints and every callback remains subject-scop
   assert.match(source, /onOpen\(item\.taskId, item\.trackId\)/);
   assert.match(source, /onEdit\(item\.taskId, item\.trackId\)/);
   assert.match(source, /onAction\(item\.taskId, item\.trackId, "complete_consultation"\)/);
-  assert.match(source, /`\[\$\{item\.subject\}\] \$\{consultationActionLabel\}`/);
+  assert.match(source, /`\[\$\{item\.subject\}\] \$\{item\.studentName\} \$\{consultationActionLabel\}`/);
   assert.match(source, /strict detail permission/i);
   assert.doesNotMatch(source, /getRegistrationActionPermissions/);
   assert.doesNotMatch(source, /\.consultations/);
+  assert.match(
+    source,
+    /permissions\.canManage[\s\S]*?onEdit\(item\.taskId, item\.trackId\)[\s\S]*?:[\s\S]*?onOpen\(item\.taskId, item\.trackId\)/,
+    "one contextual open action should replace duplicate detail and management buttons",
+  );
+  assert.match(source, /aria-label=\{`\[\$\{item\.subject\}\] \$\{item\.studentName\} \$\{managementActionLabel\}`\}/);
+  assert.match(source, /aria-label=\{`\[\$\{item\.subject\}\] \$\{item\.studentName\} \$\{consultationActionLabel\}`\}/);
 });
 
 test("workspace derives tab counts from every track before filtering the selected view", async () => {
@@ -320,7 +392,7 @@ test("workspace derives tab counts from every track before filtering the selecte
   assert.match(source, /const registrationTrackItems = useMemo/);
   assert.match(source, /getRegistrationTrackTabCounts\(registrationTrackItems\.map\(\(item\) => item\.track\)\)/);
   assert.match(source, /const visibleRegistrationTrackItems = useMemo/);
-  assert.match(source, /filterRegistrationTrackListItems\(registrationTrackItems, registrationView\)/);
+  assert.match(source, /filterRegistrationTrackListItems\(registrationTrackItems, registrationView, deferredQuery\)/);
   assert.match(source, /<RegistrationTrackList/);
   assert.match(source, /items=\{visibleRegistrationTrackItems\}/);
   assert.match(source, /viewerId=\{registrationViewerId\}/);
@@ -329,6 +401,13 @@ test("workspace derives tab counts from every track before filtering the selecte
   assert.doesNotMatch(source, /isRegistrationPipelineInView/);
   assert.match(source, /const visibleWorkspaceItemCount = isRegistrationWorkspace[\s\S]*?visibleRegistrationTrackItems\.length/);
   assert.match(source, /shouldHideEmptySurface = !loading && visibleWorkspaceItemCount === 0/);
+  assert.match(source, /const registrationEmptyLabel = hasQuery[\s\S]*?현재 단계에서 검색 결과가 없습니다\./);
+  assert.match(source, /등록 업무가 없습니다\./);
+  assert.match(source, /emptyLabel=\{registrationEmptyLabel\}/);
+  assert.match(
+    source,
+    /loading \? \(\s*isRegistrationWorkspace \? \([\s\S]*?등록 업무를 불러오는 중입니다\./,
+  );
 });
 
 test("registration deep links preserve task, track, and appointment ids and clear them on close", async () => {
@@ -553,6 +632,14 @@ test("operational detail omits the internal subject event log", async () => {
   assert.doesNotMatch(source, /과목별 진행 이력/)
 })
 
+test("대기 상세는 저장된 현재반 claim을 수업 선택값으로 다시 연다", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  assert.match(source, /getRegistrationCurrentClassWaitClassId/)
+  assert.match(source, /currentClassWaitClassId=\{selectedCurrentClassWaitClassId\}/)
+  assert.match(source, /useState\(currentClassWaitClassId\)/)
+  assert.match(source, /selectedTrack\.waitingKind[^\n]*detail\.enrollments/)
+})
+
 test("migration review blocks ordinary actions until explicit attribution", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /과목 분리 확인 필요/)
@@ -709,16 +796,52 @@ test("track editor opens one shared editor for level tests and visit consultatio
 
 test("phone and visit consultation completion share the subject outcome dialog", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const dialogSource = sourceBetween(source, "export function RegistrationConsultationOutcomeDialog", "export function RegistrationMigrationReviewEditor")
   assert.match(source, /RegistrationConsultationOutcomeDialog/)
   assert.match(source, /completeRegistrationConsultation/)
   assert.match(source, /consultationId: consultation\.id/)
   assert.match(source, />등록</)
   assert.match(source, />대기</)
   assert.match(source, />미등록 완료</)
+  assert.match(source, /className="grid grid-cols-2 gap-2 sm:grid-cols-3"/)
+  assert.match(source, /className="col-span-2 sm:col-span-1"[\s\S]*?>미등록 완료</)
   assert.match(source, /현재 학기 수강반 대기/)
   assert.match(source, /현재 학기 개강반 대기/)
   assert.match(source, /다음 학기 개강반 대기/)
   assert.doesNotMatch(source, /상담 완료일시/)
+  assert.match(dialogSource, /if \(!nextOpen && \(saving \|\| refreshPending\)\) return/)
+  assert.match(dialogSource, /aria-pressed=\{draft\.outcome === "enrollment"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(dialogSource, /aria-pressed=\{draft\.outcome === "waiting"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(dialogSource, /aria-pressed=\{draft\.outcome === "not_registered"\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(dialogSource, /value=\{draft\.waitingKind\}[\s\S]*?disabled=\{saving\}/)
+  assert.match(dialogSource, /SubjectClassSelect[\s\S]*?disabled=\{saving\}/)
+  assert.match(dialogSource, /saving \? "저장 중" : "상담 결과 저장"/)
+  assert.match(dialogSource, /DialogContent className="max-h-\[calc\(100dvh-1rem\)\] overflow-y-auto sm:max-w-lg"/)
+})
+
+test("registration stage selects have subject-specific accessible names", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const subjectSelectSource = sourceBetween(source, "function SubjectClassSelect(", "function InquiryStageEditor(")
+  const inquirySource = sourceBetween(source, "function InquiryStageEditor(", "function WaitingStageEditor(")
+  const waitingSource = sourceBetween(source, "function WaitingStageEditor(", "function RegistrationTrackStageEditor(")
+  const migrationSource = sourceBetween(source, "export function RegistrationMigrationReviewEditor", "export function RegistrationTrackEditor")
+
+  assert.match(subjectSelectSource, /aria-label=\{`\$\{subject\} 수업 선택`\}/)
+  assert.match(subjectSelectSource, /className="h-9 w-full min-w-0/)
+  assert.match(inquirySource, /aria-label=\{`\$\{track\.subject\} 대기 종류`\}/)
+  assert.match(waitingSource, /aria-label=\{`\$\{track\.subject\} 대기 종류`\}/)
+  assert.match(migrationSource, /aria-label=\{`\$\{track\.subject\} 대기 종류`\}/)
+})
+
+test("appointment editor opens before history and scrolls into view", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const editorSource = source.slice(source.indexOf("export function RegistrationTrackEditor"))
+  assert.match(source, /const appointmentEditorRef = useRef<HTMLDivElement \| null>\(null\)/)
+  assert.match(source, /appointmentEditorRef\.current\?\.scrollIntoView\(\{ block: "nearest", behavior: "smooth" \}\)/)
+  assert.ok(
+    editorSource.indexOf('ref={appointmentEditorRef}') < editorSource.indexOf("<RegistrationHistoryTimeline"),
+    "appointment editor should render before the history timeline",
+  )
 })
 
 test("phone completion does not call the visit reservation notification helper", async () => {
@@ -755,6 +878,18 @@ test("enrollment decision exposes waiting and not-registered before a batch star
   assert.match(source, /미등록 완료/)
   assert.match(source, /current_class/)
   assert.match(source, /reason/)
+})
+
+test("enrollment cancellation selects expose subject-specific accessible names", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  assert.match(source, /aria-label=\{`\$\{track\.subject\} 등록 결정 후 대기 종류`\}/)
+  assert.match(source, /aria-label=\{`\$\{track\.subject\} 등록 결정 후 대기 수업`\}/)
+  assert.match(source, /aria-label=\{`\$\{track\.subject\} 수강 취소 후 단계`\}/)
+  assert.match(source, /aria-label=\{`\$\{track\.subject\} 수강 취소 대기 종류`\}/)
+  assert.match(source, /aria-label=\{`\$\{track\.subject\} 수강 취소 대기 수업`\}/)
+  assert.match(source, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 입학 처리 취소 후 단계`\}/)
+  assert.match(source, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 입학 처리 취소 대기 종류`\}/)
+  assert.match(source, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 입학 처리 취소 대기 수업`\}/)
 })
 
 test("case admission panel selects exact rows and renders the ordered mixed-subject batch checklist", async () => {

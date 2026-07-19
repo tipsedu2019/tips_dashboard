@@ -929,6 +929,49 @@ test("fixture registration create keeps production conditions and follows manage
   assert.match(createGate, /!isTodoWorkspace && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace \|\| !showEmptyCreate\)/);
 });
 
+test("fixture registration stays loading until its runtime adapter is installed", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assertIncludesAll(workspaceSource, [
+    "const registrationFixturePrepared = Boolean(",
+    "const [registrationFixtureRuntimeReady, setRegistrationFixtureRuntimeReady] = useState(false)",
+    "const registrationFixtureTransitioning = registrationFixtureRequested !== registrationFixtureRuntimeReady",
+    "const loading = workspaceLoading || registrationFixtureTransitioning",
+    "if (!registrationFixturePrepared || !registrationFixtureModule || !registrationFixtureStateRef.current)",
+    "setRegistrationFixtureRuntimeReady(true)",
+    "setRegistrationFixtureRuntimeReady(false)",
+  ]);
+});
+
+test("fixture registration withholds every provider token even before its runtime is ready", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assertIncludesAll(workspaceSource, [
+    'const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken',
+    "sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken)",
+    "sessionToken={registrationNotificationSessionToken}",
+    "notificationToken={registrationNotificationSessionToken}",
+    "!registrationFixtureRequested && showLegacyNotificationSettingsLauncher",
+  ]);
+});
+
+test("leaving a registration fixture clears provider retry targets before production resumes", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const fixtureRetryCleanup = workspaceSource.slice(
+    workspaceSource.indexOf("const registrationVisitNotificationRetryGenerationRef"),
+    workspaceSource.indexOf("const withdrawalCreateHandledRef"),
+  );
+
+  assertIncludesAll(fixtureRetryCleanup, [
+    "if (registrationFixtureRequested) return",
+    "registrationVisitNotificationRetryGenerationRef.current += 1",
+    "registrationVisitNotificationRetryInFlightRef.current = false",
+    "setPendingRegistrationVisitNotificationTargets([])",
+    "setRetryingRegistrationVisitNotifications(false)",
+    "[registrationFixtureRequested]",
+  ]);
+});
+
 test("registration exposes six ordered work tabs with separate level-test and consultation track states", async () => {
   const [workspaceSource, trackListSource, trackModelSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
@@ -970,36 +1013,69 @@ test("registration exposes six ordered work tabs with separate level-test and co
   ]);
 });
 
-test("registration process manual opens from an icon beside the tabs without duplicating the workflow inline", async () => {
+test("registration toolbar keeps the workflow self-explanatory with search and refresh instead of a duplicate manual", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const dialogDefinitionStart = workspaceSource.indexOf("function RegistrationProcessManualDialog");
-
-  assert.notEqual(dialogDefinitionStart, -1, "RegistrationProcessManualDialog should exist");
-  const dialogDefinitionEnd = workspaceSource.indexOf("\nfunction ", dialogDefinitionStart + "function RegistrationProcessManualDialog".length);
-  const dialogSource = workspaceSource.slice(
-    dialogDefinitionStart,
-    dialogDefinitionEnd > dialogDefinitionStart ? dialogDefinitionEnd : workspaceSource.length,
-  );
-  assertIncludesAll(dialogSource, [
-    "getRegistrationWorkflowStages()",
-    '<Dialog open={open} onOpenChange={onOpenChange}>',
-    '<DialogTitle>등록 프로세스 &amp; 매뉴얼</DialogTitle>',
-    'aria-label="등록 프로세스 6단계"',
-  ]);
-
-  const registrationTabsRender = workspaceSource.indexOf("? REGISTRATION_VIEW_TABS.map");
-  const manualButtonRender = workspaceSource.indexOf('aria-label="등록 프로세스 & 매뉴얼"', registrationTabsRender);
-  const notificationButtonRender = workspaceSource.indexOf('isRegistrationWorkspace ? "등록 알림 설정"', registrationTabsRender);
-  assert.ok(registrationTabsRender >= 0, "registration top tabs should render");
-  assert.ok(manualButtonRender > registrationTabsRender, "process manual icon should render beside the registration tabs");
-  assert.ok(manualButtonRender < notificationButtonRender, "process manual icon should render before notification settings");
+  assert.doesNotMatch(workspaceSource, /RegistrationProcessManualDialog/);
+  assert.doesNotMatch(workspaceSource, /registrationProcessManualOpen/i);
+  assert.doesNotMatch(workspaceSource, /등록 프로세스 & 매뉴얼/);
+  assert.doesNotMatch(workspaceSource, /BookOpenCheck/);
   assert.doesNotMatch(workspaceSource, /RegistrationWorkflowChart|registration-workflow-chart|등록 업무 6단계/);
   assert.doesNotMatch(workspaceSource, /aria-label="학년 필터"|allLabel="학년 전체"|selectedGradeFilter|appliedGradeFilter/);
+  assert.match(workspaceSource, /const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query\.trim\(\)\.length > 0/);
+  assert.match(workspaceSource, /const showSearch = isRegistrationWorkspace\s*\? registrationMode === "list"\s*:/);
+  assert.match(workspaceSource, /filterRegistrationTrackListItems\(registrationTrackItems, registrationView, deferredQuery\)/);
+  assert.match(workspaceSource, /isRegistrationWorkspace[\s\S]*?aria-label="새로고침"/);
+  assert.match(workspaceSource, /setRegistrationCalendarRefreshToken\(\(current\) => current \+ 1\)/);
+  assert.match(workspaceSource, /isRegistrationWorkspace \? "w-full !flex-nowrap !overflow-x-auto lg:flex-1"/);
+});
 
-  assert.doesNotMatch(
-    workspaceSource,
-    /\{isRegistrationWorkspace && \(\s*<Button[\s\S]{0,500}onClick=\{\(\) => void reload/,
+test("closing a registration form clears validation feedback before returning to the list", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const closeFormSource = source.slice(
+    source.indexOf("  function closeForm()"),
+    source.indexOf("  function cancelFormCloseConfirmation", source.indexOf("  function closeForm()")),
   );
+
+  assert.match(closeFormSource, /function closeForm\(\)[\s\S]*?setMessage\(""\)/);
+  assert.match(closeFormSource, /function discardFormAndClose\(\)[\s\S]*?setMessage\(""\)/);
+  assert.match(closeFormSource, /setFormCompletionBlockers\(\[\]\)/);
+});
+
+test("canonical registration detail shows a retry state instead of a permanent loading message after failure", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  assert.match(source, /const \[registrationDetailLoadError, setRegistrationDetailLoadError\] = useState\(""\)/);
+  assert.match(
+    source,
+    /const isCanonicalRegistrationTrackDetail = Boolean\([\s\S]*?selectedRegistrationAppointmentId/,
+    "calendar appointment loads must stay on the canonical detail surface before a track is resolved",
+  );
+  assert.match(source, /setRegistrationDetailLoadError\(""\)[\s\S]*?loadRegistrationCaseForWorkspace/);
+  assert.match(source, /setRegistrationDetailLoadError\("선택한 과목 상세를 불러오지 못했습니다\."\)/);
+  assert.match(source, /setRegistrationDetailLoadError\("등록 예약 상세를 불러오지 못했습니다\."\)/);
+  assert.match(source, /registrationDetailLoadError \? \([\s\S]*?등록 상세 다시 시도/);
+  assert.match(source, /등록 상세 다시 시도[\s\S]*?openRegistrationTrack/);
+  assert.match(source, /등록 상세 다시 시도[\s\S]*?openRegistrationAppointment/);
+});
+
+test("registration list and calendar navigation clear stale detail notices", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const modeSource = source.slice(
+    source.indexOf("  const syncRegistrationMode"),
+    source.indexOf("  function handleRegistrationViewTabKeyDown"),
+  );
+  const editSource = source.slice(
+    source.indexOf("  const editRegistrationTrack"),
+    source.indexOf("  const openRegistrationAppointment"),
+  );
+  const appointmentSource = source.slice(
+    source.indexOf("  const openRegistrationAppointment"),
+    source.indexOf("  const openRegistrationCalendarItem"),
+  );
+
+  assert.match(modeSource, /setNotice\(""\)/);
+  assert.match(appointmentSource, /setNotice\(""\)/);
+  assert.doesNotMatch(editSource, /과목별 상세를 확인하세요/);
+  assert.doesNotMatch(source, /상담 결과 입력을 계속 진행하세요/);
 });
 
 test("registration keeps the result URL only in canonical completion and detail surfaces", async () => {
@@ -1058,7 +1134,7 @@ test("등록 예약 달력은 목록 흐름과 분리되고 정확한 예약 딥
   );
   assert.match(
     workspaceSource,
-    /catch(?: \(error\))? \{[\s\S]*?selectionKey[\s\S]*?setMessage\("등록 예약 상세를 불러오지 못했습니다\. 달력을 다시 불러오세요\."\)/,
+    /catch(?: \(error\))? \{[\s\S]*?selectionKey[\s\S]*?setRegistrationDetailLoadError\("등록 예약 상세를 불러오지 못했습니다\."\)/,
     "예약 상세 실패는 내부 오류 문자열을 사용자에게 그대로 노출하면 안 됩니다.",
   );
 
@@ -1781,7 +1857,7 @@ test("registration subject tracks split combined inquiries and preserve subjects
 
   assertIncludesAll(workspaceSource, [
     "buildRegistrationTrackListItems(scopedTasks)",
-    "filterRegistrationTrackListItems(registrationTrackItems, registrationView)",
+    "filterRegistrationTrackListItems(registrationTrackItems, registrationView, deferredQuery)",
     'form.type !== "registration" || !form.subject',
   ]);
   assertIncludesAll(trackListSource, [
@@ -1846,15 +1922,14 @@ test("registration resolves and edits directors per subject in the canonical ini
   assert.doesNotMatch(workspaceSource, /function handleRegistrationCounselorChange/);
 });
 
-test("shared operation form actions sit flush below content instead of floating over fields", async () => {
+test("registration form actions remain in normal flow and wrap safely on narrow screens", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const start = source.indexOf('"-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4');
-  const end = source.indexOf("</form>", start);
-  const actionBarSource = source.slice(start, end);
-
-  assert.ok(start >= 0, "shared operation action bar should exist");
-  assert.match(actionBarSource, /-mx-6 -mb-6/);
-  assert.doesNotMatch(actionBarSource, /sticky bottom-0|backdrop-blur/);
+  assert.match(source, /const formActionBarClassName = "-mx-6 -mb-6[^"\n]*"/);
+  assert.match(source, /className=\{formActionBarClassName\}/);
+  assert.doesNotMatch(source, /form\.type === "registration" \? "sticky bottom-0/);
+  assert.match(source, /form\.type === "registration" \? "scroll-pb-24 sm:max-w-4xl" : "scroll-pb-24"/);
+  assert.match(source, /form\.type === "registration" \? "h-auto min-h-9 whitespace-normal" : ""/);
+  assert.match(source, /form\.type === "registration" \? "break-words text-center leading-tight" : "truncate"/);
 });
 
 test("operation class options query the canonical fee schema before legacy tuition fallbacks", async () => {

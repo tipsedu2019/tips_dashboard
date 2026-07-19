@@ -44,6 +44,12 @@ export type RegistrationSubjectTrackFixtureDebugReplay = {
   afterCounts: RegistrationSubjectTrackFixtureDebugCounts
 }
 
+export type RegistrationSubjectTrackFixtureDebugActionBehavior = {
+  type: string
+  delayMs?: number
+  error?: string
+}
+
 export type RegistrationSubjectTrackFixtureAdapter = {
   readonly intakeWorkflowRuntimeVersion: number
   executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => Promise<T>
@@ -56,6 +62,7 @@ export type RegistrationSubjectTrackFixtureAdapter = {
   loadClassDetails: (classIds: string[]) => Promise<Record<string, OpsRegistrationClassDetail>>
   debugSnapshot?: () => RegistrationSubjectTrackFixtureDebugSnapshot
   debugReplayLastCreate?: () => Promise<RegistrationSubjectTrackFixtureDebugReplay>
+  debugSetNextActionBehavior?: (behavior: RegistrationSubjectTrackFixtureDebugActionBehavior) => void
 }
 
 const activeFixtureAdapters: RegistrationSubjectTrackFixtureAdapter[] = []
@@ -64,6 +71,14 @@ let debugBridgeInstalled = false
 
 function getActiveFixtureAdapter() {
   return activeFixtureAdapters[activeFixtureAdapters.length - 1] || null
+}
+
+function isRegistrationSubjectTrackFixtureUrlActive() {
+  if (typeof window === "undefined") return false
+  return shouldEnableRegistrationSubjectTrackFixture(
+    typeof process === "undefined" ? undefined : process.env.NODE_ENV,
+    new URLSearchParams(window.location.search).get("fixture"),
+  )
 }
 
 const fixtureDebugBridge = {
@@ -76,6 +91,11 @@ const fixtureDebugBridge = {
     const adapter = getActiveFixtureAdapter()
     if (!adapter?.debugReplayLastCreate) throw new Error("registration_subject_track_fixture_debug_unavailable")
     return adapter.debugReplayLastCreate()
+  },
+  setNextActionBehavior(behavior: RegistrationSubjectTrackFixtureDebugActionBehavior) {
+    const adapter = getActiveFixtureAdapter()
+    if (!adapter?.debugSetNextActionBehavior) throw new Error("registration_subject_track_fixture_debug_unavailable")
+    adapter.debugSetNextActionBehavior(behavior)
   },
 }
 
@@ -136,7 +156,13 @@ export function executeRegistrationSubjectTrackFixtureAction<T = unknown>(
   type: string,
   payload: Record<string, unknown> = {},
 ): Promise<T> | null {
-  return getActiveFixtureAdapter()?.executeAction<T>(type, payload) || null
+  if (typeof window !== "undefined" && !isRegistrationSubjectTrackFixtureUrlActive()) return null
+  const adapter = getActiveFixtureAdapter()
+  if (adapter) return adapter.executeAction<T>(type, payload)
+  if (isRegistrationSubjectTrackFixtureUrlActive()) {
+    return Promise.reject(new Error("registration_subject_track_fixture_runtime_not_ready"))
+  }
+  return null
 }
 
 export function loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion(): number | null {

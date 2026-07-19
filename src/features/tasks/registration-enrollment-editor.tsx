@@ -534,12 +534,12 @@ export function RegistrationEnrollmentEditor({
             </div>
             {decisionDestination === "waiting" ? (
               <div className="grid gap-2 sm:grid-cols-2">
-                <select className="h-9 rounded-md border bg-background px-3 text-sm" value={decisionWaitingKind} onChange={(event) => setDecisionWaitingKind(event.target.value as RegistrationWaitingKind)}>
+                <select aria-label={`${track.subject} 등록 결정 후 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={decisionWaitingKind} onChange={(event) => setDecisionWaitingKind(event.target.value as RegistrationWaitingKind)}>
                   <option value="">대기 종류 선택</option>
                   {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
                 {decisionWaitingKind === "current_class" ? (
-                  <select className="h-9 rounded-md border bg-background px-3 text-sm" value={decisionClassId} onChange={(event) => setDecisionClassId(event.target.value)}>
+                  <select aria-label={`${track.subject} 등록 결정 후 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={decisionClassId} onChange={(event) => setDecisionClassId(event.target.value)}>
                     <option value="">대기 수업 선택</option>
                     {subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}
                   </select>
@@ -581,7 +581,7 @@ export function RegistrationEnrollmentEditor({
           <h4 className="text-sm font-semibold">수강 취소</h4>
           <Textarea value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="취소 사유" />
           {selectedEnrollmentCancellation.requiresDestination ? (
-            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={cancelDestination} onChange={(event) => setCancelDestination(event.target.value as typeof cancelDestination)}>
+            <select aria-label={`${track.subject} 수강 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestination} onChange={(event) => setCancelDestination(event.target.value as typeof cancelDestination)}>
               <option value="">취소 후 단계 선택</option>
               <option value="enrollment_decided">등록 결정으로 이동</option>
               <option value="waiting">대기로 이동</option>
@@ -590,12 +590,12 @@ export function RegistrationEnrollmentEditor({
           ) : null}
           {selectedEnrollmentCancellation.requiresDestination && cancelDestination === "waiting" ? (
             <div className="grid gap-2 sm:grid-cols-2">
-              <select className="h-9 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKind} onChange={(event) => setCancelWaitingKind(event.target.value as RegistrationWaitingKind)}>
+              <select aria-label={`${track.subject} 수강 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKind} onChange={(event) => setCancelWaitingKind(event.target.value as RegistrationWaitingKind)}>
                 <option value="">대기 종류 선택</option>
                 {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               {cancelWaitingKind === "current_class" ? (
-                <select className="h-9 rounded-md border bg-background px-3 text-sm" value={cancelClassId} onChange={(event) => setCancelClassId(event.target.value)}>
+                <select aria-label={`${track.subject} 수강 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassId} onChange={(event) => setCancelClassId(event.target.value)}>
                   <option value="">대기 수업 선택</option>
                   {subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}
                 </select>
@@ -939,7 +939,7 @@ export function RegistrationAdmissionPanel({
                   return next
                 })} disabled={Boolean(busyAction)} /> : null}
                 <Badge variant="outline">{track?.subject || "과목"}</Badge>
-                <span className="min-w-0 flex-1 truncate">{classItem?.label || enrollment.classId}</span>
+                <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{classItem?.label || enrollment.classId}</span>
               </label>
             )
           }) : <p className="text-sm text-muted-foreground">입학 처리할 저장된 수업이 없습니다.</p>}
@@ -1002,18 +1002,18 @@ export function RegistrationAdmissionPanel({
                     <span className="text-sm font-medium">{track?.subject || "과목"}</span>
                     {isFirstAdmission ? (
                       <>
-                        <select className="h-9 rounded-md border bg-background px-3 text-sm" value={cancelDestinations[trackId] || ""} onChange={(event) => setCancelDestinations((current) => ({ ...current, [trackId]: event.target.value as "" | "waiting" | "not_registered" }))}>
+                        <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestinations[trackId] || ""} onChange={(event) => setCancelDestinations((current) => ({ ...current, [trackId]: event.target.value as "" | "waiting" | "not_registered" }))}>
                           <option value="">취소 후 단계 선택</option>
                           <option value="not_registered">미등록 완료</option>
                           <option value="waiting">대기로 이동</option>
                         </select>
                         {cancelDestinations[trackId] === "waiting" ? (
                           <div className="grid gap-2">
-                            <select className="h-9 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKinds[trackId] || ""} onChange={(event) => setCancelWaitingKinds((current) => ({ ...current, [trackId]: event.target.value as RegistrationWaitingKind }))}>
+                            <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKinds[trackId] || ""} onChange={(event) => setCancelWaitingKinds((current) => ({ ...current, [trackId]: event.target.value as RegistrationWaitingKind }))}>
                               <option value="">대기 종류 선택</option>
                               {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </select>
-                            {cancelWaitingKinds[trackId] === "current_class" ? <select className="h-9 rounded-md border bg-background px-3 text-sm" value={cancelClassIds[trackId] || ""} onChange={(event) => setCancelClassIds((current) => ({ ...current, [trackId]: event.target.value }))}><option value="">대기 수업 선택</option>{subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}</select> : null}
+                            {cancelWaitingKinds[trackId] === "current_class" ? <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassIds[trackId] || ""} onChange={(event) => setCancelClassIds((current) => ({ ...current, [trackId]: event.target.value }))}><option value="">대기 수업 선택</option>{subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}</select> : null}
                           </div>
                         ) : <span />}
                       </>

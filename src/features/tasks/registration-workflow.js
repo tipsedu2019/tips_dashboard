@@ -391,6 +391,7 @@ export function getRegistrationPersistenceErrorMessage(error, fallback = "저장
   if (message.includes("registration_director_required") || message.includes("registration_director_override_invalid")) return "상담 책임자를 지정해 주세요.";
   if (message.includes("registration_persistence_mode_changed")) return "등록 저장 환경이 변경되었습니다. 창을 닫고 최신 상태에서 다시 등록해 주세요.";
   if (message.includes("registration_legacy_create_outcome_unknown")) return "이전 저장 결과를 확인해야 합니다. 목록을 새로고침해 중복 등록 여부를 확인해 주세요.";
+  if (message.includes("registration_fixture_forced_failure")) return "등록을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.";
   if (message.includes("idempotency_key_reused")) return "입력 내용이 변경되었습니다. 다시 저장해 주세요.";
   return fallback;
 }

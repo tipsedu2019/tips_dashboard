@@ -207,6 +207,10 @@ test("R09e registration persistence failures use operator-facing guidance", () =
     getRegistrationPersistenceErrorMessage({ message: "registration_legacy_create_outcome_unknown" }),
     "이전 저장 결과를 확인해야 합니다. 목록을 새로고침해 중복 등록 여부를 확인해 주세요.",
   );
+  assert.equal(
+    getRegistrationPersistenceErrorMessage({ message: "registration_fixture_forced_failure" }),
+    "등록을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+  );
 });
 
 test("R10 grade choices cover every school grade without a stale year prefix", () => {

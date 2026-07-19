@@ -193,6 +193,17 @@ export type RegistrationEnrollmentDraft = {
   rosterReleaseKind?: "withdrawal" | "transfer" | null
 }
 
+export function getRegistrationCurrentClassWaitClassId(input?: {
+  trackId?: string | null
+  waitingKind?: string | null
+  enrollments?: readonly {
+    trackId?: string | null
+    classId?: string | null
+    status?: "planned" | "waitlisted" | "enrolled" | "canceled" | null
+    rosterActive?: boolean | null
+  }[]
+}): string
+
 export type RegistrationEnrollmentSerializedRow = {
   id?: string
   classId: string
