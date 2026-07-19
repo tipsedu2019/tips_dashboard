@@ -31,7 +31,10 @@ import {
   type RegistrationEnrollmentDraft,
 } from "./registration-track-model.js"
 import { getSelectableRegistrationScheduleSessions } from "./registration-workflow"
-import type { RegistrationEnrollmentDirtyScope as RegistrationEnrollmentDirtyScopeModel } from "./registration-application-model"
+import {
+  reconcileRegistrationEnrollmentDraft,
+  type RegistrationEnrollmentDirtyScope as RegistrationEnrollmentDirtyScopeModel,
+} from "./registration-application-model"
 import {
   advanceRegistrationAdmissionBatch,
   cancelRegistrationAdmissionBatch,
@@ -59,6 +62,7 @@ export type RegistrationEnrollmentDirtyScope = RegistrationEnrollmentDirtyScopeM
 type PersistedRegistrationEnrollmentDraft = {
   rows: RegistrationEnrollmentDraft[]
   baseline: string
+  canonicalKey: string
 }
 
 const persistedRegistrationEnrollmentDrafts = new Map<string, PersistedRegistrationEnrollmentDraft>()
@@ -198,16 +202,23 @@ export function RegistrationEnrollmentEditor({
     () => enrollments.filter((enrollment) => enrollment.trackId === track.id),
     [enrollments, track.id],
   )
+  const canonicalEnrollmentKey = useMemo(() => JSON.stringify({
+    trackStatus: track.status,
+    enrollments: [...trackEnrollments].sort((left, right) => left.id.localeCompare(right.id)),
+  }), [track.status, trackEnrollments])
+  const canonicalDraftRows = useMemo(() => {
+    const mutableRows = trackEnrollments.filter(isMutableDraft)
+    return mutableRows.length > 0
+      ? mutableRows.map(toDraft)
+      : track.status === "enrollment_decided"
+        ? [createRegistrationEnrollmentDraft({ clientKey: `enrollment-row:${taskId}:${track.id}` })]
+        : []
+  }, [taskId, track.id, track.status, trackEnrollments])
   const enrollmentDraftScopeKey = `${taskId}:${track.id}`
   const cachedEnrollmentDraft = persistedRegistrationEnrollmentDrafts.get(enrollmentDraftScopeKey)
   const [draftRows, setDraftRows] = useState<RegistrationEnrollmentDraft[]>(() => {
     if (cachedEnrollmentDraft) return cachedEnrollmentDraft.rows.map((row) => ({ ...row }))
-    const initialMutableRows = trackEnrollments.filter(isMutableDraft)
-    return initialMutableRows.length > 0
-      ? initialMutableRows.map(toDraft)
-      : track.status === "enrollment_decided"
-        ? [createRegistrationEnrollmentDraft({ clientKey: createRegistrationMutationRequestKey("enrollment-row", `${taskId}:${track.id}`) })]
-        : []
+    return canonicalDraftRows
   })
   const [classDetailById, setClassDetailById] = useState<Record<string, OpsRegistrationClassDetail | null>>({})
   const [loadingClassIds, setLoadingClassIds] = useState<Set<string>>(() => new Set())
@@ -230,6 +241,7 @@ export function RegistrationEnrollmentEditor({
   const [cancellationValidationError, setCancellationValidationError] = useState("")
   const sectionRef = useRef<HTMLElement | null>(null)
   const initialDraftRowsRef = useRef(cachedEnrollmentDraft?.baseline || JSON.stringify(draftRows))
+  const canonicalKeyRef = useRef(cachedEnrollmentDraft?.canonicalKey || canonicalEnrollmentKey)
   const submissionKeys = useSubmissionKeys()
   const subjectClasses = useMemo(
     () => classes.filter((classItem) => classItem.subject.trim() === track.subject),
@@ -260,6 +272,20 @@ export function RegistrationEnrollmentEditor({
   useScopedDirtyState({ kind: "decision" }, !decisionRefreshPending && decisionDirty, onDirtyChange)
   useScopedDirtyState(cancellationScope, !cancellationRefreshPending && cancellationDirty, onDirtyChange)
   useEffect(() => {
+    setDraftRows((current) => {
+      const reconciled = reconcileRegistrationEnrollmentDraft({
+        currentDraft: current,
+        currentBaseline: initialDraftRowsRef.current,
+        previousCanonicalKey: canonicalKeyRef.current,
+        nextCanonicalKey: canonicalEnrollmentKey,
+        nextCanonicalDraft: canonicalDraftRows,
+      })
+      initialDraftRowsRef.current = reconciled.baseline
+      canonicalKeyRef.current = reconciled.canonicalKey
+      return reconciled.draft
+    })
+  }, [canonicalDraftRows, canonicalEnrollmentKey, draftRows])
+  useEffect(() => {
     if (!rowsDirty) {
       persistedRegistrationEnrollmentDrafts.delete(enrollmentDraftScopeKey)
       return
@@ -267,6 +293,7 @@ export function RegistrationEnrollmentEditor({
     persistedRegistrationEnrollmentDrafts.set(enrollmentDraftScopeKey, {
       rows: draftRows.map((row) => ({ ...row })),
       baseline: initialDraftRowsRef.current,
+      canonicalKey: canonicalKeyRef.current,
     })
   }, [draftRows, enrollmentDraftScopeKey, rowsDirty])
 

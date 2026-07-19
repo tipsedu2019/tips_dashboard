@@ -14,8 +14,11 @@ const {
   getRegistrationCreateSectionStates,
   getRegistrationCommonConflictRows,
   getRegistrationEnrollmentDirtyKey,
+  beginRegistrationConflictComparison,
   isRegistrationApplicationSectionContentDisabled,
+  reconcileRegistrationEnrollmentDraft,
   reconcileRegistrationEditorDraft,
+  settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
 } = application
 
@@ -372,4 +375,69 @@ test("enrollment row, decision, and cancellation drafts keep independent stable 
   assert.equal(decisionKey, "placement:decision-track123")
   assert.equal(cancellationKey, "placement:cancellation-track123-enrollment456")
   assert.deepEqual([...dirty], [rowsKey, cancellationKey])
+})
+
+test("clean enrollment rows adopt a newer canonical revision while dirty rows survive it", () => {
+  const cleanRows = [{ clientKey: "enrollment-1", status: "planned", classId: "class-old" }]
+  const latestRows = []
+  const cleanResult = reconcileRegistrationEnrollmentDraft({
+    currentDraft: cleanRows,
+    currentBaseline: JSON.stringify(cleanRows),
+    previousCanonicalKey: "enrollments-v1",
+    nextCanonicalKey: "enrollments-v2",
+    nextCanonicalDraft: latestRows,
+  })
+
+  assert.deepEqual(cleanResult, {
+    draft: latestRows,
+    baseline: JSON.stringify(latestRows),
+    canonicalKey: "enrollments-v2",
+  })
+
+  const dirtyRows = [{ clientKey: "enrollment-1", status: "planned", classId: "class-local" }]
+  const dirtyResult = reconcileRegistrationEnrollmentDraft({
+    currentDraft: dirtyRows,
+    currentBaseline: JSON.stringify(cleanRows),
+    previousCanonicalKey: "enrollments-v1",
+    nextCanonicalKey: "enrollments-v2",
+    nextCanonicalDraft: latestRows,
+  })
+
+  assert.equal(dirtyResult.draft, dirtyRows)
+  assert.equal(dirtyResult.baseline, JSON.stringify(cleanRows))
+  assert.equal(dirtyResult.canonicalKey, "enrollments-v1")
+
+  const afterLocalRevert = reconcileRegistrationEnrollmentDraft({
+    currentDraft: cleanRows,
+    currentBaseline: JSON.stringify(cleanRows),
+    previousCanonicalKey: dirtyResult.canonicalKey,
+    nextCanonicalKey: "enrollments-v2",
+    nextCanonicalDraft: latestRows,
+  })
+  assert.deepEqual(afterLocalRevert.draft, latestRows)
+  assert.equal(afterLocalRevert.canonicalKey, "enrollments-v2")
+})
+
+test("a conflict attempt remains available until a refresh actually succeeds", () => {
+  const attempted = { profileId: "director-local", label: "내 선택" }
+  const begun = beginRegistrationConflictComparison(attempted)
+
+  assert.deepEqual(begun, {
+    attempted,
+    latestReady: false,
+    refreshError: "",
+  })
+
+  const failed = settleRegistrationConflictComparison(begun, {
+    succeeded: false,
+    error: "최신 정보를 불러오지 못했습니다.",
+  })
+  assert.equal(failed.attempted, attempted)
+  assert.equal(failed.latestReady, false)
+  assert.equal(failed.refreshError, "최신 정보를 불러오지 못했습니다.")
+
+  const retried = settleRegistrationConflictComparison(failed, { succeeded: true })
+  assert.equal(retried.attempted, attempted)
+  assert.equal(retried.latestReady, true)
+  assert.equal(retried.refreshError, "")
 })

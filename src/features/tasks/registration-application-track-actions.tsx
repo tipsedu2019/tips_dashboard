@@ -9,7 +9,13 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
 import type { OpsClassOption, OpsProfileOption, OpsTask, OpsTeacherOption, OpsTextbookOption } from "./ops-task-service"
-import { getRegistrationCommonConflictRows, reconcileRegistrationEditorDraft } from "./registration-application-model"
+import {
+  beginRegistrationConflictComparison,
+  getRegistrationCommonConflictRows,
+  reconcileRegistrationEditorDraft,
+  settleRegistrationConflictComparison,
+  type RegistrationConflictComparison,
+} from "./registration-application-model"
 import {
   advanceRegistrationAutomaticSavingGeneration,
   resolveRegistrationTrackDirectorDefaults,
@@ -132,7 +138,7 @@ export function RegistrationTrackDirectorSection({
     ? directorDraft.value
     : serverDirectorProfileId
   const [savingManual, setSavingManual] = useState(false)
-  const [manualDirectorConflictAttempt, setManualDirectorConflictAttempt] = useState<{ profileId: string; label: string } | null>(null)
+  const [manualDirectorConflictAttempt, setManualDirectorConflictAttempt] = useState<RegistrationConflictComparison<{ profileId: string; label: string }> | null>(null)
   const [automaticError, setAutomaticError] = useState("")
   const [automaticRefreshError, setAutomaticRefreshError] = useState("")
   const [automaticRefreshTrackId, setAutomaticRefreshTrackId] = useState("")
@@ -182,11 +188,17 @@ export function RegistrationTrackDirectorSection({
       try {
         await onReload(request.preferredTrackId || undefined)
         if (!activeRef.current) return
+        setManualDirectorConflictAttempt((current) => current
+          ? settleRegistrationConflictComparison(current, { succeeded: true })
+          : current)
         setAutomaticRefreshError("")
         setAutomaticRefreshTrackId("")
       } catch (refreshError) {
         if (!activeRef.current) return
         const refreshMessage = errorMessage(refreshError, "최신 등록 정보를 다시 불러오지 못했습니다.")
+        setManualDirectorConflictAttempt((current) => current
+          ? settleRegistrationConflictComparison(current, { succeeded: false, error: refreshMessage })
+          : current)
         setAutomaticRefreshError(refreshMessage)
         setAutomaticRefreshTrackId(request.preferredTrackId)
         onWarning(refreshMessage)
@@ -371,14 +383,18 @@ export function RegistrationTrackDirectorSection({
         onWarning(COMMITTED_REFRESH_ERROR)
       } else if (message.includes("registration_common_revision_conflict")) {
         requestKeysRef.current.delete(logicalKey)
+        const comparison = beginRegistrationConflictComparison(attemptedDirector)
+        setManualDirectorConflictAttempt(comparison)
         try {
           await onReload(track.id)
-          setManualDirectorConflictAttempt(attemptedDirector)
+          setManualDirectorConflictAttempt(settleRegistrationConflictComparison(comparison, { succeeded: true }))
           onWarning("다른 사용자가 상담 책임자를 변경했습니다. 내 선택과 최신 저장 담당자를 비교하세요.")
         } catch {
-          setAutomaticRefreshError("다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다.")
+          const refreshMessage = "다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다."
+          setManualDirectorConflictAttempt(settleRegistrationConflictComparison(comparison, { succeeded: false, error: refreshMessage }))
+          setAutomaticRefreshError(refreshMessage)
           setAutomaticRefreshTrackId(track.id)
-          onWarning("창을 닫고 다시 열거나 최신 정보 다시 불러오기를 눌러 주세요.")
+          onWarning("최신 정보 다시 불러오기를 눌러 주세요.")
         }
       } else if (message.includes("registration_visit_reassign_requires_reschedule")) {
         onOpenVisit(track.id)
@@ -434,19 +450,20 @@ export function RegistrationTrackDirectorSection({
       {manualDirectorConflictAttempt ? (
         <div role="alert" className="grid w-full gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
           <div className="grid gap-2 sm:grid-cols-2">
-            <div><div className="text-xs font-medium">내가 선택한 담당자</div><div>{manualDirectorConflictAttempt.label}</div></div>
-            <div><div className="text-xs font-medium">최신 저장 담당자</div><div>{track.directorName || "미지정"}</div></div>
+            <div><div className="text-xs font-medium">내가 선택한 담당자</div><div>{manualDirectorConflictAttempt.attempted.label}</div></div>
+            <div><div className="text-xs font-medium">최신 저장 담당자</div><div>{manualDirectorConflictAttempt.latestReady ? track.directorName || "미지정" : "최신 정보 다시 불러오기 필요"}</div></div>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          {manualDirectorConflictAttempt.refreshError ? <p className="text-xs">{manualDirectorConflictAttempt.refreshError}</p> : null}
+          {manualDirectorConflictAttempt.latestReady ? <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <Button type="button" size="sm" variant="outline" aria-label={`${track.subject} 최신 담당자 사용`} onClick={() => {
               setDirectorDraft({ trackId: track.id, baselineProfileId: serverDirectorProfileId, value: serverDirectorProfileId })
               setManualDirectorConflictAttempt(null)
             }}>최신 담당자 사용</Button>
             <Button type="button" size="sm" aria-label={`${track.subject} 내 담당자 선택 다시 적용`} onClick={() => {
-              setDirectorDraft({ trackId: track.id, baselineProfileId: serverDirectorProfileId, value: manualDirectorConflictAttempt.profileId })
+              setDirectorDraft({ trackId: track.id, baselineProfileId: serverDirectorProfileId, value: manualDirectorConflictAttempt.attempted.profileId })
               setManualDirectorConflictAttempt(null)
             }}>내 선택 다시 적용</Button>
-          </div>
+          </div> : null}
         </div>
       ) : null}
       <Label className="grid min-w-[13rem] flex-1 gap-1 text-xs text-muted-foreground">
@@ -1839,12 +1856,107 @@ export function RegistrationConsultationOutcomeEditor({
 
 type ReviewTargetState = RegistrationMigrationTrackState["targetStatus"] | ""
 
-type RegistrationMigrationConflictAttempt = {
+export type RegistrationMigrationConflictAttempt = {
   assignments: Record<string, string>
   targetStates: Record<string, ReviewTargetState>
   waitingKinds: Record<string, RegistrationWaitingKind>
   classIds: Record<string, string>
   summaryLines: string[]
+}
+
+type RegistrationMigrationDirectorConflictAttempt = {
+  trackId: string
+  profileId: string
+  label: string
+}
+
+export type RegistrationMigrationConflictState =
+  | {
+    kind: "director"
+    taskId: string
+    comparison: RegistrationConflictComparison<RegistrationMigrationDirectorConflictAttempt>
+  }
+  | {
+    kind: "review"
+    taskId: string
+    comparison: RegistrationConflictComparison<RegistrationMigrationConflictAttempt>
+  }
+
+export type RegistrationMigrationDirtyScope = "director" | "review"
+
+export function RegistrationMigrationConflictNotice({
+  conflict,
+  detail,
+  retrying,
+  canReapply,
+  onRetry,
+  onUseLatest,
+  onReapply,
+}: {
+  conflict: RegistrationMigrationConflictState
+  detail: OpsRegistrationCaseDetail
+  retrying: boolean
+  canReapply: boolean
+  onRetry: () => void
+  onUseLatest: () => void
+  onReapply: () => void
+}) {
+  const { comparison } = conflict
+  const directorAttempt = conflict.kind === "director" ? conflict.comparison.attempted : null
+  const reviewAttempt = conflict.kind === "review" ? conflict.comparison.attempted : null
+  const directorTrack = conflict.kind === "director"
+    ? detail.tracks.find((item) => item.id === directorAttempt?.trackId) || null
+    : null
+  const subjectLabel = directorTrack?.subject || detail.tracks.map((item) => item.subject).join("·") || "과목"
+  return (
+    <div role="alert" className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+      <p className="font-semibold">다른 사용자가 등록 정보를 먼저 저장했습니다.</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <div className="text-xs font-medium">{conflict.kind === "director" ? "내가 선택한 담당자" : "내가 선택한 분리안"}</div>
+          {conflict.kind === "director" ? (
+            <div>{directorAttempt?.label}</div>
+          ) : (
+            <ul className="mt-1 grid gap-1 text-xs">
+              {reviewAttempt?.summaryLines.map((line, index) => <li key={`attempt-${index}`}>{line}</li>)}
+            </ul>
+          )}
+        </div>
+        <div>
+          <div className="text-xs font-medium">{conflict.kind === "director" ? "최신 저장 담당자" : "최신 저장 상태"}</div>
+          {comparison.latestReady ? conflict.kind === "director" ? (
+            <div>{directorTrack?.directorName || "미지정"}</div>
+          ) : (
+            <ul className="mt-1 grid gap-1 text-xs">
+              <li>공통 정보 버전: {detail.commonRevision}</li>
+              {detail.tracks.map((item) => <li key={`latest-track-${item.id}`}>{item.subject}: {STATUS_LABELS[item.status]} · {item.directorName || "담당자 미지정"}</li>)}
+            </ul>
+          ) : (
+            <div>최신 정보 다시 불러오기 필요</div>
+          )}
+        </div>
+      </div>
+      {comparison.refreshError ? <p className="text-xs">{comparison.refreshError}</p> : null}
+      {!comparison.latestReady ? (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" variant="outline" aria-label={`${subjectLabel} 충돌 최신 정보 다시 불러오기`} onClick={onRetry} disabled={retrying}>
+            최신 정보 다시 불러오기
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button type="button" size="sm" variant="outline" aria-label={`${subjectLabel} ${conflict.kind === "director" ? "최신 담당자" : "최신 과목 분리 상태"} 사용`} onClick={onUseLatest}>
+            {conflict.kind === "director" ? "최신 담당자 사용" : "최신 상태 사용"}
+          </Button>
+          {canReapply ? (
+            <Button type="button" size="sm" aria-label={`${subjectLabel} ${conflict.kind === "director" ? "내 담당자 선택" : "내 과목 분리안"} 다시 적용`} onClick={onReapply}>
+              {conflict.kind === "director" ? "내 선택 다시 적용" : "내 분리안 다시 적용"}
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function RegistrationMigrationReviewEditor({
@@ -1858,6 +1970,10 @@ export function RegistrationMigrationReviewEditor({
   onResolved,
   onWarning,
   onDirtyChange,
+  conflictState,
+  onConflictStateChange,
+  directorConflictResetVersion,
+  reviewConflictResetVersion,
 }: {
   task: OpsTask
   detail: OpsRegistrationCaseDetail
@@ -1869,7 +1985,11 @@ export function RegistrationMigrationReviewEditor({
   onRetryDirectorCatalog?: () => boolean | Promise<boolean>
   onResolved: () => void | Promise<void>
   onWarning: (message: string) => void
-  onDirtyChange?: (dirty: boolean) => void
+  onDirtyChange?: (scope: RegistrationMigrationDirtyScope, dirty: boolean) => void
+  conflictState: RegistrationMigrationConflictState | null
+  onConflictStateChange: (conflict: RegistrationMigrationConflictState | null) => void
+  directorConflictResetVersion: number
+  reviewConflictResetVersion: number
 }) {
   const reviewTracks = [
     track,
@@ -1884,30 +2004,45 @@ export function RegistrationMigrationReviewEditor({
   const [classIds, setClassIds] = useState<Record<string, string>>({})
   const [directorIds, setDirectorIds] = useState<Record<string, string>>(() => Object.fromEntries(reviewTracks.map((track) => [track.id, track.directorProfileId || ""])))
   const [savingDirectorId, setSavingDirectorId] = useState("")
-  const [directorConflictAttempt, setDirectorConflictAttempt] = useState<{ trackId: string; profileId: string; label: string } | null>(null)
-  const [migrationConflictAttempt, setMigrationConflictAttempt] = useState<RegistrationMigrationConflictAttempt | null>(null)
   const [catalogRefreshRequired, setCatalogRefreshRequired] = useState(false)
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [refreshPending, setRefreshPending] = useState(false)
+  const [directorRefreshPending, setDirectorRefreshPending] = useState(false)
+  const [reviewRefreshPending, setReviewRefreshPending] = useState(false)
+  const directorConflictResetVersionRef = useRef(directorConflictResetVersion)
+  const reviewConflictResetVersionRef = useRef(reviewConflictResetVersion)
   const submissionKeys = useSubmissionKeys()
   const activeDirectorProfileIds = new Set(teacherOptions.map((teacher) => teacher.profileId).filter(Boolean))
   const availableDirectors = directorOptions.filter((profile) => profile.role === "admin" && activeDirectorProfileIds.has(profile.id))
   const hasLevelTestReservation = hasLegacyLevelTestReservation(detail.migrationLegacy)
   const hasVisitReservation = hasLegacyVisitReservation(detail.migrationLegacy)
   const directorBaseline = Object.fromEntries(reviewTracks.map((item) => [item.id, item.directorProfileId || ""]))
+  const reviewFormDirty = Object.keys(assignments).length > 0
+    || Object.keys(targetStates).length > 0
+    || Object.keys(waitingKinds).length > 0
+    || Object.keys(classIds).length > 0
+  const directorDirty = JSON.stringify(directorIds) !== JSON.stringify(directorBaseline)
   useOwnedDirtyState(
-    !refreshPending && (
-      Object.keys(assignments).length > 0
-      || Object.keys(targetStates).length > 0
-      || Object.keys(waitingKinds).length > 0
-      || Object.keys(classIds).length > 0
-      || JSON.stringify(directorIds) !== JSON.stringify(directorBaseline)
-      || Boolean(directorConflictAttempt)
-      || Boolean(migrationConflictAttempt)
-    ),
-    onDirtyChange,
+    !directorRefreshPending && directorDirty,
+    (dirty) => onDirtyChange?.("director", dirty),
   )
+  useOwnedDirtyState(
+    !reviewRefreshPending && reviewFormDirty,
+    (dirty) => onDirtyChange?.("review", dirty),
+  )
+  useEffect(() => {
+    if (directorConflictResetVersionRef.current === directorConflictResetVersion) return
+    directorConflictResetVersionRef.current = directorConflictResetVersion
+    setDirectorIds(directorBaseline)
+  }, [directorConflictResetVersion, directorBaseline])
+  useEffect(() => {
+    if (reviewConflictResetVersionRef.current === reviewConflictResetVersion) return
+    reviewConflictResetVersionRef.current = reviewConflictResetVersion
+    setAssignments({})
+    setTargetStates({})
+    setWaitingKinds({})
+    setClassIds({})
+  }, [reviewConflictResetVersion])
 
   function groupIsAssignedTo(group: string, trackId: string) {
     if (!requiresExplicitAssignments) {
@@ -1937,8 +2072,9 @@ export function RegistrationMigrationReviewEditor({
   }
 
   const canResolve = permissions.canManage
-    && !directorConflictAttempt
-    && !migrationConflictAttempt
+    && !conflictState
+    && !directorRefreshPending
+    && !reviewRefreshPending
     && !detail.migrationLegacy?.snapshotMissing
     && (!requiresExplicitAssignments || groups.every((group) => Boolean(assignments[group.key])))
     && reviewTracks.every(targetIsValid)
@@ -1947,12 +2083,11 @@ export function RegistrationMigrationReviewEditor({
     const directorProfileId = directorIds[track.id] || ""
     if (
       !permissions.canManage
-      || refreshPending
+      || directorRefreshPending
       || !directorProfileId
       || !availableDirectors.some((profile) => profile.id === directorProfileId)
       || savingDirectorId
-      || directorConflictAttempt
-      || migrationConflictAttempt
+      || conflictState
     ) return
     const attemptedDirector = {
       trackId: track.id,
@@ -1977,12 +2112,12 @@ export function RegistrationMigrationReviewEditor({
         requestKey,
       })
       submissionKeys.clear(kind, migrationDirectorEntityKey)
-      setDirectorConflictAttempt(null)
-      onDirtyChange?.(false)
-      setRefreshPending(true)
+      onConflictStateChange(null)
+      onDirtyChange?.("director", false)
+      setDirectorRefreshPending(true)
       try {
         await onResolved()
-        setRefreshPending(false)
+        setDirectorRefreshPending(false)
       } catch {
         onWarning(COMMITTED_REFRESH_ERROR)
       }
@@ -1990,11 +2125,25 @@ export function RegistrationMigrationReviewEditor({
       const message = errorMessage(error, "상담 책임자를 저장하지 못했습니다.")
       if (message.includes("registration_common_revision_conflict")) {
         submissionKeys.clear(kind, migrationDirectorEntityKey)
+        const nextConflict: RegistrationMigrationConflictState = {
+          kind: "director",
+          taskId: detail.task.id,
+          comparison: beginRegistrationConflictComparison(attemptedDirector),
+        }
+        onConflictStateChange(nextConflict)
         try {
           await onResolved()
-          setDirectorConflictAttempt(attemptedDirector)
+          onConflictStateChange({
+            ...nextConflict,
+            comparison: settleRegistrationConflictComparison(nextConflict.comparison, { succeeded: true }),
+          })
           onWarning("다른 사용자가 상담 책임자를 변경했습니다. 내 선택과 최신 저장 담당자를 비교하세요.")
         } catch {
+          const refreshMessage = "다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다."
+          onConflictStateChange({
+            ...nextConflict,
+            comparison: settleRegistrationConflictComparison(nextConflict.comparison, { succeeded: false, error: refreshMessage }),
+          })
           onWarning("다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다.")
         }
       } else if (isRegistrationDirectorCatalogRefreshError(message)) {
@@ -2009,7 +2158,7 @@ export function RegistrationMigrationReviewEditor({
   }
 
   async function retryDirectorCatalog() {
-    if (!onRetryDirectorCatalog || catalogRefreshing || refreshPending) return
+    if (!onRetryDirectorCatalog || catalogRefreshing || directorRefreshPending) return
     setCatalogRefreshing(true)
     try {
       const refreshed = await onRetryDirectorCatalog()
@@ -2025,12 +2174,25 @@ export function RegistrationMigrationReviewEditor({
     }
   }
 
+  async function retryDirectorRefresh() {
+    if (savingDirectorId) return
+    setSavingDirectorId("refresh")
+    try {
+      await onResolved()
+      setDirectorRefreshPending(false)
+    } catch {
+      onWarning("최신 내용을 불러오지 못했습니다. 잠시 후 다시 시도하세요.")
+    } finally {
+      setSavingDirectorId("")
+    }
+  }
+
   async function retryResolutionRefresh() {
     if (saving || savingDirectorId) return
     setSaving(true)
     try {
       await onResolved()
-      setRefreshPending(false)
+      setReviewRefreshPending(false)
     } catch {
       onWarning("최신 내용을 불러오지 못했습니다. 잠시 후 다시 시도하세요.")
     } finally {
@@ -2039,7 +2201,7 @@ export function RegistrationMigrationReviewEditor({
   }
 
   async function resolveReview() {
-    if (!canResolve || saving || refreshPending) return
+    if (!canResolve || saving || reviewRefreshPending) return
     const payloadAssignments: RegistrationMigrationAssignment[] = requiresExplicitAssignments
       ? groups.map((group) => ({
         group: group.key,
@@ -2097,12 +2259,12 @@ export function RegistrationMigrationReviewEditor({
         requestKey,
       })
       submissionKeys.clear(kind, migrationReviewEntityKey)
-      setMigrationConflictAttempt(null)
-      onDirtyChange?.(false)
-      setRefreshPending(true)
+      onConflictStateChange(null)
+      onDirtyChange?.("review", false)
+      setReviewRefreshPending(true)
       try {
         await onResolved()
-        setRefreshPending(false)
+        setReviewRefreshPending(false)
       } catch {
         onWarning(COMMITTED_REFRESH_ERROR)
       }
@@ -2110,11 +2272,25 @@ export function RegistrationMigrationReviewEditor({
       const message = errorMessage(error, "과목 분리 확인을 저장하지 못했습니다.")
       if (message.includes("registration_common_revision_conflict")) {
         submissionKeys.clear(kind, migrationReviewEntityKey)
+        const nextConflict: RegistrationMigrationConflictState = {
+          kind: "review",
+          taskId: detail.task.id,
+          comparison: beginRegistrationConflictComparison(attemptedReview),
+        }
+        onConflictStateChange(nextConflict)
         try {
           await onResolved()
-          setMigrationConflictAttempt(attemptedReview)
+          onConflictStateChange({
+            ...nextConflict,
+            comparison: settleRegistrationConflictComparison(nextConflict.comparison, { succeeded: true }),
+          })
           onWarning("다른 사용자가 등록 정보를 변경했습니다. 내 분리안과 최신 저장 상태를 비교하세요.")
         } catch {
+          const refreshMessage = "다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다."
+          onConflictStateChange({
+            ...nextConflict,
+            comparison: settleRegistrationConflictComparison(nextConflict.comparison, { succeeded: false, error: refreshMessage }),
+          })
           onWarning("다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다.")
         }
       } else {
@@ -2131,45 +2307,8 @@ export function RegistrationMigrationReviewEditor({
         <h3 className="text-sm font-semibold text-amber-950">과목 분리 확인 필요</h3>
         <p className="text-xs text-amber-900/75">기존 공통 기록을 한 과목에만 귀속하거나 공통 이력으로 남겨야 다음 업무를 진행할 수 있습니다.</p>
       </div>
-      <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryResolutionRefresh()} />
-
-      {migrationConflictAttempt ? (
-        <div role="alert" className="grid gap-3 rounded-md border border-amber-300 bg-background p-3 text-sm text-amber-950">
-          <p className="font-semibold">다른 사용자가 등록 정보를 먼저 저장했습니다.</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <div className="text-xs font-medium">내가 선택한 분리안</div>
-              <ul className="mt-1 grid gap-1 text-xs">
-                {migrationConflictAttempt.summaryLines.map((line, index) => <li key={`attempt-${index}`}>{line}</li>)}
-              </ul>
-            </div>
-            <div>
-              <div className="text-xs font-medium">최신 저장 상태</div>
-              <ul className="mt-1 grid gap-1 text-xs">
-                <li>공통 정보 버전: {detail.commonRevision}</li>
-                {reviewTracks.map((item) => <li key={`latest-track-${item.id}`}>{item.subject}: {STATUS_LABELS[item.status]} · {item.directorName || "담당자 미지정"}</li>)}
-              </ul>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" size="sm" variant="outline" aria-label={`${reviewSubjectLabel} 최신 과목 분리 상태 사용`} onClick={() => {
-              setAssignments({})
-              setTargetStates({})
-              setWaitingKinds({})
-              setClassIds({})
-              setDirectorIds(directorBaseline)
-              setMigrationConflictAttempt(null)
-            }}>최신 상태 사용</Button>
-            <Button type="button" size="sm" aria-label={`${reviewSubjectLabel} 내 과목 분리안 다시 적용`} onClick={() => {
-              setAssignments({ ...migrationConflictAttempt.assignments })
-              setTargetStates({ ...migrationConflictAttempt.targetStates })
-              setWaitingKinds({ ...migrationConflictAttempt.waitingKinds })
-              setClassIds({ ...migrationConflictAttempt.classIds })
-              setMigrationConflictAttempt(null)
-            }}>내 분리안 다시 적용</Button>
-          </div>
-        </div>
-      ) : null}
+      <RegistrationRefreshRecovery pending={directorRefreshPending} retrying={Boolean(savingDirectorId)} onRetry={() => void retryDirectorRefresh()} ownerLabel={reviewSubjectLabel} />
+      <RegistrationRefreshRecovery pending={reviewRefreshPending} retrying={saving} onRetry={() => void retryResolutionRefresh()} ownerLabel={reviewSubjectLabel} />
 
       {detail.migrationLegacy?.snapshotMissing ? (
         <p role="alert" className="rounded-md border border-destructive/30 bg-background px-3 py-2 text-sm text-destructive">
@@ -2193,7 +2332,7 @@ export function RegistrationMigrationReviewEditor({
             className="h-9 rounded-md border bg-background px-3 text-sm"
             value={assignments[group.key] || ""}
             onChange={(event) => setAssignments((current) => ({ ...current, [group.key]: event.target.value }))}
-            disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || saving}
+            disabled={Boolean(conflictState) || reviewRefreshPending || !permissions.canManage || saving}
           >
             <option value="">귀속 대상 선택</option>
             {reviewTracks.map((track) => <option key={track.id} value={track.id}>{track.subject}</option>)}
@@ -2212,24 +2351,6 @@ export function RegistrationMigrationReviewEditor({
               <Badge variant="outline">검토 필요</Badge>
             </div>
             <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]">
-              {directorConflictAttempt?.trackId === track.id ? (
-                <div role="alert" className="grid gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm sm:col-span-2">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div><div className="text-xs font-medium">내가 선택한 담당자</div><div>{directorConflictAttempt.label}</div></div>
-                    <div><div className="text-xs font-medium">최신 저장 담당자</div><div>{track.directorName || "미지정"}</div></div>
-                  </div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-                    <Button type="button" size="sm" variant="outline" aria-label={`${track.subject} 최신 담당자 사용`} onClick={() => {
-                      setDirectorIds((current) => ({ ...current, [track.id]: track.directorProfileId || "" }))
-                      setDirectorConflictAttempt(null)
-                    }}>최신 담당자 사용</Button>
-                    <Button type="button" size="sm" aria-label={`${track.subject} 내 담당자 선택 다시 적용`} onClick={() => {
-                      setDirectorIds((current) => ({ ...current, [track.id]: directorConflictAttempt.profileId }))
-                      setDirectorConflictAttempt(null)
-                    }}>내 선택 다시 적용</Button>
-                  </div>
-                </div>
-              ) : null}
               <Label className="grid gap-1.5">
                 상담 책임자
                 <select
@@ -2237,7 +2358,7 @@ export function RegistrationMigrationReviewEditor({
                   className="h-9 rounded-md border bg-background px-3 text-sm"
                   value={directorIds[track.id] || ""}
                   onChange={(event) => setDirectorIds((current) => ({ ...current, [track.id]: event.target.value }))}
-                  disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || saving || savingDirectorId === track.id}
+                  disabled={Boolean(conflictState) || directorRefreshPending || !permissions.canManage || savingDirectorId === track.id}
                 >
                   <option value="">원장 선택</option>
                   {directorIds[track.id] && !availableDirectors.some((profile) => profile.id === directorIds[track.id]) ? (
@@ -2246,7 +2367,7 @@ export function RegistrationMigrationReviewEditor({
                   {availableDirectors.map((profile) => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
                 </select>
               </Label>
-              <Button type="button" aria-label={`${track.subject} 상담 책임자 저장`} variant="outline" size="sm" className="self-end" onClick={() => void saveDirector(track)} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || !availableDirectors.some((profile) => profile.id === directorIds[track.id]) || saving || Boolean(savingDirectorId)}>
+              <Button type="button" aria-label={`${track.subject} 상담 책임자 저장`} variant="outline" size="sm" className="self-end" onClick={() => void saveDirector(track)} disabled={Boolean(conflictState) || directorRefreshPending || !permissions.canManage || !availableDirectors.some((profile) => profile.id === directorIds[track.id]) || Boolean(savingDirectorId)}>
                 책임자 저장
               </Button>
             </div>
@@ -2257,7 +2378,7 @@ export function RegistrationMigrationReviewEditor({
                 className="h-9 rounded-md border bg-background px-3 text-sm"
                 value={target}
                 onChange={(event) => setTargetStates((current) => ({ ...current, [track.id]: event.target.value as ReviewTargetState }))}
-                disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !permissions.canManage || saving}
+                disabled={Boolean(conflictState) || reviewRefreshPending || !permissions.canManage || saving}
               >
                 <option value="">단계 선택</option>
                 <option value="inquiry">문의</option>
@@ -2276,11 +2397,11 @@ export function RegistrationMigrationReviewEditor({
             {target === "visit_consultation_scheduled" && !hasVisitReservation ? <p className="text-xs text-amber-900">방문상담 예약 정보가 불완전해 새 예약이 필요합니다.</p> : null}
             {target === "waiting" ? (
               <div className="grid gap-2 sm:grid-cols-2">
-                <select aria-label={`${track.subject} 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKinds((current) => ({ ...current, [track.id]: event.target.value as RegistrationWaitingKind }))} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || saving}>
+                <select aria-label={`${track.subject} 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={waitingKind} onChange={(event) => setWaitingKinds((current) => ({ ...current, [track.id]: event.target.value as RegistrationWaitingKind }))} disabled={Boolean(conflictState) || reviewRefreshPending || saving}>
                   <option value="">대기 종류 선택</option>
                   {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
-                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => setClassIds((current) => ({ ...current, [track.id]: value }))} classOptions={classOptions} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || saving} /> : null}
+                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => setClassIds((current) => ({ ...current, [track.id]: value }))} classOptions={classOptions} disabled={Boolean(conflictState) || reviewRefreshPending || saving} /> : null}
               </div>
             ) : null}
           </div>
@@ -2290,11 +2411,11 @@ export function RegistrationMigrationReviewEditor({
       {permissions.canManage ? (
         <div className="flex flex-wrap justify-end gap-2">
           {catalogRefreshRequired ? (
-            <Button type="button" variant="outline" aria-label={`${reviewSubjectLabel} 담당자 정보 다시 불러오기`} onClick={() => void retryDirectorCatalog()} disabled={refreshPending || !onRetryDirectorCatalog || catalogRefreshing}>
+            <Button type="button" variant="outline" aria-label={`${reviewSubjectLabel} 담당자 정보 다시 불러오기`} onClick={() => void retryDirectorCatalog()} disabled={directorRefreshPending || !onRetryDirectorCatalog || catalogRefreshing}>
               담당자 정보 다시 불러오기
             </Button>
           ) : null}
-          <Button type="button" aria-label={`${reviewSubjectLabel} 과목 분리 확인 저장`} onClick={() => void resolveReview()} disabled={Boolean(migrationConflictAttempt) || Boolean(directorConflictAttempt) || refreshPending || !canResolve || saving || Boolean(savingDirectorId)}>
+          <Button type="button" aria-label={`${reviewSubjectLabel} 과목 분리 확인 저장`} onClick={() => void resolveReview()} disabled={Boolean(conflictState) || reviewRefreshPending || !canResolve || saving || Boolean(savingDirectorId)}>
             과목 분리 확인 저장
           </Button>
         </div>

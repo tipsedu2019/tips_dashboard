@@ -326,6 +326,51 @@ export function reconcileRegistrationEditorDraft<T>(input: {
   }
 }
 
+export function reconcileRegistrationEnrollmentDraft<T>(input: {
+  currentDraft: T
+  currentBaseline: string
+  previousCanonicalKey: string
+  nextCanonicalKey: string
+  nextCanonicalDraft: T
+}): { draft: T; baseline: string; canonicalKey: string } {
+  const dirty = JSON.stringify(input.currentDraft) !== input.currentBaseline
+  if (dirty || input.previousCanonicalKey === input.nextCanonicalKey) {
+    return {
+      draft: input.currentDraft,
+      baseline: input.currentBaseline,
+      canonicalKey: input.previousCanonicalKey,
+    }
+  }
+  return {
+    draft: input.nextCanonicalDraft,
+    baseline: JSON.stringify(input.nextCanonicalDraft),
+    canonicalKey: input.nextCanonicalKey,
+  }
+}
+
+export type RegistrationConflictComparison<T> = {
+  attempted: T
+  latestReady: boolean
+  refreshError: string
+}
+
+export function beginRegistrationConflictComparison<T>(
+  attempted: T,
+): RegistrationConflictComparison<T> {
+  return { attempted, latestReady: false, refreshError: "" }
+}
+
+export function settleRegistrationConflictComparison<T>(
+  comparison: RegistrationConflictComparison<T>,
+  result: { succeeded: boolean; error?: string },
+): RegistrationConflictComparison<T> {
+  return {
+    attempted: comparison.attempted,
+    latestReady: result.succeeded,
+    refreshError: result.succeeded ? "" : result.error || "최신 정보를 불러오지 못했습니다.",
+  }
+}
+
 export function getRegistrationCommonConflictRows<T extends Record<string, string>>(input: {
   attempted: T
   latest: T

@@ -15,6 +15,7 @@ import {
   getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
+  settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
   type RegistrationApplicationDirtyKey,
   type RegistrationApplicationSectionKey,
@@ -29,6 +30,7 @@ import {
   RegistrationConsultationSummary,
   RegistrationEnrollmentTrackEditor,
   RegistrationLevelTestSummary,
+  RegistrationMigrationConflictNotice,
   RegistrationMigrationReviewEditor,
   RegistrationPlacementSummary,
   RegistrationSubjectProgress,
@@ -37,6 +39,8 @@ import {
   RegistrationTrackStageEditor,
   getRegistrationIdentityEditLock,
   type RegistrationCommonDraft,
+  type RegistrationMigrationConflictState,
+  type RegistrationMigrationDirtyScope,
   type RegistrationTrackActionPermissions,
 } from "./registration-application-track-actions"
 import { RegistrationAppointmentEditor } from "./registration-appointment-editor"
@@ -299,6 +303,10 @@ export function RegistrationApplication({
   closeAction,
 }: RegistrationApplicationProps) {
   const [appointmentEditor, setAppointmentEditor] = useState<AppointmentEditorState | null>(null)
+  const [migrationConflictState, setMigrationConflictState] = useState<RegistrationMigrationConflictState | null>(null)
+  const [migrationConflictRetrying, setMigrationConflictRetrying] = useState(false)
+  const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
+  const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
   const onDirtyChangeRef = useRef(onDirtyChange)
@@ -307,6 +315,9 @@ export function RegistrationApplication({
   const canManageCase = viewerRole === "admin" || viewerRole === "staff"
   const reviewTrack = detail.tracks.find((track) => track.migrationReviewRequired) || null
   const reviewBlocked = Boolean(reviewTrack)
+  const activeMigrationConflictState = migrationConflictState?.taskId === detail.task.id
+    ? migrationConflictState
+    : null
 
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange
@@ -330,6 +341,67 @@ export function RegistrationApplication({
     dirtyKeysRef.current = next
     onDirtyChangeRef.current?.(next.size > 0)
   }, [])
+  useEffect(() => {
+    setMigrationConflictState(null)
+    setMigrationConflictRetrying(false)
+    setMigrationDirectorResetVersion(0)
+    setMigrationReviewResetVersion(0)
+  }, [detail.task.id])
+  useEffect(() => {
+    setDirty("inquiry:migration-conflict", Boolean(activeMigrationConflictState))
+  }, [activeMigrationConflictState, setDirty])
+
+  async function retryMigrationConflictRefresh() {
+    if (!activeMigrationConflictState || migrationConflictRetrying) return
+    setMigrationConflictRetrying(true)
+    try {
+      await onReload()
+      setMigrationConflictState((current) => {
+        if (!current) return current
+        if (current.kind === "director") {
+          return {
+            ...current,
+            comparison: settleRegistrationConflictComparison(current.comparison, { succeeded: true }),
+          }
+        }
+        return {
+          ...current,
+          comparison: settleRegistrationConflictComparison(current.comparison, { succeeded: true }),
+        }
+      })
+    } catch (error) {
+      const message = errorMessage(error, "최신 등록 정보를 다시 불러오지 못했습니다.")
+      setMigrationConflictState((current) => {
+        if (!current) return current
+        if (current.kind === "director") {
+          return {
+            ...current,
+            comparison: settleRegistrationConflictComparison(current.comparison, { succeeded: false, error: message }),
+          }
+        }
+        return {
+          ...current,
+          comparison: settleRegistrationConflictComparison(current.comparison, { succeeded: false, error: message }),
+        }
+      })
+      onWarning(message)
+    } finally {
+      setMigrationConflictRetrying(false)
+    }
+  }
+
+  function useLatestMigrationConflict() {
+    if (activeMigrationConflictState?.kind === "director") {
+      setMigrationDirectorResetVersion((current) => current + 1)
+    } else if (activeMigrationConflictState?.kind === "review") {
+      setMigrationReviewResetVersion((current) => current + 1)
+    }
+    setMigrationConflictState(null)
+  }
+
+  function reapplyMigrationConflict() {
+    setMigrationConflictState(null)
+  }
 
   const permissionsByTrackId = useMemo(() => new Map(detail.tracks.map((track) => {
     const activeConsultation = detail.consultations.find((item) => (
@@ -704,6 +776,17 @@ export function RegistrationApplication({
           exceptionContent={(
             <div className="grid gap-3">
               <RegistrationSubjectProgress detail={detail} selectedTrackId={focusTrackId} onSelectTrack={onFocusTrack} />
+              {activeMigrationConflictState ? (
+                <RegistrationMigrationConflictNotice
+                  conflict={activeMigrationConflictState}
+                  detail={detail}
+                  retrying={migrationConflictRetrying}
+                  canReapply={Boolean(reviewTrack)}
+                  onRetry={() => void retryMigrationConflictRefresh()}
+                  onUseLatest={useLatestMigrationConflict}
+                  onReapply={reapplyMigrationConflict}
+                />
+              ) : null}
               {reviewTrack ? (
                 <RegistrationMigrationReviewEditor
                   key={detail.task.id}
@@ -717,7 +800,15 @@ export function RegistrationApplication({
                   onRetryDirectorCatalog={onRetryDirectorCatalog}
                   onResolved={onReload}
                   onWarning={onWarning}
-                  onDirtyChange={(dirty) => setDirty(`inquiry:track-${reviewTrack.id}`, dirty)}
+                  conflictState={activeMigrationConflictState}
+                  onConflictStateChange={setMigrationConflictState}
+                  directorConflictResetVersion={migrationDirectorResetVersion}
+                  reviewConflictResetVersion={migrationReviewResetVersion}
+                  onDirtyChange={(scope: RegistrationMigrationDirtyScope, dirty) => setDirty(
+                    `inquiry:track-${reviewTrack.id}`,
+                    dirty,
+                    `migration-${scope}:${reviewTrack.id}`,
+                  )}
                 />
               ) : null}
               {renderTrackFrames("inquiry")}
