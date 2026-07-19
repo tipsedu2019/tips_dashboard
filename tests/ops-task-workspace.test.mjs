@@ -945,6 +945,28 @@ test("fixture registration stays loading until its runtime adapter is installed"
   ]);
 });
 
+test("fixture fault query is armed before runtime readiness and any option or action work", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const setupStart = source.indexOf("useLayoutEffect(() =>", source.indexOf("registrationFixturePrepared"));
+  const setupEnd = source.indexOf("\n  const reload = useCallback", setupStart);
+  const setup = source.slice(setupStart, setupEnd);
+
+  assertIncludesAll(source, [
+    'searchParams.get("fixtureFaultType")',
+    'searchParams.get("fixtureFaultTaskId")',
+    'searchParams.get("fixtureFaultCanonicalRequestNote")',
+    'searchParams.get("fixtureFaultError")',
+  ]);
+  assertIncludesAll(setup, [
+    "parseRegistrationSubjectTrackFixtureQueryFault",
+    "adapter.debugSetNextFault?.(registrationFixtureFault)",
+    "installRegistrationSubjectTrackFixtureRuntime",
+    "setRegistrationFixtureRuntimeReady(true)",
+  ]);
+  assert.ok(setup.indexOf("adapter.debugSetNextFault") < setup.indexOf("installRegistrationSubjectTrackFixtureRuntime"));
+  assert.ok(setup.indexOf("installRegistrationSubjectTrackFixtureRuntime") < setup.indexOf("setRegistrationFixtureRuntimeReady(true)"));
+});
+
 test("fixture registration withholds every provider token even before its runtime is ready", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
 

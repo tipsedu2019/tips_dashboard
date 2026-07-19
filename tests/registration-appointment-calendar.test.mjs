@@ -14,6 +14,14 @@ const pgTapUrl = new URL(
   "../supabase/tests/registration_subject_tracks_runtime_test.sql",
   import.meta.url,
 );
+const verifierUrl = new URL(
+  "../scripts/verify-ops-task-browser-workflow.mjs",
+  import.meta.url,
+);
+const caseListModelUrl = new URL(
+  "../src/features/tasks/registration-case-list-model.ts",
+  import.meta.url,
+);
 
 async function loadModel() {
   return import(modelUrl.href);
@@ -170,6 +178,23 @@ test("딥 링크는 taskId, appointmentId, view 순서를 고정하고 값을 �
     buildRegistrationAppointmentHref("task / 1", "appointment / 1"),
     "/admin/registration?taskId=task+%2F+1&appointmentId=appointment+%2F+1&view=calendar",
   );
+});
+
+test("브라우저 검증은 달력 예약 ID로 같은 신청서를 열고 예약 섹션에 초점을 둔다", async () => {
+  const [verifierSource, caseListSource] = await Promise.all([
+    readFile(verifierUrl, "utf8"),
+    readFile(caseListModelUrl, "utf8"),
+  ]);
+  const start = verifierSource.indexOf("async function verifyRegistrationSubjectTrackFixture");
+  const end = verifierSource.indexOf("async function login", start);
+  const verifier = verifierSource.slice(start, end);
+
+  assert.match(verifier, /fixture-appointment-dual-test/);
+  assert.match(verifier, /view:\s*"calendar"/);
+  assert.match(verifier, /appointmentId:\s*"fixture-appointment-dual-test"/);
+  assert.match(verifier, /calendar focus/);
+  assert.match(verifier, /registration-application-level_test/);
+  assert.doesNotMatch(caseListSource, /appointmentId|appointment_id/);
 });
 
 test("서울 자정 경계와 연말을 기준으로 날짜 키를 계산한다", async () => {

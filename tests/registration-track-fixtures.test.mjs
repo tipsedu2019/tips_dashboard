@@ -7,6 +7,7 @@ import ts from "typescript"
 
 const fixtureUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
 const fixtureRuntimeUrl = new URL("../src/features/tasks/registration-track-fixture-runtime.ts", import.meta.url)
+const caseListModelUrl = new URL("../src/features/tasks/registration-case-list-model.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 const serviceUrl = new URL("../src/features/tasks/registration-track-service.ts", import.meta.url)
 const opsServiceUrl = new URL("../src/features/tasks/ops-task-service.ts", import.meta.url)
@@ -57,6 +58,10 @@ async function loadFixtureModule() {
 
 async function loadFixtureRuntimeModule() {
   return loadTsModule(fixtureRuntimeUrl)
+}
+
+async function loadCaseListModel() {
+  return import(caseListModelUrl.href)
 }
 
 async function loadServiceBoundary({
@@ -219,6 +224,44 @@ test("fixture query action behavior only accepts an exact safe one-shot control"
   }
 })
 
+test("fixture query faults accept only the two exact one-shot contracts", async () => {
+  const fixture = await loadFixtureModule()
+  const parse = fixture.parseRegistrationSubjectTrackFixtureQueryFault
+
+  assert.equal(typeof parse, "function")
+  assert.deepEqual(plain(parse({
+    enabled: true,
+    type: "option_data_once",
+    taskId: null,
+    canonicalRequestNote: null,
+    error: "선택 정보를 불러오지 못했습니다.",
+  })), {
+    kind: "option_data_once",
+    error: "선택 정보를 불러오지 못했습니다.",
+  })
+  assert.deepEqual(plain(parse({
+    enabled: true,
+    type: "common_revision_conflict_once",
+    taskId: "fixture-task-dual-test",
+    canonicalRequestNote: "다른 담당자가 먼저 저장한 요청 사항",
+    error: null,
+  })), {
+    kind: "common_revision_conflict_once",
+    taskId: "fixture-task-dual-test",
+    canonicalRequestNote: "다른 담당자가 먼저 저장한 요청 사항",
+  })
+
+  for (const input of [
+    { enabled: false, type: "option_data_once", error: "실패" },
+    { enabled: true, type: "option_data", error: "실패" },
+    { enabled: true, type: "option_data_once", error: "" },
+    { enabled: true, type: "common_revision_conflict_once", taskId: "", canonicalRequestNote: "최신" },
+    { enabled: true, type: "common_revision_conflict_once", taskId: "fixture-task-dual-test", canonicalRequestNote: "" },
+  ]) {
+    assert.equal(parse(input), null)
+  }
+})
+
 test("fixture reset is deterministic and contains the approved workflow samples", async () => {
   const { createRegistrationSubjectTrackFixtureState } = await loadFixtureModule()
   const first = createRegistrationSubjectTrackFixtureState()
@@ -231,6 +274,7 @@ test("fixture reset is deterministic and contains the approved workflow samples"
     "split visit and phone consultation",
     "independent consultation and level-test stages",
     "partial registration with later batch",
+    "all subject tracks terminal",
     "multiple English classes",
     "enrollment decided add-button",
     "admission panel with non-enrollment sibling",
@@ -289,6 +333,12 @@ test("fixture reset is deterministic and contains the approved workflow samples"
     [2, "draft"],
   ])
 
+  const allTerminal = first.caseDetails["fixture-task-all-terminal"]
+  assert.deepEqual(plain(allTerminal.tracks.map((track) => [track.subject, track.status])), [
+    ["영어", "registered"],
+    ["수학", "not_registered"],
+  ])
+
   const multiple = first.caseDetails["fixture-task-multiple-classes"]
   assert.deepEqual(plain(multiple.enrollments.map((row) => row.classId)), [
     "fixture-class-eng-a",
@@ -302,6 +352,40 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.equal(sibling.tracks.some((track) => track.status === "enrollment_processing"), true)
   assert.equal(sibling.admissionBatches.some((batch) => batch.status === "draft"), true)
   assert.equal(first.caseDetails["fixture-task-migration-review"].tracks.every((track) => track.migrationReviewRequired), true)
+})
+
+test("fixture cases project once per view with stable cross-view identity and all-terminal completion", async () => {
+  const { createRegistrationSubjectTrackFixtureState } = await loadFixtureModule()
+  const {
+    buildRegistrationCaseListItems,
+    filterRegistrationCaseListItems,
+    getRegistrationCaseTabCounts,
+  } = await loadCaseListModel()
+  const state = createRegistrationSubjectTrackFixtureState()
+  const items = buildRegistrationCaseListItems(state.workspaceData.tasks)
+  const views = Object.fromEntries(
+    ["inquiry", "level_test", "consulting", "waiting", "enrollment", "closed"]
+      .map((view) => [view, filterRegistrationCaseListItems(items, view)]),
+  )
+
+  for (const rows of Object.values(views)) {
+    assert.equal(rows.length, new Set(rows.map((row) => row.taskId)).size)
+  }
+  const dualRows = views.level_test.filter((row) => row.taskId === "fixture-task-dual-test")
+  assert.equal(dualRows.length, 1)
+  assert.deepEqual(plain(dualRows[0].matchingTracks.map((track) => track.subject)), ["영어", "수학"])
+
+  const crossConsulting = views.consulting.find((row) => row.taskId === "fixture-task-cross-stage")
+  const crossLevelTest = views.level_test.find((row) => row.taskId === "fixture-task-cross-stage")
+  assert.equal(crossConsulting?.task, crossLevelTest?.task)
+  assert.deepEqual(plain(crossConsulting?.matchingTracks.map((track) => track.subject)), ["영어"])
+  assert.deepEqual(plain(crossLevelTest?.matchingTracks.map((track) => track.subject)), ["수학"])
+
+  assert.equal(views.closed.some((row) => row.taskId === "fixture-task-partial-registration"), false)
+  assert.deepEqual(plain(
+    views.closed.filter((row) => row.taskId === "fixture-task-all-terminal").map((row) => row.taskId),
+  ), ["fixture-task-all-terminal"])
+  assert.equal(getRegistrationCaseTabCounts(items).closed >= 1, true)
 })
 
 test("fixture calendar adapter derives one live row per canonical appointment", async () => {
@@ -1166,6 +1250,7 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.equal(typeof bridge?.snapshot, "function")
   assert.equal(typeof bridge?.replayLastCreate, "function")
   assert.equal(typeof bridge?.setNextActionBehavior, "function")
+  assert.equal(typeof bridge?.setNextFault, "function")
   const initialSnapshot = plain(bridge.snapshot())
   assert.equal(initialSnapshot.lastCreate, null)
   assert.deepEqual(initialSnapshot.notificationTargetHistory, plain(state.notificationTargetHistory))
@@ -1178,8 +1263,8 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
   assert.deepEqual(before.lastCreate.command.payload, plain(input))
   assert.deepEqual(before.lastCreate.result, plain(originalResult))
   assert.deepEqual(before.lastCreate.result.notificationJobs, [])
-  assert.equal(before.counts.cases, 10)
-  assert.equal(before.counts.tracks, 17)
+  assert.equal(before.counts.cases, 11)
+  assert.equal(before.counts.tracks, 19)
   assert.equal(before.counts.appointments, 6)
   assert.equal(before.counts.externalCalls, 0)
   assert.equal(before.counts.notificationReceipts, 1)
@@ -1194,6 +1279,97 @@ test("fixture runtime exposes a dev-only replay bridge and removes it on cleanup
 
   cleanup()
   assert.equal(context[runtime.REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL], undefined)
+})
+
+test("fixture option fault is scoped to one option load and never records an external call", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+
+  adapter.debugSetNextFault({
+    kind: "option_data_once",
+    error: "fixture_option_data_unavailable",
+  })
+  await adapter.loadWorkspaceData()
+  await adapter.executeAction("updateRegistrationCaseCommon", {
+    taskId: "fixture-task-enrollment-decided",
+    expectedCommonRevision: 1,
+    studentName: "정하린",
+    campus: "본관",
+    priority: "normal",
+    schoolGrade: "고1",
+    schoolName: "중앙고",
+    parentPhone: "01012345678",
+    studentPhone: "01098765432",
+    inquiryAt: "2026-07-12T09:00:00+09:00",
+    requestNote: "다른 동작은 fault를 소비하지 않음",
+    requestKey: "fixture-option-fault-unrelated-action",
+  })
+  await assert.rejects(adapter.loadOptionData(), /fixture_option_data_unavailable/)
+  const options = await adapter.loadOptionData()
+
+  assert.equal(options.schemaReady, true)
+  assert.equal(state.externalCallLedger.length, 0)
+})
+
+test("fixture common conflict updates canonical state once and remains scoped to its task", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const commonPayload = (taskId, expectedCommonRevision, requestNote, requestKey) => ({
+    taskId,
+    expectedCommonRevision,
+    studentName: state.caseDetails[taskId].task.studentName,
+    campus: "본관",
+    priority: "normal",
+    schoolGrade: "고1",
+    schoolName: "중앙고",
+    parentPhone: "01012345678",
+    studentPhone: "01098765432",
+    inquiryAt: "2026-07-12T09:00:00+09:00",
+    requestNote,
+    requestKey,
+  })
+
+  adapter.debugSetNextFault({
+    kind: "common_revision_conflict_once",
+    taskId: "fixture-task-dual-test",
+    canonicalRequestNote: "다른 담당자가 먼저 저장한 요청 사항",
+  })
+  await adapter.executeAction(
+    "updateRegistrationCaseCommon",
+    commonPayload("fixture-task-enrollment-decided", 1, "무관한 신청서 저장", "fixture-conflict-other-task"),
+  )
+  await assert.rejects(
+    adapter.executeAction(
+      "updateRegistrationCaseCommon",
+      commonPayload("fixture-task-dual-test", 1, "내가 저장하려던 요청 사항", "fixture-conflict-attempt"),
+    ),
+    /registration_common_revision_conflict/,
+  )
+
+  const conflicted = state.caseDetails["fixture-task-dual-test"]
+  assert.equal(conflicted.commonRevision, 2)
+  assert.equal(conflicted.task.registration.requestNote, "다른 담당자가 먼저 저장한 요청 사항")
+  assert.equal(
+    state.workspaceData.tasks.find((task) => task.id === conflicted.task.id)?.registration?.requestNote,
+    "다른 담당자가 먼저 저장한 요청 사항",
+  )
+  assert.equal(state.receipts["fixture-conflict-attempt"], undefined)
+
+  await adapter.executeAction(
+    "updateRegistrationCaseCommon",
+    commonPayload("fixture-task-dual-test", 2, "내가 저장하려던 요청 사항", "fixture-conflict-resubmit"),
+  )
+  assert.equal(state.caseDetails["fixture-task-dual-test"].commonRevision, 3)
+  assert.equal(state.caseDetails["fixture-task-dual-test"].task.registration.requestNote, "내가 저장하려던 요청 사항")
+  assert.equal(state.externalCallLedger.length, 0)
 })
 
 test("fixture debug behavior injects one slow or failed action before mutation", async () => {
@@ -1916,8 +2092,14 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.match(source, /searchParams\.get\("fixtureActionType"\)/)
   assert.match(source, /searchParams\.get\("fixtureActionDelayMs"\)/)
   assert.match(source, /searchParams\.get\("fixtureActionError"\)/)
+  assert.match(source, /searchParams\.get\("fixtureFaultType"\)/)
+  assert.match(source, /searchParams\.get\("fixtureFaultTaskId"\)/)
+  assert.match(source, /searchParams\.get\("fixtureFaultCanonicalRequestNote"\)/)
+  assert.match(source, /searchParams\.get\("fixtureFaultError"\)/)
   assert.match(source, /parseRegistrationSubjectTrackFixtureQueryActionBehavior\(\{[\s\S]*?enabled: registrationFixturePrepared/)
   assert.match(source, /if \(registrationFixtureActionBehavior\) adapter\.debugSetNextActionBehavior\?\.\(registrationFixtureActionBehavior\)/)
+  assert.match(source, /parseRegistrationSubjectTrackFixtureQueryFault/)
+  assert.match(source, /if \(registrationFixtureFault\) adapter\.debugSetNextFault\?\.\(registrationFixtureFault\)/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationCaseList/)
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationApplication/)
   assert.match(source, /!registrationFixtureRequested && showLegacyNotificationSettingsLauncher && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace\)/)

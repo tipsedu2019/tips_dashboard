@@ -50,6 +50,14 @@ export type RegistrationSubjectTrackFixtureDebugActionBehavior = {
   error?: string
 }
 
+export type RegistrationSubjectTrackFixtureDebugFault =
+  | { kind: "option_data_once"; error: string }
+  | {
+      kind: "common_revision_conflict_once"
+      taskId: string
+      canonicalRequestNote: string
+    }
+
 export type RegistrationSubjectTrackFixtureAdapter = {
   readonly intakeWorkflowRuntimeVersion: number
   executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => Promise<T>
@@ -63,6 +71,9 @@ export type RegistrationSubjectTrackFixtureAdapter = {
   debugSnapshot?: () => RegistrationSubjectTrackFixtureDebugSnapshot
   debugReplayLastCreate?: () => Promise<RegistrationSubjectTrackFixtureDebugReplay>
   debugSetNextActionBehavior?: (behavior: RegistrationSubjectTrackFixtureDebugActionBehavior) => void
+  debugSetNextFault?: (
+    fault: RegistrationSubjectTrackFixtureDebugFault,
+  ) => void
 }
 
 const activeFixtureAdapters: RegistrationSubjectTrackFixtureAdapter[] = []
@@ -96,6 +107,11 @@ const fixtureDebugBridge = {
     const adapter = getActiveFixtureAdapter()
     if (!adapter?.debugSetNextActionBehavior) throw new Error("registration_subject_track_fixture_debug_unavailable")
     adapter.debugSetNextActionBehavior(behavior)
+  },
+  setNextFault(fault: RegistrationSubjectTrackFixtureDebugFault) {
+    const adapter = getActiveFixtureAdapter()
+    if (!adapter?.debugSetNextFault) throw new Error("registration_subject_track_fixture_debug_unavailable")
+    adapter.debugSetNextFault(fault)
   },
 }
 

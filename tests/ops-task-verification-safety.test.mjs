@@ -216,6 +216,51 @@ test("subject-track fixture verification exercises the operational scenarios and
   assert.match(fixtureVerifier, /scrollWidth[\s\S]*?viewportWidth/)
 })
 
+test("browser route health is checked again after interactions and includes failed requests", () => {
+  const browserSource = sources[1]
+  const start = browserSource.indexOf("async function inspectRoute")
+  const end = browserSource.indexOf("async function inspectPublicSmokeRoute", start)
+  const inspect = browserSource.slice(start, end)
+
+  assertIncludesAll(inspect, [
+    "failedRequests",
+    'page.on("requestfailed", onRequestFailed)',
+    'page.off("requestfailed", onRequestFailed)',
+    'assertRouteHealth("initial navigation")',
+    'assertRouteHealth("post interaction")',
+  ])
+  const initialHealth = inspect.indexOf('assertRouteHealth("initial navigation")')
+  const interaction = inspect.indexOf("const interactionResult = await verifyRouteInteraction")
+  const postHealth = inspect.indexOf('assertRouteHealth("post interaction")')
+  assert.ok(initialHealth >= 0 && interaction > initialHealth && postHealth > interaction)
+  assert.match(inspect, /consoleMessages[\s\S]*pageErrors[\s\S]*failedRequests[\s\S]*responseErrors/)
+  assert.match(inspect, /document\.documentElement\.scrollWidth[\s\S]*window\.innerWidth/)
+})
+
+test("registration provider interception blocks only POST dispatch while passive readiness reads continue", () => {
+  const browserSource = sources[1]
+  const start = browserSource.indexOf("async function verifyRegistrationSubjectTrackFixture")
+  const end = browserSource.indexOf("async function login", start)
+  const fixtureVerifier = browserSource.slice(start, end)
+
+  assertIncludesAll(fixtureVerifier, [
+    '"**/api/google-chat"',
+    '"**/api/web-push"',
+    '"**/api/solapi/**"',
+    '"**/api/registration/consultation-notification"',
+    '"**/api/notifications/worker"',
+    '"**/api/notifications/connections"',
+    '"**/api/notifications/legacy/**"',
+    "permission prompt",
+    "self-test",
+  ])
+  assert.match(fixtureVerifier, /route\.request\(\)\.method\(\) !== "POST"[\s\S]*?route\.continue\(\)/)
+  assert.match(fixtureVerifier, /createdResult\.notificationJobs\.length\s*!==\s*0/)
+  assert.match(fixtureVerifier, /savedSnapshot\.counts\.notificationReceipts\s*!==\s*0/)
+  assert.match(fixtureVerifier, /savedSnapshot\.counts\.externalCalls\s*!==\s*0/)
+  assert.match(fixtureVerifier, /interceptedProviderRequests\.length\s*!==\s*0/)
+})
+
 test("authorized concurrency verification executes only gated seeded races with separate actor lanes", () => {
   assert.match(concurrencySource, /executeAuthorizedScenarios/)
   assert.doesNotMatch(concurrencySource, /Executable seeded mutation races are not implemented/)

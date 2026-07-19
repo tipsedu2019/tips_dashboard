@@ -177,6 +177,7 @@ import {
 import {
   executeRegistrationSubjectTrackFixtureAction,
   installRegistrationSubjectTrackFixtureRuntime,
+  loadRegistrationSubjectTrackFixtureOptionData,
   shouldEnableRegistrationSubjectTrackFixture,
 } from "./registration-track-fixture-runtime"
 import type { RegistrationSubjectTrackFixtureState } from "./registration-track-fixtures"
@@ -8305,6 +8306,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const registrationFixtureActionType = searchParams.get("fixtureActionType")
   const registrationFixtureActionDelayMs = searchParams.get("fixtureActionDelayMs")
   const registrationFixtureActionError = searchParams.get("fixtureActionError")
+  const registrationFixtureFaultType = searchParams.get("fixtureFaultType")
+  const registrationFixtureFaultTaskId = searchParams.get("fixtureFaultTaskId")
+  const registrationFixtureFaultCanonicalRequestNote = searchParams.get("fixtureFaultCanonicalRequestNote")
+  const registrationFixtureFaultError = searchParams.get("fixtureFaultError")
   const registrationFixtureRequested = isRegistrationWorkspace
     && shouldEnableRegistrationSubjectTrackFixture(process.env.NODE_ENV, registrationFixtureValue)
   const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken
@@ -8547,6 +8552,15 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         error: registrationFixtureActionError,
       })
     if (registrationFixtureActionBehavior) adapter.debugSetNextActionBehavior?.(registrationFixtureActionBehavior)
+    const registrationFixtureFault = registrationFixtureModule
+      .parseRegistrationSubjectTrackFixtureQueryFault({
+        enabled: registrationFixturePrepared,
+        type: registrationFixtureFaultType,
+        taskId: registrationFixtureFaultTaskId,
+        canonicalRequestNote: registrationFixtureFaultCanonicalRequestNote,
+        error: registrationFixtureFaultError,
+      })
+    if (registrationFixtureFault) adapter.debugSetNextFault?.(registrationFixtureFault)
     const uninstallFixtureRuntime = installRegistrationSubjectTrackFixtureRuntime(
       process.env.NODE_ENV,
       registrationFixtureValue,
@@ -8564,6 +8578,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationFixtureActionDelayMs,
     registrationFixtureActionError,
     registrationFixtureActionType,
+    registrationFixtureFaultCanonicalRequestNote,
+    registrationFixtureFaultError,
+    registrationFixtureFaultTaskId,
+    registrationFixtureFaultType,
     registrationFixturePrepared,
     registrationFixtureModule,
     registrationFixtureValue,
@@ -8694,13 +8712,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const ensureRegistrationOptions = useCallback(async (force = false) => {
     if (registrationFixtureRequested && !registrationFixtureEnabled) return false
     if (registrationFixtureEnabled) {
-      const enrichmentData = registrationFixtureStateRef.current!.optionData
-      registrationOptionsLoadedRef.current = true
-      registrationOptionsDataRef.current = enrichmentData
-      setRegistrationOptionsLoading(false)
+      setRegistrationOptionsLoading(true)
       setRegistrationOptionsError("")
-      setData(registrationFixtureStateRef.current!.workspaceData)
-      return true
+      try {
+        const fixtureOptions = loadRegistrationSubjectTrackFixtureOptionData()
+        if (!fixtureOptions) throw new Error("registration_subject_track_fixture_runtime_not_ready")
+        const enrichmentData = await fixtureOptions
+        registrationOptionsLoadedRef.current = true
+        registrationOptionsDataRef.current = enrichmentData
+        setRegistrationOptionsLoading(false)
+        setData(registrationFixtureStateRef.current!.workspaceData)
+        return true
+      } catch (error) {
+        registrationOptionsLoadedRef.current = false
+        registrationOptionsDataRef.current = null
+        setRegistrationOptionsError(error instanceof Error ? error.message : "선택 정보를 불러오지 못했습니다.")
+        setRegistrationOptionsLoading(false)
+        return false
+      }
     }
     if (
       !isRegistrationWorkspace

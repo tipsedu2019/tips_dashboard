@@ -1808,23 +1808,53 @@ async function verifyInitialSelectControls(dialog, route) {
 
 async function verifyRegistrationSinglePageDialog(dialog) {
   const dialogText = await dialog.innerText({ timeout: 5000 })
-  for (const expectedLabel of ["문의 정보", "필수", "선택"]) {
-    if (!dialogText.includes(expectedLabel)) throw new Error(`registration dialog is missing ${expectedLabel}.`)
-  }
-  for (const retiredLabel of ["전화상담 예약일시", "시험지·결과지 URL", "등록·대기 정보", "입학 처리", "담당자 및 일시 이력"]) {
-    if (dialogText.includes(retiredLabel)) throw new Error(`registration dialog still renders ${retiredLabel}.`)
+  const applicationSections = [
+    ["inquiry", "문의 정보"],
+    ["level_test", "레벨테스트"],
+    ["consultation", "상담"],
+    ["enrollment", "등록·대기 정보"],
+    ["admission", "입학 처리"],
+    ["history", "자동 이력"],
+  ]
+  for (const [sectionId, title] of applicationSections) {
+    const section = dialog.locator(`[data-registration-application-section="${sectionId}"]`)
+    if (await section.count() !== 1 || !(await section.isVisible().catch(() => false))) {
+      throw new Error(`registration dialog is missing its fixed ${title} section.`)
+    }
+    if (!(await section.innerText()).includes(title)) {
+      throw new Error(`registration dialog section ${sectionId} is missing ${title}.`)
+    }
   }
   if (/\b1\/4\b/.test(dialogText)) throw new Error("registration dialog still shows the old step progress label.")
   if (await dialog.getByRole("group", { name: /등록 입력 단계/ }).count().catch(() => 0)) {
     throw new Error("registration dialog still shows the old input tabs.")
   }
-
-  const currentSections = dialog.locator('[data-registration-current="true"]')
-  if (await currentSections.count() !== 1 || !(await currentSections.first().innerText()).includes("문의 정보")) {
-    throw new Error("registration inquiry section is not the single highlighted current step.")
+  if (dialogText.includes("현재 업무")) {
+    throw new Error("registration dialog still renders a split 현재 업무 editor.")
   }
   if (!(await dialog.getByLabel("학생명", { exact: true }).isEnabled().catch(() => false))) {
     throw new Error("registration inquiry fields are not enabled.")
+  }
+
+  const lockedSections = dialog.locator('[data-registration-application-section] [role="group"][aria-disabled="true"]')
+  if (await lockedSections.count() === 0) {
+    throw new Error("registration dialog does not expose visible-but-locked future sections with aria-disabled.")
+  }
+  const lockReasons = await lockedSections.locator('[id$="-lock-reason"]').allInnerTexts().catch(() => [])
+  if (!lockReasons.some((reason) => reason.trim().length > 0)) {
+    throw new Error("registration dialog locked sections do not explain why they are unavailable.")
+  }
+
+  const page = dialog.page()
+  const detachedAppointmentEditors = page.locator('section[aria-label="레벨테스트 예약"], section[aria-label="방문상담 예약"]')
+  const appointmentEditorCount = await detachedAppointmentEditors.count().catch(() => 0)
+  for (let index = 0; index < appointmentEditorCount; index += 1) {
+    const isInsideApplicationHost = await detachedAppointmentEditors.nth(index).evaluate((element) => (
+      Boolean(element.closest('[data-registration-application-host]'))
+    ))
+    if (!isInsideApplicationHost) {
+      throw new Error("registration appointment editor escaped the common application host.")
+    }
   }
 }
 
@@ -2606,13 +2636,22 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     }
   }
 
-  async function openRegistrationSubjectTrackFixtureCase({ taskId, trackId, studentName, fixtureRole = "english_admin" }) {
+  async function openRegistrationSubjectTrackFixtureCase({
+    taskId,
+    trackId,
+    studentName,
+    fixtureRole = "english_admin",
+    appointmentId = "",
+    view = "",
+  }) {
     const search = new URLSearchParams({
       fixture: "registration-subject-tracks",
       fixtureRole,
       taskId,
       trackId,
     })
+    if (appointmentId) search.set("appointmentId", appointmentId)
+    if (view) search.set("view", view)
     await page.goto(joinUrl(baseUrl, `/admin/registration?${search.toString()}`), { waitUntil: "networkidle" })
     const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
     await dialog.waitFor({ state: "visible", timeout: 5000 })
@@ -2645,17 +2684,31 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     await subjectButton.click()
   }
 
-  async function openFixtureCaseFromList({ studentName, subject, viewLabel }) {
+  async function openFixtureCaseFromList({ studentName, subject = "영어", viewLabel }) {
     const viewTab = page.getByRole("tab", { name: new RegExp(`^${viewLabel}`) }).first()
     await viewTab.click()
-    const detailButton = await firstUsable(
-      page.getByRole("button", { name: `[${subject}] ${studentName} 상세`, exact: true }),
-    )
+    const mobileRow = page.getByRole("listitem", { name: `${studentName} 등록 신청`, exact: true })
+    const desktopRow = page.getByRole("row").filter({ hasText: studentName })
+    const registrationCaseRow = await firstUsable(mobileRow.or(desktopRow))
+    if (!(await registrationCaseRow.isVisible().catch(() => false))) {
+      throw new Error(`${studentName} registration case row is not visible in ${viewLabel}.`)
+    }
+    const visibleMatchingRows = await mobileRow.or(desktopRow).evaluateAll((rows) => rows.filter((row) => {
+      const style = window.getComputedStyle(row)
+      return style.display !== "none" && style.visibility !== "hidden" && row.getBoundingClientRect().width > 0
+    }).length)
+    if (visibleMatchingRows !== 1) {
+      throw new Error(`${studentName} registration case row appeared ${visibleMatchingRows} times in ${viewLabel}.`)
+    }
+    const detailButton = await firstUsable(registrationCaseRow.getByRole("button", {
+      name: new RegExp(`^${studentName} (문의 처리|레벨테스트 관리|상담 관리|대기 관리|등록 관리|완료 보기|상세)$`),
+    }))
     await waitUntilEnabled(detailButton, `${studentName} ${subject} fixture detail button`)
     await detailButton.click()
     const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
     await dialog.waitFor({ state: "visible", timeout: 5000 })
     await assertNoHorizontalOverflow(dialog, `${studentName} reopened subject-track fixture`)
+    if (subject) await selectFixtureSubject(dialog, subject)
     return dialog
   }
 
@@ -2696,6 +2749,74 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     return page.evaluate((globalName) => globalThis[globalName].replayLastCreate(), fixtureDebugGlobal)
   }
 
+  async function setNextFault(fault) {
+    await page.evaluate(({ globalName, nextFault }) => {
+      globalThis[globalName].setNextFault(nextFault)
+    }, { globalName: fixtureDebugGlobal, nextFault: fault })
+  }
+
+  async function assertSubjectQualifiedAccessibleNames(applicationHost) {
+    const missing = await applicationHost.locator('[data-registration-focus-track] input, [data-registration-focus-track] select, [data-registration-focus-track] button').evaluateAll((controls) => controls
+      .filter((control) => !control.disabled && control.getBoundingClientRect().width > 0)
+      .map((control) => control.getAttribute("aria-label") || control.labels?.[0]?.textContent?.trim() || "")
+      .filter((ariaLabel) => !/(영어|수학)/.test(ariaLabel)))
+    if (missing.length > 0) {
+      throw new Error(`subject-qualified accessible name is missing from ${missing.length} enabled track control(s).`)
+    }
+  }
+
+  async function assertMobileActionDomOrder(applicationHost) {
+    if (await page.evaluate(() => window.innerWidth) > 390) return
+    const reversedSections = await applicationHost.locator('[data-registration-application-section]').evaluateAll((sections) => sections.filter((section) => {
+      const fields = [...section.querySelectorAll('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')]
+        .filter((field) => field.getBoundingClientRect().width > 0)
+      const actions = [...section.querySelectorAll('button:not(:disabled)')]
+        .filter((button) => button.getBoundingClientRect().width > 0)
+      if (fields.length === 0 || actions.length === 0) return false
+      const lastField = fields[fields.length - 1]
+      const primaryAction = actions[actions.length - 1]
+      return !(lastField.compareDocumentPosition(primaryAction) & Node.DOCUMENT_POSITION_FOLLOWING)
+    }).map((section) => section.getAttribute("data-registration-application-section")))
+    if (reversedSections.length > 0) {
+      throw new Error(`mobile action DOM order precedes its fields in: ${reversedSections.join(", ")}.`)
+    }
+  }
+
+  async function assertNonColorWorkflowState(applicationHost, expectedState) {
+    const stateSignals = {
+      locked: '[aria-disabled="true"][aria-describedby]',
+      current: 'text=/진행 중|현재/',
+      saved: 'text=/저장|완료/',
+      failed: '[role="alert"]',
+    }
+    const signal = stateSignals[expectedState]
+    if (!signal || !(await applicationHost.locator(signal).first().isVisible().catch(() => false))) {
+      throw new Error(`${expectedState} workflow state is conveyed by color alone.`)
+    }
+  }
+
+  async function assertActionBelongsToSection(applicationHost, actionName, sectionId) {
+    const action = applicationHost.getByRole("button", { name: actionName, exact: true }).first()
+    if (!(await action.isVisible().catch(() => false))) return
+    const actualSection = await action.evaluate((button) => (
+      button.closest('[data-registration-application-section]')?.getAttribute("data-registration-application-section") || ""
+    ))
+    if (actualSection !== sectionId) {
+      throw new Error(`${actionName} belongs to ${actualSection || "no section"}, expected ${sectionId}.`)
+    }
+  }
+
+  async function verifyAutomaticHistory(applicationHost) {
+    const history = applicationHost.locator('[data-registration-application-section="history"]')
+    await requireVisibleText(history, "자동 이력", "automatic history")
+    const editableHistory = history.locator('textarea, [contenteditable="true"], button').filter({ hasText: /수정|삭제|저장/ })
+    if (await editableHistory.count() > 0) throw new Error("automatic history exposes manual edit controls.")
+    const historyText = await history.innerText()
+    if (!/[가-힣]|시스템/.test(historyText) || !/\d{1,2}[:.]\d{2}|\d{4}/.test(historyText)) {
+      throw new Error("automatic history is missing an actor or timestamp.")
+    }
+  }
+
   async function waitForInputValue(locator, expectedValue, label, timeoutMs = 10000) {
     const startedAt = Date.now()
     while (Date.now() - startedAt < timeoutMs) {
@@ -2713,17 +2834,26 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     "**/api/solapi",
     "**/api/solapi/**",
     "**/api/registration/consultation-notification",
+    "**/api/notifications/worker",
+    "**/api/notifications/connections",
+    "**/api/notifications/legacy/**",
+    "**/api/notifications/self-test/**",
+    "**/api/notifications/**/self-test",
   ]
   const interceptedProviderRequests = []
   const fulfillProviderFixture = async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue()
+      return
+    }
     interceptedProviderRequests.push({
       method: route.request().method(),
       url: route.request().url(),
     })
     await route.fulfill({
-      status: 200,
+      status: 503,
       contentType: "application/json",
-      body: JSON.stringify({ ok: true, fixture: true }),
+      body: JSON.stringify({ ok: false, fixture: true, blocked: "provider POST dispatch" }),
     })
   }
   function assertNoInterceptedProviderRequests(stage) {
@@ -2736,20 +2866,46 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   for (const providerRoutePattern of providerRoutePatterns) {
     await page.route(providerRoutePattern, fulfillProviderFixture)
   }
+  const notificationPermissionPrompts = []
+  await page.exposeFunction("__TIPS_RECORD_NOTIFICATION_PERMISSION_PROMPT__", () => {
+    notificationPermissionPrompts.push("permission prompt")
+  })
+  const installNotificationPermissionGuard = () => {
+    if (typeof Notification !== "undefined" && typeof Notification.requestPermission === "function") {
+      Notification.requestPermission = async () => {
+        await globalThis.__TIPS_RECORD_NOTIFICATION_PERMISSION_PROMPT__?.()
+        throw new Error("registration fixture blocked a notification permission prompt")
+      }
+    }
+  }
+  await page.addInitScript(installNotificationPermissionGuard)
+  await page.evaluate(installNotificationPermissionGuard)
 
   try {
   const createButton = page.getByRole("button", { name: "등록 추가", exact: true }).last()
   await waitUntilEnabled(createButton, "registration fixture create button")
   await createButton.click()
-  const createDialog = page.getByRole("dialog").filter({ hasText: "등록 추가" }).first()
+  const createApplicationHost = page.locator('[data-registration-application-host]').first()
+  const createDialog = createApplicationHost
   await createDialog.waitFor({ state: "visible", timeout: 5000 })
+  await verifyRegistrationSinglePageDialog(createDialog)
+  const prematureSaveButton = createDialog.getByRole("button", { name: "저장", exact: true }).last()
+  await prematureSaveButton.click()
+  const requiredFieldAlert = createDialog.getByRole("alert").last()
+  await requiredFieldAlert.waitFor({ state: "visible", timeout: 5000 })
+  const requiredAlertText = await requiredFieldAlert.innerText()
+  if (!/[가-힣]/.test(requiredAlertText)) throw new Error("role=alert validation feedback is not written in Korean.")
+  const focusedInquiryField = await createDialog.evaluate((host) => (
+    Boolean(document.activeElement?.closest('[data-registration-application-section="inquiry"]') === host.querySelector('[data-registration-application-section="inquiry"]'))
+  ))
+  if (!focusedInquiryField) throw new Error("invalid create submission did not focus the first inquiry blocker.")
   await createDialog.getByLabel(/^학생명/).fill(createdStudentName)
   await createDialog.getByLabel(/^학부모 전화/).fill("01012345678")
   await createDialog.getByRole("button", { name: "영어", exact: true }).click()
   await createDialog.getByRole("button", { name: "수학", exact: true }).click()
   await selectListboxOptionIfPresent(page, createDialog, "학년", "고1")
   await createDialog.getByLabel("영어 다음 업무", { exact: true }).selectOption("direct_phone")
-  await createDialog.getByLabel("수학 다음 업무", { exact: true }).selectOption("visit")
+  await createDialog.getByLabel("수학 다음 업무", { exact: true }).selectOption("level_test")
   const englishDirector = createDialog.getByLabel("영어 상담 책임자", { exact: true })
   const mathDirector = createDialog.getByLabel("수학 상담 책임자", { exact: true })
   await englishDirector.selectOption("fixture-profile-english-director")
@@ -2757,17 +2913,21 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   if (await englishDirector.inputValue() === await mathDirector.inputValue()) {
     throw new Error("registration initial plan did not retain different English and Mathematics directors.")
   }
-  await chooseFirstFixtureDate(createDialog, "방문상담 예약일 날짜")
-  await chooseFixtureTime(createDialog, "방문상담 예약일 시각", "오전 10:00")
-  await createDialog.getByLabel("방문상담실", { exact: true }).fill("상담실 2")
+  await chooseFirstFixtureDate(createDialog, "레벨테스트 예약일 날짜")
+  await chooseFixtureTime(createDialog, "레벨테스트 예약일 시각", "오전 10:00")
+  await createDialog.getByLabel("레벨테스트 장소", { exact: true }).locator("input").fill("시험실 2")
   const createText = await createDialog.innerText()
-  for (const expectedLabel of ["과목별 상담 책임자", "방문상담 예약일시", "방문상담실"]) {
+  for (const expectedLabel of ["과목별 상담 책임자", "레벨테스트", "예약일시", "장소"]) {
     if (!createText.includes(expectedLabel)) throw new Error(`registration initial plan is missing ${expectedLabel}.`)
   }
+  const visitOption = createDialog.getByLabel("수학 다음 업무", { exact: true }).locator('option[value="visit"]')
+  if (await visitOption.count() !== 1 || !createText.includes("방문상담일시") || !createText.includes("방문상담실")) {
+    throw new Error("registration initial plan does not keep direct-visit controls behind the atomic-only route.")
+  }
   const visitFieldOrder = ["과목별 상담 책임자", "방문상담 예약일시", "방문상담실"]
-    .map((label) => createText.indexOf(label))
+    .map((label) => createText.replace("방문상담일시", "방문상담 예약일시").indexOf(label))
   if (!(visitFieldOrder[0] < visitFieldOrder[1] && visitFieldOrder[1] < visitFieldOrder[2])) {
-    throw new Error("registration initial plan does not render owner, visit time, and room in operational order.")
+    throw new Error("registration initial plan does not render owner, direct-visit time, and room in operational order.")
   }
   for (const retiredLabel of ["전화상담 예약일시", "시험지·결과지 URL"]) {
     if (createText.includes(retiredLabel)) throw new Error(`registration initial plan still renders ${retiredLabel}.`)
@@ -2776,12 +2936,14 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   const saveCreateButton = createDialog.getByRole("button", { name: "저장", exact: true }).last()
   await waitUntilEnabled(saveCreateButton, "registration fixture save button")
   await saveCreateButton.click()
-  try {
-    await createDialog.waitFor({ state: "hidden", timeout: 15000 })
-  } catch (error) {
-    const alertText = await createDialog.getByRole("alert").allInnerTexts().catch(() => [])
-    throw new Error(`registration fixture create did not close after save: ${alertText.join(" | ")}`, { cause: error })
+  await createApplicationHost.waitFor({ state: "visible", timeout: 15000 })
+  await page.waitForFunction(() => (
+    document.querySelector('[data-registration-application-host]')?.getAttribute('data-registration-application-mode') === "detail"
+  ), undefined, { timeout: 15000 })
+  if (await createApplicationHost.getAttribute("data-registration-application-mode") !== "detail") {
+    throw new Error("create and detail did not remain in the same application host.")
   }
+  await verifyRegistrationSinglePageDialog(createApplicationHost)
 
   await page.waitForFunction((globalName) => Boolean(globalThis[globalName]?.snapshot()?.lastCreate), fixtureDebugGlobal, { timeout: 5000 })
   const savedSnapshot = await readFixtureDebugSnapshot()
@@ -2790,13 +2952,13 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   if (!createdDetail || !createdResult?.taskId) throw new Error("registration fixture debug bridge did not capture the saved create receipt.")
   const createdEnglish = createdDetail.tracks.find((track) => track.subject === "영어")
   const createdMath = createdDetail.tracks.find((track) => track.subject === "수학")
-  const createdVisit = createdDetail.appointments.find((appointment) => appointment.kind === "visit_consultation")
+  const createdLevelTest = createdDetail.appointments.find((appointment) => appointment.kind === "level_test")
   const englishPhoneRows = createdDetail.consultations.filter((item) => item.trackId === createdEnglish?.id && item.mode === "phone" && item.status === "waiting")
-  const mathVisitRows = createdDetail.consultations.filter((item) => item.trackId === createdMath?.id && item.mode === "visit" && item.status === "scheduled")
+  const mathLevelTestRows = createdDetail.levelTests.filter((item) => item.trackId === createdMath?.id && item.status === "scheduled")
   if (createdDetail.tracks.length !== 2 || new Set(createdDetail.tracks.map((track) => track.subject)).size !== 2) {
     throw new Error("registration fixture create did not persist exactly one English and one Mathematics track.")
   }
-  if (createdEnglish?.status !== "consultation_waiting" || createdMath?.status !== "visit_consultation_scheduled") {
+  if (createdEnglish?.status !== "consultation_waiting" || createdMath?.status !== "level_test_scheduled") {
     throw new Error("registration fixture create did not persist the canonical mixed consultation statuses.")
   }
   if (
@@ -2806,11 +2968,11 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   ) {
     throw new Error("registration fixture create did not preserve the independent directors.")
   }
-  if (createdDetail.appointments.length !== 1 || !createdVisit || englishPhoneRows.length !== 1 || mathVisitRows.length !== 1) {
-    throw new Error("registration fixture create duplicated or omitted its canonical consultation rows.")
+  if (createdDetail.appointments.length !== 1 || !createdLevelTest || englishPhoneRows.length !== 1 || mathLevelTestRows.length !== 1) {
+    throw new Error("registration fixture create duplicated or omitted its canonical phone and level-test rows.")
   }
-  if (mathVisitRows[0].appointmentId !== createdVisit.id || englishPhoneRows[0].appointmentId !== null) {
-    throw new Error("registration fixture create linked the mixed consultation rows incorrectly.")
+  if (mathLevelTestRows[0].appointmentId !== createdLevelTest.id || englishPhoneRows[0].appointmentId !== null) {
+    throw new Error("registration fixture create linked the mixed phone and level-test rows incorrectly.")
   }
   if (savedSnapshot.counts.externalCalls !== 0) {
     throw new Error(`registration fixture recorded outbound provider calls: ${savedSnapshot.counts.externalCalls}.`)
@@ -2847,8 +3009,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     throw new Error("registration fixture did not preserve out-of-order target reconciliation supersession.")
   }
   assertNoInterceptedProviderRequests("atomic create")
-  if (savedSnapshot.counts.notificationReceipts !== 1) {
-    throw new Error(`registration fixture notification receipt count is ${savedSnapshot.counts.notificationReceipts}, expected 1.`)
+  if (savedSnapshot.counts.notificationReceipts !== 0) {
+    throw new Error(`registration fixture notification receipt count is ${savedSnapshot.counts.notificationReceipts}, expected 0.`)
   }
 
   const replay = await replayLastFixtureCreate()
@@ -2866,16 +3028,26 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     throw new Error("registration fixture replay changed the persisted state counts.")
   }
 
-  let createdDialog = await openCreatedRegistrationCase(createdStudentName)
+  let createdDialog = createApplicationHost
   await requireVisibleText(createdDialog, "전화상담은 예약 없이")
   const createdPhoneStage = createdDialog.locator('section[aria-label="영어 상담 대기"]')
   if (await createdPhoneStage.getByText("예약 일시", { exact: false }).count() > 0) {
     throw new Error("created English direct-phone track rendered a reservation time.")
   }
   await selectFixtureSubject(createdDialog, "수학")
-  await requireVisibleText(createdDialog, "방문상담 일시")
-  await requireVisibleText(createdDialog, "방문상담 장소")
-  await requireVisibleText(createdDialog, "상담실 2")
+  await requireVisibleText(createdDialog, "레벨테스트 예약")
+  await requireVisibleText(createdDialog, "시험실 2")
+  await assertSubjectQualifiedAccessibleNames(createdDialog)
+  await assertMobileActionDomOrder(createdDialog)
+  await assertNonColorWorkflowState(createdDialog, "current")
+  await assertNonColorWorkflowState(createdDialog, "saved")
+  await verifyAutomaticHistory(createdDialog)
+  await assertActionBelongsToSection(createdDialog, "영어 상담 결과 저장", "consultation")
+  await closeFixtureDialog(createdDialog)
+
+  createdDialog = await openCreatedRegistrationCase(createdStudentName)
+  await requireVisibleText(createdDialog, "영어")
+  await requireVisibleText(createdDialog, "수학")
   await closeFixtureDialog(createdDialog)
 
   const tabs = ["문의", "레벨테스트", "상담", "대기", "등록", "완료"]
@@ -2970,6 +3142,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
   await requireVisibleText(multipleDialog, "고1 영어 특강")
   await requireVisibleText(multipleDialog, "수업 추가")
   await requireVisibleText(multipleDialog, "1. 입학신청서 발송")
+  await assertActionBelongsToSection(multipleDialog, "수업 추가", "placement")
+  await assertActionBelongsToSection(multipleDialog, "입학 처리 시작", "admission")
 
   const readOnlyAdmissionDialog = await openRegistrationSubjectTrackFixtureCase({
     taskId: "fixture-task-partial-registration",
@@ -3010,6 +3184,129 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
     "fixture-profile-english-director",
     "reopened registration migration director",
   )
+
+  await closeFixtureDialog(reloadedMigrationDialog)
+
+  const crossStageConsultationDialog = await openFixtureCaseFromList({
+    studentName: "김예린",
+    subject: "영어",
+    viewLabel: "상담",
+  })
+  const consultationTaskId = new URL(page.url()).searchParams.get("taskId")
+  await requireVisibleText(crossStageConsultationDialog, "전화상담은 예약 없이")
+  await closeFixtureDialog(crossStageConsultationDialog)
+  const crossStageLevelTestDialog = await openFixtureCaseFromList({
+    studentName: "김예린",
+    subject: "수학",
+    viewLabel: "레벨테스트",
+  })
+  const levelTestTaskId = new URL(page.url()).searchParams.get("taskId")
+  if (consultationTaskId !== "fixture-task-cross-stage" || levelTestTaskId !== consultationTaskId) {
+    throw new Error("cross-stage list views did not open the same common application.")
+  }
+  await requireVisibleText(crossStageLevelTestDialog, "영어")
+  await requireVisibleText(crossStageLevelTestDialog, "수학")
+  await closeFixtureDialog(crossStageLevelTestDialog)
+
+  const allTerminalDialog = await openFixtureCaseFromList({
+    studentName: "서지안",
+    subject: "영어",
+    viewLabel: "완료",
+  })
+  if (new URL(page.url()).searchParams.get("taskId") !== "fixture-task-all-terminal") {
+    throw new Error("the all-terminal case did not retain its one completed task identity.")
+  }
+  await requireVisibleText(allTerminalDialog, "등록 완료")
+  await requireVisibleText(allTerminalDialog, "미등록 완료")
+  await verifyAutomaticHistory(allTerminalDialog)
+  await closeFixtureDialog(allTerminalDialog)
+
+  const calendarDialog = await openRegistrationSubjectTrackFixtureCase({
+    taskId: "fixture-task-dual-test",
+    trackId: "fixture-track-dual-english",
+    appointmentId: "fixture-appointment-dual-test",
+    view: "calendar",
+    studentName: "김다미",
+  })
+  const calendarEditor = calendarDialog.locator('section[aria-label="레벨테스트 예약"]')
+  await calendarEditor.waitFor({ state: "visible", timeout: 5000 })
+  const calendarFocusSection = await calendarEditor.evaluate((editor) => (
+    editor.closest('[data-registration-application-section]')?.id || ""
+  ))
+  if (calendarFocusSection !== "registration-application-level_test") {
+    throw new Error(`calendar focus opened ${calendarFocusSection || "no section"} instead of the level-test section.`)
+  }
+
+  await page.goto(joinUrl(baseUrl, "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin&taskId=fixture-task-cross-stage&trackId=fixture-track-cross-english"), { waitUntil: "networkidle" })
+  const siblingDraftDialog = page.getByRole("dialog", { name: "등록: 김예린" }).first()
+  await siblingDraftDialog.waitFor({ state: "visible", timeout: 5000 })
+  const unsavedInquiryRequestNote = "문의 메모 초안은 형제 과목 저장 뒤에도 유지"
+  const siblingRequestNote = siblingDraftDialog.getByLabel("요청 사항", { exact: true })
+  await siblingRequestNote.fill(unsavedInquiryRequestNote)
+  await siblingDraftDialog.getByRole("button", { name: "영어 상담 결과 대기", exact: true }).click()
+  const phoneConsultationSave = siblingDraftDialog.getByRole("button", { name: "영어 상담 결과 저장", exact: true })
+  await waitUntilEnabled(phoneConsultationSave, "phone-consultation save")
+  await phoneConsultationSave.click()
+  await waitForInputValue(siblingRequestNote, unsavedInquiryRequestNote, "sibling inquiry draft after phone consultation save")
+  await page.keyboard.press("Escape")
+  const dirtyCloseConfirmation = page.getByRole("dialog", { name: "입력한 내용을 버릴까요?" })
+  await dirtyCloseConfirmation.waitFor({ state: "visible", timeout: 5000 })
+  await dirtyCloseConfirmation.getByRole("button", { name: "계속 작성", exact: true }).click()
+  await siblingDraftDialog.waitFor({ state: "visible", timeout: 5000 })
+  await page.keyboard.press("Escape")
+  await dirtyCloseConfirmation.getByRole("button", { name: "저장하지 않고 닫기", exact: true }).click()
+  await siblingDraftDialog.waitFor({ state: "hidden", timeout: 5000 })
+  const discarded = !(await siblingDraftDialog.isVisible().catch(() => false))
+  if (!discarded) throw new Error("dirty-close confirmation did not discard the sibling draft.")
+
+  const conflictDialog = await openRegistrationSubjectTrackFixtureCase({
+    taskId: "fixture-task-dual-test",
+    trackId: "fixture-track-dual-english",
+    studentName: "김다미",
+  })
+  const attemptedRequestNote = "내가 저장하려던 요청 사항"
+  const canonicalRequestNote = "다른 담당자가 먼저 저장한 요청 사항"
+  await setNextFault({
+    kind: "common_revision_conflict_once",
+    taskId: "fixture-task-dual-test",
+    canonicalRequestNote,
+  })
+  const conflictRequestNote = conflictDialog.getByLabel("요청 사항", { exact: true })
+  await conflictRequestNote.fill(attemptedRequestNote)
+  await conflictDialog.getByRole("button", { name: "공통 정보 저장", exact: true }).click()
+  const commonConflictAlert = conflictDialog.getByRole("alert").filter({ hasText: attemptedRequestNote })
+  await commonConflictAlert.waitFor({ state: "visible", timeout: 5000 })
+  await requireVisibleText(commonConflictAlert, canonicalRequestNote)
+  await commonConflictAlert.getByRole("button", { name: "내 입력 다시 적용", exact: true }).click()
+  await conflictDialog.getByRole("button", { name: "공통 정보 저장", exact: true }).click()
+  await waitForInputValue(conflictRequestNote, attemptedRequestNote, "retried common information")
+  await closeFixtureDialog(conflictDialog)
+
+  const optionFaultSearch = new URLSearchParams({
+    fixture: "registration-subject-tracks",
+    fixtureRole: "english_admin",
+    fixtureFaultType: "option_data_once",
+    fixtureFaultError: "선택 정보 일시 실패",
+  })
+  await page.goto(joinUrl(baseUrl, `/admin/registration?${optionFaultSearch.toString()}`), { waitUntil: "networkidle" })
+  const optionFaultCreateButton = page.getByRole("button", { name: "등록 추가", exact: true }).last()
+  await waitUntilEnabled(optionFaultCreateButton, "option fault create button")
+  await optionFaultCreateButton.click()
+  const optionFaultHost = page.locator('[data-registration-application-host]').first()
+  await optionFaultHost.waitFor({ state: "visible", timeout: 5000 })
+  const optionFaultAlert = optionFaultHost.getByRole("alert").filter({ hasText: "선택 정보 일시 실패" })
+  await optionFaultAlert.waitFor({ state: "visible", timeout: 5000 })
+  if (!(await optionFaultHost.getByLabel("학생명", { exact: true }).isEnabled())) {
+    throw new Error("option failure disabled inquiry-owned fields.")
+  }
+  await assertNonColorWorkflowState(optionFaultHost, "locked")
+  await assertNonColorWorkflowState(optionFaultHost, "failed")
+  await optionFaultAlert.getByRole("button", { name: "다시 불러오기", exact: true }).click()
+  await optionFaultAlert.waitFor({ state: "hidden", timeout: 5000 })
+
+  if (notificationPermissionPrompts.length !== 0) {
+    throw new Error(`registration fixture triggered ${notificationPermissionPrompts.length} notification permission prompt(s).`)
+  }
   assertNoInterceptedProviderRequests("full subject-track workflow")
 
   return {
@@ -3024,6 +3321,11 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl }) {
       "multiple English classes",
       "admission checklist permissions",
       "migration review gate",
+      "one case across consultation and level-test views",
+      "all-terminal completed row",
+      "calendar appointment deep link and focus",
+      "sibling draft preservation and dirty-close confirmation",
+      "common revision conflict and option retry",
     ],
   }
   } finally {
@@ -3071,6 +3373,7 @@ async function login(page, baseUrl, candidates, password, artifactDir) {
 async function inspectRoute(page, baseUrl, route, options = {}) {
   const consoleMessages = []
   const pageErrors = []
+  const failedRequests = []
   const responseErrors = []
   const isKnownRedirectMeasureError = (value) =>
     route.name === "lesson-design" &&
@@ -3087,18 +3390,32 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
     const request = response.request()
     responseErrors.push(`${response.status()} ${request.method()} ${response.url()}`)
   }
+  const onRequestFailed = (request) => {
+    failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "request failed"}`)
+  }
   page.on("console", onConsole)
   page.on("pageerror", onPageError)
+  page.on("requestfailed", onRequestFailed)
   page.on("response", onResponse)
 
   try {
+    const assertRouteHealth = async (stage) => {
+      const metrics = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+      }))
+      if (metrics.scrollWidth > metrics.viewportWidth + 8) {
+        throw new Error(`${route.name} has horizontal overflow during ${stage}: ${metrics.scrollWidth}px over ${metrics.viewportWidth}px.`)
+      }
+      if (consoleMessages.length > 0 || pageErrors.length > 0 || failedRequests.length > 0 || responseErrors.length > 0) {
+        throw new Error(`${route.name} has browser errors during ${stage}: ${[...consoleMessages, ...pageErrors, ...failedRequests, ...responseErrors].join(" | ")}`)
+      }
+      return metrics
+    }
+
     await page.goto(joinUrl(baseUrl, route.path), { waitUntil: "networkidle" })
     const url = new URL(page.url())
     const bodyText = await waitForRouteText(page, route)
-    const metrics = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      viewportWidth: window.innerWidth,
-    }))
 
     if (url.pathname.includes("/sign-in")) throw new Error(`${route.name} redirected to sign-in.`)
     if (bodyText.length < 20) throw new Error(`${route.name} rendered too little content.`)
@@ -3108,13 +3425,9 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
     if (bodyText.includes(SAMPLE_TAG)) throw new Error(`${route.name} still shows a sample workflow tag.`)
     if (bodyText.includes(UI_SAMPLE_PREFIX)) throw new Error(`${route.name} still shows a UI sample task.`)
     if (/403|permission denied|unauthorized/i.test(bodyText)) throw new Error(`${route.name} rendered an authorization error.`)
-    if (metrics.scrollWidth > metrics.viewportWidth + 8) {
-      throw new Error(`${route.name} has horizontal overflow: ${metrics.scrollWidth}px over ${metrics.viewportWidth}px.`)
-    }
-    if (consoleMessages.length > 0 || pageErrors.length > 0 || responseErrors.length > 0) {
-      throw new Error(`${route.name} has browser errors: ${[...consoleMessages, ...pageErrors, ...responseErrors].join(" | ")}`)
-    }
+    const metrics = await assertRouteHealth("initial navigation")
     const interactionResult = await verifyRouteInteraction(page, route, { ...options, baseUrl })
+    await assertRouteHealth("post interaction")
 
     return {
       name: route.name,
@@ -3128,6 +3441,7 @@ async function inspectRoute(page, baseUrl, route, options = {}) {
   } finally {
     page.off("console", onConsole)
     page.off("pageerror", onPageError)
+    page.off("requestfailed", onRequestFailed)
     page.off("response", onResponse)
   }
 }

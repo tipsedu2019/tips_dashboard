@@ -31,6 +31,7 @@ import type {
   RegistrationSubjectTrackFixtureAdapter,
   RegistrationSubjectTrackFixtureDebugActionBehavior,
   RegistrationSubjectTrackFixtureDebugCounts,
+  RegistrationSubjectTrackFixtureDebugFault,
   RegistrationSubjectTrackFixtureDebugSnapshot,
 } from "./registration-track-fixture-runtime"
 
@@ -95,6 +96,29 @@ export function parseRegistrationSubjectTrackFixtureQueryActionBehavior(input: {
   const error = rawError ? REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_ERROR_MESSAGE : ""
   if (delayMs <= 0 && !error) return null
   return { type, delayMs, error }
+}
+
+export function parseRegistrationSubjectTrackFixtureQueryFault(input: {
+  enabled: boolean
+  type: string | null | undefined
+  taskId?: string | null | undefined
+  canonicalRequestNote?: string | null | undefined
+  error?: string | null | undefined
+}): RegistrationSubjectTrackFixtureDebugFault | null {
+  if (!input.enabled) return null
+  const kind = String(input.type || "").trim()
+  if (kind === "option_data_once") {
+    const error = String(input.error || "").trim().slice(0, 160)
+    return error ? { kind, error } : null
+  }
+  if (kind === "common_revision_conflict_once") {
+    const taskId = String(input.taskId || "").trim().slice(0, 160)
+    const canonicalRequestNote = String(input.canonicalRequestNote || "").trim().slice(0, 2_000)
+    return taskId && canonicalRequestNote
+      ? { kind, taskId, canonicalRequestNote }
+      : null
+  }
+  return null
 }
 
 export type RegistrationSubjectTrackFixtureViewerKey = "english_admin" | "math_admin" | "staff" | "assistant"
@@ -178,6 +202,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
 ): RegistrationSubjectTrackFixtureAdapter {
   let lastCreate: RegistrationSubjectTrackFixtureDebugSnapshot["lastCreate"] = null
   let nextActionBehavior: Required<RegistrationSubjectTrackFixtureDebugActionBehavior> | null = null
+  let nextFault: RegistrationSubjectTrackFixtureDebugFault | null = null
 
   function debugCounts(state: RegistrationSubjectTrackFixtureState): RegistrationSubjectTrackFixtureDebugCounts {
     const details = Object.values(state.caseDetails)
@@ -228,6 +253,27 @@ export function createRegistrationSubjectTrackFixtureAdapter(
     executeAction: <T = unknown>(type: string, payload: Record<string, unknown>) => {
       const behavior = nextActionBehavior?.type === type ? nextActionBehavior : null
       if (behavior) nextActionBehavior = null
+      const consumeCommonRevisionConflictFault = () => {
+        if (
+          nextFault?.kind === "common_revision_conflict_once"
+          && type === "updateRegistrationCaseCommon"
+          && String(payload.taskId || "") === nextFault.taskId
+        ) {
+          const fault = nextFault
+          nextFault = null
+          const faultState = clone(runtime.getState())
+          const detail = requireCase(faultState.caseDetails[fault.taskId], "case_not_found")
+          detail.task.registration = {
+            ...detail.task.registration,
+            requestNote: fault.canonicalRequestNote,
+          }
+          detail.commonRevision += 1
+          syncCase(faultState, detail)
+          runtime.replaceState(faultState)
+          return new Error("registration_common_revision_conflict")
+        }
+        return null
+      }
       const executeNow = () => {
         const outcome = reduceRegistrationSubjectTrackFixture(runtime.getState(), {
           type,
@@ -256,6 +302,11 @@ export function createRegistrationSubjectTrackFixtureAdapter(
               reject(new Error(behavior.error))
               return
             }
+            const faultError = consumeCommonRevisionConflictFault()
+            if (faultError) {
+              reject(faultError)
+              return
+            }
             try {
               resolve(executeNow())
             } catch (error) {
@@ -265,6 +316,8 @@ export function createRegistrationSubjectTrackFixtureAdapter(
         })
       }
       if (behavior?.error) return Promise.reject(new Error(behavior.error))
+      const faultError = consumeCommonRevisionConflictFault()
+      if (faultError) return Promise.reject(faultError)
       return Promise.resolve(executeNow())
     },
     loadAppointmentCalendarRows: (input) => Promise.resolve(
@@ -276,7 +329,14 @@ export function createRegistrationSubjectTrackFixtureAdapter(
       return Promise.resolve(detail)
     },
     loadWorkspaceData: () => Promise.resolve(clone(runtime.getState().workspaceData)),
-    loadOptionData: () => Promise.resolve(clone(runtime.getState().optionData)),
+    loadOptionData: () => {
+      if (nextFault?.kind === "option_data_once") {
+        const fault = nextFault
+        nextFault = null
+        return Promise.reject(new Error(fault.error))
+      }
+      return Promise.resolve(clone(runtime.getState().optionData))
+    },
     loadClassDetails: (classIds) => Promise.resolve(getRegistrationSubjectTrackFixtureClassDetails(runtime.getState(), classIds)),
     debugSnapshot,
     debugSetNextActionBehavior: (behavior) => {
@@ -287,6 +347,24 @@ export function createRegistrationSubjectTrackFixtureAdapter(
         throw new Error("registration_subject_track_fixture_debug_action_invalid")
       }
       nextActionBehavior = { type, delayMs, error }
+    },
+    debugSetNextFault: (fault) => {
+      if (fault?.kind === "option_data_once") {
+        const error = String(fault.error || "").trim().slice(0, 160)
+        if (!error) throw new Error("registration_subject_track_fixture_debug_fault_invalid")
+        nextFault = { kind: fault.kind, error }
+        return
+      }
+      if (fault?.kind === "common_revision_conflict_once") {
+        const taskId = String(fault.taskId || "").trim().slice(0, 160)
+        const canonicalRequestNote = String(fault.canonicalRequestNote || "").trim().slice(0, 2_000)
+        if (!taskId || !canonicalRequestNote) {
+          throw new Error("registration_subject_track_fixture_debug_fault_invalid")
+        }
+        nextFault = { kind: fault.kind, taskId, canonicalRequestNote }
+        return
+      }
+      throw new Error("registration_subject_track_fixture_debug_fault_invalid")
     },
     debugReplayLastCreate: () => {
       if (!lastCreate) return Promise.reject(new Error("registration_subject_track_fixture_debug_create_missing"))
@@ -721,6 +799,20 @@ function buildFixtureCases() {
     enrollment({ id: "fixture-enrollment-partial-math", trackId: partialTracks[1].id, classId: "fixture-class-math-a", textbookId: "fixture-textbook-math-a", admissionBatchId: openAdmission.id, status: "planned" }),
   ]
 
+  const allTerminalTaskId = "fixture-task-all-terminal"
+  const allTerminalTracks = [
+    track({ id: "fixture-track-all-terminal-english", taskId: allTerminalTaskId, subject: "영어", status: "registered" }),
+    track({ id: "fixture-track-all-terminal-math", taskId: allTerminalTaskId, subject: "수학", status: "not_registered" }),
+  ]
+  const allTerminalTask = taskTemplate({
+    id: allTerminalTaskId,
+    studentName: "서지안",
+    subject: "영어, 수학",
+    tracks: allTerminalTracks,
+  })
+  allTerminalTask.status = "done"
+  allTerminalTask.completedAt = FIXTURE_NOW
+
   const multipleTaskId = "fixture-task-multiple-classes"
   const multipleTracks = [track({ id: "fixture-track-multiple-english", taskId: multipleTaskId, subject: "영어", status: "enrollment_decided" })]
   const multipleTask = taskTemplate({ id: multipleTaskId, studentName: "최유진", subject: "영어", tracks: multipleTracks })
@@ -815,6 +907,7 @@ function buildFixtureCases() {
     [splitTaskId]: caseDetail({ task: splitTask, tracks: splitTracks, appointments: [visitAppointment], consultations: splitConsultations }),
     [crossStageTaskId]: caseDetail({ task: crossStageTask, tracks: crossStageTracks, appointments: [crossStageAppointment], levelTests: [crossStageAttempt], consultations: [crossStageConsultation] }),
     [partialTaskId]: caseDetail({ task: partialTask, tracks: partialTracks, admissionBatches: [completedAdmission, openAdmission], enrollments: partialEnrollments }),
+    [allTerminalTaskId]: caseDetail({ task: allTerminalTask, tracks: allTerminalTracks }),
     [multipleTaskId]: caseDetail({ task: multipleTask, tracks: multipleTracks, enrollments: multipleEnrollments }),
     [decidedTaskId]: caseDetail({ task: decidedTask, tracks: decidedTracks }),
     [siblingTaskId]: caseDetail({ task: siblingTask, tracks: siblingTracks, appointments: [siblingAppointment], levelTests: [siblingAttempt], admissionBatches: [siblingBatch], enrollments: [siblingEnrollment] }),
@@ -886,6 +979,7 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
       { name: "split visit and phone consultation", taskId: "fixture-task-split-consultation" },
       { name: "independent consultation and level-test stages", taskId: "fixture-task-cross-stage" },
       { name: "partial registration with later batch", taskId: "fixture-task-partial-registration" },
+      { name: "all subject tracks terminal", taskId: "fixture-task-all-terminal" },
       { name: "multiple English classes", taskId: "fixture-task-multiple-classes" },
       { name: "enrollment decided add-button", taskId: "fixture-task-enrollment-decided" },
       { name: "admission panel with non-enrollment sibling", taskId: "fixture-task-admission-sibling" },
