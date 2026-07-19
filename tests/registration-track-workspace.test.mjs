@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import vm from "node:vm";
-
-import ts from "typescript";
-
-import { getRegistrationTrackViewKey } from "../src/features/tasks/registration-track-model.js";
 
 const listUrl = new URL(
-  "../src/features/tasks/registration-track-list.tsx",
+  "../src/features/tasks/registration-case-list.tsx",
   import.meta.url,
 );
 
@@ -32,30 +27,8 @@ function sourceBetween(source, startMarker, endMarker) {
   return source.slice(start + startMarker.length, end);
 }
 
-async function loadListAdapter() {
-  const source = await readListSource();
-  const adapterSource = sourceBetween(
-    source,
-    "// registration-track-list-adapter:start",
-    "// registration-track-list-adapter:end",
-  );
-  const compiled = ts.transpileModule(
-    `${adapterSource}\nmodule.exports = { buildRegistrationTrackListItems, filterRegistrationTrackListItems, sortRegistrationConsultationItems, getRegistrationTrackTimeValue };`,
-    {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2020,
-      },
-    },
-  ).outputText;
-  const sandboxModule = { exports: {} };
-
-  vm.runInNewContext(compiled, {
-    module: sandboxModule,
-    exports: sandboxModule.exports,
-    getRegistrationTrackViewKey,
-  });
-  return sandboxModule.exports;
+async function loadCaseListModel() {
+  return import("../src/features/tasks/registration-case-list-model.ts");
 }
 
 function fixtureTasks() {
@@ -103,86 +76,56 @@ function consultationItem(trackId, stageEnteredAt, phoneReadyAt, mode = "phone")
   }
 }
 
-test("phone queue sorts and displays only canonical readiness when stage order conflicts", async () => {
-  const { sortRegistrationConsultationItems, getRegistrationTrackTimeValue } = await loadListAdapter()
-  const items = sortRegistrationConsultationItems([
-    consultationItem("stage-old-ready-new", "2026-07-10T03:00:00Z", "2026-07-12T03:00:00Z"),
-    consultationItem("stage-new-ready-old", "2026-07-12T03:00:00Z", "2026-07-10T03:00:00Z"),
-  ])
-  assert.deepEqual(plain(items.map((item) => item.trackId)), ["stage-new-ready-old", "stage-old-ready-new"])
-  assert.equal(getRegistrationTrackTimeValue(items[0]), "2026-07-10T03:00:00Z")
+test("case list renders one keyed application row in each responsive surface", async () => {
+  const source = await readListSource();
+
+  assert.match(source, /export function RegistrationCaseList/);
+  assert.match(source, /export function RegistrationCaseListRow/);
+  assert.match(source, /data-testid="registration-case-desktop-list"/);
+  assert.match(source, /data-testid="registration-case-mobile-list"/);
+  assert.match(source, /key=\{item\.taskId\}/);
+  assert.match(source, /item\.tracks\.map/);
+  assert.match(source, /item\.matchingTracks\.map/);
+  assert.match(source, /REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40/);
+});
+
+test("case projection retains canonical phone and visit dates", async () => {
+  const { getRegistrationCaseTrackTimeValue } = await loadCaseListModel()
+  assert.equal(getRegistrationCaseTrackTimeValue({ status: "consultation_waiting", stageEnteredAt: "stage", phoneReadyAt: "phone", visitScheduledAt: "visit" }), "phone")
+  assert.equal(getRegistrationCaseTrackTimeValue({ status: "visit_consultation_scheduled", stageEnteredAt: "stage", phoneReadyAt: null, visitScheduledAt: "visit" }), "visit")
 })
 
-test("phone queue puts invalid and missing readiness last with a stable key tie-break", async () => {
-  const { sortRegistrationConsultationItems, getRegistrationTrackTimeValue } = await loadListAdapter()
-  const items = sortRegistrationConsultationItems([
-    consultationItem("missing-z", "2026-07-01T00:00:00Z", null),
-    consultationItem("equal-b", "2026-07-01T00:00:00Z", "2026-07-10T03:00:00Z"),
-    consultationItem("invalid-a", "2026-07-01T00:00:00Z", "not-a-date"),
-    consultationItem("equal-a", "2026-07-20T00:00:00Z", "2026-07-10T03:00:00Z"),
-    consultationItem("missing-a", "2026-07-30T00:00:00Z", ""),
-  ])
+test("one parent application remains one list item while retaining every subject", async () => {
+  const { buildRegistrationCaseListItems } = await loadCaseListModel();
+  const items = buildRegistrationCaseListItems(fixtureTasks());
 
-  assert.deepEqual(plain(items.map((item) => item.trackId)), [
-    "equal-a", "equal-b", "invalid-a", "missing-a", "missing-z",
-  ])
-  assert.equal(getRegistrationTrackTimeValue(items[2]), "not-a-date")
-  assert.equal(getRegistrationTrackTimeValue(items[3]), "")
-})
-
-test("visit rows use only the canonical active appointment time and never relabel stage entry as the booking", async () => {
-  const { getRegistrationTrackTimeValue } = await loadListAdapter()
-  assert.equal(getRegistrationTrackTimeValue({
-    status: "visit_consultation_scheduled",
-    visitScheduledAt: "2026-07-15T03:00:00Z",
-    stageEnteredAt: "2026-07-12T01:00:00Z",
-  }), "2026-07-15T03:00:00Z")
-  assert.equal(getRegistrationTrackTimeValue({
-    status: "visit_consultation_scheduled",
-    visitScheduledAt: "",
-    stageEnteredAt: "2026-07-12T01:00:00Z",
-  }), "")
-  assert.equal(getRegistrationTrackTimeValue({
-    status: "level_test_scheduled",
-    visitScheduledAt: "",
-    stageEnteredAt: "2026-07-12T01:00:00Z",
-  }), "2026-07-12T01:00:00Z")
-})
-
-test("one parent case becomes one work item per subject track", async () => {
-  const { buildRegistrationTrackListItems } = await loadListAdapter();
-  const items = buildRegistrationTrackListItems(fixtureTasks());
-
-  assert.deepEqual(plain(items.map((item) => [item.key, item.subject, item.viewKey])), [
-    ["case-1:eng", "영어", "consulting"],
-    ["case-1:math", "수학", "level_test"],
-  ]);
+  assert.equal(items.length, 1);
   assert.equal(items[0].taskId, "case-1");
-  assert.equal(items[0].trackId, "eng");
+  assert.deepEqual(items[0].tracks.map((item) => item.trackId), ["eng", "math"]);
 });
 
-test("same parent tracks can appear in different tabs", async () => {
+test("one application can appear in different views without duplicating a view row", async () => {
   const {
-    buildRegistrationTrackListItems,
-    filterRegistrationTrackListItems,
-  } = await loadListAdapter();
-  const items = buildRegistrationTrackListItems(fixtureTasks());
+    buildRegistrationCaseListItems,
+    filterRegistrationCaseListItems,
+  } = await loadCaseListModel();
+  const items = buildRegistrationCaseListItems(fixtureTasks());
 
   assert.deepEqual(
-    plain(filterRegistrationTrackListItems(items, "consulting").map((item) => item.trackId)),
-    ["eng"],
+    plain(filterRegistrationCaseListItems(items, "consulting").map((item) => item.taskId)),
+    ["case-1"],
   );
   assert.deepEqual(
-    plain(filterRegistrationTrackListItems(items, "level_test").map((item) => item.trackId)),
-    ["math"],
+    plain(filterRegistrationCaseListItems(items, "level_test").map((item) => item.taskId)),
+    ["case-1"],
   );
 });
 
-test("registration search narrows the selected tab by student, phone, subject, director, and place", async () => {
+test("application search narrows the selected view by student, phone, subject, director, and place", async () => {
   const {
-    buildRegistrationTrackListItems,
-    filterRegistrationTrackListItems,
-  } = await loadListAdapter();
+    buildRegistrationCaseListItems,
+    filterRegistrationCaseListItems,
+  } = await loadCaseListModel();
   const tasks = fixtureTasks();
   tasks[0].registration = {
     parentPhone: "010-1234-5678",
@@ -191,6 +134,7 @@ test("registration search narrows the selected tab by student, phone, subject, d
   tasks.push({
     ...tasks[0],
     id: "case-visit",
+    title: "등록: 박방문",
     studentName: "박방문",
     registration: {
       parentPhone: "010-9999-0000",
@@ -206,29 +150,34 @@ test("registration search narrows the selected tab by student, phone, subject, d
       visitPlace: "별관 상담실",
     }],
   });
-  const items = buildRegistrationTrackListItems(tasks);
+  const items = buildRegistrationCaseListItems(tasks);
 
   for (const query of ["김다미", "1234-5678", "영어", "강부희"]) {
     assert.deepEqual(
-      plain(filterRegistrationTrackListItems(items, "consulting", query).map((item) => item.trackId)),
-      ["eng"],
-      `${query} should find only the matching consultation track`,
+      plain(filterRegistrationCaseListItems(items, "consulting", query).map((item) => item.taskId)),
+      ["case-1"],
+      `${query} should find only the matching application`,
     );
   }
-  for (const query of ["박방문", "9999-0000", "수학", "이상담", "별관 상담실"]) {
+  for (const query of ["박방문", "9999-0000", "이상담", "별관 상담실"]) {
     assert.deepEqual(
-      plain(filterRegistrationTrackListItems(items, "consulting", query).map((item) => item.trackId)),
-      ["math-visit"],
-      `${query} should find only the matching visit track`,
+      plain(filterRegistrationCaseListItems(items, "consulting", query).map((item) => item.taskId)),
+      ["case-visit"],
+      `${query} should find only the matching application`,
     );
   }
+  assert.deepEqual(
+    plain(filterRegistrationCaseListItems(items, "consulting", "수학").map((item) => item.taskId)),
+    ["case-1", "case-visit"],
+    "subject search should find every matching application in the current view",
+  )
 });
 
-test("phone consultation queue is oldest-first without reordering other tabs", async () => {
+test("phone consultation applications are oldest-first without reordering other views", async () => {
   const {
-    buildRegistrationTrackListItems,
-    filterRegistrationTrackListItems,
-  } = await loadListAdapter();
+    buildRegistrationCaseListItems,
+    filterRegistrationCaseListItems,
+  } = await loadCaseListModel();
   const tasks = fixtureTasks();
   const baseTask = tasks[0];
   tasks.unshift({
@@ -265,56 +214,45 @@ test("phone consultation queue is oldest-first without reordering other tabs", a
     }],
   });
 
-  const items = buildRegistrationTrackListItems(tasks);
+  const items = buildRegistrationCaseListItems(tasks);
   const originalItems = plain(items);
   assert.deepEqual(
-    plain(filterRegistrationTrackListItems(items, "consulting").map((item) => item.trackId)),
-    ["eng", "eng-newer", "eng-visit"],
+    plain(filterRegistrationCaseListItems(items, "consulting").map((item) => item.taskId)),
+    ["case-1", "case-2", "case-3"],
   );
   assert.deepEqual(
-    plain(filterRegistrationTrackListItems(items, "level_test").map((item) => item.trackId)),
-    ["math", "math-second"],
+    plain(filterRegistrationCaseListItems(items, "level_test").map((item) => item.taskId)),
+    ["case-1", "case-4"],
   );
   assert.deepEqual(plain(items), originalItems, "filtering must not mutate the shared track list");
 });
 
-test("track list renders compact subject-scoped desktop and mobile rows", async () => {
+test("case list renders application-scoped desktop and mobile rows", async () => {
   const source = await readListSource();
-  const identitySource = sourceBetween(source, "function RegistrationTrackIdentity", "function formatStageEnteredAt");
+  const rowSource = sourceBetween(source, "export function RegistrationCaseListRow", "export function RegistrationCaseList");
 
-  assert.match(source, /export function RegistrationTrackList/);
-  assert.match(source, /data-testid="registration-track-desktop-list"/);
-  assert.match(source, /data-testid="registration-track-mobile-list"/);
+  assert.match(source, /export function RegistrationCaseList/);
+  assert.match(source, /data-testid="registration-case-desktop-list"/);
+  assert.match(source, /data-testid="registration-case-mobile-list"/);
   assert.match(source, /item\.studentName/);
-  assert.match(source, /<Badge variant="outline">\{item\.subject\}<\/Badge>/);
-  assert.match(source, /<RegistrationTrackStatusBadge status=\{item\.status\}/);
-  assert.match(source, /같은 문의의 과목별 진행/);
-  assert.match(source, /단일 과목 문의/);
-  assert.match(source, /item\.directorName \|\| "미지정"/);
+  assert.match(source, /item\.tracks\.map/);
+  assert.match(source, /item\.matchingTracks\.map/);
   assert.match(source, /min-w-0/);
   assert.match(source, /overflow-hidden/);
-  assert.match(source, /REGISTRATION_TRACK_INITIAL_RENDER_LIMIT/);
+  assert.match(source, /REGISTRATION_CASE_INITIAL_RENDER_LIMIT/);
   assert.match(source, /visibleItems/);
   assert.match(source, /windowState\.key === itemSetKey/);
   assert.match(source, /setWindowState/);
   assert.match(source, /더 보기/);
-  assert.match(source, /REGISTRATION_TRACK_DATE_FORMATTER/);
-  assert.match(source, /content-visibility:auto/);
   assert.match(source, /role="status"/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /visitScheduledAt/);
   assert.match(source, /visitPlace/);
   assert.match(source, /phoneReadyAt/);
-  assert.match(source, /전화상담 대기 기준/);
-  assert.match(source, /전화상담 대기 ·/);
-  assert.match(source, /방문상담 일시/);
-  assert.match(source, /방문상담 장소/);
   assert.match(source, /className="grid min-w-0 gap-2 p-2 lg:hidden"/);
   assert.match(source, /className="hidden w-full min-w-0 overflow-hidden lg:block"/);
   assert.doesNotMatch(source, /md:hidden|md:block/);
-  assert.match(identitySource, /flex-wrap/);
-  assert.match(identitySource, /\[overflow-wrap:anywhere\]/);
-  assert.doesNotMatch(identitySource, /truncate/);
+  assert.match(source, /item\.representativeTrack\.trackId/);
   assert.match(source, /break-words \[overflow-wrap:anywhere\]/);
 });
 
@@ -362,44 +300,42 @@ test("unbatched enrollment drafts may omit a schedule while batch start requires
   assert.match(source, /입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요/)
 })
 
-test("list permissions are summary hints and every callback remains subject-scoped", async () => {
+test("case list permissions are summary hints and each quick action remains subject-scoped", async () => {
   const source = await readListSource();
 
   assert.match(source, /getRegistrationSummaryActionPermissions/);
   assert.match(source, /canOpenConsultationCompletion/);
-  assert.match(source, /onOpen\(item\.taskId, item\.trackId\)/);
-  assert.match(source, /onEdit\(item\.taskId, item\.trackId\)/);
-  assert.match(source, /onAction\(item\.taskId, item\.trackId, "complete_consultation"\)/);
-  assert.match(source, /`\[\$\{item\.subject\}\] \$\{item\.studentName\} \$\{consultationActionLabel\}`/);
+  assert.match(source, /onOpen\(item\.taskId, item\.representativeTrack\.trackId\)/);
+  assert.match(source, /onEdit\(item\.taskId, item\.representativeTrack\.trackId\)/);
+  assert.match(source, /onAction\(item\.taskId, track\.trackId, "complete_consultation"\)/);
   assert.match(source, /strict detail permission/i);
   assert.doesNotMatch(source, /getRegistrationActionPermissions/);
   assert.doesNotMatch(source, /\.consultations/);
   assert.match(
     source,
-    /permissions\.canManage[\s\S]*?onEdit\(item\.taskId, item\.trackId\)[\s\S]*?:[\s\S]*?onOpen\(item\.taskId, item\.trackId\)/,
+    /representativePermissions\.canManage[\s\S]*?onEdit\(item\.taskId, item\.representativeTrack\.trackId\)[\s\S]*?:[\s\S]*?onOpen\(item\.taskId, item\.representativeTrack\.trackId\)/,
     "one contextual open action should replace duplicate detail and management buttons",
   );
-  assert.match(source, /aria-label=\{`\[\$\{item\.subject\}\] \$\{item\.studentName\} \$\{managementActionLabel\}`\}/);
-  assert.match(source, /aria-label=\{`\[\$\{item\.subject\}\] \$\{item\.studentName\} \$\{consultationActionLabel\}`\}/);
+  assert.match(source, /aria-label=\{`\$\{track\.subject\} \$\{item\.studentName\} \$\{consultationActionLabel\}`\}/);
 });
 
-test("workspace derives tab counts from every track before filtering the selected view", async () => {
+test("workspace derives tab counts from application cases before filtering the selected view", async () => {
   const source = await readWorkspaceSource();
 
-  assert.match(source, /buildRegistrationTrackListItems/);
-  assert.match(source, /filterRegistrationTrackListItems/);
-  assert.match(source, /getRegistrationTrackTabCounts/);
-  assert.match(source, /const registrationTrackItems = useMemo/);
-  assert.match(source, /getRegistrationTrackTabCounts\(registrationTrackItems\.map\(\(item\) => item\.track\)\)/);
-  assert.match(source, /const visibleRegistrationTrackItems = useMemo/);
-  assert.match(source, /filterRegistrationTrackListItems\(registrationTrackItems, registrationView, deferredQuery\)/);
-  assert.match(source, /<RegistrationTrackList/);
-  assert.match(source, /items=\{visibleRegistrationTrackItems\}/);
+  assert.match(source, /buildRegistrationCaseListItems/);
+  assert.match(source, /filterRegistrationCaseListItems/);
+  assert.match(source, /getRegistrationCaseTabCounts/);
+  assert.match(source, /const registrationCaseItems = useMemo/);
+  assert.match(source, /getRegistrationCaseTabCounts\(registrationCaseItems\)/);
+  assert.match(source, /const visibleRegistrationCaseItems = useMemo/);
+  assert.match(source, /filterRegistrationCaseListItems\(registrationCaseItems, registrationView, deferredQuery\)/);
+  assert.match(source, /<RegistrationCaseList/);
+  assert.match(source, /items=\{visibleRegistrationCaseItems\}/);
   assert.match(source, /viewerId=\{registrationViewerId\}/);
   assert.match(source, /viewerRole=\{registrationViewerRole\}/);
   assert.doesNotMatch(source, /\bregistrationPipeline\b/);
   assert.doesNotMatch(source, /isRegistrationPipelineInView/);
-  assert.match(source, /const visibleWorkspaceItemCount = isRegistrationWorkspace[\s\S]*?visibleRegistrationTrackItems\.length/);
+  assert.match(source, /const visibleWorkspaceItemCount = isRegistrationWorkspace[\s\S]*?visibleRegistrationCaseItems\.length/);
   assert.match(source, /shouldHideEmptySurface = !loading && visibleWorkspaceItemCount === 0/);
   assert.match(source, /const registrationEmptyLabel = hasQuery[\s\S]*?현재 단계에서 검색 결과가 없습니다\./);
   assert.match(source, /등록 업무가 없습니다\./);

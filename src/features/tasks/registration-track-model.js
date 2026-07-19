@@ -43,12 +43,6 @@ export function getRegistrationTrackViewKey(status) {
   return STATUS_TO_VIEW[String(status || "").trim()] || "inquiry"
 }
 
-export function getRegistrationTrackTabCounts(tracks = []) {
-  const counts = { inquiry: 0, level_test: 0, consulting: 0, waiting: 0, enrollment: 0, closed: 0 }
-  for (const track of tracks) counts[getRegistrationTrackViewKey(track?.status)] += 1
-  return counts
-}
-
 export function isRegistrationTrackTerminal(status) {
   return TERMINAL_STATUSES.has(String(status || "").trim())
 }

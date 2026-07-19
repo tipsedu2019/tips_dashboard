@@ -805,8 +805,8 @@ test("registration keeps the operational pipeline as first-class state", async (
   }
 
   assertIncludesAll(combined, [
-    "RegistrationTrackList",
-    "getRegistrationTrackTabCounts",
+    "RegistrationCaseList",
+    "getRegistrationCaseTabCounts",
     "pipelineStatus",
     "pipeline_status",
     "REGISTRATION_PIPELINE_STATUSES",
@@ -817,17 +817,17 @@ test("registration keeps the operational pipeline as first-class state", async (
   ]);
 });
 
-test("registration workspace replaces Notion registration management with subject-track tabs and canonical controls", async () => {
-  const [workspaceSource, serviceSource, migrationSource, trackListSource, trackModelSource, initialPlanSource] = await Promise.all([
+test("registration workspace replaces Notion registration management with one application row per view", async () => {
+  const [workspaceSource, serviceSource, migrationSource, caseListSource, trackModelSource, initialPlanSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("supabase/migrations/20260710052914_registration_operational_fields.sql"),
-    readSource("src/features/tasks/registration-track-list.tsx"),
+    readSource("src/features/tasks/registration-case-list.tsx"),
     readSource("src/features/tasks/registration-track-model.js"),
     readSource("src/features/tasks/registration-initial-plan-control.tsx"),
   ]);
-  const combined = `${workspaceSource}\n${serviceSource}\n${migrationSource}\n${trackListSource}\n${trackModelSource}`;
-  const registrationTableSource = trackListSource;
+  const combined = `${workspaceSource}\n${serviceSource}\n${migrationSource}\n${caseListSource}\n${trackModelSource}`;
+  const registrationTableSource = caseListSource;
   const detailDialogSource = workspaceSource.slice(
     workspaceSource.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && detailOpen}"),
     workspaceSource.indexOf("<Dialog open={Boolean(deleteTarget)}"),
@@ -838,14 +838,14 @@ test("registration workspace replaces Notion registration management with subjec
     "REGISTRATION_VIEW_TABS",
     "STATUS_TO_VIEW",
     "getRegistrationTrackViewKey",
-    "RegistrationTrackList",
-    "buildRegistrationTrackListItems",
-    "filterRegistrationTrackListItems",
+    "RegistrationCaseList",
+    "buildRegistrationCaseListItems",
+    "filterRegistrationCaseListItems",
     "RegistrationWorkflowStatusBadge",
     "RegistrationOperationsChecklistChips",
     "RegistrationNotificationSettingsDialog",
     "RegistrationDetailPanel",
-    "getRegistrationTrackTabCounts",
+    "getRegistrationCaseTabCounts",
     "collectRegistrationLegacySourceIds",
     "dispatchLegacyOpsTaskSources",
     "textbookPreparation",
@@ -872,29 +872,16 @@ test("registration workspace replaces Notion registration management with subjec
   ]);
 
   assertIncludesAll(registrationTableSource, [
-    'data-testid="registration-track-mobile-list"',
-    'data-testid="registration-track-desktop-list"',
-    'aria-label="과목별 등록 데이터테이블"',
-    "RegistrationTrackActions",
-    "item.subject",
-    "item.directorName",
-    "getRegistrationTrackTimeValue(item)",
-    'if (item.status === "consultation_waiting") return item.phoneReadyAt || ""',
-    'if (item.status === "visit_consultation_scheduled") return item.visitScheduledAt',
-    "formatStageEnteredAt(getRegistrationTrackTimeValue(item))",
-    '전화상담 대기 기준',
-    '전화상담 대기 ·',
+    'data-testid="registration-case-mobile-list"',
+    'data-testid="registration-case-desktop-list"',
+    'aria-label="등록 신청 데이터테이블"',
+    "RegistrationCaseActions",
+    "item.tracks.map",
+    "item.matchingTracks.map",
+    "getRegistrationCaseTrackTimeLabel(track)",
+    "REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40",
+    "key={item.taskId}",
   ]);
-  assert.doesNotMatch(
-    registrationTableSource,
-    /formatStageEnteredAt\(item\.stageEnteredAt\)/,
-    "visit rows must not relabel stage entry as their appointment time",
-  );
-  assert.doesNotMatch(
-    registrationTableSource,
-    /if \(item\.status === "consultation_waiting"\) return item\.stageEnteredAt/,
-    "phone rows must not synthesize readiness from stage entry",
-  );
 
   assertIncludesAll(workspaceSource, [
     'label="진행상태"',
@@ -972,10 +959,10 @@ test("leaving a registration fixture clears provider retry targets before produc
   ]);
 });
 
-test("registration exposes six ordered work tabs with separate level-test and consultation track states", async () => {
-  const [workspaceSource, trackListSource, trackModelSource] = await Promise.all([
+test("registration exposes six ordered work tabs with case rows retaining subject-specific states", async () => {
+  const [workspaceSource, caseListSource, trackModelSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
-    readSource("src/features/tasks/registration-track-list.tsx"),
+    readSource("src/features/tasks/registration-case-list.tsx"),
     readSource("src/features/tasks/registration-track-model.js"),
   ]);
   const tabsSource = workspaceSource.slice(
@@ -1004,12 +991,12 @@ test("registration exposes six ordered work tabs with separate level-test and co
     'visit_consultation_scheduled: "consulting"',
   ]);
 
-  assertIncludesAll(trackListSource, [
+  assertIncludesAll(caseListSource, [
     'level_test_scheduled: "레벨테스트 예약"',
     'level_test_in_progress: "레벨테스트 진행"',
     'consultation_waiting: "전화상담 대기"',
     'visit_consultation_scheduled: "방문상담 예약"',
-    'onAction(item.taskId, item.trackId, "complete_consultation")',
+    'onAction(item.taskId, track.trackId, "complete_consultation")',
   ]);
 });
 
@@ -1023,7 +1010,7 @@ test("registration toolbar keeps the workflow self-explanatory with search and r
   assert.doesNotMatch(workspaceSource, /aria-label="학년 필터"|allLabel="학년 전체"|selectedGradeFilter|appliedGradeFilter/);
   assert.match(workspaceSource, /const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query\.trim\(\)\.length > 0/);
   assert.match(workspaceSource, /const showSearch = isRegistrationWorkspace\s*\? registrationMode === "list"\s*:/);
-  assert.match(workspaceSource, /filterRegistrationTrackListItems\(registrationTrackItems, registrationView, deferredQuery\)/);
+  assert.match(workspaceSource, /filterRegistrationCaseListItems\(registrationCaseItems, registrationView, deferredQuery\)/);
   assert.match(workspaceSource, /isRegistrationWorkspace[\s\S]*?aria-label="새로고침"/);
   assert.match(workspaceSource, /setRegistrationCalendarRefreshToken\(\(current\) => current \+ 1\)/);
   assert.match(workspaceSource, /isRegistrationWorkspace \? "w-full !flex-nowrap !overflow-x-auto lg:flex-1"/);
@@ -1167,23 +1154,23 @@ test("등록 예약 달력은 목록 흐름과 분리되고 정확한 예약 딥
   assert.doesNotMatch(calendarSource, /\bdraggable\b|onDrop|onDrag|resize|range-create|onDelete/);
 });
 
-test("registration tabs render compact subject-track rows without the retired parent table filters", async () => {
+test("registration tabs render compact application rows without the retired parent table filters", async () => {
   const [workspaceSource, tableSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
-    readSource("src/features/tasks/registration-track-list.tsx"),
+    readSource("src/features/tasks/registration-case-list.tsx"),
   ]);
 
   assertIncludesAll(workspaceSource, [
     "key={registrationView}",
-    "items={visibleRegistrationTrackItems}",
+    "items={visibleRegistrationCaseItems}",
     "viewerRole={registrationViewerRole}",
   ]);
   assertIncludesAll(tableSource, [
-    'aria-label="과목별 등록 업무 목록"',
-    'aria-label="과목별 등록 모바일 목록"',
-    'aria-label="과목별 등록 데이터테이블"',
+    'aria-label="등록 신청 목록"',
+    'aria-label="등록 신청 모바일 목록"',
+    'aria-label="등록 신청 데이터테이블"',
     "const visibleItems = items.slice(0, visibleCount)",
-    "RegistrationTrackIdentity",
+    "RegistrationCaseListRow",
   ]);
   assert.doesNotMatch(workspaceSource, /RegistrationDataTable|RegistrationPipelineFilter/);
   assert.doesNotMatch(tableSource, /selectedGradeFilter|selectedCounselorFilter|RegistrationResizableHeaderCell/);
@@ -1264,10 +1251,10 @@ test("registration list renders core data without starting option reads until a 
   assert.doesNotMatch(reloadSource, /loadOpsTaskWorkspaceOptionData/);
 });
 
-test("registration alone uses the subject-track list while neighboring operation tables stay wired", async () => {
+test("registration alone uses the application list while neighboring operation tables stay wired", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
-  assert.match(workspaceSource, /isRegistrationWorkspace \? \([\s\S]*?<RegistrationTrackList/);
+  assert.match(workspaceSource, /isRegistrationWorkspace \? \([\s\S]*?<RegistrationCaseList/);
   assert.match(workspaceSource, /isWithdrawalWorkspace \? \([\s\S]*?<WithdrawalDataTable/);
   assert.match(workspaceSource, /isTransferWorkspace \? \([\s\S]*?<TransferDataTable/);
   assert.match(workspaceSource, /onOpen=\{\(taskId, trackId\) => void openRegistrationTrack\(taskId, trackId\)\}/);
@@ -1848,24 +1835,24 @@ test("committed initial visit notifications expose an in-session notification-on
   assert.match(source, /const submissionViewerId = currentUserId[\s\S]*?const submissionViewerGeneration = workspaceViewerGenerationRef\.current/)
 })
 
-test("registration subject tracks split combined inquiries and preserve subjects during class sync", async () => {
-  const [workspaceSource, serviceSource, trackListSource] = await Promise.all([
+test("registration application rows retain every subject during class sync", async () => {
+  const [workspaceSource, serviceSource, caseListSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-service.ts"),
-    readSource("src/features/tasks/registration-track-list.tsx"),
+    readSource("src/features/tasks/registration-case-list.tsx"),
   ]);
 
   assertIncludesAll(workspaceSource, [
-    "buildRegistrationTrackListItems(scopedTasks)",
-    "filterRegistrationTrackListItems(registrationTrackItems, registrationView, deferredQuery)",
+    "buildRegistrationCaseListItems(scopedTasks)",
+    "filterRegistrationCaseListItems(registrationCaseItems, registrationView, deferredQuery)",
     'form.type !== "registration" || !form.subject',
   ]);
-  assertIncludesAll(trackListSource, [
-    "tasks.flatMap((task)",
-    "registrationTracks.map((track)",
-    "taskId: task.id",
-    "trackId: track.id",
-    "subject: track.subject",
+  assertIncludesAll(caseListSource, [
+    "item.tracks.map",
+    "item.matchingTracks.map",
+    "item.representativeTrack.trackId",
+    "track.trackId",
+    "track.subject",
   ]);
   assertIncludesAll(serviceSource, [
     "assertRegistrationInquiryBaseReady",

@@ -127,11 +127,14 @@ import {
   resolveRegistrationDirectorDefault,
 } from "./registration-director-default.js"
 import {
-  RegistrationTrackList,
-  buildRegistrationTrackListItems,
-  filterRegistrationTrackListItems,
-  type RegistrationTrackListAction,
-} from "./registration-track-list"
+  RegistrationCaseList,
+  type RegistrationCaseListAction,
+} from "./registration-case-list"
+import {
+  buildRegistrationCaseListItems,
+  filterRegistrationCaseListItems,
+  getRegistrationCaseTabCounts,
+} from "./registration-case-list-model"
 import { RegistrationAppointmentCalendar } from "./registration-appointment-calendar"
 import type { RegistrationAppointmentCalendarItem } from "./registration-appointment-calendar-model"
 import { RegistrationTrackEditor } from "./registration-track-editor"
@@ -169,7 +172,6 @@ import {
 } from "./registration-consultation-notification.js"
 import {
   getRegistrationActionPermissions,
-  getRegistrationTrackTabCounts,
 } from "./registration-track-model.js"
 import {
   executeRegistrationSubjectTrackFixtureAction,
@@ -9088,17 +9090,17 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     operations: getWithdrawalViewTasks(scopedTasks, "operations").length,
     closed: getWithdrawalViewTasks(scopedTasks, "closed").length,
   }), [scopedTasks])
-  const registrationTrackItems = useMemo(
-    () => buildRegistrationTrackListItems(scopedTasks),
+  const registrationCaseItems = useMemo(
+    () => buildRegistrationCaseListItems(scopedTasks),
     [scopedTasks],
   )
   const registrationCounts = useMemo(
-    () => getRegistrationTrackTabCounts(registrationTrackItems.map((item) => item.track)),
-    [registrationTrackItems],
+    () => getRegistrationCaseTabCounts(registrationCaseItems),
+    [registrationCaseItems],
   )
-  const visibleRegistrationTrackItems = useMemo(
-    () => filterRegistrationTrackListItems(registrationTrackItems, registrationView, deferredQuery),
-    [deferredQuery, registrationTrackItems, registrationView],
+  const visibleRegistrationCaseItems = useMemo(
+    () => filterRegistrationCaseListItems(registrationCaseItems, registrationView, deferredQuery),
+    [deferredQuery, registrationCaseItems, registrationView],
   )
   const wordRetestRoleContext = useMemo(
     () => (canManageAll || isStaff ? {} : currentUserContext),
@@ -9282,7 +9284,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const isRegistrationFilteredEmpty = isRegistrationWorkspace && registrationView !== "inquiry"
   const isFilteredEmpty = hasQuery || isTodoFilteredEmpty || isWordRetestFilteredEmpty || isWithdrawalFilteredEmpty || isRegistrationFilteredEmpty || (!isTodoWorkspace && taskFocus !== "none")
   const visibleWorkspaceItemCount = isRegistrationWorkspace
-    ? visibleRegistrationTrackItems.length
+    ? visibleRegistrationCaseItems.length
     : visibleTasks.length
   const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
   const showToolbarCreate = (!registrationFixtureEnabled || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
@@ -9723,7 +9725,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const handleRegistrationTrackAction = useCallback(async (
     taskId: string,
     trackId: string,
-    action: RegistrationTrackListAction,
+    action: RegistrationCaseListAction,
   ) => {
     if (action !== "complete_consultation") return
     if (isLegacyRegistrationTrackId(trackId)) {
@@ -11762,9 +11764,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 onOpenAppointment={openRegistrationCalendarItem}
               />
             ) : (
-	            <RegistrationTrackList
+	            <RegistrationCaseList
 	              key={registrationView}
-	              items={visibleRegistrationTrackItems}
+	              items={visibleRegistrationCaseItems}
 	              viewerId={registrationViewerId}
 	              viewerRole={registrationViewerRole}
 	              loading={loading}

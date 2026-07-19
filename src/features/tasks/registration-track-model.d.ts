@@ -106,10 +106,6 @@ export function getRegistrationTrackViewKey(
   status?: RegistrationTrackStatus | null,
 ): RegistrationTrackViewKey
 
-export function getRegistrationTrackTabCounts(
-  tracks?: readonly RegistrationTrackSummary[],
-): Record<RegistrationTrackViewKey, number>
-
 export function getAllowedRegistrationTrackActions(
   status?: RegistrationTrackStatus | null,
 ): readonly RegistrationTrackAction[]

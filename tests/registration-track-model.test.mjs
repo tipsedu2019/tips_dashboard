@@ -22,13 +22,16 @@ import {
   getAllowedRegistrationTrackActions,
   getRegistrationCurrentClassWaitClassId,
   getRegistrationTrackNextStatus,
-  getRegistrationTrackTabCounts,
   getRegistrationTrackTransitionBlockers,
   getRegistrationTrackViewKey,
   mergeSavedRegistrationEnrollmentRows,
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
 } from "../src/features/tasks/registration-track-model.js"
+import {
+  buildRegistrationCaseListItems,
+  getRegistrationCaseTabCounts,
+} from "../src/features/tasks/registration-case-list-model.ts"
 
 test("allowed actions are returned as a fresh view of the authoritative status matrix", () => {
   const first = getAllowedRegistrationTrackActions("consultation_waiting")
@@ -520,11 +523,17 @@ test("track statuses map one-to-one to the six registration tabs", () => {
   assert.equal(getRegistrationTrackViewKey("registered"), "closed")
 })
 
-test("tab counts count subject tracks rather than parent cases", () => {
-  assert.deepEqual(getRegistrationTrackTabCounts([
-    { id: "english", taskId: "case-1", status: "consultation_waiting" },
-    { id: "math", taskId: "case-1", status: "level_test_scheduled" },
-  ]), { inquiry: 0, level_test: 1, consulting: 1, waiting: 0, enrollment: 0, closed: 0 })
+test("tab counts count one application case even when multiple subjects match a view", () => {
+  const items = buildRegistrationCaseListItems([{
+    id: "case-1",
+    title: "등록: 학생",
+    studentName: "학생",
+    registrationTracks: [
+      { id: "english", taskId: "case-1", subject: "영어", status: "consultation_waiting", directorName: "", directorProfileId: null, stageEnteredAt: "", phoneReadyAt: null, migrationReviewRequired: false },
+      { id: "math", taskId: "case-1", subject: "수학", status: "visit_consultation_scheduled", directorName: "", directorProfileId: null, stageEnteredAt: "", phoneReadyAt: null, migrationReviewRequired: false },
+    ],
+  }])
+  assert.deepEqual(getRegistrationCaseTabCounts(items), { inquiry: 0, level_test: 0, consulting: 1, waiting: 0, enrollment: 0, closed: 0 })
 })
 
 test("phone consultation completion requires an outcome and advances atomically", () => {
