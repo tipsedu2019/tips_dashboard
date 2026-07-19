@@ -98,6 +98,65 @@ test("registration create mounts the shared cumulative application with visible 
   assert.doesNotMatch(create, /onSaveHistory|이력 추가|이력 수정|이력 삭제/)
 })
 
+test("registration create keeps the complete approved future field packet mounted in order", async () => {
+  const create = await readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8")
+  const initialPlan = await readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8")
+  const levelTest = sourceBetween(
+    initialPlan,
+    "export function RegistrationInitialLevelTestFields",
+    "export function RegistrationInitialConsultationFields",
+  )
+  const placement = sourceBetween(
+    create,
+    "placement={(\n",
+    "admission={(\n",
+  )
+
+  const assertOrdered = (source, labels) => {
+    let cursor = -1
+    for (const label of labels) {
+      const next = source.indexOf(label, cursor + 1)
+      assert.ok(next > cursor, `${label} follows the approved order`)
+      cursor = next
+    }
+  }
+
+  assertOrdered(levelTest, [
+    'label="진행상태"',
+    "<span>예약일시</span>",
+    "<span>장소</span>",
+    'label="시험 시작·완료 상태"',
+    "<span>시험지·결과지 링크</span>",
+    'label="결과"',
+  ])
+  assertOrdered(placement, [
+    "대기 종류",
+    'label="대기 수업"',
+    'label="등록 단계"',
+    'label="수강 수업"',
+    'label="교재"',
+    'label="수업 시작일·회차"',
+    'label="입학 처리 시작 행동"',
+    'label="문의 요청 사항"',
+  ])
+  assert.match(levelTest, /data-registration-focus="levelTestAt"/)
+  assert.match(levelTest, /data-registration-focus="levelTestPlace"/)
+  assert.match(initialPlan, /data-registration-focus=\{`counselor:\$\{subject\}`\}/)
+  assert.match(initialPlan, /data-registration-focus="visitConsultationAt"/)
+  assert.match(initialPlan, /data-registration-focus="visitConsultationPlace"/)
+})
+
+test("registration create owns one accurate inquiry lock reason without a duplicate runtime note", async () => {
+  const create = await readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8")
+
+  assert.match(create, /const inquiryLockReason = disabled[\s\S]*?저장 중입니다/)
+  assert.match(create, /persistence\.mode\.startsWith\("blocked_"\)[\s\S]*?note/)
+  assert.match(create, /inquiry: \{ \.\.\.base\.inquiry, lockReason: inquiryLockReason \}/)
+  assert.match(create, /const showInquiryOnlyNote = persistence\.mode === "canonical_inquiry"[\s\S]*?legacy_inquiry/)
+  assert.match(create, /exceptionContent=\{showInquiryOnlyNote/)
+  assert.doesNotMatch(create, /exceptionContent=\{note \?/)
+})
+
 async function loadCaseListModel() {
   return import("../src/features/tasks/registration-case-list-model.ts");
 }

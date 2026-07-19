@@ -95,8 +95,9 @@ export function RegistrationInitialLevelTestFields({
 
   return (
     <div className="grid gap-3 md:grid-cols-2">
-      <Label className="grid gap-1.5">
-        <span>레벨테스트 예약일시</span>
+      <ReadonlyInitialField label="진행상태" value="첫 저장 전" />
+      <Label className="grid gap-1.5" aria-label="레벨테스트 예약일시" data-registration-focus="levelTestAt">
+        <span>예약일시</span>
         <DateTimePickerControl
           value={draft.levelTestScheduledAt}
           onChange={(value) => onChange({ ...draft, levelTestScheduledAt: value })}
@@ -107,14 +108,20 @@ export function RegistrationInitialLevelTestFields({
           disabled={fieldsDisabled}
         />
       </Label>
-      <Label className="grid gap-1.5">
-        <span>레벨테스트 장소</span>
+      <Label className="grid gap-1.5" aria-label="레벨테스트 장소" data-registration-focus="levelTestPlace">
+        <span>장소</span>
         <Input
           value={draft.levelTestPlace}
           disabled={fieldsDisabled}
           onChange={(event) => onChange({ ...draft, levelTestPlace: event.target.value })}
         />
       </Label>
+      <ReadonlyInitialField label="시험 시작·완료 상태" value="첫 저장 후 진행" />
+      <Label className="grid gap-1.5">
+        <span>시험지·결과지 링크</span>
+        <Input value="" readOnly disabled placeholder="첫 저장 후 입력" />
+      </Label>
+      <ReadonlyInitialField label="결과" value="첫 저장 후 입력" />
       <ParticipantBadges subjects={levelTestSubjects} />
     </div>
   )
@@ -144,7 +151,7 @@ export function RegistrationInitialConsultationFields({
           const options = directorOptionsBySubject[subject] || []
           const subjectDisabled = disabled || !consultationSubjects.includes(subject)
           return (
-            <Label key={subject} className="grid gap-1.5">
+            <Label key={subject} className="grid gap-1.5" data-registration-focus={`counselor:${subject}`}>
               <span>{subject} 상담 책임자</span>
               <select
                 value={value}
@@ -173,7 +180,7 @@ export function RegistrationInitialConsultationFields({
         <output>저장 시 자동 기록</output>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <Label className="grid gap-1.5">
+        <Label className="grid gap-1.5" data-registration-focus="visitConsultationAt">
           <span>방문상담일시</span>
           <DateTimePickerControl
             value={draft.visitScheduledAt}
@@ -185,7 +192,7 @@ export function RegistrationInitialConsultationFields({
             disabled={visitFieldsDisabled}
           />
         </Label>
-        <Label className="grid gap-1.5">
+        <Label className="grid gap-1.5" data-registration-focus="visitConsultationPlace">
           <span>방문상담실</span>
           <Input
             value={draft.visitPlace}
@@ -225,6 +232,15 @@ function ParticipantBadges({ subjects }: { subjects: RegistrationSubject[] }) {
       {subjects.length > 0
         ? subjects.map((subject) => <Badge key={subject} variant="secondary">{subject}</Badge>)
         : <span className="text-xs text-muted-foreground">없음</span>}
+    </div>
+  )
+}
+
+function ReadonlyInitialField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <output>{value}</output>
     </div>
   )
 }

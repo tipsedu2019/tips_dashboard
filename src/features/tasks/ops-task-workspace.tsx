@@ -97,6 +97,7 @@ import {
   canEditRegistrationTask,
   canSendRegistrationAdmissionMessage,
   getRegistrationBlockerFocusKey,
+  getRegistrationBlockerSection,
   getRegistrationBranchActions,
   getRegistrationChecklistAvailability,
   getRegistrationCreateBlockers,
@@ -2424,10 +2425,11 @@ function getCompletionBlockerActionLabel(blockers: string[]) {
 
 function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): FormDetailStepKey | null {
   if (type === "registration") {
-    if (blockers.some((blocker) => ["학생", "학생명", "학부모 전화", "과목"].includes(blocker))) return "registration_contact"
-    if (blockers.some((blocker) => ["레벨테스트 예약일시", "레벨테스트 장소", "레벨테스트 완료일시", "레벨테스트 결과", "상담 예약일시", "방문상담실", "상담 완료일시", "상담 책임자"].includes(blocker))) return "registration_test"
-    if (blockers.some((blocker) => ["수업", "교재", "수업시작일"].includes(blocker))) return "registration_start"
-    if (blockers.some((blocker) => ["입학신청서 발송", "메이크에듀 등록(수업, 교재)", "청구서 발송", "수납 완료 확인"].includes(blocker))) return "registration_checks"
+    const blockerSections = blockers.map((blocker) => getRegistrationBlockerSection(blocker))
+    if (blockerSections.includes("inquiry")) return "registration_contact"
+    if (blockerSections.includes("level_test") || blockerSections.includes("consultation")) return "registration_test"
+    if (blockerSections.includes("placement")) return "registration_start"
+    if (blockerSections.includes("admission")) return "registration_checks"
   }
 
   if (type === "withdrawal") {
@@ -2448,14 +2450,6 @@ function getCompletionBlockerFormStep(type: OpsTaskType, blockers: string[]): Fo
   }
 
   return null
-}
-
-function getRegistrationFormSectionForBlocker(blocker: string): RegistrationFormSectionKey {
-  if (["학생", "학생명", "학부모 전화", "과목"].includes(blocker)) return "inquiry"
-  if (["레벨테스트 예약일시", "레벨테스트 장소", "레벨테스트 완료일시", "레벨테스트 결과"].includes(blocker)) return "level_test"
-  if (["상담 예약일시", "방문상담실", "상담 완료일시", "상담 책임자"].includes(blocker)) return "consultation"
-  if (["수업", "교재", "수업시작일"].includes(blocker)) return "placement"
-  return "admission"
 }
 
 function dateLabel(value: string) {
@@ -9315,6 +9309,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	  const formDetailTabs = useMemo(() => getFormDetailTabs(form.type), [form.type])
 	  const isTemplateForm = form.type !== "general"
 	  const isWordRetestForm = form.type === "word_retest"
+  const registrationCreateApplicationRendered = isTemplateForm
+    && !isWordRetestForm
+    && form.type === "registration"
+    && !editingTask
+    && Boolean(
+      registrationPersistence
+      && registrationInitialWorkflowDraft
+      && registrationResolvedDirectorIds
+      && registrationDirectorOptionsBySubject,
+    )
 	  const activeFormDetailStep = formDetailTabs.some((tab) => tab.key === formDetailStep)
 	    ? formDetailStep
 	    : getDefaultFormDetailStep(form.type)
@@ -10645,7 +10649,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setFormDetailStep(nextStep)
     if (form.type !== "registration") return
 
-    const sectionKey = getRegistrationFormSectionForBlocker(blocker)
+    const sectionKey = getRegistrationBlockerSection(blocker) as RegistrationFormSectionKey
     const focusKey = getRegistrationBlockerFocusKey(blocker)
     window.requestAnimationFrame(() => {
       const section = document.getElementById(`registration-application-${sectionKey}`)
@@ -11961,6 +11965,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ].join(" ")}
           closeButtonLabel={formCloseLabel}
           onCloseButtonClick={closeForm}
+          showCloseButton={!registrationCreateApplicationRendered}
         >
           <DialogHeader className="-mx-6 -mt-6 border-b px-6 pb-5 pt-4">
             <DialogTitle>{formDialogTitle}</DialogTitle>
@@ -12248,6 +12253,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                     </Button>
                   )}
                   registrationDisabled={saving}
+                  registrationCreateApplicationRendered={registrationCreateApplicationRendered}
                   editingRegistration={Boolean(editingTask)}
                   updateWithdrawal={updateWithdrawal}
                   updateTransfer={updateTransfer}
@@ -12780,6 +12786,7 @@ function TypeSpecificFields({
   onRegistrationInitialWorkflowChange,
   registrationCloseAction,
   registrationDisabled,
+  registrationCreateApplicationRendered,
   editingRegistration,
   updateWithdrawal,
   updateTransfer,
@@ -12804,6 +12811,7 @@ function TypeSpecificFields({
   onRegistrationInitialWorkflowChange?: (draft: RegistrationInitialWorkflowDraft) => void
   registrationCloseAction?: ReactNode
   registrationDisabled?: boolean
+  registrationCreateApplicationRendered?: boolean
   editingRegistration?: boolean
   updateWithdrawal: (key: keyof NonNullable<OpsTaskInput["withdrawal"]>, value: string | boolean) => void
   updateTransfer: (key: keyof NonNullable<OpsTaskInput["transfer"]>, value: string | boolean) => void
@@ -13342,7 +13350,8 @@ function TypeSpecificFields({
     const registrationSubjects = parseRegistrationSubjects(form.subject) as RegistrationSubject[]
 
     if (
-      !editingRegistration
+      registrationCreateApplicationRendered
+      && !editingRegistration
       && registrationPersistence
       && registrationInitialWorkflowDraft
       && registrationResolvedDirectorIds

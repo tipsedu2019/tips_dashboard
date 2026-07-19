@@ -640,6 +640,7 @@ test("operation form close keeps the header icon-only and asks before discarding
   assertIncludesAll(formDialogSource, [
     "closeButtonLabel={formCloseLabel}",
     "onCloseButtonClick={closeForm}",
+    "showCloseButton={!registrationCreateApplicationRendered}",
   ]);
 
   assert.doesNotMatch(formDialogSource, /\bshowCloseButtonText\b/);
@@ -4070,7 +4071,8 @@ test("registration create shows locked placement while canonical track editors o
 
   assert.match(create, /RegistrationApplicationPlacementSection/);
   assert.match(create, /수업 시작 일정/);
-  assert.doesNotMatch(create, /classStartDate|classStartSession|fillRegistration/);
+  assert.match(create, /focusKey="classStartDate"/);
+  assert.doesNotMatch(create, /classStartSession|fillRegistration/);
   assertIncludesAll(source, ["RegistrationTrackEditor", "RegistrationAdmissionPanel"]);
 });
 
@@ -4147,4 +4149,24 @@ test("pending registration edits do not re-render or mutate downstream completio
 
   assertIncludesAll(create, ["RegistrationApplicationInquirySection", "RegistrationInitialRouteFields"]);
   assert.doesNotMatch(create, /getRegistrationChecklistEditorState|completionIntentPipelineStatus|checked=\{registrationChecklistEditorState\.completed\}/);
+});
+
+test("registration create blocker focus uses normalized section IDs and exact focus markers", async () => {
+  const [workspace, workflow, initialPlan] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-workflow.js"),
+    readSource("src/features/tasks/registration-initial-plan-control.tsx"),
+  ]);
+  const focusSource = workspace.slice(
+    workspace.indexOf("function focusRegistrationFormSection"),
+    workspace.indexOf("const changeStatus", workspace.indexOf("function focusRegistrationFormSection")),
+  );
+
+  assert.match(workspace, /getRegistrationBlockerSection/);
+  assert.match(focusSource, /getRegistrationBlockerSection\(blocker\)/);
+  assert.match(focusSource, /registration-application-\$\{sectionKey\}/);
+  assert.match(focusSource, /\[data-registration-focus="\$\{focusKey\}"\]/);
+  assert.match(focusSource, /focusTarget \|\| section/);
+  assert.match(workflow, /counselor:\$\{subjectCounselor\[1\]\}/);
+  assert.match(initialPlan, /data-registration-focus=\{`counselor:\$\{subject\}`\}/);
 });

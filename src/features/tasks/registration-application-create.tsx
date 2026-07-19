@@ -101,12 +101,21 @@ export function RegistrationApplicationCreate({
   const consultationSubjects = subjects.filter((subject) => (
     draft.subjectPlans[subject] === "direct_phone" || draft.subjectPlans[subject] === "visit"
   ))
+  const note = persistenceNote(persistence.mode)
+  const inquiryLockReason = disabled
+    ? "저장 중입니다"
+    : persistence.mode.startsWith("blocked_")
+      ? note
+      : ""
+  const showInquiryOnlyNote = persistence.mode === "canonical_inquiry"
+    || persistence.mode === "legacy_inquiry"
   const writable = !disabled && ["ready_atomic", "canonical_inquiry", "legacy_inquiry"].includes(persistence.mode)
   const sectionStates = useMemo(() => {
     const base = getRegistrationCreateSectionStates({ subjects, draft, writable })
     const canPlanInitialWorkflow = writable && persistence.mode === "ready_atomic"
     return {
       ...base,
+      inquiry: { ...base.inquiry, lockReason: inquiryLockReason },
       level_test: levelTestSubjects.length > 0 && canPlanInitialWorkflow
         ? { ...base.level_test, editable: true, lockReason: "" }
         : base.level_test,
@@ -115,7 +124,7 @@ export function RegistrationApplicationCreate({
         : base.consultation,
       history: { ...base.history, lockReason: "첫 저장 후 자동 기록됩니다" },
     }
-  }, [consultationSubjects.length, draft, levelTestSubjects.length, persistence.mode, subjects, writable])
+  }, [consultationSubjects.length, draft, inquiryLockReason, levelTestSubjects.length, persistence.mode, subjects, writable])
   const initialFieldsProps = {
     subjects,
     draft,
@@ -124,7 +133,6 @@ export function RegistrationApplicationCreate({
     disabled,
     onChange: onDraftChange,
   }
-  const note = persistenceNote(persistence.mode)
 
   function updateSubjects(subject: RegistrationSubject, checked: boolean) {
     const next = checked
@@ -227,8 +235,8 @@ export function RegistrationApplicationCreate({
               disabled={disabled || !writable}
             />
           )}
-          exceptionContent={note ? (
-            <p role={persistence.mode.startsWith("blocked_") ? "alert" : "note"} className="text-sm text-muted-foreground">
+          exceptionContent={showInquiryOnlyNote ? (
+            <p role="note" className="text-sm text-muted-foreground">
               {note}
             </p>
           ) : undefined}
@@ -251,14 +259,17 @@ export function RegistrationApplicationCreate({
             <div className="grid gap-3 md:grid-cols-2">
               <Label className="grid gap-1.5">
                 <span>대기 종류</span>
-                <select defaultValue="" className="h-10 rounded-md border border-input bg-background px-3 text-sm">
+                <select defaultValue="" disabled className="h-10 rounded-md border border-input bg-background px-3 text-sm">
                   <option value="">첫 저장 후 선택</option>
                 </select>
               </Label>
-              <Label className="grid gap-1.5">
-                <span>수업 시작 일정</span>
-                <Input value="" readOnly placeholder="첫 저장 후 입력" />
-              </Label>
+              <ReadonlyCreateField label="대기 수업" />
+              <ReadonlyCreateField label="등록 단계" />
+              <ReadonlyCreateField label="수강 수업" focusKey="classId" />
+              <ReadonlyCreateField label="교재" focusKey="textbookId" />
+              <ReadonlyCreateField label="수업 시작일·회차" focusKey="classStartDate" ariaLabel="수업 시작 일정" />
+              <ReadonlyCreateField label="입학 처리 시작 행동" />
+              <ReadonlyCreateField label="문의 요청 사항" value={registration.requestNote || "기록 없음"} />
             </div>
           )}
         />
@@ -280,5 +291,24 @@ export function RegistrationApplicationCreate({
       )}
       history={<div aria-label="자동 이력" />}
     />
+  )
+}
+
+function ReadonlyCreateField({
+  label,
+  value = "첫 저장 후 입력",
+  focusKey,
+  ariaLabel,
+}: {
+  label: string
+  value?: string
+  focusKey?: string
+  ariaLabel?: string
+}) {
+  return (
+    <Label className="grid gap-1.5" data-registration-focus={focusKey} aria-label={ariaLabel}>
+      <span>{label}</span>
+      <Input value={value} readOnly disabled />
+    </Label>
   )
 }

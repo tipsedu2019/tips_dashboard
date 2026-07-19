@@ -11,6 +11,7 @@ import {
   getEmptyRegistrationFilters,
   getManualAdmissionCompletionStatus,
   getRegistrationBlockerFocusKey,
+  getRegistrationBlockerSection,
   getRegistrationBranchActions,
   getRegistrationChecklistAvailability,
   getRegistrationConsistencyBlockers,
@@ -559,6 +560,22 @@ test("R44 blocker navigation targets the exact missing registration control", ()
   assert.equal(getRegistrationBlockerFocusKey("문의일시"), "inquiryAt");
   assert.equal(getRegistrationBlockerFocusKey("시험지·결과지 URL"), "levelTestMaterialLink");
   assert.equal(getRegistrationBlockerFocusKey("교재"), "textbookId");
+});
+
+test("create blocker routing normalizes emitted subject and visit labels", () => {
+  assert.equal(getRegistrationBlockerSection("학년"), "inquiry");
+  assert.equal(getRegistrationBlockerSection("레벨테스트 예약일시"), "level_test");
+  assert.equal(getRegistrationBlockerSection("영어 상담 책임자"), "consultation");
+  assert.equal(getRegistrationBlockerSection("수학 상담 책임자"), "consultation");
+  assert.equal(getRegistrationBlockerSection("방문상담 예약일시"), "consultation");
+  assert.equal(getRegistrationBlockerSection("방문상담실"), "consultation");
+
+  assert.equal(getRegistrationBlockerFocusKey("레벨테스트 예약일시"), "levelTestAt");
+  assert.equal(getRegistrationBlockerFocusKey("레벨테스트 장소"), "levelTestPlace");
+  assert.equal(getRegistrationBlockerFocusKey("영어 상담 책임자"), "counselor:영어");
+  assert.equal(getRegistrationBlockerFocusKey("수학 상담 책임자"), "counselor:수학");
+  assert.equal(getRegistrationBlockerFocusKey("방문상담 예약일시"), "visitConsultationAt");
+  assert.equal(getRegistrationBlockerFocusKey("방문상담실"), "visitConsultationPlace");
 });
 
 test("R45 inquiry-stage mobile cards omit future workflow sections", () => {

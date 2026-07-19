@@ -163,6 +163,7 @@ const REGISTRATION_BLOCKER_FOCUS_KEYS = {
   "레벨테스트 결과": "levelTestResult",
   "시험지·결과지 URL": "levelTestMaterialLink",
   "상담 예약일시": "consultationAtReservation",
+  "방문상담 예약일시": "visitConsultationAt",
   "방문상담실": "visitConsultationPlace",
   "상담 완료일시": "consultationAt",
   "상담 책임자": "counselor",
@@ -747,7 +748,20 @@ export function isRegistrationCompletionImmutable(pipelineStatus) {
 }
 
 export function getRegistrationBlockerFocusKey(blocker) {
-  return REGISTRATION_BLOCKER_FOCUS_KEYS[text(blocker)] || "";
+  const normalized = text(blocker);
+  const subjectCounselor = normalized.match(/^(영어|수학) 상담 책임자$/);
+  if (subjectCounselor) return `counselor:${subjectCounselor[1]}`;
+  return REGISTRATION_BLOCKER_FOCUS_KEYS[normalized] || "";
+}
+
+export function getRegistrationBlockerSection(blocker) {
+  const normalized = text(blocker);
+  if (["학생", "학생명", "학년", "학부모 전화", "문의일시", "과목"].includes(normalized)) return "inquiry";
+  if (["레벨테스트 예약일시", "레벨테스트 장소", "레벨테스트 완료일시", "레벨테스트 결과", "시험지·결과지 URL"].includes(normalized)) return "level_test";
+  if (/^(영어|수학) 상담 책임자$/.test(normalized)) return "consultation";
+  if (["상담 예약일시", "방문상담 예약일시", "방문상담실", "상담 완료일시", "상담 책임자"].includes(normalized)) return "consultation";
+  if (["수업", "교재", "수업시작일"].includes(normalized)) return "placement";
+  return "admission";
 }
 
 export function getRegistrationMobileSections(pipelineStatus, registration = {}) {
