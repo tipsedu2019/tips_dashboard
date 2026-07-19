@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const verifierUrl = new URL("../scripts/verify-ops-task-browser-workflow.mjs", import.meta.url)
+const appointmentEditorUrl = new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url)
+const enrollmentEditorUrl = new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url)
+const trackActionsUrl = new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url)
+const registrationCreateUrl = new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url)
+const registrationTrackEditorUrl = new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url)
 
 function registrationVerifier(source) {
   const start = source.indexOf("async function verifyRegistrationSubjectTrackFixture")
@@ -113,11 +118,73 @@ test("registration fixture verifier preserves sibling drafts and performs access
     assert.match(verifier, new RegExp(`assertNonColorWorkflowState\\([^\\n]+"${state}"`))
   }
   assert.match(verifier, /\[data-registration-track-id\][\s\S]*?input/)
-  assert.match(verifier, /\[data-registration-appointment-focus\][\s\S]*?(영어\|수학\|적용 과목\|예약)/)
+  assert.match(verifier, /\[data-registration-appointment-focus\][\s\S]*?data-registration-appointment-subjects/)
+  assert.match(verifier, /participantSubjects\.filter\(\(subject\) => !label\.includes\(subject\)\)/)
   assert.match(verifier, /data-registration-primary-action/)
   assert.match(verifier, /data-registration-state/)
   assert.match(verifier, /first invalid control|first inquiry blocker/)
   assert.match(verifier, /if \(!\(await action\.isVisible/)
+})
+
+test("registration fixture verifier uses the rendered subject checkbox controls before option fault retry", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+
+  assert.match(verifier, /createDialog\.getByRole\("checkbox", \{ name: "영어", exact: true \}\)\.check\(\)/)
+  assert.match(verifier, /createDialog\.getByRole\("checkbox", \{ name: "수학", exact: true \}\)\.check\(\)/)
+  assert.match(verifier, /optionFaultHost\.getByRole\("checkbox", \{ name: "영어", exact: true \}\)\.check\(\)[\s\S]*?getByLabel\("영어 다음 업무", \{ exact: true \}\)\.selectOption\("direct_phone"\)/)
+  assert.match(verifier, /optionFaultDirector[\s\S]*?optionFaultRetry\.click\(\)[\s\S]*?optionFaultDirector\.isEnabled\(\)[\s\S]*?optionFaultDirector\.locator\("option"\)/)
+})
+
+test("registration fixture verifier snapshots every destructive navigation through one wrapper", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+  const wrapperStart = verifier.indexOf("async function navigateRegistrationFixture")
+  const wrapperEnd = verifier.indexOf("\n\n  async function openRegistrationSubjectTrackFixtureCase", wrapperStart)
+
+  assert.ok(wrapperStart >= 0 && wrapperEnd > wrapperStart, "fixture navigation wrapper is missing")
+  const wrapper = verifier.slice(wrapperStart, wrapperEnd)
+  const withoutWrapper = verifier.slice(0, wrapperStart) + verifier.slice(wrapperEnd)
+  assert.match(wrapper, /recordFixtureSafetySnapshot/)
+  assert.match(verifier, /recordFixtureSafetySnapshot[\s\S]*?assertRegistrationFixtureSafetySnapshot[\s\S]*?fixtureSafetySnapshots\.push/)
+  assert.match(wrapper, /page\.goto\(/)
+  assert.doesNotMatch(withoutWrapper, /page\.goto\(/)
+  assert.match(verifier, /initial fixture snapshot/)
+  assert.match(verifier, /pre-navigation fixture snapshot/)
+  assert.match(verifier, /final fixture snapshot/)
+  assert.match(verifier, /fixtureSafetySnapshots\.length/)
+  assert.match(verifier, /fixtureSafetySnapshots\.at\(-1\)/)
+  assert.match(verifier, /fixtureSafetySnapshots\.reduce/)
+  assert.match(verifier, /fixtureSafetyAggregate\.notificationReceipts/)
+  assert.match(verifier, /fixtureSafetyAggregate\.externalCalls/)
+})
+
+test("registration primary-action markers own the data controls they commit", async () => {
+  const [verifierSource, appointmentSource, enrollmentSource, actionsSource, createSource, trackEditorSource] = await Promise.all([
+    readFile(verifierUrl, "utf8"),
+    readFile(appointmentEditorUrl, "utf8"),
+    readFile(enrollmentEditorUrl, "utf8"),
+    readFile(trackActionsUrl, "utf8"),
+    readFile(registrationCreateUrl, "utf8"),
+    readFile(registrationTrackEditorUrl, "utf8"),
+  ])
+  const verifier = registrationVerifier(verifierSource)
+
+  assert.match(verifier, /data-registration-action-owner/)
+  assert.match(verifier, /querySelectorAll\('\[data-registration-primary-action\]'/)
+  assert.match(verifier, /closest\('\[data-registration-action-owner\]'/)
+  assert.match(verifier, /lastOwnedField/)
+  assert.match(verifier, /data-registration-appointment-subjects/)
+  assert.match(verifier, /data-registration-appointment-shared-controls/)
+  assert.match(verifier, /multipleDialog[\s\S]*?assertMobileActionDomOrder\(multipleDialog\)/)
+  assert.match(appointmentSource, /data-registration-action-owner/)
+  assert.match(appointmentSource, /data-registration-appointment-shared-controls/)
+  assert.match(actionsSource, /data-registration-action-owner/)
+  assert.match(enrollmentSource, /enrollment-row-save/)
+  assert.match(enrollmentSource, /enrollment-row-add/)
+  assert.match(enrollmentSource, /admission-start/)
+  assert.doesNotMatch(createSource, /data-registration-primary-action="consultation-catalog-retry"/)
+  assert.doesNotMatch(trackEditorSource, /data-registration-primary-action=\{`\$\{kind\}:\$\{plan\.appointmentId\}`\}/)
 })
 
 test("registration fixture verifier opens a real calendar item before it mutates the dual-test appointment", async () => {

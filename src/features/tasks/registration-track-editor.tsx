@@ -674,7 +674,6 @@ export function RegistrationApplication({
                 type="button"
                 variant="outline"
                 size="sm"
-                data-registration-primary-action={`${kind}:${plan.appointmentId}`}
                 onClick={() => openAppointment(owner, kind, plan.appointmentId)}
               >
                 {label}
@@ -699,6 +698,10 @@ export function RegistrationApplication({
     <div
       ref={appointmentEditorRef}
       data-registration-appointment-focus={editorAppointment?.id || ""}
+      data-registration-appointment-subjects={detail.tracks
+        .filter((track) => appointmentParticipantIds.includes(track.id))
+        .map((track) => track.subject)
+        .join("|")}
       className="grid scroll-m-4 gap-2"
     >
       <div className="flex flex-wrap gap-1" aria-label="예약 적용 과목">

@@ -1486,7 +1486,7 @@ function WaitingStageEditor({
   }
 
   return (
-    <section ref={sectionRef} className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 대기 처리`}>
+    <section ref={sectionRef} data-registration-action-owner={`${track.subject}:waiting-close`} className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={`${track.subject} 대기 처리`}>
       <div>
         <h3 className="text-sm font-semibold">[{track.subject}] 대기 관리</h3>
         <p className="text-xs text-muted-foreground">등록 전환 시 레벨테스트 재응시 여부를 반드시 결정합니다.</p>
@@ -1846,7 +1846,7 @@ export function RegistrationConsultationOutcomeEditor({
   }
 
   return (
-    <section ref={sectionRef} className="grid gap-4 rounded-md border bg-background p-3" aria-label={subject + " 상담 결과"}>
+    <section ref={sectionRef} data-registration-action-owner={`${subject}:consultation-outcome-save`} className="grid gap-4 rounded-md border bg-background p-3" aria-label={subject + " 상담 결과"}>
       <div>
         <h4 className="text-sm font-semibold">[{subject}] {consultation.mode === "phone" ? "전화상담" : "방문상담"} 결과</h4>
         <p className="text-xs text-muted-foreground">완료 일시는 저장 시 자동 기록됩니다. 과목별 다음 단계를 선택하세요.</p>

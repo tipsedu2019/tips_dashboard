@@ -2620,6 +2620,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   if (!registrationFixtureSafety) throw new Error("registration fixture safety guards were not installed before navigation.")
   await registrationFixtureSafety.installPageGuard()
   const fixtureDebugGlobal = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
+  const fixtureSafetySnapshots = []
 
   async function assertNoHorizontalOverflow(locator, label) {
     const metrics = await page.evaluate(() => ({
@@ -2638,6 +2639,23 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     }
   }
 
+  async function recordFixtureSafetySnapshot(stage) {
+    const snapshot = await readFixtureDebugSnapshot()
+    assertRegistrationFixtureSafetySnapshot(snapshot, registrationFixtureSafety, stage)
+    fixtureSafetySnapshots.push({
+      stage,
+      counts: { ...snapshot.counts },
+    })
+    return snapshot
+  }
+
+  async function navigateRegistrationFixture(stage, url) {
+    await recordFixtureSafetySnapshot(`pre-navigation fixture snapshot: ${stage}`)
+    await page.goto(url, { waitUntil: "networkidle" })
+  }
+
+  await recordFixtureSafetySnapshot("initial fixture snapshot")
+
   async function openRegistrationSubjectTrackFixtureCase({
     taskId,
     trackId,
@@ -2654,7 +2672,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     })
     if (appointmentId) search.set("appointmentId", appointmentId)
     if (view) search.set("view", view)
-    await page.goto(joinUrl(baseUrl, `/admin/registration?${search.toString()}`), { waitUntil: "networkidle" })
+    await navigateRegistrationFixture("open subject-track case", joinUrl(baseUrl, `/admin/registration?${search.toString()}`))
     const dialog = page.getByRole("dialog", { name: `등록: ${studentName}` }).first()
     await dialog.waitFor({ state: "visible", timeout: 5000 })
     await assertNoHorizontalOverflow(dialog, `${studentName} subject-track fixture`)
@@ -2672,7 +2690,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       fixtureRole,
       view: "calendar",
     })
-    await page.goto(joinUrl(baseUrl, `/admin/registration?${search.toString()}`), { waitUntil: "networkidle" })
+    await navigateRegistrationFixture("open calendar appointment", joinUrl(baseUrl, `/admin/registration?${search.toString()}`))
     const calendarItem = page.locator(
       `[data-registration-calendar-item][data-registration-calendar-appointment-id="${appointmentId}"][data-registration-calendar-task-id="${taskId}"]`,
     ).first()
@@ -2804,29 +2822,48 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
 
   async function assertAppointmentAccessibleNames(applicationHost) {
-    const missing = await applicationHost.locator('[data-registration-appointment-focus] input, [data-registration-appointment-focus] select, [data-registration-appointment-focus] button').evaluateAll((controls) => controls
-      .filter((control) => !control.disabled && control.getBoundingClientRect().width > 0)
-      .map((control) => control.getAttribute("aria-label") || control.labels?.[0]?.textContent?.trim() || "")
-      .filter((ariaLabel) => !/(영어|수학|적용 과목|예약)/.test(ariaLabel)))
+    const missing = await applicationHost.locator('[data-registration-appointment-focus]').evaluateAll((wrappers) => wrappers.flatMap((wrapper) => {
+      const participantSubjects = (wrapper.getAttribute("data-registration-appointment-subjects") || "")
+        .split("|")
+        .map((subject) => subject.trim())
+        .filter(Boolean)
+      const controls = [...wrapper.querySelectorAll('[data-registration-appointment-shared-controls] input, [data-registration-appointment-shared-controls] select, [data-registration-appointment-shared-controls] button')]
+      if (participantSubjects.length === 0) {
+        return [{ label: "appointment wrapper", missingSubjects: ["participant subjects"] }]
+      }
+      return controls
+        .filter((control) => !control.disabled && control.getBoundingClientRect().width > 0)
+        .map((control) => {
+          const label = control.getAttribute("aria-label") || control.labels?.[0]?.textContent?.trim() || ""
+          return {
+            label,
+            missingSubjects: participantSubjects.filter((subject) => !label.includes(subject)),
+          }
+        })
+        .filter(({ missingSubjects }) => missingSubjects.length > 0)
+    }))
     if (missing.length > 0) {
-      throw new Error(`participant-qualified accessible name is missing from ${missing.length} enabled shared appointment control(s).`)
+      throw new Error(`participant-qualified accessible name is missing actual participant subject(s) from ${missing.length} enabled shared appointment control(s): ${missing.map((item) => `${item.label} (${item.missingSubjects.join(", ")})`).join(" | ")}.`)
     }
   }
 
   async function assertMobileActionDomOrder(applicationHost) {
     if (await page.evaluate(() => window.innerWidth) > 390) return
-    const reversedSections = await applicationHost.locator('[data-registration-application-section]').evaluateAll((sections) => sections.filter((section) => {
-      const fields = [...section.querySelectorAll('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')]
-        .filter((field) => field.getBoundingClientRect().width > 0)
-      const actions = [...section.querySelectorAll('button[data-registration-primary-action]:not(:disabled), button:not(:disabled)')]
-        .filter((button) => button.getBoundingClientRect().width > 0)
-      if (fields.length === 0 || actions.length === 0) return false
-      const lastField = fields[fields.length - 1]
-      const primaryAction = [...actions].reverse().find((button) => button.hasAttribute('data-registration-primary-action')) || actions[actions.length - 1]
-      return !(lastField.compareDocumentPosition(primaryAction) & Node.DOCUMENT_POSITION_FOLLOWING)
-    }).map((section) => section.getAttribute("data-registration-application-section")))
-    if (reversedSections.length > 0) {
-      throw new Error(`mobile action DOM order precedes its fields in: ${reversedSections.join(", ")}.`)
+    const invalidOwners = await applicationHost.evaluate((host) => [...host.querySelectorAll('[data-registration-primary-action]')]
+      .filter((action) => !action.matches(':disabled') && action.getBoundingClientRect().width > 0)
+      .flatMap((action) => {
+        const owner = action.closest('[data-registration-action-owner]')
+        const actionLabel = action.getAttribute('aria-label') || action.textContent?.trim() || 'unnamed action'
+        if (!owner) return [`${actionLabel} has no action owner`]
+        const fields = [...owner.querySelectorAll('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')]
+          .filter((field) => field.getBoundingClientRect().width > 0)
+        if (fields.length === 0) return []
+        const lastOwnedField = fields[fields.length - 1]
+        const followsLastField = Boolean(lastOwnedField.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING)
+        return followsLastField ? [] : [`${actionLabel} precedes its owner's last enabled field`]
+      }))
+    if (invalidOwners.length > 0) {
+      throw new Error(`mobile action DOM order is invalid: ${invalidOwners.join(", ")}.`)
     }
   }
 
@@ -2924,8 +2961,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   if (!focusedFirstInvalidControl) throw new Error("invalid create submission did not focus the first invalid control (subject selection).")
   await createDialog.getByLabel(/^학생명/).fill(createdStudentName)
   await createDialog.getByLabel(/^학부모 전화/).fill("01012345678")
-  await createDialog.getByRole("button", { name: "영어", exact: true }).click()
-  await createDialog.getByRole("button", { name: "수학", exact: true }).click()
+  await createDialog.getByRole("checkbox", { name: "영어", exact: true }).check()
+  await createDialog.getByRole("checkbox", { name: "수학", exact: true }).check()
   await selectListboxOptionIfPresent(page, createDialog, "학년", "고1")
   await createDialog.getByLabel("영어 다음 업무", { exact: true }).selectOption("direct_phone")
   await createDialog.getByLabel("수학 다음 업무", { exact: true }).selectOption("level_test")
@@ -3192,6 +3229,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await requireVisibleText(multipleDialog, "1. 입학신청서 발송")
   await assertActionBelongsToSection(multipleDialog, "수업 추가", "placement")
   await assertActionBelongsToSection(multipleDialog, "입학 처리 시작", "admission")
+  await assertMobileActionDomOrder(multipleDialog)
 
   const readOnlyAdmissionDialog = await openRegistrationSubjectTrackFixtureCase({
     taskId: "fixture-task-partial-registration",
@@ -3269,7 +3307,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await verifyAutomaticHistory(allTerminalDialog)
   await closeFixtureDialog(allTerminalDialog)
 
-  await page.goto(joinUrl(baseUrl, "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin&taskId=fixture-task-cross-stage&trackId=fixture-track-cross-english"), { waitUntil: "networkidle" })
+  await navigateRegistrationFixture("reload sibling draft", joinUrl(baseUrl, "/admin/registration?fixture=registration-subject-tracks&fixtureRole=english_admin&taskId=fixture-task-cross-stage&trackId=fixture-track-cross-english"))
   const siblingDraftDialog = page.getByRole("dialog", { name: "등록: 김예린" }).first()
   await siblingDraftDialog.waitFor({ state: "visible", timeout: 5000 })
   const unsavedInquiryRequestNote = "문의 메모 초안은 형제 과목 저장 뒤에도 유지"
@@ -3320,7 +3358,7 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     fixtureFaultType: "option_data_once",
     fixtureFaultError: "선택 정보 일시 실패",
   })
-  await page.goto(joinUrl(baseUrl, `/admin/registration?${optionFaultSearch.toString()}`), { waitUntil: "networkidle" })
+  await navigateRegistrationFixture("load option fault fixture", joinUrl(baseUrl, `/admin/registration?${optionFaultSearch.toString()}`))
   const optionFaultCreateButton = page.getByRole("button", { name: "등록 추가", exact: true }).last()
   await waitUntilEnabled(optionFaultCreateButton, "option fault create button")
   await optionFaultCreateButton.click()
@@ -3331,6 +3369,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   if (!(await optionFaultHost.getByLabel("학생명", { exact: true }).isEnabled())) {
     throw new Error("option failure disabled inquiry-owned fields.")
   }
+  await optionFaultHost.getByRole("checkbox", { name: "영어", exact: true }).check()
+  await optionFaultHost.getByLabel("영어 다음 업무", { exact: true }).selectOption("direct_phone")
   const optionFaultDirector = optionFaultHost.getByLabel("영어 상담 책임자", { exact: true })
   if (await optionFaultDirector.isEnabled()) {
     throw new Error("option failure did not locally lock the catalog-owned director control.")
@@ -3346,7 +3386,6 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
   await optionFaultRetry.click()
   await optionFaultAlert.waitFor({ state: "hidden", timeout: 5000 })
-  await optionFaultHost.getByLabel("영어 다음 업무", { exact: true }).selectOption("direct_phone")
   await optionFaultDirector.waitFor({ state: "visible", timeout: 5000 })
   if (!(await optionFaultDirector.isEnabled()) || await optionFaultDirector.locator("option").count() < 2) {
     throw new Error("option retry did not recover catalog-owned selectors and options.")
@@ -3354,6 +3393,15 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
 
   const finalFixtureSnapshot = await readFixtureDebugSnapshot()
   assertRegistrationFixtureSafetySnapshot(finalFixtureSnapshot, registrationFixtureSafety, "final fixture snapshot")
+  fixtureSafetySnapshots.push({ stage: "final fixture snapshot", counts: { ...finalFixtureSnapshot.counts } })
+  const finalFixtureSafetySnapshot = fixtureSafetySnapshots.at(-1)
+  const fixtureSafetyAggregate = fixtureSafetySnapshots.reduce((totals, snapshot) => ({
+    notificationReceipts: totals.notificationReceipts + snapshot.counts.notificationReceipts,
+    externalCalls: totals.externalCalls + snapshot.counts.externalCalls,
+  }), { notificationReceipts: 0, externalCalls: 0 })
+  if (!finalFixtureSafetySnapshot || fixtureSafetySnapshots.length < 2 || finalFixtureSafetySnapshot.counts.notificationReceipts !== 0 || finalFixtureSafetySnapshot.counts.externalCalls !== 0 || fixtureSafetyAggregate.notificationReceipts !== 0 || fixtureSafetyAggregate.externalCalls !== 0) {
+    throw new Error("fixture safety snapshot ledger did not retain a zero-provider final aggregate.")
+  }
   assertNoInterceptedProviderRequests("full subject-track workflow")
 
   return {

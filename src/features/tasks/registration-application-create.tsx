@@ -181,7 +181,6 @@ export function RegistrationApplicationCreate({
                 type="button"
                 variant="outline"
                 size="sm"
-                data-registration-primary-action="consultation-catalog-retry"
                 onClick={onRetryCatalog}
               >
                 다시 불러오기

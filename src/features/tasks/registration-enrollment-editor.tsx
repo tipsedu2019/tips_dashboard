@@ -583,6 +583,7 @@ export function RegistrationEnrollmentEditor({
         <Badge variant="outline">{draftRows.length}개 수업</Badge>
       </div>
 
+      <div data-registration-action-owner={`${track.subject}:enrollment-rows`} className="grid gap-3">
       {draftRows.map((row, index) => {
         const detail = row.classId ? classDetailById[row.classId] : null
         const sessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan)
@@ -675,15 +676,16 @@ export function RegistrationEnrollmentEditor({
 
       {canEditRows ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-          <Button type="button" aria-label={`${track.subject} 수업 추가`} variant="outline" onClick={addRow} disabled={saving}>
+          <Button type="button" data-registration-primary-action={`${track.subject}:enrollment-row-add`} aria-label={`${track.subject} 수업 추가`} variant="outline" onClick={addRow} disabled={saving}>
             <Plus className="size-4" aria-hidden="true" />
             수업 추가
           </Button>
-          <Button type="button" aria-label={`${track.subject} 수업 정보 저장`} onClick={() => void saveRows()} disabled={saving || rowsRefreshPending || draftRows.length === 0}>
+          <Button type="button" data-registration-primary-action={`${track.subject}:enrollment-row-save`} aria-label={`${track.subject} 수업 정보 저장`} onClick={() => void saveRows()} disabled={saving || rowsRefreshPending || draftRows.length === 0}>
             {saving ? "저장 중" : "수업 정보 저장"}
           </Button>
         </div>
       ) : null}
+      </div>
       {rowsValidationError ? <p role="alert" className="text-xs text-destructive">{rowsValidationError}</p> : null}
 
       {rowsRefreshPending ? (
@@ -1176,7 +1178,7 @@ export function RegistrationAdmissionPanel({
       {batchRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
 
       {!openBatch ? (
-        <div className="grid gap-2">
+        <div data-registration-action-owner="admission-start" className="grid gap-2">
           {unbatchedPlannedEnrollments.length > 0 ? unbatchedPlannedEnrollments.map((enrollment) => {
             const track = trackById.get(enrollment.trackId)
             const classItem = classById.get(enrollment.classId)
@@ -1194,7 +1196,7 @@ export function RegistrationAdmissionPanel({
             )
           }) : <p className="text-sm text-muted-foreground">입학 처리할 저장된 수업이 없습니다.</p>}
           {permissions.canManage && unbatchedPlannedEnrollments.length > 0 ? (
-            <Button type="button" onClick={() => void startBatch()} disabled={!admissionNoticeSent || activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
+            <Button type="button" data-registration-primary-action="admission-start" onClick={() => void startBatch()} disabled={!admissionNoticeSent || activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
           ) : null}
           {!admissionNoticeSent && unbatchedPlannedEnrollments.length > 0 ? <p className="text-xs text-muted-foreground">입학신청서 발송을 먼저 완료하세요.</p> : null}
           {admissionNoticeSent && activeSelectedEnrollmentIds.length > 0 && !selectedEnrollmentsHaveCompleteSchedules ? <p className="text-xs text-muted-foreground">입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.</p> : null}

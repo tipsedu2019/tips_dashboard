@@ -409,6 +409,10 @@ export function RegistrationAppointmentEditor({
     effectiveProcessingReadiness,
   )
   const trackLabels = Object.fromEntries(eligibleTracks.map((track) => [track.id, track.subject]))
+  const appointmentParticipantSubjectLabel = appointmentDraft.trackIds
+    .map((trackId) => trackLabels[trackId])
+    .filter(Boolean)
+    .join("·") || eligibleTracks.map((track) => track.subject).join("·") || "과목"
   const normalizedDraft = JSON.stringify({
     appointmentId: baseAppointmentId,
     expectedNotificationRevision,
@@ -997,59 +1001,61 @@ export function RegistrationAppointmentEditor({
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
-        <Label data-appointment-field="scheduled-at" className="grid min-w-0 gap-1.5">
-          <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>
-          <DateTimePickerControl
-            value={scheduledAt}
-            onChange={(value) => { setValidationError(""); setScheduledAt(value) }}
-            dateAriaLabel={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 날짜`}
-            timeAriaLabel={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 시각`}
-            required
-            disabled={saving || mutationLocked}
-            disablePortal
-            timeOptions={REGISTRATION_TIME_OPTIONS}
-          />
-        </Label>
-        <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
-          <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
-          <Input aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 장소`} value={place} onChange={(event) => { setValidationError(""); setPlace(event.target.value) }} placeholder="본관, 상담실 등" disabled={saving || mutationLocked} />
-        </Label>
-      </div>
-
-      <fieldset data-appointment-field="tracks" className="grid gap-2">
-        <legend className="text-sm font-medium">적용 과목 <span className="text-xs font-semibold text-primary">필수</span></legend>
-        <div className="flex flex-wrap gap-2">
-          {selectableTracks.map((track) => {
-            const selected = appointmentDraft.trackIds.includes(track.id)
-            return (
-              <Button
-                key={track.id}
-                type="button"
-                size="sm"
-                variant={selected ? "default" : "outline"}
-                aria-pressed={selected}
-                aria-label={`${track.subject} 예약 적용 ${selected ? "선택됨" : "선택 안 됨"}`}
-                disabled={saving || mutationLocked || editMode === "replace_remaining"}
-                onClick={() => toggleTrack(track.id)}
-              >
-                {track.subject}
-              </Button>
-            )
-          })}
+      <div data-registration-action-owner={`${appointmentParticipantSubjectLabel}:appointment-save`} data-registration-appointment-shared-controls className="grid gap-3">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
+          <Label data-appointment-field="scheduled-at" className="grid min-w-0 gap-1.5">
+            <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>
+            <DateTimePickerControl
+              value={scheduledAt}
+              onChange={(value) => { setValidationError(""); setScheduledAt(value) }}
+              dateAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜`}
+              timeAriaLabel={`${appointmentParticipantSubjectLabel} 예약 시각`}
+              required
+              disabled={saving || mutationLocked}
+              disablePortal
+              timeOptions={REGISTRATION_TIME_OPTIONS}
+            />
+          </Label>
+          <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
+            <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
+            <Input aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`} value={place} onChange={(event) => { setValidationError(""); setPlace(event.target.value) }} placeholder="본관, 상담실 등" disabled={saving || mutationLocked} />
+          </Label>
         </div>
-        {selectableTracks.length === 0 ? <p className="text-xs text-muted-foreground">현재 함께 예약할 수 있는 과목이 없습니다.</p> : null}
-        {editMode === "replace_remaining" ? (
-          <p className="text-xs text-muted-foreground">이미 결과가 확정된 과목은 유지하고, 남은 예약 과목만 새 일정으로 옮깁니다.</p>
-        ) : null}
-      </fieldset>
 
-      <div className="flex justify-end">
-        <Button type="button" data-registration-primary-action={`${eligibleTracks.map((track) => track.subject).join("-") || "subjects"}:appointment-save`} aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
-          {appointment
-            ? editMode === "replace_remaining" ? "남은 과목 일정 다시 잡기" : "예약 수정"
-            : "예약 저장"}
-        </Button>
+        <fieldset data-appointment-field="tracks" className="grid gap-2">
+          <legend className="text-sm font-medium">적용 과목 <span className="text-xs font-semibold text-primary">필수</span></legend>
+          <div className="flex flex-wrap gap-2">
+            {selectableTracks.map((track) => {
+              const selected = appointmentDraft.trackIds.includes(track.id)
+              return (
+                <Button
+                  key={track.id}
+                  type="button"
+                  size="sm"
+                  variant={selected ? "default" : "outline"}
+                  aria-pressed={selected}
+                  aria-label={`${appointmentParticipantSubjectLabel} 예약 적용: ${track.subject} ${selected ? "선택됨" : "선택 안 됨"}`}
+                  disabled={saving || mutationLocked || editMode === "replace_remaining"}
+                  onClick={() => toggleTrack(track.id)}
+                >
+                  {track.subject}
+                </Button>
+              )
+            })}
+          </div>
+          {selectableTracks.length === 0 ? <p className="text-xs text-muted-foreground">현재 함께 예약할 수 있는 과목이 없습니다.</p> : null}
+          {editMode === "replace_remaining" ? (
+            <p className="text-xs text-muted-foreground">이미 결과가 확정된 과목은 유지하고, 남은 예약 과목만 새 일정으로 옮깁니다.</p>
+          ) : null}
+        </fieldset>
+
+        <div className="flex justify-end">
+          <Button type="button" data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`} aria-label={`${appointmentParticipantSubjectLabel} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
+            {appointment
+              ? editMode === "replace_remaining" ? "남은 과목 일정 다시 잡기" : "예약 수정"
+              : "예약 저장"}
+          </Button>
+        </div>
       </div>
 
       {kind === "level_test" ? (
