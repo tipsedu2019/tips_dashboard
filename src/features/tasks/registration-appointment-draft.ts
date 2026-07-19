@@ -60,6 +60,15 @@ function normalizedTrackIds(trackIds: readonly string[]) {
   return Array.from(new Set(trackIds.map((trackId) => String(trackId).trim()).filter(Boolean))).sort()
 }
 
+export function getRegistrationAppointmentParticipantSubjects(
+  draft: Pick<RegistrationAppointmentDraft, "trackIds"> | null | undefined,
+  trackLabels: Record<string, string>,
+) {
+  return normalizedTrackIds(draft?.trackIds || [])
+    .map((trackId) => trackLabels[trackId])
+    .filter((subject): subject is string => Boolean(subject))
+}
+
 function cloneDraft(draft: RegistrationAppointmentDraft): RegistrationAppointmentDraft {
   return {
     scheduledAt: String(draft.scheduledAt || ""),

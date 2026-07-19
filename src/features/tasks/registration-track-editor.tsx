@@ -691,24 +691,12 @@ export function RegistrationApplication({
   const appointmentActivities = appointmentEditor?.kind === "level_test"
     ? detail.levelTests
     : detail.consultations.filter((item) => item.mode === "visit")
-  const appointmentParticipantIds = editorAppointment
-    ? appointmentActivities.filter((item) => item.appointmentId === editorAppointment.id).map((item) => item.trackId)
-    : appointmentEditor?.initialTrackId ? [appointmentEditor.initialTrackId] : []
   const appointmentEditorContent = appointmentEditor ? (
     <div
       ref={appointmentEditorRef}
       data-registration-appointment-focus={editorAppointment?.id || ""}
-      data-registration-appointment-subjects={detail.tracks
-        .filter((track) => appointmentParticipantIds.includes(track.id))
-        .map((track) => track.subject)
-        .join("|")}
       className="grid scroll-m-4 gap-2"
     >
-      <div className="flex flex-wrap gap-1" aria-label="예약 적용 과목">
-        {detail.tracks.filter((track) => appointmentParticipantIds.includes(track.id)).map((track) => (
-          <Badge key={track.id} variant="secondary">{track.subject}</Badge>
-        ))}
-      </div>
       <RegistrationAppointmentEditor
         key={`${appointmentEditor.kind}:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}`}
         kind={appointmentEditor.kind}

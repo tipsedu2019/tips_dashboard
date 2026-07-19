@@ -118,7 +118,7 @@ test("registration fixture verifier preserves sibling drafts and performs access
     assert.match(verifier, new RegExp(`assertNonColorWorkflowState\\([^\\n]+"${state}"`))
   }
   assert.match(verifier, /\[data-registration-track-id\][\s\S]*?input/)
-  assert.match(verifier, /\[data-registration-appointment-focus\][\s\S]*?data-registration-appointment-subjects/)
+  assert.match(verifier, /\[data-registration-appointment-shared-controls\][\s\S]*?data-registration-appointment-subjects/)
   assert.match(verifier, /participantSubjects\.filter\(\(subject\) => !label\.includes\(subject\)\)/)
   assert.match(verifier, /data-registration-primary-action/)
   assert.match(verifier, /data-registration-state/)
@@ -189,6 +189,8 @@ test("registration primary-action markers own the data controls they commit", as
   assert.match(verifier, /multipleDialog[\s\S]*?assertMobileActionDomOrder\(multipleDialog\)/)
   assert.match(appointmentSource, /data-registration-action-owner/)
   assert.match(appointmentSource, /data-registration-appointment-shared-controls/)
+  assert.match(appointmentSource, /data-registration-appointment-subjects=\{appointmentParticipantSubjects\.join\("\|"\)\}/)
+  assert.doesNotMatch(trackEditorSource, /data-registration-appointment-subjects/)
   assert.match(actionsSource, /data-registration-action-owner/)
   assert.match(enrollmentSource, /enrollment-row-save/)
   assert.match(enrollmentSource, /enrollment-row-add/)

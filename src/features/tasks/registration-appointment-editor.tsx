@@ -19,6 +19,7 @@ import { sendRegistrationVisitNotificationTarget } from "./registration-consulta
 import {
   buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
+  getRegistrationAppointmentParticipantSubjects,
   isRegistrationNotificationProcessingReady,
   rebaseRegistrationAppointmentDraft,
   type RegistrationAppointmentConflict,
@@ -409,10 +410,13 @@ export function RegistrationAppointmentEditor({
     effectiveProcessingReadiness,
   )
   const trackLabels = Object.fromEntries(eligibleTracks.map((track) => [track.id, track.subject]))
-  const appointmentParticipantSubjectLabel = appointmentDraft.trackIds
-    .map((trackId) => trackLabels[trackId])
-    .filter(Boolean)
-    .join("·") || eligibleTracks.map((track) => track.subject).join("·") || "과목"
+  const appointmentParticipantSubjects = getRegistrationAppointmentParticipantSubjects(
+    appointmentDraft,
+    trackLabels,
+  )
+  const appointmentParticipantSubjectLabel = appointmentParticipantSubjects.join("·")
+    || eligibleTracks.map((track) => track.subject).join("·")
+    || "과목"
   const normalizedDraft = JSON.stringify({
     appointmentId: baseAppointmentId,
     expectedNotificationRevision,
@@ -1001,7 +1005,12 @@ export function RegistrationAppointmentEditor({
         </div>
       ) : null}
 
-      <div data-registration-action-owner={`${appointmentParticipantSubjectLabel}:appointment-save`} data-registration-appointment-shared-controls className="grid gap-3">
+      <div
+        data-registration-action-owner={`${appointmentParticipantSubjectLabel}:appointment-save`}
+        data-registration-appointment-shared-controls
+        data-registration-appointment-subjects={appointmentParticipantSubjects.join("|")}
+        className="grid gap-3"
+      >
         <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
           <Label data-appointment-field="scheduled-at" className="grid min-w-0 gap-1.5">
             <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>

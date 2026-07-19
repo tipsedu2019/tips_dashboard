@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
+  getRegistrationAppointmentParticipantSubjects,
   isRegistrationNotificationProcessingReady,
   rebaseRegistrationAppointmentDraft,
 } from "../src/features/tasks/registration-appointment-draft.ts"
@@ -136,6 +137,25 @@ test("취소 확인은 이후 상태와 0개 라운드를 보여 주며 사유�
   assert.match(message, /이후.*예약 취소/s)
   assert.match(message, /미래 알림.*2회.*0회/s)
   assert.doesNotMatch(message, /사유/)
+})
+
+test("공유 예약에서 과목을 해제해 저장한 뒤 다시 열면 draft의 활성 참가 과목만 라벨로 복원한다", () => {
+  const activeDraft = {
+    scheduledAt: "2026-07-20T06:00:00.000Z",
+    place: "본관 201호",
+    trackIds: ["track-english", "track-math"],
+    replaceRemaining: false,
+  }
+  const savedTrackIds = activeDraft.trackIds.filter((trackId) => trackId !== "track-math")
+  const reloadedDraft = { ...activeDraft, trackIds: savedTrackIds }
+
+  assert.deepEqual(
+    getRegistrationAppointmentParticipantSubjects(reloadedDraft, {
+      "track-english": "영어",
+      "track-math": "수학",
+    }),
+    ["영어"],
+  )
 })
 
 test("처리 상태 안전 게이트는 두 runtime marker와 최근 성공 worker·watchdog가 모두 있어야 열린다", () => {

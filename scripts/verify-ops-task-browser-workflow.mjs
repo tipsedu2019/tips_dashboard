@@ -2823,14 +2823,14 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
 
   async function assertAppointmentAccessibleNames(applicationHost) {
-    const missing = await applicationHost.locator('[data-registration-appointment-focus]').evaluateAll((wrappers) => wrappers.flatMap((wrapper) => {
-      const participantSubjects = (wrapper.getAttribute("data-registration-appointment-subjects") || "")
+    const missing = await applicationHost.locator('[data-registration-appointment-shared-controls]').evaluateAll((owners) => owners.flatMap((owner) => {
+      const participantSubjects = (owner.getAttribute("data-registration-appointment-subjects") || "")
         .split("|")
         .map((subject) => subject.trim())
         .filter(Boolean)
-      const controls = [...wrapper.querySelectorAll('[data-registration-appointment-shared-controls] input, [data-registration-appointment-shared-controls] select, [data-registration-appointment-shared-controls] button')]
+      const controls = [...owner.querySelectorAll('input, select, button')]
       if (participantSubjects.length === 0) {
-        return [{ label: "appointment wrapper", missingSubjects: ["participant subjects"] }]
+        return [{ label: "shared appointment controls", missingSubjects: ["participant subjects"] }]
       }
       return controls
         .filter((control) => !control.disabled && control.getBoundingClientRect().width > 0)
