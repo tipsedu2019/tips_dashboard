@@ -19,6 +19,7 @@ import {
   getRegistrationLevelTestAppointmentStatus,
   getRegistrationSummaryActionPermissions,
   getRegistrationActionPermissions,
+  getAllowedRegistrationTrackActions,
   getRegistrationCurrentClassWaitClassId,
   getRegistrationTrackNextStatus,
   getRegistrationTrackTabCounts,
@@ -28,6 +29,18 @@ import {
   restoreRegistrationEnrollmentDraft,
   serializeRegistrationEnrollmentRows,
 } from "../src/features/tasks/registration-track-model.js"
+
+test("allowed actions are returned as a fresh view of the authoritative status matrix", () => {
+  const first = getAllowedRegistrationTrackActions("consultation_waiting")
+  first.pop()
+
+  assert.deepEqual(first, ["complete_phone_consultation"])
+  assert.deepEqual(getAllowedRegistrationTrackActions("consultation_waiting"), [
+    "complete_phone_consultation",
+    "schedule_visit",
+  ])
+  assert.deepEqual(getAllowedRegistrationTrackActions("unknown"), [])
+})
 
 test("현재반 대기 수업은 활성 waitlisted claim에서만 복원한다", () => {
   const enrollments = [

@@ -178,7 +178,33 @@ function createSessionStorageMock() {
   };
 }
 
-function createWorkspaceLoaderHarness({ taskGatesByType = {}, windowMock } = {}) {
+function registrationSummaryTrack(taskId, id, subject, status) {
+  return {
+    id,
+    taskId,
+    subject,
+    status,
+    legacy: false,
+    directorProfileId: null,
+    directorName: "",
+    directorAssignmentSource: "",
+    directorAssignmentRuleKey: "",
+    waitingKind: "",
+    levelTestRetakeDecision: "",
+    migrationReviewRequired: false,
+    stageEnteredAt: "2026-07-12T00:00:00Z",
+    phoneReadyAt: null,
+    phoneReadySource: null,
+  }
+}
+
+function createWorkspaceLoaderHarness({
+  taskGatesByType = {},
+  windowMock,
+  registrationTrackSummaryFactory = (taskIds) => taskIds.map((taskId) => (
+    registrationSummaryTrack(taskId, `track:${taskId}`, "영어", "inquiry")
+  )),
+} = {}) {
   const defaultTaskGate = deferred();
   const explicitTaskGates = new Map(
     Object.entries(taskGatesByType).map(([taskType, gates]) => [taskType, [...gates]]),
@@ -256,6 +282,14 @@ function createWorkspaceLoaderHarness({ taskGatesByType = {}, windowMock } = {})
     error: null,
   };
   const emptyMap = () => new Map();
+  const groupByTaskId = (items) => items.reduce((grouped, item) => {
+    const taskId = String(item?.taskId || "")
+    if (!taskId) return grouped
+    const current = grouped.get(taskId) || []
+    current.push(item)
+    grouped.set(taskId, current)
+    return grouped
+  }, new Map())
   const emptyRows = async () => [];
 
   const {
@@ -290,21 +324,7 @@ function createWorkspaceLoaderHarness({ taskGatesByType = {}, windowMock } = {})
         counts.trackSummaryCalls.push({ taskIds: [...taskIds], viewerId, force: options.force });
         return {
           mode: "ready",
-          tracks: taskIds.map((taskId) => ({
-            id: `track:${taskId}`,
-            taskId,
-            subject: "영어",
-            status: "inquiry",
-            legacy: false,
-            directorProfileId: null,
-            directorName: "",
-            directorAssignmentSource: "",
-            directorAssignmentRuleKey: "",
-            waitingKind: "",
-            levelTestRetakeDecision: "",
-            migrationReviewRequired: false,
-            stageEnteredAt: "2026-07-12T00:00:00Z",
-          })),
+          tracks: registrationTrackSummaryFactory(taskIds),
         };
       },
       clearRegistrationTrackServiceCaches() {
@@ -323,7 +343,7 @@ function createWorkspaceLoaderHarness({ taskGatesByType = {}, windowMock } = {})
         });
       },
       buildProfileLookup: emptyMap,
-      byTaskId: emptyMap,
+      byTaskId: groupByTaskId,
       singleByTaskId: emptyMap,
       mapComment: (row) => row,
       mapAttachment: (row) => row,
@@ -760,6 +780,35 @@ test("registration cold load uses the narrow parent projection and loads track s
     force: true,
   }]);
 });
+
+test("registration parent loading preserves one task with every subject track", async () => {
+  const harness = createWorkspaceLoaderHarness({
+    registrationTrackSummaryFactory: (taskIds) => taskIds.flatMap((taskId) => [
+      registrationSummaryTrack(taskId, "eng", "영어", "consultation_waiting"),
+      registrationSummaryTrack(taskId, "math", "수학", "level_test_scheduled"),
+    ]),
+  })
+  const load = harness.loadOpsTaskWorkspaceData({
+    taskType: "registration",
+    viewerId: "viewer-a",
+    force: true,
+  })
+  harness.releaseTasks([{
+    id: "case-1",
+    type: "registration",
+    ops_registration_details: { task_id: "case-1" },
+  }])
+  const data = await load
+
+  assert.equal(data.tasks.length, 1)
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(
+      data.tasks[0].registrationTracks.map(({ id, subject }) => [id, subject]),
+    )),
+    [["eng", "영어"], ["math", "수학"]],
+  )
+  assert.equal(harness.counts.taskQueries, 1)
+})
 
 test("ready registration summaries use child rows per parent and fall back only for a parent with zero children", () => {
   const resolveRegistrationTrackSummariesForParents = loadRegistrationTrackParentResolver();

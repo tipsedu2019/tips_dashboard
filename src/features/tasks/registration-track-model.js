@@ -31,8 +31,12 @@ const ALLOWED_ACTIONS_BY_STATUS = Object.freeze({
   inquiry_closed: new Set(["reopen_track"]),
 })
 
+export function getAllowedRegistrationTrackActions(status) {
+  return Array.from(ALLOWED_ACTIONS_BY_STATUS[status] || [])
+}
+
 function isAllowedRegistrationTrackAction(status, action) {
-  return Boolean(ALLOWED_ACTIONS_BY_STATUS[status]?.has(action))
+  return getAllowedRegistrationTrackActions(status).includes(action)
 }
 
 export function getRegistrationTrackViewKey(status) {

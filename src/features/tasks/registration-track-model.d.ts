@@ -33,7 +33,7 @@ export type RegistrationAdmissionBatchSummary = {
   status: "draft" | "invoiced" | "paid" | "completed" | "canceled"
 }
 
-type RegistrationTrackAction =
+export type RegistrationTrackAction =
   | "schedule_level_test"
   | "route_consultation"
   | "route_waiting"
@@ -109,6 +109,10 @@ export function getRegistrationTrackViewKey(
 export function getRegistrationTrackTabCounts(
   tracks?: readonly RegistrationTrackSummary[],
 ): Record<RegistrationTrackViewKey, number>
+
+export function getAllowedRegistrationTrackActions(
+  status?: RegistrationTrackStatus | null,
+): readonly RegistrationTrackAction[]
 
 export function isRegistrationTrackTerminal(
   status?: RegistrationTrackStatus | null,
