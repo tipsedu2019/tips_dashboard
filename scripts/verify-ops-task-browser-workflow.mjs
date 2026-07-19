@@ -2785,7 +2785,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
 
   async function chooseFixtureTime(dialog, ariaLabel, optionLabel) {
-    const trigger = dialog.getByRole("button", { name: new RegExp(`^${ariaLabel}`) }).first()
+    const triggerName = ariaLabel instanceof RegExp ? ariaLabel : new RegExp(`^${ariaLabel}`)
+    const trigger = dialog.getByRole("button", { name: triggerName }).first()
     await trigger.click()
     const option = await firstUsable(dialog.getByRole("option", { name: optionLabel, exact: true }))
     if (!(await option.isVisible().catch(() => false))) {
@@ -2848,16 +2849,15 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
 
   async function assertMobileActionDomOrder(applicationHost) {
-    if (await page.evaluate(() => window.innerWidth) > 390) return
     const invalidOwners = await applicationHost.evaluate((host) => [...host.querySelectorAll('[data-registration-primary-action]')]
-      .filter((action) => !action.matches(':disabled') && action.getBoundingClientRect().width > 0)
+      .filter((action) => action.getBoundingClientRect().width > 0)
       .flatMap((action) => {
         const owner = action.closest('[data-registration-action-owner]')
         const actionLabel = action.getAttribute('aria-label') || action.textContent?.trim() || 'unnamed action'
         if (!owner) return [`${actionLabel} has no action owner`]
-        const fields = [...owner.querySelectorAll('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')]
+        const fields = [...owner.querySelectorAll('input, select, textarea')]
           .filter((field) => field.getBoundingClientRect().width > 0)
-        if (fields.length === 0) return []
+        if (fields.length === 0) return [`${actionLabel} owner has no visible data field`]
         const lastOwnedField = fields[fields.length - 1]
         const followsLastField = Boolean(lastOwnedField.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING)
         return followsLastField ? [] : [`${actionLabel} precedes its owner's last enabled field`]
@@ -3159,13 +3159,14 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   if (!selectedSubjectText.includes("영어") || !selectedSubjectText.includes("수학")) {
     throw new Error("shared level-test fixture is missing an English or Math participant.")
   }
-  await chooseFixtureTime(sharedAppointment, "시각 선택", "오전 10:30")
+  await assertMobileActionDomOrder(dualDialog)
+  await chooseFixtureTime(sharedAppointment, /^영어·수학 예약 시각/, "오전 10:30")
   await sharedAppointment.locator('input[placeholder="본관, 상담실 등"]').fill("본관 202호")
-  await sharedAppointment.getByRole("button", { name: "수학", exact: true }).click()
+  await sharedAppointment.getByRole("button", { name: "영어·수학 예약 적용: 수학 선택됨", exact: true }).click()
   if (await sharedAppointment.locator('button[aria-pressed="true"]').count() !== 1) {
     throw new Error("shared level-test participant edit did not retain exactly one subject.")
   }
-  const rescheduleButton = sharedAppointment.getByRole("button", { name: "예약 수정", exact: true })
+  const rescheduleButton = sharedAppointment.getByRole("button", { name: "영어 예약 저장", exact: true })
   await waitUntilEnabled(rescheduleButton, "registration level-test reschedule button")
   await rescheduleButton.click()
   await sharedAppointment.waitFor({ state: "hidden", timeout: 10000 })
@@ -3179,18 +3180,19 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await dualDialog.getByRole("button", { name: "예약 및 과목별 결과 관리" }).click()
   const reloadedAppointment = dualDialog.locator('section[aria-label="레벨테스트 예약"]')
   await assertAppointmentAccessibleNames(dualDialog)
+  await assertMobileActionDomOrder(dualDialog)
   if (await reloadedAppointment.locator('button[aria-pressed="true"]').count() !== 1) {
     throw new Error("canonical reload did not preserve the edited appointment participant set.")
   }
   if (await reloadedAppointment.locator('input[placeholder="본관, 상담실 등"]').inputValue() !== "본관 202호") {
     throw new Error("canonical appointment reload did not preserve the edited place.")
   }
-  await reloadedAppointment.getByRole("button", { name: /^시각 선택: 오전 10:30$/ }).waitFor({ state: "visible", timeout: 5000 })
-  await reloadedAppointment.getByRole("button", { name: "시험 시작", exact: true }).click()
-  const resultButton = reloadedAppointment.getByRole("button", { name: "결과 완료", exact: true })
+  await reloadedAppointment.getByRole("button", { name: /^영어 예약 시각: 오전 10:30$/ }).waitFor({ state: "visible", timeout: 5000 })
+  await reloadedAppointment.getByRole("button", { name: "영어 시험 시작", exact: true }).click()
+  const resultButton = reloadedAppointment.getByRole("button", { name: "영어 결과 완료", exact: true })
   await resultButton.waitFor({ state: "visible", timeout: 10000 })
   const levelTestResultUrl = "https://drive.google.com/fixture/browser-result"
-  await reloadedAppointment.getByLabel("시험지·결과지 URL", { exact: true }).first().fill(levelTestResultUrl)
+  await reloadedAppointment.getByLabel("영어 시험지·결과지 URL", { exact: true }).first().fill(levelTestResultUrl)
   await waitUntilEnabled(resultButton, "registration level-test result completion button")
   await resultButton.click()
   await requireVisibleText(dualDialog, "전화상담은 예약 없이")

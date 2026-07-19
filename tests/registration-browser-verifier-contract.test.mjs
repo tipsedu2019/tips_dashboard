@@ -169,6 +169,10 @@ test("registration primary-action markers own the data controls they commit", as
     readFile(registrationTrackEditorUrl, "utf8"),
   ])
   const verifier = registrationVerifier(verifierSource)
+  const mobileActionStart = verifier.indexOf("async function assertMobileActionDomOrder")
+  const mobileActionEnd = verifier.indexOf("async function assertNonColorWorkflowState", mobileActionStart)
+  assert.ok(mobileActionStart >= 0 && mobileActionEnd > mobileActionStart, "mobile action order verifier is missing")
+  const mobileActionVerifier = verifier.slice(mobileActionStart, mobileActionEnd)
 
   assert.match(verifier, /data-registration-action-owner/)
   assert.match(verifier, /querySelectorAll\('\[data-registration-primary-action\]'/)
@@ -176,6 +180,12 @@ test("registration primary-action markers own the data controls they commit", as
   assert.match(verifier, /lastOwnedField/)
   assert.match(verifier, /data-registration-appointment-subjects/)
   assert.match(verifier, /data-registration-appointment-shared-controls/)
+  assert.doesNotMatch(mobileActionVerifier, /action\.matches\(':disabled'\)/)
+  assert.match(mobileActionVerifier, /querySelectorAll\('input, select, textarea'\)/)
+  assert.match(mobileActionVerifier, /owner has no visible data field/)
+  assert.doesNotMatch(mobileActionVerifier, /window\.innerWidth/)
+  assert.match(verifier, /sharedAppointment[\s\S]*?assertMobileActionDomOrder\(dualDialog\)/)
+  assert.match(verifier, /reloadedAppointment[\s\S]*?assertMobileActionDomOrder\(dualDialog\)/)
   assert.match(verifier, /multipleDialog[\s\S]*?assertMobileActionDomOrder\(multipleDialog\)/)
   assert.match(appointmentSource, /data-registration-action-owner/)
   assert.match(appointmentSource, /data-registration-appointment-shared-controls/)
@@ -185,6 +195,33 @@ test("registration primary-action markers own the data controls they commit", as
   assert.match(enrollmentSource, /admission-start/)
   assert.doesNotMatch(createSource, /data-registration-primary-action="consultation-catalog-retry"/)
   assert.doesNotMatch(trackEditorSource, /data-registration-primary-action=\{`\$\{kind\}:\$\{plan\.appointmentId\}`\}/)
+})
+
+test("shared appointment browser selectors track the subject-qualified rendered controls", async () => {
+  const [verifierSource, appointmentSource] = await Promise.all([
+    readFile(verifierUrl, "utf8"),
+    readFile(appointmentEditorUrl, "utf8"),
+  ])
+  const verifier = registrationVerifier(verifierSource)
+
+  for (const renderedControl of [
+    "appointmentParticipantSubjectLabel} 예약 시각",
+    "appointmentParticipantSubjectLabel} 예약 적용: ${track.subject}",
+    "appointmentParticipantSubjectLabel} 예약 저장",
+    'track?.subject || "과목"} 시험 시작',
+    'track?.subject || "과목"} 결과 완료',
+    'track?.subject || "과목"} 시험지·결과지 URL',
+  ]) {
+    assert.ok(appointmentSource.includes(renderedControl), `appointment editor is missing ${renderedControl}`)
+  }
+
+  assert.match(verifier, /chooseFixtureTime\(sharedAppointment, \/\^영어·수학 예약 시각\//)
+  assert.match(verifier, /영어·수학 예약 적용: 수학/)
+  assert.match(verifier, /name: "영어 예약 저장", exact: true/)
+  assert.match(verifier, /\^영어 예약 시각: 오전 10:30\$/)
+  assert.match(verifier, /name: "영어 시험 시작", exact: true/)
+  assert.match(verifier, /name: "영어 결과 완료", exact: true/)
+  assert.match(verifier, /getByLabel\("영어 시험지·결과지 URL", \{ exact: true \}\)/)
 })
 
 test("registration fixture verifier opens a real calendar item before it mutates the dual-test appointment", async () => {
