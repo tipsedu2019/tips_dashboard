@@ -448,6 +448,10 @@ export function RegistrationApplication({
     admissionApplicationMessageStatus: detail.admissionApplicationMessageStatus,
     admissionApplicationMessageClaimActive: detail.admissionApplicationMessageClaimActive,
   })
+  const admissionTargetTracks = admissionApplicationState.targetTrackIds.flatMap((trackId) => {
+    const track = detail.tracks.find((item) => item.id === trackId)
+    return track ? [track] : []
+  })
   const admissionMessageRecoveryAvailable = Boolean(
     detail.admissionApplicationMessageId
     && ["pending", "unknown", "failed_hold"].includes(detail.admissionApplicationMessageStatus),
@@ -660,6 +664,7 @@ export function RegistrationApplication({
         {plans.map((plan) => {
           const owner = trackContexts.find((context) => context.track.id === plan.ownerTrackId)
           if (!owner) return null
+          const participantSubjectLabel = plan.participantSubjects.join("·") || "과목"
           const label = kind === "level_test"
             ? plan.status === "completed" ? "레벨테스트 결과 보기" : "예약 및 과목별 결과 관리"
             : "방문상담 예약 수정"
@@ -672,6 +677,9 @@ export function RegistrationApplication({
               </div>
               <Button
                 type="button"
+                data-registration-appointment-plan-action=""
+                data-registration-appointment-subjects={plan.participantSubjects.join("|")}
+                aria-label={`${participantSubjectLabel} ${label}`}
                 variant="outline"
                 size="sm"
                 onClick={() => openAppointment(owner, kind, plan.appointmentId)}
@@ -841,9 +849,9 @@ export function RegistrationApplication({
           fields={(
             <div className="grid gap-3">
               {renderTrackFrames("admission")}
-              {detail.tracks.some((track) => track.status === "enrollment_decided") ? (
+              {admissionTargetTracks.length > 0 ? (
                 <div className="flex flex-wrap gap-1" aria-label="입학신청서 발송 과목">
-                  {detail.tracks.filter((track) => track.status === "enrollment_decided").map((track) => (
+                  {admissionTargetTracks.map((track) => (
                     <Badge key={track.id} variant="outline">{track.subject}</Badge>
                   ))}
                 </div>

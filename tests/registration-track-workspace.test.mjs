@@ -691,7 +691,8 @@ test("two decided subjects share one admission send action and expose two badges
   assert.match(application, /getRegistrationApplicationCaseEditableSections\(\{[\s\S]*?admissionBatches: detail\.admissionBatches/)
   assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: detail\.tracks,[\s\S]*?enrollments: detail\.enrollments/)
   assert.match(application, /admissionApplicationState\.canSend/)
-  assert.match(application, /detail\.tracks\.filter\(\(track\) => track\.status === "enrollment_decided"\)\.map/)
+  assert.match(application, /admissionApplicationState\.targetTrackIds/)
+  assert.match(application, /admissionTargetTracks\.map/)
   assert.equal((enrollment.match(/>입학신청서 발송<\/Button>/g) || []).length, 1)
 })
 
@@ -966,6 +967,18 @@ test("appointment editor uses one schedule and one result control per subject", 
   assert.match(source, /cancelRegistrationAppointment/)
 })
 
+test("all-terminal appointment results replace mutation controls with a read-only summary", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /editMode !== "read_only"/)
+  assert.match(source, /data-registration-appointment-readonly-summary/)
+  assert.match(source, /예약 일시[\s\S]*?장소[\s\S]*?참여 과목/)
+  assert.match(source, /data-registration-appointment-shared-controls/)
+  assert.match(source, /activities\.map/)
+  assert.match(source, /다시 예약/)
+  assert.match(source, /문의 종료/)
+})
+
 test("appointment editor dispatches only authoritative notification targets before its saved handoff", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /onSaved\(saved\)/)
@@ -1002,6 +1015,15 @@ test("track editor opens one shared editor for level tests and visit consultatio
   assert.equal((source.match(/<RegistrationAppointmentEditor/g) || []).length, 1)
   assert.doesNotMatch(stageSource, /예약 및 과목별 결과 관리|레벨테스트 결과 보기|방문상담 예약 수정/)
   assert.match(source, /방문상담 예약/)
+})
+
+test("appointment plan entry actions expose their actual participant subjects", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /const participantSubjectLabel = plan\.participantSubjects\.join\("·"\) \|\| "과목"/)
+  assert.match(source, /data-registration-appointment-plan-action/)
+  assert.match(source, /data-registration-appointment-subjects=\{plan\.participantSubjects\.join\("\|"\)\}/)
+  assert.match(source, /aria-label=\{`\$\{participantSubjectLabel\} \$\{label\}`\}/)
 })
 
 test("phone and visit consultation completion share one inline subject outcome editor", async () => {
@@ -1136,6 +1158,17 @@ test("case admission message states stay actionable independently of the selecte
   assert.match(source, /onReconcileAdmissionMessage/)
   assert.match(source, /onReleaseAdmissionMessageRetry/)
   assert.match(source, /onSendAdmissionMessage/)
+})
+
+test("case admission badges use the same decided and add-class eligibility as the send action", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const admission = sourceBetween(source, "admission={(\n", "history={<RegistrationHistoryTimeline")
+
+  assert.match(source, /admissionApplicationState\.targetTrackIds/)
+  assert.match(source, /admissionTargetTracks/)
+  assert.match(admission, /admissionTargetTracks\.map/)
+  assert.doesNotMatch(admission, /track\.status === "enrollment_decided"/)
+  assert.equal((source.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
 })
 
 test("unified track editor and workspace mount subject rows plus one case-level admission panel", async () => {

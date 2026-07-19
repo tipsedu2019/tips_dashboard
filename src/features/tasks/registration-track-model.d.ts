@@ -139,10 +139,10 @@ export function getEligibleSharedAppointmentTracks<T extends RegistrationTrackSu
 
 export function getRegistrationAppointmentEditMode(
   activities?: readonly RegistrationAppointmentActivitySummary[],
-): "edit" | "replace_remaining"
+): "edit" | "replace_remaining" | "read_only"
 
 export function getRegistrationAppointmentPayloadTrackIds(
-  editMode: "edit" | "replace_remaining",
+  editMode: "edit" | "replace_remaining" | "read_only",
   selectedTrackIds?: readonly string[],
   activities?: readonly RegistrationAppointmentActivitySummary[],
   currentAppointmentId?: string | null,
@@ -153,6 +153,7 @@ export function getLatestRegistrationLevelTestActivityIds(
 ): string[]
 
 export type RegistrationAdmissionApplicationState = {
+  targetTrackIds: string[]
   eligible: boolean
   delivered: boolean
   syncNeeded: boolean

@@ -380,6 +380,7 @@ test("admission application state follows eligible child tracks and active messa
     admissionApplicationMessageStatus: "",
     admissionApplicationMessageClaimActive: false,
   }), {
+    targetTrackIds: ["english"],
     eligible: true,
     delivered: false,
     syncNeeded: false,
@@ -394,6 +395,7 @@ test("admission application state follows eligible child tracks and active messa
     admissionApplicationMessageStatus: "accepted",
     admissionApplicationMessageClaimActive: true,
   }), {
+    targetTrackIds: ["english"],
     eligible: true,
     delivered: true,
     syncNeeded: true,
@@ -412,6 +414,39 @@ test("admission application state follows eligible child tracks and active messa
     assert.equal(blocked.blocked, true)
     assert.equal(blocked.canSend, false)
   }
+})
+
+test("admission application targets decided and unbatched add-class tracks exactly once", () => {
+  const tracks = [
+    { id: "english", status: "enrollment_decided" },
+    { id: "math", status: "registered" },
+    { id: "science", status: "level_test_scheduled" },
+  ]
+  const base = {
+    tracks,
+    admissionNoticeSent: false,
+    admissionApplicationMessageStatus: "",
+    admissionApplicationMessageClaimActive: false,
+  }
+
+  assert.deepEqual(getRegistrationAdmissionApplicationState({
+    ...base,
+    enrollments: [],
+  }).targetTrackIds, ["english"])
+  assert.deepEqual(getRegistrationAdmissionApplicationState({
+    ...base,
+    tracks: tracks.slice(1),
+    enrollments: [{ trackId: "math", status: "planned", admissionBatchId: null }],
+  }).targetTrackIds, ["math"])
+  assert.deepEqual(getRegistrationAdmissionApplicationState({
+    ...base,
+    enrollments: [
+      { trackId: "math", status: "planned", admissionBatchId: null },
+      { trackId: "math", status: "planned", admissionBatchId: null },
+      { trackId: "missing", status: "planned", admissionBatchId: null },
+      { status: "planned", admissionBatchId: null },
+    ],
+  }).targetTrackIds, ["english", "math"])
 })
 
 test("admission application excludes released history and batched or canceled add-class rows", () => {
@@ -487,9 +522,10 @@ test("visit appointment eligibility includes only free consultation-waiting subj
   )
 })
 
-test("started shared appointment requires replacement rather than in-place edit", () => {
+test("appointment mutation mode distinguishes scheduled, partial, and all-terminal participants", () => {
   assert.equal(getRegistrationAppointmentEditMode([{ status: "scheduled" }, { status: "scheduled" }]), "edit")
   assert.equal(getRegistrationAppointmentEditMode([{ status: "completed" }, { status: "scheduled" }]), "replace_remaining")
+  assert.equal(getRegistrationAppointmentEditMode([{ status: "completed" }, { status: "absent" }]), "read_only")
 })
 
 test("a mounted appointment transition submits only still-scheduled children on the current appointment", () => {

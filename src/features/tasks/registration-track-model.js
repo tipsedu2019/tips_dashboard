@@ -165,6 +165,9 @@ export function getEligibleSharedAppointmentTracks(
 }
 
 export function getRegistrationAppointmentEditMode(activities = []) {
+  if (activities.length > 0 && !activities.some((activity) => activity?.status === "scheduled")) {
+    return "read_only"
+  }
   return activities.every((activity) => activity?.status === "scheduled")
     ? "edit"
     : "replace_remaining"
@@ -203,20 +206,26 @@ export function getLatestRegistrationLevelTestActivityIds(activities = []) {
 export function getRegistrationAdmissionApplicationState(input = {}) {
   const tracks = Array.isArray(input.tracks) ? input.tracks : []
   const enrollments = Array.isArray(input.enrollments) ? input.enrollments : []
-  const eligibleTrackIds = new Set(tracks
-    .filter((track) => track?.status === "enrollment_decided")
-    .map((track) => String(track?.id || ""))
+  const addClassTrackIds = new Set(enrollments
+    .filter((enrollment) => (
+      enrollment?.status === "planned"
+      && !enrollment?.admissionBatchId
+    ))
+    .map((enrollment) => String(enrollment?.trackId || ""))
     .filter(Boolean))
-  const registeredTrackIds = new Set(tracks
-    .filter((track) => track?.status === "registered")
-    .map((track) => String(track?.id || ""))
-    .filter(Boolean))
-  const hasEligibleAddClassRow = enrollments.some((enrollment) => (
-    registeredTrackIds.has(String(enrollment?.trackId || ""))
-    && enrollment?.status === "planned"
-    && !enrollment?.admissionBatchId
-  ))
-  const eligible = eligibleTrackIds.size > 0 || hasEligibleAddClassRow
+  const targetTrackIds = []
+  const targetTrackIdSet = new Set()
+  for (const track of tracks) {
+    const trackId = String(track?.id || "")
+    if (!trackId || targetTrackIdSet.has(trackId)) continue
+    if (
+      track?.status !== "enrollment_decided"
+      && !(track?.status === "registered" && addClassTrackIds.has(trackId))
+    ) continue
+    targetTrackIdSet.add(trackId)
+    targetTrackIds.push(trackId)
+  }
+  const eligible = targetTrackIds.length > 0
   const status = String(input.admissionApplicationMessageStatus || "")
   const claimActive = Boolean(input.admissionApplicationMessageClaimActive)
   const accepted = status === "accepted"
@@ -225,6 +234,7 @@ export function getRegistrationAdmissionApplicationState(input = {}) {
   const blocked = claimActive && ["pending", "unknown", "failed_hold"].includes(status)
 
   return {
+    targetTrackIds,
     eligible,
     delivered,
     syncNeeded,
