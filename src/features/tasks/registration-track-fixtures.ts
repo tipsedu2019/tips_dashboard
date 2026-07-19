@@ -113,8 +113,12 @@ export function parseRegistrationSubjectTrackFixtureQueryFault(input: {
   }
   if (kind === "common_revision_conflict_once") {
     const taskId = String(input.taskId || "").trim().slice(0, 160)
-    const canonicalRequestNote = String(input.canonicalRequestNote || "").trim().slice(0, 2_000)
-    return taskId && canonicalRequestNote
+    const hasCanonicalRequestNote = Object.prototype.hasOwnProperty.call(input, "canonicalRequestNote")
+    const canonicalRequestNote = input.canonicalRequestNote
+    return taskId
+      && hasCanonicalRequestNote
+      && typeof canonicalRequestNote === "string"
+      && canonicalRequestNote.length <= 2_000
       ? { kind, taskId, canonicalRequestNote }
       : null
   }
@@ -357,8 +361,14 @@ export function createRegistrationSubjectTrackFixtureAdapter(
       }
       if (fault?.kind === "common_revision_conflict_once") {
         const taskId = String(fault.taskId || "").trim().slice(0, 160)
-        const canonicalRequestNote = String(fault.canonicalRequestNote || "").trim().slice(0, 2_000)
-        if (!taskId || !canonicalRequestNote) {
+        const hasCanonicalRequestNote = Object.prototype.hasOwnProperty.call(fault, "canonicalRequestNote")
+        const canonicalRequestNote = fault.canonicalRequestNote
+        if (
+          !taskId
+          || !hasCanonicalRequestNote
+          || typeof canonicalRequestNote !== "string"
+          || canonicalRequestNote.length > 2_000
+        ) {
           throw new Error("registration_subject_track_fixture_debug_fault_invalid")
         }
         nextFault = { kind: fault.kind, taskId, canonicalRequestNote }
@@ -577,6 +587,7 @@ function caseDetail(input: {
   consultations?: OpsRegistrationConsultation[]
   admissionBatches?: OpsRegistrationAdmissionBatch[]
   enrollments?: OpsRegistrationEnrollment[]
+  events?: OpsRegistrationTrackEvent[]
   migrationLegacy?: OpsRegistrationCaseDetail["migrationLegacy"]
 }): OpsRegistrationCaseDetail {
   return {
@@ -595,7 +606,7 @@ function caseDetail(input: {
     consultations: input.consultations || [],
     admissionBatches: input.admissionBatches || [],
     enrollments: input.enrollments || [],
-    events: [],
+    events: input.events || [],
     migrationLegacy: input.migrationLegacy || null,
   }
 }
@@ -812,6 +823,44 @@ function buildFixtureCases() {
   })
   allTerminalTask.status = "done"
   allTerminalTask.completedAt = FIXTURE_NOW
+  const allTerminalEvents: OpsRegistrationTrackEvent[] = [
+    {
+      id: "fixture-event-all-terminal-english-registration",
+      taskId: allTerminalTaskId,
+      trackId: allTerminalTracks[0].id,
+      eventType: "registration_completed",
+      subject: "영어",
+      source: "enrollment_processing",
+      destination: "registered",
+      reason: "등록 완료",
+      metadata: {},
+      actorId: FIXTURE_ACTOR_ID,
+      actorKind: "user",
+      systemSource: null,
+      reasonCode: "등록 완료",
+      payloadVersion: 2,
+      occurredAt: FIXTURE_NOW,
+      legacyText: null,
+    },
+    {
+      id: "fixture-event-all-terminal-math-closed",
+      taskId: allTerminalTaskId,
+      trackId: allTerminalTracks[1].id,
+      eventType: "track_closed",
+      subject: "수학",
+      source: "waiting",
+      destination: "not_registered",
+      reason: "등록하지 않음",
+      metadata: {},
+      actorId: FIXTURE_ACTOR_ID,
+      actorKind: "user",
+      systemSource: null,
+      reasonCode: "등록하지 않음",
+      payloadVersion: 2,
+      occurredAt: FIXTURE_NOW,
+      legacyText: null,
+    },
+  ]
 
   const multipleTaskId = "fixture-task-multiple-classes"
   const multipleTracks = [track({ id: "fixture-track-multiple-english", taskId: multipleTaskId, subject: "영어", status: "enrollment_decided" })]
@@ -907,7 +956,7 @@ function buildFixtureCases() {
     [splitTaskId]: caseDetail({ task: splitTask, tracks: splitTracks, appointments: [visitAppointment], consultations: splitConsultations }),
     [crossStageTaskId]: caseDetail({ task: crossStageTask, tracks: crossStageTracks, appointments: [crossStageAppointment], levelTests: [crossStageAttempt], consultations: [crossStageConsultation] }),
     [partialTaskId]: caseDetail({ task: partialTask, tracks: partialTracks, admissionBatches: [completedAdmission, openAdmission], enrollments: partialEnrollments }),
-    [allTerminalTaskId]: caseDetail({ task: allTerminalTask, tracks: allTerminalTracks }),
+    [allTerminalTaskId]: caseDetail({ task: allTerminalTask, tracks: allTerminalTracks, events: allTerminalEvents }),
     [multipleTaskId]: caseDetail({ task: multipleTask, tracks: multipleTracks, enrollments: multipleEnrollments }),
     [decidedTaskId]: caseDetail({ task: decidedTask, tracks: decidedTracks }),
     [siblingTaskId]: caseDetail({ task: siblingTask, tracks: siblingTracks, appointments: [siblingAppointment], levelTests: [siblingAttempt], admissionBatches: [siblingBatch], enrollments: [siblingEnrollment] }),
@@ -944,11 +993,11 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
   }
   const workspaceData: OpsTaskWorkspaceData = {
     tasks: Object.values(caseDetails).map((detail) => detail.task),
-    profiles,
+    profiles: [],
     students: [],
-    classes: Object.values(classDetails),
-    textbooks,
-    teachers,
+    classes: [],
+    textbooks: [],
+    teachers: [],
     schemaReady: true,
     error: null,
   }
@@ -990,6 +1039,21 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     notificationJobs: notificationTargetScenario.notificationJobs,
     externalCallLedger: [],
     sequence: 0,
+  }
+}
+
+/** The fixture follows the production split: case data first, lookup catalog later. */
+export function mergeRegistrationSubjectTrackFixtureWorkspaceOptions(
+  current: OpsTaskWorkspaceData,
+  enrichment: RegistrationSubjectTrackFixtureState["optionData"],
+): OpsTaskWorkspaceData {
+  return {
+    ...current,
+    profiles: enrichment.profiles,
+    students: enrichment.students,
+    classes: enrichment.classes,
+    textbooks: enrichment.textbooks,
+    teachers: enrichment.teachers,
   }
 }
 

@@ -1045,7 +1045,7 @@ export function RegistrationAppointmentEditor({
       </fieldset>
 
       <div className="flex justify-end">
-        <Button type="button" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
+        <Button type="button" data-registration-primary-action={`${eligibleTracks.map((track) => track.subject).join("-") || "subjects"}:appointment-save`} aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 저장`} onClick={() => void saveAppointment()} disabled={saving || mutationLocked || Boolean(conflict)}>
           {appointment
             ? editMode === "replace_remaining" ? "남은 과목 일정 다시 잡기" : "예약 수정"
             : "예약 저장"}

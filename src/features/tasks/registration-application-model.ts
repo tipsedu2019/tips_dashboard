@@ -38,6 +38,43 @@ export type RegistrationApplicationSectionState = {
   lockReason: string
 }
 
+export type RegistrationCreateCatalogStatus = "ready" | "loading" | "error"
+
+/** Keep inquiry writable while the optional consultation catalog resolves. */
+export function getRegistrationCreateCatalogState(input: {
+  status: RegistrationCreateCatalogStatus
+  error: string
+}) {
+  if (input.status === "ready") {
+    return {
+      status: input.status,
+      inquiryEditable: true,
+      catalogControlsDisabled: false,
+      showLocalStatus: false,
+      showLocalRetry: false,
+      lockReason: "",
+    }
+  }
+  if (input.status === "error") {
+    return {
+      status: input.status,
+      inquiryEditable: true,
+      catalogControlsDisabled: true,
+      showLocalStatus: true,
+      showLocalRetry: true,
+      lockReason: input.error || "선택 정보를 불러오지 못했습니다.",
+    }
+  }
+  return {
+    status: input.status,
+    inquiryEditable: true,
+    catalogControlsDisabled: true,
+    showLocalStatus: true,
+    showLocalRetry: false,
+    lockReason: "상담 책임자 선택 정보를 불러오는 중입니다",
+  }
+}
+
 export type RegistrationApplicationTrackSectionState =
   RegistrationApplicationSectionState & {
     actions: readonly RegistrationTrackAction[]

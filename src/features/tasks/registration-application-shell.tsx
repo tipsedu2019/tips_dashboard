@@ -21,6 +21,7 @@ export type RegistrationApplicationShellProps = {
     RegistrationApplicationSectionKey,
     RegistrationApplicationSectionState
   >
+  sectionNotices?: Partial<Record<RegistrationApplicationSectionKey, ReactNode>>
   inquiry: ReactNode
   levelTest: ReactNode
   consultation: ReactNode
@@ -51,11 +52,13 @@ function RegistrationApplicationSection({
   mode,
   section,
   state,
+  notice,
   children,
 }: {
   mode: "create" | "detail"
   section: RegistrationApplicationSectionKey
   state: RegistrationApplicationSectionState
+  notice?: ReactNode
   children: ReactNode
 }) {
   const lockReasonId = `registration-application-${section}-lock-reason`
@@ -64,13 +67,21 @@ function RegistrationApplicationSection({
     section,
     editable: state.editable,
   })
+  const stateLabel = contentDisabled
+    ? `${SECTION_TITLES[section]}: ${state.lockReason || "입력 잠김"}`
+    : state.current
+      ? `${SECTION_TITLES[section]}: 현재 진행 단계`
+      : `${SECTION_TITLES[section]}: 사용 가능`
 
   return (
     <section
       id={`registration-application-${section}`}
       data-registration-application-section={section}
+      data-registration-state={contentDisabled ? "locked" : state.current ? "current" : "ready"}
+      aria-label={stateLabel}
       className="grid gap-3 border-t pt-5"
     >
+      {notice}
       <div
         role="group"
         aria-disabled={contentDisabled}
@@ -112,7 +123,13 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
       {REGISTRATION_APPLICATION_SECTION_ORDER.map((section) => {
         const contentKey = SECTION_CONTENT_KEY[section]
         return (
-          <RegistrationApplicationSection key={section} mode={props.mode} section={section} state={props.sectionStates[section]}>
+          <RegistrationApplicationSection
+            key={section}
+            mode={props.mode}
+            section={section}
+            state={props.sectionStates[section]}
+            notice={props.sectionNotices?.[section]}
+          >
             {props[contentKey]}
           </RegistrationApplicationSection>
         )

@@ -1519,7 +1519,7 @@ function WaitingStageEditor({
           </div>
           <div className="grid gap-2 border-t pt-3 sm:grid-cols-[1fr_auto]">
             <Input aria-label={`${track.subject} 대기 종료 사유`} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="미등록 종료 사유" disabled={saving} />
-            <Button type="button" aria-label={`${track.subject} 대기 종료 미등록`} variant="ghost" onClick={() => void transition("close_not_registered")} disabled={saving || !reason.trim()}>
+            <Button type="button" data-registration-primary-action={`${track.subject}:waiting-close`} aria-label={`${track.subject} 대기 종료 미등록`} variant="ghost" onClick={() => void transition("close_not_registered")} disabled={saving || !reason.trim()}>
               대기 종료 · 미등록
             </Button>
           </div>
@@ -1884,7 +1884,7 @@ export function RegistrationConsultationOutcomeEditor({
             </div>
           ) : null}
           <div className="flex justify-end">
-            <Button type="button" aria-label={`${subject} 상담 결과 저장`} onClick={() => void submit()} disabled={saving}>{saving ? "저장 중" : "상담 결과 저장"}</Button>
+          <Button type="button" data-registration-primary-action={`${subject}:consultation-outcome-save`} aria-label={`${subject} 상담 결과 저장`} onClick={() => void submit()} disabled={saving}>{saving ? "저장 중" : "상담 결과 저장"}</Button>
           </div>
         </>
       )}

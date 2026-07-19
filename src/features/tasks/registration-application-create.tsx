@@ -5,12 +5,17 @@ import { useEffect, useMemo, type ReactNode } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@/components/ui/button"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import { RegistrationApplicationInquirySection } from "./registration-application-inquiry-section"
 import { RegistrationApplicationLevelTestSection } from "./registration-application-level-test-section"
-import { getRegistrationCreateSectionStates } from "./registration-application-model"
+import {
+  getRegistrationCreateCatalogState,
+  getRegistrationCreateSectionStates,
+  type RegistrationCreateCatalogStatus,
+} from "./registration-application-model"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
@@ -56,6 +61,9 @@ export type RegistrationApplicationCreateProps = {
     Array<{ value: string; label: string }>
   >
   disabled: boolean
+  catalogStatus?: RegistrationCreateCatalogStatus
+  catalogError?: string
+  onRetryCatalog?: () => void
   closeAction: ReactNode
   onFormPatch: (patch: Partial<OpsTaskInput>) => void
   onRegistrationFieldChange: (
@@ -81,11 +89,15 @@ export function RegistrationApplicationCreate({
   resolvedDirectorIds,
   directorOptionsBySubject,
   disabled,
+  catalogStatus = "ready",
+  catalogError = "",
+  onRetryCatalog,
   closeAction,
   onFormPatch,
   onRegistrationFieldChange,
   onDraftChange,
 }: RegistrationApplicationCreateProps) {
+  const catalogState = getRegistrationCreateCatalogState({ status: catalogStatus, error: catalogError })
   const registration = form.registration || {}
   const subjects = parseRegistrationSubjects(form.subject) as RegistrationSubject[]
   const stableAllowedInitialActions = persistence.mode === "ready_atomic"
@@ -131,6 +143,8 @@ export function RegistrationApplicationCreate({
     resolvedDirectorIds,
     directorOptionsBySubject,
     disabled,
+    catalogControlsDisabled: catalogState.catalogControlsDisabled,
+    catalogLockReason: catalogState.lockReason,
     onChange: onDraftChange,
   }
 
@@ -152,6 +166,30 @@ export function RegistrationApplicationCreate({
         statusLabel: INITIAL_ACTION_LABEL[draft.subjectPlans[subject] || "inquiry"],
       }))}
       sectionStates={sectionStates}
+      sectionNotices={catalogState.showLocalStatus ? {
+        consultation: (
+          <div
+            data-registration-catalog-status={catalogState.status}
+            data-registration-state={catalogState.status === "error" ? "failed" : "locked"}
+            role={catalogState.status === "error" ? "alert" : "status"}
+            aria-live="polite"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+          >
+            <span>{catalogState.lockReason}</span>
+            {catalogState.showLocalRetry && onRetryCatalog ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-registration-primary-action="consultation-catalog-retry"
+                onClick={onRetryCatalog}
+              >
+                다시 불러오기
+              </Button>
+            ) : null}
+          </div>
+        ),
+      } : undefined}
       inquiry={(
         <RegistrationApplicationInquirySection
           mode="create"

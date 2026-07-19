@@ -250,6 +250,7 @@ function RegistrationTrackSectionFrame({
       aria-current={sectionState.current ? "step" : undefined}
       data-registration-track-id={context.track.id}
       data-registration-focus-track={focused ? context.track.id : undefined}
+      data-registration-state={sectionState.current ? "current" : sectionState.editable ? "ready" : "locked"}
       className={[
         "grid min-w-0 gap-3 rounded-md border p-3",
         focused ? "border-primary/60 bg-primary/[0.025]" : "bg-background",
@@ -669,7 +670,13 @@ export function RegistrationApplication({
                   <Badge key={subject} variant="secondary">{subject}</Badge>
                 ))}
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => openAppointment(owner, kind, plan.appointmentId)}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-registration-primary-action={`${kind}:${plan.appointmentId}`}
+                onClick={() => openAppointment(owner, kind, plan.appointmentId)}
+              >
                 {label}
               </Button>
             </div>
@@ -689,7 +696,11 @@ export function RegistrationApplication({
     ? appointmentActivities.filter((item) => item.appointmentId === editorAppointment.id).map((item) => item.trackId)
     : appointmentEditor?.initialTrackId ? [appointmentEditor.initialTrackId] : []
   const appointmentEditorContent = appointmentEditor ? (
-    <div ref={appointmentEditorRef} className="grid scroll-m-4 gap-2">
+    <div
+      ref={appointmentEditorRef}
+      data-registration-appointment-focus={editorAppointment?.id || ""}
+      className="grid scroll-m-4 gap-2"
+    >
       <div className="flex flex-wrap gap-1" aria-label="예약 적용 과목">
         {detail.tracks.filter((track) => appointmentParticipantIds.includes(track.id)).map((track) => (
           <Badge key={track.id} variant="secondary">{track.subject}</Badge>

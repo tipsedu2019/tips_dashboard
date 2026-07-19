@@ -25,6 +25,8 @@ export type RegistrationInitialPlanControlProps = {
     Array<{ value: string; label: string }>
   >
   disabled: boolean
+  catalogControlsDisabled?: boolean
+  catalogLockReason?: string
   onChange: (draft: RegistrationInitialWorkflowDraft) => void
 }
 
@@ -133,6 +135,8 @@ export function RegistrationInitialConsultationFields({
   resolvedDirectorIds,
   directorOptionsBySubject,
   disabled,
+  catalogControlsDisabled = false,
+  catalogLockReason = "",
   onChange,
 }: RegistrationInitialPlanControlProps): JSX.Element {
   const orderedSubjects = selectedSubjects(subjects)
@@ -140,16 +144,28 @@ export function RegistrationInitialConsultationFields({
     draft.subjectPlans[subject] === "direct_phone" || draft.subjectPlans[subject] === "visit"
   ))
   const visitSubjects = getRegistrationInitialWorkflowParticipants(draft, "visit")
-  const visitFieldsDisabled = disabled || visitSubjects.length === 0
+  const consultationControlsDisabled = disabled || catalogControlsDisabled
+  const visitFieldsDisabled = consultationControlsDisabled || visitSubjects.length === 0
 
   return (
-    <div className="grid gap-4">
+    <div
+      className="grid gap-4"
+      data-registration-catalog-owned="consultation"
+      role="group"
+      aria-disabled={consultationControlsDisabled}
+      aria-describedby={catalogLockReason ? "registration-create-catalog-lock-reason" : undefined}
+    >
+      {catalogLockReason ? (
+        <p id="registration-create-catalog-lock-reason" data-registration-state="locked" className="sr-only">
+          {catalogLockReason}
+        </p>
+      ) : null}
       <div className="grid gap-3 md:grid-cols-2">
         {orderedSubjects.map((subject) => {
           const resolvedDirectorId = resolvedDirectorIds[subject] || ""
           const value = draft.directorOverrides[subject] || resolvedDirectorId
           const options = directorOptionsBySubject[subject] || []
-          const subjectDisabled = disabled || !consultationSubjects.includes(subject)
+          const subjectDisabled = consultationControlsDisabled || !consultationSubjects.includes(subject)
           return (
             <Label key={subject} className="grid gap-1.5" data-registration-focus={`counselor:${subject}`}>
               <span>{subject} 상담 책임자</span>

@@ -12,6 +12,7 @@ const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", imp
 const serviceUrl = new URL("../src/features/tasks/registration-track-service.ts", import.meta.url)
 const opsServiceUrl = new URL("../src/features/tasks/ops-task-service.ts", import.meta.url)
 const notificationUrl = new URL("../src/features/tasks/registration-consultation-notification.js", import.meta.url)
+const historyModelUrl = new URL("../src/features/tasks/registration-track-history.js", import.meta.url)
 
 async function loadTsModule(url) {
   const source = await readFile(url, "utf8")
@@ -62,6 +63,10 @@ async function loadFixtureRuntimeModule() {
 
 async function loadCaseListModel() {
   return import(caseListModelUrl.href)
+}
+
+async function loadRegistrationHistoryModel() {
+  return import(historyModelUrl.href)
 }
 
 async function loadServiceBoundary({
@@ -251,15 +256,71 @@ test("fixture query faults accept only the two exact one-shot contracts", async 
     canonicalRequestNote: "다른 담당자가 먼저 저장한 요청 사항",
   })
 
+  assert.deepEqual(plain(parse({
+    enabled: true,
+    type: "common_revision_conflict_once",
+    taskId: "fixture-task-dual-test",
+    canonicalRequestNote: "",
+    error: null,
+  })), {
+    kind: "common_revision_conflict_once",
+    taskId: "fixture-task-dual-test",
+    canonicalRequestNote: "",
+  })
+
   for (const input of [
     { enabled: false, type: "option_data_once", error: "실패" },
     { enabled: true, type: "option_data", error: "실패" },
     { enabled: true, type: "option_data_once", error: "" },
     { enabled: true, type: "common_revision_conflict_once", taskId: "", canonicalRequestNote: "최신" },
-    { enabled: true, type: "common_revision_conflict_once", taskId: "fixture-task-dual-test", canonicalRequestNote: "" },
+    { enabled: true, type: "common_revision_conflict_once", taskId: "fixture-task-dual-test" },
+    { enabled: true, type: "common_revision_conflict_once", taskId: "fixture-task-dual-test", canonicalRequestNote: null },
+    { enabled: true, type: "common_revision_conflict_once", taskId: "fixture-task-dual-test", canonicalRequestNote: "x".repeat(2_001) },
   ]) {
     assert.equal(parse(input), null)
   }
+})
+
+test("fixture option loading keeps core data catalog-free, consumes one fault, and merges the retry result", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+
+  const core = await adapter.loadWorkspaceData()
+  assert.deepEqual(plain({
+    profiles: core.profiles,
+    classes: core.classes,
+    textbooks: core.textbooks,
+    teachers: core.teachers,
+  }), {
+    profiles: [],
+    classes: [],
+    textbooks: [],
+    teachers: [],
+  })
+
+  adapter.debugSetNextFault({ kind: "option_data_once", error: "fixture_option_data_unavailable" })
+  await assert.rejects(adapter.loadOptionData(), /fixture_option_data_unavailable/)
+  const enrichment = await adapter.loadOptionData()
+  assert.equal(enrichment.profiles.length > 0, true)
+  assert.equal(enrichment.classes.length > 0, true)
+  assert.equal(enrichment.textbooks.length > 0, true)
+  assert.equal(enrichment.teachers.length > 0, true)
+
+  assert.equal(typeof fixture.mergeRegistrationSubjectTrackFixtureWorkspaceOptions, "function")
+  const merged = fixture.mergeRegistrationSubjectTrackFixtureWorkspaceOptions(core, enrichment)
+  assert.deepEqual(plain({
+    taskIds: merged.tasks.map((task) => task.id),
+    profileIds: merged.profiles.map((profile) => profile.id),
+    classIds: merged.classes.map((item) => item.id),
+  }), {
+    taskIds: core.tasks.map((task) => task.id),
+    profileIds: enrichment.profiles.map((profile) => profile.id),
+    classIds: enrichment.classes.map((item) => item.id),
+  })
 })
 
 test("fixture reset is deterministic and contains the approved workflow samples", async () => {
@@ -338,6 +399,33 @@ test("fixture reset is deterministic and contains the approved workflow samples"
     ["영어", "registered"],
     ["수학", "not_registered"],
   ])
+  assert.deepEqual(plain(allTerminal.events.map((event) => [
+    event.trackId,
+    event.subject,
+    event.eventType,
+    event.destination,
+    event.actorId,
+    event.actorKind,
+    event.occurredAt,
+  ])), [
+    ["fixture-track-all-terminal-english", "영어", "registration_completed", "registered", "fixture-profile-staff", "user", "2026-07-13T09:00:00+09:00"],
+    ["fixture-track-all-terminal-math", "수학", "track_closed", "not_registered", "fixture-profile-staff", "user", "2026-07-13T09:00:00+09:00"],
+  ])
+  const { buildRegistrationSubjectHistory } = await loadRegistrationHistoryModel()
+  assert.deepEqual(
+    buildRegistrationSubjectHistory(allTerminal).map((item) => [
+      item.title,
+      item.stage,
+      item.subjects,
+      item.actorId,
+      item.actorKind,
+      item.occurredAt,
+    ]),
+    [
+      ["등록 완료", "registration", ["영어"], "fixture-profile-staff", "user", "2026-07-13T09:00:00+09:00"],
+      ["등록 흐름 종료", "closure", ["수학"], "fixture-profile-staff", "user", "2026-07-13T09:00:00+09:00"],
+    ],
+  )
 
   const multiple = first.caseDetails["fixture-task-multiple-classes"]
   assert.deepEqual(plain(multiple.enrollments.map((row) => row.classId)), [
@@ -1370,6 +1458,37 @@ test("fixture common conflict updates canonical state once and remains scoped to
   assert.equal(state.caseDetails["fixture-task-dual-test"].commonRevision, 3)
   assert.equal(state.caseDetails["fixture-task-dual-test"].task.registration.requestNote, "내가 저장하려던 요청 사항")
   assert.equal(state.externalCallLedger.length, 0)
+})
+
+test("fixture common conflict preserves an explicit empty canonical request note", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const taskId = "fixture-task-dual-test"
+  adapter.debugSetNextFault({
+    kind: "common_revision_conflict_once",
+    taskId,
+    canonicalRequestNote: "",
+  })
+  await assert.rejects(adapter.executeAction("updateRegistrationCaseCommon", {
+    taskId,
+    expectedCommonRevision: 1,
+    studentName: state.caseDetails[taskId].task.studentName,
+    campus: "본관",
+    priority: "normal",
+    schoolGrade: "고1",
+    schoolName: "중앙고",
+    parentPhone: "01012345678",
+    studentPhone: "01098765432",
+    inquiryAt: "2026-07-12T09:00:00+09:00",
+    requestNote: "내 요청 사항",
+    requestKey: "fixture-empty-canonical-conflict",
+  }), /registration_common_revision_conflict/)
+  assert.equal(state.caseDetails[taskId].task.registration.requestNote, "")
+  assert.equal(state.caseDetails[taskId].commonRevision, 2)
 })
 
 test("fixture debug behavior injects one slow or failed action before mutation", async () => {

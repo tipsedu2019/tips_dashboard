@@ -11,6 +11,7 @@ const {
   getRegistrationApplicationCaseEditableSections,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
+  getRegistrationCreateCatalogState,
   getRegistrationCreateSectionStates,
   getRegistrationCommonConflictRows,
   getRegistrationEnrollmentDirtyKey,
@@ -164,6 +165,33 @@ test("create mode exposes every future section in a locked state", () => {
     assert.equal(states[section].editable, false, section)
     assert.ok(states[section].lockReason, section)
   }
+})
+
+test("create catalog state keeps inquiry writable while locking only catalog-owned consultation controls", () => {
+  assert.deepEqual(getRegistrationCreateCatalogState({ status: "ready", error: "" }), {
+    status: "ready",
+    inquiryEditable: true,
+    catalogControlsDisabled: false,
+    showLocalStatus: false,
+    showLocalRetry: false,
+    lockReason: "",
+  })
+  assert.deepEqual(getRegistrationCreateCatalogState({ status: "loading", error: "" }), {
+    status: "loading",
+    inquiryEditable: true,
+    catalogControlsDisabled: true,
+    showLocalStatus: true,
+    showLocalRetry: false,
+    lockReason: "상담 책임자 선택 정보를 불러오는 중입니다",
+  })
+  assert.deepEqual(getRegistrationCreateCatalogState({ status: "error", error: "선택 정보 일시 실패" }), {
+    status: "error",
+    inquiryEditable: true,
+    catalogControlsDisabled: true,
+    showLocalStatus: true,
+    showLocalRetry: true,
+    lockReason: "선택 정보 일시 실패",
+  })
 })
 
 test("mixed tracks aggregate current emphasis without unlocking the sibling", () => {

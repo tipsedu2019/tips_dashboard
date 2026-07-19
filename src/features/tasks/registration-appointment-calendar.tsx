@@ -99,6 +99,9 @@ function appointmentCard(
     <button
       key={item.id}
       type="button"
+      data-registration-calendar-item=""
+      data-registration-calendar-appointment-id={item.appointmentId}
+      data-registration-calendar-task-id={item.taskId}
       onClick={() => onOpenAppointment(item)}
       aria-label={`${formatDateKey(getSeoulRegistrationDateKey(item.scheduledAt), { month: "long", day: "numeric", weekday: "short" })} ${item.studentName} ${KIND_LABELS[item.kind]} ${formatSeoulTime(item.scheduledAt)} ${STATUS_LABELS[item.status]} 상세`}
       className="grid w-full min-w-0 gap-1 rounded-md border bg-background px-2 py-2 text-left shadow-sm transition-colors hover:border-primary/45 hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

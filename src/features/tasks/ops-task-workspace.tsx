@@ -8721,7 +8721,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         registrationOptionsLoadedRef.current = true
         registrationOptionsDataRef.current = enrichmentData
         setRegistrationOptionsLoading(false)
-        setData(registrationFixtureStateRef.current!.workspaceData)
+        setData((current) => mergeOpsTaskWorkspaceOptionData(
+          current || registrationFixtureStateRef.current!.workspaceData,
+          enrichmentData,
+        ))
         return true
       } catch (error) {
         registrationOptionsLoadedRef.current = false
@@ -9057,6 +9060,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
     return { 영어: optionsFor("영어"), 수학: optionsFor("수학") }
   }, [profiles, teachers])
+  const registrationCreateCatalogStatus = registrationOptionsLoading
+    ? "loading" as const
+    : registrationOptionsError
+      ? "error" as const
+      : registrationOptionsDataRef.current?.directorCatalogStatus === "authoritative"
+        ? "ready" as const
+        : "loading" as const
   const optionIndexes = useMemo(() => buildOpsTaskOptionIndexes(students, classes, textbooks, teachers), [students, classes, textbooks, teachers])
 
   useEffect(() => {
@@ -13105,26 +13115,23 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         <DialogContent
           data-registration-application-host=""
           data-registration-application-mode={registrationApplicationHost.kind}
+          data-registration-state={registrationApplicationHost.kind === "detail"
+            ? "saved"
+            : registrationApplicationHost.kind === "refresh_failed"
+              ? "failed"
+              : registrationApplicationHost.kind === "loading_detail"
+                ? "loading"
+                : "ready"}
           showCloseButton={false}
           className="z-[80] max-h-[calc(100dvh-1rem)] scroll-pb-24 overflow-x-hidden overflow-y-auto overscroll-contain sm:max-h-[92vh] sm:max-w-4xl"
         >
+          {registrationApplicationHost.kind === "detail" ? (
+            <span data-registration-state="saved" className="sr-only">저장된 신청서</span>
+          ) : null}
           {registrationApplicationHost.kind === "create" ? (
             <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
               <DialogTitle className="sr-only">등록 신청서</DialogTitle>
               <DialogDescription className="sr-only">새 등록 신청서 내용을 입력합니다.</DialogDescription>
-              {registrationOptionsLoading ? (
-                <div role="status" aria-live="polite" className="rounded-md border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
-                  상담 책임자·수업·교재 선택 정보를 불러오는 중입니다.
-                </div>
-              ) : null}
-              {registrationOptionsError ? (
-                <div role="alert" className="flex flex-col gap-2 rounded-md border border-destructive/30 px-3 py-2 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
-                  <span>{registrationOptionsError}</span>
-                  <Button type="button" variant="outline" size="sm" onClick={() => void ensureRegistrationOptions()}>
-                    다시 불러오기
-                  </Button>
-                </div>
-              ) : null}
               {message ? (
                 <div role="alert" className="rounded-md border border-destructive/30 whitespace-pre-line bg-background px-3 py-2 text-sm text-destructive">
                   <span>{message}</span>
@@ -13152,6 +13159,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 resolvedDirectorIds={registrationResolvedDirectorIds}
                 directorOptionsBySubject={registrationDirectorOptionsBySubject}
                 disabled={saving}
+                catalogStatus={registrationCreateCatalogStatus}
+                catalogError={registrationOptionsError}
+                onRetryCatalog={() => void retryRegistrationOptions()}
                 closeAction={(
                   <Button type="button" variant="ghost" size="icon" onClick={requestRegistrationApplicationClose} aria-label={formCloseLabel}>
                     <X className="size-4" />
