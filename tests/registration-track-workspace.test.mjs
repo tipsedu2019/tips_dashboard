@@ -27,6 +27,26 @@ function sourceBetween(source, startMarker, endMarker) {
   return source.slice(start + startMarker.length, end);
 }
 
+test("registration application shell renders all six sections once in fixed order without stage navigation", async () => {
+  const shell = await readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8")
+  const inquiry = await readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8")
+
+  const titles = ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입력 처리", "담당자 및 일시 이력"]
+  let previous = -1
+  for (const title of titles) {
+    const index = shell.indexOf(title)
+    assert.ok(index > previous, `${title} is rendered after the preceding section`)
+    assert.equal(shell.indexOf(title, index + 1), -1, `${title} is rendered exactly once`)
+    previous = index
+  }
+  assert.match(shell, /aria-disabled/)
+  assert.match(shell, /editable/)
+  assert.match(inquiry, /inquiryAt/)
+  assert.match(inquiry, /저장 시 자동 기록/)
+  assert.match(inquiry, /exceptionContent/)
+  assert.doesNotMatch(shell, /이전|다음|stage tabs|StageTabs/)
+})
+
 async function loadCaseListModel() {
   return import("../src/features/tasks/registration-case-list-model.ts");
 }
