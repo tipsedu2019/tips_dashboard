@@ -537,19 +537,9 @@ export function RegistrationApplication({
       })
     } catch (error) {
       if (errorMessage(error, "").includes("registration_common_revision_conflict")) {
-        try {
-          await onReload()
-          return "conflict_reloaded" as const
-        } catch {
-          throw new Error("다른 사용자의 변경은 감지했지만 최신 정보를 다시 불러오지 못했습니다. 최신 정보로 다시 시도하려면 창을 닫고 다시 여세요.")
-        }
+        return "conflict" as const
       }
       throw error
-    }
-    try {
-      await onReload()
-    } catch {
-      return "committed_refresh_pending" as const
     }
     return "saved" as const
   }

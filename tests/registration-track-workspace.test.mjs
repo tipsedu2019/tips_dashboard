@@ -783,18 +783,24 @@ test("canonical track detail resolves and persists director defaults only for ma
   assert.match(workspace, /setRegistrationOptionsLoading\(false\)[\s\S]*?return enrichmentData\.directorCatalogStatus === "authoritative"/)
 })
 
-test("common information conflicts clear their stable key only after a successful latest-data reload", async () => {
+test("common information conflicts retain the attempted draft when latest-data reload fails", async () => {
   const source = await readRegistrationApplicationSource()
   const commonSection = sourceBetween(source, "function RegistrationCommonInfoSection", "function RegistrationSubjectSyncSection")
-  const saveCommon = sourceBetween(source, "async function saveCommon", "return (")
+  const saveCommon = sourceBetween(source, "async function saveCommon", "function openAppointment")
+  const conflict = sourceBetween(commonSection, 'outcome === "conflict"', '} else {')
+  const retry = sourceBetween(commonSection, "async function retryConflictRefresh", "async function retryRefresh")
 
   assert.match(commonSection, /type RegistrationCommonSaveOutcome|Promise<RegistrationCommonSaveOutcome>/)
-  assert.match(commonSection, /const outcome = await onSave\(draft, requestKey\)[\s\S]*?submissionKeys\.clear/)
-  assert.match(commonSection, /outcome === "conflict_reloaded"[\s\S]*?최신 정보로 다시 불러왔습니다/)
+  assert.match(commonSection, /const outcome = await onSave\(attemptedDraft, requestKey\)[\s\S]*?submissionKeys\.clear/)
+  assert.ok(conflict.indexOf("beginRegistrationConflictComparison") < conflict.indexOf("await onReload"))
+  assert.match(conflict, /setConflictAttempt\(comparison\)/)
+  assert.match(conflict, /settleRegistrationConflictComparison\(comparison, \{ succeeded: false/)
+  assert.match(commonSection, /conflictAttempt\.latestReady/)
+  assert.match(retry, /await onReload\(\)/)
+  assert.doesNotMatch(retry, /onSave/)
   assert.doesNotMatch(commonSection, /message\.includes\("registration_common_revision_conflict"\)[\s\S]*?submissionKeys\.clear/)
-  assert.match(saveCommon, /registration_common_revision_conflict[\s\S]*?await onReload\(\)[\s\S]*?return "conflict_reloaded"/)
-  assert.match(saveCommon, /최신 정보를 다시 불러오지 못했습니다[\s\S]*?창을 닫고 다시 여세요/)
-  assert.match(saveCommon, /await onReload\(\)[\s\S]*?return "saved"/)
+  assert.match(saveCommon, /registration_common_revision_conflict[\s\S]*?return "conflict"/)
+  assert.doesNotMatch(saveCommon, /await onReload/)
 })
 
 test("ordinary tracks expose compact manual director selection and visit reassignment guidance", async () => {
@@ -1411,7 +1417,7 @@ test("common revision conflicts show attempted and latest values before an expli
   assert.match(common, /최신 저장 값/)
   assert.match(common, /최신 값 사용/)
   assert.match(common, /내 입력 다시 적용/)
-  assert.doesNotMatch(sourceBetween(common, 'outcome === "conflict_reloaded"', 'outcome === "committed_refresh_pending"'), /await onSave/)
+  assert.doesNotMatch(sourceBetween(common, 'outcome === "conflict"', '} else {'), /await onSave/)
 })
 
 test("manual director revision conflicts compare the attempted and latest director before retry", async () => {

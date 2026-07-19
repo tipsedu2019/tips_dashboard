@@ -869,7 +869,7 @@ const REGISTRATION_COMMON_FIELD_LABELS: Record<keyof RegistrationCommonDraft, st
   priority: "우선순위",
 }
 
-export type RegistrationCommonSaveOutcome = "saved" | "conflict_reloaded" | "committed_refresh_pending"
+export type RegistrationCommonSaveOutcome = "saved" | "conflict"
 
 export function RegistrationCommonInfoSection({
   task,
@@ -912,7 +912,7 @@ export function RegistrationCommonInfoSection({
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const [validationError, setValidationError] = useState("")
-  const [conflictAttempt, setConflictAttempt] = useState<RegistrationCommonDraft | null>(null)
+  const [conflictAttempt, setConflictAttempt] = useState<RegistrationConflictComparison<RegistrationCommonDraft> | null>(null)
   const sectionRef = useRef<HTMLElement | null>(null)
   const dirty = JSON.stringify(draft) !== JSON.stringify(canonicalDraft) || Boolean(conflictAttempt)
   useOwnedDirtyState(dirty && !refreshPending, onDirtyChange)
@@ -935,9 +935,9 @@ export function RegistrationCommonInfoSection({
     && draft.campus.trim()
     && draft.inquiryAt,
   )
-  const conflictRows = conflictAttempt
+  const conflictRows = conflictAttempt?.latestReady
     ? getRegistrationCommonConflictRows({
-        attempted: conflictAttempt,
+        attempted: conflictAttempt.attempted,
         latest: canonicalDraft,
         labels: REGISTRATION_COMMON_FIELD_LABELS,
       })
@@ -950,7 +950,7 @@ export function RegistrationCommonInfoSection({
   }
 
   async function submit() {
-    if (!canEdit || saving || refreshPending) return
+    if (!canEdit || saving || refreshPending || conflictAttempt) return
     if (!valid) {
       setValidationError("필수 문의 정보를 확인하고 올바르게 입력하세요.")
       const invalidField = !draft.studentName.trim()
@@ -981,22 +981,53 @@ export function RegistrationCommonInfoSection({
     const attemptedDraft = { ...draft }
     setSaving(true)
     try {
-      const outcome = await onSave(draft, requestKey)
+      const outcome = await onSave(attemptedDraft, requestKey)
       submissionKeys.clear(kind, commonPayloadKey)
-      if (outcome === "conflict_reloaded") {
-        setConflictAttempt(attemptedDraft)
-        onWarning("다른 사용자가 공통 정보를 변경했습니다. 최신 정보로 다시 불러왔습니다.")
-      } else if (outcome === "committed_refresh_pending") {
+      if (outcome === "conflict") {
+        const comparison = beginRegistrationConflictComparison(attemptedDraft)
+        setConflictAttempt(comparison)
+        try {
+          await onReload()
+          setConflictAttempt(settleRegistrationConflictComparison(comparison, { succeeded: true }))
+          onWarning("다른 사용자가 공통 정보를 변경했습니다. 내 입력과 최신 저장 값을 비교하세요.")
+        } catch {
+          const refreshMessage = "다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다."
+          setConflictAttempt(settleRegistrationConflictComparison(comparison, { succeeded: false, error: refreshMessage }))
+          onWarning(refreshMessage)
+        }
+      } else {
         setConflictAttempt(null)
         onDirtyChange?.(false)
         setRefreshPending(true)
-        onWarning(COMMITTED_REFRESH_ERROR)
-      } else {
-        setConflictAttempt(null)
+        try {
+          await onReload()
+          setRefreshPending(false)
+        } catch {
+          onWarning(COMMITTED_REFRESH_ERROR)
+        }
       }
     } catch (error) {
       const message = errorMessage(error, "공통 정보를 저장하지 못했습니다.")
       onWarning(message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function retryConflictRefresh() {
+    if (saving || !conflictAttempt) return
+    setSaving(true)
+    try {
+      await onReload()
+      setConflictAttempt((current) => current
+        ? settleRegistrationConflictComparison(current, { succeeded: true })
+        : current)
+    } catch (error) {
+      const refreshMessage = errorMessage(error, "최신 공통 정보를 다시 불러오지 못했습니다.")
+      setConflictAttempt((current) => current
+        ? settleRegistrationConflictComparison(current, { succeeded: false, error: refreshMessage })
+        : current)
+      onWarning(refreshMessage)
     } finally {
       setSaving(false)
     }
@@ -1024,7 +1055,15 @@ export function RegistrationCommonInfoSection({
             <div className="font-semibold">다른 사용자가 공통 정보를 먼저 저장했습니다.</div>
             <p className="text-xs">내가 입력한 값과 최신 저장 값을 확인한 뒤 사용할 내용을 선택하세요.</p>
           </div>
-          {conflictRows.length > 0 ? (
+          {!conflictAttempt.latestReady ? (
+            <div className="grid gap-2">
+              <p className="text-xs">내 입력은 보존했습니다. 최신 저장 값을 불러온 뒤 비교할 수 있습니다.</p>
+              {conflictAttempt.refreshError ? <p className="text-xs">{conflictAttempt.refreshError}</p> : null}
+              <div className="flex justify-end">
+                <Button type="button" size="sm" variant="outline" onClick={() => void retryConflictRefresh()} disabled={saving}>최신 정보 다시 불러오기</Button>
+              </div>
+            </div>
+          ) : conflictRows.length > 0 ? (
             <div className="grid gap-2">
               {conflictRows.map((row) => (
                 <dl key={row.field} className="grid gap-1 rounded-md border border-amber-200 bg-background p-2 sm:grid-cols-2">
@@ -1034,17 +1073,17 @@ export function RegistrationCommonInfoSection({
               ))}
             </div>
           ) : <p className="text-xs">표시할 값 차이가 없습니다. 최신 값을 사용하세요.</p>}
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          {conflictAttempt.latestReady ? <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <Button type="button" size="sm" variant="outline" onClick={() => {
               setDraft({ ...canonicalDraft })
               setConflictAttempt(null)
             }}>최신 값 사용</Button>
             <Button type="button" size="sm" onClick={() => {
-              setDraft({ ...conflictAttempt })
+              setDraft({ ...conflictAttempt.attempted })
               setConflictAttempt(null)
               focusFirstInvalid(sectionRef.current, "[data-common-field]")
             }}>내 입력 다시 적용</Button>
-          </div>
+          </div> : null}
         </div>
       ) : null}
       {!embedded || identityLocked ? <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1054,32 +1093,32 @@ export function RegistrationCommonInfoSection({
       <div className="grid min-w-0 gap-3 sm:grid-cols-2">
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("학생명", true)}
-          <Input data-common-field="student-name" value={draft.studentName} onChange={(event) => update("studentName", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending} />
+          <Input data-common-field="student-name" value={draft.studentName} onChange={(event) => update("studentName", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
         </Label>
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("학년", true)}
-          <Input data-common-field="school-grade" value={draft.schoolGrade} onChange={(event) => update("schoolGrade", event.target.value)} disabled={!canEdit || saving || refreshPending} />
+          <Input data-common-field="school-grade" value={draft.schoolGrade} onChange={(event) => update("schoolGrade", event.target.value)} disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)} />
         </Label>
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("학교")}
-          <Input value={draft.schoolName} onChange={(event) => update("schoolName", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending} />
+          <Input value={draft.schoolName} onChange={(event) => update("schoolName", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
         </Label>
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("학부모 전화", true)}
-          <Input data-common-field="parent-phone" inputMode="tel" value={draft.parentPhone} onChange={(event) => update("parentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending} />
+          <Input data-common-field="parent-phone" inputMode="tel" value={draft.parentPhone} onChange={(event) => update("parentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
         </Label>
         <Label className="grid min-w-0 gap-1.5">
           {requiredLabel("학생 전화")}
-          <Input inputMode="tel" value={draft.studentPhone} onChange={(event) => update("studentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending} />
+          <Input inputMode="tel" value={draft.studentPhone} onChange={(event) => update("studentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
         </Label>
         <Label className="grid min-w-0 gap-1.5 sm:col-span-2">
           {requiredLabel("요청 사항")}
-          <Textarea value={draft.requestNote} onChange={(event) => update("requestNote", event.target.value)} disabled={!canEdit || saving || refreshPending} rows={3} />
+          <Textarea value={draft.requestNote} onChange={(event) => update("requestNote", event.target.value)} disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)} rows={3} />
         </Label>
       </div>
       {canEdit ? (
         <div className="flex justify-end">
-          <Button type="button" size="sm" onClick={() => void submit()} disabled={saving || refreshPending}>
+          <Button type="button" size="sm" onClick={() => void submit()} disabled={saving || refreshPending || Boolean(conflictAttempt)}>
             공통 정보 저장
           </Button>
         </div>
