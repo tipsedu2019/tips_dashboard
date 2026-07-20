@@ -15,6 +15,7 @@ import {
   getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
+  resolveRegistrationActiveTrackId,
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
   type RegistrationApplicationDirtyKey,
@@ -23,6 +24,7 @@ import {
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationHistoryAction } from "./registration-application-history-action"
 import { RegistrationApplicationShell } from "./registration-application-shell"
+import { RegistrationApplicationSubjectTabs } from "./registration-application-subject-tabs"
 import {
   REGISTRATION_DIRECTOR_VISIBLE_STATUSES,
   REGISTRATION_TRACK_STATUS_LABELS,
@@ -34,7 +36,6 @@ import {
   RegistrationMigrationConflictNotice,
   RegistrationMigrationReviewEditor,
   RegistrationPlacementSummary,
-  RegistrationSubjectProgress,
   RegistrationSubjectSyncSection,
   RegistrationTrackDirectorSection,
   RegistrationTrackStageEditor,
@@ -238,7 +239,7 @@ function RegistrationTrackSectionFrame({
   detail,
   classOptions,
   textbookOptions,
-  focused,
+  selected,
   children,
 }: {
   section: RegistrationApplicationSectionKey
@@ -246,20 +247,24 @@ function RegistrationTrackSectionFrame({
   detail: OpsRegistrationCaseDetail
   classOptions: OpsClassOption[]
   textbookOptions: OpsTextbookOption[]
-  focused: boolean
+  selected: boolean
   children?: ReactNode
 }) {
   const sectionState = context.state.sections[section]
   return (
     <article
+      role="tabpanel"
       id={`registration-${section}-${context.track.id}`}
+      aria-labelledby={`registration-subject-tab-${context.track.id}`}
+      hidden={!selected}
       aria-current={sectionState.current ? "step" : undefined}
       data-registration-track-id={context.track.id}
-      data-registration-focus-track={focused ? context.track.id : undefined}
+      data-registration-subject={context.track.subject}
+      data-registration-focus-track={selected ? context.track.id : undefined}
       data-registration-state={sectionState.current ? "current" : sectionState.editable ? "ready" : "locked"}
       className={[
         "grid min-w-0 gap-3 rounded-md border p-3",
-        focused ? "border-primary/60 bg-primary/[0.025]" : "bg-background",
+        selected ? "border-primary/60 bg-primary/[0.025]" : "bg-background",
       ].join(" ")}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -323,9 +328,14 @@ export function RegistrationApplication({
   const onDirtyChangeRef = useRef(onDirtyChange)
   const appointmentEditorRef = useRef<HTMLDivElement | null>(null)
   const initialAppointmentAppliedRef = useRef("")
+  const initialFocusRequestRef = useRef({ taskId: detail.task.id, trackId: focusTrackId })
+  const initialFocusAppliedRef = useRef("")
+  if (initialFocusRequestRef.current.taskId !== detail.task.id) {
+    initialFocusRequestRef.current = { taskId: detail.task.id, trackId: focusTrackId }
+  }
   const canManageCase = viewerRole === "admin" || viewerRole === "staff"
+  const activeTrackId = resolveRegistrationActiveTrackId(detail.tracks, focusTrackId)
   const reviewTrack = detail.tracks.find((track) => track.migrationReviewRequired) || null
-  const reviewBlocked = Boolean(reviewTrack)
   const activeMigrationConflictState = migrationConflictState?.taskId === detail.task.id
     ? migrationConflictState
     : null
@@ -480,31 +490,43 @@ export function RegistrationApplication({
       .filter((track) => permissionsByTrackId.get(track.id)?.canManage)
       .map((track) => track.id),
   })
-  const appointmentActionSections = appointmentActionPlans.flatMap((plan) => (
-    permissionsByTrackId.get(plan.ownerTrackId)?.canManage
-      ? [plan.kind === "level_test" ? "level_test" as const : "consultation" as const]
-      : []
+  const activeTrackStates = trackStates.filter((state) => state.trackId === activeTrackId)
+  const activeAppointmentActionPlans = appointmentActionPlans.filter((plan) => (
+    activeTrackId ? plan.participantTrackIds.includes(activeTrackId) : false
   ))
-  const caseEditableSections = getRegistrationApplicationCaseEditableSections({
-    canManage: canManageCase,
-    admissionMessageEditable: admissionEditable,
-    admissionBatches: detail.admissionBatches,
-    appointmentActionSections,
-  })
   const sectionStates = getRegistrationApplicationSectionStates({
-    tracks: trackStates,
-    caseEditableSections,
+    tracks: activeTrackStates,
+    caseEditableSections: getRegistrationApplicationCaseEditableSections({
+      canManage: canManageCase,
+      admissionMessageEditable: admissionEditable,
+      admissionBatches: detail.admissionBatches,
+      appointmentActionSections: activeAppointmentActionPlans.map((plan) => plan.kind === "level_test" ? "level_test" : "consultation"),
+    }),
   })
-  const focusedState = trackStates.find((state) => state.trackId === focusTrackId) || null
+  const focusedState = trackStates.find((state) => state.trackId === activeTrackId) || null
+  const subjectPanelIdsByTrackId = Object.fromEntries(detail.tracks.map((track) => [
+    track.id,
+    ["inquiry", "level_test", "consultation", "placement", "admission"]
+      .map((section) => `registration-${section}-${track.id}`),
+  ]))
 
   useEffect(() => {
-    if (!focusTrackId || !focusedState) return
+    if (!activeTrackId || focusTrackId === activeTrackId) return
+    onFocusTrack(activeTrackId)
+  }, [activeTrackId, focusTrackId, onFocusTrack])
+
+  useEffect(() => {
+    const initialFocusRequest = initialFocusRequestRef.current
+    if (!focusTrackId || !focusedState || focusTrackId !== activeTrackId) return
+    if (initialFocusRequest.taskId !== detail.task.id || initialFocusRequest.trackId !== focusTrackId) return
+    if (initialFocusAppliedRef.current === detail.task.id) return
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById(`registration-${focusedState.currentSection}-${focusTrackId}`)
+      initialFocusAppliedRef.current = detail.task.id
+      document.getElementById(`registration-${focusedState.currentSection}-${activeTrackId}`)
         ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [focusTrackId, focusedState])
+  }, [activeTrackId, detail.task.id, focusTrackId, focusedState])
 
   useEffect(() => {
     if (!initialAppointmentId) {
@@ -565,6 +587,10 @@ export function RegistrationApplication({
     onAppointmentOpenChange?.(appointmentId)
   }
 
+  function handleSubjectTabChange(trackId: string) {
+    onFocusTrack(trackId)
+  }
+
   function closeAppointmentEditor() {
     setAppointmentEditor(null)
     onAppointmentOpenChange?.(null)
@@ -581,7 +607,7 @@ export function RegistrationApplication({
 
   function renderTrackActions(context: TrackContext, section: RegistrationApplicationSectionKey) {
     const { track, permissions, activeConsultation, visitAppointment } = context
-    if (reviewBlocked) return null
+    if (track.migrationReviewRequired) return null
     if (section === "placement" && ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status)) {
       return (
         <RegistrationEnrollmentTrackEditor
@@ -626,9 +652,46 @@ export function RegistrationApplication({
         detail={detail}
         classOptions={classOptions}
         textbookOptions={textbookOptions}
-        focused={focusTrackId === context.track.id}
+        selected={activeTrackId === context.track.id}
       >
-        {section === "consultation" && REGISTRATION_DIRECTOR_VISIBLE_STATUSES.has(context.track.status) && !reviewBlocked ? (
+        {section === "inquiry" && reviewTrack?.id === context.track.id ? (
+          <>
+            {activeMigrationConflictState ? (
+              <RegistrationMigrationConflictNotice
+                conflict={activeMigrationConflictState}
+                detail={detail}
+                retrying={migrationConflictRetrying}
+                canReapply={Boolean(reviewTrack)}
+                onRetry={() => void retryMigrationConflictRefresh()}
+                onUseLatest={useLatestMigrationConflict}
+                onReapply={reapplyMigrationConflict}
+              />
+            ) : null}
+            <RegistrationMigrationReviewEditor
+              key={detail.task.id}
+              task={task}
+              detail={detail}
+              track={reviewTrack}
+              permissions={permissionsByTrackId.get(reviewTrack.id) || { canManage: false, canCompleteConsultation: false, readOnly: true }}
+              directorOptions={directorOptions}
+              teacherOptions={teacherOptions}
+              classOptions={classOptions}
+              onRetryDirectorCatalog={onRetryDirectorCatalog}
+              onResolved={onReload}
+              onWarning={onWarning}
+              conflictState={activeMigrationConflictState}
+              onConflictStateChange={setMigrationConflictState}
+              directorConflictResetVersion={migrationDirectorResetVersion}
+              reviewConflictResetVersion={migrationReviewResetVersion}
+              onDirtyChange={(scope: RegistrationMigrationDirtyScope, dirty) => setDirty(
+                `inquiry:track-${reviewTrack.id}`,
+                dirty,
+                `migration-${scope}:${reviewTrack.id}`,
+              )}
+            />
+          </>
+        ) : null}
+        {section === "consultation" && REGISTRATION_DIRECTOR_VISIBLE_STATUSES.has(context.track.status) && !context.track.migrationReviewRequired ? (
           <RegistrationTrackDirectorSection
             task={task}
             detail={detail}
@@ -667,12 +730,12 @@ export function RegistrationApplication({
   }
 
   function renderAppointmentActionPlans(kind: OpsRegistrationAppointment["kind"]) {
-    const plans = appointmentActionPlans.filter((plan) => plan.kind === kind)
+    const plans = activeAppointmentActionPlans.filter((plan) => plan.kind === kind)
     if (plans.length === 0) return null
     return (
       <div className="grid gap-2" aria-label={kind === "level_test" ? "레벨테스트 예약 목록" : "방문상담 예약 목록"}>
         {plans.map((plan) => {
-          const owner = trackContexts.find((context) => context.track.id === plan.ownerTrackId)
+          const owner = trackContexts.find((context) => context.track.id === activeTrackId)
           if (!owner) return null
           const participantSubjectLabel = plan.participantSubjects.join("·") || "과목"
           const label = kind === "level_test"
@@ -787,44 +850,20 @@ export function RegistrationApplication({
               onDirtyChange={(dirty) => setDirty("inquiry:subjects", dirty)}
             />
           )}
+          subjectNavigationContent={(
+            <RegistrationApplicationSubjectTabs
+              tracks={detail.tracks.map((track) => ({
+                id: track.id,
+                subject: track.subject,
+                statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
+              }))}
+              value={activeTrackId}
+              panelIdsByTrackId={subjectPanelIdsByTrackId}
+              onValueChange={handleSubjectTabChange}
+            />
+          )}
           exceptionContent={(
             <div className="grid gap-3">
-              <RegistrationSubjectProgress detail={detail} selectedTrackId={focusTrackId} onSelectTrack={onFocusTrack} />
-              {activeMigrationConflictState ? (
-                <RegistrationMigrationConflictNotice
-                  conflict={activeMigrationConflictState}
-                  detail={detail}
-                  retrying={migrationConflictRetrying}
-                  canReapply={Boolean(reviewTrack)}
-                  onRetry={() => void retryMigrationConflictRefresh()}
-                  onUseLatest={useLatestMigrationConflict}
-                  onReapply={reapplyMigrationConflict}
-                />
-              ) : null}
-              {reviewTrack ? (
-                <RegistrationMigrationReviewEditor
-                  key={detail.task.id}
-                  task={task}
-                  detail={detail}
-                  track={reviewTrack}
-                  permissions={permissionsByTrackId.get(reviewTrack.id) || { canManage: false, canCompleteConsultation: false, readOnly: true }}
-                  directorOptions={directorOptions}
-                  teacherOptions={teacherOptions}
-                  classOptions={classOptions}
-                  onRetryDirectorCatalog={onRetryDirectorCatalog}
-                  onResolved={onReload}
-                  onWarning={onWarning}
-                  conflictState={activeMigrationConflictState}
-                  onConflictStateChange={setMigrationConflictState}
-                  directorConflictResetVersion={migrationDirectorResetVersion}
-                  reviewConflictResetVersion={migrationReviewResetVersion}
-                  onDirtyChange={(scope: RegistrationMigrationDirtyScope, dirty) => setDirty(
-                    `inquiry:track-${reviewTrack.id}`,
-                    dirty,
-                    `migration-${scope}:${reviewTrack.id}`,
-                  )}
-                />
-              ) : null}
               {renderTrackFrames("inquiry")}
             </div>
           )}
@@ -832,7 +871,7 @@ export function RegistrationApplication({
       )}
       levelTest={(
         <RegistrationApplicationLevelTestSection editable={sectionStates.level_test.editable}>
-          <RegistrationLevelTestSummary detail={detail} />
+          <RegistrationLevelTestSummary detail={detail} trackId={activeTrackId} />
           {renderTrackFrames("level_test")}
           {renderAppointmentActionPlans("level_test")}
           {appointmentEditor?.kind === "level_test" ? appointmentEditorContent : null}
@@ -840,7 +879,7 @@ export function RegistrationApplication({
       )}
       consultation={(
         <RegistrationApplicationConsultationSection editable={sectionStates.consultation.editable}>
-          <RegistrationConsultationSummary detail={detail} />
+          <RegistrationConsultationSummary detail={detail} trackId={activeTrackId} />
           {renderTrackFrames("consultation")}
           {renderAppointmentActionPlans("visit_consultation")}
           {appointmentEditor?.kind === "visit_consultation" ? appointmentEditorContent : null}
@@ -851,7 +890,7 @@ export function RegistrationApplication({
           editable={sectionStates.placement.editable}
           fields={(
             <div className="grid gap-3">
-              <RegistrationPlacementSummary detail={detail} classes={classOptions} />
+              <RegistrationPlacementSummary detail={detail} classes={classOptions} trackId={activeTrackId} />
               {renderTrackFrames("placement")}
             </div>
           )}

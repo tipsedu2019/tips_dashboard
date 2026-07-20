@@ -19,11 +19,12 @@ async function readWorkspaceSource() {
 }
 
 async function readRegistrationApplicationSource() {
-  const [actions, application] = await Promise.all([
+  const [actions, application, subjectTabs] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-subject-tabs.tsx", import.meta.url), "utf8").catch(() => ""),
   ])
-  return `${actions}\n${application}`
+  return `${actions}\n${application}\n${subjectTabs}`
 }
 
 function sourceBetween(source, startMarker, endMarker) {
@@ -580,7 +581,7 @@ test("track editor shows common information once and subject-scoped navigation",
   )
   assert.match(source, /등록 공통 정보/)
   assert.match(source, /detail\.tracks\.map/)
-  assert.match(source, /selectedTrackId/)
+  assert.match(source, /activeTrackId/)
   assert.match(source, /track\.subject/)
   assert.match(source, /track\.status/)
   assert.match(source, /updateRegistrationCaseCommon/)
@@ -617,14 +618,20 @@ test("canonical detail uses one progressively filled registration application", 
   assert.match(source, /admission=\{/)
   assert.match(source, /historyAction=\{<RegistrationApplicationHistoryAction/)
   assert.doesNotMatch(source, /history=\{<RegistrationHistoryTimeline/)
-  assert.doesNotMatch(source, /role="tablist" aria-label="과목별 등록 진행"/)
+  assert.match(source, /role="tablist"/)
+  assert.match(source, /aria-label="과목별 등록 진행"/)
+  assert.match(source, /role="tab"/)
+  assert.match(source, /aria-selected=\{selected\}/)
+  assert.match(source, /role="tabpanel"/)
+  assert.match(source, /hidden=\{!selected\}/)
+  assert.match(source, /trackStates\.filter\(\(state\) => state\.trackId === activeTrackId\)/)
 })
 
 test("one application keeps both subject states and prior-stage values visible", async () => {
   const source = await readRegistrationApplicationSource()
 
-  assert.match(source, /function RegistrationSubjectProgress/)
-  assert.match(source, /aria-label="과목별 진행 현황"/)
+  assert.doesNotMatch(source, /function RegistrationSubjectProgress/)
+  assert.match(source, /RegistrationApplicationSubjectTabs/)
   assert.match(source, /detail\.tracks\.map\(\(track\) =>/)
   assert.match(source, /STATUS_LABELS\[track\.status\]/)
   assert.match(source, /function RegistrationLevelTestSummary/)
@@ -759,7 +766,7 @@ test("saved application keeps exception actions in their owning sections", async
   const placement = sourceBetween(source, "placement={(\n", "admission={(\n")
   const admission = sourceBetween(source, "admission={(\n", "\n    />\n  )\n}")
 
-  assert.match(inquiry, /RegistrationMigrationReviewEditor/)
+  assert.match(source, /RegistrationMigrationReviewEditor/)
   assert.match(inquiry, /renderTrackFrames\("inquiry"\)/)
   assert.match(placement, /renderTrackFrames\("placement"\)/)
   assert.match(source, /section === "placement"[\s\S]*?<RegistrationEnrollmentTrackEditor/)
@@ -1033,7 +1040,7 @@ test("track editor opens one shared editor for level tests and visit consultatio
   const stageSource = sourceBetween(source, "export function RegistrationTrackStageEditor", "type ConsultationOutcomeDraft")
   assert.match(source, /RegistrationAppointmentEditor/)
   assert.match(source, /getRegistrationApplicationAppointmentActionPlans\(\{/)
-  assert.match(source, /appointmentActionPlans\.filter\(\(plan\) => plan\.kind === kind\)/)
+  assert.match(source, /activeAppointmentActionPlans\.filter\(\(plan\) => plan\.kind === kind\)/)
   assert.match(source, /plans\.map\(\(plan\) =>/)
   assert.match(source, /openAppointment\(owner, kind, plan\.appointmentId\)/)
   assert.match(source, /openAppointment\(context, "level_test"/)
@@ -1505,7 +1512,7 @@ test("migration review revision conflicts preserve a comparable draft behind an 
 
   assert.match(editor, /useState<RegistrationMigrationConflictState \| null>\(null\)/)
   assert.match(editor, /<RegistrationMigrationConflictNotice/)
-  assert.ok(editor.indexOf("<RegistrationMigrationConflictNotice") < editor.indexOf("{reviewTrack ? ("))
+  assert.ok(editor.indexOf("<RegistrationMigrationConflictNotice") < editor.indexOf("<RegistrationMigrationReviewEditor"))
   assert.match(editor, /<RegistrationMigrationReviewEditor[\s\S]*?key=\{detail\.task\.id\}/)
   assert.match(migration, /onConflictStateChange/)
   assert.match(actions, /내가 선택한 분리안/)

@@ -48,6 +48,15 @@ export type RegistrationApplicationSectionState = {
 
 export type RegistrationCreateCatalogStatus = "ready" | "loading" | "partial" | "error"
 
+export function resolveRegistrationActiveTrackId(
+  tracks: readonly Pick<OpsRegistrationTrackSummary, "id">[],
+  requestedTrackId: string | null,
+): string | null {
+  return tracks.some((track) => track.id === requestedTrackId)
+    ? requestedTrackId
+    : tracks[0]?.id || null
+}
+
 export function resolveRegistrationCreateCatalogStatus(input: {
   loading: boolean
   error: string

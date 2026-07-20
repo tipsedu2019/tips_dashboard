@@ -626,42 +626,16 @@ const CONSULTATION_OUTCOME_LABELS: Record<NonNullable<OpsRegistrationConsultatio
   not_registered: "미등록",
 }
 
-export function RegistrationSubjectProgress({
+export function RegistrationLevelTestSummary({
   detail,
-  selectedTrackId,
-  onSelectTrack,
+  trackId,
 }: {
   detail: OpsRegistrationCaseDetail
-  selectedTrackId: string | null
-  onSelectTrack: (trackId: string) => void
+  trackId: string | null
 }) {
   return (
-    <div className="grid min-w-0 gap-2" aria-label="과목별 진행 현황">
-      <span className="text-xs font-medium text-muted-foreground">과목별 진행</span>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {detail.tracks.map((track) => (
-          <Button
-            key={track.id}
-            type="button"
-            variant={track.id === selectedTrackId ? "secondary" : "outline"}
-            className="h-auto min-w-0 justify-between gap-3 px-3 py-2"
-            aria-pressed={track.id === selectedTrackId}
-            aria-label={`${track.subject} 진행 현황 선택`}
-            onClick={() => onSelectTrack(track.id)}
-          >
-            <span>{track.subject}</span>
-            <span className="truncate text-xs font-normal text-muted-foreground">{STATUS_LABELS[track.status]}</span>
-          </Button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-export function RegistrationLevelTestSummary({ detail }: { detail: OpsRegistrationCaseDetail }) {
-  return (
     <div className="grid gap-2">
-      {detail.tracks.map((track) => {
+      {detail.tracks.filter((track) => track.id === trackId).map((track) => {
         const attempt = detail.levelTests
           .filter((item) => item.trackId === track.id)
           .reduce<OpsRegistrationCaseDetail["levelTests"][number] | null>((latest, item) => (
@@ -685,10 +659,16 @@ export function RegistrationLevelTestSummary({ detail }: { detail: OpsRegistrati
   )
 }
 
-export function RegistrationConsultationSummary({ detail }: { detail: OpsRegistrationCaseDetail }) {
+export function RegistrationConsultationSummary({
+  detail,
+  trackId,
+}: {
+  detail: OpsRegistrationCaseDetail
+  trackId: string | null
+}) {
   return (
     <div className="grid gap-2">
-      {detail.tracks.map((track) => {
+      {detail.tracks.filter((track) => track.id === trackId).map((track) => {
         const consultation = detail.consultations
           .filter((item) => item.trackId === track.id)
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] || null
@@ -718,13 +698,15 @@ export function RegistrationConsultationSummary({ detail }: { detail: OpsRegistr
 export function RegistrationPlacementSummary({
   detail,
   classes,
+  trackId,
 }: {
   detail: OpsRegistrationCaseDetail
   classes: OpsClassOption[]
+  trackId: string | null
 }) {
   return (
     <div className="grid gap-2">
-      {detail.tracks.map((track) => {
+      {detail.tracks.filter((track) => track.id === trackId).map((track) => {
         const enrollments = detail.enrollments.filter((item) => item.trackId === track.id && item.status !== "canceled")
         const classNames = enrollments
           .map((enrollment) => classes.find((item) => item.id === enrollment.classId)?.label || enrollment.classId)

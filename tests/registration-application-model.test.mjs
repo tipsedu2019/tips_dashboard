@@ -71,6 +71,13 @@ const cases = [
   ["inquiry_closed", "inquiry"],
 ]
 
+test("active registration track keeps a valid request and falls back after subject removal", () => {
+  const tracks = [{ id: "english" }, { id: "math" }]
+  assert.equal(application.resolveRegistrationActiveTrackId(tracks, "math"), "math")
+  assert.equal(application.resolveRegistrationActiveTrackId(tracks, "removed"), "english")
+  assert.equal(application.resolveRegistrationActiveTrackId([], "removed"), null)
+})
+
 test("every saved track status has one explicit current application section", () => {
   for (const [status, currentSection] of cases) {
     const state = getRegistrationApplicationTrackState({
