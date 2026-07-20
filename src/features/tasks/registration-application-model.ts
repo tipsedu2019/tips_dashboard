@@ -292,6 +292,17 @@ export function getRegistrationApplicationAppointmentActionPlans(input: {
   })
 }
 
+export function resolveRegistrationAppointmentEditorSeedTrackIds(
+  plans: readonly Pick<RegistrationApplicationAppointmentActionPlan, "appointmentId" | "participantTrackIds">[],
+  appointmentId: string | null,
+  initialTrackId: string | null,
+): string[] {
+  if (appointmentId) {
+    return [...(plans.find((plan) => plan.appointmentId === appointmentId)?.participantTrackIds || [])]
+  }
+  return initialTrackId ? [initialTrackId] : []
+}
+
 export function getRegistrationApplicationCaseEditableSections(input: {
   canManage: boolean
   admissionMessageEditable: boolean

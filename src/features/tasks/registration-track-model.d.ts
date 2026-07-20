@@ -148,6 +148,13 @@ export function getRegistrationAppointmentPayloadTrackIds(
   currentAppointmentId?: string | null,
 ): string[]
 
+export function getRegistrationAppointmentReportedTrackIds(
+  editMode: "edit" | "replace_remaining" | "read_only",
+  draftTrackIds?: readonly string[],
+  activities?: readonly RegistrationAppointmentActivitySummary[],
+  currentAppointmentId?: string | null,
+): string[] | null
+
 export function getLatestRegistrationLevelTestActivityIds(
   activities?: readonly RegistrationAppointmentActivitySummary[],
 ): string[]

@@ -13,6 +13,7 @@ import {
   getLatestRegistrationLevelTestActivityIds,
   getRegistrationAppointmentEditMode,
   getRegistrationAppointmentPayloadTrackIds,
+  getRegistrationAppointmentReportedTrackIds,
 } from "./registration-track-model.js"
 import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow.js"
 import { sendRegistrationVisitNotificationTarget } from "./registration-consultation-notification.js"
@@ -356,14 +357,20 @@ export function RegistrationAppointmentEditor({
   useEffect(() => {
     onParticipantTrackIdsChangeRef.current = onParticipantTrackIdsChange
   }, [onParticipantTrackIdsChange])
-  const participantTrackIdsKey = appointmentDraft.trackIds.join("\u001f")
+  const reportedParticipantTrackIds = getRegistrationAppointmentReportedTrackIds(
+    editMode,
+    appointmentDraft.trackIds,
+    currentActivities,
+    appointment?.id || null,
+  )
+  const participantTrackIdsKey = reportedParticipantTrackIds?.join("\u001f") ?? null
   const reportedParticipantTrackIdsKeyRef = useRef<string | null>(null)
   useEffect(() => {
-    if (editMode === "read_only") return
+    if (!reportedParticipantTrackIds) return
     if (reportedParticipantTrackIdsKeyRef.current === participantTrackIdsKey) return
     reportedParticipantTrackIdsKeyRef.current = participantTrackIdsKey
-    onParticipantTrackIdsChangeRef.current?.([...appointmentDraft.trackIds])
-  }, [appointmentDraft.trackIds, editMode, participantTrackIdsKey])
+    onParticipantTrackIdsChangeRef.current?.(reportedParticipantTrackIds)
+  }, [participantTrackIdsKey, reportedParticipantTrackIds])
   const previousAppointmentDraft: RegistrationAppointmentDraft | null = appointment
     ? {
         scheduledAt: appointment.scheduledAt,

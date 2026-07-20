@@ -325,6 +325,29 @@ test("shared appointment actions group participants once per appointment id", ()
   assert.deepEqual(plans[3].participantTrackIds, [english.id])
 })
 
+test("existing appointment editor seed stays empty when status filtering produces no plan", () => {
+  const tracks = [makeTrack("level_test_scheduled", "영어"), makeTrack("level_test_scheduled", "수학")]
+  const plans = getRegistrationApplicationAppointmentActionPlans({
+    tracks,
+    appointments: [
+      { id: "level-canceled", kind: "level_test", status: "canceled" },
+      { id: "visit-no-scheduled", kind: "visit_consultation", status: "completed" },
+    ],
+    levelTests: [
+      { appointmentId: "level-canceled", trackId: tracks[0].id, status: "canceled" },
+    ],
+    consultations: [
+      { appointmentId: "visit-no-scheduled", trackId: tracks[1].id, mode: "visit", status: "completed" },
+      { appointmentId: "visit-no-scheduled", trackId: tracks[0].id, mode: "visit", status: "canceled" },
+    ],
+  })
+
+  assert.deepEqual(plans, [])
+  assert.deepEqual(application.resolveRegistrationAppointmentEditorSeedTrackIds(plans, "level-canceled", tracks[0].id), [])
+  assert.deepEqual(application.resolveRegistrationAppointmentEditorSeedTrackIds(plans, "visit-no-scheduled", tracks[1].id), [])
+  assert.deepEqual(application.resolveRegistrationAppointmentEditorSeedTrackIds(plans, null, tracks[0].id), [tracks[0].id])
+})
+
 test("an open admission batch enables the case section for registered add-class work", () => {
   assert.equal(typeof getRegistrationApplicationCaseEditableSections, "function")
   const registered = getRegistrationApplicationTrackState({

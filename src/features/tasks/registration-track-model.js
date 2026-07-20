@@ -190,6 +190,25 @@ export function getRegistrationAppointmentPayloadTrackIds(
     .filter(Boolean)))
 }
 
+export function getRegistrationAppointmentReportedTrackIds(
+  editMode,
+  draftTrackIds = [],
+  activities = [],
+  currentAppointmentId = null,
+) {
+  if (editMode === "read_only") return null
+  const reportedTrackIds = new Set(draftTrackIds.filter(Boolean))
+  if (editMode === "replace_remaining") {
+    const currentId = String(currentAppointmentId || "")
+    for (const activity of activities) {
+      if (activity?.appointmentId !== currentId) continue
+      if (["scheduled", "canceled"].includes(activity?.status)) continue
+      if (activity?.trackId) reportedTrackIds.add(activity.trackId)
+    }
+  }
+  return Array.from(reportedTrackIds).sort()
+}
+
 export function getLatestRegistrationLevelTestActivityIds(activities = []) {
   const latestByTrack = new Map()
   for (const activity of activities) {

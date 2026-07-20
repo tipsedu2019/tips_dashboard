@@ -16,6 +16,7 @@ import {
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   resolveRegistrationActiveTrackId,
+  resolveRegistrationAppointmentEditorSeedTrackIds,
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
   type RegistrationApplicationDirtyKey,
@@ -542,13 +543,14 @@ export function RegistrationApplication({
     if (initialAppointmentAppliedRef.current === initialKey) return
     const appointment = detail.appointments.find((item) => item.id === initialAppointmentId) || null
     if (!appointment) return
-    const initialAppointmentActionPlan = appointmentActionPlans.find((plan) => plan.appointmentId === appointment.id) || null
     const fallbackTrackId = focusTrackId && detail.tracks.some((track) => track.id === focusTrackId)
       ? focusTrackId
       : detail.tracks[0]?.id || ""
-    const initialAppointmentParticipantTrackIds = initialAppointmentActionPlan?.participantTrackIds.length
-      ? initialAppointmentActionPlan.participantTrackIds
-      : fallbackTrackId ? [fallbackTrackId] : []
+    const initialAppointmentParticipantTrackIds = resolveRegistrationAppointmentEditorSeedTrackIds(
+      appointmentActionPlans,
+      appointment.id,
+      null,
+    )
     const initialTrackId = focusTrackId && initialAppointmentParticipantTrackIds.includes(focusTrackId)
       ? focusTrackId
       : initialAppointmentParticipantTrackIds[0] || fallbackTrackId
@@ -593,9 +595,11 @@ export function RegistrationApplication({
 
   function openAppointment(context: TrackContext, kind: OpsRegistrationAppointment["kind"], appointmentId: string | null) {
     onFocusTrack(context.track.id)
-    const appointmentParticipantTrackIds = appointmentId
-      ? appointmentActionPlans.find((plan) => plan.appointmentId === appointmentId)?.participantTrackIds || [context.track.id]
-      : [context.track.id]
+    const appointmentParticipantTrackIds = resolveRegistrationAppointmentEditorSeedTrackIds(
+      appointmentActionPlans,
+      appointmentId,
+      context.track.id,
+    )
     setAppointmentDraftParticipantTrackIds(appointmentParticipantTrackIds)
     setAppointmentEditor({ kind, appointmentId, initialTrackId: context.track.id })
     onAppointmentOpenChange?.(appointmentId)

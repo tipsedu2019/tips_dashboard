@@ -8,6 +8,7 @@ import {
   getEligibleSharedAppointmentTracks,
   getRegistrationAppointmentEditMode,
   getRegistrationAppointmentPayloadTrackIds,
+  getRegistrationAppointmentReportedTrackIds,
   getLatestRegistrationLevelTestActivityIds,
   getRegistrationAdmissionBatchCancellationGroups,
   getRegistrationAdmissionBatchChecklist,
@@ -43,6 +44,31 @@ test("allowed actions are returned as a fresh view of the authoritative status m
     "schedule_visit",
   ])
   assert.deepEqual(getAllowedRegistrationTrackActions("unknown"), [])
+})
+
+test("replace remaining tab scope keeps immutable participants while scheduled draft subjects change", () => {
+  const activities = [
+    { appointmentId: "shared", trackId: "english", status: "completed" },
+    { appointmentId: "shared", trackId: "science", status: "absent" },
+    { appointmentId: "shared", trackId: "math", status: "scheduled" },
+    { appointmentId: "shared", trackId: "canceled", status: "canceled" },
+    { appointmentId: "other", trackId: "other", status: "completed" },
+  ]
+
+  assert.deepEqual(
+    getRegistrationAppointmentReportedTrackIds("replace_remaining", ["math"], activities, "shared"),
+    ["english", "math", "science"],
+  )
+  assert.deepEqual(
+    getRegistrationAppointmentReportedTrackIds("replace_remaining", [], activities, "shared"),
+    ["english", "science"],
+  )
+  assert.deepEqual(
+    getRegistrationAppointmentReportedTrackIds("replace_remaining", ["new"], activities, "shared"),
+    ["english", "new", "science"],
+  )
+  assert.deepEqual(getRegistrationAppointmentReportedTrackIds("edit", ["math", "new"], activities, "shared"), ["math", "new"])
+  assert.equal(getRegistrationAppointmentReportedTrackIds("read_only", [], activities, "shared"), null)
 })
 
 test("현재반 대기 수업은 활성 waitlisted claim에서만 복원한다", () => {

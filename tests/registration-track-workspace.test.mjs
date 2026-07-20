@@ -1116,9 +1116,9 @@ test("open appointment editor stays mounted but hides outside participating subj
   const editor = source.slice(source.indexOf("const editorAppointment ="), source.indexOf("\n\n  return (", source.indexOf("const editorAppointment =")))
   const openAppointment = sourceBetween(source, "function openAppointment", "function handleSubjectTabChange")
 
-  assert.match(openAppointment, /appointmentId[\s\S]*?appointmentActionPlans\.find\(\(plan\) => plan\.appointmentId === appointmentId\)\?\.participantTrackIds/)
+  assert.match(openAppointment, /resolveRegistrationAppointmentEditorSeedTrackIds\([\s\S]*?appointmentActionPlans,[\s\S]*?appointmentId,[\s\S]*?context\.track\.id/)
   assert.match(openAppointment, /setAppointmentDraftParticipantTrackIds\(appointmentParticipantTrackIds\)/)
-  assert.match(source, /const initialAppointmentActionPlan = appointmentActionPlans\.find\(\(plan\) => plan\.appointmentId === appointment\.id\)/)
+  assert.match(source, /resolveRegistrationAppointmentEditorSeedTrackIds\([\s\S]*?appointmentActionPlans,[\s\S]*?appointment\.id,[\s\S]*?null/)
   assert.match(source, /setAppointmentDraftParticipantTrackIds\(initialAppointmentParticipantTrackIds\)/)
   assert.match(editor, /const appointmentEditorParticipantTrackIds = appointmentEditor \? appointmentDraftParticipantTrackIds : \[\]/)
   assert.doesNotMatch(editor, /editorAppointmentActionPlan|appointmentActionPlans\.find/)
@@ -1137,14 +1137,23 @@ test("new appointment editor reports current draft subjects without remounting",
   assert.match(appointment, /onParticipantTrackIdsChange\?: \(trackIds: readonly string\[\]\) => void/)
   assert.match(appointment, /const onParticipantTrackIdsChangeRef = useRef\(onParticipantTrackIdsChange\)/)
   assert.match(appointment, /onParticipantTrackIdsChangeRef\.current = onParticipantTrackIdsChange/)
-  assert.match(appointment, /const participantTrackIdsKey = appointmentDraft\.trackIds\.join\(/)
-  assert.match(appointment, /if \(editMode === "read_only"\) return/)
-  assert.match(appointment, /onParticipantTrackIdsChangeRef\.current\?\.\(\[\.\.\.appointmentDraft\.trackIds\]\)/)
+  assert.match(appointment, /getRegistrationAppointmentReportedTrackIds\([\s\S]*?editMode,[\s\S]*?appointmentDraft\.trackIds,[\s\S]*?currentActivities/)
+  assert.match(appointment, /const participantTrackIdsKey = reportedParticipantTrackIds\?\.join\(/)
+  assert.match(appointment, /if \(!reportedParticipantTrackIds\) return/)
+  assert.match(appointment, /onParticipantTrackIdsChangeRef\.current\?\.\(reportedParticipantTrackIds\)/)
   assert.match(application, /const \[appointmentDraftParticipantTrackIds, setAppointmentDraftParticipantTrackIds\] = useState<string\[\]>\(\[\]\)/)
   assert.match(application, /const handleAppointmentParticipantTrackIdsChange = useCallback/)
   assert.match(application, /sameRegistrationTrackIds/)
   assert.match(application, /onParticipantTrackIdsChange=\{handleAppointmentParticipantTrackIdsChange\}/)
   assert.equal((application.match(/<RegistrationAppointmentEditor/g) || []).length, 1)
+})
+
+test("appointment participant report helper keeps its TypeScript contract", async () => {
+  const declarations = await readFile(new URL("../src/features/tasks/registration-track-model.d.ts", import.meta.url), "utf8")
+
+  assert.match(declarations, /export function getRegistrationAppointmentReportedTrackIds\(/)
+  assert.match(declarations, /editMode: "edit" \| "replace_remaining" \| "read_only"/)
+  assert.match(declarations, /\): string\[\] \| null/)
 })
 
 test("phone completion does not call the visit reservation notification helper", async () => {
