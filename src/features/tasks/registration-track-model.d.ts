@@ -149,6 +149,7 @@ export function getRegistrationAppointmentPayloadTrackIds(
 ): string[]
 
 export function getRegistrationAppointmentReportedTrackIds(
+  kind: "level_test" | "visit_consultation",
   editMode: "edit" | "replace_remaining" | "read_only",
   draftTrackIds?: readonly string[],
   activities?: readonly RegistrationAppointmentActivitySummary[],

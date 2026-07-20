@@ -358,6 +358,7 @@ export function RegistrationAppointmentEditor({
     onParticipantTrackIdsChangeRef.current = onParticipantTrackIdsChange
   }, [onParticipantTrackIdsChange])
   const reportedParticipantTrackIds = getRegistrationAppointmentReportedTrackIds(
+    kind,
     editMode,
     appointmentDraft.trackIds,
     currentActivities,

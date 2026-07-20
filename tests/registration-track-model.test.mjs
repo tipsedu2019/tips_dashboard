@@ -56,19 +56,41 @@ test("replace remaining tab scope keeps immutable participants while scheduled d
   ]
 
   assert.deepEqual(
-    getRegistrationAppointmentReportedTrackIds("replace_remaining", ["math"], activities, "shared"),
+    getRegistrationAppointmentReportedTrackIds("level_test", "replace_remaining", ["math"], activities, "shared"),
     ["english", "math", "science"],
   )
   assert.deepEqual(
-    getRegistrationAppointmentReportedTrackIds("replace_remaining", [], activities, "shared"),
+    getRegistrationAppointmentReportedTrackIds("level_test", "replace_remaining", [], activities, "shared"),
     ["english", "science"],
   )
   assert.deepEqual(
-    getRegistrationAppointmentReportedTrackIds("replace_remaining", ["new"], activities, "shared"),
+    getRegistrationAppointmentReportedTrackIds("level_test", "replace_remaining", ["new"], activities, "shared"),
     ["english", "new", "science"],
   )
-  assert.deepEqual(getRegistrationAppointmentReportedTrackIds("edit", ["math", "new"], activities, "shared"), ["math", "new"])
-  assert.equal(getRegistrationAppointmentReportedTrackIds("read_only", [], activities, "shared"), null)
+  assert.deepEqual(
+    getRegistrationAppointmentReportedTrackIds("level_test", "edit", ["math", "new"], activities, "shared"),
+    ["math", "new"],
+  )
+  assert.equal(getRegistrationAppointmentReportedTrackIds("level_test", "read_only", [], activities, "shared"), null)
+})
+
+test("visit appointment tab scope reports only the live scheduled draft", () => {
+  const activities = [
+    { appointmentId: "shared-visit", trackId: "english", status: "completed" },
+    { appointmentId: "shared-visit", trackId: "math", status: "scheduled" },
+    { appointmentId: "shared-visit", trackId: "science", status: "canceled" },
+  ]
+
+  assert.deepEqual(
+    getRegistrationAppointmentReportedTrackIds(
+      "visit_consultation",
+      "replace_remaining",
+      ["math"],
+      activities,
+      "shared-visit",
+    ),
+    ["math"],
+  )
 })
 
 test("현재반 대기 수업은 활성 waitlisted claim에서만 복원한다", () => {

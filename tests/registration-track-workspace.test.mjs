@@ -1133,11 +1133,16 @@ test("new appointment editor reports current draft subjects without remounting",
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8"),
   ])
+  const participantReport = sourceBetween(
+    appointment,
+    "const reportedParticipantTrackIds =",
+    "const participantTrackIdsKey",
+  )
 
   assert.match(appointment, /onParticipantTrackIdsChange\?: \(trackIds: readonly string\[\]\) => void/)
   assert.match(appointment, /const onParticipantTrackIdsChangeRef = useRef\(onParticipantTrackIdsChange\)/)
   assert.match(appointment, /onParticipantTrackIdsChangeRef\.current = onParticipantTrackIdsChange/)
-  assert.match(appointment, /getRegistrationAppointmentReportedTrackIds\([\s\S]*?editMode,[\s\S]*?appointmentDraft\.trackIds,[\s\S]*?currentActivities/)
+  assert.match(participantReport, /getRegistrationAppointmentReportedTrackIds\([\s\S]*?kind,[\s\S]*?editMode,[\s\S]*?appointmentDraft\.trackIds,[\s\S]*?currentActivities,[\s\S]*?appointment\?\.id \|\| null/)
   assert.match(appointment, /const participantTrackIdsKey = reportedParticipantTrackIds\?\.join\(/)
   assert.match(appointment, /if \(!reportedParticipantTrackIds\) return/)
   assert.match(appointment, /onParticipantTrackIdsChangeRef\.current\?\.\(reportedParticipantTrackIds\)/)
@@ -1150,10 +1155,15 @@ test("new appointment editor reports current draft subjects without remounting",
 
 test("appointment participant report helper keeps its TypeScript contract", async () => {
   const declarations = await readFile(new URL("../src/features/tasks/registration-track-model.d.ts", import.meta.url), "utf8")
+  const participantReportDeclaration = sourceBetween(
+    declarations,
+    "export function getRegistrationAppointmentReportedTrackIds(",
+    "export function getLatestRegistrationLevelTestActivityIds(",
+  )
 
-  assert.match(declarations, /export function getRegistrationAppointmentReportedTrackIds\(/)
-  assert.match(declarations, /editMode: "edit" \| "replace_remaining" \| "read_only"/)
-  assert.match(declarations, /\): string\[\] \| null/)
+  assert.match(participantReportDeclaration, /editMode: "edit" \| "replace_remaining" \| "read_only"/)
+  assert.match(participantReportDeclaration, /kind: "level_test" \| "visit_consultation"/)
+  assert.match(participantReportDeclaration, /\): string\[\] \| null/)
 })
 
 test("phone completion does not call the visit reservation notification helper", async () => {

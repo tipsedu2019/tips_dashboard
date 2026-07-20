@@ -191,6 +191,7 @@ export function getRegistrationAppointmentPayloadTrackIds(
 }
 
 export function getRegistrationAppointmentReportedTrackIds(
+  kind,
   editMode,
   draftTrackIds = [],
   activities = [],
@@ -198,7 +199,7 @@ export function getRegistrationAppointmentReportedTrackIds(
 ) {
   if (editMode === "read_only") return null
   const reportedTrackIds = new Set(draftTrackIds.filter(Boolean))
-  if (editMode === "replace_remaining") {
+  if (editMode === "replace_remaining" && kind === "level_test") {
     const currentId = String(currentAppointmentId || "")
     for (const activity of activities) {
       if (activity?.appointmentId !== currentId) continue
