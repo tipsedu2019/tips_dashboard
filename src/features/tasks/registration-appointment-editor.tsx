@@ -359,10 +359,11 @@ export function RegistrationAppointmentEditor({
   const participantTrackIdsKey = appointmentDraft.trackIds.join("\u001f")
   const reportedParticipantTrackIdsKeyRef = useRef<string | null>(null)
   useEffect(() => {
+    if (editMode === "read_only") return
     if (reportedParticipantTrackIdsKeyRef.current === participantTrackIdsKey) return
     reportedParticipantTrackIdsKeyRef.current = participantTrackIdsKey
     onParticipantTrackIdsChangeRef.current?.([...appointmentDraft.trackIds])
-  }, [appointmentDraft.trackIds, participantTrackIdsKey])
+  }, [appointmentDraft.trackIds, editMode, participantTrackIdsKey])
   const previousAppointmentDraft: RegistrationAppointmentDraft | null = appointment
     ? {
         scheduledAt: appointment.scheduledAt,

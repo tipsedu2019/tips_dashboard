@@ -542,19 +542,23 @@ export function RegistrationApplication({
     if (initialAppointmentAppliedRef.current === initialKey) return
     const appointment = detail.appointments.find((item) => item.id === initialAppointmentId) || null
     if (!appointment) return
-    const participantTrackIds = appointment.kind === "level_test"
-      ? detail.levelTests.filter((item) => item.appointmentId === appointment.id).map((item) => item.trackId)
-      : detail.consultations.filter((item) => item.appointmentId === appointment.id && item.mode === "visit").map((item) => item.trackId)
-    const initialTrackId = focusTrackId && participantTrackIds.includes(focusTrackId)
+    const initialAppointmentActionPlan = appointmentActionPlans.find((plan) => plan.appointmentId === appointment.id) || null
+    const fallbackTrackId = focusTrackId && detail.tracks.some((track) => track.id === focusTrackId)
       ? focusTrackId
-      : participantTrackIds[0] || detail.tracks[0]?.id || ""
+      : detail.tracks[0]?.id || ""
+    const initialAppointmentParticipantTrackIds = initialAppointmentActionPlan?.participantTrackIds.length
+      ? initialAppointmentActionPlan.participantTrackIds
+      : fallbackTrackId ? [fallbackTrackId] : []
+    const initialTrackId = focusTrackId && initialAppointmentParticipantTrackIds.includes(focusTrackId)
+      ? focusTrackId
+      : initialAppointmentParticipantTrackIds[0] || fallbackTrackId
     const frame = window.requestAnimationFrame(() => {
       initialAppointmentAppliedRef.current = initialKey
-      setAppointmentDraftParticipantTrackIds([initialTrackId])
+      setAppointmentDraftParticipantTrackIds(initialAppointmentParticipantTrackIds)
       setAppointmentEditor({ kind: appointment.kind, appointmentId: appointment.id, initialTrackId })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [detail.appointments, detail.consultations, detail.levelTests, detail.task.id, detail.tracks, focusTrackId, initialAppointmentId])
+  }, [appointmentActionPlans, detail.appointments, detail.task.id, detail.tracks, focusTrackId, initialAppointmentId])
 
   useEffect(() => {
     if (!appointmentEditor) return
@@ -589,7 +593,10 @@ export function RegistrationApplication({
 
   function openAppointment(context: TrackContext, kind: OpsRegistrationAppointment["kind"], appointmentId: string | null) {
     onFocusTrack(context.track.id)
-    setAppointmentDraftParticipantTrackIds([context.track.id])
+    const appointmentParticipantTrackIds = appointmentId
+      ? appointmentActionPlans.find((plan) => plan.appointmentId === appointmentId)?.participantTrackIds || [context.track.id]
+      : [context.track.id]
+    setAppointmentDraftParticipantTrackIds(appointmentParticipantTrackIds)
     setAppointmentEditor({ kind, appointmentId, initialTrackId: context.track.id })
     onAppointmentOpenChange?.(appointmentId)
   }
@@ -787,12 +794,7 @@ export function RegistrationApplication({
   const appointmentActivities = appointmentEditor?.kind === "level_test"
     ? detail.levelTests
     : detail.consultations.filter((item) => item.mode === "visit")
-  const editorAppointmentActionPlan = appointmentEditor?.appointmentId
-    ? appointmentActionPlans.find((plan) => plan.appointmentId === appointmentEditor.appointmentId) || null
-    : null
-  const appointmentEditorParticipantTrackIds = appointmentEditor?.appointmentId
-    ? editorAppointmentActionPlan?.participantTrackIds || []
-    : appointmentEditor ? appointmentDraftParticipantTrackIds : []
+  const appointmentEditorParticipantTrackIds = appointmentEditor ? appointmentDraftParticipantTrackIds : []
   const appointmentEditorContent = appointmentEditor ? (
     <div
       ref={appointmentEditorRef}
