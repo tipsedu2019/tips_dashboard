@@ -6,6 +6,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 import { getRegistrationTransitionBlockers } from "../src/features/tasks/registration-workflow.js";
+import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
 
 const routeUrl = new URL(
   "../src/app/api/registration/consultation-notification/route.ts",
@@ -82,6 +83,7 @@ async function loadRegistrationServiceFactory() {
     module: sandboxModule,
     exports: sandboxModule.exports,
     crypto: { randomUUID: () => "generated-request-id" },
+    normalizeRegistrationLevelTestPlace,
   });
   return sandboxModule.exports;
 }
