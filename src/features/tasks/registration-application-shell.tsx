@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 
 import type { RegistrationSubject } from "./registration-track-service"
 import {
-  REGISTRATION_APPLICATION_SECTION_ORDER,
+  REGISTRATION_APPLICATION_BODY_SECTION_ORDER,
   isRegistrationApplicationSectionContentDisabled,
   type RegistrationApplicationSectionKey,
   type RegistrationApplicationSectionState,
@@ -12,6 +12,7 @@ export type RegistrationApplicationShellProps = {
   mode: "create" | "detail"
   studentName: string
   closeAction: ReactNode
+  historyAction?: ReactNode
   tracks: Array<{
     key: string
     subject: RegistrationSubject
@@ -27,7 +28,6 @@ export type RegistrationApplicationShellProps = {
   consultation: ReactNode
   placement: ReactNode
   admission: ReactNode
-  history: ReactNode
 }
 
 const SECTION_CONTENT_KEY = {
@@ -36,16 +36,14 @@ const SECTION_CONTENT_KEY = {
   consultation: "consultation",
   placement: "placement",
   admission: "admission",
-  history: "history",
 } as const
 
-const SECTION_TITLES: Record<RegistrationApplicationSectionKey, string> = {
+const SECTION_TITLES: Record<(typeof REGISTRATION_APPLICATION_BODY_SECTION_ORDER)[number], string> = {
   inquiry: "문의 정보",
   level_test: "레벨테스트",
   consultation: "상담",
   placement: "등록·대기 정보",
   admission: "입학 처리",
-  history: "자동 이력",
 }
 
 function RegistrationApplicationSection({
@@ -56,7 +54,7 @@ function RegistrationApplicationSection({
   children,
 }: {
   mode: "create" | "detail"
-  section: RegistrationApplicationSectionKey
+  section: (typeof REGISTRATION_APPLICATION_BODY_SECTION_ORDER)[number]
   state: RegistrationApplicationSectionState
   notice?: ReactNode
   children: ReactNode
@@ -116,11 +114,12 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
               </span>
             ))}
           </div>
+          {props.historyAction}
           {props.closeAction}
         </div>
       </header>
 
-      {REGISTRATION_APPLICATION_SECTION_ORDER.map((section) => {
+      {REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map((section) => {
         const contentKey = SECTION_CONTENT_KEY[section]
         return (
           <RegistrationApplicationSection

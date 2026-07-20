@@ -1743,16 +1743,17 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.match(submitFormSource, /sanitizeRegistrationInquiryOnlyInput/);
 });
 
-test("canonical registration application mounts one honest read-only timeline in section six", async () => {
+test("canonical registration application opens one honest read-only timeline from the detail header", async () => {
   assert.equal(
     await pathExists("src/features/tasks/registration-history-timeline.tsx"),
     true,
     "the canonical registration timeline component should exist",
   );
 
-  const [workspaceSource, editorSource, timelineSource] = await Promise.all([
+  const [workspaceSource, editorSource, actionSource, timelineSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-track-editor.tsx"),
+    readSource("src/features/tasks/registration-application-history-action.tsx").catch(() => ""),
     readSource("src/features/tasks/registration-history-timeline.tsx"),
   ]);
   const canonicalDetailStart = workspaceSource.indexOf("registrationCaseDetail && isCanonicalRegistrationTrackDetail");
@@ -1761,9 +1762,13 @@ test("canonical registration application mounts one honest read-only timeline in
     workspaceSource.indexOf(') : selectedTaskFresh.type === "withdrawal"', canonicalDetailStart),
   );
 
-  assert.match(editorSource, /import \{ RegistrationHistoryTimeline \} from "\.\/registration-history-timeline"/);
-  assert.match(editorSource, /<RegistrationHistoryTimeline[\s\S]*?detail=\{detail\}[\s\S]*?profiles=/);
-  assert.match(editorSource, /history=\{<RegistrationHistoryTimeline/);
+  assert.match(editorSource, /import \{ RegistrationApplicationHistoryAction \} from "\.\/registration-application-history-action"/);
+  assert.match(editorSource, /historyAction=\{<RegistrationApplicationHistoryAction[\s\S]*?detail=\{detail\}[\s\S]*?profiles=/);
+  assert.doesNotMatch(editorSource, /history=\{<RegistrationHistoryTimeline/);
+  assert.match(actionSource, /aria-label="자동 이력 보기"/);
+  assert.match(actionSource, /<Popover>/);
+  assert.match(actionSource, /<RegistrationHistoryTimeline[\s\S]*?embedded/);
+  assert.doesNotMatch(actionSource, /<Sheet|<Dialog/);
   assert.doesNotMatch(editorSource, /현재 업무/);
   assert.doesNotMatch(editorSource, /담당자 및 일시 이력/);
   assert.match(timelineSource, /buildRegistrationSubjectHistory\(detail\)/);

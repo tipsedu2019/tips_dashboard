@@ -21,6 +21,7 @@ import {
   type RegistrationApplicationSectionKey,
 } from "./registration-application-model"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
+import { RegistrationApplicationHistoryAction } from "./registration-application-history-action"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
   REGISTRATION_DIRECTOR_VISIBLE_STATUSES,
@@ -49,7 +50,6 @@ import {
   RegistrationAdmissionPanel,
   type RegistrationAdmissionPanelProps,
 } from "./registration-enrollment-editor"
-import { RegistrationHistoryTimeline } from "./registration-history-timeline"
 import type {
   OpsClassOption,
   OpsProfileOption,
@@ -745,6 +745,7 @@ export function RegistrationApplication({
       mode="detail"
       studentName={detail.task.studentName || detail.task.title}
       closeAction={closeAction}
+      historyAction={<RegistrationApplicationHistoryAction detail={detail} profiles={profiles} />}
       tracks={detail.tracks.map((track) => ({
         key: track.id,
         subject: track.subject,
@@ -892,7 +893,6 @@ export function RegistrationApplication({
           )}
         />
       )}
-      history={<RegistrationHistoryTimeline detail={detail} profiles={profiles} />}
     />
   )
 }

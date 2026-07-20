@@ -332,7 +332,6 @@ export function RegistrationApplicationCreate({
           )}
         />
       )}
-      history={<div aria-label="자동 이력" />}
     />
   )
 }

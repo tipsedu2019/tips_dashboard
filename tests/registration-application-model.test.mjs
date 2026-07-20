@@ -6,6 +6,7 @@ const trackModel = await import("../src/features/tasks/registration-track-model.
 
 const {
   REGISTRATION_ACTION_SECTION,
+  REGISTRATION_APPLICATION_BODY_SECTION_ORDER,
   REGISTRATION_APPLICATION_SECTION_ORDER,
   getRegistrationApplicationAppointmentActionPlans,
   getRegistrationApplicationCaseEditableSections,
@@ -23,6 +24,17 @@ const {
   settleRegistrationConflictComparison,
   updateRegistrationApplicationDirtyKeys,
 } = application
+
+test("visible application body excludes history while internal state retains it", () => {
+  assert.deepEqual(REGISTRATION_APPLICATION_BODY_SECTION_ORDER, [
+    "inquiry",
+    "level_test",
+    "consultation",
+    "placement",
+    "admission",
+  ])
+  assert.ok(REGISTRATION_APPLICATION_SECTION_ORDER.includes("history"))
+})
 
 function makeTrack(status, subject = "영어") {
   return {

@@ -24,6 +24,14 @@ export const REGISTRATION_APPLICATION_SECTION_ORDER = [
 export type RegistrationApplicationSectionKey =
   (typeof REGISTRATION_APPLICATION_SECTION_ORDER)[number]
 
+export const REGISTRATION_APPLICATION_BODY_SECTION_ORDER = [
+  "inquiry",
+  "level_test",
+  "consultation",
+  "placement",
+  "admission",
+] as const satisfies readonly RegistrationApplicationSectionKey[]
+
 export type RegistrationApplicationDirtyKey =
   `${RegistrationApplicationSectionKey}:${string}`
 

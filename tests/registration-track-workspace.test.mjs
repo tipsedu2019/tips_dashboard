@@ -35,11 +35,11 @@ function sourceBetween(source, startMarker, endMarker) {
   return source.slice(start + startMarker.length, end);
 }
 
-test("registration application shell renders all six sections once in fixed order without stage navigation", async () => {
+test("registration application shell renders the five body sections once in fixed order without stage navigation", async () => {
   const shell = await readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8")
   const inquiry = await readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8")
 
-  const titles = ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리", "자동 이력"]
+  const titles = ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리"]
   let previous = -1
   for (const title of titles) {
     const index = shell.indexOf(title)
@@ -53,10 +53,38 @@ test("registration application shell renders all six sections once in fixed orde
   assert.match(shell, /<fieldset[\s\S]*disabled=\{contentDisabled\}/)
   assert.match(shell, /closeAction: ReactNode/)
   assert.match(shell, /\{props\.closeAction\}/)
+  assert.doesNotMatch(shell, /자동 이력/)
+  assert.doesNotMatch(shell, /\{props\.history\}/)
   assert.doesNotMatch(inquiry, /inquiryAt/)
   assert.match(inquiry, /\{subjectSyncContent\}[\s\S]*\{commonInfoContent\}/)
   assert.match(inquiry, /exceptionContent/)
   assert.doesNotMatch(shell, /이전|다음|stage tabs|StageTabs/)
+})
+
+test("saved detail exposes automatic history from a header clock popover only", async () => {
+  const [shell, detail, create, action, timeline] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-history-action.tsx", import.meta.url), "utf8").catch(() => ""),
+    readFile(new URL("../src/features/tasks/registration-history-timeline.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.match(shell, /historyAction\?: ReactNode/)
+  assert.match(shell, /\{props\.historyAction\}\s*\{props\.closeAction\}/)
+  assert.doesNotMatch(shell, /history: ReactNode|history: "history"|history: "자동 이력"/)
+  assert.match(action, /Clock3/)
+  assert.match(action, /aria-label="자동 이력 보기"/)
+  assert.match(action, /<Popover>/)
+  assert.match(action, /<PopoverTrigger asChild>/)
+  assert.match(action, /<PopoverContent/)
+  assert.match(action, /<RegistrationHistoryTimeline[\s\S]*?embedded/)
+  assert.doesNotMatch(action, /<Sheet|<Dialog/)
+  assert.match(detail, /historyAction=\{<RegistrationApplicationHistoryAction detail=\{detail\} profiles=\{profiles\} \/>\}/)
+  assert.doesNotMatch(detail, /history=\{|<RegistrationHistoryTimeline/)
+  assert.doesNotMatch(create, /historyAction=|history=\{/)
+  assert.match(timeline, /embedded\?: boolean/)
+  assert.match(timeline, /embedded\s*\?[^:]+:[^}]+/)
 })
 
 test("create and detail share the approved subject-first inquiry controls", async () => {
@@ -587,7 +615,8 @@ test("canonical detail uses one progressively filled registration application", 
   assert.match(source, /consultation=\{/)
   assert.match(source, /placement=\{/)
   assert.match(source, /admission=\{/)
-  assert.match(source, /history=\{<RegistrationHistoryTimeline/)
+  assert.match(source, /historyAction=\{<RegistrationApplicationHistoryAction/)
+  assert.doesNotMatch(source, /history=\{<RegistrationHistoryTimeline/)
   assert.doesNotMatch(source, /role="tablist" aria-label="과목별 등록 진행"/)
 })
 
@@ -691,7 +720,7 @@ test("two decided subjects share one admission send action and expose two badges
   assert.equal((enrollment.match(/>입학신청서 발송<\/Button>/g) || []).length, 1)
 })
 
-test("saved and create applications share one six-section shell with inline owning editors", async () => {
+test("saved and create applications share one five-section shell with inline owning editors", async () => {
   const [detail, create, actions, appointment, workspace] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
@@ -709,6 +738,8 @@ test("saved and create applications share one six-section shell with inline owni
     assert.match(consumer, /RegistrationApplicationAdmissionSection/)
   }
   assert.match(detail, /closeAction=\{closeAction\}/)
+  assert.match(detail, /historyAction=\{<RegistrationApplicationHistoryAction/)
+  assert.doesNotMatch(create, /historyAction=/)
   assert.match(workspace, /showCloseButton=\{!canonicalRegistrationApplicationRendered\}/)
   assert.match(workspace, /closeAction=\{registrationDetailCloseAction\}/)
   assert.match(appointment, /embedded\?: boolean/)
@@ -726,7 +757,7 @@ test("saved application keeps exception actions in their owning sections", async
   const source = await readRegistrationApplicationSource()
   const inquiry = sourceBetween(source, "inquiry={(\n", "levelTest={(\n")
   const placement = sourceBetween(source, "placement={(\n", "admission={(\n")
-  const admission = sourceBetween(source, "admission={(\n", "history={")
+  const admission = sourceBetween(source, "admission={(\n", "\n    />\n  )\n}")
 
   assert.match(inquiry, /RegistrationMigrationReviewEditor/)
   assert.match(inquiry, /renderTrackFrames\("inquiry"\)/)
@@ -1062,14 +1093,14 @@ test("registration stage selects have subject-specific accessible names", async 
   assert.match(migrationSource, /aria-label=\{`\$\{track\.subject\} 대기 종류`\}/)
 })
 
-test("appointment editor opens before history and scrolls into view", async () => {
+test("appointment editor opens before the header history action and scrolls into view", async () => {
   const source = await readRegistrationApplicationSource()
   const editorSource = source.slice(source.indexOf("export function RegistrationApplication"))
   assert.match(source, /const appointmentEditorRef = useRef<HTMLDivElement \| null>\(null\)/)
   assert.match(source, /appointmentEditorRef\.current\?\.scrollIntoView\(\{ block: "nearest", behavior: "smooth" \}\)/)
   assert.ok(
-    editorSource.indexOf('ref={appointmentEditorRef}') < editorSource.indexOf("<RegistrationHistoryTimeline"),
-    "appointment editor should render before the history timeline",
+    editorSource.indexOf('ref={appointmentEditorRef}') < editorSource.indexOf("<RegistrationApplicationHistoryAction"),
+    "appointment editor should render before the history action",
   )
 })
 
@@ -1157,7 +1188,7 @@ test("case admission message states stay actionable independently of the selecte
 
 test("case admission badges use the same decided and add-class eligibility as the send action", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
-  const admission = sourceBetween(source, "admission={(\n", "history={<RegistrationHistoryTimeline")
+  const admission = sourceBetween(source, "admission={(\n", "\n    />\n  )\n}")
 
   assert.match(source, /admissionApplicationState\.targetTrackIds/)
   assert.match(source, /admissionTargetTracks/)

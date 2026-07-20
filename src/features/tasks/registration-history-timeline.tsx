@@ -15,6 +15,7 @@ import type { OpsRegistrationCaseDetail, RegistrationSubject } from "./registrat
 export type RegistrationHistoryTimelineProps = {
   detail: OpsRegistrationCaseDetail
   profiles: OpsProfileOption[]
+  embedded?: boolean
 }
 
 const STAGE_LABELS: Record<RegistrationHistoryStage, string> = {
@@ -135,7 +136,7 @@ function historyDetailLines(item: RegistrationSubjectHistoryItem) {
   return lines
 }
 
-export function RegistrationHistoryTimeline({ detail, profiles }: RegistrationHistoryTimelineProps) {
+export function RegistrationHistoryTimeline({ detail, profiles, embedded = false }: RegistrationHistoryTimelineProps) {
   const subjectFilterId = useId()
   const stageFilterId = useId()
   const [subjectFilter, setSubjectFilter] = useState<"all" | RegistrationSubject>("all")
@@ -165,7 +166,12 @@ export function RegistrationHistoryTimeline({ detail, profiles }: RegistrationHi
   )), [effectiveStageFilter, effectiveSubjectFilter, history])
 
   return (
-    <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label="등록 자동 이력">
+    <section
+      className={embedded
+        ? "grid min-w-0 gap-3 p-3"
+        : "grid min-w-0 gap-3 rounded-md border p-3"}
+      aria-label="등록 자동 이력"
+    >
       <div>
         <h3 className="text-sm font-semibold">자동 이력</h3>
         <p className="text-xs text-muted-foreground">저장된 주요 단계만 시간과 행위자 기준으로 보여 줍니다.</p>
