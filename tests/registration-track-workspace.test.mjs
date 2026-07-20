@@ -79,6 +79,16 @@ test("saved detail exposes automatic history from a header clock popover only", 
   assert.match(action, /<Popover>/)
   assert.match(action, /<PopoverTrigger asChild>/)
   assert.match(action, /<PopoverContent/)
+  assert.match(action, /useRef<HTMLButtonElement>\(null\)/)
+  assert.match(action, /useRef\(false\)/)
+  assert.match(action, /ref=\{historyTriggerRef\}/)
+  assert.match(action, /onEscapeKeyDown=\{\(\) => \{[\s\S]*restoreHistoryTriggerFocusRef\.current = true/)
+  assert.match(action, /onCloseAutoFocus=\{\(event\) => \{/)
+  assert.match(action, /if \(!restoreHistoryTriggerFocusRef\.current\) return/)
+  assert.match(
+    action,
+    /event\.preventDefault\(\)[\s\S]*historyTriggerRef\.current\?\.focus\(\{ preventScroll: true \}\)/,
+  )
   assert.match(action, /<RegistrationHistoryTimeline[\s\S]*?embedded/)
   assert.doesNotMatch(action, /<Sheet|<Dialog/)
   assert.match(detail, /historyAction=\{<RegistrationApplicationHistoryAction detail=\{detail\} profiles=\{profiles\} \/>\}/)

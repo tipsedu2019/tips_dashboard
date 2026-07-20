@@ -3006,17 +3006,24 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     const focusReturned = await historyButton.evaluate((button) => document.activeElement === button)
     if (!focusReturned) throw new Error("registration history did not return focus to its clock button.")
 
-    await historyButton.focus()
-    const scrollBeforeHistoryOpen = await applicationHost.evaluate((host) => {
-      const maximumScroll = Math.max(0, host.scrollHeight - host.clientHeight)
-      host.scrollTop = Math.min(8, maximumScroll)
-      return host.scrollTop
-    })
-    if (scrollBeforeHistoryOpen <= 0) {
-      throw new Error("registration application could not establish positive app scroll before opening history.")
-    }
     await historyButton.click()
     await historyPanel.waitFor({ state: "visible", timeout: 5000 })
+    const historyButtonElement = await historyButton.elementHandle()
+    if (!historyButtonElement) throw new Error("registration history trigger disappeared while its Popover was open.")
+    const scrolledHistoryState = await applicationHost.evaluate((host, button) => {
+      const maximumScroll = Math.max(0, host.scrollHeight - host.clientHeight)
+      host.scrollTop = Math.min(100, maximumScroll)
+      const hostRect = host.getBoundingClientRect()
+      const triggerRect = button.getBoundingClientRect()
+      return {
+        scrollTop: host.scrollTop,
+        triggerAboveApplicationViewport: triggerRect.bottom <= hostRect.top,
+      }
+    }, historyButtonElement)
+    const scrollBeforeHistoryEscape = scrolledHistoryState.scrollTop
+    if (scrollBeforeHistoryEscape <= 0 || !scrolledHistoryState.triggerAboveApplicationViewport) {
+      throw new Error("registration application could not scroll the open history trigger above its viewport.")
+    }
     const applicationHostElement = await applicationHost.elementHandle()
     const historyPortalEscapedApplication = applicationHostElement && await historyPanel.evaluate(
       (panel, host) => !host.contains(panel),
@@ -3027,8 +3034,13 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     }
     await page.keyboard.press("Escape")
     await historyPanel.waitFor({ state: "hidden", timeout: 5000 })
+    await page.waitForFunction(
+      (button) => document.activeElement === button,
+      historyButtonElement,
+      { timeout: 5000 },
+    )
     const scrollAfterEscape = await applicationHost.evaluate((host) => host.scrollTop)
-    if (scrollAfterEscape !== scrollBeforeHistoryOpen || !(await applicationHost.isVisible().catch(() => false))) {
+    if (scrollAfterEscape !== scrollBeforeHistoryEscape || !(await applicationHost.isVisible().catch(() => false))) {
       throw new Error("Escape changed the registration application scroll or closed its dialog.")
     }
     const finalFocusReturned = await historyButton.evaluate((button) => document.activeElement === button)
