@@ -194,6 +194,67 @@ test("option recovery and accessibility checks execute without saving", async ()
   assert.doesNotMatch(verifier, /optionFaultHost[\s\S]*?getByRole\("checkbox"/)
 })
 
+test("appointment plan accessibility rejects visible actions without participant subjects", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+  const start = verifier.indexOf("async function assertAppointmentPlanAccessibleNames")
+  const end = verifier.indexOf("async function assertAppointmentAccessibleNames", start)
+  const assertion = verifier.slice(start, end)
+
+  assert.match(assertion, /participantSubjects\.length > 0/)
+  assert.match(assertion, /:\s*\["participant subjects"\]/)
+  assert.match(assertion, /participantSubjects\.filter\(\(subject\) => !label\.includes\(subject\)\)/)
+})
+
+test("mobile primary actions require an owned visible data field", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+  const start = verifier.indexOf("async function assertMobileActionDomOrder")
+  const end = verifier.indexOf("async function assertNonColorWorkflowState", start)
+  const assertion = verifier.slice(start, end)
+
+  assert.match(assertion, /actionLabel/)
+  assert.match(assertion, /if \(fields\.length === 0\) return \[`\$\{actionLabel\} owner has no visible data field`\]/)
+  assert.doesNotMatch(assertion, /if \(fields\.length === 0\) return \[\]/)
+})
+
+test("non-color workflow assertions cover and execute locked current saved and failed", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+  const start = verifier.indexOf("async function assertNonColorWorkflowState")
+  const end = verifier.indexOf("async function verifyHistoryPopover", start)
+  const assertion = verifier.slice(start, end)
+
+  for (const state of ["locked", "current", "saved", "failed"]) {
+    assert.match(assertion, new RegExp(`${state}:`), `${state} matcher must exist`)
+  }
+  assert.match(assertion, /ariaLabel/)
+  assert.match(assertion, /describedBy/)
+  assert.match(assertion, /text/)
+  assert.match(assertion, /\[signal\.ariaLabel, signal\.describedBy, signal\.text\]\.filter\(Boolean\)\.join\(" "\)/)
+  for (const call of [
+    'assertNonColorWorkflowState(optionFaultHost, "locked")',
+    'assertNonColorWorkflowState(detailApplicationHost, "current")',
+    'assertNonColorWorkflowState(detailApplicationHost, "saved")',
+    'assertNonColorWorkflowState(optionFaultHost, "failed")',
+  ]) {
+    assert.ok(verifier.includes(call), `verifier does not execute ${call}`)
+  }
+})
+
+test("list reopen requires exactly one requested subject tab", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+  const start = verifier.indexOf("async function openFixtureCaseFromList")
+  const end = verifier.indexOf("async function assertPrecedes", start)
+  const helper = verifier.slice(start, end)
+
+  assert.match(helper, /const subjectTabCount = await subjectTab\.count\(\)/)
+  assert.match(helper, /if \(subjectTabCount !== 1\)/)
+  assert.match(helper, /requested subject tab count is \$\{subjectTabCount\}, expected 1/)
+  assert.doesNotMatch(helper, /if \(await subjectTab\.count\(\)\) await subjectTab\.click\(\)/)
+})
+
 test("fixture verification remains provider-zero and excludes every send or retry mutation", async () => {
   const source = await readFile(verifierUrl, "utf8")
   const verifier = registrationVerifier(source)

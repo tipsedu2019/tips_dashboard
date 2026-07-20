@@ -2778,7 +2778,11 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     if (subject) {
       const subjectTab = applicationHost.getByRole("tablist", { name: "과목별 등록 진행" })
         .getByRole("tab", { name: new RegExp(`^${subject}`) })
-      if (await subjectTab.count()) await subjectTab.click()
+      const subjectTabCount = await subjectTab.count()
+      if (subjectTabCount !== 1) {
+        throw new Error(`${studentName} ${subject} requested subject tab count is ${subjectTabCount}, expected 1.`)
+      }
+      await subjectTab.click()
     }
     return applicationHost
   }
@@ -2906,7 +2910,12 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
         const participantSubjects = (action.getAttribute("data-registration-appointment-subjects") || "")
           .split("|").map((subject) => subject.trim()).filter(Boolean)
         const label = action.getAttribute("aria-label") || action.textContent?.trim() || ""
-        return { label, missingSubjects: participantSubjects.filter((subject) => !label.includes(subject)) }
+        return {
+          label,
+          missingSubjects: participantSubjects.length > 0
+            ? participantSubjects.filter((subject) => !label.includes(subject))
+            : ["participant subjects"],
+        }
       })
       .filter(({ missingSubjects }) => missingSubjects.length > 0))
     if (missing.length > 0) throw new Error("appointment plan actions are missing participant-qualified accessible names.")
@@ -2931,13 +2940,14 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
       .filter((action) => action.getBoundingClientRect().width > 0)
       .flatMap((action) => {
         const owner = action.closest("[data-registration-action-owner]")
-        if (!owner) return ["primary action has no owner"]
+        const actionLabel = action.getAttribute("aria-label") || action.textContent?.trim() || "unnamed action"
+        if (!owner) return [`${actionLabel} has no action owner`]
         const fields = [...owner.querySelectorAll("input, select, textarea")]
           .filter((field) => field.getBoundingClientRect().width > 0)
-        if (fields.length === 0) return []
+        if (fields.length === 0) return [`${actionLabel} owner has no visible data field`]
         return fields[fields.length - 1].compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING
           ? []
-          : ["primary action precedes its final field"]
+          : [`${actionLabel} precedes its owner's final field`]
       }))
     if (invalidOwners.length > 0) throw new Error(`mobile action DOM order is invalid: ${invalidOwners.join(", ")}.`)
   }
@@ -2945,15 +2955,27 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   async function assertNonColorWorkflowState(applicationHost, expectedState) {
     const stateMatchers = {
       locked: /잠김|저장|입력|선택 후|불러오기|현재 진행 단계가 아닙니다/,
+      current: /현재|진행 중/,
+      saved: /^(저장된 신청서|저장 완료)$/,
       failed: /실패|못했습니다|오류/,
     }
-    const stateSignals = await applicationHost.locator(`[data-registration-state="${expectedState}"]`).evaluateAll((elements) => elements.map((element) => {
-      const describedBy = (element.getAttribute("aria-describedby") || "").split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent?.trim() || "").filter(Boolean).join(" ")
-      return [element.getAttribute("aria-label") || "", describedBy, element.textContent?.trim() || ""].join(" ")
-    }))
+    const stateSignals = await applicationHost.evaluate((host, state) => (
+      [...host.querySelectorAll(`[data-registration-state="${state}"]`)].map((element) => {
+        const describedBy = (element.getAttribute("aria-describedby") || "").split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent?.trim() || "")
+          .filter(Boolean)
+          .join(" ")
+        return {
+          ariaLabel: element.getAttribute("aria-label") || "",
+          describedBy,
+          text: element.textContent?.trim() || "",
+        }
+      })
+    ), expectedState)
     const matcher = stateMatchers[expectedState]
-    if (!matcher || !stateSignals.some((signal) => matcher.test(signal))) {
+    if (!matcher || !stateSignals.some((signal) => matcher.test(
+      [signal.ariaLabel, signal.describedBy, signal.text].filter(Boolean).join(" "),
+    ))) {
       throw new Error(`${expectedState} workflow state is conveyed by color alone.`)
     }
   }
@@ -3105,6 +3127,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await assertSubjectQualifiedAccessibleNames(detailApplicationHost)
   await assertAppointmentPlanAccessibleNames(detailApplicationHost)
   await assertAppointmentAccessibleNames(detailApplicationHost)
+  await assertNonColorWorkflowState(detailApplicationHost, "current")
+  await assertNonColorWorkflowState(detailApplicationHost, "saved")
 
   await verifyHistoryPopover(detailApplicationHost)
 
