@@ -64,6 +64,7 @@ export type RegistrationAppointmentEditorProps = {
   notificationProcessingReadiness?: RegistrationNotificationProcessingReadiness | null
   onDirtyChange?: (dirty: boolean) => void
   onTrackDirtyChange?: (trackId: string, dirty: boolean) => void
+  onParticipantTrackIdsChange?: (trackIds: readonly string[]) => void
 }
 
 type SubmissionKeys = {
@@ -179,6 +180,7 @@ export function RegistrationAppointmentEditor({
   notificationProcessingReadiness = null,
   onDirtyChange,
   onTrackDirtyChange,
+  onParticipantTrackIdsChange,
 }: RegistrationAppointmentEditorProps) {
   const conflictScopeKey = `${taskId}:${kind}`
   const submissionKeys = useSubmissionKeys(conflictScopeKey)
@@ -350,6 +352,17 @@ export function RegistrationAppointmentEditor({
     trackIds: [...(preserveLocalDraft ? selectedTrackIds : effectiveSelectedTrackIds)].sort(),
     replaceRemaining: draftReplaceRemaining,
   }
+  const onParticipantTrackIdsChangeRef = useRef(onParticipantTrackIdsChange)
+  useEffect(() => {
+    onParticipantTrackIdsChangeRef.current = onParticipantTrackIdsChange
+  }, [onParticipantTrackIdsChange])
+  const participantTrackIdsKey = appointmentDraft.trackIds.join("\u001f")
+  const reportedParticipantTrackIdsKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (reportedParticipantTrackIdsKeyRef.current === participantTrackIdsKey) return
+    reportedParticipantTrackIdsKeyRef.current = participantTrackIdsKey
+    onParticipantTrackIdsChangeRef.current?.([...appointmentDraft.trackIds])
+  }, [appointmentDraft.trackIds, participantTrackIdsKey])
   const previousAppointmentDraft: RegistrationAppointmentDraft | null = appointment
     ? {
         scheduledAt: appointment.scheduledAt,

@@ -146,6 +146,10 @@ function errorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function sameRegistrationTrackIds(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((trackId, index) => trackId === right[index])
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "기록 없음"
   const date = new Date(value)
@@ -319,6 +323,7 @@ export function RegistrationApplication({
   closeAction,
 }: RegistrationApplicationProps) {
   const [appointmentEditor, setAppointmentEditor] = useState<AppointmentEditorState | null>(null)
+  const [appointmentDraftParticipantTrackIds, setAppointmentDraftParticipantTrackIds] = useState<string[]>([])
   const [migrationConflictState, setMigrationConflictState] = useState<RegistrationMigrationConflictState | null>(null)
   const [migrationConflictRetrying, setMigrationConflictRetrying] = useState(false)
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
@@ -545,6 +550,7 @@ export function RegistrationApplication({
       : participantTrackIds[0] || detail.tracks[0]?.id || ""
     const frame = window.requestAnimationFrame(() => {
       initialAppointmentAppliedRef.current = initialKey
+      setAppointmentDraftParticipantTrackIds([initialTrackId])
       setAppointmentEditor({ kind: appointment.kind, appointmentId: appointment.id, initialTrackId })
     })
     return () => window.cancelAnimationFrame(frame)
@@ -583,6 +589,7 @@ export function RegistrationApplication({
 
   function openAppointment(context: TrackContext, kind: OpsRegistrationAppointment["kind"], appointmentId: string | null) {
     onFocusTrack(context.track.id)
+    setAppointmentDraftParticipantTrackIds([context.track.id])
     setAppointmentEditor({ kind, appointmentId, initialTrackId: context.track.id })
     onAppointmentOpenChange?.(appointmentId)
   }
@@ -592,6 +599,7 @@ export function RegistrationApplication({
   }
 
   function closeAppointmentEditor() {
+    setAppointmentDraftParticipantTrackIds([])
     setAppointmentEditor(null)
     onAppointmentOpenChange?.(null)
   }
@@ -604,6 +612,13 @@ export function RegistrationApplication({
       onWarning("상담 책임자가 없는 과목을 먼저 지정하세요.")
     }
   }
+
+  const handleAppointmentParticipantTrackIdsChange = useCallback((trackIds: readonly string[]) => {
+    const nextTrackIds = Array.from(new Set(trackIds)).sort()
+    setAppointmentDraftParticipantTrackIds((currentTrackIds) => (
+      sameRegistrationTrackIds(currentTrackIds, nextTrackIds) ? currentTrackIds : nextTrackIds
+    ))
+  }, [])
 
   function renderTrackActions(context: TrackContext, section: RegistrationApplicationSectionKey) {
     const { track, permissions, activeConsultation, visitAppointment } = context
@@ -772,18 +787,12 @@ export function RegistrationApplication({
   const appointmentActivities = appointmentEditor?.kind === "level_test"
     ? detail.levelTests
     : detail.consultations.filter((item) => item.mode === "visit")
+  const editorAppointmentActionPlan = appointmentEditor?.appointmentId
+    ? appointmentActionPlans.find((plan) => plan.appointmentId === appointmentEditor.appointmentId) || null
+    : null
   const appointmentEditorParticipantTrackIds = appointmentEditor?.appointmentId
-    ? appointmentEditor.kind === "level_test"
-      ? detail.levelTests
-        .filter((item) => item.appointmentId === appointmentEditor.appointmentId)
-        .map((item) => item.trackId)
-      : detail.consultations
-        .filter((item) => (
-          item.appointmentId === appointmentEditor.appointmentId
-          && item.mode === "visit"
-        ))
-        .map((item) => item.trackId)
-    : appointmentEditor ? [appointmentEditor.initialTrackId] : []
+    ? editorAppointmentActionPlan?.participantTrackIds || []
+    : appointmentEditor ? appointmentDraftParticipantTrackIds : []
   const appointmentEditorContent = appointmentEditor ? (
     <div
       ref={appointmentEditorRef}
@@ -807,11 +816,13 @@ export function RegistrationApplication({
         onRebook={appointmentEditor.kind === "level_test" ? (trackId) => {
           onFocusTrack(trackId)
           onAppointmentOpenChange?.(null)
+          setAppointmentDraftParticipantTrackIds([trackId])
           setAppointmentEditor({ kind: "level_test", appointmentId: null, initialTrackId: trackId })
         } : undefined}
         notificationToken={notificationToken}
         onDirtyChange={(dirty) => setDirty(`${appointmentEditor.kind === "level_test" ? "level_test" : "consultation"}:appointment-${editorAppointment?.id || "new"}`, dirty)}
         onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
+        onParticipantTrackIdsChange={handleAppointmentParticipantTrackIdsChange}
       />
     </div>
   ) : null

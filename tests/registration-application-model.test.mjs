@@ -297,26 +297,32 @@ test("shared appointment actions group participants once per appointment id", ()
       { id: "level-shared", kind: "level_test", status: "scheduled" },
       { id: "level-other", kind: "level_test", status: "completed" },
       { id: "visit-shared", kind: "visit_consultation", status: "scheduled" },
+      { id: "visit-filtered", kind: "visit_consultation", status: "scheduled" },
     ],
     levelTests: [
       { appointmentId: "level-shared", trackId: english.id, status: "scheduled" },
       { appointmentId: "level-shared", trackId: mathematics.id, status: "scheduled" },
       { appointmentId: "level-other", trackId: english.id, status: "completed" },
+      { appointmentId: "level-other", trackId: mathematics.id, status: "canceled" },
     ],
     consultations: [
       { appointmentId: "visit-shared", trackId: english.id, mode: "visit", status: "scheduled" },
       { appointmentId: "visit-shared", trackId: mathematics.id, mode: "visit", status: "scheduled" },
+      { appointmentId: "visit-filtered", trackId: english.id, mode: "visit", status: "scheduled" },
+      { appointmentId: "visit-filtered", trackId: mathematics.id, mode: "visit", status: "completed" },
+      { appointmentId: "visit-filtered", trackId: mathematics.id, mode: "visit", status: "canceled" },
     ],
     actionableTrackIds: [mathematics.id],
   })
 
-  assert.equal(plans.length, 3)
-  assert.deepEqual(plans.map((plan) => plan.appointmentId), ["level-shared", "level-other", "visit-shared"])
+  assert.equal(plans.length, 4)
+  assert.deepEqual(plans.map((plan) => plan.appointmentId), ["level-shared", "level-other", "visit-shared", "visit-filtered"])
   assert.deepEqual(plans[0].participantTrackIds, [english.id, mathematics.id])
   assert.deepEqual(plans[0].participantSubjects, ["영어", "수학"])
   assert.equal(plans[0].ownerTrackId, mathematics.id)
   assert.deepEqual(plans[1].participantTrackIds, [english.id])
   assert.deepEqual(plans[2].participantSubjects, ["영어", "수학"])
+  assert.deepEqual(plans[3].participantTrackIds, [english.id])
 })
 
 test("an open admission batch enables the case section for registered add-class work", () => {

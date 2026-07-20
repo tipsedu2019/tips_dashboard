@@ -1115,13 +1115,31 @@ test("open appointment editor stays mounted but hides outside participating subj
   const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
   const editor = source.slice(source.indexOf("const editorAppointment ="), source.indexOf("\n\n  return (", source.indexOf("const editorAppointment =")))
 
-  assert.match(editor, /const appointmentEditorParticipantTrackIds = appointmentEditor\?\.appointmentId/)
-  assert.match(editor, /appointmentEditor\.kind === "level_test"[\s\S]*?detail\.levelTests[\s\S]*?\.filter\(\(item\) => item\.appointmentId === appointmentEditor\.appointmentId\)/)
-  assert.match(editor, /detail\.consultations[\s\S]*?\.filter\(\(item\) => \([\s\S]*?item\.appointmentId === appointmentEditor\.appointmentId[\s\S]*?item\.mode === "visit"/)
-  assert.match(editor, /: appointmentEditor \? \[appointmentEditor\.initialTrackId\] : \[\]/)
+  assert.match(editor, /const editorAppointmentActionPlan = appointmentEditor\?\.appointmentId[\s\S]*?appointmentActionPlans\.find\(\(plan\) => plan\.appointmentId === appointmentEditor\.appointmentId\)/)
+  assert.match(editor, /const appointmentEditorParticipantTrackIds = appointmentEditor\?\.appointmentId[\s\S]*?editorAppointmentActionPlan\?\.participantTrackIds \|\| \[\]/)
+  assert.match(editor, /: appointmentEditor \? appointmentDraftParticipantTrackIds : \[\]/)
   assert.match(editor, /const appointmentEditorContent = appointmentEditor \? \(/)
   assert.match(editor, /hidden=\{!\(activeTrackId && appointmentEditorParticipantTrackIds\.includes\(activeTrackId\)\)\}/)
   assert.doesNotMatch(editor, /const appointmentEditorContent = appointmentEditor && activeTrackId/)
+  assert.doesNotMatch(editor, /detail\.levelTests[\s\S]*?\.filter\(\(item\) => item\.appointmentId === appointmentEditor\.appointmentId\)[\s\S]*?const appointmentEditorContent/)
+})
+
+test("new appointment editor reports current draft subjects without remounting", async () => {
+  const [application, appointment] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.match(appointment, /onParticipantTrackIdsChange\?: \(trackIds: readonly string\[\]\) => void/)
+  assert.match(appointment, /const onParticipantTrackIdsChangeRef = useRef\(onParticipantTrackIdsChange\)/)
+  assert.match(appointment, /onParticipantTrackIdsChangeRef\.current = onParticipantTrackIdsChange/)
+  assert.match(appointment, /const participantTrackIdsKey = appointmentDraft\.trackIds\.join\(/)
+  assert.match(appointment, /onParticipantTrackIdsChangeRef\.current\?\.\(\[\.\.\.appointmentDraft\.trackIds\]\)/)
+  assert.match(application, /const \[appointmentDraftParticipantTrackIds, setAppointmentDraftParticipantTrackIds\] = useState<string\[\]>\(\[\]\)/)
+  assert.match(application, /const handleAppointmentParticipantTrackIdsChange = useCallback/)
+  assert.match(application, /sameRegistrationTrackIds/)
+  assert.match(application, /onParticipantTrackIdsChange=\{handleAppointmentParticipantTrackIdsChange\}/)
+  assert.equal((application.match(/<RegistrationAppointmentEditor/g) || []).length, 1)
 })
 
 test("phone completion does not call the visit reservation notification helper", async () => {
