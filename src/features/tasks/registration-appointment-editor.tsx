@@ -15,6 +15,10 @@ import {
   getRegistrationAppointmentPayloadTrackIds,
   getRegistrationAppointmentReportedTrackIds,
 } from "./registration-track-model.js"
+import {
+  REGISTRATION_LEVEL_TEST_PLACES,
+  normalizeRegistrationLevelTestPlace,
+} from "./registration-level-test-place.ts"
 import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow.js"
 import { sendRegistrationVisitNotificationTarget } from "./registration-consultation-notification.js"
 import {
@@ -450,9 +454,17 @@ export function RegistrationAppointmentEditor({
     kind,
     ...appointmentDraft,
   })
+  const canonicalLevelTestPlace = kind === "level_test"
+    ? normalizeRegistrationLevelTestPlace(place)
+    : null
+  const legacyLevelTestPlace = kind === "level_test"
+    && appointment?.place
+    && !normalizeRegistrationLevelTestPlace(appointment.place)
+      ? appointment.place
+      : ""
   const canSave = Boolean(
     scheduledAt
-    && place.trim()
+    && (kind === "level_test" ? canonicalLevelTestPlace : place.trim())
     && appointmentDraft.trackIds.length > 0
     && !saving
     && !mutationLocked
@@ -776,8 +788,8 @@ export function RegistrationAppointmentEditor({
       onWarning(message)
       const selector = !scheduledAt
         ? "[data-appointment-field=scheduled-at] input, [data-appointment-field=scheduled-at] button"
-        : !place.trim()
-          ? "[data-appointment-field=place] input"
+        : !(kind === "level_test" ? canonicalLevelTestPlace : place.trim())
+          ? "[data-appointment-field=place] select, [data-appointment-field=place] input"
           : "[data-appointment-field=tracks] button"
       window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(selector)?.focus())
       return
@@ -797,7 +809,7 @@ export function RegistrationAppointmentEditor({
         taskId,
         kind,
         scheduledAt: toScheduledAt(scheduledAt),
-        place: place.trim(),
+        place: canonicalLevelTestPlace ?? place.trim(),
         trackIds: appointmentDraft.trackIds,
         replaceRemaining: editMode === "replace_remaining",
         requestKey,
@@ -1056,7 +1068,27 @@ export function RegistrationAppointmentEditor({
             </Label>
             <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
               <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
-              <Input aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`} value={place} onChange={(event) => { setValidationError(""); setPlace(event.target.value) }} placeholder="본관, 상담실 등" disabled={saving || mutationLocked} />
+              {kind === "level_test" ? (
+                <>
+                  <select
+                    aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`}
+                    value={normalizeRegistrationLevelTestPlace(place) ?? ""}
+                    onChange={(event) => { setValidationError(""); setPlace(event.target.value) }}
+                    disabled={saving || mutationLocked}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="">장소 선택</option>
+                    {REGISTRATION_LEVEL_TEST_PLACES.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                  {legacyLevelTestPlace ? (
+                    <span className="text-xs text-muted-foreground">기존 저장 장소: {appointment?.place}</span>
+                  ) : null}
+                </>
+              ) : (
+                <Input aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`} value={place} onChange={(event) => { setValidationError(""); setPlace(event.target.value) }} placeholder="상담실" disabled={saving || mutationLocked} />
+              )}
             </Label>
           </div>
 

@@ -3,6 +3,10 @@ import { spawnSync } from "node:child_process"
 import test from "node:test"
 
 import {
+  REGISTRATION_LEVEL_TEST_PLACES,
+  normalizeRegistrationLevelTestPlace,
+} from "../src/features/tasks/registration-level-test-place.ts"
+import {
   assertRegistrationCreateAttemptPersistenceMode,
   createRegistrationCreateAttempt,
   createRegistrationInitialWorkflowDraft,
@@ -18,6 +22,15 @@ import {
   setRegistrationInitialSubjectAction,
   toRegistrationScheduledAtIso,
 } from "../src/features/tasks/registration-intake-workflow.ts"
+
+test("level-test places accept only trimmed canonical values", () => {
+  assert.deepEqual(REGISTRATION_LEVEL_TEST_PLACES, ["본관", "별관"])
+  assert.equal(normalizeRegistrationLevelTestPlace(" 본관 "), "본관")
+  assert.equal(normalizeRegistrationLevelTestPlace("\t별관\n"), "별관")
+  assert.equal(normalizeRegistrationLevelTestPlace(""), null)
+  assert.equal(normalizeRegistrationLevelTestPlace("   "), null)
+  assert.equal(normalizeRegistrationLevelTestPlace("본관 201호"), null)
+})
 
 test("ready-atomic capability preserves all four initial routes", () => {
   const allowed = ["inquiry", "direct_phone", "level_test", "visit"]
@@ -449,5 +462,16 @@ test("reports plan, appointment, and subject-specific director blockers", () => 
   assert.deepEqual(
     getRegistrationInitialWorkflowBlockers(ready, ["영어", "수학"], { 영어: " director-eng " }),
     [],
+  )
+
+  const noncanonicalLevelTestPlace = {
+    ...createRegistrationInitialWorkflowDraft(["영어"]),
+    subjectPlans: { 영어: "level_test" },
+    levelTestScheduledAt: "2026-07-15T10:00",
+    levelTestPlace: "본관 201호",
+  }
+  assert.deepEqual(
+    getRegistrationInitialWorkflowBlockers(noncanonicalLevelTestPlace, ["영어"], {}),
+    ["레벨테스트 장소"],
   )
 })

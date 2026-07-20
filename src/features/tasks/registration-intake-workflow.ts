@@ -1,6 +1,7 @@
 import type { RegistrationSubject } from "./registration-track-service"
 import type { RegistrationIntakeRuntimeState } from "./registration-intake-runtime-probe"
 import type { RegistrationRuntimeState } from "./registration-runtime-probe"
+import { normalizeRegistrationLevelTestPlace } from "./registration-level-test-place.ts"
 
 // registration-intake-workflow-model:start
 export type RegistrationInitialAction =
@@ -420,12 +421,16 @@ export function normalizeRegistrationInitialWorkflow(
   const normalizedDraft = { ...draft, subjectPlans }
   const levelTestSubjects = getRegistrationInitialWorkflowParticipants(normalizedDraft, "level_test")
   const visitSubjects = getRegistrationInitialWorkflowParticipants(normalizedDraft, "visit")
+  const levelTestPlace = normalizeRegistrationLevelTestPlace(draft.levelTestPlace)
+  if (levelTestSubjects.length > 0 && !levelTestPlace) {
+    throw new Error("registration_initial_level_test_place_invalid")
+  }
 
   return {
     subjectPlans,
     levelTestAppointment: levelTestSubjects.length > 0 ? {
       scheduledAt: toRegistrationScheduledAtIso(draft.levelTestScheduledAt),
-      place: trimmed(draft.levelTestPlace),
+      place: levelTestPlace as NonNullable<typeof levelTestPlace>,
       subjects: levelTestSubjects,
     } : null,
     visitAppointment: visitSubjects.length > 0 ? {
@@ -456,7 +461,7 @@ export function getRegistrationInitialWorkflowBlockers(
 
   if (getRegistrationInitialWorkflowParticipants(selectedPlanDraft, "level_test").length > 0) {
     if (!trimmed(draft.levelTestScheduledAt)) blockers.push("레벨테스트 예약일시")
-    if (!trimmed(draft.levelTestPlace)) blockers.push("레벨테스트 장소")
+    if (!normalizeRegistrationLevelTestPlace(draft.levelTestPlace)) blockers.push("레벨테스트 장소")
   }
 
   for (const subject of selectedSubjects) {

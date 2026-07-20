@@ -27,6 +27,7 @@ import type {
   RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
 import type { RegistrationInitialWorkflowPayload } from "./registration-intake-workflow"
+import { normalizeRegistrationLevelTestPlace } from "./registration-level-test-place.ts"
 import {
   probeRegistrationIntakeWorkflowRuntime as probeRegistrationIntakeWorkflowRuntimeFromDatabase,
   resetRegistrationIntakeWorkflowRuntimeProbe,
@@ -1955,12 +1956,18 @@ export function createRegistrationTrackService(
     expectedNotificationRevision: number | null
     requestKey: string
   }): Promise<RegistrationAppointmentMutationResponse> {
+    const levelTestPlace = input.kind === "level_test"
+      ? normalizeRegistrationLevelTestPlace(input.place)
+      : null
+    if (input.kind === "level_test" && !levelTestPlace) {
+      throw new Error("registration_level_test_place_invalid")
+    }
     const result = await callRpc<unknown>("save_registration_shared_appointment", {
       p_appointment_id: normalizeUuid(input.appointmentId),
       p_task_id: input.taskId,
       p_kind: input.kind,
       p_scheduled_at: input.scheduledAt,
-      p_place: input.place,
+      p_place: levelTestPlace ?? input.place,
       p_track_ids: input.trackIds,
       p_replace_remaining: input.replaceRemaining,
       p_expected_notification_revision: input.expectedNotificationRevision,

@@ -5,6 +5,8 @@ import vm from "node:vm";
 
 import ts from "typescript";
 
+import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
+
 const serviceUrl = new URL(
   "../src/features/tasks/registration-track-service.ts",
   import.meta.url,
@@ -40,6 +42,7 @@ async function loadFactory(extraGlobals = {}) {
     module: sandboxModule,
     exports: sandboxModule.exports,
     crypto: { randomUUID: () => "uuid-from-crypto" },
+    normalizeRegistrationLevelTestPlace,
     ...extraGlobals,
   });
   return sandboxModule.exports;
@@ -1490,6 +1493,38 @@ test("appointment creation and director default clearing send nullable canonical
   assert.match(source, /assignmentSource: "default" \| "manual" \| "clear_default"/);
   assert.match(source, /directorProfileId: string \| null/);
   assert.match(source, /ruleKey: string \| null/);
+});
+
+test("appointment save constrains only level-test places", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient();
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const common = {
+    appointmentId: null,
+    taskId: "task-1",
+    scheduledAt: "2026-07-13T01:00:00Z",
+    trackIds: ["track-1"],
+    replaceRemaining: false,
+    expectedNotificationRevision: null,
+    requestKey: "appointment-key",
+  };
+
+  await assert.rejects(
+    service.saveRegistrationSharedAppointment({
+      ...common,
+      kind: "level_test",
+      place: "본관 201호",
+    }),
+    /registration_level_test_place_invalid/,
+  );
+  assert.equal(harness.rpcCalls.length, 0);
+
+  await service.saveRegistrationSharedAppointment({
+    ...common,
+    kind: "visit_consultation",
+    place: "본관 201호",
+  });
+  assert.equal(harness.rpcCalls[0][1].p_place, "본관 201호");
 });
 
 test("incomplete profile or teacher identity makes the director catalog partial", async () => {

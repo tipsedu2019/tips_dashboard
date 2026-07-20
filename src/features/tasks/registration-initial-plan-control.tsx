@@ -13,6 +13,7 @@ import {
   type RegistrationInitialAction,
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
+import { REGISTRATION_LEVEL_TEST_PLACES } from "./registration-level-test-place.ts"
 import type { RegistrationSubject } from "./registration-track-service"
 import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow"
 
@@ -111,11 +112,17 @@ export function RegistrationInitialLevelTestFields({
       </Label>
       <Label className="grid gap-1.5" aria-label="레벨테스트 장소" data-registration-focus="levelTestPlace">
         <span>장소</span>
-        <Input
+        <select
           value={draft.levelTestPlace}
           disabled={fieldsDisabled}
           onChange={(event) => onChange({ ...draft, levelTestPlace: event.target.value })}
-        />
+          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="">장소 선택</option>
+          {REGISTRATION_LEVEL_TEST_PLACES.map((place) => (
+            <option key={place} value={place}>{place}</option>
+          ))}
+        </select>
       </Label>
       <ReadonlyInitialField label="시험 시작·완료 상태" value="첫 저장 후 진행" />
       <Label className="grid gap-1.5">

@@ -195,6 +195,29 @@ test("registration create mounts the shared cumulative application with visible 
   assert.doesNotMatch(create, /onSaveHistory|이력 추가|이력 수정|이력 삭제/)
 })
 
+test("level-test places use canonical selects while visit consultations stay free text", async () => {
+  const [initialPlan, appointmentEditor] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8"),
+  ])
+  const initialLevelTest = sourceBetween(
+    initialPlan,
+    "export function RegistrationInitialLevelTestFields",
+    "export function RegistrationInitialConsultationFields",
+  )
+  const initialConsultation = sourceBetween(
+    initialPlan,
+    "export function RegistrationInitialConsultationFields",
+    "export function RegistrationInitialPlanControl",
+  )
+
+  assert.match(initialLevelTest, /data-registration-focus="levelTestPlace"[\s\S]*?<select[\s\S]*?<option value="">장소 선택<\/option>[\s\S]*?REGISTRATION_LEVEL_TEST_PLACES\.map/)
+  assert.match(initialConsultation, /data-registration-focus="visitConsultationPlace"[\s\S]*?<Input/)
+  assert.match(appointmentEditor, /kind === "level_test"[\s\S]*?<select[\s\S]*?REGISTRATION_LEVEL_TEST_PLACES\.map[\s\S]*?: \([\s\S]*?<Input/)
+  assert.match(appointmentEditor, /normalizeRegistrationLevelTestPlace\(place\) \?\? ""/)
+  assert.match(appointmentEditor, /기존 저장 장소: \{appointment\?\.place\}/)
+})
+
 test("registration create keeps the complete approved future field packet mounted in order", async () => {
   const create = await readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8")
   const initialPlan = await readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8")
