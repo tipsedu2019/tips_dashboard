@@ -347,6 +347,55 @@ test("each admission revision derives its own ordered checklist", () => {
     Object.entries(completeChecklist).find(([, complete]) => !complete)?.[0] || null,
     null,
   )
+
+  assert.deepEqual(getRegistrationAdmissionBatchChecklist({
+    admissionNoticeSent: true,
+    enrollments: [{ status: "canceled", makeeduRegistered: true }],
+    batch: { status: "completed", invoiceSentAt: "2026-07-20", paymentConfirmedAt: "2026-07-21" },
+  }), completeChecklist)
+})
+
+test("completed admission progress remains visible until a new revision is pending", async () => {
+  const model = await import("../src/features/tasks/registration-track-model.js")
+  assert.equal(typeof model.getRegistrationAdmissionProgressDisplay, "function")
+
+  const completedBatch = {
+    id: "completed-2",
+    revisionNumber: 2,
+    status: "completed",
+    invoiceSentAt: "2026-07-20",
+    paymentConfirmedAt: "2026-07-21",
+  }
+  const completedEnrollment = {
+    id: "enrollment-2",
+    admissionBatchId: completedBatch.id,
+    status: "enrolled",
+    makeeduRegistered: true,
+  }
+  assert.deepEqual(model.getRegistrationAdmissionProgressDisplay({
+    batches: [
+      { id: "completed-1", revisionNumber: 1, status: "completed" },
+      completedBatch,
+      { id: "canceled-3", revisionNumber: 3, status: "canceled" },
+    ],
+    enrollments: [completedEnrollment],
+  }), {
+    openBatch: null,
+    displayBatch: completedBatch,
+    displayEnrollments: [completedEnrollment],
+  })
+
+  assert.deepEqual(model.getRegistrationAdmissionProgressDisplay({
+    batches: [completedBatch],
+    enrollments: [
+      completedEnrollment,
+      { id: "new-draft", admissionBatchId: null, status: "planned", makeeduRegistered: false },
+    ],
+  }), {
+    openBatch: null,
+    displayBatch: null,
+    displayEnrollments: [],
+  })
 })
 
 test("planned enrollment cancellation never asks for a track destination", () => {

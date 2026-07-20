@@ -480,12 +480,37 @@ export function getRegistrationAdmissionBatchChecklist(input = {}) {
   const status = enrollmentText(batch.status)
   return {
     admissionNotice: Boolean(input.admissionNoticeSent),
-    makeedu: activeEnrollments.length > 0
-      && activeEnrollments.every((enrollment) => enrollment?.makeeduRegistered === true),
+    makeedu: status === "completed" || (activeEnrollments.length > 0
+      && activeEnrollments.every((enrollment) => enrollment?.makeeduRegistered === true)),
     invoice: Boolean(batch.invoiceSentAt) || ["invoiced", "paid", "completed"].includes(status),
     payment: Boolean(batch.paymentConfirmedAt) || ["paid", "completed"].includes(status),
     complete: status === "completed",
   }
+}
+
+export function getRegistrationAdmissionProgressDisplay(input = {}) {
+  const batches = Array.isArray(input.batches) ? input.batches : []
+  const enrollments = Array.isArray(input.enrollments) ? input.enrollments : []
+  const openBatch = batches.find((batch) => !TERMINAL_BATCH_STATUSES.has(enrollmentText(batch?.status))) || null
+  const hasPendingRevision = enrollments.some((enrollment) => (
+    enrollmentText(enrollment?.status) === "planned"
+    && !enrollmentText(enrollment?.admissionBatchId)
+    && Boolean(enrollmentText(enrollment?.id))
+  ))
+  const displayBatch = openBatch || (!hasPendingRevision
+    ? [...batches]
+      .filter((batch) => enrollmentText(batch?.status) === "completed")
+      .sort((left, right) => Number(right?.revisionNumber || 0) - Number(left?.revisionNumber || 0))[0] || null
+    : null)
+  const displayBatchId = enrollmentText(displayBatch?.id)
+  const displayEnrollments = displayBatchId
+    ? enrollments.filter((enrollment) => (
+      enrollmentText(enrollment?.admissionBatchId) === displayBatchId
+      && enrollmentText(enrollment?.status) !== "canceled"
+    ))
+    : []
+
+  return { openBatch, displayBatch, displayEnrollments }
 }
 
 export function getRegistrationEnrollmentCancellationState(input = {}) {

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import test from "node:test";
+import vm from "node:vm";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+const require = createRequire(import.meta.url);
+const ts = require("typescript");
 
 const listUrl = new URL(
   "../src/features/tasks/registration-case-list.tsx",
@@ -29,6 +36,44 @@ async function readRegistrationApplicationSource() {
 
 async function readAdmissionProgressSource() {
   return readFile(new URL("../src/features/tasks/registration-admission-progress.tsx", import.meta.url), "utf8")
+}
+
+async function loadAdmissionProgressRuntime() {
+  const fileName = new URL("../src/features/tasks/registration-admission-progress.tsx", import.meta.url)
+  const source = await readFile(fileName, "utf8")
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: fileName.pathname,
+  }).outputText
+  const runtimeModule = { exports: {} }
+  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
+    filename: fileName.pathname,
+  })
+  factory(require, runtimeModule, runtimeModule.exports)
+  return runtimeModule.exports
+}
+
+const ADMISSION_PROGRESS_LABELS = [
+  "입학신청서 발송",
+  "메이크에듀 등록(수업, 교재)",
+  "청구서 발송",
+  "수납 완료 확인",
+  "등록 완료",
+]
+
+function admissionProgressSteps(checklist) {
+  return [
+    { key: "admissionNotice", label: ADMISSION_PROGRESS_LABELS[0], complete: checklist.admissionNotice },
+    { key: "makeedu", label: ADMISSION_PROGRESS_LABELS[1], complete: checklist.makeedu },
+    { key: "invoice", label: ADMISSION_PROGRESS_LABELS[2], complete: checklist.invoice },
+    { key: "payment", label: ADMISSION_PROGRESS_LABELS[3], complete: checklist.payment },
+    { key: "complete", label: ADMISSION_PROGRESS_LABELS[4], complete: checklist.complete },
+  ]
 }
 
 function sourceBetween(source, startMarker, endMarker) {
@@ -1328,7 +1373,8 @@ test("create and saved admission sections share one ordered five-step progress l
   ]
 
   assert.equal((progress.match(/<ol aria-label="입학 처리 진행"/g) || []).length, 1)
-  assert.match(progress, /steps: readonly \[RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep\]/)
+  assert.match(progress, /export type RegistrationAdmissionProgressSteps = readonly \[[\s\S]*?RegistrationAdmissionProgressStep<"admissionNotice">,[\s\S]*?RegistrationAdmissionProgressStep<"makeedu">,[\s\S]*?RegistrationAdmissionProgressStep<"invoice">,[\s\S]*?RegistrationAdmissionProgressStep<"payment">,[\s\S]*?RegistrationAdmissionProgressStep<"complete">,[\s\S]*?\]/)
+  assert.match(progress, /steps: RegistrationAdmissionProgressSteps/)
   assert.match(progress, /const currentIndex = steps\.findIndex\(\(step\) => !step\.complete\)/)
   assert.match(progress, /aria-current=\{index === currentIndex \? "step" : undefined\}/)
   assert.match(progress, /data-registration-admission-locked=\{step\.locked \? "true" : undefined\}/)
@@ -1340,6 +1386,73 @@ test("create and saved admission sections share one ordered five-step progress l
     assert.ok(create.includes(`label: "${label}"`), `create: ${label}`)
     assert.ok(enrollment.includes(`label: "${label}"`), `saved: ${label}`)
   }
+})
+
+test("admission progress renders one semantic ordered list with runtime current and completion states", async () => {
+  const { RegistrationAdmissionProgress } = await loadAdmissionProgressRuntime()
+  const html = renderToStaticMarkup(createElement(RegistrationAdmissionProgress, {
+    steps: admissionProgressSteps({
+      admissionNotice: true,
+      makeedu: false,
+      invoice: false,
+      payment: false,
+      complete: false,
+    }),
+  }))
+  const rows = html.match(/<li\b[\s\S]*?<\/li>/g) || []
+
+  assert.equal((html.match(/<ol\b/g) || []).length, 1)
+  assert.match(html, /<ol aria-label="입학 처리 진행"/)
+  assert.equal(rows.length, 5)
+  let previousLabelIndex = -1
+  for (const label of ADMISSION_PROGRESS_LABELS) {
+    const labelIndex = html.indexOf(label)
+    assert.ok(labelIndex > previousLabelIndex, `${label} remains in its ordered position`)
+    previousLabelIndex = labelIndex
+  }
+  assert.equal((html.match(/aria-current="step"/g) || []).length, 1)
+  assert.doesNotMatch(rows[0], /aria-current="step"/)
+  assert.match(rows[0], /data-registration-admission-state="complete"[\s\S]*?lucide-check[\s\S]*?완료/)
+  assert.match(rows[1], /aria-current="step"[\s\S]*?2\. 메이크에듀 등록\(수업, 교재\)[\s\S]*?현재/)
+})
+
+test("a completed saved admission case renders five complete rows and no current item", async () => {
+  const [{ RegistrationAdmissionProgress }, model] = await Promise.all([
+    loadAdmissionProgressRuntime(),
+    import("../src/features/tasks/registration-track-model.js"),
+  ])
+  assert.equal(typeof model.getRegistrationAdmissionProgressDisplay, "function")
+
+  const completedBatch = {
+    id: "completed-batch",
+    revisionNumber: 2,
+    status: "completed",
+    invoiceSentAt: "2026-07-20",
+    paymentConfirmedAt: "2026-07-21",
+  }
+  const display = model.getRegistrationAdmissionProgressDisplay({
+    batches: [completedBatch],
+    enrollments: [{
+      id: "completed-enrollment",
+      admissionBatchId: completedBatch.id,
+      status: "canceled",
+      makeeduRegistered: true,
+    }],
+  })
+  const checklist = model.getRegistrationAdmissionBatchChecklist({
+    admissionNoticeSent: true,
+    enrollments: display.displayEnrollments,
+    batch: display.displayBatch,
+  })
+  const html = renderToStaticMarkup(createElement(RegistrationAdmissionProgress, {
+    steps: admissionProgressSteps(checklist),
+  }))
+
+  assert.equal(display.openBatch, null)
+  assert.equal(display.displayBatch.id, completedBatch.id)
+  assert.equal((html.match(/<li\b/g) || []).length, 5)
+  assert.equal((html.match(/data-registration-admission-state="complete"/g) || []).length, 5)
+  assert.equal((html.match(/aria-current="step"/g) || []).length, 0)
 })
 
 test("ordered admission steps retain explicit message reconciliation and batch RPC controls", async () => {
@@ -1358,6 +1471,9 @@ test("ordered admission steps retain explicit message reconciliation and batch R
   assert.equal((panel.match(/onCheckAdmissionMessage\(\{/g) || []).length, 1)
   assert.equal((panel.match(/onReconcileAdmissionMessage\(\{/g) || []).length, 2)
   assert.equal((panel.match(/onReleaseAdmissionMessageRetry\(\{/g) || []).length, 1)
+  assert.match(panel, /openBatch && permissions\.canManage \? <Button[\s\S]*?setMakeedu\(enrollment\)/)
+  assert.equal((panel.match(/content: openBatch && permissions\.canManage \? \(/g) || []).length, 3)
+  assert.match(panel, /\{openBatch \? \([\s\S]*?입학 처리 취소/)
   assert.match(panel, /disabled=\{!admissionNoticeSent \|\| activeSelectedEnrollmentIds\.length === 0 \|\| !selectedEnrollmentsHaveCompleteSchedules \|\| Boolean\(busyAction\) \|\| batchRefreshPending\}/)
   assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.makeedu \|\| checklist\.invoice \|\| Boolean\(busyAction\)\}/)
   assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.invoice \|\| checklist\.payment \|\| Boolean\(busyAction\)\}/)

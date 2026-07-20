@@ -1,8 +1,10 @@
 import type { ReactNode } from "react"
 import { Check, Circle, CircleDot } from "lucide-react"
 
-export type RegistrationAdmissionProgressStep = {
-  key: "admissionNotice" | "makeedu" | "invoice" | "payment" | "complete"
+export type RegistrationAdmissionProgressKey = "admissionNotice" | "makeedu" | "invoice" | "payment" | "complete"
+
+export type RegistrationAdmissionProgressStep<TKey extends RegistrationAdmissionProgressKey = RegistrationAdmissionProgressKey> = {
+  key: TKey
   label: string
   complete: boolean
   locked?: boolean
@@ -10,17 +12,17 @@ export type RegistrationAdmissionProgressStep = {
 }
 
 export type RegistrationAdmissionProgressSteps = readonly [
-  RegistrationAdmissionProgressStep,
-  RegistrationAdmissionProgressStep,
-  RegistrationAdmissionProgressStep,
-  RegistrationAdmissionProgressStep,
-  RegistrationAdmissionProgressStep,
+  RegistrationAdmissionProgressStep<"admissionNotice">,
+  RegistrationAdmissionProgressStep<"makeedu">,
+  RegistrationAdmissionProgressStep<"invoice">,
+  RegistrationAdmissionProgressStep<"payment">,
+  RegistrationAdmissionProgressStep<"complete">,
 ]
 
 export function RegistrationAdmissionProgress({
   steps,
 }: {
-  steps: readonly [RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep]
+  steps: RegistrationAdmissionProgressSteps
 }) {
   const currentIndex = steps.findIndex((step) => !step.complete)
 

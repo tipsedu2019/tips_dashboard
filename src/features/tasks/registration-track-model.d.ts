@@ -286,6 +286,26 @@ export function getRegistrationAdmissionBatchChecklist(input?: {
   complete: boolean
 }
 
+export function getRegistrationAdmissionProgressDisplay<
+  TBatch extends {
+    id?: string | null
+    revisionNumber?: number | null
+    status?: "draft" | "invoiced" | "paid" | "completed" | "canceled" | null
+  },
+  TEnrollment extends {
+    id?: string | null
+    admissionBatchId?: string | null
+    status?: "planned" | "waitlisted" | "enrolled" | "canceled" | null
+  },
+>(input?: {
+  batches?: readonly TBatch[]
+  enrollments?: readonly TEnrollment[]
+}): {
+  openBatch: TBatch | null
+  displayBatch: TBatch | null
+  displayEnrollments: TEnrollment[]
+}
+
 type RegistrationEnrollmentCancellationSummary = {
   id?: string | null
   trackId?: string | null

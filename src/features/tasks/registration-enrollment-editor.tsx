@@ -26,6 +26,7 @@ import {
   getRegistrationAdmissionApplicationState,
   getRegistrationAdmissionBatchCancellationGroups,
   getRegistrationAdmissionBatchChecklist,
+  getRegistrationAdmissionProgressDisplay,
   getRegistrationAdmissionRecoveryDelayMs,
   getRegistrationEnrollmentBlockers,
   getRegistrationEnrollmentCancellationState,
@@ -885,13 +886,14 @@ export function RegistrationAdmissionPanel({
   const admissionSectionRef = useRef<HTMLElement | null>(null)
   const trackById = useMemo(() => new Map(tracks.map((track) => [track.id, track])), [tracks])
   const classById = useMemo(() => new Map(classes.map((classItem) => [classItem.id, classItem])), [classes])
-  const openBatch = batches.find((batch) => !["completed", "canceled"].includes(batch.status)) || null
-  const currentBatchEnrollments = openBatch
-    ? enrollments.filter((enrollment) => enrollment.admissionBatchId === openBatch.id && enrollment.status !== "canceled")
-    : []
   const unbatchedPlannedEnrollments = enrollments.filter((enrollment) => (
     enrollment.status === "planned" && !enrollment.admissionBatchId && Boolean(enrollment.id)
   ))
+  const {
+    openBatch,
+    displayBatch,
+    displayEnrollments: currentBatchEnrollments,
+  } = getRegistrationAdmissionProgressDisplay({ batches, enrollments })
   const activeSelectedEnrollmentIds = getRegistrationSelectedAdmissionEnrollmentIds({
     selectedEnrollmentIds,
     enrollments: unbatchedPlannedEnrollments,
@@ -917,7 +919,7 @@ export function RegistrationAdmissionPanel({
   const checklist = getRegistrationAdmissionBatchChecklist({
     admissionNoticeSent,
     enrollments: currentBatchEnrollments,
-    batch: openBatch,
+    batch: displayBatch,
   })
   const messageRecoveryAvailable = useAdmissionRecoveryAvailable(admissionApplicationMessageUpdatedAt)
   const messageDirty = !messageRefreshPending && (evidenceText !== "{}" || Boolean(messageReason))
@@ -1184,7 +1186,7 @@ export function RegistrationAdmissionPanel({
       content: (
         <div className="grid gap-2">
           {batchRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
-          {!openBatch ? (
+          {!displayBatch ? (
             <div data-registration-action-owner="admission-start" className="grid gap-2">
               {unbatchedPlannedEnrollments.length > 0 ? unbatchedPlannedEnrollments.map((enrollment) => {
                 const track = trackById.get(enrollment.trackId)
@@ -1215,7 +1217,7 @@ export function RegistrationAdmissionPanel({
               <div key={enrollment.id} className="grid gap-2 rounded-md border px-3 py-2 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
                 <Badge variant="outline">{track?.subject || "과목"}</Badge>
                 <span className="truncate">{classItem?.label || enrollment.classId}</span>
-                {permissions.canManage ? <Button type="button" aria-label={`${track?.subject || "과목"} ${enrollment.makeeduRegistered ? "메이크에듀 등록됨" : "메이크에듀 등록"}`} size="sm" variant={enrollment.makeeduRegistered ? "default" : "outline"} onClick={() => void setMakeedu(enrollment)} disabled={batchRefreshPending || Boolean(busyAction) || openBatch.status !== "draft"}>{enrollment.makeeduRegistered ? "등록됨" : "메이크에듀 등록"}</Button> : <span>{enrollment.makeeduRegistered ? "등록됨" : "대기"}</span>}
+                {openBatch && permissions.canManage ? <Button type="button" aria-label={`${track?.subject || "과목"} ${enrollment.makeeduRegistered ? "메이크에듀 등록됨" : "메이크에듀 등록"}`} size="sm" variant={enrollment.makeeduRegistered ? "default" : "outline"} onClick={() => void setMakeedu(enrollment)} disabled={batchRefreshPending || Boolean(busyAction) || openBatch.status !== "draft"}>{enrollment.makeeduRegistered ? "등록됨" : "메이크에듀 등록"}</Button> : <span>{enrollment.makeeduRegistered ? "등록됨" : "대기"}</span>}
               </div>
             )
           })}
@@ -1226,28 +1228,28 @@ export function RegistrationAdmissionPanel({
       key: "invoice",
       label: "청구서 발송",
       complete: checklist.invoice,
-      locked: !openBatch,
-      content: openBatch ? permissions.canManage ? (
+      locked: !displayBatch,
+      content: openBatch && permissions.canManage ? (
         <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={batchRefreshPending || !checklist.makeedu || checklist.invoice || Boolean(busyAction)}>3. 청구서 발송</Button>
-      ) : <span className="text-sm text-muted-foreground">{checklist.invoice ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
+      ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.invoice ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
     },
     {
       key: "payment",
       label: "수납 완료 확인",
       complete: checklist.payment,
-      locked: !openBatch,
-      content: openBatch ? permissions.canManage ? (
+      locked: !displayBatch,
+      content: openBatch && permissions.canManage ? (
         <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={batchRefreshPending || !checklist.invoice || checklist.payment || Boolean(busyAction)}>4. 수납 완료 확인</Button>
-      ) : <span className="text-sm text-muted-foreground">{checklist.payment ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
+      ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.payment ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
     },
     {
       key: "complete",
       label: "등록 완료",
       complete: checklist.complete,
-      locked: !openBatch,
-      content: openBatch ? permissions.canManage ? (
+      locked: !displayBatch,
+      content: openBatch && permissions.canManage ? (
         <Button type="button" onClick={() => void completeBatch()} disabled={batchRefreshPending || !checklist.payment || checklist.complete || Boolean(busyAction)}>5. 등록 완료</Button>
-      ) : <span className="text-sm text-muted-foreground">{checklist.complete ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
+      ) : displayBatch ? <span className="text-sm text-muted-foreground">{checklist.complete ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
     },
   ]
 
@@ -1255,7 +1257,7 @@ export function RegistrationAdmissionPanel({
     <section ref={admissionSectionRef} className="grid gap-3 rounded-md border p-3" aria-label="입학 처리">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">입학 처리</h3>
-        <Badge variant={openBatch ? "default" : "outline"}>{openBatch ? `${openBatch.revisionNumber}차 처리` : "대상 선택"}</Badge>
+        <Badge variant={openBatch ? "default" : "outline"}>{displayBatch ? `${displayBatch.revisionNumber}차 처리` : "대상 선택"}</Badge>
       </div>
 
       <div role="group" aria-label={permissions.canManage ? undefined : "읽기 전용 입학 처리 상태"}>
