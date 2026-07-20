@@ -9491,7 +9491,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
-    if (type === "registration") void ensureRegistrationOptions()
+    if (type === "registration") void ensureRegistrationOptions(true)
     const defaultAssigneeId = currentUserId || ""
     const defaultAssigneeTeam = profileTeamById.get(defaultAssigneeId) || ""
     const defaultDueAt = taskFocus === "today" ? dueTodayValue : ""
@@ -9575,7 +9575,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ])
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
-    if (task.type === "registration") void ensureRegistrationOptions()
+    if (task.type === "registration") void ensureRegistrationOptions(true)
     const inferredCompletionIntent = completionIntent || getCompletionIntentForBlockedEdit(task, blockers)
     const shouldDeferWordRetestRetryBlockers = inferredCompletionIntent?.kind === "word_retest_retry"
     const nextForm = applyFormCompletionIntent(formFromTask(task), inferredCompletionIntent)
@@ -9785,7 +9785,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     try {
       const [detail] = await Promise.all([
         loadRegistrationCaseForWorkspace(taskId),
-        canManageRegistrationWorkflow ? ensureRegistrationOptions() : Promise.resolve(),
+        canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
       ])
       if (registrationTrackSelectionRef.current !== selectionKey) return null
       const track = detail.tracks.find((item) => item.id === trackId)
@@ -9875,7 +9875,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     try {
       const [detail] = await Promise.all([
         loadRegistrationCaseForWorkspace(taskId),
-        canManageRegistrationWorkflow ? ensureRegistrationOptions() : Promise.resolve(),
+        canManageRegistrationWorkflow ? ensureRegistrationOptions(true) : Promise.resolve(),
       ])
       if (registrationTrackSelectionRef.current !== selectionKey) return null
       const appointmentFocus = resolveRegistrationAppointmentFocus(detail, appointmentId, preferredTrackId)

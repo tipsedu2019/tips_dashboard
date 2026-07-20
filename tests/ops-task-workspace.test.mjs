@@ -1282,10 +1282,16 @@ test("registration list renders core data without starting option reads until a 
     "viewerId: currentUserId",
     "mergeOpsTaskWorkspaceOptionData(current, enrichmentData)",
     "workspaceLoadGenerationRef.current !== loadGeneration",
-    "if (type === \"registration\") void ensureRegistrationOptions()",
-    "if (task.type === \"registration\") void ensureRegistrationOptions()",
+    "if (type === \"registration\") void ensureRegistrationOptions(true)",
+    "if (task.type === \"registration\") void ensureRegistrationOptions(true)",
   ]);
   assert.doesNotMatch(reloadSource, /loadOpsTaskWorkspaceOptionData/);
+});
+
+test("registration entry points force-refresh school options", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  assert.equal((workspaceSource.match(/ensureRegistrationOptions\(true\)/g) || []).length >= 4, true);
 });
 
 test("registration alone uses the application list while neighboring operation tables stay wired", async () => {

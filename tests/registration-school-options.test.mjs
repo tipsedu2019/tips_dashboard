@@ -46,3 +46,13 @@ test("school choices are grade-scoped, sorted, and preserve only the current leg
     ],
   )
 })
+
+test("elementary 기타 remains an available choice for 초1", () => {
+  assert.deepEqual(
+    schoolOptions.getRegistrationSchoolChoices({
+      schools: [{ id: "other", name: "기타", category: "elementary", sortOrder: 1 }],
+      grade: "초1",
+    }),
+    [{ value: "기타", label: "기타", legacy: false }],
+  )
+})
