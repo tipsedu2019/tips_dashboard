@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const verifierUrl = new URL("../scripts/verify-ops-task-browser-workflow.mjs", import.meta.url)
+const fixtureUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
+const fixtureRuntimeUrl = new URL("../src/features/tasks/registration-track-fixture-runtime.ts", import.meta.url)
 
 function registrationVerifier(source) {
   const start = source.indexOf("async function verifyRegistrationSubjectTrackFixture")
@@ -79,7 +81,117 @@ test("history popover verifies content, focus return, and isolated Escape behavi
   assert.match(verifier, /keyboard\.press\("Escape"\)/)
   assert.match(verifier, /scrollTop/)
   assert.match(verifier, /historyButton\.focus/)
+  assert.match(verifier, /scrollBeforeHistoryOpen/)
+  assert.match(verifier, /if \(scrollBeforeHistoryOpen <= 0\)/)
+  assert.match(verifier, /historyPortalEscapedApplication/)
+  assert.match(verifier, /scrollAfterEscape !== scrollBeforeHistoryOpen/)
+  const positiveScroll = verifier.indexOf("const scrollBeforeHistoryOpen")
+  const finalHistoryOpen = verifier.indexOf("await historyButton.click()", positiveScroll)
+  assert.ok(positiveScroll >= 0 && finalHistoryOpen > positiveScroll, "positive dialog scroll must be established before history opens")
   assert.doesNotMatch(verifier, /locator\('\[data-registration-application-section="history"\]'/)
+})
+
+test("every fixture navigation checks a complete state digest against the first baseline", async () => {
+  const [source, fixtureSource, runtimeSource] = await Promise.all([
+    readFile(verifierUrl, "utf8"),
+    readFile(fixtureUrl, "utf8"),
+    readFile(fixtureRuntimeUrl, "utf8"),
+  ])
+  const verifier = registrationVerifier(source)
+  const recordStart = verifier.indexOf("async function recordFixtureSafetySnapshot")
+  const navigateStart = verifier.indexOf("async function navigateRegistrationFixture")
+  const record = verifier.slice(recordStart, navigateStart)
+  const navigateEnd = verifier.indexOf("async function assertNoHorizontalOverflow", navigateStart)
+  const navigate = verifier.slice(navigateStart, navigateEnd)
+
+  assert.match(runtimeSource, /stateDigest: string/)
+  assert.match(fixtureSource, /stateDigest: getRegistrationSubjectTrackFixtureStateDigest\(state\)/)
+  assert.match(verifier, /let fixtureStateBaselineDigest = null/)
+  assert.match(record, /snapshot\.stateDigest/)
+  assert.match(record, /fixtureStateBaselineDigest === null/)
+  assert.match(record, /snapshot\.stateDigest !== fixtureStateBaselineDigest/)
+  assert.match(record, /stage/)
+  assert.ok(navigate.indexOf("recordFixtureSafetySnapshot") < navigate.indexOf("page.goto"), "baseline assertion must run before every navigation")
+  assert.doesNotMatch(verifier.slice(0, navigateStart) + verifier.slice(navigateEnd), /page\.goto\(/)
+})
+
+test("read-only coverage reopens calendar and list cases without persistent actions", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+
+  const calendarStart = verifier.indexOf("async function openRegistrationSubjectTrackFixtureCalendarItem")
+  const calendarEnd = verifier.indexOf("async function openFixtureCaseFromList", calendarStart)
+  assert.ok(calendarStart >= 0 && calendarEnd > calendarStart, "calendar and list helpers must execute")
+  const calendar = verifier.slice(calendarStart, calendarEnd)
+  assert.match(calendar, /data-registration-calendar-item/)
+  assert.match(calendar, /calendarItem\.click\(\)/)
+  assert.match(calendar, /waitForURL/)
+  assert.match(calendar, /data-registration-appointment-focus/)
+  assert.match(calendar, /registration-application-level_test/)
+  assert.match(verifier, /await openRegistrationSubjectTrackFixtureCalendarItem\(\{[\s\S]*?fixture-appointment-dual-test/)
+
+  const listStart = verifier.indexOf("async function openFixtureCaseFromList")
+  const listEnd = verifier.indexOf("async function assertPrecedes", listStart)
+  const list = verifier.slice(listStart, listEnd)
+  assert.match(list, /getByRole\("tab"/)
+  assert.match(list, /getByRole\("listitem"/)
+  assert.match(list, /getByRole\("row"\)/)
+  assert.match(list, /detailButton\.click\(\)/)
+  assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "김예린"[\s\S]*?viewLabel: "상담"/)
+  assert.match(verifier, /openFixtureCaseFromList\(\{ studentName: "서지안"[\s\S]*?viewLabel: "완료"/)
+
+  assert.doesNotMatch(verifier, /saveCreateButton|createdResult|예약 저장[^\n]*click\(|입학 처리 시작[^\n]*click\(/)
+})
+
+test("read-only edge scenarios keep permissions migration terminal and dirty-close coverage", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+
+  for (const marker of [
+    "fixture-task-partial-registration",
+    "읽기 전용 입학 처리 상태",
+    'fixtureRole: "assistant"',
+    "fixture-task-migration-review",
+    "과목 분리 확인 필요",
+    "fixture-task-cross-stage",
+    "fixture-task-all-terminal",
+    "등록 완료",
+    "미등록 완료",
+  ]) {
+    assert.ok(verifier.includes(marker), `restored read-only verifier is missing ${marker}`)
+  }
+  assert.match(verifier, /readOnlyAdmissionDialog[\s\S]*?getByRole\("button", \{ name: "입학 처리 시작" \}\)\.count\(\)/)
+  assert.match(verifier, /migrationDialog[\s\S]*?section\[aria-label="영어 문의 처리"\][\s\S]*?count\(\)/)
+  assert.match(verifier, /consultationTaskId[\s\S]*?levelTestTaskId[\s\S]*?fixture-task-cross-stage/)
+  assert.match(verifier, /unsavedInquiryRequestNote[\s\S]*?fill\(unsavedInquiryRequestNote\)[\s\S]*?keyboard\.press\("Escape"\)[\s\S]*?입력한 내용을 버릴까요\?[\s\S]*?계속 작성[\s\S]*?저장하지 않고 닫기/)
+  assert.doesNotMatch(verifier, /phoneConsultationSave|공통 정보 저장[^\n]*click\(/)
+})
+
+test("option recovery and accessibility checks execute without saving", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+
+  assert.match(verifier, /async function setNextFault/)
+  assert.match(verifier, /kind: "option_data_once"/)
+  assert.match(verifier, /optionFaultHost\.locator\('\[data-registration-focus="subject"\] button\[aria-pressed\]'/)
+  assert.match(verifier, /optionFaultRetry\.click\(\)/)
+  assert.match(verifier, /optionFaultDirector\.isEnabled\(\)/)
+  assert.match(verifier, /async function assertSubjectQualifiedAccessibleNames/)
+  assert.match(verifier, /async function assertAppointmentPlanAccessibleNames/)
+  assert.match(verifier, /async function assertAppointmentAccessibleNames/)
+  assert.match(verifier, /async function assertMobileActionDomOrder/)
+  assert.match(verifier, /async function assertNonColorWorkflowState/)
+  for (const call of [
+    "assertSubjectQualifiedAccessibleNames(detailApplicationHost)",
+    "assertAppointmentPlanAccessibleNames(detailApplicationHost)",
+    "assertAppointmentAccessibleNames(detailApplicationHost)",
+    "assertMobileActionDomOrder(admissionApplicationHost)",
+    'assertNonColorWorkflowState(optionFaultHost, "locked")',
+    'assertNonColorWorkflowState(optionFaultHost, "failed")',
+  ]) {
+    assert.ok(verifier.includes(call), `restored verifier does not execute ${call}`)
+  }
+  assert.doesNotMatch(verifier, /optionFaultHost[\s\S]*?getByRole\("checkbox"/)
 })
 
 test("fixture verification remains provider-zero and excludes every send or retry mutation", async () => {

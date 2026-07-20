@@ -195,6 +195,8 @@ test("subject-track fixture verification exercises the refined no-save applicati
 
   assertIncludesAll(fixtureVerifier, [
     "openRegistrationSubjectTrackFixtureCase",
+    "openRegistrationSubjectTrackFixtureCalendarItem",
+    "openFixtureCaseFromList",
     "assertNoHorizontalOverflow",
     "fixture-task-dual-test",
     "fixture-track-dual-english",
@@ -208,6 +210,19 @@ test("subject-track fixture verification exercises the refined no-save applicati
     "fixture-task-multiple-classes",
     "수업 추가",
     "입학 처리 시작",
+    "fixture-task-partial-registration",
+    "읽기 전용 입학 처리 상태",
+    "fixture-task-migration-review",
+    "과목 분리 확인 필요",
+    "fixture-task-cross-stage",
+    "fixture-task-all-terminal",
+    "저장하지 않고 닫기",
+    "option_data_once",
+    "assertSubjectQualifiedAccessibleNames",
+    "assertAppointmentPlanAccessibleNames",
+    "assertAppointmentAccessibleNames",
+    "assertMobileActionDomOrder",
+    "assertNonColorWorkflowState",
   ])
   assert.match(fixtureVerifier, /button\[aria-pressed\]/)
   assert.match(fixtureVerifier, /scrollWidth[\s\S]*?viewportWidth/)
@@ -254,8 +269,9 @@ test("registration provider interception and snapshots enforce a provider-zero n
   ])
   assert.match(fixtureVerifier, /route\.request\(\)\.method\(\) !== "POST"[\s\S]*?route\.continue\(\)/)
   assert.match(fixtureVerifier, /assertRegistrationFixtureSafetySnapshot/)
-  assert.match(fixtureVerifier, /initialSnapshot[\s\S]*?finalFixtureSnapshot/)
-  assert.match(fixtureVerifier, /JSON\.stringify\(finalFixtureSnapshot\.counts\)[\s\S]*?JSON\.stringify\(initialSnapshot\.counts\)/)
+  assert.match(fixtureVerifier, /let fixtureStateBaselineDigest = null/)
+  assert.match(fixtureVerifier, /snapshot\.stateDigest !== fixtureStateBaselineDigest/)
+  assert.match(fixtureVerifier, /recordFixtureSafetySnapshot\(`pre-navigation fixture snapshot: \$\{stage\}`\)[\s\S]*?page\.goto/)
   assert.match(fixtureVerifier, /assertNoInterceptedProviderRequests\("no-send registration application verification"\)/)
   assert.doesNotMatch(fixtureVerifier, /createdResult|saveCreateButton|notification retry[^\n]*click\(/i)
 })

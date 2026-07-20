@@ -216,6 +216,20 @@ export type RegistrationSubjectTrackFixtureRuntime = {
   replaceState: (state: RegistrationSubjectTrackFixtureState) => void
 }
 
+export function getRegistrationSubjectTrackFixtureStateDigest(
+  state: RegistrationSubjectTrackFixtureState,
+) {
+  const serialized = JSON.stringify(state)
+  let primary = 0x811c9dc5
+  let secondary = 0x9e3779b9
+  for (let index = 0; index < serialized.length; index += 1) {
+    const code = serialized.charCodeAt(index)
+    primary = Math.imul(primary ^ code, 0x01000193) >>> 0
+    secondary = Math.imul(secondary ^ (code + index), 0x85ebca6b) >>> 0
+  }
+  return `${serialized.length.toString(16)}-${primary.toString(16).padStart(8, "0")}-${secondary.toString(16).padStart(8, "0")}`
+}
+
 export function createRegistrationSubjectTrackFixtureAdapter(
   runtime: RegistrationSubjectTrackFixtureRuntime,
 ): RegistrationSubjectTrackFixtureAdapter {
@@ -248,6 +262,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
     if (!lastCreate) {
       return {
         counts: debugCounts(state),
+        stateDigest: getRegistrationSubjectTrackFixtureStateDigest(state),
         lastCreate: null,
         notificationTargetHistory: clone(state.notificationTargetHistory),
         notificationJobs: clone(state.notificationJobs),
@@ -256,6 +271,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
     const taskId = String((lastCreate.result as { taskId?: unknown } | null)?.taskId || "")
     return {
       counts: debugCounts(state),
+      stateDigest: getRegistrationSubjectTrackFixtureStateDigest(state),
       notificationTargetHistory: clone(state.notificationTargetHistory),
       notificationJobs: clone(state.notificationJobs),
       lastCreate: {

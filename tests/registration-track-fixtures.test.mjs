@@ -1406,6 +1406,41 @@ test("fixture option fault is scoped to one option load and never records an ext
   assert.equal(state.externalCallLedger.length, 0)
 })
 
+test("fixture state digest detects a same-count canonical mutation before navigation", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const taskId = "fixture-task-dual-test"
+  const before = plain(adapter.debugSnapshot())
+
+  adapter.debugSetNextFault({
+    kind: "common_revision_conflict_once",
+    taskId,
+    canonicalRequestNote: "navigation ledger must detect this same-count mutation",
+  })
+  await assert.rejects(adapter.executeAction("updateRegistrationCaseCommon", {
+    taskId,
+    expectedCommonRevision: 1,
+    studentName: state.caseDetails[taskId].task.studentName,
+    campus: "본관",
+    priority: "normal",
+    schoolGrade: "고1",
+    schoolName: "중앙고",
+    parentPhone: "01012345678",
+    studentPhone: "01098765432",
+    inquiryAt: "2026-07-12T09:00:00+09:00",
+    requestNote: "local attempted value",
+    requestKey: "fixture-state-digest-conflict",
+  }), /registration_common_revision_conflict/)
+  const after = plain(adapter.debugSnapshot())
+
+  assert.deepEqual(after.counts, before.counts, "the mutation must not rely on count changes")
+  assert.notEqual(after.stateDigest, before.stateDigest)
+})
+
 test("fixture common conflict updates canonical state once and remains scoped to its task", async () => {
   const fixture = await loadFixtureModule()
   let state = fixture.createRegistrationSubjectTrackFixtureState()

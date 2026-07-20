@@ -22,6 +22,7 @@ export type RegistrationSubjectTrackFixtureDebugCounts = {
 
 export type RegistrationSubjectTrackFixtureDebugSnapshot = {
   counts: RegistrationSubjectTrackFixtureDebugCounts
+  stateDigest: string
   lastCreate: {
     command: {
       type: "createRegistrationCaseWithInitialWorkflow"
