@@ -74,6 +74,13 @@ const ACTION_ASSIGNEE_STATUSES = new Set(["requested", "confirmed", "in_progress
 const ACTION_REQUESTER_STATUSES = new Set(["review_requested"]);
 const WORD_RETEST_ASSISTANT_ACTION_STATUSES = new Set(["requested", "confirmed", "in_progress", "on_hold"]);
 const WORD_RETEST_TEACHER_ACTION_STATUSES = new Set(["review_requested"]);
+const WORD_RETEST_SCORE_ENTRY_STATUSES = new Set(["requested", "confirmed", "in_progress", "on_hold"]);
+const WORD_RETEST_SCORE_FIELDS = [
+  ["firstScore", "first_score"],
+  ["secondScore", "second_score"],
+  ["thirdScore", "third_score"],
+  ["scoreOutOf100", "score_out_of_100"],
+];
 
 export const OPS_TASK_WORKFLOW_STATUS_ORDER = [
   "requested",
@@ -152,6 +159,51 @@ export function isOpsTaskInUserSent(task = {}, context = {}) {
 
 function getWordRetestDetail(task = {}) {
   return task.wordRetest || task.word_retest || {};
+}
+
+function wordRetestScoreValue(detail = {}, [camelKey, snakeKey]) {
+  const value = detail[camelKey] ?? detail[snakeKey];
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function hasNewOrChangedWordRetestScore(currentDetail = {}, inputDetail = {}) {
+  return WORD_RETEST_SCORE_FIELDS.some((field) => {
+    const nextValue = wordRetestScoreValue(inputDetail, field);
+    return nextValue !== "" && nextValue !== wordRetestScoreValue(currentDetail, field);
+  });
+}
+
+export function getWordRetestScoreSavePlan(task = {}, input = {}) {
+  if (text(task.type) !== "word_retest" || text(input.type) !== "word_retest") {
+    return { requiresStartTransition: false, input };
+  }
+
+  const currentStatus = text(task.status || "requested");
+  const inputStatus = text(input.status || currentStatus);
+  const currentDetail = getWordRetestDetail(task);
+  const inputDetail = getWordRetestDetail(input);
+  const currentRetestStatus = text(currentDetail.retestStatus || currentDetail.retest_status || "not_started");
+  const inputRetestStatus = text(inputDetail.retestStatus || inputDetail.retest_status || currentRetestStatus);
+  const scoreCanStart = hasNewOrChangedWordRetestScore(currentDetail, inputDetail)
+    && WORD_RETEST_SCORE_ENTRY_STATUSES.has(currentStatus)
+    && WORD_RETEST_SCORE_ENTRY_STATUSES.has(inputStatus)
+    && !["absent", "done"].includes(currentRetestStatus)
+    && !["absent", "done"].includes(inputRetestStatus);
+
+  if (!scoreCanStart) return { requiresStartTransition: false, input };
+
+  return {
+    requiresStartTransition: currentStatus !== "in_progress" || currentRetestStatus !== "in_progress",
+    input: {
+      ...input,
+      status: "in_progress",
+      completedAt: "",
+      wordRetest: {
+        ...inputDetail,
+        retestStatus: "in_progress",
+      },
+    },
+  };
 }
 
 function matchesWordRetestTeacher(task = {}, context = {}) {

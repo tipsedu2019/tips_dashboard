@@ -5,6 +5,7 @@ import {
   REGISTRATION_PIPELINE_STATUSES,
   getOpsTaskCalendarItems,
   getTaskTypeLabel,
+  getWordRetestScoreSavePlan,
   summarizeOpsTasks,
 } from "./ops-task-model"
 import {
@@ -4115,27 +4116,49 @@ export async function updateOpsTask(
 ): Promise<OpsTaskSourceEventReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
-  const nextStatus = input.status || "requested"
   const existingTask = await loadOpsTaskById(taskId)
   if (!existingTask) throw new Error("업무 데이터를 다시 불러오세요.")
+  const scoreSavePlan = getWordRetestScoreSavePlan(existingTask, input)
+  input = scoreSavePlan.input as OpsTaskInput
+  const nextStatus = input.status || "requested"
   assertCompletedOperationStatusTransition(existingTask, nextStatus)
   assertCompletedOperationEditable(existingTask)
   assertRegistrationInquiryBaseReady(input)
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
 
+  let persistedTask = existingTask
+  let startSourceEventIds: string[] = []
+  if (scoreSavePlan.requiresStartTransition) {
+    const startResponse = await runIdempotentOpsTaskProducerRpc("transition_ops_task_status_v2", {
+      p_task_id: taskId,
+      p_status: "in_progress",
+      p_expected_updated_at: existingTask.updatedAt,
+    })
+    startSourceEventIds = producerSourceEventIds(startResponse)
+    const startedTask = await loadOpsTaskById(taskId)
+    if (
+      !startedTask
+      || startedTask.status !== "in_progress"
+      || startedTask.wordRetest?.retestStatus !== "in_progress"
+    ) {
+      throw new Error("시험 시작 상태를 다시 불러오세요.")
+    }
+    persistedTask = startedTask
+  }
+
   if (input.type === "general" || input.type === "word_retest" || input.type === "textbook") {
     const response = await runIdempotentOpsTaskProducerRpc("update_ops_task_v2", {
       p_task_id: taskId,
       p_input: buildOpsTaskProducerInput(input),
-      p_expected_updated_at: existingTask.updatedAt,
+      p_expected_updated_at: persistedTask.updatedAt,
     })
     const activityEventId = input.type === "textbook"
       ? producerActivityEventId(response)
       : undefined
     clearOpsTaskWorkspaceDataCache()
     return {
-      sourceEventIds: producerSourceEventIds(response),
+      sourceEventIds: [...startSourceEventIds, ...producerSourceEventIds(response)],
       ...(activityEventId ? { activityEventId } : {}),
     }
   }

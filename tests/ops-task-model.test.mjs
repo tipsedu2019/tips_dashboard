@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import * as opsTaskModel from "../src/features/tasks/ops-task-model.js";
 import {
   OPS_TASK_STATUSES,
   OPS_TASK_TYPES,
@@ -24,6 +25,60 @@ import {
   sortOpsTasksByWorkflowStatus,
   summarizeOpsTasks,
 } from "../src/features/tasks/ops-task-model.js";
+
+test("점수가 먼저 입력된 시작 전 단어 재시험은 시험 시작 저장 계획으로 정규화한다", () => {
+  assert.equal(
+    typeof opsTaskModel.getWordRetestScoreSavePlan,
+    "function",
+    "점수 선입력 저장 계획 함수가 필요하다",
+  );
+
+  const input = {
+    type: "word_retest",
+    status: "requested",
+    completedAt: "",
+    wordRetest: {
+      retestStatus: "not_started",
+      firstScore: "17",
+      secondScore: "",
+      thirdScore: "",
+    },
+  };
+  const plan = opsTaskModel.getWordRetestScoreSavePlan({
+    type: "word_retest",
+    status: "requested",
+    wordRetest: { retestStatus: "not_started" },
+  }, input);
+
+  assert.equal(plan.requiresStartTransition, true);
+  assert.equal(plan.input.status, "in_progress");
+  assert.equal(plan.input.wordRetest.retestStatus, "in_progress");
+  assert.equal(plan.input.wordRetest.firstScore, "17");
+});
+
+test("기존 점수만 남은 보류 재시험은 비점수 수정으로 자동 재시작하지 않는다", () => {
+  const plan = opsTaskModel.getWordRetestScoreSavePlan({
+    type: "word_retest",
+    status: "on_hold",
+    wordRetest: {
+      retestStatus: "in_progress",
+      firstScore: "17",
+      note: "수정 전",
+    },
+  }, {
+    type: "word_retest",
+    status: "on_hold",
+    wordRetest: {
+      retestStatus: "in_progress",
+      firstScore: "17",
+      note: "메모만 수정",
+    },
+  });
+
+  assert.equal(plan.requiresStartTransition, false);
+  assert.equal(plan.input.status, "on_hold");
+  assert.equal(plan.input.wordRetest.retestStatus, "in_progress");
+});
 
 test("task history pushes one list-to-detail entry and replaces internal URL changes without duplicates", () => {
   assert.equal(getOpsTaskHistoryMutation({
