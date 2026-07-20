@@ -870,9 +870,9 @@ test("detail caches are viewer-scoped, rejected reads are removed, and clear ign
   assert.equal(harness.queries.length, afterViewerOne + 18);
 });
 
-test("registration option loader starts only four reads, excludes students and inactive rows", async () => {
+test("registration option loader starts five reads, includes schools, excludes students and inactive rows", async () => {
   const { createRegistrationTrackService } = await loadFactory();
-  const gates = new Map(["profiles", "classes", "textbooks", "teacher_catalogs"].map((table) => [table, deferred()]));
+  const gates = new Map(["profiles", "classes", "textbooks", "teacher_catalogs", "academic_schools"].map((table) => [table, deferred()]));
   const rows = {
     profiles: [{ id: "director-1", name: "강부희", email: "director@test", role: "admin", login_id: "director" }],
     classes: [
@@ -884,6 +884,10 @@ test("registration option loader starts only four reads, excludes students and i
       { id: "book-2", title: "미사용", publisher: "출판사", subject: "영어", status: "미사용" },
     ],
     teacher_catalogs: [{ id: "teacher-1", name: "교사", subjects: ["영어"], is_visible: true, sort_order: 1, profile_id: "director-1", account_email: "director@test" }],
+    academic_schools: [
+      { id: "school-high-2", name: "한빛고", category: "highschool", sort_order: 2 },
+      { id: "school-high-1", name: "가람고", category: "high", sort_order: 1 },
+    ],
   };
   const harness = createClient({
     queryHandler(query) {
@@ -897,9 +901,9 @@ test("registration option loader starts only four reads, excludes students and i
 
   const load = service.loadWorkspaceOptionData({ viewerId: "viewer-1" });
   await Promise.resolve();
-  assert.equal(harness.getMaxActiveQueries(), 4);
+  assert.equal(harness.getMaxActiveQueries(), 5);
   assert.deepEqual(harness.queries.map((query) => query.table).sort(), [
-    "classes", "profiles", "teacher_catalogs", "textbooks",
+    "academic_schools", "classes", "profiles", "teacher_catalogs", "textbooks",
   ]);
   assert.ok(!harness.queries.some((query) => query.table === "students"));
   for (const query of harness.queries) {
@@ -912,8 +916,15 @@ test("registration option loader starts only four reads, excludes students and i
   assert.equal(result.students.length, 0);
   assert.deepEqual(Array.from(result.classes, (row) => row.id), ["class-1"]);
   assert.deepEqual(Array.from(result.textbooks, (row) => row.id), ["book-1"]);
+  assert.deepEqual(Array.from(result.schools, (school) => ({ ...school })), [
+    { id: "school-high-2", name: "한빛고", category: "highschool", sortOrder: 2 },
+    { id: "school-high-1", name: "가람고", category: "high", sortOrder: 1 },
+  ]);
+  assert.equal(result.schoolCatalogStatus, "authoritative");
+  assert.equal(result.schoolCatalogError, null);
+  assert.equal(harness.queries.find((query) => query.table === "academic_schools").columns, "id,name,category,sort_order");
   assert.deepEqual(measures, [{
-    name: "registration:option-summary", cacheHit: false, queryCount: 4, ok: true,
+    name: "registration:option-summary", cacheHit: false, queryCount: 5, ok: true,
   }]);
 });
 
@@ -952,8 +963,23 @@ test("option fallback is partial, option errors are explicit, and failed measure
   assert.equal(result.schemaReady, false);
   assert.match(result.error, /permission denied/);
   assert.deepEqual(deniedMeasures, [{
-    name: "registration:option-summary", cacheHit: false, queryCount: 4, ok: true,
+    name: "registration:option-summary", cacheHit: false, queryCount: 5, ok: true,
   }]);
+});
+
+test("school catalog failure does not fail required registration options", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({ queryHandler(query) {
+    if (query.table === "academic_schools") return { data: null, error: new Error("school denied") };
+    return { data: [], error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const result = await service.loadWorkspaceOptionData({ viewerId: "viewer-1" });
+  assert.equal(result.schemaReady, true);
+  assert.equal(result.error, null);
+  assert.equal(result.schoolCatalogStatus, "error");
+  assert.match(result.schoolCatalogError, /school denied/);
+  assert.deepEqual(Array.from(result.schools), []);
 });
 
 test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nullable UUIDs", async () => {

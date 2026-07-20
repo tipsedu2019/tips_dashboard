@@ -114,6 +114,15 @@ export type OpsTeacherOption = OpsLinkedOption & {
   sortOrder: number
 }
 
+export type OpsSchoolOption = {
+  id: string
+  name: string
+  category: string
+  sortOrder: number
+}
+
+export type RegistrationSchoolCatalogStatus = "authoritative" | "error"
+
 export type OpsRegistrationDetail = {
   pipelineStatus?: string
   inquiryAt?: string
@@ -286,6 +295,9 @@ export type OpsTaskWorkspaceOptionData = Pick<
   "profiles" | "students" | "classes" | "textbooks" | "teachers" | "schemaReady" | "error"
 > & {
   directorCatalogStatus?: "authoritative" | "partial" | "error"
+  schools?: OpsSchoolOption[]
+  schoolCatalogStatus?: RegistrationSchoolCatalogStatus
+  schoolCatalogError?: string | null
 }
 
 export type OpsTaskInput = {

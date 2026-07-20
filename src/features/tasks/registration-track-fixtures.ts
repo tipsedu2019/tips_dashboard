@@ -2,6 +2,7 @@ import type {
   OpsClassOption,
   OpsProfileOption,
   OpsRegistrationClassDetail,
+  OpsSchoolOption,
   OpsTask,
   OpsTaskWorkspaceData,
   OpsTeacherOption,
@@ -180,9 +181,12 @@ export type RegistrationSubjectTrackFixtureState = {
     classes: OpsClassOption[]
     textbooks: OpsTextbookOption[]
     teachers: OpsTeacherOption[]
+    schools: OpsSchoolOption[]
     schemaReady: true
     error: null
     directorCatalogStatus: "authoritative"
+    schoolCatalogStatus: "authoritative"
+    schoolCatalogError: null
   }
   caseDetails: Record<string, OpsRegistrationCaseDetail>
   classDetails: Record<string, OpsRegistrationClassDetail>
@@ -996,6 +1000,11 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     { id: "fixture-teacher-english", label: "강부희", subjects: ["영어"], profileId: "fixture-profile-english-director", accountEmail: "english-director@fixture.local", sortOrder: 1 },
     { id: "fixture-teacher-math", label: "양소윤", subjects: ["수학"], profileId: "fixture-profile-math-director", accountEmail: "math-director@fixture.local", sortOrder: 2 },
   ]
+  const schools: OpsSchoolOption[] = [
+    { id: "fixture-school-elementary", name: "새봄초", category: "elementary", sortOrder: 1 },
+    { id: "fixture-school-middle", name: "새봄중", category: "middle", sortOrder: 1 },
+    { id: "fixture-school-high", name: "새봄고", category: "high", sortOrder: 1 },
+  ]
   const caseDetails = buildFixtureCases()
   for (const detail of Object.values(caseDetails)) {
     projectFixturePhoneReadiness(detail)
@@ -1021,9 +1030,12 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
       classes: Object.values(classDetails),
       textbooks,
       teachers,
+      schools,
       schemaReady: true,
       error: null,
       directorCatalogStatus: "authoritative",
+      schoolCatalogStatus: "authoritative",
+      schoolCatalogError: null,
     },
     caseDetails,
     classDetails,

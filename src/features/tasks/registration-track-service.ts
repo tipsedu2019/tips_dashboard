@@ -18,11 +18,13 @@ import {
 import type {
   OpsClassOption,
   OpsProfileOption,
+  OpsSchoolOption,
   OpsTask,
   OpsTaskAttachment,
   OpsTaskComment,
   OpsTeacherOption,
   OpsTextbookOption,
+  RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
 import type { RegistrationInitialWorkflowPayload } from "./registration-intake-workflow"
 import {
@@ -261,6 +263,9 @@ export type OpsRegistrationWorkspaceOptionData = {
   schemaReady: boolean
   error: string | null
   directorCatalogStatus: "authoritative" | "partial" | "error"
+  schools: OpsSchoolOption[]
+  schoolCatalogStatus: RegistrationSchoolCatalogStatus
+  schoolCatalogError: string | null
 }
 
 export type RegistrationCaseCreateResponse = {
@@ -1643,7 +1648,7 @@ export function createRegistrationTrackService(
     const requestEpoch = optionEpochs.get(cacheKey) || 0
 
     const request = measure("registration:option-summary", false, async (metrics) => {
-      const [profiles, classes, textbooks, teachers] = await Promise.all([
+      const [profiles, classes, textbooks, teachers, schools] = await Promise.all([
         readWithFallback("profiles", ["id,name,email,role,login_id", "id,name"], metrics),
         readWithFallback("classes", [
           "id,name,subject,grade,teacher,room,textbook_ids,status",
@@ -1658,8 +1663,9 @@ export function createRegistrationTrackService(
           "id,name,subjects,is_visible,sort_order,profile_id,account_email",
           "id,name,subjects,is_visible,sort_order",
         ], metrics),
+        readWithFallback("academic_schools", ["id,name,category,sort_order"], metrics),
       ])
-      const errors = [profiles.error, classes.error, textbooks.error, teachers.error].filter(Boolean)
+      const requiredErrors = [profiles.error, classes.error, textbooks.error, teachers.error].filter(Boolean)
       const profileIds = new Set(profiles.rows.map((row) => text(value(row, "id"))).filter(Boolean))
       const profileIdentityComplete = profiles.rows.every((row) => (
         Boolean(text(value(row, "id")))
@@ -1727,6 +1733,12 @@ export function createRegistrationTrackService(
           sortOrder: numberValue(value(row, "sort_order", "sortOrder")),
         } satisfies OpsTeacherOption))
         .sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label, "ko"))
+      const schoolOptions = schools.rows.map((row) => ({
+        id: text(value(row, "id")),
+        name: text(value(row, "name")),
+        category: text(value(row, "category")),
+        sortOrder: numberValue(value(row, "sort_order", "sortOrder")),
+      } satisfies OpsSchoolOption))
 
       return {
         profiles: profileOptions,
@@ -1734,9 +1746,12 @@ export function createRegistrationTrackService(
         classes: classOptions,
         textbooks: textbookOptions,
         teachers: teacherOptions,
-        schemaReady: errors.length === 0,
-        error: errors.length > 0 ? errorText(errors[0]) : null,
+        schemaReady: requiredErrors.length === 0,
+        error: requiredErrors.length > 0 ? errorText(requiredErrors[0]) : null,
         directorCatalogStatus,
+        schools: schoolOptions,
+        schoolCatalogStatus: schools.error ? "error" : "authoritative",
+        schoolCatalogError: schools.error ? errorText(schools.error) : null,
       } satisfies OpsRegistrationWorkspaceOptionData
       })
       .then((result) => {

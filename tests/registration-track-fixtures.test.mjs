@@ -309,6 +309,9 @@ test("fixture option loading keeps core data catalog-free, consumes one fault, a
   assert.equal(enrichment.classes.length > 0, true)
   assert.equal(enrichment.textbooks.length > 0, true)
   assert.equal(enrichment.teachers.length > 0, true)
+  assert.deepEqual(Array.from(enrichment.schools, (school) => school.category).sort(), ["elementary", "high", "middle"])
+  assert.equal(enrichment.schoolCatalogStatus, "authoritative")
+  assert.equal(enrichment.schoolCatalogError, null)
 
   assert.equal(typeof fixture.mergeRegistrationSubjectTrackFixtureWorkspaceOptions, "function")
   const merged = fixture.mergeRegistrationSubjectTrackFixtureWorkspaceOptions(core, enrichment)
