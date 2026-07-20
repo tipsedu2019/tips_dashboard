@@ -1013,6 +1013,18 @@ test("R77 registration schedule sessions keep only active normal and makeup date
   ]);
 });
 
+test("registration start schedules include only lessons after the registration decision date", () => {
+  const sessions = getSelectableRegistrationScheduleSessions({
+    sessions: [
+      { date: "2026-07-19", sessionNumber: 1, scheduleState: "active" },
+      { date: "2026-07-20", sessionNumber: 2, scheduleState: "active" },
+      { date: "2026-07-21", sessionNumber: 3, scheduleState: "active" },
+    ],
+  }, { afterDateKey: "2026-07-20" });
+
+  assert.deepEqual(sessions.map((session) => session.value), ["2026-07-21:3"]);
+});
+
 test("R78 linked textbook default requires current class-change intent and respects saved or explicit empty choices", () => {
   const base = {
     classId: "class-b",

@@ -85,11 +85,11 @@ function sourceBetween(source, startMarker, endMarker) {
   return source.slice(start + startMarker.length, end);
 }
 
-test("registration application shell renders the five body sections once in fixed order without stage navigation", async () => {
+test("registration application shell separates waiting and registration in fixed process order", async () => {
   const shell = await readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8")
   const inquiry = await readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8")
 
-  const titles = ["문의 정보", "레벨테스트", "상담", "등록·대기 정보", "입학 처리"]
+  const titles = ["문의", "1. 레벨테스트", "2. 상담", "3. 대기", "4. 등록", "5. 입학"]
   let previous = -1
   for (const title of titles) {
     const index = shell.indexOf(title)
@@ -111,7 +111,31 @@ test("registration application shell renders the five body sections once in fixe
   assert.doesNotMatch(shell, /이전|다음|stage tabs|StageTabs/)
 })
 
-test("registration application renders subject navigation and active-track progress above inquiry", async () => {
+test("registration progress supports consultation to waiting to registration and direct registration", async () => {
+  const model = await readFile(new URL("../src/features/tasks/registration-application-model.ts", import.meta.url), "utf8")
+  assert.match(model, /"consultation",\s*"waiting",\s*"registration",\s*"admission"/)
+  assert.match(model, /waitingKind[\s\S]*?"skipped"/)
+  assert.match(model, /waiting: "대기"/)
+  assert.match(model, /registration: "등록"/)
+})
+
+test("registration start schedule is a calendar filtered after the decision date", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  assert.match(source, /<Calendar/)
+  assert.match(source, /afterDateKey: registrationDecisionDateKey/)
+  assert.match(source, /수업 시작일 선택/)
+  assert.doesNotMatch(source, /<select[\s\S]{0,500}수업일·회차 선택/)
+})
+
+test("waiting and registration summaries omit unexplained duplicate fields", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  assert.doesNotMatch(source, /valueField\("입학 처리 시작 행동"/)
+  assert.doesNotMatch(source, /valueField\("문의 요청 사항"/)
+  assert.match(source, /placementMode === "waiting"/)
+  assert.match(source, /placementMode === "registration"/)
+})
+
+test("registration application keeps a numbered clickable progress stepper at the top", async () => {
   const [shell, create, detail, stepper] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
@@ -119,23 +143,47 @@ test("registration application renders subject navigation and active-track progr
     readFile(new URL("../src/features/tasks/registration-application-progress-stepper.tsx", import.meta.url), "utf8").catch(() => ""),
   ])
 
-  assert.match(shell, /subjectNavigation\?: ReactNode/)
   assert.match(shell, /progress: ReactNode/)
-  assert.ok(shell.indexOf("{props.subjectNavigation}") < shell.indexOf("REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map"))
-  assert.ok(shell.indexOf("{props.progress}") < shell.indexOf("REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map"))
+  assert.ok(shell.indexOf("{props.progress}") < shell.indexOf("APPLICATION_UI_SECTION_ORDER.map"))
   assert.match(stepper, /<ol/)
   assert.match(stepper, /aria-current=\{[^}]*\? "step"/)
   assert.match(stepper, /lucide-react/)
-  assert.match(stepper, /지남/)
-  assert.match(stepper, /현재/)
-  assert.match(stepper, /예정/)
-  assert.match(stepper, /완료/)
-  assert.match(stepper, /종료/)
-
+  assert.match(stepper, /scrollIntoView/)
+  assert.match(stepper, /target\.open = true/)
+  assert.match(stepper, /<button/)
+  assert.doesNotMatch(stepper, />\{presentation\.label\}</)
   assert.match(create, /progress=\{<RegistrationApplicationProgressStepper steps=\{getRegistrationApplicationProgress\("inquiry"\)\} \/>\}/)
-  assert.match(detail, /subjectNavigation=\{\([\s\S]*?<RegistrationApplicationSubjectTabs/)
-  assert.match(detail, /progress=\{<RegistrationApplicationProgressStepper steps=\{getRegistrationApplicationProgress\(activeTrack\?\.status \|\| "inquiry"\)\} \/>\}/)
-  assert.doesNotMatch(detail, /subjectNavigationContent=\{/)
+  assert.match(detail, /progress=\{<RegistrationApplicationProgressStepper steps=\{getRegistrationApplicationProgress\(activeTrack\?\.status \|\| "inquiry", activeTrack\?\.waitingKind \|\| ""\)\} \/>\}/)
+})
+
+test("each registration process owns subject selection instead of inquiry route selects", async () => {
+  const [create, detail, initialPlan] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
+  ])
+  assert.doesNotMatch(create, /<RegistrationInitialRouteFields/)
+  assert.doesNotMatch(initialPlan, /과목별 다음 업무|다음 업무/)
+  assert.match(initialPlan, /ProcessSubjectPicker/)
+  assert.match(create, /RegistrationInitialLevelTestFields[\s\S]*RegistrationInitialConsultationFields/)
+  assert.ok((detail.match(/<RegistrationApplicationSubjectTabs/g) || []).length >= 5)
+})
+
+test("registration selects use the shared dashboard select and disabled gray treatment", async () => {
+  const [select, initialPlan, shell, workspace] = await Promise.all([
+    readFile(new URL("../src/components/ui/select.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
+    readWorkspaceSource(),
+  ])
+  assert.match(select, /disabled:bg-muted/)
+  assert.match(select, /disabled:opacity-100/)
+  assert.match(initialPlan, /SelectTrigger/)
+  assert.doesNotMatch(initialPlan, /<select/)
+  assert.match(shell, /\[&_select:disabled\]:bg-muted/)
+  assert.doesNotMatch(workspace, /adminProfileIds/)
+  assert.match(workspace, /profileOptions/)
+  assert.match(workspace, /profile\.role[\s\S]*?=== "admin"/)
 })
 
 test("top progress replaces only generic duplicate status fields", async () => {
@@ -148,9 +196,13 @@ test("top progress replaces only generic duplicate status fields", async () => {
   assert.doesNotMatch(shell, />진행 중</)
   assert.doesNotMatch(detail, /valueField\("진행상태"/)
   assert.doesNotMatch(initialPlan, /ReadonlyInitialField label="진행상태"/)
-  assert.match(detail, /valueField\("시험 시작·완료 상태"/)
+  assert.doesNotMatch(detail, /valueField\("시험 시작·완료 상태"/)
+  assert.doesNotMatch(detail, /valueField\("결과"/)
+  assert.match(detail, /valueField\(`\$\{track\.subject\} 결과 링크`/)
   assert.match(detail, /valueField\("등록 단계"/)
-  assert.match(initialPlan, /ReadonlyInitialField label="시험 시작·완료 상태"/)
+  assert.doesNotMatch(initialPlan, /시험 시작·완료 상태|ReadonlyInitialField/)
+  assert.match(initialPlan, /<span>영어 결과 링크<\/span>/)
+  assert.match(initialPlan, /<span>수학 결과 링크<\/span>/)
 })
 
 test("saved detail exposes automatic history from a header clock popover only", async () => {
@@ -187,6 +239,8 @@ test("saved detail exposes automatic history from a header clock popover only", 
   assert.doesNotMatch(create, /historyAction=|history=\{/)
   assert.match(timeline, /embedded\?: boolean/)
   assert.match(timeline, /embedded\s*\?[^:]+:[^}]+/)
+  assert.doesNotMatch(timeline, /subjectFilter|stageFilter|과목 전체|단계 전체|<select/)
+  assert.match(timeline, /누가 · 언제 · 무엇을 · 어떻게/)
 })
 
 test("create and detail share the approved subject-first inquiry controls", async () => {
@@ -216,11 +270,10 @@ test("registration create mounts the shared cumulative application with visible 
   assert.match(create, /import \{ RegistrationApplicationShell \} from "\.\/registration-application-shell"/)
   assert.match(create, /import \{ RegistrationApplicationInquirySection \} from "\.\/registration-application-inquiry-section"/)
   assert.match(create, /getRegistrationCreateSectionStates/)
-  assert.match(create, /RegistrationInitialRouteFields/)
   assert.match(create, /RegistrationInitialLevelTestFields/)
   assert.match(create, /RegistrationInitialConsultationFields/)
-  assert.match(create, /allowedInitialActions=\{persistence\.mode === "ready_atomic"/)
-  assert.match(create, /persistence\.mode === "ready_atomic"[\s\S]*?\["inquiry", "direct_phone", "level_test", "visit"\][\s\S]*?\["inquiry"\]/)
+  assert.match(create, /const READY_INITIAL_ACTIONS = \["inquiry", "direct_phone", "level_test", "visit"\]/)
+  assert.match(create, /const INQUIRY_ONLY_INITIAL_ACTIONS = \["inquiry"\]/)
   assert.match(create, /useEffect\([\s\S]*?reconcileRegistrationInitialWorkflowCapabilities/)
   assert.doesNotMatch(create, /<form\b/)
   assert.doesNotMatch(create, /useState\(|createRegistrationInitialWorkflowDraft/)
@@ -229,9 +282,7 @@ test("registration create mounts the shared cumulative application with visible 
   assert.match(create, /inquiryAtLabel="저장 시 자동 기록"/)
   assert.doesNotMatch(create + workspace, /문의 채널|문의채널|inquiryChannel/)
 
-  assert.match(initialPlan, /export function RegistrationInitialRouteFields/)
-  assert.match(initialPlan, /allowedInitialActions/)
-  assert.match(initialPlan, /PLAN_OPTIONS\.filter/)
+  assert.match(initialPlan, /function ProcessSubjectPicker/)
   assert.match(levelTest + initialPlan, /레벨테스트 예약일시/)
   assert.match(levelTest + initialPlan, /레벨테스트 장소/)
   assert.match(consultation + initialPlan, /상담 책임자[\s\S]*전화상담 대기 기준일시[\s\S]*방문상담일시[\s\S]*방문상담실[\s\S]*상담 결과/)
@@ -244,7 +295,7 @@ test("registration create mounts the shared cumulative application with visible 
   assert.doesNotMatch(create, /onSaveHistory|이력 추가|이력 수정|이력 삭제/)
 })
 
-test("level-test places use canonical selects while visit consultations stay free text", async () => {
+test("level-test and visit-consultation places use the same canonical selects", async () => {
   const [initialPlan, appointmentEditor] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8"),
@@ -260,11 +311,25 @@ test("level-test places use canonical selects while visit consultations stay fre
     "export function RegistrationInitialPlanControl",
   )
 
-  assert.match(initialLevelTest, /data-registration-focus="levelTestPlace"[\s\S]*?<select[\s\S]*?<option value="">장소 선택<\/option>[\s\S]*?REGISTRATION_LEVEL_TEST_PLACES\.map/)
-  assert.match(initialConsultation, /data-registration-focus="visitConsultationPlace"[\s\S]*?<Input/)
-  assert.match(appointmentEditor, /kind === "level_test"[\s\S]*?<select[\s\S]*?REGISTRATION_LEVEL_TEST_PLACES\.map[\s\S]*?: \([\s\S]*?<Input/)
+  assert.match(initialLevelTest, /data-registration-focus="levelTestPlace"[\s\S]*?<DashboardSelect[\s\S]*?placeholder="장소 선택"[\s\S]*?REGISTRATION_LEVEL_TEST_PLACES\.map/)
+  assert.match(initialConsultation, /data-registration-focus="visitConsultationPlace"[\s\S]*?<DashboardSelect[\s\S]*?placeholder="장소 선택"[\s\S]*?REGISTRATION_LEVEL_TEST_PLACES\.map/)
+  assert.match(appointmentEditor, /data-appointment-field="place"[\s\S]*?<select[\s\S]*?REGISTRATION_LEVEL_TEST_PLACES\.map/)
+  assert.doesNotMatch(appointmentEditor, /placeholder="상담실"/)
   assert.match(appointmentEditor, /normalizeRegistrationLevelTestPlace\(place\) \?\? ""/)
   assert.match(appointmentEditor, /기존 저장 장소: \{appointment\?\.place\}/)
+})
+
+test("future registration sections default collapsed while current and reached sections stay open", async () => {
+  const [model, shell] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-model.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.match(model, /upcoming: boolean/)
+  assert.match(model, /upcoming: section !== "history"/)
+  assert.match(model, /level_test: \{ current: false, editable: false, lockReason: futureLockReason, upcoming: true \}/)
+  assert.match(shell, /<details[\s\S]*?open=\{!state\.upcoming\}/)
+  assert.match(shell, /<summary[\s\S]*?SECTION_TITLES\[section\]/)
 })
 
 test("registration create keeps the complete approved future field packet mounted in order", async () => {
@@ -275,9 +340,14 @@ test("registration create keeps the complete approved future field packet mounte
     "export function RegistrationInitialLevelTestFields",
     "export function RegistrationInitialConsultationFields",
   )
-  const placement = sourceBetween(
+  const waiting = sourceBetween(
     create,
-    "placement={(\n",
+    "waiting={(\n",
+    "registration={(\n",
+  )
+  const registration = sourceBetween(
+    create,
+    "registration={(\n",
     "admission={(\n",
   )
 
@@ -293,19 +363,19 @@ test("registration create keeps the complete approved future field packet mounte
   assertOrdered(levelTest, [
     "<span>예약일시</span>",
     "<span>장소</span>",
-    'label="시험 시작·완료 상태"',
-    "<span>시험지·결과지 링크</span>",
-    'label="결과"',
+    "<span>영어 결과 링크</span>",
+    "<span>수학 결과 링크</span>",
   ])
-  assertOrdered(placement, [
+  assert.doesNotMatch(levelTest, /시험 시작·완료 상태|시험지·결과지 링크|참여 과목|ParticipantBadges/)
+  assertOrdered(waiting, [
     "대기 종류",
     'label="대기 수업"',
+  ])
+  assertOrdered(registration, [
     'label="등록 단계"',
     'label="수강 수업"',
     'label="교재"',
     'label="수업 시작일·회차"',
-    'label="입학 처리 시작 행동"',
-    'label="문의 요청 사항"',
   ])
   assert.match(levelTest, /data-registration-focus="levelTestAt"/)
   assert.match(levelTest, /data-registration-focus="levelTestPlace"/)
@@ -321,7 +391,8 @@ test("registration create owns one accurate inquiry lock reason without a duplic
   assert.match(create, /persistence\.mode\.startsWith\("blocked_"\)[\s\S]*?note/)
   assert.match(create, /inquiry: \{ \.\.\.base\.inquiry, lockReason: inquiryLockReason \}/)
   assert.match(create, /const showInquiryOnlyNote = persistence\.mode === "canonical_inquiry"[\s\S]*?legacy_inquiry/)
-  assert.match(create, /exceptionContent=\{\([\s\S]*?<RegistrationInitialRouteFields[\s\S]*?showInquiryOnlyNote/)
+  assert.match(create, /exceptionContent=\{\([\s\S]*?showInquiryOnlyNote/)
+  assert.doesNotMatch(create, /RegistrationInitialRouteFields/)
   assert.doesNotMatch(create, /exceptionContent=\{note \?/)
 })
 
@@ -548,7 +619,8 @@ test("desktop application rows provide one table cell for each column while mobi
 
   assert.match(desktopSource, /<RegistrationCaseListRow item=\{item\}[\s\S]*?cellRole="cell"/);
   assert.match(source, /role=\{cellRole\}/);
-  assert.equal((source.match(/role=\{cellRole\}/g) || []).length, 3);
+  assert.match(source, /RegistrationCaseProcessCells item=\{item\} cellRole=\{cellRole\}/);
+  assert.equal((source.match(/role=\{cellRole\}/g) || []).length, 2);
 });
 
 test("registration summaries wrap long operational values instead of clipping them", async () => {
@@ -737,7 +809,8 @@ test("canonical detail uses one progressively filled registration application", 
   assert.match(source, /inquiry=\{/)
   assert.match(source, /levelTest=\{/)
   assert.match(source, /consultation=\{/)
-  assert.match(source, /placement=\{/)
+  assert.match(source, /waiting=\{/)
+  assert.match(source, /registration=\{/)
   assert.match(source, /admission=\{/)
   assert.match(source, /historyAction=\{<RegistrationApplicationHistoryAction/)
   assert.doesNotMatch(source, /history=\{<RegistrationHistoryTimeline/)
@@ -886,12 +959,14 @@ test("saved and create applications share one five-section shell with inline own
 test("saved application keeps exception actions in their owning sections", async () => {
   const source = await readRegistrationApplicationSource()
   const inquiry = sourceBetween(source, "inquiry={(\n", "levelTest={(\n")
-  const placement = sourceBetween(source, "placement={(\n", "admission={(\n")
+  const waiting = sourceBetween(source, "waiting={(\n", "registration={(\n")
+  const registration = sourceBetween(source, "registration={(\n", "admission={(\n")
   const admission = sourceBetween(source, "admission={(\n", "\n    />\n  )\n}")
 
   assert.match(source, /RegistrationMigrationReviewEditor/)
   assert.match(inquiry, /renderTrackFrames\("inquiry"\)/)
-  assert.match(placement, /renderTrackFrames\("placement"\)/)
+  assert.match(waiting, /renderTrackFrames\("placement", "waiting"\)/)
+  assert.match(registration, /renderTrackFrames\("placement", "registration"\)/)
   assert.match(source, /section === "placement"[\s\S]*?<RegistrationEnrollmentTrackEditor/)
   assert.match(admission, /RegistrationAdmissionPanel/)
   assert.match(admission, /cancelRegistrationAdmissionBatch|admissionActions/)
@@ -1113,7 +1188,8 @@ test("appointment editor uses one schedule and one result control per subject", 
   assert.match(source, /timeOptions=\{REGISTRATION_TIME_OPTIONS\}/)
   assert.match(source, /적용 과목/)
   assert.match(source, /activities\.map/)
-  assert.match(source, /시험지·결과지 URL/)
+  assert.match(source, /\$\{track\?\.subject \|\| "과목"\} 결과 링크/)
+  assert.match(source, /결과 링크 저장/)
   assert.match(source, /시험 시작/)
   assert.match(source, /startRegistrationLevelTestAttempt/)
   assert.match(source, /문의 종료/)
@@ -1379,6 +1455,10 @@ test("create and saved admission sections share one ordered five-step progress l
   assert.match(progress, /aria-current=\{index === currentIndex \? "step" : undefined\}/)
   assert.match(progress, /data-registration-admission-locked=\{step\.locked \? "true" : undefined\}/)
   assert.match(progress, /step\.complete[\s\S]*?<Check/)
+  assert.match(progress, /grid-cols-5/)
+  assert.match(progress, /role="tab"/)
+  assert.match(progress, /role="tabpanel"/)
+  assert.match(progress, /selectedKey/)
   assert.equal((create.match(/<RegistrationAdmissionProgress/g) || []).length, 1)
   assert.equal((create.match(/locked: true/g) || []).length, 5)
   assert.equal((enrollment.match(/<RegistrationAdmissionProgress/g) || []).length, 1)
@@ -1730,7 +1810,7 @@ test("subject-owned controls name their subject and keep mobile primary actions 
   const enrollmentRows = sourceBetween(enrollment, "export function RegistrationEnrollmentEditor", "export type RegistrationAdmissionPanelProps")
 
   assert.match(consultation, /aria-label=\{`\$\{subject\} 상담 결과 저장`\}/)
-  assert.match(appointment, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 시험지·결과지 URL`\}/)
+  assert.match(appointment, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 결과 링크`\}/)
   assert.match(enrollmentRows, /aria-label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/)
   assert.ok(consultation.indexOf("waitingKind") < consultation.indexOf("상담 결과 저장"))
   assert.ok(enrollmentRows.indexOf("draftRows.map") < enrollmentRows.indexOf("수업 정보 저장"))

@@ -9084,18 +9084,23 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     teachers,
   ])
   const registrationDirectorOptionsBySubject = useMemo(() => {
-    const adminProfileIds = new Set(profiles
+    const profileOptions = profiles
       .filter((profile) => String(profile.role || "").trim().toLowerCase() === "admin")
-      .map((profile) => profile.id))
+      .map((profile) => ({ value: profile.id, label: profile.label }))
     const optionsFor = (subject: RegistrationSubject) => {
       const seen = new Set<string>()
-      return teachers.flatMap((teacher) => {
+      const teacherOptions = teachers.flatMap((teacher) => {
         const profileId = String(teacher.profileId || "").trim()
-        if (!profileId || seen.has(profileId) || !adminProfileIds.has(profileId)) return []
+        if (!profileId || seen.has(profileId)) return []
         if (teacher.subjects?.length && !teacher.subjects.includes(subject)) return []
         seen.add(profileId)
         return [{ value: profileId, label: teacher.label }]
       })
+      return [...teacherOptions, ...profileOptions.filter((option) => {
+        if (seen.has(option.value)) return false
+        seen.add(option.value)
+        return true
+      })]
     }
     return { 영어: optionsFor("영어"), 수학: optionsFor("수학") }
   }, [profiles, teachers])
@@ -11993,24 +11998,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 <span className="sr-only">{isRegistrationWorkspace ? "등록 알림 설정" : isTransferWorkspace ? "전반 알림 설정" : "퇴원 알림 설정"}</span>
               </Button>
             )}
-            {isRegistrationWorkspace && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setRegistrationCalendarRefreshToken((current) => current + 1)
-                  void reload(true)
-                }}
-                disabled={loading}
-                aria-label="새로고침"
-                title="등록 목록과 달력 새로고침"
-                className="size-8 px-0"
-              >
-                <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} aria-hidden="true" />
-                <span className="sr-only">새로고침</span>
-              </Button>
-            )}
             {!isWordRetestWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && (
               <Button type="button" variant="outline" size="sm" onClick={() => void reload(true)} disabled={loading} aria-label="새로고침" className="size-8 px-0">
                 <RefreshCw className="size-4" />
@@ -12261,6 +12248,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              onOpen={(taskId, trackId) => void openRegistrationTrack(taskId, trackId)}
 	              onEdit={(taskId, trackId) => void editRegistrationTrack(taskId, trackId)}
 	              onAction={(taskId, trackId, action) => void handleRegistrationTrackAction(taskId, trackId, action)}
+	              canDelete={(item) => canDeleteTask(item.task)}
+	              onDelete={(item) => requestRemoveTask(item.task)}
 	              emptyLabel={registrationEmptyLabel}
 	            />
             )

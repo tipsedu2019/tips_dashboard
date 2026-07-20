@@ -203,9 +203,10 @@ function registrationScheduleDateKey(value) {
 
 /**
  * @param {any} schedulePlan
+ * @param {{afterDateKey?: string}} [options]
  * @returns {RegistrationScheduleSession[]}
  */
-export function getSelectableRegistrationScheduleSessions(schedulePlan) {
+export function getSelectableRegistrationScheduleSessions(schedulePlan, options = {}) {
   const sessions = Array.isArray(schedulePlan?.sessions)
     ? schedulePlan.sessions
     : Array.isArray(schedulePlan?.session_list)
@@ -218,6 +219,7 @@ export function getSelectableRegistrationScheduleSessions(schedulePlan) {
     const state = text(entry.scheduleState || entry.schedule_state || entry.state || "active").toLowerCase() || "active";
     if (!["active", "normal", "makeup"].includes(state)) return [];
     const dateKey = registrationScheduleDateKey(entry.date || entry.session_date || entry.dateValue || entry.date_value);
+    if (options.afterDateKey && dateKey <= options.afterDateKey) return [];
     const rawSessionNumber = Number(entry.sessionNumber ?? entry.session_number);
     const sessionNumber = Number.isInteger(rawSessionNumber) ? rawSessionNumber : 0;
     if (!dateKey || sessionNumber <= 0) return [];

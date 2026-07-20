@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Plus, RefreshCw, Trash2 } from "lucide-react"
+import { CalendarDays, Plus, RefreshCw, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Calendar } from "@/components/ui/calendar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 
 import {
@@ -90,6 +92,65 @@ const WAITING_KIND_OPTIONS: Array<{ value: Exclude<RegistrationWaitingKind, "">;
   { value: "current_term_opening", label: "현재 학기 개강반 대기" },
   { value: "next_term_opening", label: "다음 학기 개강반 대기" },
 ]
+
+function registrationDateKey(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return typeof value === "string" ? value.slice(0, 10) : ""
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date)
+}
+
+function registrationCalendarDate(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+type RegistrationScheduleSession = ReturnType<typeof getSelectableRegistrationScheduleSessions>[number]
+
+function RegistrationStartScheduleCalendar({
+  subject,
+  rowIndex,
+  sessions,
+  value,
+  disabled,
+  onSelect,
+}: {
+  subject: string
+  rowIndex: number
+  sessions: RegistrationScheduleSession[]
+  value: string
+  disabled: boolean
+  onSelect: (session: RegistrationScheduleSession) => void
+}) {
+  const sessionsByDate = new Map(sessions.map((session) => [session.dateKey, session]))
+  const selectedSession = sessions.find((session) => session.value === value)
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" className="h-9 w-full min-w-0 justify-start font-normal" disabled={disabled} aria-label={`${subject} 수업 ${rowIndex} 시작 일정 선택`}>
+          <CalendarDays className="size-4" aria-hidden="true" />
+          {selectedSession ? `${selectedSession.dateKey} · ${selectedSession.sessionLabel}` : "수업 시작일 선택"}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0" disablePortal>
+        <Calendar
+          mode="single"
+          selected={selectedSession ? registrationCalendarDate(selectedSession.dateKey) : undefined}
+          defaultMonth={registrationCalendarDate(selectedSession?.dateKey || sessions[0]?.dateKey || registrationDateKey(new Date()))}
+          disabled={(date) => !sessionsByDate.has(registrationDateKey(date))}
+          onSelect={(date) => {
+            const session = date ? sessionsByDate.get(registrationDateKey(date)) : null
+            if (session) onSelect(session)
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message
@@ -581,6 +642,7 @@ export function RegistrationEnrollmentEditor({
   }
 
   const immutableHistory = trackEnrollments.filter((enrollment) => !isMutableDraft(enrollment))
+  const registrationDecisionDateKey = registrationDateKey(track.stageEnteredAt)
 
   return (
     <section ref={sectionRef} className="grid gap-3" aria-label={`${track.subject} 수강 수업`}>
@@ -592,7 +654,7 @@ export function RegistrationEnrollmentEditor({
       <div data-registration-action-owner={`${track.subject}:enrollment-rows`} className="grid gap-3">
       {draftRows.map((row, index) => {
         const detail = row.classId ? classDetailById[row.classId] : null
-        const sessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan)
+        const sessions = getSelectableRegistrationScheduleSessions(detail?.schedulePlan, { afterDateKey: registrationDecisionDateKey })
         const linkedTextbookIds = detail?.textbookIds
           || subjectClasses.find((classItem) => classItem.id === row.classId)?.textbookIds
           || []
@@ -627,23 +689,20 @@ export function RegistrationEnrollmentEditor({
             </Label>
             <Label className="grid gap-1.5">
               <span>수업 시작 일정</span>
-              <select
-                className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm"
-                aria-label={`${track.subject} 수업 ${index + 1} 시작 일정 선택`}
+              <RegistrationStartScheduleCalendar
+                subject={track.subject}
+                rowIndex={index + 1}
+                sessions={sessions}
                 value={row.classStartSessionKey}
-                onChange={(event) => {
-                  const session = sessions.find((item) => item.value === event.target.value)
+                onSelect={(session) => {
                   updateRow(row.clientKey, {
-                    classStartDate: session?.dateKey || "",
-                    classStartSessionKey: session?.value || "",
-                    classStartSession: session?.sessionLabel || "",
+                    classStartDate: session.dateKey,
+                    classStartSessionKey: session.value,
+                    classStartSession: session.sessionLabel,
                   })
                 }}
                 disabled={!canEditRows || saving || !row.classId || loadingClassIds.has(row.classId) || classDetailById[row.classId] === null}
-              >
-                <option value="">{loadingClassIds.has(row.classId) ? "일정 불러오는 중" : "수업일·회차 선택"}</option>
-                {sessions.map((session) => <option key={session.value} value={session.value}>{session.dateKey} · {session.sessionLabel}{session.state === "makeup" ? " · 보강" : ""}</option>)}
-              </select>
+              />
             </Label>
             <Button
               type="button"

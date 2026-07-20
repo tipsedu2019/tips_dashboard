@@ -2,7 +2,6 @@ import type { ReactNode } from "react"
 
 import type { RegistrationSubject } from "./registration-track-service"
 import {
-  REGISTRATION_APPLICATION_BODY_SECTION_ORDER,
   isRegistrationApplicationSectionContentDisabled,
   type RegistrationApplicationSectionKey,
   type RegistrationApplicationSectionState,
@@ -13,7 +12,6 @@ export type RegistrationApplicationShellProps = {
   studentName: string
   closeAction: ReactNode
   historyAction?: ReactNode
-  subjectNavigation?: ReactNode
   progress: ReactNode
   tracks: Array<{
     key: string
@@ -28,7 +26,10 @@ export type RegistrationApplicationShellProps = {
   inquiry: ReactNode
   levelTest: ReactNode
   consultation: ReactNode
-  placement: ReactNode
+  waiting: ReactNode
+  registration: ReactNode
+  waitingState: RegistrationApplicationSectionState
+  registrationState: RegistrationApplicationSectionState
   admission: ReactNode
 }
 
@@ -36,16 +37,21 @@ const SECTION_CONTENT_KEY = {
   inquiry: "inquiry",
   level_test: "levelTest",
   consultation: "consultation",
-  placement: "placement",
+  waiting: "waiting",
+  registration: "registration",
   admission: "admission",
 } as const
 
-const SECTION_TITLES: Record<(typeof REGISTRATION_APPLICATION_BODY_SECTION_ORDER)[number], string> = {
-  inquiry: "문의 정보",
-  level_test: "레벨테스트",
-  consultation: "상담",
-  placement: "등록·대기 정보",
-  admission: "입학 처리",
+const APPLICATION_UI_SECTION_ORDER = ["inquiry", "level_test", "consultation", "waiting", "registration", "admission"] as const
+type RegistrationApplicationUiSectionKey = typeof APPLICATION_UI_SECTION_ORDER[number]
+
+const SECTION_TITLES: Record<RegistrationApplicationUiSectionKey, string> = {
+  inquiry: "문의",
+  level_test: "1. 레벨테스트",
+  consultation: "2. 상담",
+  waiting: "3. 대기",
+  registration: "4. 등록",
+  admission: "5. 입학",
 }
 
 function RegistrationApplicationSection({
@@ -56,7 +62,7 @@ function RegistrationApplicationSection({
   children,
 }: {
   mode: "create" | "detail"
-  section: (typeof REGISTRATION_APPLICATION_BODY_SECTION_ORDER)[number]
+  section: RegistrationApplicationUiSectionKey
   state: RegistrationApplicationSectionState
   notice?: ReactNode
   children: ReactNode
@@ -64,7 +70,7 @@ function RegistrationApplicationSection({
   const lockReasonId = `registration-application-${section}-lock-reason`
   const contentDisabled = isRegistrationApplicationSectionContentDisabled({
     mode,
-    section,
+    section: section === "waiting" || section === "registration" ? "placement" : section,
     editable: state.editable,
   })
   const stateLabel = contentDisabled
@@ -74,13 +80,19 @@ function RegistrationApplicationSection({
       : `${SECTION_TITLES[section]}: 사용 가능`
 
   return (
-    <section
+    <details
+      open={!state.upcoming}
       id={`registration-application-${section}`}
       data-registration-application-section={section}
       data-registration-state={contentDisabled ? "locked" : state.current ? "current" : "ready"}
       aria-label={stateLabel}
-      className="grid gap-3 border-t pt-5"
+      className="group scroll-mt-4 border-t pt-5"
     >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold marker:hidden">
+        <span>{SECTION_TITLES[section]}</span>
+        <span className="text-xs font-normal text-muted-foreground group-open:hidden">펼치기</span>
+      </summary>
+      <div className="mt-3 grid gap-3">
       {notice}
       <div
         role="group"
@@ -88,7 +100,6 @@ function RegistrationApplicationSection({
         aria-describedby={state.lockReason ? lockReasonId : undefined}
         className="grid gap-3"
       >
-        <h3 className="text-sm font-semibold">{SECTION_TITLES[section]}</h3>
         {state.lockReason ? (
           <p id={lockReasonId} className="text-xs text-muted-foreground">{state.lockReason}</p>
         ) : null}
@@ -96,13 +107,14 @@ function RegistrationApplicationSection({
           {children}
         </fieldset>
       </div>
-    </section>
+      </div>
+    </details>
   )
 }
 
 export function RegistrationApplicationShell(props: RegistrationApplicationShellProps) {
   return (
-    <div data-registration-application-mode={props.mode} className="grid gap-5">
+    <div data-registration-application-mode={props.mode} className="grid gap-5 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
       <header className="flex min-w-0 items-center justify-between gap-3">
         <h2 className="min-w-0 truncate text-base font-semibold">{props.studentName}</h2>
         <div className="flex items-center justify-end gap-2">
@@ -118,18 +130,22 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
         </div>
       </header>
 
-      {props.subjectNavigation}
       {props.progress}
 
-      {REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map((section) => {
+      {APPLICATION_UI_SECTION_ORDER.map((section) => {
         const contentKey = SECTION_CONTENT_KEY[section]
+        const sectionState = section === "waiting"
+          ? props.waitingState
+          : section === "registration"
+            ? props.registrationState
+            : props.sectionStates[section]
         return (
           <RegistrationApplicationSection
             key={section}
             mode={props.mode}
             section={section}
-            state={props.sectionStates[section]}
-            notice={props.sectionNotices?.[section]}
+            state={sectionState}
+            notice={section === "waiting" || section === "registration" ? undefined : props.sectionNotices?.[section]}
           >
             {props[contentKey]}
           </RegistrationApplicationSection>

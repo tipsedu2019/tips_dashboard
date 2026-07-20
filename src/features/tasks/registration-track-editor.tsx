@@ -38,7 +38,6 @@ import {
   RegistrationLevelTestSummary,
   RegistrationMigrationConflictNotice,
   RegistrationMigrationReviewEditor,
-  RegistrationPlacementSummary,
   RegistrationSubjectSyncSection,
   RegistrationTrackDirectorSection,
   RegistrationTrackStageEditor,
@@ -134,6 +133,8 @@ type AppointmentEditorState = {
   initialTrackId: string
 }
 
+type RegistrationPlacementMode = "waiting" | "registration"
+
 const WAITING_KIND_LABELS = {
   "": "기록 없음",
   current_class: "현재 학기 수강반 대기",
@@ -178,12 +179,14 @@ function RegistrationTrackSectionValues({
   detail,
   classOptions,
   textbookOptions,
+  placementMode,
 }: {
   section: RegistrationApplicationSectionKey
   context: TrackContext
   detail: OpsRegistrationCaseDetail
   classOptions: OpsClassOption[]
   textbookOptions: OpsTextbookOption[]
+  placementMode?: RegistrationPlacementMode
 }) {
   const { track, latestLevelTest, activeConsultation, visitAppointment } = context
   const enrollments = detail.enrollments.filter((enrollment) => enrollment.trackId === track.id)
@@ -205,9 +208,7 @@ function RegistrationTrackSectionValues({
     fields = [
       valueField("예약일시", formatDateTime(levelTestAppointment?.scheduledAt)),
       valueField("장소", levelTestAppointment?.place || "기록 없음"),
-      valueField("시험 시작·완료 상태", latestLevelTest?.status || "기록 없음"),
-      valueField("시험지·결과지 링크", latestLevelTest?.materialLink || "기록 없음"),
-      valueField("결과", latestLevelTest?.status === "completed" ? "완료" : "기록 없음"),
+      valueField(`${track.subject} 결과 링크`, latestLevelTest?.materialLink || "기록 없음"),
     ]
   } else if (section === "consultation") {
     fields = [
@@ -218,15 +219,14 @@ function RegistrationTrackSectionValues({
       valueField("상담 결과", activeConsultation?.outcome || "기록 없음"),
     ]
   } else if (section === "placement") {
-    fields = [
+    fields = placementMode === "waiting" ? [
       valueField("대기 종류", WAITING_KIND_LABELS[track.waitingKind]),
       valueField("대기 수업", track.waitingKind === "current_class" ? classItem?.label || "기록 없음" : "해당 없음"),
+    ] : [
       valueField("등록 단계", REGISTRATION_TRACK_STATUS_LABELS[track.status]),
       valueField("수강 수업", classItem?.label || "기록 없음"),
       valueField("교재", textbook?.label || "기록 없음"),
       valueField("수업 시작일·회차", [latestEnrollment?.classStartDate, latestEnrollment?.classStartSession].filter(Boolean).join(" · ") || "기록 없음"),
-      valueField("입학 처리 시작 행동", latestEnrollment?.admissionBatchId ? "입학 처리 진행" : "기록 없음"),
-      valueField("문의 요청 사항", detail.task.registration?.requestNote || "기록 없음"),
     ]
   } else {
     fields = [
@@ -245,6 +245,7 @@ function RegistrationTrackSectionFrame({
   textbookOptions,
   selected,
   children,
+  placementMode,
 }: {
   section: RegistrationApplicationSectionKey
   context: TrackContext
@@ -253,15 +254,20 @@ function RegistrationTrackSectionFrame({
   textbookOptions: OpsTextbookOption[]
   selected: boolean
   children?: ReactNode
+  placementMode?: RegistrationPlacementMode
 }) {
   const sectionState = context.state.sections[section]
+  const placementCurrent = section !== "placement" || placementMode === "waiting"
+    ? context.track.status === "waiting"
+    : ["enrollment_decided", "enrollment_processing", "registered", "not_registered"].includes(context.track.status)
+  const displayCurrent = section === "placement" ? placementCurrent : sectionState.current
   return (
     <article
       role="tabpanel"
       id={`registration-${section}-${context.track.id}`}
       aria-labelledby={`registration-subject-tab-${context.track.id}`}
       hidden={!selected}
-      aria-current={sectionState.current ? "step" : undefined}
+      aria-current={displayCurrent ? "step" : undefined}
       data-registration-track-id={context.track.id}
       data-registration-subject={context.track.subject}
       data-registration-focus-track={selected ? context.track.id : undefined}
@@ -273,8 +279,8 @@ function RegistrationTrackSectionFrame({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-sm font-semibold">{context.track.subject}</h4>
-        <Badge variant={sectionState.current ? "default" : "outline"}>
-          {sectionState.current ? "현재 · " : ""}{REGISTRATION_TRACK_STATUS_LABELS[context.track.status]}
+        <Badge variant={displayCurrent ? "default" : "outline"}>
+          {displayCurrent ? "현재 · " : ""}{REGISTRATION_TRACK_STATUS_LABELS[context.track.status]}
         </Badge>
       </div>
       <RegistrationTrackSectionValues
@@ -283,6 +289,7 @@ function RegistrationTrackSectionFrame({
         detail={detail}
         classOptions={classOptions}
         textbookOptions={textbookOptions}
+        placementMode={placementMode}
       />
       {sectionState.lockReason ? (
         <p className="text-xs text-muted-foreground">{sectionState.lockReason}</p>
@@ -509,6 +516,23 @@ export function RegistrationApplication({
       appointmentActionSections: activeAppointmentActionPlans.map((plan) => plan.kind === "level_test" ? "level_test" : "consultation"),
     }),
   })
+  const activeProgress = getRegistrationApplicationProgress(activeTrack?.status || "inquiry", activeTrack?.waitingKind || "")
+  const splitPlacementState = (key: "waiting" | "registration") => {
+    const progressState = activeProgress.find((step) => step.key === key)?.state || "upcoming"
+    const current = progressState === "current" || progressState === "terminal"
+    return {
+      current,
+      editable: current && sectionStates.placement.editable,
+      upcoming: progressState === "upcoming",
+      lockReason: current && sectionStates.placement.editable
+        ? ""
+        : progressState === "upcoming"
+          ? "현재 진행 단계가 아닙니다"
+          : "완료된 단계입니다",
+    }
+  }
+  const waitingState = splitPlacementState("waiting")
+  const registrationState = splitPlacementState("registration")
   const focusedState = trackStates.find((state) => state.trackId === activeTrackId) || null
   const subjectPanelIdsByTrackId = Object.fromEntries(detail.tracks.map((track) => [
     track.id,
@@ -631,10 +655,10 @@ export function RegistrationApplication({
     ))
   }, [])
 
-  function renderTrackActions(context: TrackContext, section: RegistrationApplicationSectionKey) {
+  function renderTrackActions(context: TrackContext, section: RegistrationApplicationSectionKey, placementMode?: RegistrationPlacementMode) {
     const { track, permissions, activeConsultation, visitAppointment } = context
     if (track.migrationReviewRequired) return null
-    if (section === "placement" && ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status)) {
+    if (section === "placement" && placementMode === "registration" && ["enrollment_decided", "enrollment_processing", "registered"].includes(track.status)) {
       return (
         <RegistrationEnrollmentTrackEditor
           detail={detail}
@@ -650,6 +674,8 @@ export function RegistrationApplication({
       )
     }
     if (context.state.currentSection !== section) return null
+    if (section === "placement" && placementMode === "waiting" && track.status !== "waiting") return null
+    if (section === "placement" && placementMode === "registration" && track.status === "waiting") return null
     if (section === "admission") return null
     return (
       <RegistrationTrackStageEditor
@@ -669,7 +695,7 @@ export function RegistrationApplication({
     )
   }
 
-  function renderTrackFrames(section: RegistrationApplicationSectionKey) {
+  function renderTrackFrames(section: RegistrationApplicationSectionKey, placementMode?: RegistrationPlacementMode) {
     return trackContexts.map((context) => (
       <RegistrationTrackSectionFrame
         key={`${section}:${context.track.id}`}
@@ -679,6 +705,7 @@ export function RegistrationApplication({
         classOptions={classOptions}
         textbookOptions={textbookOptions}
         selected={activeTrackId === context.track.id}
+        placementMode={placementMode}
       >
         {section === "inquiry" && reviewTrack?.id === context.track.id ? (
           <>
@@ -736,7 +763,7 @@ export function RegistrationApplication({
             onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `director:${context.track.id}`)}
           />
         ) : null}
-        {renderTrackActions(context, section)}
+        {renderTrackActions(context, section, placementMode)}
         {section === "consultation"
           && context.activeConsultation
           && context.permissions.canCompleteConsultation ? (
@@ -844,19 +871,7 @@ export function RegistrationApplication({
         subject: track.subject,
         statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
       }))}
-      subjectNavigation={(
-        <RegistrationApplicationSubjectTabs
-          tracks={detail.tracks.map((track) => ({
-            id: track.id,
-            subject: track.subject,
-            statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
-          }))}
-          value={activeTrackId}
-          panelIdsByTrackId={subjectPanelIdsByTrackId}
-          onValueChange={handleSubjectTabChange}
-        />
-      )}
-      progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress(activeTrack?.status || "inquiry")} />}
+      progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress(activeTrack?.status || "inquiry", activeTrack?.waitingKind || "")} />}
       sectionStates={sectionStates}
       inquiry={(
         <RegistrationApplicationInquirySection
@@ -902,6 +917,7 @@ export function RegistrationApplication({
       )}
       levelTest={(
         <RegistrationApplicationLevelTestSection editable={sectionStates.level_test.editable}>
+          <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
           <RegistrationLevelTestSummary detail={detail} trackId={activeTrackId} />
           {renderTrackFrames("level_test")}
           {renderAppointmentActionPlans("level_test")}
@@ -910,19 +926,33 @@ export function RegistrationApplication({
       )}
       consultation={(
         <RegistrationApplicationConsultationSection editable={sectionStates.consultation.editable}>
+          <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
           <RegistrationConsultationSummary detail={detail} trackId={activeTrackId} />
           {renderTrackFrames("consultation")}
           {renderAppointmentActionPlans("visit_consultation")}
           {appointmentEditor?.kind === "visit_consultation" ? appointmentEditorContent : null}
         </RegistrationApplicationConsultationSection>
       )}
-      placement={(
+      waitingState={waitingState}
+      registrationState={registrationState}
+      waiting={(
         <RegistrationApplicationPlacementSection
-          editable={sectionStates.placement.editable}
+          editable={waitingState.editable}
           fields={(
             <div className="grid gap-3">
-              <RegistrationPlacementSummary detail={detail} classes={classOptions} trackId={activeTrackId} />
-              {renderTrackFrames("placement")}
+              <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
+              {renderTrackFrames("placement", "waiting")}
+            </div>
+          )}
+        />
+      )}
+      registration={(
+        <RegistrationApplicationPlacementSection
+          editable={registrationState.editable}
+          fields={(
+            <div className="grid gap-3">
+              <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
+              {renderTrackFrames("placement", "registration")}
             </div>
           )}
         />
@@ -932,6 +962,7 @@ export function RegistrationApplication({
           editable={sectionStates.admission.editable}
           fields={(
             <div className="grid gap-3">
+              <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
               {renderTrackFrames("admission")}
               {admissionTargetTracks.length > 0 ? (
                 <div className="flex flex-wrap gap-1" aria-label="입학신청서 발송 과목">

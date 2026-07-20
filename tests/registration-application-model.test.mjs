@@ -72,15 +72,15 @@ const cases = [
   ["inquiry_closed", "inquiry"],
 ]
 
-const progressKeys = ["inquiry", "level_test", "consultation", "placement", "admission"]
+const progressKeys = ["inquiry", "level_test", "consultation", "waiting", "registration", "admission"]
 
-test("registration progress derives five ordered steps from the active track status", () => {
+test("registration progress derives six ordered steps from the active track status", () => {
   const expectedStatesByStatus = {
-    inquiry: ["current", "upcoming", "upcoming", "upcoming", "upcoming"],
-    level_test_scheduled: ["reached", "current", "upcoming", "upcoming", "upcoming"],
-    consultation_waiting: ["reached", "reached", "current", "upcoming", "upcoming"],
-    waiting: ["reached", "reached", "reached", "current", "upcoming"],
-    enrollment_processing: ["reached", "reached", "reached", "reached", "current"],
+    inquiry: ["current", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming"],
+    level_test_scheduled: ["reached", "current", "upcoming", "upcoming", "upcoming", "upcoming"],
+    consultation_waiting: ["reached", "reached", "current", "upcoming", "upcoming", "upcoming"],
+    waiting: ["reached", "reached", "reached", "current", "upcoming", "upcoming"],
+    enrollment_processing: ["reached", "reached", "reached", "skipped", "reached", "current"],
   }
 
   for (const [status, expectedStates] of Object.entries(expectedStatesByStatus)) {
@@ -93,15 +93,15 @@ test("registration progress derives five ordered steps from the active track sta
 test("registered completes all progress while closed outcomes terminate only their outcome step", () => {
   assert.deepEqual(
     getRegistrationApplicationProgress("registered").map((step) => step.state),
-    ["complete", "complete", "complete", "complete", "complete"],
+    ["complete", "complete", "complete", "skipped", "complete", "complete"],
   )
   assert.deepEqual(
     getRegistrationApplicationProgress("not_registered").map((step) => step.state),
-    ["reached", "reached", "reached", "terminal", "upcoming"],
+    ["reached", "reached", "reached", "skipped", "terminal", "upcoming"],
   )
   assert.deepEqual(
     getRegistrationApplicationProgress("inquiry_closed").map((step) => step.state),
-    ["terminal", "upcoming", "upcoming", "upcoming", "upcoming"],
+    ["terminal", "upcoming", "upcoming", "upcoming", "upcoming", "upcoming"],
   )
 })
 

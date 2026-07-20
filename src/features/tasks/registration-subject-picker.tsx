@@ -15,9 +15,9 @@ export type RegistrationSubjectPickerProps = {
 
 export function RegistrationSubjectPicker(props: RegistrationSubjectPickerProps) {
   return (
-    <section className="grid gap-2" aria-label="문의 과목" data-registration-focus="subject">
+    <section className="grid gap-2" aria-label="과목" data-registration-focus="subject">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">문의 과목</h3>
+        <h3 className="text-sm font-semibold">과목</h3>
         {props.action}
       </div>
       <div className="grid grid-cols-2 gap-2">
