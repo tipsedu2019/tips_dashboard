@@ -187,7 +187,7 @@ test("authenticated browser verification includes the deterministic subject-trac
   assert.match(browserSource, /multiple English classes/)
 })
 
-test("subject-track fixture verification exercises the operational scenarios and mobile dialog overflow", () => {
+test("subject-track fixture verification exercises the refined no-save application and mobile overflow", () => {
   const browserSource = sources[1]
   const start = browserSource.indexOf("async function verifyRegistrationSubjectTrackFixture")
   const end = browserSource.indexOf("async function login", start)
@@ -198,22 +198,20 @@ test("subject-track fixture verification exercises the operational scenarios and
     "assertNoHorizontalOverflow",
     "fixture-task-dual-test",
     "fixture-track-dual-english",
-    "적용 과목",
-    "fixture-task-split-consultation",
-    "fixture-track-split-math",
-    "전화상담은 예약 없이",
-    "방문상담 일시",
-    "방문상담 장소",
+    "과목별 등록 진행",
+    "registration-subject-tab-",
+    "브라우저 검증용 되돌릴 초안",
+    "자동 이력 보기",
+    "등록 자동 이력",
+    "학년을 먼저 선택",
+    "새봄고",
     "fixture-task-multiple-classes",
-    "고1 영어 정규 A",
-    "고1 영어 특강",
     "수업 추가",
-    "읽기 전용 입학 처리 상태",
-    'fixtureRole: "assistant"',
-    "과목 분리 확인 필요",
+    "입학 처리 시작",
   ])
-  assert.match(fixtureVerifier, /aria-pressed="true"/)
+  assert.match(fixtureVerifier, /button\[aria-pressed\]/)
   assert.match(fixtureVerifier, /scrollWidth[\s\S]*?viewportWidth/)
+  assert.doesNotMatch(fixtureVerifier, /saveCreateButton|createdResult|replayLastFixtureCreate/)
 })
 
 test("browser route health is checked again after interactions and includes failed requests", () => {
@@ -237,7 +235,7 @@ test("browser route health is checked again after interactions and includes fail
   assert.match(inspect, /document\.documentElement\.scrollWidth[\s\S]*window\.innerWidth/)
 })
 
-test("registration provider interception blocks only POST dispatch while passive readiness reads continue", () => {
+test("registration provider interception and snapshots enforce a provider-zero no-mutation verifier", () => {
   const browserSource = sources[1]
   const start = browserSource.indexOf("async function verifyRegistrationSubjectTrackFixture")
   const end = browserSource.indexOf("async function login", start)
@@ -255,10 +253,11 @@ test("registration provider interception blocks only POST dispatch while passive
     "self-test",
   ])
   assert.match(fixtureVerifier, /route\.request\(\)\.method\(\) !== "POST"[\s\S]*?route\.continue\(\)/)
-  assert.match(fixtureVerifier, /createdResult\.notificationJobs\.length\s*!==\s*0/)
-  assert.match(fixtureVerifier, /savedSnapshot\.counts\.notificationReceipts\s*!==\s*0/)
-  assert.match(fixtureVerifier, /savedSnapshot\.counts\.externalCalls\s*!==\s*0/)
-  assert.match(fixtureVerifier, /interceptedProviderRequests\.length\s*!==\s*0/)
+  assert.match(fixtureVerifier, /assertRegistrationFixtureSafetySnapshot/)
+  assert.match(fixtureVerifier, /initialSnapshot[\s\S]*?finalFixtureSnapshot/)
+  assert.match(fixtureVerifier, /JSON\.stringify\(finalFixtureSnapshot\.counts\)[\s\S]*?JSON\.stringify\(initialSnapshot\.counts\)/)
+  assert.match(fixtureVerifier, /assertNoInterceptedProviderRequests\("no-send registration application verification"\)/)
+  assert.doesNotMatch(fixtureVerifier, /createdResult|saveCreateButton|notification retry[^\n]*click\(/i)
 })
 
 test("authorized concurrency verification executes only gated seeded races with separate actor lanes", () => {

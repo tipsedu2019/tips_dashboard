@@ -1613,16 +1613,18 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.doesNotMatch(sampleWorkflowSource, /inquiry_channel/);
   assert.doesNotMatch(browserWorkflowSource, /inquiry_channel/);
   assertIncludesAll(browserWorkflowSource, [
-    "async function selectListboxOptionIfPresent",
-    'await selectListboxOptionIfPresent(page, dialog, "학년", "고1")',
-    "전화상담 예약일시",
-    "시험지·결과지 URL",
-    "상담 책임자",
-    "방문상담 예약일시",
-    "방문상담실",
-    "canonical reload",
+    '[data-registration-focus="subject"] button[aria-pressed]',
+    "applicationHost.getByLabel(/^학년/)",
+    'schoolGrade.selectOption("고1")',
+    "applicationHost.getByLabel(/^학교/)",
+    "새봄고",
+    "새봄초",
+    "새봄중",
+    "과목별 등록 진행",
+    "registration-subject-tab-",
+    "기존 입력",
+    'data-registration-application-section="placement"',
     'width: 1349, height: 987',
-    "visitFieldOrder",
   ]);
   assert.doesNotMatch(browserWorkflowSource, /fillIfPresent\(dialog, "학년"/);
   assert.doesNotMatch(source, /ensureRegistrationInquiryAt/);
