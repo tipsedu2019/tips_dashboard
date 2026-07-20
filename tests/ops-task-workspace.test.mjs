@@ -907,7 +907,7 @@ test("registration workspace replaces Notion registration management with one ap
     "admissionActions",
   ]);
   assertIncludesAll(initialPlanSource, [
-    "과목별 다음 업무",
+    "ProcessSubjectPicker",
     "상담 책임자",
     "방문상담일시",
     "방문상담실",
@@ -1037,7 +1037,7 @@ test("registration exposes six ordered work tabs with case rows retaining subjec
   ]);
 });
 
-test("registration toolbar keeps the workflow self-explanatory with search and refresh instead of a duplicate manual", async () => {
+test("registration toolbar keeps search without a manual or refresh button", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   assert.doesNotMatch(workspaceSource, /RegistrationProcessManualDialog/);
   assert.doesNotMatch(workspaceSource, /registrationProcessManualOpen/i);
@@ -1048,8 +1048,11 @@ test("registration toolbar keeps the workflow self-explanatory with search and r
   assert.match(workspaceSource, /const hasQuery = !isWithdrawalWorkspace && !isTransferWorkspace && query\.trim\(\)\.length > 0/);
   assert.match(workspaceSource, /const showSearch = isRegistrationWorkspace\s*\? registrationMode === "list"\s*:/);
   assert.match(workspaceSource, /filterRegistrationCaseListItems\(registrationCaseItems, registrationView, deferredQuery\)/);
-  assert.match(workspaceSource, /isRegistrationWorkspace[\s\S]*?aria-label="새로고침"/);
-  assert.match(workspaceSource, /setRegistrationCalendarRefreshToken\(\(current\) => current \+ 1\)/);
+  const registrationToolbar = workspaceSource.slice(
+    workspaceSource.indexOf("{isRegistrationWorkspace && ("),
+    workspaceSource.indexOf("{!isWordRetestWorkspace && !isRegistrationWorkspace", workspaceSource.indexOf("{isRegistrationWorkspace && (")),
+  );
+  assert.doesNotMatch(registrationToolbar, /aria-label="새로고침"|등록 목록과 달력 새로고침/);
   assert.match(workspaceSource, /isRegistrationWorkspace \? "w-full !flex-nowrap !overflow-x-auto lg:flex-1"/);
 });
 
@@ -1102,7 +1105,7 @@ test("registration list and calendar navigation clear stale detail notices", asy
   assert.doesNotMatch(source, /상담 결과 입력을 계속 진행하세요/);
 });
 
-test("registration keeps the result URL only in canonical completion and detail surfaces", async () => {
+test("registration labels canonical result links by subject and keeps legacy detail compatibility", async () => {
   const [workspaceSource, appointmentEditorSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-appointment-editor.tsx"),
@@ -1117,7 +1120,7 @@ test("registration keeps the result URL only in canonical completion and detail 
   );
 
   assert.doesNotMatch(registrationFormSource, /시험지·결과지 URL|levelTestMaterialLink/);
-  assert.match(appointmentEditorSource, /시험지·결과지 URL/);
+  assert.match(appointmentEditorSource, /\$\{track\?\.subject \|\| "과목"\} 결과 링크/);
   assert.match(registrationDetailSource, /RegistrationExternalLinkInfo label="시험지·결과지 URL"/);
 });
 
@@ -1211,6 +1214,29 @@ test("registration tabs render compact application rows without the retired pare
   ]);
   assert.doesNotMatch(workspaceSource, /RegistrationDataTable|RegistrationPipelineFilter/);
   assert.doesNotMatch(tableSource, /selectedGradeFilter|selectedCounselorFilter|RegistrationResizableHeaderCell/);
+});
+
+test("registration rows expose process-specific columns and safe deletion", async () => {
+  const [workspaceSource, tableSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/registration-case-list.tsx"),
+  ]);
+
+  assertIncludesAll(tableSource, [
+    "REGISTRATION_CASE_VIEW_COLUMNS",
+    'inquiry: ["학생", "학년 · 학교", "연락처", "문의 과목 · 일시"]',
+    'level_test: ["학생 · 과목", "예약 일시", "장소", "진행 · 결과"]',
+    'consulting: ["학생 · 과목", "상담 유형", "책임자", "기준 · 예약 일시", "장소"]',
+    'waiting: ["학생 · 과목", "대기 종류", "책임자", "단계 진입일시"]',
+    'enrollment: ["학생 · 과목", "등록 상태", "수업 시작", "교재 준비"]',
+    'closed: ["학생 · 과목", "완료 상태", "책임자", "완료 일시"]',
+    "onDelete",
+    "삭제",
+  ]);
+  assertIncludesAll(workspaceSource, [
+    "canDelete={(item) => canDeleteTask(item.task)}",
+    "onDelete={(item) => requestRemoveTask(item.task)}",
+  ]);
 });
 
 test("registration hold and terminal states expose only valid explicit actions", async () => {
@@ -1655,9 +1681,8 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     assert.match(controlSource, /timeOptions=\{REGISTRATION_TIME_OPTIONS\}/);
   }
   assertIncludesAll(initialPlanSource, [
-    "과목별 다음 업무",
-    "문의 유지",
-    "바로 전화상담",
+    "ProcessSubjectPicker",
+    "전화상담",
     "레벨테스트",
     "방문상담",
     "상담 책임자",
@@ -1667,11 +1692,12 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "timeAriaLabel=\"방문상담일 시각\"",
     "레벨테스트 장소",
     "방문상담실",
-    "참여 과목",
+    "영어 결과 링크",
+    "수학 결과 링크",
   ]);
-  assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink/);
+  assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink|참여 과목|ParticipantBadges/);
   assertInOrder(initialPlanSource, ["상담 책임자", "전화상담 대기 기준일시", "방문상담일시", "방문상담실", "상담 결과"]);
-  assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소", "참여 과목"]);
+  assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소", "영어 결과 링크", "수학 결과 링크"]);
   assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
   const inquirySource = `${subjectPickerSource}\n${inquiryFieldsSource}`;
@@ -1780,8 +1806,7 @@ test("canonical registration application opens one honest read-only timeline fro
   assert.doesNotMatch(editorSource, /현재 업무/);
   assert.doesNotMatch(editorSource, /담당자 및 일시 이력/);
   assert.match(timelineSource, /buildRegistrationSubjectHistory\(detail\)/);
-  assert.match(timelineSource, /과목 전체/);
-  assert.match(timelineSource, /단계 전체/);
+  assert.doesNotMatch(timelineSource, /과목 전체|단계 전체|subjectFilter|stageFilter/);
   assert.match(timelineSource, /알 수 없음/);
   assert.match(timelineSource, /마이그레이션/);
   assert.match(timelineSource, /시간 확인 불가/);
@@ -2145,7 +2170,7 @@ test("registration resolves and edits directors per subject in the canonical ini
     "orderedSubjects.map((subject)",
     "draft.directorOverrides[subject] || resolvedDirectorId",
     "directorOptionsBySubject[subject]",
-    "[subject]: event.target.value",
+    "[subject]: nextValue",
     "`${subject} 상담 책임자`",
   ]);
   assert.doesNotMatch(workspaceSource, /function handleRegistrationCounselorChange/);
@@ -3723,12 +3748,13 @@ test("word retest workspace keeps page title full and add actions compact", asyn
 });
 
 test("management sync connects registration transfer withdrawal and word retest data", async () => {
-  const [workspaceSource, serviceSource, accessMigrationSource, deleteGuardMigrationSource, detailDeleteGuardMigrationSource] = await Promise.all([
+  const [workspaceSource, serviceSource, accessMigrationSource, deleteGuardMigrationSource, detailDeleteGuardMigrationSource, deleteProducerMigrationSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/ops-task-service.ts"),
     readSource("supabase/migrations/20260524150000_ops_word_retest_teacher_access.sql"),
     readSource("supabase/migrations/20260524153000_ops_task_history_delete_guard.sql"),
     readSource("supabase/migrations/20260524154000_ops_task_detail_history_delete_guard.sql"),
+    readSource("supabase/migrations/20260716194930_ops_task_delete_producer.sql"),
   ]);
 
   assertIncludesAll(workspaceSource, [
@@ -3862,11 +3888,21 @@ test("management sync connects registration transfer withdrawal and word retest 
     "throw new Error(\"업무 데이터를 다시 불러오세요.\")",
   ]);
   assertIncludesAll(deleteOpsTaskSource, [
-    ".from(\"ops_tasks\").delete().eq(\"id\", taskId).select(\"id\")",
-    "if (error || !didMutateOpsTask(data)) {",
+    'runIdempotentOpsTaskProducerRpc("delete_ops_task_v1"',
+    "producerDeletedTask(response, taskId)",
     "if (rollbackWaitlist) await rollbackWaitlist()",
   ]);
+  assert.doesNotMatch(deleteOpsTaskSource, /\.from\("ops_tasks"\)\.delete\(\)/);
   assert.doesNotMatch(deleteOpsTaskSource, /deleteOpsTaskChildRows/);
+
+  assertIncludesAll(deleteProducerMigrationSource, [
+    "create or replace function dashboard_private.delete_ops_task_v1_impl",
+    "dashboard_private.assert_ops_task_actor_v2(v_task, null)",
+    "dashboard_private.registration_task_has_subject_tracks(v_task.id)",
+    "delete from public.ops_tasks task",
+    "create or replace function public.delete_ops_task_v1",
+    "grant execute on function public.delete_ops_task_v1(uuid, uuid) to authenticated",
+  ]);
 
   assertIncludesAll(detailDeleteGuardMigrationSource, [
     "drop policy if exists ops_registration_details_write",
@@ -4386,7 +4422,8 @@ test("registration form saves common edits through the canonical common writer",
 test("pending registration edits do not re-render or mutate downstream completion controls", async () => {
   const create = await readSource("src/features/tasks/registration-application-create.tsx");
 
-  assertIncludesAll(create, ["RegistrationApplicationInquirySection", "RegistrationInitialRouteFields"]);
+  assertIncludesAll(create, ["RegistrationApplicationInquirySection", "RegistrationInitialLevelTestFields", "RegistrationInitialConsultationFields"]);
+  assert.doesNotMatch(create, /RegistrationInitialRouteFields/);
   assert.doesNotMatch(create, /getRegistrationChecklistEditorState|completionIntentPipelineStatus|checked=\{registrationChecklistEditorState\.completed\}/);
 });
 

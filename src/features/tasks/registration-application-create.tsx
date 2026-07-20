@@ -25,7 +25,6 @@ import { RegistrationApplicationProgressStepper } from "./registration-applicati
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
-  getRegistrationInitialWorkflowParticipants,
   reconcileRegistrationInitialWorkflowCapabilities,
   type RegistrationInitialAction,
   type RegistrationInitialPersistenceProbeResult,
@@ -34,7 +33,6 @@ import {
 import {
   RegistrationInitialConsultationFields,
   RegistrationInitialLevelTestFields,
-  RegistrationInitialRouteFields,
 } from "./registration-initial-plan-control"
 import {
   getRegistrationSchoolChoices,
@@ -129,10 +127,6 @@ export function RegistrationApplicationCreate({
     if (reconciled !== draft) onDraftChange(reconciled)
   }, [draft, onDraftChange, stableAllowedInitialActions])
 
-  const levelTestSubjects = getRegistrationInitialWorkflowParticipants(draft, "level_test")
-  const consultationSubjects = subjects.filter((subject) => (
-    draft.subjectPlans[subject] === "direct_phone" || draft.subjectPlans[subject] === "visit"
-  ))
   const note = persistenceNote(persistence.mode)
   const inquiryLockReason = disabled
     ? "저장 중입니다"
@@ -148,15 +142,15 @@ export function RegistrationApplicationCreate({
     return {
       ...base,
       inquiry: { ...base.inquiry, lockReason: inquiryLockReason },
-      level_test: levelTestSubjects.length > 0 && canPlanInitialWorkflow
+      level_test: canPlanInitialWorkflow
         ? { ...base.level_test, editable: true, lockReason: "" }
         : base.level_test,
-      consultation: consultationSubjects.length > 0 && canPlanInitialWorkflow
+      consultation: canPlanInitialWorkflow
         ? { ...base.consultation, editable: true, lockReason: "" }
         : base.consultation,
       history: { ...base.history, lockReason: "첫 저장 후 자동 기록됩니다" },
     }
-  }, [consultationSubjects.length, draft, inquiryLockReason, levelTestSubjects.length, persistence.mode, subjects, writable])
+  }, [draft, inquiryLockReason, persistence.mode, subjects, writable])
   const initialFieldsProps = {
     subjects,
     draft,
@@ -273,13 +267,6 @@ export function RegistrationApplicationCreate({
           )}
           exceptionContent={(
             <div className="grid gap-3">
-              <RegistrationInitialRouteFields
-                {...initialFieldsProps}
-                allowedInitialActions={persistence.mode === "ready_atomic"
-                  ? ["inquiry", "direct_phone", "level_test", "visit"]
-                  : ["inquiry"]}
-                disabled={disabled || !writable}
-              />
               {showInquiryOnlyNote ? (
                 <p role="note" className="text-sm text-muted-foreground">
                   {note}
@@ -299,7 +286,9 @@ export function RegistrationApplicationCreate({
           <RegistrationInitialConsultationFields {...initialFieldsProps} disabled={!sectionStates.consultation.editable} />
         </RegistrationApplicationConsultationSection>
       )}
-      placement={(
+      waitingState={sectionStates.placement}
+      registrationState={sectionStates.placement}
+      waiting={(
         <RegistrationApplicationPlacementSection
           editable={sectionStates.placement.editable}
           fields={(
@@ -311,12 +300,19 @@ export function RegistrationApplicationCreate({
                 </select>
               </Label>
               <ReadonlyCreateField label="대기 수업" />
+            </div>
+          )}
+        />
+      )}
+      registration={(
+        <RegistrationApplicationPlacementSection
+          editable={sectionStates.placement.editable}
+          fields={(
+            <div className="grid gap-3 md:grid-cols-2">
               <ReadonlyCreateField label="등록 단계" />
               <ReadonlyCreateField label="수강 수업" focusKey="classId" />
               <ReadonlyCreateField label="교재" focusKey="textbookId" />
               <ReadonlyCreateField label="수업 시작일·회차" focusKey="classStartDate" ariaLabel="수업 시작 일정" />
-              <ReadonlyCreateField label="입학 처리 시작 행동" />
-              <ReadonlyCreateField label="문의 요청 사항" value={registration.requestNote || "기록 없음"} />
             </div>
           )}
         />

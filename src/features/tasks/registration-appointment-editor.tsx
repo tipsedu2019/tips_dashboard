@@ -454,17 +454,14 @@ export function RegistrationAppointmentEditor({
     kind,
     ...appointmentDraft,
   })
-  const canonicalLevelTestPlace = kind === "level_test"
-    ? normalizeRegistrationLevelTestPlace(place)
-    : null
-  const legacyLevelTestPlace = kind === "level_test"
-    && appointment?.place
+  const canonicalLevelTestPlace = normalizeRegistrationLevelTestPlace(place)
+  const legacyLevelTestPlace = appointment?.place
     && !normalizeRegistrationLevelTestPlace(appointment.place)
       ? appointment.place
       : ""
   const canSave = Boolean(
     scheduledAt
-    && (kind === "level_test" ? canonicalLevelTestPlace : place.trim())
+    && canonicalLevelTestPlace
     && appointmentDraft.trackIds.length > 0
     && !saving
     && !mutationLocked
@@ -788,7 +785,7 @@ export function RegistrationAppointmentEditor({
       onWarning(message)
       const selector = !scheduledAt
         ? "[data-appointment-field=scheduled-at] input, [data-appointment-field=scheduled-at] button"
-        : !(kind === "level_test" ? canonicalLevelTestPlace : place.trim())
+        : !canonicalLevelTestPlace
           ? "[data-appointment-field=place] select, [data-appointment-field=place] input"
           : "[data-appointment-field=tracks] button"
       window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(selector)?.focus())
@@ -809,7 +806,7 @@ export function RegistrationAppointmentEditor({
         taskId,
         kind,
         scheduledAt: toScheduledAt(scheduledAt),
-        place: canonicalLevelTestPlace ?? place.trim(),
+        place: canonicalLevelTestPlace || "",
         trackIds: appointmentDraft.trackIds,
         replaceRemaining: editMode === "replace_remaining",
         requestKey,
@@ -896,7 +893,7 @@ export function RegistrationAppointmentEditor({
     const materialLink = (draftLinks[activity.id] || activity.materialLink || "").trim()
     const track = trackById.get(activity.trackId)
     if (status === "completed" && !materialLink) {
-      onWarning("완료하려면 시험지·결과지 URL을 입력하세요.")
+      onWarning(`[${track?.subject || "해당 과목"}] 결과 링크를 입력하세요.`)
       return
     }
     if (status === "completed" && !track?.directorProfileId) {
@@ -1068,8 +1065,7 @@ export function RegistrationAppointmentEditor({
             </Label>
             <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
               <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
-              {kind === "level_test" ? (
-                <>
+              <>
                   <select
                     aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`}
                     value={normalizeRegistrationLevelTestPlace(place) ?? ""}
@@ -1086,9 +1082,6 @@ export function RegistrationAppointmentEditor({
                     <span className="text-xs text-muted-foreground">기존 저장 장소: {appointment?.place}</span>
                   ) : null}
                 </>
-              ) : (
-                <Input aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`} value={place} onChange={(event) => { setValidationError(""); setPlace(event.target.value) }} placeholder="상담실" disabled={saving || mutationLocked} />
-              )}
             </Label>
           </div>
 
@@ -1177,10 +1170,10 @@ export function RegistrationAppointmentEditor({
                   </div>
                 ) : null}
                 <Label className="grid gap-1.5">
-                  시험지·결과지 URL
+                  {track?.subject || "과목"} 결과 링크
                   <Input
                     type="url"
-                    aria-label={`${track?.subject || "과목"} 시험지·결과지 URL`}
+                    aria-label={`${track?.subject || "과목"} 결과 링크`}
                     value={materialLink}
                     onChange={(event) => setDraftLinks((current) => ({ ...current, [activity.id]: event.target.value }))}
                     placeholder="https://drive.google.com/..."
@@ -1199,7 +1192,7 @@ export function RegistrationAppointmentEditor({
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button type="button" aria-label={`${track?.subject || "과목"} 미응시`} size="sm" variant="outline" onClick={() => void completeAttempt(activity, "absent")} disabled={trackRefreshPending || Boolean(activitySavingId)}>미응시</Button>
                       <Button type="button" aria-label={`${track?.subject || "과목"} 과목 취소`} size="sm" variant="ghost" onClick={() => void completeAttempt(activity, "canceled")} disabled={trackRefreshPending || Boolean(activitySavingId)}>과목 취소</Button>
-                      <Button type="button" aria-label={`${track?.subject || "과목"} 결과 완료`} size="sm" onClick={() => void completeAttempt(activity, "completed")} disabled={trackRefreshPending || Boolean(activitySavingId) || !materialLink.trim() || !track?.directorProfileId}>결과 완료</Button>
+                      <Button type="button" aria-label={`${track?.subject || "과목"} 결과 링크 저장`} size="sm" onClick={() => void completeAttempt(activity, "completed")} disabled={trackRefreshPending || Boolean(activitySavingId) || !materialLink.trim() || !track?.directorProfileId}>결과 링크 저장</Button>
                     </div>
                   </div>
                 ) : null}

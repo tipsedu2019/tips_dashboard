@@ -361,6 +361,7 @@ test("closure migration은 writer 회수 뒤 보관 이력 최종 parity를 검�
   assert.match(source, /translator_failed/)
   assert.match(source, /notification_contract_route_outcomes/)
   assert.match(source, /notification_contract_deployment_receipts/)
+  assert.doesNotMatch(source, /pg_catalog\.coalesce\s*\(/)
   assert.doesNotMatch(source, /bridge_aware_client_bundles/)
   assert.match(source, /pre_bridge_server_instances/)
   assert.match(source, /v_ops_task_route_successes = 0/)

@@ -2182,6 +2182,12 @@ function producerCleanupDeleted(response: OpsTaskProducerResponse, taskId: strin
   }
 }
 
+function producerDeletedTask(response: OpsTaskProducerResponse, taskId: string) {
+  if (response.deleted !== true || text(response.taskId) !== taskId) {
+    throw new Error("업무 삭제 결과를 확인하지 못했습니다.")
+  }
+}
+
 export type OpsTaskProducerReceipt = Readonly<{
   taskId: string
   sourceEventIds: string[]
@@ -4524,11 +4530,14 @@ export async function deleteOpsTask(taskId: string) {
     throw new Error("등록 완료 건은 학생·수업·교재 연결을 유지해야 하므로 삭제할 수 없습니다.")
   }
   const rollbackWaitlist = await removeRegistrationWaitlistOnDelete(task)
-  const { data, error } = await supabase.from("ops_tasks").delete().eq("id", taskId).select("id")
-  if (error || !didMutateOpsTask(data)) {
+  try {
+    const response = await runIdempotentOpsTaskProducerRpc("delete_ops_task_v1", {
+      p_task_id: taskId,
+    })
+    producerDeletedTask(response, taskId)
+  } catch (error) {
     if (rollbackWaitlist) await rollbackWaitlist()
-    if (error) throw error
-    throw new Error("업무 데이터를 다시 불러오세요.")
+    throw error
   }
   clearOpsTaskWorkspaceDataCache()
 }

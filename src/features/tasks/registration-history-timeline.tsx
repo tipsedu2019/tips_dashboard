@@ -1,39 +1,21 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
+import { useMemo } from "react"
 
 import { Badge } from "@/components/ui/badge"
 
 import type { OpsProfileOption } from "./ops-task-service"
 import {
   buildRegistrationSubjectHistory,
-  type RegistrationHistoryStage,
   type RegistrationSubjectHistoryItem,
 } from "./registration-track-history.js"
-import type { OpsRegistrationCaseDetail, RegistrationSubject } from "./registration-track-service"
+import type { OpsRegistrationCaseDetail } from "./registration-track-service"
 
 export type RegistrationHistoryTimelineProps = {
   detail: OpsRegistrationCaseDetail
   profiles: OpsProfileOption[]
   embedded?: boolean
 }
-
-const STAGE_LABELS: Record<RegistrationHistoryStage, string> = {
-  inquiry: "문의",
-  responsibility: "상담 책임",
-  level_test: "레벨테스트",
-  consultation: "상담",
-  waiting: "대기",
-  admission: "입학 처리",
-  registration: "등록 완료",
-  closure: "종료",
-  reopening: "다시 열기",
-  migration: "이전 자료",
-}
-
-const STAGE_ORDER = new Map(
-  (Object.keys(STAGE_LABELS) as RegistrationHistoryStage[]).map((stage, index) => [stage, index]),
-)
 
 const HISTORY_DATE_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul",
@@ -137,34 +119,11 @@ function historyDetailLines(item: RegistrationSubjectHistoryItem) {
 }
 
 export function RegistrationHistoryTimeline({ detail, profiles, embedded = false }: RegistrationHistoryTimelineProps) {
-  const subjectFilterId = useId()
-  const stageFilterId = useId()
-  const [subjectFilter, setSubjectFilter] = useState<"all" | RegistrationSubject>("all")
-  const [stageFilter, setStageFilter] = useState<"all" | RegistrationHistoryStage>("all")
   const history = useMemo(() => buildRegistrationSubjectHistory(detail), [detail])
   const profileById = useMemo(
     () => new Map(profiles.map((profile) => [profile.id, profile.label])),
     [profiles],
   )
-  const stages = useMemo(() => (
-    [...new Set(history.map((item) => item.stage))]
-      .sort((left, right) => (STAGE_ORDER.get(left) || 0) - (STAGE_ORDER.get(right) || 0))
-  ), [history])
-  const availableSubjects = useMemo(
-    () => new Set(history.flatMap((item) => item.subjects)),
-    [history],
-  )
-  const effectiveSubjectFilter = subjectFilter === "all" || availableSubjects.has(subjectFilter)
-    ? subjectFilter
-    : "all"
-  const effectiveStageFilter = stageFilter === "all" || stages.includes(stageFilter)
-    ? stageFilter
-    : "all"
-  const filteredHistory = useMemo(() => history.filter((item) => (
-    (effectiveSubjectFilter === "all" || item.subjects.includes(effectiveSubjectFilter))
-    && (effectiveStageFilter === "all" || item.stage === effectiveStageFilter)
-  )), [effectiveStageFilter, effectiveSubjectFilter, history])
-
   return (
     <section
       className={embedded
@@ -174,44 +133,15 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
     >
       <div>
         <h3 className="text-sm font-semibold">자동 이력</h3>
-        <p className="text-xs text-muted-foreground">저장된 주요 단계만 시간과 행위자 기준으로 보여 줍니다.</p>
+        <p className="text-xs text-muted-foreground">누가 · 언제 · 무엇을 · 어떻게 처리했는지 시간순으로 보여 줍니다.</p>
       </div>
-
-      <div className="grid gap-2 sm:grid-cols-2">
-        <label htmlFor={subjectFilterId} className="grid gap-1 text-xs font-medium text-muted-foreground">
-          과목
-          <select
-            id={subjectFilterId}
-            className="h-9 rounded-md border bg-background px-3 text-sm text-foreground"
-            value={effectiveSubjectFilter}
-            onChange={(event) => setSubjectFilter(event.target.value as "all" | RegistrationSubject)}
-          >
-            <option value="all">과목 전체</option>
-            <option value="영어">영어</option>
-            <option value="수학">수학</option>
-          </select>
-        </label>
-        <label htmlFor={stageFilterId} className="grid gap-1 text-xs font-medium text-muted-foreground">
-          단계
-          <select
-            id={stageFilterId}
-            className="h-9 rounded-md border bg-background px-3 text-sm text-foreground"
-            value={effectiveStageFilter}
-            onChange={(event) => setStageFilter(event.target.value as "all" | RegistrationHistoryStage)}
-          >
-            <option value="all">단계 전체</option>
-            {stages.map((stage) => <option key={stage} value={stage}>{STAGE_LABELS[stage]}</option>)}
-          </select>
-        </label>
-      </div>
-
-      {filteredHistory.length === 0 ? (
+      {history.length === 0 ? (
         <p className="rounded-md bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
-          조건에 맞는 자동 이력이 없습니다.
+          아직 자동 이력이 없습니다.
         </p>
       ) : (
         <ol className="grid gap-2">
-          {filteredHistory.map((item) => {
+          {history.map((item) => {
             const detailLines = historyDetailLines(item)
             return (
               <li key={item.id} className="grid min-w-0 gap-2 rounded-md bg-muted/30 px-3 py-2.5">
@@ -219,11 +149,10 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium">{item.title}</span>
-                      <Badge variant="outline">{STAGE_LABELS[item.stage]}</Badge>
                       {item.subjects.map((subject) => <Badge key={subject} variant="secondary">{subject}</Badge>)}
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {historyTimeLabel(item)} · {historyActorLabel(item, profileById)}
+                      {historyActorLabel(item, profileById)} · {historyTimeLabel(item)}
                     </p>
                   </div>
                 </div>

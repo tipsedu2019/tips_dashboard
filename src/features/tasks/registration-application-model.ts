@@ -47,6 +47,7 @@ export type RegistrationApplicationSectionState = {
   current: boolean
   editable: boolean
   lockReason: string
+  upcoming: boolean
 }
 
 export type RegistrationCreateCatalogStatus = "ready" | "loading" | "partial" | "error"
@@ -174,9 +175,27 @@ export type RegistrationApplicationProgressState =
   | "upcoming"
   | "complete"
   | "terminal"
+  | "skipped"
+
+export type RegistrationApplicationProgressKey =
+  | "inquiry"
+  | "level_test"
+  | "consultation"
+  | "waiting"
+  | "registration"
+  | "admission"
+
+const REGISTRATION_APPLICATION_PROGRESS_ORDER: RegistrationApplicationProgressKey[] = [
+  "inquiry",
+  "level_test",
+  "consultation",
+  "waiting",
+  "registration",
+  "admission",
+]
 
 export type RegistrationApplicationProgressStep = {
-  key: RegistrationApplicationBodySectionKey
+  key: RegistrationApplicationProgressKey
   label: string
   state: RegistrationApplicationProgressState
 }
@@ -188,29 +207,39 @@ const REGISTRATION_APPLICATION_PROGRESS_LABELS: Record<
   inquiry: "문의",
   level_test: "레벨테스트",
   consultation: "상담",
-  placement: "등록·대기",
-  admission: "입학 처리",
+  waiting: "대기",
+  registration: "등록",
+  admission: "입학",
 }
 
 export function getRegistrationApplicationProgress(
   status: OpsRegistrationTrackSummary["status"],
+  waitingKind: OpsRegistrationTrackSummary["waitingKind"] = "",
 ): RegistrationApplicationProgressStep[] {
   if (status === "registered") {
-    return REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map((key) => ({
+    return REGISTRATION_APPLICATION_PROGRESS_ORDER.map((key) => ({
       key,
       label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
-      state: "complete",
+      state: key === "waiting" && !waitingKind ? "skipped" : "complete",
     }))
   }
 
-  const currentSection = CURRENT_SECTION_BY_STATUS[status]
-  const currentIndex = REGISTRATION_APPLICATION_BODY_SECTION_ORDER.indexOf(currentSection)
+  const currentSection: RegistrationApplicationProgressKey = status === "waiting"
+    ? "waiting"
+    : ["enrollment_decided", "not_registered"].includes(status)
+      ? "registration"
+      : status === "enrollment_processing"
+        ? "admission"
+        : CURRENT_SECTION_BY_STATUS[status] as Exclude<RegistrationApplicationProgressKey, "waiting" | "registration">
+  const currentIndex = REGISTRATION_APPLICATION_PROGRESS_ORDER.indexOf(currentSection)
   const terminal = status === "not_registered" || status === "inquiry_closed"
 
-  return REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map((key, index) => ({
+  return REGISTRATION_APPLICATION_PROGRESS_ORDER.map((key, index) => ({
     key,
     label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
-    state: index === currentIndex
+    state: key === "waiting" && index < currentIndex && !waitingKind
+      ? "skipped"
+      : index === currentIndex
       ? terminal ? "terminal" : "current"
       : index < currentIndex ? "reached" : "upcoming",
   }))
@@ -287,6 +316,10 @@ export function getRegistrationApplicationTrackState(input: {
       current: section === currentSection,
       editable: lockReason === "",
       lockReason,
+      upcoming: section !== "history" && input.track.status !== "registered" && (
+        REGISTRATION_APPLICATION_BODY_SECTION_ORDER.indexOf(section as RegistrationApplicationBodySectionKey)
+        > REGISTRATION_APPLICATION_BODY_SECTION_ORDER.indexOf(currentSection)
+      ),
       actions: actionsBySection[section],
     }
   }
@@ -397,15 +430,17 @@ export function getRegistrationCreateSectionStates(input: {
       current: true,
       editable: input.writable,
       lockReason: input.writable ? "" : "등록 정보를 수정할 권한이 없습니다",
+      upcoming: false,
     },
-    level_test: { current: false, editable: false, lockReason: futureLockReason },
-    consultation: { current: false, editable: false, lockReason: futureLockReason },
-    placement: { current: false, editable: false, lockReason: futureLockReason },
-    admission: { current: false, editable: false, lockReason: futureLockReason },
+    level_test: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
+    consultation: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
+    placement: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
+    admission: { current: false, editable: false, lockReason: futureLockReason, upcoming: true },
     history: {
       current: false,
       editable: false,
       lockReason: "저장 시 자동 기록됩니다",
+      upcoming: false,
     },
   }
 }
@@ -428,6 +463,8 @@ export function getRegistrationApplicationSectionStates(input: {
     states[section] = {
       current: trackStates.some((state) => state.current),
       editable,
+      upcoming: section !== "history" && input.tracks.length > 0
+        && trackStates.every((state) => state.upcoming),
       lockReason: editable
         ? ""
         : trackStates.find((state) => state.lockReason)?.lockReason

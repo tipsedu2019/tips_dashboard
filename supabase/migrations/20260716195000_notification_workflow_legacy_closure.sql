@@ -153,15 +153,15 @@ begin
         then pg_catalog.min(receipt_rows.build_revision_hash)
       else null
     end,
-    pg_catalog.coalesce(pg_catalog.max(
+    coalesce(pg_catalog.max(
       (pg_catalog.date_part(
         'epoch', (receipt_rows.observed_at - receipt_rows.previous_at)
       ))::numeric
     ), 0),
-    pg_catalog.coalesce(pg_catalog.sum(receipt_rows.pre_bridge_server_instances), 0),
-    pg_catalog.coalesce(pg_catalog.sum(receipt_rows.total_server_instances), 0),
-    pg_catalog.coalesce(pg_catalog.sum(receipt_rows.bridge_aware_server_instances), 0),
-    pg_catalog.coalesce(pg_catalog.bool_and(
+    coalesce(pg_catalog.sum(receipt_rows.pre_bridge_server_instances), 0),
+    coalesce(pg_catalog.sum(receipt_rows.total_server_instances), 0),
+    coalesce(pg_catalog.sum(receipt_rows.bridge_aware_server_instances), 0),
+    coalesce(pg_catalog.bool_and(
       receipt_rows.contract_version = 2
       and receipt_rows.pre_bridge_server_instances = 0
       and receipt_rows.bridge_aware_server_instances = receipt_rows.total_server_instances
