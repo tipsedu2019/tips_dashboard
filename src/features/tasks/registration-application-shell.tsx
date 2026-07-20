@@ -13,6 +13,8 @@ export type RegistrationApplicationShellProps = {
   studentName: string
   closeAction: ReactNode
   historyAction?: ReactNode
+  subjectNavigation?: ReactNode
+  progress: ReactNode
   tracks: Array<{
     key: string
     subject: RegistrationSubject
@@ -86,10 +88,7 @@ function RegistrationApplicationSection({
         aria-describedby={state.lockReason ? lockReasonId : undefined}
         className="grid gap-3"
       >
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold">{SECTION_TITLES[section]}</h3>
-          {state.current ? <span className="text-xs text-muted-foreground">진행 중</span> : null}
-        </div>
+        <h3 className="text-sm font-semibold">{SECTION_TITLES[section]}</h3>
         {state.lockReason ? (
           <p id={lockReasonId} className="text-xs text-muted-foreground">{state.lockReason}</p>
         ) : null}
@@ -118,6 +117,9 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
           {props.closeAction}
         </div>
       </header>
+
+      {props.subjectNavigation}
+      {props.progress}
 
       {REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map((section) => {
         const contentKey = SECTION_CONTENT_KEY[section]

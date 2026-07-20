@@ -32,6 +32,9 @@ export const REGISTRATION_APPLICATION_BODY_SECTION_ORDER = [
   "admission",
 ] as const satisfies readonly RegistrationApplicationSectionKey[]
 
+export type RegistrationApplicationBodySectionKey =
+  (typeof REGISTRATION_APPLICATION_BODY_SECTION_ORDER)[number]
+
 export type RegistrationApplicationDirtyKey =
   `${RegistrationApplicationSectionKey}:${string}`
 
@@ -149,7 +152,7 @@ export const REGISTRATION_ACTION_SECTION = {
 
 const CURRENT_SECTION_BY_STATUS: Record<
   OpsRegistrationTrackSummary["status"],
-  RegistrationApplicationSectionKey
+  RegistrationApplicationBodySectionKey
 > = {
   inquiry: "inquiry",
   migration_review: "inquiry",
@@ -163,6 +166,54 @@ const CURRENT_SECTION_BY_STATUS: Record<
   registered: "placement",
   not_registered: "placement",
   inquiry_closed: "inquiry",
+}
+
+export type RegistrationApplicationProgressState =
+  | "reached"
+  | "current"
+  | "upcoming"
+  | "complete"
+  | "terminal"
+
+export type RegistrationApplicationProgressStep = {
+  key: RegistrationApplicationBodySectionKey
+  label: string
+  state: RegistrationApplicationProgressState
+}
+
+const REGISTRATION_APPLICATION_PROGRESS_LABELS: Record<
+  RegistrationApplicationProgressStep["key"],
+  string
+> = {
+  inquiry: "문의",
+  level_test: "레벨테스트",
+  consultation: "상담",
+  placement: "등록·대기",
+  admission: "입학 처리",
+}
+
+export function getRegistrationApplicationProgress(
+  status: OpsRegistrationTrackSummary["status"],
+): RegistrationApplicationProgressStep[] {
+  if (status === "registered") {
+    return REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map((key) => ({
+      key,
+      label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
+      state: "complete",
+    }))
+  }
+
+  const currentSection = CURRENT_SECTION_BY_STATUS[status]
+  const currentIndex = REGISTRATION_APPLICATION_BODY_SECTION_ORDER.indexOf(currentSection)
+  const terminal = status === "not_registered" || status === "inquiry_closed"
+
+  return REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map((key, index) => ({
+    key,
+    label: REGISTRATION_APPLICATION_PROGRESS_LABELS[key],
+    state: index === currentIndex
+      ? terminal ? "terminal" : "current"
+      : index < currentIndex ? "reached" : "upcoming",
+  }))
 }
 
 function getActionSection(

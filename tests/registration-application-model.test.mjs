@@ -10,6 +10,7 @@ const {
   REGISTRATION_APPLICATION_SECTION_ORDER,
   getRegistrationApplicationAppointmentActionPlans,
   getRegistrationApplicationCaseEditableSections,
+  getRegistrationApplicationProgress,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
   getRegistrationCreateCatalogState,
@@ -70,6 +71,39 @@ const cases = [
   ["not_registered", "placement"],
   ["inquiry_closed", "inquiry"],
 ]
+
+const progressKeys = ["inquiry", "level_test", "consultation", "placement", "admission"]
+
+test("registration progress derives five ordered steps from the active track status", () => {
+  const expectedStatesByStatus = {
+    inquiry: ["current", "upcoming", "upcoming", "upcoming", "upcoming"],
+    level_test_scheduled: ["reached", "current", "upcoming", "upcoming", "upcoming"],
+    consultation_waiting: ["reached", "reached", "current", "upcoming", "upcoming"],
+    waiting: ["reached", "reached", "reached", "current", "upcoming"],
+    enrollment_processing: ["reached", "reached", "reached", "reached", "current"],
+  }
+
+  for (const [status, expectedStates] of Object.entries(expectedStatesByStatus)) {
+    const progress = getRegistrationApplicationProgress(status)
+    assert.deepEqual(progress.map((step) => step.key), progressKeys, status)
+    assert.deepEqual(progress.map((step) => step.state), expectedStates, status)
+  }
+})
+
+test("registered completes all progress while closed outcomes terminate only their outcome step", () => {
+  assert.deepEqual(
+    getRegistrationApplicationProgress("registered").map((step) => step.state),
+    ["complete", "complete", "complete", "complete", "complete"],
+  )
+  assert.deepEqual(
+    getRegistrationApplicationProgress("not_registered").map((step) => step.state),
+    ["reached", "reached", "reached", "terminal", "upcoming"],
+  )
+  assert.deepEqual(
+    getRegistrationApplicationProgress("inquiry_closed").map((step) => step.state),
+    ["terminal", "upcoming", "upcoming", "upcoming", "upcoming"],
+  )
+})
 
 test("active registration track keeps a valid request and falls back after subject removal", () => {
   const tracks = [{ id: "english" }, { id: "math" }]

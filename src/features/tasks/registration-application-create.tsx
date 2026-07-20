@@ -17,8 +17,10 @@ import { RegistrationApplicationLevelTestSection } from "./registration-applicat
 import {
   getRegistrationCreateCatalogState,
   getRegistrationCreateSectionStates,
+  getRegistrationApplicationProgress,
   type RegistrationCreateCatalogStatus,
 } from "./registration-application-model"
+import { RegistrationApplicationProgressStepper } from "./registration-application-progress-stepper"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
@@ -212,6 +214,7 @@ export function RegistrationApplicationCreate({
         subject,
         statusLabel: INITIAL_ACTION_LABEL[draft.subjectPlans[subject] || "inquiry"],
       }))}
+      progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress("inquiry")} />}
       sectionStates={sectionStates}
       sectionNotices={catalogState.showLocalStatus ? {
         consultation: (

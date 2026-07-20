@@ -97,7 +97,6 @@ export function RegistrationInitialLevelTestFields({
 
   return (
     <div className="grid gap-3 md:grid-cols-2">
-      <ReadonlyInitialField label="진행상태" value="첫 저장 전" />
       <Label className="grid gap-1.5" aria-label="레벨테스트 예약일시" data-registration-focus="levelTestAt">
         <span>예약일시</span>
         <DateTimePickerControl

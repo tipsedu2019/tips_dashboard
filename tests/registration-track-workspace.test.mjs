@@ -62,6 +62,48 @@ test("registration application shell renders the five body sections once in fixe
   assert.doesNotMatch(shell, /이전|다음|stage tabs|StageTabs/)
 })
 
+test("registration application renders subject navigation and active-track progress above inquiry", async () => {
+  const [shell, create, detail, stepper] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-progress-stepper.tsx", import.meta.url), "utf8").catch(() => ""),
+  ])
+
+  assert.match(shell, /subjectNavigation\?: ReactNode/)
+  assert.match(shell, /progress: ReactNode/)
+  assert.ok(shell.indexOf("{props.subjectNavigation}") < shell.indexOf("REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map"))
+  assert.ok(shell.indexOf("{props.progress}") < shell.indexOf("REGISTRATION_APPLICATION_BODY_SECTION_ORDER.map"))
+  assert.match(stepper, /<ol/)
+  assert.match(stepper, /aria-current=\{[^}]*\? "step"/)
+  assert.match(stepper, /lucide-react/)
+  assert.match(stepper, /지남/)
+  assert.match(stepper, /현재/)
+  assert.match(stepper, /예정/)
+  assert.match(stepper, /완료/)
+  assert.match(stepper, /종료/)
+
+  assert.match(create, /progress=\{<RegistrationApplicationProgressStepper steps=\{getRegistrationApplicationProgress\("inquiry"\)\} \/>\}/)
+  assert.match(detail, /subjectNavigation=\{\([\s\S]*?<RegistrationApplicationSubjectTabs/)
+  assert.match(detail, /progress=\{<RegistrationApplicationProgressStepper steps=\{getRegistrationApplicationProgress\(activeTrack\?\.status \|\| "inquiry"\)\} \/>\}/)
+  assert.doesNotMatch(detail, /subjectNavigationContent=\{/)
+})
+
+test("top progress replaces only generic duplicate status fields", async () => {
+  const [shell, detail, initialPlan] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
+  ])
+
+  assert.doesNotMatch(shell, />진행 중</)
+  assert.doesNotMatch(detail, /valueField\("진행상태"/)
+  assert.doesNotMatch(initialPlan, /ReadonlyInitialField label="진행상태"/)
+  assert.match(detail, /valueField\("시험 시작·완료 상태"/)
+  assert.match(detail, /valueField\("등록 단계"/)
+  assert.match(initialPlan, /ReadonlyInitialField label="시험 시작·완료 상태"/)
+})
+
 test("saved detail exposes automatic history from a header clock popover only", async () => {
   const [shell, detail, create, action, timeline] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
@@ -177,7 +219,6 @@ test("registration create keeps the complete approved future field packet mounte
   }
 
   assertOrdered(levelTest, [
-    'label="진행상태"',
     "<span>예약일시</span>",
     "<span>장소</span>",
     'label="시험 시작·완료 상태"',

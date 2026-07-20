@@ -12,6 +12,7 @@ import { RegistrationApplicationLevelTestSection } from "./registration-applicat
 import {
   getRegistrationApplicationAppointmentActionPlans,
   getRegistrationApplicationCaseEditableSections,
+  getRegistrationApplicationProgress,
   getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
   getRegistrationApplicationTrackState,
@@ -22,6 +23,7 @@ import {
   type RegistrationApplicationDirtyKey,
   type RegistrationApplicationSectionKey,
 } from "./registration-application-model"
+import { RegistrationApplicationProgressStepper } from "./registration-application-progress-stepper"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationHistoryAction } from "./registration-application-history-action"
 import { RegistrationApplicationShell } from "./registration-application-shell"
@@ -197,12 +199,10 @@ function RegistrationTrackSectionValues({
   let fields: ReactNode[]
   if (section === "inquiry") {
     fields = [
-      valueField("진행상태", REGISTRATION_TRACK_STATUS_LABELS[track.status]),
       valueField("상담 책임자", track.directorName || "미지정"),
     ]
   } else if (section === "level_test") {
     fields = [
-      valueField("진행상태", latestLevelTest ? latestLevelTest.status : "기록 없음"),
       valueField("예약일시", formatDateTime(levelTestAppointment?.scheduledAt)),
       valueField("장소", levelTestAppointment?.place || "기록 없음"),
       valueField("시험 시작·완료 상태", latestLevelTest?.status || "기록 없음"),
@@ -230,7 +230,6 @@ function RegistrationTrackSectionValues({
     ]
   } else {
     fields = [
-      valueField("진행상태", REGISTRATION_TRACK_STATUS_LABELS[track.status]),
       valueField("입학 처리 묶음", latestEnrollment?.admissionBatchId || "기록 없음"),
     ]
   }
@@ -341,6 +340,7 @@ export function RegistrationApplication({
   }
   const canManageCase = viewerRole === "admin" || viewerRole === "staff"
   const activeTrackId = resolveRegistrationActiveTrackId(detail.tracks, focusTrackId)
+  const activeTrack = detail.tracks.find((track) => track.id === activeTrackId) || null
   const reviewTrack = detail.tracks.find((track) => track.migrationReviewRequired) || null
   const activeMigrationConflictState = migrationConflictState?.taskId === detail.task.id
     ? migrationConflictState
@@ -844,6 +844,19 @@ export function RegistrationApplication({
         subject: track.subject,
         statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
       }))}
+      subjectNavigation={(
+        <RegistrationApplicationSubjectTabs
+          tracks={detail.tracks.map((track) => ({
+            id: track.id,
+            subject: track.subject,
+            statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
+          }))}
+          value={activeTrackId}
+          panelIdsByTrackId={subjectPanelIdsByTrackId}
+          onValueChange={handleSubjectTabChange}
+        />
+      )}
+      progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress(activeTrack?.status || "inquiry")} />}
       sectionStates={sectionStates}
       inquiry={(
         <RegistrationApplicationInquirySection
@@ -878,18 +891,6 @@ export function RegistrationApplication({
               onReload={onReload}
               onWarning={onWarning}
               onDirtyChange={(dirty) => setDirty("inquiry:subjects", dirty)}
-            />
-          )}
-          subjectNavigationContent={(
-            <RegistrationApplicationSubjectTabs
-              tracks={detail.tracks.map((track) => ({
-                id: track.id,
-                subject: track.subject,
-                statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
-              }))}
-              value={activeTrackId}
-              panelIdsByTrackId={subjectPanelIdsByTrackId}
-              onValueChange={handleSubjectTabChange}
             />
           )}
           exceptionContent={(
