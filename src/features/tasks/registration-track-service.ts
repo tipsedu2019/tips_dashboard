@@ -1216,6 +1216,32 @@ function requireRequestKey(input: unknown) {
   return requestKey
 }
 
+function normalizeRegistrationInitialLevelTestAppointment(
+  input: RegistrationCaseCreateWithInitialWorkflowInput,
+): RegistrationCaseCreateWithInitialWorkflowInput {
+  if (!input.levelTestAppointment) return input
+  const place = normalizeRegistrationLevelTestPlace(input.levelTestAppointment.place)
+  if (!place) throw new Error("registration_level_test_place_invalid")
+  if (place === input.levelTestAppointment.place) return input
+  return {
+    ...input,
+    levelTestAppointment: {
+      ...input.levelTestAppointment,
+      place,
+    },
+  }
+}
+
+function normalizeRegistrationSharedAppointmentInput(
+  input: SaveRegistrationSharedAppointmentInput,
+): SaveRegistrationSharedAppointmentInput {
+  if (input.kind !== "level_test") return input
+  const place = normalizeRegistrationLevelTestPlace(input.place)
+  if (!place) throw new Error("registration_level_test_place_invalid")
+  if (place === input.place) return input
+  return { ...input, place }
+}
+
 function requireMessageRequestKey(input: unknown) {
   const requestKey = text(input)
   if (!requestKey) throw new Error("A non-empty message request key is required.")
@@ -1832,6 +1858,7 @@ export function createRegistrationTrackService(
   async function createRegistrationCaseWithInitialWorkflow(
     input: RegistrationCaseCreateWithInitialWorkflowInput,
   ): Promise<RegistrationCaseCreateWithInitialWorkflowResponse> {
+    const normalizedInput = normalizeRegistrationInitialLevelTestAppointment(input)
     await requireReadyRuntime()
     const intakeRuntime = await options.probeIntakeRuntime()
     if (intakeRuntime.available !== true || intakeRuntime.version !== 1) {
@@ -1840,21 +1867,21 @@ export function createRegistrationTrackService(
     const result = await callRpc<RegistrationCaseCreateWithInitialWorkflowResponse>(
       "create_registration_case_with_initial_workflow_v1",
       {
-        p_student_name: input.studentName,
-        p_school_grade: input.schoolGrade,
-        p_school_name: input.schoolName,
-        p_parent_phone: input.parentPhone,
-        p_student_phone: input.studentPhone,
-        p_campus: input.campus,
-        p_inquiry_at: input.inquiryAt,
-        p_subjects: input.subjects,
-        p_request_note: input.requestNote,
-        p_priority: input.priority,
-        p_subject_plans: input.subjectPlans,
-        p_level_test_appointment: input.levelTestAppointment,
-        p_visit_appointment: input.visitAppointment,
-        p_director_overrides: input.directorOverrides,
-        p_request_key: requireRequestKey(input.requestKey),
+        p_student_name: normalizedInput.studentName,
+        p_school_grade: normalizedInput.schoolGrade,
+        p_school_name: normalizedInput.schoolName,
+        p_parent_phone: normalizedInput.parentPhone,
+        p_student_phone: normalizedInput.studentPhone,
+        p_campus: normalizedInput.campus,
+        p_inquiry_at: normalizedInput.inquiryAt,
+        p_subjects: normalizedInput.subjects,
+        p_request_note: normalizedInput.requestNote,
+        p_priority: normalizedInput.priority,
+        p_subject_plans: normalizedInput.subjectPlans,
+        p_level_test_appointment: normalizedInput.levelTestAppointment,
+        p_visit_appointment: normalizedInput.visitAppointment,
+        p_director_overrides: normalizedInput.directorOverrides,
+        p_request_key: requireRequestKey(normalizedInput.requestKey),
       },
       { runtimeChecked: true },
     )
@@ -1956,22 +1983,17 @@ export function createRegistrationTrackService(
     expectedNotificationRevision: number | null
     requestKey: string
   }): Promise<RegistrationAppointmentMutationResponse> {
-    const levelTestPlace = input.kind === "level_test"
-      ? normalizeRegistrationLevelTestPlace(input.place)
-      : null
-    if (input.kind === "level_test" && !levelTestPlace) {
-      throw new Error("registration_level_test_place_invalid")
-    }
+    const normalizedInput = normalizeRegistrationSharedAppointmentInput(input)
     const result = await callRpc<unknown>("save_registration_shared_appointment", {
-      p_appointment_id: normalizeUuid(input.appointmentId),
-      p_task_id: input.taskId,
-      p_kind: input.kind,
-      p_scheduled_at: input.scheduledAt,
-      p_place: levelTestPlace ?? input.place,
-      p_track_ids: input.trackIds,
-      p_replace_remaining: input.replaceRemaining,
-      p_expected_notification_revision: input.expectedNotificationRevision,
-      p_request_key: requireRequestKey(input.requestKey),
+      p_appointment_id: normalizeUuid(normalizedInput.appointmentId),
+      p_task_id: normalizedInput.taskId,
+      p_kind: normalizedInput.kind,
+      p_scheduled_at: normalizedInput.scheduledAt,
+      p_place: normalizedInput.place,
+      p_track_ids: normalizedInput.trackIds,
+      p_replace_remaining: normalizedInput.replaceRemaining,
+      p_expected_notification_revision: normalizedInput.expectedNotificationRevision,
+      p_request_key: requireRequestKey(normalizedInput.requestKey),
     })
     return mapRegistrationAppointmentMutationResponse(result)
   }
@@ -2534,12 +2556,13 @@ export function createRegistrationCase(
 export function createRegistrationCaseWithInitialWorkflow(
   input: RegistrationCaseCreateWithInitialWorkflowInput,
 ): Promise<RegistrationCaseCreateWithInitialWorkflowResponse> {
+  const normalizedInput = normalizeRegistrationInitialLevelTestAppointment(input)
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationCaseCreateWithInitialWorkflowResponse>(
     "createRegistrationCaseWithInitialWorkflow",
-    input as unknown as Record<string, unknown>,
+    normalizedInput as unknown as Record<string, unknown>,
   )
   if (fixture !== null) return fixture
-  return defaultRegistrationTrackService.createRegistrationCaseWithInitialWorkflow(input)
+  return defaultRegistrationTrackService.createRegistrationCaseWithInitialWorkflow(normalizedInput)
 }
 
 export function syncRegistrationCaseSubjects(
@@ -2577,9 +2600,10 @@ export function assignRegistrationTrackDirector(
 export function saveRegistrationSharedAppointment(
   input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationSharedAppointment>[0],
 ): Promise<RegistrationAppointmentMutationResponse> {
-  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationAppointmentMutationResponse>("saveRegistrationSharedAppointment", input)
+  const normalizedInput = normalizeRegistrationSharedAppointmentInput(input)
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationAppointmentMutationResponse>("saveRegistrationSharedAppointment", normalizedInput)
   if (fixture) return fixture
-  return defaultRegistrationTrackService.saveRegistrationSharedAppointment(input)
+  return defaultRegistrationTrackService.saveRegistrationSharedAppointment(normalizedInput)
 }
 
 export function cancelRegistrationAppointment(

@@ -1402,6 +1402,46 @@ test("atomic initial workflow create rechecks both exact runtime markers before 
   }
 });
 
+test("atomic initial workflow create constrains only level-test places before RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient();
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const levelTestInput = {
+    ...initialWorkflowCreateInput(),
+    subjectPlans: { 영어: "level_test" },
+    levelTestAppointment: {
+      scheduledAt: "2026-07-18T01:00:00Z",
+      place: "본관 201호",
+      subjects: ["영어"],
+    },
+  };
+
+  await assert.rejects(
+    service.createRegistrationCaseWithInitialWorkflow(levelTestInput),
+    /registration_level_test_place_invalid/,
+  );
+  assert.equal(harness.rpcCalls.length, 0);
+
+  await service.createRegistrationCaseWithInitialWorkflow({
+    ...levelTestInput,
+    levelTestAppointment: { ...levelTestInput.levelTestAppointment, place: "  별관  " },
+  });
+  assert.equal(harness.rpcCalls[0][1].p_level_test_appointment.place, "별관");
+
+  await service.createRegistrationCaseWithInitialWorkflow({
+    ...initialWorkflowCreateInput(),
+    subjectPlans: { 영어: "visit" },
+    levelTestAppointment: null,
+    visitAppointment: {
+      scheduledAt: "2026-07-18T02:00:00Z",
+      place: "본관 201호",
+      subjects: ["영어"],
+    },
+    requestKey: "visit-free-text",
+  });
+  assert.equal(harness.rpcCalls[1][1].p_visit_appointment.place, "본관 201호");
+});
+
 test("receipt keys are required and maintenance blocks every new mutation before RPC", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient();

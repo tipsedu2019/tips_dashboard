@@ -29,6 +29,17 @@ async function loadTsModule(url) {
     structuredClone,
     setTimeout,
     clearTimeout,
+    require(specifier) {
+      if (specifier === "./registration-level-test-place.ts") {
+        return {
+          normalizeRegistrationLevelTestPlace(value) {
+            const normalized = String(value ?? "").trim()
+            return ["본관", "별관"].includes(normalized) ? normalized : null
+          },
+        }
+      }
+      throw new Error(`unexpected require: ${specifier}`)
+    },
   })
   return sandboxModule.exports
 }
@@ -138,6 +149,14 @@ async function loadServiceBoundary({
           invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure(error) { throw error },
         }
       }
+      if (specifier === "./registration-level-test-place.ts") {
+        return {
+          normalizeRegistrationLevelTestPlace(value) {
+            const normalized = String(value ?? "").trim()
+            return ["본관", "별관"].includes(normalized) ? normalized : null
+          },
+        }
+      }
       throw new Error(`unexpected require: ${specifier}`)
     },
   })
@@ -159,7 +178,7 @@ function initialWorkflowInput(overrides = {}) {
     subjectPlans: { 수학: "direct_phone", 영어: "level_test" },
     levelTestAppointment: {
       scheduledAt: "2026-07-14T10:00:00+09:00",
-      place: "본관 201호",
+      place: "본관",
       subjects: ["영어"],
     },
     visitAppointment: null,
@@ -1656,6 +1675,104 @@ test("a thrown fixture create error propagates and never falls through to Supaba
   assert.equal(calls.rpc.length, 0)
 })
 
+test("public fixture-first persistence wrappers reject noncanonical level-test places before mutation", async () => {
+  const fixtureResponse = {
+    taskId: "fixture-task-created",
+    commonRevision: 1,
+    subjects: ["영어"],
+    tracks: [],
+    appointments: [],
+    notificationTargets: [],
+  }
+  const { service, calls } = await loadServiceBoundary({
+    fixtureVersion: 1,
+    executeFixtureAction: (type) => type === "createRegistrationCaseWithInitialWorkflow"
+      ? Promise.resolve(fixtureResponse)
+      : Promise.resolve({ appointmentId: "fixture-appointment-created", notificationRevision: 1 }),
+  })
+
+  assert.throws(
+    () => service.createRegistrationCaseWithInitialWorkflow(initialWorkflowInput({
+      levelTestAppointment: {
+        scheduledAt: "2026-07-14T10:00:00+09:00",
+        place: "본관 201호",
+        subjects: ["영어"],
+      },
+    })),
+    /registration_level_test_place_invalid/,
+  )
+  assert.equal(calls.fixtureActions.length, 0)
+
+  const saveInput = {
+    appointmentId: null,
+    taskId: "fixture-task-dual-test",
+    kind: "level_test",
+    scheduledAt: "2026-07-20T10:00:00+09:00",
+    place: "별관 301호",
+    trackIds: ["fixture-track-dual-english"],
+    replaceRemaining: false,
+    expectedNotificationRevision: null,
+    requestKey: "fixture-invalid-place-save",
+  }
+  assert.throws(
+    () => service.saveRegistrationSharedAppointment(saveInput),
+    /registration_level_test_place_invalid/,
+  )
+  assert.equal(calls.fixtureActions.length, 0)
+
+  await service.saveRegistrationSharedAppointment({
+    ...saveInput,
+    kind: "visit_consultation",
+    place: "별관 301호",
+    requestKey: "fixture-visit-place-save",
+  })
+  assert.equal(calls.fixtureActions.length, 1)
+  assert.equal(calls.fixtureActions[0][1].place, "별관 301호")
+})
+
+test("fixture reducer rejects noncanonical level-test places without changing state", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  const initial = createRegistrationSubjectTrackFixtureState()
+  const snapshot = plain(initial)
+  const invalidCreate = initialWorkflowInput({
+    levelTestAppointment: {
+      scheduledAt: "2026-07-14T10:00:00+09:00",
+      place: "본관 201호",
+      subjects: ["영어"],
+    },
+    requestKey: "fixture-reducer-invalid-create-place",
+  })
+
+  assert.throws(
+    () => reduceRegistrationSubjectTrackFixture(initial, {
+      type: "createRegistrationCaseWithInitialWorkflow",
+      requestKey: invalidCreate.requestKey,
+      payload: invalidCreate,
+    }),
+    /registration_level_test_place_invalid/,
+  )
+  assert.deepEqual(plain(initial), snapshot)
+
+  assert.throws(
+    () => reduceRegistrationSubjectTrackFixture(initial, {
+      type: "saveRegistrationSharedAppointment",
+      requestKey: "fixture-reducer-invalid-save-place",
+      payload: {
+        taskId: "fixture-task-dual-test",
+        appointmentId: "fixture-appointment-dual-test",
+        expectedNotificationRevision: 1,
+        kind: "level_test",
+        scheduledAt: "2026-07-20T10:00:00+09:00",
+        place: "별관 301호",
+        trackIds: ["fixture-track-dual-english"],
+        replaceRemaining: false,
+      },
+    }),
+    /registration_level_test_place_invalid/,
+  )
+  assert.deepEqual(plain(initial), snapshot)
+})
+
 test("fixture atomic create materializes mixed subject paths and exact canonical events once", async () => {
   const {
     createRegistrationSubjectTrackFixtureState,
@@ -1774,7 +1891,7 @@ test("fixture atomic create shares one level-test appointment across two attempt
     subjectPlans: { 영어: "level_test", 수학: "level_test" },
     levelTestAppointment: {
       scheduledAt: "2026-07-14T10:00:00+09:00",
-      place: "본관 201호",
+      place: "본관",
       subjects: ["수학", "영어"],
     },
   })
@@ -1956,7 +2073,7 @@ test("fixture appointment edits and cancellations restore deselected subject sta
       expectedNotificationRevision: 1,
       kind: "level_test",
       scheduledAt: "2026-07-15T11:00:00+09:00",
-      place: "본관 201호",
+      place: "본관",
       trackIds: ["fixture-track-dual-english"],
     },
   })
@@ -2014,7 +2131,7 @@ test("fixture replacement creates a new appointment and partial cancellation pre
       expectedNotificationRevision: 1,
       kind: "level_test",
       scheduledAt: "2026-07-22T10:00:00+09:00",
-      place: "본관 201호",
+      place: "본관",
       trackIds: ["fixture-track-dual-math"],
       replaceRemaining: true,
     },
@@ -2065,7 +2182,7 @@ test("fixture replacement creates a new appointment and partial cancellation pre
       expectedNotificationRevision: 1,
       kind: "level_test",
       scheduledAt: "2026-07-22T10:00:00+09:00",
-      place: "본관 201호",
+      place: "본관",
       trackIds: ["fixture-track-dual-math"],
       replaceRemaining: true,
     },
@@ -2087,7 +2204,7 @@ test("fixture replacement creates a new appointment and partial cancellation pre
       expectedNotificationRevision: 1,
       kind: "level_test",
       scheduledAt: "2026-07-22T10:00:00+09:00",
-      place: "본관 201호",
+      place: "본관",
       trackIds: ["fixture-track-dual-math"],
       replaceRemaining: true,
     },

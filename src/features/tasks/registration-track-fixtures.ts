@@ -35,6 +35,7 @@ import type {
   RegistrationSubjectTrackFixtureDebugFault,
   RegistrationSubjectTrackFixtureDebugSnapshot,
 } from "./registration-track-fixture-runtime"
+import { normalizeRegistrationLevelTestPlace } from "./registration-level-test-place.ts"
 
 const FIXTURE_NOW = "2026-07-13T09:00:00+09:00"
 const FIXTURE_ACTOR_ID = "fixture-profile-staff"
@@ -1501,7 +1502,16 @@ function normalizeFixtureInitialWorkflowInput(
   for (const subject of subjects) subjectPlans[subject] = (rawPlans as Record<string, RegistrationInitialAction>)[subject]
   const levelTestSubjects = subjects.filter((subject) => subjectPlans[subject] === "level_test")
   const visitSubjects = subjects.filter((subject) => subjectPlans[subject] === "visit")
-  const levelTestAppointment = normalizeFixtureAppointment(payload.levelTestAppointment, levelTestSubjects)
+  const rawLevelTestAppointment = normalizeFixtureAppointment(payload.levelTestAppointment, levelTestSubjects)
+  const levelTestPlace = rawLevelTestAppointment
+    ? normalizeRegistrationLevelTestPlace(rawLevelTestAppointment.place)
+    : null
+  if (rawLevelTestAppointment && !levelTestPlace) {
+    fixtureInitialError("registration_level_test_place_invalid")
+  }
+  const levelTestAppointment = rawLevelTestAppointment
+    ? { ...rawLevelTestAppointment, place: levelTestPlace! }
+    : null
   const visitAppointment = normalizeFixtureAppointment(payload.visitAppointment, visitSubjects)
 
   const rawOverrides = payload.directorOverrides ?? {}
@@ -1909,6 +1919,11 @@ export function reduceRegistrationSubjectTrackFixture(
   }
   const type = command.type as RegistrationSubjectTrackFixtureAction
   const rawPayload = clone(command.payload || {})
+  if (type === "saveRegistrationSharedAppointment" && rawPayload.kind === "level_test") {
+    const place = normalizeRegistrationLevelTestPlace(rawPayload.place)
+    if (!place) fixtureInitialError("registration_level_test_place_invalid")
+    rawPayload.place = place
+  }
   const normalizedInitialInput = type === "createRegistrationCaseWithInitialWorkflow"
     ? normalizeFixtureInitialWorkflowInput(current, rawPayload, command.requestKey)
     : null
