@@ -1111,6 +1111,19 @@ test("appointment editor opens before the header history action and scrolls into
   )
 })
 
+test("open appointment editor stays mounted but hides outside participating subject tabs", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
+  const editor = source.slice(source.indexOf("const editorAppointment ="), source.indexOf("\n\n  return (", source.indexOf("const editorAppointment =")))
+
+  assert.match(editor, /const appointmentEditorParticipantTrackIds = appointmentEditor\?\.appointmentId/)
+  assert.match(editor, /appointmentEditor\.kind === "level_test"[\s\S]*?detail\.levelTests[\s\S]*?\.filter\(\(item\) => item\.appointmentId === appointmentEditor\.appointmentId\)/)
+  assert.match(editor, /detail\.consultations[\s\S]*?\.filter\(\(item\) => \([\s\S]*?item\.appointmentId === appointmentEditor\.appointmentId[\s\S]*?item\.mode === "visit"/)
+  assert.match(editor, /: appointmentEditor \? \[appointmentEditor\.initialTrackId\] : \[\]/)
+  assert.match(editor, /const appointmentEditorContent = appointmentEditor \? \(/)
+  assert.match(editor, /hidden=\{!\(activeTrackId && appointmentEditorParticipantTrackIds\.includes\(activeTrackId\)\)\}/)
+  assert.doesNotMatch(editor, /const appointmentEditorContent = appointmentEditor && activeTrackId/)
+})
+
 test("phone completion does not call the visit reservation notification helper", async () => {
   const source = await readRegistrationApplicationSource()
   const outcomeBlock = sourceBetween(source, "export function RegistrationConsultationOutcomeEditor", "export function RegistrationMigrationReviewEditor")

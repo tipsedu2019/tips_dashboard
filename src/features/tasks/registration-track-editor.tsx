@@ -772,9 +772,22 @@ export function RegistrationApplication({
   const appointmentActivities = appointmentEditor?.kind === "level_test"
     ? detail.levelTests
     : detail.consultations.filter((item) => item.mode === "visit")
+  const appointmentEditorParticipantTrackIds = appointmentEditor?.appointmentId
+    ? appointmentEditor.kind === "level_test"
+      ? detail.levelTests
+        .filter((item) => item.appointmentId === appointmentEditor.appointmentId)
+        .map((item) => item.trackId)
+      : detail.consultations
+        .filter((item) => (
+          item.appointmentId === appointmentEditor.appointmentId
+          && item.mode === "visit"
+        ))
+        .map((item) => item.trackId)
+    : appointmentEditor ? [appointmentEditor.initialTrackId] : []
   const appointmentEditorContent = appointmentEditor ? (
     <div
       ref={appointmentEditorRef}
+      hidden={!(activeTrackId && appointmentEditorParticipantTrackIds.includes(activeTrackId))}
       data-registration-appointment-focus={editorAppointment?.id || ""}
       className="grid scroll-m-4 gap-2"
     >
