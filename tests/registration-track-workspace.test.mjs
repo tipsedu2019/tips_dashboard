@@ -27,6 +27,10 @@ async function readRegistrationApplicationSource() {
   return `${actions}\n${application}\n${subjectTabs}`
 }
 
+async function readAdmissionProgressSource() {
+  return readFile(new URL("../src/features/tasks/registration-admission-progress.tsx", import.meta.url), "utf8")
+}
+
 function sourceBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start + startMarker.length);
@@ -1309,6 +1313,57 @@ test("case admission panel selects exact rows and renders the ordered mixed-subj
   assert.match(source, /이전 입학 처리/)
 })
 
+test("create and saved admission sections share one ordered five-step progress list", async () => {
+  const [progress, create, enrollment] = await Promise.all([
+    readAdmissionProgressSource(),
+    readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
+  ])
+  const labels = [
+    "입학신청서 발송",
+    "메이크에듀 등록(수업, 교재)",
+    "청구서 발송",
+    "수납 완료 확인",
+    "등록 완료",
+  ]
+
+  assert.equal((progress.match(/<ol aria-label="입학 처리 진행"/g) || []).length, 1)
+  assert.match(progress, /steps: readonly \[RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep, RegistrationAdmissionProgressStep\]/)
+  assert.match(progress, /const currentIndex = steps\.findIndex\(\(step\) => !step\.complete\)/)
+  assert.match(progress, /aria-current=\{index === currentIndex \? "step" : undefined\}/)
+  assert.match(progress, /data-registration-admission-locked=\{step\.locked \? "true" : undefined\}/)
+  assert.match(progress, /step\.complete[\s\S]*?<Check/)
+  assert.equal((create.match(/<RegistrationAdmissionProgress/g) || []).length, 1)
+  assert.equal((create.match(/locked: true/g) || []).length, 5)
+  assert.equal((enrollment.match(/<RegistrationAdmissionProgress/g) || []).length, 1)
+  for (const label of labels) {
+    assert.ok(create.includes(`label: "${label}"`), `create: ${label}`)
+    assert.ok(enrollment.includes(`label: "${label}"`), `saved: ${label}`)
+  }
+})
+
+test("ordered admission steps retain explicit message reconciliation and batch RPC controls", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
+  const panel = source.slice(source.indexOf("export function RegistrationAdmissionPanel"))
+
+  for (const action of [
+    "startRegistrationAdmissionBatch",
+    "setRegistrationEnrollmentMakeedu",
+    "advanceRegistrationAdmissionBatch",
+    "completeRegistrationAdmissionBatch",
+  ]) {
+    assert.equal((panel.match(new RegExp(`${action}\\(\\{`, "g")) || []).length, 1, action)
+  }
+  assert.equal((panel.match(/onSendAdmissionMessage\(\{/g) || []).length, 2)
+  assert.equal((panel.match(/onCheckAdmissionMessage\(\{/g) || []).length, 1)
+  assert.equal((panel.match(/onReconcileAdmissionMessage\(\{/g) || []).length, 2)
+  assert.equal((panel.match(/onReleaseAdmissionMessageRetry\(\{/g) || []).length, 1)
+  assert.match(panel, /disabled=\{!admissionNoticeSent \|\| activeSelectedEnrollmentIds\.length === 0 \|\| !selectedEnrollmentsHaveCompleteSchedules \|\| Boolean\(busyAction\) \|\| batchRefreshPending\}/)
+  assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.makeedu \|\| checklist\.invoice \|\| Boolean\(busyAction\)\}/)
+  assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.invoice \|\| checklist\.payment \|\| Boolean\(busyAction\)\}/)
+  assert.match(panel, /disabled=\{batchRefreshPending \|\| !checklist\.payment \|\| checklist\.complete \|\| Boolean\(busyAction\)\}/)
+})
+
 test("case admission message states stay actionable independently of the selected subject", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /getRegistrationAdmissionApplicationState/)
@@ -1440,7 +1495,7 @@ test("persisted null textbooks remain explicitly cleared after editor remount", 
 test("read-only admission viewers see checklist status without mutation buttons", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /permissions\.canManage \? \([\s\S]*3\. 청구서 발송[\s\S]*4\. 수납 완료 확인[\s\S]*5\. 등록 완료/)
-  assert.match(source, /aria-label="읽기 전용 입학 처리 상태"/)
+  assert.match(source, /aria-label=\{permissions\.canManage \? undefined : "읽기 전용 입학 처리 상태"\}/)
   assert.match(source, /const isAddClass = addClassTrackIds\.includes\(trackId\)/)
   assert.match(source, /isAddClass \? <span[\s\S]*기존 등록 유지/)
 })

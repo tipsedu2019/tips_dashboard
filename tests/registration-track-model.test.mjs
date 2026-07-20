@@ -314,28 +314,39 @@ test("a globally valid textbook is still blocked when it is not linked to the se
 })
 
 test("each admission revision derives its own ordered checklist", () => {
-  assert.deepEqual(getRegistrationAdmissionBatchChecklist({
+  const incompleteChecklist = getRegistrationAdmissionBatchChecklist({
     admissionNoticeSent: true,
     enrollments: [{ makeeduRegistered: true }, { makeeduRegistered: false }],
     batch: { status: "draft", invoiceSentAt: "", paymentConfirmedAt: "" },
-  }), {
+  })
+  assert.deepEqual(incompleteChecklist, {
     admissionNotice: true,
     makeedu: false,
     invoice: false,
     payment: false,
     complete: false,
   })
-  assert.deepEqual(getRegistrationAdmissionBatchChecklist({
+  assert.equal(
+    Object.entries(incompleteChecklist).find(([, complete]) => !complete)?.[0] || null,
+    "makeedu",
+  )
+
+  const completeChecklist = getRegistrationAdmissionBatchChecklist({
     admissionNoticeSent: true,
     enrollments: [{ makeeduRegistered: true }],
-    batch: { status: "paid", invoiceSentAt: "2026-07-20", paymentConfirmedAt: "2026-07-21" },
-  }), {
+    batch: { status: "completed", invoiceSentAt: "2026-07-20", paymentConfirmedAt: "2026-07-21" },
+  })
+  assert.deepEqual(completeChecklist, {
     admissionNotice: true,
     makeedu: true,
     invoice: true,
     payment: true,
-    complete: false,
+    complete: true,
   })
+  assert.equal(
+    Object.entries(completeChecklist).find(([, complete]) => !complete)?.[0] || null,
+    null,
+  )
 })
 
 test("planned enrollment cancellation never asks for a track destination", () => {

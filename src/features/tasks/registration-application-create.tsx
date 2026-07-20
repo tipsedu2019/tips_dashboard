@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
+import { RegistrationAdmissionProgress } from "./registration-admission-progress"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import {
   RegistrationInquiryCommonFields,
@@ -324,14 +325,13 @@ export function RegistrationApplicationCreate({
         <RegistrationApplicationAdmissionSection
           editable={sectionStates.admission.editable}
           fields={(
-            <div className="grid gap-2 md:grid-cols-2">
-              {["입학신청서 발송", "메이크에듀 등록(수업, 교재)", "청구서 발송", "수납 완료 확인", "등록 완료"].map((label) => (
-                <Label key={label} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                  <input type="checkbox" checked={false} readOnly />
-                  <span>{label}</span>
-                </Label>
-              ))}
-            </div>
+            <RegistrationAdmissionProgress steps={[
+              { key: "admissionNotice", label: "입학신청서 발송", complete: false, locked: true },
+              { key: "makeedu", label: "메이크에듀 등록(수업, 교재)", complete: false, locked: true },
+              { key: "invoice", label: "청구서 발송", complete: false, locked: true },
+              { key: "payment", label: "수납 완료 확인", complete: false, locked: true },
+              { key: "complete", label: "등록 완료", complete: false, locked: true },
+            ]} />
           )}
         />
       )}

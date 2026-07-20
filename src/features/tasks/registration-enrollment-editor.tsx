@@ -10,6 +10,11 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
 import {
+  RegistrationAdmissionProgress,
+  type RegistrationAdmissionProgressSteps,
+} from "./registration-admission-progress"
+
+import {
   loadOpsRegistrationClassDetails,
   type OpsClassOption,
   type OpsRegistrationClassDetail,
@@ -1125,86 +1130,85 @@ export function RegistrationAdmissionPanel({
     "": admissionNoticeSent ? "입학신청서 발송 완료" : "입학신청서 발송 전",
   }[admissionApplicationMessageStatus]
 
-  return (
-    <section ref={admissionSectionRef} className="grid gap-3 rounded-md border p-3" aria-label="입학 처리">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">입학 처리</h3>
-        <Badge variant={openBatch ? "default" : "outline"}>{openBatch ? `${openBatch.revisionNumber}차 처리` : "대상 선택"}</Badge>
-      </div>
-
-      <div className="grid gap-2 rounded-md bg-muted/30 p-3 text-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="font-medium">1. 입학신청서 발송</span>
+  const admissionProgressSteps: RegistrationAdmissionProgressSteps = [
+    {
+      key: "admissionNotice",
+      label: "입학신청서 발송",
+      complete: checklist.admissionNotice,
+      content: (
+        <div className="grid gap-2 text-sm">
           <span className="text-xs text-muted-foreground">{messageStatusLabel}</span>
-        </div>
-        {messageRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("message")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
-        {permissions.canManage && applicationState.canSend ? (
-          <Button type="button" size="sm" className="w-fit" onClick={() => void runMessageAction("admission-send", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>입학신청서 발송</Button>
-        ) : null}
-        {permissions.canManage && applicationState.syncNeeded ? (
-          <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-sync", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), admissionApplicationMessageId || taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>상태 동기화</Button>
-        ) : null}
-        {permissions.canManage && admissionApplicationMessageStatus === "pending" && admissionApplicationMessageId ? (
-          <>
-            <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-check", () => onCheckAdmissionMessage({ messageId: admissionApplicationMessageId }), admissionApplicationMessageId)} disabled={Boolean(busyAction) || messageRefreshPending || !messageRecoveryAvailable}>발송 상태 확인</Button>
-            {!messageRecoveryAvailable ? <p className="text-xs text-muted-foreground">발송 후 15분이 지나면 확인할 수 있습니다.</p> : null}
-          </>
-        ) : null}
-        {permissions.canManage && ["unknown", "failed_hold"].includes(admissionApplicationMessageStatus) && admissionApplicationMessageId ? (
-          <div className="grid gap-2">
-            <Textarea aria-label="입학신청서 제공사 확인 증빙" value={evidenceText} onChange={(event) => setEvidenceText(event.target.value)} placeholder="제공사 확인 증빙 JSON" className="font-mono text-xs" disabled={messageRefreshPending} />
-            <Input aria-label="입학신청서 확인 사유" value={messageReason} onChange={(event) => setMessageReason(event.target.value)} placeholder="확인 사유" disabled={messageRefreshPending} />
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending} onClick={() => {
-                const providerEvidence = requireMessageEvidence()
-                if (!providerEvidence) return
-                void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "accepted", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:accepted:${evidenceText}:${messageReason.trim()}`)
-              }}>접수 확인</Button>
-              {admissionApplicationMessageStatus === "unknown" ? <Button type="button" size="sm" variant="destructive" disabled={messageRefreshPending} onClick={() => {
-                const providerEvidence = requireMessageEvidence()
-                if (!providerEvidence) return
-                void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "failed", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:failed:${evidenceText}:${messageReason.trim()}`)
-              }}>미접수 기록</Button> : null}
-              {admissionApplicationMessageStatus === "failed_hold" ? <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending || !messageRecoveryAvailable} onClick={() => {
-                const providerEvidence = requireMessageEvidence(true)
-                if (!providerEvidence) return
-                void runMessageAction("admission-release", (requestKey) => onReleaseAdmissionMessageRetry({ messageId: admissionApplicationMessageId, providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:${evidenceText}:${messageReason.trim()}`)
-              }}>재발송 허용</Button> : null}
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {batchRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
-
-      {!openBatch ? (
-        <div data-registration-action-owner="admission-start" className="grid gap-2">
-          {unbatchedPlannedEnrollments.length > 0 ? unbatchedPlannedEnrollments.map((enrollment) => {
-            const track = trackById.get(enrollment.trackId)
-            const classItem = classById.get(enrollment.classId)
-            return (
-              <label key={enrollment.id} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-                {permissions.canManage ? <input type="checkbox" aria-label={`${track?.subject || "과목"} ${classItem?.label || enrollment.classId} 입학 처리 선택`} checked={selectedEnrollmentIds.has(enrollment.id)} onChange={(event) => setSelectedEnrollmentIds((current) => {
-                  const next = new Set(current)
-                  if (event.target.checked) next.add(enrollment.id)
-                  else next.delete(enrollment.id)
-                  return next
-                })} disabled={Boolean(busyAction) || batchRefreshPending} /> : null}
-                <Badge variant="outline">{track?.subject || "과목"}</Badge>
-                <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{classItem?.label || enrollment.classId}</span>
-              </label>
-            )
-          }) : <p className="text-sm text-muted-foreground">입학 처리할 저장된 수업이 없습니다.</p>}
-          {permissions.canManage && unbatchedPlannedEnrollments.length > 0 ? (
-            <Button type="button" data-registration-primary-action="admission-start" onClick={() => void startBatch()} disabled={!admissionNoticeSent || activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
+          {messageRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("message")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
+          {permissions.canManage && applicationState.canSend ? (
+            <Button type="button" size="sm" className="w-fit" onClick={() => void runMessageAction("admission-send", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>입학신청서 발송</Button>
           ) : null}
-          {!admissionNoticeSent && unbatchedPlannedEnrollments.length > 0 ? <p className="text-xs text-muted-foreground">입학신청서 발송을 먼저 완료하세요.</p> : null}
-          {admissionNoticeSent && activeSelectedEnrollmentIds.length > 0 && !selectedEnrollmentsHaveCompleteSchedules ? <p className="text-xs text-muted-foreground">입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.</p> : null}
+          {permissions.canManage && applicationState.syncNeeded ? (
+            <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-sync", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), admissionApplicationMessageId || taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>상태 동기화</Button>
+          ) : null}
+          {permissions.canManage && admissionApplicationMessageStatus === "pending" && admissionApplicationMessageId ? (
+            <>
+              <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => void runMessageAction("admission-check", () => onCheckAdmissionMessage({ messageId: admissionApplicationMessageId }), admissionApplicationMessageId)} disabled={Boolean(busyAction) || messageRefreshPending || !messageRecoveryAvailable}>발송 상태 확인</Button>
+              {!messageRecoveryAvailable ? <p className="text-xs text-muted-foreground">발송 후 15분이 지나면 확인할 수 있습니다.</p> : null}
+            </>
+          ) : null}
+          {permissions.canManage && ["unknown", "failed_hold"].includes(admissionApplicationMessageStatus) && admissionApplicationMessageId ? (
+            <div className="grid gap-2">
+              <Textarea aria-label="입학신청서 제공사 확인 증빙" value={evidenceText} onChange={(event) => setEvidenceText(event.target.value)} placeholder="제공사 확인 증빙 JSON" className="font-mono text-xs" disabled={messageRefreshPending} />
+              <Input aria-label="입학신청서 확인 사유" value={messageReason} onChange={(event) => setMessageReason(event.target.value)} placeholder="확인 사유" disabled={messageRefreshPending} />
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending} onClick={() => {
+                  const providerEvidence = requireMessageEvidence()
+                  if (!providerEvidence) return
+                  void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "accepted", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:accepted:${evidenceText}:${messageReason.trim()}`)
+                }}>접수 확인</Button>
+                {admissionApplicationMessageStatus === "unknown" ? <Button type="button" size="sm" variant="destructive" disabled={messageRefreshPending} onClick={() => {
+                  const providerEvidence = requireMessageEvidence()
+                  if (!providerEvidence) return
+                  void runMessageAction("admission-reconcile", (requestKey) => onReconcileAdmissionMessage({ messageId: admissionApplicationMessageId, resolution: "failed", providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:failed:${evidenceText}:${messageReason.trim()}`)
+                }}>미접수 기록</Button> : null}
+                {admissionApplicationMessageStatus === "failed_hold" ? <Button type="button" size="sm" variant="outline" disabled={messageRefreshPending || !messageRecoveryAvailable} onClick={() => {
+                  const providerEvidence = requireMessageEvidence(true)
+                  if (!providerEvidence) return
+                  void runMessageAction("admission-release", (requestKey) => onReleaseAdmissionMessageRetry({ messageId: admissionApplicationMessageId, providerEvidence, reason: messageReason.trim(), requestKey }), `${admissionApplicationMessageId}:${evidenceText}:${messageReason.trim()}`)
+                }}>재발송 허용</Button> : null}
+              </div>
+            </div>
+          ) : null}
         </div>
-      ) : (
+      ),
+    },
+    {
+      key: "makeedu",
+      label: "메이크에듀 등록(수업, 교재)",
+      complete: checklist.makeedu,
+      content: (
         <div className="grid gap-2">
-          <div className="text-sm font-medium">2. 메이크에듀 등록</div>
-          {currentBatchEnrollments.map((enrollment) => {
+          {batchRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
+          {!openBatch ? (
+            <div data-registration-action-owner="admission-start" className="grid gap-2">
+              {unbatchedPlannedEnrollments.length > 0 ? unbatchedPlannedEnrollments.map((enrollment) => {
+                const track = trackById.get(enrollment.trackId)
+                const classItem = classById.get(enrollment.classId)
+                return (
+                  <label key={enrollment.id} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+                    {permissions.canManage ? <input type="checkbox" aria-label={`${track?.subject || "과목"} ${classItem?.label || enrollment.classId} 입학 처리 선택`} checked={selectedEnrollmentIds.has(enrollment.id)} onChange={(event) => setSelectedEnrollmentIds((current) => {
+                      const next = new Set(current)
+                      if (event.target.checked) next.add(enrollment.id)
+                      else next.delete(enrollment.id)
+                      return next
+                    })} disabled={Boolean(busyAction) || batchRefreshPending} /> : null}
+                    <Badge variant="outline">{track?.subject || "과목"}</Badge>
+                    <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{classItem?.label || enrollment.classId}</span>
+                  </label>
+                )
+              }) : <p className="text-sm text-muted-foreground">입학 처리할 저장된 수업이 없습니다.</p>}
+              {permissions.canManage && unbatchedPlannedEnrollments.length > 0 ? (
+                <Button type="button" data-registration-primary-action="admission-start" onClick={() => void startBatch()} disabled={!admissionNoticeSent || activeSelectedEnrollmentIds.length === 0 || !selectedEnrollmentsHaveCompleteSchedules || Boolean(busyAction) || batchRefreshPending}>입학 처리 시작</Button>
+              ) : null}
+              {!admissionNoticeSent && unbatchedPlannedEnrollments.length > 0 ? <p className="text-xs text-muted-foreground">입학신청서 발송을 먼저 완료하세요.</p> : null}
+              {admissionNoticeSent && activeSelectedEnrollmentIds.length > 0 && !selectedEnrollmentsHaveCompleteSchedules ? <p className="text-xs text-muted-foreground">입학 처리 전에 선택한 모든 수업의 시작 일정을 지정하세요.</p> : null}
+            </div>
+          ) : currentBatchEnrollments.map((enrollment) => {
             const track = trackById.get(enrollment.trackId)
             const classItem = classById.get(enrollment.classId)
             return (
@@ -1215,20 +1219,51 @@ export function RegistrationAdmissionPanel({
               </div>
             )
           })}
-          {permissions.canManage ? (
-            <>
-              <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={batchRefreshPending || !checklist.makeedu || checklist.invoice || Boolean(busyAction)}>3. 청구서 발송</Button>
-              <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={batchRefreshPending || !checklist.invoice || checklist.payment || Boolean(busyAction)}>4. 수납 완료 확인</Button>
-              <Button type="button" onClick={() => void completeBatch()} disabled={batchRefreshPending || !checklist.payment || checklist.complete || Boolean(busyAction)}>5. 등록 완료</Button>
-            </>
-          ) : (
-            <dl aria-label="읽기 전용 입학 처리 상태" className="grid gap-2 rounded-md bg-muted/30 p-3 text-sm">
-              <div className="flex justify-between gap-2"><dt>3. 청구서 발송</dt><dd>{checklist.invoice ? "완료" : "대기"}</dd></div>
-              <div className="flex justify-between gap-2"><dt>4. 수납 완료 확인</dt><dd>{checklist.payment ? "완료" : "대기"}</dd></div>
-              <div className="flex justify-between gap-2"><dt>5. 등록 완료</dt><dd>{checklist.complete ? "완료" : "대기"}</dd></div>
-            </dl>
-          )}
+        </div>
+      ),
+    },
+    {
+      key: "invoice",
+      label: "청구서 발송",
+      complete: checklist.invoice,
+      locked: !openBatch,
+      content: openBatch ? permissions.canManage ? (
+        <Button type="button" variant={checklist.invoice ? "outline" : "default"} onClick={() => void advanceBatch("invoice_sent")} disabled={batchRefreshPending || !checklist.makeedu || checklist.invoice || Boolean(busyAction)}>3. 청구서 발송</Button>
+      ) : <span className="text-sm text-muted-foreground">{checklist.invoice ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
+    },
+    {
+      key: "payment",
+      label: "수납 완료 확인",
+      complete: checklist.payment,
+      locked: !openBatch,
+      content: openBatch ? permissions.canManage ? (
+        <Button type="button" variant={checklist.payment ? "outline" : "default"} onClick={() => void advanceBatch("payment_confirmed")} disabled={batchRefreshPending || !checklist.invoice || checklist.payment || Boolean(busyAction)}>4. 수납 완료 확인</Button>
+      ) : <span className="text-sm text-muted-foreground">{checklist.payment ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
+    },
+    {
+      key: "complete",
+      label: "등록 완료",
+      complete: checklist.complete,
+      locked: !openBatch,
+      content: openBatch ? permissions.canManage ? (
+        <Button type="button" onClick={() => void completeBatch()} disabled={batchRefreshPending || !checklist.payment || checklist.complete || Boolean(busyAction)}>5. 등록 완료</Button>
+      ) : <span className="text-sm text-muted-foreground">{checklist.complete ? "완료" : "대기"}</span> : <span className="text-sm text-muted-foreground">입학 처리 시작 후 진행합니다.</span>,
+    },
+  ]
 
+  return (
+    <section ref={admissionSectionRef} className="grid gap-3 rounded-md border p-3" aria-label="입학 처리">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">입학 처리</h3>
+        <Badge variant={openBatch ? "default" : "outline"}>{openBatch ? `${openBatch.revisionNumber}차 처리` : "대상 선택"}</Badge>
+      </div>
+
+      <div role="group" aria-label={permissions.canManage ? undefined : "읽기 전용 입학 처리 상태"}>
+        <RegistrationAdmissionProgress steps={admissionProgressSteps} />
+      </div>
+
+      {openBatch ? (
+        <div className="grid gap-2">
           {permissions.canManage && ["draft", "invoiced"].includes(openBatch.status) ? (
             <Button type="button" variant="destructive" onClick={() => {
               if (cancelBatchOpen) {
@@ -1278,7 +1313,7 @@ export function RegistrationAdmissionPanel({
             </div>
           ) : null}
         </div>
-      )}
+      ) : null}
 
       {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
 
