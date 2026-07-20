@@ -53,9 +53,11 @@ import { RegistrationHistoryTimeline } from "./registration-history-timeline"
 import type {
   OpsClassOption,
   OpsProfileOption,
+  OpsSchoolOption,
   OpsTask,
   OpsTeacherOption,
   OpsTextbookOption,
+  RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
 import { type RegistrationDirectorCatalogStatus } from "./registration-director-default.js"
 import {
@@ -91,6 +93,10 @@ export type RegistrationApplicationProps = {
   teacherOptions?: OpsTeacherOption[]
   directorCatalogStatus?: RegistrationDirectorCatalogStatus
   onRetryDirectorCatalog?: () => boolean | Promise<boolean>
+  schools?: OpsSchoolOption[]
+  schoolCatalogStatus?: "loading" | RegistrationSchoolCatalogStatus
+  schoolCatalogError?: string
+  onRetrySchools?: () => void
   classOptions?: OpsClassOption[]
   textbookOptions?: OpsTextbookOption[]
   admissionActions: Pick<
@@ -294,6 +300,10 @@ export function RegistrationApplication({
   teacherOptions = [],
   directorCatalogStatus = "loading",
   onRetryDirectorCatalog,
+  schools = [],
+  schoolCatalogStatus = "loading",
+  schoolCatalogError = "",
+  onRetrySchools,
   classOptions = [],
   textbookOptions = [],
   admissionActions,
@@ -744,7 +754,6 @@ export function RegistrationApplication({
       inquiry={(
         <RegistrationApplicationInquirySection
           mode="detail"
-          inquiryAt={formatDateTime(detail.task.registration?.inquiryAt || detail.task.createdAt)}
           editable={sectionStates.inquiry.editable}
           lockReason={sectionStates.inquiry.lockReason}
           onDirtyChange={(scope, dirty) => setDirty(`inquiry:${scope}`, dirty)}
@@ -755,6 +764,10 @@ export function RegistrationApplication({
               commonRevision={detail.commonRevision}
               identityLocked={getRegistrationIdentityEditLock(detail)}
               canEdit={canManageCase}
+              schools={schools}
+              schoolCatalogStatus={schoolCatalogStatus}
+              schoolCatalogError={schoolCatalogError}
+              onRetrySchools={onRetrySchools}
               embedded
               onSave={saveCommon}
               onReload={onReload}

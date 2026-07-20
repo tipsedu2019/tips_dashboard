@@ -4,11 +4,14 @@ import { useEffect, useMemo, type ReactNode } from "react"
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
+import {
+  RegistrationInquiryCommonFields,
+  type RegistrationInquiryFieldName,
+} from "./registration-application-inquiry-fields"
 import { RegistrationApplicationInquirySection } from "./registration-application-inquiry-section"
 import { RegistrationApplicationLevelTestSection } from "./registration-application-level-test-section"
 import {
@@ -30,11 +33,17 @@ import {
   RegistrationInitialLevelTestFields,
   RegistrationInitialRouteFields,
 } from "./registration-initial-plan-control"
-import type { OpsTaskInput } from "./ops-task-service"
+import {
+  getRegistrationSchoolChoices,
+} from "./registration-school-options"
+import type {
+  OpsSchoolOption,
+  OpsTaskInput,
+  RegistrationSchoolCatalogStatus,
+} from "./ops-task-service"
+import { RegistrationSubjectPicker } from "./registration-subject-picker"
 import type { RegistrationSubject } from "./registration-track-service"
 import {
-  getRegistrationGradeOptions,
-  isValidRegistrationMobilePhone,
   normalizeRegistrationPhone,
   parseRegistrationSubjects,
   serializeRegistrationSubjects,
@@ -42,7 +51,6 @@ import {
 
 const READY_INITIAL_ACTIONS = ["inquiry", "direct_phone", "level_test", "visit"] as const
 const INQUIRY_ONLY_INITIAL_ACTIONS = ["inquiry"] as const
-const SUBJECTS: RegistrationSubject[] = ["영어", "수학"]
 
 const INITIAL_ACTION_LABEL: Record<RegistrationInitialAction, string> = {
   inquiry: "문의 유지",
@@ -64,6 +72,10 @@ export type RegistrationApplicationCreateProps = {
   catalogStatus?: RegistrationCreateCatalogStatus
   catalogError?: string
   onRetryCatalog?: () => void
+  schools?: OpsSchoolOption[]
+  schoolCatalogStatus?: "loading" | RegistrationSchoolCatalogStatus
+  schoolCatalogError?: string
+  onRetrySchools?: () => void
   closeAction: ReactNode
   onFormPatch: (patch: Partial<OpsTaskInput>) => void
   onRegistrationFieldChange: (
@@ -92,6 +104,10 @@ export function RegistrationApplicationCreate({
   catalogStatus = "ready",
   catalogError = "",
   onRetryCatalog,
+  schools = [],
+  schoolCatalogStatus = "loading",
+  schoolCatalogError = "",
+  onRetrySchools,
   closeAction,
   onFormPatch,
   onRegistrationFieldChange,
@@ -156,6 +172,36 @@ export function RegistrationApplicationCreate({
     onFormPatch({ subject: serializeRegistrationSubjects(next) })
   }
 
+  const schoolChoices = getRegistrationSchoolChoices({
+    schools,
+    grade: registration.schoolGrade || "",
+    currentSchoolName: registration.schoolName || "",
+  })
+
+  function handleInquiryFieldChange(field: RegistrationInquiryFieldName, value: string) {
+    if (field === "studentName") {
+      onFormPatch({ studentName: value })
+      return
+    }
+    if (field === "schoolGrade") {
+      const catalogChoices = getRegistrationSchoolChoices({ schools, grade: value })
+      onRegistrationFieldChange("schoolGrade", value)
+      if (
+        schoolCatalogStatus === "authoritative"
+        && registration.schoolName
+        && !catalogChoices.some((choice) => choice.value === registration.schoolName)
+      ) {
+        onRegistrationFieldChange("schoolName", "")
+      }
+      return
+    }
+    if (field === "parentPhone" || field === "studentPhone") {
+      onRegistrationFieldChange(field, normalizeRegistrationPhone(value))
+      return
+    }
+    onRegistrationFieldChange(field, value)
+  }
+
   return (
     <RegistrationApplicationShell
       mode="create"
@@ -193,91 +239,50 @@ export function RegistrationApplicationCreate({
       inquiry={(
         <RegistrationApplicationInquirySection
           mode="create"
-          inquiryAt={null}
           editable={sectionStates.inquiry.editable}
           lockReason={sectionStates.inquiry.lockReason}
-          commonInfoContent={(
-            <div className="grid gap-3 md:grid-cols-2">
-              <fieldset className="grid gap-1.5" data-registration-focus="subject">
-                <legend className="text-sm font-medium">과목</legend>
-                <div className="flex min-h-10 flex-wrap items-center gap-3 rounded-md border px-3 py-2">
-                  {SUBJECTS.map((subject) => (
-                    <Label key={subject} className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={subjects.includes(subject)}
-                        onChange={(event) => updateSubjects(subject, event.target.checked)}
-                      />
-                      <span>{subject}</span>
-                    </Label>
-                  ))}
-                </div>
-              </fieldset>
-              <Label className="grid gap-1.5" data-registration-focus="studentName">
-                <span>학생명</span>
-                <Input
-                  value={form.studentName || ""}
-                  onChange={(event) => onFormPatch({ studentName: event.target.value })}
-                />
-              </Label>
-              <Label className="grid gap-1.5" data-registration-focus="schoolGrade">
-                <span>학년</span>
-                <select
-                  value={registration.schoolGrade || ""}
-                  onChange={(event) => onRegistrationFieldChange("schoolGrade", event.target.value)}
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="">미정</option>
-                  {getRegistrationGradeOptions().map((grade) => <option key={grade} value={grade}>{grade}</option>)}
-                </select>
-              </Label>
-              <Label className="grid gap-1.5">
-                <span>학교</span>
-                <Input
-                  value={registration.schoolName || ""}
-                  onChange={(event) => onRegistrationFieldChange("schoolName", event.target.value)}
-                />
-              </Label>
-              <Label className="grid gap-1.5" data-registration-focus="parentPhone">
-                <span>학부모 전화</span>
-                <Input
-                  inputMode="tel"
-                  value={registration.parentPhone || ""}
-                  aria-invalid={Boolean(registration.parentPhone && !isValidRegistrationMobilePhone(registration.parentPhone))}
-                  onChange={(event) => onRegistrationFieldChange("parentPhone", normalizeRegistrationPhone(event.target.value))}
-                />
-              </Label>
-              <Label className="grid gap-1.5">
-                <span>학생 전화</span>
-                <Input
-                  inputMode="tel"
-                  value={registration.studentPhone || ""}
-                  onChange={(event) => onRegistrationFieldChange("studentPhone", normalizeRegistrationPhone(event.target.value))}
-                />
-              </Label>
-              <Label className="grid gap-1.5 md:col-span-2">
-                <span>요청 사항</span>
-                <Textarea
-                  value={registration.requestNote || ""}
-                  onChange={(event) => onRegistrationFieldChange("requestNote", event.target.value)}
-                />
-              </Label>
-            </div>
-          )}
           subjectSyncContent={(
-            <RegistrationInitialRouteFields
-              {...initialFieldsProps}
-              allowedInitialActions={persistence.mode === "ready_atomic"
-                ? ["inquiry", "direct_phone", "level_test", "visit"]
-                : ["inquiry"]}
+            <RegistrationSubjectPicker
+              value={subjects}
               disabled={disabled || !writable}
+              onToggle={updateSubjects}
             />
           )}
-          exceptionContent={showInquiryOnlyNote ? (
-            <p role="note" className="text-sm text-muted-foreground">
-              {note}
-            </p>
-          ) : undefined}
+          commonInfoContent={(
+            <RegistrationInquiryCommonFields
+              values={{
+                studentName: form.studentName || "",
+                schoolGrade: registration.schoolGrade || "",
+                schoolName: registration.schoolName || "",
+                parentPhone: registration.parentPhone || "",
+                studentPhone: registration.studentPhone || "",
+                requestNote: registration.requestNote || "",
+              }}
+              inquiryAtLabel="저장 시 자동 기록"
+              schoolChoices={schoolChoices}
+              schoolCatalogStatus={schoolCatalogStatus}
+              schoolCatalogError={schoolCatalogError}
+              disabled={disabled || !writable}
+              onChange={handleInquiryFieldChange}
+              onRetrySchools={onRetrySchools}
+            />
+          )}
+          exceptionContent={(
+            <div className="grid gap-3">
+              <RegistrationInitialRouteFields
+                {...initialFieldsProps}
+                allowedInitialActions={persistence.mode === "ready_atomic"
+                  ? ["inquiry", "direct_phone", "level_test", "visit"]
+                  : ["inquiry"]}
+                disabled={disabled || !writable}
+              />
+              {showInquiryOnlyNote ? (
+                <p role="note" className="text-sm text-muted-foreground">
+                  {note}
+                </p>
+              ) : null}
+            </div>
+          )}
         />
       )}
       levelTest={(

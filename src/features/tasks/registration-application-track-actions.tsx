@@ -6,9 +6,22 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 
-import type { OpsClassOption, OpsProfileOption, OpsTask, OpsTeacherOption, OpsTextbookOption } from "./ops-task-service"
+import {
+  RegistrationInquiryCommonFields,
+  type RegistrationInquiryFieldName,
+} from "./registration-application-inquiry-fields"
+import { getRegistrationSchoolChoices } from "./registration-school-options"
+import { RegistrationSubjectPicker } from "./registration-subject-picker"
+import type {
+  OpsClassOption,
+  OpsProfileOption,
+  OpsSchoolOption,
+  OpsTask,
+  OpsTeacherOption,
+  OpsTextbookOption,
+  RegistrationSchoolCatalogStatus,
+} from "./ops-task-service"
 import {
   beginRegistrationConflictComparison,
   getRegistrationCommonConflictRows,
@@ -804,15 +817,14 @@ function toLocalDateTime(value: string | undefined) {
   return `${year}-${month}-${day}T${hours}:${minutes}`
 }
 
-function requiredLabel(label: string, required = false) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span>{label}</span>
-      <span className={required ? "text-xs font-semibold text-primary" : "text-xs font-normal text-muted-foreground"}>
-        {required ? "필수" : "선택"}
-      </span>
-    </span>
-  )
+function formatRegistrationInquiryAt(value: string) {
+  if (!value) return "기록된 문의 일시가 없습니다"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date)
 }
 
 function legacyText(
@@ -876,6 +888,10 @@ export function RegistrationCommonInfoSection({
   commonRevision,
   identityLocked,
   canEdit,
+  schools = [],
+  schoolCatalogStatus = "loading",
+  schoolCatalogError = "",
+  onRetrySchools,
   embedded = false,
   onSave,
   onReload,
@@ -886,6 +902,10 @@ export function RegistrationCommonInfoSection({
   commonRevision: number
   identityLocked: boolean
   canEdit: boolean
+  schools?: OpsSchoolOption[]
+  schoolCatalogStatus?: "loading" | RegistrationSchoolCatalogStatus
+  schoolCatalogError?: string
+  onRetrySchools?: () => void
   embedded?: boolean
   onSave: (draft: RegistrationCommonDraft, requestKey: string) => Promise<RegistrationCommonSaveOutcome>
   onReload: () => void | Promise<void>
@@ -947,6 +967,29 @@ export function RegistrationCommonInfoSection({
     setValidationError("")
     setConflictAttempt(null)
     setDraft((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateSchoolGrade(nextGrade: string) {
+    const catalogChoices = getRegistrationSchoolChoices({ schools, grade: nextGrade })
+    setValidationError("")
+    setConflictAttempt(null)
+    setDraft((current) => ({
+      ...current,
+      schoolGrade: nextGrade,
+      schoolName: identityLocked || schoolCatalogStatus !== "authoritative"
+        ? current.schoolName
+        : catalogChoices.some((choice) => choice.value === current.schoolName)
+          ? current.schoolName
+          : "",
+    }))
+  }
+
+  function updateInquiryField(field: RegistrationInquiryFieldName, value: string) {
+    if (field === "schoolGrade") {
+      updateSchoolGrade(value)
+      return
+    }
+    update(field, value)
   }
 
   async function submit() {
@@ -1090,32 +1133,26 @@ export function RegistrationCommonInfoSection({
         {!embedded ? <h3 className="text-sm font-semibold">등록 공통 정보</h3> : null}
         {identityLocked ? <Badge variant="secondary">학생 연결 보정 필요</Badge> : null}
       </div> : null}
-      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-        <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("학생명", true)}
-          <Input data-common-field="student-name" value={draft.studentName} onChange={(event) => update("studentName", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
-        </Label>
-        <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("학년", true)}
-          <Input data-common-field="school-grade" value={draft.schoolGrade} onChange={(event) => update("schoolGrade", event.target.value)} disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)} />
-        </Label>
-        <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("학교")}
-          <Input value={draft.schoolName} onChange={(event) => update("schoolName", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
-        </Label>
-        <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("학부모 전화", true)}
-          <Input data-common-field="parent-phone" inputMode="tel" value={draft.parentPhone} onChange={(event) => update("parentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
-        </Label>
-        <Label className="grid min-w-0 gap-1.5">
-          {requiredLabel("학생 전화")}
-          <Input inputMode="tel" value={draft.studentPhone} onChange={(event) => update("studentPhone", event.target.value)} disabled={!canEdit || identityLocked || saving || refreshPending || Boolean(conflictAttempt)} />
-        </Label>
-        <Label className="grid min-w-0 gap-1.5 sm:col-span-2">
-          {requiredLabel("요청 사항")}
-          <Textarea value={draft.requestNote} onChange={(event) => update("requestNote", event.target.value)} disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)} rows={3} />
-        </Label>
-      </div>
+      <RegistrationInquiryCommonFields
+        values={draft}
+        inquiryAtLabel={formatRegistrationInquiryAt(draft.inquiryAt)}
+        schoolChoices={getRegistrationSchoolChoices({
+          schools,
+          grade: draft.schoolGrade,
+          currentSchoolName: draft.schoolName,
+        })}
+        schoolCatalogStatus={schoolCatalogStatus}
+        schoolCatalogError={schoolCatalogError}
+        disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)}
+        disabledFields={{
+          studentName: identityLocked,
+          schoolName: identityLocked,
+          parentPhone: identityLocked,
+          studentPhone: identityLocked,
+        }}
+        onChange={updateInquiryField}
+        onRetrySchools={onRetrySchools}
+      />
       {canEdit ? (
         <div className="flex justify-end">
           <Button type="button" size="sm" onClick={() => void submit()} disabled={saving || refreshPending || Boolean(conflictAttempt)}>
@@ -1154,12 +1191,16 @@ export function RegistrationSubjectSyncSection({
       .map((track) => track.subject),
   )
   const canonicalSubjects = detail.tracks.map((track) => track.subject).sort().join("|")
+  const disabledSubjects = new Set(SUBJECTS.filter((subject) => (
+    subjects.includes(subject)
+    && (!removableSubjects.has(subject) || subjects.length === 1)
+  )))
   useOwnedDirtyState(!refreshPending && [...subjects].sort().join("|") !== canonicalSubjects, onDirtyChange)
 
-  function toggle(subject: RegistrationSubject) {
-    setSubjects((current) => current.includes(subject)
-      ? current.filter((value) => value !== subject)
-      : SUBJECTS.filter((value) => value === subject || current.includes(value)))
+  function toggle(subject: RegistrationSubject, selected: boolean) {
+    setSubjects((current) => selected
+      ? SUBJECTS.filter((value) => value === subject || current.includes(value))
+      : current.filter((value) => value !== subject))
   }
 
   async function submit() {
@@ -1213,37 +1254,17 @@ export function RegistrationSubjectSyncSection({
 
   return (
     <section className={embedded ? "grid min-w-0 gap-2" : "grid min-w-0 gap-2 rounded-md border p-3"} aria-label="문의 과목 편집">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">문의 과목</h3>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {SUBJECTS.map((subject) => (
-          <Button
-            key={subject}
-            type="button"
-            variant={subjects.includes(subject) ? "secondary" : "outline"}
-            aria-pressed={subjects.includes(subject)}
-            onClick={() => toggle(subject)}
-            aria-label={`${subject} 문의 과목 ${subjects.includes(subject) ? "선택됨" : "선택 안 됨"}`}
-            disabled={
-              !canManage
-              || saving
-              || refreshPending
-              || (subjects.includes(subject) && !removableSubjects.has(subject))
-              || (subjects.length === 1 && subjects.includes(subject))
-            }
-          >
-            {subject}
-          </Button>
-        ))}
-      </div>
-      {canManage && !refreshPending ? (
-        <div className="flex justify-end">
+      <RegistrationSubjectPicker
+        value={subjects}
+        disabled={!canManage || saving || refreshPending}
+        disabledSubjects={disabledSubjects}
+        onToggle={toggle}
+        action={canManage && !refreshPending ? (
           <Button type="button" variant="outline" size="sm" onClick={() => void submit()} disabled={saving || subjects.length === 0}>
             과목 저장
           </Button>
-        </div>
-      ) : null}
+        ) : undefined}
+      />
       {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
       <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} />
     </section>

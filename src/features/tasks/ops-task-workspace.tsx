@@ -85,6 +85,7 @@ import {
   type OpsLinkedOption,
   type OpsTaskComment,
   type OpsProfileOption,
+  type OpsSchoolOption,
   type OpsStudentOption,
   type OpsTeacherOption,
   type OpsTextbookOption,
@@ -95,6 +96,7 @@ import {
   type OpsTaskType,
   type OpsTaskWorkspaceData,
   type OpsTaskWorkspaceOptionData,
+  type RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
 import {
   canEditRegistrationTask,
@@ -12736,6 +12738,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   )}
                   registrationDisabled={saving}
                   registrationCreateApplicationRendered={registrationCreateApplicationRendered}
+                  schools={registrationOptionsDataRef.current?.schools || []}
+                  schoolCatalogStatus={registrationOptionsLoading
+                    ? "loading"
+                    : registrationOptionsDataRef.current?.schoolCatalogStatus
+                      || (registrationOptionsError ? "error" : "loading")}
+                  schoolCatalogError={registrationOptionsDataRef.current?.schoolCatalogError || registrationOptionsError}
+                  onRetrySchools={() => void retryRegistrationOptions()}
                   editingRegistration={Boolean(editingTask)}
                   updateWithdrawal={updateWithdrawal}
                   updateTransfer={updateTransfer}
@@ -12941,6 +12950,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       teacherOptions={data?.teachers || EMPTY_TEACHER_OPTIONS}
                       directorCatalogStatus={registrationOptionsLoading ? "loading" : registrationOptionsDataRef.current?.directorCatalogStatus || (registrationOptionsError ? "error" : "loading")}
                       onRetryDirectorCatalog={retryRegistrationOptions}
+                      schools={registrationOptionsDataRef.current?.schools || []}
+                      schoolCatalogStatus={registrationOptionsLoading
+                        ? "loading"
+                        : registrationOptionsDataRef.current?.schoolCatalogStatus
+                          || (registrationOptionsError ? "error" : "loading")}
+                      schoolCatalogError={registrationOptionsDataRef.current?.schoolCatalogError || registrationOptionsError}
+                      onRetrySchools={() => void retryRegistrationOptions()}
                       classOptions={data?.classes || EMPTY_CLASS_OPTIONS}
                       textbookOptions={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
                       closeAction={registrationDetailCloseAction}
@@ -13246,6 +13262,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 catalogStatus={registrationCreateCatalogStatus}
                 catalogError={registrationOptionsError}
                 onRetryCatalog={() => void retryRegistrationOptions()}
+                schools={registrationOptionsDataRef.current?.schools || []}
+                schoolCatalogStatus={registrationOptionsLoading
+                  ? "loading"
+                  : registrationOptionsDataRef.current?.schoolCatalogStatus
+                    || (registrationOptionsError ? "error" : "loading")}
+                schoolCatalogError={registrationOptionsDataRef.current?.schoolCatalogError || registrationOptionsError}
+                onRetrySchools={() => void retryRegistrationOptions()}
                 closeAction={(
                   <Button type="button" variant="ghost" size="icon" onClick={requestRegistrationApplicationClose} aria-label={formCloseLabel}>
                     <X className="size-4" />
@@ -13358,6 +13381,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 teacherOptions={data?.teachers || EMPTY_TEACHER_OPTIONS}
                 directorCatalogStatus={registrationOptionsLoading ? "loading" : registrationOptionsDataRef.current?.directorCatalogStatus || (registrationOptionsError ? "error" : "loading")}
                 onRetryDirectorCatalog={retryRegistrationOptions}
+                schools={registrationOptionsDataRef.current?.schools || []}
+                schoolCatalogStatus={registrationOptionsLoading
+                  ? "loading"
+                  : registrationOptionsDataRef.current?.schoolCatalogStatus
+                    || (registrationOptionsError ? "error" : "loading")}
+                schoolCatalogError={registrationOptionsDataRef.current?.schoolCatalogError || registrationOptionsError}
+                onRetrySchools={() => void retryRegistrationOptions()}
                 classOptions={data?.classes || EMPTY_CLASS_OPTIONS}
                 textbookOptions={data?.textbooks || EMPTY_TEXTBOOK_OPTIONS}
                 closeAction={registrationDetailCloseAction}
@@ -13444,6 +13474,10 @@ function TypeSpecificFields({
   registrationCloseAction,
   registrationDisabled,
   registrationCreateApplicationRendered,
+  schools,
+  schoolCatalogStatus,
+  schoolCatalogError,
+  onRetrySchools,
   editingRegistration,
   updateWithdrawal,
   updateTransfer,
@@ -13469,6 +13503,10 @@ function TypeSpecificFields({
   registrationCloseAction?: ReactNode
   registrationDisabled?: boolean
   registrationCreateApplicationRendered?: boolean
+  schools?: OpsSchoolOption[]
+  schoolCatalogStatus?: "loading" | RegistrationSchoolCatalogStatus
+  schoolCatalogError?: string
+  onRetrySchools?: () => void
   editingRegistration?: boolean
   updateWithdrawal: (key: keyof NonNullable<OpsTaskInput["withdrawal"]>, value: string | boolean) => void
   updateTransfer: (key: keyof NonNullable<OpsTaskInput["transfer"]>, value: string | boolean) => void
@@ -14024,6 +14062,10 @@ function TypeSpecificFields({
           resolvedDirectorIds={registrationResolvedDirectorIds}
           directorOptionsBySubject={registrationDirectorOptionsBySubject}
           disabled={Boolean(registrationDisabled)}
+          schools={schools}
+          schoolCatalogStatus={schoolCatalogStatus}
+          schoolCatalogError={schoolCatalogError}
+          onRetrySchools={onRetrySchools}
           closeAction={registrationCloseAction}
           onFormPatch={updateFormPatch}
           onRegistrationFieldChange={updateRegistration}

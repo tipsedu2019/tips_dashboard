@@ -53,10 +53,25 @@ test("registration application shell renders all six sections once in fixed orde
   assert.match(shell, /<fieldset[\s\S]*disabled=\{contentDisabled\}/)
   assert.match(shell, /closeAction: ReactNode/)
   assert.match(shell, /\{props\.closeAction\}/)
-  assert.match(inquiry, /inquiryAt/)
-  assert.match(inquiry, /저장 시 자동 기록/)
+  assert.doesNotMatch(inquiry, /inquiryAt/)
+  assert.match(inquiry, /\{subjectSyncContent\}[\s\S]*\{commonInfoContent\}/)
   assert.match(inquiry, /exceptionContent/)
   assert.doesNotMatch(shell, /이전|다음|stage tabs|StageTabs/)
+})
+
+test("create and detail share the approved subject-first inquiry controls", async () => {
+  const fields = await readFile(new URL("../src/features/tasks/registration-application-inquiry-fields.tsx", import.meta.url), "utf8")
+  const picker = await readFile(new URL("../src/features/tasks/registration-subject-picker.tsx", import.meta.url), "utf8")
+  const create = await readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8")
+  const actions = await readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8")
+  assert.match(create, /<RegistrationInquiryCommonFields/)
+  assert.match(actions, /<RegistrationInquiryCommonFields/)
+  assert.match(create, /<RegistrationSubjectPicker/)
+  assert.match(actions, /<RegistrationSubjectPicker/)
+  assert.match(fields, /학생명[\s\S]*문의일시[\s\S]*학년[\s\S]*학교[\s\S]*학부모 전화[\s\S]*학생 전화[\s\S]*요청 사항/)
+  assert.match(picker, /variant=\{selected \? "default" : "outline"\}/)
+  assert.match(picker, /aria-pressed=\{selected\}/)
+  assert.match(picker, /<Check/)
 })
 
 test("registration create mounts the shared cumulative application with visible locked future fields", async () => {
@@ -80,16 +95,8 @@ test("registration create mounts the shared cumulative application with visible 
   assert.doesNotMatch(create, /<form\b/)
   assert.doesNotMatch(create, /useState\(|createRegistrationInitialWorkflowDraft/)
 
-  const inquiryFields = ["과목", "학생명", "학년", "학교", "학부모 전화", "학생 전화", "요청 사항"]
-  let inquiryCursor = -1
-  for (const field of inquiryFields) {
-    const next = create.indexOf(field, inquiryCursor + 1)
-    assert.ok(next > inquiryCursor, `${field} follows the approved inquiry order`)
-    inquiryCursor = next
-  }
   assert.match(create, /mode="create"/)
-  assert.match(create, /inquiryAt=\{null\}/)
-  assert.match(create, /저장 시 자동 기록|RegistrationApplicationInquirySection/)
+  assert.match(create, /inquiryAtLabel="저장 시 자동 기록"/)
   assert.doesNotMatch(create + workspace, /문의 채널|문의채널|inquiryChannel/)
 
   assert.match(initialPlan, /export function RegistrationInitialRouteFields/)
@@ -162,7 +169,7 @@ test("registration create owns one accurate inquiry lock reason without a duplic
   assert.match(create, /persistence\.mode\.startsWith\("blocked_"\)[\s\S]*?note/)
   assert.match(create, /inquiry: \{ \.\.\.base\.inquiry, lockReason: inquiryLockReason \}/)
   assert.match(create, /const showInquiryOnlyNote = persistence\.mode === "canonical_inquiry"[\s\S]*?legacy_inquiry/)
-  assert.match(create, /exceptionContent=\{showInquiryOnlyNote/)
+  assert.match(create, /exceptionContent=\{\([\s\S]*?<RegistrationInitialRouteFields[\s\S]*?showInquiryOnlyNote/)
   assert.doesNotMatch(create, /exceptionContent=\{note \?/)
 })
 
@@ -555,7 +562,7 @@ test("track editor shows common information once and subject-scoped navigation",
   assert.match(source, /getRegistrationIdentityEditLock\(detail\)/)
   assert.match(source, /admissionApplicationAccepted/)
   assert.match(source, /공통 정보 저장/)
-  assert.doesNotMatch(commonInfoSource, /문의일시|DateTimePickerControl/)
+  assert.doesNotMatch(commonInfoSource, /DateTimePickerControl/)
   assert.match(
     commonInfoSource,
     /inquiryAt: toLocalDateTime\(registration\.inquiryAt \|\| task\.createdAt\)/,
@@ -659,7 +666,7 @@ test("terminal subjects do not gate common edits and progressed subjects cannot 
   assert.match(application, /<RegistrationCommonInfoSection[\s\S]*?canEdit=\{canManageCase\}/)
   assert.doesNotMatch(saveCommon, /syncRegistrationCaseSubjects|subjects:/)
   assert.match(syncSection, /track\.status === "inquiry" && !track\.migrationReviewRequired/)
-  assert.match(syncSection, /subjects\.includes\(subject\) && !removableSubjects\.has\(subject\)/)
+  assert.match(syncSection, /disabledSubjects=/)
   assert.match(syncSection, /syncRegistrationCaseSubjects/)
 })
 

@@ -1546,9 +1546,11 @@ test("registration follows the real decision waitlist admission form and manual 
 });
 
 test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {
-  const [source, createSource, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+  const [source, createSource, inquiryFieldsSource, subjectPickerSource, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-application-create.tsx"),
+    readSource("src/features/tasks/registration-application-inquiry-fields.tsx"),
+    readSource("src/features/tasks/registration-subject-picker.tsx"),
     readSource("src/features/tasks/registration-initial-plan-control.tsx"),
     readSource("src/features/tasks/registration-intake-workflow.ts"),
     readSource("src/features/tasks/registration-workflow.js"),
@@ -1664,18 +1666,14 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소", "참여 과목"]);
   assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
-  const inquiryStart = createSource.indexOf("commonInfoContent");
-  const inquiryEnd = createSource.indexOf("subjectSyncContent", inquiryStart);
-  const inquirySource = createSource.slice(inquiryStart, inquiryEnd);
-  assert.match(inquirySource, /className="grid gap-3 md:grid-cols-2"/);
+  const inquirySource = `${subjectPickerSource}\n${inquiryFieldsSource}`;
+  assert.match(inquiryFieldsSource, /sm:grid-cols-2/);
   const orderedInquiryFields = [
     'data-registration-focus="subject"',
     'data-registration-focus="studentName"',
     'data-registration-focus="schoolGrade"',
-    '<span>학년</span>',
-    '<span>학교</span>',
     'data-registration-focus="parentPhone"',
-    '<span>학생 전화</span>',
+    '요청 사항',
   ];
   for (let index = 1; index < orderedInquiryFields.length; index += 1) {
     assert.ok(
@@ -1683,13 +1681,8 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
       `${orderedInquiryFields[index - 1]} should appear before ${orderedInquiryFields[index]}`,
     );
   }
-  assertIncludesAll(inquirySource, [
-    "<span>학생명</span>",
-    '<legend className="text-sm font-medium">과목</legend>',
-    "<span>학년</span>",
-    "<span>학부모 전화</span>",
-  ]);
-  assert.doesNotMatch(inquirySource, /문의일시|focusKey="inquiryAt"|DateTimePickerControl/);
+  assertIncludesAll(inquirySource, ["문의 과목", "학생명", "문의일시", "학년", "학교", "학부모 전화", "학생 전화"]);
+  assert.doesNotMatch(inquirySource, /focusKey="inquiryAt"|DateTimePickerControl/);
   assert.doesNotMatch(createSource, /label="캠퍼스"|updateForm\("campus"/);
   assert.doesNotMatch(inquirySource, /autoFocus=/);
   assertIncludesAll(source, [
@@ -2022,6 +2015,21 @@ test("registration host create and detail modes have accessible Radix titles wit
   assert.match(host, /registrationApplicationHost\.kind === "create"[\s\S]*?<DialogTitle className="sr-only">등록 신청서<\/DialogTitle>[\s\S]*?<RegistrationApplicationCreate/);
   assert.match(host, /registrationApplicationHost\.kind === "detail"[\s\S]*?<DialogTitle className="sr-only">등록 신청서<\/DialogTitle>[\s\S]*?<RegistrationApplication/);
   assert.equal((host.match(/<DialogTitle className="sr-only">등록 신청서<\/DialogTitle>/g) || []).length, 2);
+});
+
+test("registration application hosts pass the shared school catalog controls", async () => {
+  const workspace = await readSource("src/features/tasks/ops-task-workspace.tsx");
+
+  for (const hostName of ["RegistrationApplicationCreate", "RegistrationApplication"]) {
+    const hosts = [...workspace.matchAll(new RegExp(`<${hostName}\\s[\\s\\S]*?\\n\\s*/>`, "g"))];
+    assert.ok(hosts.length > 0, `${hostName} hosts exist`);
+    for (const [host] of hosts) {
+      assert.match(host, /schools=/);
+      assert.match(host, /schoolCatalogStatus=/);
+      assert.match(host, /schoolCatalogError=/);
+      assert.match(host, /onRetrySchools=/);
+    }
+  }
 });
 
 test("appointment refresh retry reuses canonical appointment validation and clears stale links", async () => {
