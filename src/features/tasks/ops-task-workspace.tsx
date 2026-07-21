@@ -7913,6 +7913,13 @@ function buildFallbackTaskTitle(input: OpsTaskInput) {
   return primaryName ? `${typeLabel}: ${primaryName}` : ""
 }
 
+function withoutWordRetestLineage(wordRetest: NonNullable<OpsTaskInput["wordRetest"]>) {
+  const { retryOfTaskId, retryTaskId, ...editableWordRetest } = wordRetest
+  void retryOfTaskId
+  void retryTaskId
+  return editableWordRetest
+}
+
 function normalizeFormForSubmit(input: OpsTaskInput): OpsTaskInput {
   if (input.type === "word_retest") {
     return {
@@ -10816,7 +10823,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           startAt: "",
           dueAt: "",
           wordRetest: {
-            ...(payload.wordRetest || {}),
+            ...withoutWordRetestLineage(payload.wordRetest || {}),
             retestStatus: "not_started",
             firstScore: "",
             secondScore: "",
@@ -10827,14 +10834,29 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
         const retryReceipt = await retryWordRetest(editingTask.id, retryPayload)
         const taskId = retryReceipt.taskId
+        const sourceFallbackInput: OpsTaskInput = {
+          ...formFromTask(editingTask),
+          status: "done",
+          completedAt: new Date().toISOString(),
+          wordRetest: {
+            ...(editingTask.wordRetest || {}),
+            testAt: editingTask.wordRetest?.testAt || "",
+            retestStatus: originalWordRetestStatus,
+            retryTaskId: taskId,
+          },
+        }
+        const childFallbackInput: OpsTaskInput = {
+          ...retryPayload,
+          wordRetest: {
+            ...(retryPayload.wordRetest || {}),
+            testAt: retryPayload.wordRetest?.testAt || editingTask.wordRetest?.testAt || "",
+            retestStatus: "not_started",
+            retryOfTaskId: editingTask.id,
+          },
+        }
         const [syncedOriginal, syncedRetry] = await Promise.all([
-          loadSavedTaskOrFallback(editingTask.id, {
-            ...formFromTask(editingTask),
-            status: "done",
-            completedAt: new Date().toISOString(),
-            wordRetest: { ...(editingTask.wordRetest || {}), retestStatus: originalWordRetestStatus },
-          }, editingTask),
-          loadSavedTaskOrFallback(taskId, retryPayload),
+          loadSavedTaskOrFallback(editingTask.id, sourceFallbackInput, editingTask),
+          loadSavedTaskOrFallback(taskId, childFallbackInput),
         ])
         replaceTaskInState(syncedOriginal)
         prependTask(syncedRetry)

@@ -3746,6 +3746,31 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   ]);
 });
 
+test("reretry reload fallbacks preserve local lineage without sending it to the producer", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const retryFlow = source.slice(
+    source.indexOf("if (isWordRetestRetry && editingTask"),
+    source.indexOf("const createWordRetestStudentIds", source.indexOf("if (isWordRetestRetry && editingTask")),
+  );
+  const retryPayload = retryFlow.slice(
+    retryFlow.indexOf("const retryPayload"),
+    retryFlow.indexOf("const retryReceipt"),
+  );
+  const lineageSanitizer = source.slice(
+    source.indexOf("function withoutWordRetestLineage"),
+    source.indexOf("function normalizeFormForSubmit"),
+  );
+
+  assert.match(lineageSanitizer, /retryOfTaskId[\s\S]*retryTaskId[\s\S]*return editableWordRetest/);
+  assert.match(retryPayload, /withoutWordRetestLineage\(payload\.wordRetest \|\| \{\}\)/);
+  assert.match(retryFlow, /const sourceFallbackInput:[\s\S]*wordRetest:[\s\S]*retryTaskId: taskId/);
+  assert.match(retryFlow, /const childFallbackInput:[\s\S]*wordRetest:[\s\S]*retestStatus: "not_started"[\s\S]*retryOfTaskId: editingTask\.id/);
+  assert.match(retryFlow, /loadSavedTaskOrFallback\(editingTask\.id, sourceFallbackInput, editingTask\)/);
+  assert.match(retryFlow, /loadSavedTaskOrFallback\(taskId, childFallbackInput\)/);
+  assert.match(retryFlow, /const retryReceipt = await retryWordRetest\(editingTask\.id, retryPayload\)/);
+  assert.doesNotMatch(retryPayload, /retryTaskId|retryOfTaskId/);
+});
+
 test("word retest workspace keeps page title full and add actions compact", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
