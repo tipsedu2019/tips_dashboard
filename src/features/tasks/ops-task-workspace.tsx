@@ -14763,6 +14763,15 @@ function WordRetestStatusBadge({ value, taskStatus, wordRetest }: { value?: stri
   )
 }
 
+function WordRetestLineageBadges({ wordRetest }: { wordRetest?: OpsTaskInput["wordRetest"] }) {
+  return (
+    <>
+      {wordRetest?.retryOfTaskId && <Badge variant="outline">재재시험</Badge>}
+      {wordRetest?.retryTaskId && <Badge variant="secondary">재재시험 추가됨</Badge>}
+    </>
+  )
+}
+
 function WordRetestScoreResultCell({ wordRetest }: { wordRetest?: OpsTaskInput["wordRetest"] }) {
   if (isWordRetestAbsent(wordRetest)) {
     return <span className="text-sm text-muted-foreground">미응시</span>
@@ -15543,7 +15552,10 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
       </span>
       <span className="order-1 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">진행상태</span>
-        <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
+        <span className="inline-flex min-w-0 flex-wrap items-center gap-1 align-middle">
+          <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
+          <WordRetestLineageBadges wordRetest={wordRetest} />
+        </span>
       </span>
       <span className="order-5 min-w-0 md:order-none">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">본시험일</span>
@@ -16390,6 +16402,7 @@ function WordRetestDetailPanel({ task }: { task: OpsTask }) {
       <div className="flex flex-wrap items-center gap-2">
         <TaskTypeBadge type={task.type} />
         <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
+        <WordRetestLineageBadges wordRetest={wordRetest} />
         <Badge variant="outline">{getWordRetestBranch(task)}</Badge>
         <Badge variant="secondary">{getWordRetestTeacherLabel(task)}</Badge>
         <Badge variant="secondary">{getWordRetestClassLabel(task)}</Badge>

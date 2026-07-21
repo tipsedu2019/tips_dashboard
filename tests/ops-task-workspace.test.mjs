@@ -3772,6 +3772,30 @@ test("reretry reload fallbacks preserve local lineage without sending it to the 
   assert.doesNotMatch(retryPayload, /retryTaskId|retryOfTaskId/);
 });
 
+test("word retest lineage badges sit beside preserved result status in list and detail", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const lineageBadgesSource = source.slice(
+    source.indexOf("function WordRetestLineageBadges"),
+    source.indexOf("function WordRetestScoreResultCell"),
+  );
+  const rowSource = source.slice(
+    source.indexOf("const WordRetestTaskRow"),
+    source.indexOf("function WordRetestRoleActionButton"),
+  );
+  const detailSource = source.slice(
+    source.indexOf("function WordRetestDetailPanel"),
+    source.indexOf("function Info("),
+  );
+
+  assert.match(source, /function WordRetestLineageBadges/);
+  assert.match(lineageBadgesSource, /wordRetest\?\.retryOfTaskId[\s\S]*>재재시험<\/Badge>/);
+  assert.match(lineageBadgesSource, /wordRetest\?\.retryTaskId[\s\S]*>재재시험 추가됨<\/Badge>/);
+  assertInOrder(rowSource, ["<WordRetestStatusBadge", "<WordRetestLineageBadges wordRetest={wordRetest} />"]);
+  assertInOrder(detailSource, ["<WordRetestStatusBadge", "<WordRetestLineageBadges wordRetest={wordRetest} />"]);
+  assert.match(source, /if \(scoreResult === "failed"\) return "미완료: 불합격"/);
+  assert.match(source, /if \(statusValue === "absent"\) return "미응시"/);
+});
+
 test("completed absent word retests expose one recovery reretry action only in teacher mode", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const actionSource = source.slice(
