@@ -112,7 +112,12 @@ begin
   v_detail := dashboard_private.ops_task_input_detail_v2(p_input, 'word_retest')
     - 'retry_of_task_id' - 'retry_task_id';
   v_detail := v_detail || pg_catalog.jsonb_build_object(
-    'test_at', coalesce(nullif(v_detail ->> 'test_at', ''), v_previous_detail.test_at::text)
+    'test_at', coalesce(
+      nullif(v_detail ->> 'test_at', ''),
+      v_previous_detail.test_at::text,
+      v_previous_task.due_at::text,
+      v_previous_task.start_at::text
+    )
   );
   v_effective_input := p_input || pg_catalog.jsonb_build_object('word_retest', v_detail);
 

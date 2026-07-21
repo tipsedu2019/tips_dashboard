@@ -3526,7 +3526,10 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.match(workspaceSource, /kind: "word_retest_retry"[\s\S]*retryReason: WordRetestRetryReason/);
   assert.match(workspaceSource, /label: "재재시험 추가"[\s\S]*retryReason: "failed"/);
   assert.match(workspaceSource, /label: "재재시험 추가"[\s\S]*retryReason: "absent"/);
-  assert.match(workspaceSource, /testAt: wordRetest\.testAt \|\| ""/);
+  assert.match(
+    workspaceSource,
+    /testAt: dateInputValue\(wordRetest\.testAt \|\| task\.dueAt \|\| task\.startAt \|\| ""\)/,
+  );
   assert.doesNotMatch(workspaceSource, /testAt: ""[\s\S]*retryReason/);
   assert.match(workspaceSource, /재재시험 추가 및 불합격 확인/);
   assert.match(workspaceSource, /재재시험 추가 및 미응시 확인/);

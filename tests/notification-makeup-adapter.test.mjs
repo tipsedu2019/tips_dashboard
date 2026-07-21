@@ -276,6 +276,10 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     sql,
     "create policy makeup_notification_settings_assistant_hard_deny",
   )
+  const deliveriesPolicy = statementBlock(
+    sql,
+    "create policy makeup_notification_deliveries_assistant_hard_deny",
+  )
   const dashboardNotificationPolicy = statementBlock(
     sql,
     "create policy dashboard_notifications_assistant_makeup_hard_deny",
@@ -328,6 +332,7 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     "makeup_requests",
     "makeup_request_events",
     "makeup_notification_settings",
+    "makeup_notification_deliveries",
     "dashboard_notifications",
   ]) {
     assert.match(
@@ -345,6 +350,7 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     [requestPolicy, "all"],
     [eventPolicy, "all"],
     [settingsPolicy, "select"],
+    [deliveriesPolicy, "all"],
     [dashboardNotificationPolicy, "all"],
   ]) {
     assert.match(policy, /as restrictive/)
@@ -358,6 +364,8 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     assert.match(policy, /using \(/)
     assert.match(policy, /with check \(/)
   }
+  assert.match(deliveriesPolicy, /using \(/)
+  assert.match(deliveriesPolicy, /with check \(/)
 
   for (const source of [dashboardNotificationPolicy, visibleInboxRows]) {
     assert.match(source, /(?:notification\.)?type\s*=\s*'makeup_request'/)

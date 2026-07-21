@@ -1,6 +1,6 @@
 begin;
 
-select plan(84);
+select plan(85);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -1267,6 +1267,17 @@ select throws_ok($$
   )
 $$, '42501', 'new row violates row-level security policy "dashboard_notifications_assistant_makeup_hard_deny" for table "dashboard_notifications"',
   '조교는 휴보강 알림을 직접 생성할 수도 없다');
+select throws_ok($$
+  insert into public.makeup_notification_deliveries(
+    trigger_kind, channel, status, title, body, actor_profile_id, metadata
+  ) values (
+    'submitted', 'dashboard_personal', 'skipped',
+    '조교 휴보강 발송 이력 직접 생성 우회', '차단되어야 하는 발송 이력',
+    '92000000-0000-4000-8000-000000000004',
+    '{"source":"assistant-bypass-test"}'::jsonb
+  )
+$$, '42501', 'new row violates row-level security policy "makeup_notification_deliveries_assistant_hard_deny" for table "makeup_notification_deliveries"',
+  '조교는 휴보강 발송 이력을 직접 생성해 보관 trigger를 실행할 수 없다');
 select throws_ok($$
   select public.create_makeup_request_v2(
     (select input from assistant_makeup_guard_create_input),

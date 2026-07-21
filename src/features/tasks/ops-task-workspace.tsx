@@ -9614,7 +9614,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       wordRetest: {
         ...wordRetest,
         retestStatus: "not_started",
-        testAt: wordRetest.testAt || "",
+        testAt: dateInputValue(wordRetest.testAt || task.dueAt || task.startAt || ""),
         firstScore: "",
         secondScore: "",
         thirdScore: "",

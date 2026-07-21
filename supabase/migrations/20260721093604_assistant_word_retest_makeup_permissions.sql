@@ -60,6 +60,7 @@ begin
     or pg_catalog.to_regclass('public.makeup_requests') is null
     or pg_catalog.to_regclass('public.makeup_request_events') is null
     or pg_catalog.to_regclass('public.makeup_notification_settings') is null
+    or pg_catalog.to_regclass('public.makeup_notification_deliveries') is null
     or pg_catalog.to_regclass('public.dashboard_notifications') is null
   then
     raise exception 'assistant_permission_prerequisite_missing' using errcode = '55000';
@@ -446,6 +447,28 @@ create policy makeup_notification_settings_assistant_hard_deny
   for select
   to authenticated
   using (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+    )
+  );
+
+drop policy if exists makeup_notification_deliveries_assistant_hard_deny
+  on public.makeup_notification_deliveries;
+create policy makeup_notification_deliveries_assistant_hard_deny
+  on public.makeup_notification_deliveries
+  as restrictive
+  for all
+  to authenticated
+  using (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+    )
+  )
+  with check (
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null

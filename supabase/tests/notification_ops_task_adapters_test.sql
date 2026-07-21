@@ -636,6 +636,14 @@ values (
   '2026-07-05T12:34:56.000Z'::timestamptz
 );
 
+insert into public.ops_tasks(id, title, type, status, requested_by, due_at)
+values (
+  '72000000-0000-4000-8000-000000000108'::uuid,
+  '레거시 마감일 본시험 원본', 'word_retest', 'review_requested',
+  '71000000-0000-4000-8000-000000000001'::uuid,
+  '2026-07-06T01:00:00.000Z'::timestamptz
+);
+
 insert into public.ops_word_retests(
   task_id, branch, teacher_catalog_id, teacher_name, class_name, student_name,
   test_at, total_question_count, cutoff_question_count,
@@ -691,6 +699,18 @@ values (
   '본관', '71000000-0000-4000-8000-000000000005'::uuid,
   'Task 15 연결 선생님', '재재시험 수업', '완료 미응시 학생',
   '2026-07-05T01:00:00.000Z', 10, 8, null, 'absent', null, null
+);
+
+insert into public.ops_word_retests(
+  task_id, branch, teacher_catalog_id, teacher_name, class_name, student_name,
+  test_at, total_question_count, cutoff_question_count,
+  first_score, retest_status, retry_of_task_id, retry_task_id
+)
+values (
+  '72000000-0000-4000-8000-000000000108'::uuid,
+  '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+  'Task 15 연결 선생님', '재재시험 수업', '레거시 날짜 학생',
+  null, 10, 8, null, 'absent', null, null
 );
 
 insert into public.ops_task_events(
@@ -991,6 +1011,37 @@ select is(
   ),
   '2026-07-02T01:00:00.000Z'::timestamptz,
   '후속 본시험일을 생략하면 미응시 원본의 본시험일을 상속한다'
+);
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'legacy-due-inherited-date', public.retry_word_retest_v1(
+  '72000000-0000-4000-8000-000000000108'::uuid,
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '레거시 날짜 후속 재재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '레거시 날짜 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000212'::uuid
+);
+
+select is(
+  (
+    select detail.test_at
+    from public.ops_word_retests detail
+    where detail.task_id = (
+      select (response -> 'task' ->> 'id')::uuid
+      from word_retest_reretry_results where attempt_key = 'legacy-due-inherited-date'
+    )
+  ),
+  '2026-07-06T01:00:00.000Z'::timestamptz,
+  '세부 본시험일이 비어 있는 레거시 원본은 업무 마감일을 본시험일로 상속한다'
 );
 
 select is(

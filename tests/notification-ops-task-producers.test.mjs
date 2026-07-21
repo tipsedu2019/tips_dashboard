@@ -434,7 +434,10 @@ test("재재시험 RPC는 미응시 원본·이전 날짜·연결 자식 마감 
 
   assert.match(sql, /create or replace function dashboard_private\.retry_word_retest_v1_impl/)
   assert.match(sql, /v_previous_detail\.retest_status = 'absent'/)
-  assert.match(sql, /coalesce\(nullif\(v_detail ->> 'test_at', ''\), v_previous_detail\.test_at::text\)/)
+  assert.match(
+    sql,
+    /coalesce\(\s*nullif\(v_detail ->> 'test_at', ''\),\s*v_previous_detail\.test_at::text,\s*v_previous_task\.due_at::text,\s*v_previous_task\.start_at::text\s*\)/,
+  )
   assert.doesNotMatch(sql, /set retest_status = 'done'[\s\S]*where detail\.task_id = p_previous_task_id/)
   assert.match(sql, /v_detail\.retry_of_task_id is not null[\s\S]*word_retest_absent_deadline_not_allowed/)
   assert.match(sql, /word_retest\.completed/)
