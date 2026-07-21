@@ -316,7 +316,6 @@ export function buildAdminNavGroups({
       ],
     },
     { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
-    { title: "휴보강", url: "/admin/makeup-requests", icon: CalendarClock },
     {
       title: "학사일정",
       url: "/admin/academic-calendar",

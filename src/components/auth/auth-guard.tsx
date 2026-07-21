@@ -9,7 +9,6 @@ import { useAuth } from "@/providers/auth-provider"
 const ASSISTANT_ALLOWED_ADMIN_PATHS = [
   "/admin/tasks",
   "/admin/word-retests",
-  "/admin/makeup-requests",
   "/admin/academic-calendar",
   "/admin/calendar",
   "/admin/timetable",

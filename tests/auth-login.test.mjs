@@ -293,26 +293,45 @@ test("registered sign-in explains the next step and viewer accounts can open the
   assert.match(adminLayoutSource, /관리팀에게 권한 조정을 요청하세요\./);
 });
 
-test("assistant role can enter the shell but not management or curriculum planning", async () => {
-  const [authUtilsSource, authGuardSource, sidebarSource, commandSearchSource] =
+test("assistant role cannot navigate search or directly access makeup while full roles retain it", async () => {
+  const [authUtilsSource, authGuardSource, navigationSource, sidebarSource, commandSearchSource] =
     await Promise.all([
       readSource("src/lib/auth-utils.ts"),
       readSource("src/components/auth/auth-guard.tsx"),
+      readSource("src/lib/navigation.ts"),
       readSource("src/components/app-sidebar.tsx"),
       readSource("src/components/command-search.tsx"),
     ]);
+  const assistantAllowedPathsSource = authGuardSource.slice(
+    authGuardSource.indexOf("const ASSISTANT_ALLOWED_ADMIN_PATHS"),
+    authGuardSource.indexOf("function normalizeAdminPath"),
+  );
+  const assistantOverviewSource = navigationSource.slice(
+    navigationSource.indexOf("const assistantOverviewItems"),
+    navigationSource.indexOf("const fullOverviewItems"),
+  );
+  const fullOverviewSource = navigationSource.slice(
+    navigationSource.indexOf("const fullOverviewItems"),
+    navigationSource.indexOf("const overview"),
+  );
 
   assert.match(authUtilsSource, /normalizedRole === "assistant"/);
   assert.match(authUtilsSource, /canUseAssistantOperations/);
   assert.match(authUtilsSource, /defaultAdminPath: canUseAssistantOperations \? "\/admin\/tasks" : "\/admin\/dashboard"/);
   assert.match(authGuardSource, /ASSISTANT_ALLOWED_ADMIN_PATHS/);
-  assert.match(authGuardSource, /"\/admin\/tasks"/);
-  assert.match(authGuardSource, /"\/admin\/word-retests"/);
-  assert.match(authGuardSource, /"\/admin\/academic-calendar"/);
-  assert.match(authGuardSource, /"\/admin\/timetable"/);
+  assert.match(assistantAllowedPathsSource, /"\/admin\/tasks"/);
+  assert.match(assistantAllowedPathsSource, /"\/admin\/word-retests"/);
+  assert.match(assistantAllowedPathsSource, /"\/admin\/academic-calendar"/);
+  assert.match(assistantAllowedPathsSource, /"\/admin\/timetable"/);
+  assert.doesNotMatch(assistantAllowedPathsSource, /"\/admin\/makeup-requests"/);
+  assert.match(assistantOverviewSource, /url: "\/admin\/word-retests"/);
+  assert.doesNotMatch(assistantOverviewSource, /url: "\/admin\/makeup-requests"/);
+  assert.match(fullOverviewSource, /url: "\/admin\/makeup-requests"/);
+  assert.match(authGuardSource, /const canAccessCurrentRoute = !canUseAssistantOperations \|\| canAssistantAccessPath\(pathname\)/);
   assert.match(authGuardSource, /router\.replace\(defaultAdminPath\)/);
   assert.match(sidebarSource, /canUseAssistantOperations/);
   assert.match(commandSearchSource, /canUseAssistantOperations/);
+  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations \}\)/);
 });
 
 test("forgot-password uses the receivable email reset flow", async () => {

@@ -117,12 +117,50 @@ function loadMakeupPayloadValidation() {
   );
 }
 
-test("makeup request route is exposed in admin navigation and quick search", () => {
+test("makeup request route remains exposed to full roles but not the assistant shell", () => {
+  const assistantAllowedPathsSource = authGuardSource.slice(
+    authGuardSource.indexOf("const ASSISTANT_ALLOWED_ADMIN_PATHS"),
+    authGuardSource.indexOf("function normalizeAdminPath"),
+  );
+
   assert.match(navigationSource, /title: "휴보강"/);
   assert.doesNotMatch(navigationSource, /title: "휴보강 신청서"/);
   assert.match(navigationSource, /url: "\/admin\/makeup-requests"/);
   assert.match(navigationSource, /match: "\/admin\/makeup-requests"/);
-  assert.match(authGuardSource, /"\/admin\/makeup-requests"/);
+  assert.doesNotMatch(assistantAllowedPathsSource, /"\/admin\/makeup-requests"/);
+});
+
+test("assistant makeup approval is rejected from the actor profile before body or service work", () => {
+  const postSource = makeupApprovalRouteSource.slice(
+    makeupApprovalRouteSource.indexOf("export async function POST"),
+  );
+  const authIndex = postSource.indexOf("actorClient.auth.getUser(token)");
+  const profileLookupIndex = postSource.indexOf('.from("profiles")');
+  const lookupFailureIndex = postSource.indexOf("if (actorProfileError || !isRecord(actorProfile))");
+  const assistantDenialIndex = postSource.indexOf('if (text(actorProfile.role) === "assistant")');
+  const serviceClientIndex = postSource.indexOf("const serverClient = serviceClient()");
+  const bodyIndex = postSource.indexOf("request.json()");
+  const replayIndex = postSource.indexOf("attemptMakeupApprovalReplay");
+
+  assert.match(
+    postSource,
+    /actorClient\s*\.from\("profiles"\)\s*\.select\("role"\)\s*\.eq\("id", actor\.user\.id\)\s*\.single\(\)/,
+  );
+  assert.match(
+    postSource,
+    /if \(actorProfileError \|\| !isRecord\(actorProfile\)\) return response\(\{ ok: false, error: "휴보강 권한을 확인할 수 없습니다\." \}, 503\)/,
+  );
+  assert.match(
+    postSource,
+    /if \(text\(actorProfile\.role\) === "assistant"\) return response\(\{ ok: false, error: "휴보강 접근 권한이 없습니다\." \}, 403\)/,
+  );
+  assert.doesNotMatch(postSource, /serverClient\s*\.from\("profiles"\)/);
+  assert.ok(authIndex >= 0 && authIndex < profileLookupIndex, "actor authentication must precede the profile role lookup");
+  assert.ok(profileLookupIndex < lookupFailureIndex, "profile lookup errors must fail closed");
+  assert.ok(lookupFailureIndex < assistantDenialIndex, "assistant role denial must follow the authoritative lookup");
+  assert.ok(assistantDenialIndex < serviceClientIndex, "assistant denial must precede service-role client creation");
+  assert.ok(assistantDenialIndex < bodyIndex, "assistant denial must precede request body parsing");
+  assert.ok(assistantDenialIndex < replayIndex, "assistant denial must precede approval replay");
 });
 
 test("makeup request migration creates request event and notification tables", () => {

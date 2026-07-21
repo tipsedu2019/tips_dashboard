@@ -191,12 +191,21 @@ export async function POST(request: Request) {
   const authorization = text(request.headers.get("authorization"))
   const token = authorization.replace(/^Bearer\s+/i, "")
   const actorClient = authenticatedClient(token)
-  const serverClient = serviceClient()
   if (!actorClient || !token) return response({ ok: false, error: "인증이 필요합니다." }, 401)
-  if (!serverClient) return response({ ok: false, error: "휴보강 승인 저장소를 사용할 수 없습니다." }, 503)
 
   const { data: actor, error: actorError } = await actorClient.auth.getUser(token)
   if (actorError || !actor.user?.id) return response({ ok: false, error: "인증이 필요합니다." }, 401)
+
+  const { data: actorProfile, error: actorProfileError } = await actorClient
+    .from("profiles")
+    .select("role")
+    .eq("id", actor.user.id)
+    .single()
+  if (actorProfileError || !isRecord(actorProfile)) return response({ ok: false, error: "휴보강 권한을 확인할 수 없습니다." }, 503)
+  if (text(actorProfile.role) === "assistant") return response({ ok: false, error: "휴보강 접근 권한이 없습니다." }, 403)
+
+  const serverClient = serviceClient()
+  if (!serverClient) return response({ ok: false, error: "휴보강 승인 저장소를 사용할 수 없습니다." }, 503)
 
   const body = await request.json().catch(() => null)
   if (
