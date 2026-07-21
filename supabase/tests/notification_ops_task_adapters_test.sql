@@ -1186,5 +1186,565 @@ select is(
 );
 
 reset role;
+
+insert into public.ops_tasks(id, title, type, status, requested_by, completed_at)
+values
+  (
+    '73000000-0000-4000-8000-000000000101'::uuid,
+    '조교 수동 미응시 허용', 'word_retest', 'in_progress',
+    '71000000-0000-4000-8000-000000000001'::uuid, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000102'::uuid,
+    '조교 완료 미응시 차단', 'word_retest', 'done',
+    '71000000-0000-4000-8000-000000000001'::uuid,
+    '2026-07-21T01:00:00.000Z'::timestamptz
+  ),
+  (
+    '73000000-0000-4000-8000-000000000103'::uuid,
+    '조교 취소 상태 차단', 'word_retest', 'canceled',
+    '71000000-0000-4000-8000-000000000001'::uuid, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000104'::uuid,
+    '조교 일반 업무 회귀', 'general', 'requested',
+    '71000000-0000-4000-8000-000000000001'::uuid, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000105'::uuid,
+    '교사 최종 확인 회귀', 'word_retest', 'review_requested',
+    '71000000-0000-4000-8000-000000000001'::uuid, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000106'::uuid,
+    '관리자 재재시험 회귀', 'word_retest', 'review_requested',
+    '71000000-0000-4000-8000-000000000001'::uuid, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000107'::uuid,
+    '조교 확정 시작 허용', 'word_retest', 'confirmed',
+    '71000000-0000-4000-8000-000000000001'::uuid, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000108'::uuid,
+    '조교 보류 시작 허용', 'word_retest', 'on_hold',
+    '71000000-0000-4000-8000-000000000001'::uuid, null
+  );
+
+insert into public.ops_word_retests(
+  task_id, branch, teacher_catalog_id, teacher_name, class_name, student_name,
+  test_at, total_question_count, cutoff_question_count,
+  first_score, retest_status, retry_of_task_id, retry_task_id
+)
+values
+  (
+    '73000000-0000-4000-8000-000000000101'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '조교 권한 수업', '미응시 학생',
+    '2026-07-21T01:00:00.000Z', 10, 8, null, 'in_progress', null, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000102'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '조교 권한 수업', '완료 미응시 학생',
+    '2026-07-20T01:00:00.000Z', 10, 8, null, 'absent', null, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000103'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '조교 권한 수업', '취소 학생',
+    '2026-07-20T01:00:00.000Z', 10, 8, null, 'absent', null, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000105'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '조교 권한 수업', '교사 확인 학생',
+    '2026-07-21T01:00:00.000Z', 10, 8, 9, 'done', null, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000106'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '조교 권한 수업', '관리자 후속 학생',
+    '2026-07-21T01:00:00.000Z', 10, 8, 4, 'done', null, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000107'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '조교 권한 수업', '확정 시작 학생',
+    '2026-07-21T01:00:00.000Z', 10, 8, null, 'not_started', null, null
+  ),
+  (
+    '73000000-0000-4000-8000-000000000108'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '조교 권한 수업', '보류 시작 학생',
+    '2026-07-21T01:00:00.000Z', 10, 8, null, 'not_started', null, null
+  );
+
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000003","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000003',
+  true
+);
+set local role authenticated;
+
+select lives_ok($$
+  select public.update_ops_task_v2(
+    '73000000-0000-4000-8000-000000000104'::uuid,
+    '{"priority":"high"}'::jsonb,
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = '73000000-0000-4000-8000-000000000104'::uuid
+    ),
+    '73000000-0000-4000-8000-000000000216'::uuid
+  )
+$$, '조교의 기존 일반 업무 수정 권한은 유지된다');
+
+create temporary table assistant_word_retest_results (
+  attempt_key text primary key,
+  response jsonb not null
+) on commit drop;
+
+insert into assistant_word_retest_results(attempt_key, response)
+select 'created', public.create_ops_task_v2(
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '조교 진행 단계 재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '조교 진행 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '조교 권한 수업',
+      'test_at', '2026-07-21T01:00:00.000Z',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '73000000-0000-4000-8000-000000000201'::uuid
+);
+
+select lives_ok($$
+  select public.update_ops_task_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    '{"task":{"status":"requested","priority":"normal"}}'::jsonb,
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000221'::uuid
+  )
+$$, '조교는 시작 전 현재 상태를 유지하는 일반 편집을 저장할 수 있다');
+
+select throws_ok($$
+  select public.update_ops_task_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    '{"task":{"status":"in_progress"}}'::jsonb,
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000202'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교는 일반 수정 RPC로 요청 상태를 진행 중으로 우회할 수 없다');
+
+select throws_ok($$
+  select public.transition_ops_task_status_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    'confirmed',
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000203'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교의 상태 전이는 시험 시작 한 방향만 허용한다');
+
+create temporary table assistant_word_retest_versions (
+  version_key text primary key,
+  updated_at timestamptz not null
+) on commit drop;
+
+insert into assistant_word_retest_versions(version_key, updated_at)
+select 'requested-start', task.updated_at
+from public.ops_tasks task
+where task.id = (
+  select (response -> 'task' ->> 'id')::uuid
+  from assistant_word_retest_results where attempt_key = 'created'
+);
+
+select lives_ok($$
+  select public.transition_ops_task_status_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    'in_progress',
+    (select updated_at from assistant_word_retest_versions where version_key = 'requested-start'),
+    '73000000-0000-4000-8000-000000000204'::uuid
+  )
+$$, '조교는 요청 상태의 단어 재시험을 정상 시작할 수 있다');
+
+select lives_ok($$
+  select public.transition_ops_task_status_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    'in_progress',
+    (select updated_at from assistant_word_retest_versions where version_key = 'requested-start'),
+    '73000000-0000-4000-8000-000000000204'::uuid
+  )
+$$, '조교의 정상 시작 응답 유실 재시도는 현재 진행 상태에서도 같은 응답을 돌려준다');
+
+select throws_ok($$
+  select public.transition_ops_task_status_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    'confirmed',
+    (select updated_at from assistant_word_retest_versions where version_key = 'requested-start'),
+    '73000000-0000-4000-8000-000000000204'::uuid
+  )
+$$, '22023', 'idempotency_key_reused',
+  '조교의 같은 시작 요청 ID에 다른 상태를 넣으면 기존 멱등 충돌 의미를 유지한다');
+
+select is(
+  (
+    select count(*) from public.ops_task_events event
+    where event.request_id = '73000000-0000-4000-8000-000000000204'::uuid
+  ),
+  1::bigint,
+  '조교의 정상 시작 재시도는 시작 이벤트를 중복 기록하지 않는다'
+);
+
+select lives_ok($$
+  select public.transition_ops_task_status_v2(
+    '73000000-0000-4000-8000-000000000107'::uuid,
+    'in_progress',
+    (select task.updated_at from public.ops_tasks task where task.id = '73000000-0000-4000-8000-000000000107'::uuid),
+    '73000000-0000-4000-8000-000000000217'::uuid
+  )
+$$, '조교는 확정 상태의 단어 재시험을 정상 시작할 수 있다');
+
+select lives_ok($$
+  select public.transition_ops_task_status_v2(
+    '73000000-0000-4000-8000-000000000108'::uuid,
+    'in_progress',
+    (select task.updated_at from public.ops_tasks task where task.id = '73000000-0000-4000-8000-000000000108'::uuid),
+    '73000000-0000-4000-8000-000000000218'::uuid
+  )
+$$, '조교는 보류 상태의 단어 재시험을 정상 시작할 수 있다');
+
+select lives_ok($$
+  select public.update_ops_task_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    jsonb_build_object(
+      'task', jsonb_build_object('status', 'in_progress', 'priority', 'high'),
+      'word_retest', jsonb_build_object('first_score', 5)
+    ),
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000205'::uuid
+  )
+$$, '정상 시작 뒤 조교의 점수·편집 저장은 현재 진행 상태를 유지한다');
+
+select throws_ok($$
+  select public.transition_ops_task_status_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    'review_requested',
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000206'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교는 일반 상태 RPC로 결과 검토 상태를 만들 수 없다');
+
+select lives_ok($$
+  select public.report_word_retest_result_v1(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    '{"first_score":5}'::jsonb,
+    '73000000-0000-4000-8000-000000000207'::uuid
+  )
+$$, '조교의 전용 결과 보고 권한은 유지된다');
+
+select throws_ok($$
+  select public.transition_ops_task_status_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    'done',
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000207'::uuid
+  )
+$$, '22023', 'idempotency_key_reused',
+  '닫힌 조교 단계에서도 다른 RPC의 같은 요청 ID는 기존 멱등 충돌 의미를 유지한다');
+
+select lives_ok($$
+  select public.report_word_retest_absent_v1(
+    '73000000-0000-4000-8000-000000000101'::uuid,
+    'manual',
+    '73000000-0000-4000-8000-000000000208'::uuid
+  )
+$$, '조교의 기존 수동 미응시 보고 권한은 유지된다');
+
+select throws_ok($$
+  select public.update_ops_task_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    '{"task":{"status":"review_requested","priority":"urgent"}}'::jsonb,
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000209'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '검토 요청 상태에서는 같은 상태를 적어도 조교의 일반 수정 RPC를 차단한다');
+
+select throws_ok($$
+  select public.transition_ops_task_status_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    'done',
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000210'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교는 일반 상태 RPC로 최종 확인을 우회할 수 없다');
+
+select throws_ok($$
+  select public.retry_word_retest_v1(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    jsonb_build_object(
+      'task', jsonb_build_object(
+        'type', 'word_retest', 'title', '조교 불합격 후속 우회', 'status', 'requested'
+      ),
+      'word_retest', jsonb_build_object(
+        'branch', '본관', 'student_name', '조교 진행 학생',
+        'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+        'teacher_name', 'Task 15 연결 선생님', 'class_name', '조교 권한 수업',
+        'total_question_count', 10, 'cutoff_question_count', 8,
+        'retest_status', 'not_started'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000211'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교는 불합격 원본에서 재재시험을 추가할 수 없다');
+
+select throws_ok($$
+  select public.request_word_retest_revision_v1(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    '조교 수정 요청 우회',
+    '73000000-0000-4000-8000-000000000212'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교는 전용 수정 요청 RPC를 실행할 수 없다');
+
+select throws_ok($$
+  select public.update_ops_task_v2(
+    '73000000-0000-4000-8000-000000000102'::uuid,
+    '{"task":{"status":"done","priority":"high"}}'::jsonb,
+    (select task.updated_at from public.ops_tasks task where task.id = '73000000-0000-4000-8000-000000000102'::uuid),
+    '73000000-0000-4000-8000-000000000213'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '완료 상태에서는 같은 상태를 적어도 조교의 일반 수정 RPC를 차단한다');
+
+select throws_ok($$
+  select public.transition_ops_task_status_v2(
+    '73000000-0000-4000-8000-000000000103'::uuid,
+    'canceled',
+    (select task.updated_at from public.ops_tasks task where task.id = '73000000-0000-4000-8000-000000000103'::uuid),
+    '73000000-0000-4000-8000-000000000214'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '취소 상태에서는 같은 상태 전이도 조교에게 허용하지 않는다');
+
+select throws_ok($$
+  select public.retry_word_retest_v1(
+    '73000000-0000-4000-8000-000000000102'::uuid,
+    jsonb_build_object(
+      'task', jsonb_build_object(
+        'type', 'word_retest', 'title', '조교 완료 미응시 후속 우회', 'status', 'requested'
+      ),
+      'word_retest', jsonb_build_object(
+        'branch', '본관', 'student_name', '완료 미응시 학생',
+        'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+        'teacher_name', 'Task 15 연결 선생님', 'class_name', '조교 권한 수업',
+        'total_question_count', 10, 'cutoff_question_count', 8,
+        'retest_status', 'not_started'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000215'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '완료 미응시 원본도 조교의 재재시험 생성 대상이 아니다');
+
+select results_eq(
+  $$
+    select task.status, detail.retest_status, detail.retry_task_id::text
+    from public.ops_tasks task
+    join public.ops_word_retests detail on detail.task_id = task.id
+    where task.id = (
+      select (response -> 'task' ->> 'id')::uuid
+      from assistant_word_retest_results where attempt_key = 'created'
+    )
+  $$,
+  $$ values ('review_requested'::text, 'done'::text, null::text) $$,
+  '차단된 일반 수정·상태·수정 요청·재재시험 호출 뒤 불합격 원본은 그대로다'
+);
+
+select results_eq(
+  $$
+    select task.status, detail.retest_status, detail.retry_task_id::text
+    from public.ops_tasks task
+    join public.ops_word_retests detail on detail.task_id = task.id
+    where task.id in (
+      '73000000-0000-4000-8000-000000000102'::uuid,
+      '73000000-0000-4000-8000-000000000103'::uuid
+    )
+    order by task.id
+  $$,
+  $$
+    values
+      ('done'::text, 'absent'::text, null::text),
+      ('canceled'::text, 'absent'::text, null::text)
+  $$,
+  '차단된 완료·취소 우회 뒤 상태와 후속 링크가 그대로다'
+);
+
+select is(
+  (
+    select count(*) from public.ops_tasks task
+    where task.title in ('조교 불합격 후속 우회', '조교 완료 미응시 후속 우회')
+  ),
+  0::bigint,
+  '차단된 조교 재재시험 호출은 자식 업무를 만들지 않는다'
+);
+
+select is(
+  (
+    select count(*) from public.ops_task_events event
+    where event.request_id in (
+      '73000000-0000-4000-8000-000000000202'::uuid,
+      '73000000-0000-4000-8000-000000000203'::uuid,
+      '73000000-0000-4000-8000-000000000206'::uuid,
+      '73000000-0000-4000-8000-000000000209'::uuid,
+      '73000000-0000-4000-8000-000000000210'::uuid,
+      '73000000-0000-4000-8000-000000000211'::uuid,
+      '73000000-0000-4000-8000-000000000212'::uuid,
+      '73000000-0000-4000-8000-000000000213'::uuid,
+      '73000000-0000-4000-8000-000000000214'::uuid,
+      '73000000-0000-4000-8000-000000000215'::uuid
+    )
+  ),
+  0::bigint,
+  '차단된 조교 호출은 업무 이벤트를 남기지 않는다'
+);
+
+reset role;
+select is(
+  (
+    select count(*) from dashboard_private.notification_request_ledger ledger
+    where ledger.request_id in (
+      '73000000-0000-4000-8000-000000000202'::uuid,
+      '73000000-0000-4000-8000-000000000203'::uuid,
+      '73000000-0000-4000-8000-000000000206'::uuid,
+      '73000000-0000-4000-8000-000000000209'::uuid,
+      '73000000-0000-4000-8000-000000000210'::uuid,
+      '73000000-0000-4000-8000-000000000211'::uuid,
+      '73000000-0000-4000-8000-000000000212'::uuid,
+      '73000000-0000-4000-8000-000000000213'::uuid,
+      '73000000-0000-4000-8000-000000000214'::uuid,
+      '73000000-0000-4000-8000-000000000215'::uuid
+    )
+  ),
+  0::bigint,
+  '차단된 조교 호출은 요청 원장도 남기지 않는다'
+);
+
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000004","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000004',
+  true
+);
+set local role authenticated;
+
+select lives_ok($$
+  select public.transition_ops_task_status_v2(
+    '73000000-0000-4000-8000-000000000105'::uuid,
+    'done',
+    (select task.updated_at from public.ops_tasks task where task.id = '73000000-0000-4000-8000-000000000105'::uuid),
+    '73000000-0000-4000-8000-000000000219'::uuid
+  )
+$$, '연결 교사의 검토 결과 최종 확인 경로는 유지된다');
+
+reset role;
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000001","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000001',
+  true
+);
+set local role authenticated;
+
+select lives_ok($$
+  select public.retry_word_retest_v1(
+    '73000000-0000-4000-8000-000000000106'::uuid,
+    jsonb_build_object(
+      'task', jsonb_build_object(
+        'type', 'word_retest', 'title', '관리자 재재시험 회귀 자식', 'status', 'requested'
+      ),
+      'word_retest', jsonb_build_object(
+        'branch', '본관', 'student_name', '관리자 후속 학생',
+        'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+        'teacher_name', 'Task 15 연결 선생님', 'class_name', '조교 권한 수업',
+        'total_question_count', 10, 'cutoff_question_count', 8,
+        'retest_status', 'not_started'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000220'::uuid
+  )
+$$, '관리자의 재재시험 추가 경로는 유지된다');
+
+reset role;
 select * from finish();
 rollback;

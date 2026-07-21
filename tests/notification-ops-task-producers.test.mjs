@@ -13,6 +13,10 @@ const reretryMigrationUrl = new URL(
   "../supabase/migrations/20260721093603_word_retest_reretry.sql",
   import.meta.url,
 )
+const assistantWordRetestPermissionsMigrationUrl = new URL(
+  "../supabase/migrations/20260721093604_assistant_word_retest_makeup_permissions.sql",
+  import.meta.url,
+)
 const serviceUrl = new URL("../src/features/tasks/ops-task-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 
@@ -82,6 +86,124 @@ test("고정 목적 RPC 10개가 인증 사용자에게만 열리고 등록 업�
   assert.match(sql, /ops_task_type_not_supported/)
   assert.match(sql, /v_type\s*=\s*'registration'[\s\S]*registration_dedicated_service_required/)
   assert.doesNotMatch(sql, /grant execute[\s\S]*to anon/)
+})
+
+test("조교 단어 재시험 권한은 공개 RPC 입구에서 진행 단계만 허용하고 교사 동작을 차단한다", async () => {
+  const sql = await source(assistantWordRetestPermissionsMigrationUrl)
+  const predicate = block(
+    sql,
+    "create or replace function dashboard_private.is_authenticated_assistant_request_v1",
+    "create or replace function dashboard_private.assert_assistant_word_retest_update_v1",
+  )
+  const updateGuard = block(
+    sql,
+    "create or replace function dashboard_private.assert_assistant_word_retest_update_v1",
+    "create or replace function dashboard_private.assert_assistant_word_retest_transition_v1",
+  )
+  const transitionGuard = block(
+    sql,
+    "create or replace function dashboard_private.assert_assistant_word_retest_transition_v1",
+    "create or replace function dashboard_private.assert_assistant_word_retest_teacher_action_v1",
+  )
+  const teacherActionGuard = block(
+    sql,
+    "create or replace function dashboard_private.assert_assistant_word_retest_teacher_action_v1",
+    "create or replace function public.update_ops_task_v2",
+  )
+  const updateWrapper = block(
+    sql,
+    "create or replace function public.update_ops_task_v2",
+    "create or replace function public.transition_ops_task_status_v2",
+  )
+  const transitionWrapper = block(
+    sql,
+    "create or replace function public.transition_ops_task_status_v2",
+    "create or replace function public.retry_word_retest_v1",
+  )
+  const retryWrapper = block(
+    sql,
+    "create or replace function public.retry_word_retest_v1",
+    "create or replace function public.request_word_retest_revision_v1",
+  )
+  const revisionWrapper = block(
+    sql,
+    "create or replace function public.request_word_retest_revision_v1",
+    "alter function dashboard_private.is_authenticated_assistant_request_v1",
+  )
+
+  assert.match(predicate, /auth\.jwt\(\)\s*->>\s*'role'[\s\S]*=\s*'authenticated'/)
+  assert.match(predicate, /auth\.uid\(\)/)
+  assert.match(predicate, /from public\.profiles profile[\s\S]*profile\.id\s*=\s*\(select auth\.uid\(\)\)[\s\S]*profile\.role\s*=\s*'assistant'/)
+  assert.match(predicate, /security definer[\s\S]*set search_path = ''/)
+  assert.doesNotMatch(sql, /\bcurrent_user\b/)
+
+  assert.match(updateGuard, /for update of task/)
+  assert.match(updateGuard, /for update of detail/)
+  assert.match(updateGuard, /v_task\.status not in \('requested', 'confirmed', 'in_progress', 'on_hold'\)/)
+  assert.match(updateGuard, /v_detail\.retest_status not in \('not_started', 'in_progress'\)/)
+  assert.match(updateGuard, /v_requested_status is distinct from v_task\.status/)
+  assert.match(transitionGuard, /v_task\.status not in \('requested', 'confirmed', 'on_hold'\)/)
+  assert.match(transitionGuard, /p_status is distinct from 'in_progress'/)
+  for (const guard of [updateGuard, transitionGuard]) {
+    assert.match(
+      guard,
+      /notification_request_ledger[\s\S]*ledger\.request_id = p_request_id[\s\S]*return/,
+    )
+    assert.doesNotMatch(guard, /ledger\.request_kind/)
+    assert.doesNotMatch(guard, /ledger\.request_fingerprint/)
+  }
+
+  for (const guardedBlock of [updateGuard, transitionGuard, teacherActionGuard]) {
+    assert.match(guardedBlock, /word_retest_assistant_action_not_allowed[\s\S]*errcode = '42501'/)
+  }
+  assert.ok(
+    updateWrapper.indexOf("assert_assistant_word_retest_update_v1") <
+      updateWrapper.indexOf("update_ops_task_v2_impl"),
+  )
+  assert.ok(
+    transitionWrapper.indexOf("assert_assistant_word_retest_transition_v1") <
+      transitionWrapper.indexOf("transition_ops_task_status_v2_impl"),
+  )
+  for (const [wrapper, implementation] of [
+    [retryWrapper, "retry_word_retest_v1_impl"],
+    [revisionWrapper, "request_word_retest_revision_v1_impl"],
+  ]) {
+    assert.ok(
+      wrapper.indexOf("assert_assistant_word_retest_teacher_action_v1") <
+        wrapper.indexOf(implementation),
+    )
+  }
+  for (const wrapper of [updateWrapper, transitionWrapper, retryWrapper, revisionWrapper]) {
+    assert.match(wrapper, /returns jsonb[\s\S]*security definer[\s\S]*set search_path = ''/)
+  }
+
+  assert.doesNotMatch(sql, /create\s+(?:constraint\s+)?trigger/i)
+  assert.doesNotMatch(sql, /create or replace function dashboard_private\.(?:update_ops_task_v2_impl|transition_ops_task_status_v2_impl|retry_word_retest_v1_impl|request_word_retest_revision_v1_impl)/)
+  assert.doesNotMatch(sql, /create or replace function public\.(?:create_ops_task_v2|report_word_retest_result_v1|report_word_retest_absent_v1)/)
+  assert.doesNotMatch(sql, /notification_rules|runtime_version|provider|makeup/i)
+  for (const privateSignature of [
+    "is_authenticated_assistant_request_v1\\(\\)",
+    "assert_assistant_word_retest_update_v1\\(\\s*uuid, jsonb, timestamptz, uuid\\s*\\)",
+    "assert_assistant_word_retest_transition_v1\\(\\s*uuid, text, timestamptz, uuid\\s*\\)",
+    "assert_assistant_word_retest_teacher_action_v1\\(\\)",
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(
+        `revoke all on function dashboard_private\\.${privateSignature}[\\s\\S]*from public, anon, authenticated, service_role`,
+      ),
+    )
+  }
+
+  for (const signature of [
+    "update_ops_task_v2(uuid, jsonb, timestamptz, uuid)",
+    "transition_ops_task_status_v2(uuid, text, timestamptz, uuid)",
+    "retry_word_retest_v1(uuid, jsonb, uuid)",
+    "request_word_retest_revision_v1(uuid, text, uuid)",
+  ]) {
+    assert.match(sql, new RegExp(`revoke all on function public\\.${signature.replace(/[()]/g, "\\$&")}`))
+    assert.match(sql, new RegExp(`grant execute on function public\\.${signature.replace(/[()]/g, "\\$&")}[\\s\\S]*to authenticated`))
+  }
 })
 
 test("생산자 RPC 설치 시 업무·재시험 원장의 인증 사용자 직접 DML을 즉시 닫는다", async () => {
