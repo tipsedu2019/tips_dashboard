@@ -9,6 +9,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260716190000_notification_ops_task_producers.sql",
   import.meta.url,
 )
+const reretryMigrationUrl = new URL(
+  "../supabase/migrations/20260721093603_word_retest_reretry.sql",
+  import.meta.url,
+)
 const serviceUrl = new URL("../src/features/tasks/ops-task-service.ts", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 
@@ -278,6 +282,19 @@ test("재시험 재생성은 이전 업무 완료·양방향 연결·새 업무 
   assert.match(retry, /'word_retest\.completed'/)
   assert.match(retry, /'word_retest\.retry_created'/)
   assert.match(retry, /sourceEventIds/)
+})
+
+test("재재시험 RPC는 미응시 원본·이전 날짜·연결 자식 마감 예외를 보존한다", async () => {
+  const sql = await source(reretryMigrationUrl)
+
+  assert.match(sql, /create or replace function dashboard_private\.retry_word_retest_v1_impl/)
+  assert.match(sql, /v_previous_detail\.retest_status = 'absent'/)
+  assert.match(sql, /coalesce\(nullif\(v_detail ->> 'test_at', ''\), v_previous_detail\.test_at::text\)/)
+  assert.doesNotMatch(sql, /set retest_status = 'done'[\s\S]*where detail\.task_id = p_previous_task_id/)
+  assert.match(sql, /v_detail\.retry_of_task_id is not null[\s\S]*word_retest_absent_deadline_not_allowed/)
+  assert.match(sql, /word_retest\.completed/)
+  assert.match(sql, /word_retest\.retry_created/)
+  assert.doesNotMatch(sql, /ops_task_notification_producers_runtime_version[\s\S]*return 2/)
 })
 
 test("결과·미응시·수정 요청 RPC는 브라우저 수신자 없이 권위 상태와 원본 이벤트를 함께 저장한다", async () => {

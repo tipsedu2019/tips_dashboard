@@ -594,5 +594,407 @@ select is(
 set local role authenticated;
 
 reset role;
+
+insert into public.ops_tasks(id, title, type, status, requested_by)
+values
+  (
+    '72000000-0000-4000-8000-000000000101'::uuid,
+    '재재시험 불합격 원본', 'word_retest', 'review_requested',
+    '71000000-0000-4000-8000-000000000001'::uuid
+  ),
+  (
+    '72000000-0000-4000-8000-000000000102'::uuid,
+    '재재시험 미응시 원본', 'word_retest', 'review_requested',
+    '71000000-0000-4000-8000-000000000001'::uuid
+  ),
+  (
+    '72000000-0000-4000-8000-000000000103'::uuid,
+    '재재시험 변경일 원본', 'word_retest', 'review_requested',
+    '71000000-0000-4000-8000-000000000001'::uuid
+  ),
+  (
+    '72000000-0000-4000-8000-000000000104'::uuid,
+    '재재시험 연결 부모', 'word_retest', 'done',
+    '71000000-0000-4000-8000-000000000001'::uuid
+  ),
+  (
+    '72000000-0000-4000-8000-000000000105'::uuid,
+    '재재시험 연결 자식', 'word_retest', 'requested',
+    '71000000-0000-4000-8000-000000000001'::uuid
+  ),
+  (
+    '72000000-0000-4000-8000-000000000106'::uuid,
+    '재재시험 롤백 원본', 'word_retest', 'review_requested',
+    '71000000-0000-4000-8000-000000000001'::uuid
+  );
+
+insert into public.ops_word_retests(
+  task_id, branch, teacher_catalog_id, teacher_name, class_name, student_name,
+  test_at, total_question_count, cutoff_question_count,
+  first_score, retest_status, retry_of_task_id, retry_task_id
+)
+values
+  (
+    '72000000-0000-4000-8000-000000000101'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '재재시험 수업', '불합격 학생',
+    '2026-07-01T01:00:00.000Z', 10, 8, 5, 'done', null, null
+  ),
+  (
+    '72000000-0000-4000-8000-000000000102'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '재재시험 수업', '미응시 학생',
+    '2026-07-02T01:00:00.000Z', 10, 8, null, 'absent', null, null
+  ),
+  (
+    '72000000-0000-4000-8000-000000000103'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '재재시험 수업', '변경일 학생',
+    '2026-07-03T01:00:00.000Z', 10, 8, null, 'absent', null, null
+  ),
+  (
+    '72000000-0000-4000-8000-000000000104'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '재재시험 수업', '연결 학생',
+    '2026-01-01T01:00:00.000Z', 10, 8, null, 'absent',
+    null, '72000000-0000-4000-8000-000000000105'::uuid
+  ),
+  (
+    '72000000-0000-4000-8000-000000000105'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '재재시험 수업', '연결 학생',
+    '2026-01-01T01:00:00.000Z', 10, 8, null, 'not_started',
+    '72000000-0000-4000-8000-000000000104'::uuid, null
+  ),
+  (
+    '72000000-0000-4000-8000-000000000106'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '재재시험 수업', '롤백 학생',
+    '2026-07-04T01:00:00.000Z', 10, 8, 4, 'done', null, null
+  );
+
+set local role authenticated;
+
+create temporary table word_retest_reretry_results (
+  attempt_key text primary key,
+  response jsonb not null
+) on commit drop;
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'failed-first', public.retry_word_retest_v1(
+  '72000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '불합격 후속 재재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '불합격 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+      'test_at', '2026-07-08T01:00:00.000Z',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000201'::uuid
+);
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'failed-replay', public.retry_word_retest_v1(
+  '72000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '불합격 후속 재재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '불합격 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+      'test_at', '2026-07-08T01:00:00.000Z',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000201'::uuid
+);
+
+select is(
+  (select response -> 'task' ->> 'id' from word_retest_reretry_results where attempt_key = 'failed-replay'),
+  (select response -> 'task' ->> 'id' from word_retest_reretry_results where attempt_key = 'failed-first'),
+  '불합격 원본의 같은 요청 ID 재실행은 최초 후속 UUID를 돌려준다'
+);
+
+select is(
+  (
+    select detail.retest_status
+    from public.ops_word_retests detail
+    where detail.task_id = '72000000-0000-4000-8000-000000000101'::uuid
+  ),
+  'done',
+  '불합격 원본의 완료 결과는 후속 생성 뒤에도 보존된다'
+);
+
+select throws_ok($$
+  select public.retry_word_retest_v1(
+    '72000000-0000-4000-8000-000000000101'::uuid,
+    jsonb_build_object(
+      'task', jsonb_build_object(
+        'type', 'word_retest', 'title', '중복 후속 재재시험', 'status', 'requested'
+      ),
+      'word_retest', jsonb_build_object(
+        'branch', '본관', 'student_name', '불합격 학생',
+        'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+        'test_at', '2026-07-09T01:00:00.000Z', 'retest_status', 'not_started'
+      )
+    ),
+    '72000000-0000-4000-8000-000000000202'::uuid
+  )
+$$, '40001', 'word_retest_retry_conflict',
+  '같은 원본의 다른 요청 ID 후속 생성은 충돌로 거부된다');
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'absent-inherited-date', public.retry_word_retest_v1(
+  '72000000-0000-4000-8000-000000000102'::uuid,
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '미응시 후속 재재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '미응시 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000203'::uuid
+);
+
+select is(
+  (
+    select task.status
+    from public.ops_tasks task
+    where task.id = '72000000-0000-4000-8000-000000000102'::uuid
+  ),
+  'done',
+  '미응시 원본의 업무 상태만 완료된다'
+);
+
+select is(
+  (
+    select detail.retest_status
+    from public.ops_word_retests detail
+    where detail.task_id = '72000000-0000-4000-8000-000000000102'::uuid
+  ),
+  'absent',
+  '미응시 원본의 세부 결과는 완료로 덮어쓰지 않는다'
+);
+
+select is(
+  (
+    select detail.test_at
+    from public.ops_word_retests detail
+    where detail.task_id = (
+      select (response -> 'task' ->> 'id')::uuid
+      from word_retest_reretry_results where attempt_key = 'absent-inherited-date'
+    )
+  ),
+  '2026-07-02T01:00:00.000Z'::timestamptz,
+  '후속 본시험일을 생략하면 미응시 원본의 본시험일을 상속한다'
+);
+
+select is(
+  (
+    select detail.retry_task_id::text
+    from public.ops_word_retests detail
+    where detail.task_id = '72000000-0000-4000-8000-000000000102'::uuid
+  ),
+  (
+    select response -> 'task' ->> 'id'
+    from word_retest_reretry_results where attempt_key = 'absent-inherited-date'
+  ),
+  '미응시 원본은 후속 재재시험을 가리킨다'
+);
+
+select is(
+  (
+    select detail.retry_of_task_id::text
+    from public.ops_word_retests detail
+    where detail.task_id = (
+      select (response -> 'task' ->> 'id')::uuid
+      from word_retest_reretry_results where attempt_key = 'absent-inherited-date'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000102',
+  '미응시 후속 재재시험은 원본을 가리킨다'
+);
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'absent-changed-date', public.retry_word_retest_v1(
+  '72000000-0000-4000-8000-000000000103'::uuid,
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '변경일 후속 재재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '변경일 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+      'test_at', '2026-08-05T01:00:00.000Z',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000204'::uuid
+);
+
+select is(
+  (
+    select detail.test_at
+    from public.ops_word_retests detail
+    where detail.task_id = (
+      select (response -> 'task' ->> 'id')::uuid
+      from word_retest_reretry_results where attempt_key = 'absent-changed-date'
+    )
+  ),
+  '2026-08-05T01:00:00.000Z'::timestamptz,
+  '명시적으로 바꾼 후속 본시험일은 원본 날짜로 덮어쓰지 않는다'
+);
+
+select throws_ok($$
+  select public.report_word_retest_absent_v1(
+    '72000000-0000-4000-8000-000000000105'::uuid,
+    'deadline',
+    '72000000-0000-4000-8000-000000000205'::uuid
+  )
+$$, '40001', 'word_retest_absent_deadline_not_allowed',
+  '연결 자식은 기한 경과 미응시 자동 처리에서 제외된다');
+
+select lives_ok($$
+  select public.transition_ops_task_status_v2(
+    '72000000-0000-4000-8000-000000000105'::uuid,
+    'in_progress',
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = '72000000-0000-4000-8000-000000000105'::uuid
+    ),
+    '72000000-0000-4000-8000-000000000206'::uuid
+  )
+$$, '연결 자식도 일반 시험 시작 전이를 사용할 수 있다');
+
+select lives_ok($$
+  select public.report_word_retest_absent_v1(
+    '72000000-0000-4000-8000-000000000105'::uuid,
+    'manual',
+    '72000000-0000-4000-8000-000000000207'::uuid
+  )
+$$, '시작한 연결 자식의 수동 미응시 처리는 유지된다');
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'middle-outgoing', public.retry_word_retest_v1(
+  '72000000-0000-4000-8000-000000000105'::uuid,
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '연결 자식의 후속 재재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '연결 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+      'test_at', '2026-08-06T01:00:00.000Z',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000208'::uuid
+);
+
+select results_eq(
+  $$
+    select detail.retry_of_task_id::text, detail.retry_task_id::text
+    from public.ops_word_retests detail
+    where detail.task_id = '72000000-0000-4000-8000-000000000105'::uuid
+  $$,
+  $$
+    values (
+      '72000000-0000-4000-8000-000000000104'::text,
+      (
+        select response -> 'task' ->> 'id'
+        from word_retest_reretry_results where attempt_key = 'middle-outgoing'
+      )
+    )
+  $$,
+  '중간 연결 자식은 들어오는 링크와 나가는 링크를 함께 가진다'
+);
+
+reset role;
+create or replace function pg_temp.reject_word_retest_retry_created_fixture()
+returns trigger language plpgsql as $$
+begin
+  if new.event_type = 'word_retest.retry_created'
+    and new.payload ->> 'task_title' = '재재시험 원자성 실패'
+  then
+    raise exception 'forced_word_retest_retry_created_failure';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger reject_word_retest_retry_created_fixture
+before insert on public.ops_task_events
+for each row execute function pg_temp.reject_word_retest_retry_created_fixture();
+set local role authenticated;
+
+select throws_ok($$
+  select public.retry_word_retest_v1(
+    '72000000-0000-4000-8000-000000000106'::uuid,
+    jsonb_build_object(
+      'task', jsonb_build_object(
+        'type', 'word_retest', 'title', '재재시험 원자성 실패', 'status', 'requested'
+      ),
+      'word_retest', jsonb_build_object(
+        'branch', '본관', 'student_name', '롤백 학생',
+        'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+        'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+        'test_at', '2026-08-07T01:00:00.000Z',
+        'total_question_count', 10, 'cutoff_question_count', 8,
+        'retest_status', 'not_started'
+      )
+    ),
+    '72000000-0000-4000-8000-000000000209'::uuid
+  )
+$$, 'P0001', 'forced_word_retest_retry_created_failure',
+  '후속 생성 이벤트 실패는 재재시험 RPC 전체를 롤백한다');
+
+select results_eq(
+  $$
+    select task.status, detail.retest_status, detail.retry_task_id::text
+    from public.ops_tasks task
+    join public.ops_word_retests detail on detail.task_id = task.id
+    where task.id = '72000000-0000-4000-8000-000000000106'::uuid
+  $$,
+  $$ values ('review_requested'::text, 'done'::text, null::text) $$,
+  '실패 뒤 원본 업무 상태·결과·링크가 모두 복구된다'
+);
+
+select is(
+  (
+    select count(*) from public.ops_tasks task
+    where task.title = '재재시험 원자성 실패'
+  ),
+  0::bigint,
+  '실패 뒤 생성한 후속 업무가 남지 않는다'
+);
+
+select is(
+  (
+    select count(*) from public.ops_task_events event
+    where event.request_id = '72000000-0000-4000-8000-000000000209'::uuid
+  ),
+  0::bigint,
+  '후속 생성 이벤트 실패 뒤 앞선 완료 이벤트도 남지 않는다'
+);
+
+reset role;
 select * from finish();
 rollback;
