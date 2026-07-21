@@ -1,6 +1,6 @@
 begin;
 
-select plan(80);
+select plan(84);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -1125,6 +1125,68 @@ insert into public.makeup_request_events(
   '조교 참여 이력 RLS 검증'
 );
 
+insert into public.dashboard_notifications(
+  id, recipient_profile_id, type, title, body, href, metadata
+)
+values
+  (
+    '92000000-0000-4000-8000-000000000641',
+    '92000000-0000-4000-8000-000000000004',
+    'makeup_request', '레거시 휴보강 알림', '조교에게 숨겨야 하는 레거시 본문',
+    '/admin/makeup-requests?request=legacy', '{}'::jsonb
+  ),
+  (
+    '92000000-0000-4000-8000-000000000642',
+    '92000000-0000-4000-8000-000000000004',
+    'notification_control_plane', 'canonical 휴보강 알림',
+    '조교에게 숨겨야 하는 canonical 본문', '/admin/makeup-requests?request=canonical',
+    '{"workflow_key":"makeup_requests"}'::jsonb
+  ),
+  (
+    '92000000-0000-4000-8000-000000000643',
+    '92000000-0000-4000-8000-000000000004',
+    'general', '링크 기반 휴보강 알림', '조교에게 숨겨야 하는 링크 본문',
+    '/admin/makeup-requests/archive', '{}'::jsonb
+  ),
+  (
+    '92000000-0000-4000-8000-000000000644',
+    '92000000-0000-4000-8000-000000000004',
+    'notification_control_plane', '조교 일반 업무 알림',
+    '조교에게 유지해야 하는 일반 업무 본문', '/admin/tasks',
+    '{"workflow_key":"tasks"}'::jsonb
+  );
+
+insert into public.dashboard_notifications(
+  id, recipient_profile_id, type, title, body, href, metadata
+)
+select
+  mapping.target_id,
+  '92000000-0000-4000-8000-000000000005'::uuid,
+  source.type,
+  source.title,
+  source.body,
+  source.href,
+  source.metadata
+from (values
+  (
+    '92000000-0000-4000-8000-000000000641'::uuid,
+    '92000000-0000-4000-8000-000000000645'::uuid
+  ),
+  (
+    '92000000-0000-4000-8000-000000000642'::uuid,
+    '92000000-0000-4000-8000-000000000646'::uuid
+  ),
+  (
+    '92000000-0000-4000-8000-000000000643'::uuid,
+    '92000000-0000-4000-8000-000000000647'::uuid
+  ),
+  (
+    '92000000-0000-4000-8000-000000000644'::uuid,
+    '92000000-0000-4000-8000-000000000648'::uuid
+  )
+) mapping(source_id, target_id)
+join public.dashboard_notifications source on source.id = mapping.source_id;
+
 create temporary table assistant_makeup_guard_create_input(
   input jsonb not null
 ) on commit drop;
@@ -1169,6 +1231,42 @@ select is(
   0::bigint,
   '조교는 휴보강 알림 설정을 조회할 수 없다'
 );
+select results_eq(
+  $$
+    select notification.id
+    from public.dashboard_notifications notification
+    where notification.id between
+      '92000000-0000-4000-8000-000000000641'::uuid
+      and '92000000-0000-4000-8000-000000000644'::uuid
+    order by notification.id
+  $$,
+  $$ values ('92000000-0000-4000-8000-000000000644'::uuid) $$,
+  '조교의 직접 알림 조회는 휴보강 세 형식을 숨기고 일반 업무 알림을 유지한다'
+);
+select results_eq(
+  $$
+    select item ->> 'id'
+    from pg_catalog.jsonb_array_elements(
+      public.get_dashboard_notification_inbox_v1(100, null, null) -> 'items'
+    ) item
+    where (item ->> 'id')::uuid between
+      '92000000-0000-4000-8000-000000000641'::uuid
+      and '92000000-0000-4000-8000-000000000644'::uuid
+    order by item ->> 'id'
+  $$,
+  $$ values ('92000000-0000-4000-8000-000000000644'::text) $$,
+  '조교 공개 알림함 응답에도 일반 업무 알림만 남는다'
+);
+select throws_ok($$
+  insert into public.dashboard_notifications(
+    recipient_profile_id, type, title, href, metadata
+  ) values (
+    '92000000-0000-4000-8000-000000000004',
+    'makeup_request', '조교 휴보강 알림 직접 생성 우회',
+    '/admin/makeup-requests', '{}'::jsonb
+  )
+$$, '42501', 'new row violates row-level security policy "dashboard_notifications_assistant_makeup_hard_deny" for table "dashboard_notifications"',
+  '조교는 휴보강 알림을 직접 생성할 수도 없다');
 select throws_ok($$
   select public.create_makeup_request_v2(
     (select input from assistant_makeup_guard_create_input),
@@ -1194,6 +1292,21 @@ select throws_ok($$
 $$, '42501', 'makeup_request_assistant_forbidden',
   '조교의 휴보강 삭제도 공개 RPC 입구에서 차단한다');
 reset role;
+
+select results_eq(
+  $$
+    select visible.id
+    from dashboard_private.visible_dashboard_notification_rows_v1(
+      '92000000-0000-4000-8000-000000000004'
+    ) visible
+    where visible.id between
+      '92000000-0000-4000-8000-000000000641'::uuid
+      and '92000000-0000-4000-8000-000000000644'::uuid
+    order by visible.id
+  $$,
+  $$ values ('92000000-0000-4000-8000-000000000644'::uuid) $$,
+  '조교 알림함 SECURITY DEFINER 내부 경로도 휴보강 알림을 숨긴다'
+);
 
 select throws_ok($$
   insert into public.makeup_requests(
@@ -1350,8 +1463,24 @@ set local role authenticated;
 select ok(
   exists (select 1 from public.makeup_requests)
   and exists (select 1 from public.makeup_request_events)
-  and exists (select 1 from public.makeup_notification_settings),
-  '관리자의 기존 휴보강 신청·이력·설정 조회 권한은 유지된다'
+  and exists (select 1 from public.makeup_notification_settings)
+  and (
+    select count(*) = 4
+    from public.dashboard_notifications notification
+    where notification.id between
+      '92000000-0000-4000-8000-000000000641'::uuid
+      and '92000000-0000-4000-8000-000000000644'::uuid
+  )
+  and (
+    select count(*) = 4
+    from pg_catalog.jsonb_array_elements(
+      public.get_dashboard_notification_inbox_v1(100, null, null) -> 'items'
+    ) item
+    where (item ->> 'id')::uuid between
+      '92000000-0000-4000-8000-000000000645'::uuid
+      and '92000000-0000-4000-8000-000000000648'::uuid
+  ),
+  '관리자의 기존 휴보강 신청·이력·설정·알림 조회 권한은 유지된다'
 );
 reset role;
 

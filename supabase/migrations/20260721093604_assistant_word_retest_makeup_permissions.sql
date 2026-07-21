@@ -34,6 +34,9 @@ begin
       'public.current_dashboard_role()'
     ) is null
     or pg_catalog.to_regprocedure(
+      'dashboard_private.visible_dashboard_notification_rows_v1(uuid)'
+    ) is null
+    or pg_catalog.to_regprocedure(
       'public.create_makeup_request_v2(jsonb,uuid)'
     ) is null
     or pg_catalog.to_regprocedure(
@@ -57,6 +60,7 @@ begin
     or pg_catalog.to_regclass('public.makeup_requests') is null
     or pg_catalog.to_regclass('public.makeup_request_events') is null
     or pg_catalog.to_regclass('public.makeup_notification_settings') is null
+    or pg_catalog.to_regclass('public.dashboard_notifications') is null
   then
     raise exception 'assistant_permission_prerequisite_missing' using errcode = '55000';
   end if;
@@ -448,6 +452,113 @@ create policy makeup_notification_settings_assistant_hard_deny
       and (select public.current_dashboard_role()) = 'assistant'
     )
   );
+
+drop policy if exists dashboard_notifications_assistant_makeup_hard_deny
+  on public.dashboard_notifications;
+create policy dashboard_notifications_assistant_makeup_hard_deny
+  on public.dashboard_notifications
+  as restrictive
+  for all
+  to authenticated
+  using (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+      and coalesce(
+        type = 'makeup_request'
+        or metadata ->> 'workflow_key' = 'makeup_requests'
+        or href like '/admin/makeup-requests%',
+        false
+      )
+    )
+  )
+  with check (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+      and coalesce(
+        type = 'makeup_request'
+        or metadata ->> 'workflow_key' = 'makeup_requests'
+        or href like '/admin/makeup-requests%',
+        false
+      )
+    )
+  );
+
+create or replace function dashboard_private.visible_dashboard_notification_rows_v1(
+  p_profile_id uuid
+)
+returns table (
+  id uuid,
+  recipient_profile_id uuid,
+  recipient_team text,
+  actor_profile_id uuid,
+  notification_type text,
+  title text,
+  body text,
+  href text,
+  metadata jsonb,
+  legacy_read_at timestamptz,
+  receipt_read_at timestamptz,
+  read_at timestamptz,
+  created_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select
+    notification.id,
+    notification.recipient_profile_id,
+    notification.recipient_team,
+    notification.actor_profile_id,
+    notification.type as notification_type,
+    notification.title,
+    notification.body,
+    notification.href,
+    notification.metadata,
+    notification.read_at as legacy_read_at,
+    receipt.read_at as receipt_read_at,
+    coalesce(receipt.read_at, notification.read_at) as read_at,
+    notification.created_at
+  from public.dashboard_notifications notification
+  left join public.dashboard_notification_read_receipts receipt
+    on receipt.notification_id = notification.id
+   and receipt.profile_id = p_profile_id
+  where p_profile_id is not null
+    and notification.revoked_at is null
+    and notification.type <> 'registration_consultation_admin_chat'
+    and not (
+      exists (
+        select 1
+        from public.profiles profile
+        where profile.id = p_profile_id
+          and profile.role = 'assistant'
+      )
+      and coalesce(
+        notification.type = 'makeup_request'
+        or notification.metadata ->> 'workflow_key' = 'makeup_requests'
+        or notification.href like '/admin/makeup-requests%',
+        false
+      )
+    )
+    and (
+      notification.recipient_profile_id = p_profile_id
+      or (
+        notification.recipient_profile_id is null
+        and notification.recipient_team = '관리팀'
+        and exists (
+          select 1
+          from public.profiles profile
+          where profile.id = p_profile_id
+            and profile.role in ('admin', 'staff')
+        )
+      )
+    );
+$$;
 
 create or replace function dashboard_private.assert_assistant_makeup_action_v1(
   p_patch jsonb default null

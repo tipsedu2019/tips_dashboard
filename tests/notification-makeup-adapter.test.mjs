@@ -276,6 +276,15 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     sql,
     "create policy makeup_notification_settings_assistant_hard_deny",
   )
+  const dashboardNotificationPolicy = statementBlock(
+    sql,
+    "create policy dashboard_notifications_assistant_makeup_hard_deny",
+  )
+  const visibleInboxRows = createFunctionBlock(
+    sql,
+    "dashboard_private.visible_dashboard_notification_rows_v1",
+    "dashboard_private.assert_assistant_makeup_action_v1",
+  )
   const actionGuard = createFunctionBlock(
     sql,
     "dashboard_private.assert_assistant_makeup_action_v1",
@@ -319,18 +328,24 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     "makeup_requests",
     "makeup_request_events",
     "makeup_notification_settings",
+    "dashboard_notifications",
   ]) {
     assert.match(
       prerequisite,
       new RegExp(`to_regclass\\('public\\.${table}'\\)[\\s\\S]*?is null`),
     )
   }
+  assert.match(
+    prerequisite,
+    /to_regprocedure\(\s*'dashboard_private\.visible_dashboard_notification_rows_v1\(uuid\)'\s*\)[\s\S]*?is null/,
+  )
   assert.match(prerequisite, /assistant_permission_prerequisite_missing/)
 
   for (const [policy, command] of [
     [requestPolicy, "all"],
     [eventPolicy, "all"],
     [settingsPolicy, "select"],
+    [dashboardNotificationPolicy, "all"],
   ]) {
     assert.match(policy, /as restrictive/)
     assert.match(policy, new RegExp(`for ${command}`))
@@ -343,6 +358,18 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     assert.match(policy, /using \(/)
     assert.match(policy, /with check \(/)
   }
+
+  for (const source of [dashboardNotificationPolicy, visibleInboxRows]) {
+    assert.match(source, /(?:notification\.)?type\s*=\s*'makeup_request'/)
+    assert.match(source, /(?:notification\.)?metadata\s*->>\s*'workflow_key'\s*=\s*'makeup_requests'/)
+    assert.match(source, /(?:notification\.)?href\s+like\s+'\/admin\/makeup-requests%'/)
+  }
+  assert.match(dashboardNotificationPolicy, /current_dashboard_role\(\)[\s\S]*'assistant'/)
+  assert.match(visibleInboxRows, /profile\.role\s*=\s*'assistant'/)
+  assert.match(dashboardNotificationPolicy, /using \(/)
+  assert.match(dashboardNotificationPolicy, /with check \(/)
+  assert.match(visibleInboxRows, /security definer[\s\S]*set search_path = ''/)
+  assert.match(visibleInboxRows, /notification\.type\s*<>\s*'registration_consultation_admin_chat'/)
 
   assert.match(actionGuard, /is_authenticated_assistant_request_v1\(\)/)
   assert.match(actionGuard, /auth\.jwt\(\)[\s\S]*'role'[\s\S]*'service_role'/)
