@@ -1508,6 +1508,38 @@ select throws_ok($$
 $$, '42501', 'word_retest_assistant_action_not_allowed',
   '조교는 일반 수정 RPC로 진행 중 세부 상태를 시작 전으로 되돌릴 수 없다');
 
+select throws_ok($$
+  select public.update_ops_task_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    '{"task":{"status":"in_progress"},"word_retest":{"retest_status":""}}'::jsonb,
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000225'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교는 빈 세부 상태로 진행 중 재시험을 시작 전 단계로 되돌릴 수 없다');
+
+select throws_ok($$
+  select public.update_ops_task_v2(
+    (select (response -> 'task' ->> 'id')::uuid from assistant_word_retest_results where attempt_key = 'created'),
+    '{"task":{"status":"in_progress"},"word_retest":{"retest_status":null}}'::jsonb,
+    (
+      select task.updated_at from public.ops_tasks task
+      where task.id = (
+        select (response -> 'task' ->> 'id')::uuid
+        from assistant_word_retest_results where attempt_key = 'created'
+      )
+    ),
+    '73000000-0000-4000-8000-000000000226'::uuid
+  )
+$$, '42501', 'word_retest_assistant_action_not_allowed',
+  '조교는 null 세부 상태로 진행 중 재시험을 시작 전 단계로 되돌릴 수 없다');
+
 select results_eq(
   $$
     select task.status, detail.retest_status, detail.first_score
@@ -1729,7 +1761,9 @@ select is(
       '73000000-0000-4000-8000-000000000215'::uuid,
       '73000000-0000-4000-8000-000000000222'::uuid,
       '73000000-0000-4000-8000-000000000223'::uuid,
-      '73000000-0000-4000-8000-000000000224'::uuid
+      '73000000-0000-4000-8000-000000000224'::uuid,
+      '73000000-0000-4000-8000-000000000225'::uuid,
+      '73000000-0000-4000-8000-000000000226'::uuid
     )
   ),
   0::bigint,
@@ -1753,7 +1787,9 @@ select is(
       '73000000-0000-4000-8000-000000000215'::uuid,
       '73000000-0000-4000-8000-000000000222'::uuid,
       '73000000-0000-4000-8000-000000000223'::uuid,
-      '73000000-0000-4000-8000-000000000224'::uuid
+      '73000000-0000-4000-8000-000000000224'::uuid,
+      '73000000-0000-4000-8000-000000000225'::uuid,
+      '73000000-0000-4000-8000-000000000226'::uuid
     )
   ),
   0::bigint,

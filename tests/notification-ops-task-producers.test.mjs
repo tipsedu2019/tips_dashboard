@@ -144,7 +144,11 @@ test("조교 단어 재시험 권한은 공개 RPC 입구에서 진행 단계만
   assert.match(updateGuard, /v_requested_status is distinct from v_task\.status/)
   assert.match(
     updateGuard,
-    /v_requested_retest_status := coalesce\([\s\S]*ops_task_input_detail_v2\(\s*p_input,\s*'word_retest'\s*\)[\s\S]*->> 'retest_status'/,
+    /v_requested_detail := dashboard_private\.ops_task_input_detail_v2\(\s*p_input,\s*'word_retest'\s*\)/,
+  )
+  assert.match(
+    updateGuard,
+    /v_requested_retest_status := case[\s\S]*when v_requested_detail \? 'retest_status'[\s\S]*then coalesce\([\s\S]*nullif\(v_requested_detail ->> 'retest_status',\s*''\)[\s\S]*'not_started'[\s\S]*else v_detail\.retest_status[\s\S]*end/,
   )
   assert.match(
     updateGuard,

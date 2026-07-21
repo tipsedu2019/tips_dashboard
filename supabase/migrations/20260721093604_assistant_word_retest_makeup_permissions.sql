@@ -70,6 +70,7 @@ declare
   v_task public.ops_tasks%rowtype;
   v_detail public.ops_word_retests%rowtype;
   v_requested_status text;
+  v_requested_detail jsonb;
   v_requested_retest_status text;
 begin
   if not dashboard_private.is_authenticated_assistant_request_v1() then
@@ -118,16 +119,17 @@ begin
     ),
     v_task.status
   );
-  v_requested_retest_status := coalesce(
-    nullif(
-      dashboard_private.ops_task_input_detail_v2(
-        p_input,
-        'word_retest'
-      ) ->> 'retest_status',
-      ''
-    ),
-    v_detail.retest_status
+  v_requested_detail := dashboard_private.ops_task_input_detail_v2(
+    p_input,
+    'word_retest'
   );
+  v_requested_retest_status := case
+    when v_requested_detail ? 'retest_status' then coalesce(
+      nullif(v_requested_detail ->> 'retest_status', ''),
+      'not_started'
+    )
+    else v_detail.retest_status
+  end;
   if v_task.status not in ('requested', 'confirmed', 'in_progress', 'on_hold')
     or v_detail.retest_status not in ('not_started', 'in_progress')
     or v_requested_status is distinct from v_task.status
