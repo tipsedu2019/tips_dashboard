@@ -297,6 +297,28 @@ test("재재시험 RPC는 미응시 원본·이전 날짜·연결 자식 마감 
   assert.doesNotMatch(sql, /ops_task_notification_producers_runtime_version[\s\S]*return 2/)
 })
 
+test("완료된 미응시 원본 복구는 완료 시각을 보존하고 완료 이벤트를 중복 기록하지 않는다", async () => {
+  const sql = await source(reretryMigrationUrl)
+  const retry = block(
+    sql,
+    "create or replace function dashboard_private.retry_word_retest_v1_impl",
+    "create or replace function dashboard_private.report_word_retest_absent_v1_impl",
+  )
+
+  assert.match(
+    retry,
+    /v_previous_task\.status = 'review_requested'[\s\S]*v_previous_detail\.retest_status = 'absent'[\s\S]*v_previous_task\.status = 'done'[\s\S]*v_previous_detail\.retest_status = 'absent'/,
+  )
+  assert.match(
+    retry,
+    /set status = 'done', completed_at = coalesce\(task\.completed_at, pg_catalog\.clock_timestamp\(\)\)/,
+  )
+  assert.match(
+    retry,
+    /if v_previous_status <> 'done' then[\s\S]*'word_retest\.completed'[\s\S]*v_source_event_ids :=[\s\S]*end if;[\s\S]*'word_retest\.retry_created'/,
+  )
+})
+
 test("결과·미응시·수정 요청 RPC는 브라우저 수신자 없이 권위 상태와 원본 이벤트를 함께 저장한다", async () => {
   const sql = await source(migrationUrl)
   for (const [name, eventKey] of [

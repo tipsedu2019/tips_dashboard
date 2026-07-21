@@ -3764,11 +3764,36 @@ test("reretry reload fallbacks preserve local lineage without sending it to the 
   assert.match(lineageSanitizer, /retryOfTaskId[\s\S]*retryTaskId[\s\S]*return editableWordRetest/);
   assert.match(retryPayload, /withoutWordRetestLineage\(payload\.wordRetest \|\| \{\}\)/);
   assert.match(retryFlow, /const sourceFallbackInput:[\s\S]*wordRetest:[\s\S]*retryTaskId: taskId/);
+  assert.match(retryFlow, /completedAt: editingTask\.completedAt \|\| new Date\(\)\.toISOString\(\)/);
   assert.match(retryFlow, /const childFallbackInput:[\s\S]*wordRetest:[\s\S]*retestStatus: "not_started"[\s\S]*retryOfTaskId: editingTask\.id/);
   assert.match(retryFlow, /loadSavedTaskOrFallback\(editingTask\.id, sourceFallbackInput, editingTask\)/);
   assert.match(retryFlow, /loadSavedTaskOrFallback\(taskId, childFallbackInput\)/);
   assert.match(retryFlow, /const retryReceipt = await retryWordRetest\(editingTask\.id, retryPayload\)/);
   assert.doesNotMatch(retryPayload, /retryTaskId|retryOfTaskId/);
+});
+
+test("completed absent word retests expose one recovery reretry action only in teacher mode", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const actionSource = source.slice(
+    source.indexOf("function getWordRetestPrimaryActions"),
+    source.indexOf("function shouldShowDetailStatusBadge"),
+  );
+
+  assert.match(
+    actionSource,
+    /const canRetryCompletedAbsent = mode === "teacher"[\s\S]*task\.status === "done"[\s\S]*wordRetest\.retestStatus === "absent"[\s\S]*!wordRetest\.retryTaskId/,
+    "teacher mode should recover only done absent sources without an outgoing retry link",
+  );
+  assert.match(
+    actionSource,
+    /if \(canRetryCompletedAbsent\) return \[\{ kind: "word_retest_retry", label: "재재시험 추가", retryReason: "absent" \}\]/,
+    "completed absent recovery should return exactly one reretry action",
+  );
+  assert.ok(
+    actionSource.indexOf("if (canRetryCompletedAbsent)") <
+      actionSource.indexOf('getWordRetestWorkspaceRole(task) === "completed"'),
+    "completed absent recovery must run before the completed-workspace early return",
+  );
 });
 
 test("word retest workspace keeps page title full and add actions compact", async () => {

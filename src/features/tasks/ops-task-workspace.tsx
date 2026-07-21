@@ -7823,9 +7823,14 @@ function getSecondaryTaskStatusOptions(task: Pick<OpsTask, "status" | "type">) {
 }
 
 function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, completionBlockers: string[] = EMPTY_COMPLETION_BLOCKERS): WordRetestPrimaryAction[] {
+  const wordRetest = task.wordRetest || {}
+  const canRetryCompletedAbsent = mode === "teacher"
+    && task.status === "done"
+    && wordRetest.retestStatus === "absent"
+    && !wordRetest.retryTaskId
+  if (canRetryCompletedAbsent) return [{ kind: "word_retest_retry", label: "재재시험 추가", retryReason: "absent" }]
   if (getWordRetestWorkspaceRole(task) === "completed") return []
 
-  const wordRetest = task.wordRetest || {}
   const absent = isWordRetestAbsent(wordRetest)
   const scoreResult = getWordRetestScoreResult(wordRetest)
 
@@ -10837,7 +10842,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         const sourceFallbackInput: OpsTaskInput = {
           ...formFromTask(editingTask),
           status: "done",
-          completedAt: new Date().toISOString(),
+          completedAt: editingTask.completedAt || new Date().toISOString(),
           wordRetest: {
             ...(editingTask.wordRetest || {}),
             testAt: editingTask.wordRetest?.testAt || "",

@@ -63,28 +63,36 @@ begin
   if not found then
     raise exception 'word_retest_not_found' using errcode = 'P0002';
   end if;
-  if v_previous_task.status <> 'review_requested'
-    or v_previous_detail.retry_task_id is not null
+  if v_previous_detail.retry_task_id is not null
     or not (
-      v_previous_detail.retest_status = 'absent'
+      (
+        v_previous_task.status = 'review_requested'
+        and (
+          v_previous_detail.retest_status = 'absent'
+          or (
+            v_previous_detail.retest_status = 'done'
+            and v_previous_detail.cutoff_question_count is not null
+            and exists (
+              select 1 from (values
+                (v_previous_detail.first_score),
+                (v_previous_detail.second_score),
+                (v_previous_detail.third_score)
+              ) score(value) where score.value is not null
+            )
+            and not exists (
+              select 1 from (values
+                (v_previous_detail.first_score),
+                (v_previous_detail.second_score),
+                (v_previous_detail.third_score)
+              ) score(value)
+              where score.value >= v_previous_detail.cutoff_question_count
+            )
+          )
+        )
+      )
       or (
-        v_previous_detail.retest_status = 'done'
-        and v_previous_detail.cutoff_question_count is not null
-        and exists (
-          select 1 from (values
-            (v_previous_detail.first_score),
-            (v_previous_detail.second_score),
-            (v_previous_detail.third_score)
-          ) score(value) where score.value is not null
-        )
-        and not exists (
-          select 1 from (values
-            (v_previous_detail.first_score),
-            (v_previous_detail.second_score),
-            (v_previous_detail.third_score)
-          ) score(value)
-          where score.value >= v_previous_detail.cutoff_question_count
-        )
+        v_previous_task.status = 'done'
+        and v_previous_detail.retest_status = 'absent'
       )
     )
   then
@@ -109,7 +117,7 @@ begin
   v_effective_input := p_input || pg_catalog.jsonb_build_object('word_retest', v_detail);
 
   update public.ops_tasks task
-  set status = 'done', completed_at = pg_catalog.clock_timestamp()
+  set status = 'done', completed_at = coalesce(task.completed_at, pg_catalog.clock_timestamp())
   where task.id = p_previous_task_id
   returning task.* into v_previous_task;
 
@@ -134,12 +142,14 @@ begin
     raise exception 'word_retest_retry_conflict' using errcode = '40001';
   end if;
 
-  v_source := dashboard_private.record_ops_task_notification_source_v2(
-    v_previous_task, 'word_retest.completed', p_request_id,
-    'status', v_previous_status, 'done',
-    pg_catalog.jsonb_build_object('retry_task_id', v_new_task.id)
-  );
-  v_source_event_ids := v_source_event_ids || pg_catalog.jsonb_build_array(v_source ->> 'sourceEventId');
+  if v_previous_status <> 'done' then
+    v_source := dashboard_private.record_ops_task_notification_source_v2(
+      v_previous_task, 'word_retest.completed', p_request_id,
+      'status', v_previous_status, 'done',
+      pg_catalog.jsonb_build_object('retry_task_id', v_new_task.id)
+    );
+    v_source_event_ids := v_source_event_ids || pg_catalog.jsonb_build_array(v_source ->> 'sourceEventId');
+  end if;
   v_source := dashboard_private.record_ops_task_notification_source_v2(
     v_new_task, 'word_retest.retry_created', p_request_id,
     'retry_of_task_id', p_previous_task_id::text, v_new_task.id::text,
