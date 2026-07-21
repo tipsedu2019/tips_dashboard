@@ -731,6 +731,57 @@ select 'done-absent-recovery', public.retry_word_retest_v1(
   '72000000-0000-4000-8000-000000000210'::uuid
 );
 
+insert into word_retest_reretry_results(attempt_key, response)
+select 'done-absent-recovery-replay', public.retry_word_retest_v1(
+  '72000000-0000-4000-8000-000000000107'::uuid,
+  jsonb_build_object(
+    'task', jsonb_build_object(
+      'type', 'word_retest', 'title', '완료 미응시 후속 재재시험', 'status', 'requested'
+    ),
+    'word_retest', jsonb_build_object(
+      'branch', '본관', 'student_name', '완료 미응시 학생',
+      'teacher_catalog_id', '71000000-0000-4000-8000-000000000005',
+      'teacher_name', 'Task 15 연결 선생님', 'class_name', '재재시험 수업',
+      'total_question_count', 10, 'cutoff_question_count', 8,
+      'retest_status', 'not_started'
+    )
+  ),
+  '72000000-0000-4000-8000-000000000210'::uuid
+);
+
+select is(
+  (
+    select response -> 'task' ->> 'id'
+    from word_retest_reretry_results where attempt_key = 'done-absent-recovery-replay'
+  ),
+  (
+    select response -> 'task' ->> 'id'
+    from word_retest_reretry_results where attempt_key = 'done-absent-recovery'
+  ),
+  '완료 미응시 원본의 같은 요청 ID 재실행은 최초 후속 UUID를 돌려준다'
+);
+
+select is(
+  (
+    select response -> 'sourceEventIds'
+    from word_retest_reretry_results where attempt_key = 'done-absent-recovery-replay'
+  ),
+  (
+    select response -> 'sourceEventIds'
+    from word_retest_reretry_results where attempt_key = 'done-absent-recovery'
+  ),
+  '완료 미응시 원본의 같은 요청 ID 재실행은 최초 원본 이벤트 UUID 배열을 그대로 돌려준다'
+);
+
+select is(
+  (
+    select jsonb_array_length(response -> 'sourceEventIds')
+    from word_retest_reretry_results where attempt_key = 'done-absent-recovery-replay'
+  ),
+  1,
+  '완료 미응시 원본 재실행 응답에는 후속 생성 원본 이벤트 UUID 한 개만 있다'
+);
+
 select results_eq(
   $$
     select task.status, task.completed_at, detail.retest_status,
