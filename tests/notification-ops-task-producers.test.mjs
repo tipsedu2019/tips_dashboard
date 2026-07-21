@@ -10,11 +10,11 @@ const migrationUrl = new URL(
   import.meta.url,
 )
 const reretryMigrationUrl = new URL(
-  "../supabase/migrations/20260721093603_word_retest_reretry.sql",
+  "../supabase/migrations/20260721131836_word_retest_reretry.sql",
   import.meta.url,
 )
 const assistantWordRetestPermissionsMigrationUrl = new URL(
-  "../supabase/migrations/20260721093604_assistant_word_retest_makeup_permissions.sql",
+  "../supabase/migrations/20260721131903_assistant_word_retest_makeup_permissions.sql",
   import.meta.url,
 )
 const serviceUrl = new URL("../src/features/tasks/ops-task-service.ts", import.meta.url)

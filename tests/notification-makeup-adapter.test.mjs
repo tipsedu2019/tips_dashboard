@@ -8,7 +8,11 @@ const migrationUrl = new URL(
   import.meta.url,
 )
 const assistantPermissionsMigrationUrl = new URL(
-  "../supabase/migrations/20260721093604_assistant_word_retest_makeup_permissions.sql",
+  "../supabase/migrations/20260721131903_assistant_word_retest_makeup_permissions.sql",
+  import.meta.url,
+)
+const assistantPolicyPerformanceMigrationUrl = new URL(
+  "../supabase/migrations/20260721132249_assistant_makeup_policy_performance.sql",
   import.meta.url,
 )
 const pgTapUrl = new URL(
@@ -358,7 +362,7 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     assert.match(policy, /to authenticated/)
     assert.match(policy, /auth\.jwt\(\)[\s\S]*'role'[\s\S]*'authenticated'/)
     assert.match(policy, /auth\.uid\(\)/)
-    assert.match(policy, /current_dashboard_role\(\)[\s\S]*'assistant'/)
+    assert.match(policy, /from public\.profiles profile[\s\S]*profile\.id\s*=\s*\(select auth\.uid\(\)\)[\s\S]*profile\.role\s*=\s*'assistant'/)
   }
   for (const policy of [requestPolicy, eventPolicy]) {
     assert.match(policy, /using \(/)
@@ -372,7 +376,7 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
     assert.match(source, /(?:notification\.)?metadata\s*->>\s*'workflow_key'\s*=\s*'makeup_requests'/)
     assert.match(source, /(?:notification\.)?href\s+like\s+'\/admin\/makeup-requests%'/)
   }
-  assert.match(dashboardNotificationPolicy, /current_dashboard_role\(\)[\s\S]*'assistant'/)
+  assert.match(dashboardNotificationPolicy, /from public\.profiles profile[\s\S]*profile\.role\s*=\s*'assistant'/)
   assert.match(visibleInboxRows, /profile\.role\s*=\s*'assistant'/)
   assert.match(dashboardNotificationPolicy, /using \(/)
   assert.match(dashboardNotificationPolicy, /with check \(/)
@@ -430,6 +434,27 @@ test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구
   assert.match(sql, /grant execute on function public\.transition_makeup_request_v2\([^;]*to authenticated, service_role;/)
   assert.match(sql, /grant execute on function public\.delete_makeup_request_v2\(uuid, uuid\)[^;]*to authenticated, service_role;/)
   assert.doesNotMatch(sql, /create or replace function public\.(?:get_makeup_legacy_dispatch_plan_v1|materialize_makeup_legacy|finalize_makeup_legacy|prepare_makeup_legacy)/)
+  assert.doesNotMatch(sql, /notification_(?:runtime_flags|rules)|provider/i)
+})
+
+test("조교 휴보강 restrictive RLS는 역할 조회를 행별 재평가하지 않는다", async () => {
+  const sql = await optionalSource(assistantPolicyPerformanceMigrationUrl)
+  for (const [policy, table] of [
+    ["makeup_requests_assistant_hard_deny", "makeup_requests"],
+    ["makeup_request_events_assistant_hard_deny", "makeup_request_events"],
+    ["makeup_notification_settings_assistant_hard_deny", "makeup_notification_settings"],
+    ["makeup_notification_deliveries_assistant_hard_deny", "makeup_notification_deliveries"],
+    ["dashboard_notifications_assistant_makeup_hard_deny", "dashboard_notifications"],
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(`alter policy ${policy}\\s+on public\\.${table}`),
+    )
+  }
+  assert.equal((sql.match(/from public\.profiles profile/g) || []).length, 9)
+  assert.match(sql, /profile\.id\s*=\s*\(select auth\.uid\(\)\)/)
+  assert.match(sql, /profile\.role\s*=\s*'assistant'/)
+  assert.doesNotMatch(sql, /current_dashboard_role\(\)/)
   assert.doesNotMatch(sql, /notification_(?:runtime_flags|rules)|provider/i)
 })
 

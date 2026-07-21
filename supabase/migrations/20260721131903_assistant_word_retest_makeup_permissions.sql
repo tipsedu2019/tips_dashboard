@@ -406,14 +406,24 @@ create policy makeup_requests_assistant_hard_deny
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
     )
   )
   with check (
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
     )
   );
 
@@ -428,14 +438,24 @@ create policy makeup_request_events_assistant_hard_deny
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
     )
   )
   with check (
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
     )
   );
 
@@ -450,7 +470,12 @@ create policy makeup_notification_settings_assistant_hard_deny
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
     )
   );
 
@@ -465,14 +490,24 @@ create policy makeup_notification_deliveries_assistant_hard_deny
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
     )
   )
   with check (
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
     )
   );
 
@@ -487,7 +522,12 @@ create policy dashboard_notifications_assistant_makeup_hard_deny
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
       and coalesce(
         type = 'makeup_request'
         or metadata ->> 'workflow_key' = 'makeup_requests'
@@ -500,7 +540,12 @@ create policy dashboard_notifications_assistant_makeup_hard_deny
     not (
       coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
       and (select auth.uid()) is not null
-      and (select public.current_dashboard_role()) = 'assistant'
+      and exists (
+        select 1
+        from public.profiles profile
+        where profile.id = (select auth.uid())
+          and profile.role = 'assistant'
+      )
       and coalesce(
         type = 'makeup_request'
         or metadata ->> 'workflow_key' = 'makeup_requests'
