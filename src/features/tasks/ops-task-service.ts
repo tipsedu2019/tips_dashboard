@@ -191,6 +191,8 @@ export type OpsTransferDetail = {
 }
 
 export type OpsWordRetestDetail = {
+  readonly retryOfTaskId?: string
+  readonly retryTaskId?: string
   branch?: string
   teacherId?: string
   teacherName?: string
@@ -1090,6 +1092,8 @@ function mapTransfer(row: Row | undefined): OpsTransferDetail | undefined {
 function mapWordRetest(row: Row | undefined): OpsWordRetestDetail | undefined {
   if (!row) return undefined
   return {
+    retryOfTaskId: text(row.retry_of_task_id),
+    retryTaskId: text(row.retry_task_id),
     branch: text(row.branch),
     teacherId: text(row.teacher_catalog_id),
     teacherName: text(row.teacher_name),

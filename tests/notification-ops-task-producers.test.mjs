@@ -399,6 +399,36 @@ test("점수 선입력 저장은 시험 시작 전이를 확정한 최신 버전
   assert.match(update, /startSourceEventIds[\s\S]*producerSourceEventIds\(response\)/)
 })
 
+test("단어 재시험 계보 링크는 읽기 전용으로 매핑하고 생산 payload에는 포함하지 않는다", async () => {
+  const service = await source(serviceUrl)
+  const { buildWordRetestRow, mapWordRetest } = loadServiceFunctions([
+    block(service, "function mapWordRetest", "function mapComment"),
+    block(service, "function buildWordRetestRow", "type OpsTaskProducerResponse"),
+  ], ["mapWordRetest", "buildWordRetestRow"], {
+    text: (value) => String(value || "").trim(),
+    numberText: (value) => value === null || value === undefined ? "" : String(value),
+    nullable: (value) => String(value || "").trim() || null,
+    nullableDate: (value) => String(value || "").trim() || null,
+    nullableNumber: (value) => String(value || "").trim() || null,
+  })
+
+  const mapped = mapWordRetest({
+    task_id: "task-1",
+    retry_of_task_id: "task-0",
+    retry_task_id: "task-2",
+  })
+  assert.equal(mapped.retryOfTaskId, "task-0")
+  assert.equal(mapped.retryTaskId, "task-2")
+
+  const row = buildWordRetestRow("task-1", {
+    retryOfTaskId: "task-0",
+    retryTaskId: "task-2",
+  })
+  for (const key of ["retryOfTaskId", "retryTaskId", "retry_of_task_id", "retry_task_id"]) {
+    assert.equal(key in row, false, `${key} must not be in producer payload`)
+  }
+})
+
 test("클라이언트는 closure 후 활동 이력·댓글을 테이블에 직접 쓰지 않고 UUID 영수증을 검증한다", async () => {
   const service = await source(serviceUrl)
   const eventWriter = block(

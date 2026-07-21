@@ -23,6 +23,7 @@ import {
   sortOpsTasksByPriority,
   sortOpsTasksByWorkDate,
   sortOpsTasksByWorkflowStatus,
+  shouldAutoMarkWordRetestAbsent,
   summarizeOpsTasks,
 } from "../src/features/tasks/ops-task-model.js";
 
@@ -54,6 +55,20 @@ test("점수가 먼저 입력된 시작 전 단어 재시험은 시험 시작 �
   assert.equal(plan.input.status, "in_progress");
   assert.equal(plan.input.wordRetest.retestStatus, "in_progress");
   assert.equal(plan.input.wordRetest.firstScore, "17");
+});
+
+test("only basic word retests become automatically absent after seven days", () => {
+  const basic = {
+    type: "word_retest",
+    status: "requested",
+    wordRetest: { retestStatus: "not_started", testAt: "2026-07-01" },
+  };
+  assert.equal(shouldAutoMarkWordRetestAbsent(basic, "2026-07-09"), true);
+  assert.equal(shouldAutoMarkWordRetestAbsent({
+    ...basic,
+    wordRetest: { ...basic.wordRetest, retryOfTaskId: "previous-task" },
+  }, "2026-07-09"), false);
+  assert.equal(shouldAutoMarkWordRetestAbsent(basic, "2026-07-08"), false);
 });
 
 test("기존 점수만 남은 보류 재시험은 비점수 수정으로 자동 재시작하지 않는다", () => {

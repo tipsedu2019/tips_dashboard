@@ -254,6 +254,19 @@ export function toDateKey(value) {
   return `${year}-${month}-${day}`;
 }
 
+export function shouldAutoMarkWordRetestAbsent(task = {}, todayKey = toDateKey(new Date())) {
+  if (text(task.type) !== "word_retest") return false;
+  if (!["requested", "confirmed", "on_hold"].includes(text(task.status))) return false;
+  const detail = getWordRetestDetail(task);
+  if (text(detail.retryOfTaskId || detail.retry_of_task_id)) return false;
+  if (text(detail.retestStatus || detail.retest_status || "not_started") !== "not_started") return false;
+  const testAt = toDateKey(detail.testAt || detail.test_at);
+  if (!testAt || !todayKey) return false;
+  const deadline = new Date(`${testAt}T00:00:00+09:00`);
+  deadline.setDate(deadline.getDate() + 7);
+  return todayKey > toDateKey(deadline);
+}
+
 function taskPrimaryDate(task = {}) {
   return getOpsTaskCalendarItems([task])[0]?.date || "";
 }

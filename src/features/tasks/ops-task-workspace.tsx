@@ -56,6 +56,7 @@ import {
   sortOpsTasksByPriority,
   sortOpsTasksByWorkflowStatus,
   sortOpsTasksByWorkDate,
+  shouldAutoMarkWordRetestAbsent,
   toDateKey,
 } from "./ops-task-model"
 import {
@@ -1827,31 +1828,6 @@ function matchesWordRetestPeriodFilter(
   const endDateKey = toDateKey(customEndDate)
   if (!startDateKey && !endDateKey) return true
   return isDateKeyInRange(dateKey, startDateKey, endDateKey)
-}
-
-function getWordRetestAutoAbsentDeadline(task: OpsTask) {
-  const rawValue = String(task.wordRetest?.testAt || task.dueAt || task.startAt || "").trim()
-  if (!rawValue) return null
-  const dateKey = toDateKey(rawValue)
-  if (!dateKey) return null
-  const [year, month, day] = dateKey.split("-").map(Number)
-  if (!year || !month || !day) return null
-  const deadline = new Date(year, month - 1, day, 23, 59, 59, 999)
-  deadline.setDate(deadline.getDate() + 7)
-  return deadline.getTime()
-}
-
-function shouldAutoMarkWordRetestAbsent(task: OpsTask, now = new Date()) {
-  const wordRetest = task.wordRetest || {}
-  const retestStatus = String(wordRetest.retestStatus || "not_started").trim() || "not_started"
-  const deadline = getWordRetestAutoAbsentDeadline(task)
-
-  return task.type === "word_retest" &&
-    !isClosedOpsTask(task) &&
-    ["requested", "confirmed", "on_hold"].includes(task.status) &&
-    retestStatus === "not_started" &&
-    deadline !== null &&
-    deadline < now.getTime()
 }
 
 function sortWordRetestTasksByTestAt(tasks: OpsTask[]) {
