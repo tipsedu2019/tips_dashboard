@@ -1,6 +1,6 @@
 begin;
 
-select plan(56);
+select plan(80);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -1036,6 +1036,364 @@ select ok(
   '승인 취소 성공 뒤 일정·캘린더·업무·canonical 상태가 모두 함께 복구된다'
 );
 
+insert into auth.users(
+  id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+)
+values
+  (
+    '92000000-0000-4000-8000-000000000004',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', 'makeup-assistant@test.invalid',
+    crypt('makeup-test-only', gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"fixture":"makeup-assistant-guard"}'::jsonb, now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000005',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', 'makeup-admin@test.invalid',
+    crypt('makeup-test-only', gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"fixture":"makeup-assistant-guard"}'::jsonb, now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000006',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', 'makeup-staff@test.invalid',
+    crypt('makeup-test-only', gen_salt('bf')), now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"fixture":"makeup-assistant-guard"}'::jsonb, now(), now()
+  )
+on conflict (id) do update
+set email = excluded.email,
+    updated_at = excluded.updated_at;
+
+insert into public.profiles(id, role, name, email, created_at, updated_at)
+values
+  (
+    '92000000-0000-4000-8000-000000000004', 'assistant',
+    '휴보강 차단 조교', 'makeup-assistant@test.invalid', now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000005', 'admin',
+    '휴보강 회귀 관리자', 'makeup-admin@test.invalid', now(), now()
+  ),
+  (
+    '92000000-0000-4000-8000-000000000006', 'staff',
+    '휴보강 회귀 운영자', 'makeup-staff@test.invalid', now(), now()
+  )
+on conflict (id) do update
+set role = excluded.role,
+    name = excluded.name,
+    email = excluded.email,
+    updated_at = excluded.updated_at;
+
+insert into public.makeup_requests(
+  id, status, request_kind, subject, approval_group,
+  requester_id, approver_profile_id, class_name, reason, makeup_slots
+)
+values
+  (
+    '92000000-0000-4000-8000-000000000408',
+    'approval_pending', 'cancel_only', 'english', 'english',
+    '92000000-0000-4000-8000-000000000004',
+    '92000000-0000-4000-8000-000000000004',
+    '조교 참여 휴보강 fixture', 'RLS와 전이 차단 검증', '[]'::jsonb
+  ),
+  (
+    '92000000-0000-4000-8000-000000000409',
+    'canceled', 'cancel_only', 'english', 'english',
+    '92000000-0000-4000-8000-000000000004',
+    '92000000-0000-4000-8000-000000000004',
+    '조교 삭제 차단 fixture', '삭제와 직접 DML 차단 검증', '[]'::jsonb
+  ),
+  (
+    '92000000-0000-4000-8000-000000000410',
+    'canceled', 'cancel_only', 'english', 'english',
+    '92000000-0000-4000-8000-000000000005',
+    '92000000-0000-4000-8000-000000000005',
+    '관리자 삭제 회귀 fixture', '관리자 기존 삭제 흐름 보존', '[]'::jsonb
+  );
+
+insert into public.makeup_request_events(
+  request_id, actor_id, event_type, note
+) values (
+  '92000000-0000-4000-8000-000000000408',
+  '92000000-0000-4000-8000-000000000004',
+  'submitted',
+  '조교 참여 이력 RLS 검증'
+);
+
+create temporary table assistant_makeup_guard_create_input(
+  input jsonb not null
+) on commit drop;
+insert into assistant_makeup_guard_create_input(input)
+values ('{
+  "request_kind":"cancel_only",
+  "subject":"english",
+  "approval_group":"unknown",
+  "requester_id":"92000000-0000-4000-8000-000000000001",
+  "teacher_catalog_id":"92000000-0000-4000-8000-000000000901",
+  "teacher_profile_id":"92000000-0000-4000-8000-000000000001",
+  "class_id":"92000000-0000-4000-8000-000000000301",
+  "class_name":"휴보강 원자 승인 수업",
+  "reason":"조교 휴보강 생성 차단과 재생 검증",
+  "cancel_date":"2026-07-30",
+  "makeup_slots":[],
+  "approver_teacher_catalog_id":"92000000-0000-4000-8000-000000000902",
+  "approver_profile_id":"92000000-0000-4000-8000-000000000002"
+}'::jsonb);
+grant select on assistant_makeup_guard_create_input to authenticated;
+
+create temporary table assistant_makeup_guard_results(
+  result_key text primary key,
+  payload jsonb not null
+) on commit drop;
+grant select, insert on assistant_makeup_guard_results to authenticated;
+
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000004');
+set local role authenticated;
+select is(
+  (select count(*) from public.makeup_requests),
+  0::bigint,
+  '조교는 자신이 참여한 휴보강 신청도 조회할 수 없다'
+);
+select is(
+  (select count(*) from public.makeup_request_events),
+  0::bigint,
+  '조교는 자신이 남긴 휴보강 이력도 조회할 수 없다'
+);
+select is(
+  (select count(*) from public.makeup_notification_settings),
+  0::bigint,
+  '조교는 휴보강 알림 설정을 조회할 수 없다'
+);
+select throws_ok($$
+  select public.create_makeup_request_v2(
+    (select input from assistant_makeup_guard_create_input),
+    '92000000-0000-4000-8000-000000000701'
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '조교의 유효한 휴보강 생성 요청도 공개 RPC 입구에서 차단한다');
+select throws_ok($$
+  select public.transition_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000408',
+    'revision_requested',
+    '{"note":"조교 전이 차단"}'::jsonb,
+    'approval_pending',
+    '92000000-0000-4000-8000-000000000702'
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '조교의 유효한 휴보강 전이도 공개 RPC 입구에서 차단한다');
+select throws_ok($$
+  select public.delete_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000409',
+    '92000000-0000-4000-8000-000000000703'
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '조교의 휴보강 삭제도 공개 RPC 입구에서 차단한다');
+reset role;
+
+select throws_ok($$
+  insert into public.makeup_requests(
+    id, status, request_kind, subject, approval_group,
+    requester_id, class_name, reason, makeup_slots
+  ) values (
+    '92000000-0000-4000-8000-000000000499',
+    'approval_pending', 'cancel_only', 'english', 'english',
+    '92000000-0000-4000-8000-000000000004',
+    '조교 직접 생성 우회', 'DML trigger 검증', '[]'::jsonb
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '조교 JWT는 postgres 소유자 실행에서도 직접 INSERT trigger로 차단된다');
+select throws_ok($$
+  update public.makeup_requests request
+  set reason = '조교 직접 수정 우회'
+  where request.id = '92000000-0000-4000-8000-000000000408'
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '조교 JWT는 postgres 소유자 실행에서도 직접 UPDATE trigger로 차단된다');
+select throws_ok($$
+  delete from public.makeup_requests request
+  where request.id = '92000000-0000-4000-8000-000000000409'
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '조교 JWT는 postgres 소유자 실행에서도 직접 DELETE trigger로 차단된다');
+
+select pg_temp.makeup_set_service_actor('92000000-0000-4000-8000-000000000004');
+set local role service_role;
+select throws_ok($$
+  select public.transition_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000408',
+    'approve',
+    '{"actor_profile_id":"92000000-0000-4000-8000-000000000004"}'::jsonb,
+    'approval_pending',
+    '92000000-0000-4000-8000-000000000704'
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  'service_role 승인도 actor_profile_id가 조교이면 구현과 ledger 전에 차단한다');
+select throws_ok($$
+  select public.transition_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000408',
+    'approve',
+    '{"actor_profile_id":"{92000000-0000-4000-8000-000000000004}"}'::jsonb,
+    'approval_pending',
+    '92000000-0000-4000-8000-000000000707'
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '중괄호 UUID actor_profile_id도 같은 조교로 해석해 service_role 승인을 차단한다');
+select throws_ok($$
+  select public.transition_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000408',
+    'approve',
+    '{"actor_profile_id":"92000000000040008000000000000004"}'::jsonb,
+    'approval_pending',
+    '92000000-0000-4000-8000-000000000708'
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '하이픈 없는 UUID actor_profile_id도 같은 조교로 해석해 service_role 승인을 차단한다');
+reset role;
+
+select results_eq(
+  $$
+    select
+      (select request.status from public.makeup_requests request
+        where request.id = '92000000-0000-4000-8000-000000000408'),
+      (select request.status from public.makeup_requests request
+        where request.id = '92000000-0000-4000-8000-000000000409'),
+      (select count(*) from public.makeup_requests request
+        where request.id = '92000000-0000-4000-8000-000000000499')
+  $$,
+  $$ values ('approval_pending'::text, 'canceled'::text, 0::bigint) $$,
+  '차단된 RPC와 직접 DML 뒤 원본 휴보강 행은 그대로다'
+);
+select is(
+  (
+    select count(*) from public.makeup_request_events event_row
+    where event_row.mutation_request_id in (
+      '92000000-0000-4000-8000-000000000701'::uuid,
+      '92000000-0000-4000-8000-000000000702'::uuid,
+      '92000000-0000-4000-8000-000000000703'::uuid,
+      '92000000-0000-4000-8000-000000000704'::uuid,
+      '92000000-0000-4000-8000-000000000707'::uuid,
+      '92000000-0000-4000-8000-000000000708'::uuid
+    )
+  ),
+  0::bigint,
+  '차단된 조교 휴보강 호출은 원본 이벤트를 남기지 않는다'
+);
+select is(
+  (
+    select count(*) from dashboard_private.notification_request_ledger ledger
+    where ledger.request_id in (
+      '92000000-0000-4000-8000-000000000701'::uuid,
+      '92000000-0000-4000-8000-000000000702'::uuid,
+      '92000000-0000-4000-8000-000000000703'::uuid,
+      '92000000-0000-4000-8000-000000000704'::uuid,
+      '92000000-0000-4000-8000-000000000707'::uuid,
+      '92000000-0000-4000-8000-000000000708'::uuid
+    )
+  ),
+  0::bigint,
+  '차단된 조교 휴보강 호출은 요청 원장을 남기지 않는다'
+);
+
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000005');
+set local role authenticated;
+select lives_ok($$
+  insert into assistant_makeup_guard_results(result_key, payload)
+  select 'allowed_create', public.create_makeup_request_v2(
+    (select input from assistant_makeup_guard_create_input),
+    '92000000-0000-4000-8000-000000000705'
+  )
+$$, '관리자의 기존 휴보강 생성 흐름은 유지된다');
+reset role;
+
+update public.profiles profile
+set role = 'assistant'
+where profile.id = '92000000-0000-4000-8000-000000000005';
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000005');
+set local role authenticated;
+select throws_ok($$
+  select public.create_makeup_request_v2(
+    (select input from assistant_makeup_guard_create_input),
+    '92000000-0000-4000-8000-000000000705'
+  )
+$$, '42501', 'makeup_request_assistant_forbidden',
+  '허용 역할에서 만든 정확한 replay도 현재 사용자가 조교이면 먼저 차단한다');
+reset role;
+update public.profiles profile
+set role = 'admin'
+where profile.id = '92000000-0000-4000-8000-000000000005';
+
+select ok(
+  (
+    select count(*) = 1
+    from public.makeup_requests request
+    where request.class_name = '휴보강 원자 승인 수업'
+      and request.reason = '조교 휴보강 생성 차단과 재생 검증'
+  )
+  and (
+    select count(*) = 1
+    from public.makeup_request_events event_row
+    where event_row.mutation_request_id = '92000000-0000-4000-8000-000000000705'
+  )
+  and (
+    select count(*) = 1
+    from dashboard_private.notification_request_ledger ledger
+    where ledger.request_id = '92000000-0000-4000-8000-000000000705'
+  ),
+  '조교로 바뀐 뒤 거절된 exact replay는 기존 행·이벤트·원장을 중복하지 않는다'
+);
+
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000005');
+set local role authenticated;
+select ok(
+  exists (select 1 from public.makeup_requests)
+  and exists (select 1 from public.makeup_request_events)
+  and exists (select 1 from public.makeup_notification_settings),
+  '관리자의 기존 휴보강 신청·이력·설정 조회 권한은 유지된다'
+);
+reset role;
+
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000006');
+set local role authenticated;
+select ok(
+  exists (select 1 from public.makeup_requests)
+  and exists (select 1 from public.makeup_request_events)
+  and exists (select 1 from public.makeup_notification_settings),
+  '운영자의 기존 휴보강 신청·이력·설정 조회 권한은 유지된다'
+);
+reset role;
+
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000001');
+set local role authenticated;
+select ok(
+  exists (
+    select 1 from public.makeup_requests request
+    where request.id = '92000000-0000-4000-8000-000000000401'
+  )
+  and exists (
+    select 1 from public.makeup_request_events event_row
+    where event_row.request_id = '92000000-0000-4000-8000-000000000401'
+  ),
+  '선생님의 기존 참여 휴보강 신청·이력 조회 권한은 유지된다'
+);
+reset role;
+
+select pg_temp.makeup_set_actor('92000000-0000-4000-8000-000000000005');
+set local role authenticated;
+select lives_ok($$
+  select public.delete_makeup_request_v2(
+    '92000000-0000-4000-8000-000000000410',
+    '92000000-0000-4000-8000-000000000706'
+  )
+$$, '관리자의 기존 닫힌 휴보강 삭제 흐름은 유지된다');
+reset role;
+select is_empty($$
+  select request.id from public.makeup_requests request
+  where request.id = '92000000-0000-4000-8000-000000000410'
+$$, '관리자 삭제가 허용된 휴보강 원본은 실제로 제거된다');
+
 select ok(
   pg_catalog.has_function_privilege(
     'authenticated',
@@ -1053,6 +1411,25 @@ select ok(
     'EXECUTE'
   ),
   '업무 RPC만 인증 사용자에게 열리고 내부 import 함수는 비공개다'
+);
+
+select ok(
+  pg_catalog.has_function_privilege(
+    'service_role',
+    'public.create_makeup_request_v2(jsonb,uuid)',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'service_role',
+    'public.transition_makeup_request_v2(uuid,text,jsonb,text,uuid)',
+    'EXECUTE'
+  )
+  and pg_catalog.has_function_privilege(
+    'service_role',
+    'public.delete_makeup_request_v2(uuid,uuid)',
+    'EXECUTE'
+  ),
+  'service_role의 기존 휴보강 생성·전이·삭제 RPC 실행 권한을 모두 보존한다'
 );
 
 select ok(

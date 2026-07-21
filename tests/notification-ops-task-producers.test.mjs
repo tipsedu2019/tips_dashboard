@@ -189,10 +189,21 @@ test("조교 단어 재시험 권한은 공개 RPC 입구에서 진행 단계만
     assert.match(wrapper, /returns jsonb[\s\S]*security definer[\s\S]*set search_path = ''/)
   }
 
-  assert.doesNotMatch(sql, /create\s+(?:constraint\s+)?trigger/i)
+  const wordRetestBoundary = [
+    predicate,
+    updateGuard,
+    transitionGuard,
+    teacherActionGuard,
+    updateWrapper,
+    transitionWrapper,
+    retryWrapper,
+    revisionWrapper,
+  ].join("\n")
+  assert.doesNotMatch(wordRetestBoundary, /create\s+(?:constraint\s+)?trigger/i)
   assert.doesNotMatch(sql, /create or replace function dashboard_private\.(?:update_ops_task_v2_impl|transition_ops_task_status_v2_impl|retry_word_retest_v1_impl|request_word_retest_revision_v1_impl)/)
   assert.doesNotMatch(sql, /create or replace function public\.(?:create_ops_task_v2|report_word_retest_result_v1|report_word_retest_absent_v1)/)
-  assert.doesNotMatch(sql, /notification_rules|runtime_version|provider|makeup/i)
+  assert.doesNotMatch(sql, /notification_rules|runtime_version|provider/i)
+  assert.doesNotMatch(wordRetestBoundary, /makeup/i)
   for (const privateSignature of [
     "is_authenticated_assistant_request_v1\\(\\)",
     "assert_assistant_word_retest_update_v1\\(\\s*uuid, jsonb, timestamptz, uuid\\s*\\)",

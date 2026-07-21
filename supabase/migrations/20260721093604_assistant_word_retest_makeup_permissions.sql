@@ -30,11 +30,35 @@ begin
     or pg_catalog.to_regprocedure(
       'public.request_word_retest_revision_v1(uuid,text,uuid)'
     ) is null
+    or pg_catalog.to_regprocedure(
+      'public.current_dashboard_role()'
+    ) is null
+    or pg_catalog.to_regprocedure(
+      'public.create_makeup_request_v2(jsonb,uuid)'
+    ) is null
+    or pg_catalog.to_regprocedure(
+      'public.transition_makeup_request_v2(uuid,text,jsonb,text,uuid)'
+    ) is null
+    or pg_catalog.to_regprocedure(
+      'public.delete_makeup_request_v2(uuid,uuid)'
+    ) is null
+    or pg_catalog.to_regprocedure(
+      'dashboard_private.create_makeup_request_v2_unguarded(jsonb,uuid)'
+    ) is not null
+    or pg_catalog.to_regprocedure(
+      'dashboard_private.transition_makeup_request_v2_unguarded(uuid,text,jsonb,text,uuid)'
+    ) is not null
+    or pg_catalog.to_regprocedure(
+      'dashboard_private.delete_makeup_request_v2_unguarded(uuid,uuid)'
+    ) is not null
     or pg_catalog.to_regclass(
       'dashboard_private.notification_request_ledger'
     ) is null
+    or pg_catalog.to_regclass('public.makeup_requests') is null
+    or pg_catalog.to_regclass('public.makeup_request_events') is null
+    or pg_catalog.to_regclass('public.makeup_notification_settings') is null
   then
-    raise exception 'assistant_word_retest_prerequisite_missing' using errcode = '55000';
+    raise exception 'assistant_permission_prerequisite_missing' using errcode = '55000';
   end if;
 end;
 $$;
@@ -365,5 +389,237 @@ grant execute on function public.retry_word_retest_v1(uuid, jsonb, uuid)
   to authenticated;
 grant execute on function public.request_word_retest_revision_v1(uuid, text, uuid)
   to authenticated;
+
+drop policy if exists makeup_requests_assistant_hard_deny
+  on public.makeup_requests;
+create policy makeup_requests_assistant_hard_deny
+  on public.makeup_requests
+  as restrictive
+  for all
+  to authenticated
+  using (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+    )
+  )
+  with check (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+    )
+  );
+
+drop policy if exists makeup_request_events_assistant_hard_deny
+  on public.makeup_request_events;
+create policy makeup_request_events_assistant_hard_deny
+  on public.makeup_request_events
+  as restrictive
+  for all
+  to authenticated
+  using (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+    )
+  )
+  with check (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+    )
+  );
+
+drop policy if exists makeup_notification_settings_assistant_hard_deny
+  on public.makeup_notification_settings;
+create policy makeup_notification_settings_assistant_hard_deny
+  on public.makeup_notification_settings
+  as restrictive
+  for select
+  to authenticated
+  using (
+    not (
+      coalesce((select auth.jwt() ->> 'role'), '') = 'authenticated'
+      and (select auth.uid()) is not null
+      and (select public.current_dashboard_role()) = 'assistant'
+    )
+  );
+
+create or replace function dashboard_private.assert_assistant_makeup_action_v1(
+  p_patch jsonb default null
+) returns void
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if dashboard_private.is_authenticated_assistant_request_v1() then
+    raise exception 'makeup_request_assistant_forbidden' using errcode = '42501';
+  end if;
+  if coalesce((select auth.jwt() ->> 'role'), '') = 'service_role'
+    and p_patch is not null
+    and pg_catalog.jsonb_typeof(p_patch) = 'object'
+    and exists (
+      select 1
+      from public.profiles profile
+      where profile.id = nullif(
+          pg_catalog.btrim(p_patch ->> 'actor_profile_id'), ''
+        )::uuid
+        and profile.role = 'assistant'
+    )
+  then
+    raise exception 'makeup_request_assistant_forbidden' using errcode = '42501';
+  end if;
+end;
+$$;
+
+create or replace function dashboard_private.reject_assistant_makeup_request_dml_v1()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if dashboard_private.is_authenticated_assistant_request_v1() then
+    raise exception 'makeup_request_assistant_forbidden' using errcode = '42501';
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists reject_assistant_makeup_request_dml_v1
+  on public.makeup_requests;
+create trigger reject_assistant_makeup_request_dml_v1
+before insert or update or delete on public.makeup_requests
+for each row
+execute function dashboard_private.reject_assistant_makeup_request_dml_v1();
+
+alter function public.create_makeup_request_v2(jsonb, uuid)
+  set schema dashboard_private;
+alter function dashboard_private.create_makeup_request_v2(jsonb, uuid)
+  rename to create_makeup_request_v2_unguarded;
+alter function public.transition_makeup_request_v2(uuid, text, jsonb, text, uuid)
+  set schema dashboard_private;
+alter function dashboard_private.transition_makeup_request_v2(uuid, text, jsonb, text, uuid)
+  rename to transition_makeup_request_v2_unguarded;
+alter function public.delete_makeup_request_v2(uuid, uuid)
+  set schema dashboard_private;
+alter function dashboard_private.delete_makeup_request_v2(uuid, uuid)
+  rename to delete_makeup_request_v2_unguarded;
+
+create or replace function public.create_makeup_request_v2(
+  p_input jsonb,
+  p_request_id uuid
+) returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  perform dashboard_private.assert_assistant_makeup_action_v1(null);
+  return dashboard_private.create_makeup_request_v2_unguarded(
+    p_input,
+    p_request_id
+  );
+end;
+$$;
+
+create or replace function public.transition_makeup_request_v2(
+  p_makeup_request_id uuid,
+  p_command text,
+  p_patch jsonb,
+  p_expected_status text,
+  p_request_id uuid
+) returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  perform dashboard_private.assert_assistant_makeup_action_v1(p_patch);
+  return dashboard_private.transition_makeup_request_v2_unguarded(
+    p_makeup_request_id,
+    p_command,
+    p_patch,
+    p_expected_status,
+    p_request_id
+  );
+end;
+$$;
+
+create or replace function public.delete_makeup_request_v2(
+  p_makeup_request_id uuid,
+  p_request_id uuid
+) returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  perform dashboard_private.assert_assistant_makeup_action_v1(null);
+  return dashboard_private.delete_makeup_request_v2_unguarded(
+    p_makeup_request_id,
+    p_request_id
+  );
+end;
+$$;
+
+alter function dashboard_private.assert_assistant_makeup_action_v1(jsonb)
+  owner to postgres;
+alter function dashboard_private.reject_assistant_makeup_request_dml_v1()
+  owner to postgres;
+alter function dashboard_private.create_makeup_request_v2_unguarded(jsonb, uuid)
+  owner to postgres;
+alter function dashboard_private.transition_makeup_request_v2_unguarded(
+  uuid, text, jsonb, text, uuid
+) owner to postgres;
+alter function dashboard_private.delete_makeup_request_v2_unguarded(uuid, uuid)
+  owner to postgres;
+alter function public.create_makeup_request_v2(jsonb, uuid)
+  owner to postgres;
+alter function public.transition_makeup_request_v2(
+  uuid, text, jsonb, text, uuid
+) owner to postgres;
+alter function public.delete_makeup_request_v2(uuid, uuid)
+  owner to postgres;
+
+revoke all on function dashboard_private.assert_assistant_makeup_action_v1(jsonb)
+  from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.reject_assistant_makeup_request_dml_v1()
+  from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.create_makeup_request_v2_unguarded(jsonb, uuid)
+  from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.transition_makeup_request_v2_unguarded(
+  uuid, text, jsonb, text, uuid
+) from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.delete_makeup_request_v2_unguarded(uuid, uuid)
+  from public, anon, authenticated, service_role;
+
+revoke all on function public.create_makeup_request_v2(jsonb, uuid)
+  from public, anon, authenticated, service_role;
+revoke all on function public.transition_makeup_request_v2(
+  uuid, text, jsonb, text, uuid
+) from public, anon, authenticated, service_role;
+revoke all on function public.delete_makeup_request_v2(uuid, uuid)
+  from public, anon, authenticated, service_role;
+
+grant execute on function public.create_makeup_request_v2(jsonb, uuid)
+  to authenticated, service_role;
+grant execute on function public.transition_makeup_request_v2(
+  uuid, text, jsonb, text, uuid
+) to authenticated, service_role;
+grant execute on function public.delete_makeup_request_v2(uuid, uuid)
+  to authenticated, service_role;
 
 commit;

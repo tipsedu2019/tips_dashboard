@@ -7,6 +7,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260716192000_notification_makeup_adapter.sql",
   import.meta.url,
 )
+const assistantPermissionsMigrationUrl = new URL(
+  "../supabase/migrations/20260721093604_assistant_word_retest_makeup_permissions.sql",
+  import.meta.url,
+)
 const pgTapUrl = new URL(
   "../supabase/tests/notification_makeup_adapter_test.sql",
   import.meta.url,
@@ -38,6 +42,24 @@ function functionBlock(source, name, nextName) {
   const end = nextName ? source.indexOf(`function ${nextName}`, start + 1) : source.length
   assert.notEqual(end, -1, `함수 끝을 찾지 못했습니다: ${name}`)
   return source.slice(start, end)
+}
+
+function createFunctionBlock(source, name, nextName) {
+  const start = source.indexOf(`create or replace function ${name}`)
+  assert.notEqual(start, -1, `함수 시작을 찾지 못했습니다: ${name}`)
+  const end = nextName
+    ? source.indexOf(`create or replace function ${nextName}`, start + 1)
+    : source.length
+  assert.notEqual(end, -1, `함수 끝을 찾지 못했습니다: ${name}`)
+  return source.slice(start, end)
+}
+
+function statementBlock(source, marker) {
+  const start = source.indexOf(marker)
+  assert.notEqual(start, -1, `SQL 문 시작을 찾지 못했습니다: ${marker}`)
+  const end = source.indexOf(";", start)
+  assert.notEqual(end, -1, `SQL 문 끝을 찾지 못했습니다: ${marker}`)
+  return source.slice(start, end + 1)
 }
 
 test("Task 8 기준 설정은 원본 revision/checksum으로 비교하고 운영자 수정과 충돌하면 중단한다", async () => {
@@ -232,6 +254,148 @@ test("고정 전이 명령만 허용하고 상태·행위자·삭제 권한을 �
   assert.match(sql, /makeup_request_transition_forbidden/)
   assert.match(sql, /makeup_request_delete_forbidden/)
   assert.doesNotMatch(domainRpcSource, /p_(?:title|body|href|recipient|target|webhook)/i)
+})
+
+test("조교 휴보강 권한은 restrictive RLS·DML trigger·공개 RPC 입구에서 모두 차단한다", async () => {
+  const sql = await optionalSource(assistantPermissionsMigrationUrl)
+  const prerequisite = sql.slice(
+    0,
+    sql.indexOf(
+      "create or replace function dashboard_private.is_authenticated_assistant_request_v1",
+    ),
+  )
+  const requestPolicy = statementBlock(
+    sql,
+    "create policy makeup_requests_assistant_hard_deny",
+  )
+  const eventPolicy = statementBlock(
+    sql,
+    "create policy makeup_request_events_assistant_hard_deny",
+  )
+  const settingsPolicy = statementBlock(
+    sql,
+    "create policy makeup_notification_settings_assistant_hard_deny",
+  )
+  const actionGuard = createFunctionBlock(
+    sql,
+    "dashboard_private.assert_assistant_makeup_action_v1",
+    "dashboard_private.reject_assistant_makeup_request_dml_v1",
+  )
+  const dmlGuard = createFunctionBlock(
+    sql,
+    "dashboard_private.reject_assistant_makeup_request_dml_v1",
+    "public.create_makeup_request_v2",
+  )
+  const createWrapper = createFunctionBlock(
+    sql,
+    "public.create_makeup_request_v2",
+    "public.transition_makeup_request_v2",
+  )
+  const transitionWrapper = createFunctionBlock(
+    sql,
+    "public.transition_makeup_request_v2",
+    "public.delete_makeup_request_v2",
+  )
+  const deleteWrapper = createFunctionBlock(
+    sql,
+    "public.delete_makeup_request_v2",
+  )
+
+  for (const [name, signature] of [
+    ["create_makeup_request_v2", "jsonb,uuid"],
+    ["transition_makeup_request_v2", "uuid,text,jsonb,text,uuid"],
+    ["delete_makeup_request_v2", "uuid,uuid"],
+  ]) {
+    assert.match(
+      prerequisite,
+      new RegExp(`to_regprocedure\\(\\s*'public\\.${name}\\(${signature}\\)'\\s*\\)[\\s\\S]*?is null`),
+    )
+    assert.match(
+      prerequisite,
+      new RegExp(`to_regprocedure\\(\\s*'dashboard_private\\.${name}_unguarded\\(${signature}\\)'\\s*\\)[\\s\\S]*?is not null`),
+    )
+  }
+  for (const table of [
+    "makeup_requests",
+    "makeup_request_events",
+    "makeup_notification_settings",
+  ]) {
+    assert.match(
+      prerequisite,
+      new RegExp(`to_regclass\\('public\\.${table}'\\)[\\s\\S]*?is null`),
+    )
+  }
+  assert.match(prerequisite, /assistant_permission_prerequisite_missing/)
+
+  for (const [policy, command] of [
+    [requestPolicy, "all"],
+    [eventPolicy, "all"],
+    [settingsPolicy, "select"],
+  ]) {
+    assert.match(policy, /as restrictive/)
+    assert.match(policy, new RegExp(`for ${command}`))
+    assert.match(policy, /to authenticated/)
+    assert.match(policy, /auth\.jwt\(\)[\s\S]*'role'[\s\S]*'authenticated'/)
+    assert.match(policy, /auth\.uid\(\)/)
+    assert.match(policy, /current_dashboard_role\(\)[\s\S]*'assistant'/)
+  }
+  for (const policy of [requestPolicy, eventPolicy]) {
+    assert.match(policy, /using \(/)
+    assert.match(policy, /with check \(/)
+  }
+
+  assert.match(actionGuard, /is_authenticated_assistant_request_v1\(\)/)
+  assert.match(actionGuard, /auth\.jwt\(\)[\s\S]*'role'[\s\S]*'service_role'/)
+  assert.match(actionGuard, /from public\.profiles profile[\s\S]*p_patch ->> 'actor_profile_id'[\s\S]*profile\.role = 'assistant'/)
+  assert.match(
+    actionGuard,
+    /profile\.id\s*=\s*nullif\(\s*pg_catalog\.btrim\(p_patch ->> 'actor_profile_id'\), ''\s*\)::uuid/,
+  )
+  assert.match(actionGuard, /makeup_request_assistant_forbidden[\s\S]*errcode = '42501'/)
+  assert.match(dmlGuard, /is_authenticated_assistant_request_v1\(\)/)
+  assert.match(dmlGuard, /makeup_request_assistant_forbidden[\s\S]*errcode = '42501'/)
+  assert.doesNotMatch(actionGuard + dmlGuard, /\bcurrent_user\b/)
+  assert.match(
+    sql,
+    /create trigger reject_assistant_makeup_request_dml_v1[\s\S]*before insert or update or delete[\s\S]*on public\.makeup_requests/,
+  )
+
+  for (const [name, signature] of [
+    ["create_makeup_request_v2", "jsonb, uuid"],
+    ["transition_makeup_request_v2", "uuid, text, jsonb, text, uuid"],
+    ["delete_makeup_request_v2", "uuid, uuid"],
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(`alter function public\\.${name}\\(\\s*${signature}\\s*\\)[\\s\\S]*set schema dashboard_private`),
+    )
+    assert.match(
+      sql,
+      new RegExp(`alter function dashboard_private\\.${name}\\(\\s*${signature}\\s*\\)[\\s\\S]*rename to ${name}_unguarded`),
+    )
+    assert.match(
+      sql,
+      new RegExp(`revoke all on function dashboard_private\\.${name}_unguarded\\([\\s\\S]*?from public, anon, authenticated, service_role`),
+    )
+  }
+
+  for (const [wrapper, implementation] of [
+    [createWrapper, "create_makeup_request_v2_unguarded"],
+    [transitionWrapper, "transition_makeup_request_v2_unguarded"],
+    [deleteWrapper, "delete_makeup_request_v2_unguarded"],
+  ]) {
+    assert.match(wrapper, /returns jsonb[\s\S]*volatile[\s\S]*security definer[\s\S]*set search_path = ''/)
+    assert.ok(
+      wrapper.indexOf("assert_assistant_makeup_action_v1") <
+        wrapper.indexOf(implementation),
+    )
+  }
+  assert.match(transitionWrapper, /assert_assistant_makeup_action_v1\(p_patch\)/)
+  assert.match(sql, /grant execute on function public\.create_makeup_request_v2\(jsonb, uuid\)[^;]*to authenticated, service_role;/)
+  assert.match(sql, /grant execute on function public\.transition_makeup_request_v2\([^;]*to authenticated, service_role;/)
+  assert.match(sql, /grant execute on function public\.delete_makeup_request_v2\(uuid, uuid\)[^;]*to authenticated, service_role;/)
+  assert.doesNotMatch(sql, /create or replace function public\.(?:get_makeup_legacy_dispatch_plan_v1|materialize_makeup_legacy|finalize_makeup_legacy|prepare_makeup_legacy)/)
+  assert.doesNotMatch(sql, /notification_(?:runtime_flags|rules)|provider/i)
 })
 
 test("승인 취소와 삭제는 이전 미전송 건만 source_status_changed로 끝낸다", async () => {
