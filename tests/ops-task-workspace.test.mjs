@@ -3313,15 +3313,16 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "getWordRetestPrimaryActions",
     '"word_retest_complete"',
     '"word_retest_retry"',
-    'retryReason?: "failed"',
+    'type WordRetestRetryReason = "failed" | "absent"',
     "submitWordRetestCompletion",
-    'retestStatus: "done"',
     'wordRetestStatus: "not_started"',
-    "openFailedWordRetestRetryForm",
-    "isFailedWordRetestRetry",
+    "openWordRetestRetryForm",
+    "isWordRetestRetry",
     "operationCompletionBlockers",
-    "재시험 추가 및 불합격 확인",
-    "재시험을 추가하고 불합격을 확인했습니다.",
+    "재재시험 추가 및 불합격 확인",
+    "재재시험 추가 및 미응시 확인",
+    "재재시험을 추가하고 불합격을 확인했습니다.",
+    "재재시험을 추가하고 미응시를 확인했습니다.",
     "불합격 결과를 담당선생님에게 보냈습니다.",
     "합격 결과를 담당선생님에게 보냈습니다.",
     "진행상태를 변경했습니다.",
@@ -3544,9 +3545,19 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "불합격 확인",
     'editingTask && formCompletionIntent?.kind !== "word_retest_retry" && (',
     'formCompletionIntent?.kind !== "word_retest_retry"',
-    'const isFailedWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry"',
-    'if (step === "word_retest_scores" && isFailedWordRetestRetryForm) return null',
+    'const isWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry"',
+    'if (step === "word_retest_scores" && isWordRetestRetryForm) return null',
   ]);
+  assert.match(workspaceSource, /type WordRetestRetryReason = "failed" \| "absent"/);
+  assert.match(workspaceSource, /kind: "word_retest_retry"[\s\S]*retryReason: WordRetestRetryReason/);
+  assert.match(workspaceSource, /label: "재재시험 추가"[\s\S]*retryReason: "failed"/);
+  assert.match(workspaceSource, /label: "재재시험 추가"[\s\S]*retryReason: "absent"/);
+  assert.match(workspaceSource, /testAt: wordRetest\.testAt \|\| ""/);
+  assert.doesNotMatch(workspaceSource, /testAt: ""[\s\S]*retryReason/);
+  assert.match(workspaceSource, /재재시험 추가 및 불합격 확인/);
+  assert.match(workspaceSource, /재재시험 추가 및 미응시 확인/);
+  assert.match(workspaceSource, /retryReason === "absent"[\s\S]*retestStatus: originalWordRetestStatus/);
+  assert.match(workspaceSource, /wordRetest\.retryTaskId[\s\S]*label: "재재시험 추가"/);
   assert.match(
     workspaceSource,
     /const absentNodes:[\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[0\][\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[1\][\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[2\][\s\S]*label: "재시험 추가"[\s\S]*detail: "담당선생님"/,

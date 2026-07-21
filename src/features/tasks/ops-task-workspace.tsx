@@ -347,9 +347,11 @@ type TransferTableSort = {
 } | null
 type WordRetestTableColumnKey = "select" | "status" | "testAt" | "teacher" | "class" | "student" | "textbook" | "unit" | "total" | "cutoff" | "score" | "result" | "action"
 type TaskFocus = "none" | "today" | "overdue" | "mine" | "unassigned" | "confirmation"
+type WordRetestRetryReason = "failed" | "absent"
 type FormCompletionIntent = {
   kind?: "word_retest_retry"
-  retryReason?: "failed"
+  label?: "재재시험 추가"
+  retryReason?: WordRetestRetryReason
   status?: OpsTaskStatus
   registrationPipelineStatus?: string
   wordRetestStatus?: string
@@ -369,7 +371,7 @@ type QuickAddPreviewItem = { key: string; label: string }
 type WordRetestPrimaryAction =
   | { kind: "status"; status: OpsTaskStatus; label: string }
   | { kind: "word_retest_complete"; label: string }
-  | { kind: "word_retest_retry"; label: string }
+  | { kind: "word_retest_retry"; label: "재재시험 추가"; retryReason: WordRetestRetryReason }
   | { kind: "edit"; label: string; blockers?: string[] }
 type OpsTaskOptionIndexes = {
   studentsById: Map<string, OpsStudentOption>
@@ -1564,7 +1566,9 @@ function getFormCompletionIntentSubmitLabel(intent: FormCompletionIntent | null,
   if (!intent && taskType === "transfer" && !isEditing) return "전반 신청"
   if (!intent) return "저장"
   if (intent.kind === "word_retest_retry") {
-    return "재시험 추가 및 불합격 확인"
+    return intent.retryReason === "absent"
+      ? "재재시험 추가 및 미응시 확인"
+      : "재재시험 추가 및 불합격 확인"
   }
   if (intent.registrationPipelineStatus) return `저장 후 ${getCompactRegistrationPipelineLabel(intent.registrationPipelineStatus)}`
   if (intent.status === "done") return "저장 후 완료"
@@ -7839,10 +7843,17 @@ function getWordRetestPrimaryActions(task: OpsTask, mode: WordRetestMode, comple
   }
 
   if (mode === "teacher" && task.status === "review_requested") {
-    if (absent) return [{ kind: "status", status: "done", label: "미응시 확인" }]
-    if (scoreResult === "failed") {
+    if (absent) {
+      if (wordRetest.retryTaskId) return [{ kind: "status", status: "done", label: "미응시 확인" }]
       return [
-        { kind: "word_retest_retry", label: "재시험 추가" },
+        { kind: "word_retest_retry", label: "재재시험 추가", retryReason: "absent" },
+        { kind: "status", status: "done", label: "미응시 확인" },
+      ]
+    }
+    if (scoreResult === "failed") {
+      if (wordRetest.retryTaskId) return [{ kind: "status", status: "done", label: "불합격 확인" }]
+      return [
+        { kind: "word_retest_retry", label: "재재시험 추가", retryReason: "failed" },
         { kind: "status", status: "done", label: "불합격 확인" },
       ]
     }
@@ -9458,15 +9469,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [hasUnsavedWorkspaceInput])
   const isEditingLockedCompletedTask = Boolean(editingTask && isClosedOpsTask(editingTask) && !formCompletionIntent)
   const canSubmitCurrentForm = canSubmitOpsTaskForm(form, Boolean(editingTask))
-  const formDialogTitle = editingTask
-    ? form.type === "general"
-      ? "할 일 수정"
-      : `${getTaskTypeLabel(form.type)} 수정`
-	    : isTemplateForm
-	      ? getWorkspaceCreateActionLabel(workspace, getTaskTypeLabel(form.type))
-	      : isTodoWorkspace
-	        ? "할 일 추가"
-	        : `${workspaceLabel} 추가`
+  const formDialogTitle = formCompletionIntent?.kind === "word_retest_retry"
+    ? formCompletionIntent.retryReason === "absent"
+      ? "미응시 재재시험 추가"
+      : "불합격 재재시험 추가"
+    : editingTask
+      ? form.type === "general"
+        ? "할 일 수정"
+        : `${getTaskTypeLabel(form.type)} 수정`
+	      : isTemplateForm
+	        ? getWorkspaceCreateActionLabel(workspace, getTaskTypeLabel(form.type))
+	        : isTodoWorkspace
+	          ? "할 일 추가"
+	          : `${workspaceLabel} 추가`
   const formCloseLabel = "닫기"
   const formActionBarClassName = "-mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:items-center sm:justify-end"
 
@@ -9579,7 +9594,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setFormOpen(true)
   }, [ensureRegistrationOptions, syncTaskDeepLink])
 
-  const openFailedWordRetestRetryForm = useCallback((task: OpsTask) => {
+  const openWordRetestRetryForm = useCallback((task: OpsTask, retryReason: WordRetestRetryReason) => {
     const baseForm = formFromTask(task)
     const wordRetest = baseForm.wordRetest || {}
     const nextForm = cloneForm({
@@ -9595,7 +9610,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       wordRetest: {
         ...wordRetest,
         retestStatus: "not_started",
-        testAt: "",
+        testAt: wordRetest.testAt || "",
         firstScore: "",
         secondScore: "",
         thirdScore: "",
@@ -9615,7 +9630,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setFormCompletionBlockers([])
     setFormCompletionIntent({
       kind: "word_retest_retry",
-      retryReason: "failed",
+      label: "재재시험 추가",
+      retryReason,
       status: "requested",
       wordRetestStatus: "not_started",
     })
@@ -10757,8 +10773,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         }
         : inputWithCompletionIntent
       const payload = normalizeFormForSubmit(inputWithRegistrationPrefillStatus)
-      const isFailedWordRetestRetry = formCompletionIntent?.kind === "word_retest_retry"
-        && formCompletionIntent.retryReason === "failed"
+      const isWordRetestRetry = formCompletionIntent?.kind === "word_retest_retry"
         && Boolean(editingTask)
         && payload.type === "word_retest"
       const intentBlockers = formCompletionIntent?.kind === "word_retest_retry" && payload.type === "word_retest" && !String(payload.wordRetest?.testAt || "").trim()
@@ -10769,7 +10784,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         data?.textbooks || EMPTY_TEXTBOOK_OPTIONS,
         optionIndexes,
       )
-      const operationCompletionBlockers = isFailedWordRetestRetry
+      const operationCompletionBlockers = isWordRetestRetry
         ? []
         : getOperationCompletionBlockers(
           payload,
@@ -10787,7 +10802,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         setSaving(false)
         return
       }
-      if (isFailedWordRetestRetry && editingTask && payload.type === "word_retest") {
+      if (isWordRetestRetry && editingTask && payload.type === "word_retest") {
+        const retryReason = formCompletionIntent.retryReason || "failed"
+        const originalWordRetestStatus = retryReason === "absent"
+          ? editingTask.wordRetest?.retestStatus || "absent"
+          : editingTask.wordRetest?.retestStatus || "done"
         const retryPayload = normalizeFormForSubmit({
           ...payload,
           status: "requested",
@@ -10813,7 +10832,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             ...formFromTask(editingTask),
             status: "done",
             completedAt: new Date().toISOString(),
-            wordRetest: { ...(editingTask.wordRetest || {}), retestStatus: "done" },
+            wordRetest: { ...(editingTask.wordRetest || {}), retestStatus: originalWordRetestStatus },
           }, editingTask),
           loadSavedTaskOrFallback(taskId, retryPayload),
         ])
@@ -10827,8 +10846,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         setQuery("")
         await dispatchLegacyOpsTaskSources(retryReceipt.sourceEventIds, notificationSessionToken)
         setNotice(savedWithRefreshWarning
-          ? "재시험 저장은 완료했습니다. 최신 상세는 새로고침해 확인하세요."
-          : "재시험을 추가하고 불합격을 확인했습니다.")
+          ? retryReason === "absent"
+            ? "미응시 재재시험 저장은 완료했습니다. 최신 상세는 새로고침해 확인하세요."
+            : "불합격 재재시험 저장은 완료했습니다. 최신 상세는 새로고침해 확인하세요."
+          : retryReason === "absent"
+            ? "재재시험을 추가하고 미응시를 확인했습니다."
+            : "재재시험을 추가하고 불합격을 확인했습니다.")
         return
       }
       const createWordRetestStudentIds = wasEditing || payload.type !== "word_retest"
@@ -11698,8 +11721,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const handleWordRetestCompletion = useStableEvent((task: OpsTask) => {
     void submitWordRetestCompletion(task)
   })
-  const handleWordRetestRetry = useStableEvent((task: OpsTask) => {
-    openFailedWordRetestRetryForm(task)
+  const handleWordRetestRetry = useStableEvent((task: OpsTask, retryReason: WordRetestRetryReason) => {
+    openWordRetestRetryForm(task, retryReason)
   })
   const handleWordRetestScoreSave = useStableEvent((task: OpsTask) => {
     void saveWordRetestInlineScores(task)
@@ -13005,7 +13028,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                          onEdit={openEdit}
 	                          onStatusChange={(task, status) => void changeStatus(task, status)}
 	                          onComplete={(task) => void submitWordRetestCompletion(task)}
-	                          onRetry={openFailedWordRetestRetryForm}
+	                          onRetry={openWordRetestRetryForm}
 	                          disabled={saving}
 	                        />
 	                      ))}
@@ -14319,7 +14342,7 @@ function TypeSpecificFields({
   }
 
   if (form.type === "word_retest") {
-    const isFailedWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry" && formCompletionIntent.retryReason === "failed"
+    const isWordRetestRetryForm = formCompletionIntent?.kind === "word_retest_retry"
 
     if (step === "word_retest_basic") {
       return (
@@ -14424,7 +14447,7 @@ function TypeSpecificFields({
       )
     }
 
-    if (step === "word_retest_scores" && isFailedWordRetestRetryForm) return null
+    if (step === "word_retest_scores" && isWordRetestRetryForm) return null
 
     if (step === "word_retest_scores") {
       return (
@@ -15266,7 +15289,7 @@ function WordRetestTaskList({
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
-  onRetry: (task: OpsTask) => void
+  onRetry: (task: OpsTask, retryReason: WordRetestRetryReason) => void
   scoreDrafts: Record<string, WordRetestScoreDraft>
   onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
   onScoreSave: (task: OpsTask) => void
@@ -15447,7 +15470,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
-  onRetry: (task: OpsTask) => void
+  onRetry: (task: OpsTask, retryReason: WordRetestRetryReason) => void
   scoreDraft?: WordRetestScoreDraft
   onScoreDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
   onScoreSave: (task: OpsTask) => void
@@ -15590,7 +15613,7 @@ function WordRetestRoleActionButton({
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
   onComplete: (task: OpsTask) => void
-  onRetry: (task: OpsTask) => void
+  onRetry: (task: OpsTask, retryReason: WordRetestRetryReason) => void
   disabled: boolean
 }) {
   if (!action) return null
@@ -15610,7 +15633,7 @@ function WordRetestRoleActionButton({
           return
         }
         if (action.kind === "word_retest_retry") {
-          onRetry(task)
+          onRetry(task, action.retryReason)
           return
         }
         onStatusChange(task, action.status)

@@ -388,7 +388,7 @@ test("클라이언트 서비스는 일반·단어 재시험을 고정 RPC로 보
 
   const retryFlow = block(
     workspace,
-    "if (isFailedWordRetestRetry",
+    "if (isWordRetestRetry",
     "const createWordRetestStudentIds",
   )
   assert.match(retryFlow, /retryWordRetest\(/)
