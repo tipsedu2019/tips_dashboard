@@ -71,6 +71,23 @@ test("only basic word retests become automatically absent after seven days", () 
   assert.equal(shouldAutoMarkWordRetestAbsent(basic, "2026-07-08"), false);
 });
 
+test("legacy basic word retests keep task-level due and start date deadlines", () => {
+  const basic = {
+    type: "word_retest",
+    status: "requested",
+    wordRetest: { retestStatus: "not_started" },
+  };
+
+  assert.equal(shouldAutoMarkWordRetestAbsent({
+    ...basic,
+    dueAt: "2026-07-01",
+  }, "2026-07-09"), true);
+  assert.equal(shouldAutoMarkWordRetestAbsent({
+    ...basic,
+    startAt: "2026-07-01",
+  }, "2026-07-09"), true);
+});
+
 test("기존 점수만 남은 보류 재시험은 비점수 수정으로 자동 재시작하지 않는다", () => {
   const plan = opsTaskModel.getWordRetestScoreSavePlan({
     type: "word_retest",

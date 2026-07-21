@@ -260,7 +260,7 @@ export function shouldAutoMarkWordRetestAbsent(task = {}, todayKey = toDateKey(n
   const detail = getWordRetestDetail(task);
   if (text(detail.retryOfTaskId || detail.retry_of_task_id)) return false;
   if (text(detail.retestStatus || detail.retest_status || "not_started") !== "not_started") return false;
-  const testAt = toDateKey(detail.testAt || detail.test_at);
+  const testAt = toDateKey(detail.testAt || detail.test_at || task.dueAt || task.startAt);
   if (!testAt || !todayKey) return false;
   const deadline = new Date(`${testAt}T00:00:00+09:00`);
   deadline.setDate(deadline.getDate() + 7);
