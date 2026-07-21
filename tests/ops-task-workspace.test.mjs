@@ -2256,7 +2256,7 @@ test("operation forms keep staged linked selectors outside canonical registratio
     "inferWordRetestTextbookGradePill",
     "wordRetestTextbookGradeFilter",
     'const defaultAssigneeId = currentUserId || ""',
-    "const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()",
+    "const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()",
     'setWordRetestMode(isTeacher && !isStaff ? "teacher" : "assistant")',
     "shouldShowFormDetailTabs",
     "{formStepProgressLabel}",
@@ -3680,6 +3680,50 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "score_out_of_100 numeric(8,2)",
     "cutoff_question_count numeric(8,2)",
   ]);
+});
+
+test("actual assistants are locked to the shared assistant word retest queue", async () => {
+  const [workspaceSource, modelSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-model.js"),
+  ]);
+  const routeSyncSource = workspaceSource.slice(
+    workspaceSource.indexOf("const nextWordRetestRole"),
+    workspaceSource.indexOf("const syncView"),
+  );
+  const roleContextSource = workspaceSource.slice(
+    workspaceSource.indexOf("const wordRetestRoleContext"),
+    workspaceSource.indexOf("const branchScopedWordRetestTasks"),
+  );
+  const roleTabsSource = workspaceSource.slice(
+    workspaceSource.indexOf("const wordRetestRoleTabs"),
+    workspaceSource.indexOf("const branchScopedWordRetestTasks"),
+  );
+  const toolbarTabsSource = workspaceSource.slice(
+    workspaceSource.indexOf('role="tablist" aria-label={isTodoWorkspace'),
+    workspaceSource.indexOf(": isRegistrationWorkspace", workspaceSource.indexOf('role="tablist" aria-label={isTodoWorkspace')),
+  );
+
+  assert.match(modelSource, /export function getWordRetestRoleContext/);
+  assertIncludesAll(workspaceSource, [
+    "getWordRetestRoleContext",
+    "const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()",
+    "if (isAssistant && nextMode !== \"assistant\") return",
+    "wordRetestRoleTabs.map((tab) =>",
+  ]);
+  assert.match(
+    roleContextSource,
+    /getWordRetestRoleContext\(\{[\s\S]*canManageAll[\s\S]*currentUserContext[\s\S]*currentUserTaskTeam[\s\S]*isAssistant[\s\S]*isStaff[\s\S]*wordRetestMode/,
+  );
+  assert.match(
+    roleTabsSource,
+    /const wordRetestRoleTabs = isAssistant[\s\S]*WORD_RETEST_ROLE_TABS\.filter\(\(tab\) => tab\.key === "assistant"\)[\s\S]*WORD_RETEST_ROLE_TABS/,
+  );
+  assert.match(
+    routeSyncSource,
+    /if \(isAssistant\) \{[\s\S]*setWordRetestMode\("assistant"\)[\s\S]*routeParams\.set\("role", "assistant"\)/,
+  );
+  assert.doesNotMatch(toolbarTabsSource, /WORD_RETEST_ROLE_TABS\.map\(\(tab\) =>/);
 });
 
 test("word retest workflow guidance lives in a global manual outside task dialogs", async () => {

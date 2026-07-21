@@ -44,6 +44,7 @@ import {
   getTaskPriorityLabel,
   getTaskStatusLabel,
   getTaskTypeLabel,
+  getWordRetestRoleContext,
   getWordRetestWorkspaceRole,
   hasOpsTaskCalendarDate,
   hasOpsTaskOverdueCalendarDate,
@@ -8265,7 +8266,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const requestedWithdrawalStudentId = isWithdrawalWorkspace && searchParams.get("create") === "withdrawal"
     ? searchParams.get("studentId") || ""
     : ""
-  const { user, session, canManageAll, isAdmin, isStaff, isTeacher } = useAuth()
+  const { user, session, canManageAll, isAdmin, isStaff, isTeacher, isAssistant } = useAuth()
   const notificationSessionToken = session?.access_token || ""
   const notificationControlPlaneAvailability = useNotificationControlPlaneAvailability()
   const canonicalNotificationEnabled = notificationControlPlaneAvailability.status === "enabled"
@@ -8769,7 +8770,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     } else if (isWithdrawalWorkspace || isTransferWorkspace) {
       if (isWithdrawalViewKey(nextWorkflowFlow)) setWithdrawalView(nextWorkflowFlow)
     } else if (isWordRetestWorkspace) {
-      if (isWordRetestModeKey(nextWordRetestRole)) setWordRetestMode(nextWordRetestRole)
+      if (isAssistant) setWordRetestMode("assistant")
+      else if (isWordRetestModeKey(nextWordRetestRole)) setWordRetestMode(nextWordRetestRole)
       if (isWordRetestBranchFilterKey(nextWordRetestBranch)) setWordRetestBranchFilter(nextWordRetestBranch)
       setWordRetestPeriodFilter(isWordRetestPeriodFilterKey(nextWordRetestPeriod) ? nextWordRetestPeriod : "all")
       setWordRetestCustomStartDate(toDateKey(nextWordRetestFrom))
@@ -8780,13 +8782,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     if (nextFocus && isTaskFocus(nextFocus)) {
       setTaskFocus(nextFocus)
     }
-  }, [isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, searchParams])
+  }, [isAssistant, isRegistrationWorkspace, isTodoWorkspace, isTransferWorkspace, isWithdrawalWorkspace, isWordRetestWorkspace, searchParams])
 
   useEffect(() => {
     if (!isWordRetestWorkspace) return
-    if (isWordRetestModeKey(searchParams.get("role") || "")) return
+    const requestedMode = searchParams.get("role") || ""
+    if (isAssistant) {
+      setWordRetestMode("assistant")
+      if (requestedMode !== "assistant") {
+        const routeParams = new URLSearchParams(window.location.search)
+        routeParams.set("role", "assistant")
+        const queryString = routeParams.toString()
+        window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
+      }
+      return
+    }
+    if (isWordRetestModeKey(requestedMode)) return
     setWordRetestMode(isTeacher && !isStaff ? "teacher" : "assistant")
-  }, [isStaff, isTeacher, isWordRetestWorkspace, searchParams])
+  }, [isAssistant, isStaff, isTeacher, isWordRetestWorkspace, searchParams])
 
   const syncView = (nextView: ViewKey, nextFocus: TaskFocus = "none") => {
     setView(nextView)
@@ -8890,6 +8903,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const syncWordRetestMode = (nextMode: WordRetestMode) => {
+    if (isAssistant && nextMode !== "assistant") return
     setWordRetestMode(nextMode)
     setTaskFocus("none")
     const searchParams = new URLSearchParams(window.location.search)
@@ -9196,9 +9210,19 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     () => filterRegistrationCaseListItems(registrationCaseItems, registrationView, deferredQuery),
     [deferredQuery, registrationCaseItems, registrationView],
   )
+  const wordRetestRoleTabs = isAssistant
+    ? WORD_RETEST_ROLE_TABS.filter((tab) => tab.key === "assistant")
+    : WORD_RETEST_ROLE_TABS
   const wordRetestRoleContext = useMemo(
-    () => (canManageAll || isStaff ? {} : currentUserContext),
-    [canManageAll, currentUserContext, isStaff],
+    () => getWordRetestRoleContext({
+      canManageAll,
+      currentUserContext,
+      currentUserTaskTeam,
+      isAssistant,
+      isStaff,
+      wordRetestMode,
+    }),
+    [canManageAll, currentUserContext, currentUserTaskTeam, isAssistant, isStaff, wordRetestMode],
   )
   const branchScopedWordRetestTasks = useMemo(() => (
     scopedTasks.filter((task) => wordRetestBranchFilter === "all" || getWordRetestBranch(task) === wordRetestBranchFilter)
@@ -11814,7 +11838,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
 	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : isRegistrationWorkspace ? "w-full !flex-nowrap !overflow-x-auto lg:flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
-	              ? WORD_RETEST_ROLE_TABS.map((tab) => {
+	              ? wordRetestRoleTabs.map((tab) => {
 	                const roleCount = wordRetestRoleCounts[tab.key]
 
 	                return (

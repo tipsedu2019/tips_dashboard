@@ -215,6 +215,23 @@ function matchesWordRetestTeacher(task = {}, context = {}) {
   ) || matchesTeam([task.requestedTeam, task.requested_team], context);
 }
 
+export function getWordRetestRoleContext({
+  canManageAll = false,
+  isStaff = false,
+  isAssistant = false,
+  wordRetestMode = "assistant",
+  currentUserContext = {},
+  currentUserTaskTeam = "",
+} = {}) {
+  if (canManageAll || isStaff) return {};
+  if (!isAssistant || text(wordRetestMode) !== "assistant") return currentUserContext;
+
+  return {
+    ...currentUserContext,
+    currentUserTeam: text(currentUserTaskTeam) || text(currentUserContext.currentUserTeam) || "조교팀",
+  };
+}
+
 export function getWordRetestWorkspaceRole(task = {}) {
   if (text(task.type) !== "word_retest") return "none";
   if (isClosedOpsTask(task)) return "completed";

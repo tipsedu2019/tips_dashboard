@@ -262,6 +262,93 @@ test("word retest workspace roles follow assistant teacher action ownership", ()
   assert.equal(getWordRetestWorkspaceRole({ type: "general", status: "requested" }), "none");
 });
 
+test("word retest role context gives actual assistants their resolved team without broadening other roles", () => {
+  assert.equal(
+    typeof opsTaskModel.getWordRetestRoleContext,
+    "function",
+    "word retest role context resolver is required",
+  );
+
+  const assistantPersonalContext = {
+    currentUserId: "assistant-1",
+    currentUserLabel: "조교",
+    currentUserTeam: "",
+  };
+  const assistantContext = opsTaskModel.getWordRetestRoleContext({
+    canManageAll: false,
+    isStaff: false,
+    isAssistant: true,
+    wordRetestMode: "assistant",
+    currentUserContext: assistantPersonalContext,
+    currentUserTaskTeam: "조교팀",
+  });
+  const sharedAssistantTask = {
+    type: "word_retest",
+    status: "requested",
+    assigneeId: "",
+    assigneeTeam: "조교팀",
+  };
+
+  assert.deepEqual(assistantContext, {
+    ...assistantPersonalContext,
+    currentUserTeam: "조교팀",
+  });
+  assert.equal(isWordRetestInAssistantQueue(sharedAssistantTask, assistantContext), true);
+  assert.equal(isWordRetestInAssistantQueue({
+    ...sharedAssistantTask,
+    assigneeTeam: "관리팀",
+  }, assistantContext), false);
+
+  const fallbackAssistantContext = opsTaskModel.getWordRetestRoleContext({
+    canManageAll: false,
+    isStaff: false,
+    isAssistant: true,
+    wordRetestMode: "assistant",
+    currentUserContext: assistantPersonalContext,
+    currentUserTaskTeam: "",
+  });
+  assert.equal(fallbackAssistantContext.currentUserTeam, "조교팀");
+  assert.equal(
+    isWordRetestInAssistantQueue(sharedAssistantTask, fallbackAssistantContext),
+    true,
+    "assistant identity fields must not block the shared assistant-team match",
+  );
+
+  for (const managerContext of [
+    { canManageAll: true, isStaff: false },
+    { canManageAll: false, isStaff: true },
+  ]) {
+    assert.deepEqual(opsTaskModel.getWordRetestRoleContext({
+      ...managerContext,
+      isAssistant: false,
+      wordRetestMode: "assistant",
+      currentUserContext: assistantPersonalContext,
+      currentUserTaskTeam: "조교팀",
+    }), {});
+  }
+
+  const teacherPersonalContext = {
+    currentUserId: "teacher-1",
+    currentUserLabel: "한지현",
+    currentUserTeam: "영어팀",
+  };
+  const teacherContext = opsTaskModel.getWordRetestRoleContext({
+    canManageAll: false,
+    isStaff: false,
+    isAssistant: false,
+    wordRetestMode: "teacher",
+    currentUserContext: teacherPersonalContext,
+    currentUserTaskTeam: "조교팀",
+  });
+  assert.deepEqual(teacherContext, teacherPersonalContext);
+  assert.equal(isWordRetestInTeacherQueue({
+    type: "word_retest",
+    status: "review_requested",
+    requestedBy: "teacher-1",
+    wordRetest: { teacherId: "teacher-1" },
+  }, teacherContext), true);
+});
+
 test("team workflow sorting supports due-date and status ordering", () => {
   const tasks = [
     { id: "none", title: "미정", status: "confirmed", priority: "normal" },
