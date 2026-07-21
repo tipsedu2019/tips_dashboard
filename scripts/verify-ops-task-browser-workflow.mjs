@@ -16,6 +16,15 @@ const DEFAULT_QUICK_ADD_SAMPLE_COUNT = 1
 const DEFAULT_OPERATION_SAMPLE_COUNT = 1
 const MAX_INITIAL_TEMPLATE_CONTROLS = 22
 const MAX_INITIAL_SELECT_OPTIONS = 16
+const WORD_RETEST_MANUAL_TITLE = "영어 단어 재시험 업무 매뉴얼"
+const WORD_RETEST_MANUAL_CONTENT = [
+  "재시험(기본) 추가 → 시험 시작 → 점수 입력·저장 → 결과 판정",
+  "본시험일 + 7일 → 미응시 보고 → 미응시 확인 또는 재재시험 추가",
+  "불합격 보고 → 불합격 확인 또는 재재시험 추가",
+  "합격 보고 → 합격 확인",
+  "이전 본시험일 기본 유지",
+  "자동 미응시 기한 없음",
+]
 const SIGN_IN_EXPECTED_TEXTS = ["TIPS 로그인", "아이디", "비밀번호"]
 const SUBJECT_TRACK_SAMPLES = [
   {
@@ -2161,7 +2170,12 @@ async function verifySingleCreateDialogInteraction(page, route, sampleIndex) {
     if (route.name === "registration") {
       await verifyRegistrationSinglePageDialog(dialog)
     } else if (route.name === "word-retests") {
-      if (!dialogText.includes("진행상태")) throw new Error("word-retests dialog did not show the progress stepper.")
+      if (dialogText.includes("업무 흐름 보기")) {
+        throw new Error("word-retests create dialog still shows a modal-local workflow chart.")
+      }
+      if (WORD_RETEST_MANUAL_CONTENT.some((expectedText) => dialogText.includes(expectedText))) {
+        throw new Error("word-retests create dialog contains global manual content.")
+      }
     } else {
       await verifyFlatOperationDialog(dialog, route)
     }
@@ -2388,6 +2402,36 @@ async function verifyOperationCompletionSet(page, baseUrl, viewportName, loginId
   }
 }
 
+async function verifyWordRetestManualInteraction(page) {
+  const manualButton = page.getByRole("button", { name: WORD_RETEST_MANUAL_TITLE, exact: true })
+  if (await manualButton.count() !== 1 || !(await manualButton.isVisible().catch(() => false))) {
+    throw new Error("Word retest manual launcher was not visible in the toolbar.")
+  }
+  const manualButtonElement = await manualButton.elementHandle()
+  if (!manualButtonElement) throw new Error("Word retest manual launcher disappeared before opening.")
+
+  await manualButton.click()
+  const manualDialog = page.getByRole("dialog", { name: WORD_RETEST_MANUAL_TITLE, exact: true })
+  await manualDialog.waitFor({ state: "visible", timeout: 5000 })
+  const manualText = await manualDialog.innerText({ timeout: 5000 })
+  for (const expectedText of WORD_RETEST_MANUAL_CONTENT) {
+    if (!manualText.includes(expectedText)) throw new Error(`Word retest manual is missing ${expectedText}.`)
+  }
+  if (await manualDialog.locator("ol").count() !== 1) {
+    throw new Error("Word retest manual does not expose its workflows as an ordered list.")
+  }
+
+  await page.keyboard.press("Escape")
+  await manualDialog.waitFor({ state: "hidden", timeout: 5000 })
+  await page.waitForFunction(
+    (button) => document.activeElement === button,
+    manualButtonElement,
+    { timeout: 5000 },
+  )
+  const focusReturned = await manualButton.evaluate((button) => document.activeElement === button)
+  if (!focusReturned) throw new Error("Word retest manual did not return focus to its toolbar launcher.")
+}
+
 async function verifyWordRetestModeInteraction(page) {
   const teacherButton = await firstUsable(
     page.locator('button, [role="button"]').filter({ hasText: /담당\s*선생님/ }),
@@ -2609,7 +2653,10 @@ async function verifyMakeupRequestInteraction(page) {
 }
 
 async function verifyRouteInteraction(page, route, options = {}) {
-  if (route.name === "word-retests") await verifyWordRetestModeInteraction(page)
+  if (route.name === "word-retests") {
+    await verifyWordRetestManualInteraction(page)
+    await verifyWordRetestModeInteraction(page)
+  }
   if (route.interaction === "makeup-request") return verifyMakeupRequestInteraction(page)
   if (route.interaction === "quick-add") return verifyQuickAddInteraction(page, options.quickAddSampleCount)
   if (route.interaction === "open-create") return verifyCreateDialogInteraction(page, route, options.operationSampleCount)

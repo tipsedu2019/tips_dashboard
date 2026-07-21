@@ -3370,19 +3370,6 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestStatusBadge",
     "WordRetestScoreResultCell",
     "getWordRetestScorePercent",
-    "WordRetestProgressStepper",
-    "WORD_RETEST_DIAGRAM_MAIN_NODES",
-    "WORD_RETEST_DIAGRAM_ABSENT_NODES",
-    "WORD_RETEST_DIAGRAM_RESULT_BRANCHES",
-    "WordRetestCompactFlowNode",
-    "WordRetestCompactNode",
-    "WordRetestFlowArrow",
-    "WordRetestFlowColumnSpacer",
-    "WordRetestFlowLane",
-    "WordRetestFlowChart",
-    "aria-expanded={open}",
-    "업무 흐름 보기",
-    "접기",
     'isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2"',
     'isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto"',
     "showClosedToggle && !isWordRetestWorkspace",
@@ -3391,27 +3378,14 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     'className="h-9 shrink-0 whitespace-nowrap px-3"',
     "!isWordRetestWorkspace && (",
     "getWorkspaceCreateActionLabel(workspace, workspaceLabel)",
-    "min-w-[620px]",
-    "h-10 w-[108px]",
-    "현재 진행상태",
-    "재시험 추가",
-    "공통",
     "담당선생님",
     "조교선생님",
-    "시험 진행",
-    "결과 판정",
-    "본시험일 + 7일",
-    "커트라인 미만",
-    "커트라인 이상",
     "불합격",
-    "결과: 불합격",
     "불합격 확인",
     "미응시 보고",
     "미응시 확인",
     "합격",
-    "결과: 합격",
     "합격 확인",
-    "returnToStart: true",
     "불합격 보고",
     "합격 보고",
     "WordRetestPeriodFilterBar",
@@ -3558,34 +3532,6 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.match(workspaceSource, /재재시험 추가 및 미응시 확인/);
   assert.match(workspaceSource, /retryReason === "absent"[\s\S]*retestStatus: originalWordRetestStatus/);
   assert.match(workspaceSource, /wordRetest\.retryTaskId[\s\S]*label: "재재시험 추가"/);
-  assert.match(
-    workspaceSource,
-    /const absentNodes:[\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[0\][\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[1\][\s\S]*WORD_RETEST_DIAGRAM_ABSENT_NODES\[2\][\s\S]*label: "재시험 추가"[\s\S]*detail: "담당선생님"/,
-  );
-  assert.match(
-    workspaceSource,
-    /<WordRetestFlowLane label="미응시" nodes=\{absentNodes\} activeKeys=\{activeKeys\} tone="destructive" \/>/,
-  );
-  assert.doesNotMatch(
-    workspaceSource,
-    /<WordRetestFlowLane label="미응시"[\s\S]*leadingSlots=\{1\}/,
-  );
-  assert.match(
-    workspaceSource,
-    /<WordRetestFlowLane label=\{failedBranch.label\} nodes=\{failedNodes\} activeKeys=\{activeKeys\} tone="warning" \/>/,
-  );
-  assert.match(
-    workspaceSource,
-    /<WordRetestFlowLane label=\{passedBranch.label\} nodes=\{passedNodes\} activeKeys=\{activeKeys\} tone="primary" \/>/,
-  );
-  assert.doesNotMatch(workspaceSource, /min-w-\[720px\]/);
-  assert.doesNotMatch(workspaceSource, /min-w-\[700px\]/);
-  assert.doesNotMatch(workspaceSource, /label=\{failedBranch.label\}[\s\S]*leadingSlots=\{3\}/);
-  assert.doesNotMatch(workspaceSource, /label=\{passedBranch.label\}[\s\S]*leadingSlots=\{3\}/);
-  assert.doesNotMatch(
-    workspaceSource,
-    /const absentNodes:[\s\S]*label: "시작 전"[\s\S]*detail: "복귀"[\s\S]*\]/,
-  );
   assert.doesNotMatch(workspaceSource, /세부과목 전체/);
   assert.doesNotMatch(workspaceSource, /shouldRequestReview/);
   assert.doesNotMatch(workspaceSource, /kind: "edit", label: "점수 입력"/);
@@ -3703,16 +3649,6 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.match(wordRetestMainExamDateFieldSource, /setCalendarDateOpen\(false\)/);
   assert.doesNotMatch(wordRetestMainExamDateFieldSource, /Clock|timeListRef|handleTimeListWheel|WORD_RETEST_TIME_OPTIONS|직접 시간 입력/);
 
-  const progressStepperSource = workspaceSource.slice(
-    workspaceSource.indexOf("function WordRetestProgressStepper"),
-    workspaceSource.indexOf("function WordRetestInlineScoreEditor"),
-  );
-  assert.ok(progressStepperSource.includes("aria-expanded={open}"));
-  assert.ok(
-    progressStepperSource.indexOf("업무 흐름 보기") < progressStepperSource.indexOf("<WordRetestFlowChart"),
-    "word retest workflow chart should stay behind the collapsible progress control",
-  );
-
   const wordRetestToolbarSource = workspaceSource.slice(
     workspaceSource.indexOf("{isWordRetestWorkspace && ("),
     workspaceSource.indexOf("{isTodoWorkspace && ("),
@@ -3744,6 +3680,97 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "score_out_of_100 numeric(8,2)",
     "cutoff_question_count numeric(8,2)",
   ]);
+});
+
+test("word retest workflow guidance lives in a global manual outside task dialogs", async () => {
+  const manualPath = "src/features/tasks/word-retest-manual-dialog.tsx";
+  assert.equal(await pathExists(manualPath), true, "word retest manual dialog should exist");
+
+  const [workspaceSource, manualSource, browserSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource(manualPath),
+    readSource("scripts/verify-ops-task-browser-workflow.mjs"),
+  ]);
+  const toolbarStart = workspaceSource.indexOf("{showClosedToggle && !isWordRetestWorkspace");
+  const notificationLauncherStart = workspaceSource.indexOf(
+    "{showNotificationSettingsLauncher && canonicalNotificationEnabled",
+    toolbarStart,
+  );
+  const manualLauncherSource = workspaceSource.slice(
+    workspaceSource.indexOf("{isWordRetestWorkspace && (", toolbarStart),
+    notificationLauncherStart,
+  );
+  const detailSource = workspaceSource.slice(
+    workspaceSource.indexOf("function WordRetestDetailPanel"),
+    workspaceSource.indexOf("function Info("),
+  );
+
+  assert.match(
+    manualSource,
+    /type WordRetestManualDialogProps = \{\s*open: boolean\s*onOpenChange: \(open: boolean\) => void\s*\}/,
+  );
+  assert.match(manualSource, /export function WordRetestManualDialog\(\{ open, onOpenChange \}: WordRetestManualDialogProps\)/);
+  assert.match(manualSource, /<DialogTitle>영어 단어 재시험 업무 매뉴얼<\/DialogTitle>/);
+  assert.match(manualSource, /<ol[\s\S]*<li/);
+  assertIncludesAll(manualSource, [
+    "재시험(기본) 추가 → 시험 시작 → 점수 입력·저장 → 결과 판정",
+    "본시험일 + 7일 → 미응시 보고 → 미응시 확인 또는 재재시험 추가",
+    "불합격 보고 → 불합격 확인 또는 재재시험 추가",
+    "합격 보고 → 합격 확인",
+    "이전 본시험일 기본 유지",
+    "자동 미응시 기한 없음",
+  ]);
+
+  assertIncludesAll(workspaceSource, [
+    'import { WordRetestManualDialog } from "./word-retest-manual-dialog"',
+    "const [wordRetestManualOpen, setWordRetestManualOpen] = useState(false)",
+    "<WordRetestManualDialog",
+    "open={wordRetestManualOpen}",
+    "onOpenChange={setWordRetestManualOpen}",
+  ]);
+  assert.match(manualLauncherSource, /^\{isWordRetestWorkspace && \(/);
+  assertInOrder(manualLauncherSource, [
+    'aria-label="영어 단어 재시험 업무 매뉴얼"',
+    'title="영어 단어 재시험 업무 매뉴얼"',
+  ]);
+  assert.doesNotMatch(
+    manualLauncherSource,
+    /canManageAll|isStaff|canonicalNotificationEnabled|legacyNotificationEnabled|showNotificationSettingsLauncher/,
+  );
+  assert.ok(notificationLauncherStart > toolbarStart, "notification launcher should follow the manual launcher");
+  assert.match(
+    workspaceSource,
+    /\{isWordRetestWorkspace && \(\s*<WordRetestManualDialog[\s\S]*?open=\{wordRetestManualOpen\}[\s\S]*?onOpenChange=\{setWordRetestManualOpen\}/,
+  );
+  assert.doesNotMatch(
+    workspaceSource,
+    /WordRetestProgressStepper|WordRetestFlowChart|WordRetestFlowLane|WordRetestCompactNode|WORD_RETEST_DIAGRAM_|업무 흐름 보기/,
+  );
+  assert.match(detailSource, /<WordRetestStatusBadge/);
+
+  assertIncludesAll(browserSource, [
+    "const WORD_RETEST_MANUAL_TITLE = \"영어 단어 재시험 업무 매뉴얼\"",
+    "async function verifyWordRetestManualInteraction(page)",
+    'getByRole("button", { name: WORD_RETEST_MANUAL_TITLE, exact: true })',
+    'getByRole("dialog", { name: WORD_RETEST_MANUAL_TITLE, exact: true })',
+    'manualDialog.waitFor({ state: "visible"',
+    "manualDialog.innerText",
+    'page.keyboard.press("Escape")',
+    'manualDialog.waitFor({ state: "hidden"',
+    "document.activeElement === button",
+    'dialogText.includes("업무 흐름 보기")',
+    "await verifyWordRetestManualInteraction(page)",
+  ]);
+  for (const expectedText of [
+    "재시험(기본) 추가 → 시험 시작 → 점수 입력·저장 → 결과 판정",
+    "본시험일 + 7일 → 미응시 보고 → 미응시 확인 또는 재재시험 추가",
+    "불합격 보고 → 불합격 확인 또는 재재시험 추가",
+    "합격 보고 → 합격 확인",
+    "이전 본시험일 기본 유지",
+    "자동 미응시 기한 없음",
+  ]) {
+    assert.ok(browserSource.includes(expectedText), `browser verifier should check ${expectedText}`);
+  }
 });
 
 test("reretry reload fallbacks preserve local lineage without sending it to the producer", async () => {
