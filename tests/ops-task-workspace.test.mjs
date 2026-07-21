@@ -3754,6 +3754,15 @@ test("word retest workflow guidance lives in a global manual outside task dialog
     /type WordRetestManualDialogProps = \{\s*open: boolean\s*onOpenChange: \(open: boolean\) => void\s*\}/,
   );
   assert.match(manualSource, /export function WordRetestManualDialog\(\{ open, onOpenChange \}: WordRetestManualDialogProps\)/);
+  assert.match(manualSource, /<DialogTrigger asChild>/);
+  assertInOrder(manualSource, [
+    "<DialogTrigger asChild>",
+    'aria-label="영어 단어 재시험 업무 매뉴얼"',
+    'title="영어 단어 재시험 업무 매뉴얼"',
+    '<BookOpenText className="size-4" aria-hidden="true" />',
+    "</DialogTrigger>",
+    "<DialogContent",
+  ]);
   assert.match(manualSource, /<DialogTitle>영어 단어 재시험 업무 매뉴얼<\/DialogTitle>/);
   assert.match(manualSource, /<ol[\s\S]*<li/);
   assertIncludesAll(manualSource, [
@@ -3774,17 +3783,22 @@ test("word retest workflow guidance lives in a global manual outside task dialog
   ]);
   assert.match(manualLauncherSource, /^\{isWordRetestWorkspace && \(/);
   assertInOrder(manualLauncherSource, [
-    'aria-label="영어 단어 재시험 업무 매뉴얼"',
-    'title="영어 단어 재시험 업무 매뉴얼"',
+    "<WordRetestManualDialog",
+    "open={wordRetestManualOpen}",
+    "onOpenChange={setWordRetestManualOpen}",
   ]);
   assert.doesNotMatch(
     manualLauncherSource,
     /canManageAll|isStaff|canonicalNotificationEnabled|legacyNotificationEnabled|showNotificationSettingsLauncher/,
   );
-  assert.ok(notificationLauncherStart > toolbarStart, "notification launcher should follow the manual launcher");
-  assert.match(
-    workspaceSource,
-    /\{isWordRetestWorkspace && \(\s*<WordRetestManualDialog[\s\S]*?open=\{wordRetestManualOpen\}[\s\S]*?onOpenChange=\{setWordRetestManualOpen\}/,
+  assert.ok(
+    notificationLauncherStart > workspaceSource.indexOf("<WordRetestManualDialog", toolbarStart),
+    "notification launcher should immediately follow the manual launcher component",
+  );
+  assert.equal(
+    (workspaceSource.match(/<WordRetestManualDialog/g) || []).length,
+    1,
+    "word retest manual should be mounted exactly once in the toolbar",
   );
   assert.doesNotMatch(
     workspaceSource,

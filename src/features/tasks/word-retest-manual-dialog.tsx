@@ -1,11 +1,15 @@
 "use client"
 
+import { BookOpenText } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
 
 type WordRetestManualDialogProps = {
@@ -35,6 +39,19 @@ const WORD_RETEST_MANUAL_FLOWS = [
 export function WordRetestManualDialog({ open, onOpenChange }: WordRetestManualDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-label="영어 단어 재시험 업무 매뉴얼"
+          title="영어 단어 재시험 업무 매뉴얼"
+          className="size-8 px-0"
+        >
+          <BookOpenText className="size-4" aria-hidden="true" />
+          <span className="sr-only">영어 단어 재시험 업무 매뉴얼</span>
+        </Button>
+      </DialogTrigger>
       <DialogContent
         closeButtonLabel="영어 단어 재시험 업무 매뉴얼 닫기"
         className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl"

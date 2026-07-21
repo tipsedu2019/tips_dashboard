@@ -11984,18 +11984,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               </Button>
             )}
             {isWordRetestWorkspace && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setWordRetestManualOpen(true)}
-                aria-label="영어 단어 재시험 업무 매뉴얼"
-                title="영어 단어 재시험 업무 매뉴얼"
-                className="size-8 px-0"
-              >
-                <CircleHelp className="size-4" aria-hidden="true" />
-                <span className="sr-only">영어 단어 재시험 업무 매뉴얼</span>
-              </Button>
+              <WordRetestManualDialog
+                open={wordRetestManualOpen}
+                onOpenChange={setWordRetestManualOpen}
+              />
             )}
             {showNotificationSettingsLauncher && canonicalNotificationEnabled && (isTodoWorkspace || isWordRetestWorkspace) ? (
               <Button
@@ -12412,14 +12404,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           />
         )}
       </div>
-
-      {isWordRetestWorkspace && (
-        <WordRetestManualDialog
-          open={wordRetestManualOpen}
-          onOpenChange={setWordRetestManualOpen}
-        />
-      )}
-
       {canonicalNotificationEnabled ? (
         <NotificationControlPanel
           workflowKey={notificationWorkflowKey}
