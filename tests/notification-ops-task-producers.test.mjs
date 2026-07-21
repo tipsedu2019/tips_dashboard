@@ -142,6 +142,14 @@ test("조교 단어 재시험 권한은 공개 RPC 입구에서 진행 단계만
   assert.match(updateGuard, /v_task\.status not in \('requested', 'confirmed', 'in_progress', 'on_hold'\)/)
   assert.match(updateGuard, /v_detail\.retest_status not in \('not_started', 'in_progress'\)/)
   assert.match(updateGuard, /v_requested_status is distinct from v_task\.status/)
+  assert.match(
+    updateGuard,
+    /v_requested_retest_status := coalesce\([\s\S]*ops_task_input_detail_v2\(\s*p_input,\s*'word_retest'\s*\)[\s\S]*->> 'retest_status'/,
+  )
+  assert.match(
+    updateGuard,
+    /v_requested_retest_status is distinct from v_detail\.retest_status/,
+  )
   assert.match(transitionGuard, /v_task\.status not in \('requested', 'confirmed', 'on_hold'\)/)
   assert.match(transitionGuard, /p_status is distinct from 'in_progress'/)
   for (const guard of [updateGuard, transitionGuard]) {
