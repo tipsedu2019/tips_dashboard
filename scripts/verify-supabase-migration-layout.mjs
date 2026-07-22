@@ -8,6 +8,7 @@ const QUARANTINE_RELATIVE_PATH = join("supabase", "pending-migrations", "notific
 const ACTIVE_RELATIVE_PATH = join("supabase", "migrations")
 const WORKFLOWS_RELATIVE_PATH = join(".github", "workflows")
 const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e9fe479cf6c90e5a1681532c88b8ce378a72456c801744582cc04bf850b135f1"
 const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
 const QUARANTINE_README_SHA256 = "62e387da1575982f154427f5f3ed001ffdb8c9c832744cdb79a45fd3f0ee905f"
@@ -88,22 +89,31 @@ function sha256(source) {
   return createHash("sha256").update(source).digest("hex")
 }
 
-function functionDefinitionSource(source, functionName) {
-  const declaration = `create or replace function ${functionName}(`
-  if (source.split(declaration).length - 1 !== 1) return null
-  const start = source.indexOf(declaration)
-  const possibleEnds = [
-    source.indexOf("\ncreate or replace function ", start + declaration.length),
-    source.indexOf("\nalter function ", start + declaration.length),
-  ].filter((index) => index >= 0)
-  const end = possibleEnds.length > 0 ? Math.min(...possibleEnds) : source.length
-  return source.slice(start, end)
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function functionDefinitionSources(source, functionName) {
+  const qualifiedName = functionName
+    .split(".")
+    .map((part) => escapeRegExp(part))
+    .join("\\s*\\.\\s*")
+  const targetPattern = new RegExp(
+    `\\bcreate\\s+(?:or\\s+replace\\s+)?function\\s+${qualifiedName}\\s*\\(`,
+    "gi",
+  )
+  const anyFunctionPattern = /\bcreate\s+(?:or\s+replace\s+)?function\s+/gi
+  const allStarts = [...source.matchAll(anyFunctionPattern)].map((match) => match.index)
+  return [...source.matchAll(targetPattern)].map((match) => {
+    const end = allStarts.find((index) => index > match.index) ?? source.length
+    return source.slice(match.index, end)
+  })
 }
 
 function hasJobBoundary(lines, startIndex, endIndex) {
   return lines
     .slice(startIndex + 1, endIndex)
-    .some((line) => /^ {2}[A-Za-z0-9_-]+:\s*(?:#.*)?$/.test(line))
+    .some((line) => /^ {2}(?:[A-Za-z0-9_-]+|"[^"]+"|'[^']+'):\s*(?:#.*)?$/.test(line))
 }
 
 async function statKind(path) {
@@ -254,8 +264,11 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(errors, "cutover_sql_present_in_active_lane", relative(resolvedRoot, activePath))
     }
   }
-  for (const entry of (await listDirectory(activeDir)) ?? []) {
-    if (!entry.endsWith(".sql")) continue
+  const activeSqlEntries = ((await listDirectory(activeDir)) ?? [])
+    .filter((entry) => /\.sql$/i.test(entry))
+    .sort()
+  const activeSqlSources = []
+  for (const entry of activeSqlEntries) {
     const entryPath = join(activeDir, entry)
     const stat = await statKind(entryPath)
     if (!stat?.isFile()) {
@@ -263,6 +276,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       continue
     }
     const source = await readFile(entryPath)
+    activeSqlSources.push({ entryPath, source: source.toString("utf8") })
     const timestamp = entry.match(/^(\d{14})/)?.[1]
     if (timestamp && quarantineTimestamps.has(timestamp)) {
       addError(errors, "cutover_timestamp_reused_in_active_lane", relative(resolvedRoot, entryPath))
@@ -285,13 +299,34 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(errors, "science_superseding_migration_hash_mismatch", relative(resolvedRoot, scienceMigrationPath))
     }
     for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
-      const definition = functionDefinitionSource(scienceSource, contract.function)
+      const definitions = functionDefinitionSources(scienceSource, contract.function)
       const contractPath = `${relative(resolvedRoot, scienceMigrationPath)}#${contract.function}`
-      if (definition === null) {
+      if (definitions.length !== 1) {
         addError(errors, "science_superseded_definition_missing", contractPath)
-      } else if (!contract.markers.every((marker) => definition.includes(marker))) {
+      } else if (!contract.markers.every((marker) => definitions[0].includes(marker))) {
         addError(errors, "science_superseding_contract_mismatch", contractPath)
       }
+    }
+  }
+
+  for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
+    let finalDefinition = null
+    let finalDefinitionPath = relative(resolvedRoot, activeDir)
+    for (const { entryPath, source } of activeSqlSources) {
+      for (const definition of functionDefinitionSources(source, contract.function)) {
+        finalDefinition = definition
+        finalDefinitionPath = relative(resolvedRoot, entryPath)
+      }
+    }
+    if (
+      finalDefinition === null ||
+      !contract.markers.every((marker) => finalDefinition.includes(marker))
+    ) {
+      addError(
+        errors,
+        "science_final_definition_mismatch",
+        `${finalDefinitionPath}#${contract.function}`,
+      )
     }
   }
 
@@ -302,6 +337,16 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const requiredWorkflowStat = await statKind(requiredWorkflowPath)
   if (!requiredWorkflowStat?.isFile()) {
     addError(errors, "required_db_push_workflow_not_regular", relative(resolvedRoot, requiredWorkflowPath))
+  } else if (sha256(await readFile(requiredWorkflowPath)) !== REQUIRED_DB_PUSH_WORKFLOW_SHA256) {
+    addError(errors, "required_db_push_workflow_hash_mismatch", relative(resolvedRoot, requiredWorkflowPath))
+  }
+  for (const entry of (await listDirectory(workflowsDir)) ?? []) {
+    if (!/\.ya?ml$/i.test(entry)) continue
+    const entryPath = join(workflowsDir, entry)
+    const stat = await statKind(entryPath)
+    if (!stat?.isFile()) {
+      addError(errors, "workflow_entry_not_regular", relative(resolvedRoot, entryPath))
+    }
   }
   const workflowFiles = await listWorkflowFiles(workflowsDir)
   for (const workflowPath of workflowFiles) {
@@ -317,6 +362,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     const lines = workflow.split(/\r?\n/)
     if (
       workflow.includes("--workdir") ||
+      lines.some((line) => /^\s*working-directory\s*:/.test(line)) ||
+      lines.some((line) => /^\s*continue-on-error\s*:\s*true\s*(?:#.*)?$/i.test(line)) ||
+      lines.some((line) => /^\s*if\s*:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:#.*)?$/i.test(line)) ||
       lines.some((line) => /^(?:cp|mv|rsync)\b/.test(line.trim().replace(/^run:\s*/, "")))
     ) {
       addError(errors, "db_push_workflow_layout_bypass", workflowRelativePath)

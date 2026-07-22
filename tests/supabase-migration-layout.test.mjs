@@ -20,7 +20,9 @@ import { validateSupabaseMigrationLayout } from "../scripts/verify-supabase-migr
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
+const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e9fe479cf6c90e5a1681532c88b8ce378a72456c801744582cc04bf850b135f1"
 
 const EXPECTED_SQL = Object.freeze([
   ["20260716195000_notification_workflow_legacy_closure.sql", "e9131131f0d9419a4a8fdf5d69a58a1047a41583f98d9ef7b5b376374ee52975"],
@@ -59,6 +61,7 @@ after(async () => {
 test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다", async () => {
   const errors = await validateSupabaseMigrationLayout({ repoRoot })
   assert.deepEqual(errors, [])
+  assert.equal(await sha256(requiredWorkflowPath), REQUIRED_DB_PUSH_WORKFLOW_SHA256)
   for (const [file, digest] of EXPECTED_SQL) {
     assert.equal(await sha256(join(quarantineDir, file)), digest)
     await assert.rejects(readFile(join(activeDir, file)))
@@ -165,6 +168,29 @@ test("science superseding migration의 바이트와 contract를 고정한다", a
     await validateSupabaseMigrationLayout({ repoRoot: scienceFixture }),
     "science_superseding_migration_hash_mismatch",
   )
+
+  const legacyFixture = await createRepoFixture()
+  const legacyActiveDir = join(legacyFixture, "supabase", "migrations")
+  const legacyQuarantineDir = join(
+    legacyFixture,
+    "supabase",
+    "pending-migrations",
+    "notification-cutover",
+  )
+  await copyFile(
+    join(legacyQuarantineDir, "20260716195500_notification_worker_schedule.sql"),
+    join(legacyActiveDir, "20260723100000_legacy_revalidate.sql"),
+  )
+  await copyFile(
+    join(legacyQuarantineDir, "20260716195900_notification_control_plane_forward_compat.sql"),
+    join(legacyActiveDir, "20260723100001_legacy_prepare.sql"),
+  )
+  const legacyErrors = await validateSupabaseMigrationLayout({ repoRoot: legacyFixture })
+  assert.equal(
+    legacyErrors.filter((error) => error.includes("science_final_definition_mismatch")).length,
+    2,
+    `expected both legacy final definitions to fail, received ${JSON.stringify(legacyErrors)}`,
+  )
 })
 
 test("required DB push workflow의 실파일, exact command, 순서를 강제한다", async () => {
@@ -193,6 +219,16 @@ test("required DB push workflow의 실파일, exact command, 순서를 강제한
   assertIncludesErrorCode(
     await validateSupabaseMigrationLayout({ repoRoot: symlinkWorkflowFixture }),
     "required_db_push_workflow_not_regular",
+  )
+
+  const topLevelSymlinkFixture = await createRepoFixture()
+  await symlink(
+    "supabase-db-push.yml",
+    join(topLevelSymlinkFixture, ".github", "workflows", "linked.yml"),
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: topLevelSymlinkFixture }),
+    "workflow_entry_not_regular",
   )
 
   const workflowFixture = await createRepoFixture()
@@ -226,6 +262,55 @@ test("required DB push workflow의 실파일, exact command, 순서를 강제한
     "layout_verifier_command_count_mismatch",
   )
 
+  const verifierIfFixture = await createRepoFixture()
+  const verifierIfPath = join(verifierIfFixture, ".github", "workflows", "supabase-db-push.yml")
+  const verifierIfWorkflow = await readFile(verifierIfPath, "utf8")
+  await writeFile(
+    verifierIfPath,
+    verifierIfWorkflow.replace(
+      "      - name: Verify Supabase migration layout\n",
+      "      - name: Verify Supabase migration layout\n        if: false\n",
+    ),
+  )
+  const verifierIfErrors = await validateSupabaseMigrationLayout({ repoRoot: verifierIfFixture })
+  assertIncludesErrorCode(verifierIfErrors, "required_db_push_workflow_hash_mismatch")
+  assertIncludesErrorCode(verifierIfErrors, "db_push_workflow_layout_bypass")
+
+  const continueFixture = await createRepoFixture()
+  const continuePath = join(continueFixture, ".github", "workflows", "supabase-db-push.yml")
+  const continueWorkflow = await readFile(continuePath, "utf8")
+  await writeFile(
+    continuePath,
+    continueWorkflow.replace(
+      "      - name: Verify Supabase migration layout\n",
+      "      - name: Verify Supabase migration layout\n        continue-on-error: true\n",
+    ),
+  )
+  const continueErrors = await validateSupabaseMigrationLayout({ repoRoot: continueFixture })
+  assertIncludesErrorCode(continueErrors, "required_db_push_workflow_hash_mismatch")
+  assertIncludesErrorCode(continueErrors, "db_push_workflow_layout_bypass")
+
+  const workingDirectoryFixture = await createRepoFixture()
+  const workingDirectoryPath = join(
+    workingDirectoryFixture,
+    ".github",
+    "workflows",
+    "supabase-db-push.yml",
+  )
+  const workingDirectoryWorkflow = await readFile(workingDirectoryPath, "utf8")
+  await writeFile(
+    workingDirectoryPath,
+    workingDirectoryWorkflow.replace(
+      "      - name: Push migrations\n",
+      "      - name: Push migrations\n        working-directory: supabase/pending-migrations/notification-cutover\n",
+    ),
+  )
+  const workingDirectoryErrors = await validateSupabaseMigrationLayout({
+    repoRoot: workingDirectoryFixture,
+  })
+  assertIncludesErrorCode(workingDirectoryErrors, "required_db_push_workflow_hash_mismatch")
+  assertIncludesErrorCode(workingDirectoryErrors, "db_push_workflow_layout_bypass")
+
   const otherJobFixture = await createRepoFixture()
   const otherJobPath = join(otherJobFixture, ".github", "workflows", "supabase-db-push.yml")
   const otherJobWorkflow = await readFile(otherJobPath, "utf8")
@@ -235,13 +320,12 @@ test("required DB push workflow의 실파일, exact command, 순서를 강제한
       .replace(/^.*node scripts\/verify-supabase-migration-layout\.mjs.*(?:\n|$)/m, "")
       .replace(
         "jobs:\n",
-        "jobs:\n  layout-only:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Verify layout\n        run: node scripts/verify-supabase-migration-layout.mjs\n",
+        "jobs:\n  \"layout-only\":\n    runs-on: ubuntu-latest\n    steps:\n      - name: Verify layout\n        run: node scripts/verify-supabase-migration-layout.mjs\n",
       ),
   )
-  assertIncludesErrorCode(
-    await validateSupabaseMigrationLayout({ repoRoot: otherJobFixture }),
-    "db_push_without_prior_layout_verifier",
-  )
+  const otherJobErrors = await validateSupabaseMigrationLayout({ repoRoot: otherJobFixture })
+  assertIncludesErrorCode(otherJobErrors, "required_db_push_workflow_hash_mismatch")
+  assertIncludesErrorCode(otherJobErrors, "db_push_without_prior_layout_verifier")
 
   const externalPushFixture = await createRepoFixture()
   await writeFile(
