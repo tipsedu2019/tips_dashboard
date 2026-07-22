@@ -1,4 +1,10 @@
 import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supabase.ts";
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  isScienceGrade,
+  parseAcademicSubject,
+  sortAcademicSubjects,
+} from "../../lib/academic-subject-registry.ts";
 import { normalizeStudentStatus } from "../../lib/student-status.js";
 
 const DEFAULT_CLASS_STATUS = "수강";
@@ -8,6 +14,9 @@ const DASHBOARD_ROLES = ["admin", "staff", "teacher", "assistant", "viewer"];
 const CLASSROOM_ALIAS_MAP = new Map([
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],
+  ["별4", "별관 4강"],
+  ["별4강", "별관 4강"],
+  ["별관4강", "별관 4강"],
   ["별5", "별관 5강"],
   ["별5강", "별관 5강"],
   ["별7", "별관 5강"],
@@ -56,6 +65,97 @@ function getClassTypeValue(record = {}) {
 
 function normalizeSubjectList(subjects) {
   return [...new Set((Array.isArray(subjects) ? subjects : []).map((subject) => trimText(subject)).filter(Boolean))];
+}
+
+function getCatalogSubjectMemberships(catalog = {}) {
+  if (Array.isArray(catalog.subjects)) {
+    return normalizeSubjectList(catalog.subjects);
+  }
+  return trimText(catalog.subjects)
+    .split(/[,，/]+/)
+    .map((subject) => trimText(subject))
+    .filter(Boolean);
+}
+
+function normalizeCatalogSubjectToken(value) {
+  return trimText(value).replace(/\s+/g, "").replace(/(과목|팀)$/g, "");
+}
+
+function matchesLegacyCatalogSubject(catalog, subject) {
+  const selectedSubject = trimText(subject);
+  if (!selectedSubject) return true;
+  const memberships = getCatalogSubjectMemberships(catalog);
+  if (memberships.length === 0) return true;
+  const selectedToken = normalizeCatalogSubjectToken(selectedSubject);
+  return memberships.some((membership) => (
+    membership === selectedSubject
+    || normalizeCatalogSubjectToken(membership) === selectedToken
+  ));
+}
+
+export function isTeacherCatalogForClassSubject(catalog = {}, subject = "") {
+  const selectedSubject = parseAcademicSubject(subject) || trimText(subject);
+  if (selectedSubject === "과학") {
+    return getCatalogSubjectMemberships(catalog).includes("과학팀");
+  }
+  return matchesLegacyCatalogSubject(catalog, selectedSubject);
+}
+
+export function isClassroomCatalogForClassSubject(catalog = {}, subject = "") {
+  const selectedSubject = parseAcademicSubject(subject) || trimText(subject);
+  if (selectedSubject === "과학") {
+    return getCatalogSubjectMemberships(catalog).includes("과학");
+  }
+  return matchesLegacyCatalogSubject(catalog, selectedSubject);
+}
+
+function getVisibleScienceCatalogNames(catalogs, predicate, normalizeName = trimText) {
+  return new Set((Array.isArray(catalogs) ? catalogs : [])
+    .filter((catalog) => catalog?.is_visible !== false && predicate(catalog, "과학"))
+    .map((catalog) => normalizeName(catalog?.name))
+    .filter(Boolean));
+}
+
+function getSelectedClassResourceNames(value, normalizeName = trimText) {
+  return trimText(value)
+    .split(/[,，/]+/)
+    .map((name) => normalizeName(name.replace(/\([^)]*\)/g, "")))
+    .filter(Boolean);
+}
+
+function assertScienceClassCandidateMembership(record, context) {
+  if (!context || typeof context !== "object") return;
+
+  const teacherNames = getVisibleScienceCatalogNames(
+    context.teacherCatalogs,
+    isTeacherCatalogForClassSubject,
+  );
+  const classroomNames = getVisibleScienceCatalogNames(
+    context.classroomCatalogs,
+    isClassroomCatalogForClassSubject,
+    normalizeClassroomName,
+  );
+  const selectedTeachers = getSelectedClassResourceNames(record.teacher || record.teacherName || record.teacher_name);
+  const selectedClassrooms = getSelectedClassResourceNames(
+    record.classroom || record.room,
+    normalizeClassroomName,
+  );
+
+  if (selectedTeachers.length === 0 || selectedTeachers.some((name) => !teacherNames.has(name))) {
+    throw new Error("과학 수업은 표시 중인 과학팀 교사를 선택해야 합니다.");
+  }
+  if (selectedClassrooms.length === 0 || selectedClassrooms.some((name) => !classroomNames.has(name))) {
+    throw new Error("과학 수업은 표시 중인 과학 강의실을 선택해야 합니다.");
+  }
+}
+
+function normalizeClassroomSubjectList(subjects) {
+  const values = Array.isArray(subjects) ? subjects : [];
+  const parsed = values.map((subject) => parseAcademicSubject(subject));
+  if (parsed.length === 0 || parsed.some((subject) => subject === null)) {
+    throw new Error("강의실 과목은 영어, 수학, 과학 중 하나 이상 선택해야 합니다.");
+  }
+  return sortAcademicSubjects(parsed);
 }
 
 function normalizeDashboardRole(value) {
@@ -187,7 +287,9 @@ export function buildResourceCatalogPayload(resources = [], options = {}) {
       kind === "classroom"
         ? normalizeClassroomName(resource?.name)
         : trimText(resource?.name),
-    subjects: normalizeSubjectList(resource?.subjects),
+    subjects: kind === "classroom"
+      ? normalizeClassroomSubjectList(resource?.subjects)
+      : normalizeSubjectList(resource?.subjects),
     is_visible: resource?.isVisible !== false,
     sort_order: resource?.sortOrder ?? resource?.sort_order ?? index,
     ...(kind === "teacher"
@@ -555,7 +657,10 @@ async function upsertClassRows(client, payload) {
   try {
     return await upsertRows(client, "classes", payload);
   } catch (error) {
-    const fallbackFields = getStaleSchemaFallbackFields(error, ["class_type"]);
+    const optionalFields = trimText(payload?.subject) === "과학"
+      ? ["class_type"]
+      : ["class_type", "subject_area_key"];
+    const fallbackFields = getStaleSchemaFallbackFields(error, optionalFields);
     if (fallbackFields.length === 0) {
       throw error;
     }
@@ -769,16 +874,34 @@ export function buildStudentPayload(record = {}, options = {}) {
 }
 
 export function buildClassPayload(record = {}, options = {}) {
-  const { generateId = createId } = options;
+  const { generateId = createId, candidateMembershipContext } = options;
   const id = trimText(record.id) || generateId();
   const name = trimText(record.name || record.className || record.class_name);
   const classroom = normalizeClassroomName(record.classroom || record.room);
+  const rawSubject = trimText(record.subject);
+  const subject = parseAcademicSubject(rawSubject) || rawSubject;
+  const grade = trimText(record.grade);
+  const subjectAreaKey = trimText(record.subjectAreaKey || record.subject_area_key);
+
+  if (subject === "과학") {
+    if (!isScienceGrade(grade)) {
+      throw new Error("과학 수업은 고1~고3만 선택할 수 있습니다.");
+    }
+    if (!subjectAreaKey) {
+      throw new Error("과학 영역을 선택하세요.");
+    }
+    assertScienceClassCandidateMembership(record, candidateMembershipContext);
+  } else if (subjectAreaKey) {
+    throw new Error("과학 수업에서만 과학 영역을 선택할 수 있습니다.");
+  }
+
   return {
     id,
     name,
     class_type: getClassTypeValue(record),
-    subject: trimText(record.subject),
-    grade: trimText(record.grade),
+    subject,
+    subject_area_key: subjectAreaKey || null,
+    grade,
     teacher: trimText(record.teacher || record.teacherName || record.teacher_name),
     schedule: trimText(record.schedule),
     room: classroom,
@@ -791,6 +914,20 @@ export function buildClassPayload(record = {}, options = {}) {
       : getArrayField(record, "waitlist_student_ids", "waitlistStudentIds"),
     textbook_ids: getArrayField(record, "textbook_ids", "textbookIds"),
   };
+}
+
+export function buildClassSubjectOptions(rows = []) {
+  const legacyValues = (Array.isArray(rows) ? rows : [])
+    .map((row) => trimText(row?.subject))
+    .filter(Boolean)
+    .map((subject) => parseAcademicSubject(subject) || subject);
+  const registered = new Set(ACADEMIC_SUBJECT_VALUES);
+  return [
+    ...ACADEMIC_SUBJECT_VALUES,
+    ...legacyValues.filter((subject, index, values) => (
+      !registered.has(subject) && values.indexOf(subject) === index
+    )),
+  ];
 }
 
 export function buildTextbookPayload(record = {}, options = {}) {
@@ -1014,10 +1151,13 @@ export function createManagementService(options = {}) {
       return deleteRows(client, "students", id ? [id] : []);
     },
 
-    async createClass(record = {}) {
+    async createClass(record = {}, options = {}) {
       const client = ensureClient(supabase);
       const runtime = await probeRegistrationRuntime();
-      const payload = buildClassPayload(record, { generateId });
+      const payload = buildClassPayload(record, {
+        generateId,
+        candidateMembershipContext: options.candidateMembershipContext,
+      });
       const created = await upsertClassRows(
         client,
         runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
@@ -1025,10 +1165,13 @@ export function createManagementService(options = {}) {
       return Array.isArray(created) ? created[0] || null : created || null;
     },
 
-    async updateClass(record = {}) {
+    async updateClass(record = {}, options = {}) {
       const client = ensureClient(supabase);
       const runtime = await probeRegistrationRuntime();
-      const payload = buildClassPayload(record, { generateId });
+      const payload = buildClassPayload(record, {
+        generateId,
+        candidateMembershipContext: options.candidateMembershipContext,
+      });
       const updated = await upsertClassRows(
         client,
         runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),

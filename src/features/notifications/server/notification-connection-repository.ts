@@ -25,6 +25,7 @@ const CONNECTION_TO_CHANNEL = {
   "google_chat.executive": "executive",
   "google_chat.math": "math",
   "google_chat.english": "english",
+  "google_chat.science": "science",
 } as const
 const CHANNEL_TO_CONNECTION = Object.fromEntries(
   Object.entries(CONNECTION_TO_CHANNEL).map(([connectionKey, channel]) => [channel, connectionKey]),

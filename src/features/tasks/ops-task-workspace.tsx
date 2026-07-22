@@ -28,6 +28,11 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/compon
 import { Textarea } from "@/components/ui/textarea"
 import { NotificationControlPanel, useNotificationControlPlaneAvailability } from "@/features/notifications/notification-control-panel"
 import type { NotificationWorkflowKey } from "@/features/notifications/notification-control-plane-types"
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  parseAcademicSubject,
+  subjectSupports,
+} from "@/lib/academic-subject-registry"
 import { useAuth } from "@/providers/auth-provider"
 
 import {
@@ -135,6 +140,11 @@ import {
   resolveRegistrationDirectorDefault,
 } from "./registration-director-default.js"
 import {
+  getRegistrationSubjectCompatibilityCapabilities,
+  probeRegistrationSubjectCapabilities,
+  type RegistrationSubjectCapability,
+} from "./registration-subject-capability-probe"
+import {
   RegistrationCaseList,
   type RegistrationCaseListAction,
 } from "./registration-case-list"
@@ -163,11 +173,13 @@ import {
   assertRegistrationCreateAttemptPersistenceMode,
   createRegistrationCreateAttempt,
   createRegistrationInitialWorkflowDraft,
+  getRegistrationSubjectPickerAvailability,
   getRegistrationInitialWorkflowBlockers,
   markRegistrationLegacyCreateStarted,
   normalizeRegistrationInitialWorkflow,
   probeRegistrationInitialPersistence,
   reconcileRegistrationInitialWorkflowDraft,
+  reconcileRegistrationSubjectsForGrade,
   type RegistrationCreateAttempt,
   type RegistrationInitialPersistenceProbeResult,
   type RegistrationInitialWorkflowDraft,
@@ -185,6 +197,7 @@ import {
 import {
   executeRegistrationSubjectTrackFixtureAction,
   installRegistrationSubjectTrackFixtureRuntime,
+  loadRegistrationSubjectTrackFixtureCapabilities,
   loadRegistrationSubjectTrackFixtureOptionData,
   shouldEnableRegistrationSubjectTrackFixture,
 } from "./registration-track-fixture-runtime"
@@ -659,12 +672,6 @@ const REGISTRATION_VIEW_TABS: Array<{ key: RegistrationViewKey; label: string }>
 
 const REGISTRATION_GRADE_OPTIONS = getRegistrationGradeOptions()
 
-const REGISTRATION_SUBJECT_OPTIONS = [
-  { value: "", label: "미지정" },
-  { value: "영어", label: "영어" },
-  { value: "수학", label: "수학" },
-] as const
-
 function getRegistrationAppointmentParticipantTrackIds(
   detail: OpsRegistrationCaseDetail,
   appointmentId: string,
@@ -676,7 +683,10 @@ function getRegistrationAppointmentParticipantTrackIds(
     : detail.consultations.filter((item) => item.appointmentId === appointmentId && item.mode === "visit").map((item) => item.trackId))
   return detail.tracks
     .filter((track) => participantIds.has(track.id))
-    .sort((left, right) => (left.subject === "영어" ? 0 : 1) - (right.subject === "영어" ? 0 : 1) || left.id.localeCompare(right.id))
+    .sort((left, right) => (
+      ACADEMIC_SUBJECT_VALUES.indexOf(left.subject) - ACADEMIC_SUBJECT_VALUES.indexOf(right.subject)
+      || left.id.localeCompare(right.id)
+    ))
     .map((track) => track.id)
 }
 
@@ -830,18 +840,27 @@ function RegistrationFieldLabel({
 function RegistrationSubjectField({
   label,
   values,
+  grade,
+  capabilities,
   onChange,
   required = false,
 }: {
   label: ReactNode
   values: string[]
+  grade: string
+  capabilities: readonly RegistrationSubjectCapability[]
   onChange: (values: string[]) => void
   required?: boolean
 }) {
   const fieldId = useId()
   const requiredDescriptionId = useId()
   const valueSet = new Set(values)
-  const options = REGISTRATION_SUBJECT_OPTIONS.filter((option) => option.value)
+  const availability = getRegistrationSubjectPickerAvailability({
+    capabilities,
+    grade,
+    selectedSubjects: values as RegistrationSubject[],
+  })
+  const options = availability.options.map((subject) => ({ value: subject, label: subject }))
 
   return (
     <div className="grid min-w-0 gap-1.5 text-sm font-medium">
@@ -852,18 +871,21 @@ function RegistrationSubjectField({
         </span>
       )}
       <div
-        className="grid grid-cols-2 gap-1.5"
+        className="grid grid-cols-1 gap-1.5 sm:grid-cols-3"
         role="group"
         aria-labelledby={fieldId}
         aria-describedby={required ? requiredDescriptionId : undefined}
       >
         {options.map((option) => {
           const selected = valueSet.has(option.value)
+          const disabledReason = availability.disabledReasonBySubject[option.value]
           return (
             <button
               key={option.value}
               type="button"
               aria-pressed={selected}
+              disabled={Boolean(disabledReason)}
+              title={disabledReason}
               onClick={() => onChange(selected
                 ? values.filter((value) => value !== option.value)
                 : [...values, option.value])}
@@ -880,6 +902,9 @@ function RegistrationSubjectField({
           )
         })}
       </div>
+      {[...new Set(Object.values(availability.disabledReasonBySubject).filter(Boolean))].map((reason) => (
+        <span key={reason} className="text-xs font-normal text-muted-foreground">{reason}</span>
+      ))}
     </div>
   )
 }
@@ -1108,6 +1133,8 @@ function shouldClearProfileForTeam(profileId: string | undefined, team: string, 
 
 function isWordRetestClassOption(classItem?: OpsClassOption) {
   if (!classItem) return false
+  const canonicalSubject = parseAcademicSubject(classItem.subject)
+  if (canonicalSubject) return subjectSupports(canonicalSubject, "word_retest")
   return isEnglishOperationOption([classItem.subject, classItem.meta, classItem.label].filter(Boolean).join(" "))
 }
 
@@ -1180,19 +1207,24 @@ function getWordRetestStudentOptions(students: OpsStudentOption[], classItem?: O
 }
 
 function getWordRetestClassOptions(classes: OpsClassOption[], student?: OpsStudentOption, selectedClassId = "", teacher?: OpsTeacherOption) {
-  const englishClasses = classes.filter(isWordRetestClassOption)
-  const baseClasses = englishClasses.length > 0 ? englishClasses : classes
+  const baseClasses = classes.filter(isWordRetestClassOption)
   const teacherName = normalizeLookupValue(teacher?.label)
   const teacherClasses = teacherName ? baseClasses.filter((classItem) => normalizeLookupValue(classItem.teacher) === teacherName) : []
   const teacherScopedClasses = teacherClasses.length > 0 ? teacherClasses : baseClasses
   const studentClassIds = getStudentRosterClassIds(student, classes)
   const studentClasses = teacherScopedClasses.filter((classItem) => studentClassIds.includes(classItem.id))
-  const selectedClass = classes.find((classItem) => classItem.id === selectedClassId)
+  const selectedClass = baseClasses.find((classItem) => classItem.id === selectedClassId)
   return uniqueClassOptions([selectedClass, ...(studentClasses.length > 0 ? studentClasses : teacherScopedClasses)].filter(Boolean) as OpsClassOption[])
 }
 
 function isWordRetestTeacherOption(teacher?: OpsTeacherOption) {
   if (!teacher) return false
+  const canonicalSubjects = teacher.subjects
+    .map(parseAcademicSubject)
+    .filter((subject) => subject !== null)
+  if (canonicalSubjects.length > 0) {
+    return canonicalSubjects.some((canonicalSubject) => subjectSupports(canonicalSubject, "word_retest"))
+  }
   const meta = teacher.meta || teacher.label || ""
   return teacher.subjects.some((subject) => isEnglishOperationOption(subject)) || isEnglishOperationOption(meta)
 }
@@ -1207,9 +1239,8 @@ function uniqueTeacherOptions(teachers: OpsTeacherOption[]) {
 }
 
 function getWordRetestTeacherOptions(teachers: OpsTeacherOption[], selectedTeacherId = "") {
-  const englishTeachers = teachers.filter(isWordRetestTeacherOption)
-  const baseTeachers = englishTeachers.length > 0 ? englishTeachers : teachers
-  const selectedTeacher = teachers.find((teacher) => teacher.id === selectedTeacherId)
+  const baseTeachers = teachers.filter(isWordRetestTeacherOption)
+  const selectedTeacher = baseTeachers.find((teacher) => teacher.id === selectedTeacherId)
   return uniqueTeacherOptions([selectedTeacher, ...baseTeachers].filter(Boolean) as OpsTeacherOption[])
 }
 
@@ -1341,6 +1372,8 @@ function normalizeWordRetestTextbookSubjectLabel(subject: string) {
 }
 
 function isWordRetestTextbookOption(textbook: OpsTextbookOption) {
+  const canonicalSubject = parseAcademicSubject(textbook.subject)
+  if (canonicalSubject && !subjectSupports(canonicalSubject, "word_retest")) return false
   return inferWordRetestTextbookSubject(textbook) === "어휘"
 }
 
@@ -8346,6 +8379,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const loading = workspaceLoading || registrationFixtureTransitioning
   const [registrationOptionsLoading, setRegistrationOptionsLoading] = useState(false)
   const [registrationOptionsError, setRegistrationOptionsError] = useState("")
+  const [registrationSubjectCapabilities, setRegistrationSubjectCapabilities] = useState<readonly RegistrationSubjectCapability[]>(
+    () => getRegistrationSubjectCompatibilityCapabilities(),
+  )
+  const [registrationSubjectCapabilityError, setRegistrationSubjectCapabilityError] = useState("")
   const [view, setView] = useState<ViewKey>("all")
   const [todoView, setTodoView] = useState<TodoViewKey>("inbox")
   const [withdrawalView, setWithdrawalView] = useState<WithdrawalViewKey>("applicant")
@@ -9052,6 +9089,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         inquiryAt: form.registration?.inquiryAt,
         teachers,
         profiles,
+        ...{ capabilities: registrationSubjectCapabilities },
       })
       return resolution.status === "resolved" && resolution.profileId
         ? [[subject, resolution.profileId]]
@@ -9061,6 +9099,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     form.registration?.inquiryAt,
     form.registration?.schoolGrade,
     profiles,
+    registrationSubjectCapabilities,
     registrationInitialSubjects,
     teachers,
   ])
@@ -9083,14 +9122,49 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         return true
       })]
     }
-    return { 영어: optionsFor("영어"), 수학: optionsFor("수학") }
-  }, [profiles, teachers])
+    const scienceCapability = registrationSubjectCapabilities.find((item) => item.subject === "과학" && item.isActive)
+    const configuredScienceProfileId = scienceCapability?.defaultDirectorProfileId || ""
+    const configuredScienceTeacher = teachers.find((teacher) => (
+      teacher.profileId === configuredScienceProfileId
+      && teacher.subjects?.includes("과학팀")
+    ))
+    const configuredScienceProfile = profiles.find((profile) => profile.id === configuredScienceProfileId)
+    return {
+      영어: optionsFor("영어"),
+      수학: optionsFor("수학"),
+      과학: configuredScienceProfileId && configuredScienceTeacher && configuredScienceProfile
+        ? [{ value: configuredScienceProfileId, label: configuredScienceTeacher.label || configuredScienceProfile.label }]
+        : [],
+    }
+  }, [profiles, registrationSubjectCapabilities, teachers])
   const registrationCreateCatalogStatus = resolveRegistrationCreateCatalogStatus({
     loading: registrationOptionsLoading,
     error: registrationOptionsError,
     directorCatalogStatus: registrationOptionsDataRef.current?.directorCatalogStatus,
   })
   const optionIndexes = useMemo(() => buildOpsTaskOptionIndexes(students, classes, textbooks, teachers), [students, classes, textbooks, teachers])
+
+  useEffect(() => {
+    if (!isRegistrationWorkspace) return
+    if (registrationFixtureRequested && !registrationFixtureEnabled) return
+    let active = true
+    const fixtureCapabilities = registrationFixtureEnabled
+      ? loadRegistrationSubjectTrackFixtureCapabilities()
+      : null
+    const request = fixtureCapabilities || probeRegistrationSubjectCapabilities()
+    void request.then((capabilities) => {
+      if (!active) return
+      setRegistrationSubjectCapabilities(capabilities)
+      setRegistrationSubjectCapabilityError("")
+    }).catch(() => {
+      if (!active) return
+      setRegistrationSubjectCapabilities(getRegistrationSubjectCompatibilityCapabilities())
+      setRegistrationSubjectCapabilityError("과목 사용 범위를 확인하지 못해 영어·수학만 신규 선택할 수 있습니다.")
+    })
+    return () => {
+      active = false
+    }
+  }, [currentUserId, isRegistrationWorkspace, registrationFixtureEnabled, registrationFixtureRequested, registrationFixtureRevision])
 
   useEffect(() => {
     if (form.type !== "registration") return
@@ -12737,6 +12811,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   registrationInitialWorkflowDraft={registrationInitialWorkflowDraft}
                   registrationResolvedDirectorIds={registrationResolvedDirectorIds}
                   registrationDirectorOptionsBySubject={registrationDirectorOptionsBySubject}
+                  registrationSubjectCapabilities={registrationSubjectCapabilities}
+                  registrationSubjectCapabilityError={registrationSubjectCapabilityError}
                   onRegistrationInitialWorkflowChange={setRegistrationInitialWorkflowDraft}
                   registrationCloseAction={(
                     <Button type="button" variant="ghost" size="icon" onClick={closeForm} aria-label={formCloseLabel}>
@@ -12956,6 +13032,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       directorOptions={data?.profiles || EMPTY_PROFILE_OPTIONS}
                       teacherOptions={data?.teachers || EMPTY_TEACHER_OPTIONS}
                       directorCatalogStatus={registrationOptionsLoading ? "loading" : registrationOptionsDataRef.current?.directorCatalogStatus || (registrationOptionsError ? "error" : "loading")}
+                      subjectCapabilities={registrationSubjectCapabilities}
                       onRetryDirectorCatalog={retryRegistrationOptions}
                       schools={registrationOptionsDataRef.current?.schools || []}
                       schoolCatalogStatus={registrationOptionsLoading
@@ -13265,6 +13342,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 persistence={registrationPersistence}
                 resolvedDirectorIds={registrationResolvedDirectorIds}
                 directorOptionsBySubject={registrationDirectorOptionsBySubject}
+                subjectCapabilities={registrationSubjectCapabilities}
+                subjectCapabilityError={registrationSubjectCapabilityError}
                 disabled={saving}
                 catalogStatus={registrationCreateCatalogStatus}
                 catalogError={registrationOptionsError}
@@ -13387,6 +13466,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 directorOptions={data?.profiles || EMPTY_PROFILE_OPTIONS}
                 teacherOptions={data?.teachers || EMPTY_TEACHER_OPTIONS}
                 directorCatalogStatus={registrationOptionsLoading ? "loading" : registrationOptionsDataRef.current?.directorCatalogStatus || (registrationOptionsError ? "error" : "loading")}
+                subjectCapabilities={registrationSubjectCapabilities}
                 onRetryDirectorCatalog={retryRegistrationOptions}
                 schools={registrationOptionsDataRef.current?.schools || []}
                 schoolCatalogStatus={registrationOptionsLoading
@@ -13477,6 +13557,8 @@ function TypeSpecificFields({
   registrationInitialWorkflowDraft,
   registrationResolvedDirectorIds,
   registrationDirectorOptionsBySubject,
+  registrationSubjectCapabilities,
+  registrationSubjectCapabilityError,
   onRegistrationInitialWorkflowChange,
   registrationCloseAction,
   registrationDisabled,
@@ -13506,6 +13588,8 @@ function TypeSpecificFields({
   registrationInitialWorkflowDraft?: RegistrationInitialWorkflowDraft
   registrationResolvedDirectorIds?: Partial<Record<RegistrationSubject, string>>
   registrationDirectorOptionsBySubject?: Record<RegistrationSubject, Array<{ value: string; label: string }>>
+  registrationSubjectCapabilities?: readonly RegistrationSubjectCapability[]
+  registrationSubjectCapabilityError?: string
   onRegistrationInitialWorkflowChange?: (draft: RegistrationInitialWorkflowDraft) => void
   registrationCloseAction?: ReactNode
   registrationDisabled?: boolean
@@ -14068,6 +14152,8 @@ function TypeSpecificFields({
           persistence={registrationPersistence}
           resolvedDirectorIds={registrationResolvedDirectorIds}
           directorOptionsBySubject={registrationDirectorOptionsBySubject}
+          subjectCapabilities={registrationSubjectCapabilities || getRegistrationSubjectCompatibilityCapabilities()}
+          subjectCapabilityError={registrationSubjectCapabilityError}
           disabled={Boolean(registrationDisabled)}
           schools={schools}
           schoolCatalogStatus={schoolCatalogStatus}
@@ -14097,6 +14183,8 @@ function TypeSpecificFields({
                 <RegistrationSubjectField
                   label={<RegistrationFieldLabel label="과목" requirement="required" />}
                   values={registrationSubjects}
+                  grade={registration.schoolGrade || ""}
+                  capabilities={registrationSubjectCapabilities || getRegistrationSubjectCompatibilityCapabilities()}
                   required
                   onChange={(values) => updateForm("subject", serializeRegistrationSubjects(values))}
                 />
@@ -14122,7 +14210,25 @@ function TypeSpecificFields({
                   ...REGISTRATION_GRADE_OPTIONS.map((grade) => ({ value: grade, label: grade })),
                 ]}
                 required
-                onChange={(value) => updateRegistration("schoolGrade", value)}
+                onChange={(value) => {
+                  updateRegistration("schoolGrade", value)
+                  if (
+                    registrationInitialWorkflowDraft
+                    && onRegistrationInitialWorkflowChange
+                    && registrationSubjectCapabilities
+                  ) {
+                    const reconciled = reconcileRegistrationSubjectsForGrade({
+                      capabilities: registrationSubjectCapabilities,
+                      grade: value,
+                      subjects: registrationSubjects,
+                      draft: registrationInitialWorkflowDraft,
+                    })
+                    if (reconciled.removedSubjects.length > 0) {
+                      updateForm("subject", serializeRegistrationSubjects(reconciled.subjects))
+                      onRegistrationInitialWorkflowChange(reconciled.draft)
+                    }
+                  }
+                }}
               />
             </RegistrationFocusTarget>
             <TextField

@@ -77,12 +77,22 @@ test("teacher timetable filters only academic teams for the selected subject", (
       schedule: "목 19:00-20:00",
       status: "수강",
     },
+    {
+      id: "science-class",
+      name: "고3 과학",
+      subject: "과학",
+      teacher: "이과학",
+      classroom: "별관 4강",
+      schedule: "금 19:00-20:00",
+      status: "수강",
+    },
   ];
   const teacherCatalogs = [
     { name: "강부희", subjects: "영어팀", sort_order: 1 },
     { name: "김민경", subjects: "수학팀", sort_order: 2 },
-    { name: "정보영", subjects: "관리팀", sort_order: 3 },
-    { name: "허승주", subjects: "조교팀", sort_order: 4 },
+    { name: "이과학", subjects: "science", sort_order: 3 },
+    { name: "정보영", subjects: "관리팀", sort_order: 4 },
+    { name: "허승주", subjects: "조교팀", sort_order: 5 },
   ];
 
   const allSubjects = buildTimetableWorkspaceModel({ classes, teacherCatalogs });
@@ -96,10 +106,16 @@ test("teacher timetable filters only academic teams for the selected subject", (
     teacherCatalogs,
     filters: { subject: "수학" },
   });
+  const scienceOnly = buildTimetableWorkspaceModel({
+    classes,
+    teacherCatalogs,
+    filters: { subject: "과학" },
+  });
 
-  assert.deepEqual(allSubjects.teacherOptions, ["강부희", "김민경"]);
+  assert.deepEqual(allSubjects.teacherOptions, ["강부희", "김민경", "이과학"]);
   assert.deepEqual(englishOnly.teacherOptions, ["강부희"]);
   assert.deepEqual(mathOnly.teacherOptions, ["김민경"]);
+  assert.deepEqual(scienceOnly.teacherOptions, ["이과학"]);
 });
 
 test("weekly timetable panels fit all weekdays without horizontal scrolling", () => {

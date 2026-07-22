@@ -1,3 +1,7 @@
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  parseAcademicSubject,
+} from "../../lib/academic-subject-registry.ts"
 import type { RegistrationSubject } from "./registration-track-service"
 
 export type RegistrationAppointmentCalendarKind = "level_test" | "visit_consultation"
@@ -60,10 +64,6 @@ const CALENDAR_STATUSES = new Set<RegistrationAppointmentCalendarStatus>([
   "completed",
   "canceled",
 ])
-const SUBJECT_ORDER: Record<RegistrationSubject, number> = {
-  영어: 0,
-  수학: 1,
-}
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 const OFFSET_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|([+-])(\d{2}):(\d{2}))$/
 
@@ -174,8 +174,8 @@ function normalizeParticipants(row: RegistrationAppointmentCalendarRow) {
   }
 
   const participants = row.track_ids.map((trackId, index) => {
-    const subject = row.subjects[index]
-    if (subject !== "영어" && subject !== "수학") invalidCalendarRow("subjects")
+    const subject = parseAcademicSubject(row.subjects[index])
+    if (!subject) invalidCalendarRow("subjects")
     return {
       trackId: requireNonEmptyString(trackId, "track_ids"),
       subject,
@@ -187,7 +187,7 @@ function normalizeParticipants(row: RegistrationAppointmentCalendarRow) {
   ) invalidCalendarRow("participants")
 
   participants.sort((left, right) => (
-    SUBJECT_ORDER[left.subject] - SUBJECT_ORDER[right.subject]
+    ACADEMIC_SUBJECT_VALUES.indexOf(left.subject) - ACADEMIC_SUBJECT_VALUES.indexOf(right.subject)
     || left.trackId.localeCompare(right.trackId)
   ))
   return participants

@@ -117,3 +117,45 @@ test("academic event form keeps date ranges valid while editing", async () => {
   assert.match(source, /onChange=\{\(event\) => handleEndDateChange\(event\.target\.value\)\}/);
   assert.match(source, /if \(nextEndDate < nextDate\)/);
 });
+
+test("science exam UI loads active areas, validates before save, and exposes science details", async () => {
+  const [calendarSource, eventFormSource, editorSource, workspaceSource, calendarShellSource] = await Promise.all([
+    readFile(new URL("src/app/admin/calendar/components/calendar-main.tsx", root), "utf8"),
+    readFile(new URL("src/app/admin/calendar/components/event-form.tsx", root), "utf8"),
+    readFile(new URL("src/features/operations/academic-event-editor-sheet.tsx", root), "utf8"),
+    readFile(new URL("src/features/operations/academic-calendar-workspace.tsx", root), "utf8"),
+    readFile(new URL("src/app/admin/calendar/components/calendar.tsx", root), "utf8"),
+  ]);
+
+  assert.match(calendarSource, /과학시험일/);
+  assert.match(calendarSource, /scienceAreaLabel/);
+  assert.match(eventFormSource, /list_active_science_subject_areas_v1/);
+  assert.match(eventFormSource, /validateScienceExamDraft/);
+  assert.match(eventFormSource, /과학 영역/);
+  assert.ok(
+    eventFormSource.indexOf("validateScienceExamDraft") < eventFormSource.indexOf("await onSave"),
+    "science validation must run before the save callback",
+  );
+  assert.match(editorSource, /scienceAreaKey/);
+  assert.match(editorSource, /과학 영역/);
+  assert.match(workspaceSource, /list_active_science_subject_areas_v1/);
+  assert.match(workspaceSource, /prepareAcademicEventMetadataForWrite/);
+  assert.match(workspaceSource, /scienceSubjectAreas: activeScienceAreas/);
+  assert.match(workspaceSource, /scienceAreaKey[,:]/);
+  assert.match(workspaceSource, /getAcademicEventFilterTypeKey/);
+  assert.match(calendarShellSource, /getAcademicEventFilterTypeKey/);
+  assert.doesNotMatch(calendarSource, /\|\| !event\.examTerm\) \{\s*return null/);
+  assert.match(calendarSource, /const badgeLabel = event\.examTerm \|\| scienceAreaLabel \|\|/);
+});
+
+test("annual board loads the current science area map for labels and saves the stable key", async () => {
+  const source = await readFile(
+    new URL("src/features/operations/academic-annual-board-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(source, /list_active_science_subject_areas_v1/);
+  assert.match(source, /parseActiveScienceSubjectAreas/);
+  assert.match(source, /scienceSubjectAreas: activeScienceAreas/);
+  assert.match(source, /scienceAreaKey: eventData\.scienceAreaKey/);
+});

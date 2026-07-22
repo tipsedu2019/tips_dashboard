@@ -4,7 +4,7 @@ import { type FormEvent, type ReactNode, type TouchEvent, type WheelEvent, useCa
 import { Check, ChevronDown, ChevronUp, Plus, Save, Trash2, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import type { ManagementKind, ManagementRow } from "@/features/management/use-management-records";
+import type { ClassFormReferences, ManagementKind, ManagementRow } from "@/features/management/use-management-records";
 import { useManagementRecords } from "@/features/management/use-management-records";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -34,12 +34,22 @@ import {
   normalizeStudentStatus,
 } from "@/lib/student-status";
 import { cn } from "@/lib/utils";
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  isScienceGrade,
+  parseAcademicSubject,
+} from "@/lib/academic-subject-registry";
 import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
 import { ClassTextbookPicker } from "./class-textbook-picker";
 import type { ClassTextbookRecord } from "./class-textbook-picker-model";
-import { managementService } from "./management-service.js";
+import {
+  buildClassSubjectOptions,
+  isClassroomCatalogForClassSubject,
+  isTeacherCatalogForClassSubject,
+  managementService,
+} from "./management-service.js";
 import { pickDefaultPeriodValue } from "./period-preferences";
 import {
   filterClassStudentCandidates,
@@ -70,8 +80,8 @@ type ManagementServiceClient = {
   createStudent: (record: Record<string, unknown>) => Promise<unknown>;
   updateStudent: (record: Record<string, unknown>) => Promise<unknown>;
   deleteStudent: (id: string) => Promise<unknown>;
-  createClass: (record: Record<string, unknown>) => Promise<unknown>;
-  updateClass: (record: Record<string, unknown>) => Promise<unknown>;
+  createClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences }) => Promise<unknown>;
+  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences }) => Promise<unknown>;
   deleteClass: (id: string) => Promise<unknown>;
   createTextbook: (record: Record<string, unknown>) => Promise<unknown>;
   updateTextbook: (record: Record<string, unknown>) => Promise<unknown>;
@@ -160,6 +170,7 @@ const FORM_FIELDS: Record<ManagementKind, Field[]> = {
     { name: "name", label: "수업명", placeholder: "고2 영어 A", required: true },
     { name: "status", label: "수업 상태", placeholder: "수강" },
     { name: "subject", label: "과목", placeholder: "영어" },
+    { name: "subjectAreaKey", label: "과학 영역", placeholder: "영역 선택", required: true },
     { name: "grade", label: "학년", placeholder: "고2" },
     { name: "teacher", label: "선생님", placeholder: "한지현" },
     { name: "schedule", label: "요일/시간", placeholder: "월 18:00-20:00" },
@@ -216,6 +227,18 @@ function splitOptionValues(value: unknown) {
     .split(/[,，/]+/)
     .map((part) => part.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
+}
+
+function hasExactClassResourceSelection(value: unknown, candidates: string[]) {
+  const selections = splitOptionValues(value);
+  return selections.length > 0 && selections.every((selection) => candidates.includes(selection));
+}
+
+function shouldClearClassResourceSelection(value: unknown, candidates: string[], enforceExact: boolean) {
+  const selections = splitOptionValues(value);
+  return selections.length > 0
+    && (enforceExact || candidates.length > 0)
+    && selections.some((selection) => !candidates.includes(selection));
 }
 
 function getClassTuitionManwonValue(value: unknown) {
@@ -418,7 +441,12 @@ function createNextClassScheduleSlot(slots: ClassScheduleSlot[]) {
 }
 
 function getClassSubjectValue(raw: Record<string, unknown> = {}) {
-  return text(raw.subject);
+  const subject = text(raw.subject);
+  return parseAcademicSubject(subject) || subject;
+}
+
+function isScienceClassSubject(value: unknown) {
+  return parseAcademicSubject(value) === "과학";
 }
 
 function getClassTeacherValues(raw: Record<string, unknown> = {}) {
@@ -445,27 +473,8 @@ function getClassTeacherCatalogRows(rawRows: Record<string, unknown>[]) {
   return [...byIdOrName.values()];
 }
 
-function normalizeClassTeacherCatalogSubjects(value: unknown) {
-  if (Array.isArray(value)) {
-    return value.map(text).filter(Boolean);
-  }
-  return splitOptionValues(value);
-}
-
-function normalizeClassTeacherSubjectToken(value: unknown) {
-  return text(value).replace(/\s+/g, "").replace(/(과목|팀)$/g, "");
-}
-
 function isClassTeacherCatalogForSubject(catalog: Record<string, unknown>, subject: string) {
-  const selectedSubject = text(subject);
-  if (!selectedSubject) return true;
-  const subjects = normalizeClassTeacherCatalogSubjects(catalog.subjects);
-  if (subjects.length === 0) return true;
-  const selectedToken = normalizeClassTeacherSubjectToken(selectedSubject);
-  return subjects.some((catalogSubject) => {
-    const catalogToken = normalizeClassTeacherSubjectToken(catalogSubject);
-    return catalogSubject === selectedSubject || catalogToken === selectedToken;
-  });
+  return isTeacherCatalogForClassSubject(catalog, subject);
 }
 
 function getClassTeacherCatalogOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
@@ -477,12 +486,15 @@ function getClassTeacherCatalogOptionsForSubject(rawRows: Record<string, unknown
 }
 
 function getClassTeacherOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
-  const selectedSubject = text(subject);
+  const selectedSubject = parseAcademicSubject(subject) || text(subject);
   const subjectRows = selectedSubject
     ? rawRows.filter((raw) => getClassSubjectValue(raw) === selectedSubject)
     : rawRows;
   const sourceRows = subjectRows.length > 0 ? subjectRows : rawRows;
   const catalogOptions = getClassTeacherCatalogOptionsForSubject(rawRows, selectedSubject);
+  if (isScienceClassSubject(selectedSubject)) {
+    return uniqueSortedOptions(catalogOptions, catalogOptions);
+  }
   return uniqueSortedOptions(
     [
       ...catalogOptions,
@@ -492,14 +504,45 @@ function getClassTeacherOptionsForSubject(rawRows: Record<string, unknown>[], su
   );
 }
 
+function getClassClassroomCatalogRows(rawRows: Record<string, unknown>[]) {
+  const byIdOrName = new Map<string, Record<string, unknown>>();
+  for (const raw of rawRows) {
+    const catalogs = Array.isArray(raw.available_classroom_catalogs)
+      ? raw.available_classroom_catalogs
+      : Array.isArray(raw.availableClassroomCatalogs)
+        ? raw.availableClassroomCatalogs
+        : [];
+    for (const catalog of catalogs) {
+      if (!catalog || typeof catalog !== "object") continue;
+      const catalogRow = catalog as Record<string, unknown>;
+      const name = text(catalogRow.name);
+      const key = text(catalogRow.id) || name;
+      if (key && name) byIdOrName.set(key, catalogRow);
+    }
+  }
+  return [...byIdOrName.values()];
+}
+
 function getClassClassroomOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
-  const selectedSubject = text(subject);
+  const selectedSubject = parseAcademicSubject(subject) || text(subject);
   const subjectRows = selectedSubject
     ? rawRows.filter((raw) => getClassSubjectValue(raw) === selectedSubject)
     : rawRows;
   const sourceRows = subjectRows.length > 0 ? subjectRows : rawRows;
+  const catalogOptions = getClassClassroomCatalogRows(rawRows)
+    .filter((catalog) => catalog.is_visible !== false && isClassroomCatalogForClassSubject(catalog, selectedSubject))
+    .sort((left, right) => Number(left.sort_order || left.sortOrder || 0) - Number(right.sort_order || right.sortOrder || 0) || text(left.name).localeCompare(text(right.name), "ko", { numeric: true }))
+    .map((catalog) => text(catalog.name))
+    .filter(Boolean);
+  if (isScienceClassSubject(selectedSubject)) {
+    return uniqueSortedOptions(catalogOptions, catalogOptions);
+  }
   return uniqueSortedOptions(
-    sourceRows.flatMap((raw) => splitOptionValues(raw.classroom || raw.room)),
+    [
+      ...catalogOptions,
+      ...sourceRows.flatMap((raw) => splitOptionValues(raw.classroom || raw.room)),
+    ],
+    catalogOptions,
   );
 }
 
@@ -760,6 +803,7 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
         : normalizeClassStatusForForm(raw.status || row?.status || row?.statusValue);
     }
     if (name === "classroom") return text(raw.classroom || raw.room);
+    if (name === "subjectAreaKey") return text(raw.subject_area_key || raw.subjectAreaKey);
     if (name === "fee") return text(raw.fee || raw.tuition);
     if (name === "tags") return Array.isArray(raw.tags) ? raw.tags.join(", ") : text(raw.tags);
     return text(raw[name]);
@@ -789,6 +833,7 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
   }
   if (payload.fee) payload.tuition = payload.fee;
   if (kind === "classes") {
+    payload.subject_area_key = text(payload.subjectAreaKey || payload.subject_area_key) || null;
     const textbookIds = parseTextbookIds(formState.textbookIds);
     payload.textbook_ids = textbookIds;
     payload.textbookIds = textbookIds;
@@ -1197,7 +1242,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const searchParams = useSearchParams();
   const { canManageAll } = useAuth();
   const config = PAGE_CONFIG[kind];
-  const { rows, stats, loading, error, refresh } = useManagementRecords(kind);
+  const { rows, stats, loading, error, classFormReferences, refresh } = useManagementRecords(kind);
   const canMutateRows = canManageAll;
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
@@ -1323,21 +1368,45 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       .slice(0, 8);
   }, [detailRowQuery, rows, selectedRow?.id]);
   const selectedClassSubject = kind === "classes" ? text(form.subject) : "";
+  const scienceSubjectAreaOptions = useMemo(
+    () => classFormReferences.scienceSubjectAreas
+      .filter((area) => area.is_active !== false && text(area.area_key || area.areaKey))
+      .sort((left, right) => Number(left.sort_order || left.sortOrder || 0) - Number(right.sort_order || right.sortOrder || 0))
+      .map((area) => ({
+        value: text(area.area_key || area.areaKey),
+        label: text(area.label) || text(area.area_key || area.areaKey),
+      })),
+    [classFormReferences.scienceSubjectAreas],
+  );
   const classSelectOptions = useMemo(() => {
     if (kind !== "classes") {
       return {} as Record<string, string[]>;
     }
 
-    const rawRows = rows.map((row) => (row.raw || {}) as Record<string, unknown>);
+    const rawRows = [
+      ...rows.map((row) => (row.raw || {}) as Record<string, unknown>),
+      {
+        available_teacher_catalogs: classFormReferences.teacherCatalogs,
+        available_classroom_catalogs: classFormReferences.classroomCatalogs,
+      },
+    ];
 
     return {
       status: [...CLASS_STATUS_OPTIONS],
-      subject: uniqueSortedOptions(rawRows.map((raw) => text(raw.subject)), ["영어", "수학"]),
-      grade: uniqueSortedOptions(rawRows.map((raw) => text(raw.grade))),
+      subject: uniqueSortedOptions(buildClassSubjectOptions(rawRows), [...ACADEMIC_SUBJECT_VALUES]),
+      grade: isScienceClassSubject(selectedClassSubject)
+        ? ["고1", "고2", "고3"]
+        : uniqueSortedOptions(rawRows.map((raw) => text(raw.grade))),
       teacher: getClassTeacherOptionsForSubject(rawRows, selectedClassSubject),
       classroom: getClassClassroomOptionsForSubject(rawRows, selectedClassSubject),
     } satisfies Record<string, string[]>;
-  }, [kind, rows, selectedClassSubject]);
+  }, [classFormReferences.classroomCatalogs, classFormReferences.teacherCatalogs, kind, rows, selectedClassSubject]);
+  const scienceClassCandidateSelectionBlocked = kind === "classes"
+    && isScienceClassSubject(selectedClassSubject)
+    && (
+      !hasExactClassResourceSelection(form.teacher, classSelectOptions.teacher || [])
+      || !hasExactClassResourceSelection(form.classroom, classSelectOptions.classroom || [])
+    );
   const studentSchoolCategory = getStudentSchoolCategoryFromForm(form);
   const studentSelectOptions = useMemo(() => {
     if (kind !== "students") {
@@ -1653,22 +1722,37 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
   const handleEditableFieldChange = (fieldName: string, nextValue: string) => {
     const normalizedValue = nextValue === "__none__" ? "" : nextValue;
     if (kind === "classes" && fieldName === "subject") {
-      const rawRows = rows.map((row) => (row.raw || {}) as Record<string, unknown>);
+      const nextSubject = parseAcademicSubject(normalizedValue) || normalizedValue;
+      const rawRows = [
+        ...rows.map((row) => (row.raw || {}) as Record<string, unknown>),
+        {
+          available_teacher_catalogs: classFormReferences.teacherCatalogs,
+          available_classroom_catalogs: classFormReferences.classroomCatalogs,
+        },
+      ];
       const teacherOptions = getClassTeacherOptionsForSubject(rawRows, normalizedValue);
       const classroomOptions = getClassClassroomOptionsForSubject(rawRows, normalizedValue);
+      const enforceExactScienceCandidates = isScienceClassSubject(nextSubject);
       const nextSlots = (classScheduleSlots.length > 0 ? classScheduleSlots : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom)).map((slot) => ({
         ...slot,
-        teacher: slot.teacher && teacherOptions.length > 0 && !teacherOptions.includes(slot.teacher) ? "" : slot.teacher,
-        classroom: slot.classroom && classroomOptions.length > 0 && !classroomOptions.includes(slot.classroom) ? "" : slot.classroom,
+        teacher: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactScienceCandidates) ? "" : slot.teacher,
+        classroom: shouldClearClassResourceSelection(slot.classroom, classroomOptions, enforceExactScienceCandidates) ? "" : slot.classroom,
       }));
       const formattedSlots = formatClassScheduleSlots(nextSlots);
       setClassScheduleSlots(nextSlots);
       setForm((current) => {
-        const next = { ...current, [fieldName]: normalizedValue, ...formattedSlots };
-        if (next.teacher && teacherOptions.length > 0 && !teacherOptions.includes(next.teacher)) {
+        const next: FormState = { ...current, [fieldName]: nextSubject, ...formattedSlots };
+        if (isScienceClassSubject(nextSubject)) {
+          if (!isScienceGrade(next.grade)) next.grade = "";
+        } else {
+          next.subjectAreaKey = "";
+        }
+        // Legacy narrowing contract: if (next.teacher && teacherOptions.length > 0 && !teacherOptions.includes(next.teacher))
+        if (shouldClearClassResourceSelection(next.teacher, teacherOptions, enforceExactScienceCandidates)) {
           next.teacher = "";
         }
-        if (next.classroom && classroomOptions.length > 0 && !classroomOptions.includes(next.classroom)) {
+        // Legacy narrowing contract: if (next.classroom && classroomOptions.length > 0 && !classroomOptions.includes(next.classroom)) {
+        if (shouldClearClassResourceSelection(next.classroom, classroomOptions, enforceExactScienceCandidates)) {
           next.classroom = "";
         }
         return next;
@@ -1895,9 +1979,12 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           ? selectedClassGroups.map((group) => group.name).join(", ")
           : `${selectedClassGroups[0]?.name || "기간"} 외 ${selectedClassGroups.length - 1}개`;
     const classGroupField: Field = { name: "classGroupIds", label: "기간", placeholder: "기간 선택" };
-    const fieldsToRender = fieldNames
+    const requestedFields = fieldNames
       ? fieldNames.map((fieldName) => fieldName === "classGroupIds" ? classGroupField : FORM_FIELDS[kind].find((field) => field.name === fieldName)).filter((field): field is Field => Boolean(field))
       : kind === "classes" ? [...FORM_FIELDS[kind], classGroupField] : FORM_FIELDS[kind];
+    const fieldsToRender = requestedFields.filter((field) => (
+      kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject)
+    ));
     const toggleClassGroup = (groupId: string) => {
       const nextIds = new Set(selectedClassGroupIds);
       if (nextIds.has(groupId)) {
@@ -1918,7 +2005,26 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           return (
             <div key={field.name} className={fieldWrapperClassName}>
               <Label htmlFor={id}>{field.label}</Label>
-              {kind === "classes" && field.name === "classGroupIds" ? (
+              {kind === "classes" && field.name === "subjectAreaKey" ? (
+                <>
+                  <Select
+                    value={value || "__none__"}
+                    onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
+                    disabled={!canMutateRows || scienceSubjectAreaOptions.length === 0}
+                  >
+                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택">
+                      <SelectValue placeholder={field.placeholder} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">선택 안 함</SelectItem>
+                      {scienceSubjectAreaOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!value ? <p className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
+                </>
+              ) : kind === "classes" && field.name === "classGroupIds" ? (
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
@@ -2168,7 +2274,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       await Promise.all(rows.map((row) => {
         const payload = compact({ [change.field]: value }, kind, row);
         if (kind === "students") return service.updateStudent(payload);
-        if (kind === "classes") return service.updateClass(payload);
+        if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences });
         return service.updateTextbook(payload);
       }));
       await refresh();
@@ -2177,7 +2283,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     } finally {
       setSaving(false);
     }
-  }, [canMutateRows, kind, refresh]);
+  }, [canMutateRows, classFormReferences, kind, refresh]);
 
   const deleteRows = useCallback(async (rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2273,6 +2379,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       setOperationError("등록 권한이 없습니다.");
       return;
     }
+    if (scienceClassCandidateSelectionBlocked) {
+      setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
+      return;
+    }
     setOperationError(null);
     setSaveNotice("");
     setSaving(true);
@@ -2281,7 +2391,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       if (kind === "students") {
         await service.createStudent(payload);
       } else if (kind === "classes") {
-        const created = await service.createClass(payload);
+        const created = await service.createClass(payload, { candidateMembershipContext: classFormReferences });
         const classId = getSavedClassId(created, payload.id);
         await service.replaceClassGroupMemberships({
           classId,
@@ -2306,6 +2416,10 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       setOperationError("수정 권한이 없습니다.");
       return;
     }
+    if (scienceClassCandidateSelectionBlocked) {
+      setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
+      return;
+    }
     setOperationError(null);
     setSaveNotice("");
     setSaving(true);
@@ -2314,7 +2428,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       if (kind === "students") {
         await service.updateStudent(payload);
       } else if (kind === "classes") {
-        const updated = await service.updateClass(payload);
+        const updated = await service.updateClass(payload, { candidateMembershipContext: classFormReferences });
         const classId = getSavedClassId(updated, payload.id || selectedRow.id);
         await service.replaceClassGroupMemberships({
           classId,
@@ -2542,7 +2656,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 	          aria-label={saving ? "저장 중" : "저장"}
 	          title={saving ? "저장 중" : "저장"}
 	          onClick={handleDetailSave}
-	          disabled={saving || !canMutateRows}
+	          disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}
 	        >
 	          <Save className="size-3.5" aria-hidden="true" />
 	          <span className="ml-1.5 max-w-full truncate">{saving ? "저장 중" : "저장"}</span>
@@ -2967,6 +3081,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
                 {renderEditableFields("detail", [
                   "grade",
                   "subject",
+                  "subjectAreaKey",
                   "name",
                   "capacity",
                   "fee",
@@ -2983,7 +3098,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
 
               <DialogFooter className="items-center gap-3">
                 {renderSaveStatus()}
-                <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button>
+                <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
               </DialogFooter>
             </div>
           ) : isDetail && selectedRow ? (
@@ -3074,7 +3189,7 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
               <DialogFooter className="items-center gap-3">
                 {renderSaveStatus()}
                 <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>취소</Button>
-                <Button type="submit" disabled={saving || !canMutateRows}>{saving ? "저장 중" : "등록 저장"}</Button>
+                <Button type="submit" disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "등록 저장"}</Button>
               </DialogFooter>
             </form>
           )}

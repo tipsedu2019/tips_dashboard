@@ -36,10 +36,22 @@ import type {
   RegistrationSubjectTrackFixtureDebugSnapshot,
 } from "./registration-track-fixture-runtime"
 import { normalizeRegistrationLevelTestPlace } from "./registration-level-test-place.ts"
+import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import { ACADEMIC_SUBJECT_VALUES, sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 
 const FIXTURE_NOW = "2026-07-13T09:00:00+09:00"
 const FIXTURE_ACTOR_ID = "fixture-profile-staff"
-const REGISTRATION_SUBJECT_ORDER: RegistrationSubject[] = ["영어", "수학"]
+const REGISTRATION_SUBJECT_ORDER: readonly RegistrationSubject[] = ACADEMIC_SUBJECT_VALUES
+const FIXTURE_SUBJECT_KEYS: Record<RegistrationSubject, string> = {
+  영어: "english",
+  수학: "math",
+  과학: "science",
+}
+const FIXTURE_DIRECTORS: Record<RegistrationSubject, { profileId: string; name: string }> = {
+  영어: { profileId: "fixture-profile-english-director", name: "강부희" },
+  수학: { profileId: "fixture-profile-math-director", name: "양소윤" },
+  과학: { profileId: "fixture-profile-science-director", name: "과학원장" },
+}
 const REGISTRATION_INITIAL_ACTIONS = ["inquiry", "level_test", "direct_phone", "visit"] as const
 type RegistrationInitialAction = typeof REGISTRATION_INITIAL_ACTIONS[number]
 
@@ -132,12 +144,12 @@ export function parseRegistrationSubjectTrackFixtureQueryFault(input: {
   return null
 }
 
-export type RegistrationSubjectTrackFixtureViewerKey = "english_admin" | "math_admin" | "staff" | "assistant"
+export type RegistrationSubjectTrackFixtureViewerKey = "english_admin" | "math_admin" | "science_teacher" | "staff" | "assistant"
 
 export type RegistrationSubjectTrackFixtureViewer = {
   key: RegistrationSubjectTrackFixtureViewerKey
   viewerId: string
-  viewerRole: "admin" | "staff" | "assistant"
+  viewerRole: "admin" | "staff" | "assistant" | "teacher"
 }
 
 export type RegistrationSubjectTrackFixtureReceipt = {
@@ -189,6 +201,7 @@ export type RegistrationSubjectTrackFixtureState = {
     schoolCatalogStatus: "authoritative"
     schoolCatalogError: null
   }
+  subjectCapabilities: RegistrationSubjectCapability[]
   caseDetails: Record<string, OpsRegistrationCaseDetail>
   classDetails: Record<string, OpsRegistrationClassDetail>
   viewers: Record<RegistrationSubjectTrackFixtureViewerKey, RegistrationSubjectTrackFixtureViewer>
@@ -373,6 +386,10 @@ export function createRegistrationSubjectTrackFixtureAdapter(
       }
       return Promise.resolve(clone(runtime.getState().optionData))
     },
+    loadSubjectCapabilities: () => Promise.resolve(clone(runtime.getState().subjectCapabilities)),
+    loadScienceConsultationClassOptions: () => Promise.resolve(clone(
+      runtime.getState().optionData.classes.filter((item) => item.subject === "과학"),
+    )),
     loadClassDetails: (classIds) => Promise.resolve(getRegistrationSubjectTrackFixtureClassDetails(runtime.getState(), classIds)),
     debugSnapshot,
     debugSetNextActionBehavior: (behavior) => {
@@ -553,6 +570,7 @@ function track(input: {
   phoneReadyAt?: string | null
   phoneReadySource?: RegistrationPhoneReadySource | null
 }): OpsRegistrationTrackSummary {
+  const defaultDirector = FIXTURE_DIRECTORS[input.subject]
   return {
     id: input.id,
     taskId: input.taskId,
@@ -560,11 +578,15 @@ function track(input: {
     status: input.status,
     legacy: false,
     directorProfileId: input.directorProfileId === undefined
-      ? (input.subject === "영어" ? "fixture-profile-english-director" : "fixture-profile-math-director")
+      ? defaultDirector.profileId
       : input.directorProfileId,
-    directorName: input.directorName ?? (input.subject === "영어" ? "강부희" : "양소윤"),
+    directorName: input.directorName ?? defaultDirector.name,
     directorAssignmentSource: input.migrationReviewRequired ? "migration" : "default",
-    directorAssignmentRuleKey: input.migrationReviewRequired ? "" : `academic-director-v1:2026:${input.subject}:고1`,
+    directorAssignmentRuleKey: input.migrationReviewRequired
+      ? ""
+      : input.subject === "과학"
+        ? `subject-director-v1:과학:${defaultDirector.profileId}`
+        : `academic-director-v1:2026:${input.subject}:고1`,
     waitingKind: "",
     levelTestRetakeDecision: "",
     migrationReviewRequired: Boolean(input.migrationReviewRequired),
@@ -650,14 +672,24 @@ function classOption(input: {
   textbookIds: string[]
   startDate: string
 }): OpsRegistrationClassDetail {
+  const teacherBySubject: Record<RegistrationSubject, string> = {
+    영어: "강부희",
+    수학: "양소윤",
+    과학: "과학원장",
+  }
+  const roomBySubject: Record<RegistrationSubject, string> = {
+    영어: "201",
+    수학: "301",
+    과학: "별관 4강",
+  }
   return {
     id: input.id,
     label: input.label,
     meta: `${input.subject} · 고1`,
     subject: input.subject,
     grade: "고1",
-    teacher: input.subject === "영어" ? "강부희" : "양소윤",
-    room: input.subject === "영어" ? "201" : "301",
+    teacher: teacherBySubject[input.subject],
+    room: roomBySubject[input.subject],
     schedule: "주 2회",
     schedulePlan: {
       sessions: [
@@ -691,7 +723,7 @@ function buildFixtureCases() {
     updatedAt: FIXTURE_NOW,
   }
   const dualAttempts: OpsRegistrationLevelTest[] = dualTracks.map((item) => ({
-    id: item.subject === "영어" ? "fixture-attempt-dual-english" : "fixture-attempt-dual-math",
+    id: `fixture-attempt-dual-${FIXTURE_SUBJECT_KEYS[item.subject]}`,
     trackId: item.id,
     appointmentId: dualAppointment.id,
     attemptNumber: 1,
@@ -1001,21 +1033,25 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     "fixture-class-eng-a": classOption({ id: "fixture-class-eng-a", label: "고1 영어 정규 A", subject: "영어", textbookIds: ["fixture-textbook-eng-a"], startDate: "2026-07-20" }),
     "fixture-class-eng-special": classOption({ id: "fixture-class-eng-special", label: "고1 영어 특강", subject: "영어", textbookIds: ["fixture-textbook-eng-special"], startDate: "2026-07-21" }),
     "fixture-class-math-a": classOption({ id: "fixture-class-math-a", label: "고1 수학 정규 A", subject: "수학", textbookIds: ["fixture-textbook-math-a"], startDate: "2026-07-20" }),
+    "fixture-class-science-a": classOption({ id: "fixture-class-science-a", label: "고1 과학 정규 A", subject: "과학", textbookIds: ["fixture-textbook-science-a"], startDate: "2026-07-20" }),
   }
   const textbooks: OpsTextbookOption[] = [
     { id: "fixture-textbook-eng-a", label: "고1 영어 기본서", publisher: "TIPS", subject: "영어" },
     { id: "fixture-textbook-eng-special", label: "고1 영어 특강 교재", publisher: "TIPS", subject: "영어" },
     { id: "fixture-textbook-math-a", label: "고1 수학 기본서", publisher: "TIPS", subject: "수학" },
+    { id: "fixture-textbook-science-a", label: "고1 과학 기본서", publisher: "TIPS", subject: "과학" },
   ]
   const profiles: OpsProfileOption[] = [
     { id: "fixture-profile-english-director", label: "강부희", email: "english-director@fixture.local", loginId: "fixture-english-director", role: "admin" },
     { id: "fixture-profile-math-director", label: "양소윤", email: "math-director@fixture.local", loginId: "fixture-math-director", role: "admin" },
+    { id: "fixture-profile-science-director", label: "과학원장", email: "science-director@fixture.local", loginId: "fixture-science-director", role: "teacher" },
     { id: "fixture-profile-staff", label: "운영팀", email: "staff@fixture.local", loginId: "fixture-staff", role: "staff" },
     { id: "fixture-profile-assistant", label: "조교", email: "assistant@fixture.local", loginId: "fixture-assistant", role: "assistant" },
   ]
   const teachers: OpsTeacherOption[] = [
     { id: "fixture-teacher-english", label: "강부희", subjects: ["영어"], profileId: "fixture-profile-english-director", accountEmail: "english-director@fixture.local", sortOrder: 1 },
     { id: "fixture-teacher-math", label: "양소윤", subjects: ["수학"], profileId: "fixture-profile-math-director", accountEmail: "math-director@fixture.local", sortOrder: 2 },
+    { id: "fixture-teacher-science", label: "과학원장", subjects: ["과학", "과학팀"], profileId: "fixture-profile-science-director", accountEmail: "science-director@fixture.local", sortOrder: 3 },
   ]
   const schools: OpsSchoolOption[] = [
     { id: "fixture-school-elementary", name: "새봄초", category: "elementary", sortOrder: 1 },
@@ -1041,6 +1077,11 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
   const notificationTargetScenario = createFixtureNotificationTargetScenario()
   return {
     workspaceData,
+    subjectCapabilities: [
+      { subject: "영어", isActive: true, registrationCreateEnabled: true, gradeLevels: ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3", "고1", "고2", "고3"], sortOrder: 10, defaultDirectorProfileId: null },
+      { subject: "수학", isActive: true, registrationCreateEnabled: true, gradeLevels: ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3", "고1", "고2", "고3"], sortOrder: 20, defaultDirectorProfileId: null },
+      { subject: "과학", isActive: true, registrationCreateEnabled: true, gradeLevels: ["고1", "고2", "고3"], sortOrder: 30, defaultDirectorProfileId: "fixture-profile-science-director" },
+    ],
     optionData: {
       profiles,
       students: [],
@@ -1059,6 +1100,7 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
     viewers: {
       english_admin: { key: "english_admin", viewerId: "fixture-profile-english-director", viewerRole: "admin" },
       math_admin: { key: "math_admin", viewerId: "fixture-profile-math-director", viewerRole: "admin" },
+      science_teacher: { key: "science_teacher", viewerId: "fixture-profile-science-director", viewerRole: "teacher" },
       staff: { key: "staff", viewerId: "fixture-profile-staff", viewerRole: "staff" },
       assistant: { key: "assistant", viewerId: "fixture-profile-assistant", viewerRole: "assistant" },
     },
@@ -1405,8 +1447,7 @@ function orderedFixtureSubjects(value: unknown): RegistrationSubject[] {
   if (value.some((entry) => !REGISTRATION_SUBJECT_ORDER.includes(fixtureInputText(entry) as RegistrationSubject))) {
     fixtureInitialError("registration_subject_invalid")
   }
-  const selected = new Set(value.map(fixtureInputText))
-  const subjects = REGISTRATION_SUBJECT_ORDER.filter((subject) => selected.has(subject))
+  const subjects = sortAcademicSubjects(value) as RegistrationSubject[]
   if (subjects.length === 0) fixtureInitialError("registration_subjects_required")
   return subjects
 }
@@ -1467,9 +1508,10 @@ function isFixtureDirectorEligible(
   const profile = state.optionData.profiles.find((item) => item.id === profileId)
   return Boolean(
     profile
-    && ["admin", "staff"].includes(profile.role)
+    && (["admin", "staff"].includes(profile.role) || (subject === "과학" && profile.role === "teacher"))
     && state.optionData.teachers.some((teacher) => (
-      teacher.profileId === profileId && teacher.subjects.includes(subject)
+      teacher.profileId === profileId
+      && (subject === "과학" ? teacher.subjects.includes("과학팀") : teacher.subjects.includes(subject))
     )),
   )
 }
@@ -1597,7 +1639,9 @@ function resolveFixtureInitialDirectors(
       profileId: eligibleProfileId,
       source: eligibleProfileId ? (override ? "manual" : "default") : "",
       ruleKey: eligibleProfileId && !override
-        ? `academic-director-v1:2026:${subject}:${input.schoolGrade}`
+        ? subject === "과학"
+          ? `subject-director-v1:과학:${eligibleProfileId}`
+          : `academic-director-v1:2026:${subject}:${input.schoolGrade}`
         : "",
       name: eligibleProfileId ? profile?.label || teacher?.label || "" : "",
     }
@@ -1963,11 +2007,11 @@ export function reduceRegistrationSubjectTrackFixture(
     case "syncRegistrationCaseSubjects": {
       const taskId = asText(payload, "taskId")
       const detail = requireCase(state.caseDetails[taskId], "case_not_found")
-      const subjects = Array.from(new Set((payload.subjects as RegistrationSubject[] || []).filter((item) => ["영어", "수학"].includes(item))))
+      const subjects = sortAcademicSubjects(payload.subjects as RegistrationSubject[] || []) as RegistrationSubject[]
       const kept = detail.tracks.filter((item) => subjects.includes(item.subject))
       for (const subject of subjects) {
         if (!kept.some((item) => item.subject === subject)) {
-          kept.push(track({ id: `fixture-track-${taskId}-${subject === "영어" ? "english" : "math"}`, taskId, subject, status: "inquiry" }))
+          kept.push(track({ id: `fixture-track-${taskId}-${FIXTURE_SUBJECT_KEYS[subject]}`, taskId, subject, status: "inquiry" }))
         }
       }
       detail.tracks = kept

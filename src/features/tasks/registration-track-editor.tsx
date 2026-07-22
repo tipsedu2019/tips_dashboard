@@ -63,12 +63,15 @@ import type {
   RegistrationSchoolCatalogStatus,
 } from "./ops-task-service"
 import { type RegistrationDirectorCatalogStatus } from "./registration-director-default.js"
+import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import { ACADEMIC_SUBJECT_VALUES } from "../../lib/academic-subject-registry.ts"
 import {
   getRegistrationActionPermissions,
   getRegistrationAdmissionApplicationState,
   getRegistrationCurrentClassWaitClassId,
 } from "./registration-track-model.js"
 import {
+  loadAssignedScienceConsultationClassOptions,
   updateRegistrationCaseCommon,
   type OpsRegistrationAppointment,
   type OpsRegistrationCaseDetail,
@@ -95,6 +98,7 @@ export type RegistrationApplicationProps = {
   directorOptions?: OpsProfileOption[]
   teacherOptions?: OpsTeacherOption[]
   directorCatalogStatus?: RegistrationDirectorCatalogStatus
+  subjectCapabilities: readonly RegistrationSubjectCapability[]
   onRetryDirectorCatalog?: () => boolean | Promise<boolean>
   schools?: OpsSchoolOption[]
   schoolCatalogStatus?: "loading" | RegistrationSchoolCatalogStatus
@@ -315,6 +319,7 @@ export function RegistrationApplication({
   directorOptions = [],
   teacherOptions = [],
   directorCatalogStatus = "loading",
+  subjectCapabilities,
   onRetryDirectorCatalog,
   schools = [],
   schoolCatalogStatus = "loading",
@@ -335,6 +340,7 @@ export function RegistrationApplication({
   const [migrationConflictRetrying, setMigrationConflictRetrying] = useState(false)
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
+  const [scienceConsultationClassOptions, setScienceConsultationClassOptions] = useState<OpsClassOption[]>([])
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
   const onDirtyChangeRef = useRef(onDirtyChange)
@@ -346,9 +352,13 @@ export function RegistrationApplication({
     initialFocusRequestRef.current = { taskId: detail.task.id, trackId: focusTrackId }
   }
   const canManageCase = viewerRole === "admin" || viewerRole === "staff"
-  const activeTrackId = resolveRegistrationActiveTrackId(detail.tracks, focusTrackId)
-  const activeTrack = detail.tracks.find((track) => track.id === activeTrackId) || null
-  const reviewTrack = detail.tracks.find((track) => track.migrationReviewRequired) || null
+  const orderedTracks = useMemo(() => [...detail.tracks].sort((left, right) => (
+    ACADEMIC_SUBJECT_VALUES.indexOf(left.subject) - ACADEMIC_SUBJECT_VALUES.indexOf(right.subject)
+    || left.id.localeCompare(right.id)
+  )), [detail.tracks])
+  const activeTrackId = resolveRegistrationActiveTrackId(orderedTracks, focusTrackId)
+  const activeTrack = orderedTracks.find((track) => track.id === activeTrackId) || null
+  const reviewTrack = orderedTracks.find((track) => track.migrationReviewRequired) || null
   const activeMigrationConflictState = migrationConflictState?.taskId === detail.task.id
     ? migrationConflictState
     : null
@@ -437,20 +447,20 @@ export function RegistrationApplication({
     setMigrationConflictState(null)
   }
 
-  const permissionsByTrackId = useMemo(() => new Map(detail.tracks.map((track) => {
+  const permissionsByTrackId = useMemo(() => new Map(orderedTracks.map((track) => {
     const activeConsultation = detail.consultations.find((item) => (
       item.trackId === track.id
       && ((track.status === "consultation_waiting" && item.mode === "phone" && item.status === "waiting")
         || (track.status === "visit_consultation_scheduled" && item.mode === "visit" && item.status === "scheduled"))
     )) || null
     return [track.id, getRegistrationActionPermissions({ viewerId, viewerRole, track, activeConsultation }) as RegistrationTrackActionPermissions]
-  })), [detail.consultations, detail.tracks, viewerId, viewerRole])
-  const trackStates = detail.tracks.map((track) => getRegistrationApplicationTrackState({
+  })), [detail.consultations, orderedTracks, viewerId, viewerRole])
+  const trackStates = orderedTracks.map((track) => getRegistrationApplicationTrackState({
     track,
     canManage: permissionsByTrackId.get(track.id)?.canManage || false,
     canCompleteConsultation: permissionsByTrackId.get(track.id)?.canCompleteConsultation || false,
   }))
-  const trackContexts: TrackContext[] = detail.tracks.map((track) => {
+  const trackContexts: TrackContext[] = orderedTracks.map((track) => {
     const levelTests = detail.levelTests.filter((item) => item.trackId === track.id)
     const latestLevelTest = levelTests.reduce<typeof levelTests[number] | null>((latest, item) => (
       !latest || item.attemptNumber > latest.attemptNumber ? item : latest
@@ -474,8 +484,28 @@ export function RegistrationApplication({
         : null,
     }
   })
+  const assignedScienceConsultationId = trackContexts.find((context) => (
+    viewerRole === "teacher"
+    && context.track.subject === "과학"
+    && context.permissions.canCompleteConsultation
+  ))?.activeConsultation?.id || ""
+  useEffect(() => {
+    let active = true
+    setScienceConsultationClassOptions([])
+    if (!assignedScienceConsultationId || !viewerId) return () => { active = false }
+    void loadAssignedScienceConsultationClassOptions({ viewerId, consultationId: assignedScienceConsultationId })
+      .then((options) => {
+        if (active) setScienceConsultationClassOptions(options.filter((item) => item.subject === "과학"))
+      })
+      .catch(() => {
+        if (!active) return
+        setScienceConsultationClassOptions([])
+        onWarning("과학 수업 목록을 불러오지 못했습니다.")
+      })
+    return () => { active = false }
+  }, [assignedScienceConsultationId, onWarning, viewerId])
   const admissionApplicationState = getRegistrationAdmissionApplicationState({
-    tracks: detail.tracks,
+    tracks: orderedTracks,
     enrollments: detail.enrollments,
     admissionNoticeSent: Boolean(detail.task.registration?.admissionNoticeSent),
     admissionApplicationMessageStatus: detail.admissionApplicationMessageStatus,
@@ -495,11 +525,11 @@ export function RegistrationApplication({
     || admissionMessageRecoveryAvailable
   )
   const appointmentActionPlans = getRegistrationApplicationAppointmentActionPlans({
-    tracks: detail.tracks,
+    tracks: orderedTracks,
     appointments: detail.appointments,
     levelTests: detail.levelTests,
     consultations: detail.consultations,
-    actionableTrackIds: detail.tracks
+    actionableTrackIds: orderedTracks
       .filter((track) => permissionsByTrackId.get(track.id)?.canManage)
       .map((track) => track.id),
   })
@@ -534,7 +564,7 @@ export function RegistrationApplication({
   const waitingState = splitPlacementState("waiting")
   const registrationState = splitPlacementState("registration")
   const focusedState = trackStates.find((state) => state.trackId === activeTrackId) || null
-  const subjectPanelIdsByTrackId = Object.fromEntries(detail.tracks.map((track) => [
+  const subjectPanelIdsByTrackId = Object.fromEntries(orderedTracks.map((track) => [
     track.id,
     ["inquiry", "level_test", "consultation", "placement", "admission"]
       .map((section) => `registration-${section}-${track.id}`),
@@ -567,9 +597,9 @@ export function RegistrationApplication({
     if (initialAppointmentAppliedRef.current === initialKey) return
     const appointment = detail.appointments.find((item) => item.id === initialAppointmentId) || null
     if (!appointment) return
-    const fallbackTrackId = focusTrackId && detail.tracks.some((track) => track.id === focusTrackId)
+    const fallbackTrackId = focusTrackId && orderedTracks.some((track) => track.id === focusTrackId)
       ? focusTrackId
-      : detail.tracks[0]?.id || ""
+      : orderedTracks[0]?.id || ""
     const initialAppointmentParticipantTrackIds = resolveRegistrationAppointmentEditorSeedTrackIds(
       appointmentActionPlans,
       appointment.id,
@@ -584,7 +614,7 @@ export function RegistrationApplication({
       setAppointmentEditor({ kind: appointment.kind, appointmentId: appointment.id, initialTrackId })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [appointmentActionPlans, detail.appointments, detail.task.id, detail.tracks, focusTrackId, initialAppointmentId])
+  }, [appointmentActionPlans, detail.appointments, detail.task.id, focusTrackId, initialAppointmentId, orderedTracks])
 
   useEffect(() => {
     if (!appointmentEditor) return
@@ -753,6 +783,7 @@ export function RegistrationApplication({
             directorOptions={directorOptions}
             teacherOptions={teacherOptions}
             directorCatalogStatus={directorCatalogStatus}
+            subjectCapabilities={subjectCapabilities}
             onRetryDirectorCatalog={onRetryDirectorCatalog}
             onOpenVisit={(trackId) => {
               const target = trackContexts.find((item) => item.track.id === trackId)
@@ -772,7 +803,11 @@ export function RegistrationApplication({
               subject={context.track.subject}
               consultation={context.activeConsultation}
               active
-              classOptions={classOptions}
+              classOptions={viewerRole === "teacher"
+                && context.permissions.canCompleteConsultation
+                && context.track.subject === "과학"
+                ? scienceConsultationClassOptions
+                : classOptions}
               onReload={onReload}
               onWarning={onWarning}
               onDirtyChange={(dirty) => setDirty(`consultation:track-${context.track.id}`, dirty, `outcome:${context.activeConsultation?.id || context.track.id}`)}
@@ -837,7 +872,7 @@ export function RegistrationApplication({
         key={`${appointmentEditor.kind}:${editorAppointment?.id || "new"}:${editorAppointment?.notificationRevision ?? "new"}`}
         kind={appointmentEditor.kind}
         taskId={detail.task.id}
-        eligibleTracks={detail.tracks}
+        eligibleTracks={orderedTracks}
         initialTrackId={appointmentEditor.initialTrackId}
         appointment={editorAppointment}
         activities={appointmentActivities}
@@ -866,7 +901,7 @@ export function RegistrationApplication({
       studentName={detail.task.studentName || detail.task.title}
       closeAction={closeAction}
       historyAction={<RegistrationApplicationHistoryAction detail={detail} profiles={profiles} />}
-      tracks={detail.tracks.map((track) => ({
+      tracks={orderedTracks.map((track) => ({
         key: track.id,
         subject: track.subject,
         statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status],
@@ -899,9 +934,10 @@ export function RegistrationApplication({
           )}
           subjectSyncContent={(
             <RegistrationSubjectSyncSection
-              key={`${detail.task.id}:${detail.tracks.map((track) => track.id).join(",")}`}
+              key={`${detail.task.id}:${orderedTracks.map((track) => track.id).join(",")}`}
               detail={detail}
               canManage={canManageCase}
+              subjectCapabilities={subjectCapabilities}
               embedded
               onReload={onReload}
               onWarning={onWarning}
@@ -917,7 +953,7 @@ export function RegistrationApplication({
       )}
       levelTest={(
         <RegistrationApplicationLevelTestSection editable={sectionStates.level_test.editable}>
-          <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
+          <RegistrationApplicationSubjectTabs tracks={orderedTracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
           <RegistrationLevelTestSummary detail={detail} trackId={activeTrackId} />
           {renderTrackFrames("level_test")}
           {renderAppointmentActionPlans("level_test")}
@@ -926,7 +962,7 @@ export function RegistrationApplication({
       )}
       consultation={(
         <RegistrationApplicationConsultationSection editable={sectionStates.consultation.editable}>
-          <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
+          <RegistrationApplicationSubjectTabs tracks={orderedTracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
           <RegistrationConsultationSummary detail={detail} trackId={activeTrackId} />
           {renderTrackFrames("consultation")}
           {renderAppointmentActionPlans("visit_consultation")}
@@ -940,7 +976,7 @@ export function RegistrationApplication({
           editable={waitingState.editable}
           fields={(
             <div className="grid gap-3">
-              <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
+              <RegistrationApplicationSubjectTabs tracks={orderedTracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
               {renderTrackFrames("placement", "waiting")}
             </div>
           )}
@@ -951,7 +987,7 @@ export function RegistrationApplication({
           editable={registrationState.editable}
           fields={(
             <div className="grid gap-3">
-              <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
+              <RegistrationApplicationSubjectTabs tracks={orderedTracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
               {renderTrackFrames("placement", "registration")}
             </div>
           )}
@@ -962,7 +998,7 @@ export function RegistrationApplication({
           editable={sectionStates.admission.editable}
           fields={(
             <div className="grid gap-3">
-              <RegistrationApplicationSubjectTabs tracks={detail.tracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
+              <RegistrationApplicationSubjectTabs tracks={orderedTracks.map((track) => ({ id: track.id, subject: track.subject, statusLabel: REGISTRATION_TRACK_STATUS_LABELS[track.status] }))} value={activeTrackId} panelIdsByTrackId={subjectPanelIdsByTrackId} onValueChange={handleSubjectTabChange} />
               {renderTrackFrames("admission")}
               {admissionTargetTracks.length > 0 ? (
                 <div className="flex flex-wrap gap-1" aria-label="입학신청서 발송 과목">
@@ -973,7 +1009,7 @@ export function RegistrationApplication({
               ) : null}
               <RegistrationAdmissionPanel
                 taskId={detail.task.id}
-                tracks={detail.tracks}
+                tracks={orderedTracks}
                 enrollments={detail.enrollments}
                 batches={detail.admissionBatches}
                 classes={classOptions}

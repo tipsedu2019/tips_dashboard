@@ -262,7 +262,7 @@ function hasRequiredGoogleChatConnection(
     if (rule.audienceKey === "management_team") return ["google_chat.management"]
     if (rule.audienceKey === "executive_team") return ["google_chat.executive"]
     if (rule.audienceKey === "subject_team") {
-      return ["google_chat.math", "google_chat.english"]
+      return ["google_chat.math", "google_chat.english", "google_chat.science"]
     }
     return []
   })()

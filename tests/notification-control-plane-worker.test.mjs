@@ -11,6 +11,14 @@ const workerForwardMigrationUrl = new URL(
   "../supabase/migrations/20260716195900_notification_control_plane_forward_compat.sql",
   import.meta.url,
 )
+const workerScheduleMigrationUrl = new URL(
+  "../supabase/migrations/20260716195500_notification_worker_schedule.sql",
+  import.meta.url,
+)
+const scienceConnectionMigrationUrl = new URL(
+  "../supabase/migrations/20260722120000_science_notification_connection.sql",
+  import.meta.url,
+)
 const registrationProviderClaimMigrationUrl = new URL(
   "../supabase/migrations/20260716195800_notification_registration_provider_claim.sql",
   import.meta.url,
@@ -2014,6 +2022,146 @@ test("forward prepare RPC는 가변 원본·수신자·delivery를 잠근 같은
   ].map((needle) => appointmentBranch.indexOf(needle))
   assert.ok(appointmentOrder.every((index) => index >= 0))
   assert.deepEqual([...appointmentOrder].sort((left, right) => left - right), appointmentOrder)
+})
+
+test("science forward migration은 canonical prepare worker 전체를 보존하고 subject-aware director를 재검증한다", async () => {
+  const [forward, scienceMigration] = await Promise.all([
+    readFile(workerForwardMigrationUrl, "utf8"),
+    readFile(scienceConnectionMigrationUrl, "utf8"),
+  ])
+  const canonical = functionBlock(forward, "prepare_notification_immediate_delivery_v1")
+  const science = functionBlock(scienceMigration, "prepare_notification_immediate_delivery_v1")
+
+  assert.ok(science.length >= canonical.length - 300, "canonical worker를 축약하면 안 된다")
+  for (const boundary of [
+    "notification_runtime_flags",
+    "notification_cutover_owners",
+    "ops_task_events",
+    "makeup_request_events",
+    "approval_events",
+    "ops_registration_appointments",
+    "ops_registration_subject_tracks",
+    "notification_deliveries",
+    "revalidate_immediate_notification_delivery_v1",
+    "finalize_notification_delivery_v1",
+    "commit_notification_in_app_delivery_v1",
+    "begin_notification_delivery_send_v1",
+  ]) {
+    assert.match(science, new RegExp(boundary, "i"), `${boundary} canonical 경계를 보존해야 한다`)
+  }
+  assert.match(
+    science,
+    /is_active_subject_director\(\s*v_delivery\.target_profile_id\s*,\s*track\.subject\s*\)/i,
+  )
+  assert.match(science, /v_delivery\.audience_key\s*=\s*'track_director'/i)
+  assert.match(science, /track\.task_id\s*=\s*v_parent_uuid/i)
+  assert.match(science, /track\.director_profile_id\s*=\s*v_delivery\.target_profile_id/i)
+  assert.match(
+    science,
+    /p_source_type\s*=\s*'registration_appointment'[\s\S]*?track\.id\s*=\s*any\(v_track_ids\)/i,
+  )
+  assert.match(
+    science,
+    /p_source_type\s*=\s*'ops_task_event'[\s\S]*?track\.id::text\s*=\s*\(v_event\.payload\s*->>\s*'track_id'\)/i,
+  )
+  assert.doesNotMatch(science, /is_active_registration_director/i)
+})
+
+test("science forward migration은 active revalidate와 begin-send 전체 본문·ACL을 보존하며 science 연결만 확장한다", async () => {
+  const [workerMigration, workerScheduleMigration, scienceMigration] = await Promise.all([
+    readFile(workerMigrationUrl, "utf8"),
+    readFile(workerScheduleMigrationUrl, "utf8"),
+    readFile(scienceConnectionMigrationUrl, "utf8"),
+  ])
+  const activeBegin = normalizeSql(functionBlock(workerMigration, "begin_notification_delivery_send_v1"))
+  const activeRevalidate = normalizeSql(functionBlock(
+    workerScheduleMigration,
+    "revalidate_immediate_notification_delivery_v1",
+  ))
+  const scienceBegin = normalizeSql(functionBlock(
+    scienceMigration,
+    "begin_notification_delivery_send_v1",
+  ))
+  const scienceRevalidate = normalizeSql(functionBlock(
+    scienceMigration,
+    "revalidate_immediate_notification_delivery_v1",
+  ))
+  const withoutScienceConnectionMap = (sql) => sql.replaceAll(
+    " when 'google_chat.science' then 'science'",
+    "",
+  )
+
+  assert.equal(withoutScienceConnectionMap(scienceBegin), activeBegin)
+  assert.equal(withoutScienceConnectionMap(scienceRevalidate), activeRevalidate)
+  for (const body of [scienceBegin, scienceRevalidate]) {
+    assert.match(body, /security definer set search_path = ''/i)
+    assert.match(body, /when 'google_chat\.science' then 'science'/i)
+  }
+  assert.match(
+    scienceMigration,
+    /alter\s+function\s+public\.revalidate_immediate_notification_delivery_v1\([\s\S]*?\)\s+owner\s+to\s+postgres/i,
+  )
+  assert.match(
+    scienceMigration,
+    /alter\s+function\s+public\.begin_notification_delivery_send_v1\(uuid,\s*uuid\)\s+owner\s+to\s+postgres/i,
+  )
+  for (const signature of [
+    "public.revalidate_immediate_notification_delivery_v1",
+    "public.begin_notification_delivery_send_v1",
+  ]) {
+    const escaped = escapeRegex(signature)
+    assert.match(
+      scienceMigration,
+      new RegExp(`revoke\\s+all\\s+on\\s+function\\s+${escaped}\\([\\s\\S]*?from\\s+public,\\s*anon,\\s*authenticated`, "i"),
+    )
+    assert.match(
+      scienceMigration,
+      new RegExp(`grant\\s+execute\\s+on\\s+function\\s+${escaped}\\([\\s\\S]*?to\\s+service_role`, "i"),
+    )
+  }
+})
+
+test("science prepare worker는 예약의 정확한 track subject settings를 track 다음 순서로 잠근다", async () => {
+  const scienceMigration = await readFile(scienceConnectionMigrationUrl, "utf8")
+  const prepare = functionBlock(scienceMigration, "prepare_notification_immediate_delivery_v1")
+  const appointmentBranch = prepare.slice(
+    prepare.indexOf("elsif p_source_type = 'registration_appointment'"),
+    prepare.indexOf("elsif p_source_type = 'ops_registration_message'"),
+  )
+
+  assert.match(
+    appointmentBranch,
+    /from\s+public\.academic_subject_settings\s+setting[\s\S]*?where\s+setting\.subject\s+in\s*\([\s\S]*?from\s+public\.ops_registration_subject_tracks\s+track[\s\S]*?track\.id\s*=\s*any\(v_track_ids\)[\s\S]*?order\s+by\s+setting\.subject\s+for\s+share\s+of\s+setting/i,
+  )
+  const trackLock = appointmentBranch.indexOf("from public.ops_registration_subject_tracks track")
+  const settingLock = appointmentBranch.indexOf("from public.academic_subject_settings setting")
+  const appointmentLock = appointmentBranch.indexOf("select appointment.* into v_appointment")
+  assert.ok(trackLock >= 0 && trackLock < settingLock && settingLock < appointmentLock)
+})
+
+test("science prepare worker는 즉시 이벤트의 정확한 track subject settings를 director 검사 전에 잠근다", async () => {
+  const scienceMigration = await readFile(scienceConnectionMigrationUrl, "utf8")
+  const prepare = functionBlock(scienceMigration, "prepare_notification_immediate_delivery_v1")
+  const taskEventBranch = prepare.slice(
+    prepare.indexOf("if p_source_type = 'ops_task_event'"),
+    prepare.indexOf("elsif p_source_type = 'ops_task_comment'"),
+  )
+
+  assert.match(
+    taskEventBranch,
+    /p_workflow_key\s*=\s*'registration'[\s\S]*?from\s+public\.ops_registration_subject_tracks\s+track[\s\S]*?track\.task_id\s*=\s*v_parent_uuid[\s\S]*?track\.id::text\s*=\s*\(v_event\.payload\s*->>\s*'track_id'\)[\s\S]*?for\s+share\s+of\s+track/i,
+  )
+  assert.match(
+    taskEventBranch,
+    /from\s+public\.academic_subject_settings\s+setting[\s\S]*?where\s+setting\.subject\s+in\s*\([\s\S]*?track\.id::text\s*=\s*\(v_event\.payload\s*->>\s*'track_id'\)[\s\S]*?order\s+by\s+setting\.subject\s+for\s+share\s+of\s+setting/i,
+  )
+  const taskLock = taskEventBranch.indexOf("from public.ops_tasks task")
+  const trackLock = taskEventBranch.indexOf("from public.ops_registration_subject_tracks track")
+  const settingLock = taskEventBranch.indexOf("from public.academic_subject_settings setting")
+  const sourceLock = taskEventBranch.lastIndexOf("from public.ops_task_events source")
+  const directorCheck = prepare.indexOf("dashboard_private.is_active_subject_director")
+  assert.ok(taskLock >= 0 && taskLock < trackLock && trackLock < settingLock && settingLock < sourceLock)
+  assert.ok(settingLock >= 0 && settingLock < directorCheck)
 })
 
 test("forward prepare RPC는 등록 예약 알림의 revision·수신자·현재 예약시각을 원자 재확인한다", async () => {

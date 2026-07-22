@@ -21,6 +21,9 @@ const CLASSROOM_ALIAS_MAP = new Map([
   ["본5강", "본관 5강"],
   ["별3", "별관 3강"],
   ["별3강", "별관 3강"],
+  ["별4", "별관 4강"],
+  ["별4강", "별관 4강"],
+  ["별관4강", "별관 4강"],
   ["별5", "별관 5강"],
   ["별5강", "별관 5강"],
   ["별7", "별관 5강"],
@@ -464,12 +467,14 @@ function getClassTextbookCatalog(classItem = {}, textbooks = []) {
       const title = text(planEntry?.alias) || getTextbookTitle(textbook) || textbookId;
       const area = text(planEntry?.area) || getTextbookCategory(textbook);
       const subSubject = text(planEntry?.subSubject || planEntry?.sub_subject);
+      const subjectAreaKey = text(textbook?.subject_area_key || textbook?.subjectAreaKey);
       return {
         textbookId,
         title,
         sourceTitle: getTextbookTitle(textbook) || title,
         publisher: getTextbookPublisher(textbook),
         subject: text(textbook?.subject),
+        subjectAreaKey,
         category: getTextbookCategory(textbook),
         area,
         subSubject,
@@ -701,6 +706,7 @@ function createTimetableRow(classItem, classTerms, slot, classGroupsForClass = [
     fullTitle: text(classItem?.className || classItem?.name),
     academicYear: getClassAcademicYear(classItem, classTerms),
     subject: text(classItem?.subject),
+    subjectAreaKey: text(classItem?.subject_area_key || classItem?.subjectAreaKey),
     grade: text(classItem?.grade),
     teacher,
     classroom,
@@ -1006,6 +1012,7 @@ function createCurriculumRow(classItem, classTerms, textbooks, progressSummaryBy
     title,
     fullTitle: text(classItem?.className || classItem?.name),
     subject: text(classItem?.subject),
+    subjectAreaKey: text(classItem?.subject_area_key || classItem?.subjectAreaKey),
     grade: text(classItem?.grade),
     term,
     teacherNames,
@@ -1148,8 +1155,8 @@ function matchesSubjectCatalog(subjects = [], currentSubject = "") {
   ));
 }
 
-const TIMETABLE_ACADEMIC_TEACHER_TEAMS = new Set(["영어팀", "수학팀"]);
-const TIMETABLE_KNOWN_TEACHER_TEAMS = new Set(["영어팀", "수학팀", "관리팀", "조교팀"]);
+const TIMETABLE_ACADEMIC_TEACHER_TEAMS = new Set(["영어팀", "수학팀", "과학팀"]);
+const TIMETABLE_KNOWN_TEACHER_TEAMS = new Set(["영어팀", "수학팀", "과학팀", "관리팀", "조교팀"]);
 const TIMETABLE_TEACHER_TEAM_ALIASES = new Map([
   ["english", "영어팀"],
   ["eng", "영어팀"],
@@ -1158,6 +1165,9 @@ const TIMETABLE_TEACHER_TEAM_ALIASES = new Map([
   ["math", "수학팀"],
   ["수학", "수학팀"],
   ["수학팀", "수학팀"],
+  ["science", "과학팀"],
+  ["과학", "과학팀"],
+  ["과학팀", "과학팀"],
   ["admin", "관리팀"],
   ["staff", "관리팀"],
   ["management", "관리팀"],

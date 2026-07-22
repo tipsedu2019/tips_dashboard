@@ -2,6 +2,8 @@ import type { RegistrationSubject } from "./registration-track-service"
 import type { RegistrationIntakeRuntimeState } from "./registration-intake-runtime-probe"
 import type { RegistrationRuntimeState } from "./registration-runtime-probe"
 import { normalizeRegistrationLevelTestPlace } from "./registration-level-test-place.ts"
+import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import { ACADEMIC_SUBJECT_VALUES, sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 
 // registration-intake-workflow-model:start
 export type RegistrationInitialAction =
@@ -86,12 +88,93 @@ export type RegistrationCreateAttempt = {
   normalizedInitialWorkflow: RegistrationInitialWorkflowPayload
 }
 
-const SUBJECT_ORDER: RegistrationSubject[] = ["영어", "수학"]
+const SUBJECT_ORDER: readonly RegistrationSubject[] = ACADEMIC_SUBJECT_VALUES
 const INITIAL_ACTIONS: RegistrationInitialAction[] = ["inquiry", "level_test", "direct_phone", "visit"]
 
 function orderedSubjects(subjects: RegistrationSubject[]) {
-  const selected = new Set(subjects)
-  return SUBJECT_ORDER.filter((subject) => selected.has(subject))
+  return sortAcademicSubjects(subjects) as RegistrationSubject[]
+}
+
+export type RegistrationSubjectPickerAvailability = {
+  options: RegistrationSubject[]
+  disabledReasonBySubject: Partial<Record<RegistrationSubject, string>>
+}
+
+function registrationSubjectDisabledReason(
+  capability: RegistrationSubjectCapability,
+  grade: string,
+) {
+  if (!capability.isActive || !capability.registrationCreateEnabled) {
+    return `${capability.subject} 신규 등록이 비활성화되어 있습니다.`
+  }
+  const normalizedGrade = trimmed(grade)
+  if (!normalizedGrade) return capability.subject === "과학" ? "과학 선택 전에 학년을 먼저 선택하세요." : ""
+  if (!capability.gradeLevels.includes(normalizedGrade)) {
+    return `${capability.subject}은(는) 현재 학년에서 신규 등록할 수 없습니다. 과학은 고등부만 선택할 수 있습니다.`
+  }
+  return ""
+}
+
+export function getRegistrationSubjectPickerAvailability(input: {
+  capabilities: readonly RegistrationSubjectCapability[]
+  grade: string
+  selectedSubjects: readonly RegistrationSubject[]
+}): RegistrationSubjectPickerAvailability {
+  const selected = new Set(input.selectedSubjects)
+  const capabilityBySubject = new Map(
+    input.capabilities.map((capability) => [capability.subject, capability]),
+  )
+  const options: RegistrationSubject[] = []
+  const disabledReasonBySubject: Partial<Record<RegistrationSubject, string>> = {}
+
+  for (const subject of SUBJECT_ORDER) {
+    const capability = capabilityBySubject.get(subject)
+    if (!capability) {
+      if (selected.has(subject)) {
+        options.push(subject)
+        disabledReasonBySubject[subject] = `${subject} 신규 등록 정보를 확인할 수 없습니다.`
+      }
+      continue
+    }
+    if (capability.isActive && capability.registrationCreateEnabled) {
+      options.push(subject)
+    } else if (selected.has(subject)) {
+      options.push(subject)
+    } else {
+      continue
+    }
+    const reason = registrationSubjectDisabledReason(capability, input.grade)
+    if (reason) disabledReasonBySubject[subject] = reason
+  }
+
+  return { options, disabledReasonBySubject }
+}
+
+export function reconcileRegistrationSubjectsForGrade(input: {
+  capabilities: readonly RegistrationSubjectCapability[]
+  grade: string
+  subjects: RegistrationSubject[]
+  draft: RegistrationInitialWorkflowDraft
+}) {
+  const availability = getRegistrationSubjectPickerAvailability({
+    capabilities: input.capabilities,
+    grade: input.grade,
+    selectedSubjects: input.subjects,
+  })
+  const removedSubjects = orderedSubjects(input.subjects).filter((subject) => (
+    Boolean(availability.disabledReasonBySubject[subject])
+  ))
+  const removed = new Set(removedSubjects)
+  const subjects = orderedSubjects(input.subjects).filter((subject) => !removed.has(subject))
+  const draft = reconcileRegistrationInitialWorkflowDraft(input.draft, subjects)
+  return {
+    subjects,
+    draft,
+    removedSubjects,
+    removalReason: removedSubjects.length > 0
+      ? removedSubjects.map((subject) => availability.disabledReasonBySubject[subject]).filter(Boolean).join(" ")
+      : "",
+  }
 }
 
 function isRegistrationInitialAction(value: unknown): value is RegistrationInitialAction {

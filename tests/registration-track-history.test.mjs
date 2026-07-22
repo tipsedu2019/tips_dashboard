@@ -55,6 +55,33 @@ test("shared appointments and batches list each participating subject once", () 
   assert.deepEqual(history.find((item) => item.id === "enrollment:enroll-eng").subjects, ["영어"]);
 });
 
+test("history keeps science in registry order and filters unsupported subjects", () => {
+  const history = buildRegistrationSubjectHistory({
+    tracks: [
+      { id: "science", subject: "과학" },
+      { id: "english", subject: "영어" },
+      { id: "unsupported", subject: "unknown" },
+    ],
+    appointments: [{
+      id: "shared-science",
+      kind: "level_test",
+      scheduledAt: "2026-07-14T01:00:00Z",
+      place: "본관",
+      status: "scheduled",
+    }],
+    levelTests: [
+      { id: "science-test", trackId: "science", appointmentId: "shared-science", attemptNumber: 1, status: "scheduled" },
+      { id: "english-test", trackId: "english", appointmentId: "shared-science", attemptNumber: 1, status: "scheduled" },
+      { id: "unsupported-test", trackId: "unsupported", appointmentId: "shared-science", attemptNumber: 1, status: "scheduled" },
+    ],
+  });
+
+  assert.deepEqual(
+    history.find((item) => item.id === "appointment:shared-science").subjects,
+    ["영어", "과학"],
+  );
+});
+
 test("equal timestamps use stable ids and malformed collections degrade to an empty history", () => {
   const detail = detailFixture();
   detail.events = [

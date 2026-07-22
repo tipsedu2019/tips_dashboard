@@ -26,6 +26,22 @@ const principalTeachers = [
   { id: "teacher-yang", label: "양소윤", profileId: "profile-yang" },
 ];
 
+const scienceCapability = {
+  subject: "과학",
+  isActive: true,
+  registrationCreateEnabled: true,
+  gradeLevels: ["고1", "고2", "고3"],
+  sortOrder: 30,
+  defaultDirectorProfileId: "profile-science",
+};
+const scienceProfile = { id: "profile-science", label: "과학원장", role: "teacher" };
+const scienceTeacher = {
+  id: "teacher-science",
+  label: "과학원장",
+  profileId: "profile-science",
+  subjects: ["과학", "과학팀"],
+};
+
 function selection(result) {
   return {
     status: result.status,
@@ -142,6 +158,42 @@ test("ambiguous unsupported and unlinked principal rules leave the registration 
   });
   assert.equal(nonPrincipalAccount.status, "unavailable");
   assert.equal(nonPrincipalAccount.profileId, "");
+});
+
+test("science resolves only the configured active profile-linked science-team candidate", async () => {
+  const { buildRegistrationDirectorRuleKey, resolveRegistrationDirectorDefault } = await loadHelper();
+  const common = {
+    subjects: ["과학"],
+    grade: "고2",
+    inquiryAt: "2026-07-11T10:00",
+    capabilities: [scienceCapability],
+    profiles: [...principalProfiles, scienceProfile],
+    teachers: [...principalTeachers, scienceTeacher],
+  };
+
+  assert.deepEqual(selection(resolveRegistrationDirectorDefault(common)), {
+    status: "resolved",
+    profileId: "profile-science",
+    counselor: "과학원장",
+    effectiveYear: 2026,
+  });
+  assert.equal(buildRegistrationDirectorRuleKey({
+    subject: "과학",
+    grade: "고2",
+    inquiryAt: "2026-07-11T10:00",
+    profileId: "profile-science",
+  }), "subject-director-v1:과학:profile-science");
+
+  for (const override of [
+    { capabilities: [{ ...scienceCapability, defaultDirectorProfileId: null }] },
+    { capabilities: [{ ...scienceCapability, isActive: false }] },
+    { profiles: principalProfiles },
+    { teachers: principalTeachers },
+    { teachers: [...principalTeachers, { ...scienceTeacher, subjects: ["과학"] }] },
+    { teachers: [...principalTeachers, { ...scienceTeacher, subjects: ["영어"] }] },
+  ]) {
+    assert.equal(resolveRegistrationDirectorDefault({ ...common, ...override }).status, "unavailable");
+  }
 });
 
 test("late principal options fill an eligible empty automatic default", async () => {
@@ -417,6 +469,41 @@ test("default assignments clear only for deterministic or authoritative missing 
     ...common, tracks: [unavailable], grade: "고2", teachers: [], catalogStatus: "authoritative",
   });
   assert.equal(authoritative.shouldClear, true);
+});
+
+test("compatibility-disabled science preserves an existing default while active settings remain authoritative", async () => {
+  const { resolveRegistrationTrackDirectorDefaults } = await loadHelper();
+  const track = {
+    id: "science",
+    subject: "과학",
+    status: "inquiry",
+    directorProfileId: "saved-science",
+    directorName: "기존 과학 담당",
+    directorAssignmentSource: "default",
+    directorAssignmentRuleKey: "subject-director-v1:과학:saved-science",
+  };
+  const common = {
+    tracks: [track],
+    grade: "고1",
+    inquiryAt: "2026-07-11T10:00",
+    teachers: principalTeachers,
+    profiles: principalProfiles,
+    catalogStatus: "authoritative",
+  };
+
+  const [compatibility] = resolveRegistrationTrackDirectorDefaults({
+    ...common,
+    capabilities: [{ ...scienceCapability, isActive: false, defaultDirectorProfileId: null }],
+  });
+  assert.equal(compatibility.status, "unavailable");
+  assert.equal(compatibility.shouldClear, false);
+
+  const [activeMissing] = resolveRegistrationTrackDirectorDefaults({
+    ...common,
+    capabilities: [{ ...scienceCapability, defaultDirectorProfileId: null }],
+  });
+  assert.equal(activeMissing.status, "unavailable");
+  assert.equal(activeMissing.shouldClear, true);
 });
 
 test("a persisted default re-resolves but an already current default is a no-op", async () => {

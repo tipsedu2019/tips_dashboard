@@ -26,6 +26,34 @@ test("admin textbooks route uses the dedicated operations workspace", async () =
   assert.match(workspaceSource, /TabsTrigger value="closing"/);
 });
 
+test("textbook workspace reuses its preloaded science area map for every master save", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+  const preloadedContextCount = (
+    workspaceSource.match(/scienceSubjectAreas:\s*data\.scienceSubjectAreas/g) || []
+  ).length;
+
+  assert.equal(preloadedContextCount, 3);
+});
+
+test("textbook edit and purchase-request forms preserve unsupported subjects until explicit selection", async () => {
+  const workspaceSource = await readFile(
+    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /subject:\s*getTextbookSubjectWriteValue\(row\.subject\)/);
+  assert.match(workspaceSource, /subject:\s*getTextbookSubjectWriteValue\(line\.subject\)/);
+  assert.doesNotMatch(workspaceSource, /subject:\s*normalizeSubjectValue\(row\.subject\)/);
+  assert.doesNotMatch(
+    workspaceSource,
+    /subject:\s*normalizeSubjectValue\(line\.subject\s*\|\|\s*emptyMasterForm\.subject\)/,
+  );
+  assert.match(workspaceSource, /validateTextbookTaxonomyForWrite\(masterForm\)/);
+});
+
 test("textbook workspace fourth-pass polish keeps dialogs and dense tables stable", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),

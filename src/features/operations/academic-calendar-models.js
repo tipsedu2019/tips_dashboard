@@ -3,7 +3,10 @@ import {
   parseGradeSelection,
   serializeGradeSelection,
 } from "../../app/admin/calendar/utils/calendar-grid.js"
-import { normalizeAcademicEventType } from "./academic-event-utils.js";
+import {
+  getScienceSubjectAreaLabel,
+  normalizeAcademicEventType,
+} from "./academic-event-utils.js";
 
 function text(value) {
   return String(value || "").trim();
@@ -106,7 +109,7 @@ function deriveExamTerm(title, start) {
   return ""
 }
 
-function normalizeAcademicEvent(row = {}, academicSchools = []) {
+function normalizeAcademicEvent(row = {}, academicSchools = [], scienceSubjectAreas = []) {
   const school = findSchool(row.school_id || row.schoolId, academicSchools);
   const meta = extractEmbeddedNoteMeta(row.note);
   const start = text(row.start || row.start_date || row.date);
@@ -138,6 +141,14 @@ function normalizeAcademicEvent(row = {}, academicSchools = []) {
   const schoolName = text(row.school || row.schoolName || school?.name)
   const title = text(row.title) || (inferredType === "시험기간" && examTerm ? `${schoolName || "학교 미지정"} ${examTerm}` : "제목 없는 일정")
   const academicYear = text(row.academic_year || row.academicYear || meta.academicYear || start.slice(0, 4))
+  const scienceAreaKey = text(meta.scienceAreaKey)
+  const scienceAreaLabel = getScienceSubjectAreaLabel(scienceAreaKey, scienceSubjectAreas)
+  const firstScopeSummary = [
+    ...(textbookScopes.length > 0 ? textbookScopes.map((item) => [item.name, item.scope].filter(Boolean).join(" ")) : []),
+    ...(subtextbookScopes.length > 0 ? subtextbookScopes.map((item) => [item.name, item.scope].filter(Boolean).join(" ")) : []),
+    textbookScope,
+    subtextbookScope,
+  ].filter(Boolean)[0] || ""
 
   return {
     id: text(row.id),
@@ -153,16 +164,17 @@ function normalizeAcademicEvent(row = {}, academicSchools = []) {
     gradeBadges: getGradeBadgeLabels(grade),
     gradeValues: parseGradeSelection(grade),
     examTerm,
+    scienceAreaKey,
+    scienceAreaLabel,
+    embeddedNoteMeta: meta,
     textbookScope,
     subtextbookScope,
     textbookScopes,
     subtextbookScopes,
-    scopeSummary: [
-      ...(textbookScopes.length > 0 ? textbookScopes.map((item) => [item.name, item.scope].filter(Boolean).join(" ")) : []),
-      ...(subtextbookScopes.length > 0 ? subtextbookScopes.map((item) => [item.name, item.scope].filter(Boolean).join(" ")) : []),
-      textbookScope,
-      subtextbookScope,
-    ].filter(Boolean)[0] || "",
+    scopeSummary:
+      inferredType === "과학시험일"
+        ? [scienceAreaLabel, firstScopeSummary].filter(Boolean).join(" · ")
+        : firstScopeSummary,
     note: stripEmbeddedNoteMeta(row.note || row.content),
   };
 }
@@ -170,7 +182,7 @@ function normalizeAcademicEvent(row = {}, academicSchools = []) {
 function getTemplateEventStyle(type) {
   const normalized = normalizeAcademicEventType(type);
 
-  if (["시험기간", "영어시험일", "수학시험일"].includes(normalized)) {
+  if (["시험기간", "영어시험일", "수학시험일", "과학시험일"].includes(normalized)) {
     return { type: "task", color: "bg-rose-500" };
   }
 
@@ -220,6 +232,9 @@ function buildTemplateCalendarEntries(event) {
       category: event.category,
       grade: event.grade,
       examTerm: event.examTerm,
+      scienceAreaKey: event.scienceAreaKey,
+      scienceAreaLabel: event.scienceAreaLabel,
+      embeddedNoteMeta: event.embeddedNoteMeta,
       scopeSummary: event.scopeSummary,
       textbookScope: event.textbookScope,
       subtextbookScope: event.subtextbookScope,
@@ -232,9 +247,10 @@ function buildTemplateCalendarEntries(event) {
 export function buildAcademicCalendarTemplateModel({
   academicEvents = [],
   academicSchools = [],
+  scienceSubjectAreas = [],
 } = {}) {
   const normalizedEvents = academicEvents
-    .map((row) => normalizeAcademicEvent(row, academicSchools))
+    .map((row) => normalizeAcademicEvent(row, academicSchools, scienceSubjectAreas))
     .filter((event) => event.id && event.start);
 
   const events = normalizedEvents.flatMap(buildTemplateCalendarEntries);
@@ -268,11 +284,18 @@ function buildScopeSummary(event) {
     text(event.subtextbookScope),
   ].filter(Boolean);
 
-  return scopeLabels[0] || "";
+  const firstScope = scopeLabels[0] || "";
+  return normalizeAcademicEventType(event?.type) === "과학시험일"
+    ? [text(event?.scienceAreaLabel), firstScope].filter(Boolean).join(" · ")
+    : firstScope;
 }
 
-function buildBoardMetaBadges(event) {
-  return [text(event.examTerm), buildScopeSummary(event)].filter(Boolean).slice(0, 2);
+function buildBoardMetaBadges(event, boardType = event?.type) {
+  return [...new Set([
+    text(event.examTerm),
+    boardType === "과학시험일" ? text(event.scienceAreaLabel) : "",
+    buildScopeSummary(event),
+  ].filter(Boolean))].slice(0, 3);
 }
 
 function buildScheduleRangeLabel(start, end) {
@@ -335,12 +358,16 @@ function getSubjectExamBoardType(subject) {
   if (normalized.includes("수학")) {
     return "수학시험일"
   }
+  if (normalized === "과학" || normalized.toLowerCase() === "science") {
+    return "과학시험일"
+  }
   return ""
 }
 
 function getSubjectLabelForBoardType(boardType) {
   if (boardType === "영어시험일") return "영어"
   if (boardType === "수학시험일") return "수학"
+  if (boardType === "과학시험일") return "과학"
   return ""
 }
 
@@ -351,7 +378,31 @@ function getBoardTypeDisplayLabel(type) {
   if (type === "수학시험일") {
     return "수학 시험일 및 시험범위"
   }
+  if (type === "과학시험일") {
+    return "과학 시험일 및 시험범위"
+  }
   return type || "시험기간"
+}
+
+function buildSubjectScopeSummary(event, boardType, detail = {}, materialSections = []) {
+  const detailScope = text(
+    detail?.textbook_scope ||
+      detail?.textbookScope ||
+      detail?.supplement_scope ||
+      detail?.supplementScope ||
+      detail?.other_scope ||
+      detail?.otherScope,
+  )
+  const materialScope = (Array.isArray(materialSections) ? materialSections : [])
+    .flatMap((section) => (Array.isArray(section?.items) ? section.items : []))
+    .map(text)
+    .find(Boolean) || ""
+  const scope = detailScope || materialScope || buildScopeSummary(event)
+
+  if (boardType === "과학시험일") {
+    return [text(event?.scienceAreaLabel), scope].filter(Boolean).join(" · ")
+  }
+  return buildScopeSummary(event) || scope
 }
 
 function resolveCurriculumMaterialLabel(material = {}, textbooks = []) {
@@ -716,15 +767,18 @@ function buildDerivedSubjectExamEntries(event, gradeKey, academicEventExamDetail
       grade: event.grade,
       gradeBadges: Array.isArray(event.gradeBadges) ? event.gradeBadges : getGradeBadgeLabels(event.grade),
       examTerm: event.examTerm,
+      scienceAreaKey: event.scienceAreaKey,
+      scienceAreaLabel: event.scienceAreaLabel,
+      embeddedNoteMeta: event.embeddedNoteMeta,
       examDateLabel: dateLabel,
       linkedScheduleLabel,
       subjectSummary: true,
-      scopeSummary: buildScopeSummary(event),
+      scopeSummary: buildSubjectScopeSummary(event, boardType, primaryDetail, materialSections),
       textbookScope: text(primaryDetail?.textbook_scope || primaryDetail?.textbookScope),
       subtextbookScope: text(primaryDetail?.supplement_scope || primaryDetail?.supplementScope),
       textbookScopes: structuredScopeBuckets.textbookScopes,
       subtextbookScopes: structuredScopeBuckets.subtextbookScopes,
-      metaBadges: buildBoardMetaBadges(event),
+      metaBadges: buildBoardMetaBadges(event, boardType),
       materialSections,
       displaySections: buildDisplaySectionsForSubjectEntry(materialSections),
       color: getAcademicEventColor(boardType),
@@ -738,7 +792,7 @@ function buildFallbackSubjectExamEntries(event, gradeKey, academyCurriculumPlans
     return []
   }
 
-  return ["영어시험일", "수학시험일"].flatMap((boardType) => {
+  return ["영어시험일", "수학시험일", "과학시험일"].flatMap((boardType) => {
     if (existingTypes.has(boardType)) {
       return []
     }
@@ -790,15 +844,18 @@ function buildFallbackSubjectExamEntries(event, gradeKey, academyCurriculumPlans
       grade: event.grade,
       gradeBadges: Array.isArray(event.gradeBadges) ? event.gradeBadges : getGradeBadgeLabels(event.grade),
       examTerm: event.examTerm,
+      scienceAreaKey: event.scienceAreaKey,
+      scienceAreaLabel: event.scienceAreaLabel,
+      embeddedNoteMeta: event.embeddedNoteMeta,
       examDateLabel: "시험일 미입력",
       linkedScheduleLabel: [event.title, buildScheduleRangeLabel(event.start, event.end)].filter(Boolean).join(" · "),
       subjectSummary: true,
-      scopeSummary: buildScopeSummary(event),
+      scopeSummary: buildSubjectScopeSummary(event, boardType, syntheticDetail, materialSections),
       textbookScope: "",
       subtextbookScope: "",
       textbookScopes: structuredScopeBuckets.textbookScopes,
       subtextbookScopes: structuredScopeBuckets.subtextbookScopes,
-      metaBadges: buildBoardMetaBadges(event),
+      metaBadges: buildBoardMetaBadges(event, boardType),
       materialSections,
       displaySections: buildDisplaySectionsForSubjectEntry(materialSections),
       color: getAcademicEventColor(boardType),
@@ -822,6 +879,7 @@ function buildSchoolRow(event, school, grade) {
       "시험기간": [],
       "영어시험일": [],
       "수학시험일": [],
+      "과학시험일": [],
       "체험학습": [],
       "방학·휴일·기타": [],
       "팁스": [],
@@ -841,6 +899,7 @@ function compareBoardEntries(left, right) {
 export function buildAcademicAnnualBoardModel({
   academicEvents = [],
   academicSchools = [],
+  scienceSubjectAreas = [],
   academicEventExamDetails = [],
   academyCurriculumPlans = [],
   academyCurriculumMaterials = [],
@@ -853,7 +912,7 @@ export function buildAcademicAnnualBoardModel({
   selectedSemester = "전체",
 } = {}) {
   const normalizedEvents = academicEvents
-    .map((row) => normalizeAcademicEvent(row, academicSchools))
+    .map((row) => normalizeAcademicEvent(row, academicSchools, scienceSubjectAreas))
     .filter((event) => event.start || event.examTerm || event.scopeSummary || event.textbookScope || event.subtextbookScope || (Array.isArray(event.textbookScopes) && event.textbookScopes.length > 0) || (Array.isArray(event.subtextbookScopes) && event.subtextbookScopes.length > 0));
 
   const yearOptions = [
@@ -863,7 +922,7 @@ export function buildAcademicAnnualBoardModel({
   const activeSemester = getSemesterLabel(selectedSemester)
   const semesterOptions = ["전체", "1학기", "2학기"]
   const rowsBySchoolId = new Map();
-  const boardTypes = ["시험기간", "영어시험일", "수학시험일", "체험학습", "방학·휴일·기타", "팁스"];
+  const boardTypes = ["시험기간", "영어시험일", "수학시험일", "과학시험일", "체험학습", "방학·휴일·기타", "팁스"];
 
   normalizedEvents
     .filter(
@@ -905,6 +964,9 @@ export function buildAcademicAnnualBoardModel({
           grade: event.grade,
           gradeBadges: Array.isArray(event.gradeBadges) ? event.gradeBadges : getGradeBadgeLabels(event.grade),
           examTerm: event.examTerm,
+          scienceAreaKey: event.scienceAreaKey,
+          scienceAreaLabel: event.scienceAreaLabel,
+          embeddedNoteMeta: event.embeddedNoteMeta,
           scopeSummary: buildScopeSummary(event),
           textbookScope: text(event.textbookScope),
           subtextbookScope: text(event.subtextbookScope),

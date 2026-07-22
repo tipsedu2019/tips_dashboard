@@ -7,6 +7,9 @@ import type { RegistrationSubject } from "./registration-track-service"
 
 export type RegistrationSubjectPickerProps = {
   value: readonly RegistrationSubject[]
+  options: readonly RegistrationSubject[]
+  grade: string
+  disabledReasonBySubject?: Partial<Record<RegistrationSubject, string>>
   disabled?: boolean
   disabledSubjects?: ReadonlySet<RegistrationSubject>
   onToggle: (subject: RegistrationSubject, selected: boolean) => void
@@ -20,9 +23,10 @@ export function RegistrationSubjectPicker(props: RegistrationSubjectPickerProps)
         <h3 className="text-sm font-semibold">과목</h3>
         {props.action}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        {(["영어", "수학"] as RegistrationSubject[]).map((subject) => {
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {props.options.map((subject) => {
           const selected = props.value.includes(subject)
+          const disabledReason = props.disabledReasonBySubject?.[subject] || ""
           return (
             <Button
               key={subject}
@@ -30,7 +34,9 @@ export function RegistrationSubjectPicker(props: RegistrationSubjectPickerProps)
               variant={selected ? "default" : "outline"}
               aria-pressed={selected}
               aria-label={`${subject} 문의 과목 ${selected ? "선택됨" : "선택 안 됨"}`}
-              disabled={props.disabled || props.disabledSubjects?.has(subject)}
+              disabled={props.disabled || props.disabledSubjects?.has(subject) || Boolean(disabledReason)}
+              title={disabledReason || undefined}
+              data-registration-grade={props.grade}
               onClick={() => props.onToggle(subject, !selected)}
             >
               {selected ? <Check aria-hidden="true" className="size-4" /> : null}
@@ -39,6 +45,9 @@ export function RegistrationSubjectPicker(props: RegistrationSubjectPickerProps)
           )
         })}
       </div>
+      {[...new Set(props.options.map((subject) => props.disabledReasonBySubject?.[subject]).filter(Boolean))].map((reason) => (
+        <p key={reason} className="text-xs text-muted-foreground" data-registration-subject-reason>{reason}</p>
+      ))}
     </section>
   )
 }

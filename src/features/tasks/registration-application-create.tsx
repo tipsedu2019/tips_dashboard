@@ -26,6 +26,9 @@ import { RegistrationApplicationPlacementSection } from "./registration-applicat
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
   reconcileRegistrationInitialWorkflowCapabilities,
+  getRegistrationSubjectPickerAvailability,
+  reconcileRegistrationInitialWorkflowDraft,
+  reconcileRegistrationSubjectsForGrade,
   type RegistrationInitialAction,
   type RegistrationInitialPersistenceProbeResult,
   type RegistrationInitialWorkflowDraft,
@@ -44,6 +47,8 @@ import type {
 } from "./ops-task-service"
 import { RegistrationSubjectPicker } from "./registration-subject-picker"
 import type { RegistrationSubject } from "./registration-track-service"
+import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 import {
   normalizeRegistrationPhone,
   parseRegistrationSubjects,
@@ -69,6 +74,8 @@ export type RegistrationApplicationCreateProps = {
     RegistrationSubject,
     Array<{ value: string; label: string }>
   >
+  subjectCapabilities: readonly RegistrationSubjectCapability[]
+  subjectCapabilityError?: string
   disabled: boolean
   catalogStatus?: RegistrationCreateCatalogStatus
   catalogError?: string
@@ -101,6 +108,8 @@ export function RegistrationApplicationCreate({
   persistence,
   resolvedDirectorIds,
   directorOptionsBySubject,
+  subjectCapabilities,
+  subjectCapabilityError = "",
   disabled,
   catalogStatus = "ready",
   catalogError = "",
@@ -118,6 +127,11 @@ export function RegistrationApplicationCreate({
   const catalogFailed = catalogState.status === "error" || catalogState.status === "partial"
   const registration = form.registration || {}
   const subjects = parseRegistrationSubjects(form.subject) as RegistrationSubject[]
+  const subjectAvailability = useMemo(() => getRegistrationSubjectPickerAvailability({
+    capabilities: subjectCapabilities,
+    grade: registration.schoolGrade || "",
+    selectedSubjects: subjects,
+  }), [registration.schoolGrade, subjectCapabilities, subjects])
   const stableAllowedInitialActions = persistence.mode === "ready_atomic"
     ? READY_INITIAL_ACTIONS
     : INQUIRY_ONLY_INITIAL_ACTIONS
@@ -163,10 +177,11 @@ export function RegistrationApplicationCreate({
   }
 
   function updateSubjects(subject: RegistrationSubject, checked: boolean) {
-    const next = checked
+    const next = sortAcademicSubjects(checked
       ? [...subjects, subject]
-      : subjects.filter((item) => item !== subject)
+      : subjects.filter((item) => item !== subject)) as RegistrationSubject[]
     onFormPatch({ subject: serializeRegistrationSubjects(next) })
+    onDraftChange(reconcileRegistrationInitialWorkflowDraft(draft, next))
   }
 
   const schoolChoices = getRegistrationSchoolChoices({
@@ -183,6 +198,16 @@ export function RegistrationApplicationCreate({
     if (field === "schoolGrade") {
       const catalogChoices = getRegistrationSchoolChoices({ schools, grade: value })
       onRegistrationFieldChange("schoolGrade", value)
+      const reconciled = reconcileRegistrationSubjectsForGrade({
+        capabilities: subjectCapabilities,
+        grade: value,
+        subjects,
+        draft,
+      })
+      if (reconciled.removedSubjects.length > 0) {
+        onFormPatch({ subject: serializeRegistrationSubjects(reconciled.subjects) })
+        onDraftChange(reconciled.draft)
+      }
       if (
         schoolCatalogStatus === "authoritative"
         && registration.schoolName
@@ -242,6 +267,9 @@ export function RegistrationApplicationCreate({
           subjectSyncContent={(
             <RegistrationSubjectPicker
               value={subjects}
+              options={subjectAvailability.options}
+              grade={registration.schoolGrade || ""}
+              disabledReasonBySubject={subjectAvailability.disabledReasonBySubject}
               disabled={disabled || !writable}
               onToggle={updateSubjects}
             />
@@ -267,6 +295,7 @@ export function RegistrationApplicationCreate({
           )}
           exceptionContent={(
             <div className="grid gap-3">
+              {subjectCapabilityError ? <p role="status" className="text-sm text-muted-foreground">{subjectCapabilityError}</p> : null}
               {showInquiryOnlyNote ? (
                 <p role="note" className="text-sm text-muted-foreground">
                   {note}

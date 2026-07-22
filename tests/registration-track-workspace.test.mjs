@@ -256,6 +256,69 @@ test("create and detail share the approved subject-first inquiry controls", asyn
   assert.match(picker, /variant=\{selected \? "default" : "outline"\}/)
   assert.match(picker, /aria-pressed=\{selected\}/)
   assert.match(picker, /<Check/)
+  assert.match(picker, /options: readonly RegistrationSubject\[\]/)
+  assert.match(picker, /grade: string/)
+  assert.match(picker, /disabledReasonBySubject/)
+  assert.match(picker, /grid-cols-1[^"]*sm:grid-cols-3/)
+  assert.doesNotMatch(picker, /\["영어", "수학"\]/)
+  assert.match(create, /getRegistrationSubjectPickerAvailability/)
+  assert.match(create, /reconcileRegistrationSubjectsForGrade/)
+  assert.match(actions, /sortAcademicSubjects/)
+})
+
+test("registration subject tabs and initial root-subject controls support three registry-ordered columns", async () => {
+  const [tabs, initialPlan, actions, application] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-subject-tabs.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+  ])
+  assert.match(tabs, /grid-cols-1[^"]*sm:grid-cols-3/)
+  assert.match(initialPlan, /sortAcademicSubjects/)
+  assert.match(initialPlan, /grid-cols-1[^"]*sm:grid-cols-3/)
+  assert.match(initialPlan, /md:grid-cols-3/)
+  assert.doesNotMatch(initialPlan, /const SUBJECT_ORDER: RegistrationSubject\[\] = \["영어", "수학"\]/)
+  assert.doesNotMatch(actions, /const SUBJECTS: RegistrationSubject\[\] = \["영어", "수학"\]/)
+  assert.match(application, /ACADEMIC_SUBJECT_VALUES\.indexOf\(left\.subject\)/)
+  assert.match(application, /ACADEMIC_SUBJECT_VALUES\.indexOf\(right\.subject\)/)
+})
+
+test("science director UI consumes only the configured capability profile and teacher completion remains read-only", async () => {
+  const [actions, application, model, workspace] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-track-model.js", import.meta.url), "utf8"),
+    readWorkspaceSource(),
+  ])
+  assert.match(actions, /defaultDirectorProfileId/)
+  assert.match(actions, /profile\.id === configuredProfileId/)
+  assert.match(actions, /teacher\.subjects\?\.includes\("과학팀"\)/)
+  assert.doesNotMatch(actions, /subject === "과학" \|\| subject === "과학팀"/)
+  assert.match(workspace, /teacher\.subjects\?\.includes\("과학팀"\)/)
+  assert.doesNotMatch(workspace, /subject === "과학" \|\| subject === "과학팀"/)
+  assert.match(actions, /capabilities: subjectCapabilities/)
+  assert.match(application, /subjectCapabilities=\{subjectCapabilities\}/)
+  assert.match(model, /input\.viewerRole === "teacher" && input\.track\?\.subject === "과학"/)
+  assert.match(model, /readOnly: !canManage/)
+})
+
+test("assigned science teacher lazily reads only consultation class options while unassigned viewers make zero requests", async () => {
+  const application = await readFile(
+    new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url),
+    "utf8",
+  )
+  assert.match(
+    application,
+    /const assignedScienceConsultationId = trackContexts\.find\(\(context\) => \([\s\S]*viewerRole === "teacher"[\s\S]*context\.track\.subject === "과학"[\s\S]*context\.permissions\.canCompleteConsultation/,
+  )
+  const guardIndex = application.indexOf("if (!assignedScienceConsultationId || !viewerId)")
+  const readIndex = application.indexOf("loadAssignedScienceConsultationClassOptions({ viewerId, consultationId: assignedScienceConsultationId })")
+  assert.ok(guardIndex >= 0 && readIndex > guardIndex, "unassigned viewer must return before the read")
+  assert.doesNotMatch(application, /loadOpsTaskWorkspaceOptionData/)
+  assert.match(
+    application,
+    /classOptions=\{viewerRole === "teacher"\s*&& context\.permissions\.canCompleteConsultation\s*&& context\.track\.subject === "과학"\s*\? scienceConsultationClassOptions\s*:\s*classOptions\}/,
+  )
 })
 
 test("registration create mounts the shared cumulative application with visible locked future fields", async () => {
@@ -878,7 +941,7 @@ test("two tracks at different statuses expose both current sections and actions 
   assert.deepEqual(states.map((state) => state.currentSection), ["level_test", "consultation"])
   assert.deepEqual(states[0].sections.level_test.actions, ["start_level_test", "record_level_test_result", "cancel_level_test"])
   assert.ok(states[1].sections.consultation.actions.includes("complete_phone_consultation"))
-  assert.match(source, /detail\.tracks\.map\(\(track\) => getRegistrationApplicationTrackState/)
+  assert.match(source, /orderedTracks\.map\(\(track\) => getRegistrationApplicationTrackState/)
   assert.match(source, /trackContexts\.map/)
   assert.match(source, /<RegistrationApplicationShell/)
   assert.doesNotMatch(source, /focusTrackId === context\.track\.id\) \? \(\s*<RegistrationConsultationOutcomeEditor/)
@@ -916,7 +979,7 @@ test("two decided subjects share one admission send action and expose two badges
   assert.deepEqual(badges, ["영어", "수학"])
   assert.equal((application.match(/<RegistrationAdmissionPanel/g) || []).length, 1)
   assert.match(application, /getRegistrationApplicationCaseEditableSections\(\{[\s\S]*?admissionBatches: detail\.admissionBatches/)
-  assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: detail\.tracks,[\s\S]*?enrollments: detail\.enrollments/)
+  assert.match(application, /getRegistrationAdmissionApplicationState\(\{[\s\S]*?tracks: orderedTracks,[\s\S]*?enrollments: detail\.enrollments/)
   assert.match(application, /admissionApplicationState\.canSend/)
   assert.match(application, /admissionApplicationState\.targetTrackIds/)
   assert.match(application, /admissionTargetTracks\.map/)
@@ -1179,6 +1242,18 @@ test("ready-mode creation uses one guarded initial-workflow RPC without a direct
   assert.match(source, /registrationCreateAttemptRef/)
   assert.doesNotMatch(source, /persistCreatedRegistrationDirectorDefaults/)
   assert.match(source, /registrationPersistence\.mode === "blocked_maintenance"/)
+})
+
+test("registration director options resolve science as its own subject", async () => {
+  const source = await readWorkspaceSource()
+  assert.match(source, /const configuredScienceProfileId = scienceCapability\?\.defaultDirectorProfileId \|\| ""/)
+  assert.match(source, /teacher\.profileId === configuredScienceProfileId/)
+  assert.match(source, /과학: configuredScienceProfileId && configuredScienceTeacher && configuredScienceProfile/)
+  assert.doesNotMatch(source, /과학:\s*optionsFor\("(?:영어|수학)"\)/)
+  assert.doesNotMatch(source, /과학:\s*optionsFor\("과학"\)/)
+  assert.match(source, /ACADEMIC_SUBJECT_VALUES\.indexOf\(left\.subject\)/)
+  assert.match(source, /ACADEMIC_SUBJECT_VALUES\.indexOf\(right\.subject\)/)
+  assert.doesNotMatch(source, /left\.subject === "영어" \? 0 : 1/)
 })
 
 test("appointment editor uses one schedule and one result control per subject", async () => {

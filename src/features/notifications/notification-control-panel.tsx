@@ -79,6 +79,7 @@ const CONNECTION_LABELS: Record<NotificationConnectionKey, string> = {
   "google_chat.executive": "경영진 Google Chat",
   "google_chat.math": "수학팀 Google Chat",
   "google_chat.english": "영어팀 Google Chat",
+  "google_chat.science": "과학팀 Google Chat",
 }
 
 const RECONCILIATION_POLL_MAX_ATTEMPTS = 8
@@ -203,6 +204,7 @@ function revisionsForPatch(
 
 function connectionFromWire(input: unknown): NotificationConnectionDto | null {
   if (!isRecord(input)) return null
+  if ("webhook_url" in input || "webhook_url_ciphertext" in input) return null
   const connectionKey = input.connection_key
   if (
     typeof connectionKey !== "string" ||
@@ -355,7 +357,7 @@ function RuleToggle({
       : rule.audienceKey === "executive_team"
         ? ["google_chat.executive"]
         : rule.audienceKey === "subject_team"
-          ? ["google_chat.math", "google_chat.english"]
+          ? ["google_chat.math", "google_chat.english", "google_chat.science"]
           : []
   const connectionMissing = value.enabled && rule.channelKey === "google_chat" && (
     requiredConnectionKeys.length === 0 ||

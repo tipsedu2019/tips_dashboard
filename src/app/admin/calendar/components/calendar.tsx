@@ -4,6 +4,7 @@ import { isSameDay } from "date-fns"
 import { useMemo, useState } from "react"
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { getAcademicEventFilterTypeKey } from "@/features/operations/academic-event-utils.js"
 import { CalendarMain } from "./calendar-main"
 import { CalendarSidebar } from "./calendar-sidebar"
 import { EventForm } from "./event-form"
@@ -108,7 +109,7 @@ export function Calendar({
   const visibleEvents = useMemo(
     () =>
       events.filter((event) => {
-        const typeKey = `type:${String(event.typeLabel || "기타")}`
+        const typeKey = getAcademicEventFilterTypeKey(event.typeLabel || "기타")
         const categoryKey = `category:${String(event.category || "all")}`
         const typeVisible = activeFilters[typeKey] ?? true
         const categoryVisible = activeFilters[categoryKey] ?? true

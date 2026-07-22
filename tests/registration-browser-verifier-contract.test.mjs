@@ -287,3 +287,33 @@ test("fixture verification remains provider-zero and excludes every send or retr
     assert.doesNotMatch(verifier, prohibited)
   }
 })
+
+test("science registration DB projections expose three-track calendar and reminder ordering", async () => {
+  const migration = await readFile(
+    new URL("../supabase/migrations/20260722100000_registration_science_subject.sql", import.meta.url),
+    "utf8",
+  )
+
+  assert.match(migration, /create or replace view public\.ops_registration_appointment_calendar/)
+  assert.match(migration, /when '영어' then 10[\s\S]*?when '수학' then 20[\s\S]*?when '과학' then 30/)
+  assert.match(
+    migration,
+    /registration_appointment_track_ids_v1[\s\S]*?array_agg\([\s\S]*?registration_subject_sort_order/,
+  )
+  assert.match(
+    migration,
+    /preview_registration_appointment_reminders_v1[\s\S]*?cardinality\(p_track_ids\) not between 1 and 3/,
+  )
+  assert.match(
+    migration,
+    /registration_appointment_source_snapshot_v1[\s\S]*?registration_subject_sort_order[\s\S]*?'participants'/,
+  )
+  assert.match(
+    migration,
+    /write_registration_track_event_v2[\s\S]*?registration_subject_sort_order[\s\S]*?'subjects'/,
+  )
+  assert.match(
+    migration,
+    /registration_message_track_id_v1[\s\S]*?registration_subject_sort_order/,
+  )
+})

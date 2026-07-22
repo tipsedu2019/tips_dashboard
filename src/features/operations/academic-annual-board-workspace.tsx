@@ -38,6 +38,7 @@ import {
   getAcademicEventMutationErrorMessage,
   getPersistedAcademicEventId,
   isSubjectExamType,
+  parseActiveScienceSubjectAreas,
   runAcademicEventMutation,
 } from "./academic-event-utils.js";
 import {
@@ -49,11 +50,12 @@ import {
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 
 const FIXED_EXAM_TERM_ROWS = ["1학기 중간", "1학기 기말", "2학기 중간", "2학기 기말"] as const;
-const BOARD_TYPES: AcademicAnnualBoardType[] = ["시험기간", "영어시험일", "수학시험일", "체험학습", "방학·휴일·기타", "팁스"];
-const SUBJECT_BOARD_TYPES: AcademicAnnualBoardType[] = ["영어시험일", "수학시험일"];
+const BOARD_TYPES: AcademicAnnualBoardType[] = ["시험기간", "영어시험일", "수학시험일", "과학시험일", "체험학습", "방학·휴일·기타", "팁스"];
+const SUBJECT_BOARD_TYPES: AcademicAnnualBoardType[] = ["영어시험일", "수학시험일", "과학시험일"];
 const SEMESTER_FILTER_OPTIONS = ["전체", "1학기", "2학기"] as const;
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"] as const;
-const HIGH_GRADE_COLUMN_LABELS = ["고1", "고2", "고3"] as const;
+const HIGH_SCHOOL_GRADES = ["고1", "고2", "고3"] as const;
+const HIGH_GRADE_COLUMN_LABELS = HIGH_SCHOOL_GRADES;
 const MIDDLE_GRADE_COLUMN_LABELS = ["중1", "중2", "중3"] as const;
 
 type ExamTerm = (typeof FIXED_EXAM_TERM_ROWS)[number];
@@ -61,6 +63,12 @@ type SemesterFilter = (typeof SEMESTER_FILTER_OPTIONS)[number];
 type GradeColumnLabel = (typeof HIGH_GRADE_COLUMN_LABELS)[number] | (typeof MIDDLE_GRADE_COLUMN_LABELS)[number];
 type EntryState = "complete" | "warning" | "empty";
 type AnnualBoardCellType = AcademicAnnualBoardType;
+type ScienceBoardCalendarEvent = CalendarEvent & {
+  scienceAreaKey?: string;
+  scienceAreaLabel?: string;
+  embeddedNoteMeta?: Record<string, unknown>;
+};
+type ScienceBoardDraft = Partial<ScienceBoardCalendarEvent>;
 
 type AnnualBoardTermRow =
   | {
@@ -155,6 +163,9 @@ function buildBoardEventTitle(type: string) {
   if (type === "수학시험일") {
     return "수학 시험일 및 시험범위";
   }
+  if (type === "과학시험일") {
+    return "과학 시험일 및 시험범위";
+  }
   return "시험기간";
 }
 
@@ -188,6 +199,7 @@ function buildBoardDraftDate(
 function getTypeLabel(type: AcademicAnnualBoardType) {
   if (type === "영어시험일") return "영어";
   if (type === "수학시험일") return "수학";
+  if (type === "과학시험일") return "과학";
   if (type === "방학·휴일·기타") return "방학·기타";
   if (type === "팁스") return "팁스";
   return type;
@@ -310,7 +322,17 @@ function formatSubjectDateLabel(entry?: AcademicAnnualBoardEntry | null, options
 }
 
 function getEntryByTerm(row: AcademicAnnualBoardRow, type: AcademicAnnualBoardType, examTerm: ExamTerm) {
-  return (row.typeBuckets[type] || []).find((entry) => text(entry.examTerm) === examTerm) || null;
+  const entries = row.typeBuckets[type] || [];
+  const exactEntry = entries.find((entry) => text(entry.examTerm) === examTerm);
+  if (exactEntry || !isSubjectExamType(type) || !examTerm.endsWith("중간")) {
+    return exactEntry || null;
+  }
+
+  const targetSemester = examTerm.startsWith("1학기") ? "1학기" : "2학기";
+  const legacySubjectEntry = entries.find(
+    (entry) => !text(entry.examTerm) && getEntrySemester(entry) === targetSemester,
+  );
+  return legacySubjectEntry || null;
 }
 
 function buildBoardEntryMissingItems(entry?: AcademicAnnualBoardEntry | null) {
@@ -332,6 +354,7 @@ function buildBoardEntryMissingItems(entry?: AcademicAnnualBoardEntry | null) {
   return [
     isSubjectExamType(entry.type) && (!text(entry.examDateLabel) || text(entry.examDateLabel) === "시험일 미입력") ? "시험일 미입력" : null,
     isSubjectExamType(entry.type) && scopeItems.length === 0 ? "시험범위 미입력" : null,
+    entry.type === "과학시험일" && !text(entry.scienceAreaKey) ? "과학 영역 미입력" : null,
     hasStructuredPartialScope ? "시험범위 일부 미입력" : null,
   ].filter((item): item is string => Boolean(item));
 }
@@ -445,6 +468,7 @@ function getCellToneClass(type: AcademicAnnualBoardType, state: EntryState, acti
     type === "시험기간" && "annual-board-value-period",
     type === "영어시험일" && "annual-board-value-english",
     type === "수학시험일" && "annual-board-value-math",
+    type === "과학시험일" && "annual-board-value-math annual-board-value-science",
     type === "체험학습" && "annual-board-value-experience",
     type === "방학·휴일·기타" && "annual-board-value-vacation",
     state === "empty" && "annual-board-value-empty",
@@ -535,6 +559,7 @@ function AnnualBoardCellHoverContent({
   entries,
   state,
   readOnly,
+  canCreateScienceExam,
   onEdit,
   onCreate,
 }: {
@@ -545,6 +570,7 @@ function AnnualBoardCellHoverContent({
   entries: AcademicAnnualBoardEntry[];
   state: EntryState;
   readOnly: boolean;
+  canCreateScienceExam: boolean;
   onEdit: (entry: AcademicAnnualBoardEntry) => void;
   onCreate: () => void;
 }) {
@@ -584,6 +610,12 @@ function AnnualBoardCellHoverContent({
 
         {SUBJECT_BOARD_TYPES.includes(type) ? (
           <>
+            {type === "과학시험일" && primaryEntry?.scienceAreaLabel ? (
+              <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3">
+                <span className="annual-board-muted-label">과학 영역</span>
+                <span className="annual-board-hover-value font-semibold">{primaryEntry.scienceAreaLabel}</span>
+              </div>
+            ) : null}
             <ScopeSection title="교재 시험범위" items={textbookScopes} />
             <ScopeSection title="부교재 시험범위" items={subtextbookScopes} />
           </>
@@ -606,22 +638,24 @@ function AnnualBoardCellHoverContent({
           </div>
         ) : null}
 
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 rounded-[4px] bg-[#2F6FED] text-[12px] active:scale-[0.98]"
-          disabled={readOnly}
-          onClick={() => {
-            if (primaryEntry) {
-              onEdit(primaryEntry);
-              return;
-            }
-            onCreate();
-          }}
-        >
-          <Pencil data-icon="inline-start" />
-          수정
-        </Button>
+        {primaryEntry || canCreateScienceExam ? (
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 rounded-[4px] bg-[#2F6FED] text-[12px] active:scale-[0.98]"
+            disabled={readOnly}
+            onClick={() => {
+              if (primaryEntry) {
+                onEdit(primaryEntry);
+                return;
+              }
+              onCreate();
+            }}
+          >
+            <Pencil data-icon="inline-start" />
+            {primaryEntry ? "수정" : "추가"}
+          </Button>
+        ) : null}
       </div>
     </HoverCardContent>
   );
@@ -662,6 +696,8 @@ function AnnualBoardValueCell({
     hoveredCell?.termKey === termRow.key &&
     hoveredCell?.type === type;
   const examTerm = termRow.kind === "exam" ? termRow.examTerm : undefined;
+  const canCreateScienceExam =
+    type !== "과학시험일" || HIGH_SCHOOL_GRADES.includes(gradeLabel as (typeof HIGH_SCHOOL_GRADES)[number]);
   const hoverPayload = {
     schoolKey: schoolRow.schoolKey,
     gradeLabel,
@@ -691,6 +727,7 @@ function AnnualBoardValueCell({
         entries={entries}
         state={state}
         readOnly={readOnly}
+        canCreateScienceExam={canCreateScienceExam}
         onEdit={(entry) => onEntryEdit(row, entry)}
         onCreate={() => onCellCreate(row, type, examTerm)}
       />
@@ -790,16 +827,18 @@ function AnnualBoardMapView({
                           const periodEntry = getEntryByTerm(gradeRow, "시험기간", termRow.examTerm);
                           const englishEntry = getEntryByTerm(gradeRow, "영어시험일", termRow.examTerm);
                           const mathEntry = getEntryByTerm(gradeRow, "수학시험일", termRow.examTerm);
+                          const scienceEntry = getEntryByTerm(gradeRow, "과학시험일", termRow.examTerm);
                           const cells = [
                             { type: "시험기간" as const, entry: periodEntry, label: getBoardCellLabel(periodEntry, "시험기간", { compact: true }) },
                             { type: "영어시험일" as const, entry: englishEntry, label: getBoardCellLabel(englishEntry, "영어시험일", { compact: true }).replace("시험일 미입력", "미입력") },
                             { type: "수학시험일" as const, entry: mathEntry, label: getBoardCellLabel(mathEntry, "수학시험일", { compact: true }).replace("시험일 미입력", "미입력") },
+                            { type: "과학시험일" as const, entry: scienceEntry, label: getBoardCellLabel(scienceEntry, "과학시험일", { compact: true }).replace("시험일 미입력", "미입력") },
                           ];
 
                           return (
                             <div key={`${gradeRow.id}-mobile-${termRow.key}`} className="grid gap-1">
                               <p className="text-[11px] font-semibold text-[#667085]">{termRow.label}</p>
-                              <div className="grid grid-cols-3 gap-1">
+                              <div className="grid grid-cols-4 gap-1">
                                 {cells.map((cell) => (
                                   <AnnualBoardValueCell
                                     key={`${gradeRow.id}-mobile-${termRow.key}-${cell.type}`}
@@ -908,10 +947,14 @@ function AnnualBoardMapView({
                         className={cn("annual-board-grade-cell border-b border-r border-[#D9E1EA] p-0 align-top", columnActive && "annual-board-column-active")}
                       >
                         {gradeRow ? (
-                          <div className="annual-board-grade-grid">
+                          <div
+                            className="annual-board-grade-grid"
+                            style={{ gridTemplateColumns: "minmax(120px,1.5fr) repeat(3,minmax(70px,1fr))" }}
+                          >
                             <div className="annual-board-grade-subheader">시험기간</div>
                             <div className="annual-board-grade-subheader">영어</div>
                             <div className="annual-board-grade-subheader">수학</div>
+                            <div className="annual-board-grade-subheader border-r-0">과학</div>
                             {termRows.map((termRow) => {
                               if (termRow.kind === "event") {
                                 const entries = getEventEntriesForSemester(gradeRow, termRow.type, selectedSemester);
@@ -940,10 +983,12 @@ function AnnualBoardMapView({
                               const periodEntry = getEntryByTerm(gradeRow, "시험기간", termRow.examTerm);
                               const englishEntry = getEntryByTerm(gradeRow, "영어시험일", termRow.examTerm);
                               const mathEntry = getEntryByTerm(gradeRow, "수학시험일", termRow.examTerm);
+                              const scienceEntry = getEntryByTerm(gradeRow, "과학시험일", termRow.examTerm);
                               const cells = [
                                 { type: "시험기간" as const, entry: periodEntry, label: getBoardCellLabel(periodEntry, "시험기간", { compact: true }) },
                                 { type: "영어시험일" as const, entry: englishEntry, label: getBoardCellLabel(englishEntry, "영어시험일", { compact: true }).replace("시험일 미입력", "미입력") },
                                 { type: "수학시험일" as const, entry: mathEntry, label: getBoardCellLabel(mathEntry, "수학시험일", { compact: true }).replace("시험일 미입력", "미입력") },
+                                { type: "과학시험일" as const, entry: scienceEntry, label: getBoardCellLabel(scienceEntry, "과학시험일", { compact: true }).replace("시험일 미입력", "미입력") },
                               ];
                               return cells.map((cell) => (
                                 <div key={`${gradeRow.id}-${termRow.key}-${cell.type}`} className="annual-board-exam-cell">
@@ -995,6 +1040,7 @@ export function AcademicAnnualBoardWorkspace() {
   const [appliedHighlightEventId, setAppliedHighlightEventId] = useState("");
   const [hoveredCell, setHoveredCell] = useState<HoveredAnnualBoardCell | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [activeScienceAreas, setActiveScienceAreas] = useState<ReturnType<typeof parseActiveScienceSubjectAreas>>([]);
   const [editingBoardEvent, setEditingBoardEvent] = useState<CalendarEvent | null>(null);
   const [boardDraft, setBoardDraft] = useState<Partial<CalendarEvent> | null>(null);
   const [showBoardEventForm, setShowBoardEventForm] = useState(false);
@@ -1002,6 +1048,22 @@ export function AcademicAnnualBoardWorkspace() {
   const annualBoardExportRef = useRef<HTMLDivElement | null>(null);
   const isSeedCalendar = data.academicCalendarSource === "seed";
   const readOnly = !canManageAll || isSeedCalendar;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!supabase) return;
+
+    const client = supabase;
+    void Promise.resolve().then(async () => {
+      const { data: areaRows, error: areaError } = await client.rpc("list_active_science_subject_areas_v1");
+      if (cancelled) return;
+      setActiveScienceAreas(areaError ? [] : parseActiveScienceSubjectAreas(areaRows));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const initialYear = text(searchParams.get("year"));
@@ -1023,6 +1085,7 @@ export function AcademicAnnualBoardWorkspace() {
       buildAcademicAnnualBoardModel({
         academicEvents: data.academicEvents,
         academicSchools: data.academicSchools,
+        scienceSubjectAreas: activeScienceAreas,
         academicEventExamDetails: data.academicEventExamDetails,
         academyCurriculumPlans: data.academyCurriculumPlans,
         academyCurriculumMaterials: data.academyCurriculumMaterials,
@@ -1034,7 +1097,7 @@ export function AcademicAnnualBoardWorkspace() {
         selectedYear,
         selectedSemester,
       }),
-    [data.academicEventExamDetails, data.academicEvents, data.academicSchools, data.academicCurriculumProfiles, data.academicExamMaterialItems, data.academicExamMaterialPlans, data.academicSupplementMaterials, data.academyCurriculumMaterials, data.academyCurriculumPlans, data.textbooks, selectedSemester, selectedYear],
+    [activeScienceAreas, data.academicEventExamDetails, data.academicEvents, data.academicSchools, data.academicCurriculumProfiles, data.academicExamMaterialItems, data.academicExamMaterialPlans, data.academicSupplementMaterials, data.academyCurriculumMaterials, data.academyCurriculumPlans, data.textbooks, selectedSemester, selectedYear],
   );
 
   const allSchoolOptions = useMemo(
@@ -1195,8 +1258,7 @@ export function AcademicAnnualBoardWorkspace() {
   ) => {
     const persistedId = getPersistedAcademicEventId(entry.id);
 
-    setBoardDraft(null);
-    setEditingBoardEvent({
+    const editingEvent: ScienceBoardCalendarEvent = {
       id: persistedId,
       sourceId: persistedId,
       title: entry.title,
@@ -1215,10 +1277,15 @@ export function AcademicAnnualBoardWorkspace() {
       category: row.category,
       grade: entry.grade || row.grade,
       examTerm: entry.examTerm || "",
+      scienceAreaKey: entry.scienceAreaKey || "",
+      scienceAreaLabel: entry.scienceAreaLabel || "",
+      embeddedNoteMeta: entry.embeddedNoteMeta || {},
       textbookScopes: normalizeScopeItems(entry.textbookScopes),
       subtextbookScopes: normalizeScopeItems(entry.subtextbookScopes),
-      note: entry.note || entry.scopeSummary || "",
-    });
+      note: entry.note || "",
+    };
+    setBoardDraft(null);
+    setEditingBoardEvent(editingEvent);
     setShowBoardEventForm(true);
   };
 
@@ -1231,10 +1298,16 @@ export function AcademicAnnualBoardWorkspace() {
       return;
     }
 
+    if (
+      type === "과학시험일" &&
+      !row.gradeValues.some((grade) => HIGH_SCHOOL_GRADES.includes(grade as (typeof HIGH_SCHOOL_GRADES)[number]))
+    ) {
+      return;
+    }
+
     const resolvedExamTerm = type === "시험기간" || isSubjectExamType(type) ? examTerm : "";
     const draftDate = buildBoardDraftDate(model.selectedYear, row, type, resolvedExamTerm);
-    setEditingBoardEvent(null);
-    setBoardDraft({
+    const draft: ScienceBoardDraft = {
       title: buildBoardEventTitle(type),
       schoolId: row.schoolId,
       schoolName: row.schoolName,
@@ -1247,7 +1320,12 @@ export function AcademicAnnualBoardWorkspace() {
       examTerm: resolvedExamTerm,
       textbookScopes: [],
       subtextbookScopes: [],
-    });
+      scienceAreaKey: "",
+      scienceAreaLabel: "",
+      embeddedNoteMeta: {},
+    };
+    setEditingBoardEvent(null);
+    setBoardDraft(draft);
     setShowBoardEventForm(true);
   };
 
@@ -1283,6 +1361,7 @@ export function AcademicAnnualBoardWorkspace() {
         grade: eventData.grade,
         note: eventData.note || eventData.description,
         examTerm: eventData.examTerm,
+        scienceAreaKey: eventData.scienceAreaKey,
         textbookScope: "",
         subtextbookScope: "",
         textbookScopes: eventData.textbookScopes,

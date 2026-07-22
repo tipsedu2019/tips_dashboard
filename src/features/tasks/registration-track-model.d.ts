@@ -1,3 +1,7 @@
+import type { AcademicSubjectValue } from "../../lib/academic-subject-registry.ts"
+
+export type RegistrationSubject = AcademicSubjectValue
+
 export type RegistrationTrackStatus =
   | "inquiry"
   | "migration_review"
@@ -23,7 +27,7 @@ export type RegistrationTrackViewKey =
 export type RegistrationTrackSummary = {
   id?: string
   taskId?: string
-  subject?: "영어" | "수학"
+  subject?: RegistrationSubject
   status: RegistrationTrackStatus
   directorProfileId?: string | null
   levelTestRetakeDecision?: "" | "required" | "not_required" | null

@@ -33,3 +33,30 @@ test("registration runtime textbook fixtures satisfy required taxonomy", async (
   assert.match(source, /insert into public\.textbooks\([\s\S]*school_levels[\s\S]*grade_levels[\s\S]*sub_subject/i);
   assert.match(source, /array\['middle'\]::text\[\][\s\S]*array\['m1', 'm2', 'm3'\]::text\[\]/i);
 });
+
+test("science textbook taxonomy replaces only the subject check and seeds stable area labels", async () => {
+  const sql = await readMigration("science_classes_and_textbooks");
+  assert.match(sql, /drop constraint if exists textbooks_subject_required/i);
+  assert.match(sql, /textbooks_subject_required[\s\S]*subject in \('english', 'math', 'science', 'other'\)/i);
+  assert.match(sql, /insert into public\.textbook_sub_subject_settings/i);
+  assert.match(sql, /\('science', '통합과학', 10\)/i);
+  assert.match(sql, /\('science', '물리학', 20\)/i);
+  assert.match(sql, /\('science', '화학', 30\)/i);
+  assert.match(sql, /\('science', '생명과학', 40\)/i);
+  assert.match(sql, /\('science', '지구과학', 50\)/i);
+  assert.doesNotMatch(sql, /delete\s+from\s+public\.textbook_sub_subject_settings/i);
+  assert.match(sql, /notify pgrst, 'reload schema'/i);
+});
+
+test("science textbook write trigger stores the active area's current label", async () => {
+  const sql = await readMigration("science_classes_and_textbooks");
+  assert.match(
+    sql,
+    /select\s+area\.label\s+into\s+subject_area_label[\s\S]*area\.is_active\s*=\s*true/i,
+  );
+  assert.match(sql, /new\.sub_subject\s*:=\s*subject_area_label/i);
+  assert.match(
+    sql,
+    /before insert or update of subject,\s*subject_area_key,\s*sub_subject\s+on public\.textbooks/i,
+  );
+});

@@ -1384,6 +1384,29 @@ test("registration option enrichment survives a slower core revalidation", async
   assert.doesNotMatch(optionSource, /workspaceLoadGenerationRef\.current !== loadGeneration/);
 });
 
+test("registration subject capability uses one cached probe and its failure is isolated from detail and option loading", async () => {
+  const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const capabilityEffect = workspaceSource.slice(
+    workspaceSource.indexOf("const fixtureCapabilities = registrationFixtureEnabled"),
+    workspaceSource.indexOf("useEffect(() => {\n    if (form.type !== \"registration\")", workspaceSource.indexOf("const fixtureCapabilities = registrationFixtureEnabled")),
+  );
+  const optionLoader = workspaceSource.slice(
+    workspaceSource.indexOf("const ensureRegistrationOptions = useCallback"),
+    workspaceSource.indexOf("useEffect(() => {", workspaceSource.indexOf("const ensureRegistrationOptions = useCallback")),
+  );
+
+  assert.match(workspaceSource, /probeRegistrationSubjectCapabilities/);
+  assert.match(workspaceSource, /getRegistrationSubjectCompatibilityCapabilities/);
+  assert.match(capabilityEffect, /fixtureCapabilities \|\| probeRegistrationSubjectCapabilities\(\)/);
+  assert.match(capabilityEffect, /setRegistrationSubjectCapabilities\(capabilities\)/);
+  assert.match(capabilityEffect, /\.catch\(\(\) => \{/);
+  assert.match(capabilityEffect, /setRegistrationSubjectCapabilityError/);
+  assert.doesNotMatch(capabilityEffect, /setRegistrationOptionsError|loadOpsRegistrationCaseDetail|ensureRegistrationOptions/);
+  assert.doesNotMatch(optionLoader, /probeRegistrationSubjectCapabilities/);
+  assert.match(workspaceSource, /subjectCapabilities=\{registrationSubjectCapabilities\}/);
+  assert.match(workspaceSource, /subjectCapabilityError=\{registrationSubjectCapabilityError\}/);
+});
+
 test("automatic word-retest mutations cannot commit across viewer or reload ownership changes", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const autoMutationSource = workspaceSource.slice(
@@ -4616,7 +4639,8 @@ test("registration create blocker focus uses normalized section IDs and exact fo
   assert.match(focusSource, /registration-application-\$\{sectionKey\}/);
   assert.match(focusSource, /\[data-registration-focus="\$\{focusKey\}"\]/);
   assert.match(focusSource, /focusTarget \|\| section/);
-  assert.match(workflow, /counselor:\$\{subjectCounselor\[1\]\}/);
+  assert.match(workflow, /const counselorSubject = parseAcademicSubject\(subjectCounselor\?\.\[1\]\)/);
+  assert.match(workflow, /counselor:\$\{counselorSubject\}/);
   assert.match(initialPlan, /data-registration-focus=\{`counselor:\$\{subject\}`\}/);
 });
 

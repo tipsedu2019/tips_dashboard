@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   buildPurchaseLifecycleDraft,
@@ -106,11 +107,47 @@ test("monthly closing compares opening stock, movements, and cash settlement", (
     [
       ["english", 0, 0, 0, 0],
       ["math", 0, 0, 0, 0],
+      ["science", 0, 0, 0, 0],
       ["other", 4, 44000, 39600, 4400],
     ],
   );
   assert.equal(closing.settlementDifference, -1600);
   assert.equal(closing.needsReview, true);
+});
+
+test("monthly closing keeps science sales in a separate team bucket", () => {
+  const closing = buildTextbookMonthlyClosing({
+    stockMoves: [
+      {
+        move_type: "sale_issue",
+        subject: "science",
+        quantity: -2,
+        unit_amount: 15000,
+        amount: -30000,
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    closing.teamMargins.map((row) => [row.team, row.saleQuantity, row.saleAmount]),
+    [
+      ["english", 0, 0],
+      ["math", 0, 0],
+      ["science", 2, 30000],
+      ["other", 0, 0],
+    ],
+  );
+});
+
+test("monthly closing controls include science without changing the approval shape", () => {
+  const workspaceSource = readFileSync(
+    new URL("../src/features/textbooks/textbook-operations-workspace.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /item\.team === "science"/);
+  assert.match(workspaceSource, /\["all", "english", "math", "science"\]/);
+  assert.match(workspaceSource, /<SelectItem value="science">과학<\/SelectItem>/);
 });
 
 test("monthly closing filters stock moves by textbook subject", () => {

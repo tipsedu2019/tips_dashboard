@@ -581,7 +581,7 @@ export function getRegistrationActionPermissions(input = {}) {
   const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
   const consultation = input.activeConsultation
   const canCompleteOwnConsultation = Boolean(
-    input.viewerRole === "admin"
+    (input.viewerRole === "admin" || (input.viewerRole === "teacher" && input.track?.subject === "과학"))
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && consultation?.trackId === input.track?.id
@@ -599,7 +599,7 @@ export function getRegistrationActionPermissions(input = {}) {
 export function getRegistrationSummaryActionPermissions(input = {}) {
   const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
   const canOpenOwnConsultationHint = Boolean(
-    input.viewerRole === "admin"
+    (input.viewerRole === "admin" || (input.viewerRole === "teacher" && input.track?.subject === "과학"))
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && ["consultation_waiting", "visit_consultation_scheduled"].includes(input.track?.status),

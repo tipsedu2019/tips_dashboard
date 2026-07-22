@@ -348,7 +348,12 @@ function normalizeSchoolKey(value) {
 }
 
 function normalizeSubject(value) {
-  return text(value);
+  const raw = text(value);
+  const normalized = raw.toLowerCase();
+  if (normalized === "english") return "영어";
+  if (normalized === "math") return "수학";
+  if (normalized === "science") return "과학";
+  return raw;
 }
 
 const DASHBOARD_SUBJECT_FILTERS = [
@@ -504,13 +509,14 @@ function matchesGradeReference(item = {}, studentGrade = "") {
 
 function isModernExamCalendarEvent(event = {}) {
   const type = normalizeAcademicEventType(event.type || event.typeLabel || event.type_label);
-  return type === "시험기간" || type === "영어시험일" || type === "수학시험일";
+  return type === "시험기간" || type === "영어시험일" || type === "수학시험일" || type === "과학시험일";
 }
 
 function subjectOfExamEventType(value) {
   const type = normalizeAcademicEventType(value);
   if (type === "영어시험일") return "영어";
   if (type === "수학시험일") return "수학";
+  if (type === "과학시험일") return "과학";
   return "";
 }
 

@@ -618,6 +618,21 @@ test("R51 English and Math serialize to one stable scalar registration payload",
   );
 });
 
+test("registration subject helpers keep science and reject unsupported values", () => {
+  assert.deepEqual(
+    parseRegistrationSubjects(["과학", "unknown", "science", "영어"]),
+    ["영어", "과학"],
+  );
+  assert.equal(
+    serializeRegistrationSubjects(["science", "수학", "영어", "unknown"]),
+    "영어, 수학, 과학",
+  );
+  assert.equal(registrationSubjectIncludes("영어, 과학", "과학"), true);
+  assert.equal(registrationSubjectIncludes("unknown", "unknown"), false);
+  assert.equal(getRegistrationBlockerFocusKey("과학 상담 책임자"), "counselor:과학");
+  assert.equal(getRegistrationBlockerSection("과학 상담 책임자"), "consultation");
+});
+
 test("R52 a complete English-and-Math inquiry is valid for create", () => {
   const payload = {
     studentName: "김하윤",

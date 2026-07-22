@@ -46,6 +46,10 @@ const settingsMigrationUrl = new URL(
   "../supabase/migrations/20260716111000_notification_control_plane_settings_rpc.sql",
   import.meta.url,
 )
+const scienceConnectionMigrationUrl = new URL(
+  "../supabase/migrations/20260722120000_science_notification_connection.sql",
+  import.meta.url,
+)
 const deferredDeliveryRouteUrl = new URL(
   "../src/app/api/notifications/deliveries/[deliveryId]/route.ts",
   import.meta.url,
@@ -1032,6 +1036,13 @@ test("connection repository returns masked DTOs and never exposes either stored 
       webhook_url_mask: null,
       connection_state: "disconnected",
     }),
+    makeConnectionRow({
+      channel: "science",
+      webhook_url: "",
+      webhook_url_ciphertext: null,
+      webhook_url_mask: null,
+      connection_state: "disconnected",
+    }),
   ])
   const repository = createNotificationConnectionRepository({
     store,
@@ -1047,12 +1058,58 @@ test("connection repository returns masked DTOs and never exposes either stored 
     ["google_chat.management", "legacy_active"],
     ["google_chat.executive", "encrypted_active"],
     ["google_chat.math", "disconnected"],
+    ["google_chat.science", "disconnected"],
   ])
-  assert.equal(result[2].configured, false)
+  assert.equal(result[3].configured, false)
+  assert.equal(result[3].webhookUrlMask, null)
   assert.doesNotMatch(
     JSON.stringify(result),
     /key-secret|token-secret|second-key|second-token|webhook_url_ciphertext|legacy-value-that-must-not-win/,
   )
+})
+
+test("science connection mutations use the science DB channel without implicit verification", async () => {
+  const { createNotificationConnectionRepository } = await import(repositoryModuleUrl)
+  const store = createConnectionStore([makeConnectionRow({
+    channel: "science",
+    webhook_url: "",
+    webhook_url_ciphertext: null,
+    webhook_url_mask: null,
+    connection_state: "disconnected",
+  })])
+  let providerCalls = 0
+  const repository = createNotificationConnectionRepository({
+    store,
+    encryptionKey: ENCRYPTION_KEY,
+    sendVerification: async () => {
+      providerCalls += 1
+      return { succeeded: true, resultCode: "accepted" }
+    },
+  })
+
+  const result = await repository.replaceConnection({
+    connectionKey: "google_chat.science",
+    webhookUrl: SECOND_GOOGLE_CHAT_URL,
+    expectedRevision: BIG_REVISION,
+    requestId: "30000000-0000-4000-8000-000000000299",
+    actorUserId: ADMIN_ID,
+    actorClient: { id: "admin-authenticated-client" },
+  })
+
+  assert.equal(store.calls.find((call) => call.operation === "replaceAtomic").input.channel, "science")
+  assert.equal(result.connectionKey, "google_chat.science")
+  assert.equal(result.connectionState, "encrypted_active")
+  assert.equal(providerCalls, 0)
+  assert.doesNotMatch(JSON.stringify(result), /key-secret|token-secret|webhookUrlCiphertext/)
+})
+
+test("science migration recreates the current safe connection serializers", async () => {
+  const migration = await readFile(scienceConnectionMigrationUrl, "utf8")
+  assert.match(migration, /create\s+or\s+replace\s+function\s+dashboard_private\.notification_connection_safe_json_v1/i)
+  assert.match(migration, /when\s+'science'\s+then\s+'google_chat\.science'/i)
+  assert.match(migration, /create\s+or\s+replace\s+function\s+dashboard_private\.notification_control_plane_snapshot_v1/i)
+  assert.match(migration, /when\s+'science'\s+then\s+5/i)
+  assert.match(migration, /channel\s+in\s*\(\s*'admin'\s*,\s*'executive'\s*,\s*'math'\s*,\s*'english'\s*,\s*'science'\s*\)/i)
 })
 
 test("connection replace dual-writes legacy plaintext and ciphertext atomically without verification", async () => {

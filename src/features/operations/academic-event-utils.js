@@ -58,6 +58,7 @@ export const DEFAULT_ACADEMIC_EVENT_TYPES = [
   "시험기간",
   "영어시험일",
   "수학시험일",
+  "과학시험일",
   "체험학습",
   "방학·휴일·기타",
   "팁스",
@@ -66,7 +67,16 @@ export const DEFAULT_ACADEMIC_EVENT_TYPES = [
 export const ACADEMIC_EVENT_TYPE_DISPLAY_LABELS = {
   영어시험일: "영어 시험일 및 시험범위",
   수학시험일: "수학 시험일 및 시험범위",
+  과학시험일: "과학 시험일 및 시험범위",
 };
+
+export const SCIENCE_SUBJECT_AREA_OPTIONS = [
+  { areaKey: "integrated_science", label: "통합과학", sortOrder: 10 },
+  { areaKey: "physics", label: "물리학", sortOrder: 20 },
+  { areaKey: "chemistry", label: "화학", sortOrder: 30 },
+  { areaKey: "life_science", label: "생명과학", sortOrder: 40 },
+  { areaKey: "earth_science", label: "지구과학", sortOrder: 50 },
+];
 
 const DEFAULT_FALLBACK_EVENT_TYPE = "방학·휴일·기타";
 
@@ -81,6 +91,7 @@ const LEGACY_TYPE_ALIASES = {
   기타: "방학·휴일·기타",
   "영어 시험일 및 시험범위": "영어시험일",
   "수학 시험일 및 시험범위": "수학시험일",
+  "과학 시험일 및 시험범위": "과학시험일",
 };
 
 export function getAcademicEventTypeLabel(value) {
@@ -90,7 +101,82 @@ export function getAcademicEventTypeLabel(value) {
 
 export function isSubjectExamType(value) {
   const normalized = normalizeAcademicEventType(value);
-  return normalized === "영어시험일" || normalized === "수학시험일";
+  return normalized === "영어시험일" || normalized === "수학시험일" || normalized === "과학시험일";
+}
+
+export function getScienceSubjectAreaLabel(value, scienceSubjectAreas = []) {
+  const areaKey = text(value);
+  const currentArea = parseActiveScienceSubjectAreas(scienceSubjectAreas)
+    .find((area) => area.areaKey === areaKey);
+  if (currentArea) return currentArea.label;
+  return SCIENCE_SUBJECT_AREA_OPTIONS.find((option) => option.areaKey === areaKey)?.label || "";
+}
+
+function getScienceAreaKey(value) {
+  if (typeof value === "string") {
+    return text(value);
+  }
+  return text(value?.area_key || value?.areaKey || value?.key || value?.value);
+}
+
+export function parseActiveScienceSubjectAreas(value) {
+  if (!Array.isArray(value)) return [];
+
+  const knownAreas = new Map(
+    SCIENCE_SUBJECT_AREA_OPTIONS.map((area) => [area.areaKey, area]),
+  );
+  return value
+    .map((row) => {
+      const areaKey = getScienceAreaKey(row);
+      const knownArea = knownAreas.get(areaKey);
+      const label = text(row?.label);
+      const isActive = (row?.is_active ?? row?.isActive) === true;
+      if (!knownArea || !label || !isActive) return null;
+      const rawSortOrder = row?.sort_order ?? row?.sortOrder;
+      const parsedSortOrder = rawSortOrder === null || rawSortOrder === ""
+        ? Number.NaN
+        : Number(rawSortOrder);
+      return {
+        areaKey,
+        label,
+        sortOrder: Number.isFinite(parsedSortOrder) ? parsedSortOrder : knownArea.sortOrder,
+        isActive: true,
+      };
+    })
+    .filter((area) => area !== null)
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.areaKey.localeCompare(right.areaKey));
+}
+
+function parseDraftGrades(value) {
+  if (Array.isArray(value)) {
+    return value.map(text).filter(Boolean);
+  }
+  return text(value).split(/[\s,|/]+/).map(text).filter(Boolean);
+}
+
+export function validateScienceExamDraft(draft = {}, activeScienceAreas = []) {
+  if (normalizeAcademicEventType(draft.type || draft.typeLabel) !== "과학시험일") {
+    return { isValid: true, errors: {} };
+  }
+
+  const errors = {};
+  const grades = parseDraftGrades(draft.grade);
+  if (grades.length === 0 || grades.some((grade) => !["고1", "고2", "고3"].includes(grade))) {
+    errors.grade = "과학 시험일은 고1~고3만 선택할 수 있습니다.";
+  }
+
+  const scienceAreaKey = text(draft.scienceAreaKey || draft.science_area_key);
+  const isActiveArea = parseActiveScienceSubjectAreas(activeScienceAreas).some(
+    (area) => area.areaKey === scienceAreaKey,
+  );
+  if (!scienceAreaKey || !isActiveArea) {
+    errors.scienceAreaKey = "활성 과학 영역을 선택해 주세요.";
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+  };
 }
 
 export function isExamTypeWithTerm(value) {
@@ -98,14 +184,20 @@ export function isExamTypeWithTerm(value) {
   return normalized === "시험기간" || isSubjectExamType(normalized);
 }
 
-export function normalizeAcademicEventType(value) {
+export function parseAcademicEventType(value) {
   const raw = text(value);
-  if (!raw) {
-    return DEFAULT_FALLBACK_EVENT_TYPE;
-  }
+  if (!raw) return null;
 
   const normalized = LEGACY_TYPE_ALIASES[raw] || raw;
-  return DEFAULT_ACADEMIC_EVENT_TYPES.includes(normalized) ? normalized : DEFAULT_FALLBACK_EVENT_TYPE;
+  return DEFAULT_ACADEMIC_EVENT_TYPES.includes(normalized) ? normalized : null;
+}
+
+export function normalizeAcademicEventType(value) {
+  return parseAcademicEventType(value) || DEFAULT_FALLBACK_EVENT_TYPE;
+}
+
+export function getAcademicEventFilterTypeKey(value) {
+  return `type:${normalizeAcademicEventType(value)}`;
 }
 
 export function createAcademicEventDraft(event = {}, options = {}) {
@@ -114,6 +206,8 @@ export function createAcademicEventDraft(event = {}, options = {}) {
     findSchool(event.schoolId || event.school_id || options.defaultSchoolId, schoolOptions) || null;
   const start = text(event.start) || text(options.startDate);
   const end = normalizeEndDate(start, text(event.end) || text(options.endDate));
+
+  const embeddedNoteMeta = extractAcademicEventNoteMetadata(event.note);
 
   return {
     id: text(event.id),
@@ -124,22 +218,94 @@ export function createAcademicEventDraft(event = {}, options = {}) {
     start,
     end,
     grade: text(event.grade) || "all",
-    note: text(event.note),
+    scienceAreaKey: text(event.scienceAreaKey || embeddedNoteMeta.scienceAreaKey),
+    embeddedNoteMeta,
+    note: stripAcademicEventNoteMetadata(event.note),
   };
 }
 
-function buildEmbeddedNote(baseNote, extraMeta = {}) {
+export function extractAcademicEventNoteMetadata(note) {
   const marker = "[[TIPS_META]]";
-  const cleanedNote = text(baseNote);
-  const filteredMeta = Object.fromEntries(
-    Object.entries(extraMeta).filter(([, value]) => text(value)),
-  );
+  const raw = String(note || "");
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex < 0) {
+    return {};
+  }
 
-  if (Object.keys(filteredMeta).length === 0) {
+  try {
+    const parsed = JSON.parse(raw.slice(markerIndex + marker.length).trim());
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function stripAcademicEventNoteMetadata(note) {
+  const marker = "[[TIPS_META]]";
+  const raw = String(note || "");
+  const markerIndex = raw.indexOf(marker);
+  return (markerIndex < 0 ? raw : raw.slice(0, markerIndex)).trim();
+}
+
+function hasEmbeddedMetaValue(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (typeof value === "string") {
+    return Boolean(value.trim());
+  }
+  return value !== null && value !== undefined;
+}
+
+export function buildAcademicEventNote(baseNote, extraMeta = {}) {
+  const marker = "[[TIPS_META]]";
+  const cleanedNote = stripAcademicEventNoteMetadata(baseNote);
+  const mergedMeta = { ...extractAcademicEventNoteMetadata(baseNote) };
+
+  Object.entries(extraMeta).forEach(([key, value]) => {
+    if (hasEmbeddedMetaValue(value)) {
+      mergedMeta[key] = value;
+    } else {
+      delete mergedMeta[key];
+    }
+  });
+
+  if (Object.keys(mergedMeta).length === 0) {
     return cleanedNote || null;
   }
 
-  return `${cleanedNote}${cleanedNote ? "\n\n" : ""}${marker} ${JSON.stringify(filteredMeta)}`;
+  return `${cleanedNote}${cleanedNote ? "\n\n" : ""}${marker} ${JSON.stringify(mergedMeta)}`;
+}
+
+export function prepareAcademicEventMetadataForWrite(eventData = {}, activeScienceAreas = []) {
+  const embeddedNoteMeta = eventData.embeddedNoteMeta
+    && typeof eventData.embeddedNoteMeta === "object"
+    && !Array.isArray(eventData.embeddedNoteMeta)
+    ? eventData.embeddedNoteMeta
+    : {};
+  const scienceAreaKey = text(eventData.scienceAreaKey || embeddedNoteMeta.scienceAreaKey);
+  const validation = validateScienceExamDraft(
+    {
+      type: eventData.typeLabel || eventData.type,
+      grade: eventData.grade,
+      scienceAreaKey,
+    },
+    activeScienceAreas,
+  );
+
+  return {
+    ...validation,
+    scienceAreaKey,
+    note: buildAcademicEventNote(
+      eventData.note || eventData.description,
+      {
+        ...embeddedNoteMeta,
+        ...(normalizeAcademicEventType(eventData.typeLabel || eventData.type) === "과학시험일"
+          ? { scienceAreaKey }
+          : {}),
+      },
+    ),
+  };
 }
 
 function normalizeLegacyScopeValue(value) {
@@ -148,13 +314,18 @@ function normalizeLegacyScopeValue(value) {
 
 export function buildAcademicEventMutationPayload(draft = {}, schoolOptions = []) {
   const title = text(draft.title);
-  const type = normalizeAcademicEventType(draft.type);
+  const parsedType = parseAcademicEventType(draft.type);
+  const type = parsedType || DEFAULT_FALLBACK_EVENT_TYPE;
   const schoolId = text(draft.schoolId);
   const school = findSchool(schoolId, schoolOptions);
   const requiresSchool = !isTipsEventType(type);
   const start = text(draft.start);
   const end = normalizeEndDate(start, draft.end);
   const errors = {};
+
+  if (!parsedType) {
+    errors.type = "지원하는 일정 유형을 선택해 주세요.";
+  }
 
   if (!title) {
     errors.title = "제목을 입력해 주세요.";
@@ -185,9 +356,13 @@ export function buildAcademicEventMutationPayload(draft = {}, schoolOptions = []
     end,
     grade: text(draft.grade) || "all",
     category: text(school?.category || draft.category) || "all",
-    note: buildEmbeddedNote(draft.note, {
+    note: buildAcademicEventNote(draft.note, {
       examTerm: draft.examTerm,
       rangeEnd: end !== start ? end : "",
+      scienceAreaKey:
+        type === "과학시험일"
+          ? draft.scienceAreaKey || extractAcademicEventNoteMetadata(draft.note).scienceAreaKey
+          : "",
       textbookScope: normalizeLegacyScopeValue(draft.textbookScope),
       subtextbookScope: normalizeLegacyScopeValue(draft.subtextbookScope),
       textbookScopes: Array.isArray(draft.textbookScopes) ? draft.textbookScopes : [],

@@ -79,13 +79,16 @@ test("teacher settings uses fixed team groups instead of subject labels", async 
 
   assert.match(
     workspaceSource,
-    /TEAM_OPTIONS = \["영어팀", "수학팀", "관리팀", "조교팀"\]/,
+    /TEAM_OPTIONS = \["영어팀", "수학팀", "과학팀", "관리팀", "조교팀"\]/,
   );
   assert.match(
     workspaceSource,
     /TEAM_FILTERS = \["전체", \.\.\.TEAM_OPTIONS\]/,
   );
   assert.match(workspaceSource, /normalizeTeamValue/);
+  assert.match(workspaceSource, /science: "과학팀"/);
+  assert.match(workspaceSource, /과학: "과학팀"/);
+  assert.match(workspaceSource, /과학팀: "과학팀"/);
   assert.match(workspaceSource, /resolveRoleForTeam/);
   assert.match(workspaceSource, /handleTeamChange/);
   assert.match(workspaceSource, /value === "조교팀" \? "assistant"/);
@@ -94,6 +97,26 @@ test("teacher settings uses fixed team groups instead of subject labels", async 
   assert.match(workspaceSource, /placeholder="팀"/);
   assert.doesNotMatch(workspaceSource, /SUBJECT_OPTIONS/);
   assert.doesNotMatch(workspaceSource, /label: "과목"/);
+});
+
+test("science organization migration recreates the complete signup handler", async () => {
+  const migrationSource = await readFile(
+    new URL(
+      "supabase/migrations/20260722093000_science_team_and_classroom.sql",
+      root,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    migrationSource,
+    /create or replace function public\.handle_new_dashboard_user\(\)[\s\S]*returns trigger[\s\S]*security definer[\s\S]*set search_path = ''/i,
+  );
+  assert.match(migrationSource, /normalized_email text;/);
+  assert.match(migrationSource, /when '과학팀' then '과학팀'/);
+  assert.match(migrationSource, /when unique_violation then/);
+  assert.match(migrationSource, /teacher_catalog_id = linked_teacher_id/);
+  assert.match(migrationSource, /return new;/);
 });
 
 test("teacher settings uses mobile edit cards instead of a clipped wide table", async () => {

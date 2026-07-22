@@ -378,6 +378,48 @@ test("detects subject exam events saved directly on the annual board", () => {
   assert.deepEqual(conflicts[0].conflicts[0].students, ["김학생", "이학생"]);
 });
 
+test("detects science exam events saved directly on the annual board", () => {
+  const classes = [
+    {
+      id: "science-high-1",
+      name: "대기고1 과학",
+      subject: "과학",
+      schedule_plan: {
+        sessions: [{ state: "active", date: "2026-04-29" }],
+      },
+      student_ids: ["student-1"],
+    },
+  ];
+  const students = [{ id: "student-1", name: "김과학", school: "대기고", grade: "고1" }];
+  const academicSchools = [{ id: "school-1", name: "대기고" }];
+  const academicEvents = [
+    {
+      id: "event-science-exam",
+      title: "통합과학 시험",
+      school_id: "school-1",
+      grade: "고1",
+      type: "과학시험일",
+      start: "2026-04-29",
+      end: "2026-04-29",
+    },
+  ];
+
+  const conflicts = findExamConflictsForClasses(
+    classes,
+    students,
+    academicSchools,
+    [],
+    [],
+    academicEvents,
+  );
+
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].conflicts[0].rule, "same-day-subject");
+  assert.equal(conflicts[0].conflicts[0].subject, "과학");
+  assert.equal(conflicts[0].conflicts[0].examDate, "2026-04-29");
+  assert.deepEqual(conflicts[0].conflicts[0].students, ["김과학"]);
+});
+
 test("attaches class summaries to grade class breakdowns", () => {
   const metrics = buildDashboardMetrics({
     classes: [

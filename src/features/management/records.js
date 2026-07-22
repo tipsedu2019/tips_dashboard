@@ -205,6 +205,7 @@ export function normalizeClassManagementRecord(row = {}) {
     normalizeClassStatus(row.status) || computeClassStatus(row);
   const title = text(row.name || row.className) || "이름 없는 수업";
   const subject = text(row.subject) || "과목 미정";
+  const subjectAreaKey = text(row.subject_area_key || row.subjectAreaKey);
   const classType = getClassTypeValue(row);
   const schedule = text(row.schedule);
   const scheduleLines = normalizeScheduleLines(schedule);
@@ -255,6 +256,8 @@ export function normalizeClassManagementRecord(row = {}) {
       .join(" "),
     raw: {
       ...row,
+      subject_area_key: subjectAreaKey || null,
+      subjectAreaKey,
       teacher,
       classroom,
       class_type: classType,
@@ -289,6 +292,7 @@ export function normalizeClassManagementRecord(row = {}) {
       weeklyHoursLabel,
       tuitionLabel,
       classType,
+      subjectAreaKey,
       teacher,
       classroom,
       scheduleLines,

@@ -20,9 +20,10 @@ import {
 } from "./textbook-ledger.js";
 import {
   getTextbookGradeSummary,
+  getTextbookScienceAreaLabel,
   getTextbookSchoolLevelSummary,
   getTextbookTaxonomySelection,
-  normalizeTextbookSubject,
+  parseTextbookSubjectForWrite,
   validateTextbookTaxonomy,
 } from "./textbook-taxonomy";
 
@@ -32,6 +33,10 @@ type TextbookOperationsDataScope = "management" | "request";
 type TextbookOperationsDataOptions = {
   client?: SupabaseClientLike | null;
   scope?: TextbookOperationsDataScope;
+};
+type TextbookMasterWriteOptions = {
+  client?: SupabaseClientLike | null;
+  scienceSubjectAreas?: Row[];
 };
 
 const OPTIONAL_TABLES = new Set([
@@ -120,6 +125,27 @@ function isMissingColumnError(error: unknown) {
   );
 }
 
+function isMissingFunctionError(error: unknown) {
+  const code = text((error as { code?: string })?.code);
+  const message = text((error as { message?: string })?.message).toLowerCase();
+  return code === "42883" || code === "PGRST202" || message.includes("could not find the function");
+}
+
+function isMissingSubjectAreaKeyColumnError(error: unknown) {
+  const message = text((error as { message?: string })?.message).toLowerCase();
+  return isMissingColumnError(error) && message.includes("subject_area_key");
+}
+
+async function readActiveScienceSubjectAreas(client: SupabaseClientLike) {
+  if (typeof client.rpc !== "function") return [] as Row[];
+  const { data, error } = await client.rpc("list_active_science_subject_areas_v1");
+  if (error) {
+    if (isMissingFunctionError(error)) return [] as Row[];
+    throw error;
+  }
+  return (data || []) as Row[];
+}
+
 function getMissingColumnSchemaItem(table: string, columns: string, error: unknown) {
   const message = text((error as { message?: string })?.message);
   const quotedColumn = message.match(/'([^']+)'\s+column/i)?.[1];
@@ -151,6 +177,21 @@ function resolveTextbookOperationsDataOptions(input?: SupabaseClientLike | Textb
   return {
     client: ensureClient(input as SupabaseClientLike | null | undefined),
     scope: "management" as TextbookOperationsDataScope,
+  };
+}
+
+function resolveTextbookMasterWriteOptions(input?: SupabaseClientLike | TextbookMasterWriteOptions | null) {
+  if (input && typeof input === "object" && ("client" in input || "scienceSubjectAreas" in input)) {
+    const options = input as TextbookMasterWriteOptions;
+    return {
+      client: ensureClient(options.client),
+      scienceSubjectAreas: Array.isArray(options.scienceSubjectAreas) ? options.scienceSubjectAreas : undefined,
+    };
+  }
+
+  return {
+    client: ensureClient(input as SupabaseClientLike | null | undefined),
+    scienceSubjectAreas: undefined,
   };
 }
 
@@ -254,6 +295,7 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
     suppliers,
     publisherSupplierLinks,
     textbookSubSubjectSettings,
+    scienceSubjectAreas,
     locations,
     purchaseOrders,
     purchaseOrderLines,
@@ -271,6 +313,7 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
     canLoadManagementTables ? readTable(client, "textbook_suppliers", "*", missingTables) : Promise.resolve([] as Row[]),
     canLoadManagementTables ? readTable(client, "textbook_publisher_supplier_links", "*", missingTables) : Promise.resolve([] as Row[]),
     canLoadManagementTables ? readTable(client, "textbook_sub_subject_settings", "*", missingTables) : Promise.resolve([] as Row[]),
+    canLoadManagementTables ? readActiveScienceSubjectAreas(client) : Promise.resolve([] as Row[]),
     readTable(client, "textbook_inventory_locations", "*", missingTables),
     readTable(client, "textbook_purchase_orders", "*", missingTables),
     readTable(client, "textbook_purchase_order_lines", TEXTBOOK_PURCHASE_ORDER_LINE_SELECT, missingTables),
@@ -292,6 +335,7 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
     suppliers,
     publisherSupplierLinks,
     textbookSubSubjectSettings,
+    scienceSubjectAreas,
     locations,
     purchaseOrders,
     purchaseOrderLines,
@@ -311,22 +355,53 @@ export async function listTextbookOperationsData(clientInput?: SupabaseClientLik
   };
 }
 
-export async function upsertTextbookMaster(record: Row, clientInput?: SupabaseClientLike | null) {
-  const client = ensureClient(clientInput);
+export async function upsertTextbookMaster(
+  record: Row,
+  clientInput?: SupabaseClientLike | TextbookMasterWriteOptions | null,
+) {
+  const { client, scienceSubjectAreas } = resolveTextbookMasterWriteOptions(clientInput);
   const title = text(record.title || record.name);
   if (!title) {
     throw new Error("교재명을 입력하세요.");
   }
 
+  const rawSubject = text(record.subject);
+  if (!rawSubject) {
+    throw new Error("과목을 선택하세요.");
+  }
+  const subject = parseTextbookSubjectForWrite(rawSubject);
+  if (!subject) {
+    throw new Error("지원하는 교재 과목만 저장할 수 있습니다.");
+  }
+
   const taxonomy = getTextbookTaxonomySelection({
     ...record,
+    subject,
     school_levels: record.schoolLevels || record.school_levels,
     grade_levels: record.gradeLevels || record.grade_levels,
   });
-  const subject = normalizeTextbookSubject(record.subject);
-  const subSubject = text(record.subSubject || record.sub_subject);
+  const subjectAreaKey = subject === "science"
+    ? text(record.subjectAreaKey || record.subject_area_key)
+    : "";
+  let subSubject = text(record.subSubject || record.sub_subject);
+  if (subject === "science" && subjectAreaKey) {
+    const preloadedArea = scienceSubjectAreas?.find((area) => (
+      text(area.subject) === "과학"
+        && text(area.area_key || area.areaKey) === subjectAreaKey
+        && area.is_active !== false
+        && text(area.label)
+    ));
+    const areaLabel = scienceSubjectAreas === undefined
+      ? getTextbookScienceAreaLabel(subjectAreaKey)
+      : text(preloadedArea?.label);
+    if (!areaLabel) {
+      throw new Error("활성 과학 영역을 선택하세요.");
+    }
+    subSubject = areaLabel;
+  }
   const validation = validateTextbookTaxonomy({
     subject,
+    subjectAreaKey,
     schoolLevels: taxonomy.schoolLevels,
     gradeLevels: taxonomy.gradeLevels,
     subSubject,
@@ -345,6 +420,7 @@ export async function upsertTextbookMaster(record: Row, clientInput?: SupabaseCl
     title,
     name: title,
     subject,
+    subject_area_key: subjectAreaKey || null,
     category: category || text(record.category),
     school_levels: taxonomy.schoolLevels,
     grade_levels: taxonomy.gradeLevels,
@@ -363,9 +439,15 @@ export async function upsertTextbookMaster(record: Row, clientInput?: SupabaseCl
     updated_at: new Date().toISOString().slice(0, 10),
   };
 
-  const { data, error } = await client.from("textbooks").upsert(payload).select().single();
-  if (error) throw error;
-  return data as Row;
+  let result = await client.from("textbooks").upsert(payload).select().single();
+  if (result.error && subject !== "science" && isMissingSubjectAreaKeyColumnError(result.error)) {
+    const fallbackPayload = Object.fromEntries(
+      Object.entries(payload).filter(([key]) => key !== "subject_area_key"),
+    );
+    result = await client.from("textbooks").upsert(fallbackPayload).select().single();
+  }
+  if (result.error) throw result.error;
+  return result.data as Row;
 }
 
 export async function deleteTextbookMasters(idList: string[] | string, clientInput?: SupabaseClientLike | null) {

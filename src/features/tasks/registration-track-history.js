@@ -1,3 +1,5 @@
+import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts";
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -11,8 +13,7 @@ function record(value) {
 }
 
 function uniqueSubjects(values) {
-  const selected = new Set(values.filter((value) => value === "영어" || value === "수학"));
-  return ["영어", "수학"].filter((subject) => selected.has(subject));
+  return sortAcademicSubjects(values);
 }
 
 const DEFAULT_STAGE_BY_EVENT = {

@@ -5,6 +5,10 @@ const adapterModuleUrl = new URL(
   "../src/features/notifications/server/adapters/registration-notification-adapter.ts",
   import.meta.url,
 )
+const immediateAdapterModuleUrl = new URL(
+  "../src/features/notifications/server/adapters/immediate-notification-adapter.ts",
+  import.meta.url,
+)
 const workerModuleUrl = new URL(
   "../src/features/notifications/server/notification-worker.ts",
   import.meta.url,
@@ -16,6 +20,7 @@ const TASK_A = "81000000-0000-4000-8000-000000000011"
 const TASK_B = "81000000-0000-4000-8000-000000000012"
 const TRACK_ENGLISH = "81000000-0000-4000-8000-000000000021"
 const TRACK_MATH = "81000000-0000-4000-8000-000000000022"
+const TRACK_SCIENCE = "81000000-0000-4000-8000-000000000023"
 const PROFILE_A = "81000000-0000-4000-8000-000000000031"
 const PROFILE_B = "81000000-0000-4000-8000-000000000032"
 const PROFILE_C = "81000000-0000-4000-8000-000000000033"
@@ -27,6 +32,63 @@ const RULE_OFFSET = "81000000-0000-4000-8000-000000000053"
 const RULE_CHAT = "81000000-0000-4000-8000-000000000054"
 const TEMPLATE_A = "81000000-0000-4000-8000-000000000061"
 const BIG_GENERATION = "9007199254740993123456789"
+
+test("공통 immediate subject resolver는 과학/ science만 science connection으로 보내고 unknown은 닫는다", async () => {
+  const { createImmediateNotificationAdapter } = await import(immediateAdapterModuleUrl)
+  const adapter = createImmediateNotificationAdapter({
+    workflowKey: "makeup_requests",
+    sourceTypes: ["makeup_request_event"],
+    linkRoot: "/admin/makeup-requests",
+    linkPayloadKey: "request_id",
+    linkQueryKey: "requestId",
+    audienceProfileFields: { subject_team: [] },
+    eventLabels: { "makeup.submitted": "휴보강 신청" },
+    renderFields: {},
+  }, {
+    async revalidateAuthoritativeSource() {
+      return { ok: true }
+    },
+  })
+  const input = (approvalGroup) => ({
+    eventId: EVENT_A,
+    workflowKey: "makeup_requests",
+    eventKey: "makeup.submitted",
+    sourceType: "makeup_request_event",
+    sourceId: APPOINTMENT_A,
+    sourceRevision: null,
+    payloadSchemaVersion: 1,
+    payload: { approval_group: approvalGroup },
+    rule: {
+      ruleId: RULE_CHAT,
+      ruleRevision: "1",
+      templateId: TEMPLATE_A,
+      audienceKey: "subject_team",
+      channelKey: "google_chat",
+      connectionKey: null,
+      ruleVariantKey: "immediate",
+    },
+    scheduledFor: "2026-07-22T05:00:00.000Z",
+  })
+
+  for (const value of ["과학", "science"]) {
+    const result = await adapter.resolveTargets(input(value))
+    assert.deepEqual(result.targets, [{
+      targetKind: "connection",
+      targetKey: "connection:google_chat.science",
+      targetProfileId: null,
+      connectionKey: "google_chat.science",
+      targetSnapshot: { connection_key: "google_chat.science" },
+    }])
+  }
+  assert.deepEqual((await adapter.resolveTargets(input("unknown"))).targets, [{
+    targetKind: "audience",
+    targetKey: "audience:subject_team",
+    targetProfileId: null,
+    connectionKey: null,
+    targetSnapshot: { audience_key: "subject_team" },
+  }])
+  await assert.rejects(adapter.resolveTargets(input("사회")), /notification_payload_schema_unsupported/)
+})
 
 function rule(overrides = {}) {
   return {
@@ -84,6 +146,41 @@ function visitSource(overrides = {}) {
   })
 }
 
+test("등록 adapter는 과학을 레지스트리 순서로 허용하고 unknown 과목은 계속 거부한다", async () => {
+  const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
+  const science = levelTestSource({
+    participants: [
+      { trackId: TRACK_SCIENCE, subject: "과학", directorProfileId: PROFILE_C },
+      { trackId: TRACK_ENGLISH, subject: "영어", directorProfileId: PROFILE_A },
+      { trackId: TRACK_MATH, subject: "수학", directorProfileId: PROFILE_B },
+    ],
+    directorProfileIds: [PROFILE_C, PROFILE_A, PROFILE_B],
+    managementProfileIds: [PROFILE_C, PROFILE_A, PROFILE_B],
+  })
+  const fixture = createFixtureDependencies({ current: science })
+  const adapter = createRegistrationNotificationAdapter(fixture.dependencies)
+  const targets = await adapter.resolveTargets(resolveInput(science, rule()))
+  assert.equal(targets.targets.length, 3)
+  assert.deepEqual(await adapter.buildRenderContext({
+    ...resolveInput(science, rule()),
+    targetGeneration: targets.targetGeneration,
+    target: targets.targets[0],
+  }), {
+    student_name: "김학생",
+    appointment_kind: "레벨테스트",
+    scheduled_at: "2026-07-22 15:00 KST",
+    place: "3층 테스트실",
+    subjects: "영어 · 수학 · 과학",
+  })
+
+  const unknown = levelTestSource({
+    participants: [{ trackId: TRACK_SCIENCE, subject: "사회", directorProfileId: PROFILE_C }],
+    directorProfileIds: [PROFILE_C],
+  })
+  fixture.state.current = unknown
+  await assert.rejects(adapter.resolveTargets(resolveInput(unknown, rule())), /payload_schema_unsupported/)
+})
+
 function createFixtureDependencies(input = {}) {
   const state = {
     current: input.current ?? levelTestSource(),
@@ -115,8 +212,9 @@ function createFixtureDependencies(input = {}) {
 }
 
 function canonicalPayload(source) {
+  const order = { 영어: 0, 수학: 1, 과학: 2 }
   const participants = [...source.participants].sort((left, right) => (
-    (left.subject === right.subject ? 0 : left.subject === "영어" ? -1 : 1)
+    (order[left.subject] ?? 99) - (order[right.subject] ?? 99)
     || left.trackId.localeCompare(right.trackId)
   ))
   return {
@@ -881,6 +979,52 @@ test("production read 경계는 Task 11 snake_case RPC와 jsonb cursor만 사용
     transient.getSourceSnapshot(APPOINTMENT_A),
     (error) => error?.code === "notification_source_unavailable",
   )
+})
+
+test("production wire source는 canonical track-subject pair set만 participants와 정확히 일치시킨다", async () => {
+  const { createRegistrationNotificationRpcDependencies } = await import(adapterModuleUrl)
+  const participants = [
+    { track_id: TRACK_ENGLISH, subject: "영어", director_profile_id: PROFILE_A },
+    { track_id: TRACK_MATH, subject: "수학", director_profile_id: PROFILE_B },
+  ]
+  const baseWire = {
+    appointment_id: APPOINTMENT_A,
+    task_id: TASK_A,
+    student_name: "김학생",
+    kind: "level_test",
+    scheduled_at: "2026-07-22T06:00:00.000Z",
+    place: "3층 테스트실",
+    status: "scheduled",
+    notification_revision: 7,
+    recipient_revision: BIG_GENERATION,
+    track_ids: [TRACK_MATH, TRACK_ENGLISH],
+    subjects: ["수학", "영어"],
+    participants,
+    director_profile_ids: [PROFILE_A, PROFILE_B],
+    management_profile_ids: [PROFILE_A],
+    current_rules: [],
+  }
+  const read = (wire) => createRegistrationNotificationRpcDependencies({
+    async rpc() {
+      return wire
+    },
+  }).getSourceSnapshot(APPOINTMENT_A)
+
+  await assert.doesNotReject(read(baseWire), "같은 pair set의 wire 순서는 달라도 된다")
+
+  const invalidWires = [
+    { ...baseWire, subjects: ["수학", "사회"] },
+    { ...baseWire, subjects: ["수학", "science"] },
+    { ...baseWire, subjects: ["수학", "과학"] },
+    { ...baseWire, track_ids: [TRACK_ENGLISH, TRACK_MATH], subjects: ["수학", "영어"] },
+    { ...baseWire, track_ids: [TRACK_ENGLISH, TRACK_ENGLISH], subjects: ["영어", "영어"] },
+  ]
+  for (const wire of invalidWires) {
+    await assert.rejects(
+      read(wire),
+      (error) => error?.code === "payload_schema_unsupported",
+    )
+  }
 })
 
 test("production 등록 read 경계는 일시 DB 오류를 영구 schema 오류로 바꾸지 않는다", async () => {

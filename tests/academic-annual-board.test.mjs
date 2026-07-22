@@ -6,12 +6,116 @@ import {
   getPersistedAcademicEventId,
   runAcademicEventMutation,
 } from "../src/features/operations/academic-event-utils.js";
+import {
+  buildAcademicAnnualBoardModel,
+  buildAcademicCalendarTemplateModel,
+} from "../src/features/operations/academic-calendar-models.js";
 
 const root = new URL("../", import.meta.url);
 
 async function readSource(pathname) {
   return readFile(new URL(pathname, root), "utf8");
 }
+
+test("annual board orders science after math and derives its area and scope summary", () => {
+  const model = buildAcademicAnnualBoardModel({
+    selectedYear: "2026",
+    academicSchools: [{ id: "school-high", name: "대기고", category: "high" }],
+    academicEvents: [
+      {
+        id: "exam-period-1",
+        title: "대기고 1학기 중간고사",
+        school_id: "school-high",
+        school: "대기고",
+        type: "시험기간",
+        grade: "고1",
+        start: "2026-04-27",
+        end: "2026-04-30",
+        note: '사용자 메모\n\n[[TIPS_META]] {"examTerm":"1학기 중간","scienceAreaKey":"integrated_science","legacyFlag":"keep"}',
+      },
+    ],
+    academicEventExamDetails: [
+      {
+        academic_event_id: "exam-period-1",
+        grade: "고1",
+        subject: "과학",
+        exam_date: "2026-04-29",
+        textbook_scope: "1단원 물질의 규칙성",
+      },
+    ],
+  });
+
+  assert.deepEqual(model.boardTypes.slice(0, 4), [
+    "시험기간",
+    "영어시험일",
+    "수학시험일",
+    "과학시험일",
+  ]);
+  const scienceEntry = model.rows[0].typeBuckets["과학시험일"][0];
+  assert.equal(scienceEntry.title, "과학 시험일 및 시험범위");
+  assert.equal(scienceEntry.scienceAreaKey, "integrated_science");
+  assert.equal(scienceEntry.scienceAreaLabel, "통합과학");
+  assert.match(scienceEntry.scopeSummary, /통합과학/);
+  assert.match(scienceEntry.scopeSummary, /1단원 물질의 규칙성/);
+  assert.equal(scienceEntry.note, "사용자 메모");
+  assert.equal(scienceEntry.embeddedNoteMeta.legacyFlag, "keep");
+});
+
+test("calendar and annual board display the current active label for a stable science area key", () => {
+  const input = {
+    academicSchools: [{ id: "school-high", name: "대기고", category: "high" }],
+    scienceSubjectAreas: [
+      { areaKey: "physics", label: "물리", sortOrder: 20, isActive: true },
+    ],
+    academicEvents: [
+      {
+        id: "renamed-physics-event",
+        title: "물리 시험",
+        school_id: "school-high",
+        school: "대기고",
+        type: "과학시험일",
+        grade: "고2",
+        start: "2026-04-29",
+        note: '[[TIPS_META]] {"scienceAreaKey":"physics"}',
+      },
+    ],
+  };
+
+  const calendar = buildAcademicCalendarTemplateModel(input);
+  const annual = buildAcademicAnnualBoardModel({ ...input, selectedYear: "2026" });
+
+  assert.equal(calendar.events[0].scienceAreaKey, "physics");
+  assert.equal(calendar.events[0].scienceAreaLabel, "물리");
+  assert.equal(annual.rows[0].typeBuckets["과학시험일"][0].scienceAreaLabel, "물리");
+  assert.match(annual.rows[0].typeBuckets["과학시험일"][0].scopeSummary, /물리/);
+});
+
+test("annual board displays legacy middle-school science events but hides their create action", async () => {
+  const model = buildAcademicAnnualBoardModel({
+    selectedYear: "2026",
+    academicSchools: [{ id: "school-middle", name: "대기중", category: "middle" }],
+    academicEvents: [
+      {
+        id: "legacy-science-event",
+        title: "기존 과학 시험",
+        school_id: "school-middle",
+        school: "대기중",
+        type: "과학시험일",
+        grade: "중3",
+        start: "2026-04-29",
+        note: '기존 메모\n\n[[TIPS_META]] {"scienceAreaKey":"physics"}',
+      },
+    ],
+  });
+  const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
+
+  assert.equal(model.rows[0].typeBuckets["과학시험일"][0].title, "기존 과학 시험");
+  assert.match(source, /const legacySubjectEntry/);
+  assert.match(source, /examTerm\.endsWith\("중간"\)/);
+  assert.match(source, /canCreateScienceExam/);
+  assert.match(source, /HIGH_SCHOOL_GRADES\.includes/);
+  assert.match(source, /primaryEntry \|\| canCreateScienceExam/);
+});
 
 test("annual board uses one unified editable map without mode tabs", async () => {
   const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
@@ -103,6 +207,17 @@ test("annual board keeps the school column compact", async () => {
   assert.match(source, /sticky left-0 z-20 w-\[96px\]/);
   assert.match(source, /annual-board-school-cell sticky left-0 z-10 w-\[96px\]/);
   assert.doesNotMatch(source, /w-\[148px\]/);
+});
+
+test("annual board CSS keeps all four exam columns and only clears the science edge", async () => {
+  const globals = await readSource("src/app/globals.css");
+
+  assert.match(
+    globals,
+    /\.annual-board-grade-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(132px,\s*1\.6fr\)\s+repeat\(3,\s*minmax\(76px,\s*1fr\)\)/,
+  );
+  assert.match(globals, /\.annual-board-grade-grid \.annual-board-grade-subheader:nth-child\(4n\)/);
+  assert.doesNotMatch(globals, /\.annual-board-grade-grid \.annual-board-grade-subheader:nth-child\(3n\)/);
 });
 
 test("annual board model classifies event semesters by requested month split", async () => {

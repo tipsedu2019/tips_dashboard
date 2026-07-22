@@ -32,6 +32,7 @@ type AcademicEventDraft = {
   start?: string;
   end?: string;
   grade?: string;
+  scienceAreaKey?: string;
   note?: string;
 };
 
@@ -49,6 +50,7 @@ type AcademicEventEditorSheetProps = {
   draft: AcademicEventDraft | null;
   schoolOptions: AcademicEventSchoolOption[];
   typeOptions: string[];
+  scienceSubjectAreas?: Array<{ areaKey: string; label: string; isActive?: boolean }>;
   onOpenChange: (open: boolean) => void;
   onDraftChange: (patch: Partial<AcademicEventDraft>) => void;
   onSubmit: () => void;
@@ -63,6 +65,7 @@ export function AcademicEventEditorSheet({
   draft,
   schoolOptions,
   typeOptions,
+  scienceSubjectAreas = [],
   onOpenChange,
   onDraftChange,
   onSubmit,
@@ -214,6 +217,32 @@ export function AcademicEventEditorSheet({
                   onChange={(event) => onDraftChange({ grade: event.target.value })}
                 />
               </div>
+
+              {draft?.type === "과학시험일" ? (
+                <div className="grid gap-2">
+                  <Label htmlFor="academic-event-science-area">과학 영역</Label>
+                  <Select
+                    value={draft?.scienceAreaKey || ""}
+                    disabled={isDisabled || scienceSubjectAreas.length === 0}
+                    onValueChange={(value) => onDraftChange({ scienceAreaKey: value })}
+                  >
+                    <SelectTrigger id="academic-event-science-area" className="w-full">
+                      <SelectValue placeholder="과학 영역 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {scienceSubjectAreas.map((area) => (
+                        <SelectItem
+                          key={area.areaKey}
+                          value={area.areaKey}
+                          disabled={area.isActive === false}
+                        >
+                          {area.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
 
               <div className="grid gap-2">
                 <Label htmlFor="academic-event-note">메모</Label>

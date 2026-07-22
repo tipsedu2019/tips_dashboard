@@ -73,7 +73,7 @@ type AuditLog = {
   changedAt: string;
 };
 
-const TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀", "조교팀"] as const;
+const TEAM_OPTIONS = ["영어팀", "수학팀", "과학팀", "관리팀", "조교팀"] as const;
 type TeamOption = (typeof TEAM_OPTIONS)[number];
 const TEAM_FILTERS = ["전체", ...TEAM_OPTIONS] as const;
 const TEAM_ALIASES: Record<string, TeamOption> = {
@@ -83,6 +83,9 @@ const TEAM_ALIASES: Record<string, TeamOption> = {
   math: "수학팀",
   수학: "수학팀",
   수학팀: "수학팀",
+  science: "과학팀",
+  과학: "과학팀",
+  과학팀: "과학팀",
   admin: "관리팀",
   staff: "관리팀",
   관리: "관리팀",

@@ -233,7 +233,7 @@ test("self sign-up uses a receivable email and Supabase signUp", async () => {
   assert.match(source, /BLOCKED_EMAIL_DOMAIN = "tipsedu\.co\.kr"/);
   assert.match(
     source,
-    /TEACHER_TEAM_OPTIONS = \["영어팀", "수학팀", "관리팀", "조교팀"\] as const/,
+    /TEACHER_TEAM_OPTIONS = \["영어팀", "수학팀", "과학팀", "관리팀", "조교팀"\] as const/,
   );
   assert.match(
     source,

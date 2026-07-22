@@ -417,7 +417,7 @@ html {
 
 .annual-board-grade-grid {
   display: grid;
-  grid-template-columns: minmax(132px, 1.6fr) minmax(76px, 1fr) minmax(76px, 1fr);
+  grid-template-columns: minmax(132px, 1.6fr) repeat(3, minmax(76px, 1fr));
   grid-template-rows: 1.75rem repeat(var(--annual-board-row-count), 2.25rem);
   min-height: calc(1.75rem + (var(--annual-board-row-count) * 2.25rem));
 }
@@ -434,7 +434,7 @@ html {
   font-weight: 700;
 }
 
-.annual-board-grade-grid .annual-board-grade-subheader:nth-child(3n) {
+.annual-board-grade-grid .annual-board-grade-subheader:nth-child(4n) {
   border-right: 0;
 }
 
@@ -647,7 +647,7 @@ html {
   }
 
   .annual-board-grade-grid {
-    grid-template-columns: minmax(80px, 1.45fr) minmax(42px, 0.8fr) minmax(42px, 0.8fr);
+    grid-template-columns: minmax(80px, 1.45fr) repeat(3, minmax(42px, 0.8fr));
     grid-template-rows: 1.25rem repeat(var(--annual-board-row-count), 1.6rem);
     min-height: auto;
   }

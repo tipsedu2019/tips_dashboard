@@ -18,6 +18,9 @@ export type AcademicTemplateCalendarEvent = {
   grade?: string;
   gradeBadges?: string[];
   scopeSummary?: string;
+  scienceAreaKey?: string;
+  scienceAreaLabel?: string;
+  embeddedNoteMeta?: Record<string, unknown>;
   note?: string;
 };
 
@@ -30,6 +33,7 @@ export type AcademicAnnualBoardType =
   | "시험기간"
   | "영어시험일"
   | "수학시험일"
+  | "과학시험일"
   | "체험학습"
   | "방학·휴일·기타"
   | "팁스";
@@ -50,6 +54,9 @@ export type AcademicAnnualBoardEntry = {
   linkedScheduleLabel?: string;
   subjectSummary?: boolean;
   scopeSummary?: string;
+  scienceAreaKey?: string;
+  scienceAreaLabel?: string;
+  embeddedNoteMeta?: Record<string, unknown>;
   textbookScope?: string;
   subtextbookScope?: string;
   textbookScopes?: Array<{ name: string; publisher: string; scope: string }>;
@@ -92,11 +99,13 @@ export type AcademicAnnualBoardModel = {
 export function buildAcademicCalendarTemplateModel(input?: {
   academicEvents?: Array<Record<string, unknown>>;
   academicSchools?: Array<Record<string, unknown>>;
+  scienceSubjectAreas?: Array<Record<string, unknown>>;
 }): AcademicTemplateCalendarModel;
 
 export function buildAcademicAnnualBoardModel(input?: {
   academicEvents?: Array<Record<string, unknown>>;
   academicSchools?: Array<Record<string, unknown>>;
+  scienceSubjectAreas?: Array<Record<string, unknown>>;
   academicEventExamDetails?: Array<Record<string, unknown>>;
   academyCurriculumPlans?: Array<Record<string, unknown>>;
   academyCurriculumMaterials?: Array<Record<string, unknown>>;

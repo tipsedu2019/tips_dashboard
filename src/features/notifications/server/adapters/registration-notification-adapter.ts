@@ -16,10 +16,15 @@ import type {
 } from "../notification-workflow-adapter.ts"
 import type { ImmediateNotificationAdapterDependencies } from "./immediate-notification-adapter.ts"
 import { immediateNotificationProductionDependencies } from "./immediate-notification-source-reader.ts"
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  parseAcademicSubject,
+} from "../../../../lib/academic-subject-registry.ts"
+import type { AcademicSubjectValue } from "../../../../lib/academic-subject-registry.ts"
 
 type RegistrationAppointmentKind = "level_test" | "visit_consultation"
 type RegistrationAppointmentStatus = "scheduled" | "completed" | "canceled"
-type RegistrationSubject = "영어" | "수학"
+type RegistrationSubject = AcademicSubjectValue
 
 export type RegistrationNotificationParticipant = Readonly<{
   trackId: string
@@ -120,10 +125,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const POSITIVE_DECIMAL_PATTERN = /^[1-9]\d*$/
 const HASH_PATTERN = /^[a-f0-9]{64}$/
 const LOCAL_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
-const SUBJECT_ORDER: Readonly<Record<RegistrationSubject, number>> = Object.freeze({
-  영어: 0,
-  수학: 1,
-})
+const subjectOrder = (subject: RegistrationSubject) => ACADEMIC_SUBJECT_VALUES.indexOf(subject)
 
 function adapterError(code: "payload_schema_unsupported" | "schedule_validation_failed"): never {
   throw Object.assign(new Error(code), { code })
@@ -325,16 +327,15 @@ function normalizeSource(value: unknown): RegistrationNotificationSourceSnapshot
   }
   const participants = value.participants.map((participant) => {
     if (!isRecord(participant)) adapterError("payload_schema_unsupported")
-    if (participant.subject !== "영어" && participant.subject !== "수학") {
-      adapterError("payload_schema_unsupported")
-    }
+    const subject = parseAcademicSubject(participant.subject)
+    if (!subject || participant.subject !== subject) adapterError("payload_schema_unsupported")
     return Object.freeze({
       trackId: requiredUuid(participant.trackId),
-      subject: participant.subject,
+      subject,
       directorProfileId: nullableUuid(participant.directorProfileId),
     })
   }).sort((left, right) => (
-    SUBJECT_ORDER[left.subject] - SUBJECT_ORDER[right.subject]
+    subjectOrder(left.subject) - subjectOrder(right.subject)
     || left.trackId.localeCompare(right.trackId)
   ))
   if (
@@ -796,7 +797,7 @@ export function createRegistrationNotificationAdapter(
       const source = normalizeSource(rawSource)
       currentResolveRule(input, source, dependencies.now())
       const subjects = [...new Set(source.participants.map((participant) => participant.subject))]
-        .sort((left, right) => SUBJECT_ORDER[left] - SUBJECT_ORDER[right])
+        .sort((left, right) => subjectOrder(left) - subjectOrder(right))
       return Object.freeze({
         student_name: source.studentName,
         appointment_kind: source.kind === "level_test" ? "레벨테스트" : "방문상담",
@@ -1131,7 +1132,16 @@ function wireSource(value: unknown): RegistrationNotificationSourceSnapshot {
   if (!Array.isArray(value.management_profile_ids) || !Array.isArray(value.current_rules)) {
     adapterError("payload_schema_unsupported")
   }
-  return normalizeSource({
+  const wireTrackIds = trackIds.map(requiredUuid)
+  const wireSubjects = subjects.map((subject) => {
+    const parsed = parseAcademicSubject(subject)
+    if (!parsed || parsed !== subject) adapterError("payload_schema_unsupported")
+    return parsed
+  })
+  const wirePairs = new Set(wireTrackIds.map((trackId, index) => `${trackId}\u0000${wireSubjects[index]}`))
+  if (wirePairs.size !== wireTrackIds.length) adapterError("payload_schema_unsupported")
+
+  const source = normalizeSource({
     appointmentId: value.appointment_id,
     taskId: value.task_id,
     studentName: value.student_name,
@@ -1153,6 +1163,16 @@ function wireSource(value: unknown): RegistrationNotificationSourceSnapshot {
     }),
     currentRules: value.current_rules.map((item) => wireRule(item, true)),
   })
+  const participantPairs = new Set(
+    source.participants.map((participant) => `${participant.trackId}\u0000${participant.subject}`),
+  )
+  if (
+    participantPairs.size !== wirePairs.size
+    || [...wirePairs].some((pair) => !participantPairs.has(pair))
+  ) {
+    adapterError("payload_schema_unsupported")
+  }
+  return source
 }
 
 function cursorFromWire(value: unknown) {

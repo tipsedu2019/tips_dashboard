@@ -75,6 +75,7 @@ function subjectConnectionKey(payload: Readonly<Record<string, unknown>>) {
     return "google_chat.math"
   }
   if (value === "english") return "google_chat.english"
+  if (value === "과학" || value === "science") return "google_chat.science"
   if (value === "unknown") return null
   throw new Error("notification_payload_schema_unsupported")
 }

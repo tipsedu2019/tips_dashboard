@@ -151,6 +151,7 @@ export const NOTIFICATION_CONNECTION_KEYS = [
   "google_chat.executive",
   "google_chat.math",
   "google_chat.english",
+  "google_chat.science",
 ] as const
 
 export type NotificationConnectionKey = (typeof NOTIFICATION_CONNECTION_KEYS)[number]
@@ -792,7 +793,9 @@ function parseRule(
       ((audienceKey === "management_team" && connectionKey === "google_chat.management") ||
         (audienceKey === "executive_team" && connectionKey === "google_chat.executive") ||
         (audienceKey === "subject_team" &&
-          (connectionKey === "google_chat.math" || connectionKey === "google_chat.english")))
+          (connectionKey === "google_chat.math" ||
+            connectionKey === "google_chat.english" ||
+            connectionKey === "google_chat.science")))
 
     if (!connectionMatchesCell) {
       addIssue(

@@ -24,6 +24,9 @@ export interface CalendarEvent {
   grade?: string
   examTerm?: string
   scopeSummary?: string
+  scienceAreaKey?: string
+  scienceAreaLabel?: string
+  embeddedNoteMeta?: Record<string, unknown>
   textbookScope?: string
   subtextbookScope?: string
   textbookScopes?: TextbookScopeItem[]

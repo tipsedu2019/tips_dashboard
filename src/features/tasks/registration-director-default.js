@@ -52,8 +52,41 @@ export function resolveRegistrationDirectorDefault({
   inquiryAt = "",
   teachers = [],
   profiles = [],
+  capabilities = [],
 } = {}) {
   const effectiveYear = getRegistrationInquiryEffectiveYear(inquiryAt);
+  const normalizedSubjects = [...new Set(subjects.map(text).filter(Boolean))];
+  if (normalizedSubjects.length === 1 && normalizedSubjects[0] === "과학") {
+    const capability = capabilities.find((item) => text(item?.subject) === "과학");
+    const profileId = text(capability?.defaultDirectorProfileId);
+    const gradeAllowed = Array.isArray(capability?.gradeLevels)
+      && capability.gradeLevels.map(text).includes(text(grade));
+    const profile = profiles.find((item) => text(item?.id) === profileId);
+    const candidates = teachers.filter((teacher) => (
+      text(teacher?.profileId) === profileId
+      && Array.isArray(teacher?.subjects)
+      && teacher.subjects.map(text).includes("과학팀")
+    ));
+    if (!capability?.isActive || !profileId || !gradeAllowed || !profile || candidates.length !== 1) {
+      return {
+        status: "unavailable",
+        profileId: "",
+        counselor: "",
+        directorName: text(profile?.label ?? profile?.name),
+        effectiveYear,
+        reason: "science_director_unavailable",
+      };
+    }
+    const counselor = text(candidates[0]?.label ?? candidates[0]?.name ?? profile?.label ?? profile?.name);
+    return {
+      status: "resolved",
+      profileId,
+      counselor,
+      directorName: counselor,
+      effectiveYear,
+      reason: "configured_science_director",
+    };
+  }
   const assignment = resolveAcademicDirector({ subjects, grade, effectiveYear: effectiveYear || undefined });
   if (assignment.status !== "resolved") {
     return {
@@ -100,10 +133,14 @@ export function resolveRegistrationDirectorDefault({
   };
 }
 
-export function buildRegistrationDirectorRuleKey({ subject = "", grade = "", inquiryAt = "" } = {}) {
+export function buildRegistrationDirectorRuleKey({ subject = "", grade = "", inquiryAt = "", profileId = "" } = {}) {
   const effectiveYear = getRegistrationInquiryEffectiveYear(inquiryAt);
   const normalizedSubject = text(subject);
   const normalizedGrade = text(grade).replace(/\s+/g, "");
+  if (normalizedSubject === "과학") {
+    const normalizedProfileId = text(profileId);
+    return normalizedProfileId ? `subject-director-v1:${normalizedSubject}:${normalizedProfileId}` : "";
+  }
   if (!effectiveYear || !normalizedSubject || !normalizedGrade) return "";
   return `academic-director-v1:${effectiveYear}:${normalizedSubject}:${normalizedGrade}`;
 }
@@ -116,6 +153,7 @@ export function resolveRegistrationTrackDirectorDefaults({
   inquiryAt = "",
   teachers = [],
   profiles = [],
+  capabilities = [],
   catalogStatus = "loading",
 } = {}) {
   return tracks.map((track) => {
@@ -147,8 +185,18 @@ export function resolveRegistrationTrackDirectorDefaults({
       inquiryAt,
       teachers,
       profiles,
+      capabilities,
     });
-    const ruleKey = buildRegistrationDirectorRuleKey({ subject, grade, inquiryAt });
+    const ruleKey = buildRegistrationDirectorRuleKey({
+      subject,
+      grade,
+      inquiryAt,
+      profileId: resolution.profileId,
+    });
+    const scienceCapability = subject === "과학"
+      ? capabilities.find((item) => text(item?.subject) === "과학")
+      : null;
+    const canAuthoritativelyClear = subject !== "과학" || Boolean(scienceCapability?.isActive);
     const isSavedDefault = currentSource === "default";
     const shouldAssign = resolution.status === "resolved"
       && Boolean(resolution.profileId)
@@ -157,7 +205,7 @@ export function resolveRegistrationTrackDirectorDefaults({
         || currentProfileId !== resolution.profileId
         || currentRuleKey !== ruleKey
       );
-    const shouldClear = isSavedDefault && (
+    const shouldClear = isSavedDefault && canAuthoritativelyClear && (
       resolution.status === "unsupported"
       || (resolution.status === "unavailable" && catalogStatus === "authoritative")
     ) && Boolean(currentProfileId || currentRuleKey);

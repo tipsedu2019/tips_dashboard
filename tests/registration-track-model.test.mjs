@@ -767,7 +767,7 @@ test("illegal cross-stage actions are blocked instead of silently jumping stages
 })
 
 test("UI action permissions mirror the database mutation matrix", () => {
-  const track = { id: "eng", directorProfileId: "director-1", status: "consultation_waiting" }
+  const track = { id: "eng", subject: "영어", directorProfileId: "director-1", status: "consultation_waiting" }
   const activeConsultation = { trackId: "eng", directorProfileId: "director-1", mode: "phone", status: "waiting" }
   assert.deepEqual(getRegistrationActionPermissions({ viewerRole: "admin", viewerId: "director-1", track, activeConsultation }), {
     canManage: true,
@@ -790,6 +790,30 @@ test("UI action permissions mirror the database mutation matrix", () => {
     readOnly: true,
   })
   assert.equal(getRegistrationActionPermissions({ viewerRole: "teacher", viewerId: "director-1", track, activeConsultation }).canCompleteConsultation, false)
+  const scienceTrack = { ...track, id: "science", subject: "과학" }
+  const scienceConsultation = { ...activeConsultation, trackId: "science" }
+  assert.deepEqual(getRegistrationActionPermissions({
+    viewerRole: "teacher",
+    viewerId: "director-1",
+    track: scienceTrack,
+    activeConsultation: scienceConsultation,
+  }), {
+    canManage: false,
+    canCompleteConsultation: true,
+    readOnly: true,
+  })
+  assert.equal(getRegistrationActionPermissions({
+    viewerRole: "teacher",
+    viewerId: "director-2",
+    track: scienceTrack,
+    activeConsultation: scienceConsultation,
+  }).canCompleteConsultation, false)
+  assert.equal(getRegistrationActionPermissions({
+    viewerRole: "teacher",
+    viewerId: "director-1",
+    track: scienceTrack,
+    activeConsultation: { ...scienceConsultation, status: "completed" },
+  }).canCompleteConsultation, false)
   assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "admin", viewerId: "director-1", track }).canOpenConsultationCompletion, true)
   assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "admin", viewerId: "director-2", track }).canOpenConsultationCompletion, false)
 })

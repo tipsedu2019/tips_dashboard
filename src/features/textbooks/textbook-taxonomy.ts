@@ -7,6 +7,7 @@ function text(value: unknown) {
 export const TEXTBOOK_SUBJECT_OPTIONS = [
   { value: "english", label: "영어" },
   { value: "math", label: "수학" },
+  { value: "science", label: "과학" },
   { value: "other", label: "기타" },
 ];
 
@@ -15,9 +16,13 @@ export const TEXTBOOK_SUBJECT_ALIASES: Record<string, string> = {
   영어: "english",
   math: "math",
   수학: "math",
+  science: "science",
+  과학: "science",
   other: "other",
   기타: "other",
 };
+
+export type TextbookSubject = "english" | "math" | "science" | "other";
 
 export const TEXTBOOK_SCHOOL_LEVEL_OPTIONS = [
   { value: "elementary", label: "초등" },
@@ -60,7 +65,7 @@ export type TextbookTaxonomyFilters = {
 
 export type TextbookTaxonomyValidation =
   | { valid: true }
-  | { valid: false; field: "subject" | "schoolLevels" | "gradeLevels" | "subSubject"; message: string };
+  | { valid: false; field: "subject" | "schoolLevels" | "gradeLevels" | "subSubject" | "subjectAreaKey"; message: string };
 
 export const ALL_TEXTBOOK_SCHOOL_LEVELS: TextbookSchoolLevel[] = ["elementary", "middle", "high"];
 export const ALL_TEXTBOOK_GRADE_LEVELS: TextbookGradeLevel[] = [
@@ -69,9 +74,23 @@ export const ALL_TEXTBOOK_GRADE_LEVELS: TextbookGradeLevel[] = [
   "h1", "h2", "h3",
 ];
 
+export const SCIENCE_TEXTBOOK_TAXONOMY: TextbookTaxonomySelection = {
+  schoolLevels: ["high"],
+  gradeLevels: ["h1", "h2", "h3"],
+};
+
+export const TEXTBOOK_SCIENCE_AREA_OPTIONS = [
+  { value: "integrated_science", label: "통합과학", sortOrder: 10 },
+  { value: "physics", label: "물리학", sortOrder: 20 },
+  { value: "chemistry", label: "화학", sortOrder: 30 },
+  { value: "life_science", label: "생명과학", sortOrder: 40 },
+  { value: "earth_science", label: "지구과학", sortOrder: 50 },
+] as const;
+
 export const DEFAULT_TEXTBOOK_SUB_SUBJECTS: Record<string, string[]> = {
   english: ["단어", "독해", "듣기", "문법", "모고", "내신"],
   math: ["공통수학1", "공통수학2", "대수", "미적분", "확률과 통계", "기하", "수1", "수2", "내신"],
+  science: TEXTBOOK_SCIENCE_AREA_OPTIONS.map((option) => option.label),
   other: ["기타"],
 };
 
@@ -84,9 +103,18 @@ export type TextbookSubSubjectSettingRecord = {
   isNew?: boolean;
 };
 
-export function normalizeTextbookSubject(value: unknown) {
+export function parseTextbookSubjectForWrite(value: unknown): TextbookSubject | null {
   const raw = text(value);
-  return TEXTBOOK_SUBJECT_ALIASES[raw] || TEXTBOOK_SUBJECT_ALIASES[raw.toLowerCase()] || "other";
+  return (TEXTBOOK_SUBJECT_ALIASES[raw] || TEXTBOOK_SUBJECT_ALIASES[raw.toLowerCase()] || null) as TextbookSubject | null;
+}
+
+export function getTextbookSubjectWriteValue(value: unknown) {
+  const raw = text(value);
+  return parseTextbookSubjectForWrite(raw) || raw;
+}
+
+export function normalizeTextbookSubject(value: unknown) {
+  return parseTextbookSubjectForWrite(value) || "other";
 }
 
 export function getTextbookSubjectLabel(value: unknown) {
@@ -171,6 +199,13 @@ function canonicalizeTaxonomySelection(
 }
 
 export function getTextbookTaxonomySelection(row: Row): TextbookTaxonomySelection {
+  if (normalizeTextbookSubject(row.subject) === "science") {
+    return {
+      schoolLevels: [...SCIENCE_TEXTBOOK_TAXONOMY.schoolLevels],
+      gradeLevels: [...SCIENCE_TEXTBOOK_TAXONOMY.gradeLevels],
+    };
+  }
+
   const arraySchools = list(row.school_levels || row.schoolLevels);
   const arrayGrades = list(row.grade_levels || row.gradeLevels);
   if (arraySchools.length > 0 || arrayGrades.length > 0) {
@@ -259,10 +294,49 @@ export function validateTextbookTaxonomy(record: Row): TextbookTaxonomyValidatio
   if (gradeLevels.length === 0) {
     return { valid: false, field: "gradeLevels", message: "학년을 하나 이상 선택하세요." };
   }
+  const normalizedSubject = normalizeTextbookSubject(subject);
+  const subjectAreaKey = text(record.subjectAreaKey || record.subject_area_key);
+  if (normalizedSubject === "science") {
+    if (schoolLevels.length !== 1 || schoolLevels[0] !== "high") {
+      return { valid: false, field: "schoolLevels", message: "과학 교재는 고등만 선택할 수 있습니다." };
+    }
+    if (
+      gradeLevels.length !== SCIENCE_TEXTBOOK_TAXONOMY.gradeLevels.length
+      || !SCIENCE_TEXTBOOK_TAXONOMY.gradeLevels.every((grade) => gradeLevels.includes(grade))
+    ) {
+      return { valid: false, field: "gradeLevels", message: "과학 교재는 고1~고3 전체로 저장됩니다." };
+    }
+    if (!subjectAreaKey) {
+      return { valid: false, field: "subjectAreaKey", message: "과학 영역을 선택하세요." };
+    }
+  } else if (subjectAreaKey) {
+    return { valid: false, field: "subjectAreaKey", message: "과학 교재에서만 과학 영역을 선택할 수 있습니다." };
+  }
   if (!text(record.subSubject || record.sub_subject)) {
     return { valid: false, field: "subSubject", message: "세부과목을 선택하세요." };
   }
   return { valid: true };
+}
+
+export function validateTextbookTaxonomyForWrite(record: Row): TextbookTaxonomyValidation {
+  const rawSubject = text(record.subject);
+  if (!rawSubject) {
+    return { valid: false, field: "subject", message: "과목을 선택하세요." };
+  }
+  const subject = parseTextbookSubjectForWrite(rawSubject);
+  if (!subject) {
+    return { valid: false, field: "subject", message: "지원하는 교재 과목만 저장할 수 있습니다." };
+  }
+  return validateTextbookTaxonomy({ ...record, subject });
+}
+
+export function getTextbookSubjectAreaKey(row: Row) {
+  return text(row.subject_area_key || row.subjectAreaKey);
+}
+
+export function getTextbookScienceAreaLabel(value: unknown) {
+  const key = text(value);
+  return TEXTBOOK_SCIENCE_AREA_OPTIONS.find((option) => option.value === key)?.label || "";
 }
 
 export function getTextbookSchoolLevelSummary(row: Row) {

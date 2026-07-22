@@ -8,15 +8,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  ACADEMIC_SUBJECTS,
+  ACADEMIC_SUBJECT_VALUES,
+  parseAcademicSubject,
+  sortAcademicSubjects,
+  type AcademicSubjectValue,
+} from "@/lib/academic-subject-registry";
+import { supabase } from "@/lib/supabase";
 import { createId, managementService } from "./management-service.js";
 import {
   SettingsMasterHeader,
@@ -28,18 +29,18 @@ import {
   settingsTableHeadClass,
 } from "./settings-master-layout";
 import { useSettingsTableColumns, type SettingsTableColumn } from "./settings-table-columns";
-import { supabase } from "@/lib/supabase";
 
 type ClassroomRecord = {
   id: string;
   name: string;
-  subjects: string;
+  subjects: AcademicSubjectValue[];
+  hasInvalidSubjectMembership?: boolean;
   isVisible: boolean;
   sortOrder: string;
   isNew?: boolean;
 };
 
-const SUBJECT_OPTIONS = ["영어", "수학"] as const;
+const SUBJECT_OPTIONS = ACADEMIC_SUBJECT_VALUES;
 const SUBJECT_FILTERS = ["전체", ...SUBJECT_OPTIONS] as const;
 const CLASSROOM_TABLE_COLUMNS = [
   { id: "subjects", label: "과목" },
@@ -48,24 +49,19 @@ const CLASSROOM_TABLE_COLUMNS = [
   { id: "action", label: "작업", required: true },
 ] satisfies SettingsTableColumn[];
 
-function normalizeSubjectValue(subjects: string) {
-  const parsedSubjects = subjects
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  return SUBJECT_OPTIONS.find((subject) => parsedSubjects.includes(subject)) ?? SUBJECT_OPTIONS[0];
-}
-
 function toClassroomRecord(row: Record<string, unknown>, index: number): ClassroomRecord {
-  const subjects = Array.isArray(row.subjects)
-    ? row.subjects.filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(", ")
-    : "";
+  const sourceSubjects = Array.isArray(row.subjects)
+    ? row.subjects.filter((value): value is string => typeof value === "string")
+    : [];
+  const hasInvalidSubjectMembership = sourceSubjects.length === 0
+    || sourceSubjects.some((value) => parseAcademicSubject(value) === null);
+  const subjects = sortAcademicSubjects(sourceSubjects);
 
   return {
     id: String(row.id || createId()),
     name: typeof row.name === "string" ? row.name : "",
     subjects,
+    hasInvalidSubjectMembership,
     isVisible: row.is_visible !== false,
     sortOrder: String(row.sort_order ?? index),
   };
@@ -75,11 +71,43 @@ function createEmptyClassroom(nextSortOrder: number): ClassroomRecord {
   return {
     id: createId(),
     name: "",
-    subjects: "영어",
+    subjects: ["영어"],
     isVisible: true,
     sortOrder: String(nextSortOrder),
     isNew: true,
   };
+}
+
+function ClassroomSubjectToggles({
+  subjects,
+  disabled,
+  onToggle,
+}: {
+  subjects: readonly AcademicSubjectValue[];
+  disabled: boolean;
+  onToggle: (subject: AcademicSubjectValue) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" aria-label="강의실 과목 선택">
+      {ACADEMIC_SUBJECTS.map((subject) => {
+        const selected = subjects.includes(subject.value);
+        return (
+          <Button
+            key={subject.key}
+            type="button"
+            size="sm"
+            variant={selected ? "default" : "outline"}
+            className="h-8 px-3 text-xs"
+            aria-pressed={selected}
+            disabled={disabled}
+            onClick={() => onToggle(subject.value)}
+          >
+            {subject.value}
+          </Button>
+        );
+      })}
+    </div>
+  );
 }
 
 function reorderWithSequentialSort(rows: ClassroomRecord[], fromIndex: number, toIndex: number) {
@@ -156,8 +184,29 @@ export function ClassroomMasterWorkspace() {
     setIsDirty(true);
   };
 
-  const handleSubjectsChange = (id: string, value: (typeof SUBJECT_OPTIONS)[number]) => {
-    handleFieldChange(id, "subjects", value);
+  const handleSubjectToggle = (id: string, subject: AcademicSubjectValue) => {
+    const row = rows.find((item) => item.id === id);
+    if (!row) return;
+
+    const nextSubjects = row.subjects.includes(subject)
+      ? row.subjects.filter((value) => value !== subject)
+      : sortAcademicSubjects([...row.subjects, subject]);
+    if (nextSubjects.length === 0) {
+      setError("강의실 과목을 하나 이상 선택해 주세요.");
+      return;
+    }
+
+    setRows((current) => current.map((item) => (
+      item.id === id
+        ? {
+            ...item,
+            subjects: nextSubjects,
+            hasInvalidSubjectMembership: false,
+          }
+        : item
+    )));
+    setError(null);
+    setIsDirty(true);
   };
 
   const handleAdd = () => {
@@ -169,11 +218,17 @@ export function ClassroomMasterWorkspace() {
     const nextRows = rows.map((row, index) => ({
       ...row,
       name: row.name.trim(),
-      subjects: normalizeSubjectValue(row.subjects),
+      subjects: sortAcademicSubjects(row.subjects),
       sortOrder: String(index + 1),
     }));
     if (nextRows.some((row) => !row.name)) {
       setError("강의실 이름을 입력하지 않은 행이 있습니다.");
+      return;
+    }
+    if (nextRows.some((row) => (
+      row.hasInvalidSubjectMembership || row.subjects.length === 0
+    ))) {
+      setError("강의실 과목을 하나 이상 선택해 주세요.");
       return;
     }
 
@@ -189,7 +244,7 @@ export function ClassroomMasterWorkspace() {
           nextRows.map((row, index) => ({
             id: row.id,
             name: row.name,
-            subjects: [normalizeSubjectValue(row.subjects)],
+            subjects: [...row.subjects],
             isVisible: row.isVisible,
             sortOrder: index + 1,
           })),
@@ -287,7 +342,7 @@ export function ClassroomMasterWorkspace() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                       <Badge variant="secondary" className="rounded px-1.5 text-[11px]">
-                        {normalizeSubjectValue(row.subjects)}
+                        {row.subjects.join(", ") || "과목 미선택"}
                       </Badge>
                       {row.isVisible ? (
                         <Badge variant="outline" className="rounded px-1.5 text-[11px]">
@@ -313,18 +368,11 @@ export function ClassroomMasterWorkspace() {
                   </div>
 
                   <div className="grid gap-2">
-                    <Select value={normalizeSubjectValue(row.subjects)} onValueChange={(value) => handleSubjectsChange(row.id, value as (typeof SUBJECT_OPTIONS)[number])}>
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="과목" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SUBJECT_OPTIONS.map((subject) => (
-                          <SelectItem key={subject} value={subject}>
-                            {subject}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <ClassroomSubjectToggles
+                      subjects={row.subjects}
+                      disabled={saving}
+                      onToggle={(subject) => handleSubjectToggle(row.id, subject)}
+                    />
                     <Input
                       name="classroom-name"
                       className="h-9"
@@ -383,18 +431,11 @@ export function ClassroomMasterWorkspace() {
                 return (
                   <TableRow key={row.id}>
                     {isColumnVisible("subjects") ? <TableCell className={settingsTableCellClass}>
-                      <Select value={normalizeSubjectValue(row.subjects)} onValueChange={(value) => handleSubjectsChange(row.id, value as (typeof SUBJECT_OPTIONS)[number])}>
-                        <SelectTrigger className="h-9">
-                          <SelectValue placeholder="과목" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SUBJECT_OPTIONS.map((subject) => (
-                            <SelectItem key={subject} value={subject}>
-                              {subject}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <ClassroomSubjectToggles
+                        subjects={row.subjects}
+                        disabled={saving}
+                        onToggle={(subject) => handleSubjectToggle(row.id, subject)}
+                      />
                     </TableCell> : null}
                     {isColumnVisible("name") ? <TableCell className={settingsTableCellClass}>
                       <Input

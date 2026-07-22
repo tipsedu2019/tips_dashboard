@@ -1,12 +1,13 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect as useDataEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { supabase } from "@/lib/supabase"
 import {
   Dialog,
   DialogContent,
@@ -31,11 +32,14 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  buildAcademicEventNote,
   DEFAULT_ACADEMIC_EVENT_TYPES,
   getAcademicEventTypeLabel,
   getPersistedAcademicEventId,
   isExamTypeWithTerm,
   isSubjectExamType,
+  parseActiveScienceSubjectAreas,
+  validateScienceExamDraft,
 } from "@/features/operations/academic-event-utils.js"
 import { type CalendarEvent, type TextbookScopeItem } from "../types"
 import {
@@ -53,6 +57,19 @@ interface SchoolOption {
   id: string
   name: string
   category?: string
+}
+
+type ScienceSubjectArea = {
+  areaKey: string
+  label: string
+  sortOrder: number
+  isActive: boolean
+}
+
+type ScienceCalendarEvent = Partial<CalendarEvent> & {
+  scienceAreaKey?: string
+  scienceAreaLabel?: string
+  embeddedNoteMeta?: Record<string, unknown>
 }
 
 interface EventFormProps {
@@ -182,6 +199,9 @@ type EventFormData = {
   examTerm: string
   textbookScopes: TextbookScopeItem[]
   subtextbookScopes: TextbookScopeItem[]
+  scienceAreaKey: string
+  scienceAreaLabel: string
+  embeddedNoteMeta: Record<string, unknown>
   note: string
 }
 
@@ -192,6 +212,7 @@ function buildEventFormData({
   defaultEndDate,
   typeOptions,
 }: Pick<EventFormProps, "defaultDate" | "defaultEndDate" | "event" | "initialDraft" | "typeOptions">): EventFormData {
+  const sourceEvent = (event || initialDraft || {}) as ScienceCalendarEvent
   return {
     title: event?.title || initialDraft?.title || "",
     schoolId: event?.schoolId || initialDraft?.schoolId || "",
@@ -208,6 +229,9 @@ function buildEventFormData({
     examTerm: event?.examTerm || initialDraft?.examTerm || examTermOptions[0],
     textbookScopes: normalizeTextbookScopeItems(event?.textbookScopes || initialDraft?.textbookScopes),
     subtextbookScopes: normalizeTextbookScopeItems(event?.subtextbookScopes || initialDraft?.subtextbookScopes),
+    scienceAreaKey: sourceEvent.scienceAreaKey || "",
+    scienceAreaLabel: sourceEvent.scienceAreaLabel || "",
+    embeddedNoteMeta: { ...(sourceEvent.embeddedNoteMeta || {}) },
     note: event?.note || event?.description || initialDraft?.note || initialDraft?.description || "",
   }
 }
@@ -222,6 +246,7 @@ function buildEventFormResetKey({
 }: Pick<EventFormProps, "defaultDate" | "defaultEndDate" | "event" | "initialDraft" | "open" | "typeOptions">) {
   const draftDate = initialDraft?.date as Date | undefined
   const draftEndDate = initialDraft?.endDate as Date | undefined
+  const sourceEvent = (event || initialDraft || {}) as ScienceCalendarEvent
 
   return [
     open ? "open" : "closed",
@@ -233,6 +258,7 @@ function buildEventFormResetKey({
     event?.typeLabel || initialDraft?.typeLabel || typeOptions?.[0] || fallbackTypeOptions[0],
     serializeGradeSelection(event?.grade || initialDraft?.grade || "all"),
     event?.examTerm || initialDraft?.examTerm || examTermOptions[0],
+    sourceEvent.scienceAreaKey || "",
   ].join("|")
 }
 
@@ -256,6 +282,38 @@ export function EventForm({
   )
   const [formError, setFormError] = useState<string | null>(null)
   const [deleteConfirming, setDeleteConfirming] = useState(false)
+  const [activeScienceAreas, setActiveScienceAreas] = useState<ScienceSubjectArea[]>([])
+  const [loadingScienceAreas, setLoadingScienceAreas] = useState(false)
+
+  useDataEffect(() => {
+    let cancelled = false
+
+    if (!open || !supabase) {
+      return
+    }
+
+    const client = supabase
+    void Promise.resolve().then(async () => {
+      if (cancelled) return
+      setActiveScienceAreas([])
+      setLoadingScienceAreas(true)
+      const { data, error } = await client.rpc("list_active_science_subject_areas_v1")
+      if (cancelled) return
+      if (error) {
+        setActiveScienceAreas([])
+        setLoadingScienceAreas(false)
+        return
+      }
+
+      const areas = parseActiveScienceSubjectAreas(data) as ScienceSubjectArea[]
+      setActiveScienceAreas(areas)
+      setLoadingScienceAreas(false)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   if (!open && appliedFormResetKey !== formResetKey) {
     setAppliedFormResetKey(formResetKey)
@@ -279,6 +337,7 @@ export function EventForm({
   const selectedGrades = useMemo(() => parseGradeSelection(formData.grade), [formData.grade])
   const selectedGradeBadges = useMemo(() => getGradeBadgeLabels(formData.grade), [formData.grade])
   const allGradeOptions = useMemo(() => getEventGradeOptions(), [])
+  const showScienceAreaField = formData.typeLabel === "과학시험일"
   const persistedEventId = getPersistedAcademicEventId(event?.sourceId || event?.id)
   const gradeOptions = useMemo(
     () => getGradeOptionsForSchoolCategory(selectedSchool?.category),
@@ -288,6 +347,28 @@ export function EventForm({
     () => getSchoolOptionsForGrade(formData.grade, schoolOptions),
     [formData.grade, schoolOptions],
   )
+  const visibleGradeOptions = useMemo(
+    () => {
+      const options = selectedSchool ? gradeOptions : allGradeOptions
+      return showScienceAreaField
+        ? options.filter((option) => ["고1", "고2", "고3"].includes(option.value))
+        : options
+    }, [allGradeOptions, gradeOptions, selectedSchool, showScienceAreaField],
+  )
+  const scienceAreaOptions = useMemo(() => {
+    if (!formData.scienceAreaKey || activeScienceAreas.some((area) => area.areaKey === formData.scienceAreaKey)) {
+      return activeScienceAreas
+    }
+    return [
+      ...activeScienceAreas,
+      {
+        areaKey: formData.scienceAreaKey,
+        label: formData.scienceAreaLabel || formData.scienceAreaKey,
+        sortOrder: Number.MAX_SAFE_INTEGER,
+        isActive: false,
+      },
+    ]
+  }, [activeScienceAreas, formData.scienceAreaKey, formData.scienceAreaLabel])
 
   const handleSchoolChange = (schoolId: string) => {
     const nextSchool = schoolOptions.find((school) => school.id === schoolId) || null
@@ -403,8 +484,26 @@ export function EventForm({
       return
     }
 
+    const scienceValidation = validateScienceExamDraft(
+      {
+        type: formData.typeLabel,
+        grade: serializeGradeSelection(selectedGrades),
+        scienceAreaKey: formData.scienceAreaKey,
+      },
+      activeScienceAreas,
+    )
+    if (!scienceValidation.isValid) {
+      showFormError(Object.values(scienceValidation.errors)[0] || "과학 시험일 입력값을 확인해 주세요.")
+      return
+    }
+
     setFormError(null)
     setDeleteConfirming(false)
+
+    const noteWithMetadata = buildAcademicEventNote(formData.note, {
+      ...formData.embeddedNoteMeta,
+      scienceAreaKey: showScienceAreaField ? formData.scienceAreaKey : "",
+    })
 
     const saved = await onSave({
       id: persistedEventId,
@@ -427,8 +526,13 @@ export function EventForm({
       examTerm: showExamTermField ? formData.examTerm : "",
       textbookScopes: showScopeFields ? formData.textbookScopes : [],
       subtextbookScopes: showScopeFields ? formData.subtextbookScopes : [],
-      note: formData.note,
-    })
+      note: noteWithMetadata || "",
+      scienceAreaKey: showScienceAreaField ? formData.scienceAreaKey : "",
+      scienceAreaLabel: showScienceAreaField
+        ? activeScienceAreas.find((area) => area.areaKey === formData.scienceAreaKey)?.label || formData.scienceAreaLabel
+        : "",
+      embeddedNoteMeta: formData.embeddedNoteMeta,
+    } as Partial<CalendarEvent>)
     if (saved !== false) {
       onOpenChange(false)
     }
@@ -533,6 +637,38 @@ export function EventForm({
                 </Select>
               </div>
             ) : null}
+
+            {showScienceAreaField ? (
+              <div className="space-y-2">
+                <Label>과학 영역</Label>
+                <Select
+                  value={formData.scienceAreaKey}
+                  disabled={isDisabled || loadingScienceAreas || (!readOnly && activeScienceAreas.length === 0)}
+                  onValueChange={(value) => {
+                    const selectedArea = scienceAreaOptions.find((area) => area.areaKey === value)
+                    setFormData((prev) => ({
+                      ...prev,
+                      scienceAreaKey: value,
+                      scienceAreaLabel: selectedArea?.label || "",
+                    }))
+                  }}
+                >
+                  <SelectTrigger className="w-full" aria-label="과학 영역 선택">
+                    <SelectValue placeholder={loadingScienceAreas ? "과학 영역 불러오는 중" : "과학 영역 선택"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {scienceAreaOptions.map((area) => (
+                      <SelectItem key={area.areaKey} value={area.areaKey} disabled={!area.isActive && !readOnly}>
+                        {area.label}{!area.isActive ? " (비활성)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!loadingScienceAreas && activeScienceAreas.length === 0 && !readOnly ? (
+                  <p className="text-xs text-destructive">활성 과학 영역이 없습니다.</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -548,7 +684,7 @@ export function EventForm({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-64">
-                    {(selectedSchool ? gradeOptions : allGradeOptions).map((option) => {
+                    {visibleGradeOptions.map((option) => {
                       const checked =
                         option.value === "all"
                           ? selectedGrades.includes("all")

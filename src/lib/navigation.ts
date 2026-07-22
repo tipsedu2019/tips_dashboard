@@ -54,6 +54,14 @@ const workspaceMetaEntries: Array<{
   meta: AdminWorkspaceMeta
 }> = [
   {
+    match: "/admin/settings/subjects",
+    meta: {
+      section: "설정",
+      title: "과목 설정",
+      summary: "과목별 운영 상태와 등록, 담당 원장 기준을 관리합니다.",
+    },
+  },
+  {
     match: "/admin/settings/notifications",
     meta: {
       section: "설정",
@@ -406,6 +414,7 @@ export function buildAdminNavGroups({
           icon: Settings2,
           items: [
             { title: "학교 설정", url: "/admin/settings/schools" },
+            { title: "과목 설정", url: "/admin/settings/subjects" },
             { title: "선생님 설정", url: "/admin/settings/teachers" },
             { title: "강의실 설정", url: "/admin/settings/classrooms" },
             { title: "기간 설정", url: "/admin/settings/class-groups" },

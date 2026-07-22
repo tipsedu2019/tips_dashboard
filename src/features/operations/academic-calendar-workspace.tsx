@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/providers/auth-provider";
@@ -13,9 +13,13 @@ import { Calendar } from "@/app/admin/calendar/components/calendar";
 import {
   buildAcademicEventMutationPayload,
   DEFAULT_ACADEMIC_EVENT_TYPES,
+  getAcademicEventFilterTypeKey,
   getAcademicEventTypeLabel,
   getAcademicEventMutationErrorMessage,
   getPersistedAcademicEventId,
+  normalizeAcademicEventType,
+  parseActiveScienceSubjectAreas,
+  prepareAcademicEventMetadataForWrite,
   runAcademicEventMutation,
 } from "./academic-event-utils.js";
 import { buildAcademicCalendarTemplateModel } from "./academic-calendar-models.js";
@@ -49,10 +53,11 @@ function buildSidebarGroups(events: ReturnType<typeof buildAcademicCalendarTempl
   const categoryCounts = new Map<string, { label: string; count: number }>();
 
   events.forEach((event) => {
-    const typeLabel = getAcademicEventTypeLabel(text(event.typeLabel) || "기타");
-    const existingType = typeCounts.get(typeLabel) || { label: typeLabel, count: 0 };
+    const typeKey = normalizeAcademicEventType(text(event.typeLabel) || "기타");
+    const typeLabel = getAcademicEventTypeLabel(typeKey);
+    const existingType = typeCounts.get(typeKey) || { label: typeLabel, count: 0 };
     existingType.count += 1;
-    typeCounts.set(typeLabel, existingType);
+    typeCounts.set(typeKey, existingType);
 
     const categoryKey = text(event.category) || "all";
     const categoryLabel =
@@ -74,8 +79,8 @@ function buildSidebarGroups(events: ReturnType<typeof buildAcademicCalendarTempl
   return [
     {
       name: "일정 유형",
-      items: [...typeCounts.entries()].map(([typeLabel, entry], index) => ({
-        id: `type:${typeLabel}`,
+      items: [...typeCounts.entries()].map(([typeKey, entry], index) => ({
+        id: getAcademicEventFilterTypeKey(typeKey),
         name: `${entry.label} · ${entry.count}`,
         color: typePalette[index % typePalette.length],
         visible: true,
@@ -100,10 +105,27 @@ export function AcademicCalendarWorkspace() {
   const { canManageAll } = useAuth();
   const { data, error, refresh } = useOperationsWorkspaceData();
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [activeScienceAreas, setActiveScienceAreas] = useState<ReturnType<typeof parseActiveScienceSubjectAreas>>([]);
   const initialDate = useMemo(() => parseSearchDate(searchParams.get("date")), [searchParams]);
   const initialEventId = useMemo(() => text(searchParams.get("eventId")), [searchParams]);
   const initialQuery = useMemo(() => text(searchParams.get("q")), [searchParams]);
   const isSeedCalendar = data.academicCalendarSource === "seed";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!supabase) return;
+
+    const client = supabase;
+    void Promise.resolve().then(async () => {
+      const { data: areaRows, error: areaError } = await client.rpc("list_active_science_subject_areas_v1");
+      if (cancelled) return;
+      setActiveScienceAreas(areaError ? [] : parseActiveScienceSubjectAreas(areaRows));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const schoolOptions = useMemo(
     () =>
       (data.academicSchools || [])
@@ -122,8 +144,9 @@ export function AcademicCalendarWorkspace() {
       buildAcademicCalendarTemplateModel({
         academicEvents: data.academicEvents,
         academicSchools: data.academicSchools,
+        scienceSubjectAreas: activeScienceAreas,
       }),
-    [data.academicEvents, data.academicSchools],
+    [activeScienceAreas, data.academicEvents, data.academicSchools],
   );
 
   const sidebarGroups = useMemo(
@@ -158,6 +181,13 @@ export function AcademicCalendarWorkspace() {
 
     const supabaseClient = supabase;
     const existingId = getPersistedAcademicEventId(eventData.id);
+    const metadataResult = prepareAcademicEventMetadataForWrite(eventData, activeScienceAreas);
+    if (!metadataResult.isValid) {
+      const message = Object.values(metadataResult.errors)[0] || "과학 시험일 입력값을 확인해 주세요.";
+      setMutationError(message);
+      toast.error(message);
+      return false;
+    }
     const result = buildAcademicEventMutationPayload(
       {
         id: existingId,
@@ -167,8 +197,9 @@ export function AcademicCalendarWorkspace() {
         start: toDateKey(eventData.date as Date),
         end: toDateKey((eventData.endDate as Date) || (eventData.date as Date)),
         grade: eventData.grade,
-        note: eventData.note || eventData.description,
+        note: metadataResult.note,
         examTerm: eventData.examTerm,
+        scienceAreaKey: metadataResult.scienceAreaKey,
         textbookScope: eventData.textbookScope,
         subtextbookScope: eventData.subtextbookScope,
         textbookScopes: eventData.textbookScopes,

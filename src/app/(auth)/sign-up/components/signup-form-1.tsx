@@ -32,7 +32,7 @@ import { supabase, supabaseConfigError } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 const BLOCKED_EMAIL_DOMAIN = "tipsedu.co.kr";
-const TEACHER_TEAM_OPTIONS = ["영어팀", "수학팀", "관리팀", "조교팀"] as const;
+const TEACHER_TEAM_OPTIONS = ["영어팀", "수학팀", "과학팀", "관리팀", "조교팀"] as const;
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();

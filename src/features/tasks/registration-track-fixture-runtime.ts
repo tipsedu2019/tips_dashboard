@@ -1,9 +1,10 @@
-import type { OpsRegistrationClassDetail, OpsTaskWorkspaceData } from "./ops-task-service"
+import type { OpsClassOption, OpsRegistrationClassDetail, OpsTaskWorkspaceData } from "./ops-task-service"
 import type {
   RegistrationAppointmentCalendarLoadInput,
   RegistrationAppointmentCalendarRow,
 } from "./registration-appointment-calendar-model"
 import type { OpsRegistrationCaseDetail, OpsRegistrationWorkspaceOptionData } from "./registration-track-service"
+import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_QUERY_VALUE = "registration-subject-tracks"
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG_GLOBAL = "__TIPS_REGISTRATION_SUBJECT_TRACK_FIXTURE_DEBUG__"
@@ -68,6 +69,8 @@ export type RegistrationSubjectTrackFixtureAdapter = {
   loadCase: (taskId: string) => Promise<OpsRegistrationCaseDetail>
   loadWorkspaceData: () => Promise<OpsTaskWorkspaceData>
   loadOptionData: () => Promise<OpsRegistrationWorkspaceOptionData>
+  loadSubjectCapabilities: () => Promise<readonly RegistrationSubjectCapability[]>
+  loadScienceConsultationClassOptions: () => Promise<OpsClassOption[]>
   loadClassDetails: (classIds: string[]) => Promise<Record<string, OpsRegistrationClassDetail>>
   debugSnapshot?: () => RegistrationSubjectTrackFixtureDebugSnapshot
   debugReplayLastCreate?: () => Promise<RegistrationSubjectTrackFixtureDebugReplay>
@@ -202,6 +205,14 @@ export function loadRegistrationSubjectTrackFixtureWorkspaceData(): Promise<OpsT
 
 export function loadRegistrationSubjectTrackFixtureOptionData(): Promise<OpsRegistrationWorkspaceOptionData> | null {
   return getActiveFixtureAdapter()?.loadOptionData() || null
+}
+
+export function loadRegistrationSubjectTrackFixtureCapabilities(): Promise<readonly RegistrationSubjectCapability[]> | null {
+  return getActiveFixtureAdapter()?.loadSubjectCapabilities() || null
+}
+
+export function loadRegistrationSubjectTrackFixtureScienceConsultationClassOptions(): Promise<OpsClassOption[]> | null {
+  return getActiveFixtureAdapter()?.loadScienceConsultationClassOptions() || null
 }
 
 export function loadRegistrationSubjectTrackFixtureClassDetails(

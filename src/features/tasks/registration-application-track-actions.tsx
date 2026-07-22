@@ -13,6 +13,9 @@ import {
 } from "./registration-application-inquiry-fields"
 import { getRegistrationSchoolChoices } from "./registration-school-options"
 import { RegistrationSubjectPicker } from "./registration-subject-picker"
+import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
+import { getRegistrationSubjectPickerAvailability } from "./registration-intake-workflow"
+import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 import type {
   OpsClassOption,
   OpsProfileOption,
@@ -113,6 +116,7 @@ export function RegistrationTrackDirectorSection({
   directorOptions,
   teacherOptions,
   directorCatalogStatus,
+  subjectCapabilities,
   onRetryDirectorCatalog,
   onOpenVisit,
   onReload,
@@ -126,6 +130,7 @@ export function RegistrationTrackDirectorSection({
   directorOptions: OpsProfileOption[]
   teacherOptions: OpsTeacherOption[]
   directorCatalogStatus: RegistrationDirectorCatalogStatus
+  subjectCapabilities: readonly RegistrationSubjectCapability[]
   onRetryDirectorCatalog?: () => boolean | Promise<boolean>
   onOpenVisit: (trackId: string) => void
   onReload: (preferredTrackId?: string) => void | Promise<void>
@@ -136,10 +141,18 @@ export function RegistrationTrackDirectorSection({
     () => new Set(teacherOptions.map((teacher) => teacher.profileId).filter(Boolean)),
     [teacherOptions],
   )
-  const availableDirectors = useMemo(
-    () => directorOptions.filter((profile) => profile.role === "admin" && activeDirectorProfileIds.has(profile.id)),
-    [activeDirectorProfileIds, directorOptions],
-  )
+  const availableDirectors = useMemo(() => {
+    if (track.subject !== "과학") {
+      return directorOptions.filter((profile) => profile.role === "admin" && activeDirectorProfileIds.has(profile.id))
+    }
+    const configuredProfileId = subjectCapabilities.find((item) => item.subject === "과학" && item.isActive)?.defaultDirectorProfileId || ""
+    const linkedScienceProfileIds = new Set(teacherOptions.filter((teacher) => (
+      teacher.subjects?.includes("과학팀")
+    )).map((teacher) => teacher.profileId).filter(Boolean))
+    return directorOptions.filter((profile) => (
+      profile.id === configuredProfileId && linkedScienceProfileIds.has(profile.id)
+    ))
+  }, [activeDirectorProfileIds, directorOptions, subjectCapabilities, teacherOptions, track.subject])
   const [directorDraft, setDirectorDraft] = useState({
     trackId: track.id,
     baselineProfileId: track.directorProfileId || "",
@@ -182,8 +195,9 @@ export function RegistrationTrackDirectorSection({
     inquiryAt: task.registration?.inquiryAt || "",
     teachers: teacherOptions,
     profiles: directorOptions,
+    ...{ capabilities: subjectCapabilities },
     catalogStatus: directorCatalogStatus,
-  }), [detail.tracks, directorCatalogStatus, directorOptions, task.registration?.inquiryAt, task.registration?.schoolGrade, teacherOptions])
+  }), [detail.tracks, directorCatalogStatus, directorOptions, subjectCapabilities, task.registration?.inquiryAt, task.registration?.schoolGrade, teacherOptions])
   const automaticActions = useMemo(
     () => resolutions.filter((resolution) => (
       resolution.trackId === track.id
@@ -586,8 +600,6 @@ type SubmissionKeys = {
   getOrCreate: (kind: string, entityId: string) => string
   clear: (kind: string, entityId: string) => void
 }
-
-const SUBJECTS: RegistrationSubject[] = ["영어", "수학"]
 
 export const REGISTRATION_TRACK_STATUS_LABELS: Record<OpsRegistrationTrackStatus, string> = {
   inquiry: "문의",
@@ -1150,6 +1162,7 @@ export function RegistrationCommonInfoSection({
 export function RegistrationSubjectSyncSection({
   detail,
   canManage,
+  subjectCapabilities,
   embedded = false,
   onReload,
   onWarning,
@@ -1157,6 +1170,7 @@ export function RegistrationSubjectSyncSection({
 }: {
   detail: OpsRegistrationCaseDetail
   canManage: boolean
+  subjectCapabilities: readonly RegistrationSubjectCapability[]
   embedded?: boolean
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
@@ -1172,16 +1186,21 @@ export function RegistrationSubjectSyncSection({
       .filter((track) => track.status === "inquiry" && !track.migrationReviewRequired)
       .map((track) => track.subject),
   )
-  const canonicalSubjects = detail.tracks.map((track) => track.subject).sort().join("|")
-  const disabledSubjects = new Set(SUBJECTS.filter((subject) => (
+  const availability = getRegistrationSubjectPickerAvailability({
+    capabilities: subjectCapabilities,
+    grade: detail.task.registration?.schoolGrade || "",
+    selectedSubjects: subjects,
+  })
+  const canonicalSubjects = sortAcademicSubjects(detail.tracks.map((track) => track.subject)).join("|")
+  const disabledSubjects = new Set(availability.options.filter((subject) => (
     subjects.includes(subject)
-    && (!removableSubjects.has(subject) || subjects.length === 1)
+    && (!removableSubjects.has(subject) || subjects.length === 1 || Boolean(availability.disabledReasonBySubject[subject]))
   )))
-  useOwnedDirtyState(!refreshPending && [...subjects].sort().join("|") !== canonicalSubjects, onDirtyChange)
+  useOwnedDirtyState(!refreshPending && sortAcademicSubjects(subjects).join("|") !== canonicalSubjects, onDirtyChange)
 
   function toggle(subject: RegistrationSubject, selected: boolean) {
     setSubjects((current) => selected
-      ? SUBJECTS.filter((value) => value === subject || current.includes(value))
+      ? sortAcademicSubjects([...current, subject]) as RegistrationSubject[]
       : current.filter((value) => value !== subject))
   }
 
@@ -1190,7 +1209,7 @@ export function RegistrationSubjectSyncSection({
     const kind = "registration-subjects"
     const subjectPayloadKey = JSON.stringify({
       taskId: detail.task.id,
-      subjects: [...subjects].sort(),
+      subjects: sortAcademicSubjects(subjects),
     })
     const requestKey = submissionKeys.getOrCreate(kind, subjectPayloadKey)
     setSaving(true)
@@ -1238,6 +1257,9 @@ export function RegistrationSubjectSyncSection({
     <section className={embedded ? "grid min-w-0 gap-2" : "grid min-w-0 gap-2 rounded-md border p-3"} aria-label="문의 과목 편집">
       <RegistrationSubjectPicker
         value={subjects}
+        options={availability.options}
+        grade={detail.task.registration?.schoolGrade || ""}
+        disabledReasonBySubject={availability.disabledReasonBySubject}
         disabled={!canManage || saving || refreshPending}
         disabledSubjects={disabledSubjects}
         onToggle={toggle}

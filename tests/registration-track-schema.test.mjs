@@ -3499,3 +3499,91 @@ test("roster guard fix isolates student and class trigger record fields", async 
 
   assert.match(sql, /drop function dashboard_private\.prevent_direct_roster_array_write\(\)/)
 })
+
+test("science registration forward migration replaces every current three-subject gateway", async () => {
+  const sql = await readMigration("registration_science_subject")
+  const trimmed = sql.trim()
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.match(
+    sql,
+    /drop constraint if exists ops_registration_subject_tracks_subject_check[\s\S]*?add constraint ops_registration_subject_tracks_subject_check[\s\S]*?subject in \('영어', '수학', '과학'\)/i,
+  )
+
+  const sortOrder = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "registration_subject_sort_order",
+  )
+  assertInOrder(sortOrder, ["when '영어' then 10", "when '수학' then 20", "when '과학' then 30"])
+  assert.match(sortOrder, /registration_subject_unsupported/)
+
+  const capability = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "assert_registration_subject_enabled",
+  )
+  assert.match(capability, /public\.academic_subject_settings/)
+  assert.match(capability, /registration_create_enabled/)
+  assert.match(capability, /grade_levels/)
+  assert.match(capability, /'과학'[\s\S]*?'고1'[\s\S]*?'고2'[\s\S]*?'고3'/)
+
+  const subjectDirector = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "is_active_subject_director",
+  )
+  assert.match(subjectDirector, /dashboard_private\.is_active_registration_director/)
+  assert.match(subjectDirector, /academic_subject_director_candidate_is_active_v1/)
+  assert.match(subjectDirector, /default_director_profile_id/)
+
+  for (const functionName of [
+    "assert_registration_mutation_access",
+    "resolve_registration_default_director",
+    "assert_registration_track_director_ready",
+    "derive_registration_parent_projection",
+    "create_registration_case_impl",
+    "sync_registration_case_subjects_impl",
+    "update_registration_case_common_impl",
+    "assign_registration_track_director_impl",
+    "save_registration_shared_appointment_impl",
+    "create_registration_case_with_initial_workflow_v1_impl",
+    "complete_registration_consultation_impl",
+    "registration_appointment_track_ids_v1",
+    "registration_appointment_director_targets_v1",
+    "registration_appointment_rule_snapshot_v1",
+    "registration_appointment_source_snapshot_v1",
+    "preview_registration_appointment_reminders_v1",
+    "assign_registration_track_director_with_reminders_v1_impl",
+    "write_registration_track_event_v2",
+    "registration_message_track_id_v1",
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(`create or replace function dashboard_private\\.${functionName}\\(`),
+      `missing current science-aware ${functionName}`,
+    )
+  }
+
+  for (const functionName of [
+    "create_registration_case_with_initial_workflow_v1",
+    "save_registration_shared_appointment",
+    "preview_registration_appointment_reminders_v1",
+  ]) {
+    assert.match(sql, new RegExp(`create or replace function public\\.${functionName}\\(`))
+  }
+
+  assert.match(sql, /create or replace view public\.ops_registration_appointment_calendar/)
+  assert.match(sql, /cardinality\(v_subjects\) not between 1 and 3/)
+  assert.match(sql, /cardinality\(v_track_ids\) not between 1 and 3/)
+  assert.match(
+    sql,
+    /assert_registration_subject_enabled\(\s*v_subject,\s*v_school_grade\s*\)/,
+  )
+  assert.match(sql, /registration_science_grade_invalid/)
+  assert.match(sql, /registration_subject_tracks_runtime_version\(\)[\s\S]*?select 1/)
+  assert.match(sql, /registration_intake_workflow_runtime_version\(\)[\s\S]*?select 1/)
+  assert.match(sql, /registration_appointment_reminders_runtime_version\(\)[\s\S]*?select 1/)
+  assert.match(sql, /registration_notification_handoffs_runtime_version\(\)[\s\S]*?select 1/)
+})

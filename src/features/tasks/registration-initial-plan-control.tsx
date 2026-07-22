@@ -19,6 +19,7 @@ import {
 } from "./registration-level-test-place.ts"
 import type { RegistrationSubject } from "./registration-track-service"
 import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow"
+import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
 
 export type RegistrationInitialPlanControlProps = {
   subjects: RegistrationSubject[]
@@ -34,11 +35,8 @@ export type RegistrationInitialPlanControlProps = {
   onChange: (draft: RegistrationInitialWorkflowDraft) => void
 }
 
-const SUBJECT_ORDER: RegistrationSubject[] = ["영어", "수학"]
-
 function selectedSubjects(subjects: RegistrationSubject[]) {
-  const selected = new Set(subjects)
-  return SUBJECT_ORDER.filter((subject) => selected.has(subject))
+  return sortAcademicSubjects(subjects) as RegistrationSubject[]
 }
 
 function ProcessSubjectPicker({ subjects, selected, disabled, label, onToggle }: {
@@ -51,7 +49,7 @@ function ProcessSubjectPicker({ subjects, selected, disabled, label, onToggle }:
   return (
     <div className="grid gap-2" role="group" aria-label={`${label} 과목 선택`}>
       <span className="text-sm font-medium">과목</span>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {selectedSubjects(subjects).map((subject) => {
           const active = selected.includes(subject)
           return <Button key={subject} type="button" variant={active ? "default" : "outline"} aria-pressed={active} disabled={disabled} onClick={() => onToggle(subject, !active)}>{subject}</Button>
@@ -109,6 +107,12 @@ export function RegistrationInitialLevelTestFields({
           <Input value="" readOnly disabled placeholder="첫 저장 후 입력" />
         </Label>
       ) : null}
+      {levelTestSubjects.includes("과학") ? (
+        <Label className="grid gap-1.5">
+          <span>과학 결과 링크</span>
+          <Input value="" readOnly disabled placeholder="첫 저장 후 입력" />
+        </Label>
+      ) : null}
     </div>
   )
 }
@@ -151,7 +155,7 @@ export function RegistrationInitialConsultationFields({
         label="상담"
         onToggle={(subject, checked) => onChange(setRegistrationInitialSubjectAction(draft, subject, checked ? "direct_phone" : "inquiry"))}
       />
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         {orderedSubjects.map((subject) => {
           const subjectSelected = consultationSubjects.includes(subject)
           return (

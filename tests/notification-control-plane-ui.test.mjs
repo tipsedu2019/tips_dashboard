@@ -379,6 +379,22 @@ test("연결 관리는 규칙 표와 분리되고 관리자 동작은 자동 테
   assert.match(source, /if \(replaced\)[\s\S]*setWebhookInputs/)
 })
 
+test("연결 화면은 별도 과학팀 Google Chat 슬롯을 표시하고 과목팀 준비 상태에 포함한다", async () => {
+  const source = await readOptionalSource(
+    "src/features/notifications/notification-control-panel.tsx",
+  )
+
+  assert.match(source, /"google_chat\.science":\s*"과학팀 Google Chat"/)
+  assert.match(
+    source,
+    /\["google_chat\.math",\s*"google_chat\.english",\s*"google_chat\.science"\]/,
+  )
+  assert.match(
+    source,
+    /"webhook_url"\s+in\s+input\s*\|\|\s*"webhook_url_ciphertext"\s+in\s+input/,
+  )
+})
+
 test("연결 검증과 해제는 공통 확인 대화상자를 사용한다", async () => {
   const source = await readOptionalSource(
     "src/features/notifications/notification-control-panel.tsx",

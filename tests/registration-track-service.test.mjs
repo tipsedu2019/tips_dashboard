@@ -5,6 +5,7 @@ import vm from "node:vm";
 
 import ts from "typescript";
 
+import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
 
 const serviceUrl = new URL(
@@ -28,7 +29,7 @@ async function loadFactory(extraGlobals = {}) {
 
   const factorySource = source.slice(start + startMarker.length, end);
   const compiled = ts.transpileModule(
-    `${factorySource}\nmodule.exports = { createRegistrationTrackService, createRegistrationMutationRequestKey, buildRegistrationMigrationLegacySnapshot, mapTrackEvent };`,
+    `${factorySource}\nmodule.exports = { createRegistrationTrackService, createRegistrationMutationRequestKey, buildRegistrationMigrationLegacySnapshot, mapTrack, mapTrackEvent };`,
     {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
@@ -43,10 +44,21 @@ async function loadFactory(extraGlobals = {}) {
     exports: sandboxModule.exports,
     crypto: { randomUUID: () => "uuid-from-crypto" },
     normalizeRegistrationLevelTestPlace,
+    parseAcademicSubject,
     ...extraGlobals,
   });
   return sandboxModule.exports;
 }
+
+test("track rows preserve science and fail closed for unsupported subjects", async () => {
+  const { mapTrack } = await loadFactory();
+
+  assert.equal(mapTrack({ id: "science-track", subject: "과학" }).subject, "과학");
+  assert.throws(
+    () => mapTrack({ id: "unsupported-track", subject: "unknown" }),
+    /registration_subject_unsupported/,
+  );
+});
 
 test("version-2 event parser preserves explicit user, system, and migration actors", async () => {
   const { mapTrackEvent } = await loadFactory();
@@ -931,6 +943,65 @@ test("registration option loader starts five reads, includes schools, excludes s
   }]);
 });
 
+test("assigned science consultation class loader filters canonical inactive rows and bounds its consultation cache", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let now = 1_000;
+  const harness = createClient({
+    queryHandler(query) {
+      assert.equal(query.table, "classes");
+      return {
+        data: [
+          { id: "science-active", name: "고1 과학", subject: "과학", grade: "고1", teacher: "과학교사", room: "4", status: "운영" },
+          { id: "science-ended", name: "종강 과학", subject: "과학", grade: "고2", teacher: "과학교사", room: "5", status: "종료" },
+          { id: "science-archived", name: "보관 과학", subject: "과학", grade: "고3", teacher: "과학교사", room: "7", status: "종강" },
+          { id: "math-leak", name: "수학", subject: "수학", grade: "고1", teacher: "수학교사", room: "6", status: "운영" },
+        ],
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({ now: () => now }));
+
+  const first = await service.loadAssignedScienceConsultationClassOptions({ viewerId: "science-teacher", consultationId: "consultation-1" });
+  const cached = await service.loadAssignedScienceConsultationClassOptions({ viewerId: "science-teacher", consultationId: "consultation-1" });
+
+  assert.strictEqual(cached, first);
+  assert.deepEqual(JSON.parse(JSON.stringify(first)), [{
+    id: "science-active",
+    label: "고1 과학",
+    meta: "고1 · 과학교사",
+    subject: "과학",
+    grade: "고1",
+    teacher: "과학교사",
+    room: "4",
+    schedule: "",
+    studentIds: [],
+    waitlistIds: [],
+    textbookIds: [],
+  }]);
+  assert.equal(harness.queries.length, 1);
+  assert.equal(harness.queries[0].columns, "id,name,subject,grade,teacher,room,status");
+  assert.deepEqual(harness.queries[0].filters, [["eq", "subject", "과학"]]);
+  assert.equal(harness.rpcCalls.length, 0);
+
+  now += 60_001;
+  await service.loadAssignedScienceConsultationClassOptions({ viewerId: "science-teacher", consultationId: "consultation-1" });
+  assert.equal(harness.queries.length, 2);
+  await service.loadAssignedScienceConsultationClassOptions({ viewerId: "science-teacher", consultationId: "consultation-2" });
+  assert.equal(harness.queries.length, 3, "같은 viewer라도 다른 상담은 별도 cache key를 사용한다");
+  await service.loadAssignedScienceConsultationClassOptions({ viewerId: "science-teacher", consultationId: "consultation-1", force: true });
+  assert.equal(harness.queries.length, 4);
+  await assert.rejects(
+    async () => service.loadAssignedScienceConsultationClassOptions({ viewerId: "", consultationId: "consultation-1" }),
+    /non-empty viewer ID/i,
+  );
+  await assert.rejects(
+    async () => service.loadAssignedScienceConsultationClassOptions({ viewerId: "science-teacher", consultationId: "" }),
+    /non-empty consultation ID/i,
+  );
+  assert.equal(harness.queries.length, 4, "viewer 또는 assigned 상담이 없으면 class request를 만들지 않는다");
+});
+
 test("option fallback is partial, option errors are explicit, and failed measures still close", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const measures = [];
@@ -1004,6 +1075,12 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
         return { data: {
           batch: { id: "batch-1", task_id: "task-1", revision_number: 1, status: "completed", invoice_sent_at: "i", payment_confirmed_at: "p", created_at: "c", updated_at: "u" },
           enrollments: [enrollmentRow],
+        }, error: null };
+      }
+      if (name === "complete_registration_consultation") {
+        return { data: {
+          consultation: { id: "consultation-1", status: "completed", outcome: "waiting" },
+          track: { id: "track-1", task_id: "task-1", subject: "영어", pipeline_status: "waiting" },
         }, error: null };
       }
       return { data: { ok: true }, error: null };
@@ -1651,4 +1728,57 @@ test("public service source exposes typed aliases and excludes server-only or cr
   assert.match(source, /readyAt: string \| null/);
   assert.match(source, /readySource: RegistrationPhoneReadySource \| null/);
   assert.match(source, /export function createRegistrationCaseWithInitialWorkflow/);
+});
+
+test("science registration database contract preserves public RPC signatures and fail-closed capability writes", async () => {
+  const migration = await readFile(
+    new URL("../supabase/migrations/20260722100000_registration_science_subject.sql", import.meta.url),
+    "utf8",
+  );
+  const pgTap = await readFile(
+    new URL("../supabase/tests/registration_science_subject_test.sql", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    migration,
+    /create or replace function public\.create_registration_case_with_initial_workflow_v1\(\s*p_student_name text,[\s\S]*?p_request_key text[\s\S]*?returns jsonb/,
+  );
+  assert.match(
+    migration,
+    /create or replace function public\.save_registration_shared_appointment\(\s*p_appointment_id uuid,\s*p_task_id uuid,[\s\S]*?p_request_key text[\s\S]*?returns jsonb/,
+  );
+  assert.match(
+    migration,
+    /create or replace function dashboard_private\.create_registration_case_impl\([\s\S]*?registration_subject_unsupported[\s\S]*?assert_registration_subject_enabled/,
+  );
+  assert.match(
+    migration,
+    /create or replace function dashboard_private\.sync_registration_case_subjects_impl\([\s\S]*?registration_subject_unsupported[\s\S]*?assert_registration_subject_enabled/,
+  );
+  assert.match(
+    migration,
+    /update_registration_case_common_impl[\s\S]*?exists \([\s\S]*?subject = '과학'[\s\S]*?registration_science_grade_invalid/,
+  );
+  assert.match(migration, /target_fingerprint/);
+  assert.match(migration, /dashboard_private\.ops_registration_mutations/);
+  assert.match(migration, /idempotency_key_reused/);
+  assert.match(migration, /v_legacy_target_fingerprint jsonb/);
+  assert.equal(
+    [...migration.matchAll(/v_legacy_target_fingerprint jsonb/g)].length,
+    2,
+  );
+  assert.equal(
+    [...migration.matchAll(/v_legacy_target_fingerprint is not null/g)].length,
+    2,
+  );
+  assert.match(
+    migration,
+    /mutation\.target_fingerprint = v_target_fingerprint[\s\S]*?mutation\.target_fingerprint = v_legacy_target_fingerprint/,
+  );
+  assert.match(pgTap, /science-legacy-create-replay/);
+  assert.match(pgTap, /science-legacy-sync-replay/);
+  assert.match(pgTap, /'subjects', '\["\uc218\ud559", "\uc601\uc5b4"\]'::jsonb/);
+  assert.match(migration, /registration_subject_removed/);
+  assert.match(migration, /write_registration_track_event_v2/);
 });

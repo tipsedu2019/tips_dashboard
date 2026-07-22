@@ -7,6 +7,7 @@ export type TimetableRow = {
   fullTitle: string;
   academicYear: string;
   subject: string;
+  subjectAreaKey: string;
   grade: string;
   teacher: string;
   classroom: string;
@@ -92,6 +93,7 @@ export type CurriculumRow = {
   title: string;
   fullTitle: string;
   subject: string;
+  subjectAreaKey: string;
   grade: string;
   term: string;
   teacherNames: string[];
@@ -111,6 +113,7 @@ export type CurriculumRow = {
     sourceTitle: string;
     publisher: string;
     subject: string;
+    subjectAreaKey: string;
     category: string;
     area: string;
     subSubject: string;

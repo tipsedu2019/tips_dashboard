@@ -11,6 +11,7 @@ import {
 import {
   NOTIFICATION_AUDIENCE_KEYS,
   NOTIFICATION_CHANNEL_KEYS,
+  NOTIFICATION_CONNECTION_KEYS,
   NOTIFICATION_EDITABLE_CHANNEL_KEYS,
   NOTIFICATION_EVENT_KEYS_BY_WORKFLOW,
   NOTIFICATION_WORKFLOW_OPTIONS,
@@ -220,6 +221,16 @@ test("locks the complete event, audience, and channel vocabularies", () => {
   ])
 })
 
+test("locks the five Google Chat connection slots with science last", () => {
+  assert.deepEqual(NOTIFICATION_CONNECTION_KEYS, [
+    "google_chat.management",
+    "google_chat.executive",
+    "google_chat.math",
+    "google_chat.english",
+    "google_chat.science",
+  ])
+})
+
 test("maps the snake_case wire snapshot to one camelCase browser DTO", () => {
   const snapshot = parseSnapshot()
 
@@ -242,6 +253,33 @@ test("maps the snake_case wire snapshot to one camelCase browser DTO", () => {
   assert.equal(snapshot.deliverySummary.latestDeliveryAt, "2026-07-16T08:30:00.000Z")
   assert.equal("workflow_key" in snapshot, false)
   assert.equal("title_template" in snapshot.rules[0].template, false)
+})
+
+test("parses a disconnected science slot without requiring or exposing a secret", () => {
+  const wire = createWireSnapshot()
+  wire.connections.push({
+    connection_key: "google_chat.science",
+    connection_state: "disconnected",
+    revision: CONNECTION_REVISION,
+    webhook_url_mask: null,
+    last_verified_at: null,
+    last_error_code: null,
+    editable: true,
+  })
+
+  const snapshot = parseSnapshot(wire)
+  assert.deepEqual(snapshot.connections[1], {
+    connectionKey: "google_chat.science",
+    connectionState: "disconnected",
+    revision: CONNECTION_REVISION,
+    configured: false,
+    webhookUrlMask: null,
+    lastVerifiedAt: null,
+    lastErrorCode: null,
+    editable: true,
+  })
+  assert.equal("webhookUrl" in snapshot.connections[1], false)
+  assert.equal("webhookUrlCiphertext" in snapshot.connections[1], false)
 })
 
 test("preserves bigint rule, template, and connection revisions as decimal strings", () => {
@@ -399,7 +437,7 @@ test("blocks a newly enabled Google Chat rule when connection verification has f
   assert.equal(issueCodes(result).includes("google_chat_connection_required"), true)
 })
 
-test("requires both subject connections before enabling a dynamic subject-team Chat rule", () => {
+test("requires all three subject connections before enabling a dynamic subject-team Chat rule", () => {
   const wire = createWireSnapshot({ workflow_key: "makeup_requests" })
   wire.rules[0].workflow_key = "makeup_requests"
   wire.rules[0].event_key = "makeup.submitted"
@@ -415,6 +453,19 @@ test("requires both subject connections before enabling a dynamic subject-team C
   const englishConnection = structuredClone(wire.connections[0])
   englishConnection.connection_key = "google_chat.english"
   wire.connections.push(englishConnection)
+  const blockedWithoutScience = parseSnapshot(wire)
+  const blockedWithoutScienceDraft = createNotificationDraft(blockedWithoutScience)
+  blockedWithoutScienceDraft.rules["rule-registration-visit-management"].enabled = true
+  assert.equal(
+    issueCodes(validateNotificationDraft(blockedWithoutScience, blockedWithoutScienceDraft)).includes(
+      "google_chat_connection_required",
+    ),
+    true,
+  )
+
+  const scienceConnection = structuredClone(wire.connections[0])
+  scienceConnection.connection_key = "google_chat.science"
+  wire.connections.push(scienceConnection)
   const readySnapshot = parseSnapshot(wire)
   const readyDraft = createNotificationDraft(readySnapshot)
   readyDraft.rules["rule-registration-visit-management"].enabled = true

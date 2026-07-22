@@ -783,7 +783,7 @@ function getMoveUnitSalePrice(move = {}) {
 
 function getClosingTeamKey(move = {}) {
   const subject = getTextbookSubject(move) || text(move.textbook_subject || move.textbookSubject);
-  if (subject === "english" || subject === "math") {
+  if (subject === "english" || subject === "math" || subject === "science") {
     return subject;
   }
 
@@ -824,6 +824,7 @@ export function buildTextbookMonthlyClosing({
   const teamMargins = {
     english: createClosingTeamMargin("english"),
     math: createClosingTeamMargin("math"),
+    science: createClosingTeamMargin("science"),
     other: createClosingTeamMargin("other"),
   };
 

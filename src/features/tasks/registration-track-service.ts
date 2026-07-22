@@ -1,4 +1,8 @@
 import { supabase } from "@/lib/supabase"
+import {
+  parseAcademicSubject,
+  type AcademicSubjectValue,
+} from "../../lib/academic-subject-registry.ts"
 
 import {
   buildRegistrationAppointmentCalendarItems,
@@ -13,6 +17,7 @@ import {
   loadRegistrationSubjectTrackFixtureCase,
   loadRegistrationSubjectTrackFixtureIntakeRuntimeVersion,
   loadRegistrationSubjectTrackFixtureOptionData,
+  loadRegistrationSubjectTrackFixtureScienceConsultationClassOptions,
 } from "./registration-track-fixture-runtime"
 
 import type {
@@ -63,7 +68,7 @@ export type { RegistrationIntakeRuntimeState }
 
 // registration-track-service-factory:start
 type Row = Record<string, unknown>
-export type RegistrationSubject = "영어" | "수학"
+export type RegistrationSubject = AcademicSubjectValue
 export type RegistrationWaitingKind = "" | "current_class" | "current_term_opening" | "next_term_opening"
 
 export type RegistrationPhoneReadySource =
@@ -838,7 +843,9 @@ function mapRegistrationNotificationJobStatus(input: unknown): RegistrationNotif
 }
 
 function subject(input: unknown): RegistrationSubject {
-  return text(input) === "수학" ? "수학" : "영어"
+  const parsed = parseAcademicSubject(input)
+  if (!parsed) throw new Error("registration_subject_unsupported")
+  return parsed
 }
 
 function trackStatus(input: unknown): OpsRegistrationTrackStatus {
@@ -1037,7 +1044,7 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
       : versionOne
         ? text(versionOne.eventType) || text(value(row, "event_type", "eventType"))
         : text(value(row, "event_type", "eventType")),
-    subject: rawSubject === "영어" || rawSubject === "수학" ? rawSubject : null,
+    subject: parseAcademicSubject(rawSubject),
     source: canonical ? nullableText(canonical.source) : null,
     destination: canonical ? nullableText(canonical.destination) : null,
     reason: reasonCode,
@@ -1293,8 +1300,10 @@ function errorText(error: unknown) {
 
 function isClearlyInactiveStatus(input: unknown) {
   const normalized = text(input).toLowerCase()
-  return ["inactive", "archived", "disabled", "미사용", "비활성", "폐강", "종료"].includes(normalized)
+  return ["inactive", "archived", "disabled", "미사용", "비활성", "폐강", "종료", "종강"].includes(normalized)
 }
+
+const SCIENCE_CONSULTATION_CLASS_OPTION_CACHE_TTL_MS = 60_000
 
 export function createRegistrationTrackService(
   client: RegistrationTrackClient,
@@ -1316,6 +1325,12 @@ export function createRegistrationTrackService(
   const optionCache = new Map<string, OpsRegistrationWorkspaceOptionData>()
   const optionInFlight = new Map<string, Promise<OpsRegistrationWorkspaceOptionData>>()
   const optionEpochs = new Map<string, number>()
+  const scienceConsultationClassOptionCache = new Map<string, {
+    data: OpsClassOption[]
+    expiresAt: number
+  }>()
+  const scienceConsultationClassOptionInFlight = new Map<string, Promise<OpsClassOption[]>>()
+  const scienceConsultationClassOptionEpochs = new Map<string, number>()
   let cacheGeneration = 0
   let measureSequence = 0
 
@@ -1330,6 +1345,9 @@ export function createRegistrationTrackService(
     optionCache.clear()
     optionInFlight.clear()
     optionEpochs.clear()
+    scienceConsultationClassOptionCache.clear()
+    scienceConsultationClassOptionInFlight.clear()
+    scienceConsultationClassOptionEpochs.clear()
   }
 
   function advanceEpoch(epochs: Map<string, number>, cacheKey: string) {
@@ -1792,6 +1810,76 @@ export function createRegistrationTrackService(
         if (optionInFlight.get(cacheKey) === request) optionInFlight.delete(cacheKey)
       })
     optionInFlight.set(cacheKey, request)
+    return request
+  }
+
+  function loadAssignedScienceConsultationClassOptions(
+    loadOptions: { viewerId: string; consultationId: string; force?: boolean },
+  ): Promise<OpsClassOption[]> {
+    const viewerId = requireViewerId(loadOptions.viewerId)
+    const consultationId = text(loadOptions.consultationId)
+    if (!consultationId) throw new Error("A non-empty consultation ID is required.")
+    const cacheKey = `${viewerId}\u0000${consultationId}`
+    if (loadOptions.force) {
+      advanceEpoch(scienceConsultationClassOptionEpochs, cacheKey)
+      scienceConsultationClassOptionCache.delete(cacheKey)
+      scienceConsultationClassOptionInFlight.delete(cacheKey)
+    }
+    const cached = scienceConsultationClassOptionCache.get(cacheKey)
+    if (cached && cached.expiresAt > (options.now?.() ?? Date.now())) {
+      return measure("registration:science-consultation-class-options", true, async () => cached.data)
+    }
+    scienceConsultationClassOptionCache.delete(cacheKey)
+    const pending = scienceConsultationClassOptionInFlight.get(cacheKey)
+    if (pending) return pending
+    const generation = cacheGeneration
+    const requestEpoch = scienceConsultationClassOptionEpochs.get(cacheKey) || 0
+
+    const request = measure("registration:science-consultation-class-options", false, async (metrics) => {
+      metrics.queryCount += 1
+      const { data, error } = await client
+        .from("classes")
+        .select("id,name,subject,grade,teacher,room,status")
+        .eq("subject", "과학")
+      if (error) throw error
+      return rows(data)
+        .filter((row) => (
+          Boolean(text(value(row, "id")))
+          && text(value(row, "subject")) === "과학"
+          && !isClearlyInactiveStatus(value(row, "status"))
+        ))
+        .map((row) => ({
+          id: text(value(row, "id")),
+          label: text(value(row, "name")) || text(value(row, "id")),
+          meta: [text(value(row, "grade")), text(value(row, "teacher"))].filter(Boolean).join(" · "),
+          subject: "과학",
+          grade: text(value(row, "grade")),
+          teacher: text(value(row, "teacher")),
+          room: text(value(row, "room")),
+          schedule: "",
+          studentIds: [],
+          waitlistIds: [],
+          textbookIds: [],
+        } satisfies OpsClassOption))
+    })
+      .then((result) => {
+        if (
+          generation === cacheGeneration
+          && requestEpoch === (scienceConsultationClassOptionEpochs.get(cacheKey) || 0)
+        ) {
+          scienceConsultationClassOptionCache.set(cacheKey, {
+            data: result,
+            expiresAt: (options.now?.() ?? Date.now()) + SCIENCE_CONSULTATION_CLASS_OPTION_CACHE_TTL_MS,
+          })
+        }
+        return result
+      })
+      .finally(() => {
+        if (scienceConsultationClassOptionInFlight.get(cacheKey) === request) {
+          scienceConsultationClassOptionInFlight.delete(cacheKey)
+        }
+      })
+    scienceConsultationClassOptionInFlight.set(cacheKey, request)
     return request
   }
 
@@ -2414,6 +2502,7 @@ export function createRegistrationTrackService(
     loadTrackSummaries,
     loadCaseDetail,
     loadWorkspaceOptionData,
+    loadAssignedScienceConsultationClassOptions,
     createRegistrationCase,
     createRegistrationCaseWithInitialWorkflow,
     syncRegistrationCaseSubjects,
@@ -2545,6 +2634,14 @@ export function loadOpsRegistrationWorkspaceOptionData(
   const fixture = loadRegistrationSubjectTrackFixtureOptionData()
   if (fixture) return fixture
   return defaultRegistrationTrackService.loadWorkspaceOptionData(options)
+}
+
+export function loadAssignedScienceConsultationClassOptions(
+  options: { viewerId: string; consultationId: string; force?: boolean },
+): Promise<OpsClassOption[]> {
+  const fixture = loadRegistrationSubjectTrackFixtureScienceConsultationClassOptions()
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.loadAssignedScienceConsultationClassOptions(options)
 }
 
 export function createRegistrationCase(

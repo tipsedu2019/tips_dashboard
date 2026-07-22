@@ -116,17 +116,17 @@ test("같은 날의 서로 다른 예약 ID를 합치지 않고 명시한 상태
   assert.deepEqual(buildRegistrationAppointmentCalendarItems(rows, { statuses: [] }), []);
 });
 
-test("과목과 트랙을 영어 다음 수학 순서로 함께 정렬한다", async () => {
+test("과목과 트랙을 영어, 수학, 과학 레지스트리 순서로 함께 정렬한다", async () => {
   const { buildRegistrationAppointmentCalendarItems } = await loadModel();
   const [item] = buildRegistrationAppointmentCalendarItems([
     calendarRow({
-      track_ids: ["track-math", "track-english"],
-      subjects: ["수학", "영어"],
+      track_ids: ["track-science", "track-math", "track-english"],
+      subjects: ["과학", "수학", "영어"],
     }),
   ]);
 
-  assert.deepEqual(item.trackIds, ["track-english", "track-math"]);
-  assert.deepEqual(item.subjects, ["영어", "수학"]);
+  assert.deepEqual(item.trackIds, ["track-english", "track-math", "track-science"]);
+  assert.deepEqual(item.subjects, ["영어", "수학", "과학"]);
 });
 
 test("종류·상태·알림 리비전·예약 시각이 잘못된 행은 조용히 숨기지 않고 거절한다", async () => {

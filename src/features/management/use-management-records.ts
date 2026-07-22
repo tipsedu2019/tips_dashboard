@@ -36,6 +36,18 @@ export type ManagementRow = {
   metrics: Record<string, unknown>;
 };
 
+export type ClassFormReferences = {
+  teacherCatalogs: Record<string, unknown>[];
+  classroomCatalogs: Record<string, unknown>[];
+  scienceSubjectAreas: Record<string, unknown>[];
+};
+
+const EMPTY_CLASS_FORM_REFERENCES: ClassFormReferences = {
+  teacherCatalogs: [],
+  classroomCatalogs: [],
+  scienceSubjectAreas: [],
+};
+
 const CONFIG = {
   students: {
     table: "students",
@@ -123,6 +135,24 @@ async function readOptionalTable(table: string, columns = "*") {
 
   if (error) {
     if (isMissingRelationError(error) || isMissingColumnError(error)) {
+      return [] as Record<string, unknown>[];
+    }
+    throw error;
+  }
+
+  return (data || []) as unknown as Record<string, unknown>[];
+}
+
+async function readActiveScienceSubjectAreas() {
+  const { data, error } = await withTableTimeout(
+    supabase!.rpc("list_active_science_subject_areas_v1"),
+    "list_active_science_subject_areas_v1",
+    true,
+  );
+
+  if (error) {
+    const code = textValue((error as { code?: unknown })?.code);
+    if (["42883", "PGRST202"].includes(code) || isMissingRelationError(error)) {
       return [] as Record<string, unknown>[];
     }
     throw error;
@@ -470,6 +500,7 @@ function attachClassAuditSummary(
 
 export function useManagementRecords(kind: ManagementKind) {
   const [rows, setRows] = useState<ManagementRow[]>([]);
+  const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -478,6 +509,7 @@ export function useManagementRecords(kind: ManagementKind) {
 
     if (!supabase) {
       setRows([]);
+      setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
       setError("Supabase 연결 설정을 확인해 주세요.");
       setLoading(false);
       return;
@@ -487,6 +519,9 @@ export function useManagementRecords(kind: ManagementKind) {
     setError(null);
 
     try {
+      if (kind !== "classes") {
+        setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
+      }
       const { data, error: queryError } = await withTableTimeout(
         supabase.from(config.table).select("*"),
         config.table,
@@ -527,7 +562,7 @@ export function useManagementRecords(kind: ManagementKind) {
       }
 
       if (kind === "classes") {
-        const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs, teacherCatalogs] = await Promise.all([
+        const [students, classGroups, classGroupMembers, classTerms, textbooks, progressLogs, classAuditLogs, teacherCatalogs, classroomCatalogs, scienceSubjectAreas] = await Promise.all([
           readOptionalTable("students"),
           readOptionalTable("class_schedule_sync_groups"),
           readOptionalTable("class_schedule_sync_group_members", "group_id,class_id,sort_order"),
@@ -536,7 +571,10 @@ export function useManagementRecords(kind: ManagementKind) {
           readOptionalTable("progress_logs"),
           readOptionalClassAuditLogs(),
           readOptionalTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order"),
+          readOptionalTable("classroom_catalogs", "id,name,subjects,is_visible,sort_order"),
+          readActiveScienceSubjectAreas(),
         ]);
+        setClassFormReferences({ teacherCatalogs, classroomCatalogs, scienceSubjectAreas });
         const studentsById = new Map(
           students.map((student) => [textValue(student.id), student]),
         );
@@ -585,6 +623,10 @@ export function useManagementRecords(kind: ManagementKind) {
             availableClassGroups: classGroups.map((group) => toClassGroupSummary(group, textValue(group.id))),
             available_teacher_catalogs: teacherCatalogs,
             availableTeacherCatalogs: teacherCatalogs,
+            available_classroom_catalogs: classroomCatalogs,
+            availableClassroomCatalogs: classroomCatalogs,
+            available_science_subject_areas: scienceSubjectAreas,
+            availableScienceSubjectAreas: scienceSubjectAreas,
             available_textbooks: textbooks.map((textbook) => ({
               id: textValue(textbook.id),
               title: textValue(textbook.title || textbook.name),
@@ -594,6 +636,7 @@ export function useManagementRecords(kind: ManagementKind) {
               school_levels: Array.isArray(textbook.school_levels) ? textbook.school_levels : [],
               grade_levels: Array.isArray(textbook.grade_levels) ? textbook.grade_levels : [],
               sub_subject: textValue(textbook.sub_subject),
+              subject_area_key: textValue(textbook.subject_area_key),
               publisher: textValue(textbook.publisher),
             })).filter((textbook) => textbook.id && textbook.title),
           }),
@@ -608,6 +651,9 @@ export function useManagementRecords(kind: ManagementKind) {
       setError(null);
     } catch (fetchError) {
       setRows([]);
+      if (kind === "classes") {
+        setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
+      }
       setError(
         fetchError instanceof Error ? fetchError.message : "알 수 없는 연결 오류가 발생했습니다.",
       );
@@ -627,6 +673,7 @@ export function useManagementRecords(kind: ManagementKind) {
     stats,
     loading,
     error,
+    classFormReferences,
     refresh: load,
   };
 }

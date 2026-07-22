@@ -4,6 +4,17 @@ import test from "node:test"
 import vm from "node:vm"
 
 import ts from "typescript"
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  parseAcademicSubject,
+  sortAcademicSubjects,
+} from "../src/lib/academic-subject-registry.ts"
+
+const academicSubjectRegistry = {
+  ACADEMIC_SUBJECT_VALUES,
+  parseAcademicSubject,
+  sortAcademicSubjects,
+}
 
 const fixtureUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
 const fixtureRuntimeUrl = new URL("../src/features/tasks/registration-track-fixture-runtime.ts", import.meta.url)
@@ -38,6 +49,7 @@ async function loadTsModule(url) {
           },
         }
       }
+      if (specifier === "../../lib/academic-subject-registry.ts") return academicSubjectRegistry
       throw new Error(`unexpected require: ${specifier}`)
     },
   })
@@ -157,6 +169,7 @@ async function loadServiceBoundary({
           },
         }
       }
+      if (specifier === "../../lib/academic-subject-registry.ts") return academicSubjectRegistry
       throw new Error(`unexpected require: ${specifier}`)
     },
   })
@@ -331,6 +344,44 @@ test("fixture option loading keeps core data catalog-free, consumes one fault, a
   assert.deepEqual(Array.from(enrichment.schools, (school) => school.category).sort(), ["elementary", "high", "middle"])
   assert.equal(enrichment.schoolCatalogStatus, "authoritative")
   assert.equal(enrichment.schoolCatalogError, null)
+  assert.equal(typeof adapter.loadSubjectCapabilities, "function")
+  assert.deepEqual(plain(await adapter.loadSubjectCapabilities()), [
+    {
+      subject: "영어",
+      isActive: true,
+      registrationCreateEnabled: true,
+      gradeLevels: ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3", "고1", "고2", "고3"],
+      sortOrder: 10,
+      defaultDirectorProfileId: null,
+    },
+    {
+      subject: "수학",
+      isActive: true,
+      registrationCreateEnabled: true,
+      gradeLevels: ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3", "고1", "고2", "고3"],
+      sortOrder: 20,
+      defaultDirectorProfileId: null,
+    },
+    {
+      subject: "과학",
+      isActive: true,
+      registrationCreateEnabled: true,
+      gradeLevels: ["고1", "고2", "고3"],
+      sortOrder: 30,
+      defaultDirectorProfileId: "fixture-profile-science-director",
+    },
+  ])
+  assert.equal(enrichment.profiles.some((profile) => profile.id === "fixture-profile-science-director"), true)
+  assert.equal(enrichment.teachers.some((teacher) => (
+    teacher.profileId === "fixture-profile-science-director" && teacher.subjects.includes("과학팀")
+  )), true)
+  assert.equal(enrichment.classes.some((item) => item.id === "fixture-class-science-a" && item.subject === "과학"), true)
+  assert.equal(enrichment.textbooks.some((item) => item.id === "fixture-textbook-science-a" && item.subject === "과학"), true)
+  assert.equal(typeof adapter.loadScienceConsultationClassOptions, "function")
+  assert.deepEqual(
+    Array.from(await adapter.loadScienceConsultationClassOptions(), (item) => item.id),
+    ["fixture-class-science-a"],
+  )
 
   assert.equal(typeof fixture.mergeRegistrationSubjectTrackFixtureWorkspaceOptions, "function")
   const merged = fixture.mergeRegistrationSubjectTrackFixtureWorkspaceOptions(core, enrichment)
@@ -1186,6 +1237,11 @@ test("fixture roles cover assigned sibling directors, staff, and read-only assis
   })
   assert.equal(resolveRegistrationSubjectTrackFixtureViewer(state, "staff").viewerRole, "staff")
   assert.equal(resolveRegistrationSubjectTrackFixtureViewer(state, "assistant").viewerRole, "assistant")
+  assert.deepEqual(plain(resolveRegistrationSubjectTrackFixtureViewer(state, "science_teacher")), {
+    key: "science_teacher",
+    viewerId: "fixture-profile-science-director",
+    viewerRole: "teacher",
+  })
   assert.equal(resolveRegistrationSubjectTrackFixtureViewer(state, "unknown").key, "english_admin")
 })
 

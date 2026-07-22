@@ -40,7 +40,7 @@ export function RegistrationApplicationSubjectTabs({
   }
 
   return (
-    <div role="tablist" aria-label="과목별 등록 진행" className="grid grid-cols-2 gap-2">
+    <div role="tablist" aria-label="과목별 등록 진행" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       {tracks.map((track) => {
         const selected = track.id === value
         return (

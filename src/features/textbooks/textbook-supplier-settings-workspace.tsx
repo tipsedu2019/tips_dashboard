@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 import {
+  TEXTBOOK_SUBJECT_OPTIONS,
   type TextbookSubSubjectSettingRecord,
   mergeTextbookSubSubjectSettings,
 } from "./textbook-taxonomy";
@@ -48,11 +49,7 @@ type SupplierRecord = {
 
 type SettingsSection = "publishers" | "suppliers" | "subSubjects";
 
-const SUBJECT_OPTIONS = [
-  { value: "english", label: "영어" },
-  { value: "math", label: "수학" },
-  { value: "other", label: "기타" },
-];
+const SUBJECT_OPTIONS = TEXTBOOK_SUBJECT_OPTIONS;
 
 const SUBJECT_LABELS: Record<string, string> = Object.fromEntries(
   SUBJECT_OPTIONS.map((option) => [option.value, option.label]),

@@ -86,6 +86,11 @@ type MonthEventSegment = {
   continuesAfter: boolean
 }
 
+type ScienceCalendarEvent = CalendarEvent & {
+  scienceAreaKey?: string
+  scienceAreaLabel?: string
+}
+
 const MONTH_GRID_DAY_HEADER_HEIGHT = 44
 const MONTH_GRID_EVENT_LANE_HEIGHT = 26
 const MONTH_GRID_CELL_BODY_HEIGHT = 70
@@ -103,8 +108,10 @@ function formatAgendaDay(day: Date) {
 }
 
 function hasExamScopeDetails(event: CalendarEvent) {
+  const scienceEvent = event as ScienceCalendarEvent
   return Boolean(
     event.examTerm ||
+      scienceEvent.scienceAreaLabel ||
       event.scopeSummary ||
       (Array.isArray(event.textbookScopes) && event.textbookScopes.length > 0) ||
       (Array.isArray(event.subtextbookScopes) && event.subtextbookScopes.length > 0) ||
@@ -114,13 +121,17 @@ function hasExamScopeDetails(event: CalendarEvent) {
 }
 
 function renderExamScopeHover(event: CalendarEvent, badgeClassName = "") {
-  if ((event.typeLabel !== "시험기간" && event.typeLabel !== "영어시험일" && event.typeLabel !== "수학시험일") || !event.examTerm) {
+  if (event.typeLabel !== "시험기간" && event.typeLabel !== "영어시험일" && event.typeLabel !== "수학시험일" && event.typeLabel !== "과학시험일") {
     return null
   }
 
+  const scienceAreaLabel = (event as ScienceCalendarEvent).scienceAreaLabel
+  const badgeLabel = event.examTerm || scienceAreaLabel || (hasExamScopeDetails(event) ? "시험 범위" : "")
+  if (!badgeLabel) return null
+
   const badge = (
     <Badge variant="secondary" className={badgeClassName || "h-5 px-1.5 text-[10px]"}>
-      {event.examTerm}
+      {badgeLabel}
     </Badge>
   )
 
@@ -134,8 +145,16 @@ function renderExamScopeHover(event: CalendarEvent, badgeClassName = "") {
       <HoverCardContent align="start" className="w-72 space-y-3">
         <div className="space-y-1">
           <p className="text-xs font-semibold text-foreground">시험 범위 보기</p>
-          <p className="text-xs text-muted-foreground">{getAcademicEventTypeLabel(event.typeLabel)} · {event.examTerm}</p>
+          <p className="text-xs text-muted-foreground">
+            {[getAcademicEventTypeLabel(event.typeLabel), scienceAreaLabel, event.examTerm].filter(Boolean).join(" · ")}
+          </p>
         </div>
+        {scienceAreaLabel ? (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground">과학 영역</p>
+            <p className="rounded-md border bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">{scienceAreaLabel}</p>
+          </div>
+        ) : null}
         {Array.isArray(event.textbookScopes) && event.textbookScopes.length > 0 ? (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-foreground">교재 시험범위</p>
@@ -230,7 +249,14 @@ function matchesCalendarQuery(event: CalendarEvent, query: string) {
     return true
   }
 
-  const searchText = [event.title, event.schoolName, event.typeLabel, event.grade, event.description]
+  const searchText = [
+    event.title,
+    event.schoolName,
+    event.typeLabel,
+    event.grade,
+    event.description,
+    (event as ScienceCalendarEvent).scienceAreaLabel,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
