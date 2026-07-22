@@ -4,7 +4,7 @@
 
 **Goal:** 일반 Supabase 마이그레이션 배포와 미승인 알림 cutover 원본을 분리해 DB CI를 정상화하면서 provider-zero와 운영 승인 경계를 유지한다.
 
-**Architecture:** `supabase/migrations`만 실행 가능한 active lane으로 유지하고, 알림 원본 6개와 종속 pgTAP 3개는 SHA-256으로 잠긴 immutable quarantine에 둔다. Node 검증기와 GitHub Actions가 active/quarantine 경계와 직접 실행 금지를 fail-closed로 검사하며, 미래 cutover는 과학-aware 최신 정의를 사용하는 새 forward migration과 별도 activation으로 재설계한다.
+**Architecture:** `supabase/migrations`만 실행 가능한 active lane으로 유지하고, 알림 원본 SQL 6개는 SHA-256으로 잠그며 종속 pgTAP 3개는 exact name·regular-file set으로 고정한 immutable quarantine에 둔다. Node 검증기와 GitHub Actions가 active/quarantine 경계와 직접 실행 금지를 fail-closed로 검사하며, 미래 cutover는 과학-aware 최신 정의를 사용하는 새 forward migration과 별도 activation으로 재설계한다.
 
 **Tech Stack:** Supabase CLI 2.107.0, PostgreSQL SQL migrations, Node.js ESM, Node test runner, GitHub Actions, Next.js, Vercel
 

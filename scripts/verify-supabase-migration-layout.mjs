@@ -19,6 +19,12 @@ const PREPARE_FUNCTION_SIGNATURE =
   "public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)"
 const QUARANTINE_README_SHA256 = "62e387da1575982f154427f5f3ed001ffdb8c9c832744cdb79a45fd3f0ee905f"
 const DRAIN_MARKER = "notification_contract_drain_not_complete"
+const CLAIM_RECONCILE_BASELINE_FILE = "20260716112000_notification_control_plane_worker_rpc.sql"
+const CLAIM_RECONCILE_BASELINE_SHA256 = "4ab9c5f48f018d655c000e1898057df8d13883eaeeee00974cb4760bdb615250"
+const CLAIM_RECONCILE_MARKER_IDS = Object.freeze([
+  "registration_provider_claim.claim_rpc",
+  "registration_provider_claim.reconcile_rpc",
+])
 
 const EXPECTED_POLICY = Object.freeze({
   schemaVersion: 1,
@@ -35,6 +41,139 @@ const EXPECTED_SQL = Object.freeze([
   ["20260716195900_notification_control_plane_forward_compat.sql", "054914802ac9d0d9475fd18f2b52deb7bfd27552a3b92b7b5331c6d35003ee11"],
   ["20260716196000_notification_shadow_fixture_runner.sql", "ef3ebb3a345bc734343526655fd614f51a8415dbc3a87ce1a60e8e76aa91ebd1"],
   ["20260717145304_notification_shadow_deterministic_evidence.sql", "610c1ce889aa5d7deb29a5d48186976a400774a75e347f600386068af1744833"],
+])
+
+const EXPECTED_LEXICAL_SQL = Object.freeze([
+  [EXPECTED_SQL[0][0], "487e14d495cd227017a46876813a00f17ac63b2891ca5c7f307292624341d6b3"],
+  [EXPECTED_SQL[1][0], "7d5062926dc7cc0f0f5602f58bd717ef2b26e304896b94587feadc4311b7abcd"],
+  [EXPECTED_SQL[2][0], "a47121124beffff10de5a42c1a7935b1abe000890b25ecbfc0dad638e1c33b37"],
+  [EXPECTED_SQL[3][0], "35c66056658cc2a6a8e776aff2a20f90f66a06d1ba2b73f6e6b47087e673b76c"],
+  [EXPECTED_SQL[4][0], "aa8be81d5fec7b5073979720a0b69a20aa3e1827adfba61e98428e7c58296caa"],
+  [EXPECTED_SQL[5][0], "593a3d9ab88dab5deb79e33b7eeb3604cf59bec9891c18b5125d73b028e44cda"],
+])
+
+const CUTOVER_MARKER_FAMILIES = Object.freeze([
+  {
+    id: "legacy_closure",
+    reserved: [
+      ["legacy_closure.contract_table", "dashboard_private.notification_contract_closures"],
+      ["legacy_closure.runtime_version", "public.notification_workflow_legacy_closure_version"],
+    ],
+    activation: [
+      ["legacy_closure.drain_error", "'notification_contract_drain_not_complete'"],
+    ],
+    family: [
+      ["legacy_closure.contract_table", "dashboard_private.notification_contract_closures"],
+      ["legacy_closure.runtime_version", "public.notification_workflow_legacy_closure_version"],
+      ["legacy_closure.drain_error", "'notification_contract_drain_not_complete'"],
+      ["legacy_closure.writer_closed", "'legacy_writer_closed'"],
+    ],
+  },
+  {
+    id: "worker_schedule",
+    reserved: [
+      ["worker_schedule.stop_latch", "dashboard_private.notification_worker_stop_latch"],
+      ["worker_schedule.watchdog_heartbeats", "dashboard_private.notification_watchdog_heartbeats"],
+      ["worker_schedule.manage_rpc", "public.manage_notification_worker_schedule_v1"],
+      ["worker_schedule.runtime_version", "public.notification_workflow_adapters_runtime_version"],
+    ],
+    activation: [
+      ["worker_schedule.activate_rpc", "public.activate_notification_dispatch_cutover_v1"],
+      ["worker_schedule.activation_guc", "'app.notification_cutover_activation_authorized'"],
+    ],
+    family: [
+      ["worker_schedule.stop_latch", "dashboard_private.notification_worker_stop_latch"],
+      ["worker_schedule.watchdog_heartbeats", "dashboard_private.notification_watchdog_heartbeats"],
+      ["worker_schedule.manage_rpc", "public.manage_notification_worker_schedule_v1"],
+      ["worker_schedule.runtime_version", "public.notification_workflow_adapters_runtime_version"],
+      ["worker_schedule.activate_rpc", "public.activate_notification_dispatch_cutover_v1"],
+      ["worker_schedule.watchdog_job", "'tips-notification-cutover-watchdog-v1'"],
+    ],
+  },
+  {
+    id: "registration_provider_claim",
+    reserved: [
+      [
+        "registration_provider_claim.customer_message_predicate",
+        "delivery.channel_key <> 'customer_message'",
+      ],
+      [
+        "registration_provider_claim.specialized_executor_error",
+        "'notification_customer_message_specialized_executor_required'",
+      ],
+    ],
+    activation: [],
+    family: [
+      ["registration_provider_claim.claim_rpc", "public.claim_notification_deliveries_v1"],
+      ["registration_provider_claim.reconcile_rpc", "public.reconcile_notification_delivery_v1"],
+      [
+        "registration_provider_claim.customer_message_predicate",
+        "delivery.channel_key <> 'customer_message'",
+      ],
+      [
+        "registration_provider_claim.specialized_executor_error",
+        "'notification_customer_message_specialized_executor_required'",
+      ],
+    ],
+  },
+  {
+    id: "forward_compat",
+    reserved: [
+      ["forward_compat.runtime_version", "public.notification_control_plane_forward_compat_runtime_version"],
+      ["forward_compat.rendered_hash", "dashboard_private.notification_normalized_rendered_hash_v1"],
+      ["forward_compat.comparison_key", "dashboard_private.notification_shadow_comparison_key_v1"],
+      ["forward_compat.reconcile_shadow", "dashboard_private.reconcile_notification_shadow_intents_v1"],
+      ["forward_compat.worker_guard", "public.assert_notification_worker_run_allowed_v1"],
+    ],
+    activation: [],
+    family: [
+      ["forward_compat.runtime_version", "public.notification_control_plane_forward_compat_runtime_version"],
+      ["forward_compat.rendered_hash", "dashboard_private.notification_normalized_rendered_hash_v1"],
+      ["forward_compat.comparison_key", "dashboard_private.notification_shadow_comparison_key_v1"],
+      ["forward_compat.reconcile_shadow", "dashboard_private.reconcile_notification_shadow_intents_v1"],
+      ["forward_compat.worker_guard", "public.assert_notification_worker_run_allowed_v1"],
+    ],
+  },
+  {
+    id: "shadow_fixture",
+    reserved: [
+      ["shadow_fixture.evidence_table", "dashboard_private.notification_shadow_no_active_rule_evidence"],
+      ["shadow_fixture.current_evidence", "dashboard_private.notification_no_active_rule_evidence_current_v1"],
+      ["shadow_fixture.record_rpc", "public.record_notification_shadow_fixture_evidence_v1"],
+    ],
+    activation: [],
+    family: [
+      ["shadow_fixture.evidence_table", "dashboard_private.notification_shadow_no_active_rule_evidence"],
+      ["shadow_fixture.current_evidence", "dashboard_private.notification_no_active_rule_evidence_current_v1"],
+      ["shadow_fixture.record_rpc", "public.record_notification_shadow_fixture_evidence_v1"],
+      ["shadow_fixture.scope_evidence_v2", "'notification-shadow-scope-evidence-v2'"],
+      ["shadow_fixture.natural_traffic", "'natural_traffic_required'"],
+    ],
+  },
+  {
+    id: "deterministic_evidence",
+    reserved: [
+      ["deterministic_evidence.table", "dashboard_private.notification_shadow_deterministic_evidence"],
+      ["deterministic_evidence.template_checksum", "dashboard_private.notification_template_checksum_sha256_v1"],
+      ["deterministic_evidence.prepare_rpc", "public.prepare_notification_shadow_deterministic_fixture_v1"],
+      ["deterministic_evidence.record_rpc", "public.record_notification_shadow_deterministic_evidence_v1"],
+      ["deterministic_evidence.replay_rpc", "public.replay_notification_shadow_evidence_v1"],
+      ["deterministic_evidence.verify_rpc", "public.verify_notification_shadow_evidence_complete_v1"],
+    ],
+    activation: [],
+    family: [
+      ["deterministic_evidence.table", "dashboard_private.notification_shadow_deterministic_evidence"],
+      ["deterministic_evidence.template_checksum", "dashboard_private.notification_template_checksum_sha256_v1"],
+      ["deterministic_evidence.prepare_rpc", "public.prepare_notification_shadow_deterministic_fixture_v1"],
+      ["deterministic_evidence.record_rpc", "public.record_notification_shadow_deterministic_evidence_v1"],
+      ["deterministic_evidence.replay_rpc", "public.replay_notification_shadow_evidence_v1"],
+      ["deterministic_evidence.verify_rpc", "public.verify_notification_shadow_evidence_complete_v1"],
+      [
+        "deterministic_evidence.cycle_v3",
+        "'notification-shadow-deterministic-cycle-request-v3'",
+      ],
+    ],
+  },
 ])
 
 const EXPECTED_PGTAP = Object.freeze([
@@ -94,6 +233,485 @@ function markerCount(source) {
 function sha256(source) {
   return createHash("sha256").update(source).digest("hex")
 }
+
+function isSqlIdentifierStart(character) {
+  return character !== undefined && /[A-Za-z_\u0080-\uFFFF]/.test(character)
+}
+
+function isSqlIdentifierPart(character) {
+  return character !== undefined && /[A-Za-z0-9_$\u0080-\uFFFF]/.test(character)
+}
+
+function isSqlOperatorCharacter(character) {
+  return character !== undefined && /[+*/<>=~!@#%^&|`?:-]/.test(character)
+}
+
+function sqlNormalizationError(message, offset) {
+  return new Error(`${message} at UTF-16 offset ${offset}`)
+}
+
+function readSingleQuotedToken(source, start, { backslashEscapes = false } = {}) {
+  let index = start + 1
+  while (index < source.length) {
+    if (backslashEscapes && source[index] === "\\" && index + 1 < source.length) {
+      index += 2
+      continue
+    }
+    if (source[index] !== "'") {
+      index += 1
+      continue
+    }
+    if (source[index + 1] === "'") {
+      index += 2
+      continue
+    }
+    return { end: index + 1, raw: source.slice(start, index + 1) }
+  }
+  throw sqlNormalizationError("unterminated string literal", start)
+}
+
+function decodeStandardStringLiteral(raw) {
+  return raw.slice(1, -1).replaceAll("''", "'")
+}
+
+function decodeEscapeStringLiteral(raw) {
+  const source = raw.slice(1, -1)
+  let decoded = ""
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]
+    if (character === "'" && source[index + 1] === "'") {
+      decoded += "'"
+      index += 1
+      continue
+    }
+    if (character !== "\\") {
+      decoded += character
+      continue
+    }
+
+    const escaped = source[index + 1]
+    if (escaped === undefined) {
+      decoded += "\\"
+      continue
+    }
+    const simpleEscapes = {
+      b: "\b",
+      f: "\f",
+      n: "\n",
+      r: "\r",
+      t: "\t",
+    }
+    if (Object.hasOwn(simpleEscapes, escaped)) {
+      decoded += simpleEscapes[escaped]
+      index += 1
+      continue
+    }
+    if (/[0-7]/.test(escaped)) {
+      const digits = source.slice(index + 1).match(/^[0-7]{1,3}/)?.[0] ?? escaped
+      decoded += String.fromCodePoint(Number.parseInt(digits, 8))
+      index += digits.length
+      continue
+    }
+    if (escaped === "x") {
+      const digits = source.slice(index + 2).match(/^[0-9A-Fa-f]{1,2}/)?.[0]
+      if (digits) {
+        decoded += String.fromCodePoint(Number.parseInt(digits, 16))
+        index += digits.length + 1
+        continue
+      }
+    }
+    if (escaped === "u" || escaped === "U") {
+      const digitCount = escaped === "u" ? 4 : 8
+      const digits = source.slice(index + 2, index + 2 + digitCount)
+      if (new RegExp(`^[0-9A-Fa-f]{${digitCount}}$`).test(digits)) {
+        const codePoint = Number.parseInt(digits, 16)
+        if (codePoint <= 0x10ffff) decoded += String.fromCodePoint(codePoint)
+        index += digitCount + 1
+        continue
+      }
+    }
+    decoded += escaped
+    index += 1
+  }
+  return decoded
+}
+
+function readQuotedIdentifierToken(source, start) {
+  let index = start + 1
+  let decoded = ""
+  while (index < source.length) {
+    if (source[index] !== '"') {
+      decoded += source[index]
+      index += 1
+      continue
+    }
+    if (source[index + 1] === '"') {
+      decoded += '"'
+      index += 2
+      continue
+    }
+    return { decoded, end: index + 1, raw: source.slice(start, index + 1) }
+  }
+  throw sqlNormalizationError("unterminated quoted identifier", start)
+}
+
+// This is deliberately a narrow lexical fingerprint, not a PostgreSQL parser or
+// semantic canonicalizer. It removes outer layout, folds unquoted identifiers,
+// and ignores dollar tags while preserving each generic dollar body as opaque
+// bytes. Unknown punctuation remains a token; malformed supported forms fail closed.
+function tokenizeSql(source) {
+  if (typeof source !== "string") throw new TypeError("SQL source must be a string")
+  const tokens = []
+  let index = 0
+
+  const push = (type, value, markerText, quoted = false) => {
+    const token = { type, value }
+    if (markerText !== undefined) token.markerText = markerText
+    if (quoted) token.quoted = true
+    tokens.push(token)
+  }
+
+  while (index < source.length) {
+    const character = source[index]
+
+    if (/\s/.test(character)) {
+      index += 1
+      continue
+    }
+
+    if (source.startsWith("--", index)) {
+      const lineRemainder = source.slice(index + 2)
+      const newlineOffset = lineRemainder.search(/[\r\n]/)
+      index = newlineOffset === -1 ? source.length : index + 2 + newlineOffset + 1
+      continue
+    }
+
+    if (source.startsWith("/*", index)) {
+      const commentStart = index
+      let depth = 1
+      index += 2
+      while (index < source.length && depth > 0) {
+        if (source.startsWith("/*", index)) {
+          depth += 1
+          index += 2
+        } else if (source.startsWith("*/", index)) {
+          depth -= 1
+          index += 2
+        } else {
+          index += 1
+        }
+      }
+      if (depth !== 0) throw sqlNormalizationError("unterminated block comment", commentStart)
+      continue
+    }
+
+    if (/^[uU]&(?=['"])/.test(source.slice(index))) {
+      throw sqlNormalizationError("unsupported U& escape form", index)
+    }
+
+    const prefixedStringMatch = source.slice(index).match(/^[eEbBxX](?=')/)
+    if (prefixedStringMatch) {
+      const prefix = prefixedStringMatch[0].toLowerCase()
+      const literalStart = index + prefixedStringMatch[0].length
+      const literal = readSingleQuotedToken(source, literalStart, {
+        backslashEscapes: prefix === "e",
+      })
+      push(
+        "prefixed_string",
+        `${prefix}\0${literal.raw}`,
+        prefix === "e" ? decodeEscapeStringLiteral(literal.raw) : undefined,
+      )
+      index = literal.end
+      continue
+    }
+
+    if (character === "'") {
+      const literal = readSingleQuotedToken(source, index)
+      push("string", literal.raw, decodeStandardStringLiteral(literal.raw))
+      index = literal.end
+      continue
+    }
+
+    if (character === '"') {
+      const identifier = readQuotedIdentifierToken(source, index)
+      if (/^[a-z_][a-z0-9_$]*$/.test(identifier.decoded)) {
+        push("word", identifier.decoded, undefined, true)
+      } else {
+        push("quoted_identifier", identifier.decoded)
+      }
+      index = identifier.end
+      continue
+    }
+
+    if (character === "$") {
+      const delimiterMatch = source
+        .slice(index)
+        .match(/^\$(?:[A-Za-z_\u0080-\uFFFF][A-Za-z0-9_\u0080-\uFFFF]*)?\$/)
+      if (delimiterMatch) {
+        const delimiterStart = index
+        const delimiter = delimiterMatch[0]
+        const bodyStart = index + delimiter.length
+        const bodyEnd = source.indexOf(delimiter, bodyStart)
+        if (bodyEnd === -1) {
+          throw sqlNormalizationError("unterminated dollar-quoted body", delimiterStart)
+        }
+        const body = source.slice(bodyStart, bodyEnd)
+        push("dollar_string", body, body)
+        index = bodyEnd + delimiter.length
+        continue
+      }
+    }
+
+    if (isSqlIdentifierStart(character)) {
+      const wordStart = index
+      index += 1
+      while (isSqlIdentifierPart(source[index])) index += 1
+      push("word", source.slice(wordStart, index).toLowerCase())
+      continue
+    }
+
+    const numberMatch = source
+      .slice(index)
+      .match(/^(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?/)
+    if (numberMatch) {
+      push("number", numberMatch[0])
+      index += numberMatch[0].length
+      continue
+    }
+
+    if (isSqlOperatorCharacter(character)) {
+      const operatorStart = index
+      index += 1
+      while (
+        isSqlOperatorCharacter(source[index]) &&
+        !source.startsWith("--", index) &&
+        !source.startsWith("/*", index)
+      ) {
+        index += 1
+      }
+      push("operator", source.slice(operatorStart, index))
+      continue
+    }
+
+    push("symbol", character)
+    index += 1
+  }
+
+  return tokens
+}
+
+function frameSqlTokens(tokens) {
+  return tokens
+    .map(({ type, value }) => {
+      const typeLength = Buffer.byteLength(type, "utf8")
+      const valueLength = Buffer.byteLength(value, "utf8")
+      return `${typeLength}:${type}${valueLength}:${value}`
+    })
+    .join("")
+}
+
+function normalizedSqlSha256FromTokens(tokens) {
+  return sha256(`sql_lex_v1\0${frameSqlTokens(tokens)}`)
+}
+
+export function normalizedSqlSha256(source) {
+  return normalizedSqlSha256FromTokens(tokenizeSql(source))
+}
+
+function containsTokenSequence(tokens, sequence) {
+  if (sequence.length === 0 || sequence.length > tokens.length) return false
+  for (let start = 0; start <= tokens.length - sequence.length; start += 1) {
+    let matched = true
+    for (let offset = 0; offset < sequence.length; offset += 1) {
+      if (
+        tokens[start + offset].type !== sequence[offset].type ||
+        tokens[start + offset].value !== sequence[offset].value
+      ) {
+        matched = false
+        break
+      }
+    }
+    if (matched) return true
+  }
+  return false
+}
+
+function markerComparableTokens(tokens) {
+  const comparable = []
+  for (const token of tokens) {
+    if (token.markerText === undefined) {
+      comparable.push({ type: token.type, value: token.value })
+      continue
+    }
+    const previous = comparable.at(-1)
+    if (previous?.type === "marker_text") {
+      previous.value += token.markerText
+    } else {
+      comparable.push({ type: "marker_text", value: token.markerText })
+    }
+  }
+  return comparable
+}
+
+function isKeywordToken(token, value) {
+  return token?.type === "word" && token.value === value && token.quoted !== true
+}
+
+function statementPrefixBefore(tokens, index) {
+  let statementStart = index
+  while (statementStart > 0) {
+    const previous = tokens[statementStart - 1]
+    if (previous.type === "symbol" && previous.value === ";") break
+    statementStart -= 1
+  }
+  return tokens.slice(statementStart, index)
+}
+
+// Generic string values stay opaque. Only literals in statement-local
+// executable command-body positions are tokenized again for marker detection;
+// this does not alter sql_lex_v1 or treat ordinary SELECT values as SQL source.
+function isExecutableCommandBody(tokens, index) {
+  const prefix = statementPrefixBefore(tokens, index)
+  const firstWordIndex = prefix.findIndex((token) => token.type === "word")
+  if (firstWordIndex === -1) return false
+  if (isKeywordToken(prefix[firstWordIndex], "do")) return true
+  if (!isKeywordToken(prefix[firstWordIndex], "create")) return false
+
+  let commandKindIndex = firstWordIndex + 1
+  if (isKeywordToken(prefix[commandKindIndex], "or")) {
+    if (!isKeywordToken(prefix[commandKindIndex + 1], "replace")) return false
+    commandKindIndex += 2
+  }
+  const commandKind = prefix[commandKindIndex]
+  if (
+    !isKeywordToken(commandKind, "function")
+    && !isKeywordToken(commandKind, "procedure")
+  ) {
+    return false
+  }
+
+  return isKeywordToken(prefix.at(-1), "as")
+}
+
+function isStaticSqlLiteralToken(token) {
+  return token?.markerText !== undefined
+    && (token.type === "string"
+      || token.type === "prefixed_string"
+      || token.type === "dollar_string")
+}
+
+function staticExecuteLiteralRun(tokens, index, insideExecutableBody) {
+  if (
+    !insideExecutableBody
+    || !isKeywordToken(tokens[index - 1], "execute")
+    || !isStaticSqlLiteralToken(tokens[index])
+  ) {
+    return null
+  }
+
+  let end = index + 1
+  while (isStaticSqlLiteralToken(tokens[end])) end += 1
+  return {
+    end,
+    source: tokens.slice(index, end).map((token) => token.markerText).join(""),
+  }
+}
+
+function executableCommandBodyLiteralRun(tokens, index) {
+  if (!isStaticSqlLiteralToken(tokens[index]) || !isExecutableCommandBody(tokens, index)) {
+    return null
+  }
+
+  let end = index + 1
+  while (isStaticSqlLiteralToken(tokens[end])) end += 1
+  return {
+    end,
+    source: tokens.slice(index, end).map((token) => token.markerText).join(""),
+  }
+}
+
+function expandExecutableMarkerSources(tokens, depth = 0, insideExecutableBody = false) {
+  if (depth > 16) {
+    throw sqlNormalizationError("executable marker source nesting limit exceeded", 0)
+  }
+
+  const expanded = []
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    const executeLiteralRun = staticExecuteLiteralRun(tokens, index, insideExecutableBody)
+    if (executeLiteralRun !== null) {
+      expanded.push({ type: "marker_boundary", value: "" })
+      expanded.push(
+        ...expandExecutableMarkerSources(
+          tokenizeSql(executeLiteralRun.source),
+          depth + 1,
+          false,
+        ),
+      )
+      expanded.push({ type: "marker_boundary", value: "" })
+      index = executeLiteralRun.end - 1
+      continue
+    }
+
+    const commandBodyLiteralRun = executableCommandBodyLiteralRun(tokens, index)
+    if (commandBodyLiteralRun === null) {
+      expanded.push(token)
+      continue
+    }
+
+    expanded.push({ type: "marker_boundary", value: "" })
+    expanded.push(
+      ...expandExecutableMarkerSources(
+        tokenizeSql(commandBodyLiteralRun.source),
+        depth + 1,
+        true,
+      ),
+    )
+    expanded.push({ type: "marker_boundary", value: "" })
+    index = commandBodyLiteralRun.end - 1
+  }
+  return expanded
+}
+
+function markerScanTokens(tokens) {
+  return markerComparableTokens(expandExecutableMarkerSources(tokens))
+}
+
+function isQualifiedIdentifierTokens(tokens) {
+  return tokens.length >= 3
+    && tokens.length % 2 === 1
+    && tokens.every((token, index) =>
+      index % 2 === 0
+        ? token.type === "word"
+        : token.type === "symbol" && token.value === ".")
+}
+
+function compileMarkerEntries(entries) {
+  return entries.map(([id, source]) => {
+    const tokens = markerComparableTokens(tokenizeSql(source))
+    const alternatives = [tokens]
+    if (isQualifiedIdentifierTokens(tokens)) {
+      alternatives.push([tokens.at(-1)])
+    }
+    return { alternatives, id }
+  })
+}
+
+function matchingMarkerIds(tokens, markers) {
+  return markers
+    .filter((marker) => marker.alternatives.some((sequence) =>
+      containsTokenSequence(tokens, sequence)))
+    .map((marker) => marker.id)
+}
+
+const COMPILED_CUTOVER_MARKER_FAMILIES = Object.freeze(
+  CUTOVER_MARKER_FAMILIES.map((family) => ({
+    id: family.id,
+    reserved: compileMarkerEntries(family.reserved),
+    activation: compileMarkerEntries(family.activation),
+    family: compileMarkerEntries(family.family),
+  })),
+)
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -163,8 +781,9 @@ async function listDirectory(path) {
   }
 }
 
-async function listWorkflowFiles(root) {
-  const files = []
+async function listWorkflowYamlEntries(root) {
+  const yamlEntries = []
+  const nonRegularEntries = []
 
   async function visit(path) {
     const entries = await listDirectory(path)
@@ -172,16 +791,23 @@ async function listWorkflowFiles(root) {
     for (const entry of entries.sort()) {
       const entryPath = join(path, entry)
       const stat = await statKind(entryPath)
+      if (/\.ya?ml$/i.test(entry)) {
+        yamlEntries.push({ path: entryPath, stat })
+      }
+      if (!stat || (!stat.isDirectory() && !stat.isFile())) {
+        nonRegularEntries.push(entryPath)
+      }
       if (stat?.isDirectory()) {
         await visit(entryPath)
-      } else if (stat?.isFile() && /\.ya?ml$/i.test(entry)) {
-        files.push(entryPath)
       }
     }
   }
 
   await visit(root)
-  return files
+  return {
+    nonRegularEntries: nonRegularEntries.sort(),
+    yamlEntries: yamlEntries.sort((left, right) => left.path.localeCompare(right.path)),
+  }
 }
 
 export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRoot } = {}) {
@@ -290,6 +916,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   }
   const quarantineTimestamps = new Set(EXPECTED_SQL.map(([file]) => file.slice(0, 14)))
   const quarantineHashes = new Set(EXPECTED_SQL.map(([, hash]) => hash))
+  const quarantineLexicalHashes = new Set(EXPECTED_LEXICAL_SQL.map(([, hash]) => hash))
   for (const [file] of EXPECTED_SQL) {
     const activePath = join(activeDir, file)
     if (await statKind(activePath)) {
@@ -319,10 +946,79 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     if (markerCount(sourceText) > 0) {
       addError(errors, "drain_marker_present_in_active_lane", relative(resolvedRoot, entryPath))
     }
+    let sourceTokens = null
+    let sourceMarkerTokens = null
+    try {
+      sourceTokens = tokenizeSql(sourceText)
+      sourceMarkerTokens = markerScanTokens(sourceTokens)
+      if (quarantineLexicalHashes.has(normalizedSqlSha256FromTokens(sourceTokens))) {
+        addError(
+          errors,
+          "cutover_sql_semantic_hash_present_in_active_lane",
+          relative(resolvedRoot, entryPath),
+        )
+      }
+    } catch {
+      addError(
+        errors,
+        "active_migration_sql_normalization_failed",
+        relative(resolvedRoot, entryPath),
+      )
+    }
+
+    if (sourceTokens !== null && sourceMarkerTokens !== null) {
+      const activeRelativePath = relative(resolvedRoot, entryPath)
+      const isExactClaimReconcileBaseline = entry === CLAIM_RECONCILE_BASELINE_FILE
+        && sourceHash === CLAIM_RECONCILE_BASELINE_SHA256
+
+      for (const family of COMPILED_CUTOVER_MARKER_FAMILIES) {
+        const reservedMarkerIds = matchingMarkerIds(sourceMarkerTokens, family.reserved)
+        const activationMarkerIds = matchingMarkerIds(sourceMarkerTokens, family.activation)
+        const familyMarkerIds = matchingMarkerIds(sourceMarkerTokens, family.family)
+        const claimReconcileMatches = CLAIM_RECONCILE_MARKER_IDS.filter((id) =>
+          familyMarkerIds.includes(id))
+
+        for (const markerId of reservedMarkerIds) {
+          addError(
+            errors,
+            "cutover_reserved_object_present_in_active_lane",
+            `${activeRelativePath}#${markerId}`,
+          )
+        }
+        for (const markerId of activationMarkerIds) {
+          addError(
+            errors,
+            "cutover_activation_marker_present_in_active_lane",
+            `${activeRelativePath}#${markerId}`,
+          )
+        }
+
+        if (claimReconcileMatches.length > 0 && !isExactClaimReconcileBaseline) {
+          addError(
+            errors,
+            "cutover_marker_allowlist_mismatch",
+            `${activeRelativePath}#claim_reconcile_rpc`,
+          )
+        }
+
+        const thresholdMarkerIds = isExactClaimReconcileBaseline
+          ? familyMarkerIds.filter((id) => !CLAIM_RECONCILE_MARKER_IDS.includes(id))
+          : familyMarkerIds
+        if (new Set(thresholdMarkerIds).size >= 2) {
+          addError(
+            errors,
+            "cutover_semantic_marker_threshold_exceeded",
+            `${activeRelativePath}#${family.id}`,
+          )
+        }
+      }
+    }
     const isExactPrepareAclMigration = entry === PREPARE_ACL_MIGRATION_FILE
       && sourceHash === PREPARE_ACL_MIGRATION_SHA256
       && prepareAclMigrationContractValid(sourceText)
-    if (entry > SCIENCE_MIGRATION_FILE && !isExactPrepareAclMigration) {
+    const isExactScienceMigration = entry === SCIENCE_MIGRATION_FILE
+      && sourceHash === SCIENCE_MIGRATION_SHA256
+    if (!isExactScienceMigration && !isExactPrepareAclMigration) {
       const normalizedSource = sourceText.toLowerCase()
       for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
         const bareFunctionName = contract.function.split(".").at(-1).toLowerCase()
@@ -396,15 +1092,35 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     addError(errors, "required_db_push_workflow_hash_mismatch", workflowRelativePath)
     addError(errors, "db_push_workflow_secret_scope_mismatch", workflowRelativePath)
   }
-  for (const entry of (await listDirectory(workflowsDir)) ?? []) {
-    if (!/\.ya?ml$/i.test(entry)) continue
-    const entryPath = join(workflowsDir, entry)
-    const stat = await statKind(entryPath)
+  const { nonRegularEntries: workflowNonRegularEntries, yamlEntries: workflowYamlEntries } =
+    await listWorkflowYamlEntries(workflowsDir)
+  const workflowRelativeCandidates = workflowYamlEntries.map(({ path }) =>
+    relative(workflowsDir, path))
+  const workflowSetIsExact = equalJson(workflowRelativeCandidates, [REQUIRED_DB_PUSH_WORKFLOW])
+    && workflowYamlEntries[0]?.stat?.isFile()
+    && workflowNonRegularEntries.length === 0
+  if (!workflowSetIsExact) {
+    addError(errors, "workflow_file_set_mismatch", relative(resolvedRoot, workflowsDir))
+  }
+  const reportedNonRegularWorkflowPaths = new Set()
+  for (const { path: workflowPath, stat } of workflowYamlEntries) {
+    const workflowRelativeToDirectory = relative(workflowsDir, workflowPath)
+    const workflowRelativePath = relative(resolvedRoot, workflowPath)
     if (!stat?.isFile()) {
-      addError(errors, "workflow_entry_not_regular", relative(resolvedRoot, entryPath))
+      addError(errors, "workflow_entry_not_regular", workflowRelativePath)
+      reportedNonRegularWorkflowPaths.add(workflowPath)
+    }
+    if (workflowRelativeToDirectory !== REQUIRED_DB_PUSH_WORKFLOW) {
+      addError(errors, "unexpected_workflow_file", workflowRelativePath)
     }
   }
-  const workflowFiles = await listWorkflowFiles(workflowsDir)
+  for (const workflowPath of workflowNonRegularEntries) {
+    if (reportedNonRegularWorkflowPaths.has(workflowPath)) continue
+    addError(errors, "workflow_entry_not_regular", relative(resolvedRoot, workflowPath))
+  }
+  const workflowFiles = workflowYamlEntries
+    .filter(({ stat }) => stat?.isFile())
+    .map(({ path }) => path)
   for (const workflowPath of workflowFiles) {
     const workflow = await readFile(workflowPath, "utf8")
     const workflowRelativePath = relative(resolvedRoot, workflowPath)
@@ -416,6 +1132,23 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     }
 
     const lines = workflow.split(/\r?\n/)
+    const unfoldedLineContinuations = workflow.replace(/\\\r?\n\s*/g, " ")
+    if (
+      unfoldedLineContinuations !== workflow &&
+      /\bsupabase\s+db\s+push\b/i.test(unfoldedLineContinuations)
+    ) {
+      addError(errors, "db_push_line_continuation_present", workflowRelativePath)
+    }
+    if (
+      lines.some((line) => {
+        const command = line.trim().replace(/^run:\s*/, "")
+        return /(?:^|\s)(?:node|bun|deno|bash|sh|zsh)?\s*(?:\.\/)?scripts\/[A-Za-z0-9_./-]+/.test(
+          command,
+        ) && command !== "node scripts/verify-supabase-migration-layout.mjs"
+      })
+    ) {
+      addError(errors, "db_push_workflow_wrapper_invocation_present", workflowRelativePath)
+    }
     if (
       workflow.includes("--workdir") ||
       lines.some((line) => /^\s*working-directory\s*:/.test(line)) ||
@@ -436,7 +1169,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       .map(({ index }) => index)
 
     if (workflowPath !== requiredWorkflowPath) {
-      if (workflow.includes("supabase db push")) {
+      if (/\bsupabase\s+db\s+push\b/i.test(unfoldedLineContinuations)) {
         addError(errors, "db_push_outside_required_workflow", workflowRelativePath)
       }
       continue

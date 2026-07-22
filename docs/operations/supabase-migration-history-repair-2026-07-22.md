@@ -73,5 +73,11 @@
 - 긴급 직접 적용이 필요하면 실행 전에 정식 버전과 원격 기록 버전이 동일하게 유지되는 방법을 확정한다.
 - `db push` 실패 시 SQL 재실행 전에 `migration list`, 원격 이름 및 저장 SQL 해시를 비교한다.
 - 운영 DB에서 `db reset --linked`를 실행하지 않는다.
+- quarantine 원본의 raw SHA-256뿐 아니라 근접 복사 방어용 `sql_lex_v1` lexical SHA-256, bare reserved/activation marker, family threshold를 함께 검사한다. outer comment·공백·case·lowercase quote·dollar tag 변경이나 핵심 상수 일부 변경은 승격 권한이 아니다. generic dollar body는 opaque bytes이며 이 fingerprint를 PostgreSQL 의미 동등성 증명으로 사용하지 않는다.
+- `.github/workflows` 아래 재귀적 YAML 집합은 `supabase-db-push.yml` 한 파일과 정확히 같아야 한다. sibling·nested workflow, symbolic link, wrapper·재사용 호출, multiline·줄 연속 DB push를 허용하지 않는다.
+- 실행 순서는 Checkout → focused boundary test → layout verifier → secret-bearing step이다. Supabase secret은 검증 성공 뒤 Validate required secrets·Link project·Push migrations의 해당 step `env`에만 둔다. DB push는 정확히 한 줄의 `supabase db push --linked --include-all`만 허용한다.
+- workflow 전체 SHA-256 변경은 별도 boundary-security 검토와 테스트 독립 상수의 동시 갱신을 요구한다.
+
+코드 검증기와 테스트는 악의적 maintainer까지 차단하는 완전한 보안 경계가 아니다. 같은 권한으로 검증기·테스트·workflow·고정 hash를 함께 바꿀 수 있기 때문이다. branch protection, `CODEOWNERS` 필수 리뷰, protected environment 승인, Supabase secret 최소 권한은 별도 저장소 거버넌스이며 이번 복구·강화 작업에서는 설정을 변경하지 않았다. 이 거버넌스가 별도로 확인되지 않은 상태에서 코드 검증 통과를 운영 DB 적용 또는 알림 전환 승인으로 해석하지 않는다.
 
 참고: [Supabase Database Migrations](https://supabase.com/docs/guides/deployment/database-migrations)

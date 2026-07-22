@@ -157,6 +157,7 @@ node scripts/run-notification-shadow-fixtures.mjs \
 ## 승인 경계
 
 - 코드·미리보기 완료는 운영 그림자나 운영 전환 승인이 아니다.
+- 코드 검증기·focused test·workflow hash는 악의적 maintainer까지 막는 완전한 보안 경계가 아니다. branch protection, `CODEOWNERS` 필수 리뷰, protected environment와 secret 승인은 별도 저장소 거버넌스이며 이번 변경 범위에서 설정하지 않는다.
 - 7일 운영 그림자는 별도 승인 후에만 시작한다.
 - 실제 소유자 전환은 순서별로 다시 승인받는다.
 - 운영 플래그, 비밀정보, 실제 접속 주소, 공급자 본문은 코드 커밋에 넣지 않는다.
