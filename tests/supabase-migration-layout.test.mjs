@@ -65,7 +65,7 @@ test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다"
   }
 })
 
-test("layout과 DB push workflow 변조를 fail-closed로 거부한다", async () => {
+test("quarantine SQL과 manifest 변조를 fail-closed로 거부한다", async () => {
   const hashFixture = await createRepoFixture()
   const hashQuarantineDir = join(hashFixture, "supabase", "pending-migrations", "notification-cutover")
   await appendFile(join(hashQuarantineDir, EXPECTED_SQL[0][0]), "\n")
@@ -82,6 +82,38 @@ test("layout과 DB push workflow 변조를 fail-closed로 거부한다", async (
     "quarantine_entry_not_regular",
   )
 
+  const manifestFixture = await createRepoFixture()
+  const manifestPath = join(
+    manifestFixture,
+    "supabase",
+    "pending-migrations",
+    "notification-cutover",
+    "manifest.json",
+  )
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
+  manifest.unexpectedPolicy = "allowed"
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: manifestFixture }),
+    "manifest_top_level_keys_mismatch",
+  )
+
+  const readmeFixture = await createRepoFixture()
+  const readmePath = join(
+    readmeFixture,
+    "supabase",
+    "pending-migrations",
+    "notification-cutover",
+    "README.md",
+  )
+  await appendFile(readmePath, "\n직접 적용 가능\n")
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: readmeFixture }),
+    "quarantine_readme_hash_mismatch",
+  )
+})
+
+test("active lane의 이름 변경, hash 복제, timestamp 재사용을 거부한다", async () => {
   const activeFixture = await createRepoFixture()
   const activeQuarantineDir = join(activeFixture, "supabase", "pending-migrations", "notification-cutover")
   const activeMigrationDir = join(activeFixture, "supabase", "migrations")
@@ -89,6 +121,78 @@ test("layout과 DB push workflow 변조를 fail-closed로 거부한다", async (
   assertIncludesErrorCode(
     await validateSupabaseMigrationLayout({ repoRoot: activeFixture }),
     "cutover_sql_present_in_active_lane",
+  )
+
+  const renamedFixture = await createRepoFixture()
+  const renamedQuarantineDir = join(
+    renamedFixture,
+    "supabase",
+    "pending-migrations",
+    "notification-cutover",
+  )
+  const renamedActiveDir = join(renamedFixture, "supabase", "migrations")
+  await copyFile(
+    join(renamedQuarantineDir, EXPECTED_SQL[1][0]),
+    join(renamedActiveDir, "20990101000000_renamed_cutover.sql"),
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: renamedFixture }),
+    "cutover_sql_hash_present_in_active_lane",
+  )
+
+  const timestampFixture = await createRepoFixture()
+  const timestampActiveDir = join(timestampFixture, "supabase", "migrations")
+  await writeFile(
+    join(timestampActiveDir, "20260716195800_placeholder.sql"),
+    "select 1;\n",
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: timestampFixture }),
+    "cutover_timestamp_reused_in_active_lane",
+  )
+})
+
+test("science superseding migration의 바이트와 contract를 고정한다", async () => {
+  const scienceFixture = await createRepoFixture()
+  const scienceMigrationPath = join(
+    scienceFixture,
+    "supabase",
+    "migrations",
+    "20260722120000_science_notification_connection.sql",
+  )
+  await appendFile(scienceMigrationPath, "\n-- drift\n")
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: scienceFixture }),
+    "science_superseding_migration_hash_mismatch",
+  )
+})
+
+test("required DB push workflow의 실파일, exact command, 순서를 강제한다", async () => {
+  const missingRootFixture = await createRepoFixture()
+  await rm(join(missingRootFixture, ".github", "workflows"), { recursive: true })
+  const missingRootErrors = await validateSupabaseMigrationLayout({ repoRoot: missingRootFixture })
+  assertIncludesErrorCode(missingRootErrors, "workflow_directory_not_regular")
+  assertIncludesErrorCode(missingRootErrors, "required_db_push_workflow_not_regular")
+
+  const missingWorkflowFixture = await createRepoFixture()
+  await rm(join(missingWorkflowFixture, ".github", "workflows", "supabase-db-push.yml"))
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: missingWorkflowFixture }),
+    "required_db_push_workflow_not_regular",
+  )
+
+  const symlinkWorkflowFixture = await createRepoFixture()
+  const symlinkWorkflowPath = join(
+    symlinkWorkflowFixture,
+    ".github",
+    "workflows",
+    "supabase-db-push.yml",
+  )
+  await rm(symlinkWorkflowPath)
+  await symlink("missing-workflow.yml", symlinkWorkflowPath)
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: symlinkWorkflowFixture }),
+    "required_db_push_workflow_not_regular",
   )
 
   const workflowFixture = await createRepoFixture()
@@ -99,6 +203,53 @@ test("layout과 DB push workflow 변조를 fail-closed로 거부한다", async (
   await writeFile(workflowPath, workflow.replace(verifierLine, ""))
   assertIncludesErrorCode(
     await validateSupabaseMigrationLayout({ repoRoot: workflowFixture }),
+    "layout_verifier_command_count_mismatch",
+  )
+
+  const ignoredVerifierFixture = await createRepoFixture()
+  const ignoredVerifierPath = join(
+    ignoredVerifierFixture,
+    ".github",
+    "workflows",
+    "supabase-db-push.yml",
+  )
+  const ignoredVerifierWorkflow = await readFile(ignoredVerifierPath, "utf8")
+  await writeFile(
+    ignoredVerifierPath,
+    ignoredVerifierWorkflow.replace(
+      "run: node scripts/verify-supabase-migration-layout.mjs",
+      "run: node scripts/verify-supabase-migration-layout.mjs || true",
+    ),
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: ignoredVerifierFixture }),
+    "layout_verifier_command_count_mismatch",
+  )
+
+  const otherJobFixture = await createRepoFixture()
+  const otherJobPath = join(otherJobFixture, ".github", "workflows", "supabase-db-push.yml")
+  const otherJobWorkflow = await readFile(otherJobPath, "utf8")
+  await writeFile(
+    otherJobPath,
+    otherJobWorkflow
+      .replace(/^.*node scripts\/verify-supabase-migration-layout\.mjs.*(?:\n|$)/m, "")
+      .replace(
+        "jobs:\n",
+        "jobs:\n  layout-only:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Verify layout\n        run: node scripts/verify-supabase-migration-layout.mjs\n",
+      ),
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: otherJobFixture }),
     "db_push_without_prior_layout_verifier",
+  )
+
+  const externalPushFixture = await createRepoFixture()
+  await writeFile(
+    join(externalPushFixture, ".github", "workflows", "other.yml"),
+    "name: Other\non: workflow_dispatch\njobs:\n  push:\n    runs-on: ubuntu-latest\n    steps:\n      - run: supabase db push --linked --include-all\n",
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: externalPushFixture }),
+    "db_push_outside_required_workflow",
   )
 })

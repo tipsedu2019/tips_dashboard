@@ -7,6 +7,10 @@ const defaultRepoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const QUARANTINE_RELATIVE_PATH = join("supabase", "pending-migrations", "notification-cutover")
 const ACTIVE_RELATIVE_PATH = join("supabase", "migrations")
 const WORKFLOWS_RELATIVE_PATH = join(".github", "workflows")
+const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
+const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
+const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
+const QUARANTINE_README_SHA256 = "62e387da1575982f154427f5f3ed001ffdb8c9c832744cdb79a45fd3f0ee905f"
 const DRAIN_MARKER = "notification_contract_drain_not_complete"
 
 const EXPECTED_POLICY = Object.freeze({
@@ -43,6 +47,31 @@ const EXPECTED_SUPERSEDED_DEFINITIONS = Object.freeze([
   },
 ])
 
+const EXPECTED_MANIFEST_KEYS = Object.freeze([
+  ...Object.keys(EXPECTED_POLICY),
+  "sqlFiles",
+  "pgTapTests",
+  "supersededDefinitions",
+].sort())
+
+const SCIENCE_SUPERSEDING_CONTRACTS = Object.freeze([
+  {
+    function: "public.revalidate_immediate_notification_delivery_v1",
+    markers: [
+      "when 'google_chat.science' then 'science'",
+      "v_delivery.audience_key = 'subject_team'",
+    ],
+  },
+  {
+    function: "public.prepare_notification_immediate_delivery_v1",
+    markers: [
+      "from public.ops_registration_subject_tracks track",
+      "dashboard_private.is_active_subject_director(",
+      "track.subject",
+    ],
+  },
+])
+
 function addError(errors, code, path) {
   errors.push(`${code}: ${path}`)
 }
@@ -53,6 +82,28 @@ function equalJson(actual, expected) {
 
 function markerCount(source) {
   return source.split(DRAIN_MARKER).length - 1
+}
+
+function sha256(source) {
+  return createHash("sha256").update(source).digest("hex")
+}
+
+function functionDefinitionSource(source, functionName) {
+  const declaration = `create or replace function ${functionName}(`
+  if (source.split(declaration).length - 1 !== 1) return null
+  const start = source.indexOf(declaration)
+  const possibleEnds = [
+    source.indexOf("\ncreate or replace function ", start + declaration.length),
+    source.indexOf("\nalter function ", start + declaration.length),
+  ].filter((index) => index >= 0)
+  const end = possibleEnds.length > 0 ? Math.min(...possibleEnds) : source.length
+  return source.slice(start, end)
+}
+
+function hasJobBoundary(lines, startIndex, endIndex) {
+  return lines
+    .slice(startIndex + 1, endIndex)
+    .some((line) => /^ {2}[A-Za-z0-9_-]+:\s*(?:#.*)?$/.test(line))
 }
 
 async function statKind(path) {
@@ -99,7 +150,10 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const quarantineTestsDir = join(quarantineDir, "tests")
   const activeDir = join(resolvedRoot, ACTIVE_RELATIVE_PATH)
   const workflowsDir = join(resolvedRoot, WORKFLOWS_RELATIVE_PATH)
+  const requiredWorkflowPath = join(workflowsDir, REQUIRED_DB_PUSH_WORKFLOW)
   const manifestPath = join(quarantineDir, "manifest.json")
+  const quarantineReadmePath = join(quarantineDir, "README.md")
+  const scienceMigrationPath = join(activeDir, SCIENCE_MIGRATION_FILE)
   let manifest = null
 
   try {
@@ -109,6 +163,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   }
 
   if (manifest !== null) {
+    if (!equalJson(Object.keys(manifest).sort(), EXPECTED_MANIFEST_KEYS)) {
+      addError(errors, "manifest_top_level_keys_mismatch", relative(resolvedRoot, manifestPath))
+    }
     const actualPolicy = Object.fromEntries(Object.keys(EXPECTED_POLICY).map((key) => [key, manifest[key]]))
     if (!equalJson(actualPolicy, EXPECTED_POLICY)) {
       addError(errors, "manifest_policy_mismatch", relative(resolvedRoot, manifestPath))
@@ -166,7 +223,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     const stat = await statKind(filePath)
     if (!stat?.isFile()) continue
     const source = await readFile(filePath)
-    const actualHash = createHash("sha256").update(source).digest("hex")
+    const actualHash = sha256(source)
     if (actualHash !== expectedHash) {
       addError(errors, "cutover_sql_hash_mismatch", relative(resolvedRoot, filePath))
     }
@@ -177,10 +234,20 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     }
   }
 
+  const quarantineReadmeStat = await statKind(quarantineReadmePath)
+  if (quarantineReadmeStat?.isFile()) {
+    const actualHash = sha256(await readFile(quarantineReadmePath))
+    if (actualHash !== QUARANTINE_README_SHA256) {
+      addError(errors, "quarantine_readme_hash_mismatch", relative(resolvedRoot, quarantineReadmePath))
+    }
+  }
+
   const activeStat = await statKind(activeDir)
   if (!activeStat?.isDirectory()) {
     addError(errors, "active_migration_directory_not_regular", relative(resolvedRoot, activeDir))
   }
+  const quarantineTimestamps = new Set(EXPECTED_SQL.map(([file]) => file.slice(0, 14)))
+  const quarantineHashes = new Set(EXPECTED_SQL.map(([, hash]) => hash))
   for (const [file] of EXPECTED_SQL) {
     const activePath = join(activeDir, file)
     if (await statKind(activePath)) {
@@ -195,11 +262,47 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(errors, "active_migration_entry_not_regular", relative(resolvedRoot, entryPath))
       continue
     }
-    if (markerCount(await readFile(entryPath, "utf8")) > 0) {
+    const source = await readFile(entryPath)
+    const timestamp = entry.match(/^(\d{14})/)?.[1]
+    if (timestamp && quarantineTimestamps.has(timestamp)) {
+      addError(errors, "cutover_timestamp_reused_in_active_lane", relative(resolvedRoot, entryPath))
+    }
+    if (quarantineHashes.has(sha256(source))) {
+      addError(errors, "cutover_sql_hash_present_in_active_lane", relative(resolvedRoot, entryPath))
+    }
+    if (markerCount(source.toString("utf8")) > 0) {
       addError(errors, "drain_marker_present_in_active_lane", relative(resolvedRoot, entryPath))
     }
   }
 
+  const scienceMigrationStat = await statKind(scienceMigrationPath)
+  if (!scienceMigrationStat?.isFile()) {
+    addError(errors, "science_superseding_migration_not_regular", relative(resolvedRoot, scienceMigrationPath))
+  } else {
+    const scienceMigration = await readFile(scienceMigrationPath)
+    const scienceSource = scienceMigration.toString("utf8")
+    if (sha256(scienceMigration) !== SCIENCE_MIGRATION_SHA256) {
+      addError(errors, "science_superseding_migration_hash_mismatch", relative(resolvedRoot, scienceMigrationPath))
+    }
+    for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
+      const definition = functionDefinitionSource(scienceSource, contract.function)
+      const contractPath = `${relative(resolvedRoot, scienceMigrationPath)}#${contract.function}`
+      if (definition === null) {
+        addError(errors, "science_superseded_definition_missing", contractPath)
+      } else if (!contract.markers.every((marker) => definition.includes(marker))) {
+        addError(errors, "science_superseding_contract_mismatch", contractPath)
+      }
+    }
+  }
+
+  const workflowsStat = await statKind(workflowsDir)
+  if (!workflowsStat?.isDirectory()) {
+    addError(errors, "workflow_directory_not_regular", relative(resolvedRoot, workflowsDir))
+  }
+  const requiredWorkflowStat = await statKind(requiredWorkflowPath)
+  if (!requiredWorkflowStat?.isFile()) {
+    addError(errors, "required_db_push_workflow_not_regular", relative(resolvedRoot, requiredWorkflowPath))
+  }
   const workflowFiles = await listWorkflowFiles(workflowsDir)
   for (const workflowPath of workflowFiles) {
     const workflow = await readFile(workflowPath, "utf8")
@@ -219,19 +322,44 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       addError(errors, "db_push_workflow_layout_bypass", workflowRelativePath)
     }
 
-    const verifierLines = lines
+    const exactVerifierLines = lines
       .map((line, index) => ({ line, index }))
-      .filter(({ line }) => line.includes("node scripts/verify-supabase-migration-layout.mjs"))
+      .filter(({ line }) => /^\s*run:\s*node scripts\/verify-supabase-migration-layout\.mjs\s*$/.test(line))
       .map(({ index }) => index)
-    for (const { line, index } of lines.map((line, index) => ({ line, index }))) {
+    const exactPushLines = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => /^\s*run:\s*supabase db push --linked --include-all\s*$/.test(line))
+      .map(({ index }) => index)
+
+    if (workflowPath !== requiredWorkflowPath) {
+      if (workflow.includes("supabase db push")) {
+        addError(errors, "db_push_outside_required_workflow", workflowRelativePath)
+      }
+      continue
+    }
+
+    for (const line of lines) {
       if (!line.includes("supabase db push")) continue
       const command = line.trim().replace(/^run:\s*/, "")
       if (command !== "supabase db push --linked --include-all") {
         addError(errors, "db_push_command_not_exact", workflowRelativePath)
       }
-      if (!verifierLines.some((verifierIndex) => verifierIndex < index)) {
-        addError(errors, "db_push_without_prior_layout_verifier", workflowRelativePath)
-      }
+    }
+    if (exactVerifierLines.length !== 1) {
+      addError(errors, "layout_verifier_command_count_mismatch", workflowRelativePath)
+    }
+    if (exactPushLines.length !== 1) {
+      addError(errors, "db_push_command_count_mismatch", workflowRelativePath)
+    }
+    if (
+      exactVerifierLines.length === 1 &&
+      exactPushLines.length === 1 &&
+      (
+        exactVerifierLines[0] >= exactPushLines[0] ||
+        hasJobBoundary(lines, exactVerifierLines[0], exactPushLines[0])
+      )
+    ) {
+      addError(errors, "db_push_without_prior_layout_verifier", workflowRelativePath)
     }
   }
 
