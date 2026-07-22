@@ -76,6 +76,7 @@ type InitialAuthSessionResult = Awaited<
 >
 
 let initialAuthSessionPromise: Promise<InitialAuthSessionResult> | null = null
+const PROFILE_QUERY_TIMEOUT_MS = 10_000
 
 function loadInitialAuthSession(client: SupabaseClient) {
   initialAuthSessionPromise ||= client.auth.getSession().finally(() => {
@@ -131,10 +132,10 @@ function createFallbackUser(supabaseUser: User, role: DashboardRole): DashboardU
   }
 }
 
-function buildReadonlyMessage(hasProfileError: boolean) {
+function buildProfileResolutionMessage(hasProfileError: boolean) {
   return hasProfileError
-    ? "프로필을 불러오지 못해 읽기 전용 권한으로 전환했습니다."
-    : "프로필 정보가 없어 읽기 전용 권한으로 접속했습니다."
+    ? "프로필을 불러오지 못해 임시 권한으로 접속했습니다."
+    : "프로필 정보가 없어 임시 권한으로 접속했습니다."
 }
 
 function isStaleRefreshTokenError(error: unknown) {
@@ -193,7 +194,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .from("profiles")
           .select("*")
           .eq("id", supabaseUser.id)
+          .abortSignal(AbortSignal.timeout(PROFILE_QUERY_TIMEOUT_MS))
           .maybeSingle()
+          .retry(false)
         let data = profileById.data
         let error = profileById.error
 
@@ -204,7 +207,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .or(`email.eq.${normalizedEmail},login_id.eq.${normalizedLoginId}`)
             .order("updated_at", { ascending: false })
             .limit(1)
+            .abortSignal(AbortSignal.timeout(PROFILE_QUERY_TIMEOUT_MS))
             .maybeSingle()
+            .retry(false)
 
           data = profileByIdentity.data
           error = profileByIdentity.error
@@ -214,8 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const fallbackRole = resolveFallbackRole(supabaseUser.email)
           return {
             user: createFallbackUser(supabaseUser, fallbackRole),
-            authError:
-              fallbackRole === "viewer" ? buildReadonlyMessage(Boolean(error)) : null,
+            authError: buildProfileResolutionMessage(Boolean(error)),
           }
         }
 
@@ -242,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const fallbackRole = resolveFallbackRole(supabaseUser.email)
         return {
           user: createFallbackUser(supabaseUser, fallbackRole),
-          authError: fallbackRole === "viewer" ? buildReadonlyMessage(true) : null,
+          authError: buildProfileResolutionMessage(true),
         }
       }
     }
@@ -283,13 +287,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (!canReuseResolvedProfile) {
-        const provisionalUser = createFallbackUser(
-          nextSession.user,
-          "viewer",
-        )
-        setUser(provisionalUser)
+        setUser(null)
         setAuthError(null)
-        setLoading(false)
+        setLoading(true)
       }
 
       const requestKey = shouldRefreshProfile

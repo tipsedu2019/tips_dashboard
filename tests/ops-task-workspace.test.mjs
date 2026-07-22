@@ -1926,6 +1926,18 @@ test("committed initial visit notifications expose an in-session notification-on
   assert.match(source, /const submissionViewerId = currentUserId[\s\S]*?const submissionViewerGeneration = workspaceViewerGenerationRef\.current/)
 })
 
+test("automatic word-retest absence attempts stay quarantined for the lifetime of the mounted workspace", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const effect = source.slice(
+    source.indexOf("async function autoMarkPastWordRetestsAbsent"),
+    source.indexOf("const submitWordRetestCompletion"),
+  );
+
+  assert.match(effect, /for \(const task of nextTasks\)/);
+  assert.doesNotMatch(effect, /Promise\.all\(nextTasks\.map/);
+  assert.doesNotMatch(effect, /autoAbsentWordRetestIdsRef\.current\.delete/);
+});
+
 test("post-commit registration work rejects a viewer generation change during notification delay", async () => {
   const isCurrent = registrationNotificationModel.isRegistrationSubmissionOwnershipCurrent;
   assert.equal(typeof isCurrent, "function", "production must expose the ownership predicate consumed by the workspace");

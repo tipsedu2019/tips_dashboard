@@ -9,9 +9,21 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { useAuth } from "@/providers/auth-provider";
 
 function ViewerPermissionNotice() {
-  const { role } = useAuth();
+  const { authError, role, user } = useAuth();
 
-  if (role === "viewer") {
+  if (authError && user?.isFallbackRole) {
+    return (
+      <div
+        data-testid="profile-resolution-notice"
+        aria-live="polite"
+        className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950 md:px-6"
+      >
+        권한 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.
+      </div>
+    );
+  }
+
+  if (role === "viewer" && user?.isFallbackRole === false) {
     return (
       <div
         data-testid="viewer-permission-notice"

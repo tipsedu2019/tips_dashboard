@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
+import { readdir, readFile } from "node:fs/promises"
 import test from "node:test"
 import vm from "node:vm"
 
@@ -22,6 +22,13 @@ const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", imp
 
 async function source(url) {
   return readFile(url, "utf8")
+}
+
+async function migrationSourceBySuffix(suffix) {
+  const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
+  const matches = (await readdir(migrationsUrl)).filter((name) => name.endsWith(suffix))
+  assert.equal(matches.length, 1, `${suffix} migration must exist exactly once`)
+  return readFile(new URL(matches[0], migrationsUrl), "utf8")
 }
 
 function block(input, start, end) {
@@ -443,6 +450,28 @@ test("재재시험 RPC는 미응시 원본·이전 날짜·연결 자식 마감 
   assert.match(sql, /word_retest\.completed/)
   assert.match(sql, /word_retest\.retry_created/)
   assert.doesNotMatch(sql, /ops_task_notification_producers_runtime_version[\s\S]*return 2/)
+})
+
+test("구버전 재재시험 자동 미응시 요청은 서버 오류와 행 잠금 없이 멱등 격리한다", async () => {
+  const sql = await migrationSourceBySuffix("_word_retest_absence_storm_guard.sql")
+  const guard = block(
+    sql,
+    "create or replace function dashboard_private.report_word_retest_absent_v1_impl",
+    "alter function dashboard_private.report_word_retest_absent_v1_impl",
+  )
+
+  assert.match(guard, /ops_task_request_replay_v2/)
+  assert.match(guard, /assert_ops_task_actor_v2/)
+  assert.match(guard, /p_source = 'deadline'[\s\S]*v_detail\.retry_of_task_id is not null/)
+  assert.match(guard, /'skippedReason', 'retry_child_deadline'/)
+  assert.match(guard, /perform dashboard_private\.finish_ops_task_request_v2/)
+  assert.match(guard, /return pg_catalog\.jsonb_build_array\(\)/)
+  assert.match(guard, /if v_replay ->> 'skippedReason' = 'retry_child_deadline'/)
+  assert.doesNotMatch(
+    guard,
+    /v_detail\.retry_of_task_id is not null[\s\S]{0,180}raise exception 'word_retest_absent_deadline_not_allowed'/,
+  )
+  assert.match(sql, /revoke all on function dashboard_private\.report_word_retest_absent_v1_impl/)
 })
 
 test("완료된 미응시 원본 복구는 완료 시각을 보존하고 완료 이벤트를 중복 기록하지 않는다", async () => {

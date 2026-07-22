@@ -11381,8 +11381,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const mutationViewerId = currentUserId
       const mutationLoadGeneration = workspaceLoadGenerationRef.current
       nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.add(task.id))
-      try {
-        const syncedTasks = await Promise.all(nextTasks.map(async (task) => {
+      const syncedTasks: OpsTask[] = []
+      let autoAbsentError: unknown = null
+
+      for (const task of nextTasks) {
+        if (!workspaceMountedRef.current || latestWorkspaceViewerIdRef.current !== mutationViewerId) break
+        if (workspaceLoadGenerationRef.current !== mutationLoadGeneration) break
+
+        try {
           const wordRetest = task.wordRetest || {}
           const payload = normalizeFormForSubmit({
             ...formFromTask(task),
@@ -11399,18 +11405,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           const receipt = await reportWordRetestAbsent(task.id, "deadline")
           await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
           const syncedTask = await loadOpsTaskById(task.id)
-          return syncedTask || {
+          syncedTasks.push(syncedTask || {
             ...task,
             ...payload,
             updatedAt: new Date().toISOString(),
-          }
-        }))
-        if (!workspaceMountedRef.current || latestWorkspaceViewerIdRef.current !== mutationViewerId) return
-        if (workspaceLoadGenerationRef.current !== mutationLoadGeneration) {
-          void reload(true, false)
-          return
+          })
+        } catch (error) {
+          autoAbsentError ||= error
         }
-        if (!invalidatePendingWorkspaceReloads()) return
+      }
+
+      if (!workspaceMountedRef.current || latestWorkspaceViewerIdRef.current !== mutationViewerId) return
+      if (workspaceLoadGenerationRef.current !== mutationLoadGeneration) {
+        void reload(true, false)
+        return
+      }
+      if (!invalidatePendingWorkspaceReloads()) return
+
+      if (syncedTasks.length > 0) {
         setData((current) => {
           const workspaceData = current || emptyOpsTaskWorkspaceData
           return {
@@ -11424,16 +11436,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           if (!current) return current
           return syncedTasks.find((task) => task.id === current.id) || current
         })
+      }
+
+      if (autoAbsentError) {
+        setMessage(getOpsTaskActionErrorMessage(
+          autoAbsentError,
+          "본시험일 기준 미응시 보고를 자동 반영하지 못했습니다.",
+        ))
+      } else {
         setMessage("")
-        setNotice(nextTasks.length > 1
-          ? `본시험일 기준 일주일 경과 ${nextTasks.length}건을 미응시 보고했습니다.`
+      }
+
+      if (syncedTasks.length > 0) {
+        setNotice(syncedTasks.length > 1
+          ? `본시험일 기준 일주일 경과 ${syncedTasks.length}건을 미응시 보고했습니다.`
           : "본시험일 기준 일주일 경과 항목을 미응시 보고했습니다.")
-      } catch (error) {
-        if (workspaceMountedRef.current && latestWorkspaceViewerIdRef.current === mutationViewerId) {
-          setMessage(getOpsTaskActionErrorMessage(error, "본시험일 기준 미응시 보고를 자동 반영하지 못했습니다."))
-        }
-      } finally {
-        nextTasks.forEach((task) => autoAbsentWordRetestIdsRef.current.delete(task.id))
       }
     }
 

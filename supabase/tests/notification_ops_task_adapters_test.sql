@@ -626,6 +626,11 @@ values
     '72000000-0000-4000-8000-000000000106'::uuid,
     '재재시험 롤백 원본', 'word_retest', 'review_requested',
     '71000000-0000-4000-8000-000000000001'::uuid
+  ),
+  (
+    '72000000-0000-4000-8000-000000000109'::uuid,
+    '일반 자동 미응시 대상', 'word_retest', 'requested',
+    '71000000-0000-4000-8000-000000000001'::uuid
   );
 
 insert into public.ops_tasks(id, title, type, status, requested_by, completed_at)
@@ -687,6 +692,12 @@ values
     '본관', '71000000-0000-4000-8000-000000000005'::uuid,
     'Task 15 연결 선생님', '재재시험 수업', '롤백 학생',
     '2026-07-04T01:00:00.000Z', 10, 8, 4, 'done', null, null
+  ),
+  (
+    '72000000-0000-4000-8000-000000000109'::uuid,
+    '본관', '71000000-0000-4000-8000-000000000005'::uuid,
+    'Task 15 연결 선생님', '재재시험 수업', '일반 자동 미응시 학생',
+    '2026-01-01T01:00:00.000Z', 10, 8, null, 'not_started', null, null
   );
 
 insert into public.ops_word_retests(
@@ -1102,14 +1113,122 @@ select is(
   '명시적으로 바꾼 후속 본시험일은 원본 날짜로 덮어쓰지 않는다'
 );
 
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000002","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000002',
+  true
+);
+
 select throws_ok($$
   select public.report_word_retest_absent_v1(
     '72000000-0000-4000-8000-000000000105'::uuid,
     'deadline',
-    '72000000-0000-4000-8000-000000000205'::uuid
+    '72000000-0000-4000-8000-000000000220'::uuid
   )
-$$, '40001', 'word_retest_absent_deadline_not_allowed',
-  '연결 자식은 기한 경과 미응시 자동 처리에서 제외된다');
+$$, '42501', 'ops_task_access_denied',
+  '권한 없는 사용자는 연결 자식 자동 미응시 차단 경로도 호출할 수 없다');
+
+select pg_catalog.set_config(
+  'request.jwt.claims',
+  '{"sub":"71000000-0000-4000-8000-000000000004","role":"authenticated"}',
+  true
+);
+select pg_catalog.set_config(
+  'request.jwt.claim.sub',
+  '71000000-0000-4000-8000-000000000004',
+  true
+);
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'retry-child-deadline-first', public.report_word_retest_absent_v1(
+  '72000000-0000-4000-8000-000000000105'::uuid,
+  'deadline',
+  '72000000-0000-4000-8000-000000000205'::uuid
+);
+
+insert into word_retest_reretry_results(attempt_key, response)
+select 'retry-child-deadline-replay', public.report_word_retest_absent_v1(
+  '72000000-0000-4000-8000-000000000105'::uuid,
+  'deadline',
+  '72000000-0000-4000-8000-000000000205'::uuid
+);
+
+select is(
+  (select response from word_retest_reretry_results where attempt_key = 'retry-child-deadline-first'),
+  '[]'::jsonb,
+  '연결 자식 자동 미응시 요청은 구버전의 새 요청 UUID 발급을 막는 빈 배열을 반환한다'
+);
+
+select is(
+  (select response from word_retest_reretry_results where attempt_key = 'retry-child-deadline-replay'),
+  (select response from word_retest_reretry_results where attempt_key = 'retry-child-deadline-first'),
+  '연결 자식 자동 미응시 재호출은 같은 차단 응답을 재생한다'
+);
+
+select results_eq(
+  $$
+    select task.status, detail.retest_status, detail.retry_of_task_id::text
+    from public.ops_tasks task
+    join public.ops_word_retests detail on detail.task_id = task.id
+    where task.id = '72000000-0000-4000-8000-000000000105'::uuid
+  $$,
+  $$
+    values (
+      'requested'::text,
+      'not_started'::text,
+      '72000000-0000-4000-8000-000000000104'::text
+    )
+  $$,
+  '연결 자식 자동 미응시 차단은 업무 상태와 계보를 바꾸지 않는다'
+);
+
+select is(
+  (
+    select count(*)
+    from public.ops_task_events event
+    where event.request_id = '72000000-0000-4000-8000-000000000205'::uuid
+      and event.event_type = 'word_retest.absent_reported'
+  ),
+  0::bigint,
+  '연결 자식 자동 미응시 차단은 미응시 원본 이벤트를 만들지 않는다'
+);
+
+reset role;
+select results_eq(
+  $$
+    select ledger.response_payload ->> 'skippedReason',
+      ledger.response_payload -> 'sourceEventIds', count(*) over ()
+    from dashboard_private.notification_request_ledger ledger
+    where ledger.request_id = '72000000-0000-4000-8000-000000000205'::uuid
+  $$,
+  $$ values ('retry_child_deadline'::text, '[]'::jsonb, 1::bigint) $$,
+  '연결 자식 자동 미응시 차단은 빈 이벤트를 가진 원장 영수증 한 건만 남긴다'
+);
+set local role authenticated;
+
+select lives_ok($$
+  select public.report_word_retest_absent_v1(
+    '72000000-0000-4000-8000-000000000109'::uuid,
+    'deadline',
+    '72000000-0000-4000-8000-000000000221'::uuid
+  )
+$$, '연결되지 않은 기본 재시험의 기존 자동 미응시 처리는 유지된다');
+
+select results_eq(
+  $$
+    select task.status, detail.retest_status
+    from public.ops_tasks task
+    join public.ops_word_retests detail on detail.task_id = task.id
+    where task.id = '72000000-0000-4000-8000-000000000109'::uuid
+  $$,
+  $$ values ('review_requested'::text, 'absent'::text) $$,
+  '기본 자동 미응시는 업무와 재시험 상태를 정상 전환한다'
+);
 
 select lives_ok($$
   select public.transition_ops_task_status_v2(

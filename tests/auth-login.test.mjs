@@ -175,10 +175,13 @@ test("auth initialization survives React strict-effect replay without duplicate 
   assert.match(source, /authResolutionRef\.current\.markResolvedProfile\(resolvedProfile\)/);
   assert.match(source, /const authSubscriptionTimer = setTimeout/);
   assert.match(source, /clearTimeout\(authSubscriptionTimer\)/);
-  assert.match(
-    source,
-    /const provisionalUser = createFallbackUser\(\s*nextSession\.user,\s*"viewer",?\s*\)[\s\S]*setUser\(provisionalUser\)[\s\S]*setLoading\(false\)[\s\S]*resolveDashboardProfile/,
-  );
+  assert.match(source, /PROFILE_QUERY_TIMEOUT_MS = 10_000/);
+  assert.match(source, /profileById[\s\S]*\.abortSignal\(AbortSignal\.timeout\(PROFILE_QUERY_TIMEOUT_MS\)\)[\s\S]*\.retry\(false\)/);
+  assert.match(source, /profileByIdentity[\s\S]*\.abortSignal\(AbortSignal\.timeout\(PROFILE_QUERY_TIMEOUT_MS\)\)[\s\S]*\.retry\(false\)/);
+  assert.match(source, /authError: buildProfileResolutionMessage\(Boolean\(error\)\)/);
+  assert.match(source, /authError: buildProfileResolutionMessage\(true\)/);
+  assert.match(source, /setUser\(null\)[\s\S]*setAuthError\(null\)[\s\S]*setLoading\(true\)[\s\S]*resolveDashboardProfile/);
+  assert.doesNotMatch(source, /const provisionalUser = createFallbackUser/);
   assert.match(
     source,
     /onAuthStateChange\([\s\S]*setTimeout\(\(\) => \{[\s\S]*void applyResolvedUser\(nextSession, resolution, event\)/,
@@ -288,9 +291,11 @@ test("registered sign-in explains the next step and viewer accounts can open the
     authUtilsSource,
     /canManageAll = normalizedRole === "admin" \|\| normalizedRole === "staff"/,
   );
-  assert.match(adminLayoutSource, /role === "viewer"/);
+  assert.match(adminLayoutSource, /role === "viewer" && user\?\.isFallbackRole === false/);
   assert.match(adminLayoutSource, /data-testid="viewer-permission-notice"/);
   assert.match(adminLayoutSource, /관리팀에게 권한 조정을 요청하세요\./);
+  assert.match(adminLayoutSource, /data-testid="profile-resolution-notice"/);
+  assert.match(adminLayoutSource, /권한 정보를 불러오지 못했습니다/);
 });
 
 test("assistant role cannot navigate search or directly access makeup while full roles retain it", async () => {
