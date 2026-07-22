@@ -22,7 +22,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e9fe479cf6c90e5a1681532c88b8ce378a72456c801744582cc04bf850b135f1"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "0c278043f29b67b24035a9fc03f72247739ee59cd89f6b84b846913c568004ca"
 
 const EXPECTED_SQL = Object.freeze([
   ["20260716195000_notification_workflow_legacy_closure.sql", "e9131131f0d9419a4a8fdf5d69a58a1047a41583f98d9ef7b5b376374ee52975"],
@@ -54,6 +54,46 @@ function assertIncludesErrorCode(errors, code) {
   )
 }
 
+function workflowWithEarlySecretScope({
+  workflowEnvLines = [],
+  jobEnvLines = [],
+  preflightEnvLines = [],
+  verifierEnvLines = [],
+  beforeVerifierLines = [],
+} = {}) {
+  return [
+    "name: Secret Scope Regression",
+    "",
+    "on: workflow_dispatch",
+    ...workflowEnvLines,
+    "",
+    "jobs:",
+    "  db-push:",
+    "    runs-on: ubuntu-latest",
+    ...jobEnvLines,
+    "    steps:",
+    "      - name: Checkout",
+    "        uses: actions/checkout@v4",
+    "",
+    ...beforeVerifierLines,
+    ...(beforeVerifierLines.length > 0 ? [""] : []),
+    "      - name: Test Supabase migration boundary",
+    ...preflightEnvLines,
+    "        run: node --test tests/supabase-migration-layout.test.mjs",
+    "",
+    "      - name: Verify Supabase migration layout",
+    ...verifierEnvLines,
+    "        run: node scripts/verify-supabase-migration-layout.mjs",
+    "",
+    "      - name: Push migrations",
+    "        env:",
+    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+    "        run: supabase db push --linked --include-all",
+    "",
+  ].join("\n")
+}
+
 after(async () => {
   await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
 })
@@ -61,6 +101,31 @@ after(async () => {
 test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다", async () => {
   const errors = await validateSupabaseMigrationLayout({ repoRoot })
   assert.deepEqual(errors, [])
+  const requiredWorkflow = await readFile(requiredWorkflowPath, "utf8")
+  assert.ok(
+    requiredWorkflow.includes(
+      [
+        "      - name: Test Supabase migration boundary",
+        "        run: node --test tests/supabase-migration-layout.test.mjs",
+        "",
+        "      - name: Verify Supabase migration layout",
+        "        run: node scripts/verify-supabase-migration-layout.mjs",
+      ].join("\n"),
+    ),
+    "focused boundary test must run secret-free immediately before the verifier",
+  )
+  assert.ok(
+    requiredWorkflow.includes(
+      [
+        "      - name: Link project",
+        "        env:",
+        "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+        "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+        '        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"',
+      ].join("\n"),
+    ),
+    "non-interactive link must receive both required secrets only at the link step",
+  )
   assert.equal(await sha256(requiredWorkflowPath), REQUIRED_DB_PUSH_WORKFLOW_SHA256)
   for (const [file, digest] of EXPECTED_SQL) {
     assert.equal(await sha256(join(quarantineDir, file)), digest)
@@ -349,4 +414,96 @@ test("required DB push workflow의 실파일, exact command, 순서를 강제한
     await validateSupabaseMigrationLayout({ repoRoot: externalPushFixture }),
     "db_push_outside_required_workflow",
   )
+})
+
+test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 fail-closed로 거부한다", async () => {
+  const secretNames = ["SUPABASE_ACCESS_TOKEN", "SUPABASE_DB_PASSWORD"]
+  const cases = []
+
+  for (const secretName of secretNames) {
+    const secretExpression = `\${{ secrets.${secretName} }}`
+    cases.push(
+      {
+        name: `workflow-level ${secretName}`,
+        source: workflowWithEarlySecretScope({
+          workflowEnvLines: ["env:", `  ${secretName}: ${secretExpression}`],
+        }),
+      },
+      {
+        name: `job-level ${secretName}`,
+        source: workflowWithEarlySecretScope({
+          jobEnvLines: ["    env:", `      ${secretName}: ${secretExpression}`],
+        }),
+      },
+      {
+        name: `preflight-step ${secretName}`,
+        source: workflowWithEarlySecretScope({
+          preflightEnvLines: ["        env:", `          ${secretName}: ${secretExpression}`],
+        }),
+      },
+      {
+        name: `verifier-step ${secretName}`,
+        source: workflowWithEarlySecretScope({
+          verifierEnvLines: ["        env:", `          ${secretName}: ${secretExpression}`],
+        }),
+      },
+    )
+  }
+
+  cases.push(
+    {
+      name: "multiline verifier expression",
+      source: workflowWithEarlySecretScope({
+        verifierEnvLines: [
+          "        env:",
+          "          SUPABASE_ACCESS_TOKEN: >-",
+          "            ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+        ],
+      }),
+    },
+    {
+      name: "YAML alias with bracket secret expression",
+      source: workflowWithEarlySecretScope({
+        jobEnvLines: [
+          "    env: &supabase-secret-env",
+          "      SUPABASE_DB_PASSWORD: ${{ secrets['SUPABASE_DB_PASSWORD'] }}",
+        ],
+        verifierEnvLines: ["        env: *supabase-secret-env"],
+      }),
+    },
+    {
+      name: "GITHUB_ENV indirection before verifier",
+      source: workflowWithEarlySecretScope({
+        beforeVerifierLines: [
+          "      - name: Export secret before verifier",
+          "        env:",
+          "          EARLY_TOKEN: ${{ secrets['SUPABASE_ACCESS_TOKEN'] }}",
+          "        shell: bash",
+          "        run: |",
+          '          echo "SUPABASE_ACCESS_TOKEN=${EARLY_TOKEN}" >> "${GITHUB_ENV}"',
+        ],
+      }),
+    },
+    {
+      name: "secret validation step reordered before verifier",
+      source: workflowWithEarlySecretScope({
+        beforeVerifierLines: [
+          "      - name: Validate required secrets",
+          "        env:",
+          "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
+          "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
+          "        run: test -n \"${SUPABASE_ACCESS_TOKEN}\" && test -n \"${SUPABASE_DB_PASSWORD}\"",
+        ],
+      }),
+    },
+  )
+
+  const fixtureRoot = await createRepoFixture()
+  const workflowPath = join(fixtureRoot, ".github", "workflows", "supabase-db-push.yml")
+  for (const { name, source } of cases) {
+    await writeFile(workflowPath, source)
+    const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+    assertIncludesErrorCode(errors, "db_push_workflow_secret_scope_mismatch")
+    assert.ok(errors.length > 0, `${name} must be rejected`)
+  }
 })

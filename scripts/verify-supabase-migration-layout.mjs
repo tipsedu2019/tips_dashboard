@@ -8,7 +8,9 @@ const QUARANTINE_RELATIVE_PATH = join("supabase", "pending-migrations", "notific
 const ACTIVE_RELATIVE_PATH = join("supabase", "migrations")
 const WORKFLOWS_RELATIVE_PATH = join(".github", "workflows")
 const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "e9fe479cf6c90e5a1681532c88b8ce378a72456c801744582cc04bf850b135f1"
+// Pin the complete workflow so aliases, multiline expressions, indirection, and
+// step reordering cannot expand Supabase secret scope before the verifier exits.
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "0c278043f29b67b24035a9fc03f72247739ee59cd89f6b84b846913c568004ca"
 const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
 const QUARANTINE_README_SHA256 = "62e387da1575982f154427f5f3ed001ffdb8c9c832744cdb79a45fd3f0ee905f"
@@ -329,7 +331,9 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   if (!requiredWorkflowStat?.isFile()) {
     addError(errors, "required_db_push_workflow_not_regular", relative(resolvedRoot, requiredWorkflowPath))
   } else if (sha256(await readFile(requiredWorkflowPath)) !== REQUIRED_DB_PUSH_WORKFLOW_SHA256) {
-    addError(errors, "required_db_push_workflow_hash_mismatch", relative(resolvedRoot, requiredWorkflowPath))
+    const workflowRelativePath = relative(resolvedRoot, requiredWorkflowPath)
+    addError(errors, "required_db_push_workflow_hash_mismatch", workflowRelativePath)
+    addError(errors, "db_push_workflow_secret_scope_mismatch", workflowRelativePath)
   }
   for (const entry of (await listDirectory(workflowsDir)) ?? []) {
     if (!/\.ya?ml$/i.test(entry)) continue
