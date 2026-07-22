@@ -108,9 +108,9 @@ function registrationSubjectDisabledReason(
     return `${capability.subject} 신규 등록이 비활성화되어 있습니다.`
   }
   const normalizedGrade = trimmed(grade)
-  if (!normalizedGrade) return capability.subject === "과학" ? "과학 선택 전에 학년을 먼저 선택하세요." : ""
+  if (!normalizedGrade) return ""
   if (!capability.gradeLevels.includes(normalizedGrade)) {
-    return `${capability.subject}은(는) 현재 학년에서 신규 등록할 수 없습니다. 과학은 고등부만 선택할 수 있습니다.`
+    return `${capability.subject}은(는) 현재 선택한 학년에서 신규 등록할 수 없습니다.`
   }
   return ""
 }

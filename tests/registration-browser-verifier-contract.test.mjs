@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const verifierUrl = new URL("../scripts/verify-ops-task-browser-workflow.mjs", import.meta.url)
+const intakeWorkflowUrl = new URL("../src/features/tasks/registration-intake-workflow.ts", import.meta.url)
 const fixtureUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
 const fixtureRuntimeUrl = new URL("../src/features/tasks/registration-track-fixture-runtime.ts", import.meta.url)
 
@@ -33,7 +34,10 @@ test("registration verifier targets the refined shared application contract", as
 })
 
 test("create verification is subject-first, grade-scoped, and never saves", async () => {
-  const source = await readFile(verifierUrl, "utf8")
+  const [source, intakeWorkflowSource] = await Promise.all([
+    readFile(verifierUrl, "utf8"),
+    readFile(intakeWorkflowUrl, "utf8"),
+  ])
   const verifier = registrationVerifier(source)
 
   assert.match(verifier, /getByRole\("button", \{ name: "등록 추가", exact: true \}\)/)
@@ -41,7 +45,14 @@ test("create verification is subject-first, grade-scoped, and never saves", asyn
   assert.match(verifier, /compareDocumentPosition/)
   assert.match(verifier, /getByLabel\(\/\^학년\//)
   assert.match(verifier, /getByLabel\(\/\^학교\//)
+  assert.match(verifier, /getByRole\("button", \{ name: \/과학 문의 과목\//)
+  assert.match(verifier, /getAttribute\("aria-pressed"\)/)
   assert.match(verifier, /selectOption\("고1"\)/)
+  assert.ok(
+    verifier.indexOf("과학 문의 과목") < verifier.indexOf('selectOption("고1")'),
+    "science must be selected before the create grade",
+  )
+  assert.doesNotMatch(intakeWorkflowSource, /과학 선택 전에 학년을 먼저 선택하세요\./)
   assert.match(verifier, /새봄고/)
   assert.match(verifier, /새봄초|새봄중/)
   assert.match(verifier, /getByRole\("button", \{ name: "자동 이력 보기" \}\)[\s\S]*?count\(\)/)

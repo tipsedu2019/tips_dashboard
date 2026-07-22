@@ -63,7 +63,7 @@ test("science-only and every mixed selection preserve ordered participants", () 
   }
 })
 
-test("new science selection is high-school only while an existing science track stays visible", () => {
+test("new science selection is grade-order independent while capability grades stay enforced", () => {
   assert.equal(typeof intakeWorkflow.getRegistrationSubjectPickerAvailability, "function")
   const high = intakeWorkflow.getRegistrationSubjectPickerAvailability({
     capabilities: scienceCapabilities,
@@ -80,7 +80,7 @@ test("new science selection is high-school only while an existing science track 
   })
   assert.equal(beforeGrade.disabledReasonBySubject.영어, undefined)
   assert.equal(beforeGrade.disabledReasonBySubject.수학, undefined)
-  assert.match(beforeGrade.disabledReasonBySubject.과학, /학년/)
+  assert.equal(beforeGrade.disabledReasonBySubject.과학, undefined)
 
   const middle = intakeWorkflow.getRegistrationSubjectPickerAvailability({
     capabilities: scienceCapabilities,
@@ -88,7 +88,10 @@ test("new science selection is high-school only while an existing science track 
     selectedSubjects: [],
   })
   assert.deepEqual(middle.options, ["영어", "수학", "과학"])
-  assert.match(middle.disabledReasonBySubject.과학, /고등|학년/)
+  assert.equal(
+    middle.disabledReasonBySubject.과학,
+    "과학은(는) 현재 선택한 학년에서 신규 등록할 수 없습니다.",
+  )
 
   const compatibility = scienceCapabilities.map((row) => row.subject === "과학"
     ? { ...row, isActive: false, registrationCreateEnabled: false, defaultDirectorProfileId: null }
@@ -103,6 +106,28 @@ test("new science selection is high-school only while an existing science track 
     grade: "고1",
     selectedSubjects: ["과학"],
   }).options, ["영어", "수학", "과학"])
+})
+
+test("an empty grade keeps the selected science plan and director override", () => {
+  const draft = {
+    ...intakeWorkflow.createRegistrationInitialWorkflowDraft(["영어", "과학"]),
+    subjectPlans: { 영어: "inquiry", 과학: "visit" },
+    visitScheduledAt: "2026-07-30T14:00",
+    visitPlace: "상담실",
+    directorOverrides: { 과학: "science-director" },
+  }
+  const result = intakeWorkflow.reconcileRegistrationSubjectsForGrade({
+    capabilities: scienceCapabilities,
+    grade: "",
+    subjects: ["영어", "과학"],
+    draft,
+  })
+
+  assert.deepEqual(result.subjects, ["영어", "과학"])
+  assert.deepEqual(result.removedSubjects, [])
+  assert.equal(result.removalReason, "")
+  assert.equal(result.draft.subjectPlans.과학, "visit")
+  assert.equal(result.draft.directorOverrides.과학, "science-director")
 })
 
 test("downgrading the create grade immediately removes science plan and override", () => {
@@ -123,7 +148,7 @@ test("downgrading the create grade immediately removes science plan and override
 
   assert.deepEqual(result.subjects, ["영어"])
   assert.deepEqual(result.removedSubjects, ["과학"])
-  assert.match(result.removalReason, /과학.*고등|고등.*과학/)
+  assert.equal(result.removalReason, "과학은(는) 현재 선택한 학년에서 신규 등록할 수 없습니다.")
   assert.deepEqual(result.draft, {
     subjectPlans: { 영어: "inquiry" },
     levelTestScheduledAt: "",

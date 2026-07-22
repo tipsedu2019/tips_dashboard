@@ -206,6 +206,7 @@ test("subject-track fixture verification exercises the refined no-save applicati
     "자동 이력 보기",
     "등록 자동 이력",
     "학년을 먼저 선택",
+    "과학 문의 과목",
     "새봄고",
     "fixture-task-multiple-classes",
     "수업 추가",

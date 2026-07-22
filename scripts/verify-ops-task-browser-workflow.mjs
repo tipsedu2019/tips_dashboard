@@ -2855,8 +2855,8 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     const requestNote = applicationHost.getByLabel("요청 사항", { exact: true }).first()
 
     await subjectPicker.waitFor({ state: "visible", timeout: 5000 })
-    if (await subjectButtons.count() !== 2) {
-      throw new Error("registration application does not expose the two pressed-state subject buttons.")
+    if (await subjectButtons.count() !== 3) {
+      throw new Error("registration application does not expose the three pressed-state subject buttons.")
     }
     for (const control of [studentName, inquiryAt, schoolGrade, schoolName, parentPhone, studentPhone, requestNote]) {
       await control.waitFor({ state: "visible", timeout: 5000 })
@@ -3119,7 +3119,16 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   if (await createControls.schoolName.isEnabled()) {
     throw new Error("school must be disabled with 학년을 먼저 선택.")
   }
+  const createScienceSubjectButton = createApplicationHost.getByRole("button", { name: /과학 문의 과목/ })
+  await waitUntilEnabled(createScienceSubjectButton, "science subject button before grade selection")
+  await createScienceSubjectButton.click()
+  if (await createScienceSubjectButton.getAttribute("aria-pressed") !== "true") {
+    throw new Error("science subject did not remain selected before grade selection.")
+  }
   await createControls.schoolGrade.selectOption("고1")
+  if (await createScienceSubjectButton.getAttribute("aria-pressed") !== "true") {
+    throw new Error("science subject did not remain selected after choosing an allowed grade.")
+  }
   await waitUntilEnabled(createControls.schoolName, "grade-scoped school select")
   const highSchoolOptions = await createControls.schoolName.locator("option").allTextContents()
   if (!highSchoolOptions.includes("새봄고")) {
