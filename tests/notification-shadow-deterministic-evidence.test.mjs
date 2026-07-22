@@ -7,7 +7,7 @@ const evaluatorUrl = new URL(
   import.meta.url,
 )
 const runnerUrl = new URL("../scripts/run-notification-shadow-fixtures.mjs", import.meta.url)
-const migrationsUrl = new URL("../supabase/migrations/", import.meta.url)
+const migrationsUrl = new URL("../supabase/pending-migrations/notification-cutover/", import.meta.url)
 
 const UUIDS = Object.freeze({
   request: "11111111-1111-4111-8111-111111111111",

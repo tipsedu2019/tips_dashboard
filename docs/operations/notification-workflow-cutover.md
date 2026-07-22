@@ -1,6 +1,12 @@
 # 알림 업무 전환·롤백 운영 절차
 
-이 문서는 공통 알림 코드와 미리보기 검증이 끝난 뒤 사용할 운영 인계서다. 검증 스크립트는 읽기 전용이며 운영 플래그를 변경하지 않는다. 배포, 마이그레이션 적용, 일정 설치, 운영 그림자 기록, 소유자 전환은 각각 범위가 명시된 별도 승인이 있어야 한다.
+이 문서는 공통 알림 코드와 미리보기 검증이 끝난 뒤 사용할 미래 전환의 안전 요구조건 기록이다. 현재 실행 가능한 전환 절차나 운영 승인서가 아니다. 검증 스크립트는 읽기 전용이며 운영 플래그를 변경하지 않는다. 배포, 마이그레이션 설치, 일정 설치, 운영 그림자 기록, 소유자 전환은 각각 범위가 명시된 별도 승인이 있어야 한다.
+
+## 격리 전환 정책
+
+quarantine의 과거 6개 SQL은 reference-only이며 직접 적용하거나 active lane으로 승격하지 않는다. 관찰을 다시 시작해도 먼저 최신 schema 기준의 새 forward-dated install migration과 service-role 전용 activation RPC를 별도 설계·검증·승인한다.
+
+과거 SQL은 현재 과학 인지 구현인 `public.revalidate_immediate_notification_delivery_v1`와 `public.prepare_notification_immediate_delivery_v1`를 과학 지원 이전 본문으로 덮어쓸 수 있다. 따라서 아래의 24시간 이상·Asia/Seoul 기준 완결된 하루 관찰과 7일 운영 shadow는 미래 전환에도 유지할 역사적 안전 요구조건이지만, 충족 여부가 quarantine SQL의 적용·복사·이름 변경·승격 권한을 만들지는 않는다.
 
 ## 전환 전에 반드시 확인할 것
 
@@ -14,20 +20,20 @@
 
 ## 구형 계약 관찰과 폐쇄
 
-이 절차는 Docker를 사용하지 않는다. 아래 내용은 현재 실행 항목이 아니라 향후 별도 승인 뒤 수행할 운영 절차다. 애플리케이션은 평소처럼 로컬 또는 Vercel에서 실행하고, 원격 DB 마이그레이션은 Supabase 플러그인으로 파일별 SQL을 적용한다. 최종 트리 전체를 한 번에 밀면 관찰 전에 폐쇄 마이그레이션까지 실행되므로, 아래의 두 단계 순서를 지켜야 한다.
+이 절차는 Docker를 사용하지 않는다. 아래 내용은 과거 브리지 설치와 미래 재설계에 남겨야 할 관찰 요구조건이며 현재 실행 항목이 아니다. 이미 설치된 브리지 SQL을 재실행하지 않고, quarantine SQL도 어떤 도구로도 적용하지 않는다. 미래 설치·활성화의 실제 명령과 승인 경계는 새 forward-dated install migration과 별도 service-role activation RPC가 준비된 뒤 새 운영 계획에 작성한다.
 
 폐쇄 전 호환 번들은 Google Chat과 Web Push의 구형 원문 호출을 오류로 만들지는 않지만 외부 공급자에는 보내지 않는다. 인증된 호출에 한해 진입점, 계약 종류, 결과, 행위자, 임의 요청 ID만 비공개 계측표에 남기고 `skipped=true`, `reason=legacy_payload_observed`로 끝낸다. 같은 업무 변경에서 생성된 안정된 원본 이벤트 ID를 서버의 고정 경로가 해석해 실제 전송을 담당하며, 브라우저가 보낸 문구와 대상을 사용하지 않는다. 제목, 본문, 수신자, 링크, 웹훅, 구독 주소 같은 내용은 계측표에 저장하지 않는다.
 
 ### 1단계: 브리지 설치와 관찰
 
-1. Supabase 플러그인으로 다음 마이그레이션만 순서대로 적용한다.
+1. 과거 1단계에서는 다음 active-lane 브리지 마이그레이션이 순서대로 설치됐다. 이 목록은 재적용 지시가 아니라 관찰 전제의 기록이다.
    - `20260716190000_notification_ops_task_producers.sql`
    - `20260716191000_notification_transfer_withdrawal_producers.sql`
    - `20260716192000_notification_makeup_adapter.sql`
    - `20260716193000_notification_approval_producers.sql`
    - `20260716194000_notification_registration_handoffs.sql`
    - `20260716194500_notification_legacy_contract_telemetry.sql`
-2. 위 DB 계약과 같은 커밋의 애플리케이션을 Vercel 운영 환경에 배포한다. 이 번들은 외부 시도 등록 RPC와 휴보강 고정 경로가 호출하는 전달 의도 RPC까지 194500에서 사용할 수 있으므로 195900을 먼저 적용할 필요가 없다. 194500의 전달 의도 RPC는 그림자 기능이 아직 없는 관찰 단계에서 검증된 `recorded=false`, `reason=shadow_contract_pending`만 반환하며 외부 발송을 막지 않는다. 195900은 같은 함수 서명을 `CREATE OR REPLACE`로 실제 그림자 비교 구현으로 교체하므로 중간에 RPC가 사라지는 배포 구간이 없다.
+2. 과거 1단계는 위 DB 계약과 같은 커밋의 애플리케이션을 Vercel 운영 환경에 배포했다. 194500의 전달 의도 RPC는 그림자 기능이 아직 없는 관찰 단계에서 검증된 `recorded=false`, `reason=shadow_contract_pending`만 반환했다. quarantine의 195900 본문은 당시 같은 함수 서명을 실제 그림자 비교 구현으로 교체하려던 reference이며, 현재 적용 순서나 승격 지시로 사용하지 않는다.
 3. 안전한 일정 실행기에서 5분마다 `node scripts/record-notification-deployment-receipt.mjs`를 실행한다. 필요한 환경 변수 이름은 `NOTIFICATION_PRODUCTION_ORIGIN`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`, `VERCEL_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`다. 토큰과 키는 일정 실행기의 비밀 변수로 주입하고 파일이나 로그에 출력하지 않는다.
 4. 영수증 기록기는 Vercel 운영 도메인이 현재 가리키는 정확한 배포 ID와 프로젝트 ID를 조회하고, 실행 중인 `/api/notifications/contract-version`의 해시와 대조한다. 빌드 명세는 Vercel이 주입한 `VERCEL_GIT_COMMIT_SHA`가 없거나 올바른 40자리 Git SHA가 아니면 닫히며, 원문 대신 `buildRevisionHash`만 반환한다. 일치한 배포 ID 해시 배열과 빌드 변경 번호 해시만 DB에 보내며 서버 수를 호출자가 입력하지 않는다. 5분 간격을 유지하고 어떤 두 영수증 사이도 10분을 넘기지 않는다.
 5. Asia/Seoul 기준 자정 이전부터 다음 자정이 지난 시점까지 관찰하여 완결된 달력일 하나와 24시간 이상을 동시에 포함한다. 관찰 구간의 모든 배포 영수증은 하나의 `buildRevisionHash`만 가리켜야 한다. 중간에 새 배포가 생기면 그 새 빌드 기준으로 24시간과 완결된 서울 운영일을 처음부터 다시 확보한다. 관찰 중 `ops-task`와 `makeup` 고정 경로를 각각 한 번 이상 실제로 성공시키며, 이 성공 기록의 빌드 해시도 영수증의 단일 빌드 해시와 같아야 한다. HTTP 2xx여도 응답의 `failed`가 1 이상이거나 `sent + deduped`가 0이면 실패이며 폐쇄 증거가 되지 않는다.
@@ -54,11 +60,11 @@ node scripts/verify-notification-contract-drain.mjs \
 
 `passed: true`이려면 구형 변환 불가 호출, 원본 ID 변환 실패, 미완료 고정 경로, 실패한 고정 경로가 모두 0이어야 한다. 두 고정 경로의 동일 빌드 성공은 각각 1건 이상이어야 하고, 배포 영수증은 구간 처음과 끝 5분 안을 덮으며 최대 공백이 10분 이하여야 한다. 모든 영수증의 활성 서버 배포가 브리지 인식 배포여야 하며 `deploymentBuildRevisionCount`는 1, `latestCompliantBuildRevisionHash`는 64자리 소문자 SHA-256이어야 한다.
 
-### 2단계: DB 자체 재검사와 폐쇄
+### 역사적 2단계 계약: DB 자체 재검사와 폐쇄
 
-검증이 통과한 뒤 Supabase 플러그인으로 `20260716195000_notification_workflow_legacy_closure.sql`만 별도로 적용한다. 이 마이그레이션은 외부 JSON을 신뢰하지 않고 DB의 직전 Asia/Seoul 달력일 전체부터 현재까지를 직접 다시 집계한다. 브리지 행을 잠근 상태에서 구형 트래픽, 변환 실패, 단일 빌드, 그 빌드의 고정 경로별 실제 성공·실패, 배포 영수증 연속성을 다시 확인한 뒤에만 폐쇄한다. 통과한 빌드 해시, 증거 시작·종료 시각, 첫·마지막 영수증 ID, 영수증 수와 경로별 성공 수는 `notification_contract_closures` 불변 표식에 함께 저장된다. 이후 단계는 단순 최신 영수증이 아니라 이 표식의 빌드 해시를 기준으로 사용한다. 먼저 시작한 구형 호출이 있으면 폐쇄가 실패하고, 폐쇄가 먼저 커밋되면 기다리던 호출은 `closed=true`를 받아 공급자를 호출하지 않고 끝난다.
+과거 `20260716195000_notification_workflow_legacy_closure.sql`이 표현한 안전 계약은 외부 JSON을 신뢰하지 않고 DB의 직전 Asia/Seoul 달력일 전체부터 현재까지를 직접 다시 집계하는 것이었다. 브리지 행을 잠근 상태에서 구형 트래픽, 변환 실패, 단일 빌드, 그 빌드의 고정 경로별 실제 성공·실패, 배포 영수증 연속성을 다시 확인하고, 통과한 빌드 해시와 증거 범위를 불변 표식에 저장하는 요구조건은 미래 install migration에도 유지한다. 이 reference SQL 자체는 검증 통과 여부와 무관하게 적용하지 않는다.
 
-195000이 성공한 뒤에만 `20260716195500_notification_worker_schedule.sql`, `20260716195800_notification_registration_provider_claim.sql`, `20260716195900_notification_control_plane_forward_compat.sql`, `20260716196000_notification_shadow_fixture_runner.sql`, `20260717145304_notification_shadow_deterministic_evidence.sql`을 순서대로 적용한다. 마지막 후속 마이그레이션은 196000을 수정하지 않고 활성 규칙별 자연 비교 완전성, 무활성 범위 현재성, 새 템플릿 SHA-256과 과거 32자리 체크섬 읽기 호환을 추가한다. 결정적 준비·기록 RPC는 운영 역할에 공개하지 않으며 전환 증거로 사용하지 않는다. 검증이 실패하면 195000 이후 파일은 적용하지 않고, 반환된 차단 원인에 해당하는 관찰 구간만 다시 확보한다.
+나머지 5개 quarantine SQL이 표현한 worker 일정, provider claim, forward-compat, shadow 증거 계약도 reference로만 보존한다. 미래 install migration은 최신 schema와 두 과학 인지 함수의 최종 본문을 기준으로 이 계약을 새로 조합해야 하며, 설치와 activation을 한 SQL에 묶지 않는다. activation은 새로 설계한 service-role 전용 RPC와 별도 승인으로만 수행하고, 자연 비교 완전성·무활성 범위 현재성·새 SHA-256 및 과거 32자리 체크섬 읽기 호환 요구조건은 유지한다.
 
 ## 고정 전환 순서
 
@@ -119,16 +125,7 @@ node scripts/run-notification-shadow-fixtures.mjs \
   --request-id '<이번 10개 범위 묶음의 새 UUID>'
 ```
 
-승인된 운영 그림자 단계에서만 같은 묶음 요청 ID로 실행한다. 서비스 역할 키는 환경 변수로만 주입하며 출력이나 파일에 남기지 않는다.
-
-```bash
-SUPABASE_URL='https://<project>.supabase.co' \
-SUPABASE_SERVICE_ROLE_KEY='<secret>' \
-node scripts/run-notification-shadow-fixtures.mjs \
-  --request-id '<dry-run과 같은 UUID>' \
-  --apply \
-  --authorization shadow-fixture-approved
-```
+과거 운영 그림자 설계는 승인된 단계에서만 같은 묶음 요청 ID로 원격 증거 기록을 허용하고, 서비스 역할 키를 환경 변수로만 주입하도록 요구했다. 현재는 이를 실행하지 않는다. 새 install migration과 별도 activation RPC가 승인될 때 원격 실행 명령도 새 계획에서 다시 정의한다.
 
 스크립트는 고정 전환 순서의 10개 범위를 한 번씩 호출하고 범위마다 서로 다른 요청 ID를 보낸다. 각 호출은 요청 원장의 완료 응답이 있더라도 현재 그림자 변경 번호·범위 설정·활성 규칙·활성 템플릿·실행 표식과 증거의 현재성을 다시 검증한다. 과거 성공이 현재와 다르면 재실행도 실패한다. 범위 결과가 `natural_comparison`이면 활성 규칙 수가 1개 이상이고 `comparisonKey`가 있어야 한다. 결과가 `no_active_rule`이면 활성 규칙 수가 0이고 `comparisonKey`는 `null`이어야 한다. 자연 비교가 필요한 활성 범위에서 현재 비교를 찾지 못하면 결정적 결과로 우회하지 않고 즉시 중단한다. 10개 범위를 처리한 뒤 DB가 모든 활성 규칙의 현재 자연 비교를 다시 확인해야 완료다. 단일 빌드 연속성은 이 실행기가 아니라 첫 소유자 전환 RPC가 배포 영수증으로 검증한다. 이 스크립트는 실제 학생·직원·예약 ID, 실제 연결값, 구독 주소, 공급자 접속 주소를 읽거나 만들지 않는다.
 

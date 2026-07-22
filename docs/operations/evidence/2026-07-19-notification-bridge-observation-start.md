@@ -60,6 +60,7 @@
 - 사용자 요청으로 이 시점에 예약 관측을 조기 종료하고 heartbeat 자동 실행을 삭제했다.
 - 유효 창이 24시간 및 서울 기준 완결된 하루 조건에 미달하므로 `get_notification_contract_drain_evidence_v1` 최종 판정은 실행하지 않았다.
 - 전환·활성화 번들 `20260716195000`, `20260716195500`, `20260716195800`, `20260716195900`, `20260716196000`, `20260717145304`, shadow, worker/watchdog 일정, 소유권 전환, 실제 발송은 적용하지 않았다.
+- 위 과거 6개 SQL은 현재 immutable quarantine의 reference-only 자료이며 직접 적용하거나 active lane으로 승격하지 않는다. 과거 본문은 현재 과학 인지 함수 `public.revalidate_immediate_notification_delivery_v1`와 `public.prepare_notification_immediate_delivery_v1`를 이전 정의로 덮어쓸 수 있다.
 
 ## 4. 발송 잠금 상태
 
@@ -112,4 +113,4 @@
 - 최종 drain evidence: 미실행
 - 예약 관측 자동 실행: 삭제 완료
 
-이 기록 이후에도 실제 알림 발송은 켜지 않는다.
+이 기록 이후에도 실제 알림 발송은 켜지 않는다. 관찰을 다시 시작할 때도 24시간 이상 및 Asia/Seoul 기준 완결된 하루와 7일 운영 shadow라는 역사적 요구조건을 유지한다. 다만 이 조건은 과거 6개 SQL의 적용 권한이 아니며, 최신 schema 기준의 새 forward-dated install migration과 service-role 전용 activation RPC를 별도 설계·검증·승인해야 한다.

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const migrationUrl = new URL(
-  "../supabase/migrations/20260716196000_notification_shadow_fixture_runner.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716196000_notification_shadow_fixture_runner.sql",
   import.meta.url,
 )
 const scriptUrl = new URL("../scripts/run-notification-shadow-fixtures.mjs", import.meta.url)
@@ -179,7 +179,7 @@ test("운영 runner는 고정 10개 scope와 자연 비교·무활성 결과를 
 
 test("후속 운영 gate는 결정적 DB 증거를 인정하지 않고 public 결정적 RPC를 닫는다", async () => {
   const source = await readFile(
-    new URL("../supabase/migrations/20260717145304_notification_shadow_deterministic_evidence.sql", import.meta.url),
+    new URL("../supabase/pending-migrations/notification-cutover/20260717145304_notification_shadow_deterministic_evidence.sql", import.meta.url),
     "utf8",
   )
   const complete = sqlFunctionBlock(

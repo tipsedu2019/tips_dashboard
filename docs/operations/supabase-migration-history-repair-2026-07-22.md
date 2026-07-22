@@ -46,7 +46,7 @@
 
 ## 별도 운영 게이트
 
-다음 6개 알림 마이그레이션은 원격 이력 불일치와 무관한 정상 미적용 상태다.
+다음 6개 알림 마이그레이션은 원격 이력 불일치와 무관한 정상 미적용 상태이며, 현재 `supabase/pending-migrations/notification-cutover/`의 immutable quarantine에 보존한다.
 
 - `20260716195000_notification_workflow_legacy_closure.sql`
 - `20260716195500_notification_worker_schedule.sql`
@@ -55,7 +55,9 @@
 - `20260716196000_notification_shadow_fixture_runner.sql`
 - `20260717145304_notification_shadow_deterministic_evidence.sql`
 
-첫 파일은 `notification_contract_drain_not_complete` 관찰 조건을 통과하기 전까지 의도적으로 실패한다. 이 파일들을 적용 완료로 위장하거나 안전 게이트를 약화해서는 안 된다. 관찰 조건이 충족된 뒤 기존 알림 전환 절차로 별도 처리한다.
+이 과거 6개 SQL은 reference-only이며 직접 적용하거나 active lane으로 복사·이름 변경·승격하지 않는다. 특히 과거 worker/forward-compat 본문은 현재 과학 인지 함수 `public.revalidate_immediate_notification_delivery_v1`와 `public.prepare_notification_immediate_delivery_v1`를 과학 지원 이전 정의로 덮어쓸 수 있다.
+
+향후 관찰을 다시 시작하더라도 24시간 이상 및 Asia/Seoul 기준 완결된 하루와 7일 운영 shadow 요구조건은 그대로 유지한다. 그 조건은 과거 SQL 적용 권한이 아니다. 최신 schema 기준의 새 forward-dated install migration과 service-role 전용 activation RPC를 별도로 설계·검증·승인한 뒤에만 새 전환 계획을 세운다.
 
 ## 재발 방지
 

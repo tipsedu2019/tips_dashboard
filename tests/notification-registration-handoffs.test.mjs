@@ -13,7 +13,7 @@ const visitRouteUrl = new URL("../src/app/api/registration/consultation-notifica
 const solapiRouteUrl = new URL("../src/app/api/solapi/registration/route.ts", import.meta.url)
 const solapiCoreUrl = new URL("../src/app/api/solapi/registration/core.js", import.meta.url)
 const workerMigrationUrl = new URL(
-  "../supabase/migrations/20260716195500_notification_worker_schedule.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql",
   import.meta.url,
 )
 const controlPlaneWorkerMigrationUrl = new URL(
@@ -21,7 +21,7 @@ const controlPlaneWorkerMigrationUrl = new URL(
   import.meta.url,
 )
 const providerClaimMigrationUrl = new URL(
-  "../supabase/migrations/20260716195800_notification_registration_provider_claim.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195800_notification_registration_provider_claim.sql",
   import.meta.url,
 )
 

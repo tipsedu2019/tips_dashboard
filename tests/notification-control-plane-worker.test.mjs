@@ -8,11 +8,11 @@ const workerMigrationUrl = new URL(
   import.meta.url,
 )
 const workerForwardMigrationUrl = new URL(
-  "../supabase/migrations/20260716195900_notification_control_plane_forward_compat.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195900_notification_control_plane_forward_compat.sql",
   import.meta.url,
 )
 const workerScheduleMigrationUrl = new URL(
-  "../supabase/migrations/20260716195500_notification_worker_schedule.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql",
   import.meta.url,
 )
 const scienceConnectionMigrationUrl = new URL(
@@ -20,7 +20,7 @@ const scienceConnectionMigrationUrl = new URL(
   import.meta.url,
 )
 const registrationProviderClaimMigrationUrl = new URL(
-  "../supabase/migrations/20260716195800_notification_registration_provider_claim.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195800_notification_registration_provider_claim.sql",
   import.meta.url,
 )
 const adapterModuleUrl = new URL(

@@ -5,7 +5,7 @@ import test from "node:test"
 const verifierUrl = new URL("../scripts/verify-notification-workflow-cutover.mjs", import.meta.url)
 const documentUrl = new URL("../docs/operations/notification-workflow-cutover.md", import.meta.url)
 const forwardCompatUrl = new URL(
-  "../supabase/migrations/20260716195500_notification_worker_schedule.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql",
   import.meta.url,
 )
 

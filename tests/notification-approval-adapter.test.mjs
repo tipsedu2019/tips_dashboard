@@ -13,11 +13,11 @@ const adapterUrl = new URL(
   import.meta.url,
 )
 const closureUrl = new URL(
-  "../supabase/migrations/20260716195000_notification_workflow_legacy_closure.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195000_notification_workflow_legacy_closure.sql",
   import.meta.url,
 )
 const workerUrl = new URL(
-  "../supabase/migrations/20260716195500_notification_worker_schedule.sql",
+  "../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql",
   import.meta.url,
 )
 const pgTapUrl = new URL("../supabase/tests/notification_approval_adapter_test.sql", import.meta.url)

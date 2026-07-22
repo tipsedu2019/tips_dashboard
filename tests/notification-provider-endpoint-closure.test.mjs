@@ -9,12 +9,12 @@ const googleChatUrl = new URL("../src/app/api/google-chat/route.ts", import.meta
 const webPushUrl = new URL("../src/app/api/web-push/route.ts", import.meta.url)
 const workerUrl = new URL("../src/app/api/notifications/worker/route.ts", import.meta.url)
 const telemetryUrl = new URL("../supabase/migrations/20260716194500_notification_legacy_contract_telemetry.sql", import.meta.url)
-const closureUrl = new URL("../supabase/migrations/20260716195000_notification_workflow_legacy_closure.sql", import.meta.url)
-const workerScheduleUrl = new URL("../supabase/migrations/20260716195500_notification_worker_schedule.sql", import.meta.url)
-const forwardCompatUrl = new URL("../supabase/migrations/20260716195900_notification_control_plane_forward_compat.sql", import.meta.url)
+const closureUrl = new URL("../supabase/pending-migrations/notification-cutover/20260716195000_notification_workflow_legacy_closure.sql", import.meta.url)
+const workerScheduleUrl = new URL("../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql", import.meta.url)
+const forwardCompatUrl = new URL("../supabase/pending-migrations/notification-cutover/20260716195900_notification_control_plane_forward_compat.sql", import.meta.url)
 const contractVersionUrl = new URL("../src/app/api/notifications/contract-version/route.ts", import.meta.url)
 const deploymentReceiptWriterUrl = new URL("../scripts/record-notification-deployment-receipt.mjs", import.meta.url)
-const workflowSeedPgTapUrl = new URL("../supabase/tests/notification_workflow_seed_test.sql", import.meta.url)
+const workflowSeedPgTapUrl = new URL("../supabase/pending-migrations/notification-cutover/tests/notification_workflow_seed_test.sql", import.meta.url)
 
 function functionBlock(source, name) {
   const start = source.indexOf(`export async function ${name}`)

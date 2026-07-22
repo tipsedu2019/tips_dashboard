@@ -5,8 +5,8 @@ import test from "node:test"
 const metricsUrl = new URL("../src/features/notifications/server/notification-operations-metrics.ts", import.meta.url)
 const scheduleScriptUrl = new URL("../scripts/manage-notification-worker-schedule.mjs", import.meta.url)
 const drainScriptUrl = new URL("../scripts/verify-notification-contract-drain.mjs", import.meta.url)
-const scheduleMigrationUrl = new URL("../supabase/migrations/20260716195500_notification_worker_schedule.sql", import.meta.url)
-const forwardMigrationUrl = new URL("../supabase/migrations/20260716195900_notification_control_plane_forward_compat.sql", import.meta.url)
+const scheduleMigrationUrl = new URL("../supabase/pending-migrations/notification-cutover/20260716195500_notification_worker_schedule.sql", import.meta.url)
+const forwardMigrationUrl = new URL("../supabase/pending-migrations/notification-cutover/20260716195900_notification_control_plane_forward_compat.sql", import.meta.url)
 
 function healthyMetrics() {
   return {
