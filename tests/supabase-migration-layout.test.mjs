@@ -23,6 +23,8 @@ const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notifica
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "0c278043f29b67b24035a9fc03f72247739ee59cd89f6b84b846913c568004ca"
+const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
+const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 
 const EXPECTED_SQL = Object.freeze([
   ["20260716195000_notification_workflow_legacy_closure.sql", "e9131131f0d9419a4a8fdf5d69a58a1047a41583f98d9ef7b5b376374ee52975"],
@@ -127,6 +129,10 @@ test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다"
     "non-interactive link must receive both required secrets only at the link step",
   )
   assert.equal(await sha256(requiredWorkflowPath), REQUIRED_DB_PUSH_WORKFLOW_SHA256)
+  assert.equal(
+    await sha256(join(activeDir, PREPARE_ACL_MIGRATION_FILE)),
+    PREPARE_ACL_MIGRATION_SHA256,
+  )
   for (const [file, digest] of EXPECTED_SQL) {
     assert.equal(await sha256(join(quarantineDir, file)), digest)
     await assert.rejects(readFile(join(activeDir, file)))
@@ -267,6 +273,67 @@ RETURNS jsonb LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
   )
   assertIncludesErrorCode(
     await validateSupabaseMigrationLayout({ repoRoot: commentMarkerFixture }),
+    "science_final_definition_mismatch",
+  )
+})
+
+test("prepare ACL migration만 science 이후 protected function 참조로 허용한다", async () => {
+  const missingFixture = await createRepoFixture()
+  await rm(join(missingFixture, "supabase", "migrations", PREPARE_ACL_MIGRATION_FILE))
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: missingFixture }),
+    "notification_prepare_acl_migration_not_regular",
+  )
+
+  const driftFixture = await createRepoFixture()
+  await appendFile(
+    join(driftFixture, "supabase", "migrations", PREPARE_ACL_MIGRATION_FILE),
+    "\n-- drift\n",
+  )
+  const driftErrors = await validateSupabaseMigrationLayout({ repoRoot: driftFixture })
+  assertIncludesErrorCode(driftErrors, "notification_prepare_acl_migration_hash_mismatch")
+  assertIncludesErrorCode(driftErrors, "notification_prepare_acl_migration_contract_mismatch")
+  assertIncludesErrorCode(driftErrors, "science_final_definition_mismatch")
+
+  for (const forbiddenStatement of [
+    "CREATE FUNCTION public.prepare_notification_immediate_delivery_v1() RETURNS void LANGUAGE sql AS $$ SELECT $$;",
+    "CREATE OR REPLACE FUNCTION public.prepare_notification_immediate_delivery_v1() RETURNS void LANGUAGE sql AS $$ SELECT $$;",
+    "DROP FUNCTION public.prepare_notification_immediate_delivery_v1();",
+    "UPDATE dashboard_private.notification_runtime_flags SET enabled = true;",
+  ]) {
+    const contentFixture = await createRepoFixture()
+    await appendFile(
+      join(contentFixture, "supabase", "migrations", PREPARE_ACL_MIGRATION_FILE),
+      `\n${forbiddenStatement}\n`,
+    )
+    const contentErrors = await validateSupabaseMigrationLayout({ repoRoot: contentFixture })
+    assertIncludesErrorCode(contentErrors, "notification_prepare_acl_migration_hash_mismatch")
+    assertIncludesErrorCode(contentErrors, "notification_prepare_acl_migration_contract_mismatch")
+    assertIncludesErrorCode(contentErrors, "science_final_definition_mismatch")
+  }
+
+  for (const protectedFunction of [
+    "public.prepare_notification_immediate_delivery_v1",
+    "public.revalidate_immediate_notification_delivery_v1",
+  ]) {
+    const laterFixture = await createRepoFixture()
+    await writeFile(
+      join(laterFixture, "supabase", "migrations", `20260722140000_${protectedFunction.split(".").at(-1)}.sql`),
+      `-- ${protectedFunction}\nselect 1;\n`,
+    )
+    assertIncludesErrorCode(
+      await validateSupabaseMigrationLayout({ repoRoot: laterFixture }),
+      "science_final_definition_mismatch",
+    )
+  }
+
+  const renamedFixture = await createRepoFixture()
+  await copyFile(
+    join(renamedFixture, "supabase", "migrations", PREPARE_ACL_MIGRATION_FILE),
+    join(renamedFixture, "supabase", "migrations", "20260722140001_renamed_acl.sql"),
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: renamedFixture }),
     "science_final_definition_mismatch",
   )
 })

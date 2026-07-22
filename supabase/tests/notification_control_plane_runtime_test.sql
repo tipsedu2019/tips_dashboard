@@ -1,5 +1,5 @@
 begin;
-select plan(227);
+select plan(228);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -4167,6 +4167,53 @@ where id = '30000000-0000-4000-8000-000000000001';
 
 -- Task 7 durable worker/state-machine fixtures use a separate 7600 UUID range.
 -- They exercise behavior that source-contract tests cannot prove without a DB.
+select ok(
+  pg_catalog.has_function_privilege(
+    'service_role',
+    'public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)',
+    'EXECUTE'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)',
+    'EXECUTE'
+  )
+  and (
+    select
+      pg_catalog.count(*) = 2
+      and pg_catalog.count(*) filter (
+        where acl_row.grantor = function_row.proowner
+          and acl_row.grantee = function_row.proowner
+          and acl_row.privilege_type = 'EXECUTE'
+          and acl_row.is_grantable is false
+      ) = 1
+      and pg_catalog.count(*) filter (
+        where acl_row.grantor = function_row.proowner
+          and acl_row.grantee = (
+            select role_row.oid
+            from pg_catalog.pg_roles role_row
+            where role_row.rolname = 'service_role'
+          )
+          and acl_row.privilege_type = 'EXECUTE'
+          and acl_row.is_grantable is false
+      ) = 1
+    from pg_catalog.pg_proc function_row
+    cross join lateral pg_catalog.aclexplode(
+      coalesce(
+        function_row.proacl,
+        pg_catalog.acldefault('f', function_row.proowner)
+      )
+    ) acl_row
+    where function_row.oid =
+      'public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)'::pg_catalog.regprocedure
+  ),
+  'immediate-delivery prepare has only owner and non-grantable service_role execute ACLs'
+);
 select has_function(
   'public',
   'apply_notification_fanout_batch_v1',

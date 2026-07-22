@@ -46,6 +46,14 @@
 
 ## 별도 운영 게이트
 
+### 독립 발견된 prepare ACL 보정
+
+이력 재매핑 뒤의 별도 운영 점검에서 정확한 함수 `public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)`가 `SECURITY DEFINER`이고 본문은 `service_role` 외 호출을 fail-closed 처리하지만, 운영 ACL에는 PostgreSQL 기본 PUBLIC EXECUTE와 `anon`·`authenticated` EXECUTE가 남아 있음이 확인되었다. `revalidate_immediate_notification_delivery_v1`와 `begin_notification_delivery_send_v1`는 이미 service-role-only였으므로 prepare 한 함수만의 독립 ACL 결함이다.
+
+보정은 이미 적용된 `20260722120000_science_notification_connection.sql`이나 quarantine 원본을 수정·재실행하지 않고, active lane의 `20260722130000_notification_prepare_acl_hardening.sql` 한 건으로만 수행한다. 이 migration은 정확한 함수 존재와 `SECURITY DEFINER`를 먼저 확인하고 owner를 `postgres`로 고정한 뒤 PUBLIC·`anon`·`authenticated`·`service_role`의 기존 grant를 모두 회수하고 grant option 없는 EXECUTE를 `service_role`에만 다시 부여한다. 마지막 catalog 검사는 explicit ACL이 owner와 `service_role` EXECUTE 두 행뿐인지 확인해 예상 밖 역할 grant도 fail-closed 처리한다.
+
+정식 DB CI 적용 시 의도한 변화는 함수 owner/ACL과 migration history 한 건뿐이다. 함수 본문·시그니처·데이터·runtime flags·연결 secret·cron·worker·provider 상태는 바꾸지 않는다. 기대 운영 post-state는 `service_role EXECUTE=true`, `anon/authenticated EXECUTE=false`, PUBLIC 직접 grant 없음, service-role grant option 없음이다. 로컬 구현 단계에서는 DB를 직접 적용하거나 provider를 호출하지 않고, 공식 DB CI가 적용한 뒤 실제 post-state를 별도 증거로 남긴다.
+
 다음 6개 알림 마이그레이션은 원격 이력 불일치와 무관한 정상 미적용 상태이며, 현재 `supabase/pending-migrations/notification-cutover/`의 immutable quarantine에 보존한다.
 
 - `20260716195000_notification_workflow_legacy_closure.sql`
@@ -55,7 +63,7 @@
 - `20260716196000_notification_shadow_fixture_runner.sql`
 - `20260717145304_notification_shadow_deterministic_evidence.sql`
 
-이 과거 6개 SQL은 reference-only이며 직접 적용하거나 active lane으로 복사·이름 변경·승격하지 않는다. 특히 과거 worker/forward-compat 본문은 현재 과학 인지 함수 `public.revalidate_immediate_notification_delivery_v1`와 `public.prepare_notification_immediate_delivery_v1`를 과학 지원 이전 정의로 덮어쓸 수 있다.
+이 과거 6개 SQL은 reference-only이며 직접 적용하거나 active lane으로 복사·이름 변경·승격하지 않는다. 특히 과거 worker/forward-compat 본문은 현재 과학 인지 함수 `public.revalidate_immediate_notification_delivery_v1`와 `public.prepare_notification_immediate_delivery_v1`를 과학 지원 이전 정의로 덮어쓰고, 보정된 prepare ACL까지 되돌릴 수 있다.
 
 향후 관찰을 다시 시작하더라도 24시간 이상 및 Asia/Seoul 기준 완결된 하루와 7일 운영 shadow 요구조건은 그대로 유지한다. 그 조건은 과거 SQL 적용 권한이 아니다. 최신 schema 기준의 새 forward-dated install migration과 service-role 전용 activation RPC를 별도로 설계·검증·승인한 뒤에만 새 전환 계획을 세운다.
 

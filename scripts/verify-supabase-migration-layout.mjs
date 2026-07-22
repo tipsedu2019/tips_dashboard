@@ -13,6 +13,10 @@ const REQUIRED_DB_PUSH_WORKFLOW = "supabase-db-push.yml"
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "0c278043f29b67b24035a9fc03f72247739ee59cd89f6b84b846913c568004ca"
 const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.sql"
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
+const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
+const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
+const PREPARE_FUNCTION_SIGNATURE =
+  "public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)"
 const QUARANTINE_README_SHA256 = "62e387da1575982f154427f5f3ed001ffdb8c9c832744cdb79a45fd3f0ee905f"
 const DRAIN_MARKER = "notification_contract_drain_not_complete"
 
@@ -112,6 +116,31 @@ function functionDefinitionSources(source, functionName) {
   })
 }
 
+function prepareAclMigrationContractValid(source) {
+  const signatureCount = source.split(PREPARE_FUNCTION_SIGNATURE).length - 1
+  return source.startsWith("begin;\n")
+    && source.endsWith("\ncommit;\n")
+    && signatureCount === 2
+    && (source.match(/\bset\s+local\s+(?:lock_timeout|statement_timeout|search_path)\b/gi) ?? []).length === 3
+    && (source.match(/\balter\s+function\s+public\.prepare_notification_immediate_delivery_v1\s*\(/gi) ?? []).length === 1
+    && (source.match(/\brevoke\s+all\s+on\s+function\s+public\.prepare_notification_immediate_delivery_v1\s*\(/gi) ?? []).length === 1
+    && (source.match(/\bgrant\s+execute\s+on\s+function\s+public\.prepare_notification_immediate_delivery_v1\s*\(/gi) ?? []).length === 1
+    && source.includes(") from public, anon, authenticated, service_role;")
+    && source.includes(") to service_role;")
+    && source.includes("pg_catalog.to_regprocedure(")
+    && source.includes("function_row.prosecdef")
+    && source.includes("pg_catalog.pg_get_userbyid(function_row.proowner)")
+    && source.includes("pg_catalog.has_function_privilege(")
+    && source.includes("pg_catalog.aclexplode(")
+    && source.includes("pg_catalog.count(*) = 2")
+    && source.includes("acl_row.grantee = v_owner_oid")
+    && source.includes("acl_row.grantee = v_service_role_oid")
+    && (source.match(/acl_row\.is_grantable\s+is\s+false/gi) ?? []).length === 2
+    && source.includes("v_acl_is_exact is not true")
+    && !/\bcreate\s+(?:or\s+replace\s+)?function\b|\bdrop\s+function\b/i.test(source)
+    && !/\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate)\b/i.test(source)
+}
+
 function hasJobBoundary(lines, startIndex, endIndex) {
   return lines
     .slice(startIndex + 1, endIndex)
@@ -166,6 +195,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const manifestPath = join(quarantineDir, "manifest.json")
   const quarantineReadmePath = join(quarantineDir, "README.md")
   const scienceMigrationPath = join(activeDir, SCIENCE_MIGRATION_FILE)
+  const prepareAclMigrationPath = join(activeDir, PREPARE_ACL_MIGRATION_FILE)
   let manifest = null
 
   try {
@@ -278,17 +308,21 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     }
     const source = await readFile(entryPath)
     const sourceText = source.toString("utf8")
+    const sourceHash = sha256(source)
     const timestamp = entry.match(/^(\d{14})/)?.[1]
     if (timestamp && quarantineTimestamps.has(timestamp)) {
       addError(errors, "cutover_timestamp_reused_in_active_lane", relative(resolvedRoot, entryPath))
     }
-    if (quarantineHashes.has(sha256(source))) {
+    if (quarantineHashes.has(sourceHash)) {
       addError(errors, "cutover_sql_hash_present_in_active_lane", relative(resolvedRoot, entryPath))
     }
     if (markerCount(sourceText) > 0) {
       addError(errors, "drain_marker_present_in_active_lane", relative(resolvedRoot, entryPath))
     }
-    if (entry > SCIENCE_MIGRATION_FILE) {
+    const isExactPrepareAclMigration = entry === PREPARE_ACL_MIGRATION_FILE
+      && sourceHash === PREPARE_ACL_MIGRATION_SHA256
+      && prepareAclMigrationContractValid(sourceText)
+    if (entry > SCIENCE_MIGRATION_FILE && !isExactPrepareAclMigration) {
       const normalizedSource = sourceText.toLowerCase()
       for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
         const bareFunctionName = contract.function.split(".").at(-1).toLowerCase()
@@ -300,6 +334,33 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
           )
         }
       }
+    }
+  }
+
+  const prepareAclMigrationStat = await statKind(prepareAclMigrationPath)
+  if (!prepareAclMigrationStat?.isFile()) {
+    addError(
+      errors,
+      "notification_prepare_acl_migration_not_regular",
+      relative(resolvedRoot, prepareAclMigrationPath),
+    )
+  } else {
+    const prepareAclMigration = await readFile(prepareAclMigrationPath)
+    const prepareAclSource = prepareAclMigration.toString("utf8")
+    const prepareAclHashMatches = sha256(prepareAclMigration) === PREPARE_ACL_MIGRATION_SHA256
+    if (!prepareAclHashMatches) {
+      addError(
+        errors,
+        "notification_prepare_acl_migration_hash_mismatch",
+        relative(resolvedRoot, prepareAclMigrationPath),
+      )
+    }
+    if (!prepareAclHashMatches || !prepareAclMigrationContractValid(prepareAclSource)) {
+      addError(
+        errors,
+        "notification_prepare_acl_migration_contract_mismatch",
+        relative(resolvedRoot, prepareAclMigrationPath),
+      )
     }
   }
 

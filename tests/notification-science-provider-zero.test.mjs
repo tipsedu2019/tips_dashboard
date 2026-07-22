@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
@@ -6,6 +7,18 @@ const scienceMigrationUrl = new URL(
   "../supabase/migrations/20260722120000_science_notification_connection.sql",
   import.meta.url,
 )
+const prepareAclMigrationUrl = new URL(
+  "../supabase/migrations/20260722130000_notification_prepare_acl_hardening.sql",
+  import.meta.url,
+)
+const notificationRuntimePgTapUrl = new URL(
+  "../supabase/tests/notification_control_plane_runtime_test.sql",
+  import.meta.url,
+)
+const PREPARE_FUNCTION_SIGNATURE =
+  "public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)"
+const PREPARE_ACL_MIGRATION_SHA256 =
+  "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 const runtimeFlagsMigrationUrl = new URL(
   "../supabase/migrations/20260716110000_notification_control_plane_expand.sql",
   import.meta.url,
@@ -87,6 +100,58 @@ test("science connection SQL keeps admin-only CAS, encrypted writes, and safe au
   assert.match(migration, /notification_audit_logs/i)
   assert.match(migration, /notification_connection_safe_json_v1/i)
   assert.doesNotMatch(migration, /grant\s+execute[\s\S]*authenticated/i)
+})
+
+test("prepare ACL hardening is one exact forward-only service-role contract", async () => {
+  const pgTap = await readFile(notificationRuntimePgTapUrl, "utf8")
+  assert.match(pgTap, /select\s+plan\(228\);/i)
+  assert.equal((pgTap.match(new RegExp(PREPARE_FUNCTION_SIGNATURE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length, 4)
+  assert.match(
+    pgTap,
+    /has_function_privilege\(\s*'service_role',[\s\S]*?'EXECUTE'\s*\)[\s\S]*?and\s+not\s+pg_catalog\.has_function_privilege\(\s*'anon',[\s\S]*?'EXECUTE'\s*\)[\s\S]*?and\s+not\s+pg_catalog\.has_function_privilege\(\s*'authenticated',[\s\S]*?'EXECUTE'\s*\)/i,
+  )
+  assert.match(pgTap, /pg_catalog\.count\(\*\)\s*=\s*2/i)
+  assert.match(pgTap, /acl_row\.grantee\s*=\s*function_row\.proowner/i)
+  assert.match(pgTap, /role_row\.rolname\s*=\s*'service_role'/i)
+  assert.equal((pgTap.match(/acl_row\.is_grantable\s+is\s+false/gi) ?? []).length >= 2, true)
+
+  const migration = await readFile(prepareAclMigrationUrl, "utf8")
+  assert.equal(createHash("sha256").update(migration).digest("hex"), PREPARE_ACL_MIGRATION_SHA256)
+  assert.match(migration, /^begin;\n/i)
+  assert.match(migration, /\ncommit;\n$/i)
+  assert.match(migration, /set\s+local\s+lock_timeout\s*=\s*'5s';/i)
+  assert.match(migration, /set\s+local\s+statement_timeout\s*=\s*'30s';/i)
+  assert.match(migration, /set\s+local\s+search_path\s*=\s*'';/i)
+  assert.equal((migration.match(new RegExp(PREPARE_FUNCTION_SIGNATURE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length, 2)
+  assert.match(
+    migration,
+    /alter\s+function\s+public\.prepare_notification_immediate_delivery_v1\([\s\S]*?timestamptz,\s*jsonb\s*\)\s+owner\s+to\s+postgres;/i,
+  )
+  assert.match(
+    migration,
+    /revoke\s+all\s+on\s+function\s+public\.prepare_notification_immediate_delivery_v1\([\s\S]*?timestamptz,\s*jsonb\s*\)\s+from\s+public,\s*anon,\s*authenticated,\s*service_role;/i,
+  )
+  assert.match(
+    migration,
+    /grant\s+execute\s+on\s+function\s+public\.prepare_notification_immediate_delivery_v1\([\s\S]*?timestamptz,\s*jsonb\s*\)\s+to\s+service_role;/i,
+  )
+  assert.match(migration, /pg_catalog\.to_regprocedure\(/i)
+  assert.match(migration, /function_row\.prosecdef/i)
+  assert.match(migration, /pg_catalog\.pg_get_userbyid\(function_row\.proowner\)/i)
+  assert.match(migration, /pg_catalog\.has_function_privilege\(\s*'service_role'/i)
+  assert.match(migration, /pg_catalog\.has_function_privilege\(\s*'anon'/i)
+  assert.match(migration, /pg_catalog\.has_function_privilege\(\s*'authenticated'/i)
+  assert.match(migration, /pg_catalog\.count\(\*\)\s*=\s*2/i)
+  assert.match(migration, /acl_row\.grantee\s*=\s*v_owner_oid/i)
+  assert.match(migration, /acl_row\.grantee\s*=\s*v_service_role_oid/i)
+  assert.equal((migration.match(/acl_row\.is_grantable\s+is\s+false/gi) ?? []).length, 2)
+  assert.match(migration, /v_acl_is_exact\s+is\s+not\s+true/i)
+  assert.doesNotMatch(migration, /\bcreate\s+(?:or\s+replace\s+)?function\b|\bdrop\s+function\b/i)
+  assert.doesNotMatch(migration, /\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate)\b/i)
+  assert.doesNotMatch(
+    migration,
+    /notification_runtime_flags|google_chat_webhook_settings|cron\.schedule|net\.http|fetch\s*\(|provider|secret/i,
+  )
 })
 
 test("science row is seeded disconnected with no secret and snapshot listing makes provider/fetch calls 0", async () => {

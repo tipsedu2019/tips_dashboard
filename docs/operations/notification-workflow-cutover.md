@@ -8,6 +8,8 @@ quarantine의 과거 6개 SQL은 reference-only이며 직접 적용하거나 act
 
 과거 SQL은 현재 과학 인지 구현인 `public.revalidate_immediate_notification_delivery_v1`와 `public.prepare_notification_immediate_delivery_v1`를 과학 지원 이전 본문으로 덮어쓸 수 있다. 따라서 아래의 24시간 이상·Asia/Seoul 기준 완결된 하루 관찰과 7일 운영 shadow는 미래 전환에도 유지할 역사적 안전 요구조건이지만, 충족 여부가 quarantine SQL의 적용·복사·이름 변경·승격 권한을 만들지는 않는다.
 
+독립 보안 점검에서 발견된 prepare 함수의 PUBLIC/브라우저 EXECUTE 결함은 quarantine 활성화와 무관한 `20260722130000_notification_prepare_acl_hardening.sql` 한 건으로만 보정한다. 이 active migration은 함수 본문·데이터·runtime flags·secret·cron·provider를 바꾸거나 전환을 시작하지 않는다. 정식 적용 뒤 정확한 시그니처의 기대 ACL은 postgres owner, `service_role EXECUTE=true`, `anon/authenticated EXECUTE=false`, PUBLIC 직접 grant 없음, service-role grant option 없음이다. 미래 install/activation 설계도 이 ACL을 넓히거나 과학-aware 본문을 교체할 수 없다.
+
 ## 전환 전에 반드시 확인할 것
 
 - 런타임 플래그 레지스트리는 승인된 12개 행과 정확히 일치해야 한다.

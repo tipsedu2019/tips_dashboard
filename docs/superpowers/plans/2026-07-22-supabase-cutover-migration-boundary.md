@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 운영 DB schema, data, migration history를 이번 작업에서 변경하지 않는다.
+- quarantine 경계 작업은 운영 DB를 변경하지 않는다. 후속 독립 보안 보정은 `20260722130000_notification_prepare_acl_hardening.sql` 한 건으로 정확한 함수 owner/ACL과 migration history만 의도적으로 변경하고 data·함수 본문·runtime 상태는 바꾸지 않는다.
 - 설정 UI 외 notification runtime flag 11개는 모두 `false`로 유지한다.
 - Google Chat, Web Push, SOLAPI, shadow, worker, watchdog, canonical dispatch를 활성화하지 않는다.
 - 원본 6개 SQL의 이름, 순서, 바이트와 SHA-256을 변경하지 않는다.
@@ -18,6 +18,7 @@
 - 같은 timestamp의 no-op 또는 빈 placeholder를 active lane에 만들지 않는다.
 - `supabase db push --linked --include-all`은 정상 migration 배포를 위해 유지한다.
 - 미래 cutover는 `20260722120000_science_notification_connection.sql`의 과학-aware 함수 정의를 최종 상태로 보존해야 한다.
+- 미래 cutover는 `prepare_notification_immediate_delivery_v1`의 postgres owner와 service-role-only EXECUTE ACL도 보존해야 한다.
 - 운영 DB에서 `db reset --linked`를 실행하지 않는다.
 
 ---
@@ -30,6 +31,7 @@
 - `supabase/pending-migrations/notification-cutover/tests/*.sql`: pending 객체를 요구하는 pgTAP 3개.
 - `scripts/verify-supabase-migration-layout.mjs`: manifest, 파일 타입, 집합, hash, active lane, 전체 workflow를 검증하는 Node CLI.
 - `tests/supabase-migration-layout.test.mjs`: 독립 고정 hash와 tamper fixture를 사용하는 경계 회귀 테스트.
+- `supabase/migrations/20260722130000_notification_prepare_acl_hardening.sql`: 과학-aware 함수 본문을 바꾸지 않고 누락된 prepare ACL만 보정하는 고정 active migration.
 - `.github/workflows/supabase-db-push.yml`: DB 연결 전에 layout verifier를 실행.
 - `tests/notification-*.test.mjs`: 원본 SQL source contract를 quarantine 경로에서 계속 읽음.
 - `docs/operations/notification-workflow-cutover.md`: 과거 직접 적용 절차를 금지하고 미래 forward 재설계 조건을 명시.
@@ -241,7 +243,7 @@ Expected: PASS with no provider calls or remote DB mutations.
 
 **Interfaces:**
 - Consumes: Tasks 1-3.
-- Produces: synchronized active migration history, green DB CI, unchanged provider-zero state, READY Vercel deployment.
+- Produces: synchronized active migration history, one intentional prepare ACL/history delta, unchanged data/runtime/provider-zero state, green DB CI, READY Vercel deployment.
 
 - [ ] **Step 1: Run repository verification**
 
@@ -253,7 +255,7 @@ Expected: all exit 0; existing large-file Babel notices may remain informational
 
 Run the linked Supabase migration list and `supabase db push --linked --include-all --dry-run` from the clean release checkout.
 
-Expected: no remote-only or active local-only version and `Linked project is up to date.`. Re-query schema fingerprint, 12 runtime flags, science Google Chat connection and `pg_cron`; all must match the pre-change snapshot.
+Expected: dry-run은 아직 적용되지 않은 `20260722130000` 한 건만 제시하거나, 적용 뒤에는 remote-only/active local-only 버전 없이 `Linked project is up to date.`를 반환한다. 함수 본문 지문, 데이터, 12개 runtime flag, 과학 Google Chat connection과 `pg_cron`은 pre-change snapshot과 같아야 하며 ACL만 기대 행렬로 달라야 한다.
 
 - [ ] **Step 3: Independent review**
 
@@ -269,4 +271,4 @@ Expected: DB workflow succeeds with `Linked project is up to date.` and Vercel r
 
 Verify `/` and `/admin/registration` return HTTP 200. Re-query migration history, schema fingerprint, runtime flags, science connection and pg_cron after deployment.
 
-Expected: application routes healthy; DB schema/history/provider-zero state unchanged except that normal CI is green.
+Expected: application routes healthy; migration history에는 `20260722130000` 한 건만 추가되고 정확한 prepare ACL만 달라진다. 함수 본문·data·runtime flags·provider-zero 상태는 unchanged이고 normal CI가 green이다.
