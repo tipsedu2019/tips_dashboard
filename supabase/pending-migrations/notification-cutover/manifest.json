@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "lane": "notification-cutover",
+  "status": "quarantined",
+  "executionPolicy": "forbidden_to_apply_directly",
+  "replacementPolicy": "forward_dated_install_and_separate_activation",
+  "sqlFiles": [
+    { "file": "20260716195000_notification_workflow_legacy_closure.sql", "sha256": "e9131131f0d9419a4a8fdf5d69a58a1047a41583f98d9ef7b5b376374ee52975" },
+    { "file": "20260716195500_notification_worker_schedule.sql", "sha256": "f9f335e00bb3bba815019dcf5ce73905c8de883db90ec7c99d35ae99d2609696" },
+    { "file": "20260716195800_notification_registration_provider_claim.sql", "sha256": "c682f44b0c851e49b7cec14e703ee7504bdd19b8be2416a49fc8112058826877" },
+    { "file": "20260716195900_notification_control_plane_forward_compat.sql", "sha256": "054914802ac9d0d9475fd18f2b52deb7bfd27552a3b92b7b5331c6d35003ee11" },
+    { "file": "20260716196000_notification_shadow_fixture_runner.sql", "sha256": "ef3ebb3a345bc734343526655fd614f51a8415dbc3a87ce1a60e8e76aa91ebd1" },
+    { "file": "20260717145304_notification_shadow_deterministic_evidence.sql", "sha256": "610c1ce889aa5d7deb29a5d48186976a400774a75e347f600386068af1744833" }
+  ],
+  "pgTapTests": [
+    "notification_workflow_seed_test.sql",
+    "notification_worker_schedule_test.sql",
+    "notification_shadow_deterministic_evidence_test.sql"
+  ],
+  "supersededDefinitions": [
+    { "function": "public.revalidate_immediate_notification_delivery_v1", "supersededBy": "20260722120000_science_notification_connection.sql" },
+    { "function": "public.prepare_notification_immediate_delivery_v1", "supersededBy": "20260722120000_science_notification_connection.sql" }
+  ]
+}

@@ -16,6 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify Supabase migration layout
+        run: node scripts/verify-supabase-migration-layout.mjs
+
       - name: Validate required secrets
         shell: bash
         run: |
