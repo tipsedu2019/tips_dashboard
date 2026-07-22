@@ -12,6 +12,7 @@ import {
   getRegistrationGradeOptions,
   isValidRegistrationMobilePhone,
 } from "./registration-workflow"
+import { RegistrationSelect } from "./registration-select"
 
 export type RegistrationInquiryFieldValues = {
   studentName: string
@@ -99,38 +100,41 @@ export function RegistrationInquiryCommonFields({
 
       <Label className="grid min-w-0 gap-1.5" data-registration-focus="schoolGrade">
         <FieldLabel requirement="필수">학년</FieldLabel>
-        <select
+        <RegistrationSelect
           data-common-field="school-grade"
           value={values.schoolGrade}
+          placeholder="미정"
+          options={[
+            { value: "", label: "미정" },
+            ...(currentGradeIsLegacy
+              ? [{ value: values.schoolGrade, label: `${values.schoolGrade} · 기존 입력` }]
+              : []),
+            ...gradeOptions.map((grade) => ({ value: grade, label: grade })),
+          ]}
           required
           disabled={disabled || disabledFields.schoolGrade}
-          onChange={(event) => onChange("schoolGrade", event.target.value)}
-          className="h-10 rounded-md border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <option value="">미정</option>
-          {currentGradeIsLegacy ? (
-            <option value={values.schoolGrade}>{values.schoolGrade} · 기존 입력</option>
-          ) : null}
-          {gradeOptions.map((grade) => <option key={grade} value={grade}>{grade}</option>)}
-        </select>
+          onValueChange={(value) => onChange("schoolGrade", value)}
+          className="h-10"
+        />
       </Label>
 
       <div className="grid min-w-0 gap-1.5">
         <Label className="grid min-w-0 gap-1.5">
           <FieldLabel requirement="선택">학교</FieldLabel>
-          <select
+          <RegistrationSelect
             value={values.schoolName}
+            placeholder="선택 안 함"
+            options={[
+              { value: "", label: "선택 안 함" },
+              ...visibleSchoolChoices.map((school) => ({
+                value: school.value,
+                label: school.label,
+              })),
+            ]}
             disabled={disabled || disabledFields.schoolName || !gradeRecognized || schoolUnavailable}
-            onChange={(event) => onChange("schoolName", event.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <option value="">선택 안 함</option>
-            {visibleSchoolChoices.map((school) => (
-              <option key={`${school.legacy ? "legacy" : "catalog"}:${school.value}`} value={school.value}>
-                {school.label}
-              </option>
-            ))}
-          </select>
+            onValueChange={(value) => onChange("schoolName", value)}
+            className="h-10"
+          />
         </Label>
         {schoolCatalogStatus === "error" ? (
           <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-xs text-destructive">

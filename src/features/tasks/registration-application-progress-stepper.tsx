@@ -43,8 +43,10 @@ const PROGRESS_STATE_PRESENTATION = {
 
 export function RegistrationApplicationProgressStepper({
   steps,
+  enabledKeys,
 }: {
   steps: readonly RegistrationApplicationProgressStep[]
+  enabledKeys?: readonly RegistrationApplicationProgressStep["key"][]
 }) {
   function moveToSection(key: RegistrationApplicationProgressStep["key"]) {
     const target = document.getElementById(`registration-application-${key}`)
@@ -58,6 +60,7 @@ export function RegistrationApplicationProgressStepper({
         const presentation = PROGRESS_STATE_PRESENTATION[step.state]
         const Icon = presentation.Icon
         const isActive = step.state === "current" || step.state === "terminal"
+        const enabled = !enabledKeys || enabledKeys.includes(step.key)
 
         return (
           <li
@@ -68,9 +71,10 @@ export function RegistrationApplicationProgressStepper({
           >
             <button
               type="button"
-              aria-label={`${step.label} 섹션으로 이동`}
-              className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left"
-              onClick={() => moveToSection(step.key)}
+              aria-label={enabled ? `${step.label} 섹션으로 이동` : `${step.label}: 저장 후 사용 가능`}
+              className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={!enabled}
+              onClick={enabled ? () => moveToSection(step.key) : undefined}
             >
               <Icon aria-hidden="true" className="size-4 shrink-0" />
               <span className="block min-w-0 truncate text-sm font-medium">{step.key === "inquiry" ? step.label : `${steps.findIndex((item) => item.key === step.key)}. ${step.key === "admission" ? "입학" : step.label}`}</span>

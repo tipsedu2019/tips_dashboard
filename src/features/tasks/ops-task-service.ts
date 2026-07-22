@@ -4549,14 +4549,29 @@ async function removeRegistrationWaitlistOnDelete(task: OpsTask | null) {
   }
 }
 
-export async function deleteOpsTask(taskId: string) {
+export async function deleteOpsTask(task: OpsTask) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  await assertOpsTaskExists(taskId)
-  const task = await loadOpsTaskById(taskId)
-  if (task?.type === "registration" && (task.status === "done" || isRegistrationCompletionImmutable(task.registration?.pipelineStatus))) {
+  const taskId = task.id
+  const isCanonicalRegistrationCase = task.type === "registration" && (task.registrationTracks?.length || 0) > 0
+  if (task.type === "registration" && (task.status === "done" || isRegistrationCompletionImmutable(task.registration?.pipelineStatus))) {
     throw new Error("등록 완료 건은 학생·수업·교재 연결을 유지해야 하므로 삭제할 수 없습니다.")
   }
-  const rollbackWaitlist = await removeRegistrationWaitlistOnDelete(task)
+
+  if (isCanonicalRegistrationCase) {
+    const response = await runIdempotentOpsTaskProducerRpc("delete_registration_case_v1", {
+      p_task_id: taskId,
+    })
+    producerDeletedTask(response, taskId)
+    clearOpsTaskWorkspaceDataCache()
+    return
+  }
+
+  await assertOpsTaskExists(taskId)
+  const persistedTask = await loadOpsTaskById(taskId)
+  if (persistedTask?.type === "registration" && (persistedTask.status === "done" || isRegistrationCompletionImmutable(persistedTask.registration?.pipelineStatus))) {
+    throw new Error("등록 완료 건은 학생·수업·교재 연결을 유지해야 하므로 삭제할 수 없습니다.")
+  }
+  const rollbackWaitlist = await removeRegistrationWaitlistOnDelete(persistedTask)
   try {
     const response = await runIdempotentOpsTaskProducerRpc("delete_ops_task_v1", {
       p_task_id: taskId,

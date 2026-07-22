@@ -2382,6 +2382,7 @@ test("every fixture UI mutation is declared and produces an idempotency receipt"
   assert.deepEqual(plain(REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS), [
     "createRegistrationCaseWithInitialWorkflow",
     "syncRegistrationCaseSubjects",
+    "saveRegistrationCaseInquiry",
     "updateRegistrationCaseCommon",
     "routeRegistrationInquiry",
     "assignRegistrationTrackDirector",
@@ -2516,4 +2517,86 @@ test("all registration service, exact class detail, notification, and admission 
   assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("checkRegistrationAdmissionMessage"/)
   assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("reconcileRegistrationAdmissionMessage"/)
   assert.match(workspace, /executeRegistrationSubjectTrackFixtureAction\("releaseRegistrationAdmissionMessageRetry"/)
+})
+
+test("fixture unified inquiry save rejects stale common and subject expectations without mutation", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const taskId = "fixture-task-dual-test"
+  const detail = state.caseDetails[taskId]
+  const payload = {
+    taskId,
+    studentName: detail.task.studentName,
+    schoolGrade: detail.task.registration.schoolGrade,
+    schoolName: detail.task.registration.schoolName,
+    parentPhone: detail.task.registration.parentPhone,
+    studentPhone: detail.task.registration.studentPhone,
+    campus: detail.task.campus,
+    inquiryAt: detail.task.registration.inquiryAt,
+    requestNote: "should not persist",
+    priority: detail.task.priority,
+    subjects: ["수학", "영어"],
+    expectedSubjects: ["수학", "영어"],
+  }
+  const before = plain(adapter.debugSnapshot())
+
+  assert.throws(() => adapter.executeAction("saveRegistrationCaseInquiry", {
+    ...payload,
+    expectedCommonRevision: detail.commonRevision + 1,
+    requestKey: "fixture-unified-stale-common",
+  }), /registration_common_revision_conflict/)
+  assert.deepEqual(plain(adapter.debugSnapshot()), before)
+
+  assert.throws(() => adapter.executeAction("saveRegistrationCaseInquiry", {
+    ...payload,
+    expectedCommonRevision: detail.commonRevision,
+    expectedSubjects: ["영어"],
+    requestKey: "fixture-unified-stale-subjects",
+  }), /registration_subjects_conflict/)
+  assert.deepEqual(plain(adapter.debugSnapshot()), before)
+})
+
+test("fixture unified inquiry save updates common fields subjects and revision without provider work", async () => {
+  const fixture = await loadFixtureModule()
+  let state = fixture.createRegistrationSubjectTrackFixtureState()
+  const adapter = fixture.createRegistrationSubjectTrackFixtureAdapter({
+    getState: () => state,
+    replaceState: (next) => { state = next },
+  })
+  const taskId = "fixture-task-dual-test"
+  const detail = state.caseDetails[taskId]
+  const priorRevision = detail.commonRevision
+  const priorExternalCalls = state.externalCallLedger.length
+
+  const result = await adapter.executeAction("saveRegistrationCaseInquiry", {
+    taskId,
+    studentName: detail.task.studentName,
+    schoolGrade: detail.task.registration.schoolGrade,
+    schoolName: "통합고",
+    parentPhone: detail.task.registration.parentPhone,
+    studentPhone: detail.task.registration.studentPhone,
+    campus: "별관",
+    inquiryAt: detail.task.registration.inquiryAt,
+    requestNote: "통합 저장 fixture",
+    priority: "high",
+    subjects: ["과학", "수학", "영어"],
+    expectedCommonRevision: priorRevision,
+    expectedSubjects: ["수학", "영어"],
+    requestKey: "fixture-unified-success",
+  })
+
+  const updated = state.caseDetails[taskId]
+  assert.equal(result.commonRevision, priorRevision + 1)
+  assert.equal(updated.commonRevision, priorRevision + 1)
+  assert.equal(updated.task.registration.schoolName, "통합고")
+  assert.equal(updated.task.registration.requestNote, "통합 저장 fixture")
+  assert.equal(updated.task.campus, "별관")
+  assert.equal(updated.task.priority, "high")
+  assert.deepEqual(updated.tracks.map((track) => track.subject), ["영어", "수학", "과학"])
+  assert.deepEqual(result.tracks.map((track) => track.subject), ["영어", "수학", "과학"])
+  assert.equal(state.externalCallLedger.length, priorExternalCalls)
 })

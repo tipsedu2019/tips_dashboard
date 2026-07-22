@@ -28,7 +28,9 @@ test("registration verifier targets the refined shared application contract", as
     assert.ok(verifier.includes(marker), `registration verifier is missing ${marker}`)
   }
 
-  assert.match(verifier, /data-registration-application-section="placement"/)
+  assert.doesNotMatch(verifier, /data-registration-application-section="placement"/)
+  assert.match(verifier, /const mode = await applicationHost\.getAttribute\("data-registration-application-mode"\)/)
+  assert.match(verifier, /mode === "create"[\s\S]*?\["inquiry", "level_test", "consultation"\][\s\S]*?\["inquiry", "level_test", "consultation", "waiting", "registration", "admission"\]/)
   assert.doesNotMatch(verifier, /data-registration-application-section="enrollment"/)
   assert.doesNotMatch(verifier, /data-registration-application-section="history"/)
 })
@@ -47,11 +49,14 @@ test("create verification is subject-first, grade-scoped, and never saves", asyn
   assert.match(verifier, /getByLabel\(\/\^학교\//)
   assert.match(verifier, /getByRole\("button", \{ name: \/과학 문의 과목\//)
   assert.match(verifier, /getAttribute\("aria-pressed"\)/)
-  assert.match(verifier, /selectOption\("고1"\)/)
+  assert.match(verifier, /async function selectRegistrationOption/)
+  assert.match(verifier, /async function readRegistrationOptions/)
+  assert.match(verifier, /selectRegistrationOption\(createControls\.schoolGrade, "고1"\)/)
   assert.ok(
-    verifier.indexOf("과학 문의 과목") < verifier.indexOf('selectOption("고1")'),
+    verifier.indexOf("과학 문의 과목") < verifier.indexOf('selectRegistrationOption(createControls.schoolGrade, "고1")'),
     "science must be selected before the create grade",
   )
+  assert.doesNotMatch(verifier, /\.selectOption\(/)
   assert.doesNotMatch(intakeWorkflowSource, /과학 선택 전에 학년을 먼저 선택하세요\./)
   assert.match(verifier, /새봄고/)
   assert.match(verifier, /새봄초|새봄중/)
@@ -76,7 +81,8 @@ test("saved detail verification switches every subject panel and preserves a rev
   assert.match(verifier, /data-registration-appointment-plan-action/)
   assert.match(verifier, /appointmentId/)
   assert.match(verifier, /data-registration-appointment-subjects/)
-  assert.match(verifier, /data-registration-application-section="placement"/)
+  assert.match(verifier, /data-registration-application-section="registration"/)
+  assert.match(verifier, /\["inquiry", "level_test", "consultation", "waiting", "registration", "admission"\]/)
   assert.match(verifier, /data-registration-application-section="admission"/)
 })
 
@@ -190,6 +196,10 @@ test("option recovery and accessibility checks execute without saving", async ()
   assert.match(verifier, /async function setNextFault/)
   assert.match(verifier, /kind: "option_data_once"/)
   assert.match(verifier, /optionFaultHost\.locator\('\[data-registration-focus="subject"\] button\[aria-pressed\]'/)
+  assert.match(verifier, /optionFaultConsultationSection[\s\S]*?getByRole\("button", \{ name: "상담", exact: true \}\)[\s\S]*?click\(\)/)
+  assert.match(verifier, /getByRole\("group", \{ name: "상담 과목 선택", exact: true \}\)/)
+  assert.match(verifier, /getByLabel\("영어 상담 책임자", \{ exact: true \}\)/)
+  assert.doesNotMatch(verifier, /영어 다음 업무/)
   assert.match(verifier, /optionFaultRetry\.click\(\)/)
   assert.match(verifier, /optionFaultDirector\.isEnabled\(\)/)
   assert.match(verifier, /async function assertSubjectQualifiedAccessibleNames/)
@@ -327,4 +337,23 @@ test("science registration DB projections expose three-track calendar and remind
     migration,
     /registration_message_track_id_v1[\s\S]*?registration_subject_sort_order/,
   )
+})
+
+test("saved-detail browser verification requires one unified inquiry save and no duplicate summaries", async () => {
+  const source = await readFile(verifierUrl, "utf8")
+  const verifier = registrationVerifier(source)
+
+  assert.match(verifier, /const inquirySaveButtons = detailApplicationHost\.locator\('\[data-registration-application-section="inquiry"\]'\)\.getByRole\("button", \{ name: "저장", exact: true \}\)/)
+  assert.match(verifier, /if \(await inquirySaveButtons\.count\(\) !== 1\)[\s\S]*?throw new Error/)
+  assert.match(verifier, /async function assertNoDuplicateRegistrationDetailSummaries/)
+  assert.match(verifier, /await assertNoDuplicateRegistrationDetailSummaries\(detailApplicationHost\)/)
+  const duplicateStart = verifier.indexOf("async function assertNoDuplicateRegistrationDetailSummaries")
+  const duplicateEnd = verifier.indexOf("async function ", duplicateStart + 1)
+  const duplicateHelper = verifier.slice(duplicateStart, duplicateEnd)
+  assert.match(duplicateHelper, /const forbiddenSummaryLocators = \[/)
+  assert.match(duplicateHelper, /\[data-registration-duplicate-summary\]/)
+  assert.match(duplicateHelper, /현재 진행 단계가 아닙니다/)
+  assert.match(duplicateHelper, /for \(const locator of forbiddenSummaryLocators\)[\s\S]*?const count = await locator\.count\(\)[\s\S]*?if \(count !== 0\)[\s\S]*?throw new Error/)
+  assert.doesNotMatch(verifier, /공통 정보 저장[\s\S]{0,120}click\(/)
+  assert.doesNotMatch(verifier, /과목 저장[\s\S]{0,120}click\(/)
 })

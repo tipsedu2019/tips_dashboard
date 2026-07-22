@@ -1782,3 +1782,64 @@ test("science registration database contract preserves public RPC signatures and
   assert.match(migration, /registration_subject_removed/);
   assert.match(migration, /write_registration_track_event_v2/);
 });
+
+test("unified inquiry save performs one sorted atomic RPC request", async () => {
+  const { createRegistrationTrackService } = await loadFactory()
+  const harness = createClient({
+    rpcHandler(name) {
+      assert.equal(name, "save_registration_case_inquiry_v1")
+      return {
+        data: {
+          taskId: "task-1",
+          commonRevision: 4,
+          tracks: [
+            { id: "track-english", task_id: "task-1", subject: "영어", pipeline_status: "inquiry" },
+            { id: "track-math", task_id: "task-1", subject: "수학", pipeline_status: "inquiry" },
+          ],
+        },
+        error: null,
+      }
+    },
+  })
+  const service = createRegistrationTrackService(harness.client, readyOptions())
+  const subjects = ["수학", "영어"]
+  const expectedSubjects = ["수학", "영어"]
+
+  const result = await service.saveRegistrationCaseInquiry({
+    taskId: "task-1",
+    studentName: "김다미",
+    schoolGrade: "고1",
+    schoolName: "중앙여고",
+    parentPhone: "01012345678",
+    studentPhone: "",
+    campus: "본관",
+    inquiryAt: "2026-07-12T01:00:00Z",
+    requestNote: "통합 저장",
+    priority: "normal",
+    subjects,
+    expectedCommonRevision: 3,
+    expectedSubjects,
+    requestKey: "unified-inquiry-save",
+  })
+
+  assert.equal(harness.rpcCalls.length, 1)
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.rpcCalls[0])), ["save_registration_case_inquiry_v1", {
+    p_task_id: "task-1",
+    p_student_name: "김다미",
+    p_school_grade: "고1",
+    p_school_name: "중앙여고",
+    p_parent_phone: "01012345678",
+    p_student_phone: null,
+    p_campus: "본관",
+    p_inquiry_at: "2026-07-12T01:00:00Z",
+    p_request_note: "통합 저장",
+    p_priority: "normal",
+    p_expected_common_revision: 3,
+    p_expected_subjects: ["영어", "수학"],
+    p_subjects: ["영어", "수학"],
+    p_request_key: "unified-inquiry-save",
+  }])
+  assert.deepEqual(subjects, ["수학", "영어"])
+  assert.deepEqual(expectedSubjects, ["수학", "영어"])
+  assert.deepEqual(result.tracks.map((track) => track.subject), ["영어", "수학"])
+})

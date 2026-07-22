@@ -3,8 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { DateTimePickerControl } from "@/components/ui/date-time-picker"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
@@ -21,6 +30,7 @@ import {
 } from "./registration-level-test-place.ts"
 import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow.js"
 import { sendRegistrationVisitNotificationTarget } from "./registration-consultation-notification.js"
+import { RegistrationSelect } from "./registration-select"
 import {
   buildRegistrationAppointmentConfirmation,
   compareRegistrationAppointmentDraft,
@@ -90,6 +100,11 @@ type PersistedConflictDraft = {
   local: RegistrationAppointmentDraft
   appointmentId: string | null
   expectedNotificationRevision: number | null
+}
+
+type PendingAppointmentConfirmation = {
+  action: "save" | "cancel"
+  message: string
 }
 
 const persistedAppointmentSubmissionKeys = new Map<string, string>()
@@ -253,6 +268,7 @@ export function RegistrationAppointmentEditor({
   const [trackRefreshPendingIds, setTrackRefreshPendingIds] = useState<Set<string>>(() => new Set())
   const [trackRefreshRetryingId, setTrackRefreshRetryingId] = useState("")
   const [validationError, setValidationError] = useState("")
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingAppointmentConfirmation | null>(null)
   const sectionRef = useRef<HTMLElement | null>(null)
   const [committedAppointment, setCommittedAppointment] = useState<RegistrationAppointmentMutationResponse | null>(null)
   const [pendingNotificationTargets, setPendingNotificationTargets] = useState<RegistrationAppointmentMutationResponse["notificationTargets"]>([])
@@ -549,7 +565,7 @@ export function RegistrationAppointmentEditor({
     }
   }
 
-  async function confirmAppointmentMutation(
+  async function prepareAppointmentConfirmation(
     action: "save" | "cancel",
     next: RegistrationAppointmentDraft | null,
   ) {
@@ -557,14 +573,17 @@ export function RegistrationAppointmentEditor({
       reminderRoundCount(previousAppointmentDraft),
       reminderRoundCount(next),
     ])
-    return window.confirm(buildRegistrationAppointmentConfirmation({
+    setPendingConfirmation({
       action,
-      previous: previousAppointmentDraft,
-      next,
-      previousReminderRoundCount,
-      nextReminderRoundCount,
-      trackLabels,
-    }))
+      message: buildRegistrationAppointmentConfirmation({
+        action,
+        previous: previousAppointmentDraft,
+        next,
+        previousReminderRoundCount,
+        nextReminderRoundCount,
+        trackLabels,
+      }),
+    })
   }
 
   async function dispatchNotificationTargets(
@@ -786,16 +805,16 @@ export function RegistrationAppointmentEditor({
       const selector = !scheduledAt
         ? "[data-appointment-field=scheduled-at] input, [data-appointment-field=scheduled-at] button"
         : !canonicalLevelTestPlace
-          ? "[data-appointment-field=place] select, [data-appointment-field=place] input"
+          ? "[data-appointment-field=place] [data-slot=select-trigger], [data-appointment-field=place] input"
           : "[data-appointment-field=tracks] button"
       window.requestAnimationFrame(() => sectionRef.current?.querySelector<HTMLElement>(selector)?.focus())
       return
     }
     setSaving(true)
-    if (!(await confirmAppointmentMutation("save", appointmentDraft))) {
-      setSaving(false)
-      return
-    }
+    await prepareAppointmentConfirmation("save", appointmentDraft)
+  }
+
+  async function performSaveAppointment() {
     const kindKey = "registration-appointment"
     const requestKey = submissionKeys.getOrCreate(kindKey, normalizedDraft)
     let saved: RegistrationAppointmentMutationResponse
@@ -834,7 +853,11 @@ export function RegistrationAppointmentEditor({
   async function cancelAppointment() {
     if (!appointment || saving || mutationLocked) return
     setSaving(true)
-    if (!(await confirmAppointmentMutation("cancel", null))) {
+    await prepareAppointmentConfirmation("cancel", null)
+  }
+
+  async function performCancelAppointment() {
+    if (!appointment) {
       setSaving(false)
       return
     }
@@ -866,6 +889,22 @@ export function RegistrationAppointmentEditor({
     setShowConflictComparison(false)
     await finishAppointmentSave(saved)
     setSaving(false)
+  }
+
+  function dismissAppointmentConfirmation() {
+    setPendingConfirmation(null)
+    setSaving(false)
+  }
+
+  async function confirmPreparedAppointmentMutation() {
+    const action = pendingConfirmation?.action
+    if (!action) return
+    setPendingConfirmation(null)
+    if (action === "save") {
+      await performSaveAppointment()
+      return
+    }
+    await performCancelAppointment()
   }
 
   async function startAttempt(activity: OpsRegistrationLevelTest) {
@@ -980,33 +1019,36 @@ export function RegistrationAppointmentEditor({
       </div>
 
       {conflict ? (
-        <div role="alert" className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
-          <p>다른 사용자가 예약을 먼저 변경했습니다. 내 입력은 그대로 보존되어 있습니다.</p>
-          {showConflictComparison && conflictComparison ? (
-            <dl className="grid gap-2 rounded-md border border-amber-200 bg-white/70 p-2 text-xs sm:grid-cols-3">
-              <div>
-                <dt className="font-semibold">예약 일시</dt>
-                <dd>최신 · {toLocalDateTime(conflictComparison.fields.scheduledAt.server) || "없음"}</dd>
-                <dd>내 초안 · {toLocalDateTime(conflictComparison.fields.scheduledAt.local) || "없음"}</dd>
-              </div>
-              <div>
-                <dt className="font-semibold">장소</dt>
-                <dd>최신 · {conflictComparison.fields.place.server || "없음"}</dd>
-                <dd>내 초안 · {conflictComparison.fields.place.local || "없음"}</dd>
-              </div>
-              <div>
-                <dt className="font-semibold">적용 과목</dt>
-                <dd>최신 · {conflictComparison.fields.trackIds.server.map((trackId) => trackLabels[trackId] || trackId).join(", ") || "없음"}</dd>
-                <dd>내 초안 · {conflictComparison.fields.trackIds.local.map((trackId) => trackLabels[trackId] || trackId).join(", ") || "없음"}</dd>
-              </div>
-            </dl>
-          ) : null}
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 예약 비교`} onClick={() => void compareLatestAppointment()} disabled={saving}>최신 예약 비교</Button>
-            <Button type="button" size="sm" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 다시 적용`} onClick={applyConflictDraftAgain} disabled={saving || !canApplyConflictDraft}>다시 적용</Button>
-            <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 계속 편집`} onClick={continueEditingConflictDraft} disabled={saving}>계속 편집</Button>
-          </div>
-        </div>
+        <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+          <AlertTitle>다른 사용자가 예약을 먼저 변경했습니다</AlertTitle>
+          <AlertDescription className="gap-3 text-amber-950">
+            <p>내 입력은 그대로 보존되어 있습니다.</p>
+            {showConflictComparison && conflictComparison ? (
+              <dl className="grid gap-2 rounded-md border border-amber-200 bg-white/70 p-2 text-xs sm:grid-cols-3">
+                <div>
+                  <dt className="font-semibold">예약 일시</dt>
+                  <dd>최신 · {toLocalDateTime(conflictComparison.fields.scheduledAt.server) || "없음"}</dd>
+                  <dd>내 초안 · {toLocalDateTime(conflictComparison.fields.scheduledAt.local) || "없음"}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">장소</dt>
+                  <dd>최신 · {conflictComparison.fields.place.server || "없음"}</dd>
+                  <dd>내 초안 · {conflictComparison.fields.place.local || "없음"}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold">적용 과목</dt>
+                  <dd>최신 · {conflictComparison.fields.trackIds.server.map((trackId) => trackLabels[trackId] || trackId).join(", ") || "없음"}</dd>
+                  <dd>내 초안 · {conflictComparison.fields.trackIds.local.map((trackId) => trackLabels[trackId] || trackId).join(", ") || "없음"}</dd>
+                </div>
+              </dl>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 예약 비교`} onClick={() => void compareLatestAppointment()} disabled={saving}>최신 예약 비교</Button>
+              <Button type="button" size="sm" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 다시 적용`} onClick={applyConflictDraftAgain} disabled={saving || !canApplyConflictDraft}>다시 적용</Button>
+              <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 계속 편집`} onClick={continueEditingConflictDraft} disabled={saving}>계속 편집</Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       ) : null}
       {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
 
@@ -1028,17 +1070,22 @@ export function RegistrationAppointmentEditor({
       ) : null}
 
       {pendingNotificationTargets.length > 0 ? (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          <span>예약은 저장되었습니다. 실패한 방문상담 알림만 다시 보냅니다.</span>
-          <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재시도`} onClick={() => void retryCommittedNotifications()} disabled={saving}>알림 재시도</Button>
-        </div>
+        <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+          <AlertTitle>예약은 저장되었습니다</AlertTitle>
+          <AlertDescription className="flex-row flex-wrap items-center justify-between gap-2 text-amber-950">
+            <span>실패한 방문상담 알림만 다시 보냅니다.</span>
+            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재시도`} onClick={() => void retryCommittedNotifications()} disabled={saving}>알림 재시도</Button>
+          </AlertDescription>
+        </Alert>
       ) : refreshPending || (committedAppointment && !processingReady) ? (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          <span>{refreshPending
+        <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+          <AlertTitle>{refreshPending
             ? "저장은 완료됐지만 최신 내용을 불러오지 못했습니다"
-            : "예약 저장은 완료됐지만 알림 재계산 상태는 아직 확인되지 않았습니다."}</span>
-          <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 내용 다시 불러오기`} onClick={() => void retryRefresh()} disabled={saving}>최신 내용 다시 불러오기</Button>
-        </div>
+            : "예약 저장은 완료됐지만 알림 재계산 상태는 아직 확인되지 않았습니다."}</AlertTitle>
+          <AlertDescription className="items-end">
+            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 내용 다시 불러오기`} onClick={() => void retryRefresh()} disabled={saving}>최신 내용 다시 불러오기</Button>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       {editMode !== "read_only" ? (
@@ -1065,23 +1112,21 @@ export function RegistrationAppointmentEditor({
             </Label>
             <Label data-appointment-field="place" className="grid min-w-0 gap-1.5">
               <span>장소 <span className="text-xs font-semibold text-primary">필수</span></span>
-              <>
-                  <select
-                    aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`}
-                    value={normalizeRegistrationLevelTestPlace(place) ?? ""}
-                    onChange={(event) => { setValidationError(""); setPlace(event.target.value) }}
-                    disabled={saving || mutationLocked}
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="">장소 선택</option>
-                    {REGISTRATION_LEVEL_TEST_PLACES.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                  {legacyLevelTestPlace ? (
-                    <span className="text-xs text-muted-foreground">기존 저장 장소: {appointment?.place}</span>
-                  ) : null}
-                </>
+              <RegistrationSelect
+                aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`}
+                value={normalizeRegistrationLevelTestPlace(place) ?? ""}
+                placeholder="장소 선택"
+                options={[
+                  { value: "", label: "장소 선택" },
+                  ...REGISTRATION_LEVEL_TEST_PLACES.map((option) => ({ value: option, label: option })),
+                ]}
+                onValueChange={(value) => { setValidationError(""); setPlace(value) }}
+                disabled={saving || mutationLocked}
+                className="h-10"
+              />
+              {legacyLevelTestPlace ? (
+                <span className="text-xs text-muted-foreground">기존 저장 장소: {appointment?.place}</span>
+              ) : null}
             </Label>
           </div>
 
@@ -1164,10 +1209,12 @@ export function RegistrationAppointmentEditor({
                   <RegistrationActivityStatusBadge status={activity.status} />
                 </div>
                 {trackRefreshPending ? (
-                  <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-                    <span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span>
-                    <Button type="button" size="sm" variant="outline" aria-label={`${track?.subject || "과목"} 최신 내용 다시 불러오기`} onClick={() => void retryTrackRefresh(activity.trackId)} disabled={Boolean(trackRefreshRetryingId)}>최신 내용 다시 불러오기</Button>
-                  </div>
+                  <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+                    <AlertTitle>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</AlertTitle>
+                    <AlertDescription className="items-end">
+                      <Button type="button" size="sm" variant="outline" aria-label={`${track?.subject || "과목"} 최신 내용 다시 불러오기`} onClick={() => void retryTrackRefresh(activity.trackId)} disabled={Boolean(trackRefreshRetryingId)}>최신 내용 다시 불러오기</Button>
+                    </AlertDescription>
+                  </Alert>
                 ) : null}
                 <Label className="grid gap-1.5">
                   {track?.subject || "과목"} 결과 링크
@@ -1222,6 +1269,32 @@ export function RegistrationAppointmentEditor({
           </Button>
         </div>
       ) : null}
+
+      <Dialog
+        open={Boolean(pendingConfirmation)}
+        onOpenChange={(open) => {
+          if (!open && pendingConfirmation) dismissAppointmentConfirmation()
+        }}
+      >
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{pendingConfirmation?.action === "cancel" ? "예약을 취소할까요?" : "예약을 저장할까요?"}</DialogTitle>
+            <DialogDescription className="whitespace-pre-line">
+              {pendingConfirmation?.message}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={dismissAppointmentConfirmation}>돌아가기</Button>
+            <Button
+              type="button"
+              variant={pendingConfirmation?.action === "cancel" ? "destructive" : "default"}
+              onClick={() => void confirmPreparedAppointmentMutation()}
+            >
+              {pendingConfirmation?.action === "cancel" ? "예약 취소" : "저장"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }

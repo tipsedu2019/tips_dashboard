@@ -3587,3 +3587,90 @@ test("science registration forward migration replaces every current three-subjec
   assert.match(sql, /registration_appointment_reminders_runtime_version\(\)[\s\S]*?select 1/)
   assert.match(sql, /registration_notification_handoffs_runtime_version\(\)[\s\S]*?select 1/)
 })
+
+test("unified registration inquiry save is one guarded atomic database boundary", async () => {
+  const sql = await readMigration("registration_case_inquiry_atomic_save")
+  const trimmed = sql.trim()
+  const implementation = readFunctionBlock(
+    sql,
+    "dashboard_private",
+    "save_registration_case_inquiry_v1_impl",
+  )
+  const wrapper = readFunctionBlock(sql, "public", "save_registration_case_inquiry_v1")
+
+  assert.match(trimmed, /^begin;/i)
+  assert.match(trimmed, /commit;$/i)
+  assert.deepEqual(readFunctionArgumentTypes(implementation), [
+    "uuid",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "timestamptz",
+    "text",
+    "text",
+    "integer",
+    "text[]",
+    "text[]",
+    "text",
+  ])
+  assert.deepEqual(readFunctionArgumentTypes(wrapper), readFunctionArgumentTypes(implementation))
+  assert.match(implementation, /security definer/)
+  assert.match(implementation, /set search_path = ''/)
+  assert.match(wrapper, /security invoker/)
+  assert.match(wrapper, /set search_path = ''/)
+  assert.match(implementation, /v_actor_id uuid := \(select auth\.uid\(\)\)/)
+  assert.match(implementation, /if v_actor_id is null[\s\S]*?registration_access_denied/)
+  assert.match(
+    implementation,
+    /coalesce\(public\.current_dashboard_role\(\), ''\) not in \('admin', 'staff'\)[\s\S]*?registration_access_denied/,
+  )
+
+  assertInOrder(implementation, [
+    "notification-control-plane-workflow:registration",
+    "registration:workflow:",
+    "-- registration_case_inquiry_task_row_lock",
+    "-- registration_case_inquiry_detail_row_lock",
+    "-- registration_case_inquiry_track_row_locks",
+    "-- registration_case_inquiry_prewrite_validation_complete",
+    "-- registration_case_inquiry_subject_writes",
+  ])
+  assert.match(implementation, /v_detail\.common_revision <> p_expected_common_revision[\s\S]*?registration_common_revision_conflict/)
+  assert.match(implementation, /v_current_subjects is distinct from v_expected_subjects[\s\S]*?registration_subjects_conflict/)
+  assert.match(implementation, /'과학' = any\(v_subjects\)[\s\S]*?not in \('고1', '고2', '고3'\)[\s\S]*?registration_science_grade_invalid/)
+  assert.match(implementation, /v_added_subjects[\s\S]*?assert_registration_subject_enabled\([\s\S]*?v_subject[\s\S]*?v_school_grade/)
+  assert.match(implementation, /registration_subject_removal_blocked/)
+  assert.match(implementation, /update_registration_case_common_with_reminders_v1_impl\(/)
+  assert.equal(
+    (implementation.match(/recompute_registration_parent\(/g) || []).length,
+    0,
+    "the reminder-aware common path owns the single parent recompute",
+  )
+  assert.match(implementation, /mutation_type = 'save_inquiry'/)
+  assert.match(implementation, /target_fingerprint = v_target_fingerprint/)
+  assert.match(implementation, /idempotency_key_reused/)
+
+  const signature = "uuid, text, text, text, text, text, text, timestamptz, text, text, integer, text[], text[], text"
+  assert.match(
+    sql,
+    new RegExp(`revoke all on function dashboard_private\\.save_registration_case_inquiry_v1_impl\\(${signature.replaceAll("[]", "\\[\\]")}\\)\\s+from public, anon, authenticated, service_role;`, "i"),
+  )
+  assert.match(
+    sql,
+    new RegExp(`grant execute on function dashboard_private\\.save_registration_case_inquiry_v1_impl\\(${signature.replaceAll("[]", "\\[\\]")}\\) to authenticated;`, "i"),
+  )
+  assert.match(
+    sql,
+    new RegExp(`revoke all on function public\\.save_registration_case_inquiry_v1\\(${signature.replaceAll("[]", "\\[\\]")}\\)\\s+from public, anon, authenticated, service_role;`, "i"),
+  )
+  assert.match(
+    sql,
+    new RegExp(`grant execute on function public\\.save_registration_case_inquiry_v1\\(${signature.replaceAll("[]", "\\[\\]")}\\) to authenticated;`, "i"),
+  )
+  assert.doesNotMatch(
+    implementation,
+    /send_google_chat|send_web_push|solapi|notification_provider|http_post|net\.http/i,
+  )
+})

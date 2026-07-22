@@ -1,11 +1,17 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { CalendarDays, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { CalendarDays, ChevronDown, Plus, RefreshCw, Trash2 } from "lucide-react"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -15,6 +21,7 @@ import {
   RegistrationAdmissionProgress,
   type RegistrationAdmissionProgressSteps,
 } from "./registration-admission-progress"
+import { RegistrationSelect } from "./registration-select"
 
 import {
   loadOpsRegistrationClassDetails,
@@ -188,6 +195,41 @@ function useAdmissionRecoveryAvailable(updatedAt: string | null) {
   return getRegistrationAdmissionRecoveryDelayMs(updatedAt, recoveryClock) === 0
 }
 
+function RegistrationRefreshAlert({
+  children,
+}: {
+  children: ReactNode
+}) {
+  return (
+    <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+      <AlertTitle>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</AlertTitle>
+      <AlertDescription className="items-start">
+        {children}
+      </AlertDescription>
+    </Alert>
+  )
+}
+
+function RegistrationCollapsibleTrigger({ children }: { children: ReactNode }) {
+  return (
+    <CollapsibleTrigger asChild>
+      <div
+        role="button"
+        tabIndex={0}
+        className="flex w-full cursor-pointer items-center justify-between gap-2 text-left text-sm font-medium"
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return
+          event.preventDefault()
+          event.currentTarget.click()
+        }}
+      >
+        <span>{children}</span>
+        <ChevronDown aria-hidden="true" className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+      </div>
+    </CollapsibleTrigger>
+  )
+}
+
 function useScopedDirtyState<TScope extends object>(
   scope: TScope,
   dirty: boolean,
@@ -306,6 +348,8 @@ export function RegistrationEnrollmentEditor({
   const [rowsValidationError, setRowsValidationError] = useState("")
   const [decisionValidationError, setDecisionValidationError] = useState("")
   const [cancellationValidationError, setCancellationValidationError] = useState("")
+  const [alternateRouteOpen, setAlternateRouteOpen] = useState(false)
+  const [enrollmentHistoryOpen, setEnrollmentHistoryOpen] = useState(false)
   const sectionRef = useRef<HTMLElement | null>(null)
   const initialDraftRowsRef = useRef(cachedEnrollmentDraft?.baseline || JSON.stringify(draftRows))
   const canonicalKeyRef = useRef(cachedEnrollmentDraft?.canonicalKey || canonicalEnrollmentKey)
@@ -519,7 +563,7 @@ export function RegistrationEnrollmentEditor({
       onWarning(message)
       const rowId = blockers[0]?.rowId
       window.requestAnimationFrame(() => sectionRef.current
-        ?.querySelector<HTMLElement>(`[data-enrollment-row="${rowId}"] select`)
+        ?.querySelector<HTMLElement>(`[data-enrollment-row="${rowId}"] [data-slot="select-trigger"]`)
         ?.focus())
       return
     }
@@ -666,26 +710,34 @@ export function RegistrationEnrollmentEditor({
           <article key={row.clientKey} data-enrollment-row={row.clientKey} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.25fr)_auto] sm:items-end">
             <Label className="grid gap-1.5">
               <span>수업 {index + 1}</span>
-              <select aria-label={`${track.subject} 수업 ${index + 1} 선택`} className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm" value={row.classId} onChange={(event) => { setRowsValidationError(""); selectClass(row.clientKey, event.target.value) }} disabled={!canEditRows || saving}>
-                <option value="">수업 선택</option>
-                {subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}
-              </select>
+              <RegistrationSelect
+                aria-label={`${track.subject} 수업 ${index + 1} 선택`}
+                value={row.classId}
+                placeholder="수업 선택"
+                options={[
+                  { value: "", label: "수업 선택" },
+                  ...subjectClasses.map((classItem) => ({ value: classItem.id, label: classItem.label })),
+                ]}
+                onValueChange={(value) => { setRowsValidationError(""); selectClass(row.clientKey, value) }}
+                disabled={!canEditRows || saving}
+              />
             </Label>
             <Label className="grid gap-1.5">
               <span>교재</span>
-              <select
-                className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm"
+              <RegistrationSelect
                 aria-label={`${track.subject} 수업 ${index + 1} 교재 선택`}
                 value={row.textbookId}
-                onChange={(event) => updateRow(row.clientKey, {
-                  textbookId: event.target.value,
-                  textbookExplicitlyCleared: event.target.value === "",
+                placeholder="선택 안 함 · 이미 보유"
+                options={[
+                  { value: "", label: "선택 안 함 · 이미 보유" },
+                  ...linkedTextbooks.map((textbook) => ({ value: textbook.id, label: textbook.label })),
+                ]}
+                onValueChange={(value) => updateRow(row.clientKey, {
+                  textbookId: value,
+                  textbookExplicitlyCleared: value === "",
                 })}
                 disabled={!canEditRows || saving || !row.classId}
-              >
-                <option value="">선택 안 함 · 이미 보유</option>
-                {linkedTextbooks.map((textbook) => <option key={textbook.id} value={textbook.id}>{textbook.label}</option>)}
-              </select>
+              />
             </Label>
             <Label className="grid gap-1.5">
               <span>수업 시작 일정</span>
@@ -754,24 +806,25 @@ export function RegistrationEnrollmentEditor({
       {rowsValidationError ? <p role="alert" className="text-xs text-destructive">{rowsValidationError}</p> : null}
 
       {rowsRefreshPending ? (
-        <div role="alert" className="grid gap-2 text-sm text-amber-900">
-          <span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span>
+        <RegistrationRefreshAlert>
           <Button type="button" aria-label={`${track.subject} 수업 최신 내용 다시 불러오기`} variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload({ kind: "rows" })}>
             <RefreshCw className="size-4" aria-hidden="true" />
             최신 내용 다시 불러오기
           </Button>
-        </div>
+        </RegistrationRefreshAlert>
       ) : null}
 
       {track.status === "enrollment_decided" && permissions.canManage && !trackHasOpenBatch ? (
-        <details className="rounded-md border p-3">
-          <summary className="cursor-pointer text-sm font-medium">등록 대신 다른 단계로 이동</summary>
-          <div className="mt-3 grid gap-3">
+        <Collapsible open={alternateRouteOpen} onOpenChange={setAlternateRouteOpen} className="group rounded-md border p-3">
+          <RegistrationCollapsibleTrigger>등록 대신 다른 단계로 이동</RegistrationCollapsibleTrigger>
+          <CollapsibleContent className="mt-3 grid gap-3">
             {decisionRefreshPending ? (
-              <div role="alert" className="grid gap-2 text-sm text-amber-900">
-                <span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span>
-                <Button type="button" aria-label={`${track.subject} 단계 변경 최신 내용 다시 불러오기`} variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload({ kind: "decision" })}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button>
-              </div>
+              <RegistrationRefreshAlert>
+                <Button type="button" aria-label={`${track.subject} 단계 변경 최신 내용 다시 불러오기`} variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload({ kind: "decision" })}>
+                  <RefreshCw className="size-4" aria-hidden="true" />
+                  최신 내용 다시 불러오기
+                </Button>
+              </RegistrationRefreshAlert>
             ) : <>
             <div className="flex flex-wrap gap-2">
               <Button type="button" aria-label={`${track.subject} 대기로 전환`} size="sm" variant={decisionDestination === "waiting" ? "default" : "outline"} onClick={() => { setDecisionValidationError(""); setDecisionDestination("waiting") }}>대기로 전환</Button>
@@ -779,15 +832,24 @@ export function RegistrationEnrollmentEditor({
             </div>
             {decisionDestination === "waiting" ? (
               <div className="grid gap-2 sm:grid-cols-2">
-                <select aria-label={`${track.subject} 등록 결정 후 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={decisionWaitingKind} onChange={(event) => { setDecisionValidationError(""); setDecisionWaitingKind(event.target.value as RegistrationWaitingKind) }}>
-                  <option value="">대기 종류 선택</option>
-                  {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <RegistrationSelect
+                  aria-label={`${track.subject} 등록 결정 후 대기 종류`}
+                  value={decisionWaitingKind}
+                  placeholder="대기 종류 선택"
+                  options={[{ value: "", label: "대기 종류 선택" }, ...WAITING_KIND_OPTIONS]}
+                  onValueChange={(value) => { setDecisionValidationError(""); setDecisionWaitingKind(value as RegistrationWaitingKind) }}
+                />
                 {decisionWaitingKind === "current_class" ? (
-                  <select aria-label={`${track.subject} 등록 결정 후 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={decisionClassId} onChange={(event) => { setDecisionValidationError(""); setDecisionClassId(event.target.value) }}>
-                    <option value="">대기 수업 선택</option>
-                    {subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}
-                  </select>
+                  <RegistrationSelect
+                    aria-label={`${track.subject} 등록 결정 후 대기 수업`}
+                    value={decisionClassId}
+                    placeholder="대기 수업 선택"
+                    options={[
+                      { value: "", label: "대기 수업 선택" },
+                      ...subjectClasses.map((classItem) => ({ value: classItem.id, label: classItem.label })),
+                    ]}
+                    onValueChange={(value) => { setDecisionValidationError(""); setDecisionClassId(value) }}
+                  />
                 ) : null}
               </div>
             ) : null}
@@ -795,14 +857,14 @@ export function RegistrationEnrollmentEditor({
             <Button type="button" aria-label={`${track.subject} 단계 변경`} variant={decisionDestination === "not_registered" ? "destructive" : "default"} onClick={() => void routeDecision()} disabled={saving || decisionRefreshPending}>단계 변경</Button>
             {decisionValidationError ? <p role="alert" className="text-xs text-destructive">{decisionValidationError}</p> : null}
             </>}
-          </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
       ) : null}
 
       {immutableHistory.length > 0 ? (
-        <details className="rounded-md border p-3">
-          <summary className="cursor-pointer text-sm font-medium">수강 이력 {immutableHistory.length}건</summary>
-          <div className="mt-3 grid gap-2">
+        <Collapsible open={enrollmentHistoryOpen} onOpenChange={setEnrollmentHistoryOpen} className="group rounded-md border p-3">
+          <RegistrationCollapsibleTrigger>수강 이력 {immutableHistory.length}건</RegistrationCollapsibleTrigger>
+          <CollapsibleContent className="mt-3 grid gap-2">
             {immutableHistory.map((enrollment) => {
               const classLabel = classes.find((classItem) => classItem.id === enrollment.classId)?.label || enrollment.classId
               const canCancel = permissions.canManage
@@ -820,39 +882,56 @@ export function RegistrationEnrollmentEditor({
               )
             })}
             {trackHasOpenBatch ? <p className="text-xs text-muted-foreground">진행 중인 입학 처리를 먼저 완료하거나 취소하세요.</p> : null}
-          </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
       ) : null}
 
       {permissions.canManage && cancelEnrollmentId ? (
         <section className="grid gap-3 rounded-md border border-destructive/30 p-3">
           <h4 className="text-sm font-semibold">수강 취소</h4>
           {cancellationRefreshPending ? (
-            <div role="alert" className="grid gap-2 text-sm text-amber-900">
-              <span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span>
-              <Button type="button" aria-label={`${track.subject} 수강 취소 최신 내용 다시 불러오기`} variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload(cancellationScope)}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button>
-            </div>
+            <RegistrationRefreshAlert>
+              <Button type="button" aria-label={`${track.subject} 수강 취소 최신 내용 다시 불러오기`} variant="outline" size="sm" className="w-fit" onClick={() => void retryEnrollmentReload(cancellationScope)}>
+                <RefreshCw className="size-4" aria-hidden="true" />
+                최신 내용 다시 불러오기
+              </Button>
+            </RegistrationRefreshAlert>
           ) : <>
           <Textarea aria-label={`${track.subject} 수강 취소 사유`} value={cancelReason} onChange={(event) => { setCancellationValidationError(""); setCancelReason(event.target.value) }} placeholder="취소 사유" />
           {selectedEnrollmentCancellation.requiresDestination ? (
-            <select aria-label={`${track.subject} 수강 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestination} onChange={(event) => { setCancellationValidationError(""); setCancelDestination(event.target.value as typeof cancelDestination) }}>
-              <option value="">취소 후 단계 선택</option>
-              <option value="enrollment_decided">등록 결정으로 이동</option>
-              <option value="waiting">대기로 이동</option>
-              <option value="not_registered">미등록 완료</option>
-            </select>
+            <RegistrationSelect
+              aria-label={`${track.subject} 수강 취소 후 단계`}
+              value={cancelDestination}
+              placeholder="취소 후 단계 선택"
+              options={[
+                { value: "", label: "취소 후 단계 선택" },
+                { value: "enrollment_decided", label: "등록 결정으로 이동" },
+                { value: "waiting", label: "대기로 이동" },
+                { value: "not_registered", label: "미등록 완료" },
+              ]}
+              onValueChange={(value) => { setCancellationValidationError(""); setCancelDestination(value as typeof cancelDestination) }}
+            />
           ) : null}
           {selectedEnrollmentCancellation.requiresDestination && cancelDestination === "waiting" ? (
             <div className="grid gap-2 sm:grid-cols-2">
-              <select aria-label={`${track.subject} 수강 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKind} onChange={(event) => { setCancellationValidationError(""); setCancelWaitingKind(event.target.value as RegistrationWaitingKind) }}>
-                <option value="">대기 종류 선택</option>
-                {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              <RegistrationSelect
+                aria-label={`${track.subject} 수강 취소 대기 종류`}
+                value={cancelWaitingKind}
+                placeholder="대기 종류 선택"
+                options={[{ value: "", label: "대기 종류 선택" }, ...WAITING_KIND_OPTIONS]}
+                onValueChange={(value) => { setCancellationValidationError(""); setCancelWaitingKind(value as RegistrationWaitingKind) }}
+              />
               {cancelWaitingKind === "current_class" ? (
-                <select aria-label={`${track.subject} 수강 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassId} onChange={(event) => { setCancellationValidationError(""); setCancelClassId(event.target.value) }}>
-                  <option value="">대기 수업 선택</option>
-                  {subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}
-                </select>
+                <RegistrationSelect
+                  aria-label={`${track.subject} 수강 취소 대기 수업`}
+                  value={cancelClassId}
+                  placeholder="대기 수업 선택"
+                  options={[
+                    { value: "", label: "대기 수업 선택" },
+                    ...subjectClasses.map((classItem) => ({ value: classItem.id, label: classItem.label })),
+                  ]}
+                  onValueChange={(value) => { setCancellationValidationError(""); setCancelClassId(value) }}
+                />
               ) : null}
             </div>
           ) : null}
@@ -942,6 +1021,7 @@ export function RegistrationAdmissionPanel({
   const [cancelWaitingKinds, setCancelWaitingKinds] = useState<Record<string, RegistrationWaitingKind>>({})
   const [cancelClassIds, setCancelClassIds] = useState<Record<string, string>>({})
   const [validationError, setValidationError] = useState("")
+  const [priorBatchesOpen, setPriorBatchesOpen] = useState(false)
   const admissionSectionRef = useRef<HTMLElement | null>(null)
   const trackById = useMemo(() => new Map(tracks.map((track) => [track.id, track])), [tracks])
   const classById = useMemo(() => new Map(classes.map((classItem) => [classItem.id, classItem])), [classes])
@@ -1150,17 +1230,17 @@ export function RegistrationAdmissionPanel({
     }))
     if (resolutions.some((item) => !item.destination)) {
       setValidationError("취소 후 단계를 과목별로 선택하세요.")
-      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("select")?.focus())
+      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[data-slot='select-trigger']")?.focus())
       return
     }
     if (resolutions.some((item) => item.destination === "waiting" && !item.waitingKind)) {
       setValidationError("대기 종류를 과목별로 선택하세요.")
-      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("select")?.focus())
+      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[data-slot='select-trigger']")?.focus())
       return
     }
     if (resolutions.some((item) => item.waitingKind === "current_class" && !item.classId)) {
       setValidationError("대기 수업을 과목별로 선택하세요.")
-      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("select")?.focus())
+      window.requestAnimationFrame(() => admissionSectionRef.current?.querySelector<HTMLElement>("[data-slot='select-trigger']")?.focus())
       return
     }
     const entityId = `${openBatch.id}:${cancelBatchReason.trim()}:${JSON.stringify(resolutions)}`
@@ -1199,7 +1279,14 @@ export function RegistrationAdmissionPanel({
       content: (
         <div className="grid gap-2 text-sm">
           <span className="text-xs text-muted-foreground">{messageStatusLabel}</span>
-          {messageRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("message")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
+          {messageRefreshPending ? (
+            <RegistrationRefreshAlert>
+              <Button type="button" aria-label="입학신청서 최신 내용 다시 불러오기" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("message")}>
+                <RefreshCw className="size-4" aria-hidden="true" />
+                최신 내용 다시 불러오기
+              </Button>
+            </RegistrationRefreshAlert>
+          ) : null}
           {permissions.canManage && applicationState.canSend ? (
             <Button type="button" size="sm" className="w-fit" onClick={() => void runMessageAction("admission-send", (requestKey) => onSendAdmissionMessage({ taskId, requestKey }), taskId)} disabled={Boolean(busyAction) || messageRefreshPending}>입학신청서 발송</Button>
           ) : null}
@@ -1244,7 +1331,14 @@ export function RegistrationAdmissionPanel({
       complete: checklist.makeedu,
       content: (
         <div className="grid gap-2">
-          {batchRefreshPending ? <div role="alert" className="grid gap-2 text-sm text-amber-900"><span>저장은 완료됐지만 최신 내용을 불러오지 못했습니다</span><Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}><RefreshCw className="size-4" aria-hidden="true" />최신 내용 다시 불러오기</Button></div> : null}
+          {batchRefreshPending ? (
+            <RegistrationRefreshAlert>
+              <Button type="button" aria-label="입학 처리 최신 내용 다시 불러오기" variant="outline" size="sm" className="w-fit" onClick={() => void retryAdmissionReload("batch")}>
+                <RefreshCw className="size-4" aria-hidden="true" />
+                최신 내용 다시 불러오기
+              </Button>
+            </RegistrationRefreshAlert>
+          ) : null}
           {!displayBatch ? (
             <div data-registration-action-owner="admission-start" className="grid gap-2">
               {unbatchedPlannedEnrollments.length > 0 ? unbatchedPlannedEnrollments.map((enrollment) => {
@@ -1350,18 +1444,41 @@ export function RegistrationAdmissionPanel({
                     <span className="text-sm font-medium">{track?.subject || "과목"}</span>
                     {isFirstAdmission ? (
                       <>
-                        <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 후 단계`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelDestinations[trackId] || ""} onChange={(event) => setCancelDestinations((current) => ({ ...current, [trackId]: event.target.value as "" | "waiting" | "not_registered" }))} disabled={batchRefreshPending}>
-                          <option value="">취소 후 단계 선택</option>
-                          <option value="not_registered">미등록 완료</option>
-                          <option value="waiting">대기로 이동</option>
-                        </select>
+                        <RegistrationSelect
+                          aria-label={`${track?.subject || "과목"} 입학 처리 취소 후 단계`}
+                          value={cancelDestinations[trackId] || ""}
+                          placeholder="취소 후 단계 선택"
+                          options={[
+                            { value: "", label: "취소 후 단계 선택" },
+                            { value: "not_registered", label: "미등록 완료" },
+                            { value: "waiting", label: "대기로 이동" },
+                          ]}
+                          onValueChange={(value) => setCancelDestinations((current) => ({ ...current, [trackId]: value as "" | "waiting" | "not_registered" }))}
+                          disabled={batchRefreshPending}
+                        />
                         {cancelDestinations[trackId] === "waiting" ? (
                           <div className="grid gap-2">
-                            <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 종류`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelWaitingKinds[trackId] || ""} onChange={(event) => setCancelWaitingKinds((current) => ({ ...current, [trackId]: event.target.value as RegistrationWaitingKind }))} disabled={batchRefreshPending}>
-                              <option value="">대기 종류 선택</option>
-                              {WAITING_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                            </select>
-                            {cancelWaitingKinds[trackId] === "current_class" ? <select aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 수업`} className="h-9 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={cancelClassIds[trackId] || ""} onChange={(event) => setCancelClassIds((current) => ({ ...current, [trackId]: event.target.value }))} disabled={batchRefreshPending}><option value="">대기 수업 선택</option>{subjectClasses.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.label}</option>)}</select> : null}
+                            <RegistrationSelect
+                              aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 종류`}
+                              value={cancelWaitingKinds[trackId] || ""}
+                              placeholder="대기 종류 선택"
+                              options={[{ value: "", label: "대기 종류 선택" }, ...WAITING_KIND_OPTIONS]}
+                              onValueChange={(value) => setCancelWaitingKinds((current) => ({ ...current, [trackId]: value as RegistrationWaitingKind }))}
+                              disabled={batchRefreshPending}
+                            />
+                            {cancelWaitingKinds[trackId] === "current_class" ? (
+                              <RegistrationSelect
+                                aria-label={`${track?.subject || "과목"} 입학 처리 취소 대기 수업`}
+                                value={cancelClassIds[trackId] || ""}
+                                placeholder="대기 수업 선택"
+                                options={[
+                                  { value: "", label: "대기 수업 선택" },
+                                  ...subjectClasses.map((classItem) => ({ value: classItem.id, label: classItem.label })),
+                                ]}
+                                onValueChange={(value) => setCancelClassIds((current) => ({ ...current, [trackId]: value }))}
+                                disabled={batchRefreshPending}
+                              />
+                            ) : null}
                           </div>
                         ) : <span />}
                       </>
@@ -1379,17 +1496,17 @@ export function RegistrationAdmissionPanel({
       {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
 
       {batches.some((batch) => ["completed", "canceled"].includes(batch.status)) ? (
-        <details className="rounded-md border p-3">
-          <summary className="cursor-pointer text-sm font-medium">이전 입학 처리</summary>
-          <div className="mt-2 grid gap-2">
+        <Collapsible open={priorBatchesOpen} onOpenChange={setPriorBatchesOpen} className="group rounded-md border p-3">
+          <RegistrationCollapsibleTrigger>이전 입학 처리</RegistrationCollapsibleTrigger>
+          <CollapsibleContent className="mt-2 grid gap-2">
             {batches.filter((batch) => ["completed", "canceled"].includes(batch.status)).map((batch) => (
               <div key={batch.id} className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm">
                 <span>{batch.revisionNumber}차 처리</span>
                 <Badge variant="outline">{batch.status === "completed" ? "등록 완료" : "취소"}</Badge>
               </div>
             ))}
-          </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
       ) : null}
 
     </section>

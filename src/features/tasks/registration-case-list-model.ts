@@ -52,6 +52,25 @@ const REGISTRATION_TRACK_VIEW_KEYS: RegistrationTrackViewKey[] = [
   "closed",
 ]
 
+const REVERSIBLE_REGISTRATION_TRACK_STATUSES = new Set<OpsRegistrationTrackStatus>([
+  "inquiry",
+  "migration_review",
+  "level_test_scheduled",
+  "level_test_in_progress",
+  "consultation_waiting",
+  "visit_consultation_scheduled",
+])
+
+export function canDeleteRegistrationCase(
+  task: Pick<OpsTask, "type" | "status" | "registrationTracks">,
+  viewerRole: string | null | undefined,
+): boolean {
+  if (viewerRole !== "admin" || task.type !== "registration") return false
+  if (task.status === "done" || task.status === "canceled") return false
+  const tracks = task.registrationTracks || []
+  return tracks.length > 0 && tracks.every((track) => REVERSIBLE_REGISTRATION_TRACK_STATUSES.has(track.status))
+}
+
 export function buildRegistrationCaseListItems(
   tasks: readonly OpsTask[],
 ): RegistrationCaseListItem[] {

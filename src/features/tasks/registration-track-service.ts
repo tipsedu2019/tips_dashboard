@@ -297,6 +297,29 @@ export type RegistrationCommonUpdateResponse = {
   commonRevision: number
 }
 
+export type RegistrationCaseInquirySaveInput = {
+  taskId: string
+  studentName: string
+  schoolGrade: string
+  schoolName: string
+  parentPhone: string
+  studentPhone: string
+  campus: string
+  inquiryAt: string
+  requestNote: string
+  priority: string
+  subjects: RegistrationSubject[]
+  expectedCommonRevision: number
+  expectedSubjects: RegistrationSubject[]
+  requestKey: string
+}
+
+export type RegistrationCaseInquirySaveResponse = RegistrationCommonUpdateResponse & {
+  subjects: RegistrationSubject[]
+  tracks: OpsRegistrationTrackSummary[]
+  notificationJobs?: RegistrationNotificationJobReference[]
+}
+
 export type RegistrationTrackTransitionResponse = {
   taskId: string
   trackId: string
@@ -846,6 +869,14 @@ function subject(input: unknown): RegistrationSubject {
   const parsed = parseAcademicSubject(input)
   if (!parsed) throw new Error("registration_subject_unsupported")
   return parsed
+}
+
+function orderedRegistrationSubjects(values: readonly RegistrationSubject[]): RegistrationSubject[] {
+  const order: readonly RegistrationSubject[] = ["영어", "수학", "과학"]
+  return values
+    .map((value) => subject(value))
+    .filter((value, index, subjects) => subjects.indexOf(value) === index)
+    .sort((left, right) => order.indexOf(left) - order.indexOf(right))
 }
 
 function trackStatus(input: unknown): OpsRegistrationTrackStatus {
@@ -1996,6 +2027,41 @@ export function createRegistrationTrackService(
     }
   }
 
+  async function saveRegistrationCaseInquiry(
+    input: RegistrationCaseInquirySaveInput,
+  ): Promise<RegistrationCaseInquirySaveResponse> {
+    const expectedSubjects = orderedRegistrationSubjects(input.expectedSubjects)
+    const subjects = orderedRegistrationSubjects(input.subjects)
+    const result = await callRpc<RegistrationCaseInquirySaveResponse>("save_registration_case_inquiry_v1", {
+      p_task_id: input.taskId,
+      p_student_name: input.studentName,
+      p_school_grade: input.schoolGrade,
+      p_school_name: nullableText(input.schoolName),
+      p_parent_phone: input.parentPhone,
+      p_student_phone: nullableText(input.studentPhone),
+      p_campus: input.campus,
+      p_inquiry_at: input.inquiryAt,
+      p_request_note: nullableText(input.requestNote),
+      p_priority: input.priority,
+      p_expected_common_revision: input.expectedCommonRevision,
+      p_expected_subjects: expectedSubjects,
+      p_subjects: subjects,
+      p_request_key: requireRequestKey(input.requestKey),
+    })
+    const tracks = rows(value(result as unknown as Row, "tracks"))
+      .map((row) => mapTrack(row))
+      .sort((left, right) => (
+        (["영어", "수학", "과학"] as RegistrationSubject[]).indexOf(left.subject)
+          - (["영어", "수학", "과학"] as RegistrationSubject[]).indexOf(right.subject)
+        || left.id.localeCompare(right.id)
+      ))
+    return {
+      ...result,
+      subjects,
+      tracks,
+    }
+  }
+
   async function updateRegistrationCaseCommon(input: {
     taskId: string
     studentName: string
@@ -2506,6 +2572,7 @@ export function createRegistrationTrackService(
     createRegistrationCase,
     createRegistrationCaseWithInitialWorkflow,
     syncRegistrationCaseSubjects,
+    saveRegistrationCaseInquiry,
     updateRegistrationCaseCommon,
     routeRegistrationInquiry,
     assignRegistrationTrackDirector,
@@ -2668,6 +2735,17 @@ export function syncRegistrationCaseSubjects(
   const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationSubjectSyncResponse>("syncRegistrationCaseSubjects", input)
   if (fixture) return fixture
   return defaultRegistrationTrackService.syncRegistrationCaseSubjects(input)
+}
+
+export function saveRegistrationCaseInquiry(
+  input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationCaseInquiry>[0],
+) {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationCaseInquirySaveResponse>(
+    "saveRegistrationCaseInquiry",
+    input,
+  )
+  if (fixture) return fixture
+  return defaultRegistrationTrackService.saveRegistrationCaseInquiry(input)
 }
 
 export function updateRegistrationCaseCommon(

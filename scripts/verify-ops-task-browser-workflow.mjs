@@ -2843,6 +2843,26 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     if (!precedes) throw new Error(`${label} is not rendered in the approved order.`)
   }
 
+  async function selectRegistrationOption(trigger, optionLabel) {
+    await trigger.waitFor({ state: "visible", timeout: 5000 })
+    await trigger.click()
+    const listbox = page.locator('[data-slot="select-content"][data-state="open"]').last()
+    await listbox.waitFor({ state: "visible", timeout: 5000 })
+    const option = listbox.getByRole("option", { name: optionLabel, exact: true }).first()
+    await option.waitFor({ state: "visible", timeout: 5000 })
+    await option.click()
+  }
+
+  async function readRegistrationOptions(trigger) {
+    await trigger.waitFor({ state: "visible", timeout: 5000 })
+    await trigger.click()
+    const listbox = page.locator('[data-slot="select-content"][data-state="open"]').last()
+    await listbox.waitFor({ state: "visible", timeout: 5000 })
+    const options = await listbox.getByRole("option").allTextContents()
+    await page.keyboard.press("Escape")
+    return options
+  }
+
   async function assertSharedInquiryControls(applicationHost, expectedHistoryTriggerCount) {
     const subjectPicker = applicationHost.locator('[data-registration-focus="subject"]')
     const subjectButtons = applicationHost.locator('[data-registration-focus="subject"] button[aria-pressed]')
@@ -2884,7 +2904,10 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   }
 
   async function assertApplicationSections(applicationHost) {
-    const approvedSectionIds = ["inquiry", "level_test", "consultation", "placement", "admission"]
+    const mode = await applicationHost.getAttribute("data-registration-application-mode")
+    const approvedSectionIds = mode === "create"
+      ? ["inquiry", "level_test", "consultation"]
+      : ["inquiry", "level_test", "consultation", "waiting", "registration", "admission"]
     for (const sectionId of approvedSectionIds) {
       const section = applicationHost.locator(`[data-registration-application-section="${sectionId}"]`)
       if (await section.count() !== 1 || !(await section.isVisible().catch(() => false))) {
@@ -2899,6 +2922,19 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     )
     if (unexpectedSectionIds.length > 0) {
       throw new Error(`registration application exposes unexpected sections: ${unexpectedSectionIds.join(", ")}.`)
+    }
+  }
+
+  async function assertNoDuplicateRegistrationDetailSummaries(applicationHost) {
+    const forbiddenSummaryLocators = [
+      applicationHost.locator("[data-registration-duplicate-summary]"),
+      applicationHost.getByText("현재 진행 단계가 아닙니다", { exact: true }),
+    ]
+    for (const locator of forbiddenSummaryLocators) {
+      const count = await locator.count()
+      if (count !== 0) {
+        throw new Error(`saved registration application exposes ${count} duplicate detail summaries.`)
+      }
     }
   }
 
@@ -3125,12 +3161,12 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   if (await createScienceSubjectButton.getAttribute("aria-pressed") !== "true") {
     throw new Error("science subject did not remain selected before grade selection.")
   }
-  await createControls.schoolGrade.selectOption("고1")
+  await selectRegistrationOption(createControls.schoolGrade, "고1")
   if (await createScienceSubjectButton.getAttribute("aria-pressed") !== "true") {
     throw new Error("science subject did not remain selected after choosing an allowed grade.")
   }
   await waitUntilEnabled(createControls.schoolName, "grade-scoped school select")
-  const highSchoolOptions = await createControls.schoolName.locator("option").allTextContents()
+  const highSchoolOptions = await readRegistrationOptions(createControls.schoolName)
   if (!highSchoolOptions.includes("새봄고")) {
     throw new Error("고1 school options are missing the high-school fixture 새봄고.")
   }
@@ -3150,8 +3186,13 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     throw new Error("saved registration application did not open in detail mode.")
   }
   await assertApplicationSections(detailApplicationHost)
+  const inquirySaveButtons = detailApplicationHost.locator('[data-registration-application-section="inquiry"]').getByRole("button", { name: "저장", exact: true })
+  if (await inquirySaveButtons.count() !== 1) {
+    throw new Error("saved registration application must expose exactly one unified inquiry save button.")
+  }
+  await assertNoDuplicateRegistrationDetailSummaries(detailApplicationHost)
   const detailControls = await assertSharedInquiryControls(detailApplicationHost, 1)
-  const legacySchoolOptions = await detailControls.schoolName.locator("option").allTextContents()
+  const legacySchoolOptions = await readRegistrationOptions(detailControls.schoolName)
   if (!legacySchoolOptions.some((option) => option.includes("기존 입력") && option.includes("중앙고"))) {
     throw new Error("saved non-catalog school is missing its 기존 입력 option.")
   }
@@ -3205,9 +3246,9 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
     trackId: "fixture-track-multiple-english",
     studentName: "최유진",
   })
-  const placementSection = admissionApplicationHost.locator('[data-registration-application-section="placement"]')
+  const registrationSection = admissionApplicationHost.locator('[data-registration-application-section="registration"]')
   const admissionSection = admissionApplicationHost.locator('[data-registration-application-section="admission"]')
-  await placementSection.getByRole("button", { name: "수업 추가", exact: true }).waitFor({ state: "visible", timeout: 5000 })
+  await registrationSection.getByRole("button", { name: "수업 추가", exact: true }).waitFor({ state: "visible", timeout: 5000 })
   await admissionSection.getByRole("button", { name: "입학 처리 시작", exact: true }).waitFor({ state: "visible", timeout: 5000 })
   await assertMobileActionDomOrder(admissionApplicationHost)
 
@@ -3272,7 +3313,12 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   const optionFaultHost = await getCanonicalRegistrationApplicationHost()
   const optionFaultEnglishSubject = optionFaultHost.locator('[data-registration-focus="subject"] button[aria-pressed]').filter({ hasText: "영어" })
   if (await optionFaultEnglishSubject.getAttribute("aria-pressed") !== "true") await optionFaultEnglishSubject.click()
-  await optionFaultHost.getByLabel("영어 다음 업무", { exact: true }).selectOption("direct_phone")
+  const optionFaultConsultationSection = optionFaultHost.locator('[data-registration-application-section="consultation"]')
+  const optionFaultConsultationTrigger = optionFaultConsultationSection.getByRole("button", { name: "상담", exact: true })
+  if (await optionFaultConsultationTrigger.getAttribute("aria-expanded") !== "true") await optionFaultConsultationTrigger.click()
+  const optionFaultConsultationGroup = optionFaultHost.getByRole("group", { name: "상담 과목 선택", exact: true })
+  const optionFaultEnglishConsultation = optionFaultConsultationGroup.getByRole("button", { name: "영어", exact: true })
+  if (await optionFaultEnglishConsultation.getAttribute("aria-pressed") !== "true") await optionFaultEnglishConsultation.click()
   const optionFaultDirector = optionFaultHost.getByLabel("영어 상담 책임자", { exact: true })
   if (await optionFaultDirector.isEnabled()) throw new Error("option fault left the director catalog enabled.")
   await assertNonColorWorkflowState(optionFaultHost, "locked")

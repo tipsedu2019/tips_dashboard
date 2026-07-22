@@ -150,6 +150,7 @@ import {
 } from "./registration-case-list"
 import {
   buildRegistrationCaseListItems,
+  canDeleteRegistrationCase,
   filterRegistrationCaseListItems,
   getRegistrationCaseTabCounts,
 } from "./registration-case-list-model"
@@ -1437,7 +1438,14 @@ function getUnknownErrorMessage(error: unknown) {
 }
 
 function getOpsTaskActionErrorMessage(error: unknown, fallback: string) {
-  const message = getUnknownErrorMessage(error) || fallback
+  const rawMessage = getUnknownErrorMessage(error)
+  const message = rawMessage.includes("ops_task_delete_forbidden")
+    ? "이 업무를 삭제할 권한이 없습니다."
+    : rawMessage.includes("registration_case_delete_not_allowed")
+      ? "대기 또는 등록이 시작된 신청은 삭제할 수 없습니다."
+      : rawMessage.toLowerCase().includes("upstream request timeout")
+        ? "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요."
+        : rawMessage || fallback
   const cleanupError = typeof error === "object" && error ? (error as { cleanupError?: unknown }).cleanupError : null
   const cleanupText = getUnknownErrorMessage(cleanupError)
   const cleanupMessage = cleanupText ? `생성 정리 확인 필요: ${cleanupText}` : ""
@@ -8530,6 +8538,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const canDeleteTask = useCallback(
     (task: OpsTask) => {
       if (task.type === "registration" && isRegistrationCompletionImmutable(task.registration?.pipelineStatus)) return false
+      if (task.type === "registration" && (task.registrationTracks?.length || 0) > 0) {
+        return canDeleteRegistrationCase(task, registrationViewerRole)
+      }
       const isOwnGeneralTask = (
         task.type === "general" &&
         Boolean(currentUserId) &&
@@ -8539,7 +8550,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       if (isAdmin || isOwnGeneralTask) return true
       return canDelete && (task.type === "general" || !isClosedOpsTask(task))
     },
-    [canDelete, currentUserId, isAdmin],
+    [canDelete, currentUserId, isAdmin, registrationViewerRole],
   )
   const workspaceLabel = WORKSPACE_LABELS[workspace]
 
@@ -11682,7 +11693,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setStatusUndo(null)
     try {
       const taskId = deleteTarget.id
-      await deleteOpsTask(taskId)
+      await deleteOpsTask(deleteTarget)
       setDeleteTarget(null)
       setDetailOpen(false)
       syncTaskDeepLink(null)
@@ -11690,7 +11701,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const itemLabel = deleteTarget.type === "general" ? "할 일" : getTaskTypeLabel(deleteTarget.type)
       setNotice(`${itemLabel} 삭제 완료`)
     } catch (error) {
-      setMessage(getOpsTaskActionErrorMessage(error, "삭제하지 못했습니다."))
+      setMessage(getOpsTaskActionErrorMessage(error, "등록 신청을 삭제하지 못했습니다."))
     } finally {
       setSaving(false)
     }
@@ -11705,7 +11716,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setStatusUndo(null)
     try {
       const deletedTaskIds = new Set(deletableTasks.map((task) => task.id))
-      await Promise.all(deletableTasks.map((task) => deleteOpsTask(task.id)))
+      await Promise.all(deletableTasks.map((task) => deleteOpsTask(task)))
       setBulkDeleteTargets([])
       setWordRetestSelectedTaskIds((current) => {
         const next = new Set(current)

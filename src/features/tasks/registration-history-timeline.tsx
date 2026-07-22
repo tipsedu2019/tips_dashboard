@@ -1,8 +1,13 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 
 import type { OpsProfileOption } from "./ops-task-service"
 import {
@@ -118,6 +123,23 @@ function historyDetailLines(item: RegistrationSubjectHistoryItem) {
   return lines
 }
 
+function RegistrationHistoryDetails({ lines }: { lines: string[] }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="text-xs text-muted-foreground">
+      <CollapsibleTrigger type="button" className="w-fit cursor-pointer font-medium text-foreground">
+        {open ? "상세 닫기" : "상세 보기"}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ul className="mt-1.5 grid gap-1 pl-4">
+          {lines.map((line) => <li key={line} className="list-disc break-words">{line}</li>)}
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 export function RegistrationHistoryTimeline({ detail, profiles, embedded = false }: RegistrationHistoryTimelineProps) {
   const history = useMemo(() => buildRegistrationSubjectHistory(detail), [detail])
   const profileById = useMemo(
@@ -156,12 +178,7 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
                     </p>
                   </div>
                 </div>
-                <details className="text-xs text-muted-foreground">
-                  <summary className="w-fit cursor-pointer font-medium text-foreground">상세 보기</summary>
-                  <ul className="mt-1.5 grid gap-1 pl-4">
-                    {detailLines.map((line) => <li key={line} className="list-disc break-words">{line}</li>)}
-                  </ul>
-                </details>
+                <RegistrationHistoryDetails lines={detailLines} />
               </li>
             )
           })}

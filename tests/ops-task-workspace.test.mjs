@@ -1663,14 +1663,14 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "onDraftChange={onRegistrationInitialWorkflowChange}",
   ]);
   assert.doesNotMatch(registrationFormSource, /phoneConsultationAt|levelTestAt|visitConsultationAt|visitConsultationPlace|levelTestMaterialLink/);
-  assertIncludesAll(createSource, ["RegistrationApplicationPlacementSection", "RegistrationApplicationAdmissionSection"]);
+  assert.doesNotMatch(createSource, /RegistrationApplicationPlacementSection|RegistrationApplicationAdmissionSection/);
   assert.doesNotMatch(source, /inquiryChannel|\{문의채널\}|문의채널|문의 채널/);
   assert.doesNotMatch(sampleWorkflowSource, /inquiry_channel/);
   assert.doesNotMatch(browserWorkflowSource, /inquiry_channel/);
   assertIncludesAll(browserWorkflowSource, [
     '[data-registration-focus="subject"] button[aria-pressed]',
     "applicationHost.getByLabel(/^학년/)",
-    'schoolGrade.selectOption("고1")',
+    'selectRegistrationOption(createControls.schoolGrade, "고1")',
     "applicationHost.getByLabel(/^학교/)",
     "새봄고",
     "새봄초",
@@ -1678,7 +1678,7 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "과목별 등록 진행",
     "registration-subject-tab-",
     "기존 입력",
-    'data-registration-application-section="placement"',
+    'data-registration-application-section="registration"',
     'width: 1349, height: 987',
   ]);
   assert.doesNotMatch(browserWorkflowSource, /fillIfPresent\(dialog, "학년"/);
@@ -1715,12 +1715,10 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     "timeAriaLabel=\"방문상담일 시각\"",
     "레벨테스트 장소",
     "방문상담실",
-    "영어 결과 링크",
-    "수학 결과 링크",
   ]);
-  assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink|참여 과목|ParticipantBadges/);
-  assertInOrder(initialPlanSource, ["상담 책임자", "전화상담 대기 기준일시", "방문상담일시", "방문상담실", "상담 결과"]);
-  assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소", "영어 결과 링크", "수학 결과 링크"]);
+  assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink|결과 링크|전화상담 대기 기준일시|상담 결과|참여 과목|ParticipantBadges/);
+  assertInOrder(initialPlanSource, ["상담 책임자", "방문상담일시", "방문상담실"]);
+  assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소"]);
   assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
   const inquirySource = `${subjectPickerSource}\n${inquiryFieldsSource}`;
@@ -2190,7 +2188,7 @@ test("registration resolves and edits directors per subject in the canonical ini
     "directorOptionsBySubject,",
   ]);
   assertIncludesAll(initialPlanSource, [
-    "orderedSubjects.map((subject)",
+    "consultationSubjects.map((subject)",
     "draft.directorOverrides[subject] || resolvedDirectorId",
     "directorOptionsBySubject[subject]",
     "[subject]: nextValue",
@@ -4084,6 +4082,7 @@ test("management sync connects registration transfer withdrawal and word retest 
     "throw new Error(\"업무 데이터를 다시 불러오세요.\")",
   ]);
   assertIncludesAll(deleteOpsTaskSource, [
+    'runIdempotentOpsTaskProducerRpc("delete_registration_case_v1"',
     'runIdempotentOpsTaskProducerRpc("delete_ops_task_v1"',
     "producerDeletedTask(response, taskId)",
     "if (rollbackWaitlist) await rollbackWaitlist()",
@@ -4109,6 +4108,53 @@ test("management sync connects registration transfer withdrawal and word retest 
     "public.current_dashboard_role() = 'staff'",
     "ops_tasks.status not in ('done', 'canceled')",
   ]);
+});
+
+test("canonical registration delete uses a dedicated guarded RPC and never exposes backend error codes", async () => {
+  const migrationPath = "supabase/migrations/20260722142020_registration_science_director_and_case_delete.sql";
+  assert.equal(await pathExists(migrationPath), true, `${migrationPath} must exist`);
+
+  const [workspaceSource, serviceSource, migrationSource] = await Promise.all([
+    readSource("src/features/tasks/ops-task-workspace.tsx"),
+    readSource("src/features/tasks/ops-task-service.ts"),
+    readSource(migrationPath),
+  ]);
+
+  assert.match(workspaceSource, /canDeleteRegistrationCase\(task, registrationViewerRole\)/);
+  assert.match(workspaceSource, /ops_task_delete_forbidden[\s\S]*?이 업무를 삭제할 권한이 없습니다\./);
+  assert.match(workspaceSource, /registration_case_delete_not_allowed[\s\S]*?대기 또는 등록이 시작된 신청은 삭제할 수 없습니다\./);
+  assert.match(workspaceSource, /upstream request timeout[\s\S]*?서버 응답이 지연되었습니다\. 잠시 후 다시 시도해 주세요\./);
+
+  const deleteSource = serviceSource.slice(
+    serviceSource.indexOf("export async function deleteOpsTask"),
+    serviceSource.indexOf("export async function addOpsTaskComment"),
+  );
+  assert.match(deleteSource, /export async function deleteOpsTask\(task: OpsTask\)/);
+  assert.match(deleteSource, /const taskId = task\.id/);
+  assert.match(workspaceSource, /await deleteOpsTask\(deleteTarget\)/);
+  assert.match(deleteSource, /task\.type === "registration"[\s\S]*?delete_registration_case_v1/);
+  assert.ok(deleteSource.indexOf('"delete_registration_case_v1"') < deleteSource.indexOf("await assertOpsTaskExists(taskId)"));
+  assert.match(deleteSource, /delete_ops_task_v1/);
+
+  assert.match(migrationSource, /create or replace function dashboard_private\.delete_registration_case_v1_impl/);
+  assert.match(migrationSource, /v_role is distinct from 'admin'/);
+  assert.match(migrationSource, /pipeline_status not in \([\s\S]*?'level_test_scheduled'[\s\S]*?'visit_consultation_scheduled'/);
+  assert.match(migrationSource, /ops_registration_enrollments[\s\S]*?registration_case_delete_not_allowed/);
+  assert.match(migrationSource, /ops_registration_admission_batches[\s\S]*?registration_case_delete_not_allowed/);
+  assert.match(migrationSource, /ops_registration_messages[\s\S]*?registration_case_delete_not_allowed/);
+  assertInOrder(migrationSource, [
+    "notification-control-plane-workflow:registration",
+    "registration:workflow:",
+    "cancel_registration_phone_projection_v1",
+    "cancel_registration_visit_superseded_v1",
+    "cancel_registration_appointment_reminders_v1",
+    "delete from public.ops_registration_level_tests",
+  ]);
+  assert.match(migrationSource, /cancel_registration_visit_superseded_v1\([\s\S]*?null(?:::\w+)?,[\s\S]*?'source_canceled'/);
+  assert.match(migrationSource, /cancel_registration_appointment_reminders_v1\([\s\S]*?'source_status_changed',[\s\S]*?null(?:::\w+)?/);
+  assert.match(migrationSource, /delete from public\.ops_registration_level_tests[\s\S]*?delete from public\.ops_registration_consultations[\s\S]*?delete from public\.ops_registration_appointments[\s\S]*?delete from public\.ops_registration_subject_tracks[\s\S]*?delete from public\.ops_tasks/);
+  assert.match(migrationSource, /create or replace function public\.delete_registration_case_v1/);
+  assert.match(migrationSource, /grant execute on function public\.delete_registration_case_v1\(uuid, uuid\) to authenticated/);
 });
 
 test("completed operational tasks cannot be reopened by status alone", async () => {
@@ -4536,13 +4582,12 @@ test("browser workflow scripts target the operation surfaces", async () => {
   ]);
 });
 
-test("registration create shows locked placement while canonical track editors own enrollment scheduling", async () => {
+test("registration create omits placement while canonical track editors own enrollment scheduling", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const create = await readSource("src/features/tasks/registration-application-create.tsx");
 
-  assert.match(create, /RegistrationApplicationPlacementSection/);
-  assert.match(create, /수업 시작 일정/);
-  assert.match(create, /focusKey="classStartDate"/);
+  assert.doesNotMatch(create, /RegistrationApplicationPlacementSection/);
+  assert.doesNotMatch(create, /수업 시작 일정|focusKey="classStartDate"/);
   assert.doesNotMatch(create, /classStartSession|fillRegistration/);
   assertIncludesAll(source, ["RegistrationApplication", "admissionActions"]);
 });
@@ -4575,7 +4620,7 @@ test("registration completion keeps textbook optional while validating a nonempt
   assert.match(blockerSource, /if \(hasLinkedRecord\(input\.textbookId\) && !findTextbookOption/);
 });
 
-test("registration admission checklist remains chronological and visible but locked in create", async () => {
+test("registration admission checklist remains chronological in saved detail and is omitted during create", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const create = await readSource("src/features/tasks/registration-application-create.tsx");
   const checklistStart = source.indexOf("function getRegistrationOperationsChecklist(");
@@ -4598,8 +4643,8 @@ test("registration admission checklist remains chronological and visible but loc
   assertInOrder(checklistSource, orderedLabels);
   assert.match(checklistSource, /getRegistrationPipelinePrefix\(registration\?\.pipelineStatus\) === "7\."/);
   assert.doesNotMatch(checklistSource, /textbookBillingIssued|textbookReady|timetableRosterUpdated|교재 청구출고표|교재 준비|수업시간표 명단/);
-  assertInOrder(create, orderedLabels);
-  assert.match(create, /RegistrationApplicationAdmissionSection/);
+  for (const label of orderedLabels) assert.ok(!create.includes(label), `create omits future field: ${label}`);
+  assert.doesNotMatch(create, /RegistrationApplicationAdmissionSection/);
   assert.doesNotMatch(registrationDetailSource, /<Info label="교재 준비"|textbookBillingIssued/);
   assertInOrder(registrationSummarySource, orderedLabels);
   assert.doesNotMatch(registrationSummarySource, /autoItems=|textbookBillingIssued|교재 청구출고표|교재 준비|수업시간표 명단/);

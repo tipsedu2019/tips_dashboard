@@ -2,12 +2,8 @@
 
 import { useEffect, useMemo, type ReactNode } from "react"
 
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 
-import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
-import { RegistrationAdmissionProgress } from "./registration-admission-progress"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import {
   RegistrationInquiryCommonFields,
@@ -22,14 +18,12 @@ import {
   type RegistrationCreateCatalogStatus,
 } from "./registration-application-model"
 import { RegistrationApplicationProgressStepper } from "./registration-application-progress-stepper"
-import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
   reconcileRegistrationInitialWorkflowCapabilities,
   getRegistrationSubjectPickerAvailability,
   reconcileRegistrationInitialWorkflowDraft,
   reconcileRegistrationSubjectsForGrade,
-  type RegistrationInitialAction,
   type RegistrationInitialPersistenceProbeResult,
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
@@ -57,13 +51,6 @@ import {
 
 const READY_INITIAL_ACTIONS = ["inquiry", "direct_phone", "level_test", "visit"] as const
 const INQUIRY_ONLY_INITIAL_ACTIONS = ["inquiry"] as const
-
-const INITIAL_ACTION_LABEL: Record<RegistrationInitialAction, string> = {
-  inquiry: "문의 유지",
-  direct_phone: "바로 전화상담",
-  level_test: "레벨테스트",
-  visit: "방문상담",
-}
 
 export type RegistrationApplicationCreateProps = {
   form: OpsTaskInput
@@ -162,7 +149,7 @@ export function RegistrationApplicationCreate({
       consultation: canPlanInitialWorkflow
         ? { ...base.consultation, editable: true, lockReason: "" }
         : base.consultation,
-      history: { ...base.history, lockReason: "첫 저장 후 자동 기록됩니다" },
+      history: base.history,
     }
   }, [draft, inquiryLockReason, persistence.mode, subjects, writable])
   const initialFieldsProps = {
@@ -229,12 +216,12 @@ export function RegistrationApplicationCreate({
       mode="create"
       studentName={form.studentName || "새 등록 신청"}
       closeAction={closeAction}
-      tracks={subjects.map((subject) => ({
-        key: subject,
-        subject,
-        statusLabel: INITIAL_ACTION_LABEL[draft.subjectPlans[subject] || "inquiry"],
-      }))}
-      progress={<RegistrationApplicationProgressStepper steps={getRegistrationApplicationProgress("inquiry")} />}
+      progress={(
+        <RegistrationApplicationProgressStepper
+          steps={getRegistrationApplicationProgress("inquiry")}
+          enabledKeys={["inquiry", "level_test", "consultation"]}
+        />
+      )}
       sectionStates={sectionStates}
       sectionNotices={catalogState.showLocalStatus ? {
         consultation: (
@@ -284,7 +271,7 @@ export function RegistrationApplicationCreate({
                 studentPhone: registration.studentPhone || "",
                 requestNote: registration.requestNote || "",
               }}
-              inquiryAtLabel="저장 시 자동 기록"
+              inquiryAtLabel="저장 시각"
               schoolChoices={schoolChoices}
               schoolCatalogStatus={schoolCatalogStatus}
               schoolCatalogError={schoolCatalogError}
@@ -315,70 +302,6 @@ export function RegistrationApplicationCreate({
           <RegistrationInitialConsultationFields {...initialFieldsProps} disabled={!sectionStates.consultation.editable} />
         </RegistrationApplicationConsultationSection>
       )}
-      waitingState={sectionStates.placement}
-      registrationState={sectionStates.placement}
-      waiting={(
-        <RegistrationApplicationPlacementSection
-          editable={sectionStates.placement.editable}
-          fields={(
-            <div className="grid gap-3 md:grid-cols-2">
-              <Label className="grid gap-1.5">
-                <span>대기 종류</span>
-                <select defaultValue="" disabled className="h-10 rounded-md border border-input bg-background px-3 text-sm">
-                  <option value="">첫 저장 후 선택</option>
-                </select>
-              </Label>
-              <ReadonlyCreateField label="대기 수업" />
-            </div>
-          )}
-        />
-      )}
-      registration={(
-        <RegistrationApplicationPlacementSection
-          editable={sectionStates.placement.editable}
-          fields={(
-            <div className="grid gap-3 md:grid-cols-2">
-              <ReadonlyCreateField label="등록 단계" />
-              <ReadonlyCreateField label="수강 수업" focusKey="classId" />
-              <ReadonlyCreateField label="교재" focusKey="textbookId" />
-              <ReadonlyCreateField label="수업 시작일·회차" focusKey="classStartDate" ariaLabel="수업 시작 일정" />
-            </div>
-          )}
-        />
-      )}
-      admission={(
-        <RegistrationApplicationAdmissionSection
-          editable={sectionStates.admission.editable}
-          fields={(
-            <RegistrationAdmissionProgress steps={[
-              { key: "admissionNotice", label: "입학신청서 발송", complete: false, locked: true },
-              { key: "makeedu", label: "메이크에듀 등록(수업, 교재)", complete: false, locked: true },
-              { key: "invoice", label: "청구서 발송", complete: false, locked: true },
-              { key: "payment", label: "수납 완료 확인", complete: false, locked: true },
-              { key: "complete", label: "등록 완료", complete: false, locked: true },
-            ]} />
-          )}
-        />
-      )}
     />
-  )
-}
-
-function ReadonlyCreateField({
-  label,
-  value = "첫 저장 후 입력",
-  focusKey,
-  ariaLabel,
-}: {
-  label: string
-  value?: string
-  focusKey?: string
-  ariaLabel?: string
-}) {
-  return (
-    <Label className="grid gap-1.5" data-registration-focus={focusKey} aria-label={ariaLabel}>
-      <span>{label}</span>
-      <Input value={value} readOnly disabled />
-    </Label>
   )
 }

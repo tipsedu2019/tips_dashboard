@@ -50,7 +50,7 @@ const FIXTURE_SUBJECT_KEYS: Record<RegistrationSubject, string> = {
 const FIXTURE_DIRECTORS: Record<RegistrationSubject, { profileId: string; name: string }> = {
   영어: { profileId: "fixture-profile-english-director", name: "강부희" },
   수학: { profileId: "fixture-profile-math-director", name: "양소윤" },
-  과학: { profileId: "fixture-profile-science-director", name: "과학원장" },
+  과학: { profileId: "fixture-profile-science-director", name: "김법균" },
 }
 const REGISTRATION_INITIAL_ACTIONS = ["inquiry", "level_test", "direct_phone", "visit"] as const
 type RegistrationInitialAction = typeof REGISTRATION_INITIAL_ACTIONS[number]
@@ -58,6 +58,7 @@ type RegistrationInitialAction = typeof REGISTRATION_INITIAL_ACTIONS[number]
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
   "createRegistrationCaseWithInitialWorkflow",
   "syncRegistrationCaseSubjects",
+  "saveRegistrationCaseInquiry",
   "updateRegistrationCaseCommon",
   "routeRegistrationInquiry",
   "assignRegistrationTrackDirector",
@@ -305,7 +306,7 @@ export function createRegistrationSubjectTrackFixtureAdapter(
       const consumeCommonRevisionConflictFault = () => {
         if (
           nextFault?.kind === "common_revision_conflict_once"
-          && type === "updateRegistrationCaseCommon"
+          && (type === "updateRegistrationCaseCommon" || type === "saveRegistrationCaseInquiry")
           && String(payload.taskId || "") === nextFault.taskId
         ) {
           const fault = nextFault
@@ -675,7 +676,7 @@ function classOption(input: {
   const teacherBySubject: Record<RegistrationSubject, string> = {
     영어: "강부희",
     수학: "양소윤",
-    과학: "과학원장",
+    과학: "김법균",
   }
   const roomBySubject: Record<RegistrationSubject, string> = {
     영어: "201",
@@ -1044,14 +1045,14 @@ export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjec
   const profiles: OpsProfileOption[] = [
     { id: "fixture-profile-english-director", label: "강부희", email: "english-director@fixture.local", loginId: "fixture-english-director", role: "admin" },
     { id: "fixture-profile-math-director", label: "양소윤", email: "math-director@fixture.local", loginId: "fixture-math-director", role: "admin" },
-    { id: "fixture-profile-science-director", label: "과학원장", email: "science-director@fixture.local", loginId: "fixture-science-director", role: "teacher" },
+    { id: "fixture-profile-science-director", label: "김법균", email: "science-director@fixture.local", loginId: "fixture-science-director", role: "teacher" },
     { id: "fixture-profile-staff", label: "운영팀", email: "staff@fixture.local", loginId: "fixture-staff", role: "staff" },
     { id: "fixture-profile-assistant", label: "조교", email: "assistant@fixture.local", loginId: "fixture-assistant", role: "assistant" },
   ]
   const teachers: OpsTeacherOption[] = [
     { id: "fixture-teacher-english", label: "강부희", subjects: ["영어"], profileId: "fixture-profile-english-director", accountEmail: "english-director@fixture.local", sortOrder: 1 },
     { id: "fixture-teacher-math", label: "양소윤", subjects: ["수학"], profileId: "fixture-profile-math-director", accountEmail: "math-director@fixture.local", sortOrder: 2 },
-    { id: "fixture-teacher-science", label: "과학원장", subjects: ["과학", "과학팀"], profileId: "fixture-profile-science-director", accountEmail: "science-director@fixture.local", sortOrder: 3 },
+    { id: "fixture-teacher-science", label: "김법균", subjects: ["과학", "과학팀"], profileId: "fixture-profile-science-director", accountEmail: "science-director@fixture.local", sortOrder: 3 },
   ]
   const schools: OpsSchoolOption[] = [
     { id: "fixture-school-elementary", name: "새봄초", category: "elementary", sortOrder: 1 },
@@ -1609,6 +1610,145 @@ function normalizeFixtureInitialWorkflowInput(
   }
 }
 
+type FixtureRegistrationInquiryInput = {
+  taskId: string
+  studentName: string
+  schoolGrade: string
+  schoolName: string
+  parentPhone: string
+  studentPhone: string
+  campus: string
+  inquiryAt: string
+  requestNote: string
+  priority: OpsTask["priority"]
+  subjects: RegistrationSubject[]
+  expectedCommonRevision: number
+  expectedSubjects: RegistrationSubject[]
+  requestKey: string
+}
+
+function normalizeFixtureRegistrationInquiryInput(
+  payload: Record<string, unknown>,
+  commandRequestKey: string | undefined,
+): FixtureRegistrationInquiryInput {
+  const taskId = fixtureInputText(payload.taskId)
+  if (!taskId) fixtureInitialError("registration_task_required")
+  const studentName = fixtureInputText(payload.studentName)
+  if (!studentName) fixtureInitialError("registration_student_name_required")
+  const schoolGrade = fixtureInputText(payload.schoolGrade)
+  if (!schoolGrade) fixtureInitialError("registration_school_grade_required")
+  const parentPhone = fixtureInputText(payload.parentPhone)
+  if (!/^01(0|1|[6-9])[0-9]{7,8}$/.test(parentPhone.replace(/\D+/g, ""))) {
+    fixtureInitialError("registration_parent_phone_invalid")
+  }
+  const campus = fixtureInputText(payload.campus)
+  if (!campus || !["본관", "별관"].includes(campus)) fixtureInitialError("registration_campus_invalid")
+  const inquiryAt = fixtureInputText(payload.inquiryAt)
+  if (!inquiryAt || !Number.isFinite(Date.parse(inquiryAt))) fixtureInitialError("registration_inquiry_at_required")
+  const priority = fixtureInputText(payload.priority)
+  if (!["low", "normal", "high", "urgent"].includes(priority)) fixtureInitialError("registration_priority_invalid")
+  const expectedCommonRevision = Number(payload.expectedCommonRevision)
+  if (!Number.isInteger(expectedCommonRevision) || expectedCommonRevision <= 0) {
+    fixtureInitialError("registration_common_revision_conflict")
+  }
+  const requestKey = fixtureInputText(payload.requestKey || commandRequestKey)
+  if (!requestKey) fixtureInitialError("request_key_required")
+  return {
+    taskId,
+    studentName,
+    schoolGrade,
+    schoolName: fixtureInputText(payload.schoolName),
+    parentPhone,
+    studentPhone: fixtureInputText(payload.studentPhone),
+    campus,
+    inquiryAt,
+    requestNote: fixtureInputText(payload.requestNote),
+    priority: priority as OpsTask["priority"],
+    subjects: orderedFixtureSubjects(payload.subjects),
+    expectedCommonRevision,
+    expectedSubjects: orderedFixtureSubjects(payload.expectedSubjects),
+    requestKey,
+  }
+}
+
+function sameFixtureSubjects(left: readonly RegistrationSubject[], right: readonly RegistrationSubject[]) {
+  return left.length === right.length && left.every((subject, index) => subject === right[index])
+}
+
+function fixtureIdentityText(value: unknown) {
+  return fixtureInputText(value).replace(/\s+/g, "").toLocaleLowerCase("ko-KR")
+}
+
+function fixturePhoneDigits(value: unknown) {
+  return fixtureInputText(value).replace(/\D+/g, "")
+}
+
+function fixtureRegistrationIdentityFrozen(detail: OpsRegistrationCaseDetail) {
+  return Boolean(
+    detail.task.registration?.admissionNoticeSent
+    || detail.admissionBatches.length > 0
+    || detail.enrollments.some((enrollment) => (
+      !(enrollment.status === "planned" && enrollment.admissionBatchId === null)
+    ))
+    || detail.admissionApplicationMessageClaimActive,
+  )
+}
+
+function fixtureRegistrationTrackRemovalBlocked(
+  detail: OpsRegistrationCaseDetail,
+  selected: OpsRegistrationTrackSummary,
+) {
+  return selected.status !== "inquiry"
+    || ["manual", "migration"].includes(selected.directorAssignmentSource)
+    || detail.levelTests.some((item) => item.trackId === selected.id)
+    || detail.consultations.some((item) => item.trackId === selected.id)
+    || detail.enrollments.some((item) => item.trackId === selected.id)
+    || detail.events.some((event) => (
+      event.trackId === selected.id && event.eventType !== "director_default_resolved"
+    ))
+}
+
+function validateFixtureRegistrationInquiry(
+  state: RegistrationSubjectTrackFixtureState,
+  input: FixtureRegistrationInquiryInput,
+) {
+  const detail = requireCase(state.caseDetails[input.taskId], "case_not_found")
+  if (input.expectedCommonRevision !== detail.commonRevision) {
+    fixtureInitialError("registration_common_revision_conflict")
+  }
+  const currentSubjects = sortAcademicSubjects(detail.tracks.map((track) => track.subject)) as RegistrationSubject[]
+  if (!sameFixtureSubjects(input.expectedSubjects, currentSubjects)) {
+    fixtureInitialError("registration_subjects_conflict")
+  }
+  if (input.subjects.includes("과학") && !["고1", "고2", "고3"].includes(input.schoolGrade.replace(/\s+/g, ""))) {
+    fixtureInitialError("registration_science_grade_invalid")
+  }
+  for (const subject of input.subjects.filter((subject) => !currentSubjects.includes(subject))) {
+    const capability = state.subjectCapabilities.find((candidate) => candidate.subject === subject)
+    if (
+      !capability
+      || !capability.isActive
+      || !capability.registrationCreateEnabled
+      || !capability.gradeLevels.includes(input.schoolGrade)
+    ) {
+      fixtureInitialError("registration_subject_disabled")
+    }
+  }
+  for (const selected of detail.tracks.filter((track) => !input.subjects.includes(track.subject))) {
+    if (fixtureRegistrationTrackRemovalBlocked(detail, selected)) {
+      fixtureInitialError("registration_subject_removal_blocked")
+    }
+  }
+  const registration = detail.task.registration || {}
+  const identityChanged = fixtureIdentityText(detail.task.studentName) !== fixtureIdentityText(input.studentName)
+    || fixtureInputText(registration.schoolName) !== input.schoolName
+    || fixturePhoneDigits(registration.parentPhone) !== fixturePhoneDigits(input.parentPhone)
+    || fixturePhoneDigits(registration.studentPhone) !== fixturePhoneDigits(input.studentPhone)
+  if (identityChanged && fixtureRegistrationIdentityFrozen(detail)) {
+    fixtureInitialError("registration_student_identity_correction_required")
+  }
+}
+
 type FixtureDirectorResolution = {
   profileId: string | null
   source: "default" | "manual" | ""
@@ -1971,11 +2111,14 @@ export function reduceRegistrationSubjectTrackFixture(
   const normalizedInitialInput = type === "createRegistrationCaseWithInitialWorkflow"
     ? normalizeFixtureInitialWorkflowInput(current, rawPayload, command.requestKey)
     : null
-  const payload = normalizedInitialInput
-    ? normalizedInitialInput as unknown as Record<string, unknown>
+  const normalizedInquiryInput = type === "saveRegistrationCaseInquiry"
+    ? normalizeFixtureRegistrationInquiryInput(rawPayload, command.requestKey)
+    : null
+  const payload = normalizedInitialInput || normalizedInquiryInput
+    ? (normalizedInitialInput || normalizedInquiryInput) as unknown as Record<string, unknown>
     : rawPayload
-  const key = normalizedInitialInput?.requestKey || receiptKey(command)
-  const fingerprintPayload = normalizedInitialInput
+  const key = normalizedInitialInput?.requestKey || normalizedInquiryInput?.requestKey || receiptKey(command)
+  const fingerprintPayload = normalizedInitialInput || normalizedInquiryInput
     ? Object.fromEntries(Object.entries(payload).filter(([entryKey]) => entryKey !== "requestKey"))
     : payload
   const payloadFingerprint = fixturePayloadFingerprint(fingerprintPayload)
@@ -1986,6 +2129,8 @@ export function reduceRegistrationSubjectTrackFixture(
     }
     return { state: current, result: clone(existing.result), receipt: clone(existing) }
   }
+
+  if (normalizedInquiryInput) validateFixtureRegistrationInquiry(current, normalizedInquiryInput)
 
   const state = clone(current)
   if (REGISTRATION_SUBJECT_TRACK_FIXTURE_PROVIDER_DISPATCH_ACTIONS.includes(
@@ -2017,6 +2162,48 @@ export function reduceRegistrationSubjectTrackFixture(
       detail.tracks = kept
       syncCase(state, detail)
       result = { taskId, subjects, tracks: detail.tracks }
+      break
+    }
+    case "saveRegistrationCaseInquiry": {
+      const input = normalizedInquiryInput!
+      const detail = requireCase(state.caseDetails[input.taskId], "case_not_found")
+      const kept = detail.tracks.filter((item) => input.subjects.includes(item.subject))
+      for (const subject of input.subjects) {
+        if (!kept.some((item) => item.subject === subject)) {
+          kept.push(track({
+            id: `fixture-track-${input.taskId}-${FIXTURE_SUBJECT_KEYS[subject]}`,
+            taskId: input.taskId,
+            subject,
+            status: "inquiry",
+          }))
+        }
+      }
+      detail.tracks = kept.sort((left, right) => (
+        REGISTRATION_SUBJECT_ORDER.indexOf(left.subject) - REGISTRATION_SUBJECT_ORDER.indexOf(right.subject)
+        || left.id.localeCompare(right.id)
+      ))
+      detail.task.studentName = input.studentName
+      detail.task.title = `등록: ${input.studentName}`
+      detail.task.campus = input.campus
+      detail.task.priority = input.priority
+      detail.task.registration = {
+        ...detail.task.registration,
+        schoolGrade: input.schoolGrade,
+        schoolName: input.schoolName,
+        parentPhone: input.parentPhone,
+        studentPhone: input.studentPhone,
+        inquiryAt: input.inquiryAt,
+        requestNote: input.requestNote,
+      }
+      detail.commonRevision += 1
+      syncCase(state, detail)
+      result = {
+        taskId: input.taskId,
+        commonRevision: detail.commonRevision,
+        subjects: [...input.subjects],
+        tracks: clone(detail.tracks),
+        notificationJobs: [],
+      }
       break
     }
     case "updateRegistrationCaseCommon": {

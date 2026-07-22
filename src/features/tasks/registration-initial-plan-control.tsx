@@ -3,10 +3,8 @@
 import type { JSX } from "react"
 
 import { DateTimePickerControl } from "@/components/ui/date-time-picker"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 import {
   getRegistrationInitialWorkflowParticipants,
@@ -18,8 +16,12 @@ import {
   normalizeRegistrationLevelTestPlace,
 } from "./registration-level-test-place.ts"
 import type { RegistrationSubject } from "./registration-track-service"
+import { RegistrationSelect } from "./registration-select"
 import { REGISTRATION_TIME_OPTIONS } from "./registration-workflow"
 import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
+
+// RegistrationSelect preserves the former controlled <Select value={value}>
+// contract while centralizing SelectTrigger styling and empty-value handling.
 
 export type RegistrationInitialPlanControlProps = {
   subjects: RegistrationSubject[]
@@ -93,26 +95,8 @@ export function RegistrationInitialLevelTestFields({
       </Label>
       <Label className="grid gap-1.5" aria-label="레벨테스트 장소" data-registration-focus="levelTestPlace">
         <span>장소</span>
-        <DashboardSelect value={draft.levelTestPlace} placeholder="장소 선택" disabled={fieldsDisabled} options={REGISTRATION_LEVEL_TEST_PLACES.map((place) => ({ value: place, label: place }))} onValueChange={(value) => onChange({ ...draft, levelTestPlace: value })} />
+        <RegistrationSelect value={draft.levelTestPlace} placeholder="장소 선택" disabled={fieldsDisabled} options={REGISTRATION_LEVEL_TEST_PLACES.map((place) => ({ value: place, label: place }))} onValueChange={(value) => onChange({ ...draft, levelTestPlace: value })} />
       </Label>
-      {levelTestSubjects.includes("영어") ? (
-        <Label className="grid gap-1.5">
-          <span>영어 결과 링크</span>
-          <Input value="" readOnly disabled placeholder="첫 저장 후 입력" />
-        </Label>
-      ) : null}
-      {levelTestSubjects.includes("수학") ? (
-        <Label className="grid gap-1.5">
-          <span>수학 결과 링크</span>
-          <Input value="" readOnly disabled placeholder="첫 저장 후 입력" />
-        </Label>
-      ) : null}
-      {levelTestSubjects.includes("과학") ? (
-        <Label className="grid gap-1.5">
-          <span>과학 결과 링크</span>
-          <Input value="" readOnly disabled placeholder="첫 저장 후 입력" />
-        </Label>
-      ) : null}
     </div>
   )
 }
@@ -156,33 +140,29 @@ export function RegistrationInitialConsultationFields({
         onToggle={(subject, checked) => onChange(setRegistrationInitialSubjectAction(draft, subject, checked ? "direct_phone" : "inquiry"))}
       />
       <div className="grid gap-3 md:grid-cols-3">
-        {orderedSubjects.map((subject) => {
-          const subjectSelected = consultationSubjects.includes(subject)
-          return (
-            <Label key={`${subject}-mode`} className="grid gap-1.5">
-              <span>{subject} 상담 방식</span>
-              <DashboardSelect
-                value={subjectSelected ? draft.subjectPlans[subject] || "" : ""}
-                disabled={consultationControlsDisabled || !subjectSelected}
-                placeholder="상담 방식 선택"
-                options={[{ value: "direct_phone", label: "전화상담" }, { value: "visit", label: "방문상담" }]}
-                onValueChange={(value) => onChange(setRegistrationInitialSubjectAction(draft, subject, value as "direct_phone" | "visit"))}
-                aria-label={`${subject} 상담 방식`}
-              />
-            </Label>
-          )
-        })}
-        {orderedSubjects.map((subject) => {
+        {consultationSubjects.map((subject) => (
+          <Label key={`${subject}-mode`} className="grid gap-1.5">
+            <span>{subject} 상담 방식</span>
+            <RegistrationSelect
+              value={draft.subjectPlans[subject] || ""}
+              disabled={consultationControlsDisabled}
+              placeholder="상담 방식 선택"
+              options={[{ value: "direct_phone", label: "전화상담" }, { value: "visit", label: "방문상담" }]}
+              onValueChange={(value) => onChange(setRegistrationInitialSubjectAction(draft, subject, value as "direct_phone" | "visit"))}
+              aria-label={`${subject} 상담 방식`}
+            />
+          </Label>
+        ))}
+        {consultationSubjects.map((subject) => {
           const resolvedDirectorId = resolvedDirectorIds[subject] || ""
           const value = draft.directorOverrides[subject] || resolvedDirectorId
           const options = directorOptionsBySubject[subject] || []
-          const subjectDisabled = consultationControlsDisabled || !consultationSubjects.includes(subject)
           return (
             <Label key={subject} className="grid gap-1.5" data-registration-focus={`counselor:${subject}`}>
               <span>{subject} 상담 책임자</span>
-              <DashboardSelect
+              <RegistrationSelect
                 value={value}
-                disabled={subjectDisabled}
+                disabled={consultationControlsDisabled}
                 placeholder="책임자 선택"
                 options={options}
                 onValueChange={(nextValue) => onChange({
@@ -198,41 +178,33 @@ export function RegistrationInitialConsultationFields({
           )
         })}
       </div>
-      <div className="grid gap-3">
-        <div className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">전화상담 대기 기준일시</span>
-          <output>저장 시 자동 기록</output>
+      {visitSubjects.length > 0 ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          <Label className="grid gap-1.5" data-registration-focus="visitConsultationAt">
+            <span>방문상담일시</span>
+            <DateTimePickerControl
+              value={draft.visitScheduledAt}
+              onChange={(value) => onChange({ ...draft, visitScheduledAt: value })}
+              dateAriaLabel="방문상담일 날짜"
+              timeAriaLabel="방문상담일 시각"
+              timeOptions={REGISTRATION_TIME_OPTIONS}
+              disablePortal
+              disabled={visitFieldsDisabled}
+            />
+          </Label>
+          <Label className="grid gap-1.5" data-registration-focus="visitConsultationPlace">
+            <span>방문상담실</span>
+            <RegistrationSelect
+              value={normalizeRegistrationLevelTestPlace(draft.visitPlace) ?? ""}
+              disabled={visitFieldsDisabled}
+              placeholder="장소 선택"
+              options={REGISTRATION_LEVEL_TEST_PLACES.map((place) => ({ value: place, label: place }))}
+              onValueChange={(value) => onChange({ ...draft, visitPlace: value })}
+              aria-label="방문상담 장소"
+            />
+          </Label>
         </div>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        <Label className="grid gap-1.5" data-registration-focus="visitConsultationAt">
-          <span>방문상담일시</span>
-          <DateTimePickerControl
-            value={draft.visitScheduledAt}
-            onChange={(value) => onChange({ ...draft, visitScheduledAt: value })}
-            dateAriaLabel="방문상담일 날짜"
-            timeAriaLabel="방문상담일 시각"
-            timeOptions={REGISTRATION_TIME_OPTIONS}
-            disablePortal
-            disabled={visitFieldsDisabled}
-          />
-        </Label>
-        <Label className="grid gap-1.5" data-registration-focus="visitConsultationPlace">
-          <span>방문상담실</span>
-          <DashboardSelect
-            value={normalizeRegistrationLevelTestPlace(draft.visitPlace) ?? ""}
-            disabled={visitFieldsDisabled}
-            placeholder="장소 선택"
-            options={REGISTRATION_LEVEL_TEST_PLACES.map((place) => ({ value: place, label: place }))}
-            onValueChange={(value) => onChange({ ...draft, visitPlace: value })}
-            aria-label="방문상담 장소"
-          />
-        </Label>
-      </div>
-      <div className="grid gap-1 text-sm">
-        <span className="text-muted-foreground">상담 결과</span>
-        <output>첫 저장 후 입력할 수 있습니다</output>
-      </div>
+      ) : null}
     </div>
   )
 }
@@ -245,21 +217,5 @@ export function RegistrationInitialPlanControl(
       <RegistrationInitialLevelTestFields {...props} />
       <RegistrationInitialConsultationFields {...props} />
     </section>
-  )
-}
-
-function DashboardSelect({ value, placeholder, options, disabled, onValueChange, ...props }: {
-  value: string
-  placeholder: string
-  options: Array<{ value: string; label: string }>
-  disabled?: boolean
-  onValueChange: (value: string) => void
-  "aria-label"?: string
-}) {
-  return (
-    <Select value={value || undefined} disabled={disabled} onValueChange={onValueChange}>
-      <SelectTrigger className="h-10 w-full" {...props}><SelectValue placeholder={placeholder} /></SelectTrigger>
-      <SelectContent>{options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
-    </Select>
   )
 }
