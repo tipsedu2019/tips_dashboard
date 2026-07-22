@@ -169,27 +169,40 @@ test("science superseding migration의 바이트와 contract를 고정한다", a
     "science_superseding_migration_hash_mismatch",
   )
 
-  const legacyFixture = await createRepoFixture()
-  const legacyActiveDir = join(legacyFixture, "supabase", "migrations")
-  const legacyQuarantineDir = join(
-    legacyFixture,
-    "supabase",
-    "pending-migrations",
-    "notification-cutover",
+  const quotedFixture = await createRepoFixture()
+  await writeFile(
+    join(quotedFixture, "supabase", "migrations", "20260723100000_quoted_legacy.sql"),
+    `CREATE OR REPLACE FUNCTION public."revalidate_immediate_notification_delivery_v1"()
+RETURNS jsonb LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
+`,
   )
-  await copyFile(
-    join(legacyQuarantineDir, "20260716195500_notification_worker_schedule.sql"),
-    join(legacyActiveDir, "20260723100000_legacy_revalidate.sql"),
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: quotedFixture }),
+    "science_final_definition_mismatch",
   )
-  await copyFile(
-    join(legacyQuarantineDir, "20260716195900_notification_control_plane_forward_compat.sql"),
-    join(legacyActiveDir, "20260723100001_legacy_prepare.sql"),
+
+  const dropFixture = await createRepoFixture()
+  await writeFile(
+    join(dropFixture, "supabase", "migrations", "20260723100001_drop_legacy.sql"),
+    "DROP FUNCTION public.prepare_notification_immediate_delivery_v1;\n",
   )
-  const legacyErrors = await validateSupabaseMigrationLayout({ repoRoot: legacyFixture })
-  assert.equal(
-    legacyErrors.filter((error) => error.includes("science_final_definition_mismatch")).length,
-    2,
-    `expected both legacy final definitions to fail, received ${JSON.stringify(legacyErrors)}`,
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: dropFixture }),
+    "science_final_definition_mismatch",
+  )
+
+  const commentMarkerFixture = await createRepoFixture()
+  await writeFile(
+    join(commentMarkerFixture, "supabase", "migrations", "20260723100002_comment_markers.sql"),
+    `CREATE OR REPLACE FUNCTION public.revalidate_immediate_notification_delivery_v1()
+RETURNS jsonb LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
+-- when 'google_chat.science' then 'science'
+-- v_delivery.audience_key = 'subject_team'
+`,
+  )
+  assertIncludesErrorCode(
+    await validateSupabaseMigrationLayout({ repoRoot: commentMarkerFixture }),
+    "science_final_definition_mismatch",
   )
 })
 

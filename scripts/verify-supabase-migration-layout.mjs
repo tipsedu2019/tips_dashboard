@@ -267,7 +267,6 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
   const activeSqlEntries = ((await listDirectory(activeDir)) ?? [])
     .filter((entry) => /\.sql$/i.test(entry))
     .sort()
-  const activeSqlSources = []
   for (const entry of activeSqlEntries) {
     const entryPath = join(activeDir, entry)
     const stat = await statKind(entryPath)
@@ -276,7 +275,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       continue
     }
     const source = await readFile(entryPath)
-    activeSqlSources.push({ entryPath, source: source.toString("utf8") })
+    const sourceText = source.toString("utf8")
     const timestamp = entry.match(/^(\d{14})/)?.[1]
     if (timestamp && quarantineTimestamps.has(timestamp)) {
       addError(errors, "cutover_timestamp_reused_in_active_lane", relative(resolvedRoot, entryPath))
@@ -284,8 +283,21 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     if (quarantineHashes.has(sha256(source))) {
       addError(errors, "cutover_sql_hash_present_in_active_lane", relative(resolvedRoot, entryPath))
     }
-    if (markerCount(source.toString("utf8")) > 0) {
+    if (markerCount(sourceText) > 0) {
       addError(errors, "drain_marker_present_in_active_lane", relative(resolvedRoot, entryPath))
+    }
+    if (entry > SCIENCE_MIGRATION_FILE) {
+      const normalizedSource = sourceText.toLowerCase()
+      for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
+        const bareFunctionName = contract.function.split(".").at(-1).toLowerCase()
+        if (normalizedSource.includes(bareFunctionName)) {
+          addError(
+            errors,
+            "science_final_definition_mismatch",
+            `${relative(resolvedRoot, entryPath)}#${contract.function}`,
+          )
+        }
+      }
     }
   }
 
@@ -306,27 +318,6 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       } else if (!contract.markers.every((marker) => definitions[0].includes(marker))) {
         addError(errors, "science_superseding_contract_mismatch", contractPath)
       }
-    }
-  }
-
-  for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
-    let finalDefinition = null
-    let finalDefinitionPath = relative(resolvedRoot, activeDir)
-    for (const { entryPath, source } of activeSqlSources) {
-      for (const definition of functionDefinitionSources(source, contract.function)) {
-        finalDefinition = definition
-        finalDefinitionPath = relative(resolvedRoot, entryPath)
-      }
-    }
-    if (
-      finalDefinition === null ||
-      !contract.markers.every((marker) => finalDefinition.includes(marker))
-    ) {
-      addError(
-        errors,
-        "science_final_definition_mismatch",
-        `${finalDefinitionPath}#${contract.function}`,
-      )
     }
   }
 
