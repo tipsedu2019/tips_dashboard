@@ -24,7 +24,7 @@ quarantine의 과거 6개 SQL은 reference-only이며 직접 적용하거나 act
 
 폐쇄 전 호환 번들은 Google Chat과 Web Push의 구형 원문 호출을 오류로 만들지는 않지만 외부 공급자에는 보내지 않는다. 인증된 호출에 한해 진입점, 계약 종류, 결과, 행위자, 임의 요청 ID만 비공개 계측표에 남기고 `skipped=true`, `reason=legacy_payload_observed`로 끝낸다. 같은 업무 변경에서 생성된 안정된 원본 이벤트 ID를 서버의 고정 경로가 해석해 실제 전송을 담당하며, 브라우저가 보낸 문구와 대상을 사용하지 않는다. 제목, 본문, 수신자, 링크, 웹훅, 구독 주소 같은 내용은 계측표에 저장하지 않는다.
 
-### 1단계: 브리지 설치와 관찰
+### 역사적 1단계 기록: 브리지 설치와 관찰
 
 1. 과거 1단계에서는 다음 active-lane 브리지 마이그레이션이 순서대로 설치됐다. 이 목록은 재적용 지시가 아니라 관찰 전제의 기록이다.
    - `20260716190000_notification_ops_task_producers.sql`
@@ -34,31 +34,18 @@ quarantine의 과거 6개 SQL은 reference-only이며 직접 적용하거나 act
    - `20260716194000_notification_registration_handoffs.sql`
    - `20260716194500_notification_legacy_contract_telemetry.sql`
 2. 과거 1단계는 위 DB 계약과 같은 커밋의 애플리케이션을 Vercel 운영 환경에 배포했다. 194500의 전달 의도 RPC는 그림자 기능이 아직 없는 관찰 단계에서 검증된 `recorded=false`, `reason=shadow_contract_pending`만 반환했다. quarantine의 195900 본문은 당시 같은 함수 서명을 실제 그림자 비교 구현으로 교체하려던 reference이며, 현재 적용 순서나 승격 지시로 사용하지 않는다.
-3. 안전한 일정 실행기에서 5분마다 `node scripts/record-notification-deployment-receipt.mjs`를 실행한다. 필요한 환경 변수 이름은 `NOTIFICATION_PRODUCTION_ORIGIN`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`, `VERCEL_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`다. 토큰과 키는 일정 실행기의 비밀 변수로 주입하고 파일이나 로그에 출력하지 않는다.
-4. 영수증 기록기는 Vercel 운영 도메인이 현재 가리키는 정확한 배포 ID와 프로젝트 ID를 조회하고, 실행 중인 `/api/notifications/contract-version`의 해시와 대조한다. 빌드 명세는 Vercel이 주입한 `VERCEL_GIT_COMMIT_SHA`가 없거나 올바른 40자리 Git SHA가 아니면 닫히며, 원문 대신 `buildRevisionHash`만 반환한다. 일치한 배포 ID 해시 배열과 빌드 변경 번호 해시만 DB에 보내며 서버 수를 호출자가 입력하지 않는다. 5분 간격을 유지하고 어떤 두 영수증 사이도 10분을 넘기지 않는다.
-5. Asia/Seoul 기준 자정 이전부터 다음 자정이 지난 시점까지 관찰하여 완결된 달력일 하나와 24시간 이상을 동시에 포함한다. 관찰 구간의 모든 배포 영수증은 하나의 `buildRevisionHash`만 가리켜야 한다. 중간에 새 배포가 생기면 그 새 빌드 기준으로 24시간과 완결된 서울 운영일을 처음부터 다시 확보한다. 관찰 중 `ops-task`와 `makeup` 고정 경로를 각각 한 번 이상 실제로 성공시키며, 이 성공 기록의 빌드 해시도 영수증의 단일 빌드 해시와 같아야 한다. HTTP 2xx여도 응답의 `failed`가 1 이상이거나 `sent + deduped`가 0이면 실패이며 폐쇄 증거가 되지 않는다.
+3. 과거 관찰 증거는 배포 영수증 기록기를 5분 주기로 운영하고, Vercel 운영 배포 ID·프로젝트 ID·실행 중 계약 해시를 대조한 뒤 일치한 배포 ID 해시와 `buildRevisionHash`만 DB에 기록하는 모델이었다. 당시에도 호출자가 서버 수를 제출하지 않았고, 비밀정보는 파일이나 로그에 남기지 않는 요구조건이었다.
+4. 과거 증거 모델은 24시간 이상과 Asia/Seoul 기준 완결된 달력일 하나를 동시에 포함하고, 모든 영수증이 하나의 `buildRevisionHash`를 가리키며 인접 영수증 간격이 10분을 넘지 않아야 했다. 중간 배포가 있으면 새 빌드 기준으로 관찰 창을 다시 시작하고, `ops-task`와 `makeup` 고정 경로의 실제 성공을 각각 한 건 이상 요구했다. HTTP 2xx여도 `failed`가 1 이상이거나 `sent + deduped`가 0이면 증거가 아니었다.
 
-Vercel 영수증은 운영 도메인이 가리키는 서버 배포의 교체 완료를 증명한다. 열려 있던 오래된 브라우저 탭의 존재를 추정해 100% 같은 숫자를 만들지는 않는다. 브라우저 잔존 여부는 24시간 동안 들어온 실제 구형 계약 트래픽과 원본 ID 변환 실패가 모두 0인지로 판단한다. 늦게 돌아온 탭도 임의 제목·본문·수신자를 전달할 수 없고, 서버의 고정 원본 변환에 성공하거나 거부된다.
+위 두 항목은 과거 관찰 증거의 설명일 뿐 지금 실행할 스크립트·스케줄·자격증명 주입·DB 기록·실제 업무 exercise 지시가 아니다. 최신 schema 기준의 새 forward-dated install migration과 별도 service-role 전용 activation RPC가 설계·검증·승인되기 전에는 service-role 자격증명을 주입하거나 배포 영수증을 DB에 쓰거나 `ops-task`·`makeup` 실제 exercise를 수행하는 등 DB-writing 관찰을 재개하지 않는다. 새 계획이 승인되더라도 24시간 이상 및 Asia/Seoul 기준 완결된 하루와 이후 7일 운영 shadow 게이트는 유지한다.
 
-### 증거 확인
+과거 Vercel 영수증은 운영 도메인이 가리키는 서버 배포의 교체 완료를 증명했다. 열려 있던 오래된 브라우저 탭의 존재를 추정해 100% 같은 숫자를 만들지는 않았고, 브라우저 잔존 여부는 24시간 동안 들어온 실제 구형 계약 트래픽과 원본 ID 변환 실패가 모두 0인지로 판단했다. 이 안전 판정 계약도 미래 설계에서 유지하되 현재 관찰 재개 명령으로 해석하지 않는다.
 
-Supabase 플러그인에서 관찰 시작·종료 시각을 넣어 아래 읽기 전용 RPC를 실행하고, 반환된 JSON 객체를 가공하지 않은 채 `tmp/notification-contract-drain-evidence.json`으로 저장한다.
+### 역사적 증거 판정 계약
 
-```sql
-select public.get_notification_contract_drain_evidence_v1(
-  p_window_start := '<브리지 설치 뒤의 Asia/Seoul 관찰 시작>'::timestamptz,
-  p_window_end := pg_catalog.clock_timestamp()
-);
-```
+과거 설계는 읽기 전용 `public.get_notification_contract_drain_evidence_v1` 결과를 가공하지 않고 보존한 뒤 로컬 `scripts/verify-notification-contract-drain.mjs`로 판정했다. 이 이름들은 요구조건 추적을 위한 reference이며 현재 호출 명령이 아니다. 새 install migration과 별도 activation RPC가 승인된 뒤 새 운영 계획에서만 실제 증거 수집·검증 명령을 정의한다.
 
-그다음 로컬에서 검증한다.
-
-```bash
-node scripts/verify-notification-contract-drain.mjs \
-  --evidence tmp/notification-contract-drain-evidence.json
-```
-
-`passed: true`이려면 구형 변환 불가 호출, 원본 ID 변환 실패, 미완료 고정 경로, 실패한 고정 경로가 모두 0이어야 한다. 두 고정 경로의 동일 빌드 성공은 각각 1건 이상이어야 하고, 배포 영수증은 구간 처음과 끝 5분 안을 덮으며 최대 공백이 10분 이하여야 한다. 모든 영수증의 활성 서버 배포가 브리지 인식 배포여야 하며 `deploymentBuildRevisionCount`는 1, `latestCompliantBuildRevisionHash`는 64자리 소문자 SHA-256이어야 한다.
+역사적 `passed: true` 계약은 구형 변환 불가 호출, 원본 ID 변환 실패, 미완료 고정 경로, 실패한 고정 경로가 모두 0이어야 했다. 두 고정 경로의 동일 빌드 성공은 각각 1건 이상이고, 배포 영수증은 구간 처음과 끝 5분 안을 덮으며 최대 공백이 10분 이하여야 했다. 모든 영수증의 활성 서버 배포는 브리지 인식 배포이고 `deploymentBuildRevisionCount`는 1, `latestCompliantBuildRevisionHash`는 64자리 소문자 SHA-256이어야 한다는 요구조건을 미래 설계에도 유지한다.
 
 ### 역사적 2단계 계약: DB 자체 재검사와 폐쇄
 
